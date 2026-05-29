@@ -1,0 +1,19 @@
+COMMIT_EDITMSG
+node_modules/
+dist/
+.env.local
+.env.*.local
+.env
+.env.example
+.env.deploy
+.last_deploy_timestamp
+*.log
+.DS_Store
+
+# Claude Code: ship settings.json (shared hooks for contributors),
+# keep local-only state out.
+.claude/worktrees/
+.claude/settings.local.json
+
+# Python bytecode cache from hook scripts under scripts/hooks/.
+__pycache__/
