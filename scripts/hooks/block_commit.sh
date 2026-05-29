@@ -2,10 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The resumelint Authors
 #
-# PreToolUse(Bash) hook: refuse direct `git commit` inside this repo so
-# every commit lands through `commit-all.sh` (formatting, tests,
-# structured commit). `commit-all.sh` itself is also blocked by default
-# — the user runs the commit script; Claude only prepares COMMIT_EDITMSG.
+# PreToolUse(Bash) hook: refuse `git commit` on the protected `main`
+# branch, so changes land on a feature branch and merge through a
+# reviewed pull request (see the /open-pr skill). Commits on feature
+# branches are allowed — contributors (and Claude via /open-pr) commit
+# normally, then open a PR.
+#
+# This is a local mirror of the server-side branch protection on `main`
+# (PR + 1 approval + the `verify` CI check). It is intentionally generic:
+# no dependency on any per-machine commit script.
 #
 # Scope: only enforces when the effective cwd is inside this repo.
 # Sibling repos (e.g. ~/claude-memory during /primer) are untouched.
@@ -16,9 +21,7 @@
 # Not bulletproof (subshells, pushd) but covers day-to-day shapes.
 #
 # Override (rare): export RESUMELINT_SKIP_HOOKS=1 in the shell that
-# launched `claude` BEFORE starting the session. Inline prefixing —
-# `RESUMELINT_SKIP_HOOKS=1 git commit ...` — does NOT work, because the
-# env assignment is part of the command string the hook never executes.
+# launched `claude` BEFORE starting the session.
 
 set -euo pipefail
 
@@ -49,7 +52,7 @@ if [[ "$command" =~ ^[[:space:]]*cd[[:space:]]+([^[:space:];|\&]+) ]]; then
 fi
 [[ -z "$effective_cwd" ]] && effective_cwd="${PWD:-}"
 
-# Definitively outside this repo → skip. Unknown → fall through (block)
+# Definitively outside this repo → skip. Unknown → fall through (check)
 # so we false-positive rather than silently allow a commit inside it.
 if [[ -n "$effective_cwd" \
       && "$effective_cwd" != "$REPO_ROOT" \
@@ -57,20 +60,15 @@ if [[ -n "$effective_cwd" \
   exit 0
 fi
 
-# 1) Direct git commit — never allowed in this project.
+# Only gate `git commit`. Anything else passes.
 if [[ "$command" =~ (^|[[:space:];|&]|\|\|)git[[:space:]]+commit([[:space:]]|$|\;) ]]; then
-  echo "resumelint: refusing direct \`git commit\` inside this repo." >&2
-  echo "Commits go through commit-all.sh, and the user runs the script — Claude prepares COMMIT_EDITMSG only." >&2
-  echo "Sibling repos (~/claude-memory etc.) are not affected by this hook." >&2
-  exit 2
-fi
-
-# 2) commit-all.sh — user-driven by default.
-if [[ "$command" =~ (^|[[:space:];|&/]|\|\|)commit-all\.sh([[:space:]]|$|\;) ]]; then
-  echo "resumelint: refusing commit-all.sh — the user runs the commit script." >&2
-  echo "Claude's job ends at writing COMMIT_EDITMSG and reporting tests pass." >&2
-  echo "If you really need to bypass: export RESUMELINT_SKIP_HOOKS=1 in the shell that launched \`claude\`." >&2
-  exit 2
+  current_branch="$(git -C "$effective_cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+  if [[ "$current_branch" == "main" ]]; then
+    echo "resumelint: refusing \`git commit\` on main." >&2
+    echo "main is protected — commit on a feature branch and open a PR (see the /open-pr skill)." >&2
+    echo "  git switch -c feat/<slug>   # then commit, then /open-pr" >&2
+    exit 2
+  fi
 fi
 
 exit 0
