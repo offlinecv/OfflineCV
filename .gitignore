@@ -17,3 +17,16 @@ dist/
 
 # Python bytecode cache from hook scripts under scripts/hooks/.
 __pycache__/
+
+# Local editor / workspace files (per-machine, never shared).
+*.code-workspace
+.idea/
+
+# CodeGraph local index — config.json is tracked; the on-disk index is not.
+# Mirrored here (not only in .codegraph/.gitignore) so editors that read just
+# the root ignore file don't surface these as changes.
+.codegraph/*.db
+.codegraph/*.db-shm
+.codegraph/*.db-wal
+.codegraph/cache/
+.codegraph/.dirty
