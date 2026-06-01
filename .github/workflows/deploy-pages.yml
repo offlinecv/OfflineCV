@@ -18,8 +18,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Bumped 2026-06-01 (#4): Node 20 actions deprecated, runner forces Node 24 by 2026-06-02.
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -28,7 +29,8 @@ jobs:
         env:
           VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
-      - uses: actions/upload-pages-artifact@v3
+      # v3 → v5 because v4 predates the Node 24 push; v5 (Apr 2026) is the first post-deprecation release.
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: ./dist
 
@@ -40,4 +42,5 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        # Bumped 2026-06-01 (#4): v5.0.0 release notes explicitly cite the Node 24 upgrade.
+        uses: actions/deploy-pages@v5
