@@ -355,4 +355,108 @@ describe("computeAnonymousAtsScore", () => {
     const strong = computeAnonymousAtsScore(makeAnonInput());
     expect(getScoreTier(strong.overall)).toBe("high");
   });
+
+  describe("per-bullet observations", () => {
+    it("returns one observation per extracted bullet, in order", () => {
+      const result = computeAnonymousAtsScore(makeAnonInput());
+      expect(result.bullets).toBeDefined();
+      expect(result.bullets).toHaveLength(6);
+      // Index is stable across the array.
+      result.bullets!.forEach((b, i) => expect(b.index).toBe(i));
+    });
+
+    it("flags hasMetric / startsWithActionVerb / wellFormedLength per bullet", () => {
+      // Bullets must clear the 4-word extractor floor to reach analyzeBullets,
+      // so the "too short" cases use 5–7 words (below the 8-word wellFormed floor).
+      const mixed = [
+        "- Led migration of 3 microservices reducing latency by 40%", // pass all three
+        "- Things happened over multiple weeks", // 5 words, no verb, no metric, too short
+        "- Reduced costs over multiple quarters", // 5 words, has verb, no metric, too short
+        "- Built a thing for users to enjoy across the entire platform stack and beyond extra extra extra extra extra extra extra extra extra extra extra extra extra extra extra extra extra words now", // >30 words, has verb, no metric
+      ].join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: mixed }),
+      );
+      const bullets = result.bullets!;
+      expect(bullets).toHaveLength(4);
+
+      // Bullet 0: pass all
+      expect(bullets[0].hasMetric).toBe(true);
+      expect(bullets[0].startsWithActionVerb).toBe(true);
+      expect(bullets[0].wellFormedLength).toBe(true);
+
+      // Bullet 1: no verb, no metric, too short
+      expect(bullets[1].hasMetric).toBe(false);
+      expect(bullets[1].startsWithActionVerb).toBe(false);
+      expect(bullets[1].wellFormedLength).toBe(false);
+      expect(bullets[1].wordCount).toBe(5);
+
+      // Bullet 2: verb passes, but too short and no metric
+      expect(bullets[2].hasMetric).toBe(false);
+      expect(bullets[2].startsWithActionVerb).toBe(true);
+      expect(bullets[2].wellFormedLength).toBe(false);
+
+      // Bullet 3: long bullet — verb passes, but >30 words, no metric
+      expect(bullets[3].hasMetric).toBe(false);
+      expect(bullets[3].startsWithActionVerb).toBe(true);
+      expect(bullets[3].wellFormedLength).toBe(false);
+      expect(bullets[3].wordCount).toBeGreaterThan(30);
+    });
+
+    it("returns an empty bullets array when no bullet-shaped lines are detected", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          rawText: "Just a paragraph of text with no bullet markers anywhere.",
+        }),
+      );
+      expect(result.bullets).toEqual([]);
+    });
+
+    it("treats U+F0B7 (Word's Symbol-font bullet) as a bullet marker", () => {
+      // Real-world case: Microsoft Word exports every default `•` bullet as
+      // U+F0B7 in the Symbol font's private-use area. pdfjs hands this glyph
+      // through unchanged. Without recognizing it, every bullet from a
+      // Word-exported resume disappears from the per-bullet feedback section.
+      const wordBullets = [
+        " Led migration of 3 microservices reducing latency by 40%",
+        " Built CI pipeline cutting deploy time from 45 to 8 minutes",
+        " Reduced infrastructure cost by 35% through right-sizing",
+        " Drove adoption of typed APIs across 12 backend services",
+      ].join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: wordBullets }),
+      );
+      expect(result.bullets).toHaveLength(4);
+      expect(result.bullets!.every((b) => b.hasMetric)).toBe(true);
+    });
+
+    it("treats U+FFFD (font-substituted bullet glyph) as a bullet marker", () => {
+      // Real-world case: a PDF carries the • glyph but its ToUnicode map
+      // doesn't decode it, so pdfjs emits U+FFFD ("□") in its place. The
+      // rest of the line decodes fine, so the cascade doesn't trip
+      // `fonts_unmappable` — but without recognizing U+FFFD as a marker, every
+      // bullet would silently disappear from the per-bullet feedback section.
+      const fontSubstituted = [
+        "� Led migration of 3 microservices reducing latency by 40%",
+        "� Built CI pipeline cutting deploy time from 45 to 8 minutes",
+        "� Reduced infrastructure cost by 35% through right-sizing",
+        "� Drove adoption of typed APIs across 12 backend services",
+      ].join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: fontSubstituted }),
+      );
+      expect(result.bullets).toHaveLength(4);
+      expect(result.bullets!.every((b) => b.hasMetric)).toBe(true);
+    });
+
+    it("preserves the same bullet pool the dimension scoring uses", () => {
+      const result = computeAnonymousAtsScore(makeAnonInput());
+      // The totalBullets reported by dimensions must match the bullets-array length.
+      expect(result.bullets!.length).toBe(result.specificity.totalBullets);
+      expect(result.bullets!.length).toBe(result.structure.totalBullets);
+      // And the per-bullet hasMetric flags must sum to the dimension's metricBullets.
+      const metricCount = result.bullets!.filter((b) => b.hasMetric).length;
+      expect(metricCount).toBe(result.specificity.metricBullets);
+    });
+  });
 });
