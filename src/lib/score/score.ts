@@ -51,8 +51,15 @@ export const ATS_SCORE_ALGO_VERSION = "1.0";
 // splitBullets, or extractBulletsFromText sees the change.
 
 /** Bullet markers we recognize at the start of a line. Wider than typical to
- *  catch en-dash / mid-dot resumes alongside the common dash/asterisk/bullet. */
-const BULLET_MARKER_RE = /^[\s ]*[-*•●–▪◦‣▶►·]\s+/;
+ *  catch en-dash / mid-dot resumes alongside the common dash/asterisk/bullet.
+ *  U+FFFD (replacement char) handles PDFs whose font has the bullet glyph
+ *  but ships a ToUnicode map that doesn't decode it — pdfjs surfaces these
+ *  as `□`. U+F0B7 is the Symbol-font bullet glyph Microsoft Word emits
+ *  in the private-use area for every default `•` bullet — extremely common
+ *  in Word-exported resumes. Neither trips the `fonts_unmappable` cascade (the
+ *  rest of the text decodes fine) but without them every bullet would silently
+ *  disappear from the per-bullet feedback section. */
+const BULLET_MARKER_RE = /^[\s ]*[-*•●–▪◦‣▶►·�]\s+/;
 
 /** Numbered-list prefix: "1." or "1)". */
 const NUMBERED_BULLET_RE = /^[\s ]*\d+[.)]\s+/;
@@ -121,6 +128,45 @@ function splitBullets(description: string): string[] {
       line.replace(BULLET_MARKER_RE, "").replace(NUMBERED_BULLET_RE, "").trim(),
     )
     .filter((line) => line.length > 5);
+}
+
+/**
+ * Per-bullet observation surfaced to the UI so a low score becomes "here are
+ * the three bullets to focus on changing" instead of "you're losing points on
+ * Specificity." Same three checks scoreBulletPool aggregates, kept per-bullet.
+ */
+export interface BulletObservation {
+  /** Original text of the bullet, as extracted from rawText. */
+  text: string;
+  /** Index in the order bullets were extracted from rawText. Stable for UI lists. */
+  index: number;
+  hasMetric: boolean;
+  startsWithActionVerb: boolean;
+  wellFormedLength: boolean;
+  /** Word count after marker strip — useful for the "two words — expand it" copy. */
+  wordCount: number;
+}
+
+/**
+ * Per-bullet view of the same three checks scoreBulletPool aggregates. Kept
+ * parallel to scoreBulletPool (not folded into its return shape) so the
+ * authed scorer in ~/recruidea that consumes the math signature stays stable
+ * and only the anonymous surface pays the per-bullet cost.
+ */
+function analyzeBullets(bullets: string[]): BulletObservation[] {
+  return bullets.map((text, index) => {
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    return {
+      text,
+      index,
+      hasMetric: bulletHasMetric(text),
+      startsWithActionVerb: startsWithActionVerb(text),
+      wellFormedLength:
+        wordCount >= BULLET_LENGTH_MIN_WORDS &&
+        wordCount <= BULLET_LENGTH_MAX_WORDS,
+      wordCount,
+    };
+  });
 }
 
 /**
@@ -375,6 +421,11 @@ export interface AnonymousAtsScore {
     /** Set when the resume is image-only — the score is forced to 0. */
     scanned: boolean;
   };
+  /** Per-bullet observations from the same pool that fed Specificity and
+   *  Structure. Empty array when no bullet-shaped lines were detected.
+   *  Optional so callers persisting the shape (e.g. session storage) can
+   *  omit it. */
+  bullets?: BulletObservation[];
   /** Scoring algorithm version stamp. Optional so callers persisting the
    *  shape can omit it; current builds always populate via
    *  ATS_SCORE_ALGO_VERSION. */
@@ -469,6 +520,7 @@ export function computeAnonymousAtsScore(
   // surfaces apply identical per-bullet rules.
   const bullets = extractBulletsFromText(input.rawText);
   const pool = scoreBulletPool(bullets);
+  const observations = analyzeBullets(bullets);
   const gradable = pool.total >= ANON_MIN_BULLETS_TO_GRADE;
   const specScore = gradable ? Math.round((pool.specificity / 100) * 40) : 0;
   const structScore = gradable ? Math.round((pool.structure / 100) * 30) : 0;
@@ -575,6 +627,7 @@ export function computeAnonymousAtsScore(
       multiplier,
       scanned: isScanned,
     },
+    bullets: observations,
     algoVersion: ATS_SCORE_ALGO_VERSION,
   };
 }
