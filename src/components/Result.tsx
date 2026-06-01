@@ -2,7 +2,10 @@
 // Copyright 2026 The resumelint Authors
 
 import type { CascadeResult, LayoutTrigger } from "../lib/heuristics/types.ts";
-import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import type {
+  AnonymousAtsScore,
+  BulletObservation,
+} from "../lib/score/score.ts";
 import { PdfPreview } from "./PdfPreview";
 
 interface ResultProps {
@@ -101,6 +104,7 @@ function ParsedCard({
 
       <LayoutFlagsList triggers={result.triggers} />
       <AtsScoreReadout score={score} />
+      <PerBulletFeedback bullets={score.bullets} />
     </section>
   );
 }
@@ -227,6 +231,127 @@ function Dimension({
         {hint}
       </p>
     </div>
+  );
+}
+
+function PerBulletFeedback({
+  bullets,
+}: {
+  bullets: BulletObservation[] | undefined;
+}) {
+  if (!bullets || bullets.length === 0) {
+    return (
+      <section className="flex flex-col gap-2">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+          Per-bullet feedback
+        </h2>
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+          No bullet-shaped lines detected.
+        </p>
+      </section>
+    );
+  }
+
+  const attentionCount = bullets.filter(needsAttention).length;
+  const summary =
+    attentionCount === 0
+      ? `All ${bullets.length} bullets pass every check.`
+      : `${attentionCount} of ${bullets.length} bullet${
+          bullets.length === 1 ? "" : "s"
+        } need attention — missing a metric and at least one structure check.`;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+        Per-bullet feedback
+      </h2>
+      <p className="max-w-prose text-xs text-neutral-600 dark:text-neutral-400">
+        Each bullet checked against three rules: an action verb, the 8–30-word
+        length window, and a metric. {summary}
+      </p>
+      <ul className="flex flex-col gap-1.5">
+        {bullets.map((b) => (
+          <BulletRow key={b.index} bullet={b} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function needsAttention(b: BulletObservation): boolean {
+  return !b.hasMetric && (!b.startsWithActionVerb || !b.wellFormedLength);
+}
+
+function BulletRow({ bullet }: { bullet: BulletObservation }) {
+  const attention = needsAttention(bullet);
+  const allPass =
+    bullet.hasMetric && bullet.startsWithActionVerb && bullet.wellFormedLength;
+
+  const containerCls = attention
+    ? "border-amber-300 bg-amber-50/40 dark:border-amber-700/60 dark:bg-amber-950/20"
+    : allPass
+      ? "border-neutral-200 dark:border-neutral-800"
+      : "border-neutral-300 dark:border-neutral-700";
+  const textCls = allPass
+    ? "text-neutral-500 dark:text-neutral-400"
+    : "text-neutral-800 dark:text-neutral-100";
+
+  const lengthLabel = bullet.wellFormedLength
+    ? `${bullet.wordCount} words`
+    : bullet.wordCount < 8
+      ? `${bullet.wordCount} words (too short)`
+      : `${bullet.wordCount} words (too long)`;
+
+  return (
+    <li
+      className={`flex flex-col gap-1.5 rounded border p-2 ${containerCls}`}
+    >
+      <p className={`text-xs leading-snug ${textCls}`}>
+        <span className="mr-1.5 font-mono text-[10px] text-neutral-400">
+          #{bullet.index + 1}
+        </span>
+        {bullet.text}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        <CheckPill
+          ok={bullet.startsWithActionVerb}
+          okLabel="verb"
+          failLabel="no action verb"
+        />
+        <CheckPill
+          ok={bullet.wellFormedLength}
+          okLabel={lengthLabel}
+          failLabel={lengthLabel}
+        />
+        <CheckPill
+          ok={bullet.hasMetric}
+          okLabel="metric"
+          failLabel="no metric"
+        />
+      </div>
+    </li>
+  );
+}
+
+function CheckPill({
+  ok,
+  okLabel,
+  failLabel,
+}: {
+  ok: boolean;
+  okLabel: string;
+  failLabel: string;
+}) {
+  const cls = ok
+    ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200"
+    : "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}
+    >
+      <span>{ok ? "✓" : "✗"}</span>
+      <span>{ok ? okLabel : failLabel}</span>
+    </span>
   );
 }
 
