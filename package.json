@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bake-fixtures": "UPDATE_FIXTURES=1 vitest run src/lib/heuristics/corpus.test.ts",
     "typecheck": "tsc -b --noEmit",
     "lint": "tsc -b --noEmit",
     "deploy": "./scripts/deploy_resumelint.sh"

@@ -12,5 +12,11 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     globals: true,
+    // Force pdfjs-dist to its legacy build during tests so the Node 20+
+    // env doesn't trip on `Promise.withResolvers()` (Node 22+) in the
+    // browser entry. The production bundle still ships the browser build.
+    alias: {
+      "pdfjs-dist": "pdfjs-dist/legacy/build/pdf.mjs",
+    },
   },
 });

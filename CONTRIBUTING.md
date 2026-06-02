@@ -12,7 +12,7 @@ see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout.
 ```bash
 npm install
 npm run dev        # vite dev server on http://localhost:5173
-npm run test       # vitest run (155 tests, sub-second)
+npm run test       # vitest run (167 tests, ~1s)
 npm run typecheck  # tsc -b --noEmit
 ```
 
@@ -74,6 +74,17 @@ the watcher. Match the existing pattern in
 `src/lib/heuristics/*.test.ts` and `src/lib/score/*.test.ts`; the
 heuristics tests use the `mkItem` helper in
 `src/lib/heuristics/__test-utils__/` for synthetic pdfjs items.
+
+### Corpus snapshot tests
+
+`src/lib/heuristics/corpus.test.ts` runs the full cascade + scorer
+against every PDF under `tests/fixtures/pdfs/<category>/` and diffs
+the result against a co-located `*.expected.json` snapshot. The
+snapshot only captures counts and structural flags — never raw text
+or field values — so committed fixtures stay free of PII even when
+the source PDFs include personas. Add new PDFs and re-bake snapshots
+with `npm run bake-fixtures`. Full workflow + sourcing guidance in
+[`tests/fixtures/pdfs/README.md`](./tests/fixtures/pdfs/README.md).
 
 ## Code style
 
