@@ -65,6 +65,19 @@ Apache-2.0. The patent grant is deliberate — the parser audit should be safely
 // Copyright 2026 The resumelint Authors
 ```
 
+## Test fixtures — PII policy (non-negotiable)
+
+PDF fixtures under `tests/fixtures/pdfs/<category>/` **must use synthetic personas only** — fake name, email (`@example.com`), and a `555`-style phone. The repo is **public**; the committed PDF *binary* is the exposure surface, and purging a leaked fixture after merge means `git filter-repo` + a GitHub Support ticket. Catch it before merge.
+
+- **"Self-published upstream" is not an exception.** Several OSS résumé templates ship the author's *own real résumé* as the demo PDF — e.g. Awesome-CV embeds posquit0's CV (real email + phone), Deedy-Resume embeds Debarghya Das's. Downloading those verbatim re-hosts a real person's contact info here. Re-export the template filled with synthetic data instead.
+- **Before adding a fixture — or approving a PR that adds one — extract the text and eyeball the persona:**
+  ```bash
+  pdftotext tests/fixtures/pdfs/<category>/<file>.pdf - | head -40
+  ```
+  Confirm the name, email, and phone are fake. A "PII-free" claim in a PR description is not a substitute for this check — verify the binary, not the prose.
+- The `*.expected.json` snapshots are lossy by design (keys/counts only, never field values), so they stay PII-free automatically — but that safety does **not** extend to the PDF itself.
+- Full policy + add-fixture workflow: `tests/fixtures/pdfs/README.md` (Privacy section).
+
 ## CodeGraph
 
 `.codegraph/` is present, so codegraph tools (`codegraph_search`, `codegraph_callers`, `codegraph_callees`, `codegraph_impact`, `codegraph_context`, `codegraph_node`) are available and should be preferred over raw grep for symbol lookups and call-graph traversal. Rebuild the index (`codegraph init -i` or the project's refresh command) after large structural changes.

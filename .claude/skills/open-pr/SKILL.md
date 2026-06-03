@@ -74,6 +74,33 @@ git log --oneline origin/$BASE..HEAD
 
 If empty, there's nothing to PR — say so and stop.
 
+### Step 3.5: Fixture PII preflight (run before pushing)
+
+If this PR **adds or changes** any fixture binary (PDF / image / doc), verify the
+persona is synthetic **before** it reaches `origin` — the repo is public and
+purging a leaked binary post-merge means `git filter-repo` + a GitHub Support
+ticket. See the **Test fixtures — PII policy** section in `CLAUDE.md`.
+
+```bash
+git diff --name-only --diff-filter=AM "origin/$BASE..HEAD" -- 'tests/fixtures/**' \
+  | grep -iE '\.(pdf|png|jpe?g|docx?)$'
+```
+
+For each PDF returned, extract the text and eyeball name / email / phone:
+
+```bash
+pdftotext "tests/fixtures/pdfs/<category>/<file>.pdf" - | head -40
+```
+
+- Personas **must** be synthetic — fake name, `@example.com` email, `555`-style
+  phone. "Downloaded from an OSS template repo" is **not** a pass: several
+  templates ship the author's *own real résumé* as the demo (e.g. Awesome-CV →
+  posquit0, Deedy-Resume → Debarghya Das), which carries real contact info.
+- If any fixture looks like a **real person**, STOP. Do not push. Tell the user
+  to re-export the template with synthetic data, then re-run.
+- A "PII-free" claim already written in a commit/PR body does not satisfy this —
+  verify the binary itself.
+
 ### Step 4: Push the branch
 
 ```bash
@@ -105,6 +132,9 @@ BODY
 )"
 ```
 
+If the PR adds fixtures, add a line to the Test plan:
+`- [ ] Fixture personas verified synthetic — no real PII (Step 3.5)`.
+
 `gh pr create --fill` derives title/body from the commits — fine for small PRs.
 
 ### Step 6: Report
@@ -125,3 +155,5 @@ merge their own PR via admin bypass.)
   otherwise `Refs #N`.
 - Match the commit-type prefix conventions from `CONTRIBUTING.md`
   (`feat`/`fix`/`chore`/`refactor`/`docs`/`test`).
+- **Never push a fixture binary with real PII.** Run the Step 3.5 preflight on any
+  PR that adds/changes a fixture; synthetic personas only (see `CLAUDE.md`).
