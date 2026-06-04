@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "cascade": {
+    "confidence": 0,
+    "triggers": [],
+    "tiers": [
+      "t0_layout",
+      "t1_openresume",
+      "t1_5_regex"
+    ],
+    "suggestedEscalation": "ocr",
+    "fieldsPopulated": [
+      "education",
+      "email",
+      "family_name",
+      "full_name",
+      "given_name",
+      "location",
+      "skills",
+      "summary",
+      "website_url"
+    ],
+    "skillsCount": 8,
+    "experienceCount": 0,
+    "educationCount": 2,
+    "rawTextCharCount": 1371,
+    "pageCount": 1,
+    "linkAnnotationCount": 0,
+    "hasMarkdown": true,
+    "sectionSource": "regex"
+  },
+  "score": {
+    "overall": 68,
+    "preLayoutOverall": 68,
+    "specificity": {
+      "score": 33,
+      "max": 40,
+      "gradable": true,
+      "metricBullets": 3,
+      "totalBullets": 6
+    },
+    "structure": {
+      "score": 15,
+      "max": 30,
+      "gradable": true,
+      "goodBullets": 3,
+      "totalBullets": 6
+    },
+    "completeness": {
+      "score": 20,
+      "max": 30,
+      "gradable": true,
+      "missing": [
+        "LinkedIn",
+        "phone",
+        "work experience"
+      ]
+    },
+    "layout": {
+      "triggers": [],
+      "multiplier": 1,
+      "scanned": false
+    },
+    "bulletCount": 6,
+    "algoVersion": "1.0"
+  }
+}
