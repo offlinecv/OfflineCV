@@ -2,7 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, it, expect } from "vitest";
-import { extractContact } from "./extract-fields.ts";
+import { extractContact, extractName } from "./extract-fields.ts";
 import { groupIntoLines, splitIntoSections, findSection } from "./sections.ts";
 import { US_LOCATION_RE } from "./regex.ts";
 import type { PdfLinkAnnotation } from "./types.ts";
@@ -164,6 +164,84 @@ describe("extractContact — location no longer falls back to document-wide scan
     const contact = extractContact(profile, lines);
     expect(contact.location).toContain("San Francisco");
     expect(contact.confidence.location).toBeGreaterThan(0);
+  });
+});
+
+describe("extractName — document-title boilerplate rejection (issue #10)", () => {
+  it("picks the real name when a 'Functional Resume Sample' header is above it", () => {
+    // Mode 1 of issue #10: a public Microsoft-style sample template renders
+    // the doc title in the largest font on the first profile line, which the
+    // original selector scored at 1.0 — choosing the boilerplate as the name.
+    const { profile } = buildContext([
+      { text: "Functional Resume Sample", fontSize: 22 },
+      { text: "Jane Smith", fontSize: 14 },
+      { text: "jane.smith@example.com · (555) 010-0123", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Jane Smith");
+    expect(result.confidence).toBeGreaterThan(0);
+  });
+
+  it("rejects 'Curriculum Vitae' as a name candidate", () => {
+    const { profile } = buildContext([
+      { text: "Curriculum Vitae", fontSize: 22 },
+      { text: "Jane Smith", fontSize: 14 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+
+  it("rejects 'Resume Sample' as a name candidate (all tokens are boilerplate)", () => {
+    const { profile } = buildContext([
+      { text: "Resume Sample", fontSize: 22 },
+      { text: "Jane Smith", fontSize: 14 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+
+  it("still picks 'Jane Smith Resume' (only 1 of 3 tokens is boilerplate)", () => {
+    // Conservative filter — a real name with the word "Resume" appended must
+    // still pass. Only ≥60% boilerplate triggers rejection.
+    const { profile } = buildContext([
+      { text: "Jane Smith Resume", fontSize: 18 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith Resume");
+  });
+
+  it("no regression: still picks a top-line name when no boilerplate is present", () => {
+    const { profile } = buildContext([
+      { text: "Mohin Patel", fontSize: 18 },
+      { text: "mohinp@uw.edu | 973-452-3653", fontSize: 10 },
+      { text: "" },
+      { text: "EDUCATION", fontSize: 13 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Mohin Patel");
+    expect(result.confidence).toBeGreaterThan(0.8);
+  });
+
+  it("boilerplate-rejected name still picks up the contact-cluster proximity bonus on the runner-up", () => {
+    // Regression on the proximity signal itself: when the obvious first-line
+    // candidate is rejected as boilerplate, the proximity bonus must still
+    // fire for the surviving candidate. Otherwise we'd lose a confidence
+    // signal that's most useful precisely in the issue-10 scenario.
+    const { profile } = buildContext([
+      { text: "Functional Resume Sample", fontSize: 22 },
+      { text: "Jane Smith", fontSize: 14 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Jane Smith");
+    // Must clear ANON_CONTACT_CONFIDENCE_FLOOR (0.5) in score.ts —
+    // otherwise completeness scoring marks the (correctly-detected) name as
+    // "missing", which is mode 2 of issue #10 manifesting inside the fix
+    // for mode 1. Guarded so a future tuning regression on this threshold
+    // boundary fails loudly.
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
   });
 });
 
