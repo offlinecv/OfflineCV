@@ -34,21 +34,21 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 59,
-    "preLayoutOverall": 59,
+    "overall": 58,
+    "preLayoutOverall": 58,
     "specificity": {
-      "score": 12,
+      "score": 11,
       "max": 40,
       "gradable": true,
       "metricBullets": 10,
-      "totalBullets": 58
+      "totalBullets": 59
     },
     "structure": {
       "score": 20,
       "max": 30,
       "gradable": true,
       "goodBullets": 39,
-      "totalBullets": 58
+      "totalBullets": 59
     },
     "completeness": {
       "score": 27,
@@ -63,7 +63,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 58,
+    "bulletCount": 59,
     "algoVersion": "1.0"
   }
 }

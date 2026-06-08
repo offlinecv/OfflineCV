@@ -469,11 +469,16 @@ export interface AnonymousAtsScoreInput {
 
 const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
 const ANON_MIN_BULLETS_TO_GRADE = 3;
-/** Word-count floor for raw-text bullet extraction. The authed splitBullets
- *  uses a char floor instead because its input is already a curated
- *  description string; raw-text extraction needs to skip headers / one-line
- *  section labels that share a leading marker. */
-const ANON_BULLET_MIN_WORDS = 4;
+/** Word-count floor for raw-text bullet extraction. Set to 1 so the displayed
+ *  bullet count matches what the user can see in the PDF — every line that
+ *  begins with a recognised marker AND has at least one non-empty word is a
+ *  bullet. Quality grading (well-formed length window, action verb, metric)
+ *  is handled downstream by `scoreBulletPool` and `analyzeBullets`, which
+ *  naturally penalise short bullets without hiding them from the count.
+ *  Issue #9 — previously set to 4, which silently dropped legitimate short
+ *  bullets like "• Everything that matters." and caused bullet count to
+ *  under-report vs. the visible PDF. */
+const ANON_BULLET_MIN_WORDS = 1;
 
 const ANON_CONTACT_FIELDS: readonly {
   key: "full_name" | "email" | "phone" | "location" | "linkedin_url";
@@ -489,7 +494,11 @@ const ANON_CONTACT_FIELDS: readonly {
 /**
  * Pull bullet-like lines out of raw resume text. A line counts as a bullet
  * when it starts with a recognized bullet marker (`-`, `•`, etc.) or a
- * numbered list prefix and contains 4+ words after the marker is stripped.
+ * numbered list prefix and the stripped line contains at least one word.
+ * The displayed count is meant to match what a reader sees in the PDF —
+ * short or low-quality bullets are still bullets, they just get flagged
+ * by the downstream length / verb / metric checks in `scoreBulletPool`
+ * and `analyzeBullets`.
  *
  * We deliberately do NOT try to grade unmarked indented lines — most modern
  * resumes use markers, and grading paragraphs would either over-count
