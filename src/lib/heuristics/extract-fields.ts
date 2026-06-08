@@ -65,12 +65,74 @@ function allMatches(re: RegExp, text: string): string[] {
 // ── Name ────────────────────────────────────────────────────────────────────
 
 /**
+ * Words that signal "this is a resume document title, not the candidate's name"
+ * — e.g. "Functional Resume Sample", "Chronological CV Template". Conservative:
+ * "Jane Smith Resume" still passes because only one of three words is boilerplate.
+ * See `looksLikeDocTitleBoilerplate` below for the rule.
+ */
+const NAME_BOILERPLATE_WORDS = new Set([
+  "resume",
+  "résumé",
+  "cv",
+  "curriculum",
+  "vitae",
+  "sample",
+  "template",
+  "example",
+  "draft",
+  "chronological",
+  "functional",
+  "combination",
+  "profile",
+  "biography",
+]);
+
+/**
+ * True when the line is mostly resume-document-title boilerplate rather than
+ * a person's name. Requires *all* tokens to be boilerplate (or ≥2 boilerplate
+ * tokens out of ≤3 total). Tuned so "Jane Smith" passes and "Resume" / "CV
+ * Sample" / "Functional Resume Sample" / "Curriculum Vitae" all reject.
+ */
+function looksLikeDocTitleBoilerplate(words: string[]): boolean {
+  const lowered = words.map((w) => w.toLowerCase().replace(/[^a-z]/g, ""));
+  const hits = lowered.filter((w) => NAME_BOILERPLATE_WORDS.has(w)).length;
+  if (hits === 0) return false;
+  if (hits === words.length) return true;
+  return words.length <= 3 && hits >= 2;
+}
+
+/** y-position of the first line in `lines` matching any of the contact regexes,
+ *  or undefined if no contact-bearing line is found. Used as a soft signal —
+ *  candidate names close to this y get a small bonus. */
+function findContactClusterY(lines: PdfLine[]): number | undefined {
+  for (const line of lines) {
+    if (
+      EMAIL_RE.test(line.text) ||
+      PHONE_RE.test(line.text) ||
+      LINKEDIN_RE.test(line.text)
+    ) {
+      // Reset lastIndex defensively; the constants are recompiled per call
+      // elsewhere in the file but test() with `g` flag mutates state.
+      EMAIL_RE.lastIndex = 0;
+      PHONE_RE.lastIndex = 0;
+      LINKEDIN_RE.lastIndex = 0;
+      return line.y;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Resume names almost always appear at the very top, in the largest font, with
  * 2–4 words that are all letters (plus maybe a period or hyphen). Score:
  *   +0.4 first line of profile
  *   +0.3 font size larger than the rest of profile
  *   +0.2 all-caps OR title-case
  *   +0.1 2–4 words, 2–40 chars, no digits/emails
+ *   +0.15 within ~80pt of the email/phone/linkedin line (contact-cluster proximity)
+ *
+ * Hard rejection: lines that are mostly resume-document-title boilerplate
+ * ("Functional Resume Sample", "Curriculum Vitae", etc.) — see issue #10.
  */
 export function extractName(
   profile: PdfSection,
@@ -80,8 +142,17 @@ export function extractName(
   const maxFontSize = Math.max(...profile.lines.map((l) => l.maxFontSize));
   const averageFontSize =
     profile.lines.reduce((s, l) => s + l.maxFontSize, 0) / profile.lines.length;
+  const contactY = findContactClusterY(profile.lines);
 
   let best: { line: PdfLine; score: number } | null = null;
+  // Index of the first eligible candidate after rejections. When the literal
+  // first line is rejected as boilerplate (e.g. "Functional Resume Sample"),
+  // the next surviving line is effectively the header — it inherits the
+  // first-line bonus, which also keeps confidence above the scorer's
+  // contact-field floor (0.5). Without this, fixing the wrong-name pick
+  // would dial confidence down enough to mark the (correct) name as
+  // "missing" in completeness scoring.
+  let firstEligibleIdx: number | null = null;
 
   for (let i = 0; i < Math.min(profile.lines.length, 5); i++) {
     const line = profile.lines[i];
@@ -94,14 +165,20 @@ export function extractName(
     const letterRatio =
       text.replace(/[^A-Za-z]/g, "").length / Math.max(text.length, 1);
     if (letterRatio < 0.7) continue;
+    if (looksLikeDocTitleBoilerplate(words)) continue;
+
+    if (firstEligibleIdx === null) firstEligibleIdx = i;
 
     let score = 0;
-    if (i === 0) score += 0.4;
+    if (i === firstEligibleIdx) score += 0.4;
     if (line.maxFontSize >= maxFontSize - 0.5) score += 0.3;
     if (line.maxFontSize > averageFontSize + 1) score += 0.1;
     const titleCase = words.every((w) => /^[A-Z][a-zA-Z.\-']*$/.test(w));
     if (line.allCaps || titleCase) score += 0.2;
     if (words.length >= 2 && words.length <= 4) score += 0.1;
+    if (contactY !== undefined && Math.abs(line.y - contactY) < 80) {
+      score += 0.15;
+    }
 
     if (!best || score > best.score) best = { line, score };
   }
