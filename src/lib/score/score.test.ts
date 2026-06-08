@@ -285,8 +285,36 @@ describe("computeAnonymousAtsScore", () => {
     expect(result.structure.score).toBe(0);
   });
 
+  it("counts short bullets in the visible total even when too short to score well (issue #9)", () => {
+    // Issue #9: previously ANON_BULLET_MIN_WORDS = 4 silently dropped short
+    // bullets like "• Everything that matters." (3 words after marker
+    // strip), so the displayed bullet count under-reported what the user
+    // could see in the PDF. The fix counts every marker-prefixed line and
+    // lets the well-formed length window flag short bullets in per-bullet
+    // feedback rather than hiding them.
+    const mixedLengths = [
+      "- Led migration of 3 microservices reducing latency by 40%",
+      "- Managed team of 5 engineers shipping weekly releases",
+      "- Reduced infrastructure cost by 35% through right-sizing efforts",
+      "- Increased conversion rate by 22% through experimentation",
+      "- Built CI pipeline cutting deploy time from 45 to 8 minutes",
+      "- Everything that matters.", // 3 words — pre-fix this was dropped
+    ].join("\n");
+    const result = computeAnonymousAtsScore(
+      makeAnonInput({ rawText: mixedLengths }),
+    );
+    expect(result.specificity.totalBullets).toBe(6);
+    expect(result.bullets?.length).toBe(6);
+    // The short bullet adds 1 to the denominator without contributing to
+    // metric/structure numerators, so quality scores drop slightly — that's
+    // the correct grading, previously masked by hiding the bullet.
+    expect(result.specificity.metricBullets).toBe(5);
+  });
+
   it("drops Specificity proportional to non-metric bullets", () => {
-    // Each line has ≥4 words after the marker so all six register as bullets.
+    // Each line has multiple words after the marker so all six register as
+    // bullets. (Min words to count as a bullet is 1; quality grading is
+    // handled by the length-window check, not the count filter.)
     const fewMetrics = [
       "- Reduced latency by 40%",
       "- Built a thing for users to enjoy",

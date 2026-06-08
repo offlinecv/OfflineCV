@@ -9,18 +9,19 @@
     ],
     "suggestedEscalation": "ocr",
     "fieldsPopulated": [
+      "current_company",
+      "current_title",
       "email",
+      "experience",
       "family_name",
       "full_name",
-      "github_url",
       "given_name",
-      "linkedin_url",
-      "location",
       "phone",
+      "skills",
       "website_url"
     ],
-    "skillsCount": 0,
-    "experienceCount": 0,
+    "skillsCount": 25,
+    "experienceCount": 6,
     "educationCount": 0,
     "rawTextCharCount": 3304,
     "pageCount": 1,
@@ -29,31 +30,31 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 17,
-    "preLayoutOverall": 17,
+    "overall": 47,
+    "preLayoutOverall": 47,
     "specificity": {
-      "score": 0,
+      "score": 8,
       "max": 40,
-      "gradable": false,
-      "metricBullets": 0,
-      "totalBullets": 1
+      "gradable": true,
+      "metricBullets": 1,
+      "totalBullets": 8
     },
     "structure": {
-      "score": 0,
+      "score": 21,
       "max": 30,
-      "gradable": false,
-      "goodBullets": 1,
-      "totalBullets": 1
+      "gradable": true,
+      "goodBullets": 6,
+      "totalBullets": 8
     },
     "completeness": {
-      "score": 17,
+      "score": 18,
       "max": 30,
       "gradable": true,
       "missing": [
+        "LinkedIn",
         "education",
-        "skills",
-        "summary",
-        "work experience"
+        "location",
+        "summary"
       ]
     },
     "layout": {
@@ -61,7 +62,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 1,
+    "bulletCount": 8,
     "algoVersion": "1.0"
   }
 }

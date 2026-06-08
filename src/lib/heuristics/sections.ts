@@ -42,6 +42,19 @@ export interface PdfSection {
 /** Items within this vertical distance (PDF points) are treated as same line. */
 const LINE_Y_EPS = 3.5;
 
+/**
+ * Horizontal gap inside a same-y cluster that flags a column boundary.
+ * Awesome-CV / single-column LaTeX exports produce essentially 0pt gaps
+ * between adjacent items even across `\hfill` alignment, so 50pt is well
+ * above any in-line word/run spacing while comfortably below the column
+ * gaps observed in real two-column resumes (Deedy's experience column
+ * jumps in at ~70pt past the education column edge). Splitting at this
+ * threshold rescues the bullet count on two-column layouts that don't
+ * trigger the `two_column` layout flag (asymmetric 0.33/0.66 splits
+ * like Deedy's slip past `probeTwoColumn`). Issue #9.
+ */
+const COLUMN_GAP_THRESHOLD = 50;
+
 // ── Line grouping ───────────────────────────────────────────────────────────
 
 export function groupIntoLines(items: PdfTextItem[]): PdfLine[] {
@@ -55,21 +68,39 @@ export function groupIntoLines(items: PdfTextItem[]): PdfLine[] {
   const lines: PdfLine[] = [];
   let current: PdfTextItem[] = [];
 
+  /** Build a PdfLine from a contiguous run of items (already x-sorted). */
+  const buildLine = (run: PdfTextItem[]): PdfLine => {
+    const text = mergeItemText(run);
+    const ys = run.map((i) => i.y);
+    const avgY = ys.reduce((a, b) => a + b, 0) / ys.length;
+    return {
+      page: run[0].page,
+      y: avgY,
+      x: run[0].x,
+      items: [...run],
+      text,
+      maxFontSize: Math.max(...run.map((i) => i.fontSize)),
+      allCaps: text.replace(/[^A-Za-z]/g, "").length > 0 && text === text.toUpperCase(),
+    };
+  };
+
   const flush = () => {
     if (current.length === 0) return;
     current.sort((a, b) => a.x - b.x);
-    const text = mergeItemText(current);
-    const ys = current.map((i) => i.y);
-    const avgY = ys.reduce((a, b) => a + b, 0) / ys.length;
-    lines.push({
-      page: current[0].page,
-      y: avgY,
-      x: current[0].x,
-      items: [...current],
-      text,
-      maxFontSize: Math.max(...current.map((i) => i.fontSize)),
-      allCaps: text.replace(/[^A-Za-z]/g, "").length > 0 && text === text.toUpperCase(),
-    });
+    // Split the same-y cluster at column-sized horizontal gaps so two-column
+    // layouts that share a baseline don't get merged into one PdfLine — see
+    // COLUMN_GAP_THRESHOLD and issue #9.
+    let runStart = 0;
+    for (let i = 1; i < current.length; i++) {
+      const prev = current[i - 1];
+      const cur = current[i];
+      const gap = cur.x - (prev.x + prev.width);
+      if (gap > COLUMN_GAP_THRESHOLD) {
+        lines.push(buildLine(current.slice(runStart, i)));
+        runStart = i;
+      }
+    }
+    lines.push(buildLine(current.slice(runStart)));
     current = [];
   };
 
