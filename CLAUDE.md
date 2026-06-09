@@ -71,7 +71,7 @@ We enforce this with a Claude hook (`scripts/hooks/reuse_surface_reminder.sh`) t
 
 ## Styling & Tokens
 
-- **Semantic Tokens are Canonical:** Style with semantic Tailwind classes (e.g., `bg-surface`, `text-ink`, `border-border`, `text-brand-primary`). 
+- **Semantic Tokens are Canonical:** Style with semantic Tailwind classes (e.g., `bg-surface-card`, `text-content-primary`, `border-border-light`, `text-brand-amber`). 
 - **No Hardcoded Colors:** Never hardcode hex values (`#ef4444`) or raw Tailwind palette colors (`bg-red-500`, `text-slate-400`) in feature code. 
 - **Typography:** Rely on global typography settings. If custom typography components are introduced (e.g., a `<Text>` wrapper), they must be imported from the shared UI directory, never hand-styled inline.
 

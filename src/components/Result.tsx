@@ -43,8 +43,8 @@ function StatusPill({
 }) {
   const cls =
     tone === "ok"
-      ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
-      : "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200";
+      ? "bg-feedback-success-bg text-feedback-success-text"
+      : "bg-feedback-warning-bg text-feedback-warning-text";
   return (
     <span
       className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cls}`}
@@ -66,11 +66,11 @@ function ParsedCard({
   onReset: () => void;
 }) {
   return (
-    <section className="flex flex-col gap-6 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <section className="flex flex-col gap-6 rounded-xl border border-border-light bg-surface-card p-5 shadow-sm">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <StatusPill tone="ok">Parsed</StatusPill>
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">
+          <span className="text-xs text-content-muted">
             {result.diagnostics.pages} page
             {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
             {result.diagnostics.elapsedMs} ms
@@ -79,7 +79,7 @@ function ParsedCard({
         <button
           type="button"
           onClick={onReset}
-          className="text-xs text-neutral-600 hover:underline dark:text-neutral-300"
+          className="text-xs text-content-tertiary hover:underline"
         >
           Try another PDF
         </button>
@@ -87,16 +87,16 @@ function ParsedCard({
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
             Source PDF
           </h2>
           <PdfPreview bytes={bytes} />
         </div>
         <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
             Extracted plain text
           </h2>
-          <pre className="max-h-[600px] overflow-auto rounded border border-neutral-200 bg-neutral-50 p-3 text-xs leading-relaxed dark:border-neutral-800 dark:bg-neutral-950">
+          <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-xs leading-relaxed">
             {result.rawText || "(no text extracted)"}
           </pre>
         </div>
@@ -112,21 +112,21 @@ function ParsedCard({
 function LayoutFlagsList({ triggers }: { triggers: readonly LayoutTrigger[] }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
         Layout flags
       </h2>
       {triggers.length === 0 ? (
-        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="text-sm text-content-tertiary">
           None — single-column, text-PDF layout.
         </p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {triggers.map((t) => (
             <li key={t} className="text-sm">
-              <span className="font-mono text-xs text-neutral-700 dark:text-neutral-200">
+              <span className="font-mono text-xs text-content-secondary">
                 {t}
               </span>{" "}
-              <span className="text-neutral-600 dark:text-neutral-400">
+              <span className="text-content-tertiary">
                 — {LAYOUT_TRIGGER_BLURBS[t]}
               </span>
             </li>
@@ -141,23 +141,23 @@ function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
           Reference ATS score
         </h2>
-        <span className="rounded bg-neutral-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
           alpha
         </span>
         {score.algoVersion && (
-          <span className="text-[10px] text-neutral-500">
+          <span className="text-[10px] text-content-muted">
             algo v{score.algoVersion}
           </span>
         )}
       </div>
       <div className="flex items-baseline gap-3">
         <span className="text-3xl font-semibold">{score.overall}</span>
-        <span className="text-sm text-neutral-500">/ 100</span>
+        <span className="text-sm text-content-muted">/ 100</span>
       </div>
-      <p className="max-w-prose text-xs text-neutral-600 dark:text-neutral-400">
+      <p className="max-w-prose text-xs text-content-tertiary">
         Our reference number for iterating on the parser. Not a universal
         score — different ATSes weigh things differently. See the dimensions
         below.
@@ -190,7 +190,7 @@ function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
         />
       </dl>
       {score.layout.multiplier < 1 && (
-        <p className="text-[11px] text-amber-700 dark:text-amber-300">
+        <p className="text-[11px] text-feedback-warning-text">
           Layout penalty applied (multiplier {score.layout.multiplier.toFixed(2)}
           ): pre-layout score was {score.preLayoutOverall}.
         </p>
@@ -213,21 +213,21 @@ function Dimension({
   hint: string;
 }) {
   return (
-    <div className="flex flex-col gap-1 rounded border border-neutral-200 p-2 dark:border-neutral-800">
-      <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+    <div className="flex flex-col gap-1 rounded border border-border-light p-2">
+      <dt className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
         {label}
       </dt>
       <dd className="text-base font-medium">
         {gradable ? (
           <>
             {value}
-            <span className="text-xs text-neutral-500"> / {max}</span>
+            <span className="text-xs text-content-muted"> / {max}</span>
           </>
         ) : (
-          <span className="text-neutral-400">—</span>
+          <span className="text-content-muted">—</span>
         )}
       </dd>
-      <p className="text-[10px] text-neutral-500 dark:text-neutral-400">
+      <p className="text-[10px] text-content-muted">
         {hint}
       </p>
     </div>
@@ -242,10 +242,10 @@ function PerBulletFeedback({
   if (!bullets || bullets.length === 0) {
     return (
       <section className="flex flex-col gap-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
           Per-bullet feedback
         </h2>
-        <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="text-sm text-content-tertiary">
           No bullet-shaped lines detected.
         </p>
       </section>
@@ -262,10 +262,10 @@ function PerBulletFeedback({
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+      <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
         Per-bullet feedback
       </h2>
-      <p className="max-w-prose text-xs text-neutral-600 dark:text-neutral-400">
+      <p className="max-w-prose text-xs text-content-tertiary">
         Each bullet checked against three rules: an action verb, the 8–30-word
         length window, and a metric. {summary}
       </p>
@@ -288,13 +288,13 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
     bullet.hasMetric && bullet.startsWithActionVerb && bullet.wellFormedLength;
 
   const containerCls = attention
-    ? "border-amber-300 bg-amber-50/40 dark:border-amber-700/60 dark:bg-amber-950/20"
+    ? "border-feedback-warning-border bg-feedback-warning-bg"
     : allPass
-      ? "border-neutral-200 dark:border-neutral-800"
-      : "border-neutral-300 dark:border-neutral-700";
+      ? "border-border-light"
+      : "border-border";
   const textCls = allPass
-    ? "text-neutral-500 dark:text-neutral-400"
-    : "text-neutral-800 dark:text-neutral-100";
+    ? "text-content-muted"
+    : "text-content-primary";
 
   const lengthLabel = bullet.wellFormedLength
     ? `${bullet.wordCount} words`
@@ -307,7 +307,7 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
       className={`flex flex-col gap-1.5 rounded border p-2 ${containerCls}`}
     >
       <p className={`text-xs leading-snug ${textCls}`}>
-        <span className="mr-1.5 font-mono text-[10px] text-neutral-400">
+        <span className="mr-1.5 font-mono text-[10px] text-content-muted">
           #{bullet.index + 1}
         </span>
         {bullet.text}
@@ -343,8 +343,8 @@ function CheckPill({
   failLabel: string;
 }) {
   const cls = ok
-    ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200"
-    : "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200";
+    ? "bg-feedback-success-bg text-feedback-success-text"
+    : "bg-feedback-warning-bg text-feedback-warning-text";
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}
@@ -366,13 +366,13 @@ function LimitedParsingCard({
   const uniqueUrls = Array.from(new Set(links.map((l) => l.url)));
 
   return (
-    <section className="flex flex-col gap-5 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <section className="flex flex-col gap-5 rounded-xl border border-border-light bg-surface-card p-5 shadow-sm">
       <header className="flex items-center justify-between">
         <StatusPill tone="limited">Limited parsing</StatusPill>
         <button
           type="button"
           onClick={onReset}
-          className="text-xs font-medium text-neutral-900 hover:underline dark:text-neutral-100"
+          className="text-xs font-medium text-content-primary hover:underline"
         >
           Try a different PDF
         </button>
@@ -382,7 +382,7 @@ function LimitedParsingCard({
         <h2 className="text-base font-semibold">
           Some text wasn't readable in this PDF
         </h2>
-        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+        <p className="mt-1 text-sm text-content-tertiary">
           {result.diagnostics.pages} page
           {result.diagnostics.pages === 1 ? "" : "s"} scanned. Below is what we
           could recover.
@@ -390,11 +390,11 @@ function LimitedParsingCard({
       </div>
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
           Recovered links
         </h3>
         {uniqueUrls.length === 0 ? (
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-content-muted">
             No link annotations were embedded in this PDF.
           </p>
         ) : (
@@ -405,7 +405,7 @@ function LimitedParsingCard({
                   href={url}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="font-mono text-xs text-neutral-700 underline decoration-dotted hover:decoration-solid dark:text-neutral-200"
+                  className="font-mono text-xs text-content-secondary underline decoration-dotted hover:decoration-solid"
                 >
                   {url}
                 </a>
@@ -415,13 +415,13 @@ function LimitedParsingCard({
         )}
       </section>
 
-      <hr className="border-neutral-200 dark:border-neutral-800" />
+      <hr className="border-border-light" />
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
           What happened
         </h3>
-        <p className="text-sm text-neutral-700 dark:text-neutral-300">
+        <p className="text-sm text-content-secondary">
           {LAYOUT_TRIGGER_BLURBS.fonts_unmappable}
         </p>
       </section>

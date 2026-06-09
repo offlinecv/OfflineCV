@@ -55,8 +55,8 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
         "rounded-xl border-2 border-dashed px-6 py-12 text-center",
         "transition-colors",
         dragOver
-          ? "border-neutral-900 bg-neutral-100 dark:border-neutral-100 dark:bg-neutral-800"
-          : "border-neutral-300 hover:border-neutral-500 dark:border-neutral-700 dark:hover:border-neutral-500",
+          ? "border-content-primary bg-surface-hover"
+          : "border-border hover:border-border-strong",
         disabled && "cursor-not-allowed opacity-60",
       ]
         .filter(Boolean)
@@ -74,16 +74,16 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
       <p className="text-sm font-medium">
         Drop a resume PDF here, or click to pick one
       </p>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+      <p className="text-xs text-content-muted">
         Your file stays in this browser tab.
       </p>
       {status && (
-        <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-300">
+        <p className="mt-2 text-xs text-content-tertiary">
           {status}
         </p>
       )}
       {error && (
-        <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="mt-2 text-xs text-feedback-error-text">{error}</p>
       )}
     </label>
   );
