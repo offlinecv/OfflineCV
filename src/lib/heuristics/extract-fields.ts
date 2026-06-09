@@ -129,10 +129,18 @@ function findContactClusterY(lines: PdfLine[]): number | undefined {
  *   +0.3 font size larger than the rest of profile
  *   +0.2 all-caps OR title-case
  *   +0.1 2–4 words, 2–40 chars, no digits/emails
- *   +0.15 within ~80pt of the email/phone/linkedin line (contact-cluster proximity)
+ *   +0.15 first eligible line within ~80pt of the contact cluster (soft confirm)
+ *   +0.4  *later* line within ~80pt of the contact cluster (mode-2 recovery —
+ *         lets a name set apart below a tagline/header overtake the higher line)
+ *   −0.6  line looks like a job title ("Product Designer", "Senior Marketing
+ *         Lead") — a tagline must not out-score the real name on position/size
  *
  * Hard rejection: lines that are mostly resume-document-title boilerplate
  * ("Functional Resume Sample", "Curriculum Vitae", etc.) — see issue #10.
+ *
+ * The proximity split + title penalty together let contact-cluster proximity
+ * *change the winner*, not merely nudge confidence — issue #16 (mode 2 of #10),
+ * where the real name is vertically separated from the contact block.
  */
 export function extractName(
   profile: PdfSection,
@@ -177,8 +185,17 @@ export function extractName(
     if (line.allCaps || titleCase) score += 0.2;
     if (words.length >= 2 && words.length <= 4) score += 0.1;
     if (contactY !== undefined && Math.abs(line.y - contactY) < 80) {
-      score += 0.15;
+      // First eligible line near contact: soft confirmation. A *later* line
+      // near contact: a recovery bonus large enough to overtake a higher /
+      // larger line that won only on position/size — the mode-2 case in #16.
+      // Gating the strong bonus on `i !== firstEligibleIdx` keeps the #14
+      // mode-1 fixture (first-eligible name) byte-identical.
+      score += i === firstEligibleIdx ? 0.15 : 0.4;
     }
+    // A job-title tagline ("Product Designer", "Senior Marketing Lead") must
+    // not win the name slot on position/size. Real names never match the
+    // title-keyword set, so this only ever penalizes non-name lines.
+    if (looksLikeTitle(text)) score -= 0.6;
 
     if (!best || score > best.score) best = { line, score };
   }
