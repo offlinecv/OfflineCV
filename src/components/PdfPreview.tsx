@@ -39,7 +39,7 @@ export function PdfPreview({ bytes, maxPages = 2 }: PdfPreviewProps) {
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           canvas.className =
-            "w-full rounded border border-neutral-200 dark:border-neutral-800";
+            "w-full rounded border border-border-light";
           const ctx = canvas.getContext("2d");
           if (!ctx) continue;
           await page.render({ canvasContext: ctx, viewport }).promise;
@@ -61,7 +61,7 @@ export function PdfPreview({ bytes, maxPages = 2 }: PdfPreviewProps) {
   return (
     <div className="flex flex-col gap-2" ref={containerRef}>
       {error && (
-        <p className="text-xs text-red-600 dark:text-red-400">
+        <p className="text-xs text-feedback-error-text">
           Preview failed: {error}
         </p>
       )}
