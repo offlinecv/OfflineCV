@@ -245,6 +245,60 @@ describe("extractName — document-title boilerplate rejection (issue #10)", () 
   });
 });
 
+describe("extractName — name set apart from contact block (issue #16, mode 2)", () => {
+  it("prefers the contact-adjacent name over a LARGER job-title tagline above it", () => {
+    // Mode 2 of #10/#16: a "Product Designer" tagline renders in a larger font
+    // on the first profile line, so position+size alone make it the winner —
+    // even though the real name sits one line below, immediately above the
+    // contact cluster. The contact-cluster proximity must be strong enough to
+    // *change the winner*, not merely nudge confidence.
+    const { profile } = buildContext([
+      { text: "Product Designer", fontSize: 16 },
+      { text: "Jane Smith", fontSize: 12 },
+      { text: "jane.smith@example.com", fontSize: 11 },
+      { text: "(555) 010-0123", fontSize: 11 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Jane Smith");
+    // Must clear ANON_CONTACT_CONFIDENCE_FLOOR (0.5) so completeness scoring
+    // doesn't mark the (correctly-detected) name as missing — the exact
+    // failure @sriyau64 reported.
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("prefers the contact-adjacent name over a same-size job-title line above it", () => {
+    // Same defect without the font cue: a "Senior Marketing Lead" line sits
+    // higher at the same size, so it would win the first-line bonus. Proximity
+    // to the contact cluster has to overturn that.
+    const { profile } = buildContext([
+      { text: "Senior Marketing Lead", fontSize: 12 },
+      { text: "Jane Smith", fontSize: 12 },
+      { text: "jane.smith@example.com", fontSize: 11 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Jane Smith");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("no regression: name + title + contact in reading order still picks the name", () => {
+    // The common "Name / Title / contact" stack must be unaffected — the name
+    // is the first eligible line and stays the winner even though the title
+    // line is closer to the contact cluster.
+    const { profile } = buildContext([
+      { text: "Jane Smith", fontSize: 18 },
+      { text: "Product Designer", fontSize: 12 },
+      { text: "jane.smith@example.com", fontSize: 11 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+});
+
 describe("US_LOCATION_RE — preposition-phrase city rejection", () => {
   it("does not eat lowercase prepositions like 'and' / 'of' inside the city capture", () => {
     // Pre-fix the regex captured "CS and Engineering Seattle" (26 chars
