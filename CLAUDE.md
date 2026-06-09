@@ -50,6 +50,44 @@ Each tier in `src/lib/heuristics/` is dynamic-imported from `cascade.ts` so the 
 
 UI lives in `src/App.tsx` + `src/components/{DropZone,PdfPreview,Result}.tsx`. The `Result` component branches on `triggers.includes("fonts_unmappable")` to a consolidated `LimitedParsingCard` — recovered link annotations are the visually primary content, not the warning banner.
 
+## Component Architecture & Reuse
+
+We use a strict 3-tier component architecture to prevent UI drift and enforce reuse:
+
+1. **Primitives** (`src/components/ui/*`): The raw building blocks (Buttons, Dialogs, Inputs). These own their tokens and styling. There should be exactly **one** primitive per concern (e.g., one `<Button>`). 
+2. **Shared Composed** (`src/components/shared/*`): Domain-agnostic compositions of primitives (e.g., `StatusBadge`, `Card`, `ErrorState`).
+3. **Feature** (`src/components/features/*`): Components wired to domain data (e.g., `PdfPreview`, `LimitedParsingCard`). Split these if they exceed ~200 LOC.
+
+> **The Golden Rule:** Before you write a `<button>`, a modal, a drop zone, or a warning banner—find the existing primitive or shared component and reuse it. Never hand-roll a parallel copy or an inline one-off. If a shared piece is missing a variant, add the variant to the shared piece.
+
+## Workflow-surface Reuse (The Reuse Gate)
+
+Before adding a new workflow surface or UI component, you must search the codebase for an existing surface that already owns that capability and **extend it** rather than building a parallel one. 
+
+**The Rule (Soft Gate):** 
+A new parallel surface is allowed, but only with a written justification (a "Reuse analysis"). Extending the owning surface is the default; "build new" must justify *why* (e.g., a genuinely different interaction model or isolation requirement).
+
+We enforce this with a Claude hook (`scripts/hooks/reuse_surface_reminder.sh`) that will warn you when creating new files under `src/components/`.
+
+## Styling & Tokens
+
+- **Semantic Tokens are Canonical:** Style with semantic Tailwind classes (e.g., `bg-surface`, `text-ink`, `border-border`, `text-brand-primary`). 
+- **No Hardcoded Colors:** Never hardcode hex values (`#ef4444`) or raw Tailwind palette colors (`bg-red-500`, `text-slate-400`) in feature code. 
+- **Typography:** Rely on global typography settings. If custom typography components are introduced (e.g., a `<Text>` wrapper), they must be imported from the shared UI directory, never hand-styled inline.
+
+## Data & Hooks
+
+- **Domain Logic Segregation:** Keep business logic in `src/lib/` (e.g., `heuristics/`, `score/`), strictly separated from UI components. Components should import typed async functions or hooks from `lib/`.
+- **UI Hooks:** Extract cross-cutting interaction state (like `useDisclosure` for modals, or `useFileDropZone` for drag-and-drop validation) into `src/hooks/`. Do not leave `useState`/`useEffect` boilerplate cluttering feature components.
+- **Rules of Hooks:** Keep data logic separate from UI interaction hooks. Single-use render-only logic should stay inline, but any reusable state interaction must be extracted.
+
+## What NOT to do
+
+- ❌ **Raw interactive HTML elements in features:** Do not use raw `<button className="...">` in feature code. Always use the `<Button>` primitive.
+- ❌ **Hardcoded colors:** Do not use raw hex colors or secondary styling vocabularies in feature code.
+- ❌ **Duplicated interactions:** Do not build a new modal or dropzone if one already exists.
+- ❌ **Bloated components:** Do not leave a feature component past ~200 LOC without decomposing it.
+
 ## Deploy
 
 `scripts/deploy_resumelint.sh` builds and uploads `dist/` to a GCS bucket. Project and bucket come from `.env.deploy` (gitignored, loaded by `scripts/load_env.sh::load_env_file`) or `--project=` / `--bucket=` flags. The script sources `scripts/deploy_web_utils.sh` for the macOS `gsutil` multiprocessing wrapper, dry-run mode, and modified-file detection. When a second host target lands (Cloudflare Pages, Vercel, etc.), add a sibling `scripts/deploy_resumelint_<target>.sh` rather than adding a `--target` flag here.
