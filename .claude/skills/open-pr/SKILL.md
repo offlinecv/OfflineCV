@@ -11,8 +11,9 @@ with a filled body that links the issue.
 
 ## Input
 
-Parse the argument for an **issue number** (e.g. `5`, `#5`) and/or a short commit
-message. If the issue number is absent, try to recover it from the current
+Parse the argument for an **issue number** (e.g. `5`, `#5`), a short commit
+message, and optionally `--base <ref>`. If `--base <ref>` is set, it overrides the `BASE` computed in Step 0.
+If the issue number is absent, try to recover it from the current
 branch name (`feat/...-issue-5`, `gh-5`) or a `Closes #N` / `Refs #N` trailer in
 an existing commit. If still unknown, open the PR without an issue link and note
 that in the output — don't block on it.
@@ -32,6 +33,7 @@ branch, never on `main`.
 ```bash
 REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"          # resumelint-org/resumelint
 BASE="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"  # main
+# If --base <ref> was provided, override BASE here: BASE="<ref>"
 ```
 
 ### Step 1: Get onto a feature branch (never commit on `main`)
@@ -41,7 +43,7 @@ BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 ```
 
 - If `BRANCH` is `main`:
-  - If there are **committed** commits ahead of `origin/main`, move them onto a
+  - If there are **committed** commits ahead of `origin/$BASE` (when stacking, compare against the stack base so only the child's commits show), move them onto a
     new branch and reset `main`:
     ```bash
     git switch -c feat/<short-slug>
@@ -157,3 +159,4 @@ merge their own PR via admin bypass.)
   (`feat`/`fix`/`chore`/`refactor`/`docs`/`test`).
 - **Never push a fixture binary with real PII.** Run the Step 3.5 preflight on any
   PR that adds/changes a fixture; synthetic personas only (see `CLAUDE.md`).
+- **Stacked PRs:** When `--base` points at an unmerged branch (a stacked PR), note that GitHub auto-retargets the child PR's base to the repo default once the parent merges. The child should then be rebased with `git rebase --onto main <old-base> <child>` to drop the duplicated parent commits.
