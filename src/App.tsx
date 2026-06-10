@@ -2,6 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 import { useCallback, useState } from "react";
+import { Chip } from "./components/ui/Chip.tsx";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
 import { runCascade } from "./lib/heuristics";
@@ -89,16 +90,26 @@ export default function App() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 py-10">
-      <header className="flex items-baseline justify-between">
-        <div className="flex items-baseline gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">resumelint</h1>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-            alpha
-          </span>
+      <header className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="inline-grid h-8 w-8 place-items-center rounded-md bg-brand-amber text-base font-bold text-content-inverse">
+              R
+            </span>
+            <h1 className="text-2xl font-semibold tracking-tight">resumelint</h1>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+              alpha
+            </span>
+          </div>
+          <p className="hidden text-xs text-content-muted sm:block">
+            PDF parser stress test for resumes
+          </p>
         </div>
-        <p className="hidden text-xs text-neutral-500 sm:block">
-          PDF parser stress test for resumes
-        </p>
+        <div className="flex flex-wrap gap-2">
+          <Chip icon="⚡">~30 seconds</Chip>
+          <Chip icon="🔒">Runs in your browser</Chip>
+          <Chip icon="✓">No signup required</Chip>
+        </div>
       </header>
 
       <section className="flex flex-col gap-3">
