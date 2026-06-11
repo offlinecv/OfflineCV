@@ -7,6 +7,9 @@ import type {
   BulletObservation,
 } from "../lib/score/score.ts";
 import { PdfPreview } from "./PdfPreview";
+import { Chip } from "./ui/Chip.tsx";
+import { ScoreRing } from "./features/ScoreRing.tsx";
+import { VerdictHeader } from "./features/VerdictHeader.tsx";
 
 interface ResultProps {
   result: CascadeResult;
@@ -116,9 +119,9 @@ function LayoutFlagsList({ triggers }: { triggers: readonly LayoutTrigger[] }) {
         Layout flags
       </h2>
       {triggers.length === 0 ? (
-        <p className="text-sm text-content-tertiary">
-          None — single-column, text-PDF layout.
-        </p>
+        <Chip tone="success" icon="✓">
+          Clean ATS layout — single-column, selectable text
+        </Chip>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {triggers.map((t) => (
@@ -153,9 +156,9 @@ function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
           </span>
         )}
       </div>
-      <div className="flex items-baseline gap-3">
-        <span className="text-3xl font-semibold">{score.overall}</span>
-        <span className="text-sm text-content-muted">/ 100</span>
+      <div className="flex items-center gap-4">
+        <ScoreRing score={score.overall} />
+        <VerdictHeader score={score.overall} />
       </div>
       <p className="max-w-prose text-xs text-content-tertiary">
         Our reference number for iterating on the parser. Not a universal
@@ -212,12 +215,13 @@ function Dimension({
   gradable: boolean;
   hint: string;
 }) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
-    <div className="flex flex-col gap-1 rounded border border-border-light p-2">
+    <div className="flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3">
       <dt className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
         {label}
       </dt>
-      <dd className="text-base font-medium">
+      <dd className="text-sm font-medium">
         {gradable ? (
           <>
             {value}
@@ -227,9 +231,15 @@ function Dimension({
           <span className="text-content-muted">—</span>
         )}
       </dd>
-      <p className="text-[10px] text-content-muted">
-        {hint}
-      </p>
+      {gradable && (
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-card">
+          <div
+            className="h-full rounded-full bg-brand-amber"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+      <p className="text-[10px] text-content-muted">{hint}</p>
     </div>
   );
 }
