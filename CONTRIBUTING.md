@@ -12,7 +12,7 @@ see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout.
 ```bash
 npm install
 npm run dev        # vite dev server on http://localhost:5173
-npm run test       # vitest run (167 tests, ~1s)
+npm run test       # vitest run (189 tests, ~1s)
 npm run typecheck  # tsc -b --noEmit
 ```
 
