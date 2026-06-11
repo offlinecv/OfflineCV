@@ -12,7 +12,7 @@ see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout.
 ```bash
 npm install
 npm run dev        # vite dev server on http://localhost:5173
-npm run test       # vitest run (167 tests, ~1s)
+npm run test       # vitest run (189 tests, ~1s)
 npm run typecheck  # tsc -b --noEmit
 ```
 
@@ -109,6 +109,30 @@ Apply at least one type label (`bug`, `feature`, `improvement`,
 (`documentation`, `testing`, etc.). For bugs, include a reproducer PDF
 or describe how to reproduce — `fonts_unmappable` and two-column cases
 are the most common and the hardest to repro without a sample.
+
+## Project board
+
+Issues are tracked on the **ResumeLint v1** board
+([`resumelint-org/projects/1`](https://github.com/orgs/resumelint-org/projects/1)),
+grouped by **Phase** — the milestone each issue belongs to (`M1 Parser
+Hardening`, `M2 UI Parity`, `M3 JD Matching`, `M4 AI Rewrite`, `v1.1
+Post-Launch`). v1.0 ships when M1–M4 land; v1.1 holds post-launch work.
+
+After filing an issue, place it on the roadmap. With Claude Code, run
+`/triage-issue <number>` — it picks the milestone, adds the issue to the
+board, and sets its Phase. By hand:
+
+```bash
+gh issue edit <number> --repo resumelint-org/resumelint --milestone "<milestone title>"
+```
+
+Adding an issue to the board (the Phase column) needs the `project`
+token scope, which `gh` does not grant by default — run
+`gh auth refresh -s project` once if you want to write the board.
+Without it, just set the milestone (the durable signal) and a maintainer
+can add it to the board. Maintainers: `/triage-issue` also documents the
+one-time milestone/board setup in
+[`.claude/skills/triage-issue/SKILL.md`](./.claude/skills/triage-issue/SKILL.md).
 
 ## Getting help
 

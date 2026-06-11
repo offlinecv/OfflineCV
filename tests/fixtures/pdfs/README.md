@@ -10,11 +10,18 @@ Walked and diffed by [`src/lib/heuristics/corpus.test.ts`](../../../src/lib/heur
 tests/fixtures/pdfs/
 ├── latex/          XeLaTeX / pdfTeX / LuaTeX exports
 ├── word/           Microsoft Word exports (incl. Word → macOS Quartz prints)
-├── google-docs/    Google Docs "Download as PDF" (Skia/PDF renderer)
+├── google-docs/    Google Docs "Download as PDF" (Skia/PDF renderer) — also
+│                   accepts Chromium `--print-to-pdf` Skia exports as a
+│                   deliberate proxy, since Google Docs uses the same
+│                   Skia/PDF renderer. Such proxy fixtures use the
+│                   `google-docs-skia-proxy-*` filename prefix and will
+│                   self-identify with `Creator: HeadlessChrome/<v>` in the
+│                   PDF Info dict — that is by design, not a mislabel.
 ├── mac-pages/      Apple Pages → PDF
 ├── mac-preview/    macOS Preview re-save (Quartz PDFContext)
 ├── indesign/       Adobe InDesign exports
-└── unknown/        Generator unknown or one-off (e.g. react-pdf, headless Chrome)
+└── unknown/        Generator unknown or one-off (e.g. react-pdf,
+                    WeasyPrint, other non-categorised renderers)
 ```
 
 Empty subfolders are fine and tracked via `.gitkeep` — they signal a category we haven't seeded yet.
