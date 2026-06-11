@@ -44,6 +44,10 @@ CascadeResult
        Specificity (0.4) + Structure (0.3) + Completeness (0.3)
        multiplied by a layout-trigger penalty (1.0 / 0.85 / 0.70 / 0 if scanned)
        → AnonymousAtsScore with per-dimension breakdown and ATS_SCORE_ALGO_VERSION
+
+Verdict bands: overall ≥ 80 → "Strong", ≥ 60 → "Getting There", < 60 → "Needs Work"
+(thresholds match Recruidea `ats-check-vm` buckets at 80/60; labels are a simpler
+3-label set vs. the authed scorer's tier names).
 ```
 
 Each tier in `src/lib/heuristics/` is dynamic-imported from `cascade.ts` so the entry chunk stays small and unused tiers don't ship.
