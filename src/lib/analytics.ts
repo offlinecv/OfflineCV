@@ -10,6 +10,9 @@ type PostHog = {
 const KEY = import.meta.env.VITE_POSTHOG_KEY ?? "";
 const HOST = import.meta.env.VITE_POSTHOG_HOST ?? "https://us.i.posthog.com";
 
+/** True when analytics are enabled (VITE_POSTHOG_KEY is set at build time). */
+export const ANALYTICS_ENABLED = !!KEY;
+
 let ph: PostHog | null = null;
 const queue: Array<[string, Record<string, unknown>]> = [];
 
@@ -75,6 +78,16 @@ export function trackParseCompleted(args: {
     triggers: [...args.triggers],
     algo_version: args.algoVersion,
     layout_multiplier: args.layoutMultiplier,
+  });
+}
+
+export function trackFeedback(args: {
+  verdictBand: string;
+  thumb: "up" | "down";
+}): void {
+  track("feedback_submitted", {
+    verdict_band: args.verdictBand,
+    thumb: args.thumb,
   });
 }
 

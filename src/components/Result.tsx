@@ -6,10 +6,13 @@ import type {
   AnonymousAtsScore,
   BulletObservation,
 } from "../lib/score/score.ts";
+import { getScoreTier, getScoreLabel } from "../lib/score/score.ts";
 import { PdfPreview } from "./PdfPreview";
 import { Chip } from "./ui/Chip.tsx";
 import { ScoreRing } from "./features/ScoreRing.tsx";
 import { VerdictHeader } from "./features/VerdictHeader.tsx";
+import { ContactCard } from "./features/ContactCard.tsx";
+import { FeedbackControl } from "./features/FeedbackControl.tsx";
 
 interface ResultProps {
   result: CascadeResult;
@@ -78,6 +81,9 @@ function ParsedCard({
             {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
             {result.diagnostics.elapsedMs} ms
           </span>
+          <FeedbackControl
+            verdictBand={getScoreLabel(getScoreTier(score.overall))}
+          />
         </div>
         <button
           type="button"
@@ -105,6 +111,7 @@ function ParsedCard({
         </div>
       </div>
 
+      <ContactCard result={result} />
       <LayoutFlagsList triggers={result.triggers} />
       <AtsScoreReadout score={score} />
       <PerBulletFeedback bullets={score.bullets} />
