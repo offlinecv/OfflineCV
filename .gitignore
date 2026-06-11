@@ -18,6 +18,10 @@ dist/
 # Python bytecode cache from hook scripts under scripts/hooks/.
 __pycache__/
 
+# fallow audit output (runtime reports + latest.json symlink). The hook
+# script .claude/hooks/fallow-stop.sh that writes this dir IS tracked.
+.fallow/
+
 # Local editor / workspace files (per-machine, never shared).
 *.code-workspace
 .idea/
