@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
+    "@mlc-ai/web-llm": "^0.2.84",
     "pdfjs-dist": "^4.10.38",
     "posthog-js": "^1.205.0",
     "react": "^19.1.1",
