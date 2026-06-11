@@ -30,3 +30,4 @@ __pycache__/
 .codegraph/*.db-wal
 .codegraph/cache/
 .codegraph/.dirty
+.codegraph/*.pid
