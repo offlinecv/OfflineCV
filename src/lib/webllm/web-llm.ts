@@ -27,6 +27,12 @@ let loadedFired = false;
  * the page lifetime so subsequent clicks (and concurrent clicks from
  * multiple bullet rows) all share one engine and one download.
  *
+ * On failure (OOM, dropped network, etc.) the cache is reset to `null` so
+ * the UI's "Try again" button can re-attempt. The original promise still
+ * rejects to the caller — the `.catch` here only resets the slot.
+ * `downloadStartedFired` deliberately stays `true` so a retry doesn't
+ * double-fire `webllm_download_started` for the same logical attempt.
+ *
  * Telemetry: fires `webllm_download_started` on the first call and
  * `webllm_loaded` once the engine is ready. Both fire at most once per page.
  */
@@ -38,7 +44,7 @@ export function loadEngine(
     downloadStartedFired = true;
     trackWebllmDownloadStarted();
   }
-  cached = (async () => {
+  const pending = (async () => {
     const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
     const engine = await CreateMLCEngine(MODEL_ID, {
       initProgressCallback: (report) => onProgress(report),
@@ -49,7 +55,11 @@ export function loadEngine(
     }
     return engine as unknown as WebLlmEngine;
   })();
-  return cached;
+  cached = pending;
+  pending.catch(() => {
+    if (cached === pending) cached = null;
+  });
+  return pending;
 }
 
 /** Test-only: drop caches and one-shot flags between tests. */

@@ -50,7 +50,10 @@ export async function rewriteBulletWithLlm(
   });
   const raw = response.choices[0]?.message?.content ?? "";
   const cleaned = postProcess(raw);
-  if (!firstRewriteFired) {
+  // Only count it as a "first rewrite" when the model actually returned
+  // usable output. A null/empty response is a failure mode, not a funnel
+  // step worth measuring against download conversion.
+  if (!firstRewriteFired && cleaned.length > 0) {
     firstRewriteFired = true;
     trackWebllmFirstRewrite();
   }

@@ -3,7 +3,7 @@
 
 /**
  * Per-bullet "Suggest a rewrite" CTA. Runs Qwen2-1.5B in the browser via
- * WebLLM (see ../lib/webllm/).
+ * WebLLM (see ../../lib/webllm/).
  *
  * Non-negotiable rules from issue #3:
  *   - On browsers without WebGPU, this component returns null. Not a
@@ -13,16 +13,20 @@
  *   - The model weights (~1.2GB) download on click only. Never on mount,
  *     never on hover, never on scroll-into-view. The cold-start UX is the
  *     conversion killer, not inference cost.
+ *
+ * Styling uses semantic tokens only (surface / content / border / feedback)
+ * per CLAUDE.md. The token CSS auto-adapts via prefers-color-scheme, so no
+ * `dark:` overrides are needed.
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { detectWebGpu } from "../lib/webllm/capability.ts";
-import { loadEngine } from "../lib/webllm/web-llm.ts";
-import { rewriteBulletWithLlm } from "../lib/webllm/rewrite-bullet.ts";
+import { detectWebGpu } from "../../lib/webllm/capability.ts";
+import { loadEngine } from "../../lib/webllm/web-llm.ts";
+import { rewriteBulletWithLlm } from "../../lib/webllm/rewrite-bullet.ts";
 import type {
   ProgressUpdate,
   WebGpuCapability,
-} from "../lib/webllm/types.ts";
+} from "../../lib/webllm/types.ts";
 
 interface RewriteButtonProps {
   bullet: string;
@@ -92,7 +96,7 @@ export function RewriteButton({ bullet }: RewriteButtonProps) {
         type="button"
         onClick={onClick}
         disabled={busy}
-        className="self-start rounded-md border border-neutral-300 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 hover:border-neutral-400 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+        className="self-start rounded-md border border-border-light bg-surface-card px-2 py-1 text-[11px] font-medium text-content-secondary hover:border-border hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
       >
         {labelFor(status)}
       </button>
@@ -102,9 +106,7 @@ export function RewriteButton({ bullet }: RewriteButtonProps) {
       )}
 
       {status.kind === "rewriting" && (
-        <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
-          Rewriting…
-        </p>
+        <p className="text-[11px] text-content-muted">Rewriting…</p>
       )}
 
       {status.kind === "done" && (
@@ -116,9 +118,7 @@ export function RewriteButton({ bullet }: RewriteButtonProps) {
       )}
 
       {status.kind === "error" && (
-        <p className="text-[11px] text-red-700 dark:text-red-300">
-          {status.message}
-        </p>
+        <p className="text-[11px] text-feedback-error-text">{status.message}</p>
       )}
     </div>
   );
@@ -142,27 +142,27 @@ function labelFor(status: Status): string {
 function LoadingPanel({ progress }: { progress: ProgressUpdate }) {
   const pct = Math.max(0, Math.min(100, Math.round(progress.progress * 100)));
   return (
-    <div className="flex flex-col gap-1 rounded border border-neutral-200 bg-neutral-50 p-2 dark:border-neutral-800 dark:bg-neutral-950">
-      <div className="flex items-center justify-between text-[11px] text-neutral-700 dark:text-neutral-300">
+    <div className="flex flex-col gap-1 rounded border border-border-light bg-surface-subtle p-2">
+      <div className="flex items-center justify-between text-[11px] text-content-secondary">
         <span>Loading the bullet-rewrite model (~1.2GB, one-time download)</span>
         <span className="font-mono">{pct}%</span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-base">
         <div
-          className="h-full bg-emerald-500 transition-all"
+          className="h-full bg-feedback-success-icon transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>
       {progress.text && (
-        <p className="font-mono text-[10px] text-neutral-500 dark:text-neutral-500">
+        <p className="font-mono text-[10px] text-content-muted">
           {progress.text}
         </p>
       )}
       <details className="mt-1">
-        <summary className="cursor-pointer text-[10px] text-neutral-600 hover:underline dark:text-neutral-400">
+        <summary className="cursor-pointer text-[10px] text-content-tertiary hover:underline">
           What's happening?
         </summary>
-        <p className="mt-1 max-w-prose text-[10px] leading-relaxed text-neutral-600 dark:text-neutral-400">
+        <p className="mt-1 max-w-prose text-[10px] leading-relaxed text-content-tertiary">
           A small open-source language model (Qwen2-1.5B) is downloading to
           your browser. It runs entirely on your device — your bullet text
           never leaves this tab. The download takes about a minute on a
@@ -183,14 +183,12 @@ function RewriteResult({
   onCopy: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-1 rounded border border-emerald-200 bg-emerald-50/60 p-2 dark:border-emerald-900/60 dark:bg-emerald-950/30">
-      <p className="text-xs leading-snug text-neutral-900 dark:text-neutral-100">
-        {rewritten}
-      </p>
+    <div className="flex flex-col gap-1 rounded border border-feedback-success-border bg-feedback-success-bg p-2">
+      <p className="text-xs leading-snug text-content-primary">{rewritten}</p>
       <button
         type="button"
         onClick={onCopy}
-        className="self-start text-[10px] font-medium text-emerald-800 hover:underline dark:text-emerald-200"
+        className="self-start text-[10px] font-medium text-feedback-success-text hover:underline"
       >
         {copied ? "Copied" : "Use this — copy to clipboard"}
       </button>

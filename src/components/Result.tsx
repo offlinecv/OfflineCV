@@ -18,7 +18,7 @@ import {
   scoreBandTextClass,
   scoreBandBgClass,
 } from "./features/scoreBand.ts";
-import { RewriteButton } from "./RewriteButton";
+import { RewriteButton } from "./features/RewriteButton.tsx";
 
 interface ResultProps {
   result: CascadeResult;

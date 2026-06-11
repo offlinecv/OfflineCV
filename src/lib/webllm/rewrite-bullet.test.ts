@@ -2,6 +2,18 @@
 // Copyright 2026 The resumelint Authors
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Mock the analytics tracker so we can assert the empty-output gating
+// without depending on whether VITE_POSTHOG_KEY happens to be set.
+// vi.hoisted lets us reference the mock from the hoisted vi.mock factory.
+const { trackFirstRewriteMock } = vi.hoisted(() => ({
+  trackFirstRewriteMock: vi.fn(),
+}));
+vi.mock("../analytics.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../analytics.ts")>();
+  return { ...actual, trackWebllmFirstRewrite: trackFirstRewriteMock };
+});
+
 import {
   _resetRewriteFlagsForTesting,
   BULLET_REWRITE_SYSTEM_PROMPT,
@@ -34,6 +46,7 @@ function reply(content: string | null): ChatCompletionResponse {
 describe("rewriteBulletWithLlm", () => {
   beforeEach(() => {
     _resetRewriteFlagsForTesting();
+    trackFirstRewriteMock.mockClear();
   });
 
   it("sends the system prompt and a user message containing the bullet", async () => {
@@ -84,6 +97,19 @@ describe("rewriteBulletWithLlm", () => {
     const { engine } = makeEngine(async () => reply(null));
     const out = await rewriteBulletWithLlm("orig", engine);
     expect(out).toBe("");
+  });
+
+  it("does NOT fire webllm_first_rewrite when the output is empty", async () => {
+    const { engine } = makeEngine(async () => reply(null));
+    await rewriteBulletWithLlm("orig", engine);
+    expect(trackFirstRewriteMock).not.toHaveBeenCalled();
+  });
+
+  it("fires webllm_first_rewrite exactly once on the first non-empty rewrite", async () => {
+    const { engine } = makeEngine(async () => reply("Shipped Foo."));
+    await rewriteBulletWithLlm("a", engine);
+    await rewriteBulletWithLlm("b", engine);
+    expect(trackFirstRewriteMock).toHaveBeenCalledTimes(1);
   });
 
   it("propagates engine errors to the caller", async () => {
