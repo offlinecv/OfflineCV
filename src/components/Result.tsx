@@ -303,11 +303,42 @@ function PerBulletFeedback({
         Each bullet checked against three rules: an action verb, the 8–30-word
         length window, and a metric. {summary}
       </p>
-      <ul className="flex flex-col gap-1.5">
-        {bullets.map((b) => (
-          <BulletRow key={b.index} bullet={b} />
-        ))}
-      </ul>
+      <table className="w-full border-collapse text-sm">
+        <caption className="sr-only">Per-bullet rule checks</caption>
+        <thead>
+          <tr>
+            <th
+              scope="col"
+              className="pb-1 text-left text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              {/* bullet text — no visible header */}
+            </th>
+            <th
+              scope="col"
+              className="pb-1 pr-2 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              Verb
+            </th>
+            <th
+              scope="col"
+              className="pb-1 pr-2 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              Length
+            </th>
+            <th
+              scope="col"
+              className="pb-1 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              Metric
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {bullets.map((b) => (
+            <BulletRow key={b.index} bullet={b} />
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }
@@ -321,14 +352,10 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
   const allPass =
     bullet.hasMetric && bullet.startsWithActionVerb && bullet.wellFormedLength;
 
-  const containerCls = attention
-    ? "border-feedback-warning-border bg-feedback-warning-bg"
-    : allPass
-      ? "border-border-light"
-      : "border-border";
-  const textCls = allPass
-    ? "text-content-muted"
-    : "text-content-primary";
+  const rowCls = attention
+    ? "bg-feedback-warning-bg"
+    : "";
+  const textCls = allPass ? "text-content-muted" : "text-content-primary";
 
   const lengthLabel = bullet.wellFormedLength
     ? `${bullet.wordCount} words`
@@ -336,56 +363,68 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
       ? `${bullet.wordCount} words (too short)`
       : `${bullet.wordCount} words (too long)`;
 
+  const lengthSuffix =
+    bullet.wordCount < 8 ? " ↓" : bullet.wordCount > 30 ? " ↑" : "";
+
   return (
-    <li
-      className={`flex flex-col gap-1.5 rounded border p-2 ${containerCls}`}
-    >
-      <p className={`text-sm leading-snug ${textCls}`}>
+    <tr className={rowCls}>
+      <td className={`py-1 pr-3 align-top text-sm leading-snug ${textCls}`}>
         <span className="mr-1.5 font-mono text-[11px] text-content-muted">
           #{bullet.index + 1}
         </span>
         {bullet.text}
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        <CheckPill
-          ok={bullet.startsWithActionVerb}
-          okLabel="verb"
-          failLabel="no action verb"
-        />
-        <CheckPill
-          ok={bullet.wellFormedLength}
-          okLabel={lengthLabel}
-          failLabel={lengthLabel}
-        />
-        <CheckPill
-          ok={bullet.hasMetric}
-          okLabel="metric"
-          failLabel="no metric"
-        />
-      </div>
-    </li>
-  );
-}
-
-function CheckPill({
-  ok,
-  okLabel,
-  failLabel,
-}: {
-  ok: boolean;
-  okLabel: string;
-  failLabel: string;
-}) {
-  const cls = ok
-    ? "bg-feedback-success-bg text-feedback-success-text"
-    : "bg-feedback-warning-bg text-feedback-warning-text";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}
-    >
-      <span>{ok ? "✓" : "✗"}</span>
-      <span>{ok ? okLabel : failLabel}</span>
-    </span>
+      </td>
+      <td className="py-1 pr-2 text-right align-top tabular-nums">
+        {bullet.startsWithActionVerb ? (
+          <>
+            <span className="text-feedback-success-text" aria-hidden="true">
+              ✓
+            </span>
+            <span className="sr-only">verb</span>
+          </>
+        ) : (
+          <>
+            <span className="text-feedback-warning-text" aria-hidden="true">
+              ✗
+            </span>
+            <span className="sr-only">no action verb</span>
+          </>
+        )}
+      </td>
+      <td
+        className="py-1 pr-2 text-right align-top tabular-nums"
+        title={lengthLabel}
+      >
+        <span
+          className={
+            bullet.wellFormedLength
+              ? "text-feedback-success-text"
+              : "text-feedback-warning-text"
+          }
+        >
+          {bullet.wordCount}
+          {lengthSuffix}
+        </span>
+        <span className="sr-only">{lengthLabel}</span>
+      </td>
+      <td className="py-1 text-right align-top tabular-nums">
+        {bullet.hasMetric ? (
+          <>
+            <span className="text-feedback-success-text" aria-hidden="true">
+              ✓
+            </span>
+            <span className="sr-only">metric</span>
+          </>
+        ) : (
+          <>
+            <span className="text-feedback-warning-text" aria-hidden="true">
+              ✗
+            </span>
+            <span className="sr-only">no metric</span>
+          </>
+        )}
+      </td>
+    </tr>
   );
 }
 
