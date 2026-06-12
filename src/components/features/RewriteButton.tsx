@@ -89,15 +89,22 @@ export function RewriteButton({ bullet }: RewriteButtonProps) {
   if (capability !== "available") return null;
 
   const busy = status.kind === "loading" || status.kind === "rewriting";
+  const idle = status.kind === "idle";
 
   return (
-    <div className="mt-1 flex flex-col gap-1.5">
+    <div className="flex flex-col items-end gap-1.5">
       <button
         type="button"
         onClick={onClick}
         disabled={busy}
-        className="self-start rounded-md border border-border-light bg-surface-card px-2 py-1 text-[11px] font-medium text-content-secondary hover:border-border hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+        aria-label={`Suggest a rewrite for this bullet`}
+        className={
+          idle
+            ? "group inline-flex min-h-[28px] items-center gap-1 self-start py-1 text-[11px] font-medium text-content-tertiary hover:text-brand-amber disabled:cursor-not-allowed disabled:opacity-60"
+            : "inline-flex min-h-[28px] items-center gap-1 self-start rounded-md border border-border-light bg-surface-card px-2 py-1 text-[11px] font-medium text-content-secondary hover:border-border hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+        }
       >
+        <SparkleIcon />
         {labelFor(status)}
       </button>
 
@@ -133,12 +140,26 @@ function labelFor(status: Status): string {
     case "rewriting":
       return "Rewriting…";
     case "done":
-      return "Suggest another rewrite";
+      return "Rewrite again";
     case "error":
       return "Try again";
     default:
-      return "Suggest a rewrite";
+      return "Rewrite";
   }
+}
+
+/** Inline sparkle glyph for the rewrite affordance (SVG, not emoji). */
+function SparkleIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="h-3 w-3 shrink-0"
+      fill="currentColor"
+    >
+      <path d="M12 2l1.9 5.6a4 4 0 0 0 2.5 2.5L22 12l-5.6 1.9a4 4 0 0 0-2.5 2.5L12 22l-1.9-5.6a4 4 0 0 0-2.5-2.5L2 12l5.6-1.9a4 4 0 0 0 2.5-2.5L12 2z" />
+    </svg>
+  );
 }
 
 function LoadingPanel({ progress }: { progress: ProgressUpdate }) {
