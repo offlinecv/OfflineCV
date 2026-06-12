@@ -87,7 +87,17 @@ mkdir -p "$OUT_DIR" 2>/dev/null || true
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 report="${OUT_DIR}/audit-${ts}.json"
 
-"${FALLOW[@]}" audit --changed-since "$base_ref" --format json > "$report" 2>/dev/null || true
+# Audit exactly the set the gate selected above. fallow's own --changed-since
+# re-derives a file set internally, which can diverge from $changed (different
+# diff base, deletions, non-TS/JS noise). Passing the explicit list keeps the
+# gate authoritative. Until fallow's CLI is pinned (#15) we don't assume it
+# accepts positional files: try the explicit form, and if that yields no
+# usable report, fall back to --changed-since (the prior behavior).
+mapfile -t changed_files <<< "$changed"
+
+"${FALLOW[@]}" audit --format json -- "${changed_files[@]}" > "$report" 2>/dev/null || true
+[[ -s "$report" ]] || \
+  "${FALLOW[@]}" audit --format json --changed-since "$base_ref" > "$report" 2>/dev/null || true
 
 # No usable report? Bail quietly — still a success.
 [[ -s "$report" ]] || exit 0
