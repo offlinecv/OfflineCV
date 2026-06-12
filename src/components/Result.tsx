@@ -53,7 +53,7 @@ function StatusPill({
       : "bg-feedback-warning-bg text-feedback-warning-text";
   return (
     <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cls}`}
+      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${cls}`}
     >
       {children}
     </span>
@@ -119,7 +119,7 @@ function ParsedCard({
             <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
               Extracted plain text
             </h2>
-            <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-xs leading-relaxed">
+            <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed">
               {result.rawText || "(no text extracted)"}
             </pre>
           </div>
@@ -158,58 +158,64 @@ function LayoutFlagsList({ triggers }: { triggers: readonly LayoutTrigger[] }) {
 }
 
 function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
+  const buildDate = __BUILD_DATE__.slice(0, 10);
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
           Your resume score
         </h2>
-        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
+        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-content-secondary">
           alpha
         </span>
         {score.algoVersion && (
-          <span className="text-[10px] text-content-muted">
+          <span className="text-[11px] text-content-muted">
             algo v{score.algoVersion}
           </span>
         )}
+        <span className="text-[11px] text-content-muted">
+          Built {buildDate}
+        </span>
       </div>
-      <div className="flex items-center gap-4">
-        <ScoreRing score={score.overall} />
-        <VerdictHeader score={score.overall} />
-      </div>
-      <p className="max-w-prose text-xs text-content-tertiary">
+      <p className="max-w-prose text-sm text-content-tertiary">
         A quick read on how your resume scores — based on what a generic text
         extractor pulled from your PDF, the same starting point most ATS
         parsers use. Not a universal score; systems weigh things differently.
         Dimensions below show where the points landed.
       </p>
-      <dl className="mt-1 grid grid-cols-3 gap-3 text-xs">
-        <Dimension
-          label="Specificity"
-          value={score.specificity.score}
-          max={score.specificity.max}
-          gradable={score.specificity.gradable}
-          hint={`${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`}
-        />
-        <Dimension
-          label="Structure"
-          value={score.structure.score}
-          max={score.structure.max}
-          gradable={score.structure.gradable}
-          hint={`${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`}
-        />
-        <Dimension
-          label="Completeness"
-          value={score.completeness.score}
-          max={score.completeness.max}
-          gradable={score.completeness.gradable}
-          hint={
-            score.completeness.missing.length === 0
-              ? "All expected fields present"
-              : `Missing: ${score.completeness.missing.join(", ")}`
-          }
-        />
-      </dl>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start">
+        <div className="flex items-center gap-4">
+          <ScoreRing score={score.overall} />
+          <VerdictHeader score={score.overall} />
+        </div>
+        <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3 flex-1">
+          <Dimension
+            label="Specificity"
+            value={score.specificity.score}
+            max={score.specificity.max}
+            gradable={score.specificity.gradable}
+            hint={`${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`}
+          />
+          <Dimension
+            label="Structure"
+            value={score.structure.score}
+            max={score.structure.max}
+            gradable={score.structure.gradable}
+            hint={`${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`}
+          />
+          <Dimension
+            label="Completeness"
+            value={score.completeness.score}
+            max={score.completeness.max}
+            gradable={score.completeness.gradable}
+            hint={
+              score.completeness.missing.length === 0
+                ? "All expected fields present"
+                : `Missing: ${score.completeness.missing.join(", ")}`
+            }
+          />
+        </dl>
+      </div>
       {score.layout.multiplier < 1 && (
         <p className="text-[11px] text-feedback-warning-text">
           Layout penalty applied (multiplier {score.layout.multiplier.toFixed(2)}
@@ -236,7 +242,7 @@ function Dimension({
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3">
-      <dt className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+      <dt className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
         {label}
       </dt>
       <dd className="text-sm font-medium">
@@ -257,7 +263,7 @@ function Dimension({
           />
         </div>
       )}
-      <p className="text-[10px] text-content-muted">{hint}</p>
+      <p className="text-[11px] text-content-muted">{hint}</p>
     </div>
   );
 }
@@ -293,7 +299,7 @@ function PerBulletFeedback({
       <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
         Per-bullet feedback
       </h2>
-      <p className="max-w-prose text-xs text-content-tertiary">
+      <p className="max-w-prose text-sm text-content-tertiary">
         Each bullet checked against three rules: an action verb, the 8–30-word
         length window, and a metric. {summary}
       </p>
@@ -334,8 +340,8 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
     <li
       className={`flex flex-col gap-1.5 rounded border p-2 ${containerCls}`}
     >
-      <p className={`text-xs leading-snug ${textCls}`}>
-        <span className="mr-1.5 font-mono text-[10px] text-content-muted">
+      <p className={`text-sm leading-snug ${textCls}`}>
+        <span className="mr-1.5 font-mono text-[11px] text-content-muted">
           #{bullet.index + 1}
         </span>
         {bullet.text}
@@ -375,7 +381,7 @@ function CheckPill({
     : "bg-feedback-warning-bg text-feedback-warning-text";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${cls}`}
     >
       <span>{ok ? "✓" : "✗"}</span>
       <span>{ok ? okLabel : failLabel}</span>
