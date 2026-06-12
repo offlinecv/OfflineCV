@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Chip } from "./components/ui/Chip.tsx";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
+import { JdMatch } from "./components/features/JdMatch.tsx";
+import { Card } from "./components/shared/Card.tsx";
 import { runCascade } from "./lib/heuristics";
 import type { CascadeResult } from "./lib/heuristics/types.ts";
 import {
@@ -16,6 +18,7 @@ import {
   trackParseCompleted,
   trackParseFailed,
 } from "./lib/analytics.ts";
+import { extractJdTerms, computeCoverage } from "./lib/jd-match";
 
 type ParseState =
   | { phase: "idle" }
@@ -38,6 +41,17 @@ function formatBytes(n: number): string {
 
 export default function App() {
   const [state, setState] = useState<ParseState>({ phase: "idle" });
+  const [jdText, setJdText] = useState("");
+
+  const jdMatch = useMemo(() => {
+    const trimmed = jdText.trim();
+    if (trimmed.length === 0) return null;
+    if (state.phase !== "done") return null;
+    const extracted = extractJdTerms(trimmed);
+    if (extracted.all.length === 0) return null;
+    const coverage = computeCoverage(state.result.parsed, extracted.all);
+    return { extracted, coverage };
+  }, [jdText, state]);
 
   const handleFile = useCallback(async (file: File) => {
     trackFileAccepted(file.size);
@@ -143,6 +157,43 @@ export default function App() {
           score={state.score}
           bytes={state.bytes}
           onReset={reset}
+        />
+      )}
+
+      <Card className="flex flex-col gap-3 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <h2
+            id="jd-input-label"
+            className="text-xs font-semibold uppercase tracking-wider text-content-muted"
+          >
+            Paste a job description
+          </h2>
+          <p className="max-w-prose text-xs text-content-tertiary">
+            We'll lint your resume against the JD's skills and key phrases.
+            Diagnostic, not tailoring — your JD text stays in this browser
+            tab.
+          </p>
+        </div>
+        <textarea
+          value={jdText}
+          onChange={(e) => setJdText(e.target.value)}
+          placeholder="Paste the job description here…"
+          aria-labelledby="jd-input-label"
+          className="min-h-[160px] resize-y rounded-lg border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed text-content-primary placeholder:text-content-muted focus:border-border focus:outline-none"
+        />
+        {jdText.trim().length > 0 && state.phase !== "done" && (
+          <p className="text-xs text-content-muted">
+            Drop a resume above to see what the JD asks for that's not in
+            your resume.
+          </p>
+        )}
+      </Card>
+
+      {jdMatch && (
+        <JdMatch
+          coverage={jdMatch.coverage}
+          terms={jdMatch.extracted.all}
+          nounsDropped={jdMatch.extracted.nounsDropped}
         />
       )}
 

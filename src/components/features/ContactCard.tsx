@@ -12,6 +12,7 @@
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { buildContactFields } from "../../lib/contact.ts";
 import { Chip } from "../ui/Chip.tsx";
+import { Card } from "../shared/Card.tsx";
 
 interface ContactCardProps {
   result: CascadeResult;
@@ -22,10 +23,7 @@ export function ContactCard({ result }: ContactCardProps) {
   const detectedCount = fields.filter((f) => !f.gated).length;
 
   return (
-    <section
-      id="contact"
-      className="scroll-mt-6 rounded-xl border border-border-light bg-surface-card p-5"
-    >
+    <Card id="contact" className="scroll-mt-6">
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-content-muted">
         Contact — {detectedCount} of 5 detected
       </h2>
@@ -43,6 +41,6 @@ export function ContactCard({ result }: ContactCardProps) {
           ),
         )}
       </div>
-    </section>
+    </Card>
   );
 }
