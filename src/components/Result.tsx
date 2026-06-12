@@ -263,7 +263,7 @@ function Dimension({
           />
         </div>
       )}
-      <p className="text-[11px] text-content-muted">{hint}</p>
+      <p className="text-[11px] text-content-tertiary">{hint}</p>
     </div>
   );
 }

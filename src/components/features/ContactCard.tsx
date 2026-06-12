@@ -61,10 +61,10 @@ function ContactRow({
         {label}
       </dt>
       {gated ? (
-        <dd className="flex-1 text-sm italic text-content-muted">
+        <dd className="flex-1 text-sm italic text-content-tertiary">
           — not detected
           {reason === "low_confidence" && (
-            <span className="ml-1 text-[11px] not-italic text-content-muted">
+            <span className="ml-1 text-[11px] not-italic text-content-tertiary">
               (low confidence)
             </span>
           )}
