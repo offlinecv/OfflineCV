@@ -99,7 +99,7 @@ function ParsedCard({
 
       <AtsScoreReadout score={score} />
       <ContactCard result={result} />
-      <PerBulletFeedback bullets={score.bullets} />
+      <PerBulletFeedback bullets={score.bullets} experiences={result.parsed.experience} />
 
       {/* Evidence — how a generic extractor read this PDF. Reference
           material, so it sits below the score and per-bullet findings.
