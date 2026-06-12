@@ -60,7 +60,7 @@ export function ScoreRing({ score, max = 100 }: ScoreRingProps) {
         <span className={`text-3xl font-semibold leading-none ${ringColorCls}`}>
           {score}
         </span>
-        <span className="text-[10px] text-content-muted">/ {max}</span>
+        <span className="text-[11px] text-content-muted">/ {max}</span>
       </div>
     </div>
   );

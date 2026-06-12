@@ -5,8 +5,8 @@
  * ContactCard — displays extracted contact fields from a CascadeResult.
  *
  * Each of the five contact fields (name, email, phone, LinkedIn, location) is
- * shown as a label+value row. Fields that were absent or extracted with low
- * confidence show a "— not detected" fallback instead of a value.
+ * shown as a label+value row separated by a divider. Fields that were absent
+ * or extracted with low confidence show a "— not detected" fallback.
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
@@ -20,18 +20,19 @@ export function ContactCard({ result }: ContactCardProps) {
   const fields = buildContactFields(result);
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+    <section className="rounded-xl border border-border-light bg-surface-card p-5">
+      <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-content-muted">
         Contact information
       </h2>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-        {fields.map((field) => (
+      <dl>
+        {fields.map((field, idx) => (
           <ContactRow
             key={field.key}
             label={field.label}
             value={field.value}
             gated={field.gated}
             reason={field.reason}
+            isLast={idx === fields.length - 1}
           />
         ))}
       </dl>
@@ -44,25 +45,33 @@ function ContactRow({
   value,
   gated,
   reason,
+  isLast,
 }: {
   label: string;
   value: string;
   gated: boolean;
   reason?: "absent" | "low_confidence";
+  isLast: boolean;
 }) {
   return (
-    <>
-      <dt className="font-medium text-content-secondary">{label}</dt>
+    <div
+      className={`flex items-baseline gap-3 py-2.5 ${isLast ? "" : "border-b border-border-light"}`}
+    >
+      <dt className="w-24 shrink-0 text-sm font-medium text-content-secondary">
+        {label}
+      </dt>
       {gated ? (
-        <dd className="italic text-content-muted">
+        <dd className="flex-1 text-sm italic text-content-muted">
           — not detected
           {reason === "low_confidence" && (
-            <span className="ml-1 text-[10px] not-italic">(low confidence)</span>
+            <span className="ml-1 text-[11px] not-italic text-content-muted">
+              (low confidence)
+            </span>
           )}
         </dd>
       ) : (
-        <dd className="text-content-primary">{value}</dd>
+        <dd className="flex-1 text-sm text-content-primary">{value}</dd>
       )}
-    </>
+    </div>
   );
 }
