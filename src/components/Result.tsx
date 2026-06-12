@@ -12,6 +12,7 @@ import { ScoreRing } from "./features/ScoreRing.tsx";
 import { VerdictHeader } from "./features/VerdictHeader.tsx";
 import type { VerdictDimension } from "./features/VerdictHeader.tsx";
 import { ContactCard } from "./features/ContactCard.tsx";
+import { Card } from "./shared/Card.tsx";
 import { FeedbackControl } from "./features/FeedbackControl.tsx";
 import {
   scoreBandTextClass,
@@ -76,7 +77,7 @@ function ParsedCard({
   onReset: () => void;
 }) {
   return (
-    <section className="flex flex-col gap-6 rounded-xl border border-border-light bg-surface-card p-5 shadow-sm">
+    <Card className="flex flex-col gap-6 shadow-sm">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <StatusPill tone="ok">Parsed</StatusPill>
@@ -129,7 +130,7 @@ function ParsedCard({
           </div>
         </div>
       </section>
-    </section>
+    </Card>
   );
 }
 
@@ -493,7 +494,7 @@ function LimitedParsingCard({
   const uniqueUrls = Array.from(new Set(links.map((l) => l.url)));
 
   return (
-    <section className="flex flex-col gap-5 rounded-xl border border-border-light bg-surface-card p-5 shadow-sm">
+    <Card className="flex flex-col gap-5 shadow-sm">
       <header className="flex items-center justify-between">
         <StatusPill tone="limited">Limited parsing</StatusPill>
         <button
@@ -552,6 +553,6 @@ function LimitedParsingCard({
           {LAYOUT_TRIGGER_BLURBS.fonts_unmappable}
         </p>
       </section>
-    </section>
+    </Card>
   );
 }
