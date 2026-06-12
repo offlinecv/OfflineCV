@@ -16,3 +16,17 @@ export function scoreBandTextClass(tier: ScoreTier): string {
       return "text-feedback-warning-icon";
   }
 }
+
+/** Maps a score tier to the Tailwind bg-color token for that band. */
+export function scoreBandBgClass(tier: ScoreTier): string {
+  switch (tier) {
+    case "high":
+      return "bg-feedback-success-icon";
+    case "medium":
+      return "bg-brand-amber";
+    case "low":
+      return "bg-feedback-warning-icon";
+    default:
+      return "bg-feedback-warning-icon";
+  }
+}
