@@ -18,6 +18,7 @@ import {
   scoreBandTextClass,
   scoreBandBgClass,
 } from "./features/scoreBand.ts";
+import { RewriteButton } from "./features/RewriteButton.tsx";
 
 interface ResultProps {
   result: CascadeResult;
@@ -428,6 +429,7 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
           #{bullet.index + 1}
         </span>
         {bullet.text}
+        <RewriteButton bullet={bullet.text} />
       </td>
       <td className="py-1 pr-2 text-right align-top tabular-nums">
         {bullet.startsWithActionVerb ? (
