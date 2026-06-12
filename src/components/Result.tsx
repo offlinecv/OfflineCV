@@ -96,26 +96,35 @@ function ParsedCard({
 
       <AtsScoreReadout score={score} />
       <ContactCard result={result} />
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-            Source PDF
-          </h2>
-          <PdfPreview bytes={bytes} />
-        </div>
-        <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-            Extracted plain text
-          </h2>
-          <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-xs leading-relaxed">
-            {result.rawText || "(no text extracted)"}
-          </pre>
-        </div>
-      </div>
-
-      <LayoutFlagsList triggers={result.triggers} />
       <PerBulletFeedback bullets={score.bullets} />
+
+      {/* Evidence — how a generic extractor read this PDF. Reference
+          material, so it sits below the score and per-bullet findings.
+          Layout flags head the block (the verdict); the preview and
+          extracted-text panes are the raw material under it. Both panes are
+          height-bounded so a two-page resume scrolls inside the row instead
+          of pushing it open. */}
+      <section className="flex flex-col gap-4">
+        <LayoutFlagsList triggers={result.triggers} />
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+              Source PDF
+            </h2>
+            <div className="max-h-[600px] overflow-y-auto">
+              <PdfPreview bytes={bytes} />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+              Extracted plain text
+            </h2>
+            <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-xs leading-relaxed">
+              {result.rawText || "(no text extracted)"}
+            </pre>
+          </div>
+        </div>
+      </section>
     </section>
   );
 }
