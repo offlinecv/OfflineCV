@@ -39,7 +39,13 @@
  */
 
 import type { PdfLine, PdfSection } from "./sections.ts";
-import { matchSectionHeader, SECTION_KEYWORDS, type SectionName } from "./regex.ts";
+import {
+  matchSectionHeader,
+  SECTION_KEYWORDS,
+  SPLIT_LETTER_NORMALIZABLE_SECTIONS,
+  SPLIT_LETTER_RE,
+  type SectionName,
+} from "./regex.ts";
 
 // ── Heading-surrogate font sizes ────────────────────────────────────────────
 //
@@ -80,13 +86,6 @@ const ANY_IMAGE_RE = /!\[[^\]]*\]\([^)]*\)/g;
 // escapes that appear in contact data / prose. We keep `\n` as-is.
 const BACKSLASH_ESCAPE_RE = /\\([_*[\]()!`#>.+-])/g;
 
-// A short intro letter separated from the rest of the word by a space:
-// `**S UMMARY**`, `# E XPERIENCE`, `e XPERIENCE`. Word's icon-letter
-// decorations render as a separate character next to the rest of the word.
-// Restricted to (a) the letter being a single alpha char followed by a
-// space and (b) the following word being 3+ alpha chars.
-const SPLIT_LETTER_RE = /\b([A-Za-z])\s+([A-Za-z]{3,})\b/g;
-
 /** Strip base64 image blobs and non-data image refs from markdown. */
 function stripImages(markdown: string): string {
   return markdown
@@ -98,25 +97,6 @@ function stripImages(markdown: string): string {
 function unescapeBackslashes(markdown: string): string {
   return markdown.replace(BACKSLASH_ESCAPE_RE, (_m, ch: string) => ch);
 }
-
-/**
- * Section keywords we're willing to reconstruct from Word's icon-letter
- * split (e.g. `**S UMMARY**` → `**SUMMARY**`). Deliberately excludes
- * `skills`-family keywords: DOCX resumes with a two-column layout
- * commonly place a SKILLS label in the sidebar, which mammoth flattens
- * INTO the main content stream *between* experience entries. Normalizing
- * `**S KILLS**` there would open a new section mid-experience and strand
- * every subsequent role. Literal "SKILLS" headers in the main column
- * don't use the split-letter decoration in practice, so we lose almost
- * nothing by excluding this keyword from the normalizer.
- */
-const SPLIT_LETTER_NORMALIZABLE_SECTIONS: ReadonlySet<SectionName> = new Set([
-  "summary",
-  "experience",
-  "education",
-  "certifications",
-  "projects",
-]);
 
 /**
  * Detect standalone header lines where the first letter has been split off

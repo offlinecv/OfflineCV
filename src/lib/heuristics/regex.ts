@@ -118,6 +118,33 @@ export const SECTION_KEYWORDS = {
 
 export type SectionName = keyof typeof SECTION_KEYWORDS;
 
+// A short intro letter separated from the rest of the word by a space:
+// `S UMMARY`, `E XPERIENCE`, `e xperience`. Designed templates letter-space
+// (track) the first glyph, and Word's icon-letter decoration renders it as a
+// separate character, so the PDF/markdown text layer reads the lead letter
+// split off. Restricted to (a) a single alpha char followed by a space and
+// (b) a following word of 3+ alpha chars. Shared by the markdown preprocessor
+// (`normalizeSplitLetterHeaders`) and the PDF-line `matchSectionHeader`.
+export const SPLIT_LETTER_RE = /\b([A-Za-z])\s+([A-Za-z]{3,})\b/g;
+
+/**
+ * Section keywords we're willing to reconstruct from a split lead letter
+ * (e.g. `S UMMARY` → `SUMMARY`). Deliberately excludes `skills`-family
+ * keywords: two-column résumés commonly place a SKILLS label in the sidebar,
+ * which flattens INTO the main content stream *between* experience entries.
+ * Normalizing `S KILLS` there would open a new section mid-experience and
+ * strand every subsequent role. Literal "SKILLS" headers in the main column
+ * don't use the split-letter decoration in practice, so we lose almost
+ * nothing by excluding this keyword.
+ */
+export const SPLIT_LETTER_NORMALIZABLE_SECTIONS: ReadonlySet<SectionName> =
+  new Set(["summary", "experience", "education", "certifications", "projects"]);
+
+/** Rejoin single split lead letters: `e xperience` → `experience`. */
+function rejoinSplitLetters(text: string): string {
+  return text.replace(SPLIT_LETTER_RE, (_m, a: string, b: string) => `${a}${b}`);
+}
+
 /** True if the normalized line text matches any known section header. */
 export function matchSectionHeader(text: string): SectionName | null {
   const normalized = text.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
@@ -126,6 +153,18 @@ export function matchSectionHeader(text: string): SectionName | null {
     [SectionName, readonly string[]]
   >) {
     if (keywords.includes(normalized)) return name;
+  }
+  // Split-letter headers: pdfjs reads a tracked/decorated `EXPERIENCE` as
+  // `E XPERIENCE`. Rejoin single split letters and retry, gated to the
+  // allowlist (skills excluded) so prose can't mint a false section. See #56.
+  const rejoined = rejoinSplitLetters(normalized);
+  if (rejoined !== normalized) {
+    for (const [name, keywords] of Object.entries(SECTION_KEYWORDS) as Array<
+      [SectionName, readonly string[]]
+    >) {
+      if (keywords.includes(rejoined) && SPLIT_LETTER_NORMALIZABLE_SECTIONS.has(name))
+        return name;
+    }
   }
   return null;
 }
