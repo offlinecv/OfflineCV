@@ -94,6 +94,9 @@ function ParsedCard({
         </button>
       </header>
 
+      <AtsScoreReadout score={score} />
+      <ContactCard result={result} />
+
       <div className="grid gap-4 md:grid-cols-2">
         <div className="flex flex-col gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
@@ -111,9 +114,7 @@ function ParsedCard({
         </div>
       </div>
 
-      <ContactCard result={result} />
       <LayoutFlagsList triggers={result.triggers} />
-      <AtsScoreReadout score={score} />
       <PerBulletFeedback bullets={score.bullets} />
     </section>
   );
@@ -152,7 +153,7 @@ function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-          Reference ATS score
+          Your resume score
         </h2>
         <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
           alpha
@@ -168,9 +169,10 @@ function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
         <VerdictHeader score={score.overall} />
       </div>
       <p className="max-w-prose text-xs text-content-tertiary">
-        Our reference number for iterating on the parser. Not a universal
-        score — different ATSes weigh things differently. See the dimensions
-        below.
+        A quick read on how your resume scores — based on what a generic text
+        extractor pulled from your PDF, the same starting point most ATS
+        parsers use. Not a universal score; systems weigh things differently.
+        Dimensions below show where the points landed.
       </p>
       <dl className="mt-1 grid grid-cols-3 gap-3 text-xs">
         <Dimension
