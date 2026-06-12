@@ -2,15 +2,16 @@
 // Copyright 2026 The resumelint Authors
 
 /**
- * ContactCard — displays extracted contact fields from a CascadeResult.
+ * ContactCard — displays extracted contact fields as a chip strip.
  *
- * Each of the five contact fields (name, email, phone, LinkedIn, location) is
- * shown as a label+value row separated by a divider. Fields that were absent
- * or extracted with low confidence show a "— not detected" fallback.
+ * Detected fields show the value with a success chip; undetected fields
+ * show a warning chip with a "not detected" label. Always renders all 5
+ * fields so the reader can spot gaps at a glance.
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { buildContactFields } from "../../lib/contact.ts";
+import { Chip } from "../ui/Chip.tsx";
 
 interface ContactCardProps {
   result: CascadeResult;
@@ -18,60 +19,30 @@ interface ContactCardProps {
 
 export function ContactCard({ result }: ContactCardProps) {
   const fields = buildContactFields(result);
+  const detectedCount = fields.filter((f) => !f.gated).length;
 
   return (
-    <section className="rounded-xl border border-border-light bg-surface-card p-5">
-      <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-content-muted">
-        Contact information
-      </h2>
-      <dl>
-        {fields.map((field, idx) => (
-          <ContactRow
-            key={field.key}
-            label={field.label}
-            value={field.value}
-            gated={field.gated}
-            reason={field.reason}
-            isLast={idx === fields.length - 1}
-          />
-        ))}
-      </dl>
-    </section>
-  );
-}
-
-function ContactRow({
-  label,
-  value,
-  gated,
-  reason,
-  isLast,
-}: {
-  label: string;
-  value: string;
-  gated: boolean;
-  reason?: "absent" | "low_confidence";
-  isLast: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-baseline gap-3 py-2.5 ${isLast ? "" : "border-b border-border-light"}`}
+    <section
+      id="contact"
+      className="scroll-mt-6 rounded-xl border border-border-light bg-surface-card p-5"
     >
-      <dt className="w-24 shrink-0 text-sm font-medium text-content-secondary">
-        {label}
-      </dt>
-      {gated ? (
-        <dd className="flex-1 text-sm italic text-content-tertiary">
-          — not detected
-          {reason === "low_confidence" && (
-            <span className="ml-1 text-[11px] not-italic text-content-tertiary">
-              (low confidence)
-            </span>
-          )}
-        </dd>
-      ) : (
-        <dd className="flex-1 text-sm text-content-primary">{value}</dd>
-      )}
-    </div>
+      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-content-muted">
+        Contact — {detectedCount} of 5 detected
+      </h2>
+      <div className="flex flex-wrap gap-2">
+        {fields.map((field) =>
+          field.gated ? (
+            <Chip key={field.key} tone="warning" icon="⚠">
+              {field.label} not detected
+              {field.reason === "low_confidence" && " (low confidence)"}
+            </Chip>
+          ) : (
+            <Chip key={field.key} tone="success" icon="✓">
+              {field.value}
+            </Chip>
+          ),
+        )}
+      </div>
+    </section>
   );
 }
