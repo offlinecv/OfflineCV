@@ -16,6 +16,7 @@
     "deploy": "./scripts/deploy_resumelint.sh"
   },
   "dependencies": {
+    "@fontsource/poppins": "^5.2.7",
     "pdfjs-dist": "^4.10.38",
     "posthog-js": "^1.205.0",
     "react": "^19.1.1",

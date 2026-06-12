@@ -7,6 +7,10 @@ import { GlobalWorkerOptions } from "pdfjs-dist";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import App from "./App";
 import { initAnalytics } from "./lib/analytics";
+import "@fontsource/poppins/400.css";
+import "@fontsource/poppins/500.css";
+import "@fontsource/poppins/600.css";
+import "@fontsource/poppins/700.css";
 import "./styles.css";
 
 GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
