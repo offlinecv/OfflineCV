@@ -103,8 +103,11 @@ export interface ExtractJdTermsResult {
 }
 
 /**
- * Cap on noun-pass hits surfaced per JD. A capitalization-heavy paragraph
- * can produce 50+ noisy noun phrases; surfacing them all would drown the
+ * Cap on noun-pass hits surfaced per JD. The caller applies this as a
+ * first-N-in-document-order slice (`allNouns.slice(0, NOUN_PASS_CAP)`) —
+ * there's no ranking step in v1; we keep what the regex finds first and
+ * record the rest as `nounsDropped`. A capitalization-heavy paragraph can
+ * produce 50+ noisy noun phrases; surfacing them all would drown the
  * Missing column. Empirically, typical tech JDs land at <10 noun-phrase
  * hits after the skill-overlap filter, so a 25-cap leaves comfortable
  * headroom while protecting the UI from outliers.

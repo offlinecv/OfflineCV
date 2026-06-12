@@ -71,8 +71,8 @@ export function JdMatch({ coverage, terms, nounsDropped = 0 }: JdMatchProps) {
       {nounsDropped > 0 && (
         <p className="text-[11px] text-content-muted">
           +{nounsDropped} more capitalized phrase{nounsDropped === 1 ? "" : "s"}{" "}
-          in this JD weren't surfaced — the noun-phrase pass caps at the most
-          informative ones to keep the panel readable.
+          in this JD weren't surfaced — the noun-phrase pass keeps the first
+          ones it finds and drops the rest to keep the panel readable.
         </p>
       )}
     </section>
