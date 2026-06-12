@@ -125,24 +125,24 @@ export default function App() {
         </div>
       </header>
 
-      <section className="flex flex-col gap-3">
-        <p className="max-w-prose text-sm text-neutral-700 dark:text-neutral-300">
-          Drop a resume PDF below to see what a generic text extractor reads
-          back. This is a diagnostic — not a verdict from any specific
-          applicant tracking system.
-        </p>
-        <DropZone
-          onFile={handleFile}
-          disabled={state.phase === "parsing"}
-          status={
-            state.phase === "parsing"
-              ? `Parsing ${state.fileName} (${formatBytes(state.fileSize)})…`
-              : state.phase === "done"
-                ? `${state.fileName} (${formatBytes(state.fileSize)})`
+      {state.phase !== "done" && (
+        <section className="flex flex-col gap-3">
+          <p className="max-w-prose text-sm text-neutral-700 dark:text-neutral-300">
+            Drop a resume PDF below to see what a generic text extractor reads
+            back. This is a diagnostic — not a verdict from any specific
+            applicant tracking system.
+          </p>
+          <DropZone
+            onFile={handleFile}
+            disabled={state.phase === "parsing"}
+            status={
+              state.phase === "parsing"
+                ? `Parsing ${state.fileName} (${formatBytes(state.fileSize)})…`
                 : undefined
-          }
-        />
-      </section>
+            }
+          />
+        </section>
+      )}
 
       {state.phase === "error" && (
         <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200">

@@ -53,7 +53,7 @@ function StatusPill({
       : "bg-feedback-warning-bg text-feedback-warning-text";
   return (
     <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cls}`}
+      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${cls}`}
     >
       {children}
     </span>
@@ -94,27 +94,37 @@ function ParsedCard({
         </button>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-            Source PDF
-          </h2>
-          <PdfPreview bytes={bytes} />
-        </div>
-        <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-            Extracted plain text
-          </h2>
-          <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-xs leading-relaxed">
-            {result.rawText || "(no text extracted)"}
-          </pre>
-        </div>
-      </div>
-
-      <ContactCard result={result} />
-      <LayoutFlagsList triggers={result.triggers} />
       <AtsScoreReadout score={score} />
+      <ContactCard result={result} />
       <PerBulletFeedback bullets={score.bullets} />
+
+      {/* Evidence — how a generic extractor read this PDF. Reference
+          material, so it sits below the score and per-bullet findings.
+          Layout flags head the block (the verdict); the preview and
+          extracted-text panes are the raw material under it. Both panes are
+          height-bounded so a two-page resume scrolls inside the row instead
+          of pushing it open. */}
+      <section className="flex flex-col gap-4">
+        <LayoutFlagsList triggers={result.triggers} />
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+              Source PDF
+            </h2>
+            <div className="max-h-[600px] overflow-y-auto">
+              <PdfPreview bytes={bytes} />
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+              Extracted plain text
+            </h2>
+            <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed">
+              {result.rawText || "(no text extracted)"}
+            </pre>
+          </div>
+        </div>
+      </section>
     </section>
   );
 }
@@ -148,57 +158,64 @@ function LayoutFlagsList({ triggers }: { triggers: readonly LayoutTrigger[] }) {
 }
 
 function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
+  const buildDate = __BUILD_DATE__.slice(0, 10);
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-          Reference ATS score
+          Your resume score
         </h2>
-        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
+        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-content-secondary">
           alpha
         </span>
         {score.algoVersion && (
-          <span className="text-[10px] text-content-muted">
+          <span className="text-[11px] text-content-muted">
             algo v{score.algoVersion}
           </span>
         )}
+        <span className="text-[11px] text-content-muted">
+          Built {buildDate}
+        </span>
       </div>
-      <div className="flex items-center gap-4">
-        <ScoreRing score={score.overall} />
-        <VerdictHeader score={score.overall} />
-      </div>
-      <p className="max-w-prose text-xs text-content-tertiary">
-        Our reference number for iterating on the parser. Not a universal
-        score — different ATSes weigh things differently. See the dimensions
-        below.
+      <p className="max-w-prose text-sm text-content-tertiary">
+        A quick read on how your resume scores — based on what a generic text
+        extractor pulled from your PDF, the same starting point most ATS
+        parsers use. Not a universal score; systems weigh things differently.
+        Dimensions below show where the points landed.
       </p>
-      <dl className="mt-1 grid grid-cols-3 gap-3 text-xs">
-        <Dimension
-          label="Specificity"
-          value={score.specificity.score}
-          max={score.specificity.max}
-          gradable={score.specificity.gradable}
-          hint={`${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`}
-        />
-        <Dimension
-          label="Structure"
-          value={score.structure.score}
-          max={score.structure.max}
-          gradable={score.structure.gradable}
-          hint={`${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`}
-        />
-        <Dimension
-          label="Completeness"
-          value={score.completeness.score}
-          max={score.completeness.max}
-          gradable={score.completeness.gradable}
-          hint={
-            score.completeness.missing.length === 0
-              ? "All expected fields present"
-              : `Missing: ${score.completeness.missing.join(", ")}`
-          }
-        />
-      </dl>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start">
+        <div className="flex items-center gap-4">
+          <ScoreRing score={score.overall} />
+          <VerdictHeader score={score.overall} />
+        </div>
+        <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3 flex-1">
+          <Dimension
+            label="Specificity"
+            value={score.specificity.score}
+            max={score.specificity.max}
+            gradable={score.specificity.gradable}
+            hint={`${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`}
+          />
+          <Dimension
+            label="Structure"
+            value={score.structure.score}
+            max={score.structure.max}
+            gradable={score.structure.gradable}
+            hint={`${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`}
+          />
+          <Dimension
+            label="Completeness"
+            value={score.completeness.score}
+            max={score.completeness.max}
+            gradable={score.completeness.gradable}
+            hint={
+              score.completeness.missing.length === 0
+                ? "All expected fields present"
+                : `Missing: ${score.completeness.missing.join(", ")}`
+            }
+          />
+        </dl>
+      </div>
       {score.layout.multiplier < 1 && (
         <p className="text-[11px] text-feedback-warning-text">
           Layout penalty applied (multiplier {score.layout.multiplier.toFixed(2)}
@@ -225,7 +242,7 @@ function Dimension({
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3">
-      <dt className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+      <dt className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
         {label}
       </dt>
       <dd className="text-sm font-medium">
@@ -246,7 +263,7 @@ function Dimension({
           />
         </div>
       )}
-      <p className="text-[10px] text-content-muted">{hint}</p>
+      <p className="text-[11px] text-content-muted">{hint}</p>
     </div>
   );
 }
@@ -282,15 +299,46 @@ function PerBulletFeedback({
       <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
         Per-bullet feedback
       </h2>
-      <p className="max-w-prose text-xs text-content-tertiary">
+      <p className="max-w-prose text-sm text-content-tertiary">
         Each bullet checked against three rules: an action verb, the 8–30-word
         length window, and a metric. {summary}
       </p>
-      <ul className="flex flex-col gap-1.5">
-        {bullets.map((b) => (
-          <BulletRow key={b.index} bullet={b} />
-        ))}
-      </ul>
+      <table className="w-full border-collapse text-sm">
+        <caption className="sr-only">Per-bullet rule checks</caption>
+        <thead>
+          <tr>
+            <th
+              scope="col"
+              className="pb-1 text-left text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              {/* bullet text — no visible header */}
+            </th>
+            <th
+              scope="col"
+              className="pb-1 pr-2 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              Verb
+            </th>
+            <th
+              scope="col"
+              className="pb-1 pr-2 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              Length
+            </th>
+            <th
+              scope="col"
+              className="pb-1 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
+            >
+              Metric
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {bullets.map((b) => (
+            <BulletRow key={b.index} bullet={b} />
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }
@@ -304,14 +352,10 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
   const allPass =
     bullet.hasMetric && bullet.startsWithActionVerb && bullet.wellFormedLength;
 
-  const containerCls = attention
-    ? "border-feedback-warning-border bg-feedback-warning-bg"
-    : allPass
-      ? "border-border-light"
-      : "border-border";
-  const textCls = allPass
-    ? "text-content-muted"
-    : "text-content-primary";
+  const rowCls = attention
+    ? "bg-feedback-warning-bg"
+    : "";
+  const textCls = allPass ? "text-content-muted" : "text-content-primary";
 
   const lengthLabel = bullet.wellFormedLength
     ? `${bullet.wordCount} words`
@@ -319,56 +363,68 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
       ? `${bullet.wordCount} words (too short)`
       : `${bullet.wordCount} words (too long)`;
 
+  const lengthSuffix =
+    bullet.wordCount < 8 ? " ↓" : bullet.wordCount > 30 ? " ↑" : "";
+
   return (
-    <li
-      className={`flex flex-col gap-1.5 rounded border p-2 ${containerCls}`}
-    >
-      <p className={`text-xs leading-snug ${textCls}`}>
-        <span className="mr-1.5 font-mono text-[10px] text-content-muted">
+    <tr className={rowCls}>
+      <td className={`py-1 pr-3 align-top text-sm leading-snug ${textCls}`}>
+        <span className="mr-1.5 font-mono text-[11px] text-content-muted">
           #{bullet.index + 1}
         </span>
         {bullet.text}
-      </p>
-      <div className="flex flex-wrap gap-1.5">
-        <CheckPill
-          ok={bullet.startsWithActionVerb}
-          okLabel="verb"
-          failLabel="no action verb"
-        />
-        <CheckPill
-          ok={bullet.wellFormedLength}
-          okLabel={lengthLabel}
-          failLabel={lengthLabel}
-        />
-        <CheckPill
-          ok={bullet.hasMetric}
-          okLabel="metric"
-          failLabel="no metric"
-        />
-      </div>
-    </li>
-  );
-}
-
-function CheckPill({
-  ok,
-  okLabel,
-  failLabel,
-}: {
-  ok: boolean;
-  okLabel: string;
-  failLabel: string;
-}) {
-  const cls = ok
-    ? "bg-feedback-success-bg text-feedback-success-text"
-    : "bg-feedback-warning-bg text-feedback-warning-text";
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}
-    >
-      <span>{ok ? "✓" : "✗"}</span>
-      <span>{ok ? okLabel : failLabel}</span>
-    </span>
+      </td>
+      <td className="py-1 pr-2 text-right align-top tabular-nums">
+        {bullet.startsWithActionVerb ? (
+          <>
+            <span className="text-feedback-success-text" aria-hidden="true">
+              ✓
+            </span>
+            <span className="sr-only">verb</span>
+          </>
+        ) : (
+          <>
+            <span className="text-feedback-warning-text" aria-hidden="true">
+              ✗
+            </span>
+            <span className="sr-only">no action verb</span>
+          </>
+        )}
+      </td>
+      <td
+        className="py-1 pr-2 text-right align-top tabular-nums"
+        title={lengthLabel}
+      >
+        <span
+          className={
+            bullet.wellFormedLength
+              ? "text-feedback-success-text"
+              : "text-feedback-warning-text"
+          }
+        >
+          {bullet.wordCount}
+          {lengthSuffix}
+        </span>
+        <span className="sr-only">{lengthLabel}</span>
+      </td>
+      <td className="py-1 text-right align-top tabular-nums">
+        {bullet.hasMetric ? (
+          <>
+            <span className="text-feedback-success-text" aria-hidden="true">
+              ✓
+            </span>
+            <span className="sr-only">metric</span>
+          </>
+        ) : (
+          <>
+            <span className="text-feedback-warning-text" aria-hidden="true">
+              ✗
+            </span>
+            <span className="sr-only">no metric</span>
+          </>
+        )}
+      </td>
+    </tr>
   );
 }
 
