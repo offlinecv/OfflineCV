@@ -2,6 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 import type { LayoutTrigger } from "./heuristics/types";
+import type { WebGpuCapability } from "./webllm/types";
 
 type PostHog = {
   capture: (event: string, props?: Record<string, unknown>) => void;
@@ -102,4 +103,27 @@ export function trackParseFailed(args: {
     error_name: args.errorName,
     file_size_bytes: args.fileSize,
   });
+}
+
+// WebLLM bullet-rewrite funnel. The call-sites (capability.ts, web-llm.ts,
+// rewrite-bullet.ts) gate these so each event fires at most once per page.
+// Same env-gating semantics as the existing trackers: when VITE_POSTHOG_KEY
+// is unset, `track()` is a no-op and these compile away.
+
+export function trackWebllmCapabilityDetected(
+  capability: WebGpuCapability,
+): void {
+  track("webllm_capability_detected", { capability });
+}
+
+export function trackWebllmDownloadStarted(): void {
+  track("webllm_download_started", {});
+}
+
+export function trackWebllmLoaded(): void {
+  track("webllm_loaded", {});
+}
+
+export function trackWebllmFirstRewrite(): void {
+  track("webllm_first_rewrite", {});
 }
