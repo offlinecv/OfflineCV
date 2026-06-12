@@ -28,10 +28,15 @@
  */
 
 export interface SkillEntry {
-  /** Canonical skill ID — what the UI renders. */
+  /** Canonical skill ID — stable key, used for dedupe and as the React key. */
   readonly id: string;
   /** Surface forms (lowercase) accepted as evidence of this skill. */
   readonly aliases: readonly string[];
+  /** Human display form. Omit when the `id` already reads cleanly (`react`,
+   *  `kubernetes`); set it where the kebab/lowercased id reads poorly in the
+   *  UI (`a-b-testing` → `A/B testing`, `ci-cd` → `CI/CD`). Falls back to
+   *  `id`. */
+  readonly label?: string;
 }
 
 export const SKILLS: readonly SkillEntry[] = [
@@ -51,7 +56,7 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "rails", aliases: ["rails", "ruby on rails", "ror"] },
   { id: "php", aliases: ["php"] },
   { id: "swift", aliases: ["swift"] },
-  { id: "objective-c", aliases: ["objective-c", "objective c", "obj-c"] },
+  { id: "objective-c", label: "Objective-C", aliases: ["objective-c", "objective c", "obj-c"] },
   { id: "perl", aliases: ["perl"] },
   { id: "bash", aliases: ["bash", "shell scripting", "shell script"] },
   { id: "sql", aliases: ["sql"] },
@@ -64,11 +69,11 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "dart", aliases: ["dart"] },
   { id: "lua", aliases: ["lua"] },
   { id: "matlab", aliases: ["matlab"] },
-  { id: "r-lang", aliases: ["r language", "r programming"] },
+  { id: "r-lang", label: "R", aliases: ["r language", "r programming"] },
 
   // ── Frontend / UI ────────────────────────────────────────────────────────
   { id: "react", aliases: ["react", "reactjs", "react.js"] },
-  { id: "react-native", aliases: ["react native", "react-native"] },
+  { id: "react-native", label: "React Native", aliases: ["react native", "react-native"] },
   { id: "next.js", aliases: ["next.js", "nextjs", "next js"] },
   { id: "vue", aliases: ["vue", "vue.js", "vuejs"] },
   { id: "nuxt", aliases: ["nuxt", "nuxt.js", "nuxtjs"] },
@@ -140,16 +145,16 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "sentry", aliases: ["sentry"] },
 
   // ── DevOps / CI ──────────────────────────────────────────────────────────
-  { id: "ci-cd", aliases: ["ci/cd", "cicd", "ci cd", "continuous integration", "continuous delivery", "continuous deployment"] },
-  { id: "github-actions", aliases: ["github actions"] },
-  { id: "gitlab-ci", aliases: ["gitlab ci", "gitlab-ci"] },
+  { id: "ci-cd", label: "CI/CD", aliases: ["ci/cd", "cicd", "ci cd", "continuous integration", "continuous delivery", "continuous deployment"] },
+  { id: "github-actions", label: "GitHub Actions", aliases: ["github actions"] },
+  { id: "gitlab-ci", label: "GitLab CI", aliases: ["gitlab ci", "gitlab-ci"] },
   { id: "jenkins", aliases: ["jenkins"] },
   { id: "circleci", aliases: ["circleci", "circle ci"] },
   { id: "git", aliases: ["git"] },
 
   // ── Data / ML ────────────────────────────────────────────────────────────
-  { id: "machine-learning", aliases: ["machine learning", "ml"] },
-  { id: "deep-learning", aliases: ["deep learning"] },
+  { id: "machine-learning", label: "machine learning", aliases: ["machine learning", "ml"] },
+  { id: "deep-learning", label: "deep learning", aliases: ["deep learning"] },
   { id: "pytorch", aliases: ["pytorch"] },
   { id: "tensorflow", aliases: ["tensorflow"] },
   { id: "keras", aliases: ["keras"] },
@@ -161,14 +166,14 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "langchain", aliases: ["langchain", "lang chain"] },
   { id: "llm", aliases: ["llm", "large language model", "large language models"] },
   { id: "nlp", aliases: ["nlp", "natural language processing"] },
-  { id: "computer-vision", aliases: ["computer vision", "cv (computer vision)"] },
+  { id: "computer-vision", label: "computer vision", aliases: ["computer vision", "cv (computer vision)"] },
   { id: "rag", aliases: ["rag", "retrieval augmented generation", "retrieval-augmented generation"] },
   { id: "etl", aliases: ["etl", "elt"] },
   { id: "dbt", aliases: ["dbt"] },
   { id: "tableau", aliases: ["tableau"] },
   { id: "looker", aliases: ["looker"] },
-  { id: "power-bi", aliases: ["power bi", "powerbi"] },
-  { id: "data-warehouse", aliases: ["data warehouse", "data warehousing"] },
+  { id: "power-bi", label: "Power BI", aliases: ["power bi", "powerbi"] },
+  { id: "data-warehouse", label: "data warehouse", aliases: ["data warehouse", "data warehousing"] },
 
   // ── Mobile ──────────────────────────────────────────────────────────────
   { id: "ios", aliases: ["ios"] },
@@ -196,9 +201,9 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "confluence", aliases: ["confluence"] },
   { id: "figma", aliases: ["figma"] },
   { id: "sketch", aliases: ["sketch"] },
-  { id: "product-management", aliases: ["product management", "product manager"] },
-  { id: "a-b-testing", aliases: ["a/b testing", "ab testing", "a/b test"] },
-  { id: "user-research", aliases: ["user research", "user interviews"] },
+  { id: "product-management", label: "product management", aliases: ["product management", "product manager"] },
+  { id: "a-b-testing", label: "A/B testing", aliases: ["a/b testing", "ab testing", "a/b test"] },
+  { id: "user-research", label: "user research", aliases: ["user research", "user interviews"] },
   { id: "okrs", aliases: ["okrs", "okr"] },
 
   // ── Security / misc ─────────────────────────────────────────────────────
@@ -235,6 +240,10 @@ interface CompiledIndex {
   readonly pattern: RegExp;
   readonly aliasToId: ReadonlyMap<string, string>;
   readonly idToAliases: ReadonlyMap<string, readonly string[]>;
+  /** Canonical ID → human display label (falls back to the id when an entry
+   *  has no explicit `label`). Lets the extractor render a clean term name
+   *  instead of the kebab id (`a-b-testing` → `A/B testing`). */
+  readonly idToLabel: ReadonlyMap<string, string>;
   /** Per-canonical-ID mention probe — `mentionPatterns.get("kubernetes")`
    *  returns a single regex that fires on any of {"kubernetes", "k8s"}. */
   readonly mentionPatterns: ReadonlyMap<string, RegExp>;
@@ -243,9 +252,11 @@ interface CompiledIndex {
 function compileIndex(): CompiledIndex {
   const aliasToId = new Map<string, string>();
   const idToAliases = new Map<string, readonly string[]>();
+  const idToLabel = new Map<string, string>();
   const mentionPatterns = new Map<string, RegExp>();
   for (const entry of SKILLS) {
     idToAliases.set(entry.id, entry.aliases);
+    idToLabel.set(entry.id, entry.label ?? entry.id);
     for (const alias of entry.aliases) {
       aliasToId.set(alias.toLowerCase(), entry.id);
     }
@@ -270,7 +281,7 @@ function compileIndex(): CompiledIndex {
     `${ALIAS_BOUNDARY_PREFIX}(${body})${ALIAS_BOUNDARY_SUFFIX}`,
     "gi",
   );
-  return { pattern, aliasToId, idToAliases, mentionPatterns };
+  return { pattern, aliasToId, idToAliases, idToLabel, mentionPatterns };
 }
 
 let cached: CompiledIndex | null = null;

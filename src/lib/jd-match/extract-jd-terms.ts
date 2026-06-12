@@ -271,7 +271,7 @@ function extractSkillPass(body: string, snippetChars: number): ExtractedTerm[] {
     const aliasStart = m.index + (m[0].length - m[1].length);
     seen.set(id, {
       id,
-      display: id,
+      display: index.idToLabel.get(id) ?? id,
       source: "skill",
       snippet: snippetAround(body, aliasStart, m[1].length, snippetChars),
     });

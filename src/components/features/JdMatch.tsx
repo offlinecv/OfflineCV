@@ -12,6 +12,7 @@
 
 import type { ExtractedTerm } from "../../lib/jd-match/extract-jd-terms.ts";
 import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
+import { Card } from "../shared/Card.tsx";
 
 interface JdMatchProps {
   coverage: CoverageResult;
@@ -26,7 +27,7 @@ export function JdMatch({ coverage, terms, nounsDropped = 0 }: JdMatchProps) {
   const covered = coverage.covered.length;
 
   return (
-    <section className="flex flex-col gap-4 rounded-xl border border-border-light bg-surface-card p-5 shadow-sm">
+    <Card className="flex flex-col gap-4 shadow-sm">
       <header className="flex flex-col gap-1">
         <div className="flex items-baseline gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
@@ -75,7 +76,7 @@ export function JdMatch({ coverage, terms, nounsDropped = 0 }: JdMatchProps) {
           ones it finds and drops the rest to keep the panel readable.
         </p>
       )}
-    </section>
+    </Card>
   );
 }
 

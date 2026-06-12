@@ -6,6 +6,7 @@ import { Chip } from "./components/ui/Chip.tsx";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
 import { JdMatch } from "./components/features/JdMatch.tsx";
+import { Card } from "./components/shared/Card.tsx";
 import { runCascade } from "./lib/heuristics";
 import type { CascadeResult } from "./lib/heuristics/types.ts";
 import {
@@ -159,9 +160,12 @@ export default function App() {
         />
       )}
 
-      <section className="flex flex-col gap-3 rounded-xl border border-border-light bg-surface-card p-5 shadow-sm">
+      <Card className="flex flex-col gap-3 shadow-sm">
         <div className="flex flex-col gap-1">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+          <h2
+            id="jd-input-label"
+            className="text-xs font-semibold uppercase tracking-wider text-content-muted"
+          >
             Paste a job description
           </h2>
           <p className="max-w-prose text-xs text-content-tertiary">
@@ -174,6 +178,7 @@ export default function App() {
           value={jdText}
           onChange={(e) => setJdText(e.target.value)}
           placeholder="Paste the job description here…"
+          aria-labelledby="jd-input-label"
           className="min-h-[160px] resize-y rounded-lg border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed text-content-primary placeholder:text-content-muted focus:border-border focus:outline-none"
         />
         {jdText.trim().length > 0 && state.phase !== "done" && (
@@ -182,7 +187,7 @@ export default function App() {
             your resume.
           </p>
         )}
-      </section>
+      </Card>
 
       {jdMatch && (
         <JdMatch
