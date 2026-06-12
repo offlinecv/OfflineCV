@@ -8,6 +8,9 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "/resumelint/",
   plugins: [react()],
+  define: {
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+  },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
