@@ -216,34 +216,49 @@ export const SKILLS: readonly SkillEntry[] = [
  * canonical ID via the alias-to-id index. We compile once at module load —
  * each pass over a JD is O(text length) instead of O(text × skills).
  *
- * The pattern uses lookarounds rather than `\b` because aliases include
- * punctuation (`react.js`, `c++`, `.net`, `c#`) that `\b` mis-segments. The
- * lookarounds require the surrounding character to be either absent, a
- * whitespace character, or one of a small set of separators we treat as a
- * word boundary in JD copy. Letters, digits, and most punctuation inside
- * the alias itself are matched literally.
+ * The boundary lookarounds live in `regex-utils.ts` and are shared with
+ * the resume-corpus probes in `coverage.ts` so both sides match the same
+ * notion of "word boundary".
+ *
+ * `mentionPatterns` is a parallel index mapping each canonical ID to a
+ * single per-skill regex that checks whether the corpus mentions any of
+ * that skill's aliases. Prebuilt here so the coverage check doesn't
+ * recompile a regex per alias per call.
  */
-const ALIAS_BOUNDARY = "(?:^|[\\s,;:.()\\[\\]/'\"\\u2013\\u2014])";
-const ALIAS_BOUNDARY_END = "(?=$|[\\s,;:.()\\[\\]/'\"\\u2013\\u2014])";
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+import {
+  ALIAS_BOUNDARY_PREFIX,
+  ALIAS_BOUNDARY_SUFFIX,
+  escapeRegex,
+} from "./regex-utils.ts";
 
 interface CompiledIndex {
   readonly pattern: RegExp;
   readonly aliasToId: ReadonlyMap<string, string>;
   readonly idToAliases: ReadonlyMap<string, readonly string[]>;
+  /** Per-canonical-ID mention probe — `mentionPatterns.get("kubernetes")`
+   *  returns a single regex that fires on any of {"kubernetes", "k8s"}. */
+  readonly mentionPatterns: ReadonlyMap<string, RegExp>;
 }
 
 function compileIndex(): CompiledIndex {
   const aliasToId = new Map<string, string>();
   const idToAliases = new Map<string, readonly string[]>();
+  const mentionPatterns = new Map<string, RegExp>();
   for (const entry of SKILLS) {
     idToAliases.set(entry.id, entry.aliases);
     for (const alias of entry.aliases) {
       aliasToId.set(alias.toLowerCase(), entry.id);
     }
+    const aliasGroup = entry.aliases
+      .map((a) => escapeRegex(a.toLowerCase()))
+      .join("|");
+    mentionPatterns.set(
+      entry.id,
+      new RegExp(
+        `${ALIAS_BOUNDARY_PREFIX}(?:${aliasGroup})${ALIAS_BOUNDARY_SUFFIX}`,
+        "i",
+      ),
+    );
   }
   // Sort aliases longest-first so multi-word phrases ("ruby on rails") win
   // against their prefixes ("ruby") inside a single regex pass.
@@ -252,10 +267,10 @@ function compileIndex(): CompiledIndex {
   );
   const body = sorted.map(escapeRegex).join("|");
   const pattern = new RegExp(
-    `${ALIAS_BOUNDARY}(${body})${ALIAS_BOUNDARY_END}`,
+    `${ALIAS_BOUNDARY_PREFIX}(${body})${ALIAS_BOUNDARY_SUFFIX}`,
     "gi",
   );
-  return { pattern, aliasToId, idToAliases };
+  return { pattern, aliasToId, idToAliases, mentionPatterns };
 }
 
 let cached: CompiledIndex | null = null;

@@ -28,6 +28,11 @@
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { ExtractedTerm } from "./extract-jd-terms.ts";
 import { getSkillIndex } from "./skills.ts";
+import {
+  ALIAS_BOUNDARY_PREFIX,
+  ALIAS_BOUNDARY_SUFFIX,
+  escapeRegex,
+} from "./regex-utils.ts";
 
 /** Per-source weights. Skill matches are stronger evidence than noun-phrase
  *  hits because the dictionary controls precision; noun phrases are a wider
@@ -112,30 +117,14 @@ export function buildCorpus(parsed: HeuristicParsedResume): string {
   return parts.join("\n").toLowerCase();
 }
 
-const BOUNDARY = "(?:^|[\\s,;:.()\\[\\]/'\"\\u2013\\u2014])";
-const BOUNDARY_END = "(?=$|[\\s,;:.()\\[\\]/'\"\\u2013\\u2014])";
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function corpusMentionsSkill(corpus: string, canonicalId: string): boolean {
-  const index = getSkillIndex();
-  const aliases = index.idToAliases.get(canonicalId);
-  if (!aliases) return false;
-  for (const alias of aliases) {
-    if (mentions(corpus, alias)) return true;
-  }
-  return false;
+  const re = getSkillIndex().mentionPatterns.get(canonicalId);
+  return re ? re.test(corpus) : false;
 }
 
 function corpusMentionsPhrase(corpus: string, phrase: string): boolean {
-  return mentions(corpus, phrase.toLowerCase());
-}
-
-function mentions(corpus: string, alias: string): boolean {
   const re = new RegExp(
-    `${BOUNDARY}${escapeRegex(alias)}${BOUNDARY_END}`,
+    `${ALIAS_BOUNDARY_PREFIX}${escapeRegex(phrase.toLowerCase())}${ALIAS_BOUNDARY_SUFFIX}`,
     "i",
   );
   return re.test(corpus);

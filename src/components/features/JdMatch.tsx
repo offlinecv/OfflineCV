@@ -16,9 +16,12 @@ import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
 interface JdMatchProps {
   coverage: CoverageResult;
   terms: readonly ExtractedTerm[];
+  /** How many noun-pass terms the extractor silenced past its cap. When > 0,
+   *  the UI surfaces a footnote so the user knows the panel isn't exhaustive. */
+  nounsDropped?: number;
 }
 
-export function JdMatch({ coverage, terms }: JdMatchProps) {
+export function JdMatch({ coverage, terms, nounsDropped = 0 }: JdMatchProps) {
   const total = terms.length;
   const covered = coverage.covered.length;
 
@@ -64,6 +67,14 @@ export function JdMatch({ coverage, terms }: JdMatchProps) {
           emptyCopy="Every term we extracted shows up somewhere in the resume."
         />
       </div>
+
+      {nounsDropped > 0 && (
+        <p className="text-[11px] text-content-muted">
+          +{nounsDropped} more capitalized phrase{nounsDropped === 1 ? "" : "s"}{" "}
+          in this JD weren't surfaced — the noun-phrase pass caps at the most
+          informative ones to keep the panel readable.
+        </p>
+      )}
     </section>
   );
 }

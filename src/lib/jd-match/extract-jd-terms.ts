@@ -88,14 +88,28 @@ export interface ExtractedTerm {
 export interface ExtractJdTermsResult {
   /** Skill-pass hits (canonical IDs). */
   skills: ExtractedTerm[];
-  /** Noun-pass hits. Filtered to exclude anything that also matched a skill. */
+  /** Noun-pass hits. Filtered to exclude anything that also matched a skill.
+   *  Capped at `NOUN_PASS_CAP` — see `nounsDropped` for the silenced overflow. */
   nouns: ExtractedTerm[];
   /** Concatenation of `skills` then `nouns` — convenience for the coverage step. */
   all: ExtractedTerm[];
+  /** How many noun-pass hits the cap silenced. UI surfaces this as a
+   *  "+N more not shown" footnote so the user knows the panel isn't
+   *  exhaustive when the JD is unusually noisy. */
+  nounsDropped: number;
   /** JD text after boilerplate exclusion and whitespace normalization.
    *  Exposed so coverage / UI can pull snippets from the same view we matched. */
   body: string;
 }
+
+/**
+ * Cap on noun-pass hits surfaced per JD. A capitalization-heavy paragraph
+ * can produce 50+ noisy noun phrases; surfacing them all would drown the
+ * Missing column. Empirically, typical tech JDs land at <10 noun-phrase
+ * hits after the skill-overlap filter, so a 25-cap leaves comfortable
+ * headroom while protecting the UI from outliers.
+ */
+export const NOUN_PASS_CAP = 25;
 
 /**
  * Lines that the noun-phrase regex would otherwise pick up but that almost
@@ -179,7 +193,7 @@ export function extractJdTerms(
 
   const skills = extractSkillPass(body, snippetChars);
   const skilledAliases = new Set(skills.map((t) => t.id));
-  const nouns = extractNounPass(body, snippetChars).filter((n) => {
+  const allNouns = extractNounPass(body, snippetChars).filter((n) => {
     // Drop noun hits whose lowercased form is already a skill alias —
     // those are weaker evidence for the same canonical ID.
     const lower = n.display.toLowerCase();
@@ -190,7 +204,16 @@ export function extractJdTerms(
     return true;
   });
 
-  return { skills, nouns, all: [...skills, ...nouns], body };
+  const nouns = allNouns.slice(0, NOUN_PASS_CAP);
+  const nounsDropped = Math.max(0, allNouns.length - NOUN_PASS_CAP);
+
+  return {
+    skills,
+    nouns,
+    all: [...skills, ...nouns],
+    nounsDropped,
+    body,
+  };
 }
 
 /**
@@ -259,9 +282,9 @@ function extractSkillPass(body: string, snippetChars: number): ExtractedTerm[] {
  *   - Standalone all-caps acronyms of 2–6 letters/digits (e.g. "ETL", "SOC2",
  *     "ATS"). Lowercased acronyms are NOT eligible — too noisy.
  *
- * Each hit is filtered against `NOUN_STOP_PHRASES` and `ACRONYM_STOPLIST`,
- * deduped case-insensitively, and capped at ~25 hits per JD so a paragraph
- * full of capitalized words doesn't drown the panel.
+ * Each hit is filtered against `NOUN_STOP_PHRASES` and `ACRONYM_STOPLIST`
+ * and deduped case-insensitively. The caller caps the surfaced count to
+ * `NOUN_PASS_CAP` and records the dropped overflow on `nounsDropped`.
  */
 function extractNounPass(body: string, snippetChars: number): ExtractedTerm[] {
   // Word-char class excludes `.` so "Kubernetes." captures "Kubernetes" only.
@@ -296,7 +319,7 @@ function extractNounPass(body: string, snippetChars: number): ExtractedTerm[] {
       snippet: snippetAround(body, m.index, acronym.length, snippetChars),
     });
   }
-  return Array.from(seen.values()).slice(0, 25);
+  return Array.from(seen.values());
 }
 
 function snippetAround(

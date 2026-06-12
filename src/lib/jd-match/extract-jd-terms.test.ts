@@ -117,5 +117,21 @@ Kubernetes is a core piece of the platform.
   it("returns an empty result for an empty JD", () => {
     const out = extractJdTerms("");
     expect(out.all).toHaveLength(0);
+    expect(out.nounsDropped).toBe(0);
+  });
+
+  it("caps the noun-pass list and records overflow on nounsDropped", () => {
+    // 40 distinct two-word capitalized phrases — well above the cap.
+    // Each phrase pairs a fixed "Synthetic" head with a unique two-letter
+    // tail. Letters only — the noun-pass word char class doesn't span digits.
+    const lines: string[] = [];
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (let i = 0; i < 40; i++) {
+      const tail = `${letters[i % 26]}${letters[(i + 7) % 26]}${letters[(i + 13) % 26]}`;
+      lines.push(`Synthetic ${tail}phrase here.`);
+    }
+    const out = extractJdTerms(lines.join("\n"));
+    expect(out.nouns.length).toBeLessThanOrEqual(25);
+    expect(out.nounsDropped).toBeGreaterThan(0);
   });
 });

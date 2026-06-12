@@ -185,7 +185,11 @@ export default function App() {
       </section>
 
       {jdMatch && (
-        <JdMatch coverage={jdMatch.coverage} terms={jdMatch.extracted.all} />
+        <JdMatch
+          coverage={jdMatch.coverage}
+          terms={jdMatch.extracted.all}
+          nounsDropped={jdMatch.extracted.nounsDropped}
+        />
       )}
 
       <footer className="mt-auto flex flex-col gap-2 border-t border-neutral-200 pt-6 text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-400">

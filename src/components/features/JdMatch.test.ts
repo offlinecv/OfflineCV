@@ -65,6 +65,34 @@ describe("JdMatch", () => {
     expect(html).toContain(">kubernetes<");
   });
 
+  it("surfaces the '+N more' footnote when noun-pass cap silences hits", () => {
+    const coverage: CoverageResult = {
+      covered: [],
+      missing: [],
+      score: 0,
+      weights: { skill: 1, noun: 0.5 },
+    };
+    const html = renderToStaticMarkup(
+      createElement(JdMatch, { coverage, terms: [], nounsDropped: 7 }),
+    );
+    expect(html).toContain("+7 more capitalized phrases");
+  });
+
+  it("omits the footnote when no hits were silenced", () => {
+    const coverage: CoverageResult = {
+      covered: [],
+      missing: [],
+      score: 0,
+      weights: { skill: 1, noun: 0.5 },
+    };
+    const html = renderToStaticMarkup(
+      createElement(JdMatch, { coverage, terms: [], nounsDropped: 0 }),
+    );
+    expect(html).not.toContain("not surfaced");
+    expect(html).not.toContain("not shown");
+    expect(html).not.toMatch(/\+\d+ more/);
+  });
+
   it("emits the snippet on the term row as a hover tooltip (title attribute)", () => {
     const t = term("react", "react", "skill");
     const coverage: CoverageResult = {
