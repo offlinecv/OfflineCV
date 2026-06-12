@@ -2,10 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 import type { CascadeResult, LayoutTrigger } from "../lib/heuristics/types.ts";
-import type {
-  AnonymousAtsScore,
-  BulletObservation,
-} from "../lib/score/score.ts";
+import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { getScoreTier, getScoreLabel } from "../lib/score/score.ts";
 import { PdfPreview } from "./PdfPreview";
 import { ScoreRing } from "./features/ScoreRing.tsx";
@@ -14,11 +11,11 @@ import type { VerdictDimension } from "./features/VerdictHeader.tsx";
 import { ContactCard } from "./features/ContactCard.tsx";
 import { Card } from "./shared/Card.tsx";
 import { FeedbackControl } from "./features/FeedbackControl.tsx";
+import { PerBulletFeedback } from "./features/PerBulletFeedback.tsx";
 import {
   scoreBandTextClass,
   scoreBandBgClass,
 } from "./features/scoreBand.ts";
-import { RewriteButton } from "./features/RewriteButton.tsx";
 
 interface ResultProps {
   result: CascadeResult;
@@ -317,171 +314,6 @@ function Dimension({
       )}
       <p className="text-[11px] text-content-tertiary">{hint}</p>
     </a>
-  );
-}
-
-function PerBulletFeedback({
-  bullets,
-}: {
-  bullets: BulletObservation[] | undefined;
-}) {
-  if (!bullets || bullets.length === 0) {
-    return (
-      <section
-        id="per-bullet-feedback"
-        className="scroll-mt-6 flex flex-col gap-2"
-      >
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-          Per-bullet feedback
-        </h2>
-        <p className="text-sm text-content-tertiary">
-          No bullet-shaped lines detected.
-        </p>
-      </section>
-    );
-  }
-
-  const attentionCount = bullets.filter(needsAttention).length;
-  const summary =
-    attentionCount === 0
-      ? `All ${bullets.length} bullets pass every check.`
-      : `${attentionCount} of ${bullets.length} bullet${
-          bullets.length === 1 ? "" : "s"
-        } need attention — missing a metric and at least one structure check.`;
-
-  return (
-    <section
-      id="per-bullet-feedback"
-      className="scroll-mt-6 flex flex-col gap-2"
-    >
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-        Per-bullet feedback
-      </h2>
-      <p className="max-w-prose text-sm text-content-tertiary">
-        Each bullet checked against three rules: an action verb, the 8–30-word
-        length window, and a metric. {summary}
-      </p>
-      <table className="w-full border-collapse text-sm">
-        <caption className="sr-only">Per-bullet rule checks</caption>
-        <thead>
-          <tr>
-            <th
-              scope="col"
-              className="pb-1 text-left text-[11px] font-semibold uppercase tracking-wider text-content-muted"
-            >
-              {/* bullet text — no visible header */}
-            </th>
-            <th
-              scope="col"
-              className="pb-1 pr-2 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
-            >
-              Verb
-            </th>
-            <th
-              scope="col"
-              className="pb-1 pr-2 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
-            >
-              Length
-            </th>
-            <th
-              scope="col"
-              className="pb-1 text-right text-[11px] font-semibold uppercase tracking-wider text-content-muted"
-            >
-              Metric
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {bullets.map((b) => (
-            <BulletRow key={b.index} bullet={b} />
-          ))}
-        </tbody>
-      </table>
-    </section>
-  );
-}
-
-function needsAttention(b: BulletObservation): boolean {
-  return !b.hasMetric && (!b.startsWithActionVerb || !b.wellFormedLength);
-}
-
-function BulletRow({ bullet }: { bullet: BulletObservation }) {
-  const attention = needsAttention(bullet);
-  const allPass =
-    bullet.hasMetric && bullet.startsWithActionVerb && bullet.wellFormedLength;
-
-  const rowCls = attention ? "bg-feedback-warning-bg" : "";
-  const textCls = allPass ? "text-content-muted" : "text-content-primary";
-
-  const lengthLabel = bullet.wellFormedLength
-    ? `${bullet.wordCount} words`
-    : bullet.wordCount < 8
-      ? `${bullet.wordCount} words (too short)`
-      : `${bullet.wordCount} words (too long)`;
-
-  const lengthSuffix =
-    bullet.wordCount < 8 ? " ↓" : bullet.wordCount > 30 ? " ↑" : "";
-
-  return (
-    <tr className={rowCls}>
-      <td className={`py-1 pr-3 align-top text-sm leading-snug ${textCls}`}>
-        <span className="mr-1.5 font-mono text-[11px] text-content-muted">
-          #{bullet.index + 1}
-        </span>
-        {bullet.text}
-        <RewriteButton bullet={bullet.text} />
-      </td>
-      <td className="py-1 pr-2 text-right align-top tabular-nums">
-        {bullet.startsWithActionVerb ? (
-          <>
-            <span className="text-feedback-success-text" aria-hidden="true">
-              ✓
-            </span>
-            <span className="sr-only">verb</span>
-          </>
-        ) : (
-          <>
-            <span className="text-feedback-warning-text" aria-hidden="true">
-              ✗
-            </span>
-            <span className="sr-only">no action verb</span>
-          </>
-        )}
-      </td>
-      <td
-        className="py-1 pr-2 text-right align-top tabular-nums"
-        title={lengthLabel}
-      >
-        <span
-          className={
-            bullet.wellFormedLength
-              ? "text-feedback-success-text"
-              : "text-feedback-warning-text"
-          }
-        >
-          {bullet.wordCount}
-          {lengthSuffix}
-        </span>
-        <span className="sr-only">{lengthLabel}</span>
-      </td>
-      <td className="py-1 text-right align-top tabular-nums">
-        {bullet.hasMetric ? (
-          <>
-            <span className="text-feedback-success-text" aria-hidden="true">
-              ✓
-            </span>
-            <span className="sr-only">metric</span>
-          </>
-        ) : (
-          <>
-            <span className="text-feedback-warning-text" aria-hidden="true">
-              ✗
-            </span>
-            <span className="sr-only">no metric</span>
-          </>
-        )}
-      </td>
-    </tr>
   );
 }
 
