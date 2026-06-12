@@ -35,3 +35,6 @@ __pycache__/
 .codegraph/cache/
 .codegraph/.dirty
 .codegraph/*.pid
+
+# Playwright MCP snapshot artifacts
+.playwright-mcp/
