@@ -8,11 +8,15 @@ import type {
 } from "../lib/score/score.ts";
 import { getScoreTier, getScoreLabel } from "../lib/score/score.ts";
 import { PdfPreview } from "./PdfPreview";
-import { Chip } from "./ui/Chip.tsx";
 import { ScoreRing } from "./features/ScoreRing.tsx";
 import { VerdictHeader } from "./features/VerdictHeader.tsx";
+import type { VerdictDimension } from "./features/VerdictHeader.tsx";
 import { ContactCard } from "./features/ContactCard.tsx";
 import { FeedbackControl } from "./features/FeedbackControl.tsx";
+import {
+  scoreBandTextClass,
+  scoreBandBgClass,
+} from "./features/scoreBand.ts";
 
 interface ResultProps {
   result: CascadeResult;
@@ -136,9 +140,9 @@ function LayoutFlagsList({ triggers }: { triggers: readonly LayoutTrigger[] }) {
         Layout flags
       </h2>
       {triggers.length === 0 ? (
-        <Chip tone="success" icon="✓">
-          Clean ATS layout — single-column, selectable text
-        </Chip>
+        <p className="text-sm text-content-tertiary">
+          No layout flags — standard single-column, text-selectable PDF.
+        </p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {triggers.map((t) => (
@@ -159,6 +163,39 @@ function LayoutFlagsList({ triggers }: { triggers: readonly LayoutTrigger[] }) {
 
 function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
   const buildDate = __BUILD_DATE__.slice(0, 10);
+
+  // Compute hint strings once — shared between VerdictHeader and Dimension cards.
+  const specificityHint = `${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`;
+  const structureHint = `${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`;
+  const completenessHint =
+    score.completeness.missing.length === 0
+      ? "All expected fields present"
+      : `Missing: ${score.completeness.missing.join(", ")}`;
+
+  const dimensions: VerdictDimension[] = [
+    {
+      label: "Specificity",
+      score: score.specificity.score,
+      max: score.specificity.max,
+      gradable: score.specificity.gradable,
+      hint: specificityHint,
+    },
+    {
+      label: "Structure",
+      score: score.structure.score,
+      max: score.structure.max,
+      gradable: score.structure.gradable,
+      hint: structureHint,
+    },
+    {
+      label: "Completeness",
+      score: score.completeness.score,
+      max: score.completeness.max,
+      gradable: score.completeness.gradable,
+      hint: completenessHint,
+    },
+  ];
+
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
@@ -168,51 +205,51 @@ function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
         <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-content-secondary">
           alpha
         </span>
-        {score.algoVersion && (
-          <span className="text-[11px] text-content-muted">
-            algo v{score.algoVersion}
-          </span>
-        )}
-        <span className="text-[11px] text-content-muted">
-          Built {buildDate}
-        </span>
       </div>
-      <p className="max-w-prose text-sm text-content-tertiary">
-        A quick read on how your resume scores — based on what a generic text
-        extractor pulled from your PDF, the same starting point most ATS
-        parsers use. Not a universal score; systems weigh things differently.
-        Dimensions below show where the points landed.
+      <p className="text-sm text-content-tertiary">
+        Scored from what a generic text extractor pulled from your PDF — the
+        starting point most resume parsers share.
       </p>
+      <details className="text-sm text-content-tertiary">
+        <summary className="cursor-pointer text-sm text-content-tertiary">
+          How is this scored?
+        </summary>
+        <p className="mt-1 max-w-prose text-sm text-content-tertiary">
+          A quick read on how your resume scores — based on what a generic text
+          extractor pulled from your PDF, the same starting point most ATS
+          parsers use. Not a universal score; systems weigh things differently.
+          Dimensions below show where the points landed.
+        </p>
+      </details>
       <div className="flex flex-col gap-4 md:flex-row md:items-start">
         <div className="flex items-center gap-4">
           <ScoreRing score={score.overall} />
-          <VerdictHeader score={score.overall} />
+          <VerdictHeader score={score.overall} dimensions={dimensions} />
         </div>
-        <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3 flex-1">
+        <dl className="grid flex-1 grid-cols-1 gap-3 text-xs sm:grid-cols-3">
           <Dimension
             label="Specificity"
             value={score.specificity.score}
             max={score.specificity.max}
             gradable={score.specificity.gradable}
-            hint={`${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`}
+            hint={specificityHint}
+            anchor="#per-bullet-feedback"
           />
           <Dimension
             label="Structure"
             value={score.structure.score}
             max={score.structure.max}
             gradable={score.structure.gradable}
-            hint={`${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`}
+            hint={structureHint}
+            anchor="#per-bullet-feedback"
           />
           <Dimension
             label="Completeness"
             value={score.completeness.score}
             max={score.completeness.max}
             gradable={score.completeness.gradable}
-            hint={
-              score.completeness.missing.length === 0
-                ? "All expected fields present"
-                : `Missing: ${score.completeness.missing.join(", ")}`
-            }
+            hint={completenessHint}
+            anchor="#contact"
           />
         </dl>
       </div>
@@ -222,6 +259,10 @@ function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
           ): pre-layout score was {score.preLayoutOverall}.
         </p>
       )}
+      <p className="text-[11px] text-content-muted">
+        {score.algoVersion && <>algo v{score.algoVersion} · </>}Built{" "}
+        {buildDate}
+      </p>
     </section>
   );
 }
@@ -232,23 +273,32 @@ function Dimension({
   max,
   gradable,
   hint,
+  anchor,
 }: {
   label: string;
   value: number;
   max: number;
   gradable: boolean;
   hint: string;
+  anchor: string;
 }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  const tier = getScoreTier(pct);
+  const barCls = scoreBandBgClass(tier);
+  const valueCls = scoreBandTextClass(tier);
+
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3">
+    <a
+      href={anchor}
+      className="block flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3 hover:border-border-light"
+    >
       <dt className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
         {label}
       </dt>
       <dd className="text-sm font-medium">
         {gradable ? (
           <>
-            {value}
+            <span className={valueCls}>{value}</span>
             <span className="text-xs text-content-muted"> / {max}</span>
           </>
         ) : (
@@ -258,13 +308,13 @@ function Dimension({
       {gradable && (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-card">
           <div
-            className="h-full rounded-full bg-brand-amber"
+            className={`h-full rounded-full ${barCls}`}
             style={{ width: `${pct}%` }}
           />
         </div>
       )}
-      <p className="text-[11px] text-content-muted">{hint}</p>
-    </div>
+      <p className="text-[11px] text-content-tertiary">{hint}</p>
+    </a>
   );
 }
 
@@ -275,7 +325,10 @@ function PerBulletFeedback({
 }) {
   if (!bullets || bullets.length === 0) {
     return (
-      <section className="flex flex-col gap-2">
+      <section
+        id="per-bullet-feedback"
+        className="scroll-mt-6 flex flex-col gap-2"
+      >
         <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
           Per-bullet feedback
         </h2>
@@ -295,7 +348,10 @@ function PerBulletFeedback({
         } need attention — missing a metric and at least one structure check.`;
 
   return (
-    <section className="flex flex-col gap-2">
+    <section
+      id="per-bullet-feedback"
+      className="scroll-mt-6 flex flex-col gap-2"
+    >
       <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
         Per-bullet feedback
       </h2>
@@ -352,9 +408,7 @@ function BulletRow({ bullet }: { bullet: BulletObservation }) {
   const allPass =
     bullet.hasMetric && bullet.startsWithActionVerb && bullet.wellFormedLength;
 
-  const rowCls = attention
-    ? "bg-feedback-warning-bg"
-    : "";
+  const rowCls = attention ? "bg-feedback-warning-bg" : "";
   const textCls = allPass ? "text-content-muted" : "text-content-primary";
 
   const lengthLabel = bullet.wellFormedLength
