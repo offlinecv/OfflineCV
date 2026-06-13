@@ -22,3 +22,6 @@ export type { CoverageResult } from "./coverage.ts";
 
 export { SKILLS, getSkillIndex, skillCount } from "./skills.ts";
 export type { SkillEntry } from "./skills.ts";
+
+export { fetchJdFromUrl, parseAtsUrl, htmlToPlaintext } from "./fetch-jd.ts";
+export type { AtsPlatform } from "./fetch-jd.ts";
