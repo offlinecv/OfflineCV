@@ -459,6 +459,28 @@ export function extractSummary(
 
 const SKILL_SPLIT_RE = /[,;·•|/]+|\s{2,}/;
 
+/**
+ * True if a skill token is plausibly a real skill.
+ *
+ * Defends against bleed-in from neighboring sections when the section-boundary
+ * fix did not catch a given token. Filters:
+ *   - date-range runs ("2001 - 2005 Riverton", "04/2021 - Present")
+ *   - tokens with more than 4 whitespace-delimited words (sentence fragments
+ *     like "Over 200+ interviews for engineering" — real skills are terse)
+ *
+ * Note: trailing punctuation is stripped by the caller before this check, so
+ * "AWS." → "AWS" passes without special-casing single-word tokens.
+ */
+function isSkillToken(tok: string): boolean {
+  if (tok.length < 2 || tok.length > 40) return false;
+  if (/^\d+$/.test(tok)) return false;
+  // Reject date-range runs: "2001 - 2005", "04/2021 - Present" etc.
+  if (/\d{4}\s*[-–]\s*(\d{4}|present)/i.test(tok)) return false;
+  // Reject tokens that span more than 4 words — real skills are terse.
+  if (tok.split(/\s+/).length > 4) return false;
+  return true;
+}
+
 export function extractSkills(
   skills: PdfSection | undefined,
 ): { value: string[]; confidence: number } {
@@ -468,8 +490,11 @@ export function extractSkills(
   for (const line of skills.lines) {
     const clean = stripBullet(line.text).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
     for (const raw of clean.split(SKILL_SPLIT_RE)) {
-      const tok = raw.trim();
-      if (tok.length >= 2 && tok.length <= 40 && !/^\d+$/.test(tok)) {
+      // Strip trailing sentence punctuation that can appear at line-end (e.g.
+      // "Python, JavaScript, Git, SQL, Linux, AWS." → the period is a list
+      // terminator, not part of the skill name).
+      const tok = raw.trim().replace(/[.!?,;]+$/, "");
+      if (isSkillToken(tok)) {
         tokens.add(tok);
       }
     }
