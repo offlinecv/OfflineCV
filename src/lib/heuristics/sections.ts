@@ -232,12 +232,27 @@ export function splitIntoSections(lines: PdfLine[]): PdfSection[] {
   return sections;
 }
 
-/** Helper: lookup a section by name. Returns undefined if absent. */
+/**
+ * Helper: look up a section by name. Returns undefined if absent.
+ *
+ * A section header can legitimately repeat — most often EXPERIENCE, which
+ * carries a "E XPERIENCE" continuation header at the top of page 2 on
+ * multi-page two-column résumés. Both section splitters open a fresh section
+ * each time a header matches (see `splitIntoSections` /
+ * `splitIntoSectionsWithMarkdown`), so a repeated header yields two sections of
+ * the same name. We merge their lines in document order here so the caller sees
+ * the whole section; returning only the first occurrence (the old behavior)
+ * silently dropped every role after the continuation header, stranding those
+ * bullets in the unmatched "Other" group downstream.
+ */
 export function findSection(
   sections: PdfSection[],
   name: SectionName | "profile",
 ): PdfSection | undefined {
-  return sections.find((s) => s.name === name);
+  const matches = sections.filter((s) => s.name === name);
+  if (matches.length === 0) return undefined;
+  if (matches.length === 1) return matches[0];
+  return { name, lines: matches.flatMap((s) => s.lines) };
 }
 
 // ── Markdown-anchored section splitting ──────────────────────────

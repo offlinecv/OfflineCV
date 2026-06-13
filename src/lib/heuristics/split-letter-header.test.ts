@@ -39,6 +39,34 @@ describe("split-letter section header → experience extraction (#56)", () => {
     expect(value[0].description).toContain("service mesh");
   });
 
+  it("merges a page-2 'E XPERIENCE' continuation header into one experience section", () => {
+    // Multi-page two-column résumés repeat the section header at the top of
+    // page 2 ("E XPERIENCE"), opening a SECOND experience section. findSection
+    // must merge both so page-2 roles are extracted — otherwise their bullets
+    // strand in the unmatched "Other" group. Regression for the lost-page-2-
+    // employment bug.
+    const sections = build([
+      { text: "Alex Rivera", fontSize: 18 },
+      { text: "E XPERIENCE", fontSize: 13 },
+      { text: "Senior Engineer, Acme Corp  01/2020 - 03/2023", fontSize: 11 },
+      { text: "• Led migration to a new service mesh, cutting p99 latency 40%.", fontSize: 11 },
+      { text: "E XPERIENCE", fontSize: 13 },
+      { text: "Staff Engineer, Globex Inc  06/2016 - 12/2019", fontSize: 11 },
+      { text: "• Built the billing pipeline handling 2M daily events.", fontSize: 11 },
+    ]);
+
+    // Two experience sections were opened, one per header.
+    expect(sections.filter((s) => s.name === "experience")).toHaveLength(2);
+
+    // findSection merges them; both roles survive extraction.
+    const experience = findSection(sections, "experience");
+    expect(experience).toBeDefined();
+    const { value } = extractExperience(experience);
+    const companies = value.map((e) => e.company ?? "");
+    expect(companies.some((c) => c.includes("Acme Corp"))).toBe(true);
+    expect(companies.some((c) => c.includes("Globex Inc"))).toBe(true);
+  });
+
   it("regression guard: a clean 'EXPERIENCE' header still works", () => {
     const sections = build([
       { text: "Alex Rivera", fontSize: 18 },
