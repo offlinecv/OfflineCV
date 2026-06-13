@@ -32,6 +32,21 @@ export function normalizeBulletText(s: string): string {
     .toLowerCase();
 }
 
+// ── Grading predicate ───────────────────────────────────────────────────────
+
+/**
+ * True when a bullet fails at least one of the three grading checks (no metric,
+ * weak opening verb, or out-of-window length) and therefore warrants an inline
+ * flag in the reconstructed-resume view. The complement (all three pass) renders
+ * the bullet plain.
+ *
+ * This is library logic, not UI: it mirrors the same three checks
+ * `scoreBulletPool` aggregates, exposed per-bullet for in-context display.
+ */
+export function needsAttention(b: BulletObservation): boolean {
+  return !b.hasMetric || !b.startsWithActionVerb || !b.wellFormedLength;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /**

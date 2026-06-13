@@ -8,10 +8,9 @@ import { PdfPreview } from "./PdfPreview";
 import { ScoreRing } from "./features/ScoreRing.tsx";
 import { VerdictHeader } from "./features/VerdictHeader.tsx";
 import type { VerdictDimension } from "./features/VerdictHeader.tsx";
-import { ContactCard } from "./features/ContactCard.tsx";
 import { Card } from "./shared/Card.tsx";
 import { FeedbackControl } from "./features/FeedbackControl.tsx";
-import { PerBulletFeedback } from "./features/PerBulletFeedback.tsx";
+import { ReconstructedResume } from "./features/ReconstructedResume.tsx";
 import {
   scoreBandTextClass,
   scoreBandBgClass,
@@ -98,8 +97,7 @@ function ParsedCard({
       </header>
 
       <AtsScoreReadout score={score} />
-      <ContactCard result={result} />
-      <PerBulletFeedback bullets={score.bullets} experiences={result.parsed.experience} />
+      <ReconstructedResume result={result} score={score} />
 
       {/* Evidence — how a generic extractor read this PDF. Reference
           material, so it sits below the score and per-bullet findings.
