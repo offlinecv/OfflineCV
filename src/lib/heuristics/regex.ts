@@ -114,6 +114,29 @@ export const SECTION_KEYWORDS = {
   ],
   projects: ["projects", "personal projects", "selected projects"],
   certifications: ["certifications", "certificates", "licenses", "awards"],
+  /**
+   * Sink bucket for non-core sidebar labels that must terminate the preceding
+   * section (e.g. ACHIEVEMENTS, FOCUS AREAS, STRENGTHS in two-column PDFs).
+   * Nothing renders an `other` section; its sole job is to act as a boundary
+   * so content that follows it does not bleed into the preceding section.
+   */
+  other: [
+    "strengths",
+    "achievements",
+    "accomplishments",
+    "highlights",
+    "focus areas",
+    "interests",
+    "languages",
+    "volunteer",
+    "volunteering",
+    "references",
+    "activities",
+    "awards & honors",
+    "awards and honors",
+    "hobbies",
+    "publications",
+  ],
 } as const;
 
 export type SectionName = keyof typeof SECTION_KEYWORDS;
