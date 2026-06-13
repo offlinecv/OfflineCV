@@ -30,6 +30,13 @@ import type {
 
 interface RewriteButtonProps {
   bullet: string;
+  /**
+   * Compact mode: render an icon-only trigger that sits inline on the bullet
+   * row (alongside the check badges) instead of a labelled button on its own
+   * line. The expansion panels (loading / result / error) break to full width
+   * below the bullet via `display: contents`. Used by `ResumeBulletRow`.
+   */
+  compact?: boolean;
 }
 
 type Status =
@@ -39,7 +46,7 @@ type Status =
   | { kind: "done"; rewritten: string }
   | { kind: "error"; message: string };
 
-export function RewriteButton({ bullet }: RewriteButtonProps) {
+export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [copied, setCopied] = useState(false);
@@ -91,43 +98,54 @@ export function RewriteButton({ bullet }: RewriteButtonProps) {
   const busy = status.kind === "loading" || status.kind === "rewriting";
   const idle = status.kind === "idle";
 
+  // One expansion surface (loading / rewriting / result / error). In compact
+  // mode it breaks to full width on its own row below the bullet; in the
+  // standalone (labelled) mode it stacks under the button, right-aligned.
+  const expansion =
+    status.kind === "loading" ? (
+      <LoadingPanel progress={status.progress} />
+    ) : status.kind === "rewriting" ? (
+      <p className="text-[11px] text-content-muted">Rewriting…</p>
+    ) : status.kind === "done" ? (
+      <RewriteResult
+        rewritten={status.rewritten}
+        copied={copied}
+        onCopy={onCopy}
+      />
+    ) : status.kind === "error" ? (
+      <p role="alert" className="text-[11px] text-feedback-error-text">
+        {status.message}
+      </p>
+    ) : null;
+
+  const compactButtonCls =
+    "group inline-flex min-h-[28px] min-w-[28px] shrink-0 items-center justify-center self-baseline rounded-md text-content-tertiary hover:text-brand-amber disabled:cursor-not-allowed disabled:opacity-60";
+
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    // `contents` in compact mode so the trigger and the expansion participate
+    // directly in the bullet row's flex layout: the icon sits inline with the
+    // check badges, the full-width expansion wraps to the next row.
+    <div className={compact ? "contents" : "flex flex-col items-end gap-1.5"}>
       <button
         type="button"
         onClick={onClick}
         disabled={busy}
-        aria-label={`Suggest a rewrite for this bullet`}
+        aria-label="Suggest a rewrite for this bullet"
+        title="Rewrite this bullet"
         className={
-          idle
-            ? "group inline-flex min-h-[28px] items-center gap-1 self-start py-1 text-[11px] font-medium text-content-tertiary hover:text-brand-amber disabled:cursor-not-allowed disabled:opacity-60"
-            : "inline-flex min-h-[28px] items-center gap-1 self-start rounded-md border border-border-light bg-surface-card px-2 py-1 text-[11px] font-medium text-content-secondary hover:border-border hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+          compact
+            ? compactButtonCls
+            : idle
+              ? "group inline-flex min-h-[28px] items-center gap-1 self-start py-1 text-[11px] font-medium text-content-tertiary hover:text-brand-amber disabled:cursor-not-allowed disabled:opacity-60"
+              : "inline-flex min-h-[28px] items-center gap-1 self-start rounded-md border border-border-light bg-surface-card px-2 py-1 text-[11px] font-medium text-content-secondary hover:border-border hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
         }
       >
-        <SparkleIcon />
-        {labelFor(status)}
+        <SparkleIcon className={compact ? "h-3.5 w-3.5 shrink-0" : undefined} />
+        {!compact && labelFor(status)}
       </button>
 
-      {status.kind === "loading" && (
-        <LoadingPanel progress={status.progress} />
-      )}
-
-      {status.kind === "rewriting" && (
-        <p className="text-[11px] text-content-muted">Rewriting…</p>
-      )}
-
-      {status.kind === "done" && (
-        <RewriteResult
-          rewritten={status.rewritten}
-          copied={copied}
-          onCopy={onCopy}
-        />
-      )}
-
-      {status.kind === "error" && (
-        <p role="alert" className="text-[11px] text-feedback-error-text">
-          {status.message}
-        </p>
+      {expansion && (
+        <div className={compact ? "mt-1.5 w-full" : undefined}>{expansion}</div>
       )}
     </div>
   );
@@ -149,12 +167,12 @@ function labelFor(status: Status): string {
 }
 
 /** Inline sparkle glyph for the rewrite affordance (SVG, not emoji). */
-function SparkleIcon() {
+function SparkleIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
       aria-hidden="true"
-      className="h-3 w-3 shrink-0"
+      className={className ?? "h-3 w-3 shrink-0"}
       fill="currentColor"
     >
       <path d="M12 2l1.9 5.6a4 4 0 0 0 2.5 2.5L22 12l-5.6 1.9a4 4 0 0 0-2.5 2.5L12 22l-1.9-5.6a4 4 0 0 0-2.5-2.5L2 12l5.6-1.9a4 4 0 0 0 2.5-2.5L12 2z" />
