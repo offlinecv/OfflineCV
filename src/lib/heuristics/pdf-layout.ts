@@ -26,29 +26,47 @@ const SCANNED_MIN_CHARS_PER_PAGE = 80;
 const SCANNED_MIN_ITEMS_PER_PAGE = 15;
 
 /**
- * Minimum x-distance between the two dominant x-start peaks (as a fraction of
- * page width) for a layout to count as two-column. Single-column documents
- * have their two tallest x-start bins adjacent (left margin + first indent),
- * so this gap stays small and rejects them.
+ * Maximum share of a page's text *rows* that may paint ink at the gutter strip
+ * for it to count as a real inter-column corridor. This is the primary
+ * single-column discriminator, measured by a width-aware vertical ink
+ * projection (see `detectColumnBoundaries`). Across the labeled corpus the two
+ * populations are cleanly separated with no overlap: genuine two-column layouts
+ * leave a corridor painted by ≤2.4% of rows, while single-column docs — even
+ * ones with a right-aligned date/label rail that mimics a second column — never
+ * drop below 6.3% (their wide wrapped body text inks straight through the
+ * would-be gutter). Set in the gap between those populations.
  */
-export const TWO_COLUMN_MIN_GAP_RATIO = 0.25;
+export const TWO_COLUMN_MAX_GUTTER_COVERAGE = 0.04;
 
 /**
- * Minimum share of a page's items that must fall strictly on each side of the
- * candidate split for it to count as a real second column. This is the primary
- * single-column discriminator: a genuine two-column resume splits its item
- * mass roughly evenly (~0.42–0.44 each side in the corpus), whereas a
- * single-column doc with a stray right-aligned date/label column straddling the
- * midpoint sits well below this (≤0.39 observed). Tuned to fall in the clean
- * gap between those two populations.
+ * The gutter's center must fall inside this central band of the page
+ * ([lo, hi] × width). Excludes the empty right margin of a single-column doc,
+ * which is empty but is not *between* two columns.
  */
-const TWO_COLUMN_MIN_SIDE_SHARE = 0.4;
+const TWO_COLUMN_BAND_LO = 0.2;
+const TWO_COLUMN_BAND_HI = 0.8;
+
+/** Minimum gutter width (as a fraction of page width) — guards against a
+ *  degenerate one-strip "corridor" between two adjacent words. */
+const TWO_COLUMN_MIN_GUTTER_RATIO = 0.01;
+
+/**
+ * Minimum inked text rows required on *each* side of the split. The single
+ * guard the coverage test cannot supply on its own: it rejects the empty right
+ * margin of a narrow single-column doc (zero rows right of the corridor) and
+ * stray right-edge furniture like a footer page number (a row or two), neither
+ * of which is a real column.
+ */
+const TWO_COLUMN_MIN_COLUMN_ROWS = 4;
 
 /** Minimum item count on a page before its x-distribution is trustworthy. */
 const TWO_COLUMN_MIN_ITEMS_PER_PAGE = 30;
 
-/** x-coord bin width in PDF points. */
-export const X_BIN = 18;
+/** Vertical ink-projection sampling resolution, in PDF points. */
+const X_PROJECTION_STEP = 3;
+
+/** Items within this vertical distance (PDF points) are treated as one row. */
+const ROW_Y_EPS = 3.5;
 
 // ── Probes ──────────────────────────────────────────────────────────────────
 
@@ -97,33 +115,30 @@ function probeScanned(items: PdfTextItem[], pages: PdfPageInfo[]): boolean {
 /**
  * Two-column detection, per page → split-x map (page number → column-channel x).
  *
- * Per page we bin item x-starts into `X_BIN`-wide bins, then locate the layout's
- * two dominant x-start peaks (the two tallest bins): the left margin and the
- * right column's left margin. A page qualifies as two-column when, taking the
- * lower-x peak as `leftPeak` and the higher-x peak as `rightPeak`:
- *   (a) the peak separation `(rightPeak − leftPeak) * X_BIN` is at least
- *       `TWO_COLUMN_MIN_GAP_RATIO * pageWidth`, and
- *   (b) at least `TWO_COLUMN_MIN_SIDE_SHARE` of the page's items fall strictly
- *       on each side of the split.
+ * We find the inter-column gutter with a width-aware vertical ink projection.
+ * Items are grouped into text rows (by y); each row paints the x-strips its
+ * items actually cover — `x` through `x + width`, not just the start. For each
+ * x-strip we then count the share of rows that paint it. The gutter is the
+ * widest run of central strips whose row-coverage stays at or below
+ * `TWO_COLUMN_MAX_GUTTER_COVERAGE`; the split is its center. A page qualifies
+ * when such a corridor exists in the central band and both sides carry at least
+ * `TWO_COLUMN_MIN_COLUMN_ROWS` inked rows.
  *
- * Why two-tallest-peaks rather than the widest empty x-channel: the empty
- * channel is brittle. Left-column lines wrap and spill a few tokens into the
- * gutter (e.g. a wrapped word starting mid-channel), which fragments the "empty"
- * channel into two narrow gaps and hides the real boundary — and the genuinely
- * *widest* gap can then cut through the left column's wrapped tail rather than
- * between the columns. The column *margins*, by contrast, are tall, stable
- * spikes (many lines share each column's left edge), so the two tallest bins
- * reliably mark the two columns even when the gutter is noisy. The side-share
- * floor (b) is the single-column guard: a real two-column layout balances its
- * mass ~evenly across the split, while a single-column doc with a stray
- * right-aligned date/label column does not.
+ * Why ink projection rather than an x-start histogram (the earlier approach):
+ * a histogram of where items *begin* is blind to how far they *extend*. A wide
+ * wrapped bullet that starts at the left margin but runs nearly full width reads
+ * as a single left-margin tick — so a single-column doc with a right-aligned
+ * date/label rail (its body text inks straight across the would-be gutter) is
+ * indistinguishable from a genuine narrow sidebar. Accounting for each item's
+ * full horizontal extent is exactly what separates them: a real two-column
+ * layout leaves a vertical corridor no row paints, while a date rail's "gutter"
+ * is crossed by every wrapped body line. Across the labeled corpus this cleanly
+ * separates the two populations (≤2.4% vs ≥6.3% gutter row-coverage) where the
+ * x-start histogram's populations overlapped.
  *
- * The split x is placed at the right column's left edge so wrapped left-column
- * tokens (which sit in the gutter, left of the right margin) bin LEFT: it is the
- * midpoint between the right edge of the nearest occupied bin strictly left of
- * `rightPeak` and the left edge of the `rightPeak` bin. Pages with fewer than
- * `TWO_COLUMN_MIN_ITEMS_PER_PAGE` items are skipped (too sparse to trust). A
- * page contributes an entry only when it qualifies; an empty map = single-column.
+ * Pages with fewer than `TWO_COLUMN_MIN_ITEMS_PER_PAGE` items are skipped (too
+ * sparse to trust). A page contributes an entry only when it qualifies; an empty
+ * map = single-column.
  */
 export function detectColumnBoundaries(
   items: PdfTextItem[],
@@ -134,56 +149,84 @@ export function detectColumnBoundaries(
 
   const fallbackWidth = pages[0]?.width || 612; // US Letter default
 
-  // Group item x-starts by page.
-  const byPage = new Map<number, number[]>();
+  // Group items by page.
+  const byPage = new Map<number, PdfTextItem[]>();
   for (const it of items) {
-    const xs = byPage.get(it.page);
-    if (xs) xs.push(it.x);
-    else byPage.set(it.page, [it.x]);
+    const pageItems = byPage.get(it.page);
+    if (pageItems) pageItems.push(it);
+    else byPage.set(it.page, [it]);
   }
 
-  for (const [page, xs] of byPage) {
-    if (xs.length < TWO_COLUMN_MIN_ITEMS_PER_PAGE) continue;
+  for (const [page, pageItems] of byPage) {
+    if (pageItems.length < TWO_COLUMN_MIN_ITEMS_PER_PAGE) continue;
     const pageInfo = pages.find((p) => p.page === page);
     const pageWidth = pageInfo?.width || fallbackWidth;
 
-    // Occupied-bin histogram (bin index → item count).
-    const bins = new Map<number, number>();
-    for (const x of xs) {
-      const bin = Math.floor(x / X_BIN);
-      bins.set(bin, (bins.get(bin) ?? 0) + 1);
+    // Cluster items into text rows by y-proximity.
+    const sorted = [...pageItems].sort((a, b) => a.y - b.y);
+    const rows: PdfTextItem[][] = [];
+    for (const it of sorted) {
+      const last = rows[rows.length - 1];
+      if (last && Math.abs(last[0].y - it.y) <= ROW_Y_EPS) last.push(it);
+      else rows.push([it]);
     }
-    const occupied = [...bins.keys()].sort((a, b) => a - b);
-    if (occupied.length < 2) continue;
+    if (rows.length < TWO_COLUMN_MIN_COLUMN_ROWS * 2) continue;
 
-    // Two tallest bins = the two column left-margins. Order them by x.
-    const byCount = [...bins.entries()].sort((a, b) => b[1] - a[1]);
-    const peakA = byCount[0][0];
-    const peakB = byCount[1][0];
-    const leftPeak = Math.min(peakA, peakB);
-    const rightPeak = Math.max(peakA, peakB);
+    // Vertical ink projection: for each x-strip, how many rows paint it
+    // (counting each item's full horizontal extent, not just its start).
+    const cols = Math.ceil(pageWidth / X_PROJECTION_STEP);
+    const rowCoverage = new Float64Array(cols);
+    for (const row of rows) {
+      const painted = new Uint8Array(cols);
+      for (const it of row) {
+        const x0 = Math.max(0, Math.floor(it.x / X_PROJECTION_STEP));
+        const x1 = Math.min(
+          cols - 1,
+          Math.floor((it.x + it.width) / X_PROJECTION_STEP),
+        );
+        for (let c = x0; c <= x1; c++) painted[c] = 1;
+      }
+      for (let c = 0; c < cols; c++) rowCoverage[c] += painted[c];
+    }
 
-    // (a) Peak separation wide enough to be two columns, not adjacent indents.
-    if ((rightPeak - leftPeak) * X_BIN < pageWidth * TWO_COLUMN_MIN_GAP_RATIO) {
+    // Widest run of low-coverage strips inside the central band = the gutter.
+    const lo = Math.floor((pageWidth * TWO_COLUMN_BAND_LO) / X_PROJECTION_STEP);
+    const hi = Math.ceil((pageWidth * TWO_COLUMN_BAND_HI) / X_PROJECTION_STEP);
+    let bestLen = 0;
+    let bestCenter = -1;
+    let run = 0;
+    let runStart = 0;
+    for (let c = lo; c <= hi && c < cols; c++) {
+      if (rowCoverage[c] / rows.length <= TWO_COLUMN_MAX_GUTTER_COVERAGE) {
+        if (run === 0) runStart = c;
+        run++;
+        if (run > bestLen) {
+          bestLen = run;
+          bestCenter = (runStart + c) / 2;
+        }
+      } else {
+        run = 0;
+      }
+    }
+    if (bestCenter < 0) continue;
+    if (bestLen * X_PROJECTION_STEP < pageWidth * TWO_COLUMN_MIN_GUTTER_RATIO) {
       continue;
     }
+    const split = bestCenter * X_PROJECTION_STEP;
 
-    // Split at the right column's left edge: midpoint between the nearest
-    // occupied bin strictly left of rightPeak and rightPeak's left edge.
-    let nearestLeft = -1;
-    for (const b of occupied) {
-      if (b < rightPeak) nearestLeft = b;
-      else break;
+    // Guard: a real column on each side (rejects empty right margin / footer).
+    let leftRows = 0;
+    let rightRows = 0;
+    for (const row of rows) {
+      if (row.some((it) => it.x < split)) leftRows++;
+      if (row.some((it) => it.x >= split)) rightRows++;
     }
-    if (nearestLeft < 0) continue;
-    const split = ((nearestLeft + 1) * X_BIN + rightPeak * X_BIN) / 2;
-
-    // (b) Item mass balanced across the split (the single-column guard).
-    let leftMass = 0;
-    for (const x of xs) if (x < split) leftMass++;
-    const rightMass = xs.length - leftMass;
-    const minSideMass = xs.length * TWO_COLUMN_MIN_SIDE_SHARE;
-    if (leftMass < minSideMass || rightMass < minSideMass) continue;
+    if (
+      leftRows < TWO_COLUMN_MIN_COLUMN_ROWS ||
+      rightRows < TWO_COLUMN_MIN_COLUMN_ROWS
+    ) {
+      continue;
+    }
 
     boundaries.set(page, split);
   }
