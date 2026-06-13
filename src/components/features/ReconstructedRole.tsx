@@ -31,7 +31,7 @@ import { RewriteButton } from "./RewriteButton.tsx";
 /** Inline check badge — one per failed grading rule on a flagged bullet. */
 function CheckBadge({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium bg-feedback-warning-bg text-feedback-warning-text">
+    <span className="inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium bg-feedback-warning-bg text-feedback-warning-text">
       {label}
     </span>
   );
@@ -58,17 +58,21 @@ export function ResumeBulletRow({ bullet }: { bullet: BulletObservation }) {
         </span>
         {bullet.text}
       </p>
+      {/*
+        Flagged controls sit inline on the bullet row: `flex-1` on the text
+        above flushes the check badges + rewrite icon to the right edge of the
+        same line (regressed in #57–59, which stacked them below). The compact
+        RewriteButton's expansion panel breaks to its own full-width row.
+      */}
       {flagged && (
-        <div className="flex w-full flex-col gap-1.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {!bullet.hasMetric && <CheckBadge label="no metric" />}
-            {!bullet.startsWithActionVerb && <CheckBadge label="weak verb" />}
-            {!bullet.wellFormedLength && (
-              <CheckBadge label={lengthLabel(bullet)} />
-            )}
-          </div>
-          <RewriteButton bullet={bullet.text} />
-        </div>
+        <>
+          {!bullet.hasMetric && <CheckBadge label="no metric" />}
+          {!bullet.startsWithActionVerb && <CheckBadge label="weak verb" />}
+          {!bullet.wellFormedLength && (
+            <CheckBadge label={lengthLabel(bullet)} />
+          )}
+          <RewriteButton bullet={bullet.text} compact />
+        </>
       )}
     </li>
   );
