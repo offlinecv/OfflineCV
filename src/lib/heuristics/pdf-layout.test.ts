@@ -18,6 +18,30 @@ function mkItemAt(page: number, x: number, y: number, str = "x"): PdfTextItem {
   };
 }
 
+/**
+ * A single text line with an explicit horizontal extent (`x` → `x + width`).
+ * The two-column detector projects ink across each item's full width, so tests
+ * must model how far a line reaches, not just where it starts.
+ */
+function mkLine(
+  page: number,
+  x: number,
+  y: number,
+  width: number,
+): PdfTextItem {
+  return {
+    page,
+    str: "line",
+    x,
+    y,
+    width,
+    height: 10,
+    fontSize: 11,
+    fontName: "f",
+    hasEOL: false,
+  };
+}
+
 const singlePage: PdfPageInfo[] = [
   { page: 1, width: 612, height: 792, charCount: 1500 },
 ];
@@ -40,12 +64,13 @@ describe("analyzeLayout", () => {
     expect(probes.isScanned).toBe(false);
   });
 
-  it("detects two-column layout by x-histogram bimodality", () => {
+  it("detects two-column layout by the empty inter-column corridor", () => {
     const items: PdfTextItem[] = [];
-    // Left column
-    for (let i = 0; i < 60; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "left"));
-    // Right column — far enough away to exceed TWO_COLUMN_MIN_GAP_RATIO * 612
-    for (let i = 0; i < 60; i++) items.push(mkItemAt(1, 380, 100 + i * 3, "right"));
+    // Left column (x 72→252) and right column (x 360→520) leave an empty
+    // vertical corridor at x≈252–360 that no row paints through. Rows are
+    // y-offset between columns so the columns flow independently.
+    for (let i = 0; i < 20; i++) items.push(mkLine(1, 72, 100 + i * 14, 180));
+    for (let i = 0; i < 20; i++) items.push(mkLine(1, 360, 107 + i * 14, 160));
     const probes = analyzeLayout(items, singlePage);
     expect(probes.isTwoColumn).toBe(true);
     expect(probes.triggers).toContain("two_column");
@@ -53,8 +78,22 @@ describe("analyzeLayout", () => {
 
   it("does NOT flag two-column on a normal single-column resume", () => {
     const items: PdfTextItem[] = [];
-    for (let i = 0; i < 60; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "content"));
-    for (let i = 0; i < 10; i++) items.push(mkItemAt(1, 80, 100 + i * 3, "indent"));
+    // Full-width body lines (x 72→532) ink straight across the central band,
+    // so there is no empty corridor.
+    for (let i = 0; i < 40; i++) items.push(mkLine(1, 72, 100 + i * 14, 460));
+    const probes = analyzeLayout(items, singlePage);
+    expect(probes.isTwoColumn).toBe(false);
+  });
+
+  it("does NOT flag two-column on a single-column resume with a right-aligned date rail", () => {
+    const items: PdfTextItem[] = [];
+    // Wide wrapped body (x 72→512) plus a right-aligned date (x 520→560) on
+    // every fourth row. The body inks through the would-be gutter, so the
+    // date rail never reads as a real second column.
+    for (let i = 0; i < 40; i++) {
+      items.push(mkLine(1, 72, 100 + i * 14, 440));
+      if (i % 4 === 0) items.push(mkLine(1, 520, 100 + i * 14, 40));
+    }
     const probes = analyzeLayout(items, singlePage);
     expect(probes.isTwoColumn).toBe(false);
   });
@@ -87,37 +126,39 @@ describe("analyzeLayout", () => {
 });
 
 describe("detectColumnBoundaries", () => {
-  it("returns a split between the two columns of a two-column page", () => {
+  it("returns a split inside the corridor between the two columns", () => {
     const items: PdfTextItem[] = [];
-    // Left column at x=72, right column at x=380, ~even mass on each side.
-    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "left"));
-    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 380, 100 + i * 3, "right"));
+    // Left column ends at x=252, right column starts at x=360.
+    for (let i = 0; i < 20; i++) items.push(mkLine(1, 72, 100 + i * 14, 180));
+    for (let i = 0; i < 20; i++) items.push(mkLine(1, 360, 107 + i * 14, 160));
 
     const boundaries = detectColumnBoundaries(items, singlePage);
     expect(boundaries.size).toBe(1);
     const split = boundaries.get(1)!;
-    // Split must sit strictly between the two columns so every left item bins
-    // left and every right item bins right.
-    expect(split).toBeGreaterThan(72);
-    expect(split).toBeLessThanOrEqual(380);
+    // Split must sit strictly inside the empty corridor so every left item
+    // bins left and every right item bins right.
+    expect(split).toBeGreaterThan(252);
+    expect(split).toBeLessThan(360);
   });
 
   it("returns no boundary for an indented single-column page", () => {
-    // Margin text at x=72 plus indented bullets at x=90: the two tallest bins
-    // are adjacent, so the peak separation never reaches the column gap.
+    // Full-width body plus deeper-indented bullets: ink still spans the
+    // central band on every row, so there is no corridor.
     const items: PdfTextItem[] = [];
-    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "body"));
-    for (let i = 0; i < 15; i++) items.push(mkItemAt(1, 90, 100 + i * 3, "bullet"));
+    for (let i = 0; i < 30; i++) items.push(mkLine(1, 72, 100 + i * 14, 460));
+    for (let i = 0; i < 15; i++) items.push(mkLine(1, 96, 110 + i * 14, 420));
 
     expect(detectColumnBoundaries(items, singlePage).size).toBe(0);
   });
 
   it("returns no boundary for a single-column page with a right-aligned date column", () => {
-    // A handful of right-aligned dates far to the right do not balance the
-    // page's mass, so the side-share guard rejects them as a second column.
+    // Wide body inks through the central band; the far-right dates sit beyond
+    // it, so no empty corridor forms between body and dates.
     const items: PdfTextItem[] = [];
-    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "body"));
-    for (let i = 0; i < 5; i++) items.push(mkItemAt(1, 500, 100 + i * 30, "2021"));
+    for (let i = 0; i < 40; i++) {
+      items.push(mkLine(1, 72, 100 + i * 14, 440));
+      if (i % 5 === 0) items.push(mkLine(1, 520, 100 + i * 14, 40));
+    }
 
     expect(detectColumnBoundaries(items, singlePage).size).toBe(0);
   });
