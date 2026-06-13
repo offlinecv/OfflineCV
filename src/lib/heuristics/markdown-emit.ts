@@ -21,6 +21,7 @@
  */
 
 import type { PdfTextItem, PdfPageInfo } from "./types.ts";
+import { orderItemsByColumn } from "./sections.ts";
 
 // ── Thresholds (tuneable) ───────────────────────────────────────────────────
 
@@ -73,8 +74,23 @@ export interface PdfLine {
  * Group positioned text items into logical lines. Items on the same page
  * with y within `SAME_LINE_Y_TOL` merge into one line, sorted by x.
  * Returns lines in page-then-y (top-down) order.
+ *
+ * When `boundaries` (the per-page column split-x map) is present, items are
+ * first split into column bands via `orderItemsByColumn`, so a two-column
+ * layout's left column is emitted entirely before its right column instead of
+ * being interleaved row-by-row. Single-column input yields one band, leaving
+ * the output identical to the pre-column-aware behavior.
  */
-export function groupItemsIntoLines(items: PdfTextItem[]): PdfLine[] {
+export function groupItemsIntoLines(
+  items: PdfTextItem[],
+  boundaries?: Map<number, number>,
+): PdfLine[] {
+  const bands = orderItemsByColumn(items, boundaries);
+  return bands.flatMap(groupLinesSingle);
+}
+
+/** Single-pass line grouping over one band of items (no column awareness). */
+function groupLinesSingle(items: PdfTextItem[]): PdfLine[] {
   if (items.length === 0) return [];
 
   const sorted = [...items].sort((a, b) => {
@@ -179,6 +195,12 @@ export function needsParagraphBreak(
   if (prev.page !== next.page) return true;
   const yGap = next.y - prev.y;
   if (yGap > bodySize * PARAGRAPH_GAP_RATIO) return true;
+  // y jumping backward within a page marks a left→right column-band transition
+  // (the left band ends near the page bottom; the right band restarts at the
+  // top). Insert a blank line so the right column's first heading isn't fused
+  // onto the left column's last line. Single-column input has monotonically
+  // increasing y, so this never fires there.
+  if (next.y < prev.y - bodySize) return true;
   const fontChanged = Math.abs(prev.fontSize - next.fontSize) > FONT_CHANGE_TOL;
   if (fontChanged) return true;
   return false;
@@ -196,10 +218,11 @@ export function needsParagraphBreak(
 export function emitMarkdown(
   items: PdfTextItem[],
   pages: PdfPageInfo[],
+  boundaries?: Map<number, number>,
 ): string | undefined {
   if (items.length === 0 || pages.length === 0) return undefined;
 
-  const lines = groupItemsIntoLines(items);
+  const lines = groupItemsIntoLines(items, boundaries);
   if (lines.length < MIN_LINES) return undefined;
 
   const bodySize = computeBodyFontSize(lines);

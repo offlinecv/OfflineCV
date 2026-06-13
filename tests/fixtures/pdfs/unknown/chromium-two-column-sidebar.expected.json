@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.64,
     "triggers": [
       "two_column"
     ],
@@ -10,7 +10,7 @@
       "t1_openresume",
       "t1_5_regex"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "ner",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -22,10 +22,11 @@
       "given_name",
       "location",
       "skills",
+      "summary",
       "website_url"
     ],
-    "skillsCount": 74,
-    "experienceCount": 1,
+    "skillsCount": 29,
+    "experienceCount": 7,
     "educationCount": 1,
     "rawTextCharCount": 3937,
     "pageCount": 2,
@@ -34,8 +35,8 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 46,
-    "preLayoutOverall": 54,
+    "overall": 48,
+    "preLayoutOverall": 57,
     "specificity": {
       "score": 17,
       "max": 40,
@@ -51,13 +52,12 @@
       "totalBullets": 27
     },
     "completeness": {
-      "score": 21,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
         "LinkedIn",
-        "phone",
-        "summary"
+        "phone"
       ]
     },
     "layout": {

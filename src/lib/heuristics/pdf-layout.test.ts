@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import { analyzeLayout } from "./pdf-layout.ts";
+import { analyzeLayout, detectColumnBoundaries } from "./pdf-layout.ts";
 import type { PdfPageInfo, PdfTextItem } from "./types.ts";
 
 function mkItemAt(page: number, x: number, y: number, str = "x"): PdfTextItem {
@@ -83,5 +83,46 @@ describe("analyzeLayout", () => {
     expect(probes.isScanned).toBe(true);
     expect(probes.triggers).toContain("scanned");
     expect(probes.triggers).not.toContain("fonts_unmappable");
+  });
+});
+
+describe("detectColumnBoundaries", () => {
+  it("returns a split between the two columns of a two-column page", () => {
+    const items: PdfTextItem[] = [];
+    // Left column at x=72, right column at x=380, ~even mass on each side.
+    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "left"));
+    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 380, 100 + i * 3, "right"));
+
+    const boundaries = detectColumnBoundaries(items, singlePage);
+    expect(boundaries.size).toBe(1);
+    const split = boundaries.get(1)!;
+    // Split must sit strictly between the two columns so every left item bins
+    // left and every right item bins right.
+    expect(split).toBeGreaterThan(72);
+    expect(split).toBeLessThanOrEqual(380);
+  });
+
+  it("returns no boundary for an indented single-column page", () => {
+    // Margin text at x=72 plus indented bullets at x=90: the two tallest bins
+    // are adjacent, so the peak separation never reaches the column gap.
+    const items: PdfTextItem[] = [];
+    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "body"));
+    for (let i = 0; i < 15; i++) items.push(mkItemAt(1, 90, 100 + i * 3, "bullet"));
+
+    expect(detectColumnBoundaries(items, singlePage).size).toBe(0);
+  });
+
+  it("returns no boundary for a single-column page with a right-aligned date column", () => {
+    // A handful of right-aligned dates far to the right do not balance the
+    // page's mass, so the side-share guard rejects them as a second column.
+    const items: PdfTextItem[] = [];
+    for (let i = 0; i < 40; i++) items.push(mkItemAt(1, 72, 100 + i * 3, "body"));
+    for (let i = 0; i < 5; i++) items.push(mkItemAt(1, 500, 100 + i * 30, "2021"));
+
+    expect(detectColumnBoundaries(items, singlePage).size).toBe(0);
+  });
+
+  it("returns an empty map for empty input", () => {
+    expect(detectColumnBoundaries([], singlePage).size).toBe(0);
   });
 });
