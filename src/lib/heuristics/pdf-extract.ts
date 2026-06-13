@@ -14,6 +14,7 @@
  */
 
 import { groupIntoLines } from "./sections.ts";
+import { detectColumnBoundaries } from "./pdf-layout.ts";
 import type {
   PdfExtractResult,
   PdfLinkAnnotation,
@@ -30,9 +31,12 @@ import type {
  * one `\n` per visual line and keeps bullet glyphs at line start so the
  * downstream bullet detector (score.ts:extractBulletsFromText) can see them.
  */
-export function assembleTextFromLines(items: PdfTextItem[]): string {
+export function assembleTextFromLines(
+  items: PdfTextItem[],
+  boundaries?: Map<number, number>,
+): string {
   if (items.length === 0) return "";
-  const lines = groupIntoLines(items);
+  const lines = groupIntoLines(items, boundaries);
   if (lines.length === 0) return "";
   const parts: string[] = [];
   let prevPage = lines[0].page;
@@ -194,7 +198,12 @@ export async function extractFromPdfBytes(
     });
   }
 
-  const text = assembleTextFromLines(items);
+  // Detect two-column layout once, here, then thread the per-page split-x map
+  // through every downstream line-grouping path (rawText below, plus markdown
+  // emission and the Tier-1 parser via the cascade) so the columns are read in
+  // column order instead of interleaved by a global (y, x) sort.
+  const columnBoundaries = detectColumnBoundaries(items, pages);
+  const text = assembleTextFromLines(items, columnBoundaries);
   const rawCharCount = pages.reduce((s, p) => s + p.charCount, 0);
 
   // Distinguish "no text in the source" (true scan) from "text exists but
@@ -217,5 +226,6 @@ export async function extractFromPdfBytes(
     rawCharCount,
     linkAnnotations,
     ...(extractionFailureReason ? { extractionFailureReason } : {}),
+    ...(columnBoundaries.size > 0 ? { columnBoundaries } : {}),
   };
 }

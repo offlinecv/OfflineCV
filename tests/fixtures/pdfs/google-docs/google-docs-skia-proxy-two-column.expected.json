@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.64,
     "triggers": [
       "two_column"
     ],
@@ -9,7 +9,7 @@
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "ner",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -21,12 +21,13 @@
       "github_url",
       "given_name",
       "linkedin_url",
+      "location",
       "phone",
       "skills",
       "website_url"
     ],
-    "skillsCount": 21,
-    "experienceCount": 1,
+    "skillsCount": 17,
+    "experienceCount": 3,
     "educationCount": 1,
     "rawTextCharCount": 1720,
     "pageCount": 1,
@@ -35,8 +36,8 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 53,
-    "preLayoutOverall": 62,
+    "overall": 54,
+    "preLayoutOverall": 64,
     "specificity": {
       "score": 26,
       "max": 40,
@@ -45,18 +46,17 @@
       "totalBullets": 23
     },
     "structure": {
-      "score": 12,
+      "score": 11,
       "max": 30,
       "gradable": true,
       "goodBullets": 9,
       "totalBullets": 23
     },
     "completeness": {
-      "score": 24,
+      "score": 27,
       "max": 30,
       "gradable": true,
       "missing": [
-        "location",
         "summary"
       ]
     },

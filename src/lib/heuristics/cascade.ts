@@ -94,7 +94,11 @@ export async function runCascade(
   let markdown: string | undefined;
   if (!layout.isScanned) {
     const { emitMarkdown } = await import("./markdown-emit.ts");
-    markdown = emitMarkdown(extract.items, extract.pages);
+    markdown = emitMarkdown(
+      extract.items,
+      extract.pages,
+      extract.columnBoundaries,
+    );
   }
 
   const t0Duration = Date.now() - t0Start;
@@ -139,6 +143,7 @@ export async function runCascade(
     extract.pages,
     markdown,
     extract.linkAnnotations,
+    extract.columnBoundaries,
   );
   const t1Duration = Date.now() - t1Start;
 

@@ -59,8 +59,9 @@ export function parseHeuristic(
   _pages: PdfPageInfo[],
   markdown?: string,
   annotations: PdfLinkAnnotation[] = [],
+  boundaries?: Map<number, number>,
 ): HeuristicResult {
-  const lines = groupIntoLines(items);
+  const lines = groupIntoLines(items, boundaries);
   let sections: PdfSection[] | null = null;
   let sectionSource: "markdown" | "regex" = "regex";
   if (markdown && markdown.trim().length > 0) {

@@ -55,9 +55,72 @@ const LINE_Y_EPS = 3.5;
  */
 const COLUMN_GAP_THRESHOLD = 50;
 
+// ── Column banding ──────────────────────────────────────────────────────────
+
+/**
+ * Split items into reading-order "bands" so line grouping never interleaves a
+ * two-column layout's left and right columns.
+ *
+ * `boundaries` is the per-page split-x map from `detectColumnBoundaries`.
+ *   - undefined / empty  → a single band `[items]`. The downstream grouper
+ *     then runs over every item exactly as it did before column-awareness, so
+ *     the single-column output is byte-identical.
+ *   - present            → bands are emitted page-major, ascending page order,
+ *     and within a split page the **entire left column precedes the entire
+ *     right column** (`item.x < split` → left, else right). A page without a
+ *     split contributes one band of all its items. Same-line clustering never
+ *     crosses pages, so per-page banding concatenated equals the old global
+ *     grouping whenever no page splits.
+ */
+export function orderItemsByColumn(
+  items: PdfTextItem[],
+  boundaries: Map<number, number> | undefined,
+): PdfTextItem[][] {
+  if (!boundaries || boundaries.size === 0) return [items];
+
+  // Group by page, preserving ascending page order.
+  const byPage = new Map<number, PdfTextItem[]>();
+  for (const it of items) {
+    const arr = byPage.get(it.page);
+    if (arr) arr.push(it);
+    else byPage.set(it.page, [it]);
+  }
+  const pageNums = [...byPage.keys()].sort((a, b) => a - b);
+
+  const bands: PdfTextItem[][] = [];
+  for (const page of pageNums) {
+    const pageItems = byPage.get(page)!;
+    const split = boundaries.get(page);
+    if (split === undefined) {
+      bands.push(pageItems);
+      continue;
+    }
+    const left: PdfTextItem[] = [];
+    const right: PdfTextItem[] = [];
+    for (const it of pageItems) {
+      if (it.x < split) left.push(it);
+      else right.push(it);
+    }
+    // Left band before right band; skip empty bands so a near-empty side
+    // doesn't emit a spurious blank grouping pass.
+    if (left.length > 0) bands.push(left);
+    if (right.length > 0) bands.push(right);
+  }
+  return bands;
+}
+
 // ── Line grouping ───────────────────────────────────────────────────────────
 
-export function groupIntoLines(items: PdfTextItem[]): PdfLine[] {
+export function groupIntoLines(
+  items: PdfTextItem[],
+  boundaries?: Map<number, number>,
+): PdfLine[] {
+  const bands = orderItemsByColumn(items, boundaries);
+  return bands.flatMap(groupLinesSingle);
+}
+
+/** Single-pass line grouping over one band of items (no column awareness). */
+function groupLinesSingle(items: PdfTextItem[]): PdfLine[] {
   // Sort by page, then by y (top to bottom), then by x (left to right).
   const sorted = [...items].sort((a, b) => {
     if (a.page !== b.page) return a.page - b.page;

@@ -93,6 +93,12 @@ export interface PdfExtractResult {
    *  signals (link annotations, real page dimensions). Drives the layout
    *  probe's choice between `scanned` and `fonts_unmappable`. */
   extractionFailureReason?: ExtractionFailureReason;
+  /** Per-page column split-x map from `detectColumnBoundaries` (page number →
+   *  channel-midpoint x). Present (non-empty) only for two-column pages; threaded
+   *  into every line-grouping path so left/right columns are read in column
+   *  order instead of being interleaved by a global `(y, x)` sort. Empty/absent
+   *  for single-column documents, which leaves grouping byte-identical. */
+  columnBoundaries?: Map<number, number>;
 }
 
 // ── Layout probes (Tier 0) ──────────────────────────────────────────────────
