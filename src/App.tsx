@@ -9,8 +9,10 @@ import { JdMatch } from "./components/features/JdMatch.tsx";
 import { JdInput } from "./components/features/JdInput.tsx";
 import { ErrorState } from "./components/shared/ErrorState.tsx";
 import { ErrorBoundary } from "./components/shared/ErrorBoundary.tsx";
+import { UpdateBanner } from "./components/shared/UpdateBanner.tsx";
 import { useResumeAnalysis } from "./hooks/useResumeAnalysis.ts";
 import { useEditableParse } from "./hooks/useEditableParse.ts";
+import { useUpdateChecker } from "./hooks/useUpdateChecker.ts";
 import { applyOverrides } from "./lib/edit/apply-overrides.ts";
 import { computeAnonymousAtsScore } from "./lib/score/score.ts";
 import { extractJdTerms, computeCoverage } from "./lib/jd-match";
@@ -18,6 +20,12 @@ import { extractJdTerms, computeCoverage } from "./lib/jd-match";
 export default function App() {
   const { state, handleFile, reset, formatBytes } = useResumeAnalysis();
   const [jdText, setJdText] = useState("");
+
+  // Proactive stale-deploy notice (see useUpdateChecker). Dismissable so a user
+  // mid-analysis can defer; the vite:preloadError backstop still catches a hard
+  // chunk failure if they ignore it.
+  const { updateAvailable, reload } = useUpdateChecker();
+  const [updateDismissed, setUpdateDismissed] = useState(false);
 
   // Lifted edit state (#82): overrides live ABOVE the scorer so a corrected
   // name/title/company/bullet re-grades the ATS score + JD coverage, not just
@@ -71,6 +79,13 @@ export default function App() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 py-10">
+      {updateAvailable && !updateDismissed && (
+        <UpdateBanner
+          onReload={reload}
+          onDismiss={() => setUpdateDismissed(true)}
+        />
+      )}
+
       <header className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
