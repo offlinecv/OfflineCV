@@ -16,6 +16,19 @@ import "./styles.css";
 GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 void initAnalytics();
 
+// Stale-deploy safety net. A tab loaded before a deploy holds the old
+// index.html, whose hashed tier chunks (dynamic-imported in cascade.ts) are
+// gone after a GitHub Pages deploy replaces the site snapshot. The failing
+// import fires `vite:preloadError`; reload pulls the fresh, self-consistent
+// build. The sessionStorage guard prevents a reload loop if the chunk is
+// genuinely unrecoverable. This is the hard-failure backstop; proactive
+// version detection lives in the update-checker (see useUpdateChecker).
+window.addEventListener("vite:preloadError", () => {
+  if (sessionStorage.getItem("vite-preload-reloaded")) return;
+  sessionStorage.setItem("vite-preload-reloaded", "1");
+  window.location.reload();
+});
+
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("#root not found");
 

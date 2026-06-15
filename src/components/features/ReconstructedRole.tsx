@@ -41,8 +41,8 @@ import { RewriteButton } from "./RewriteButton.tsx";
  * `BulletFlagLegend` keys the glyphs at the top of the section.
  */
 
-/** Stroke hash — the missing-number/metric flag. */
-function HashIcon() {
+/** Stroke bar-chart — the missing-metric flag ("quantify this bullet"). */
+function MetricIcon() {
   return (
     <svg
       className="h-3.5 w-3.5"
@@ -51,12 +51,13 @@ function HashIcon() {
       stroke="currentColor"
       strokeWidth="2"
       strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <line x1="4" x2="20" y1="9" y2="9" />
-      <line x1="4" x2="20" y1="15" y2="15" />
-      <line x1="10" x2="8" y1="3" y2="21" />
-      <line x1="16" x2="14" y1="3" y2="21" />
+      <line x1="4" x2="20" y1="20" y2="20" />
+      <line x1="7" x2="7" y1="20" y2="13" />
+      <line x1="12" x2="12" y1="20" y2="9" />
+      <line x1="17" x2="17" y1="20" y2="5" />
     </svg>
   );
 }
@@ -130,7 +131,7 @@ export function BulletFlagLegend() {
     <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-tertiary">
       <li className="inline-flex items-center gap-1.5">
         <FlagChip title="No metric" ariaLabel="No metric" decorative>
-          <HashIcon />
+          <MetricIcon />
         </FlagChip>
         no metric
       </li>
@@ -179,7 +180,7 @@ export function ResumeBulletRow({
   const editable = onBulletChange !== undefined;
   const displayText = override ?? bullet.text;
   return (
-    <li className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 py-1">
+    <li className="flex flex-wrap items-center gap-x-1 gap-y-1 py-1">
       <p className="min-w-0 text-sm leading-snug text-content-secondary">
         <span aria-hidden="true" className="mr-1.5 text-content-muted">
           •
@@ -190,6 +191,7 @@ export function ResumeBulletRow({
             placeholder="empty bullet"
             label="Bullet text"
             textSize="sm"
+            revealOn="hover"
             className="align-baseline text-content-secondary"
             onCommit={(v) => onBulletChange(v)}
           />
@@ -209,7 +211,7 @@ export function ResumeBulletRow({
         <>
           {!bullet.hasMetric && (
             <FlagChip title="No metric" ariaLabel="No metric">
-              <HashIcon />
+              <MetricIcon />
             </FlagChip>
           )}
           {!bullet.startsWithActionVerb && (
