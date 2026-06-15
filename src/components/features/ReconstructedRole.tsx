@@ -23,7 +23,10 @@ import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { EditableField } from "../ui/EditableField.tsx";
-import type { ExperienceFieldOverrides } from "../../hooks/useEditableParse.ts";
+import type {
+  ExperienceFieldOverrides,
+  BulletOverrides,
+} from "../../hooks/useEditableParse.ts";
 import { RewriteButton } from "./RewriteButton.tsx";
 
 // ── Bullet row ────────────────────────────────────────────────────────────────
@@ -44,19 +47,45 @@ function lengthLabel(b: BulletObservation): string {
 }
 
 /**
- * One bullet line in the reconstructed resume. Flagged bullets show the checks
- * they failed; passing bullets render plain. #59 (per-bullet rewrite) hooks in
- * on the flagged branch.
+ * One bullet line in the reconstructed resume. The bullet text is editable
+ * (#82) via the shared EditableField primitive — committing an edit feeds the
+ * authoritative re-grade in App (rawText + description), so the inline check
+ * badges below re-evaluate live. Flagged bullets show the checks they failed;
+ * passing bullets render plain. #59 (per-bullet rewrite) hooks in on the
+ * flagged branch.
  */
-export function ResumeBulletRow({ bullet }: { bullet: BulletObservation }) {
+export function ResumeBulletRow({
+  bullet,
+  override,
+  onBulletChange,
+}: {
+  bullet: BulletObservation;
+  /** In-memory override text for this bullet, if any. */
+  override?: string;
+  /** Commit an edit on this bullet (keyed by bullet.index in the caller). */
+  onBulletChange?: (value: string) => void;
+}) {
   const flagged = needsAttention(bullet);
+  const editable = onBulletChange !== undefined;
+  const displayText = override ?? bullet.text;
   return (
     <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-1">
       <p className="min-w-0 flex-1 text-sm leading-snug text-content-secondary">
         <span aria-hidden="true" className="mr-1.5 text-content-muted">
           •
         </span>
-        {bullet.text}
+        {editable ? (
+          <EditableField
+            value={displayText || undefined}
+            placeholder="empty bullet"
+            label="Bullet text"
+            textSize="sm"
+            className="align-baseline text-content-secondary"
+            onCommit={(v) => onBulletChange(v)}
+          />
+        ) : (
+          displayText
+        )}
       </p>
       {/*
         Flagged controls sit inline on the bullet row: `flex-1` on the text
@@ -71,7 +100,7 @@ export function ResumeBulletRow({ bullet }: { bullet: BulletObservation }) {
           {!bullet.wellFormedLength && (
             <CheckBadge label={lengthLabel(bullet)} />
           )}
-          <RewriteButton bullet={bullet.text} compact />
+          <RewriteButton bullet={displayText} compact />
         </>
       )}
     </li>
@@ -219,6 +248,10 @@ interface RoleEntryProps {
     field: keyof ExperienceFieldOverrides,
     value: string,
   ) => void;
+  /** Bullet-text overrides keyed by BulletObservation.index (#82). */
+  bulletOverrides?: BulletOverrides;
+  /** Commit a bullet edit, keyed by BulletObservation.index (#82). */
+  onBulletChange?: (index: number, value: string) => void;
 }
 
 /**
@@ -230,6 +263,8 @@ export function RoleEntry({
   group,
   overrides,
   onFieldChange,
+  bulletOverrides,
+  onBulletChange,
 }: RoleEntryProps) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -241,7 +276,16 @@ export function RoleEntry({
       {group.bullets.length > 0 ? (
         <ul className="list-none">
           {group.bullets.map((b) => (
-            <ResumeBulletRow key={b.index} bullet={b} />
+            <ResumeBulletRow
+              key={b.index}
+              bullet={b}
+              override={bulletOverrides?.[b.index]}
+              onBulletChange={
+                onBulletChange
+                  ? (value) => onBulletChange(b.index, value)
+                  : undefined
+              }
+            />
           ))}
         </ul>
       ) : (

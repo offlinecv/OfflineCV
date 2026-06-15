@@ -4,6 +4,7 @@
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { getScoreLabel, getScoreTier } from "../lib/score/score.ts";
+import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card } from "./shared/Card.tsx";
 import { StatusBadge } from "./shared/StatusBadge.tsx";
 import { Button } from "./ui/Button.tsx";
@@ -20,14 +21,24 @@ type SourceKind = "pdf" | "docx";
 
 interface ResultProps {
   result: CascadeResult;
+  /** EDITED score — re-graded by App from the current overrides (#82). */
   score: AnonymousAtsScore;
   /** PDF bytes for the source preview pane. Absent for DOCX uploads. */
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   onReset: () => void;
+  /** Lifted edit state (#82) — threaded to ReconstructedResume for inline edits. */
+  edit: EditableParse;
 }
 
-export function Result({ result, score, bytes, sourceKind, onReset }: ResultProps) {
+export function Result({
+  result,
+  score,
+  bytes,
+  sourceKind,
+  onReset,
+  edit,
+}: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
   if (isFontsUnmappable) {
     return <LimitedParsingCard result={result} onReset={onReset} />;
@@ -39,6 +50,7 @@ export function Result({ result, score, bytes, sourceKind, onReset }: ResultProp
       bytes={bytes}
       sourceKind={sourceKind}
       onReset={onReset}
+      edit={edit}
     />
   );
 }
@@ -51,18 +63,21 @@ function ParsedCard({
   bytes,
   sourceKind,
   onReset,
+  edit,
 }: {
   result: CascadeResult;
   score: AnonymousAtsScore;
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   onReset: () => void;
+  edit: EditableParse;
 }) {
   return (
     <Card className="flex flex-col gap-6 shadow-sm">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <StatusBadge tone="ok">Parsed</StatusBadge>
+          {edit.hasEdits && <StatusBadge tone="warning">Edited</StatusBadge>}
           <span className="text-xs text-content-muted">
             {result.diagnostics.pages} page
             {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
@@ -72,13 +87,20 @@ function ParsedCard({
             verdictBand={getScoreLabel(getScoreTier(score.overall))}
           />
         </div>
-        <Button variant="link" onClick={onReset}>
-          Try another file
-        </Button>
+        <div className="flex items-center gap-3">
+          {edit.hasEdits && (
+            <Button variant="link" onClick={edit.resetAll}>
+              Reset to parsed
+            </Button>
+          )}
+          <Button variant="link" onClick={onReset}>
+            Try another file
+          </Button>
+        </div>
       </header>
 
       <AtsScoreReadout score={score} />
-      <ReconstructedResume result={result} score={score} />
+      <ReconstructedResume result={result} score={score} edit={edit} />
 
       {/* Evidence — how a generic extractor read this file. Reference
           material, so it sits below the score and per-bullet findings.
