@@ -149,6 +149,14 @@ export function trackCascadeEvent(event: ParseEvent): void {
   }
 }
 
+export function trackRenderError(args: { errorName: string }): void {
+  // Never pass the error message — it can echo text fragments from the file
+  // being parsed and would violate the footer's privacy claim.
+  track("render_error", {
+    error_name: args.errorName,
+  });
+}
+
 // WebLLM bullet-rewrite funnel. The call-sites (capability.ts, web-llm.ts,
 // rewrite-bullet.ts) gate these so each event fires at most once per page.
 // Same env-gating semantics as the existing trackers: when VITE_POSTHOG_KEY

@@ -102,6 +102,30 @@ only when the **why** is non-obvious (a hidden constraint, a workaround
 for a specific bug, behavior that would surprise a reader). Don't
 explain **what** the code does; the names already do that.
 
+## UI primitives & tokens
+
+resumelint enforces a strict component hierarchy. Before writing any
+interactive element or styled surface, check whether a shared primitive
+already exists:
+
+- **`<Button>`** (`src/components/ui/Button.tsx`) — the one and only
+  button. Never reach for a raw `<button>` in feature code.
+- **`<StatusBadge>`** (`src/components/shared/StatusBadge.tsx`) — label
+  + colour pill for any status / confidence indicator.
+- **`<ErrorState>`** (`src/components/shared/ErrorState.tsx`) — the
+  canonical full-bleed error card. Do not hand-roll a red warning box.
+
+**No hardcoded colours.** Style with semantic Tailwind tokens
+(`bg-surface-card`, `text-content-primary`, `border-border-light`,
+`text-brand-amber`, …). Raw palette classes (`bg-red-500`,
+`text-slate-400`) and manual `dark:` variants are anti-patterns —
+dark mode is handled by the token layer, not inline overrides.
+
+A `PostToolUse` Claude Code hook (`scripts/hooks/style_guard.sh`) will
+warn you in-session if you introduce any of these anti-patterns in
+`src/components/` or `src/App.tsx`. Warnings are non-blocking; bypass
+for one session with `export RESUMELINT_SKIP_HOOKS=1`.
+
 ## Filing issues
 
 Apply at least one type label (`bug`, `feature`, `improvement`,
