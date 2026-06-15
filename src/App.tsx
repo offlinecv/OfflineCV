@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Chip } from "./components/ui/Chip.tsx";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
@@ -10,21 +10,65 @@ import { JdInput } from "./components/features/JdInput.tsx";
 import { ErrorState } from "./components/shared/ErrorState.tsx";
 import { ErrorBoundary } from "./components/shared/ErrorBoundary.tsx";
 import { useResumeAnalysis } from "./hooks/useResumeAnalysis.ts";
+import { useEditableParse } from "./hooks/useEditableParse.ts";
+import { applyOverrides } from "./lib/edit/apply-overrides.ts";
+import { computeAnonymousAtsScore } from "./lib/score/score.ts";
 import { extractJdTerms, computeCoverage } from "./lib/jd-match";
 
 export default function App() {
   const { state, handleFile, reset, formatBytes } = useResumeAnalysis();
   const [jdText, setJdText] = useState("");
 
+  // Lifted edit state (#82): overrides live ABOVE the scorer so a corrected
+  // name/title/company/bullet re-grades the ATS score + JD coverage, not just
+  // the display. Cleared on a new file via the effect below.
+  const edit = useEditableParse();
+  const { resetAll } = edit;
+
+  // Fold overrides back into a fresh { parsed, rawText } and re-grade live.
+  // When `state` isn't "done" there's nothing to apply — the memo returns null
+  // and the original score is used as-is.
+  const edited = useMemo(() => {
+    if (state.phase !== "done") return null;
+    const observations = state.score.bullets ?? [];
+    const { parsed, rawText } = applyOverrides(
+      state.result.parsed,
+      state.result.rawText,
+      edit.contactOverrides,
+      edit.experienceOverrides,
+      edit.bulletOverrides,
+      observations,
+    );
+    const score = computeAnonymousAtsScore({
+      parsed,
+      fieldConfidence: state.result.fieldConfidence,
+      triggers: state.result.triggers,
+      rawText,
+    });
+    return { parsed, rawText, score };
+  }, [
+    state,
+    edit.contactOverrides,
+    edit.experienceOverrides,
+    edit.bulletOverrides,
+  ]);
+
+  // Clear edits whenever a fresh parse lands (new file or reset).
+  useEffect(() => {
+    resetAll();
+    // Keying on the parsed object identity: a new parse → new reference.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase === "done" ? state.result : null, resetAll]);
+
   const jdMatch = useMemo(() => {
     const trimmed = jdText.trim();
     if (trimmed.length === 0) return null;
-    if (state.phase !== "done") return null;
+    if (state.phase !== "done" || !edited) return null;
     const extracted = extractJdTerms(trimmed);
     if (extracted.all.length === 0) return null;
-    const coverage = computeCoverage(state.result.parsed, extracted.all);
+    const coverage = computeCoverage(edited.parsed, extracted.all);
     return { extracted, coverage };
-  }, [jdText, state]);
+  }, [jdText, state, edited]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 py-10">
@@ -74,13 +118,14 @@ export default function App() {
       )}
 
       <ErrorBoundary onReset={reset}>
-        {state.phase === "done" && (
+        {state.phase === "done" && edited && (
           <Result
             result={state.result}
-            score={state.score}
+            score={edited.score}
             bytes={state.bytes}
             sourceKind={state.sourceKind}
             onReset={reset}
+            edit={edit}
           />
         )}
       </ErrorBoundary>
