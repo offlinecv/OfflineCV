@@ -9,9 +9,18 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required so github/codeql-action/upload-sarif can publish the fallow
+      # report to GitHub code scanning. Report-only for now (see #15).
+      security-events: write
     steps:
       # Bumped 2026-06-01 (#4): Node 20 actions deprecated, runner forces Node 24 by 2026-06-02.
       - uses: actions/checkout@v5
+        # Full history so `fallow audit` can resolve a merge-base against
+        # origin/main (its diff gate needs the base commit, not a shallow clone).
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: '20'
@@ -21,3 +30,23 @@ jobs:
       - run: npm run lint
       - run: npm run test
       - run: npm run build
+      # Report-only static-analysis gate (#15). `fallow audit` is a diff gate,
+      # so it's scoped to changes vs origin/main; non-blocking for now (a
+      # follow-up flips it to a hard gate once the baseline is clean). The
+      # guard guarantees a syntactically valid SARIF even if fallow exits
+      # non-zero, so the upload step never fails on an empty file.
+      - name: fallow static analysis
+        run: |
+          npx fallow audit --format sarif --base origin/main > fallow.sarif \
+            || echo "fallow audit exited non-zero (report-only, ignored)"
+          if [ ! -s fallow.sarif ]; then
+            echo '{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"fallow"}},"results":[]}]}' > fallow.sarif
+          fi
+          # fallow emits one SARIF run per sub-analysis (dead-code/health/dupes)
+          # with an empty category; CodeQL rejects multiple runs sharing a
+          # category, so stamp each run with a distinct automationDetails.id.
+          node -e 'const fs=require("fs");const f="fallow.sarif";const j=JSON.parse(fs.readFileSync(f,"utf8"));j.runs.forEach((r,i)=>{r.automationDetails={...(r.automationDetails||{}),id:`fallow/${i}/`}});fs.writeFileSync(f,JSON.stringify(j))'
+      - name: upload fallow SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: fallow.sarif
