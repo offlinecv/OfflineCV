@@ -166,6 +166,26 @@ can add it to the board. Maintainers: `/triage-issue` also documents the
 one-time milestone/board setup in
 [`.claude/skills/triage-issue/SKILL.md`](./.claude/skills/triage-issue/SKILL.md).
 
+## Optional tooling
+
+### caveman mode for Claude Code
+
+If you use Claude Code and want to cut token usage, you can enable
+[caveman](https://github.com/JuliusBrussee/caveman) — a compressed-output
+mode that keeps full technical accuracy while trimming roughly 75% of the
+prose. It's entirely optional, opt-in, and not required to contribute; it's
+deliberately left out of the repo's committed `.claude/settings.json` so it
+only activates for contributors who choose it.
+
+Install (one time):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh | bash
+```
+
+Toggle within a session with `/caveman` (levels: `lite`, `full`, `ultra`).
+Turn it off by typing `normal mode` or `stop caveman`.
+
 ## Getting help
 
 Tag `@s-annam` on the PR or issue.

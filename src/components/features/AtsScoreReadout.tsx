@@ -13,6 +13,7 @@ import { ScoreRing } from "./ScoreRing.tsx";
 import { VerdictHeader } from "./VerdictHeader.tsx";
 import type { VerdictDimension } from "./VerdictHeader.tsx";
 import { scoreBandBgClass, scoreBandTextClass } from "./scoreBand.ts";
+import { timeAgo } from "../../lib/date-utils.ts";
 
 // ── Dimension card ────────────────────────────────────────────────────────────
 
@@ -77,6 +78,9 @@ interface AtsScoreReadoutProps {
 
 export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
   const buildDate = __BUILD_DATE__.slice(0, 10);
+  // Prefer a friendly "7m ago"; fall back to the absolute date if the build
+  // timestamp is unparseable or somehow in the future.
+  const buildAgo = timeAgo(__BUILD_DATE__) || buildDate;
 
   // Compute hint strings once — shared between VerdictHeader and Dimension cards.
   const specificityHint = `${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`;
@@ -175,7 +179,7 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
       )}
       <p className="text-[11px] text-content-muted">
         {score.algoVersion && <>algo v{score.algoVersion} · </>}Built{" "}
-        {buildDate}
+        <span title={buildDate}>{buildAgo}</span>
       </p>
     </section>
   );
