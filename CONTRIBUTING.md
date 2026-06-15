@@ -121,10 +121,18 @@ already exists:
 `text-slate-400`) and manual `dark:` variants are anti-patterns —
 dark mode is handled by the token layer, not inline overrides.
 
-A `PostToolUse` Claude Code hook (`scripts/hooks/style_guard.sh`) will
-warn you in-session if you introduce any of these anti-patterns in
-`src/components/` or `src/App.tsx`. Warnings are non-blocking; bypass
-for one session with `export RESUMELINT_SKIP_HOOKS=1`.
+These architecture rules are enforced at two layers:
+
+1. **Blocking CI gate** — `npm run lint` (`eslint .`) runs in the `verify`
+   CI job on every PR and fails the check if a violation is introduced.
+   The same three checks (raw `<button>`, palette classes, dark: colour
+   variants, hardcoded hex) are encoded as ESLint errors in
+   `eslint.config.js`.
+2. **Advisory inline nudge** — a `PostToolUse` Claude Code hook
+   (`scripts/hooks/style_guard.sh`) fires immediately after a file edit
+   inside Claude Code, giving you instant feedback before commit.
+   Warnings are non-blocking; bypass for one session with
+   `export RESUMELINT_SKIP_HOOKS=1`.
 
 ## Filing issues
 

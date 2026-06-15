@@ -57,7 +57,6 @@ export default function App() {
   useEffect(() => {
     resetAll();
     // Keying on the parsed object identity: a new parse → new reference.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phase === "done" ? state.result : null, resetAll]);
 
   const jdMatch = useMemo(() => {

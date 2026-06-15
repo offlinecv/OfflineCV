@@ -12,7 +12,7 @@
     "test:watch": "vitest",
     "bake-fixtures": "UPDATE_FIXTURES=1 vitest run src/lib/heuristics/corpus.test.ts",
     "typecheck": "tsc -b --noEmit",
-    "lint": "tsc -b --noEmit",
+    "lint": "eslint .",
     "deploy": "./scripts/deploy_resumelint.sh"
   },
   "dependencies": {
@@ -31,9 +31,13 @@
     "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.21",
+    "eslint": "^9.29.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.2.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "typescript": "~5.8.3",
+    "typescript-eslint": "^8.34.0",
     "vite": "^7.1.2",
     "vitest": "^3.2.4"
   }

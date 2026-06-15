@@ -91,7 +91,7 @@ We enforce this with a Claude hook (`scripts/hooks/reuse_surface_reminder.sh`) t
 - ❌ **Hardcoded colors:** Do not use raw hex colors or secondary styling vocabularies in feature code.
 - ❌ **Duplicated interactions:** Do not build a new modal or dropzone if one already exists.
 - ❌ **Bloated components:** Do not leave a feature component past ~200 LOC without decomposing it.
-- ❌ **Silent style drift:** The `scripts/hooks/style_guard.sh` hook warns on raw `<button`, hardcoded palette classes, and manual `dark:` variants in `src/components/` and `src/App.tsx` — heed the warnings rather than suppressing them.
+- ❌ **Silent style drift:** The same three checks (raw `<button`, hardcoded palette classes, manual `dark:` colour variants, hardcoded hex) are now **blocked by ESLint in CI** (`npm run lint`) — violations fail the `verify` check on every PR. The `scripts/hooks/style_guard.sh` PostToolUse hook remains wired in as a fast advisory nudge inside Claude Code (non-blocking, same checks, fires before commit). Two layers — don't suppress either.
 
 ## Deploy
 
