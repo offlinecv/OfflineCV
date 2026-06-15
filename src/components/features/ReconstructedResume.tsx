@@ -42,11 +42,10 @@ import {
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
-import {
-  useEditableParse,
-} from "../../hooks/useEditableParse.ts";
 import type {
+  EditableParse,
   ExperienceFieldOverrides,
+  BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 
 // ── Rollup strip ──────────────────────────────────────────────────────────────
@@ -158,6 +157,8 @@ function ExperienceSection({
   bullets,
   experienceOverrides,
   onExperienceFieldChange,
+  bulletOverrides,
+  onBulletChange,
 }: {
   experiences: BulletExperience[];
   bullets: readonly BulletObservation[];
@@ -167,6 +168,8 @@ function ExperienceSection({
     field: keyof ExperienceFieldOverrides,
     value: string,
   ) => void;
+  bulletOverrides: BulletOverrides;
+  onBulletChange: (index: number, value: string) => void;
 }) {
   return (
     <section className="flex flex-col gap-3">
@@ -189,6 +192,8 @@ function ExperienceSection({
                         onExperienceFieldChange(idx, field, value)
                     : undefined
                 }
+                bulletOverrides={bulletOverrides}
+                onBulletChange={onBulletChange}
               />
             );
           })}
@@ -251,20 +256,27 @@ function SkillsSection({ skills }: { skills: string[] }) {
 export function ReconstructedResume({
   result,
   score,
+  edit,
 }: {
   result: CascadeResult;
+  /** EDITED score — re-graded by App from the current overrides. Its
+   *  `bullets` already carry edited text, so the bullet rows render one
+   *  source of truth. */
   score: AnonymousAtsScore;
+  /** Lifted edit state (#82) — owned by App so overrides feed scoring/JD. */
+  edit: EditableParse;
 }) {
   const parsed = result.parsed;
   const bullets = score.bullets ?? [];
 
-  // In-memory editable overrides for contact + experience headers (#58).
   const {
     contactOverrides,
     setContactField,
     experienceOverrides,
     setExperienceField,
-  } = useEditableParse();
+    bulletOverrides,
+    setBulletField,
+  } = edit;
 
   return (
     <section
@@ -286,15 +298,17 @@ export function ReconstructedResume({
       <ContactCard
         result={result}
         overrides={contactOverrides}
-        onFieldChange={(key, value) => setContactField(key, value || undefined)}
+        onFieldChange={(key, value) => setContactField(key, value)}
       />
       <ExperienceSection
         experiences={parsed.experience}
         bullets={bullets}
         experienceOverrides={experienceOverrides}
         onExperienceFieldChange={(index, field, value) =>
-          setExperienceField(index, field, value || undefined)
+          setExperienceField(index, field, value)
         }
+        bulletOverrides={bulletOverrides}
+        onBulletChange={(index, value) => setBulletField(index, value)}
       />
       <EducationSection education={parsed.education} />
       <SkillsSection skills={parsed.skills} />
