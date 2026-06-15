@@ -21,7 +21,6 @@
       "full_name",
       "given_name",
       "linkedin_url",
-      "phone",
       "skills",
       "website_url"
     ],
@@ -35,8 +34,8 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 45,
-    "preLayoutOverall": 53,
+    "overall": 43,
+    "preLayoutOverall": 50,
     "specificity": {
       "score": 8,
       "max": 40,
@@ -52,11 +51,12 @@
       "totalBullets": 8
     },
     "completeness": {
-      "score": 24,
+      "score": 21,
       "max": 30,
       "gradable": true,
       "missing": [
         "location",
+        "phone",
         "summary"
       ]
     },

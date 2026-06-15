@@ -32,6 +32,7 @@ import {
   COMPANY_SUFFIX_RE,
   PRESENT_RE,
 } from "./regex.ts";
+import { findFirstPhone } from "./phone.ts";
 
 // ── Small utilities ─────────────────────────────────────────────────────────
 
@@ -250,7 +251,8 @@ export function extractContact(
 ): ContactExtractionResult {
   const scan = (lines: PdfLine[], joined: string): ContactExtractionResult => {
     const email = firstMatch(EMAIL_RE, joined);
-    const phone = firstMatch(PHONE_RE, joined);
+    const phoneResult = findFirstPhone(joined);
+    const phone = phoneResult?.formatted;
     const linkedin = firstMatch(LINKEDIN_RE, joined);
     const github = firstMatch(GITHUB_RE, joined);
 

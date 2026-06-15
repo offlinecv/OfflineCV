@@ -29,7 +29,8 @@ import type {
   FieldConfidence,
   PdfLinkAnnotation,
 } from "./types.ts";
-import { EMAIL_RE, PHONE_RE, LINKEDIN_RE } from "./regex.ts";
+import { EMAIL_RE, LINKEDIN_RE } from "./regex.ts";
+import { findFirstPhone } from "./phone.ts";
 
 export interface RegexFallbackResult {
   parsed: HeuristicParsedResume;
@@ -70,11 +71,12 @@ export function runRegexFallback(
     }
   }
 
-  // Phone — patterns are permissive, so require a reasonable digit count.
+  // Phone — findFirstPhone runs PHONE_RE as a pre-filter then validates via
+  // libphonenumber, so the digit-count gate is no longer needed.
   if (!parsed.phone) {
-    const phone = firstMatch(PHONE_RE, rawText);
-    if (phone && digitCount(phone) >= 10) {
-      parsed.phone = phone;
+    const phoneResult = findFirstPhone(rawText);
+    if (phoneResult) {
+      parsed.phone = phoneResult.formatted;
       fieldConfidence.phone = 0.6;
       fieldsFilled.push("phone");
     }
@@ -123,10 +125,6 @@ function firstMatch(re: RegExp, text: string): string | undefined {
   re.lastIndex = 0;
   const m = re.exec(text);
   return m?.[0]?.trim();
-}
-
-function digitCount(s: string): number {
-  return (s.match(/\d/g) ?? []).length;
 }
 
 function normalizeUrl(url: string): string {

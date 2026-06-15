@@ -213,7 +213,8 @@ describe("runCascadeFromMarkdown — real-world DOCX fixtures", () => {
     );
     expect(result.parsed.full_name).toBe("Jordan Lee");
     expect(result.parsed.email).toBe("jordan.lee@example.com");
-    expect(result.parsed.phone).toMatch(/415-555-0123/);
+    // libphonenumber-js reformats US numbers to national form: (NXX) NXX-XXXX
+    expect(result.parsed.phone).toMatch(/\(415\) 555-0123/);
     // Hard-fail `zero_experience_non_student` must no longer fire.
     expect(result.parsed.experience.length).toBeGreaterThanOrEqual(1);
     expect(result.confidence).toBeGreaterThan(0);

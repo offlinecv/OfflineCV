@@ -5,7 +5,8 @@
     "triggers": [],
     "tiers": [
       "t0_layout",
-      "t1_openresume"
+      "t1_openresume",
+      "t1_5_regex"
     ],
     "suggestedEscalation": "ocr",
     "fieldsPopulated": [
@@ -20,7 +21,6 @@
       "given_name",
       "linkedin_url",
       "location",
-      "phone",
       "skills",
       "website_url"
     ],
@@ -34,8 +34,8 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 58,
-    "preLayoutOverall": 58,
+    "overall": 55,
+    "preLayoutOverall": 55,
     "specificity": {
       "score": 11,
       "max": 40,
@@ -51,10 +51,11 @@
       "totalBullets": 59
     },
     "completeness": {
-      "score": 27,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
+        "phone",
         "summary"
       ]
     },

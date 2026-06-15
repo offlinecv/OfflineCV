@@ -96,7 +96,8 @@ describe("parseHeuristicFromMarkdown — ATX heading section labels", () => {
   const markdown = [
     "# John Smith",
     "",
-    "john.smith@example.com | +1 (555) 123-4567 | Boston, MA",
+    // 415-555-0123 is a libphonenumber-valid synthetic US number (formats to (415) 555-0123).
+    "john.smith@example.com | 415-555-0123 | Boston, MA",
     "",
     "## Summary",
     "",
