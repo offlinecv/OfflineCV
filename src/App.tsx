@@ -6,19 +6,24 @@ import { Chip } from "./components/ui/Chip.tsx";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
 import { JdMatch } from "./components/features/JdMatch.tsx";
-import { Card } from "./components/shared/Card.tsx";
-import { runCascade } from "./lib/heuristics";
+import { JdInput } from "./components/features/JdInput.tsx";
+import { ErrorState } from "./components/shared/ErrorState.tsx";
+import { runCascade, runCascadeFromMarkdown } from "./lib/heuristics";
 import type { CascadeResult } from "./lib/heuristics/types.ts";
+import { parseDocx } from "./lib/ingest/docx.ts";
 import {
   computeAnonymousAtsScore,
   type AnonymousAtsScore,
 } from "./lib/score/score.ts";
 import {
+  trackCascadeEvent,
   trackFileAccepted,
   trackParseCompleted,
   trackParseFailed,
 } from "./lib/analytics.ts";
 import { extractJdTerms, computeCoverage } from "./lib/jd-match";
+
+type SourceKind = "pdf" | "docx";
 
 type ParseState =
   | { phase: "idle" }
@@ -27,7 +32,9 @@ type ParseState =
       phase: "done";
       fileName: string;
       fileSize: number;
-      bytes: ArrayBuffer;
+      /** Raw bytes — only present for PDF (used by PdfPreview). Absent for DOCX. */
+      bytes?: ArrayBuffer;
+      sourceKind: SourceKind;
       result: CascadeResult;
       score: AnonymousAtsScore;
     }
@@ -56,13 +63,34 @@ export default function App() {
   const handleFile = useCallback(async (file: File) => {
     trackFileAccepted(file.size);
     setState({ phase: "parsing", fileName: file.name, fileSize: file.size });
+    const isDocxFile =
+      file.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      file.name.toLowerCase().endsWith(".docx");
     try {
       const bytes = await file.arrayBuffer();
-      // pdfjs mutates the buffer it parses; hand it a copy so we can re-render
-      // the source PDF in the side-by-side preview afterward.
-      const result = await runCascade(bytes.slice(0), {
-        userType: "anon",
-      });
+      let result: CascadeResult;
+      let pdfBytes: ArrayBuffer | undefined;
+
+      if (isDocxFile) {
+        // DOCX path — extract markdown via mammoth+turndown, then cascade on it.
+        const { rawText, markdown } = await parseDocx(bytes);
+        result = await runCascadeFromMarkdown(rawText, markdown, {
+          userType: "anon",
+          onEvent: trackCascadeEvent,
+        });
+        // No PDF bytes to store — PdfPreview won't be shown.
+        pdfBytes = undefined;
+      } else {
+        // PDF path — pdfjs mutates the buffer it parses; hand it a copy so we
+        // can re-render the source PDF in the side-by-side preview afterward.
+        result = await runCascade(bytes.slice(0), {
+          userType: "anon",
+          onEvent: trackCascadeEvent,
+        });
+        pdfBytes = bytes;
+      }
+
       const score = computeAnonymousAtsScore({
         parsed: result.parsed,
         fieldConfidence: result.fieldConfidence,
@@ -84,7 +112,8 @@ export default function App() {
         phase: "done",
         fileName: file.name,
         fileSize: file.size,
-        bytes,
+        bytes: pdfBytes,
+        sourceKind: isDocxFile ? "docx" : "pdf",
         result,
         score,
       });
@@ -146,9 +175,7 @@ export default function App() {
       )}
 
       {state.phase === "error" && (
-        <p className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-          Couldn't parse that PDF: {state.message}
-        </p>
+        <ErrorState>Couldn't parse that PDF: {state.message}</ErrorState>
       )}
 
       {state.phase === "done" && (
@@ -156,38 +183,16 @@ export default function App() {
           result={state.result}
           score={state.score}
           bytes={state.bytes}
+          sourceKind={state.sourceKind}
           onReset={reset}
         />
       )}
 
-      <Card className="flex flex-col gap-3 shadow-sm">
-        <div className="flex flex-col gap-1">
-          <h2
-            id="jd-input-label"
-            className="text-xs font-semibold uppercase tracking-wider text-content-muted"
-          >
-            Paste a job description
-          </h2>
-          <p className="max-w-prose text-xs text-content-tertiary">
-            We'll lint your resume against the JD's skills and key phrases.
-            Diagnostic, not tailoring — your JD text stays in this browser
-            tab.
-          </p>
-        </div>
-        <textarea
-          value={jdText}
-          onChange={(e) => setJdText(e.target.value)}
-          placeholder="Paste the job description here…"
-          aria-labelledby="jd-input-label"
-          className="min-h-[160px] resize-y rounded-lg border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed text-content-primary placeholder:text-content-muted focus:border-border focus:outline-none"
-        />
-        {jdText.trim().length > 0 && state.phase !== "done" && (
-          <p className="text-xs text-content-muted">
-            Drop a resume above to see what the JD asks for that's not in
-            your resume.
-          </p>
-        )}
-      </Card>
+      <JdInput
+        value={jdText}
+        onChange={setJdText}
+        resumeParsed={state.phase === "done"}
+      />
 
       {jdMatch && (
         <JdMatch

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import type { LayoutTrigger } from "./heuristics/types";
+import type { LayoutTrigger, ParseEvent } from "./heuristics/types";
 import type { WebGpuCapability } from "./webllm/types";
 
 type PostHog = {
@@ -103,6 +103,50 @@ export function trackParseFailed(args: {
     error_name: args.errorName,
     file_size_bytes: args.fileSize,
   });
+}
+
+// Parse-funnel telemetry. Wired into runCascade via the `onEvent` callback so
+// parse_started / tier_engaged / cascade_parse_completed land in the funnel.
+// The manual `trackParseCompleted` (event: "parse_completed") is separate and
+// carries score dimensions (specificity/structure/completeness) that cascade
+// doesn't emit — keep both; they cover different analytical questions.
+//
+// Privacy-safe schema: counts, enums, and pre-bucketed sizes only.
+// No field VALUES or PII ever cross this path — they stay in the cascade result.
+export function trackCascadeEvent(event: ParseEvent): void {
+  switch (event.type) {
+    case "parse_started":
+      track("parse_funnel_started", {
+        cascade_version: event.cascade_version,
+        user_type: event.user_type,
+        file_size_kb_bucket: event.file_size_kb_bucket,
+      });
+      break;
+    case "tier_engaged":
+      track("tier_engaged", {
+        cascade_version: event.cascade_version,
+        user_type: event.user_type,
+        tier: event.tier,
+        reason: event.reason,
+        elapsed_ms_since_start: event.elapsed_ms_since_start,
+      });
+      break;
+    case "parse_completed":
+      // Named "cascade_parse_completed" (not "parse_completed") to avoid
+      // collision with the manual trackParseCompleted event that adds
+      // score-dimension data unavailable inside the cascade.
+      track("cascade_parse_completed", {
+        cascade_version: event.cascade_version,
+        user_type: event.user_type,
+        final_source: event.final_source,
+        total_duration_ms: event.total_duration_ms,
+        confidence: event.confidence,
+        triggers: [...event.triggers],
+        tier_mask: event.tier_mask,
+        llm_ran: event.llm_ran,
+      });
+      break;
+  }
 }
 
 // WebLLM bullet-rewrite funnel. The call-sites (capability.ts, web-llm.ts,

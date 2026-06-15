@@ -9,6 +9,8 @@ import { ScoreRing } from "./features/ScoreRing.tsx";
 import { VerdictHeader } from "./features/VerdictHeader.tsx";
 import type { VerdictDimension } from "./features/VerdictHeader.tsx";
 import { Card } from "./shared/Card.tsx";
+import { StatusBadge } from "./shared/StatusBadge.tsx";
+import { Button } from "./ui/Button.tsx";
 import { FeedbackControl } from "./features/FeedbackControl.tsx";
 import { ReconstructedResume } from "./features/ReconstructedResume.tsx";
 import {
@@ -16,10 +18,14 @@ import {
   scoreBandBgClass,
 } from "./features/scoreBand.ts";
 
+type SourceKind = "pdf" | "docx";
+
 interface ResultProps {
   result: CascadeResult;
   score: AnonymousAtsScore;
-  bytes: ArrayBuffer;
+  /** PDF bytes for the source preview pane. Absent for DOCX uploads. */
+  bytes?: ArrayBuffer;
+  sourceKind: SourceKind;
   onReset: () => void;
 }
 
@@ -32,52 +38,41 @@ const LAYOUT_TRIGGER_BLURBS: Record<LayoutTrigger, string> = {
     "Text is present in the source but uses custom font encodings that don't decode to characters. Common with Framer, Affinity, and some InDesign exports.",
 };
 
-export function Result({ result, score, bytes, onReset }: ResultProps) {
+export function Result({ result, score, bytes, sourceKind, onReset }: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
   if (isFontsUnmappable) {
     return <LimitedParsingCard result={result} onReset={onReset} />;
   }
   return (
-    <ParsedCard result={result} score={score} bytes={bytes} onReset={onReset} />
+    <ParsedCard
+      result={result}
+      score={score}
+      bytes={bytes}
+      sourceKind={sourceKind}
+      onReset={onReset}
+    />
   );
 }
 
-function StatusPill({
-  tone,
-  children,
-}: {
-  tone: "ok" | "limited";
-  children: React.ReactNode;
-}) {
-  const cls =
-    tone === "ok"
-      ? "bg-feedback-success-bg text-feedback-success-text"
-      : "bg-feedback-warning-bg text-feedback-warning-text";
-  return (
-    <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${cls}`}
-    >
-      {children}
-    </span>
-  );
-}
 
 function ParsedCard({
   result,
   score,
   bytes,
+  sourceKind,
   onReset,
 }: {
   result: CascadeResult;
   score: AnonymousAtsScore;
-  bytes: ArrayBuffer;
+  bytes?: ArrayBuffer;
+  sourceKind: SourceKind;
   onReset: () => void;
 }) {
   return (
     <Card className="flex flex-col gap-6 shadow-sm">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <StatusPill tone="ok">Parsed</StatusPill>
+          <StatusBadge tone="ok">Parsed</StatusBadge>
           <span className="text-xs text-content-muted">
             {result.diagnostics.pages} page
             {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
@@ -87,19 +82,15 @@ function ParsedCard({
             verdictBand={getScoreLabel(getScoreTier(score.overall))}
           />
         </div>
-        <button
-          type="button"
-          onClick={onReset}
-          className="text-xs text-content-tertiary hover:underline"
-        >
-          Try another PDF
-        </button>
+        <Button variant="link" onClick={onReset}>
+          Try another file
+        </Button>
       </header>
 
       <AtsScoreReadout score={score} />
       <ReconstructedResume result={result} score={score} />
 
-      {/* Evidence — how a generic extractor read this PDF. Reference
+      {/* Evidence — how a generic extractor read this file. Reference
           material, so it sits below the score and per-bullet findings.
           Layout flags head the block (the verdict); the preview and
           extracted-text panes are the raw material under it. Both panes are
@@ -110,11 +101,18 @@ function ParsedCard({
         <div className="grid gap-4 md:grid-cols-2">
           <div className="flex flex-col gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-              Source PDF
+              {sourceKind === "pdf" ? "Source PDF" : "Source document"}
             </h2>
-            <div className="max-h-[600px] overflow-y-auto">
-              <PdfPreview bytes={bytes} />
-            </div>
+            {sourceKind === "pdf" && bytes != null ? (
+              <div className="max-h-[600px] overflow-y-auto">
+                <PdfPreview bytes={bytes} />
+              </div>
+            ) : (
+              <p className="text-sm text-content-muted">
+                No source preview available for DOCX — extracted text is shown
+                to the right.
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
@@ -328,14 +326,10 @@ function LimitedParsingCard({
   return (
     <Card className="flex flex-col gap-5 shadow-sm">
       <header className="flex items-center justify-between">
-        <StatusPill tone="limited">Limited parsing</StatusPill>
-        <button
-          type="button"
-          onClick={onReset}
-          className="text-xs font-medium text-content-primary hover:underline"
-        >
+        <StatusBadge tone="limited">Limited parsing</StatusBadge>
+        <Button variant="link" className="text-content-primary" onClick={onReset}>
           Try a different PDF
-        </button>
+        </Button>
       </header>
 
       <div>

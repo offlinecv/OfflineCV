@@ -7,12 +7,12 @@
  * Hidden entirely when analytics are disabled (VITE_POSTHOG_KEY unset).
  * After the user votes, transitions to a "thanks" confirmation state.
  *
- * Follows Result.tsx precedent: raw <button> elements (no Button primitive),
- * semantic tokens only, accessible aria-labels.
+ * Uses <Button> primitive; semantic tokens only; accessible aria-labels.
  */
 
 import { useState } from "react";
 import { ANALYTICS_ENABLED, trackFeedback } from "../../lib/analytics.ts";
+import { Button } from "../ui/Button.tsx";
 
 interface FeedbackControlProps {
   verdictBand: string;
@@ -37,22 +37,22 @@ export function FeedbackControl({ verdictBand }: FeedbackControlProps) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-content-muted">Was this score helpful?</span>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         aria-label="Thumbs up — score was helpful"
         onClick={() => handleThumb("up")}
-        className="rounded px-2 py-0.5 text-sm text-content-secondary hover:bg-surface-subtle"
+        className="text-sm"
       >
         👍
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        variant="ghost"
         aria-label="Thumbs down — score was not helpful"
         onClick={() => handleThumb("down")}
-        className="rounded px-2 py-0.5 text-sm text-content-secondary hover:bg-surface-subtle"
+        className="text-sm"
       >
         👎
-      </button>
+      </Button>
     </div>
   );
 }

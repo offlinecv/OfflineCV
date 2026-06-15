@@ -25,6 +25,7 @@
  */
 
 import { useState, useRef, useCallback } from "react";
+import { Button } from "./Button.tsx";
 
 interface EditableFieldProps {
   value: string | undefined;
@@ -124,11 +125,11 @@ export function EditableField({
         {hasValue ? value : placeholder}
       </span>
       {/* Pencil-icon edit button — owns the interactive affordance */}
-      <button
-        type="button"
+      <Button
+        variant="icon"
         aria-label={`Edit ${label}`}
         onClick={startEdit}
-        className="inline-flex shrink-0 items-center rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-brand-amber text-content-muted hover:text-content-secondary"
+        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 text-content-muted hover:text-content-secondary"
       >
         {/* Pencil SVG — 12×12 */}
         <svg
@@ -140,7 +141,7 @@ export function EditableField({
         >
           <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086zM11.189 6.25 9.75 4.81l-6.286 6.287a.25.25 0 0 0-.064.108l-.558 1.953 1.953-.558a.25.25 0 0 0 .108-.064L11.19 6.25z" />
         </svg>
-      </button>
+      </Button>
     </span>
   );
 }

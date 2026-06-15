@@ -18,14 +18,17 @@
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
     "@mlc-ai/web-llm": "^0.2.84",
+    "mammoth": "^1.12.0",
     "pdfjs-dist": "^4.10.38",
     "posthog-js": "^1.205.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
+    "@types/turndown": "^5.0.6",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
