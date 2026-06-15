@@ -16,6 +16,18 @@ function isPdf(f: File): boolean {
   );
 }
 
+function isDocx(f: File): boolean {
+  return (
+    f.type ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    f.name.toLowerCase().endsWith(".docx")
+  );
+}
+
+function isAccepted(f: File): boolean {
+  return isPdf(f) || isDocx(f);
+}
+
 export function DropZone({ onFile, disabled, status }: DropZoneProps) {
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -27,8 +39,10 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
       setError(null);
       if (!files || files.length === 0) return;
       const f = files[0];
-      if (!isPdf(f)) {
-        setError("That doesn't look like a PDF. Please drop a .pdf file.");
+      if (!isAccepted(f)) {
+        setError(
+          "That doesn't look like a PDF or DOCX. Please drop a .pdf or .docx file.",
+        );
         return;
       }
       onFile(f);
@@ -66,13 +80,13 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
         ref={inputRef}
         id={inputId}
         type="file"
-        accept="application/pdf,.pdf"
+        accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
         className="sr-only"
         disabled={disabled}
         onChange={(e) => handleFiles(e.target.files)}
       />
       <p className="text-sm font-medium">
-        Drop a resume PDF here, or click to pick one
+        Drop a resume PDF or DOCX here, or click to pick one
       </p>
       <p className="text-xs text-content-muted">
         Your file stays in this browser tab.

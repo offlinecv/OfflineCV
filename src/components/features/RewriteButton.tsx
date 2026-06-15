@@ -27,6 +27,7 @@ import type {
   ProgressUpdate,
   WebGpuCapability,
 } from "../../lib/webllm/types.ts";
+import { Button } from "../ui/Button.tsx";
 
 interface RewriteButtonProps {
   bullet: string;
@@ -126,8 +127,9 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
     // directly in the bullet row's flex layout: the icon sits inline with the
     // check badges, the full-width expansion wraps to the next row.
     <div className={compact ? "contents" : "flex flex-col items-end gap-1.5"}>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={onClick}
         disabled={busy}
         aria-label="Suggest a rewrite for this bullet"
@@ -136,13 +138,13 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
           compact
             ? compactButtonCls
             : idle
-              ? "group inline-flex min-h-[28px] items-center gap-1 self-start py-1 text-[11px] font-medium text-content-tertiary hover:text-brand-amber disabled:cursor-not-allowed disabled:opacity-60"
-              : "inline-flex min-h-[28px] items-center gap-1 self-start rounded-md border border-border-light bg-surface-card px-2 py-1 text-[11px] font-medium text-content-secondary hover:border-border hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+              ? "group min-h-[28px] self-start py-1 text-[11px] font-medium text-content-tertiary hover:text-brand-amber hover:bg-transparent"
+              : "min-h-[28px] self-start rounded-md border border-border-light bg-surface-card px-2 py-1 text-[11px] font-medium text-content-secondary hover:border-border hover:bg-surface-hover"
         }
       >
         <SparkleIcon className={compact ? "h-3.5 w-3.5 shrink-0" : undefined} />
         {!compact && labelFor(status)}
-      </button>
+      </Button>
 
       {expansion && (
         <div className={compact ? "mt-1.5 w-full" : undefined}>{expansion}</div>
@@ -233,13 +235,13 @@ function RewriteResult({
   return (
     <div className="flex flex-col gap-1 rounded border border-feedback-success-border bg-feedback-success-bg p-2">
       <p className="text-xs leading-snug text-content-primary">{rewritten}</p>
-      <button
-        type="button"
+      <Button
+        variant="link"
         onClick={onCopy}
-        className="self-start text-[10px] font-medium text-feedback-success-text hover:underline"
+        className="text-[10px] font-medium text-feedback-success-text"
       >
         {copied ? "Copied" : "Use this — copy to clipboard"}
-      </button>
+      </Button>
     </div>
   );
 }
