@@ -1,7 +1,11 @@
 # Fixtures — PII policy (directory-scoped)
 
 Every PDF in this tree ships in a **public** repo. **Synthetic personas only** —
-fake name, `@example.com` email, `555`-style phone. No real people, ever.
+fake name, `@example.com` email, and a phone using a **real area code + `555`
+exchange + `0100`–`0199` subscriber** (e.g. `(312) 555-0123`) — passes
+`libphonenumber-js` validation, never a real line. Not area-code-`555`
+(`(555) 010-0123`): `555` is an invalid NANP area code, so the validator drops
+the field. No real people, ever.
 
 **"Self-published upstream" is not an exception.** OSS résumé templates often
 ship the author's *own real résumé* as the demo PDF (Awesome-CV → posquit0,

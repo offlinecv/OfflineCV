@@ -51,8 +51,13 @@ This repo is **public**. The PDF binary committed here is the exposure
 surface — purging a leaked fixture after merge means `git filter-repo` +
 a GitHub Support ticket. Catch it before merge.
 
-**Synthetic personas only** — fake name, `@example.com` email,
-`555`-style phone. **Real-user PDFs do not belong here, ever.**
+**Synthetic personas only** — fake name, `@example.com` email, and a phone
+using a **real area code with the `555` exchange and a `0100`–`0199`
+subscriber** (e.g. `(312) 555-0123`). That form passes the parser's
+`libphonenumber-js` validation while staying a reserved, never-rings number.
+Avoid area-code-`555` numbers like `(555) 010-0123` — `555` is an invalid NANP
+area code, so the validator rejects them and the fixture's `phone` field drops
+out of the score. **Real-user PDFs do not belong here, ever.**
 
 **"Self-published upstream" is not an exception.** Several OSS résumé
 templates ship the author's *own real résumé* as the demo PDF — e.g.
@@ -64,7 +69,7 @@ synthetic data instead.
 Sources for PII-free fixtures:
 
 - [OpenResume sample fixtures](https://github.com/xitanggg/open-resume/tree/main/public/resume-example) — placeholder personas (`John Doe`, `Leo Leopard`), the upstream this parser was ported from
-- [Awesome-CV](https://github.com/posquit0/Awesome-CV) — LaTeX template. Clone, replace persona fields in `examples/resume.tex` / `examples/cv.tex` with `Jane Smith` / `jane.smith@example.com` / `+1-555-0100`, compile with `latexmk -lualatex`
+- [Awesome-CV](https://github.com/posquit0/Awesome-CV) — LaTeX template. Clone, replace persona fields in `examples/resume.tex` / `examples/cv.tex` with `Jane Smith` / `jane.smith@example.com` / `+1 (312) 555-0123`, compile with `latexmk -lualatex`
 - [Deedy-Resume](https://github.com/deedy/Deedy-Resume) — XeLaTeX template, two font variants. Same workflow: edit the persona block in `deedy_resume.tex`, compile with `xelatex`
 - Any LaTeX/Word/Docs template, filled with synthetic data, exported
 - A friend's PDF with explicit permission → redact name/email/phone/address **in the source document**, re-export, then commit
