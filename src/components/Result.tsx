@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import type { CascadeResult, LayoutTrigger } from "../lib/heuristics/types.ts";
+import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
-import { getScoreTier, getScoreLabel } from "../lib/score/score.ts";
-import { PdfPreview } from "./PdfPreview";
-import { ScoreRing } from "./features/ScoreRing.tsx";
-import { VerdictHeader } from "./features/VerdictHeader.tsx";
-import type { VerdictDimension } from "./features/VerdictHeader.tsx";
+import { getScoreLabel, getScoreTier } from "../lib/score/score.ts";
 import { Card } from "./shared/Card.tsx";
 import { StatusBadge } from "./shared/StatusBadge.tsx";
 import { Button } from "./ui/Button.tsx";
 import { FeedbackControl } from "./features/FeedbackControl.tsx";
 import { ReconstructedResume } from "./features/ReconstructedResume.tsx";
-import {
-  scoreBandTextClass,
-  scoreBandBgClass,
-} from "./features/scoreBand.ts";
+import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
+import { EvidencePanel } from "./features/EvidencePanel.tsx";
+
+// LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
+const FONTS_UNMAPPABLE_BLURB =
+  "Text is present in the source but uses custom font encodings that don't decode to characters. Common with Framer, Affinity, and some InDesign exports.";
 
 type SourceKind = "pdf" | "docx";
 
@@ -28,15 +26,6 @@ interface ResultProps {
   sourceKind: SourceKind;
   onReset: () => void;
 }
-
-const LAYOUT_TRIGGER_BLURBS: Record<LayoutTrigger, string> = {
-  two_column:
-    "Two-column layout — some text extractors read across columns and scramble the order.",
-  scanned:
-    "Image-only PDF — no selectable text, so a plain-text extractor returns nothing.",
-  fonts_unmappable:
-    "Text is present in the source but uses custom font encodings that don't decode to characters. Common with Framer, Affinity, and some InDesign exports.",
-};
 
 export function Result({ result, score, bytes, sourceKind, onReset }: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
@@ -54,6 +43,7 @@ export function Result({ result, score, bytes, sourceKind, onReset }: ResultProp
   );
 }
 
+// ── ParsedCard ────────────────────────────────────────────────────────────────
 
 function ParsedCard({
   result,
@@ -96,222 +86,12 @@ function ParsedCard({
           extracted-text panes are the raw material under it. Both panes are
           height-bounded so a two-page resume scrolls inside the row instead
           of pushing it open. */}
-      <section className="flex flex-col gap-4">
-        <LayoutFlagsList triggers={result.triggers} />
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="flex flex-col gap-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-              {sourceKind === "pdf" ? "Source PDF" : "Source document"}
-            </h2>
-            {sourceKind === "pdf" && bytes != null ? (
-              <div className="max-h-[600px] overflow-y-auto">
-                <PdfPreview bytes={bytes} />
-              </div>
-            ) : (
-              <p className="text-sm text-content-muted">
-                No source preview available for DOCX — extracted text is shown
-                to the right.
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-              Extracted plain text
-            </h2>
-            <pre className="max-h-[600px] overflow-auto rounded border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed">
-              {result.rawText || "(no text extracted)"}
-            </pre>
-          </div>
-        </div>
-      </section>
+      <EvidencePanel result={result} bytes={bytes} sourceKind={sourceKind} />
     </Card>
   );
 }
 
-function LayoutFlagsList({ triggers }: { triggers: readonly LayoutTrigger[] }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-        Layout flags
-      </h2>
-      {triggers.length === 0 ? (
-        <p className="text-sm text-content-tertiary">
-          No layout flags — standard single-column, text-selectable PDF.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-1.5">
-          {triggers.map((t) => (
-            <li key={t} className="text-sm">
-              <span className="font-mono text-xs text-content-secondary">
-                {t}
-              </span>{" "}
-              <span className="text-content-tertiary">
-                — {LAYOUT_TRIGGER_BLURBS[t]}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function AtsScoreReadout({ score }: { score: AnonymousAtsScore }) {
-  const buildDate = __BUILD_DATE__.slice(0, 10);
-
-  // Compute hint strings once — shared between VerdictHeader and Dimension cards.
-  const specificityHint = `${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`;
-  const structureHint = `${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`;
-  const completenessHint =
-    score.completeness.missing.length === 0
-      ? "All expected fields present"
-      : `Missing: ${score.completeness.missing.join(", ")}`;
-
-  const dimensions: VerdictDimension[] = [
-    {
-      label: "Specificity",
-      score: score.specificity.score,
-      max: score.specificity.max,
-      gradable: score.specificity.gradable,
-      hint: specificityHint,
-    },
-    {
-      label: "Structure",
-      score: score.structure.score,
-      max: score.structure.max,
-      gradable: score.structure.gradable,
-      hint: structureHint,
-    },
-    {
-      label: "Completeness",
-      score: score.completeness.score,
-      max: score.completeness.max,
-      gradable: score.completeness.gradable,
-      hint: completenessHint,
-    },
-  ];
-
-  return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-          Your resume score
-        </h2>
-        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-content-secondary">
-          alpha
-        </span>
-      </div>
-      <p className="text-sm text-content-tertiary">
-        Scored from what a generic text extractor pulled from your PDF — the
-        starting point most resume parsers share.
-      </p>
-      <details className="text-sm text-content-tertiary">
-        <summary className="cursor-pointer text-sm text-content-tertiary">
-          How is this scored?
-        </summary>
-        <p className="mt-1 max-w-prose text-sm text-content-tertiary">
-          A quick read on how your resume scores — based on what a generic text
-          extractor pulled from your PDF, the same starting point most ATS
-          parsers use. Not a universal score; systems weigh things differently.
-          Dimensions below show where the points landed.
-        </p>
-      </details>
-      <div className="flex flex-col gap-4 md:flex-row md:items-start">
-        <div className="flex items-center gap-4">
-          <ScoreRing score={score.overall} />
-          <VerdictHeader score={score.overall} dimensions={dimensions} />
-        </div>
-        <dl className="grid flex-1 grid-cols-1 gap-3 text-xs sm:grid-cols-3">
-          <Dimension
-            label="Specificity"
-            value={score.specificity.score}
-            max={score.specificity.max}
-            gradable={score.specificity.gradable}
-            hint={specificityHint}
-            anchor="#per-bullet-feedback"
-          />
-          <Dimension
-            label="Structure"
-            value={score.structure.score}
-            max={score.structure.max}
-            gradable={score.structure.gradable}
-            hint={structureHint}
-            anchor="#per-bullet-feedback"
-          />
-          <Dimension
-            label="Completeness"
-            value={score.completeness.score}
-            max={score.completeness.max}
-            gradable={score.completeness.gradable}
-            hint={completenessHint}
-            anchor="#contact"
-          />
-        </dl>
-      </div>
-      {score.layout.multiplier < 1 && (
-        <p className="text-[11px] text-feedback-warning-text">
-          Layout penalty applied (multiplier {score.layout.multiplier.toFixed(2)}
-          ): pre-layout score was {score.preLayoutOverall}.
-        </p>
-      )}
-      <p className="text-[11px] text-content-muted">
-        {score.algoVersion && <>algo v{score.algoVersion} · </>}Built{" "}
-        {buildDate}
-      </p>
-    </section>
-  );
-}
-
-function Dimension({
-  label,
-  value,
-  max,
-  gradable,
-  hint,
-  anchor,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  gradable: boolean;
-  hint: string;
-  anchor: string;
-}) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
-  const tier = getScoreTier(pct);
-  const barCls = scoreBandBgClass(tier);
-  const valueCls = scoreBandTextClass(tier);
-
-  return (
-    <a
-      href={anchor}
-      className="block flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3 hover:border-border-light"
-    >
-      <dt className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
-        {label}
-      </dt>
-      <dd className="text-sm font-medium">
-        {gradable ? (
-          <>
-            <span className={valueCls}>{value}</span>
-            <span className="text-xs text-content-muted"> / {max}</span>
-          </>
-        ) : (
-          <span className="text-content-muted">—</span>
-        )}
-      </dd>
-      {gradable && (
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-card">
-          <div
-            className={`h-full rounded-full ${barCls}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      )}
-      <p className="text-[11px] text-content-tertiary">{hint}</p>
-    </a>
-  );
-}
+// ── LimitedParsingCard ────────────────────────────────────────────────────────
 
 function LimitedParsingCard({
   result,
@@ -376,7 +156,7 @@ function LimitedParsingCard({
           What happened
         </h3>
         <p className="text-sm text-content-secondary">
-          {LAYOUT_TRIGGER_BLURBS.fonts_unmappable}
+          {FONTS_UNMAPPABLE_BLURB}
         </p>
       </section>
     </Card>
