@@ -19,6 +19,7 @@
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
  */
 
+import type { ReactNode } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
@@ -29,22 +30,131 @@ import type {
 } from "../../hooks/useEditableParse.ts";
 import { RewriteButton } from "./RewriteButton.tsx";
 
-// ── Bullet row ────────────────────────────────────────────────────────────────
+// ── Bullet flags ──────────────────────────────────────────────────────────────
 
-/** Inline check badge — one per failed grading rule on a flagged bullet. */
-function CheckBadge({ label }: { label: string }) {
+/**
+ * Each failed grading rule renders as a compact amber glyph chip inline on the
+ * bullet row (was a wide text label per #57–59 — the repeated "no metric" /
+ * "weak verb" strings ate horizontal space and forced long bullets to wrap).
+ * Glyphs are SVG, not emoji (emoji don't theme and render per-platform). The
+ * meaning is never icon-only: each chip carries an `aria-label` + `title`, and
+ * `BulletFlagLegend` keys the glyphs at the top of the section.
+ */
+
+/** Stroke hash — the missing-number/metric flag. */
+function HashIcon() {
   return (
-    <span className="inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[11px] font-medium bg-feedback-warning-bg text-feedback-warning-text">
-      {label}
+    <svg
+      className="h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <line x1="4" x2="20" y1="9" y2="9" />
+      <line x1="4" x2="20" y1="15" y2="15" />
+      <line x1="10" x2="8" y1="3" y2="21" />
+      <line x1="16" x2="14" y1="3" y2="21" />
+    </svg>
+  );
+}
+
+/** Stroke bolt — the weak-opening-verb flag. */
+function BoltIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+/**
+ * One amber glyph chip. `decorative` mode (used in the legend, where an
+ * adjacent text label already names the flag) drops the redundant
+ * role/aria-label so screen readers don't announce it twice.
+ */
+function FlagChip({
+  title,
+  ariaLabel,
+  decorative = false,
+  children,
+}: {
+  title: string;
+  ariaLabel: string;
+  decorative?: boolean;
+  children: ReactNode;
+}) {
+  const a11y = decorative
+    ? { "aria-hidden": true as const }
+    : { role: "img", "aria-label": ariaLabel, title };
+  return (
+    <span
+      {...a11y}
+      className="inline-flex shrink-0 items-center justify-center rounded px-1 py-0.5 bg-feedback-warning-bg text-feedback-warning-text"
+    >
+      {children}
     </span>
   );
 }
 
-function lengthLabel(b: BulletObservation): string {
-  if (b.wellFormedLength) return `${b.wordCount} words`;
-  if (b.wordCount < 8) return `${b.wordCount} words — too short`;
-  return `${b.wordCount} words — too long`;
+/** Short word-count token shown in the length chip (the number is the signal). */
+function lengthToken(b: BulletObservation): string {
+  return `${b.wordCount}w`;
 }
+
+function lengthTitle(b: BulletObservation): string {
+  const aim = "aim 8–30 words";
+  return b.wordCount < 8
+    ? `Too short — ${aim} (${b.wordCount})`
+    : `Too long — ${aim} (${b.wordCount})`;
+}
+
+/**
+ * Glyph key for the bullet flags. Rendered once at the top of the
+ * reconstructed-resume section so the inline glyphs stay decodable
+ * (`color-not-only` / discoverability).
+ */
+export function BulletFlagLegend() {
+  return (
+    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-tertiary">
+      <li className="inline-flex items-center gap-1.5">
+        <FlagChip title="No metric" ariaLabel="No metric" decorative>
+          <HashIcon />
+        </FlagChip>
+        no metric
+      </li>
+      <li className="inline-flex items-center gap-1.5">
+        <FlagChip title="Weak opening verb" ariaLabel="Weak opening verb" decorative>
+          <BoltIcon />
+        </FlagChip>
+        weak verb
+      </li>
+      <li className="inline-flex items-center gap-1.5">
+        <FlagChip
+          title="Word count outside 8–30"
+          ariaLabel="Word count outside 8–30"
+          decorative
+        >
+          <span className="text-[11px] font-medium tabular-nums">#w</span>
+        </FlagChip>
+        length (8–30 words)
+      </li>
+    </ul>
+  );
+}
+
+// ── Bullet row ────────────────────────────────────────────────────────────────
 
 /**
  * One bullet line in the reconstructed resume. The bullet text is editable
@@ -69,8 +179,8 @@ export function ResumeBulletRow({
   const editable = onBulletChange !== undefined;
   const displayText = override ?? bullet.text;
   return (
-    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-1">
-      <p className="min-w-0 flex-1 text-sm leading-snug text-content-secondary">
+    <li className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 py-1">
+      <p className="min-w-0 text-sm leading-snug text-content-secondary">
         <span aria-hidden="true" className="mr-1.5 text-content-muted">
           •
         </span>
@@ -88,17 +198,34 @@ export function ResumeBulletRow({
         )}
       </p>
       {/*
-        Flagged controls sit inline on the bullet row: `flex-1` on the text
-        above flushes the check badges + rewrite icon to the right edge of the
-        same line (regressed in #57–59, which stacked them below). The compact
-        RewriteButton's expansion panel breaks to its own full-width row.
+        Flagged controls flow inline directly after the bullet text — no
+        `flex-1` on the text above, so the text sizes to its content and the
+        check badges + rewrite icon sit right next to it (not flushed into a
+        right-hand column). On a long bullet the text shrinks (`min-w-0`) and
+        wraps; the badges/icon wrap with it. The compact RewriteButton's
+        expansion panel breaks to its own full-width row.
       */}
       {flagged && (
         <>
-          {!bullet.hasMetric && <CheckBadge label="no metric" />}
-          {!bullet.startsWithActionVerb && <CheckBadge label="weak verb" />}
+          {!bullet.hasMetric && (
+            <FlagChip title="No metric" ariaLabel="No metric">
+              <HashIcon />
+            </FlagChip>
+          )}
+          {!bullet.startsWithActionVerb && (
+            <FlagChip title="Weak opening verb" ariaLabel="Weak opening verb">
+              <BoltIcon />
+            </FlagChip>
+          )}
           {!bullet.wellFormedLength && (
-            <CheckBadge label={lengthLabel(bullet)} />
+            <FlagChip
+              title={lengthTitle(bullet)}
+              ariaLabel={lengthTitle(bullet)}
+            >
+              <span className="text-[11px] font-medium tabular-nums">
+                {lengthToken(bullet)}
+              </span>
+            </FlagChip>
           )}
           <RewriteButton bullet={displayText} compact />
         </>

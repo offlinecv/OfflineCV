@@ -41,7 +41,7 @@ import {
   needsAttention,
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
-import { RoleEntry } from "./ReconstructedRole.tsx";
+import { RoleEntry, BulletFlagLegend } from "./ReconstructedRole.tsx";
 import type {
   EditableParse,
   ExperienceFieldOverrides,
@@ -173,7 +173,13 @@ function ExperienceSection({
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeading>Experience</SectionHeading>
+      {/* Heading row: the flag legend sits beside the Experience title (next to
+          where the inline glyphs actually appear), not at the top of the
+          section where it reads as detached. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <SectionHeading>Experience</SectionHeading>
+        {bullets.length > 0 && <BulletFlagLegend />}
+      </div>
       {experiences.length === 0 ? (
         <NotDetected what="roles" />
       ) : (

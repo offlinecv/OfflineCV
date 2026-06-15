@@ -87,7 +87,7 @@ export default function App() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Chip icon="⚡">~30 seconds</Chip>
+          <Chip icon="⚡">A few seconds</Chip>
           <Chip icon="🔒">Runs in your browser</Chip>
           <Chip icon="✓">No signup required</Chip>
         </div>
