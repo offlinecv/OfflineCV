@@ -1,0 +1,100 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The resumelint Authors */
+
+/*
+ * Default token VALUES — the SWAPPABLE layer (the default ResumeLint look).
+ *
+ * These raw --color-* custom properties are the implementation behind the
+ * semantic vocabulary in styles/theme.css. They are the override seam: a
+ * downstream productionizer supplies their own brand without forking, either
+ * by (1) redefining these same properties in a stylesheet imported after
+ * ResumeLint's (cascade wins), or (2) pointing the Vite `@design-tokens`
+ * alias at their own complete copy of this file. See the README "Theming"
+ * section. The semantic Tailwind classes are generated from these names and
+ * do not change — only the values here are meant to be replaced.
+ */
+:root {
+  color-scheme: light dark;
+
+  --color-brand-navy: #1a365d;
+  --color-brand-navy-dark: #132a4a;
+  --color-brand-amber: #b8860b;
+  --color-brand-amber-light: #d4a017;
+  --color-brand-cream: #FAFAF8;
+  --color-bg-base: #FAFAF8;
+  --color-bg-card: #ffffff;
+  --color-bg-card-warm: #f7f5f0;
+  --color-bg-subtle: #f3f4f6;
+  --color-bg-hover: #f0ede8;
+  --color-text-primary: #111827;
+  --color-text-secondary: #374151;
+  --color-text-tertiary: #4b5563;
+  --color-text-muted: #6b7280;
+  --color-text-inverse: #ffffff;
+  --color-border-light: #e5e7eb;
+  --color-border-default: #d1d5db;
+  --color-border-strong: #9ca3af;
+  --color-accent-primary: #1a365d;
+  --color-accent-primary-hover: #132a4a;
+  --color-accent-forward: #4f46e5;
+  --color-accent-forward-bg: #EEF2FF;
+  --color-feedback-error-bg: #fef2f2;
+  --color-feedback-error-border: #fecaca;
+  --color-feedback-error-text: #b91c1c;
+  --color-feedback-error-icon: #dc2626;
+  --color-feedback-warning-bg: #fffbeb;
+  --color-feedback-warning-border: #fde68a;
+  --color-feedback-warning-text: #92400e;
+  --color-feedback-warning-icon: #f59e0b;
+  --color-feedback-info-bg: #eff6ff;
+  --color-feedback-info-border: #bfdbfe;
+  --color-feedback-info-text: #1e40af;
+  --color-feedback-info-icon: #2563eb;
+  --color-feedback-success-bg: #ecfdf5;
+  --color-feedback-success-border: #a7f3d0;
+  --color-feedback-success-text: #065f46;
+  --color-feedback-success-icon: #059669;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-brand-navy: #4a90c4;
+    --color-brand-navy-dark: #3a7aad;
+    --color-brand-amber: #f0c760;
+    --color-brand-amber-light: #f5d47a;
+    --color-brand-cream: #0f1419;
+    --color-bg-base: #0f1419;
+    --color-bg-card: #1a2030;
+    --color-bg-card-warm: #1e2538;
+    --color-bg-subtle: #252d3f;
+    --color-bg-hover: #2c3549;
+    --color-text-primary: #f0f2f5;
+    --color-text-secondary: #b8bfcc;
+    --color-text-tertiary: #8892a4;
+    --color-text-muted: #8a93a6;
+    --color-text-inverse: #0f1419;
+    --color-border-light: #2c3549;
+    --color-border-default: #3a4459;
+    --color-border-strong: #4d5668;
+    --color-accent-primary: #6ba3d9;
+    --color-accent-primary-hover: #84b6e5;
+    --color-accent-forward: #818cf8;
+    --color-accent-forward-bg: #1e1b4b;
+    --color-feedback-error-bg: #2d1215;
+    --color-feedback-error-border: #5c1d24;
+    --color-feedback-error-text: #f87171;
+    --color-feedback-error-icon: #ef4444;
+    --color-feedback-warning-bg: #2d2310;
+    --color-feedback-warning-border: #5c4a1d;
+    --color-feedback-warning-text: #fbbf24;
+    --color-feedback-warning-icon: #f59e0b;
+    --color-feedback-info-bg: #1a2540;
+    --color-feedback-info-border: #1d3a6e;
+    --color-feedback-info-text: #60a5fa;
+    --color-feedback-info-icon: #3b82f6;
+    --color-feedback-success-bg: #0d2818;
+    --color-feedback-success-border: #145c33;
+    --color-feedback-success-text: #34d399;
+    --color-feedback-success-icon: #10b981;
+  }
+}

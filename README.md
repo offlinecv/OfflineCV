@@ -63,6 +63,65 @@ for the env vars is this section. To enable telemetry in a local build,
 set `VITE_POSTHOG_KEY` (and optionally `VITE_POSTHOG_HOST`, defaulting to
 `https://us.i.posthog.com`) in the environment at build time.
 
+## Theming
+
+Colors are plain CSS custom properties split into two layers:
+
+- **`src/styles/theme.css`** — the semantic vocabulary (`--color-surface-card`,
+  `--color-content-primary`, `--color-brand-amber`, …). This is the **stable
+  contract**: it generates the Tailwind classes (`bg-surface-card`,
+  `text-content-primary`, …) that the components use. Names here don't change.
+- **`src/styles/tokens.css`** — the raw values behind that vocabulary (the
+  default ResumeLint look, light and dark). This is the **swappable layer**.
+
+You can reskin resumelint to your own brand **without forking this repo**, two
+ways:
+
+### 1. Cascade override (no build config)
+
+Import your own stylesheet *after* resumelint's and redefine the same
+`--color-*` properties. The last definition wins in the cascade:
+
+```css
+/* your-brand.css — imported after resumelint's styles */
+:root {
+  --color-brand-amber: #ff6b35;
+  --color-bg-card: #fffaf5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-brand-amber: #ffa07a;
+    --color-bg-card: #1c1410;
+  }
+}
+```
+
+Only override the properties you want to change; everything else keeps the
+default. The contract to implement is the `--color-*` names in
+`src/styles/tokens.css`.
+
+### 2. Full replacement (Vite alias)
+
+`src/styles.css` imports the token *values* through a bare `@design-tokens`
+specifier. `vite.config.ts` aliases that to the in-tree
+`src/styles/tokens.css` by default, so the standalone build is unaffected.
+Point the alias at your own complete copy of the tokens file to swap the whole
+brand in one place:
+
+```ts
+// vite.config.ts (in your downstream repo / config override)
+resolve: {
+  alias: {
+    "@design-tokens": fileURLToPath(
+      new URL("./src/brand/my-tokens.css", import.meta.url),
+    ),
+  },
+},
+```
+
+Your file must define the full set of `--color-*` properties (copy
+`src/styles/tokens.css` as a starting point) so every semantic token resolves.
+
 ## Deploy (GCS)
 
 resumelint builds to a static `dist/` directory and can be hosted on any
