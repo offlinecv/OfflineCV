@@ -115,7 +115,7 @@ export function EditableField({
             sizeCls,
             weightCls,
             "text-content-primary",
-            "outline-none focus:ring-1 focus:ring-brand-amber",
+            "outline-hidden focus:ring-1 focus:ring-brand-amber",
           ].join(" ")}
         />
       </span>
@@ -148,7 +148,7 @@ export function EditableField({
         weightCls,
         hasValue ? "text-content-primary" : "text-content-muted italic",
         hoverReveal
-          ? "cursor-text rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-brand-amber"
+          ? "cursor-text rounded-xs outline-hidden focus-visible:ring-1 focus-visible:ring-brand-amber"
           : "",
       ]
         .filter(Boolean)
