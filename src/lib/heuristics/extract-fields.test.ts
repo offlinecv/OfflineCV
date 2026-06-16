@@ -2,8 +2,18 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, it, expect } from "vitest";
-import { extractContact, extractName } from "./extract-fields.ts";
-import { groupIntoLines, splitIntoSections, findSection } from "./sections.ts";
+import {
+  extractContact,
+  extractName,
+  extractEducation,
+} from "./extract-fields.ts";
+import {
+  groupIntoLines,
+  splitIntoSections,
+  findSection,
+  type PdfLine,
+  type PdfSection,
+} from "./sections.ts";
 import { US_LOCATION_RE } from "./regex.ts";
 import type { PdfLinkAnnotation } from "./types.ts";
 import { mkItems, mkDefaultPages } from "./__test-utils__/mkItem.ts";
@@ -331,5 +341,77 @@ describe("US_LOCATION_RE — preposition-phrase city rejection", () => {
     // "of Engineering Seattle, WA" must not start the capture at "of".
     const m = US_LOCATION_RE.exec("of Engineering Seattle, WA");
     if (m) expect(m[1]).not.toMatch(/^of\b/i);
+  });
+});
+
+describe("extractEducation — date-range parsing (issue #97)", () => {
+  // Minimal PdfLine factory: extractEducation only reads `text` (plus the
+  // bullet/institution-hint regexes that run over it), so the positional
+  // fields can be zeroed.
+  const mkLine = (text: string): PdfLine => ({
+    page: 0,
+    y: 0,
+    x: 0,
+    items: [],
+    text,
+    maxFontSize: 11,
+    allCaps: false,
+  });
+  const mkEduSection = (texts: string[]): PdfSection => ({
+    name: "education",
+    lines: texts.map(mkLine),
+  });
+
+  it("keeps BOTH halves of a full month-year range (the core bug)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Massachusetts Institute of Technology",
+        "B.S. Computer Science | Sep 2024 - July 2025",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].start_date).toBe("Sep 2024");
+    expect(value[0].end_date).toBe("July 2025");
+    expect(value[0].start_date_precision).toBe("month");
+    expect(value[0].end_date_precision).toBe("month");
+    // `year` stays populated (graduation year) for back-compat consumers.
+    expect(value[0].year).toBe("2025");
+  });
+
+  it("keeps both halves of a bare year-only range", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Stanford University",
+        "B.S. Symbolic Systems, 2019 - 2023",
+      ]),
+    );
+    expect(value[0].start_date).toBe("2019");
+    expect(value[0].end_date).toBe("2023");
+    expect(value[0].start_date_precision).toBe("year");
+    expect(value[0].end_date_precision).toBe("year");
+    expect(value[0].year).toBe("2023");
+  });
+
+  it("maps a single graduation date to end_date with NO spurious start", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "University of California, Berkeley",
+        "B.A. Economics — Expected Graduation: May 2027",
+      ]),
+    );
+    expect(value[0].end_date).toBe("May 2027");
+    expect(value[0].start_date).toBeUndefined();
+    expect(value[0].end_date_precision).toBe("month");
+    expect(value[0].year).toBe("2027");
+  });
+
+  it("maps a lone bare year to end_date and preserves `year` (back-compat)", () => {
+    // Mirrors the openresume.test fixture line shape.
+    const { value } = extractEducation(
+      mkEduSection(["Stanford University — B.S. Computer Science — 2019"]),
+    );
+    expect(value[0].year).toBe("2019");
+    expect(value[0].end_date).toBe("2019");
+    expect(value[0].start_date).toBeUndefined();
   });
 });

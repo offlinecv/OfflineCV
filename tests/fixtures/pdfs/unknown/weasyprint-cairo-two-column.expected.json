@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "cascade": {
     "confidence": 0,
     "triggers": [
@@ -20,15 +20,19 @@
       "full_name",
       "github_url",
       "given_name",
+      "heuristic_achievements",
       "linkedin_url",
       "location",
       "phone",
+      "projects",
       "skills",
       "website_url"
     ],
     "skillsCount": 18,
     "experienceCount": 3,
     "educationCount": 1,
+    "projectsCount": 2,
+    "achievementsCount": 1,
     "rawTextCharCount": 1722,
     "pageCount": 1,
     "linkAnnotationCount": 0,

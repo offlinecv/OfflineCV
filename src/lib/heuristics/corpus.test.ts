@@ -34,8 +34,14 @@ const FIXTURE_ROOT = join(REPO_ROOT, "tests/fixtures/pdfs");
 const UPDATE = process.env.UPDATE_FIXTURES === "1";
 
 /** Bump when the snapshot shape below changes so existing .expected.json
- *  files visibly fail until re-baked. */
-const SNAPSHOT_SCHEMA_VERSION = 1;
+ *  files visibly fail until re-baked.
+ *  - v2 (#95): added `cascade.projectsCount`; Projects section is now
+ *    extracted, so `fieldsPopulated` may include `projects`.
+ *  - v3 (#96): added `cascade.achievementsCount`; the Achievements family
+ *    (achievements/accomplishments/awards/activities) is promoted out of the
+ *    `other` sink into a real extracted section, so `fieldsPopulated` may now
+ *    include `heuristic_achievements`. */
+const SNAPSHOT_SCHEMA_VERSION = 3;
 
 function walkPdfs(dir: string): string[] {
   const out: string[] = [];
@@ -112,6 +118,9 @@ describe("corpus snapshots", () => {
               skillsCount: cascade.parsed.skills?.length ?? 0,
               experienceCount: cascade.parsed.experience?.length ?? 0,
               educationCount: cascade.parsed.education?.length ?? 0,
+              projectsCount: cascade.parsed.projects?.length ?? 0,
+              achievementsCount:
+                cascade.parsed.heuristic_achievements?.length ?? 0,
               rawTextCharCount: cascade.rawText.length,
               pageCount: cascade.diagnostics.pages,
               linkAnnotationCount: cascade.linkAnnotations.length,

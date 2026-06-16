@@ -221,8 +221,10 @@ function scoreBulletPool(bullets: string[]): {
 
 function scoreSpecificity(
   experience: ResumeExperience[],
+  extraSources: { description?: string }[] = [],
 ): { score: number; flagged_bullets: string[] } {
-  if (experience.length === 0) return { score: 0, flagged_bullets: [] };
+  if (experience.length === 0 && extraSources.length === 0)
+    return { score: 0, flagged_bullets: [] };
 
   // Walk per-role to build the flagged-bullets list (entries with no metric
   // bullet of their own), then pool all bullets and let scoreBulletPool do
@@ -245,16 +247,30 @@ function scoreSpecificity(
     allBullets.push(...bullets);
   }
 
+  // Project (#95) and achievement (#96) bullets feed the same pool as experience
+  // bullets. These extra sources carry no per-entry id, so they contribute to the
+  // aggregate math but not to the per-role flagged-bullets list.
+  for (const src of extraSources) {
+    if (src.description) allBullets.push(...splitBullets(src.description));
+  }
+
   return { score: scoreBulletPool(allBullets).specificity, flagged_bullets: flagged };
 }
 
 // ── Structure scoring (authed) ─────────────────────────────────────────────
 
-function scoreStructure(experience: ResumeExperience[]): number {
-  if (experience.length === 0) return 0;
+function scoreStructure(
+  experience: ResumeExperience[],
+  extraSources: { description?: string }[] = [],
+): number {
+  if (experience.length === 0 && extraSources.length === 0) return 0;
   const allBullets: string[] = [];
   for (const exp of experience) {
     if (exp.description) allBullets.push(...splitBullets(exp.description));
+  }
+  // Project (#95) and achievement (#96) bullets pool alongside experience bullets.
+  for (const src of extraSources) {
+    if (src.description) allBullets.push(...splitBullets(src.description));
   }
   return scoreBulletPool(allBullets).structure;
 }
@@ -331,8 +347,14 @@ function scoreCompleteness(data: ResumeData): { score: number; missing: string[]
 // ── Main scoring function ───────────────────────────────────────────────────
 
 export function computeAtsScore(data: ResumeData): AtsScore {
-  const specificity = scoreSpecificity(data.experience);
-  const structure = scoreStructure(data.experience);
+  // Projects (#95) and heuristic achievements (#96) both contribute their bullet
+  // bodies to the same pool as experience bullets — pooled here as extra sources.
+  const extraSources = [
+    ...(data.projects ?? []),
+    ...(data.heuristic_achievements ?? []),
+  ];
+  const specificity = scoreSpecificity(data.experience, extraSources);
+  const structure = scoreStructure(data.experience, extraSources);
   const completeness = scoreCompleteness(data);
 
   const overall = Math.round(

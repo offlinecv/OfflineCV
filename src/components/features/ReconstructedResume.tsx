@@ -41,7 +41,15 @@ import {
   needsAttention,
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
-import { RoleEntry, BulletFlagLegend } from "./ReconstructedRole.tsx";
+import {
+  RoleEntry,
+  ResumeBulletRow,
+  BulletFlagLegend,
+} from "./ReconstructedRole.tsx";
+import type {
+  ResumeProject,
+  HeuristicAchievement,
+} from "../../lib/score/types.ts";
 import type {
   EditableParse,
   ExperienceFieldOverrides,
@@ -125,18 +133,61 @@ function NotDetected({ what }: { what: string }) {
 // ── Sections ──────────────────────────────────────────────────────────────────
 
 /**
- * Build the per-role render list. We iterate over EVERY parsed experience (so
- * partial roles and roles with zero matched bullets still render — the gap is
- * the signal), looking up each one's matched bullets from the grouping, then
- * append the unmatched "Other" group last if present. We do NOT rely on
- * groupBulletsByExperience's output alone: it omits experiences with no matched
- * bullet, which would silently drop those roles.
+ * Group the bullet pool across experiences, projects AND achievements in one
+ * pass, then partition the result so each section renders its own entries with
+ * the SAME "every parsed entry renders, even with zero matched bullets"
+ * guarantee, and the trailing "Other" group only holds bullets matched to none.
+ *
+ * Projects (#95) and achievements (#96) are each mapped onto the
+ * `BulletExperience` shape (`name`/`title → title`, `description` verbatim) and
+ * concatenated after experiences, so a single `groupBulletsByExperience` call
+ * attributes every bullet. Without this, project/achievement bullets — which are
+ * not in any `experience.description` — fall into the null "Other" group (the
+ * leak #95 fixed). The combined index space is split back out by source length:
+ * `[experiences | projects | achievements]`.
+ *
+ * We do NOT rely on groupBulletsByExperience's output alone: it omits entries
+ * with no matched bullet, which would silently drop those roles/projects/items.
  */
-function buildRoleGroups(
+function toBulletExperience(
+  entries: ReadonlyArray<{
+    title?: string;
+    name?: string;
+    description?: string;
+    start_date?: string;
+    end_date?: string;
+    is_current?: boolean;
+  }>,
+): BulletExperience[] {
+  return entries.map((e) => ({
+    title: e.title ?? e.name,
+    description: e.description,
+    start_date: e.start_date,
+    end_date: e.end_date,
+    is_current: e.is_current,
+  }));
+}
+
+function buildEntryGroups(
   experiences: BulletExperience[],
+  projects: ResumeProject[],
+  achievements: HeuristicAchievement[],
   bullets: readonly BulletObservation[],
-): BulletGroup[] {
-  const grouped = groupBulletsByExperience([...bullets], experiences);
+): {
+  experienceGroups: BulletGroup[];
+  projectGroups: BulletGroup[];
+  achievementGroups: BulletGroup[];
+  other: BulletGroup | null;
+} {
+  const projectsAsExperience = toBulletExperience(projects);
+  const achievementsAsExperience = toBulletExperience(achievements);
+  const combined = [
+    ...experiences,
+    ...projectsAsExperience,
+    ...achievementsAsExperience,
+  ];
+  const grouped = groupBulletsByExperience([...bullets], combined);
+
   const byIndex = new Map<number, BulletGroup>();
   let other: BulletGroup | null = null;
   for (const g of grouped) {
@@ -144,24 +195,47 @@ function buildRoleGroups(
     else byIndex.set(g.experienceIndex, g);
   }
 
-  const out: BulletGroup[] = experiences.map(
-    (exp, i) =>
-      byIndex.get(i) ?? { experienceIndex: i, experience: exp, bullets: [] },
+  // Each source slices its own window out of the combined index space, falling
+  // back to an empty group so every parsed entry still renders.
+  const sliceGroups = (
+    source: BulletExperience[],
+    offset: number,
+  ): BulletGroup[] =>
+    source.map((exp, i) => {
+      const combinedIdx = offset + i;
+      return (
+        byIndex.get(combinedIdx) ?? {
+          experienceIndex: combinedIdx,
+          experience: exp,
+          bullets: [],
+        }
+      );
+    });
+
+  const experienceGroups: BulletGroup[] = experiences.map((exp, i) => ({
+    ...(byIndex.get(i) ?? { experienceIndex: i, experience: exp, bullets: [] }),
+    experienceIndex: i,
+  }));
+  const projectGroups = sliceGroups(projectsAsExperience, experiences.length);
+  const achievementGroups = sliceGroups(
+    achievementsAsExperience,
+    experiences.length + projects.length,
   );
-  if (other) out.push(other);
-  return out;
+
+  return { experienceGroups, projectGroups, achievementGroups, other };
 }
 
 function ExperienceSection({
-  experiences,
-  bullets,
+  groups,
+  hasBullets,
   experienceOverrides,
   onExperienceFieldChange,
   bulletOverrides,
   onBulletChange,
 }: {
-  experiences: BulletExperience[];
-  bullets: readonly BulletObservation[];
+  /** Pre-built experience groups + the shared "Other" group appended last. */
+  groups: BulletGroup[];
+  hasBullets: boolean;
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
   onExperienceFieldChange: (
     index: number,
@@ -171,6 +245,8 @@ function ExperienceSection({
   bulletOverrides: BulletOverrides;
   onBulletChange: (index: number, value: string) => void;
 }) {
+  // "Other" is appended with a null index; real roles carry their index.
+  const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
   return (
     <section className="flex flex-col gap-3">
       {/* Heading row: the flag legend sits beside the Experience title (next to
@@ -178,13 +254,13 @@ function ExperienceSection({
           section where it reads as detached. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <SectionHeading>Experience</SectionHeading>
-        {bullets.length > 0 && <BulletFlagLegend />}
+        {hasBullets && <BulletFlagLegend />}
       </div>
-      {experiences.length === 0 ? (
+      {roleCount === 0 ? (
         <NotDetected what="roles" />
       ) : (
         <div className="flex flex-col gap-4">
-          {buildRoleGroups(experiences, bullets).map((group, i) => {
+          {groups.map((group, i) => {
             const idx = group.experienceIndex;
             return (
               <RoleEntry
@@ -209,6 +285,138 @@ function ExperienceSection({
   );
 }
 
+/**
+ * Projects render as their OWN section (#95) — a name-led header + the same
+ * graded bullet rows used everywhere else (`ResumeBulletRow`), so project
+ * bullets are checked and flagged the same way experience bullets are. Read-only:
+ * the edit affordances (#82) target experience/contact, not projects.
+ */
+function ProjectsSection({
+  projects,
+  groups,
+  bulletOverrides,
+}: {
+  projects: ResumeProject[];
+  /** Pre-built project groups, index-aligned with `projects`. */
+  groups: BulletGroup[];
+  bulletOverrides: BulletOverrides;
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeading>Projects</SectionHeading>
+      <div className="flex flex-col gap-4">
+        {projects.map((project, i) => {
+          const group = groups[i];
+          const header = [project.name, buildProjectDates(project)]
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <div key={i} className="flex flex-col gap-1.5">
+              <h3 className="text-sm font-semibold text-content-primary">
+                {header || "Untitled project"}
+              </h3>
+              {group && group.bullets.length > 0 ? (
+                <ul className="list-none">
+                  {group.bullets.map((b) => (
+                    <ResumeBulletRow
+                      key={b.index}
+                      bullet={b}
+                      override={bulletOverrides?.[b.index]}
+                    />
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-content-tertiary">
+                  No bullet-shaped lines detected.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** Compact "start–end" / "start–Present" / "start" date string for a project. */
+function buildProjectDates(project: ResumeProject): string {
+  const { start_date, end_date, is_current } = project;
+  if (start_date && (end_date || is_current)) {
+    return `${start_date}–${is_current ? "Present" : end_date}`;
+  }
+  if (start_date) return start_date;
+  if (is_current) return "Present";
+  if (end_date) return end_date;
+  return "";
+}
+
+/**
+ * Achievements render as their OWN section (#96), mirroring ProjectsSection: a
+ * title-led header + the same graded `ResumeBulletRow`s used everywhere else, so
+ * achievement bullets are checked and flagged identically. Read-only — the edit
+ * affordances target experience/contact, not achievements. Achievements carry a
+ * single `year`, not a date range, so the header equivalent of
+ * `buildProjectDates` is just the year string.
+ */
+function AchievementsSection({
+  achievements,
+  groups,
+  bulletOverrides,
+}: {
+  achievements: HeuristicAchievement[];
+  /** Pre-built achievement groups, index-aligned with `achievements`. */
+  groups: BulletGroup[];
+  bulletOverrides: BulletOverrides;
+}) {
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeading>Achievements</SectionHeading>
+      <div className="flex flex-col gap-4">
+        {achievements.map((achievement, i) => {
+          const group = groups[i];
+          const header = [achievement.title, achievement.year]
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <div key={i} className="flex flex-col gap-1.5">
+              <h3 className="text-sm font-semibold text-content-primary">
+                {header || "Untitled achievement"}
+              </h3>
+              {group && group.bullets.length > 0 ? (
+                <ul className="list-none">
+                  {group.bullets.map((b) => (
+                    <ResumeBulletRow
+                      key={b.index}
+                      bullet={b}
+                      override={bulletOverrides?.[b.index]}
+                    />
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-content-tertiary">
+                  No bullet-shaped lines detected.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** Compact "start–end" / "end" date string for an education entry, falling back
+ *  to the single `year` when no start/end was parsed (#97). */
+function buildEducationDates(
+  edu: NonNullable<CascadeResult["parsed"]["education"]>[number],
+): string {
+  const { start_date, end_date } = edu;
+  if (start_date && end_date) return `${start_date}–${end_date}`;
+  if (end_date) return end_date;
+  if (start_date) return start_date;
+  return edu.year ?? "";
+}
+
 function EducationSection({
   education,
 }: {
@@ -225,13 +433,14 @@ function EducationSection({
             const head = [edu.degree, edu.institution]
               .filter(Boolean)
               .join(" — ");
+            const dates = buildEducationDates(edu);
             return (
               <li key={i} className="text-sm text-content-secondary">
                 <span className="font-medium text-content-primary">
                   {head || "Untitled entry"}
                 </span>
-                {edu.year && (
-                  <span className="text-content-tertiary"> · {edu.year}</span>
+                {dates && (
+                  <span className="text-content-tertiary"> · {dates}</span>
                 )}
               </li>
             );
@@ -274,6 +483,12 @@ export function ReconstructedResume({
 }) {
   const parsed = result.parsed;
   const bullets = score.bullets ?? [];
+  const projects = parsed.projects ?? [];
+  const achievements = parsed.heuristic_achievements ?? [];
+  // "above_experience" promotes the Achievements section between Summary and
+  // Experience; "default" (or unset) renders it after Projects.
+  const achievementsAbove =
+    parsed.achievements_placement === "above_experience";
 
   const {
     contactOverrides,
@@ -283,6 +498,24 @@ export function ReconstructedResume({
     bulletOverrides,
     setBulletField,
   } = edit;
+
+  // One grouping pass over experiences + projects + achievements so their
+  // bullets are attributed to their own entry and never leak into the experience
+  // "Other" group (#95, #96). The "Other" group (bullets matched to none) renders
+  // at the tail of the Experience section, as before.
+  const { experienceGroups, projectGroups, achievementGroups, other } =
+    buildEntryGroups(parsed.experience, projects, achievements, bullets);
+  const experienceRenderGroups = other
+    ? [...experienceGroups, other]
+    : experienceGroups;
+
+  const achievementsSection = achievements.length > 0 && (
+    <AchievementsSection
+      achievements={achievements}
+      groups={achievementGroups}
+      bulletOverrides={bulletOverrides}
+    />
+  );
 
   return (
     <section
@@ -306,9 +539,10 @@ export function ReconstructedResume({
         overrides={contactOverrides}
         onFieldChange={(key, value) => setContactField(key, value)}
       />
+      {achievementsAbove && achievementsSection}
       <ExperienceSection
-        experiences={parsed.experience}
-        bullets={bullets}
+        groups={experienceRenderGroups}
+        hasBullets={bullets.length > 0}
         experienceOverrides={experienceOverrides}
         onExperienceFieldChange={(index, field, value) =>
           setExperienceField(index, field, value)
@@ -316,6 +550,14 @@ export function ReconstructedResume({
         bulletOverrides={bulletOverrides}
         onBulletChange={(index, value) => setBulletField(index, value)}
       />
+      {projects.length > 0 && (
+        <ProjectsSection
+          projects={projects}
+          groups={projectGroups}
+          bulletOverrides={bulletOverrides}
+        />
+      )}
+      {!achievementsAbove && achievementsSection}
       <EducationSection education={parsed.education} />
       <SkillsSection skills={parsed.skills} />
     </section>

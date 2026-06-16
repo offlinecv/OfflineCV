@@ -13,6 +13,8 @@
 import type {
   ResumeExperience,
   ResumeEducation,
+  ResumeProject,
+  HeuristicAchievement,
 } from "../score/types.ts";
 import type { PdfLine, PdfSection } from "./sections.ts";
 import { matchSectionHeader } from "./regex.ts";
@@ -27,22 +29,24 @@ import {
   INTL_LOCATION_RE,
   DATE_RANGE_RE,
   YEAR_RE,
+  MONTH_YEAR_RE,
+  NUMERIC_MONTH_YEAR_RE,
   DEGREE_RE,
   INSTITUTION_HINTS,
   COMPANY_SUFFIX_RE,
-  PRESENT_RE,
 } from "./regex.ts";
 import { findFirstPhone } from "./phone.ts";
+import { parseEntryBlocks } from "./entry-blocks.ts";
 
 // ── Small utilities ─────────────────────────────────────────────────────────
 
 /** True if the line looks like a bullet point (starts with •, ‣, -, *, ◦, or is indented prose). */
-function isBulletLine(line: PdfLine): boolean {
+export function isBulletLine(line: PdfLine): boolean {
   return /^\s*[•\u2023\u25AA\u25CF\u25E6\u2043*\-–—]/.test(line.text);
 }
 
 /** Strip leading bullet glyphs + whitespace. */
-function stripBullet(text: string): string {
+export function stripBullet(text: string): string {
   return text.replace(/^\s*[•\u2023\u25AA\u25CF\u25E6\u2043*\-–—]\s*/, "").trim();
 }
 
@@ -523,68 +527,27 @@ export function extractSkills(
 export function extractExperience(
   experience: PdfSection | undefined,
 ): { value: ResumeExperience[]; confidence: number } {
-  if (!experience || experience.lines.length === 0)
-    return { value: [], confidence: 0 };
-
-  const lines = experience.lines;
-  const anchors: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (DATE_RANGE_RE.test(lines[i].text) || PRESENT_RE.test(lines[i].text)) {
-      anchors.push(i);
-    }
-    // Reset DATE_RANGE_RE stateful search (non-global but may still have lastIndex via exec).
-    DATE_RANGE_RE.lastIndex = 0;
-  }
-
-  if (anchors.length === 0) return { value: [], confidence: 0 };
+  // Split the section into dated entry blocks using the shared primitive, then
+  // map each block's header lines into title/company/team and score it. The
+  // windowing, date parsing, and bullet-body collection live in
+  // `parseEntryBlocks`; this function owns only the experience-specific field
+  // mapping (`disambiguateCompanyTitle`) and scoring.
+  const blocks = parseEntryBlocks(experience, {
+    anchor: "date_range",
+    collectBody: true,
+    headerLookback: 2,
+  });
+  if (blocks.length === 0) return { value: [], confidence: 0 };
 
   const entries: ResumeExperience[] = [];
   const perEntryScores: number[] = [];
 
-  for (let a = 0; a < anchors.length; a++) {
-    const anchorIdx = anchors[a];
-    const nextAnchorIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
-    const prevAnchorIdx = a === 0 ? 0 : anchors[a - 1] + 1;
-
-    // Header candidates above the anchor (for "Title\nCompany <dates>" style).
-    // Skip any bullets from the previous entry.
-    const aboveStart = Math.max(prevAnchorIdx, anchorIdx - 2);
-    const aboveLines = lines
-      .slice(aboveStart, anchorIdx)
-      .filter((l) => !isBulletLine(l));
-
-    const anchorLine = lines[anchorIdx];
-    const dates = parseDateRange(anchorLine.text);
-    const anchorTextWithoutDates = stripDateRange(anchorLine.text);
-
-    // Header candidates below the anchor (for "Company <dates>\nTitle" style):
-    // collect consecutive non-bullet lines until we hit the first bullet or
-    // the next anchor. Resumes use one or the other convention; we accept both.
-    const belowHeaderLines: typeof lines = [];
-    for (let i = anchorIdx + 1; i < nextAnchorIdx; i++) {
-      if (isBulletLine(lines[i])) break;
-      belowHeaderLines.push(lines[i]);
-    }
-
-    const allHeaderText = [
-      ...aboveLines.map((l) => l.text),
-      anchorTextWithoutDates,
-      ...belowHeaderLines.map((l) => l.text),
-    ]
-      .map((t) => t.trim())
-      .filter(Boolean);
-
-    const { title, company, team } = disambiguateCompanyTitle(allHeaderText);
-
-    // Description: bullets after the below-header lines, until the next anchor.
-    const bodyStart = anchorIdx + 1 + belowHeaderLines.length;
-    const bodyLines = lines
-      .slice(bodyStart, nextAnchorIdx)
-      .filter((l) => isBulletLine(l));
-    const description = bodyLines
-      .map((l) => stripBullet(l.text))
-      .join("\n")
-      .trim();
+  for (const block of blocks) {
+    const { dates } = block;
+    const { title, company, team } = disambiguateCompanyTitle(
+      block.headerLines,
+    );
+    const description = block.body;
 
     // Score the entry.
     let score = 0;
@@ -592,7 +555,7 @@ export function extractExperience(
     if (dates.end_date || dates.is_current) score += 0.15;
     if (company) score += 0.25;
     if (title) score += 0.2;
-    if (bodyLines.length >= 1) score += 0.15;
+    if (block.bulletCount >= 1) score += 0.15;
 
     entries.push({
       title: title ?? "",
@@ -602,6 +565,156 @@ export function extractExperience(
       ...(dates.end_date ? { end_date: dates.end_date } : {}),
       ...(dates.is_current ? { is_current: true } : {}),
       description: description || undefined,
+    });
+    perEntryScores.push(Math.min(score, 1));
+  }
+
+  const avg =
+    perEntryScores.reduce((a, b) => a + b, 0) /
+    Math.max(perEntryScores.length, 1);
+  return { value: entries, confidence: avg };
+}
+
+// ── Projects ────────────────────────────────────────────────────────────────
+
+/**
+ * Extract a standalone Projects section into `ResumeProject[]`.
+ *
+ * Thin caller of the shared `parseEntryBlocks` primitive — mirrors
+ * `extractExperience`, but anchors on `"first_line"` rather than `"date_range"`
+ * because projects are name-led and a project's date is optional. Anchoring on
+ * a date would silently drop every date-less project (the bug in #95). Each
+ * block becomes one project: `headerLines[0]` is the project name (a URL on the
+ * header is lifted into `url` and stripped from the name), the bullet body is
+ * the description, and any date the header carried is parsed off the block.
+ *
+ * The project-specific field mapping lives here; the windowing, date parsing,
+ * and bullet collection live in `parseEntryBlocks`. We deliberately do NOT
+ * reuse `disambiguateCompanyTitle` — that is experience-specific (company vs.
+ * title), which a project header does not have.
+ *
+ * Confidence is per-entry then averaged, matching `extractExperience`: a named
+ * entry with bullets scores high; a bare name scores low.
+ */
+export function extractProjects(
+  projects: PdfSection | undefined,
+): { value: ResumeProject[]; confidence: number } {
+  const blocks = parseEntryBlocks(projects, {
+    anchor: "first_line",
+    collectBody: true,
+  });
+  if (blocks.length === 0) return { value: [], confidence: 0 };
+
+  const entries: ResumeProject[] = [];
+  const perEntryScores: number[] = [];
+
+  for (const block of blocks) {
+    const { dates } = block;
+
+    // The first header line is the project name. A URL anywhere in the header
+    // lines (repo / live demo) is lifted out and stripped from the name.
+    const headerJoined = block.headerLines.join(" ");
+    const url = firstMatch(URL_RE, headerJoined);
+    const nameRaw = block.headerLines[0] ?? "";
+    const name = (url ? nameRaw.replace(URL_RE, "") : nameRaw)
+      .replace(/[\s|•·\-–—]+$/g, "")
+      .trim();
+    URL_RE.lastIndex = 0;
+
+    const description = block.body;
+
+    // Score the entry: a name (0.4), a date (0.2), and at least one bullet
+    // (0.4) — projects have no company/title axis, so the weights differ from
+    // experience but still reward a fully-formed entry.
+    let score = 0;
+    if (name) score += 0.4;
+    if (dates.start_date) score += 0.2;
+    if (block.bulletCount >= 1) score += 0.4;
+
+    entries.push({
+      name,
+      ...(dates.start_date ? { start_date: dates.start_date } : {}),
+      ...(dates.end_date ? { end_date: dates.end_date } : {}),
+      ...(dates.is_current ? { is_current: true } : {}),
+      ...(description ? { description } : {}),
+      ...(url ? { url } : {}),
+    });
+    perEntryScores.push(Math.min(score, 1));
+  }
+
+  const avg =
+    perEntryScores.reduce((a, b) => a + b, 0) /
+    Math.max(perEntryScores.length, 1);
+  return { value: entries, confidence: avg };
+}
+
+// ── Achievements ──────────────────────────────────────────────────────────────
+
+/**
+ * Extract an Achievements / Accomplishments / Awards / Activities section into
+ * `HeuristicAchievement[]`.
+ *
+ * Thin caller of the shared `parseEntryBlocks` primitive — the SAME extractor
+ * shape as `extractProjects`, deliberately not a third bespoke implementation
+ * (#96). Achievement items are name-led and often single-line, so we anchor on
+ * `"first_line"` (anchoring on a date would drop the common date-less award);
+ * `collectBody: true` so any bullets under an item become its description and
+ * pool with experience/project bullets in the scorer.
+ *
+ * Each block becomes one achievement: `headerLines[0]` is the item title (a URL
+ * on the header is lifted into `url`), any date the header carried is reduced to
+ * a single lead `year` (achievements show a year, not a range), and the bullet
+ * body is the description.
+ *
+ * Honest-by-construction (#96, option (a)): we emit only what a regex parser can
+ * truthfully assert — a title, an optional year/url, and a bullet body. We do
+ * NOT guess an `AchievementType`; the structured `Achievement[]` is the LLM
+ * path's job.
+ */
+export function extractAchievements(
+  achievements: PdfSection | undefined,
+): { value: HeuristicAchievement[]; confidence: number } {
+  const blocks = parseEntryBlocks(achievements, {
+    anchor: "first_line",
+    collectBody: true,
+  });
+  if (blocks.length === 0) return { value: [], confidence: 0 };
+
+  const entries: HeuristicAchievement[] = [];
+  const perEntryScores: number[] = [];
+
+  for (const block of blocks) {
+    const { dates } = block;
+
+    // The first header line is the item title. A URL anywhere in the header
+    // lines (publication / patent / press link) is lifted out and stripped.
+    const headerJoined = block.headerLines.join(" ");
+    const url = firstMatch(URL_RE, headerJoined);
+    const titleRaw = block.headerLines[0] ?? "";
+    const title = (url ? titleRaw.replace(URL_RE, "") : titleRaw)
+      .replace(/[\s|•·\-–—]+$/g, "")
+      .trim();
+    URL_RE.lastIndex = 0;
+
+    // Reduce any date range the header carried to a single lead year.
+    const year = dates.start_date
+      ? firstMatch(YEAR_RE, dates.start_date)
+      : undefined;
+
+    const description = block.body;
+
+    // Score the entry: a title (0.5) and at least one bullet (0.5). Achievements
+    // have no company/title axis and the year is optional, so they don't earn a
+    // date weight — a named, bulleted item is a fully-formed entry.
+    let score = 0;
+    if (title) score += 0.5;
+    if (block.bulletCount >= 1) score += 0.5;
+
+    entries.push({
+      title,
+      ...(year ? { year } : {}),
+      ...(url ? { url } : {}),
+      ...(description ? { description } : {}),
     });
     perEntryScores.push(Math.min(score, 1));
   }
@@ -640,7 +753,118 @@ function normalizeDate(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
 }
 
-function stripDateRange(text: string): string {
+/** Infer the precision a date string carries from its shape. A month name or a
+ *  numeric month (`MM/YYYY`, `MM-YYYY`) → "month"; a bare 4-digit year → "year".
+ *  Used to fill the `*_precision` companions honestly from what the text shows.
+ *  Non-global regexes (no shared `lastIndex` state) so the helper is reentrant. */
+function inferDatePrecision(date: string): "month" | "year" {
+  const monthName =
+    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i;
+  if (monthName.test(date)) return "month";
+  if (/\b(0?[1-9]|1[0-2])[\/\-]\d{4}\b/.test(date)) return "month";
+  return "year";
+}
+
+/**
+ * Education-specific date parsing on top of the shared `parseDateRange`.
+ *
+ * Education entries differ from experience in two ways:
+ *   - A real range ("Sep 2024 - July 2025") must keep BOTH halves — the old
+ *     `YEAR_RE.exec(joined)[0]` took only the first year and dropped the end.
+ *   - A lone date is a GRADUATION date ("Expected Graduation: May 2027", or a
+ *     bare "2019"), so it belongs in `end_date`, not `start_date` — emitting a
+ *     spurious `start_date` would imply an attendance range that isn't stated.
+ *
+ * `parseDateRange` returns `{ start_date }` only for both a true range's start
+ * AND the lone-date fallback, so we disambiguate on the presence of an end /
+ * is_current: an end means it was a range; otherwise the single date is the
+ * graduation date and is moved to `end_date`. `year` is kept for back-compat
+ * (graduation year preferred).
+ */
+function parseEducationDates(text: string): {
+  start_date?: string;
+  start_date_precision?: "month" | "year";
+  end_date?: string;
+  end_date_precision?: "month" | "year";
+  year?: string;
+} {
+  const { start_date, end_date, is_current } = parseDateRange(text);
+
+  // Open-ended range ("Sep 2021 - Present"): keep the start, mark graduation
+  // open. Rare for education but handled for parity with experience.
+  if (is_current && start_date) {
+    return {
+      start_date,
+      start_date_precision: inferDatePrecision(start_date),
+      year: yearOf(start_date),
+    };
+  }
+
+  // True range: both halves present.
+  if (start_date && end_date) {
+    return {
+      start_date,
+      start_date_precision: inferDatePrecision(start_date),
+      end_date,
+      end_date_precision: inferDatePrecision(end_date),
+      year: yearOf(end_date) ?? yearOf(start_date),
+    };
+  }
+
+  // Lone date (graduation / bare year): land it in end_date, no spurious start.
+  // `parseDateRange`'s single-date fallback is year-only, so re-scan the text
+  // for the richest single date ("May 2027" beats "2027") before falling back.
+  const lone = richestSingleDate(text) ?? end_date ?? start_date;
+  if (lone) {
+    return {
+      end_date: lone,
+      end_date_precision: inferDatePrecision(lone),
+      year: yearOf(lone),
+    };
+  }
+
+  return {};
+}
+
+/** Richest single date in `text`: a month-year ("May 2027" / "05/2027") if
+ *  present, else the first bare year. Used for the single-graduation-date case
+ *  where the month would otherwise be lost. Resets each global regex's
+ *  `lastIndex` so repeated calls are deterministic. */
+function richestSingleDate(text: string): string | undefined {
+  const my = MONTH_YEAR_RE.exec(text);
+  MONTH_YEAR_RE.lastIndex = 0;
+  if (my) return normalizeDate(my[0].replace(/\./g, ""));
+  const nmy = NUMERIC_MONTH_YEAR_RE.exec(text);
+  NUMERIC_MONTH_YEAR_RE.lastIndex = 0;
+  if (nmy) return nmy[0];
+  return yearOf(text);
+}
+
+/** First 4-digit year inside a date string, or undefined. */
+function yearOf(date: string): string | undefined {
+  const m = /\b(19|20)\d{2}\b/.exec(date);
+  return m ? m[0] : undefined;
+}
+
+/** Build the conditional `ResumeEducation` date spread from a parsed result,
+ *  omitting any absent field so the entry never carries `undefined` keys. */
+function educationDateFields(
+  dates: ReturnType<typeof parseEducationDates>,
+): Partial<ResumeEducation> {
+  return {
+    ...(dates.start_date ? { start_date: dates.start_date } : {}),
+    ...(dates.start_date_precision
+      ? { start_date_precision: dates.start_date_precision }
+      : {}),
+    ...(dates.end_date ? { end_date: dates.end_date } : {}),
+    ...(dates.end_date_precision
+      ? { end_date_precision: dates.end_date_precision }
+      : {}),
+    ...(dates.year ? { year: dates.year } : {}),
+  };
+}
+
+export function stripDateRange(text: string): string {
   // Remove the paired match and leftover year tokens.
   let cleaned = text.replace(DATE_RANGE_RE, "").trim();
   DATE_RANGE_RE.lastIndex = 0;
@@ -766,19 +990,22 @@ export function extractEducation(
     const institution = line.text.trim();
     const degreeMatch = DEGREE_RE.exec(joined);
     const degree = degreeMatch ? degreeMatch[0].trim() : "";
-    const yearMatch = YEAR_RE.exec(joined);
-    YEAR_RE.lastIndex = 0;
-    const year = yearMatch ? yearMatch[0] : undefined;
+    // Use the shared date primitive (via the education-specific wrapper) so a
+    // range like "Sep 2024 - July 2025" keeps both halves and a lone graduation
+    // date lands in `end_date` — the old `YEAR_RE.exec(joined)[0]` took only the
+    // first year and dropped the end (#97).
+    const dates = parseEducationDates(joined);
+    const hasDate = !!(dates.start_date || dates.end_date);
 
     let score = 0;
     if (institution) score += 0.3;
     if (degree) score += 0.4;
-    if (year) score += 0.3;
+    if (hasDate) score += 0.3;
 
     entries.push({
       institution,
       degree,
-      ...(year ? { year } : {}),
+      ...educationDateFields(dates),
     });
     perEntryScores.push(Math.min(score, 1));
     i = j;
@@ -789,12 +1016,11 @@ export function extractEducation(
     for (const line of lines) {
       const degreeMatch = DEGREE_RE.exec(line.text);
       if (!degreeMatch) continue;
-      const yearMatch = YEAR_RE.exec(line.text);
-      YEAR_RE.lastIndex = 0;
+      const dates = parseEducationDates(line.text);
       entries.push({
         degree: degreeMatch[0].trim(),
         institution: line.text.replace(degreeMatch[0], "").trim().replace(/[,|]+$/, ""),
-        ...(yearMatch ? { year: yearMatch[0] } : {}),
+        ...educationDateFields(dates),
       });
       perEntryScores.push(0.5);
     }
