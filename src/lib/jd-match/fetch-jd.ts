@@ -161,6 +161,42 @@ async function fetchRecruiteeJob(
 
 // ─── HTML → plaintext ─────────────────────────────────────────────────────────
 
+/**
+ * Resolve a numeric character reference's code point to its character, leaving
+ * the original `&#…;` text untouched when the value isn't a valid Unicode
+ * scalar (out of the 0–0x10FFFF range, or a lone surrogate). This keeps a
+ * malformed/overflowing reference visible rather than throwing or emitting U+FFFD.
+ *
+ * Code point 0xA0 (non-breaking space) is folded to a regular space so numeric
+ * `&#160;` / `&#xA0;` references match the named `&nbsp;` decode path.
+ *
+ * Non-whitespace C0 control characters and DEL (e.g. `&#0;`, `&#7;`, `&#8;`) are
+ * dropped — decoding them would inject invisible control bytes into the matched
+ * plaintext. Tab / LF / CR are kept as legitimate whitespace (the line-collapse
+ * pass downstream normalizes them).
+ */
+function decodeCodePoint(original: string, codePoint: number): string {
+  if (
+    !Number.isInteger(codePoint) ||
+    codePoint < 0 ||
+    codePoint > 0x10ffff ||
+    (codePoint >= 0xd800 && codePoint <= 0xdfff)
+  ) {
+    return original;
+  }
+  if (codePoint === 0xa0) return " ";
+  if (
+    (codePoint < 0x20 &&
+      codePoint !== 0x09 &&
+      codePoint !== 0x0a &&
+      codePoint !== 0x0d) ||
+    codePoint === 0x7f
+  ) {
+    return "";
+  }
+  return String.fromCodePoint(codePoint);
+}
+
 export function htmlToPlaintext(html: string): string {
   // Strip <style> and <script> blocks
   let text = html
@@ -174,7 +210,7 @@ export function htmlToPlaintext(html: string): string {
   // Strip remaining tags
   text = text.replace(/<[^>]+>/g, "");
 
-  // Decode common HTML entities
+  // Decode common named HTML entities
   text = text
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -182,6 +218,17 @@ export function htmlToPlaintext(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, " ");
+
+  // Decode numeric character references (decimal &#160; and hex &#x2013;).
+  // Generators such as Lever lean on these for typographic punctuation; left
+  // raw they leak `&#…;` fragments into the JD-match passes. Malformed refs
+  // like `&#x;` never match (the digit group requires 1+); out-of-range or
+  // surrogate code points are preserved by decodeCodePoint.
+  text = text
+    .replace(/&#(\d+);/g, (m, n: string) => decodeCodePoint(m, parseInt(n, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (m, h: string) =>
+      decodeCodePoint(m, parseInt(h, 16)),
+    );
 
   // Collapse trailing spaces on each line, then collapse 3+ newlines to 2
   text = text
