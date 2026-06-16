@@ -7,8 +7,7 @@
     ],
     "tiers": [
       "t0_layout",
-      "t1_openresume",
-      "t1_5_regex"
+      "t1_openresume"
     ],
     "suggestedEscalation": "ner",
     "fieldsPopulated": [
@@ -22,24 +21,25 @@
       "given_name",
       "heuristic_achievements",
       "location",
+      "phone",
       "skills",
       "summary",
       "website_url"
     ],
-    "skillsCount": 5,
-    "experienceCount": 7,
+    "skillsCount": 10,
+    "experienceCount": 5,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 1,
-    "rawTextCharCount": 3937,
+    "rawTextCharCount": 3905,
     "pageCount": 2,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
-    "sectionSource": "markdown"
+    "sectionSource": "regex"
   },
   "score": {
-    "overall": 48,
-    "preLayoutOverall": 57,
+    "overall": 51,
+    "preLayoutOverall": 60,
     "specificity": {
       "score": 17,
       "max": 40,
@@ -55,12 +55,11 @@
       "totalBullets": 27
     },
     "completeness": {
-      "score": 24,
+      "score": 27,
       "max": 30,
       "gradable": true,
       "missing": [
-        "LinkedIn",
-        "phone"
+        "LinkedIn"
       ]
     },
     "layout": {

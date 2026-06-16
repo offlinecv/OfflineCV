@@ -30,7 +30,7 @@ import type {
   PdfLinkAnnotation,
 } from "./types.ts";
 import { EMAIL_RE, LINKEDIN_RE } from "./regex.ts";
-import { findFirstPhone } from "./phone.ts";
+import { findFirstPhone, regionFromLocation } from "./phone.ts";
 
 export interface RegexFallbackResult {
   parsed: HeuristicParsedResume;
@@ -73,8 +73,11 @@ export function runRegexFallback(
 
   // Phone — findFirstPhone runs PHONE_RE as a pre-filter then validates via
   // libphonenumber, so the digit-count gate is no longer needed.
+  // Use tier-1's already-extracted location to derive region so intl
+  // national-format numbers benefit from locale-aware parsing here too.
   if (!parsed.phone) {
-    const phoneResult = findFirstPhone(rawText);
+    const region = regionFromLocation(parsed.location) ?? "US";
+    const phoneResult = findFirstPhone(rawText, region);
     if (phoneResult) {
       parsed.phone = phoneResult.formatted;
       fieldConfidence.phone = 0.6;

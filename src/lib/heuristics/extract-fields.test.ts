@@ -180,6 +180,55 @@ describe("extractContact — location no longer falls back to document-wide scan
   });
 });
 
+describe("extractContact — locale-aware phone parsing (issue #69)", () => {
+  it("parses a UK national-format number when location is 'London, United Kingdom'", () => {
+    // 020 7946 0958 is an Ofcom-reserved London documentation number.
+    // Without the region hint, libphonenumber would fail to parse national-format
+    // UK numbers (no +44 prefix), so the phone field would be undefined.
+    const { lines, profile } = buildContext([
+      { text: "Emma Clarke", fontSize: 18 },
+      { text: "emma.clarke@example.com · 020 7946 0958 · London, United Kingdom", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Some London company, 2020 - Present", fontSize: 11 },
+    ]);
+    const contact = extractContact(profile, lines);
+    expect(contact.location).toContain("London");
+    expect(contact.phone).toBeDefined();
+    // Should reformat as international since it's not a US/CA number.
+    expect(contact.phone).toMatch(/^\+44/);
+    expect(contact.confidence.phone).toBeGreaterThan(0);
+  });
+
+  it("still parses a US number correctly when location is 'Chicago, IL'", () => {
+    // (312) 555-0123 — real area code, 555 exchange, 0123 subscriber (synthetic).
+    const { lines, profile } = buildContext([
+      { text: "Alex Johnson", fontSize: 18 },
+      { text: "alex@example.com · (312) 555-0123 · Chicago, IL", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Acme Corp, 2021 - Present", fontSize: 11 },
+    ]);
+    const contact = extractContact(profile, lines);
+    expect(contact.location).toContain("Chicago");
+    expect(contact.phone).toBe("(312) 555-0123");
+  });
+
+  it("falls back gracefully when no location is present in the profile", () => {
+    // US phone should still parse under the default US fallback.
+    const { lines, profile } = buildContext([
+      { text: "Sam Rivera", fontSize: 18 },
+      { text: "sam@example.com · (408) 555-0142", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Some Corp, 2022 - Present", fontSize: 11 },
+    ]);
+    const contact = extractContact(profile, lines);
+    expect(contact.location).toBeUndefined();
+    expect(contact.phone).toBe("(408) 555-0142");
+  });
+});
+
 describe("extractName — document-title boilerplate rejection (issue #10)", () => {
   it("picks the real name when a 'Functional Resume Sample' header is above it", () => {
     // Mode 1 of issue #10: a public Microsoft-style sample template renders

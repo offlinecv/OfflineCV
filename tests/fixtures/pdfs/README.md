@@ -57,7 +57,10 @@ subscriber** (e.g. `(312) 555-0123`). That form passes the parser's
 `libphonenumber-js` validation while staying a reserved, never-rings number.
 Avoid area-code-`555` numbers like `(555) 010-0123` — `555` is an invalid NANP
 area code, so the validator rejects them and the fixture's `phone` field drops
-out of the score. **Real-user PDFs do not belong here, ever.**
+out of the score. Always use the **full 10-digit** form (e.g. `(512) 555-0142`
+not `555-0142`) — the parser's `libphonenumber-js` path requires a 10-digit
+NANP number and silently drops 7-digit local-format strings.
+**Real-user PDFs do not belong here, ever.**
 
 **"Self-published upstream" is not an exception.** Several OSS résumé
 templates ship the author's *own real résumé* as the demo PDF — e.g.

@@ -34,7 +34,7 @@ import {
   INSTITUTION_HINTS,
   COMPANY_SUFFIX_RE,
 } from "./regex.ts";
-import { findFirstPhone } from "./phone.ts";
+import { findFirstPhone, regionFromLocation } from "./phone.ts";
 import { parseEntryBlocks } from "./entry-blocks.ts";
 import type { EntryBlock } from "./entry-blocks.ts";
 import {
@@ -251,22 +251,10 @@ export function extractContact(
 ): ContactExtractionResult {
   const scan = (lines: PdfLine[], joined: string): ContactExtractionResult => {
     const email = firstMatch(EMAIL_RE, joined);
-    const phoneResult = findFirstPhone(joined);
-    const phone = phoneResult?.formatted;
-    const linkedin = firstMatch(LINKEDIN_RE, joined);
-    const github = firstMatch(GITHUB_RE, joined);
 
-    // Other URLs that aren't linkedin/github → portfolio/website bucket.
-    const others = allMatches(URL_RE, joined).filter((u) => {
-      const lower = u.toLowerCase();
-      return !lower.includes("linkedin.com") && !lower.includes("github.com");
-    });
-    const portfolio = others.find((u) =>
-      /(portfolio|\.me\b|\.io\b|\.dev\b|behance|dribbble|medium)/i.test(u),
-    );
-    const websiteCandidates = others.filter((u) => u !== portfolio);
-    const website = websiteCandidates[0];
-
+    // Extract location BEFORE phone so we can derive the parse region.
+    // `location` is intentionally not subject to the document-wide fallback —
+    // see the doc-comment on `extractContact` for the reasoning.
     let location: string | undefined;
     for (const line of lines) {
       const us = US_LOCATION_RE.exec(line.text);
@@ -284,6 +272,25 @@ export function extractContact(
         }
       }
     }
+
+    // Derive the phone parse region from the extracted location; fall back to
+    // "US" when the location is absent or the country is not in our mapping.
+    const phoneRegion = regionFromLocation(location) ?? "US";
+    const phoneResult = findFirstPhone(joined, phoneRegion);
+    const phone = phoneResult?.formatted;
+    const linkedin = firstMatch(LINKEDIN_RE, joined);
+    const github = firstMatch(GITHUB_RE, joined);
+
+    // Other URLs that aren't linkedin/github → portfolio/website bucket.
+    const others = allMatches(URL_RE, joined).filter((u) => {
+      const lower = u.toLowerCase();
+      return !lower.includes("linkedin.com") && !lower.includes("github.com");
+    });
+    const portfolio = others.find((u) =>
+      /(portfolio|\.me\b|\.io\b|\.dev\b|behance|dribbble|medium)/i.test(u),
+    );
+    const websiteCandidates = others.filter((u) => u !== portfolio);
+    const website = websiteCandidates[0];
 
     return {
       email,
