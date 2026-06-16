@@ -53,6 +53,23 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     globals: true,
+    coverage: {
+      // v8 provider; emit lcov so `fallow audit --coverage` can compute
+      // accurate CRAP scores in CI. Without coverage, CRAP collapses to a
+      // cyclomatic-only proxy that flags even simple, well-tested functions.
+      provider: "v8",
+      // `json` emits coverage/coverage-final.json (Istanbul format), which
+      // `fallow audit --coverage` consumes for accurate per-function CRAP.
+      reporter: ["text-summary", "json"],
+      reportsDirectory: "coverage",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.ts",
+        "src/**/__test-utils__/**",
+        "src/**/*.d.ts",
+        "src/main.tsx",
+      ],
+    },
     // Force pdfjs-dist to its legacy build during tests so the Node 20+
     // env doesn't trip on `Promise.withResolvers()` (Node 22+) in the
     // browser entry. The production bundle still ships the browser build.

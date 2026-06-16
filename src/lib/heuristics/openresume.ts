@@ -39,6 +39,8 @@ import {
   extractSkills,
   extractExperience,
   extractEducation,
+  extractProjects,
+  extractAchievements,
 } from "./extract-fields.ts";
 
 /**
@@ -107,6 +109,8 @@ function buildHeuristicResult(
   const experienceSection = findSection(sections, "experience");
   const educationSection = findSection(sections, "education");
   const skillsSection = findSection(sections, "skills");
+  const projectsSection = findSection(sections, "projects");
+  const achievementsSection = findSection(sections, "achievements");
 
   const name = extractName(profile);
   const contact = extractContact(profile, lines, annotations);
@@ -114,6 +118,8 @@ function buildHeuristicResult(
   const skills = extractSkills(skillsSection);
   const experience = extractExperience(experienceSection);
   const education = extractEducation(educationSection);
+  const projects = extractProjects(projectsSection);
+  const achievements = extractAchievements(achievementsSection);
 
   const parsed: HeuristicParsedResume = {
     ...(name.value ? { full_name: name.value } : {}),
@@ -131,6 +137,10 @@ function buildHeuristicResult(
     skills_inferred: [],
     experience: experience.value,
     education: education.value,
+    ...(projects.value.length > 0 ? { projects: projects.value } : {}),
+    ...(achievements.value.length > 0
+      ? { heuristic_achievements: achievements.value }
+      : {}),
     // Best-effort current role derivation.
     ...(experience.value[0]?.title ? { current_title: experience.value[0].title } : {}),
     ...(experience.value[0]?.company ? { current_company: experience.value[0].company } : {}),
@@ -149,6 +159,8 @@ function buildHeuristicResult(
     skills: skills.confidence,
     experience: experience.confidence,
     education: education.confidence,
+    projects: projects.confidence,
+    achievements: achievements.confidence,
   };
 
   return { parsed, fieldConfidence, sectionSource };

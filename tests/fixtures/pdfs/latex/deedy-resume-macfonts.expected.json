@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "cascade": {
     "confidence": 0,
     "triggers": [
@@ -20,6 +20,7 @@
       "family_name",
       "full_name",
       "given_name",
+      "heuristic_achievements",
       "linkedin_url",
       "phone",
       "skills",
@@ -28,6 +29,8 @@
     "skillsCount": 21,
     "experienceCount": 6,
     "educationCount": 3,
+    "projectsCount": 0,
+    "achievementsCount": 1,
     "rawTextCharCount": 3304,
     "pageCount": 1,
     "linkAnnotationCount": 9,
