@@ -3,9 +3,20 @@
 
 /// <reference types="vitest" />
 import { execSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+
+// Token-values swap seam. `src/styles.css` imports the raw `--color-*` values
+// via the bare `@design-tokens` specifier; this alias points it at the in-tree
+// default (`src/styles/tokens.css`), so the standalone build is unaffected. A
+// downstream productionizer can repoint this alias at their own complete tokens
+// file to swap the whole brand without forking — see the README "Theming"
+// section. The semantic vocabulary (src/styles/theme.css) is unaffected.
+const DESIGN_TOKENS_DEFAULT = fileURLToPath(
+  new URL("./src/styles/tokens.css", import.meta.url),
+);
 
 // Build identity. CI sets GITHUB_SHA (push to main → the deployed commit); a
 // local build falls back to `git rev-parse`, and a checkout without git to a
@@ -46,6 +57,11 @@ function emitVersionJson(version: string): Plugin {
 export default defineConfig({
   base: "/resumelint/",
   plugins: [tailwindcss(), react(), emitVersionJson(APP_VERSION)],
+  resolve: {
+    alias: {
+      "@design-tokens": DESIGN_TOKENS_DEFAULT,
+    },
+  },
   define: {
     __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
     __APP_VERSION__: JSON.stringify(APP_VERSION),
