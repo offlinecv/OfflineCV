@@ -105,4 +105,35 @@ describe("htmlToPlaintext", () => {
     expect(text.startsWith("A")).toBe(true);
     expect(text).not.toMatch(/\n{3,}/);
   });
+
+  it("decodes decimal numeric entities (&#160;)", () => {
+    // &#160; is the decimal nbsp; should become a space, not leak as `&#160;`.
+    const text = htmlToPlaintext("<p>Use&nbsp;Kubernetes&#160;daily.</p>");
+    expect(text).toBe("Use Kubernetes daily.");
+    expect(text).not.toContain("&#");
+  });
+
+  it("decodes hex numeric entities (&#x2013;)", () => {
+    // &#x2013; is an en-dash (–), common in Lever-generated typographic ranges.
+    const text = htmlToPlaintext("<p>2020&#x2013;2024</p>");
+    expect(text).toContain("2020–2024");
+    expect(text).not.toContain("&#");
+  });
+
+  it("decodes a decimal curly apostrophe (&#8217;) so skills regex sees the word", () => {
+    const text = htmlToPlaintext("<p>you&#8217;ll ship</p>");
+    expect(text).toContain("you’ll ship");
+    expect(text).not.toContain("&#");
+  });
+
+  it("leaves a malformed numeric reference (&#x;) unchanged", () => {
+    const text = htmlToPlaintext("<p>price &#x; range</p>");
+    expect(text).toContain("&#x;");
+  });
+
+  it("leaves an out-of-range numeric reference unchanged", () => {
+    // 0x110000 is one past the highest Unicode scalar — must not throw.
+    const text = htmlToPlaintext("<p>bad &#1114112; ref</p>");
+    expect(text).toContain("&#1114112;");
+  });
 });
