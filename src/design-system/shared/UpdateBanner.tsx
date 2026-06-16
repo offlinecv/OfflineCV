@@ -12,7 +12,7 @@
  * and feedback-info semantic tokens; no raw <button> or hardcoded colors.
  */
 
-import { Button } from "../ui/Button.tsx";
+import { Button } from "../primitives/Button.tsx";
 
 interface UpdateBannerProps {
   onReload: () => void;

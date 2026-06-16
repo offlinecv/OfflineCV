@@ -10,12 +10,23 @@ import react from "@vitejs/plugin-react";
 
 // Token-values swap seam. `src/styles.css` imports the raw `--color-*` values
 // via the bare `@design-tokens` specifier; this alias points it at the in-tree
-// default (`src/styles/tokens.css`), so the standalone build is unaffected. A
-// downstream productionizer can repoint this alias at their own complete tokens
-// file to swap the whole brand without forking — see the README "Theming"
-// section. The semantic vocabulary (src/styles/theme.css) is unaffected.
+// default (`src/design-system/styles/tokens.css`), so the standalone build is
+// unaffected. A downstream productionizer can repoint this alias at their own
+// complete tokens file to swap the whole brand without forking — see the README
+// "Theming" section. The semantic vocabulary (src/design-system/styles/theme.css)
+// is unaffected.
 const DESIGN_TOKENS_DEFAULT = fileURLToPath(
-  new URL("./src/styles/tokens.css", import.meta.url),
+  new URL("./src/design-system/styles/tokens.css", import.meta.url),
+);
+
+// Component swap seam. Feature code imports primitives + shared-composed
+// components via the bare `@design-system` specifier; this alias points it at
+// the in-tree barrel (`src/design-system/index.ts`). A downstream productionizer
+// repoints this alias (+ tsconfig `paths`) at their own module re-exporting the
+// same primitive API to swap the whole component layer without forking — see
+// the README "Theming" section.
+const DESIGN_SYSTEM_DEFAULT = fileURLToPath(
+  new URL("./src/design-system/index.ts", import.meta.url),
 );
 
 // Build identity. CI sets GITHUB_SHA (push to main → the deployed commit); a
@@ -60,6 +71,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@design-tokens": DESIGN_TOKENS_DEFAULT,
+      "@design-system": DESIGN_SYSTEM_DEFAULT,
     },
   },
   define: {
@@ -92,6 +104,7 @@ export default defineConfig({
     // browser entry. The production bundle still ships the browser build.
     alias: {
       "pdfjs-dist": "pdfjs-dist/legacy/build/pdf.mjs",
+      "@design-system": DESIGN_SYSTEM_DEFAULT,
     },
   },
 });

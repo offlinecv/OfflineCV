@@ -56,10 +56,10 @@ UI lives in `src/App.tsx` + `src/components/{DropZone,PdfPreview,Result}.tsx`. T
 
 ## Component Architecture & Reuse
 
-We use a strict 3-tier component architecture to prevent UI drift and enforce reuse:
+We use a strict 3-tier component architecture to prevent UI drift and enforce reuse. Primitives + shared-composed components live in the in-tree design-system home (`src/design-system/`) behind the `@design-system` seam; feature code consumes them via `import { ... } from "@design-system"`, never deep paths.
 
-1. **Primitives** (`src/components/ui/*`): The raw building blocks (Buttons, Dialogs, Inputs). These own their tokens and styling. There should be exactly **one** primitive per concern (e.g., one `<Button>`). 
-2. **Shared Composed** (`src/components/shared/*`): Domain-agnostic compositions of primitives (e.g., `StatusBadge`, `Card`, `ErrorState`).
+1. **Primitives** (`src/design-system/primitives/*`): The raw building blocks (Buttons, Dialogs, Inputs). These own their tokens and styling. There should be exactly **one** primitive per concern (e.g., one `<Button>`). 
+2. **Shared Composed** (`src/design-system/shared/*`): Domain-agnostic compositions of primitives (e.g., `StatusBadge`, `Card`, `ErrorState`).
 3. **Feature** (`src/components/features/*`): Components wired to domain data (e.g., `PdfPreview`, `LimitedParsingCard`). Split these if they exceed ~200 LOC.
 
 > **The Golden Rule:** Before you write a `<button>`, a modal, a drop zone, or a warning banner—find the existing primitive or shared component and reuse it. Never hand-roll a parallel copy or an inline one-off. If a shared piece is missing a variant, add the variant to the shared piece.
@@ -87,7 +87,7 @@ We enforce this with a Claude hook (`scripts/hooks/reuse_surface_reminder.sh`) t
 
 ## What NOT to do
 
-- ❌ **Raw interactive HTML elements in features:** Do not use raw `<button className="...">` in feature code. Always use the `<Button>` primitive.
+- ❌ **Raw interactive HTML elements in features:** Do not use raw `<button className="...">` in feature code. Always use the `<Button>` primitive (`import { Button } from "@design-system"`).
 - ❌ **Hardcoded colors:** Do not use raw hex colors or secondary styling vocabularies in feature code.
 - ❌ **Duplicated interactions:** Do not build a new modal or dropzone if one already exists.
 - ❌ **Bloated components:** Do not leave a feature component past ~200 LOC without decomposing it.
