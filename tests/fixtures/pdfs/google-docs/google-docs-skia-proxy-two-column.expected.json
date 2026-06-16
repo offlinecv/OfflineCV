@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "cascade": {
     "confidence": 0.64,
     "triggers": [
@@ -23,12 +23,15 @@
       "linkedin_url",
       "location",
       "phone",
+      "projects",
       "skills",
       "website_url"
     ],
     "skillsCount": 17,
     "experienceCount": 3,
     "educationCount": 1,
+    "projectsCount": 2,
+    "achievementsCount": 0,
     "rawTextCharCount": 1720,
     "pageCount": 1,
     "linkAnnotationCount": 0,

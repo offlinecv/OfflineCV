@@ -113,17 +113,38 @@ export const SECTION_KEYWORDS = {
     "technologies",
   ],
   projects: ["projects", "personal projects", "selected projects"],
-  certifications: ["certifications", "certificates", "licenses", "awards"],
+  certifications: ["certifications", "certificates", "licenses"],
   /**
-   * Sink bucket for non-core sidebar labels that must terminate the preceding
-   * section (e.g. ACHIEVEMENTS, FOCUS AREAS, STRENGTHS in two-column PDFs).
+   * Achievements family (#96). Promoted out of the `other` sink into a real,
+   * extracted section: an Achievements / Accomplishments / Awards / Activities
+   * block is name-led and often single-line, so it is parsed by
+   * `extractAchievements` on the shared entry-block primitive and rendered as
+   * its own section. Like every other keyed section it still pushes a section
+   * boundary in `splitIntoSections`, so it continues to terminate the preceding
+   * section (the boundary job it did while in `other`) — sidebar labels above
+   * the main content stream don't bleed across it. `awards` lives here rather
+   * than under `certifications` (where it was a loose alias) so an AWARDS
+   * heading reads as an achievement, not a certification.
+   */
+  achievements: [
+    "achievements",
+    "accomplishments",
+    "activities",
+    "awards",
+    "awards & honors",
+    "awards and honors",
+    "honors",
+    "honors & awards",
+    "honors and awards",
+  ],
+  /**
+   * Sink bucket for genuinely-ignored sidebar labels that must terminate the
+   * preceding section (e.g. STRENGTHS, FOCUS AREAS in two-column PDFs).
    * Nothing renders an `other` section; its sole job is to act as a boundary
    * so content that follows it does not bleed into the preceding section.
    */
   other: [
     "strengths",
-    "achievements",
-    "accomplishments",
     "highlights",
     "focus areas",
     "interests",
@@ -131,9 +152,6 @@ export const SECTION_KEYWORDS = {
     "volunteer",
     "volunteering",
     "references",
-    "activities",
-    "awards & honors",
-    "awards and honors",
     "hobbies",
     "publications",
   ],
