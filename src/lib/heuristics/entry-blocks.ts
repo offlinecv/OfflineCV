@@ -33,7 +33,7 @@ import {
   stripDateRange,
   isBulletLine,
   stripBullet,
-} from "./extract-fields.ts";
+} from "./line-primitives.ts";
 
 /**
  * How a section's entry blocks are anchored — i.e. what marks the start of a
@@ -164,61 +164,68 @@ export function parseEntryBlocks(
   if (anchors.length === 0) return [];
 
   const lookback = cfg.headerLookback ?? 0;
-  const blocks: EntryBlock[] = [];
+  return anchors.map((_, a) => buildEntryBlock(lines, anchors, a, cfg, lookback));
+}
 
-  for (let a = 0; a < anchors.length; a++) {
-    const anchorIdx = anchors[a];
-    const nextAnchorIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
-    const prevAnchorIdx = a === 0 ? 0 : anchors[a - 1] + 1;
+/**
+ * Build the single `EntryBlock` anchored at `anchors[a]`. The entry spans from
+ * just after the previous anchor to just before the next: header lines are the
+ * (lookback) non-bullet lines above the anchor, the anchor line with its dates
+ * stripped, and the consecutive non-bullet lines below it; the body is the
+ * bullet lines after that header run. Extracted from `parseEntryBlocks` so each
+ * function stays below the cognitive-complexity threshold.
+ */
+function buildEntryBlock(
+  lines: PdfLine[],
+  anchors: number[],
+  a: number,
+  cfg: EntryBlockConfig,
+  lookback: number,
+): EntryBlock {
+  const anchorIdx = anchors[a];
+  const nextAnchorIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
+  const prevAnchorIdx = a === 0 ? 0 : anchors[a - 1] + 1;
 
-    // Header candidates above the anchor (e.g. "Title\nCompany <dates>").
-    // Bounded by the previous entry's window and the configured lookback;
-    // bullets from the previous entry are skipped.
-    const aboveStart = Math.max(prevAnchorIdx, anchorIdx - lookback);
-    const aboveLines =
-      lookback > 0
-        ? lines.slice(aboveStart, anchorIdx).filter((l) => !isBulletLine(l))
-        : [];
-
-    const anchorLine = lines[anchorIdx];
-    const dates = parseDateRange(anchorLine.text);
-    const anchorTextWithoutDates = stripDateRange(anchorLine.text);
-
-    // Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
-    // consecutive non-bullet lines until the first bullet or the next anchor.
-    const belowHeaderLines: PdfLine[] = [];
-    for (let i = anchorIdx + 1; i < nextAnchorIdx; i++) {
-      if (isBulletLine(lines[i])) break;
-      belowHeaderLines.push(lines[i]);
-    }
-
-    const headerLines = [
-      ...aboveLines.map((l) => l.text),
-      anchorTextWithoutDates,
-      ...belowHeaderLines.map((l) => l.text),
-    ]
-      .map((t) => t.trim())
-      .filter(Boolean);
-
-    // Body: bullets after the below-header run, until the next anchor.
-    const bodyStart = anchorIdx + 1 + belowHeaderLines.length;
-    const bulletLines = cfg.collectBody
-      ? lines.slice(bodyStart, nextAnchorIdx).filter((l) => isBulletLine(l))
+  // Header candidates above the anchor (e.g. "Title\nCompany <dates>").
+  // Bounded by the previous entry's window and the configured lookback;
+  // bullets from the previous entry are skipped.
+  const aboveStart = Math.max(prevAnchorIdx, anchorIdx - lookback);
+  const aboveLines =
+    lookback > 0
+      ? lines.slice(aboveStart, anchorIdx).filter((l) => !isBulletLine(l))
       : [];
-    const body = cfg.collectBody
-      ? bulletLines
-          .map((l) => stripBullet(l.text))
-          .join("\n")
-          .trim() || undefined
-      : undefined;
 
-    blocks.push({
-      headerLines,
-      dates,
-      body,
-      bulletCount: bulletLines.length,
-    });
+  const anchorLine = lines[anchorIdx];
+  const dates = parseDateRange(anchorLine.text);
+  const anchorTextWithoutDates = stripDateRange(anchorLine.text);
+
+  // Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
+  // consecutive non-bullet lines until the first bullet or the next anchor.
+  const belowHeaderLines: PdfLine[] = [];
+  for (let i = anchorIdx + 1; i < nextAnchorIdx; i++) {
+    if (isBulletLine(lines[i])) break;
+    belowHeaderLines.push(lines[i]);
   }
 
-  return blocks;
+  const headerLines = [
+    ...aboveLines.map((l) => l.text),
+    anchorTextWithoutDates,
+    ...belowHeaderLines.map((l) => l.text),
+  ]
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  // Body: bullets after the below-header run, until the next anchor.
+  const bodyStart = anchorIdx + 1 + belowHeaderLines.length;
+  const bulletLines = cfg.collectBody
+    ? lines.slice(bodyStart, nextAnchorIdx).filter((l) => isBulletLine(l))
+    : [];
+  const body = cfg.collectBody
+    ? bulletLines
+        .map((l) => stripBullet(l.text))
+        .join("\n")
+        .trim() || undefined
+    : undefined;
+
+  return { headerLines, dates, body, bulletCount: bulletLines.length };
 }

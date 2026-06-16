@@ -28,7 +28,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm run test
+      # Run the suite with coverage so the fallow step below can compute
+      # accurate per-function CRAP scores (coverage/coverage-final.json).
+      - run: npm run test:coverage
       - run: npm run build
       # Report-only static-analysis gate (#15). `fallow audit` is a diff gate,
       # so it's scoped to changes vs origin/main; non-blocking for now (a
@@ -37,7 +39,8 @@ jobs:
       # non-zero, so the upload step never fails on an empty file.
       - name: fallow static analysis
         run: |
-          npx fallow audit --format sarif --base origin/main > fallow.sarif \
+          npx fallow audit --format sarif --base origin/main \
+            --coverage coverage/coverage-final.json > fallow.sarif \
             || echo "fallow audit exited non-zero (report-only, ignored)"
           if [ ! -s fallow.sarif ]; then
             echo '{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"fallow"}},"results":[]}]}' > fallow.sarif

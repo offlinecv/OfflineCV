@@ -6,6 +6,9 @@ import {
   extractContact,
   extractName,
   extractEducation,
+  extractExperience,
+  extractProjects,
+  extractAchievements,
 } from "./extract-fields.ts";
 import {
   groupIntoLines,
@@ -413,5 +416,106 @@ describe("extractEducation — date-range parsing (issue #97)", () => {
     expect(value[0].year).toBe("2019");
     expect(value[0].end_date).toBe("2019");
     expect(value[0].start_date).toBeUndefined();
+  });
+});
+
+// ── Entry-block extractors (experience / projects / achievements) ─────────────
+// Cover the per-block mapping helpers (`experienceFromBlock`, `projectFromBlock`,
+// `achievementFromBlock`) directly: fully-populated entries exercise every
+// optional-field branch, minimal/empty inputs exercise the fallbacks.
+
+function mkSection(
+  name: PdfSection["name"],
+  specs: Array<{ text: string; fontSize?: number }>,
+): PdfSection {
+  return { name, lines: groupIntoLines(mkItems(specs)) };
+}
+
+describe("extractExperience", () => {
+  it("maps a fully-formed role: title, company, dates, bullets", () => {
+    const section = mkSection("experience", [
+      { text: "Acme Corporation" },
+      { text: "Senior Software Engineer" },
+      { text: "Jan 2020 - Mar 2022" },
+      { text: "• Shipped the thing" },
+      { text: "• Drove revenue 30%" },
+    ]);
+    const { value, confidence } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].company).toBe("Acme Corporation");
+    expect(value[0].title).toBe("Senior Software Engineer");
+    expect(value[0].start_date).toBe("Jan 2020");
+    expect(value[0].end_date).toBe("Mar 2022");
+    expect(value[0].description).toContain("Shipped the thing");
+    expect(confidence).toBeGreaterThan(0.8);
+  });
+
+  it("marks an open-ended role is_current (Present)", () => {
+    const section = mkSection("experience", [
+      { text: "Globex" },
+      { text: "Staff Engineer" },
+      { text: "Apr 2022 - Present" },
+      { text: "• Owns platform" },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value[0].is_current).toBe(true);
+    expect(value[0].end_date).toBeUndefined();
+  });
+
+  it("returns empty + zero confidence for an absent section", () => {
+    expect(extractExperience(undefined)).toEqual({ value: [], confidence: 0 });
+  });
+});
+
+describe("extractProjects", () => {
+  it("lifts a URL out of the header and keeps the clean name", () => {
+    const section = mkSection("projects", [
+      { text: "Resume Linter https://github.com/acme/resumelint" },
+      { text: "• Parses PDFs in the browser" },
+    ]);
+    const { value, confidence } = extractProjects(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].name).toBe("Resume Linter");
+    expect(value[0].url).toBe("https://github.com/acme/resumelint");
+    expect(value[0].description).toContain("Parses PDFs");
+    expect(confidence).toBeGreaterThan(0);
+  });
+
+  it("keeps a date-less project (the #95 bug) with a bare name", () => {
+    const section = mkSection("projects", [{ text: "Side Project Alpha" }]);
+    const { value } = extractProjects(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].name).toBe("Side Project Alpha");
+    expect(value[0].start_date).toBeUndefined();
+  });
+
+  it("returns empty for an absent section", () => {
+    expect(extractProjects(undefined)).toEqual({ value: [], confidence: 0 });
+  });
+});
+
+describe("extractAchievements", () => {
+  it("maps title + lead year + url, dropping the date range to a year", () => {
+    const section = mkSection("achievements", [
+      { text: "Best Paper Award 2021 https://conf.example.com/paper" },
+      { text: "• Cited 100+ times" },
+    ]);
+    const { value } = extractAchievements(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].title).toBe("Best Paper Award");
+    expect(value[0].year).toBe("2021");
+    expect(value[0].url).toBe("https://conf.example.com/paper");
+    expect(value[0].description).toContain("Cited 100+");
+  });
+
+  it("keeps a bare title-only achievement", () => {
+    const section = mkSection("achievements", [{ text: "Dean's List" }]);
+    const { value } = extractAchievements(section);
+    expect(value[0].title).toBe("Dean's List");
+    expect(value[0].year).toBeUndefined();
+  });
+
+  it("returns empty for an absent section", () => {
+    expect(extractAchievements(undefined)).toEqual({ value: [], confidence: 0 });
   });
 });

@@ -27,7 +27,6 @@ import {
   URL_RE,
   US_LOCATION_RE,
   INTL_LOCATION_RE,
-  DATE_RANGE_RE,
   YEAR_RE,
   MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
@@ -37,18 +36,15 @@ import {
 } from "./regex.ts";
 import { findFirstPhone } from "./phone.ts";
 import { parseEntryBlocks } from "./entry-blocks.ts";
+import type { EntryBlock } from "./entry-blocks.ts";
+import {
+  isBulletLine,
+  stripBullet,
+  parseDateRange,
+  normalizeDate,
+} from "./line-primitives.ts";
 
 // ── Small utilities ─────────────────────────────────────────────────────────
-
-/** True if the line looks like a bullet point (starts with •, ‣, -, *, ◦, or is indented prose). */
-export function isBulletLine(line: PdfLine): boolean {
-  return /^\s*[•\u2023\u25AA\u25CF\u25E6\u2043*\-–—]/.test(line.text);
-}
-
-/** Strip leading bullet glyphs + whitespace. */
-export function stripBullet(text: string): string {
-  return text.replace(/^\s*[•\u2023\u25AA\u25CF\u25E6\u2043*\-–—]\s*/, "").trim();
-}
 
 /** First regex hit as trimmed string, or undefined. */
 function firstMatch(re: RegExp, text: string): string | undefined {
@@ -538,26 +534,34 @@ export function extractExperience(
     headerLookback: 2,
   });
   if (blocks.length === 0) return { value: [], confidence: 0 };
+  const built = blocks.map(experienceFromBlock);
+  return {
+    value: built.map((b) => b.entry),
+    confidence: avgScore(built.map((b) => b.score)),
+  };
+}
 
-  const entries: ResumeExperience[] = [];
-  const perEntryScores: number[] = [];
+/** Map one dated entry block to a `ResumeExperience` and its confidence score.
+ *  Extracted from `extractExperience` to keep each function below the
+ *  complexity threshold; mirrors `projectFromBlock` / `achievementFromBlock`. */
+function experienceFromBlock(block: EntryBlock): {
+  entry: ResumeExperience;
+  score: number;
+} {
+  const { dates } = block;
+  const { title, company, team } = disambiguateCompanyTitle(block.headerLines);
+  const description = block.body;
 
-  for (const block of blocks) {
-    const { dates } = block;
-    const { title, company, team } = disambiguateCompanyTitle(
-      block.headerLines,
-    );
-    const description = block.body;
+  // Score the entry.
+  let score = 0;
+  if (dates.start_date) score += 0.25;
+  if (dates.end_date || dates.is_current) score += 0.15;
+  if (company) score += 0.25;
+  if (title) score += 0.2;
+  if (block.bulletCount >= 1) score += 0.15;
 
-    // Score the entry.
-    let score = 0;
-    if (dates.start_date) score += 0.25;
-    if (dates.end_date || dates.is_current) score += 0.15;
-    if (company) score += 0.25;
-    if (title) score += 0.2;
-    if (block.bulletCount >= 1) score += 0.15;
-
-    entries.push({
+  return {
+    entry: {
       title: title ?? "",
       company: company ?? "",
       ...(team ? { team } : {}),
@@ -565,14 +569,9 @@ export function extractExperience(
       ...(dates.end_date ? { end_date: dates.end_date } : {}),
       ...(dates.is_current ? { is_current: true } : {}),
       description: description || undefined,
-    });
-    perEntryScores.push(Math.min(score, 1));
-  }
-
-  const avg =
-    perEntryScores.reduce((a, b) => a + b, 0) /
-    Math.max(perEntryScores.length, 1);
-  return { value: entries, confidence: avg };
+    },
+    score: Math.min(score, 1),
+  };
 }
 
 // ── Projects ────────────────────────────────────────────────────────────────
@@ -604,48 +603,67 @@ export function extractProjects(
     collectBody: true,
   });
   if (blocks.length === 0) return { value: [], confidence: 0 };
+  const built = blocks.map(projectFromBlock);
+  return {
+    value: built.map((b) => b.entry),
+    confidence: avgScore(built.map((b) => b.score)),
+  };
+}
 
-  const entries: ResumeProject[] = [];
-  const perEntryScores: number[] = [];
+/** Mean of per-entry confidence scores; 0 for an empty list. */
+function avgScore(scores: number[]): number {
+  return scores.reduce((a, b) => a + b, 0) / Math.max(scores.length, 1);
+}
 
-  for (const block of blocks) {
-    const { dates } = block;
+/**
+ * Split an entry's header lines into a leading label and a lifted URL. The URL
+ * (repo / live demo / publication link) may appear anywhere in the header; it
+ * is removed from the first line and trailing separators are trimmed. Shared by
+ * `projectFromBlock` and `achievementFromBlock` — the SAME header shape (#96).
+ */
+function liftHeaderLabel(headerLines: string[]): {
+  label: string;
+  url?: string;
+} {
+  const headerJoined = headerLines.join(" ");
+  const url = firstMatch(URL_RE, headerJoined);
+  const raw = headerLines[0] ?? "";
+  const label = (url ? raw.replace(URL_RE, "") : raw)
+    .replace(/[\s|•·\-–—]+$/g, "")
+    .trim();
+  URL_RE.lastIndex = 0;
+  return { label, ...(url ? { url } : {}) };
+}
 
-    // The first header line is the project name. A URL anywhere in the header
-    // lines (repo / live demo) is lifted out and stripped from the name.
-    const headerJoined = block.headerLines.join(" ");
-    const url = firstMatch(URL_RE, headerJoined);
-    const nameRaw = block.headerLines[0] ?? "";
-    const name = (url ? nameRaw.replace(URL_RE, "") : nameRaw)
-      .replace(/[\s|•·\-–—]+$/g, "")
-      .trim();
-    URL_RE.lastIndex = 0;
+/** Map one entry block to a `ResumeProject` and its confidence score. Extracted
+ *  from `extractProjects` to keep each function below the complexity threshold. */
+function projectFromBlock(block: EntryBlock): {
+  entry: ResumeProject;
+  score: number;
+} {
+  const { dates } = block;
+  const { label: name, url } = liftHeaderLabel(block.headerLines);
+  const description = block.body;
 
-    const description = block.body;
+  // Score the entry: a name (0.4), a date (0.2), and at least one bullet
+  // (0.4) — projects have no company/title axis, so the weights differ from
+  // experience but still reward a fully-formed entry.
+  let score = 0;
+  if (name) score += 0.4;
+  if (dates.start_date) score += 0.2;
+  if (block.bulletCount >= 1) score += 0.4;
 
-    // Score the entry: a name (0.4), a date (0.2), and at least one bullet
-    // (0.4) — projects have no company/title axis, so the weights differ from
-    // experience but still reward a fully-formed entry.
-    let score = 0;
-    if (name) score += 0.4;
-    if (dates.start_date) score += 0.2;
-    if (block.bulletCount >= 1) score += 0.4;
-
-    entries.push({
+  return {
+    entry: {
       name,
       ...(dates.start_date ? { start_date: dates.start_date } : {}),
       ...(dates.end_date ? { end_date: dates.end_date } : {}),
       ...(dates.is_current ? { is_current: true } : {}),
       ...(description ? { description } : {}),
       ...(url ? { url } : {}),
-    });
-    perEntryScores.push(Math.min(score, 1));
-  }
-
-  const avg =
-    perEntryScores.reduce((a, b) => a + b, 0) /
-    Math.max(perEntryScores.length, 1);
-  return { value: entries, confidence: avg };
+    },
+    score: Math.min(score, 1),
+  };
 }
 
 // ── Achievements ──────────────────────────────────────────────────────────────
@@ -679,79 +697,47 @@ export function extractAchievements(
     collectBody: true,
   });
   if (blocks.length === 0) return { value: [], confidence: 0 };
+  const built = blocks.map(achievementFromBlock);
+  return {
+    value: built.map((b) => b.entry),
+    confidence: avgScore(built.map((b) => b.score)),
+  };
+}
 
-  const entries: HeuristicAchievement[] = [];
-  const perEntryScores: number[] = [];
+/** Map one entry block to a `HeuristicAchievement` and its confidence score.
+ *  Extracted from `extractAchievements` to keep each function below the
+ *  complexity threshold; mirrors `projectFromBlock`. */
+function achievementFromBlock(block: EntryBlock): {
+  entry: HeuristicAchievement;
+  score: number;
+} {
+  const { dates } = block;
+  const { label: title, url } = liftHeaderLabel(block.headerLines);
 
-  for (const block of blocks) {
-    const { dates } = block;
+  // Reduce any date range the header carried to a single lead year.
+  const year = dates.start_date
+    ? firstMatch(YEAR_RE, dates.start_date)
+    : undefined;
+  const description = block.body;
 
-    // The first header line is the item title. A URL anywhere in the header
-    // lines (publication / patent / press link) is lifted out and stripped.
-    const headerJoined = block.headerLines.join(" ");
-    const url = firstMatch(URL_RE, headerJoined);
-    const titleRaw = block.headerLines[0] ?? "";
-    const title = (url ? titleRaw.replace(URL_RE, "") : titleRaw)
-      .replace(/[\s|•·\-–—]+$/g, "")
-      .trim();
-    URL_RE.lastIndex = 0;
+  // Score the entry: a title (0.5) and at least one bullet (0.5). Achievements
+  // have no company/title axis and the year is optional, so they don't earn a
+  // date weight — a named, bulleted item is a fully-formed entry.
+  let score = 0;
+  if (title) score += 0.5;
+  if (block.bulletCount >= 1) score += 0.5;
 
-    // Reduce any date range the header carried to a single lead year.
-    const year = dates.start_date
-      ? firstMatch(YEAR_RE, dates.start_date)
-      : undefined;
-
-    const description = block.body;
-
-    // Score the entry: a title (0.5) and at least one bullet (0.5). Achievements
-    // have no company/title axis and the year is optional, so they don't earn a
-    // date weight — a named, bulleted item is a fully-formed entry.
-    let score = 0;
-    if (title) score += 0.5;
-    if (block.bulletCount >= 1) score += 0.5;
-
-    entries.push({
+  return {
+    entry: {
       title,
       ...(year ? { year } : {}),
       ...(url ? { url } : {}),
       ...(description ? { description } : {}),
-    });
-    perEntryScores.push(Math.min(score, 1));
-  }
-
-  const avg =
-    perEntryScores.reduce((a, b) => a + b, 0) /
-    Math.max(perEntryScores.length, 1);
-  return { value: entries, confidence: avg };
+    },
+    score: Math.min(score, 1),
+  };
 }
 
-/** Parse a date range (start/end) from a line. Tolerates M/YYYY, Mmm YYYY, YYYY. */
-export function parseDateRange(text: string): {
-  start_date?: string;
-  end_date?: string;
-  is_current?: boolean;
-} {
-  // Try the paired DATE_RANGE_RE first.
-  const m = DATE_RANGE_RE.exec(text);
-  DATE_RANGE_RE.lastIndex = 0;
-  if (m) {
-    const start = normalizeDate(m[1]);
-    const endRaw = m[2];
-    if (/^(present|current|now|ongoing)$/i.test(endRaw)) {
-      return { start_date: start, is_current: true };
-    }
-    return { start_date: start, end_date: normalizeDate(endRaw) };
-  }
-  // Fall back to loose detection: first year.
-  const year = YEAR_RE.exec(text);
-  YEAR_RE.lastIndex = 0;
-  if (year) return { start_date: year[0] };
-  return {};
-}
-
-function normalizeDate(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim();
-}
 
 /** Infer the precision a date string carries from its shape. A month name or a
  *  numeric month (`MM/YYYY`, `MM-YYYY`) → "month"; a bare 4-digit year → "year".
@@ -862,17 +848,6 @@ function educationDateFields(
       : {}),
     ...(dates.year ? { year: dates.year } : {}),
   };
-}
-
-export function stripDateRange(text: string): string {
-  // Remove the paired match and leftover year tokens.
-  let cleaned = text.replace(DATE_RANGE_RE, "").trim();
-  DATE_RANGE_RE.lastIndex = 0;
-  cleaned = cleaned.replace(/\b(Present|Current|Now|Ongoing)\b/gi, "").trim();
-  cleaned = cleaned.replace(YEAR_RE, "").trim();
-  YEAR_RE.lastIndex = 0;
-  cleaned = cleaned.replace(/^[-–—,|\s]+|[-–—,|\s]+$/g, "");
-  return cleaned;
 }
 
 /**
