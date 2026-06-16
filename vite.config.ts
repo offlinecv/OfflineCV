@@ -4,6 +4,7 @@
 /// <reference types="vitest" />
 import { execSync } from "node:child_process";
 import { defineConfig, type Plugin } from "vite";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 
 // Build identity. CI sets GITHUB_SHA (push to main → the deployed commit); a
@@ -44,7 +45,7 @@ function emitVersionJson(version: string): Plugin {
 
 export default defineConfig({
   base: "/resumelint/",
-  plugins: [react(), emitVersionJson(APP_VERSION)],
+  plugins: [tailwindcss(), react(), emitVersionJson(APP_VERSION)],
   define: {
     __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
     __APP_VERSION__: JSON.stringify(APP_VERSION),

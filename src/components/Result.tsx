@@ -73,7 +73,7 @@ function ParsedCard({
   edit: EditableParse;
 }) {
   return (
-    <Card className="flex flex-col gap-6 shadow-sm">
+    <Card className="flex flex-col gap-6 shadow-xs">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <StatusBadge tone="ok">Parsed</StatusBadge>
@@ -126,7 +126,7 @@ function LimitedParsingCard({
   const uniqueUrls = Array.from(new Set(links.map((l) => l.url)));
 
   return (
-    <Card className="flex flex-col gap-5 shadow-sm">
+    <Card className="flex flex-col gap-5 shadow-xs">
       <header className="flex items-center justify-between">
         <StatusBadge tone="limited">Limited parsing</StatusBadge>
         <Button variant="link" className="text-content-primary" onClick={onReset}>
