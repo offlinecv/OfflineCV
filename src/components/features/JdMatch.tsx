@@ -27,7 +27,7 @@ export function JdMatch({ coverage, terms, nounsDropped = 0 }: JdMatchProps) {
   const covered = coverage.covered.length;
 
   return (
-    <Card className="flex flex-col gap-4 shadow-sm">
+    <Card className="flex flex-col gap-4 shadow-xs">
       <header className="flex flex-col gap-1">
         <div className="flex items-baseline gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">

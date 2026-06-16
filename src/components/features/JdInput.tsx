@@ -73,7 +73,7 @@ export function JdInput({ value, onChange, resumeParsed = false }: JdInputProps)
   };
 
   return (
-    <Card className="flex flex-col gap-3 shadow-sm">
+    <Card className="flex flex-col gap-3 shadow-xs">
       <div className="flex flex-col gap-1">
         <h2
           id="jd-input-label"
@@ -99,7 +99,7 @@ export function JdInput({ value, onChange, resumeParsed = false }: JdInputProps)
           onKeyDown={handleUrlKeyDown}
           placeholder="Or paste a job posting URL (Greenhouse, Lever, Workable, Recruitee)…"
           aria-label="Job posting URL"
-          className="min-w-0 flex-1 rounded-lg border border-border-light bg-surface-subtle px-3 py-1.5 text-sm text-content-primary placeholder:text-content-muted focus:border-border focus:outline-none"
+          className="min-w-0 flex-1 rounded-lg border border-border-light bg-surface-subtle px-3 py-1.5 text-sm text-content-primary placeholder:text-content-muted focus:border-border focus:outline-hidden"
         />
         <Button
           variant="primary"
@@ -132,7 +132,7 @@ export function JdInput({ value, onChange, resumeParsed = false }: JdInputProps)
         onChange={(e) => onChange(e.target.value)}
         placeholder="Paste the job description here…"
         aria-labelledby="jd-input-label"
-        className="min-h-[160px] resize-y rounded-lg border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed text-content-primary placeholder:text-content-muted focus:border-border focus:outline-none"
+        className="min-h-[160px] resize-y rounded-lg border border-border-light bg-surface-subtle p-3 text-sm leading-relaxed text-content-primary placeholder:text-content-muted focus:border-border focus:outline-hidden"
       />
 
       {value.trim().length > 0 && !resumeParsed && (
