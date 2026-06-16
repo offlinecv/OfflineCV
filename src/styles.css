@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "./styles/theme.css"; /* semantic vocabulary → var() — stable contract */
+@import "./design-system/styles/theme.css"; /* semantic vocabulary → var() — stable contract */
 @import "@design-tokens"; /* default raw values — swappable via the Vite @design-tokens alias */
 
 html {

@@ -16,9 +16,7 @@
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { buildContactFields } from "../../lib/contact.ts";
-import { Chip } from "../ui/Chip.tsx";
-import { Card } from "../shared/Card.tsx";
-import { EditableField } from "../ui/EditableField.tsx";
+import { Chip, Card, EditableField } from "@design-system";
 import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
 
 interface ContactCardProps {

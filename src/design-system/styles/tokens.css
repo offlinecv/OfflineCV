@@ -2,13 +2,17 @@
 /* Copyright 2026 The resumelint Authors */
 
 /*
- * Default token VALUES — the SWAPPABLE layer (the default ResumeLint look).
+ * Default token VALUES — the SWAPPABLE layer.
+ *
+ * A generic, accessible default palette (slate neutrals + a blue accent), NOT a
+ * specific product brand — so an outside cloner ships a clean, unbranded look
+ * out of the box and supplies their own brand at this one seam.
  *
  * These raw --color-* custom properties are the implementation behind the
  * semantic vocabulary in styles/theme.css. They are the override seam: a
  * downstream productionizer supplies their own brand without forking, either
  * by (1) redefining these same properties in a stylesheet imported after
- * ResumeLint's (cascade wins), or (2) pointing the Vite `@design-tokens`
+ * resumelint's (cascade wins), or (2) pointing the Vite `@design-tokens`
  * alias at their own complete copy of this file. See the README "Theming"
  * section. The semantic Tailwind classes are generated from these names and
  * do not change — only the values here are meant to be replaced.
@@ -16,26 +20,26 @@
 :root {
   color-scheme: light dark;
 
-  --color-brand-navy: #1a365d;
-  --color-brand-navy-dark: #132a4a;
-  --color-brand-amber: #b8860b;
-  --color-brand-amber-light: #d4a017;
-  --color-brand-cream: #FAFAF8;
-  --color-bg-base: #FAFAF8;
+  --color-brand-navy: #1e293b;
+  --color-brand-navy-dark: #0f172a;
+  --color-brand-amber: #2563eb;
+  --color-brand-amber-light: #3b82f6;
+  --color-brand-cream: #f8fafc;
+  --color-bg-base: #f8fafc;
   --color-bg-card: #ffffff;
-  --color-bg-card-warm: #f7f5f0;
-  --color-bg-subtle: #f3f4f6;
-  --color-bg-hover: #f0ede8;
-  --color-text-primary: #111827;
-  --color-text-secondary: #374151;
-  --color-text-tertiary: #4b5563;
-  --color-text-muted: #6b7280;
+  --color-bg-card-warm: #f1f5f9;
+  --color-bg-subtle: #f1f5f9;
+  --color-bg-hover: #e2e8f0;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #334155;
+  --color-text-tertiary: #475569;
+  --color-text-muted: #64748b;
   --color-text-inverse: #ffffff;
-  --color-border-light: #e5e7eb;
-  --color-border-default: #d1d5db;
-  --color-border-strong: #9ca3af;
-  --color-accent-primary: #1a365d;
-  --color-accent-primary-hover: #132a4a;
+  --color-border-light: #e2e8f0;
+  --color-border-default: #cbd5e1;
+  --color-border-strong: #94a3b8;
+  --color-accent-primary: #2563eb;
+  --color-accent-primary-hover: #1d4ed8;
   --color-accent-forward: #4f46e5;
   --color-accent-forward-bg: #EEF2FF;
   --color-feedback-error-bg: #fef2f2;
@@ -58,26 +62,26 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-brand-navy: #4a90c4;
-    --color-brand-navy-dark: #3a7aad;
-    --color-brand-amber: #f0c760;
-    --color-brand-amber-light: #f5d47a;
-    --color-brand-cream: #0f1419;
-    --color-bg-base: #0f1419;
-    --color-bg-card: #1a2030;
-    --color-bg-card-warm: #1e2538;
-    --color-bg-subtle: #252d3f;
-    --color-bg-hover: #2c3549;
-    --color-text-primary: #f0f2f5;
-    --color-text-secondary: #b8bfcc;
-    --color-text-tertiary: #8892a4;
-    --color-text-muted: #8a93a6;
-    --color-text-inverse: #0f1419;
-    --color-border-light: #2c3549;
-    --color-border-default: #3a4459;
-    --color-border-strong: #4d5668;
-    --color-accent-primary: #6ba3d9;
-    --color-accent-primary-hover: #84b6e5;
+    --color-brand-navy: #94a3b8;
+    --color-brand-navy-dark: #cbd5e1;
+    --color-brand-amber: #60a5fa;
+    --color-brand-amber-light: #93c5fd;
+    --color-brand-cream: #0f172a;
+    --color-bg-base: #0f172a;
+    --color-bg-card: #1e293b;
+    --color-bg-card-warm: #1e293b;
+    --color-bg-subtle: #334155;
+    --color-bg-hover: #334155;
+    --color-text-primary: #f1f5f9;
+    --color-text-secondary: #cbd5e1;
+    --color-text-tertiary: #94a3b8;
+    --color-text-muted: #94a3b8;
+    --color-text-inverse: #0f172a;
+    --color-border-light: #334155;
+    --color-border-default: #475569;
+    --color-border-strong: #64748b;
+    --color-accent-primary: #60a5fa;
+    --color-accent-primary-hover: #93c5fd;
     --color-accent-forward: #818cf8;
     --color-accent-forward-bg: #1e1b4b;
     --color-feedback-error-bg: #2d1215;

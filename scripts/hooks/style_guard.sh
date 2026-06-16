@@ -5,12 +5,12 @@
 # PostToolUse(Edit|Write) hook: warn when a component or App.tsx edit
 # introduces UI-primitive / token anti-patterns memorialized in CLAUDE.md:
 #
-#   1. Raw <button in feature code (outside ui/Button.tsx)
+#   1. Raw <button in feature code (outside the Button primitive)
 #   2. Hardcoded Tailwind palette classes (bg-red-500, text-slate-400, …)
 #      instead of semantic tokens (bg-surface-card, text-content-primary, …)
 #   3. Manual dark: color variants instead of semantic tokens
 #
-# Scope: src/components/**/*.{ts,tsx} and src/App.tsx.
+# Scope: src/components/**, src/design-system/**, and src/App.tsx (all .ts/.tsx).
 #
 # NON-blocking — emits warnings but always exits 0 so the edit proceeds.
 # Override: RESUMELINT_SKIP_HOOKS=1.
@@ -36,15 +36,16 @@ esac
 
 REPO_ROOT="$(cd "${HOOK_DIR}/../.." && pwd -P)"
 
-# Scope: src/components/** and src/App.tsx only.
+# Scope: src/components/**, src/design-system/**, and src/App.tsx only.
 case "$file_path" in
   "$REPO_ROOT"/src/components/*) ;;
+  "$REPO_ROOT"/src/design-system/*) ;;
   "$REPO_ROOT"/src/App.tsx) ;;
   *) exit 0 ;;
 esac
 
 # The Button primitive itself may use <button — skip it for check 1.
-BUTTON_PRIMITIVE="$REPO_ROOT/src/components/ui/Button.tsx"
+BUTTON_PRIMITIVE="$REPO_ROOT/src/design-system/primitives/Button.tsx"
 
 WARNINGS=0
 
@@ -58,7 +59,7 @@ strip_comments() { grep -v '^\s*//' "$1" 2>/dev/null | grep -v '^\s*\*'; }
 if [[ "$file_path" != "$BUTTON_PRIMITIVE" ]]; then
   if strip_comments "$file_path" | grep -q '<button'; then
     echo "⚠️  STYLE GUARD: raw <button found in ${file_path#"$REPO_ROOT"/}"
-    echo "   Use the <Button> primitive from src/components/ui/Button.tsx instead."
+    echo "   Use the <Button> primitive from @design-system instead."
     echo "   See CLAUDE.md \"What NOT to do\"."
     WARNINGS=$((WARNINGS + 1))
   fi

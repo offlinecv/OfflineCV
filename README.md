@@ -67,12 +67,15 @@ set `VITE_POSTHOG_KEY` (and optionally `VITE_POSTHOG_HOST`, defaulting to
 
 Colors are plain CSS custom properties split into two layers:
 
-- **`src/styles/theme.css`** — the semantic vocabulary (`--color-surface-card`,
-  `--color-content-primary`, `--color-brand-amber`, …). This is the **stable
-  contract**: it generates the Tailwind classes (`bg-surface-card`,
-  `text-content-primary`, …) that the components use. Names here don't change.
-- **`src/styles/tokens.css`** — the raw values behind that vocabulary (the
-  default ResumeLint look, light and dark). This is the **swappable layer**.
+- **`src/design-system/styles/theme.css`** — the semantic vocabulary
+  (`--color-surface-card`, `--color-content-primary`, `--color-brand-amber`, …).
+  This is the **stable contract**: it generates the Tailwind classes
+  (`bg-surface-card`, `text-content-primary`, …) that the components use. Names
+  here don't change.
+- **`src/design-system/styles/tokens.css`** — the raw values behind that
+  vocabulary, light and dark. The default is a **generic, accessible palette
+  (slate neutrals + a blue accent)**, not a specific product brand. This is the
+  **swappable layer**.
 
 You can reskin resumelint to your own brand **without forking this repo**, two
 ways:
@@ -98,13 +101,14 @@ Import your own stylesheet *after* resumelint's and redefine the same
 
 Only override the properties you want to change; everything else keeps the
 default. The contract to implement is the `--color-*` names in
-`src/styles/tokens.css`.
+`src/design-system/styles/tokens.css`.
 
 ### 2. Full replacement (Vite alias)
 
 `src/styles.css` imports the token *values* through a bare `@design-tokens`
 specifier. `vite.config.ts` aliases that to the in-tree
-`src/styles/tokens.css` by default, so the standalone build is unaffected.
+`src/design-system/styles/tokens.css` by default, so the standalone build is
+unaffected.
 Point the alias at your own complete copy of the tokens file to swap the whole
 brand in one place:
 
@@ -120,7 +124,59 @@ resolve: {
 ```
 
 Your file must define the full set of `--color-*` properties (copy
-`src/styles/tokens.css` as a starting point) so every semantic token resolves.
+`src/design-system/styles/tokens.css` as a starting point) so every semantic
+token resolves.
+
+### 3. Swapping the component layer (Vite alias)
+
+The token *values* are not the only swappable layer. The components themselves
+— primitives (`Button`, `Chip`, `EditableField`) and shared-composed pieces
+(`Card`, `StatusBadge`, `ErrorState`, `ErrorBoundary`, `UpdateBanner`) — live
+in one in-tree home, `src/design-system/`, and feature code imports them only
+through the bare `@design-system` specifier (never deep paths). That specifier
+is the **component seam**.
+
+`vite.config.ts` aliases `@design-system` to the in-tree barrel
+(`src/design-system/index.ts`) by default. A downstream productionizer repoints
+that alias (in both Vite `resolve.alias` *and* the tsconfig `paths` entry) at
+their own module that re-exports the same primitive API:
+
+```ts
+// vite.config.ts (downstream)
+resolve: {
+  alias: {
+    "@design-system": fileURLToPath(
+      new URL("./src/my-design-system/index.ts", import.meta.url),
+    ),
+  },
+},
+```
+
+```jsonc
+// tsconfig.app.json (downstream)
+"paths": { "@design-system": ["src/my-design-system/index.ts"] }
+```
+
+Both layers swap at the one design-system home **without forking**: token
+values via `@design-tokens`, components via `@design-system`. The semantic
+vocabulary (`theme.css`) is the contract both share.
+
+Your replacement module must export the same component API the features consume:
+
+- **`Button`** — props: `variant?: "primary" | "ghost" | "link" | "icon"`,
+  `size?: "sm" | "md"`, plus all native `<button>` attributes (`onClick`,
+  `disabled`, `type`, `aria-*`, `className`, `children`).
+- **`Card`** — props: `{ children, className?, id? }`. Renders a `<section>`.
+- **`EditableField`** — props: `{ value, placeholder?, label, onCommit,
+  className?, textWeight?, textSize?, revealOn? }` where `value` is
+  `string | undefined`, `onCommit: (newValue: string) => void`,
+  `textWeight?: "normal" | "semibold"`, `textSize?: "xs" | "sm" | "base"`,
+  `revealOn?: "reserve" | "hover"`.
+- **`Chip`** — props: `{ icon?, children, tone?: "neutral" | "success" |
+  "warning" }`.
+- **`StatusBadge`** — props: `{ tone: "ok" | "limited" | "warning", children }`.
+- **`ErrorState`** — props: `{ tone?: "error" | "warning", children,
+  className? }`.
 
 ## Deploy (GCS)
 

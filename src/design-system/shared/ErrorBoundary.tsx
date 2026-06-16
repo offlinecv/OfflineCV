@@ -26,7 +26,7 @@
 import { Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { ErrorState } from "./ErrorState.tsx";
-import { Button } from "../ui/Button.tsx";
+import { Button } from "../primitives/Button.tsx";
 import { trackRenderError } from "../../lib/analytics.ts";
 
 interface ErrorBoundaryProps {

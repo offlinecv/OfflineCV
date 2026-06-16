@@ -27,7 +27,7 @@ import type {
   ProgressUpdate,
   WebGpuCapability,
 } from "../../lib/webllm/types.ts";
-import { Button } from "../ui/Button.tsx";
+import { Button } from "@design-system";
 
 interface RewriteButtonProps {
   bullet: string;
