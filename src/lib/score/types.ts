@@ -127,9 +127,44 @@ export interface ResumeEducation {
   id?: string;
   degree: string;
   institution: string;
+  /**
+   * Lead year of the education entry, kept for back-compat with consumers that
+   * only show a single year (`looksLikeStudent`, the reconstructed view). When a
+   * date range is parsed, this is the year of `end_date` (graduation), falling
+   * back to `start_date`.
+   */
   year?: string;
+  /** Start of an attendance range, e.g. "Sep 2024" in "Sep 2024 - July 2025".
+   *  Absent for a single graduation date ("Expected Graduation: May 2027"). */
+  start_date?: string;
+  start_date_precision?: "day" | "month" | "year" | null;
+  /** End / graduation date. For a single date the date lands here, not in
+   *  `start_date`. */
+  end_date?: string;
   end_date_precision?: "day" | "month" | "year" | null;
   description?: string;
+}
+
+// ── Projects ───────────────────────────────────────────────────────────────
+// A standalone Projects section (personal / academic / side projects). Unlike
+// Experience, a project entry is name-led and its date is optional — many
+// projects carry no date at all. Bullets describe what was built; the scorer
+// reads `description` the same way it reads `ResumeExperience.description`.
+
+export interface ResumeProject {
+  /** Project name — the header line that leads the entry. Empty string only
+   *  when the block carried no usable header line. */
+  name: string;
+  /** Start of the date range, when the header carried one. */
+  start_date?: string;
+  /** End of the date range, when present. */
+  end_date?: string;
+  /** True when the header's date range ended in "Present"/"Current". */
+  is_current?: boolean;
+  /** Bullet body joined with "\n", mirroring `ResumeExperience.description`. */
+  description?: string;
+  /** A URL on the header line (repo / live demo), when one was detected. */
+  url?: string;
 }
 
 // ── Achievements ───────────────────────────────────────────────────────────
@@ -165,6 +200,30 @@ export interface Achievement {
 
 export type AchievementsPlacement = "default" | "above_experience";
 
+// ── Heuristic achievements ──────────────────────────────────────────────────
+// The deterministic parser cannot classify an achievement's TYPE (patent vs.
+// award vs. talk) — that requires the LLM path, which populates the structured
+// `Achievement[]` above. Rather than fabricate a `type` (and the
+// `custom_emoji`/`custom_label` that `type: "custom"` mandates), the heuristic
+// path emits this honest, structure-free shape: a name-led item with optional
+// year/url and a bullet body, mirroring `ResumeProject`. A name-led item is the
+// most a regex parser can truthfully assert about an Achievements / Activities
+// / Awards block. Issue #96, design option (a).
+
+export interface HeuristicAchievement {
+  /** Item title — the header line that leads the entry. Empty string only when
+   *  the block carried no usable header line. */
+  title: string;
+  /** Lead year when the header carried a date (achievements show a single year,
+   *  not a range — we keep the first year of any range the header carried). */
+  year?: string;
+  /** A URL on the header line (e.g. a publication / patent link), when found. */
+  url?: string;
+  /** Bullet body joined with "\n", mirroring `ResumeProject.description`, so the
+   *  scorer reads it the same way it reads experience and project bullets. */
+  description?: string;
+}
+
 /**
  * Minimal resume data shape used by ATS scoring. `ParsedResume` extends this
  * with richer fields.
@@ -183,8 +242,13 @@ export interface ResumeData {
   skills: string[];
   experience: ResumeExperience[];
   education: ResumeEducation[];
+  projects?: ResumeProject[];
   certifications?: string[];
   achievements?: Achievement[];
+  /** Heuristic-path achievements (#96): honest, structure-free items the
+   *  deterministic parser can assert without classifying a type. The LLM path
+   *  populates the structured `achievements` above instead. */
+  heuristic_achievements?: HeuristicAchievement[];
   /** "default" renders the Achievements section between Education and Skills;
    *  "above_experience" promotes it between Summary and Experience. */
   achievements_placement?: AchievementsPlacement;

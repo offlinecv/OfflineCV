@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "cascade": {
     "confidence": 0,
     "triggers": [],
@@ -15,6 +15,7 @@
       "full_name",
       "given_name",
       "phone",
+      "projects",
       "skills",
       "summary",
       "website_url"
@@ -22,6 +23,8 @@
     "skillsCount": 9,
     "experienceCount": 0,
     "educationCount": 2,
+    "projectsCount": 2,
+    "achievementsCount": 0,
     "rawTextCharCount": 1530,
     "pageCount": 1,
     "linkAnnotationCount": 0,
