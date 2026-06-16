@@ -2,14 +2,11 @@
 // Copyright 2026 The resumelint Authors
 
 import { useEffect, useMemo, useState } from "react";
-import { Chip } from "./components/ui/Chip.tsx";
+import { Chip, ErrorState, ErrorBoundary, UpdateBanner } from "@design-system";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
 import { JdMatch } from "./components/features/JdMatch.tsx";
 import { JdInput } from "./components/features/JdInput.tsx";
-import { ErrorState } from "./components/shared/ErrorState.tsx";
-import { ErrorBoundary } from "./components/shared/ErrorBoundary.tsx";
-import { UpdateBanner } from "./components/shared/UpdateBanner.tsx";
 import { useResumeAnalysis } from "./hooks/useResumeAnalysis.ts";
 import { useEditableParse } from "./hooks/useEditableParse.ts";
 import { useUpdateChecker } from "./hooks/useUpdateChecker.ts";

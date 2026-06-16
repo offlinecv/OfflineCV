@@ -5,7 +5,7 @@
  * Button — the ONE interactive-button primitive.
  *
  * Variants:
- *   primary — filled amber CTA (bg-brand-amber, text-content-inverse)
+ *   primary — filled accent CTA (bg-brand-amber, text-content-inverse)
  *   ghost   — minimal surface, used for secondary / icon-only actions
  *             (text-content-secondary, hover:bg-surface-subtle)
  *   link    — looks like an inline anchor (text-content-tertiary, hover:underline)

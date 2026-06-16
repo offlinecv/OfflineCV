@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The resumelint Authors
+
+/**
+ * Design-system barrel — the `@design-system` seam.
+ *
+ * Feature code imports primitives and shared-composed components from here
+ * (`import { Button, Card } from "@design-system"`), never via deep relative
+ * paths into primitives/ or shared/. A downstream productionizer repoints the
+ * `@design-system` Vite alias (+ tsconfig `paths`) at their own module that
+ * re-exports the same primitive API — swapping the whole component layer
+ * without forking. The token VALUES swap separately via the `@design-tokens`
+ * alias (see styles/tokens.css); the semantic vocabulary (styles/theme.css)
+ * is the stable contract both layers share. See the README "Theming" section.
+ */
+
+export * from "./primitives/Button.tsx";
+export * from "./primitives/Chip.tsx";
+export * from "./primitives/EditableField.tsx";
+export * from "./shared/Card.tsx";
+export * from "./shared/StatusBadge.tsx";
+export * from "./shared/ErrorState.tsx";
+export * from "./shared/ErrorBoundary.tsx";
+export * from "./shared/UpdateBanner.tsx";

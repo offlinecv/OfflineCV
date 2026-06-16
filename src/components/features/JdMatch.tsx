@@ -12,7 +12,7 @@
 
 import type { ExtractedTerm } from "../../lib/jd-match/extract-jd-terms.ts";
 import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
-import { Card } from "../shared/Card.tsx";
+import { Card } from "@design-system";
 
 interface JdMatchProps {
   coverage: CoverageResult;
