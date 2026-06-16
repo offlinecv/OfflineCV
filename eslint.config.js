@@ -99,7 +99,11 @@ export default [
   // These rules encode the same checks style_guard.sh runs (non-blocking,
   // advisory). Here they are BLOCKING (error) and run in CI.
   {
-    files: ["src/components/**/*.{ts,tsx}", "src/App.tsx"],
+    files: [
+      "src/components/**/*.{ts,tsx}",
+      "src/design-system/**/*.{ts,tsx}",
+      "src/App.tsx",
+    ],
     rules: {
       // Raw <button> outside the Button primitive is forbidden in feature code.
       "react/forbid-elements": [
@@ -109,7 +113,7 @@ export default [
             {
               element: "button",
               message:
-                "Use the <Button> primitive from src/components/ui/Button.tsx instead of a raw <button>.",
+                "Use the <Button> primitive from @design-system instead of a raw <button>.",
             },
           ],
         },
@@ -121,7 +125,7 @@ export default [
   // ── Allow raw <button> inside the Button primitive itself ────────────────
   // Flat config: later blocks win, so this override is applied last.
   {
-    files: ["src/components/ui/Button.tsx"],
+    files: ["src/design-system/primitives/Button.tsx"],
     rules: {
       "react/forbid-elements": "off",
     },

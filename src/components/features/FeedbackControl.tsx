@@ -12,7 +12,7 @@
 
 import { useState } from "react";
 import { ANALYTICS_ENABLED, trackFeedback } from "../../lib/analytics.ts";
-import { Button } from "../ui/Button.tsx";
+import { Button } from "@design-system";
 
 interface FeedbackControlProps {
   verdictBand: string;

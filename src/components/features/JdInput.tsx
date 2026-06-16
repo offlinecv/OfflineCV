@@ -17,9 +17,7 @@
  */
 
 import { useState } from "react";
-import { Card } from "../shared/Card.tsx";
-import { Button } from "../ui/Button.tsx";
-import { ErrorState } from "../shared/ErrorState.tsx";
+import { Card, Button, ErrorState } from "@design-system";
 import { fetchJdFromUrl } from "../../lib/jd-match/fetch-jd.ts";
 
 export interface JdInputProps {

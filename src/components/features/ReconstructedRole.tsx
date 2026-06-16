@@ -23,7 +23,7 @@ import type { ReactNode } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
-import { EditableField } from "../ui/EditableField.tsx";
+import { EditableField } from "@design-system";
 import type {
   ExperienceFieldOverrides,
   BulletOverrides,
