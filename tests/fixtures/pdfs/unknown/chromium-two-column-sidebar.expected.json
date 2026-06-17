@@ -22,7 +22,6 @@
       "heuristic_achievements",
       "location",
       "phone",
-      "projects",
       "skills",
       "summary",
       "website_url"
@@ -30,7 +29,7 @@
     "skillsCount": 10,
     "experienceCount": 5,
     "educationCount": 1,
-    "projectsCount": 2,
+    "projectsCount": 0,
     "achievementsCount": 1,
     "rawTextCharCount": 3905,
     "pageCount": 2,

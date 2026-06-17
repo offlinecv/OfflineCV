@@ -297,17 +297,30 @@ function isVisualHeader(line: PdfLine, bodyBaseline: number): boolean {
   return line.maxFontSize >= bodyBaseline * VISUAL_HEADER_FONT_RATIO;
 }
 
+// Non-global clones of the contact REs for stateless boolean checks. The
+// exported forms are `/g` and carry `lastIndex` across calls — calling
+// `.test()` on them here would mutate state any future `.exec()`/`.test()`
+// caller would inherit. Dropping the `g` flag makes `.test()` stateless; the
+// pattern source stays single-sourced in regex.ts (we clone `.source`).
+const EMAIL_TEST_RE = new RegExp(EMAIL_RE.source, EMAIL_RE.flags.replace("g", ""));
+const PHONE_TEST_RE = new RegExp(PHONE_RE.source, PHONE_RE.flags.replace("g", ""));
+const LINKEDIN_TEST_RE = new RegExp(
+  LINKEDIN_RE.source,
+  LINKEDIN_RE.flags.replace("g", ""),
+);
+
 /**
  * True when a line carries name/contact shape — an email, phone, or LinkedIn
  * URL. Used to keep a large contact line in the leading profile region from
- * being promoted to a section boundary. The REs are stateful (`/g`), so reset
- * `lastIndex` before each test.
+ * being promoted to a section boundary. Uses non-global clones so no shared
+ * regex `lastIndex` state is touched.
  */
 function hasContactShape(text: string): boolean {
-  EMAIL_RE.lastIndex = 0;
-  PHONE_RE.lastIndex = 0;
-  LINKEDIN_RE.lastIndex = 0;
-  return EMAIL_RE.test(text) || PHONE_RE.test(text) || LINKEDIN_RE.test(text);
+  return (
+    EMAIL_TEST_RE.test(text) ||
+    PHONE_TEST_RE.test(text) ||
+    LINKEDIN_TEST_RE.test(text)
+  );
 }
 
 // ── Section splitting ───────────────────────────────────────────────────────

@@ -77,6 +77,15 @@ describe("matchSectionHeader — head-noun anchor fallback (#108 / #111)", () =>
     expect(matchSectionHeader("looking for new employment")).toBeNull();
   });
 
+  it("rejects numeric-qualifier prose ending in a head noun", () => {
+    // FP #3b: a digit/symbol lead char is neither lower- nor uppercase, so the
+    // casing guard must require uppercase (not merely "not lowercase"), else
+    // "5 Years Experience" opens an experience boundary mid-summary.
+    expect(matchSectionHeader("5 Years Experience")).toBeNull();
+    expect(matchSectionHeader("10+ Years Experience")).toBeNull();
+    expect(matchSectionHeader("3 Years Experience")).toBeNull();
+  });
+
   it("rejects a header-shaped line ending in terminal punctuation", () => {
     // FP #4: terminal sentence punctuation marks prose, not a heading.
     expect(matchSectionHeader("Gained Relevant Experience.")).toBeNull();

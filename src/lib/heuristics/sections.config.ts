@@ -65,6 +65,66 @@ const VALID_SECTION_NAMES = new Set<string>([
   "other",
 ]);
 
+// Per-section shape check: arrays well-formed and boolean flags real booleans.
+// Boolean flags are read structurally (the SPLIT_LETTER/ANCHOR_FALLBACKS
+// filters below), so a JSON "true" (string) or 1 (number) would pass
+// structurally then act truthy — the same drift class validate() exists to
+// catch.
+function validateSection(name: SectionName, section: SectionConfig): void {
+  if (
+    !Array.isArray(section.aliases) ||
+    section.aliases.length === 0 ||
+    !section.aliases.every((a) => typeof a === "string")
+  ) {
+    throw new Error(
+      `[sections.config] Section "${name}" must have a non-empty string[] aliases array.`,
+    );
+  }
+  if (
+    !Array.isArray(section.anchors) ||
+    !section.anchors.every((a) => typeof a === "string")
+  ) {
+    throw new Error(
+      `[sections.config] Section "${name}" must have a string[] anchors array.`,
+    );
+  }
+  if (typeof section.splitLetterNormalizable !== "boolean") {
+    throw new Error(
+      `[sections.config] Section "${name}" field "splitLetterNormalizable" must be a boolean.`,
+    );
+  }
+  if (typeof section.anchorFallback !== "boolean") {
+    throw new Error(
+      `[sections.config] Section "${name}" field "anchorFallback" must be a boolean.`,
+    );
+  }
+}
+
+// Cross-section anchor uniqueness (fallback-enabled sections only).
+// matchAnchorFallback (regex.ts) returns on the first iteration hit, so a
+// collision across two anchorFallback:true sections would resolve silently by
+// iteration order. Enforce disjointness while the fallback path is the
+// load-bearing L2 contract.
+function validateAnchorUniqueness(
+  cfg: Record<SectionName, SectionConfig>,
+): void {
+  const seenAnchors = new Map<string, SectionName>();
+  for (const [name, section] of Object.entries(cfg) as Array<
+    [SectionName, SectionConfig]
+  >) {
+    if (!section.anchorFallback) continue;
+    for (const a of section.anchors) {
+      const prior = seenAnchors.get(a);
+      if (prior) {
+        throw new Error(
+          `[sections.config] Anchor "${a}" appears in fallback-enabled sections "${prior}" and "${name}". Anchor sets across anchorFallback:true sections must be disjoint.`,
+        );
+      }
+      seenAnchors.set(a, name);
+    }
+  }
+}
+
 function validate(cfg: Record<SectionName, SectionConfig>): void {
   // Catch extra JSON keys that the one-directional compile-time guard misses.
   for (const key of Object.keys(cfg)) {
@@ -75,28 +135,12 @@ function validate(cfg: Record<SectionName, SectionConfig>): void {
       );
     }
   }
-
   for (const [name, section] of Object.entries(cfg) as Array<
     [SectionName, SectionConfig]
   >) {
-    if (
-      !Array.isArray(section.aliases) ||
-      section.aliases.length === 0 ||
-      !section.aliases.every((a) => typeof a === "string")
-    ) {
-      throw new Error(
-        `[sections.config] Section "${name}" must have a non-empty string[] aliases array.`,
-      );
-    }
-    if (
-      !Array.isArray(section.anchors) ||
-      !section.anchors.every((a) => typeof a === "string")
-    ) {
-      throw new Error(
-        `[sections.config] Section "${name}" must have a string[] anchors array.`,
-      );
-    }
+    validateSection(name, section);
   }
+  validateAnchorUniqueness(cfg);
 }
 
 validate(_drift);

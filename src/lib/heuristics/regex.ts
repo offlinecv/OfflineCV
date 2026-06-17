@@ -166,13 +166,16 @@ function matchAnchorFallback(
   const tokens = normalized.split(/\s+/).filter((t) => t.length > 0);
   // Guard 2: a qualified header is short (qualifier(s) + head noun).
   if (tokens.length === 0 || tokens.length > 4) return null;
-  // Guard 7: header casing. Each word that starts with a letter must start
-  // with an uppercase letter (Title Case) — ALL CAPS satisfies this trivially.
-  // Rejects prose fragments like "i have experience" that end in a head noun.
+  // Guard 7: header casing. Every word must start with an uppercase letter
+  // (Title Case) — ALL CAPS satisfies this trivially. Requiring uppercase
+  // (not merely "not lowercase") rejects both prose fragments like
+  // "i have experience" AND numeric-qualifier prose like "5 Years Experience"
+  // / "10+ Years Experience", whose digit/symbol lead char is neither lower-
+  // nor uppercase and would otherwise slip a sentence in as a heading.
   const rawWords = raw.trim().split(/\s+/).filter((w) => w.length > 0);
   for (const w of rawWords) {
     const first = w[0];
-    if (/[a-z]/.test(first)) return null;
+    if (!/[A-Z]/.test(first)) return null;
   }
   const last = tokens[tokens.length - 1];
   // Guard 3 + 6: last token must be an anchor of a fallback-enabled section.
