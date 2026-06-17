@@ -100,10 +100,12 @@ import {
 export {
   SECTION_KEYWORDS,
   SPLIT_LETTER_NORMALIZABLE_SECTIONS,
-  SECTION_ANCHORS,
-  SECTION_ANCHOR_FALLBACKS,
   type SectionName,
 } from "./sections.config.ts";
+// SECTION_ANCHORS / SECTION_ANCHOR_FALLBACKS are imported above for local use
+// by matchAnchorFallback but intentionally NOT re-exported — they have no
+// out-of-module consumer. Anything that needs them imports from
+// ./sections.config.ts directly (its canonical home).
 
 // A short intro letter separated from the rest of the word by a space:
 // `S UMMARY`, `E XPERIENCE`, `e xperience`. Designed templates letter-space

@@ -348,43 +348,62 @@ export function splitIntoSections(lines: PdfLine[]): PdfSection[] {
   // contact-shaped line inside the profile region.
   let seenContactInProfile = false;
 
-  const open = (name: SectionName) => {
-    sections.push({ name, lines: [] });
-    openedRealSection = true;
-  };
-  const append = (line: PdfLine) => {
-    sections[sections.length - 1].lines.push(line);
-  };
-
   for (const line of lines) {
-    const header = matchSectionHeader(line.text);
-    if (header) {
-      open(header);
+    const action = classifyLine(
+      line,
+      bodyBaseline,
+      openedRealSection,
+      seenContactInProfile,
+    );
+    if (action.kind === "open") {
+      sections.push({ name: action.name, lines: [] });
+      openedRealSection = true;
       continue;
     }
-
-    const contactShaped = hasContactShape(line.text);
-
-    if (isVisualHeader(line, bodyBaseline)) {
-      if (!openedRealSection && !seenContactInProfile) {
-        // Inside the leading name/title block (no contact line seen yet) — a
-        // font-distinct line here is the name or a title/tagline, never a
-        // section header. Keep it in the profile.
-        if (contactShaped) seenContactInProfile = true;
-        append(line);
-        continue;
-      }
-      // Past the name block (contact seen, or a real section already opened):
-      // a visual header with no keyword match opens a boundary-only `other`.
-      open("other");
-      continue;
-    }
-
-    if (!openedRealSection && contactShaped) seenContactInProfile = true;
-    append(line);
+    if (action.marksContactEnd) seenContactInProfile = true;
+    sections[sections.length - 1].lines.push(line);
   }
 
   return sections;
+}
+
+/** What `classifyLine` decided to do with one line. */
+type LineAction =
+  | { kind: "open"; name: SectionName }
+  | { kind: "append"; marksContactEnd: boolean };
+
+/**
+ * Decide whether a single line opens a section boundary or appends to the
+ * current section — the per-line core of `splitIntoSections`, extracted as a
+ * pure function of the line plus the two carry-forward state flags so the
+ * splitter loop stays flat. `marksContactEnd` reports back that an appended
+ * line is the contact line that ends the leading name block (the caller flips
+ * `seenContactInProfile`).
+ */
+function classifyLine(
+  line: PdfLine,
+  bodyBaseline: number,
+  openedRealSection: boolean,
+  seenContactInProfile: boolean,
+): LineAction {
+  const header = matchSectionHeader(line.text);
+  if (header) return { kind: "open", name: header };
+
+  const contactShaped = hasContactShape(line.text);
+
+  if (isVisualHeader(line, bodyBaseline)) {
+    // Inside the leading name/title block (no contact line seen yet, no section
+    // open) — a font-distinct line here is the name or a title/tagline, never a
+    // section header. Keep it in the profile; the contact line ends the block.
+    if (!openedRealSection && !seenContactInProfile) {
+      return { kind: "append", marksContactEnd: contactShaped };
+    }
+    // Past the name block (contact seen, or a real section already opened): a
+    // visual header with no keyword match opens a boundary-only `other`.
+    return { kind: "open", name: "other" };
+  }
+
+  return { kind: "append", marksContactEnd: !openedRealSection && contactShaped };
 }
 
 /**
