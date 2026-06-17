@@ -1,0 +1,110 @@
+{
+  "version": "1",
+  "sections": {
+    "summary": {
+      "aliases": [
+        "summary",
+        "profile",
+        "objective",
+        "about",
+        "about me",
+        "professional summary"
+      ],
+      "anchors": ["summary", "profile", "objective"],
+      "splitLetterNormalizable": true,
+      "anchorFallback": true
+    },
+    "experience": {
+      "aliases": [
+        "experience",
+        "work experience",
+        "professional experience",
+        "employment",
+        "employment history",
+        "work history",
+        "career",
+        "career history"
+      ],
+      "anchors": ["experience", "employment"],
+      "splitLetterNormalizable": true,
+      "anchorFallback": true
+    },
+    "education": {
+      "aliases": [
+        "education",
+        "academic background",
+        "academics",
+        "qualifications"
+      ],
+      "anchors": ["education", "academics", "qualifications"],
+      "splitLetterNormalizable": true,
+      "anchorFallback": true
+    },
+    "skills": {
+      "aliases": [
+        "skills",
+        "technical skills",
+        "core competencies",
+        "competencies",
+        "expertise",
+        "technologies"
+      ],
+      "anchors": ["skills", "competencies", "technologies", "expertise"],
+      "splitLetterNormalizable": false,
+      "anchorFallback": false
+    },
+    "projects": {
+      "aliases": [
+        "projects",
+        "personal projects",
+        "selected projects"
+      ],
+      "anchors": ["projects"],
+      "splitLetterNormalizable": true,
+      "anchorFallback": true
+    },
+    "certifications": {
+      "aliases": [
+        "certifications",
+        "certificates",
+        "licenses"
+      ],
+      "anchors": ["certifications", "certificates", "licenses"],
+      "splitLetterNormalizable": true,
+      "anchorFallback": true
+    },
+    "achievements": {
+      "aliases": [
+        "achievements",
+        "accomplishments",
+        "activities",
+        "awards",
+        "awards & honors",
+        "awards and honors",
+        "honors",
+        "honors & awards",
+        "honors and awards"
+      ],
+      "anchors": ["achievements", "accomplishments", "awards", "honors"],
+      "splitLetterNormalizable": false,
+      "anchorFallback": true
+    },
+    "other": {
+      "aliases": [
+        "strengths",
+        "highlights",
+        "focus areas",
+        "interests",
+        "languages",
+        "volunteer",
+        "volunteering",
+        "references",
+        "hobbies",
+        "publications"
+      ],
+      "anchors": [],
+      "splitLetterNormalizable": false,
+      "anchorFallback": false
+    }
+  }
+}
