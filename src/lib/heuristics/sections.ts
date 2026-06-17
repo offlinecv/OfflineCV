@@ -15,7 +15,13 @@
  */
 
 import type { PdfTextItem } from "./types.ts";
-import { matchSectionHeader, type SectionName } from "./regex.ts";
+import {
+  matchSectionHeader,
+  EMAIL_RE,
+  PHONE_RE,
+  LINKEDIN_RE,
+  type SectionName,
+} from "./regex.ts";
 
 export interface PdfLine {
   page: number;
@@ -210,23 +216,172 @@ function mergeItemText(items: PdfTextItem[]): string {
   return out.replace(/\s+/g, " ").trim();
 }
 
+// ── Visual-header detection (L3 / #112) ─────────────────────────────────────
+
+/**
+ * Font-size ratio (line `maxFontSize` ÷ document body baseline) at which a line
+ * is "meaningfully larger" than body text and therefore visually a header.
+ *
+ * Sits deliberately between the markdown emitter's `H3_RATIO` (1.12) and
+ * `H2_RATIO` (1.25): a job title or company name rendered bold but only
+ * slightly larger than body (≈1.05–1.15×) must NOT promote to a boundary, or it
+ * would split mid-experience and strand every following role into the `other`
+ * sink. 1.2 clears the slightly-bold-title FP class while still catching the
+ * genuinely-larger invented-label headers ("Career Journey") this path exists
+ * to segment.
+ *
+ * Font distinction is the SOLE visual signal here. The issue (#112) also listed
+ * `allCaps` as an alternative, but a full-corpus pass showed bare body-size
+ * all-caps is dominated by NON-headers a boundary must never open on: acronyms
+ * and skill tokens ("HTML", "CSS", "C++", "CI/CD"), inline values ("GPA: 3.5"),
+ * and two-column sidebar labels ("STRENGTHS", "Leadership") whose flattened
+ * position mid-document would strand every following role into the `other`
+ * sink — the same hazard that keeps `skills`/`other` out of the L2 anchor
+ * fallback. Genuine all-caps *section* headers ("OBJECTIVE", "EDUCATION",
+ * "VOLUNTEER EXPERIENCE") are already caught by the keyword/anchor path before
+ * the visual path runs, so the all-caps branch added only false positives and
+ * was dropped. See the L3 corpus regression notes on #112.
+ */
+const VISUAL_HEADER_FONT_RATIO = 1.2;
+
+/** Max characters for a line to still read as a header (not a prose line). */
+const VISUAL_HEADER_MAX_CHARS = 40;
+/** Max whitespace-separated words for a header (qualifier(s) + head noun). */
+const VISUAL_HEADER_MAX_WORDS = 4;
+
+/** Terminal sentence punctuation marks prose, not a heading. */
+const TERMINAL_PUNCT_RE = /[.!?]$/;
+/** Leading bullet glyph — a header-shaped bullet is content, not a heading. */
+const VISUAL_BULLET_RE = /^\s*[•‣▪●◦⁃*\-–—]/;
+
+/**
+ * Character-weighted mode of `maxFontSize` across lines — the document body
+ * baseline used by the visual-header test. Mirrors
+ * `markdown-emit.ts::computeBodyFontSize`, but reads `PdfLine.maxFontSize`
+ * (this module's line shape) rather than that module's `PdfLine.fontSize`;
+ * weighting by character count keeps multi-line headers from dominating the
+ * mode, so the long body paragraphs win. Returns 10pt for an empty document.
+ */
+function computeBodyBaseline(lines: PdfLine[]): number {
+  if (lines.length === 0) return 10;
+  const bins = new Map<number, number>();
+  for (const line of lines) {
+    const bin = Math.round(line.maxFontSize * 10) / 10;
+    bins.set(bin, (bins.get(bin) ?? 0) + line.text.trim().length);
+  }
+  let mode = 10;
+  let maxChars = 0;
+  for (const [size, chars] of bins.entries()) {
+    if (chars > maxChars) {
+      maxChars = chars;
+      mode = size;
+    }
+  }
+  return mode;
+}
+
+/**
+ * True when a line is *visually* a header: short, unpunctuated, not a bullet,
+ * and meaningfully larger than the body baseline. This is the L3 fallback
+ * signal — it fires only after `matchSectionHeader` has already declined the
+ * line (keyword path), so a line passing this test opens a boundary-only
+ * `other` section (terminates the prior section without rendering).
+ */
+function isVisualHeader(line: PdfLine, bodyBaseline: number): boolean {
+  const text = line.text.trim();
+  if (text.length === 0 || text.length > VISUAL_HEADER_MAX_CHARS) return false;
+  if (VISUAL_BULLET_RE.test(text)) return false;
+  if (TERMINAL_PUNCT_RE.test(text)) return false;
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length > VISUAL_HEADER_MAX_WORDS) return false;
+  return line.maxFontSize >= bodyBaseline * VISUAL_HEADER_FONT_RATIO;
+}
+
+/**
+ * True when a line carries name/contact shape — an email, phone, or LinkedIn
+ * URL. Used to keep a large contact line in the leading profile region from
+ * being promoted to a section boundary. The REs are stateful (`/g`), so reset
+ * `lastIndex` before each test.
+ */
+function hasContactShape(text: string): boolean {
+  EMAIL_RE.lastIndex = 0;
+  PHONE_RE.lastIndex = 0;
+  LINKEDIN_RE.lastIndex = 0;
+  return EMAIL_RE.test(text) || PHONE_RE.test(text) || LINKEDIN_RE.test(text);
+}
+
 // ── Section splitting ───────────────────────────────────────────────────────
 
 /**
- * Scan the lines top-to-bottom, mark lines that match a canonical section
- * header, and bucket everything between headers. Content above the first
- * header lands in the synthetic `profile` section.
+ * Scan the lines top-to-bottom, mark lines that open a section, and bucket
+ * everything between headers. Content above the first header lands in the
+ * synthetic `profile` section.
+ *
+ * A line opens a section boundary when EITHER:
+ *   - keyword path: `matchSectionHeader` (L1 exact alias → L2 head-noun anchor)
+ *     returns a canonical name → label = that section; or
+ *   - visual path (L3 / #112): the line is visually a header (`isVisualHeader`)
+ *     and is not a leading name/contact line → open an `other` boundary. The
+ *     keyword path has already declined the line by this point, so the label is
+ *     always `other` — the boundary-only sink that terminates the prior section
+ *     without rendering (`regex.ts` keeps `other` out of the anchor path and out
+ *     of every `findSection` lookup in `openresume.ts`).
+ *
+ * Name/contact disambiguation: the leading profile region opens with a cluster
+ * of large-font name / title / tagline lines (a résumé header), then the
+ * contact line(s). A genuine invented-label heading always comes *after* that
+ * cluster. So while still in the profile region, a visual header is suppressed
+ * (kept in profile) until a contact-shaped line (email / phone / LinkedIn) has
+ * been seen — that contact line marks the end of the name block. This is what
+ * stops the largest-font line at the top (the name), and any title/tagline
+ * stacked under it, from becoming a section header and shattering the parse,
+ * while still letting a font-distinct invented header below the contact block
+ * open a boundary. Once any section has opened, the disambiguation no longer
+ * applies (a visual header is then unconditionally a real boundary).
  */
 export function splitIntoSections(lines: PdfLine[]): PdfSection[] {
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
+  const bodyBaseline = computeBodyBaseline(lines);
+  // True until the first non-profile section (keyword or visual) opens.
+  let openedRealSection = false;
+  // True once the leading name/title block has ended — signalled by the first
+  // contact-shaped line inside the profile region.
+  let seenContactInProfile = false;
+
+  const open = (name: SectionName) => {
+    sections.push({ name, lines: [] });
+    openedRealSection = true;
+  };
+  const append = (line: PdfLine) => {
+    sections[sections.length - 1].lines.push(line);
+  };
 
   for (const line of lines) {
     const header = matchSectionHeader(line.text);
     if (header) {
-      sections.push({ name: header, lines: [] });
+      open(header);
       continue;
     }
-    sections[sections.length - 1].lines.push(line);
+
+    const contactShaped = hasContactShape(line.text);
+
+    if (isVisualHeader(line, bodyBaseline)) {
+      if (!openedRealSection && !seenContactInProfile) {
+        // Inside the leading name/title block (no contact line seen yet) — a
+        // font-distinct line here is the name or a title/tagline, never a
+        // section header. Keep it in the profile.
+        if (contactShaped) seenContactInProfile = true;
+        append(line);
+        continue;
+      }
+      // Past the name block (contact seen, or a real section already opened):
+      // a visual header with no keyword match opens a boundary-only `other`.
+      open("other");
+      continue;
+    }
+
+    if (!openedRealSection && contactShaped) seenContactInProfile = true;
+    append(line);
   }
 
   return sections;
