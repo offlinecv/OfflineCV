@@ -102,23 +102,7 @@ export const SPLIT_LETTER_NORMALIZABLE_SECTIONS: ReadonlySet<SectionName> =
       .map(([name]) => name),
   );
 
-/**
- * Per-section anchor token sets — consumed by L2 (no reader yet).
- * Present in the JSON; re-exported here for future callers.
- */
-export const SECTION_ANCHORS: ReadonlyMap<SectionName, readonly string[]> =
-  new Map(
-    (Object.entries(_drift) as Array<[SectionName, SectionConfig]>).map(
-      ([name, cfg]) => [name, cfg.anchors as readonly string[]],
-    ),
-  );
-
-/**
- * Per-section anchor-fallback opt-in — consumed by L2 (no reader yet).
- */
-export const SECTION_ANCHOR_FALLBACK: ReadonlyMap<SectionName, boolean> =
-  new Map(
-    (Object.entries(_drift) as Array<[SectionName, SectionConfig]>).map(
-      ([name, cfg]) => [name, cfg.anchorFallback],
-    ),
-  );
+// NOTE: the per-section `anchors` and `anchorFallback` fields exist in
+// sections.config.json (validated above) but are intentionally NOT exported
+// yet — nothing reads them until L2 (#111) / L3 (#112). Those children add
+// each accessor alongside its consumer so no dead export ships here.
