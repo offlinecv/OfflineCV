@@ -83,81 +83,23 @@ export const DATE_RANGE_RE = new RegExp(
 );
 
 // ── Section header keywords ─────────────────────────────────────────────────
+//
+// Data lives in sections.config.json; the typed loader in sections.config.ts
+// owns the derived structures. Imported here for local use by matchSectionHeader
+// and re-exported so all existing import paths (sections.ts, markdown-lines.ts,
+// extract-fields.ts) resolve unchanged without touching those files.
 
-export const SECTION_KEYWORDS = {
-  summary: [
-    "summary",
-    "profile",
-    "objective",
-    "about",
-    "about me",
-    "professional summary",
-  ],
-  experience: [
-    "experience",
-    "work experience",
-    "professional experience",
-    "employment",
-    "employment history",
-    "work history",
-    "career",
-    "career history",
-  ],
-  education: ["education", "academic background", "academics", "qualifications"],
-  skills: [
-    "skills",
-    "technical skills",
-    "core competencies",
-    "competencies",
-    "expertise",
-    "technologies",
-  ],
-  projects: ["projects", "personal projects", "selected projects"],
-  certifications: ["certifications", "certificates", "licenses"],
-  /**
-   * Achievements family (#96). Promoted out of the `other` sink into a real,
-   * extracted section: an Achievements / Accomplishments / Awards / Activities
-   * block is name-led and often single-line, so it is parsed by
-   * `extractAchievements` on the shared entry-block primitive and rendered as
-   * its own section. Like every other keyed section it still pushes a section
-   * boundary in `splitIntoSections`, so it continues to terminate the preceding
-   * section (the boundary job it did while in `other`) — sidebar labels above
-   * the main content stream don't bleed across it. `awards` lives here rather
-   * than under `certifications` (where it was a loose alias) so an AWARDS
-   * heading reads as an achievement, not a certification.
-   */
-  achievements: [
-    "achievements",
-    "accomplishments",
-    "activities",
-    "awards",
-    "awards & honors",
-    "awards and honors",
-    "honors",
-    "honors & awards",
-    "honors and awards",
-  ],
-  /**
-   * Sink bucket for genuinely-ignored sidebar labels that must terminate the
-   * preceding section (e.g. STRENGTHS, FOCUS AREAS in two-column PDFs).
-   * Nothing renders an `other` section; its sole job is to act as a boundary
-   * so content that follows it does not bleed into the preceding section.
-   */
-  other: [
-    "strengths",
-    "highlights",
-    "focus areas",
-    "interests",
-    "languages",
-    "volunteer",
-    "volunteering",
-    "references",
-    "hobbies",
-    "publications",
-  ],
-} as const;
+import {
+  SECTION_KEYWORDS,
+  SPLIT_LETTER_NORMALIZABLE_SECTIONS,
+  type SectionName,
+} from "./sections.config.ts";
 
-export type SectionName = keyof typeof SECTION_KEYWORDS;
+export {
+  SECTION_KEYWORDS,
+  SPLIT_LETTER_NORMALIZABLE_SECTIONS,
+  type SectionName,
+} from "./sections.config.ts";
 
 // A short intro letter separated from the rest of the word by a space:
 // `S UMMARY`, `E XPERIENCE`, `e xperience`. Designed templates letter-space
@@ -167,19 +109,6 @@ export type SectionName = keyof typeof SECTION_KEYWORDS;
 // (b) a following word of 3+ alpha chars. Shared by the markdown preprocessor
 // (`normalizeSplitLetterHeaders`) and the PDF-line `matchSectionHeader`.
 export const SPLIT_LETTER_RE = /\b([A-Za-z])\s+([A-Za-z]{3,})\b/g;
-
-/**
- * Section keywords we're willing to reconstruct from a split lead letter
- * (e.g. `S UMMARY` → `SUMMARY`). Deliberately excludes `skills`-family
- * keywords: two-column résumés commonly place a SKILLS label in the sidebar,
- * which flattens INTO the main content stream *between* experience entries.
- * Normalizing `S KILLS` there would open a new section mid-experience and
- * strand every subsequent role. Literal "SKILLS" headers in the main column
- * don't use the split-letter decoration in practice, so we lose almost
- * nothing by excluding this keyword.
- */
-export const SPLIT_LETTER_NORMALIZABLE_SECTIONS: ReadonlySet<SectionName> =
-  new Set(["summary", "experience", "education", "certifications", "projects"]);
 
 /** Rejoin single split lead letters: `e xperience` → `experience`. */
 function rejoinSplitLetters(text: string): string {
