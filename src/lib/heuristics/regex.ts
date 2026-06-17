@@ -92,6 +92,8 @@ export const DATE_RANGE_RE = new RegExp(
 import {
   SECTION_KEYWORDS,
   SPLIT_LETTER_NORMALIZABLE_SECTIONS,
+  SECTION_ANCHORS,
+  SECTION_ANCHOR_FALLBACKS,
   type SectionName,
 } from "./sections.config.ts";
 
@@ -100,6 +102,10 @@ export {
   SPLIT_LETTER_NORMALIZABLE_SECTIONS,
   type SectionName,
 } from "./sections.config.ts";
+// SECTION_ANCHORS / SECTION_ANCHOR_FALLBACKS are imported above for local use
+// by matchAnchorFallback but intentionally NOT re-exported — they have no
+// out-of-module consumer. Anything that needs them imports from
+// ./sections.config.ts directly (its canonical home).
 
 // A short intro letter separated from the rest of the word by a space:
 // `S UMMARY`, `E XPERIENCE`, `e xperience`. Designed templates letter-space
@@ -113,6 +119,72 @@ export const SPLIT_LETTER_RE = /\b([A-Za-z])\s+([A-Za-z]{3,})\b/g;
 /** Rejoin single split lead letters: `e xperience` → `experience`. */
 function rejoinSplitLetters(text: string): string {
   return text.replace(SPLIT_LETTER_RE, (_m, a: string, b: string) => `${a}${b}`);
+}
+
+// Leading bullet glyph on a raw line. Mirrors `isBulletLine` in
+// line-primitives.ts (kept as a local literal here, not an import, to avoid the
+// import cycle line-primitives → regex). A header-shaped line that begins with
+// a bullet is content, not a heading, so the anchor fallback must reject it.
+const LEADING_BULLET_RE = /^\s*[•‣▪●◦⁃*\-–—]/;
+
+/**
+ * Head-noun anchor fallback for qualified section headers (L2 / #111).
+ *
+ * Fires only when the exact-alias and split-letter matches both fail. A
+ * qualified header is a modifier + canonical category noun — "Relevant
+ * Experience", "Customer Service Experience" (#108) — whose *last* token is the
+ * head noun. Matching head-noun-LAST (not substring `contains`) is the actual
+ * grammar of section headers: "Customer Service Experience" classifies, while
+ * the prose FP class — "5 years of relevant experience leading teams" — does
+ * not *end* in the head noun and is over length / word-count, so it never
+ * triggers.
+ *
+ * All guardrails must hold (the raw-line splitter runs this on every PDF line):
+ *   1. length ≤ 40           — enforced by the caller before this runs.
+ *   2. word count ≤ 4        — qualifier(s) + head noun.
+ *   3. last token ∈ anchors  — head-noun-last, not contains.
+ *   4. no terminal `.`/`!`/`?` — sentence punctuation marks prose.
+ *   5. not a bullet line     — checked on the raw text by the caller.
+ *   6. section's anchorFallback flag is true — `skills`/`other` stay OFF, so a
+ *      flattened two-column "SKILLS" sidebar label cannot open a section
+ *      mid-experience and strand the following roles.
+ *   7. header-cased        — every alphabetic word is Title Case (initial
+ *      capital) or the whole line is ALL CAPS. This is what separates a heading
+ *      ("Relevant Experience") from a lowercase prose fragment that happens to
+ *      end in the head noun ("i have experience"). Checked on the raw text.
+ *
+ * `raw` is the original line text (case preserved); `normalized` is the
+ * already-trimmed/lowercased/colon-stripped text from the caller. Returns the
+ * matched section, or null when no guardrail-passing anchor is found.
+ */
+function matchAnchorFallback(
+  raw: string,
+  normalized: string,
+): SectionName | null {
+  // Guard 4: terminal sentence punctuation marks prose, not a heading.
+  if (/[.!?]$/.test(normalized)) return null;
+  const tokens = normalized.split(/\s+/).filter((t) => t.length > 0);
+  // Guard 2: a qualified header is short (qualifier(s) + head noun).
+  if (tokens.length === 0 || tokens.length > 4) return null;
+  // Guard 7: header casing. Every word must start with an uppercase letter
+  // (Title Case) — ALL CAPS satisfies this trivially. Requiring uppercase
+  // (not merely "not lowercase") rejects both prose fragments like
+  // "i have experience" AND numeric-qualifier prose like "5 Years Experience"
+  // / "10+ Years Experience", whose digit/symbol lead char is neither lower-
+  // nor uppercase and would otherwise slip a sentence in as a heading.
+  const rawWords = raw.trim().split(/\s+/).filter((w) => w.length > 0);
+  for (const w of rawWords) {
+    const first = w[0];
+    if (!/[A-Z]/.test(first)) return null;
+  }
+  const last = tokens[tokens.length - 1];
+  // Guard 3 + 6: last token must be an anchor of a fallback-enabled section.
+  for (const [name, anchors] of Object.entries(SECTION_ANCHORS) as Array<
+    [SectionName, ReadonlySet<string>]
+  >) {
+    if (anchors.has(last) && SECTION_ANCHOR_FALLBACKS.has(name)) return name;
+  }
+  return null;
 }
 
 /** True if the normalized line text matches any known section header. */
@@ -135,6 +207,13 @@ export function matchSectionHeader(text: string): SectionName | null {
       if (keywords.includes(rejoined) && SPLIT_LETTER_NORMALIZABLE_SECTIONS.has(name))
         return name;
     }
+  }
+  // Head-noun anchor fallback for qualified headers ("Relevant Experience").
+  // Guard 5 (not a bullet line) runs on the raw text here, before the
+  // bullet glyph is normalized away. See matchAnchorFallback for the rest.
+  if (!LEADING_BULLET_RE.test(text)) {
+    const anchored = matchAnchorFallback(text, normalized);
+    if (anchored) return anchored;
   }
   return null;
 }

@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.86,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "none",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -17,55 +17,53 @@
       "family_name",
       "full_name",
       "given_name",
+      "linkedin_url",
+      "location",
       "phone",
-      "projects",
       "skills",
       "summary",
       "website_url"
     ],
     "skillsCount": 9,
-    "experienceCount": 2,
-    "educationCount": 2,
-    "projectsCount": 2,
+    "experienceCount": 3,
+    "educationCount": 1,
+    "projectsCount": 0,
     "achievementsCount": 0,
-    "rawTextCharCount": 1530,
+    "rawTextCharCount": 1344,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
-    "sectionSource": "regex"
+    "sectionSource": "markdown"
   },
   "score": {
-    "overall": 88,
-    "preLayoutOverall": 88,
+    "overall": 30,
+    "preLayoutOverall": 30,
     "specificity": {
-      "score": 40,
+      "score": 0,
       "max": 40,
-      "gradable": true,
-      "metricBullets": 5,
-      "totalBullets": 8
+      "gradable": false,
+      "metricBullets": 0,
+      "totalBullets": 0
     },
     "structure": {
-      "score": 24,
+      "score": 0,
       "max": 30,
-      "gradable": true,
-      "goodBullets": 7,
-      "totalBullets": 8
+      "gradable": false,
+      "goodBullets": 0,
+      "totalBullets": 0
     },
     "completeness": {
-      "score": 24,
+      "score": 30,
       "max": 30,
       "gradable": true,
-      "missing": [
-        "LinkedIn",
-        "location"
-      ]
+      "missing": []
     },
     "layout": {
       "triggers": [],
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 8,
+    "bulletCount": 0,
     "algoVersion": "1.0"
   }
 }
