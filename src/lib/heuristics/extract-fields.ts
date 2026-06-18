@@ -17,8 +17,9 @@ import type {
   HeuristicAchievement,
 } from "../score/types.ts";
 import type { PdfLine, PdfSection } from "./sections.ts";
+import { mergeItemText } from "./sections.ts";
 import { matchSectionHeader } from "./regex.ts";
-import type { PdfLinkAnnotation } from "./types.ts";
+import type { PdfLinkAnnotation, PdfTextItem } from "./types.ts";
 import {
   EMAIL_RE,
   PHONE_RE,
@@ -130,6 +131,25 @@ function looksLikeMononymName(text: string, line: PdfLine, maxFontSize: number):
   return true;
 }
 
+/**
+ * True when `raw` is a single title-cased (or all-caps) letter token that could
+ * be one half of a stacked name. Word résumé templates render the given name and
+ * family name as separate single-word lines ("Chanchal" / "Sharma"); each is
+ * individually rejected by `extractName`'s ≥2-word guard, so an adjacent pair is
+ * merged into one candidate. Section headers ("SUMMARY") and document-title
+ * boilerplate ("Resume") are excluded so neither ever glues onto a name.
+ */
+function isSingleNameWord(raw: string): boolean {
+  const text = raw.trim();
+  if (!text || text.length > 30) return false;
+  if (/\s/.test(text)) return false; // must be exactly one token
+  if (/\d/.test(text) || text.includes("@")) return false;
+  if (!/^[A-Z][A-Za-z.\-']*$/.test(text)) return false;
+  if (matchSectionHeader(text)) return false;
+  if (looksLikeDocTitleBoilerplate([text])) return false;
+  return true;
+}
+
 /** y-position of the first line in `lines` matching any of the contact regexes,
  *  or undefined if no contact-bearing line is found. Used as a soft signal —
  *  candidate names close to this y get a small bonus. */
@@ -181,7 +201,7 @@ export function extractName(
     profile.lines.reduce((s, l) => s + l.maxFontSize, 0) / profile.lines.length;
   const contactY = findContactClusterY(profile.lines);
 
-  let best: { line: PdfLine; score: number } | null = null;
+  let best: { text: string; score: number } | null = null;
   // Index of the first eligible candidate after rejections. When the literal
   // first line is rejected as boilerplate (e.g. "Functional Resume Sample"),
   // the next surviving line is effectively the header — it inherits the
@@ -191,9 +211,38 @@ export function extractName(
   // "missing" in completeness scoring.
   let firstEligibleIdx: number | null = null;
 
-  for (let i = 0; i < Math.min(profile.lines.length, 5); i++) {
+  // Candidate list: each of the top lines, plus a synthetic merge of any two
+  // adjacent single-word name lines. Word templates stack the given and family
+  // name on separate lines ("Chanchal" / "Sharma"); each is individually
+  // rejected as a lone word, so the pair is offered as one two-word candidate.
+  // The merge keeps its first line's index so it can win the first-line bonus
+  // over a tagline ("Office Manager") sitting just below it. With no stacked
+  // single-word lines, the list is exactly the top-N lines in order, so
+  // single-line layouts score byte-identically to before.
+  const scan = Math.min(profile.lines.length, 5);
+  const candidates: { text: string; line: PdfLine; idx: number }[] = [];
+  for (let i = 0; i < scan; i++) {
     const line = profile.lines[i];
-    const text = line.text.trim();
+    candidates.push({ text: line.text.trim(), line, idx: i });
+    const next = profile.lines[i + 1];
+    if (
+      i <= 1 &&
+      next &&
+      isSingleNameWord(line.text) &&
+      isSingleNameWord(next.text)
+    ) {
+      candidates.push({
+        text: `${line.text.trim()} ${next.text.trim()}`,
+        line: {
+          ...line,
+          maxFontSize: Math.max(line.maxFontSize, next.maxFontSize),
+        },
+        idx: i,
+      });
+    }
+  }
+
+  for (const { text, line, idx } of candidates) {
     if (!text || text.length > 60) continue;
     if (/\d/.test(text)) continue;
     if (text.includes("@")) continue;
@@ -216,10 +265,10 @@ export function extractName(
     if (letterRatio < 0.7) continue;
     if (looksLikeDocTitleBoilerplate(words)) continue;
 
-    if (firstEligibleIdx === null) firstEligibleIdx = i;
+    if (firstEligibleIdx === null) firstEligibleIdx = idx;
 
     let score = 0;
-    if (i === firstEligibleIdx) score += 0.4;
+    if (idx === firstEligibleIdx) score += 0.4;
     if (line.maxFontSize >= maxFontSize - 0.5) score += 0.3;
     if (line.maxFontSize > averageFontSize + 1) score += 0.1;
     const titleCase = words.every((w) => /^[A-Z][a-zA-Z.\-']*$/.test(w));
@@ -229,9 +278,9 @@ export function extractName(
       // First eligible line near contact: soft confirmation. A *later* line
       // near contact: a recovery bonus large enough to overtake a higher /
       // larger line that won only on position/size — the mode-2 case in #16.
-      // Gating the strong bonus on `i !== firstEligibleIdx` keeps the #14
+      // Gating the strong bonus on `idx !== firstEligibleIdx` keeps the #14
       // mode-1 fixture (first-eligible name) byte-identical.
-      score += i === firstEligibleIdx ? 0.15 : 0.4;
+      score += idx === firstEligibleIdx ? 0.15 : 0.4;
     }
     // A job-title tagline ("Product Designer", "Senior Marketing Lead") must
     // not win the name slot on position/size. Real names never match the
@@ -243,11 +292,11 @@ export function extractName(
     // strong mononym still clears the scorer's 0.5 contact-confidence floor.
     if (isMononym) score -= 0.1;
 
-    if (!best || score > best.score) best = { line, score };
+    if (!best || score > best.score) best = { text, score };
   }
 
   if (!best) return { confidence: 0 };
-  return { value: best.line.text.trim(), confidence: Math.min(best.score, 1) };
+  return { value: best.text, confidence: Math.min(best.score, 1) };
 }
 
 // ── Contact (email, phone, urls, location) ──────────────────────────────────
@@ -535,6 +584,42 @@ function isSkillToken(tok: string): boolean {
   return true;
 }
 
+/**
+ * Word/LaTeX résumés often lay skills out in a borderless multi-column table.
+ * pdfjs renders each inter-column gap as a wide blank "spacer" item rather than
+ * a large x-gap between glyph runs, so `groupIntoLines` (which splits only on
+ * gaps between item *edges* — see COLUMN_GAP_THRESHOLD) keeps the whole row as
+ * one PdfLine, e.g. "Project management Data analysis Communication". Splitting
+ * the line at those spacer items recovers one cell per column without resorting
+ * to a blind `\s+` split that would shred multi-word skills.
+ *
+ * A spacer must be meaningfully wider than an ordinary inter-word space (one em,
+ * 10pt floor) so normal prose spacing never triggers a split. Returns one string
+ * per column cell, or `[line.text]` when the line has no column spacers —
+ * byte-identical to the pre-column behavior for ordinary single-column lines.
+ */
+function splitColumnCells(line: PdfLine): string[] {
+  const cells: PdfTextItem[][] = [];
+  let cur: PdfTextItem[] = [];
+  for (const item of line.items) {
+    const isSpacer =
+      item.str.trim() === "" && item.width > Math.max(item.fontSize, 10);
+    if (isSpacer) {
+      if (cur.length > 0) cells.push(cur);
+      cur = [];
+      continue;
+    }
+    cur.push(item);
+  }
+  if (cur.length > 0) cells.push(cur);
+  if (cells.length <= 1) return [line.text];
+  // Collapse any whitespace a narrow (non-splitting) spacer item left inside a
+  // cell — e.g. a " \n" run between "REST" and "API" → "REST API".
+  return cells
+    .map((c) => mergeItemText(c).replace(/\s+/g, " ").trim())
+    .filter((t) => t.length > 0);
+}
+
 export function extractSkills(
   skills: PdfSection | undefined,
 ): { value: string[]; confidence: number } {
@@ -542,14 +627,16 @@ export function extractSkills(
 
   const tokens = new Set<string>();
   for (const line of skills.lines) {
-    const clean = stripBullet(line.text).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
-    for (const raw of clean.split(SKILL_SPLIT_RE)) {
-      // Strip trailing sentence punctuation that can appear at line-end (e.g.
-      // "Python, JavaScript, Git, SQL, Linux, AWS." → the period is a list
-      // terminator, not part of the skill name).
-      const tok = raw.trim().replace(/[.!?,;]+$/, "");
-      if (isSkillToken(tok)) {
-        tokens.add(tok);
+    for (const cell of splitColumnCells(line)) {
+      const clean = stripBullet(cell).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
+      for (const raw of clean.split(SKILL_SPLIT_RE)) {
+        // Strip trailing sentence punctuation that can appear at line-end (e.g.
+        // "Python, JavaScript, Git, SQL, Linux, AWS." → the period is a list
+        // terminator, not part of the skill name).
+        const tok = raw.trim().replace(/[.!?,;]+$/, "");
+        if (isSkillToken(tok)) {
+          tokens.add(tok);
+        }
       }
     }
   }

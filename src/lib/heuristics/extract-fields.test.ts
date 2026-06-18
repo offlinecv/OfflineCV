@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractContact,
   extractName,
+  extractSkills,
   extractEducation,
   extractExperience,
   extractProjects,
@@ -18,7 +19,7 @@ import {
   type PdfSection,
 } from "./sections.ts";
 import { US_LOCATION_RE } from "./regex.ts";
-import type { PdfLinkAnnotation } from "./types.ts";
+import type { PdfLinkAnnotation, PdfTextItem } from "./types.ts";
 import { mkItems, mkDefaultPages } from "./__test-utils__/mkItem.ts";
 
 void mkDefaultPages; // imported for parity with sibling tests
@@ -433,6 +434,111 @@ describe("extractName — single-word (mononym) names (issue #107)", () => {
       { text: "jane.smith@example.com", fontSize: 10 },
     ]);
     expect(extractName(profile).value).toBe("Jane Smith");
+  });
+});
+
+describe("extractName — stacked single-word name lines (#29)", () => {
+  it("merges adjacent given/family-name lines a tagline cannot outscore", () => {
+    // Word résumé templates render the name as two single-word lines
+    // ("Chanchal" / "Sharma"); each is individually rejected by the 2-word
+    // guard, so a two-word tagline below ("Office Manager") used to win the
+    // slot. The merged candidate must take it back.
+    const { profile } = buildContext([
+      { text: "Chanchal", fontSize: 20 },
+      { text: "Sharma", fontSize: 20 },
+      { text: "Office Manager", fontSize: 12 },
+      { text: "chanchals@example.com · (718) 555-0100", fontSize: 10 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Chanchal Sharma");
+    // Must clear the scorer's 0.5 contact-confidence floor.
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("does not merge a single name word with doc-title boilerplate", () => {
+    // "Jane" / "Resume" must not glue into "Jane Resume".
+    const { profile } = buildContext([
+      { text: "Jane", fontSize: 20 },
+      { text: "Resume", fontSize: 20 },
+      { text: "jane@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).not.toBe("Jane Resume");
+  });
+
+  it("leaves a normal two-word name line unchanged (no spurious merge)", () => {
+    const { profile } = buildContext([
+      { text: "Jane Smith", fontSize: 20 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+});
+
+describe("extractSkills — borderless multi-column tables (#29)", () => {
+  // pdfjs fills the inter-column gap of a Word/LaTeX skills table with a wide
+  // blank "spacer" item, so the whole row arrives as one PdfLine. The geometry
+  // below mirrors the Chanchal Word fixture: three columns at x≈122/266/423.
+  function skillsSection(
+    runs: Array<{ x: number; str: string; w: number }>,
+    text: string,
+  ): PdfSection {
+    const items: PdfTextItem[] = runs.map((r) => ({
+      page: 1,
+      str: r.str,
+      x: r.x,
+      y: 300,
+      width: r.w,
+      height: 11,
+      fontSize: 11,
+      fontName: "font-11",
+      hasEOL: true,
+    }));
+    const line: PdfLine = {
+      page: 1,
+      y: 300,
+      x: runs[0].x,
+      items,
+      text,
+      maxFontSize: 11,
+      allCaps: false,
+    };
+    return { name: "skills", lines: [line] };
+  }
+
+  it("splits a row on wide blank spacer items into one skill per column", () => {
+    const section = skillsSection(
+      [
+        { x: 122, str: "Project management", w: 85 },
+        { x: 207, str: " ", w: 59 },
+        { x: 266, str: "Data analysis", w: 53 },
+        { x: 319, str: " ", w: 105 },
+        { x: 423, str: "Communication", w: 64 },
+      ],
+      "Project management Data analysis Communication",
+    );
+    expect(extractSkills(section).value).toEqual([
+      "Project management",
+      "Data analysis",
+      "Communication",
+    ]);
+  });
+
+  it("keeps a multi-word skill intact when the internal gap is ordinary", () => {
+    // A single narrow space between "Machine" and "Learning" is NOT a column
+    // spacer, so the cell stays whole instead of shredding into two tokens.
+    const section = skillsSection(
+      [{ x: 122, str: "Machine Learning", w: 80 }],
+      "Machine Learning",
+    );
+    expect(extractSkills(section).value).toEqual(["Machine Learning"]);
+  });
+
+  it("still splits an ordinary comma-separated single-column line", () => {
+    const section = skillsSection(
+      [{ x: 122, str: "Python, Java, SQL", w: 90 }],
+      "Python, Java, SQL",
+    );
+    expect(extractSkills(section).value).toEqual(["Python", "Java", "SQL"]);
   });
 });
 

@@ -1,15 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.64,
-    "triggers": [
-      "two_column"
-    ],
+    "confidence": 0,
+    "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ner",
+    "suggestedEscalation": "ocr",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -19,58 +17,55 @@
       "family_name",
       "full_name",
       "given_name",
-      "heuristic_achievements",
       "location",
       "phone",
-      "projects",
       "skills",
-      "summary",
       "website_url"
     ],
-    "skillsCount": 18,
-    "experienceCount": 5,
+    "skillsCount": 6,
+    "experienceCount": 1,
     "educationCount": 1,
-    "projectsCount": 2,
-    "achievementsCount": 1,
-    "rawTextCharCount": 3905,
-    "pageCount": 2,
+    "projectsCount": 0,
+    "achievementsCount": 0,
+    "rawTextCharCount": 983,
+    "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 51,
-    "preLayoutOverall": 60,
+    "overall": 21,
+    "preLayoutOverall": 21,
     "specificity": {
-      "score": 17,
+      "score": 0,
       "max": 40,
-      "gradable": true,
-      "metricBullets": 7,
-      "totalBullets": 27
+      "gradable": false,
+      "metricBullets": 0,
+      "totalBullets": 0
     },
     "structure": {
-      "score": 16,
+      "score": 0,
       "max": 30,
-      "gradable": true,
-      "goodBullets": 14,
-      "totalBullets": 27
+      "gradable": false,
+      "goodBullets": 0,
+      "totalBullets": 0
     },
     "completeness": {
-      "score": 27,
+      "score": 21,
       "max": 30,
       "gradable": true,
       "missing": [
-        "LinkedIn"
+        "LinkedIn",
+        "role dates",
+        "summary"
       ]
     },
     "layout": {
-      "triggers": [
-        "two_column"
-      ],
-      "multiplier": 0.85,
+      "triggers": [],
+      "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 27,
+    "bulletCount": 0,
     "algoVersion": "1.0"
   }
 }
