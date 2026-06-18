@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { applyOverrides } from "./apply-overrides.ts";
+import { groupBulletsByExperience } from "../score/group-bullets.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { BulletObservation } from "../score/score.ts";
 
@@ -191,5 +192,130 @@ describe("applyOverrides", () => {
       [obs(0, "Built a thing")],
     );
     expect(parsed).toEqual(snapshot);
+  });
+});
+
+// ── Regression: edit + re-group attribution ──────────────────────────────────
+
+/**
+ * The original bug: editing a bullet caused it to fall into the trailing
+ * "Other bullets" group instead of staying under its role. Root cause was at
+ * the App.tsx wiring layer — the post-edit bullets (with edited text) were
+ * being looked up against pre-edit experience descriptions. This regression
+ * test pins down the contract that protects against re-introducing the bug:
+ *
+ *   applyOverrides → use the RETURNED `parsed.experience` (not the original)
+ *   when re-running groupBulletsByExperience with the edited bullet text.
+ *
+ * If a future refactor passes the un-edited descriptions to grouping again,
+ * these tests fail and point at the bug.
+ */
+describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)", () => {
+  it("edited bullet stays under its original experience when grouping uses the returned parsed.experience", () => {
+    const parsed: HeuristicParsedResume = {
+      full_name: "Jane Smith",
+      email: "jane@example.com",
+      skills: [],
+      experience: [
+        {
+          title: "Senior Engineer",
+          company: "Globex",
+          description:
+            "Built event-driven data pipeline.\nReduced deploy time by 50%.",
+        },
+        {
+          title: "Engineer",
+          company: "Initech",
+          description: "Migrated legacy monolith.",
+        },
+      ],
+      education: [],
+    };
+    const rawText =
+      "Globex\n• Built event-driven data pipeline.\n• Reduced deploy time by 50%.\nInitech\n• Migrated legacy monolith.";
+    const observations = [
+      obs(0, "Built event-driven data pipeline."),
+      obs(1, "Reduced deploy time by 50%."),
+      obs(2, "Migrated legacy monolith."),
+    ];
+
+    // User edits bullet #1 to add a new metric.
+    const editedText = "Reduced deploy time by 50%, saving $50K in compute.";
+    const result = applyOverrides(
+      parsed,
+      rawText,
+      {},
+      {},
+      { 1: editedText },
+      observations,
+    );
+
+    // Sanity: BOTH rawText and the role's description picked up the edit.
+    expect(result.rawText).toContain("$50K");
+    expect(result.parsed.experience[0].description).toContain("$50K");
+
+    // Now simulate the post-edit re-grouping. The bullets carry the edited
+    // text (as they would after re-grading); the descriptions ALSO carry the
+    // edited text (because we use the RETURNED parsed.experience, not the
+    // original). The edited bullet must stay under Globex (experienceIndex 0)
+    // — NOT fall into the trailing Other group.
+    const postEditBullets = [
+      obs(0, "Built event-driven data pipeline."),
+      obs(1, editedText),
+      obs(2, "Migrated legacy monolith."),
+    ];
+    const groups = groupBulletsByExperience(
+      postEditBullets,
+      result.parsed.experience,
+    );
+
+    const globexGroup = groups.find((g) => g.experienceIndex === 0);
+    expect(globexGroup).toBeDefined();
+    expect(globexGroup!.bullets.map((b) => b.text)).toEqual([
+      "Built event-driven data pipeline.",
+      editedText,
+    ]);
+    // No Other group — every bullet attributed to its role.
+    expect(groups.find((g) => g.experienceIndex === null)).toBeUndefined();
+  });
+
+  it("DEMONSTRATES the bug: grouping against the ORIGINAL parsed.experience misattributes the edited bullet", () => {
+    // This test pins the failure mode in case anyone "simplifies" App.tsx
+    // back to passing the original parsed.experience to ReconstructedResume.
+    const parsed: HeuristicParsedResume = {
+      full_name: "Jane Smith",
+      email: "jane@example.com",
+      skills: [],
+      experience: [
+        {
+          title: "Senior Engineer",
+          company: "Globex",
+          description: "Reduced deploy time by 50%.",
+        },
+      ],
+      education: [],
+    };
+    const observations = [obs(0, "Reduced deploy time by 50%.")];
+    const editedText = "Reduced deploy time by 50%, saving $50K in compute.";
+
+    applyOverrides(
+      parsed,
+      "• Reduced deploy time by 50%.",
+      {},
+      {},
+      { 0: editedText },
+      observations,
+    );
+
+    // Grouping the edited bullet against the ORIGINAL (un-edited) parsed.experience
+    // — the App.tsx mis-wiring that was the original bug.
+    const groups = groupBulletsByExperience(
+      [obs(0, editedText)],
+      parsed.experience,
+    );
+
+    // The edited bullet falls into Other — confirming what the user reported.
+    expect(groups.find((g) => g.experienceIndex === 0)?.bullets ?? []).toEqual([]);
+    expect(groups.find((g) => g.experienceIndex === null)?.bullets).toHaveLength(1);
   });
 });

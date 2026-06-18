@@ -179,3 +179,32 @@ export function trackWebllmLoaded(): void {
 export function trackWebllmFirstRewrite(): void {
   track("webllm_first_rewrite", {});
 }
+
+// Section-rewrite funnel (issue #63). Kept distinct from the per-bullet
+// keys above so each path's first-rewrite conversion stays measurable.
+// `webllm_first_section_rewrite` mirrors `webllm_first_rewrite` for the
+// section path; the original per-bullet key is preserved unchanged.
+
+export function trackWebllmSectionRewriteStarted(args: {
+  inputBulletCount: number;
+}): void {
+  track("webllm_section_rewrite_started", {
+    input_bullet_count: args.inputBulletCount,
+  });
+}
+
+export function trackWebllmSectionRewriteCompleted(args: {
+  inputBulletCount: number;
+  outputBulletCount: number;
+  numbersPreserved: boolean;
+}): void {
+  track("webllm_section_rewrite_completed", {
+    input_bullet_count: args.inputBulletCount,
+    output_bullet_count: args.outputBulletCount,
+    numbers_preserved: args.numbersPreserved,
+  });
+}
+
+export function trackWebllmFirstSectionRewrite(): void {
+  track("webllm_first_section_rewrite", {});
+}
