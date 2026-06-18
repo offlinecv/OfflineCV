@@ -73,7 +73,7 @@ export function parseHeuristic(
       sectionSource = "markdown";
     }
   }
-  if (!sections) sections = splitIntoSections(lines);
+  if (!sections) sections = splitIntoSections(lines, boundaries);
   return buildHeuristicResult(lines, sections, sectionSource, annotations);
 }
 

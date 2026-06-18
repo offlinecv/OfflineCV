@@ -17,6 +17,7 @@
 import type { PdfTextItem } from "./types.ts";
 import {
   matchSectionHeader,
+  matchSectionAnchorToken,
   EMAIL_RE,
   PHONE_RE,
   LINKEDIN_RE,
@@ -281,19 +282,31 @@ function computeBodyBaseline(lines: PdfLine[]): number {
 }
 
 /**
- * True when a line is *visually* a header: short, unpunctuated, not a bullet,
- * and meaningfully larger than the body baseline. This is the L3 fallback
- * signal — it fires only after `matchSectionHeader` has already declined the
- * line (keyword path), so a line passing this test opens a boundary-only
- * `other` section (terminates the prior section without rendering).
+ * Header *shape* test, independent of font: short (≤ `VISUAL_HEADER_MAX_CHARS`
+ * chars, ≤ `VISUAL_HEADER_MAX_WORDS` words), not a bullet line, and not ending
+ * in terminal sentence punctuation. This is the structural half of
+ * `isVisualHeader`; the column-gated sidebar-header recovery (#117) reuses the
+ * exact same predicate so the two paths can never drift on what counts as
+ * header-shaped.
+ */
+function isHeaderShort(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0 || t.length > VISUAL_HEADER_MAX_CHARS) return false;
+  if (VISUAL_BULLET_RE.test(t)) return false;
+  if (TERMINAL_PUNCT_RE.test(t)) return false;
+  const words = t.split(/\s+/).filter((w) => w.length > 0);
+  return words.length <= VISUAL_HEADER_MAX_WORDS;
+}
+
+/**
+ * True when a line is *visually* a header: header-shaped (`isHeaderShort`) and
+ * meaningfully larger than the body baseline. This is the L3 fallback signal —
+ * it fires only after `matchSectionHeader` has already declined the line
+ * (keyword path), so a line passing this test opens a boundary-only `other`
+ * section (terminates the prior section without rendering).
  */
 function isVisualHeader(line: PdfLine, bodyBaseline: number): boolean {
-  const text = line.text.trim();
-  if (text.length === 0 || text.length > VISUAL_HEADER_MAX_CHARS) return false;
-  if (VISUAL_BULLET_RE.test(text)) return false;
-  if (TERMINAL_PUNCT_RE.test(text)) return false;
-  const words = text.split(/\s+/).filter((w) => w.length > 0);
-  if (words.length > VISUAL_HEADER_MAX_WORDS) return false;
+  if (!isHeaderShort(line.text)) return false;
   return line.maxFontSize >= bodyBaseline * VISUAL_HEADER_FONT_RATIO;
 }
 
@@ -330,7 +343,7 @@ function hasContactShape(text: string): boolean {
  * everything between headers. Content above the first header lands in the
  * synthetic `profile` section.
  *
- * A line opens a section boundary when EITHER:
+ * A line opens a section boundary when ANY of:
  *   - keyword path: `matchSectionHeader` (L1 exact alias → L2 head-noun anchor)
  *     returns a canonical name → label = that section; or
  *   - visual path (L3 / #112): the line is visually a header (`isVisualHeader`)
@@ -338,7 +351,15 @@ function hasContactShape(text: string): boolean {
  *     keyword path has already declined the line by this point, so the label is
  *     always `other` — the boundary-only sink that terminates the prior section
  *     without rendering (`regex.ts` keeps `other` out of the anchor path and out
- *     of every `findSection` lookup in `openresume.ts`).
+ *     of every `findSection` lookup in `openresume.ts`); or
+ *   - column-gated sidebar recovery (#117): a body-size, header-shaped line in
+ *     the SECONDARY column of a detected two-column layout (`columnBoundaries`)
+ *     whose trailing token is a fallback-enabled section anchor → label = that
+ *     section. This recovers a real header that a two-column flatten glued a
+ *     sidebar bar-value onto ("20% Projects"). The column signal stands in for
+ *     the prose guards the unguarded `matchSectionAnchorToken` lookup drops, so
+ *     it never fires on main-column prose ("5 Years Experience") or single-
+ *     column docs.
  *
  * Name/contact disambiguation: the leading profile region opens with a cluster
  * of large-font name / title / tagline lines (a résumé header), then the
@@ -351,8 +372,18 @@ function hasContactShape(text: string): boolean {
  * while still letting a font-distinct invented header below the contact block
  * open a boundary. Once any section has opened, the disambiguation no longer
  * applies (a visual header is then unconditionally a real boundary).
+ *
+ * `columnBoundaries` is the per-page split-x map from `detectColumnBoundaries`
+ * (present only for detected two-column pages; undefined/empty otherwise). It
+ * feeds the sidebar-header recovery branch in `classifyLine` (#117): a glued
+ * sidebar artifact like `"20% Projects"` in the secondary column recovers its
+ * real section name. For single-column docs the map is absent and that branch
+ * never fires — output stays byte-identical to the pre-#117 behavior.
  */
-export function splitIntoSections(lines: PdfLine[]): PdfSection[] {
+export function splitIntoSections(
+  lines: PdfLine[],
+  columnBoundaries?: Map<number, number>,
+): PdfSection[] {
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
   const bodyBaseline = computeBodyBaseline(lines);
   // True until the first non-profile section (keyword or visual) opens.
@@ -362,11 +393,14 @@ export function splitIntoSections(lines: PdfLine[]): PdfSection[] {
   let seenContactInProfile = false;
 
   for (const line of lines) {
+    // Per-line column split-x (undefined for single-column pages / docs).
+    const columnSplitX = columnBoundaries?.get(line.page);
     const action = classifyLine(
       line,
       bodyBaseline,
       openedRealSection,
       seenContactInProfile,
+      columnSplitX,
     );
     if (action.kind === "open") {
       sections.push({ name: action.name, lines: [] });
@@ -398,6 +432,7 @@ function classifyLine(
   bodyBaseline: number,
   openedRealSection: boolean,
   seenContactInProfile: boolean,
+  columnSplitX: number | undefined,
 ): LineAction {
   const header = matchSectionHeader(line.text);
   if (header) return { kind: "open", name: header };
@@ -414,6 +449,23 @@ function classifyLine(
     // Past the name block (contact seen, or a real section already opened): a
     // visual header with no keyword match opens a boundary-only `other`.
     return { kind: "open", name: "other" };
+  }
+
+  // Two-column sidebar artifact: a flatten can glue a sidebar bar-value onto a
+  // real header in the secondary column ("20% Projects"). The line is body-size
+  // (no visual signal, so the branch above did not fire) and a single glued run
+  // (no x-gap), so the only signal that separates it from main-column prose like
+  // "5 Years Experience" is that it sits in the secondary column of a detected
+  // two-column layout. Gate the unguarded trailing-anchor lookup on that column
+  // signal + a header-short shape. Skipped entirely for single-column docs
+  // (columnSplitX undefined) and main-column lines (line.x < split).
+  if (
+    columnSplitX !== undefined &&
+    line.x >= columnSplitX &&
+    isHeaderShort(line.text)
+  ) {
+    const recovered = matchSectionAnchorToken(line.text);
+    if (recovered) return { kind: "open", name: recovered };
   }
 
   return { kind: "append", marksContactEnd: !openedRealSection && contactShaped };
