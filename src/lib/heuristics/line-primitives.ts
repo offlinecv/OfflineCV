@@ -40,8 +40,8 @@ export function parseDateRange(text: string): {
   const m = DATE_RANGE_RE.exec(text);
   DATE_RANGE_RE.lastIndex = 0;
   if (m) {
-    const start = normalizeDate(m[1]);
-    const endRaw = m[2];
+    const start = normalizeDate(m[1] ?? m[3]);
+    const endRaw = m[2] ?? m[4];
     if (/^(present|current|now|ongoing)$/i.test(endRaw)) {
       return { start_date: start, is_current: true };
     }

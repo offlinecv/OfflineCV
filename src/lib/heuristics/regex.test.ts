@@ -2,7 +2,8 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, it, expect } from "vitest";
-import { matchSectionHeader, matchSectionAnchorToken } from "./regex.ts";
+import { matchSectionHeader, matchSectionAnchorToken, DATE_RANGE_RE } from "./regex.ts";
+import { parseDateRange } from "./line-primitives.ts";
 
 describe("matchSectionHeader — split-letter headers (#56)", () => {
   it("matches a clean header unchanged", () => {
@@ -121,6 +122,71 @@ describe("matchSectionHeader — head-noun anchor fallback (#108 / #111)", () =>
     // "other" has no anchors and anchorFallback false; qualified forms over its
     // aliases stay unclassified.
     expect(matchSectionHeader("Spoken Languages")).toBeNull();
+  });
+});
+
+describe("DATE_RANGE_RE — separator-less month-year pairs (#119)", () => {
+  // Awesome-CV / LaTeX templates: pdfjs drops the dash glyph entirely, leaving
+  // a bare space between the two month-year anchors. Branch (b) of DATE_RANGE_RE
+  // must match without any – / — / - / to / through separator.
+
+  it("matches a bare space-separated month-year pair", () => {
+    expect(DATE_RANGE_RE.test("Sep. 2023 Mar. 2024")).toBe(true);
+    DATE_RANGE_RE.lastIndex = 0;
+  });
+
+  it("matches additional separator-less cases", () => {
+    expect(DATE_RANGE_RE.test("Mar. 2021 Jun. 2023")).toBe(true);
+    DATE_RANGE_RE.lastIndex = 0;
+    expect(DATE_RANGE_RE.test("Jun. 2017 May. 2018")).toBe(true);
+    DATE_RANGE_RE.lastIndex = 0;
+  });
+
+  it("matches a separator-less range embedded in a title-bearing line", () => {
+    // e.g. "Site Reliability Engineer Feb. 2021 Mar. 2021"
+    expect(DATE_RANGE_RE.test("Site Reliability Engineer Feb. 2021 Mar. 2021")).toBe(
+      true,
+    );
+    DATE_RANGE_RE.lastIndex = 0;
+  });
+
+  it("parseDateRange extracts correct start and end dates (sep-less)", () => {
+    const result = parseDateRange("Sep. 2023 Mar. 2024");
+    expect(result.start_date).toBe("Sep. 2023");
+    expect(result.end_date).toBe("Mar. 2024");
+    expect(result.is_current).toBeUndefined();
+  });
+
+  it("parseDateRange extracts is_current when end is Present (sep-less)", () => {
+    const result = parseDateRange("Feb. 2022 Present");
+    expect(result.start_date).toBe("Feb. 2022");
+    expect(result.is_current).toBe(true);
+  });
+
+  it("does NOT match bare adjacent years (too weak a signal)", () => {
+    // "shipped 2020 2021 release" must not fire the separator-less branch.
+    const m = DATE_RANGE_RE.exec("shipped 2020 2021 release");
+    DATE_RANGE_RE.lastIndex = 0;
+    expect(m).toBeNull();
+  });
+
+  it("existing dash-separator ranges still parse correctly (branch a)", () => {
+    // Regression guard: classic dash branch must be byte-identical.
+    const result = parseDateRange("Jan 2019 – Dec 2021");
+    expect(result.start_date).toBe("Jan 2019");
+    expect(result.end_date).toBe("Dec 2021");
+  });
+
+  it("existing 'to'-separator ranges still parse correctly (branch a)", () => {
+    const result = parseDateRange("Mar. 2020 to Jun. 2023");
+    expect(result.start_date).toBe("Mar. 2020");
+    expect(result.end_date).toBe("Jun. 2023");
+  });
+
+  it("existing Present ranges still parse correctly (branch a)", () => {
+    const result = parseDateRange("Apr 2021 – Present");
+    expect(result.start_date).toBe("Apr 2021");
+    expect(result.is_current).toBe(true);
   });
 });
 
