@@ -34,8 +34,8 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 63,
-    "preLayoutOverall": 63,
+    "overall": 67,
+    "preLayoutOverall": 67,
     "specificity": {
       "score": 17,
       "max": 40,
@@ -51,12 +51,11 @@
       "totalBullets": 31
     },
     "completeness": {
-      "score": 23,
+      "score": 27,
       "max": 30,
       "gradable": true,
       "missing": [
-        "skills",
-        "work experience"
+        "skills"
       ]
     },
     "layout": {

@@ -347,11 +347,14 @@ describe("splitIntoSections — corpus section-count regression (#112)", () => {
       hasLocation: true,
     },
     {
-      // Invented all-caps labels ("INTERNSHIPS", "ON CAMPUS INVOLVEMENT") at
-      // body size — handled by the keyword/anchor path, not over-split.
+      // Non-standard headers — "ON CAMPUS INVOLVEMENT" and "VOLUNTEER
+      // EXPERIENCE" now route to experience (Part A, issue #19); "INTERNSHIPS"
+      // was already an experience alias via anchor-fallback. Education drops
+      // to 1 (the single degree entry; prior count of 2 included involvement
+      // content misrouted into education).
       file: "google-docs/google-docs-skia-proxy-nonstandard-headers.pdf",
-      experience: 2,
-      education: 2,
+      experience: 3,
+      education: 1,
       hasLocation: false,
     },
   ];
