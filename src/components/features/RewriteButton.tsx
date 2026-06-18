@@ -2,7 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 /**
- * Per-bullet "Suggest a rewrite" CTA. Runs Qwen2-1.5B in the browser via
+ * Per-bullet "Suggest a rewrite" CTA. Runs Qwen2.5-1.5B in the browser via
  * WebLLM (see ../../lib/webllm/).
  *
  * Non-negotiable rules from issue #3:
@@ -213,7 +213,7 @@ function LoadingPanel({ progress }: { progress: ProgressUpdate }) {
           What's happening?
         </summary>
         <p className="mt-1 max-w-prose text-[10px] leading-relaxed text-content-tertiary">
-          A small open-source language model (Qwen2-1.5B) is downloading to
+          A small open-source language model (Qwen2.5-1.5B) is downloading to
           your browser. It runs entirely on your device — your bullet text
           never leaves this tab. The download takes about a minute on a
           typical connection and is cached for next time.
