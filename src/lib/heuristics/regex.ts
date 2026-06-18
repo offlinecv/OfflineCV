@@ -187,6 +187,46 @@ function matchAnchorFallback(
   return null;
 }
 
+/**
+ * Unguarded trailing-anchor lookup for the column-gated sidebar-header recovery
+ * path (#117).
+ *
+ * The unguarded cousin of {@link matchAnchorFallback}: it normalizes the text
+ * (trim, lowercase, strip a trailing `:·•`), splits into tokens, and returns
+ * the section whose anchor set contains the LAST token — provided that section
+ * has `anchorFallback` enabled (so `skills`/`other` are excluded by config).
+ *
+ * Unlike `matchAnchorFallback`, it applies NONE of the prose guards: no casing
+ * guard, no numeric-lead guard, no token-count guard, no terminal-punctuation
+ * guard. That is deliberate — this function recovers a real header that a
+ * two-column flatten glued a sidebar artifact onto (`"20% Projects"` → the
+ * `20%` is a sidebar value, `Projects` is the header). The guards that
+ * `matchAnchorFallback` uses to tell a heading from prose are replaced here by
+ * the CALLER'S column-membership signal: only `classifyLine`'s column-gated
+ * branch may call this, and only for a header-shaped line that sits in the
+ * SECONDARY column of a detected two-column layout (`line.x >= columnSplitX`).
+ * The digit-lead / prose forms it would otherwise admit (`"5 Years Experience"`,
+ * `"20% Experience"`) live in the MAIN column of those same documents — and in
+ * single-column documents the gate is absent entirely — so the column signal
+ * keeps them out.
+ *
+ * MUST NEVER be called on the text-only path (`matchSectionHeader`), which has
+ * no column signal to lean on — doing so would reopen the prose FP class that
+ * #115 closed.
+ */
+export function matchSectionAnchorToken(text: string): SectionName | null {
+  const normalized = text.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
+  const tokens = normalized.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) return null;
+  const last = tokens[tokens.length - 1];
+  for (const [name, anchors] of Object.entries(SECTION_ANCHORS) as Array<
+    [SectionName, ReadonlySet<string>]
+  >) {
+    if (anchors.has(last) && SECTION_ANCHOR_FALLBACKS.has(name)) return name;
+  }
+  return null;
+}
+
 /** True if the normalized line text matches any known section header. */
 export function matchSectionHeader(text: string): SectionName | null {
   const normalized = text.trim().toLowerCase().replace(/[:·•]+$/, "").trim();

@@ -2,7 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, it, expect } from "vitest";
-import { matchSectionHeader } from "./regex.ts";
+import { matchSectionHeader, matchSectionAnchorToken } from "./regex.ts";
 
 describe("matchSectionHeader — split-letter headers (#56)", () => {
   it("matches a clean header unchanged", () => {
@@ -84,6 +84,11 @@ describe("matchSectionHeader — head-noun anchor fallback (#108 / #111)", () =>
     expect(matchSectionHeader("5 Years Experience")).toBeNull();
     expect(matchSectionHeader("10+ Years Experience")).toBeNull();
     expect(matchSectionHeader("3 Years Experience")).toBeNull();
+    // AC pin (#117): the text-only path stays unchanged when the L3 visual
+    // recovery lands — "20% Experience" must remain null here. The recovery
+    // for "20% Projects" lives in classifyLine's font-gated visual branch via
+    // matchSectionAnchorToken, never on this path.
+    expect(matchSectionHeader("20% Experience")).toBeNull();
   });
 
   it("rejects a header-shaped line ending in terminal punctuation", () => {
@@ -116,5 +121,32 @@ describe("matchSectionHeader — head-noun anchor fallback (#108 / #111)", () =>
     // "other" has no anchors and anchorFallback false; qualified forms over its
     // aliases stay unclassified.
     expect(matchSectionHeader("Spoken Languages")).toBeNull();
+  });
+});
+
+describe("matchSectionAnchorToken — visual-path trailing anchor (#117)", () => {
+  it("recovers a section from a sidebar artifact glued onto the header", () => {
+    // The two-column flatten that motivates #117: a sidebar value `20%` is
+    // glued onto the real `Projects` header. The trailing token is the anchor,
+    // so the unguarded lookup recovers `projects`. (The font signal at the call
+    // site is what licenses skipping the prose guards.)
+    expect(matchSectionAnchorToken("20% Projects")).toBe("projects");
+  });
+
+  it("recovers past a leading noise-prefix glyph", () => {
+    // A leading bullet/box glyph is a sidebar/list artifact, not a prose marker
+    // on this font-gated path; the trailing anchor still wins.
+    expect(matchSectionAnchorToken("▪ Experience")).toBe("experience");
+  });
+
+  it("does NOT match a section whose anchorFallback is false (skills)", () => {
+    // `skills` has anchorFallback:false in the config, so even though `skills`
+    // is its anchor, the trailing-token lookup must reject it — matching the
+    // text-only path's treatment.
+    expect(matchSectionAnchorToken("Random Skills")).toBeNull();
+  });
+
+  it("returns null when the last token is not an anchor", () => {
+    expect(matchSectionAnchorToken("just some prose")).toBeNull();
   });
 });

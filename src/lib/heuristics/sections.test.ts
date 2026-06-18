@@ -25,8 +25,15 @@ import { mkItems } from "./__test-utils__/mkItem.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
 
-function build(specs: Array<{ text: string; fontSize?: number }>): PdfSection[] {
-  return splitIntoSections(groupIntoLines(mkItems(specs)));
+function build(
+  specs: Array<{ text: string; fontSize?: number; x?: number }>,
+  columnBoundaries?: Map<number, number>,
+): PdfSection[] {
+  const items = mkItems(specs);
+  return splitIntoSections(
+    groupIntoLines(items, columnBoundaries),
+    columnBoundaries,
+  );
 }
 
 /** Section names in document order (for boundary assertions). */
@@ -226,6 +233,73 @@ describe("splitIntoSections — visual-primary boundary path (#112)", () => {
       "experience",
       "education",
     ]);
+  });
+
+  describe("column-gated sidebar-header recovery (#117)", () => {
+    // A two-column flatten glues a sidebar value ("20%") onto the "Projects"
+    // header, producing a body-size, text-identical-to-prose line. The ONLY
+    // signal that separates "20% Projects" (a real header in the secondary
+    // column) from main-column prose like "20% Experience" is column
+    // membership: line.x >= the page's column split-x. The maxFontSize is kept
+    // at body size in every case so these pin the COLUMN gate, not the L3 font
+    // path.
+    const TWO_COLUMN: Map<number, number> = new Map([[1, 384]]);
+
+    it("(a) recovers `projects` for a sidebar line in the secondary column", () => {
+      const sections = build(
+        [
+          { text: "Drew Hayes", fontSize: 20 }, // name
+          { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10 }, // contact
+          { text: "EXPERIENCE", fontSize: 13 }, // real keyword section — past the name block
+          { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10 },
+          // Body-size (NOT font-distinct), secondary column (x=405 >= 384).
+          { text: "20% Projects", fontSize: 10, x: 405 },
+          { text: "Launched 10 new web fonts with external non-profit partners.", fontSize: 10, x: 405 },
+        ],
+        TWO_COLUMN,
+      );
+
+      // The sidebar-prefixed line opened a `projects` section, not `other`.
+      const projects = sectionContaining(sections, "Launched 10 new web fonts");
+      expect(projects).toBeDefined();
+      expect(projects!.name).toBe("projects");
+      expect(names(sections)).toContain("projects");
+      // No `other` sink was opened for the recovered header.
+      expect(names(sections).filter((n) => n === "other")).toHaveLength(0);
+    });
+
+    it("(b) does NOT recover the same line in the MAIN column (x < split)", () => {
+      const sections = build(
+        [
+          { text: "Drew Hayes", fontSize: 20 },
+          { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10 },
+          { text: "EXPERIENCE", fontSize: 13 },
+          { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10 },
+          // Same text, body-size, MAIN column (x=50 < 384) — must NOT recover.
+          { text: "20% Projects", fontSize: 10, x: 50 },
+          { text: "Launched 10 new web fonts with external non-profit partners.", fontSize: 10, x: 50 },
+        ],
+        TWO_COLUMN,
+      );
+
+      // No `projects` section: the main-column line is treated as prose and
+      // stays appended to the open experience section.
+      expect(names(sections)).not.toContain("projects");
+    });
+
+    it("(c) does NOT recover in a single-column doc (no column boundaries)", () => {
+      const sections = build([
+        { text: "Drew Hayes", fontSize: 20 },
+        { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10 },
+        { text: "EXPERIENCE", fontSize: 13 },
+        { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10 },
+        // Same body-size line, but no columnBoundaries passed — gate absent.
+        { text: "20% Projects", fontSize: 10 },
+        { text: "Launched 10 new web fonts with external non-profit partners.", fontSize: 10 },
+      ]);
+
+      expect(names(sections)).not.toContain("projects");
+    });
   });
 });
 
