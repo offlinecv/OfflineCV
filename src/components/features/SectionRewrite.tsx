@@ -49,7 +49,7 @@ interface SectionRewriteProps {
   bullets: readonly string[];
 }
 
-type Status =
+export type Status =
   | { kind: "idle" }
   | { kind: "loading"; progress: ProgressUpdate }
   | { kind: "rewriting" }
@@ -212,7 +212,12 @@ export function SectionRewrite({ bullets }: SectionRewriteProps) {
   );
 }
 
-function labelFor(status: Status, lockedByOther: boolean): string {
+// Helpers exported for unit tests (see SectionRewrite.test.ts). The component
+// itself is harder to render in non-idle states from a smoke test (status is
+// internal + driven by async work), so the testable surface is the helpers
+// that own the branching: `labelFor`, `formatTokens`, `ProposedSection`,
+// `NumberPreservationWarning`.
+export function labelFor(status: Status, lockedByOther: boolean): string {
   if (lockedByOther) return "Another rewrite running…";
   switch (status.kind) {
     case "loading":
@@ -258,7 +263,7 @@ function LoadingPanel({ progress }: { progress: ProgressUpdate }) {
   );
 }
 
-function ProposedSection({
+export function ProposedSection({
   original,
   result,
   copied,
@@ -352,7 +357,7 @@ function BulletColumn({
   );
 }
 
-function NumberPreservationWarning({
+export function NumberPreservationWarning({
   dropped,
   added,
 }: {
@@ -374,7 +379,7 @@ function NumberPreservationWarning({
   );
 }
 
-function formatTokens(tokens: readonly string[]): string {
+export function formatTokens(tokens: readonly string[]): string {
   if (tokens.length === 1) return tokens[0]!;
   if (tokens.length === 2) return `${tokens[0]} and ${tokens[1]}`;
   return `${tokens.slice(0, -1).join(", ")}, and ${tokens[tokens.length - 1]}`;
