@@ -592,7 +592,7 @@ export function computeAnonymousAtsScore(
   });
   completenessChecks.push({
     key: "experience",
-    passed: expEntries.length > 0,
+    passed: expEntries.length > 0 || bullets.length > 0,
     label: "work experience",
   });
   completenessChecks.push({
