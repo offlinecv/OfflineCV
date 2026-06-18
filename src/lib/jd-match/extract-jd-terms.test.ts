@@ -148,4 +148,40 @@ Kubernetes is a core piece of the platform.
     expect(out.nouns.length).toBeLessThanOrEqual(25);
     expect(out.nounsDropped).toBeGreaterThan(0);
   });
+
+  it("ranks informative noun phrases past a marketing-heavy opener instead of slicing in document order", () => {
+    // A marketing opener spends the first 25+ capitalized phrases on
+    // single-occurrence company fluff. Two informative phrases ("Event
+    // Sourcing", "Domain Modeling") appear only in a Requirements block, after
+    // the cap's worth of fluff. A document-order slice would drop both; the
+    // ranker must promote them because each recurs and lives in Requirements.
+    const fluffLines: string[] = [];
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (let i = 0; i < 30; i++) {
+      const tail = `${letters[i % 26]}${letters[(i + 5) % 26]}${letters[(i + 11) % 26]}`;
+      // Each is a distinct, single-occurrence capitalized phrase = score 0.
+      fluffLines.push(`Acme ${tail}corp is reshaping the world today.`);
+    }
+    const jd = `${fluffLines.join("\n")}
+
+Requirements:
+Event Sourcing is central here. We live and breathe Event Sourcing.
+Strong Domain Modeling skills. We obsess over Domain Modeling daily.
+`;
+    const out = extractJdTerms(jd);
+    const displays = out.nouns.map((n) => n.display);
+    // Both informative phrases must survive the cap despite arriving late.
+    expect(displays).toContain("Event Sourcing");
+    expect(displays).toContain("Domain Modeling");
+    // And they must rank above the single-occurrence opener fluff.
+    const eventIdx = displays.indexOf("Event Sourcing");
+    const domainIdx = displays.indexOf("Domain Modeling");
+    const firstFluffIdx = displays.findIndex((d) => d.startsWith("Acme"));
+    if (firstFluffIdx !== -1) {
+      expect(eventIdx).toBeLessThan(firstFluffIdx);
+      expect(domainIdx).toBeLessThan(firstFluffIdx);
+    }
+    // Overflow is still recorded.
+    expect(out.nounsDropped).toBeGreaterThan(0);
+  });
 });

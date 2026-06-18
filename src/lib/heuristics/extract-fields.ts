@@ -102,6 +102,34 @@ function looksLikeDocTitleBoilerplate(words: string[]): boolean {
   return words.length <= 3 && hits >= 2;
 }
 
+/** Single titlecase word: a leading capital then only letters / `.`-`-`-`'`
+ *  (e.g. `Etta`, `O'Brien`, `Jean-Luc`). Same per-word shape the multi-word
+ *  title-case check uses, so a mononym is held to the identical standard. */
+const SINGLE_WORD_NAME_RE = /^[A-Z][a-zA-Z.\-']*$/;
+
+/**
+ * Precision guard for a lone-word name candidate (issue #107). A single top
+ * line is more often `Profile` / `Resume` / a brand or section header than a
+ * person's mononym, so a one-word line is only ever a name when ALL hold:
+ *   - it is a section header? → reject (handled here via matchSectionHeader)
+ *   - it is doc-title boilerplate ("Resume", "Profile") → reject
+ *   - it looks like a job-title tagline ("Engineer") → reject
+ *   - it is titlecase (leading capital, letters only) → required
+ *   - it carries strong font signal (near the largest font on the page) → required
+ * The first-eligible-line constraint is enforced by the caller's control flow,
+ * NOT here: a single-word line is only admitted when it is the first surviving
+ * candidate (see `extractName`).
+ */
+function looksLikeMononymName(text: string, line: PdfLine, maxFontSize: number): boolean {
+  if (matchSectionHeader(text)) return false;
+  if (looksLikeDocTitleBoilerplate([text])) return false;
+  if (looksLikeTitle(text)) return false;
+  if (!SINGLE_WORD_NAME_RE.test(text)) return false;
+  // Strong font signal: a real name in the largest (or near-largest) font.
+  if (line.maxFontSize < maxFontSize - 0.5) return false;
+  return true;
+}
+
 /** y-position of the first line in `lines` matching any of the contact regexes,
  *  or undefined if no contact-bearing line is found. Used as a soft signal —
  *  candidate names close to this y get a small bonus. */
@@ -170,7 +198,19 @@ export function extractName(
     if (/\d/.test(text)) continue;
     if (text.includes("@")) continue;
     const words = text.split(/\s+/);
-    if (words.length < 2 || words.length > 5) continue;
+    // A two-word minimum is a precision guard — a lone top line is usually
+    // `Profile` / `Resume` / a brand or section header, not a mononym. A
+    // single-word candidate is admitted ONLY through the guarded
+    // `looksLikeMononymName` path AND only as the first eligible line (#107):
+    // a one-word line that is not first-eligible is still rejected, so a
+    // two-word name on the same résumé always wins the lead slot first.
+    const isMononym = words.length === 1;
+    if (isMononym) {
+      if (firstEligibleIdx !== null) continue;
+      if (!looksLikeMononymName(text, line, maxFontSize)) continue;
+    } else if (words.length > 5) {
+      continue;
+    }
     const letterRatio =
       text.replace(/[^A-Za-z]/g, "").length / Math.max(text.length, 1);
     if (letterRatio < 0.7) continue;
@@ -197,6 +237,11 @@ export function extractName(
     // not win the name slot on position/size. Real names never match the
     // title-keyword set, so this only ever penalizes non-name lines.
     if (looksLikeTitle(text)) score -= 0.6;
+    // Small mononym penalty (#107): a single-word pick is inherently weaker
+    // signal than a two-word name, so a genuine two-word name on the same
+    // résumé always outranks a lone-word candidate. Kept small (0.1) so a
+    // strong mononym still clears the scorer's 0.5 contact-confidence floor.
+    if (isMononym) score -= 0.1;
 
     if (!best || score > best.score) best = { line, score };
   }

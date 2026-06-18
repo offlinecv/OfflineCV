@@ -361,6 +361,81 @@ describe("extractName — name set apart from contact block (issue #16, mode 2)"
   });
 });
 
+describe("extractName — single-word (mononym) names (issue #107)", () => {
+  it("detects a lone titlecase first name as the name", () => {
+    // The reported bug: a résumé whose name line is a single word (`Etta`)
+    // was rejected by the 2-word minimum before it could be scored.
+    const { profile } = buildContext([
+      { text: "Etta", fontSize: 20 },
+      { text: "etta@example.com · (312) 555-0123", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Etta");
+    // Must clear ANON_CONTACT_CONFIDENCE_FLOOR (0.5) so completeness scoring
+    // credits the name rather than marking it missing.
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("a two-word name still wins over a single-word candidate on the same résumé", () => {
+    // The mononym path must not steal the slot from a real two-word name.
+    const { profile } = buildContext([
+      { text: "Jane Smith", fontSize: 18 },
+      { text: "Etta", fontSize: 12 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+
+  it("does not pick a single-word section header as the name", () => {
+    // "Skills" is a canonical section header — the mononym guard's
+    // matchSectionHeader check must reject it so it never becomes the name.
+    // (Build the profile section directly: the full section splitter would
+    // otherwise hive the header off into its own section.)
+    const profile: PdfSection = {
+      name: "profile",
+      lines: groupIntoLines(
+        mkItems([
+          { text: "Skills", fontSize: 20 },
+          { text: "Jane Smith", fontSize: 14 },
+          { text: "jane.smith@example.com", fontSize: 10 },
+        ]),
+      ),
+    };
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+
+  it("does not pick a single-word doc-title boilerplate ('Resume') as the name", () => {
+    const { profile } = buildContext([
+      { text: "Resume", fontSize: 20 },
+      { text: "Jane Smith", fontSize: 14 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+
+  it("does not pick a single-word job title ('Engineer') as the name", () => {
+    const { profile } = buildContext([
+      { text: "Engineer", fontSize: 20 },
+      { text: "Jane Smith", fontSize: 14 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+
+  it("does not pick a lowercase single word as the name (titlecase required)", () => {
+    const { profile } = buildContext([
+      { text: "etta", fontSize: 20 },
+      { text: "Jane Smith", fontSize: 14 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+});
+
 describe("US_LOCATION_RE — preposition-phrase city rejection", () => {
   it("does not eat lowercase prepositions like 'and' / 'of' inside the city capture", () => {
     // Pre-fix the regex captured "CS and Engineering Seattle" (26 chars

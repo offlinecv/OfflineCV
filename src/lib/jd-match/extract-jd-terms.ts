@@ -103,14 +103,17 @@ export interface ExtractJdTermsResult {
 }
 
 /**
- * Cap on noun-pass hits surfaced per JD. The caller applies this as a
- * first-N-in-document-order slice (`allNouns.slice(0, NOUN_PASS_CAP)`) —
- * there's no ranking step in v1; we keep what the regex finds first and
- * record the rest as `nounsDropped`. A capitalization-heavy paragraph can
- * produce 50+ noisy noun phrases; surfacing them all would drown the
- * Missing column. Empirically, typical tech JDs land at <10 noun-phrase
- * hits after the skill-overlap filter, so a 25-cap leaves comfortable
- * headroom while protecting the UI from outliers.
+ * Cap on noun-pass hits surfaced per JD. Before the cap is applied the caller
+ * ranks the hits by a cheap deterministic informativeness score
+ * (`rankNounHits`) and keeps the top `NOUN_PASS_CAP` — not the first-N in
+ * document order. Ranking is needed because a JD that opens with a marketing
+ * paragraph buries the informative phrases below 25 capitalized company-fluff
+ * phrases; a document-order slice would drop the signal and keep the noise.
+ * The overflow past the cap is recorded as `nounsDropped`. A
+ * capitalization-heavy paragraph can produce 50+ noisy noun phrases; surfacing
+ * them all would drown the Missing column. Empirically, typical tech JDs land
+ * at <10 noun-phrase hits after the skill-overlap filter, so a 25-cap leaves
+ * comfortable headroom while protecting the UI from outliers.
  */
 export const NOUN_PASS_CAP = 25;
 
@@ -148,6 +151,27 @@ const NOUN_STOP_PHRASES = new Set<string>([
   "friday",
   "saturday",
   "sunday",
+  // Marketing / company-fluff phrases that capitalized openers love but that
+  // carry no skill signal. Filtered out in `extractNounPass`, so they never
+  // reach the ranker — kept here (not a parallel list) per the noun-pass
+  // stoplist convention. Extend with more weak-filler phrases as JDs surface
+  // them rather than starting a second list.
+  "our customers",
+  "our clients",
+  "our partners",
+  "our employees",
+  "our offices",
+  "our headquarters",
+  "the world",
+  "the future",
+  "the industry",
+  "the market",
+  "the best",
+  "join us",
+  "learn more",
+  "apply now",
+  "our story",
+  "about us",
 ]);
 
 /** Single-token acronyms we never want as a noun-pass term. Matches things
@@ -207,7 +231,8 @@ export function extractJdTerms(
     return true;
   });
 
-  const nouns = allNouns.slice(0, NOUN_PASS_CAP);
+  const ranked = rankNounHits(allNouns, body);
+  const nouns = ranked.slice(0, NOUN_PASS_CAP);
   const nounsDropped = Math.max(0, allNouns.length - NOUN_PASS_CAP);
 
   return {
@@ -327,6 +352,73 @@ function extractNounPass(body: string, snippetChars: number): ExtractedTerm[] {
     });
   }
   return Array.from(seen.values());
+}
+
+/**
+ * Headings that mark the start of a requirements / qualifications block. A
+ * noun phrase that recurs inside one of these blocks is stronger evidence of a
+ * real requirement than the same phrase in a marketing opener, so the ranker
+ * weights requirements-portion hits extra.
+ */
+const REQUIREMENTS_HEADING_RE =
+  /\b(requirements?|qualifications?|you'?ll have|what you bring|what we'?re looking for|must have|nice to have)\b/i;
+
+/**
+ * Carve out the "requirements / qualifications" portion of the body, if any.
+ * Heuristic: from the first line whose text matches `REQUIREMENTS_HEADING_RE`
+ * to the end of the body. Cheap and deterministic — we don't try to find the
+ * block's end, since over-including only dilutes the bonus slightly. Returns
+ * the lowercased portion (or "" when no such heading exists) for substring
+ * counting.
+ */
+function requirementsPortion(body: string): string {
+  const lines = body.split("\n");
+  const start = lines.findIndex((line) => REQUIREMENTS_HEADING_RE.test(line));
+  if (start === -1) return "";
+  return lines.slice(start).join("\n").toLowerCase();
+}
+
+/**
+ * Count case-insensitive, whole-phrase occurrences of `phrase` in `haystack`
+ * (already lowercased). Word-boundary anchored so "Go" doesn't match "Google".
+ */
+function countOccurrences(haystackLower: string, phraseLower: string): number {
+  if (!phraseLower) return 0;
+  const escaped = phraseLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b${escaped}\\b`, "g");
+  const matches = haystackLower.match(re);
+  return matches ? matches.length : 0;
+}
+
+/**
+ * Rank noun-pass hits by a cheap deterministic informativeness score so the
+ * cap surfaces the most central phrases instead of the first-N in document
+ * order. Signals:
+ *   - body frequency: more occurrences across the JD → more central.
+ *   - requirements-portion frequency: occurrences inside a
+ *     requirements/qualifications block count extra (weight 2), since that's
+ *     where real must-haves live rather than marketing copy.
+ * Weak-filler phrases are already removed by `NOUN_STOP_PHRASES` upstream, so
+ * they never reach the ranker — no double-filter here.
+ *
+ * The sort is stable: ties keep the input's document order, so a JD with no
+ * repetition degrades gracefully to the prior first-N behavior.
+ */
+export function rankNounHits(
+  hits: readonly ExtractedTerm[],
+  body: string,
+): ExtractedTerm[] {
+  const bodyLower = body.toLowerCase();
+  const reqLower = requirementsPortion(body);
+  const scored = hits.map((hit, index) => {
+    const key = hit.display.toLowerCase();
+    const bodyHits = countOccurrences(bodyLower, key);
+    const reqHits = reqLower ? countOccurrences(reqLower, key) : 0;
+    const score = bodyHits + 2 * reqHits;
+    return { hit, index, score };
+  });
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  return scored.map((s) => s.hit);
 }
 
 function snippetAround(
