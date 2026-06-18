@@ -7,12 +7,11 @@ import type { ProgressUpdate, WebLlmEngine } from "./types.ts";
 /**
  * Pinned model ID. Single source of truth — never inline this string.
  *
- * Qwen2-1.5B-Instruct is the right size/quality tradeoff for the per-bullet
- * rewrite task on consumer hardware (~1.2GB quantized). Swapping models is
- * out of scope for v1 (see issue #3, Out-of-scope §); a measurement-backed
- * swap to Phi-3 or Llama-3 can revisit this constant.
+ * Qwen2.5-1.5B-Instruct is the right size/quality tradeoff for the resume
+ * rewrite task on consumer hardware (~1.2GB quantized). Multi-model selection
+ * is out of scope here and lives behind a model registry (issue #64).
  */
-export const MODEL_ID = "Qwen2-1.5B-Instruct-q4f16_1-MLC";
+export const MODEL_ID = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
 
 let cached: Promise<WebLlmEngine> | null = null;
 let downloadStartedFired = false;
