@@ -23,7 +23,18 @@
         "employment history",
         "work history",
         "career",
-        "career history"
+        "career history",
+        "volunteer experience",
+        "community service",
+        "leadership",
+        "involvement",
+        "on campus involvement",
+        "campus involvement",
+        "extracurricular",
+        "extracurricular activities",
+        "activities",
+        "volunteer",
+        "volunteering"
       ],
       "anchors": ["experience", "employment"],
       "splitLetterNormalizable": true,
@@ -77,7 +88,6 @@
       "aliases": [
         "achievements",
         "accomplishments",
-        "activities",
         "awards",
         "awards & honors",
         "awards and honors",
@@ -96,8 +106,6 @@
         "focus areas",
         "interests",
         "languages",
-        "volunteer",
-        "volunteering",
         "references",
         "hobbies",
         "publications"

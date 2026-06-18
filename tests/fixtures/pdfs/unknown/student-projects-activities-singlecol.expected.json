@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.86,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "none",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -17,7 +17,6 @@
       "family_name",
       "full_name",
       "given_name",
-      "heuristic_achievements",
       "linkedin_url",
       "location",
       "phone",
@@ -26,10 +25,10 @@
       "website_url"
     ],
     "skillsCount": 13,
-    "experienceCount": 2,
+    "experienceCount": 3,
     "educationCount": 2,
     "projectsCount": 4,
-    "achievementsCount": 4,
+    "achievementsCount": 0,
     "rawTextCharCount": 2331,
     "pageCount": 2,
     "linkAnnotationCount": 0,
