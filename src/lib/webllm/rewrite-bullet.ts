@@ -2,6 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 import { trackWebllmFirstRewrite } from "../analytics.ts";
+import { cleanRewriteLine } from "./post-process.ts";
 import type { WebLlmEngine } from "./types.ts";
 
 /**
@@ -61,13 +62,14 @@ export async function rewriteBulletWithLlm(
 }
 
 function postProcess(raw: string): string {
-  const firstLine = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  if (!firstLine) return "";
-  const withoutPrefix = firstLine.replace(/^rewritten:\s*/i, "");
-  return withoutPrefix.replace(/^["'`]|["'`]$/g, "").trim();
+  // Per-bullet path: clean every line then keep the first non-empty result.
+  // Section path uses cleanRewriteLine the same way but keeps all lines —
+  // see rewrite-section.ts.
+  for (const line of raw.split("\n")) {
+    const cleaned = cleanRewriteLine(line);
+    if (cleaned.length > 0) return cleaned;
+  }
+  return "";
 }
 
 /** Test-only: drop the one-shot telemetry flag between tests. */
