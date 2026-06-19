@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { detectWebGpu } from "../../lib/webllm/capability.ts";
 import { loadEngine } from "../../lib/webllm/web-llm.ts";
 import { rewriteSectionWithLlm } from "../../lib/webllm/rewrite-section.ts";
+import { DEFAULT_MODEL_ID } from "../../lib/webllm/models.ts";
 import type {
   ProgressUpdate,
   WebGpuCapability,
@@ -125,11 +126,18 @@ export function SectionRewrite({ bullets }: SectionRewriteProps) {
         kind: "loading",
         progress: { progress: 0, text: "Starting…" },
       });
-      const engine = await loadEngine((progress) => {
+      // PR A scope: the picker (#64 Step 6) doesn't exist yet, so every
+      // section rewrite uses the Apache-2.0 default. PR B will replace this
+      // with the user's persisted localStorage selection.
+      const engine = await loadEngine(DEFAULT_MODEL_ID, (progress) => {
         setStatus({ kind: "loading", progress });
       });
       setStatus({ kind: "rewriting" });
-      const result = await rewriteSectionWithLlm(trimmedBullets, engine);
+      const result = await rewriteSectionWithLlm(
+        trimmedBullets,
+        engine,
+        DEFAULT_MODEL_ID,
+      );
       if (result.bullets.length === 0) {
         setStatus({
           kind: "error",

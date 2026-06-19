@@ -158,10 +158,15 @@ export function trackRenderError(args: { errorName: string }): void {
   });
 }
 
-// WebLLM bullet-rewrite funnel. The call-sites (capability.ts, web-llm.ts,
-// rewrite-bullet.ts) gate these so each event fires at most once per page.
-// Same env-gating semantics as the existing trackers: when VITE_POSTHOG_KEY
-// is unset, `track()` is a no-op and these compile away.
+// WebLLM funnel. The call-sites (capability.ts, web-llm.ts, rewrite-bullet.ts,
+// rewrite-section.ts) gate the one-shot events so each fires at most once per
+// (model id, page). Same env-gating semantics as the existing trackers: when
+// VITE_POSTHOG_KEY is unset, `track()` is a no-op and these compile away.
+//
+// `model` dimension (#64): every download/loaded/rewrite event carries the
+// model id so the funnel can be sliced by model. `webllm_capability_detected`
+// has no model dimension — it's about the browser, fired before any model is
+// picked.
 
 export function trackWebllmCapabilityDetected(
   capability: WebGpuCapability,
@@ -169,16 +174,16 @@ export function trackWebllmCapabilityDetected(
   track("webllm_capability_detected", { capability });
 }
 
-export function trackWebllmDownloadStarted(): void {
-  track("webllm_download_started", {});
+export function trackWebllmDownloadStarted(args: { model: string }): void {
+  track("webllm_download_started", { model: args.model });
 }
 
-export function trackWebllmLoaded(): void {
-  track("webllm_loaded", {});
+export function trackWebllmLoaded(args: { model: string }): void {
+  track("webllm_loaded", { model: args.model });
 }
 
-export function trackWebllmFirstRewrite(): void {
-  track("webllm_first_rewrite", {});
+export function trackWebllmFirstRewrite(args: { model: string }): void {
+  track("webllm_first_rewrite", { model: args.model });
 }
 
 // Section-rewrite funnel (issue #63). Kept distinct from the per-bullet
@@ -187,27 +192,31 @@ export function trackWebllmFirstRewrite(): void {
 // section path; the original per-bullet key is preserved unchanged.
 
 export function trackWebllmSectionRewriteStarted(args: {
+  model: string;
   inputBulletCount: number;
 }): void {
   track("webllm_section_rewrite_started", {
+    model: args.model,
     input_bullet_count: args.inputBulletCount,
   });
 }
 
 export function trackWebllmSectionRewriteCompleted(args: {
+  model: string;
   inputBulletCount: number;
   outputBulletCount: number;
   numbersPreserved: boolean;
 }): void {
   track("webllm_section_rewrite_completed", {
+    model: args.model,
     input_bullet_count: args.inputBulletCount,
     output_bullet_count: args.outputBulletCount,
     numbers_preserved: args.numbersPreserved,
   });
 }
 
-export function trackWebllmFirstSectionRewrite(): void {
-  track("webllm_first_section_rewrite", {});
+export function trackWebllmFirstSectionRewrite(args: { model: string }): void {
+  track("webllm_first_section_rewrite", { model: args.model });
 }
 
 // JD URL ingestion funnel (#72 / #75). Fires on every user-initiated fetch
