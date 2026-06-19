@@ -255,7 +255,7 @@ describe("fetchJdFromUrl — Ashby", () => {
     expect(result!.text).not.toMatch(/<[^>]+>/);
   });
 
-  it("returns null when the posting id isn't in the board listing", async () => {
+  it("throws when the posting id isn't in the board listing (caller routes to network_error)", async () => {
     const fakeResponse = {
       jobBoard: { name: "Acme Corp" },
       jobPostings: [
@@ -274,21 +274,37 @@ describe("fetchJdFromUrl — Ashby", () => {
       ),
     );
 
-    const result = await fetchJdFromUrl(
-      "https://jobs.ashbyhq.com/acmecorp/22222222-2222-2222-2222-222222222222",
-    );
-    expect(result).toBeNull();
+    await expect(
+      fetchJdFromUrl(
+        "https://jobs.ashbyhq.com/acmecorp/22222222-2222-2222-2222-222222222222",
+      ),
+    ).rejects.toThrow(/Ashby/);
   });
 
-  it("returns null when the API call fails (non-2xx)", async () => {
+  it("throws when the API call fails (non-2xx) so the caller can route the network_error funnel", async () => {
+    // Distinguishes "URL parsed; fetch failed" (throw) from "URL didn't parse"
+    // (null). Without this, a transient ATS-side 500 misroutes through the
+    // `result === null` branch and gets tracked as `unsupported_unknown`.
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response("nope", { status: 404 })),
     );
 
-    const result = await fetchJdFromUrl(
-      "https://jobs.ashbyhq.com/missingco/12345678-90ab-cdef-1234-567890abcdef",
-    );
+    await expect(
+      fetchJdFromUrl(
+        "https://jobs.ashbyhq.com/missingco/12345678-90ab-cdef-1234-567890abcdef",
+      ),
+    ).rejects.toThrow(/Ashby API 404/);
+  });
+
+  it("still returns null when the URL doesn't parse to any ATS (no network call made)", async () => {
+    // Contract-pin: `null` means "couldn't identify an ATS"; throws mean "could
+    // identify, but the fetch itself failed." Keeps the JdInput routing honest.
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchJdFromUrl("https://example.com/careers/123");
     expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
