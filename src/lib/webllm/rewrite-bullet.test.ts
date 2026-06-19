@@ -20,6 +20,12 @@ import {
   buildUserPrompt,
   rewriteBulletWithLlm,
 } from "./rewrite-bullet.ts";
+
+// Pin a stable model id for the per-bullet path's telemetry assertions.
+// Using a string literal (rather than importing DEFAULT_MODEL_ID) keeps
+// this file independent of registry shape changes.
+const TEST_MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+const OTHER_MODEL = "gemma-2-2b-it-q4f16_1-MLC";
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -52,7 +58,7 @@ describe("rewriteBulletWithLlm", () => {
   it("sends the system prompt and a user message containing the bullet", async () => {
     const { engine, spy } = makeEngine(async () => reply("Shipped Foo to 10M users."));
     const bullet = "  worked on stuff   ";
-    await rewriteBulletWithLlm(bullet, engine);
+    await rewriteBulletWithLlm(bullet, engine, TEST_MODEL);
 
     expect(spy).toHaveBeenCalledTimes(1);
     const req = spy.mock.calls[0]![0] as ChatCompletionRequest;
@@ -73,7 +79,7 @@ describe("rewriteBulletWithLlm", () => {
     const { engine } = makeEngine(async () =>
       reply("Rewritten: Shipped Foo to 10M users.  "),
     );
-    const out = await rewriteBulletWithLlm("orig", engine);
+    const out = await rewriteBulletWithLlm("orig", engine, TEST_MODEL);
     expect(out).toBe("Shipped Foo to 10M users.");
   });
 
@@ -81,7 +87,7 @@ describe("rewriteBulletWithLlm", () => {
     const { engine } = makeEngine(async () =>
       reply("\n\nLed migration to Postgres, cutting tail latency 40%.\n\nNote: blah"),
     );
-    const out = await rewriteBulletWithLlm("orig", engine);
+    const out = await rewriteBulletWithLlm("orig", engine, TEST_MODEL);
     expect(out).toBe("Led migration to Postgres, cutting tail latency 40%.");
   });
 
@@ -89,27 +95,41 @@ describe("rewriteBulletWithLlm", () => {
     const { engine } = makeEngine(async () =>
       reply('"Shipped Foo to 10M users."'),
     );
-    const out = await rewriteBulletWithLlm("orig", engine);
+    const out = await rewriteBulletWithLlm("orig", engine, TEST_MODEL);
     expect(out).toBe("Shipped Foo to 10M users.");
   });
 
   it("returns an empty string when the model returns null content", async () => {
     const { engine } = makeEngine(async () => reply(null));
-    const out = await rewriteBulletWithLlm("orig", engine);
+    const out = await rewriteBulletWithLlm("orig", engine, TEST_MODEL);
     expect(out).toBe("");
   });
 
   it("does NOT fire webllm_first_rewrite when the output is empty", async () => {
     const { engine } = makeEngine(async () => reply(null));
-    await rewriteBulletWithLlm("orig", engine);
+    await rewriteBulletWithLlm("orig", engine, TEST_MODEL);
     expect(trackFirstRewriteMock).not.toHaveBeenCalled();
   });
 
   it("fires webllm_first_rewrite exactly once on the first non-empty rewrite", async () => {
     const { engine } = makeEngine(async () => reply("Shipped Foo."));
-    await rewriteBulletWithLlm("a", engine);
-    await rewriteBulletWithLlm("b", engine);
+    await rewriteBulletWithLlm("a", engine, TEST_MODEL);
+    await rewriteBulletWithLlm("b", engine, TEST_MODEL);
     expect(trackFirstRewriteMock).toHaveBeenCalledTimes(1);
+    expect(trackFirstRewriteMock).toHaveBeenCalledWith({ model: TEST_MODEL });
+  });
+
+  it("fires webllm_first_rewrite ONCE PER MODEL — a different model id re-arms the one-shot", async () => {
+    const { engine } = makeEngine(async () => reply("Shipped Foo."));
+    await rewriteBulletWithLlm("a", engine, TEST_MODEL);
+    await rewriteBulletWithLlm("b", engine, OTHER_MODEL);
+    expect(trackFirstRewriteMock).toHaveBeenCalledTimes(2);
+    expect(trackFirstRewriteMock).toHaveBeenNthCalledWith(1, {
+      model: TEST_MODEL,
+    });
+    expect(trackFirstRewriteMock).toHaveBeenNthCalledWith(2, {
+      model: OTHER_MODEL,
+    });
   });
 
   it("propagates engine errors to the caller", async () => {
@@ -118,7 +138,7 @@ describe("rewriteBulletWithLlm", () => {
     const { engine } = makeEngine(async () => {
       throw boom;
     });
-    await expect(rewriteBulletWithLlm("orig", engine)).rejects.toBe(boom);
+    await expect(rewriteBulletWithLlm("orig", engine, TEST_MODEL)).rejects.toBe(boom);
   });
 });
 
