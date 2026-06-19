@@ -68,13 +68,24 @@ export interface SectionRewriteResult {
   addedNumbers: string[];
 }
 
-let firstSectionRewriteFired = false;
+/**
+ * Per-model one-shot guard for `webllm_first_section_rewrite`. Each model's
+ * first successful section rewrite fires the event exactly once per page so
+ * the funnel can compare "X loads → Y first section rewrites" per model,
+ * mirroring the per-bullet `firstRewriteFiredFor` in rewrite-bullet.ts.
+ */
+const firstSectionRewriteFiredFor = new Set<string>();
 
 /**
  * Rewrite a whole section of resume bullets using a loaded WebLLM engine.
  *
  * Pure over `engine` — the engine is passed in so tests can supply a stub
  * implementing the `WebLlmEngine` contract without touching the real model.
+ *
+ * `modelId` is required for model-dimensioned telemetry; the engine itself
+ * doesn't expose its model id, so the caller has to thread it through. In
+ * practice this is the same value that was passed to `loadEngine(modelId,
+ * …)` to acquire the engine.
  *
  * Output handling: split on newlines, run each line through the shared
  * cleanRewriteLine helper (strips `Rewritten:` prefix echoes, surrounding
@@ -85,13 +96,18 @@ let firstSectionRewriteFired = false;
  * `webllm_section_rewrite_completed` fires with the bullet counts and
  * numbersPreserved boolean once the model returns. `webllm_first_section_rewrite`
  * is a separate one-shot flag from the per-bullet first-rewrite key,
- * preserving funnel continuity for both paths.
+ * preserving funnel continuity for both paths. All three events carry the
+ * `model` dimension.
  */
 export async function rewriteSectionWithLlm(
   bullets: readonly string[],
   engine: WebLlmEngine,
+  modelId: string,
 ): Promise<SectionRewriteResult> {
-  trackWebllmSectionRewriteStarted({ inputBulletCount: bullets.length });
+  trackWebllmSectionRewriteStarted({
+    model: modelId,
+    inputBulletCount: bullets.length,
+  });
 
   const response = await engine.chat.completions.create({
     messages: [
@@ -111,6 +127,7 @@ export async function rewriteSectionWithLlm(
   const preservation = checkNumbersPreserved(bullets, rewrittenBullets);
 
   trackWebllmSectionRewriteCompleted({
+    model: modelId,
     inputBulletCount: bullets.length,
     outputBulletCount: rewrittenBullets.length,
     numbersPreserved: preservation.ok,
@@ -119,9 +136,9 @@ export async function rewriteSectionWithLlm(
   // Same gating as the per-bullet path: only count the first *successful*
   // section rewrite (one with at least one bullet) so a null/empty model
   // response doesn't pollute the conversion funnel.
-  if (!firstSectionRewriteFired && rewrittenBullets.length > 0) {
-    firstSectionRewriteFired = true;
-    trackWebllmFirstSectionRewrite();
+  if (!firstSectionRewriteFiredFor.has(modelId) && rewrittenBullets.length > 0) {
+    firstSectionRewriteFiredFor.add(modelId);
+    trackWebllmFirstSectionRewrite({ model: modelId });
   }
 
   return {
@@ -132,7 +149,7 @@ export async function rewriteSectionWithLlm(
   };
 }
 
-/** Test-only: drop the one-shot telemetry flag between tests. */
+/** Test-only: drop the per-model one-shot telemetry flags between tests. */
 export function _resetSectionRewriteFlagsForTesting(): void {
-  firstSectionRewriteFired = false;
+  firstSectionRewriteFiredFor.clear();
 }
