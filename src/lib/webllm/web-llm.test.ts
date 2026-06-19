@@ -12,42 +12,72 @@ vi.mock("@mlc-ai/web-llm", () => ({
   CreateMLCEngine: mockCreateMLCEngine,
 }));
 
+const { trackDownloadStartedMock, trackLoadedMock } = vi.hoisted(() => ({
+  trackDownloadStartedMock: vi.fn(),
+  trackLoadedMock: vi.fn(),
+}));
+vi.mock("../analytics.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../analytics.ts")>();
+  return {
+    ...actual,
+    trackWebllmDownloadStarted: trackDownloadStartedMock,
+    trackWebllmLoaded: trackLoadedMock,
+  };
+});
+
 import {
   _resetEngineCacheForTesting,
-  MODEL_ID,
   loadEngine,
 } from "./web-llm.ts";
+import { DEFAULT_MODEL_ID, MODEL_REGISTRY } from "./models.ts";
 import type { WebLlmEngine } from "./types.ts";
 
-function fakeEngine(): WebLlmEngine {
-  return { chat: { completions: { create: vi.fn() } } };
+interface FakeEngine extends WebLlmEngine {
+  unload: ReturnType<typeof vi.fn>;
+  __id: string;
+}
+
+function fakeEngine(id: string): FakeEngine {
+  return {
+    __id: id,
+    chat: { completions: { create: vi.fn() } },
+    unload: vi.fn(async () => {}),
+  };
 }
 
 const noop = () => {};
+
+// Two known-good registry entries we can switch between.
+const MODEL_A = DEFAULT_MODEL_ID; // Apache-2.0
+const MODEL_B = MODEL_REGISTRY.find(
+  (m) => m.licenseType === "Restricted-Community",
+)!.id;
 
 describe("loadEngine", () => {
   beforeEach(() => {
     _resetEngineCacheForTesting();
     mockCreateMLCEngine.mockReset();
+    trackDownloadStartedMock.mockClear();
+    trackLoadedMock.mockClear();
   });
 
-  it("passes the pinned MODEL_ID to CreateMLCEngine", async () => {
-    const engine = fakeEngine();
+  it("passes the requested model id to CreateMLCEngine", async () => {
+    const engine = fakeEngine(MODEL_A);
     mockCreateMLCEngine.mockResolvedValue(engine);
-    await loadEngine(noop);
+    await loadEngine(MODEL_A, noop);
     expect(mockCreateMLCEngine).toHaveBeenCalledWith(
-      MODEL_ID,
+      MODEL_A,
       expect.objectContaining({ initProgressCallback: expect.any(Function) }),
     );
   });
 
-  it("caches the engine for the page lifetime — concurrent calls share one load", async () => {
-    const engine = fakeEngine();
+  it("caches per model — concurrent calls with the same id share one load", async () => {
+    const engine = fakeEngine(MODEL_A);
     mockCreateMLCEngine.mockResolvedValue(engine);
     const [a, b, c] = await Promise.all([
-      loadEngine(noop),
-      loadEngine(noop),
-      loadEngine(noop),
+      loadEngine(MODEL_A, noop),
+      loadEngine(MODEL_A, noop),
+      loadEngine(MODEL_A, noop),
     ]);
     expect(a).toBe(engine);
     expect(b).toBe(engine);
@@ -55,33 +85,155 @@ describe("loadEngine", () => {
     expect(mockCreateMLCEngine).toHaveBeenCalledTimes(1);
   });
 
-  it("clears the cache on failure so a Try-again retry can recover", async () => {
-    // First attempt: the library throws (simulates OOM or a dropped weight
-    // fetch). The cached slot must not retain this rejected promise — every
-    // subsequent click would otherwise re-reject instantly and the UI's
-    // "Try again" button would be a no-op.
+  it("returns the cached engine on a repeat call for the same id", async () => {
+    const engine = fakeEngine(MODEL_A);
+    mockCreateMLCEngine.mockResolvedValue(engine);
+    const first = await loadEngine(MODEL_A, noop);
+    const second = await loadEngine(MODEL_A, noop);
+    expect(second).toBe(first);
+    expect(mockCreateMLCEngine).toHaveBeenCalledTimes(1);
+  });
+
+  it("evicts the prior model AND calls its `unload()` when a different model is loaded", async () => {
+    const engineA = fakeEngine(MODEL_A);
+    const engineB = fakeEngine(MODEL_B);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineB);
+
+    const a = await loadEngine(MODEL_A, noop);
+    expect(a).toBe(engineA);
+    expect(engineA.unload).not.toHaveBeenCalled();
+
+    const b = await loadEngine(MODEL_B, noop);
+    expect(b).toBe(engineB);
+    // Wait a tick so the fire-and-forget unload promise gets to run.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(engineA.unload).toHaveBeenCalledTimes(1);
+    expect(engineB.unload).not.toHaveBeenCalled();
+  });
+
+  it("after switching to model B, asking for model A again starts a fresh load", async () => {
+    const engineA1 = fakeEngine(MODEL_A);
+    const engineB = fakeEngine(MODEL_B);
+    const engineA2 = fakeEngine(MODEL_A);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA1);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineB);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA2);
+
+    await loadEngine(MODEL_A, noop);
+    await loadEngine(MODEL_B, noop);
+    const aAgain = await loadEngine(MODEL_A, noop);
+
+    expect(aAgain).toBe(engineA2);
+    expect(mockCreateMLCEngine).toHaveBeenCalledTimes(3);
+  });
+
+  it("a failed switch clears only the failing model's slot (the prior model was already evicted)", async () => {
+    // Sequence: B loads OK → switch to A. The switch evicts B BEFORE A
+    // starts loading (memory invariant), so when A fails the user is left
+    // with no resident engine — that's a deliberate trade-off the file
+    // docstring spells out. This test pins both halves of the behavior:
+    //   (1) B's `.unload()` was called as part of the eviction;
+    //   (2) A's slot is cleared on failure, so a retry of A re-invokes.
+    const engineB = fakeEngine(MODEL_B);
+    const engineA = fakeEngine(MODEL_A);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineB);
+    await loadEngine(MODEL_B, noop);
+
     const failure = new Error("OOM");
     mockCreateMLCEngine.mockRejectedValueOnce(failure);
-    await expect(loadEngine(noop)).rejects.toBe(failure);
+    await expect(loadEngine(MODEL_A, noop)).rejects.toBe(failure);
 
-    // Second attempt: must re-invoke CreateMLCEngine and resolve with the new
-    // engine. If the cache wasn't cleared, this would short-circuit to the
-    // rejected promise from above.
-    const engine = fakeEngine();
-    mockCreateMLCEngine.mockResolvedValueOnce(engine);
-    await expect(loadEngine(noop)).resolves.toBe(engine);
-    expect(mockCreateMLCEngine).toHaveBeenCalledTimes(2);
+    // Drain the fire-and-forget unload promises so the assertion below sees
+    // them. Two ticks: one for the eviction's `.then` and one for the
+    // chained `.catch` we added to silence unload rejections.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(engineB.unload).toHaveBeenCalledTimes(1);
+
+    // A retry of A must re-invoke CreateMLCEngine (its slot was cleared on
+    // failure). B is NOT re-loadable from cache — it's gone.
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA);
+    await expect(loadEngine(MODEL_A, noop)).resolves.toBe(engineA);
+    // Total: B (1) + failed A (2) + successful A (3) = 3 invocations.
+    expect(mockCreateMLCEngine).toHaveBeenCalledTimes(3);
   });
+
+  // NOTE: a pinning test for the cross-model concurrent-load race was
+  // attempted here and removed. Two `loadEngine` calls in the same
+  // microtask for DIFFERENT model ids passes when web-llm.test.ts runs in
+  // isolation (`npx vitest run src/lib/webllm/web-llm.test.ts`) but fails
+  // intermittently in the full parallel-worker suite. Under load, vitest's
+  // `vi.mock` of `@mlc-ai/web-llm` races with the concurrent dynamic
+  // `import("@mlc-ai/web-llm")` calls inside `loadEngine`'s IIFEs, and one
+  // call falls through to the real `MLCEngine.reload()` (which then throws
+  // `globalThis.location.origin` undefined in Node).
+  //
+  // The behavior the test was trying to pin — that both `loadEngine` calls
+  // bypass the eviction guard and start concurrent loads — is documented
+  // explicitly in `web-llm.ts`'s file docstring (trade-off #2). The race
+  // is unreachable in PR A scope because both consumers
+  // (`RewriteButton`, `SectionRewrite`) pass `DEFAULT_MODEL_ID` only. PR B
+  // introduces a picker that CAN trigger the race; serializing
+  // cross-model loads through a single in-flight promise chain is part of
+  // PR B's scope and will land with its own coverage.
 
   it("forwards initProgressCallback reports to the supplied onProgress", async () => {
     let captured: { progress: number; text: string } | null = null;
     mockCreateMLCEngine.mockImplementationOnce(async (_id, opts) => {
       opts.initProgressCallback({ progress: 0.42, text: "fetching weights" });
-      return fakeEngine();
+      return fakeEngine(MODEL_A);
     });
-    await loadEngine((u) => {
+    await loadEngine(MODEL_A, (u) => {
       captured = u;
     });
     expect(captured).toEqual({ progress: 0.42, text: "fetching weights" });
+  });
+
+  // ── Per-model telemetry (#64 AC) ─────────────────────────────────────────
+
+  it("fires `webllm_download_started({ model })` once per model id, never twice", async () => {
+    mockCreateMLCEngine.mockResolvedValue(fakeEngine(MODEL_A));
+    await loadEngine(MODEL_A, noop);
+    await loadEngine(MODEL_A, noop);
+    expect(trackDownloadStartedMock).toHaveBeenCalledTimes(1);
+    expect(trackDownloadStartedMock).toHaveBeenCalledWith({ model: MODEL_A });
+  });
+
+  it("fires `webllm_download_started` once for EACH distinct model id", async () => {
+    mockCreateMLCEngine.mockResolvedValueOnce(fakeEngine(MODEL_A));
+    mockCreateMLCEngine.mockResolvedValueOnce(fakeEngine(MODEL_B));
+    await loadEngine(MODEL_A, noop);
+    await loadEngine(MODEL_B, noop);
+    expect(trackDownloadStartedMock).toHaveBeenCalledTimes(2);
+    expect(trackDownloadStartedMock).toHaveBeenNthCalledWith(1, {
+      model: MODEL_A,
+    });
+    expect(trackDownloadStartedMock).toHaveBeenNthCalledWith(2, {
+      model: MODEL_B,
+    });
+  });
+
+  it("does NOT re-fire `webllm_download_started` for a model whose first load failed (retry case)", async () => {
+    // Mirrors the rule from #63's web-llm.ts: a retry of the same model is
+    // still the same logical attempt, so the funnel shouldn't double-count.
+    mockCreateMLCEngine.mockRejectedValueOnce(new Error("OOM"));
+    await expect(loadEngine(MODEL_A, noop)).rejects.toThrow();
+
+    mockCreateMLCEngine.mockResolvedValueOnce(fakeEngine(MODEL_A));
+    await loadEngine(MODEL_A, noop);
+
+    expect(trackDownloadStartedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires `webllm_loaded({ model })` once per model id", async () => {
+    mockCreateMLCEngine.mockResolvedValueOnce(fakeEngine(MODEL_A));
+    mockCreateMLCEngine.mockResolvedValueOnce(fakeEngine(MODEL_B));
+    await loadEngine(MODEL_A, noop);
+    await loadEngine(MODEL_B, noop);
+    expect(trackLoadedMock).toHaveBeenCalledTimes(2);
+    expect(trackLoadedMock).toHaveBeenNthCalledWith(1, { model: MODEL_A });
+    expect(trackLoadedMock).toHaveBeenNthCalledWith(2, { model: MODEL_B });
   });
 });

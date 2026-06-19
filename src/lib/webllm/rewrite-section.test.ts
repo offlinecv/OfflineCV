@@ -40,6 +40,12 @@ import type {
   WebLlmEngine,
 } from "./types.ts";
 
+// Pin stable model ids for the section path's telemetry assertions. Using
+// string literals (rather than importing DEFAULT_MODEL_ID) keeps this file
+// independent of registry shape changes.
+const TEST_MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+const OTHER_MODEL = "gemma-2-2b-it-q4f16_1-MLC";
+
 function makeEngine(
   reply: (req: ChatCompletionRequest) => Promise<ChatCompletionResponse>,
 ): {
@@ -95,7 +101,7 @@ describe("rewriteSectionWithLlm", () => {
 
   it("sends the section system prompt and a numbered user prompt", async () => {
     const { engine, spy } = makeEngine(async () => reply("Shipped X.\nLed Y."));
-    await rewriteSectionWithLlm(["worked on X", "managed Y"], engine);
+    await rewriteSectionWithLlm(["worked on X", "managed Y"], engine, TEST_MODEL);
     const req = spy.mock.calls[0]![0] as ChatCompletionRequest;
     expect(req.messages[0]).toEqual({
       role: "system",
@@ -108,7 +114,7 @@ describe("rewriteSectionWithLlm", () => {
 
   it("uses sectionMaxTokens as max_tokens", async () => {
     const { engine, spy } = makeEngine(async () => reply("A.\nB."));
-    await rewriteSectionWithLlm(["x", "y"], engine);
+    await rewriteSectionWithLlm(["x", "y"], engine, TEST_MODEL);
     const req = spy.mock.calls[0]![0] as ChatCompletionRequest;
     expect(req.max_tokens).toBe(sectionMaxTokens(2));
   });
@@ -127,6 +133,7 @@ describe("rewriteSectionWithLlm", () => {
     const out = await rewriteSectionWithLlm(
       ["worked on Foo", "led the team", "sold things"],
       engine,
+      TEST_MODEL,
     );
     expect(out.bullets).toEqual([
       "Shipped Foo to 10M users.",
@@ -139,7 +146,7 @@ describe("rewriteSectionWithLlm", () => {
     const { engine } = makeEngine(async () =>
       reply("1. Shipped Foo.\n2) Led Y.\n3. Drove Z."),
     );
-    const out = await rewriteSectionWithLlm(["a", "b", "c"], engine);
+    const out = await rewriteSectionWithLlm(["a", "b", "c"], engine, TEST_MODEL);
     expect(out.bullets).toEqual(["Shipped Foo.", "Led Y.", "Drove Z."]);
   });
 
@@ -147,7 +154,7 @@ describe("rewriteSectionWithLlm", () => {
     const { engine } = makeEngine(async () =>
       reply('Rewritten: "Shipped Foo."\n"Led Y."'),
     );
-    const out = await rewriteSectionWithLlm(["a", "b"], engine);
+    const out = await rewriteSectionWithLlm(["a", "b"], engine, TEST_MODEL);
     expect(out.bullets).toEqual(["Shipped Foo.", "Led Y."]);
   });
 
@@ -158,6 +165,7 @@ describe("rewriteSectionWithLlm", () => {
     const out = await rewriteSectionWithLlm(
       ["Cut p99 latency 40% by sharding", "Drove $1.2M in ARR"],
       engine,
+      TEST_MODEL,
     );
     expect(out.numbersPreserved).toBe(true);
     expect(out.droppedNumbers).toEqual([]);
@@ -171,6 +179,7 @@ describe("rewriteSectionWithLlm", () => {
     const out = await rewriteSectionWithLlm(
       ["Saved the team $5K per quarter."],
       engine,
+      TEST_MODEL,
     );
     expect(out.numbersPreserved).toBe(false);
     expect(out.droppedNumbers).toEqual(["$5K"]);
@@ -183,6 +192,7 @@ describe("rewriteSectionWithLlm", () => {
     const out = await rewriteSectionWithLlm(
       ["Improved availability."],
       engine,
+      TEST_MODEL,
     );
     expect(out.numbersPreserved).toBe(false);
     expect(out.addedNumbers).toEqual(["99.9%"]);
@@ -192,37 +202,55 @@ describe("rewriteSectionWithLlm", () => {
     const { engine } = makeEngine(async () =>
       reply("Shipped Foo.\nDrove Z."),
     );
-    await rewriteSectionWithLlm(["a", "b", "c"], engine);
-    expect(trackStartedMock).toHaveBeenCalledWith({ inputBulletCount: 3 });
+    await rewriteSectionWithLlm(["a", "b", "c"], engine, TEST_MODEL);
+    expect(trackStartedMock).toHaveBeenCalledWith({
+      model: TEST_MODEL,
+      inputBulletCount: 3,
+    });
     expect(trackCompletedMock).toHaveBeenCalledWith({
+      model: TEST_MODEL,
       inputBulletCount: 3,
       outputBulletCount: 2,
       numbersPreserved: true,
     });
   });
 
-  it("fires webllm_first_section_rewrite exactly once across calls", async () => {
+  it("fires webllm_first_section_rewrite exactly once across calls for the same model", async () => {
     const { engine } = makeEngine(async () => reply("Shipped Foo."));
-    await rewriteSectionWithLlm(["a"], engine);
-    await rewriteSectionWithLlm(["b"], engine);
+    await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
+    await rewriteSectionWithLlm(["b"], engine, TEST_MODEL);
     expect(trackFirstSectionMock).toHaveBeenCalledTimes(1);
+    expect(trackFirstSectionMock).toHaveBeenCalledWith({ model: TEST_MODEL });
+  });
+
+  it("fires webllm_first_section_rewrite ONCE PER MODEL — a different model id re-arms the one-shot", async () => {
+    const { engine } = makeEngine(async () => reply("Shipped Foo."));
+    await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
+    await rewriteSectionWithLlm(["b"], engine, OTHER_MODEL);
+    expect(trackFirstSectionMock).toHaveBeenCalledTimes(2);
+    expect(trackFirstSectionMock).toHaveBeenNthCalledWith(1, {
+      model: TEST_MODEL,
+    });
+    expect(trackFirstSectionMock).toHaveBeenNthCalledWith(2, {
+      model: OTHER_MODEL,
+    });
   });
 
   it("does not fire webllm_first_section_rewrite when output is empty", async () => {
     const { engine } = makeEngine(async () => reply(null));
-    await rewriteSectionWithLlm(["a"], engine);
+    await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
     expect(trackFirstSectionMock).not.toHaveBeenCalled();
   });
 
   it("does NOT fire the per-bullet webllm_first_rewrite key", async () => {
     const { engine } = makeEngine(async () => reply("Shipped Foo."));
-    await rewriteSectionWithLlm(["a"], engine);
+    await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
     expect(trackFirstRewriteMock).not.toHaveBeenCalled();
   });
 
   it("returns an empty bullets array on null model content without throwing", async () => {
     const { engine } = makeEngine(async () => reply(null));
-    const out = await rewriteSectionWithLlm(["a"], engine);
+    const out = await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
     expect(out.bullets).toEqual([]);
     expect(out.numbersPreserved).toBe(true);
   });
@@ -232,6 +260,8 @@ describe("rewriteSectionWithLlm", () => {
     const { engine } = makeEngine(async () => {
       throw boom;
     });
-    await expect(rewriteSectionWithLlm(["a"], engine)).rejects.toBe(boom);
+    await expect(rewriteSectionWithLlm(["a"], engine, TEST_MODEL)).rejects.toBe(
+      boom,
+    );
   });
 });

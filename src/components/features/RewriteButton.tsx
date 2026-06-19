@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { detectWebGpu } from "../../lib/webllm/capability.ts";
 import { loadEngine } from "../../lib/webllm/web-llm.ts";
 import { rewriteBulletWithLlm } from "../../lib/webllm/rewrite-bullet.ts";
+import { DEFAULT_MODEL_ID } from "../../lib/webllm/models.ts";
 import type {
   ProgressUpdate,
   WebGpuCapability,
@@ -69,11 +70,18 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
         kind: "loading",
         progress: { progress: 0, text: "Starting…" },
       });
-      const engine = await loadEngine((progress) => {
+      // PR A scope: the picker (#64 Step 6) doesn't exist yet, so every
+      // rewrite uses the Apache-2.0 default. PR B will replace this with
+      // the user's persisted localStorage selection.
+      const engine = await loadEngine(DEFAULT_MODEL_ID, (progress) => {
         setStatus({ kind: "loading", progress });
       });
       setStatus({ kind: "rewriting" });
-      const rewritten = await rewriteBulletWithLlm(bullet, engine);
+      const rewritten = await rewriteBulletWithLlm(
+        bullet,
+        engine,
+        DEFAULT_MODEL_ID,
+      );
       setStatus({ kind: "done", rewritten });
     } catch (err) {
       setStatus({
