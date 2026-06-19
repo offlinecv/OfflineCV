@@ -39,21 +39,21 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 54,
-    "preLayoutOverall": 64,
+    "overall": 63,
+    "preLayoutOverall": 74,
     "specificity": {
-      "score": 26,
+      "score": 33,
       "max": 40,
       "gradable": true,
       "metricBullets": 9,
-      "totalBullets": 23
+      "totalBullets": 18
     },
     "structure": {
-      "score": 11,
+      "score": 14,
       "max": 30,
       "gradable": true,
       "goodBullets": 9,
-      "totalBullets": 23
+      "totalBullets": 18
     },
     "completeness": {
       "score": 27,
@@ -70,7 +70,7 @@
       "multiplier": 0.85,
       "scanned": false
     },
-    "bulletCount": 23,
+    "bulletCount": 18,
     "algoVersion": "1.0"
   }
 }

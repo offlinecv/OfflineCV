@@ -163,7 +163,18 @@ function buildHeuristicResult(
     achievements: achievements.confidence,
   };
 
-  return { parsed, fieldConfidence, sectionSource };
+  const skillsSectionLines = skillsSection?.lines
+    .map((l) => l.text.trim())
+    .filter((t) => t.length > 0);
+
+  return {
+    parsed,
+    fieldConfidence,
+    sectionSource,
+    ...(skillsSectionLines && skillsSectionLines.length > 0
+      ? { skillsSectionLines }
+      : {}),
+  };
 }
 
 function splitGivenFamilyName(

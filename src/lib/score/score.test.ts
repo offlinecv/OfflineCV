@@ -487,4 +487,62 @@ describe("computeAnonymousAtsScore", () => {
       expect(metricCount).toBe(result.specificity.metricBullets);
     });
   });
+
+  describe("skills bullets excluded from the experience pool (#30)", () => {
+    // A bulleted skills section ("• Project management, Data analysis") must not
+    // be judged by the action-verb / metric / length rules. The cascade supplies
+    // the skills-section text; matching lines are kept out of the bullet pool.
+    const skillsRaw = [
+      "• Project management, Data analysis",
+      "• Communication, Problem-solving",
+    ].join("\n");
+
+    it("drops skills-section lines from the pool when skillsSectionText is supplied", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: skillsRaw, skillsSectionText: skillsRaw }),
+      );
+      expect(result.bullets ?? []).toHaveLength(0);
+    });
+
+    it("would otherwise count them — proving the exclusion is what drops them", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: skillsRaw }),
+      );
+      expect((result.bullets ?? []).length).toBe(2);
+    });
+
+    it("does not exclude genuine experience bullets outside the skills section", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: STRONG_BULLETS, skillsSectionText: skillsRaw }),
+      );
+      expect(result.bullets!.length).toBe(6);
+    });
+  });
+
+  describe("lone-bullet glyph merge (Word-table layout, #30)", () => {
+    // pdfjs/pdftotext can split a table-cell bullet so the "•" lands on its own
+    // line and the text on the next. The extractor merges them before scoring.
+    it("merges a marker-only line with the following non-empty text line", () => {
+      const raw = [
+        "•",
+        "",
+        "Led migration of 3 microservices reducing latency by 40%",
+      ].join("\n");
+      const result = computeAnonymousAtsScore(makeAnonInput({ rawText: raw }));
+      expect(result.bullets!.map((b) => b.text)).toEqual([
+        "Led migration of 3 microservices reducing latency by 40%",
+      ]);
+    });
+
+    it("still excludes a lone-bullet skills entry after the merge", () => {
+      const raw = ["•", "Project management, Data analysis"].join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          rawText: raw,
+          skillsSectionText: "Project management, Data analysis",
+        }),
+      );
+      expect(result.bullets ?? []).toHaveLength(0);
+    });
+  });
 });

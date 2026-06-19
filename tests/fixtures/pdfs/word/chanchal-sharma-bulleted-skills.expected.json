@@ -17,47 +17,45 @@
       "family_name",
       "full_name",
       "given_name",
-      "heuristic_achievements",
-      "linkedin_url",
       "location",
       "phone",
-      "projects",
       "skills",
       "website_url"
     ],
-    "skillsCount": 13,
+    "skillsCount": 5,
     "experienceCount": 2,
-    "educationCount": 2,
-    "projectsCount": 4,
-    "achievementsCount": 4,
-    "rawTextCharCount": 2331,
-    "pageCount": 2,
+    "educationCount": 1,
+    "projectsCount": 0,
+    "achievementsCount": 0,
+    "rawTextCharCount": 986,
+    "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 58,
-    "preLayoutOverall": 58,
+    "overall": 24,
+    "preLayoutOverall": 24,
     "specificity": {
-      "score": 18,
+      "score": 0,
       "max": 40,
-      "gradable": true,
-      "metricBullets": 5,
-      "totalBullets": 19
+      "gradable": false,
+      "metricBullets": 0,
+      "totalBullets": 0
     },
     "structure": {
-      "score": 13,
+      "score": 0,
       "max": 30,
-      "gradable": true,
-      "goodBullets": 8,
-      "totalBullets": 19
+      "gradable": false,
+      "goodBullets": 0,
+      "totalBullets": 0
     },
     "completeness": {
-      "score": 27,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
+        "LinkedIn",
         "summary"
       ]
     },
@@ -66,7 +64,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 19,
+    "bulletCount": 0,
     "algoVersion": "1.0"
   }
 }

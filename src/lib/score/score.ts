@@ -487,6 +487,11 @@ export interface AnonymousAtsScoreInput {
   triggers: readonly string[];
   /** Concatenated text from Tier 0. Used for bullet-level analysis. */
   rawText: string;
+  /** Newline-joined text of the detected skills section, if any. Lines here are
+   *  kept out of the experience-bullet pool so skills are never judged by the
+   *  action-verb / metric / length rules (#30). Supplied by the cascade, which
+   *  owns section detection — the pure scorer does not re-derive sections. */
+  skillsSectionText?: string;
 }
 
 const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
@@ -513,6 +518,42 @@ const ANON_CONTACT_FIELDS: readonly {
   { key: "linkedin_url", label: "LinkedIn" },
 ];
 
+/** A line that is *only* a bullet glyph (no text after it). Word tables can
+ *  place the glyph and its text in separate cells, so pdfjs/pdftotext emit the
+ *  marker on its own line followed by the text on the next — see #30. Dash-style
+ *  markers are excluded here: a lone "-"/"–" line is far more often a divider
+ *  than a bullet whose text wandered onto the next line. */
+const LONE_BULLET_RE = /^\s*[•●▪◦‣▶►·�]\s*$/;
+
+/** Marker-strip a single line (bullet glyph or numbered prefix) and trim. The
+ *  key both `extractBulletsFromText` and the skills-exclusion set match on. */
+function stripBulletMarker(line: string): string {
+  return line
+    .replace(BULLET_MARKER_RE, "")
+    .replace(NUMBERED_BULLET_RE, "")
+    .trim();
+}
+
+/**
+ * Build the set of skills-section lines (marker-stripped) to keep out of the
+ * experience-bullet pool. A skill like "Project management" is not an
+ * accomplishment bullet and must not be judged by the action-verb / metric /
+ * length rules or surfaced in per-bullet feedback (#30). The text is supplied
+ * by the cascade, which owns section detection; the pure scorer never has to
+ * re-derive sections from `rawText`.
+ */
+function buildSkillsExclusion(
+  skillsSectionText: string | undefined,
+): ReadonlySet<string> | undefined {
+  if (!skillsSectionText) return undefined;
+  const set = new Set<string>();
+  for (const line of skillsSectionText.split(/\r?\n/)) {
+    const key = stripBulletMarker(line);
+    if (key) set.add(key);
+  }
+  return set.size > 0 ? set : undefined;
+}
+
 /**
  * Pull bullet-like lines out of raw resume text. A line counts as a bullet
  * when it starts with a recognized bullet marker (`-`, `•`, etc.) or a
@@ -526,11 +567,29 @@ const ANON_CONTACT_FIELDS: readonly {
  * resumes use markers, and grading paragraphs would either over-count
  * narrative summary lines or require the experience-section detection we
  * don't have without an LLM.
+ *
+ * `excludeStripped` (optional) is the marker-stripped skills-section line set;
+ * matching lines are dropped so bulleted skills never enter the pool (#30).
  */
-function extractBulletsFromText(text: string): string[] {
+function extractBulletsFromText(
+  text: string,
+  excludeStripped?: ReadonlySet<string>,
+): string[] {
   if (!text) return [];
+  const lines = text.split(/\r?\n/);
   const out: string[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (let i = 0; i < lines.length; i++) {
+    let rawLine = lines[i];
+    // Lone-bullet merge (#30): a marker-only line adopts the next non-empty
+    // line as its text, recovering Word-table layouts that split the glyph and
+    // its text into separate cells (and thus separate extracted lines).
+    if (LONE_BULLET_RE.test(rawLine)) {
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      if (j >= lines.length) break;
+      rawLine = `${rawLine.trimEnd()} ${lines[j].trim()}`;
+      i = j;
+    }
     let stripped = rawLine.replace(BULLET_MARKER_RE, "");
     if (stripped === rawLine) {
       stripped = rawLine.replace(NUMBERED_BULLET_RE, "");
@@ -538,6 +597,8 @@ function extractBulletsFromText(text: string): string[] {
     }
     const trimmed = stripped.trim();
     if (trimmed.split(/\s+/).filter(Boolean).length < ANON_BULLET_MIN_WORDS) continue;
+    // Section-aware (#30): skills entries are not experience bullets.
+    if (excludeStripped?.has(trimmed)) continue;
     out.push(trimmed);
   }
   return out;
@@ -549,7 +610,8 @@ export function computeAnonymousAtsScore(
   // ── Bullet-level dimensions (Specificity 40, Structure 30) ─────────────
   // Same scoreBulletPool the authed scorer uses — guarantees the two
   // surfaces apply identical per-bullet rules.
-  const bullets = extractBulletsFromText(input.rawText);
+  const skillsExclude = buildSkillsExclusion(input.skillsSectionText);
+  const bullets = extractBulletsFromText(input.rawText, skillsExclude);
   const pool = scoreBulletPool(bullets);
   const observations = analyzeBullets(bullets);
   const gradable = pool.total >= ANON_MIN_BULLETS_TO_GRADE;
