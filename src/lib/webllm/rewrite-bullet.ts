@@ -10,8 +10,10 @@ import type { WebLlmEngine } from "./types.ts";
  * disclosure copy paraphrases these rules so users can see what the model
  * is actually being asked to do.
  *
- * Tuned for Qwen2-1.5B-Instruct; smaller models need the rules stated more
- * emphatically than a frontier model would. Expect 5–10 iterations.
+ * Tuned for small instruct-tuned models (1.5B–3B params); they need the
+ * rules stated more emphatically than a frontier model would. Tested
+ * against Qwen2.5-1.5B; should generalize to the other registry entries
+ * (Gemma-2-2B, Llama-3.2-3B) without prompt changes.
  */
 export const BULLET_REWRITE_SYSTEM_PROMPT = `You are rewriting a single resume bullet to be more specific and outcome-oriented.
 Rules:
@@ -25,13 +27,23 @@ export function buildUserPrompt(bullet: string): string {
   return `Original: ${bullet.trim()}\nRewritten:`;
 }
 
-let firstRewriteFired = false;
+/**
+ * Per-model one-shot guard for `webllm_first_rewrite`. Each model's first
+ * successful rewrite fires the event exactly once per page so the funnel
+ * can compare "X downloads → Y first rewrites" per model.
+ */
+const firstRewriteFiredFor = new Set<string>();
 
 /**
  * Rewrite a single resume bullet using a loaded WebLLM engine.
  *
  * Pure over `engine` — the engine is passed in so tests can supply a stub
  * implementing the `WebLlmEngine` contract without touching the real model.
+ *
+ * `modelId` is required for model-dimensioned telemetry; the engine itself
+ * doesn't expose its model id, so the caller has to thread it through. In
+ * practice this is the same value that was passed to `loadEngine(modelId,
+ * …)` to acquire the engine.
  *
  * Post-processing: strip a leading `"Rewritten:"` (the model sometimes
  * echoes the prefix), drop quotes, and keep only the first non-empty line
@@ -40,6 +52,7 @@ let firstRewriteFired = false;
 export async function rewriteBulletWithLlm(
   bullet: string,
   engine: WebLlmEngine,
+  modelId: string,
 ): Promise<string> {
   const response = await engine.chat.completions.create({
     messages: [
@@ -54,9 +67,9 @@ export async function rewriteBulletWithLlm(
   // Only count it as a "first rewrite" when the model actually returned
   // usable output. A null/empty response is a failure mode, not a funnel
   // step worth measuring against download conversion.
-  if (!firstRewriteFired && cleaned.length > 0) {
-    firstRewriteFired = true;
-    trackWebllmFirstRewrite();
+  if (!firstRewriteFiredFor.has(modelId) && cleaned.length > 0) {
+    firstRewriteFiredFor.add(modelId);
+    trackWebllmFirstRewrite({ model: modelId });
   }
   return cleaned;
 }
@@ -72,7 +85,7 @@ function postProcess(raw: string): string {
   return "";
 }
 
-/** Test-only: drop the one-shot telemetry flag between tests. */
+/** Test-only: drop the per-model one-shot telemetry flags between tests. */
 export function _resetRewriteFlagsForTesting(): void {
-  firstRewriteFired = false;
+  firstRewriteFiredFor.clear();
 }
