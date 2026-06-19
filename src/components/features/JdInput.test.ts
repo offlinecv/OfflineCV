@@ -53,6 +53,17 @@ describe("JdInput — static render", () => {
     expect(html).toContain("Fetch");
   });
 
+  it("lists Ashby alongside the other supported ATS hosts in the URL placeholder", () => {
+    // Closes #74 from the user-facing surface: Ashby URLs should be advertised
+    // as supported now that the adapter exists.
+    const html = renderIdle();
+    expect(html).toContain("Ashby");
+    // Existing supported hosts stay in the placeholder.
+    for (const host of ["Greenhouse", "Lever", "Workable", "Recruitee"]) {
+      expect(html).toContain(host);
+    }
+  });
+
   it("shows the contextual hint when value is non-empty and resume is not parsed", () => {
     const html = renderIdle("some jd", false);
     expect(html).toContain("Drop a resume above");
