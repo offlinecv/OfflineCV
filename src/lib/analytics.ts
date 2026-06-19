@@ -208,3 +208,29 @@ export function trackWebllmSectionRewriteCompleted(args: {
 export function trackWebllmFirstSectionRewrite(): void {
   track("webllm_first_section_rewrite", {});
 }
+
+// JD URL ingestion funnel (#72 / #75). Fires on every user-initiated fetch
+// from the JD URL input. The `outcome` enum lets us tell apart the four
+// platform-relevant funnel states without ever recording the URL itself —
+// privacy-safe by construction. No URL, no JD text, no host fragment.
+//
+//   ok                      — fetch succeeded; `platform` is the parsed ATS
+//   unsupported_known       — host classified (linkedin/indeed/…); platform null
+//   unsupported_unknown     — host not recognised at all; platform null
+//   network_error           — supported ATS, but the API call failed
+export type JdUrlOutcome =
+  | "ok"
+  | "unsupported_known"
+  | "unsupported_unknown"
+  | "network_error";
+
+export function trackJdUrlFetch(args: {
+  outcome: JdUrlOutcome;
+  /** Set when `outcome === "ok"`; otherwise null. */
+  platform: string | null;
+}): void {
+  track("jd_url_fetch", {
+    outcome: args.outcome,
+    platform: args.platform,
+  });
+}

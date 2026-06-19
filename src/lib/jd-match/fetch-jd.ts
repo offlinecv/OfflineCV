@@ -4,7 +4,12 @@
 // ATS public JSON API clients — fetch a job description as plaintext.
 // These APIs are free, unauthenticated, and legally safe.
 
-export type AtsPlatform = "greenhouse" | "lever" | "workable" | "recruitee";
+export type AtsPlatform =
+  | "greenhouse"
+  | "lever"
+  | "workable"
+  | "recruitee"
+  | "ashby";
 
 interface ParsedAtsUrl {
   platform: AtsPlatform;
@@ -19,7 +24,8 @@ export function parseAtsUrl(url: string): ParsedAtsUrl | null {
     parseGreenhouseUrl(url) ||
     parseLeverUrl(url) ||
     parseWorkableUrl(url) ||
-    parseRecruiteeUrl(url)
+    parseRecruiteeUrl(url) ||
+    parseAshbyUrl(url)
   );
 }
 
@@ -48,6 +54,19 @@ function parseRecruiteeUrl(url: string): ParsedAtsUrl | null {
   const match = url.match(/([\w-]+)\.recruitee\.com\/o\/([\w-]+)/);
   return match
     ? { platform: "recruitee", company: match[1], jobId: match[2] }
+    : null;
+}
+
+// Ashby job-board URLs: `jobs.ashbyhq.com/{token}/{uuid}` — `token` is the
+// board slug (the public-API path component), `uuid` identifies the posting.
+// UUID-strict on the tail so a non-UUID path falls through to "unsupported"
+// instead of producing a 404 on the API.
+function parseAshbyUrl(url: string): ParsedAtsUrl | null {
+  const match = url.match(
+    /jobs\.ashbyhq\.com\/([\w-]+)\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})/i,
+  );
+  return match
+    ? { platform: "ashby", company: match[1], jobId: match[2] }
     : null;
 }
 
@@ -159,6 +178,31 @@ async function fetchRecruiteeJob(
   };
 }
 
+// Ashby job-board API: a single GET returns the whole board's posting list.
+// Public, no auth, CORS-open. Shape (relevant fields only):
+//   { jobBoard: { name }, jobPostings: [{ id, title, descriptionHtml }] }
+async function fetchAshbyJob(
+  token: string,
+  jobId: string,
+): Promise<FetchedJd> {
+  const resp = await fetchWithTimeout(
+    `https://api.ashbyhq.com/posting-api/job-board/${token}`,
+  );
+  if (!resp.ok) throw new Error(`Ashby API ${resp.status}`);
+  const data = await resp.json();
+
+  const posting = data.jobPostings?.find(
+    (p: { id: string }) => p.id === jobId,
+  );
+  if (!posting) throw new Error("Job not found in Ashby listing");
+
+  return {
+    title: posting.title,
+    company: data.jobBoard?.name || token,
+    descriptionHtml: posting.descriptionHtml,
+  };
+}
+
 // ─── HTML → plaintext ─────────────────────────────────────────────────────────
 
 /**
@@ -250,7 +294,65 @@ const FETCHERS: Record<
   lever: fetchLeverJob,
   workable: fetchWorkableJob,
   recruitee: fetchRecruiteeJob,
+  ashby: fetchAshbyJob,
 };
+
+// ─── Unsupported-host classifier ──────────────────────────────────────────────
+
+/**
+ * Hosts the UI knows are out of reach client-side, with the user-facing
+ * reason. Drives the tailored fallback message in `JdInput` so the user
+ * gets "LinkedIn blocks automated reads" instead of a generic "couldn't
+ * fetch" when their paste target is a well-known closed surface.
+ *
+ * `null` means "we don't recognise this host" — the UI falls back to its
+ * generic unsupported copy.
+ *
+ * Why these five:
+ *   - LinkedIn / Indeed / Glassdoor — Cloudflare + JA3/TLS fingerprinting +
+ *     HTTP 999 + datacenter-IP blocklists; no browser header trick gets past
+ *     these. Acknowledged closed surfaces (per #72 research).
+ *   - Workday — has a JSON endpoint but does NOT send CORS `*`, so the
+ *     browser blocks the response. Different reason from the others; same
+ *     paste-fallback outcome.
+ *   - Wellfound (formerly AngelList) — heavy bot-protection, paste-only.
+ */
+export type UnsupportedHost =
+  | "linkedin"
+  | "indeed"
+  | "glassdoor"
+  | "workday"
+  | "wellfound";
+
+const UNSUPPORTED_HOST_PATTERNS: ReadonlyArray<readonly [UnsupportedHost, RegExp]> = [
+  ["linkedin", /(^|\.)linkedin\.com\b/i],
+  ["indeed", /(^|\.)indeed\.com\b/i],
+  ["glassdoor", /(^|\.)glassdoor\.(com|co\.[a-z]{2})\b/i],
+  ["workday", /\bmyworkdayjobs\.com\b|\bworkday\.com\b/i],
+  ["wellfound", /(^|\.)wellfound\.com\b|(^|\.)angel\.co\b/i],
+];
+
+/**
+ * Match a URL string against the closed-surface host list. Returns the
+ * canonical id when the URL belongs to a known-unsupported host, else null.
+ * Pure — no network, safe to call repeatedly.
+ *
+ * Robust against malformed URLs: tries `new URL(...)` first; falls back to a
+ * raw substring scan so a bare `linkedin.com/jobs/view/123` (no scheme) still
+ * classifies.
+ */
+export function classifyUnsupportedHost(url: string): UnsupportedHost | null {
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    host = url;
+  }
+  for (const [id, pattern] of UNSUPPORTED_HOST_PATTERNS) {
+    if (pattern.test(host)) return id;
+  }
+  return null;
+}
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
