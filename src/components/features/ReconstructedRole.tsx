@@ -29,6 +29,7 @@ import type {
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 import { RewriteButton } from "./RewriteButton.tsx";
+import { SectionRewrite } from "./SectionRewrite.tsx";
 
 // ── Bullet flags ──────────────────────────────────────────────────────────────
 
@@ -395,6 +396,11 @@ export function RoleEntry({
   bulletOverrides,
   onBulletChange,
 }: RoleEntryProps) {
+  // Bullet display text honors #82 overrides — section rewrite must see the
+  // text the user actually edited, not the stale parsed text.
+  const sectionBullets = group.bullets.map(
+    (b) => bulletOverrides?.[b.index] ?? b.text,
+  );
   return (
     <div className="flex flex-col gap-1.5">
       <RoleHeader
@@ -403,20 +409,23 @@ export function RoleEntry({
         onFieldChange={onFieldChange}
       />
       {group.bullets.length > 0 ? (
-        <ul className="list-none">
-          {group.bullets.map((b) => (
-            <ResumeBulletRow
-              key={b.index}
-              bullet={b}
-              override={bulletOverrides?.[b.index]}
-              onBulletChange={
-                onBulletChange
-                  ? (value) => onBulletChange(b.index, value)
-                  : undefined
-              }
-            />
-          ))}
-        </ul>
+        <>
+          <ul className="list-none">
+            {group.bullets.map((b) => (
+              <ResumeBulletRow
+                key={b.index}
+                bullet={b}
+                override={bulletOverrides?.[b.index]}
+                onBulletChange={
+                  onBulletChange
+                    ? (value) => onBulletChange(b.index, value)
+                    : undefined
+                }
+              />
+            ))}
+          </ul>
+          <SectionRewrite bullets={sectionBullets} />
+        </>
       ) : (
         <p className="text-sm text-content-tertiary">
           No bullet-shaped lines detected.

@@ -132,7 +132,15 @@ export default function App() {
       <ErrorBoundary onReset={reset}>
         {state.phase === "done" && edited && (
           <Result
-            result={state.result}
+            // `parsed` carries the edited experience descriptions so
+            // `groupBulletsByExperience` (in ReconstructedResume) attributes
+            // edited bullets to the SAME role they came from. Without this,
+            // an edit displaces the bullet into the trailing "Other bullets"
+            // group because the original description no longer substring-
+            // matches the edited bullet text. `rawText` stays original on
+            // purpose — EvidencePanel shows "what the PDF extracted", not
+            // "what the user typed."
+            result={{ ...state.result, parsed: edited.parsed }}
             score={edited.score}
             bytes={state.bytes}
             sourceKind={state.sourceKind}

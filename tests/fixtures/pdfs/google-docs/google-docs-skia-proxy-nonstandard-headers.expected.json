@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.82,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "llm",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -24,8 +24,8 @@
       "website_url"
     ],
     "skillsCount": 9,
-    "experienceCount": 2,
-    "educationCount": 2,
+    "experienceCount": 3,
+    "educationCount": 1,
     "projectsCount": 1,
     "achievementsCount": 0,
     "rawTextCharCount": 1530,
@@ -66,6 +66,6 @@
       "scanned": false
     },
     "bulletCount": 8,
-    "algoVersion": "1.1"
+    "algoVersion": "1.2"
   }
 }

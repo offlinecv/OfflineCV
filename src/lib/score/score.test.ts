@@ -360,8 +360,11 @@ describe("computeAnonymousAtsScore", () => {
   });
 
   it("flags missing sections in completeness", () => {
+    // rawText must be empty so bullets.length === 0; Part C passes the
+    // experience check when bullets are present even if expEntries is empty.
     const result = computeAnonymousAtsScore(
       makeAnonInput({
+        rawText: "",
         parsed: {
           full_name: "Jane",
           email: "jane@example.com",

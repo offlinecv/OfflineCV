@@ -71,14 +71,26 @@ export const PRESENT_RE = /\b(Present|Current|Now|Ongoing)\b/i;
 // DOCX parsing compatible with older resumes that use "Dec '00".
 const DATE_ANCHOR = `${MONTH}\\.?\\s+(?:\\d{4}|'\\d{2})|\\d{1,2}[\\/\\-]\\d{4}|\\d{4}`;
 
+// Strict month-year anchor (no bare-year / numeric-slash forms) for the
+// separator-less branch — bare years adjacent are too weak a signal.
+const MONTH_YEAR_ANCHOR = `${MONTH}\\.?\\s+(?:\\d{4}|'\\d{2})`;
+
 /**
  * Date range between two anchors. Captures both halves. Tolerant of spacing,
  * dashes (—, –, -, to, through).
+ *
+ * Two branches:
+ *   (a) classic — any anchor, explicit separator (–/—/-/to/through), any anchor or Present.
+ *       Groups: m[1] = start, m[2] = end.
+ *   (b) separator-less — month-year WS month-year (or Present), no dash.
+ *       Covers LaTeX/Awesome-CV where pdfjs drops the dash glyph.
+ *       Groups: m[3] = start, m[4] = end.
  */
 export const DATE_RANGE_RE = new RegExp(
-  `(${DATE_ANCHOR})` +
-    `\\s*(?:–|—|-|to|through)\\s*` +
-    `(${DATE_ANCHOR}|Present|Current|Now|Ongoing)`,
+  // (a) classic: any anchor, explicit separator, any anchor|Present
+  `(?:(${DATE_ANCHOR})\\s*(?:–|—|-|to|through)\\s*(${DATE_ANCHOR}|Present|Current|Now|Ongoing))` +
+    // (b) separator-less: month-year WS month-year (or Present)
+    `|(?:(${MONTH_YEAR_ANCHOR})\\s+(${MONTH_YEAR_ANCHOR}|Present|Current|Now|Ongoing))`,
   "i",
 );
 

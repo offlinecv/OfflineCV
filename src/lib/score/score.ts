@@ -39,15 +39,19 @@ export const WEIGHTS = {
  *
  * Changelog:
  * - 1.0 (2026-04-28): initial release.
- * - 1.1 (2026-06-18): Word-template parsing + scoring fixes (#29/#30/#31) —
+ * - 1.1 (2026-06-17): separator-less month-year date ranges now anchor experience entries (#119).
+ * - 1.2 (2026-06-19): Word-template parsing + scoring fixes (#29/#30/#31) —
  *   stacked-name / en-dash-phone / column-skills recovery shifts completeness;
  *   bulleted skills leave the experience-bullet pool; redacted role dates earn
  *   partial completeness credit instead of zero. Also: LinkedIn/GitHub identity
- *   links are recovered document-wide (can lift completeness when a footer link
- *   was previously missed); wrapped-bullet lines no longer split into phantom
- *   project/achievement entries.
+ *   links are recovered document-wide; multi-degree education sections extract
+ *   every entry; and wrapped-bullet tails no longer leak into the next
+ *   experience entry's header.
  */
-export const ATS_SCORE_ALGO_VERSION = "1.1";
+// Internal-only: surfaced to the UI via the `algoVersion` score field, not
+// imported by name anywhere — so it stays unexported to satisfy the dead-code
+// gate (fallow flags exported symbols with no external consumer).
+const ATS_SCORE_ALGO_VERSION = "1.2";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -691,7 +695,7 @@ export function computeAnonymousAtsScore(
   });
   completenessChecks.push({
     key: "experience",
-    passed: expEntries.length > 0,
+    passed: expEntries.length > 0 || bullets.length > 0,
     label: "work experience",
   });
   completenessChecks.push({
