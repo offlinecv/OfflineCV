@@ -19,6 +19,7 @@
       "experience",
       "family_name",
       "full_name",
+      "github_url",
       "given_name",
       "heuristic_achievements",
       "linkedin_url",

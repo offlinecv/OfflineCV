@@ -264,7 +264,7 @@ export const DEGREE_RE =
   /\b(B\.?A\.?|B\.?S\.?|B\.?Sc\.?|B\.?E\.?|B\.?Eng\.?|B\.?Tech\.?|M\.?A\.?|M\.?S\.?|M\.?Sc\.?|M\.?Eng\.?|M\.?B\.?A\.?|Ph\.?D\.?|M\.?D\.?|J\.?D\.?|Bachelor|Master|Doctor|Associate)(?:\s+of\s+[A-Za-z ]{2,40})?/;
 
 export const INSTITUTION_HINTS =
-  /\b(University|College|Institute|School|Academy|Polytechnic)\b/i;
+  /\b(University|College|Institute|School|Academy|Polytechnic)s?\b/i;
 
 // ── Company suffix hints ────────────────────────────────────────────────────
 

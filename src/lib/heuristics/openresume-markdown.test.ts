@@ -310,3 +310,51 @@ describe("parseHeuristicFromMarkdown — minimal / missing sections", () => {
     expect(result.parsed.experience).toEqual([]);
   });
 });
+
+describe("parseHeuristicFromMarkdown — promoted-link de-duplication", () => {
+  it("promotes a bottom LinkedIn/GitHub link to contact and removes it from the body", () => {
+    // The bare links trailing the Projects section are promoted into the
+    // contact card (document-wide identity-link detection). They must not also
+    // survive as a phantom project entry whose only content is the URL.
+    const markdown = [
+      "# Jane Smith",
+      "jane.smith@example.com",
+      "## Projects",
+      "**Cool App** · 2024",
+      "- Built a thing that scaled to 1M users with 99.9% uptime reliability",
+      "github.com/janesmith",
+      "linkedin.com/in/janesmith",
+    ].join("\n");
+    const result = parseHeuristicFromMarkdown(markdown, markdown);
+
+    // Promoted into contact …
+    expect(result.parsed.github_url).toBe("https://github.com/janesmith");
+    expect(result.parsed.linkedin_url).toBe("https://linkedin.com/in/janesmith");
+    // … and NOT duplicated in the body: only the real project survives.
+    expect(result.parsed.projects?.map((p) => p.name)).toEqual(["Cool App"]);
+    expect(
+      result.parsed.projects?.some(
+        (p) => /github\.com|linkedin\.com/.test(p.url ?? "") ||
+          /github\.com|linkedin\.com/.test(p.description ?? ""),
+      ),
+    ).toBe(false);
+  });
+
+  it("preserves a deeper repo path mentioned in a real bullet", () => {
+    // Contact github is github.com/janesmith; a bullet referencing a deeper
+    // path under it (a specific repo) is a real mention, not the identity link.
+    const markdown = [
+      "# Jane Smith",
+      "jane.smith@example.com | github.com/janesmith",
+      "## Projects",
+      "**Cool App** · 2024",
+      "- Shipped github.com/janesmith/cool-app reaching 1M users with strong reliability",
+    ].join("\n");
+    const result = parseHeuristicFromMarkdown(markdown, markdown);
+
+    expect(result.parsed.github_url).toBe("https://github.com/janesmith");
+    expect(result.parsed.projects?.[0]?.description).toContain(
+      "github.com/janesmith/cool-app",
+    );
+  });
+});

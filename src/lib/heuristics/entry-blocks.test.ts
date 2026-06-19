@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import { groupIntoLines, splitIntoSections, findSection } from "./sections.ts";
 import { parseEntryBlocks } from "./entry-blocks.ts";
 import { mkItems } from "./__test-utils__/mkItem.ts";
-import type { PdfSection } from "./sections.ts";
+import type { PdfSection, PdfLine } from "./sections.ts";
 
 /** Build an experience section from line specs (the date_range anchor case). */
 function experienceSection(
@@ -22,6 +22,24 @@ function experienceSection(
 ): PdfSection | undefined {
   const sections = splitIntoSections(groupIntoLines(mkItems(specs)));
   return findSection(sections, "experience");
+}
+
+/** Build a section from explicit (text, x) lines — for x-sensitive cases like
+ *  wrapped-bullet continuations indented past the bullet marker. */
+function xSection(
+  name: PdfSection["name"],
+  rows: Array<{ text: string; x: number }>,
+): PdfSection {
+  const lines: PdfLine[] = rows.map(({ text, x }) => ({
+    page: 1,
+    y: 0,
+    x,
+    items: [],
+    text,
+    maxFontSize: 11,
+    allCaps: false,
+  }));
+  return { name, lines };
 }
 
 describe("parseEntryBlocks — date_range anchor", () => {
@@ -149,6 +167,31 @@ describe("parseEntryBlocks — date_range anchor", () => {
     );
   });
 
+  it("drops a wrapped bullet tail from the next entry's header (#boundary)", () => {
+    // The bullet wraps onto a marker-less line indented past the bullet marker
+    // (x 90 > marker x 64); headers sit at the left margin (x 50). The wrapped
+    // tail must not leak into the next entry's company / designation.
+    const section = xSection("experience", [
+      { text: "Northwind Labs  Jul 2025 - Present", x: 50 },
+      { text: "• Documented architecture and managed changes with peer", x: 64 },
+      { text: "review.", x: 90 }, // wrapped continuation of the bullet above
+      { text: "Riverton County Schools  Oct 2025 - Present", x: 50 },
+      { text: "Substitute Teacher", x: 50 },
+      { text: "• Supported classroom instruction.", x: 64 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(2);
+    // The fragment must not leak into the second entry's header.
+    expect(blocks[1].headerLines.some((h) => /review/.test(h))).toBe(false);
+    expect(
+      blocks[1].headerLines.some((h) => h.includes("Riverton County Schools")),
+    ).toBe(true);
+  });
+
   it("honors headerLookback=0 — no lines above the anchor join the header", () => {
     const section = experienceSection([
       { text: "EXPERIENCE", fontSize: 13 },
@@ -219,5 +262,45 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
     expect(blocks).toHaveLength(1);
     expect(blocks[0].dates.start_date).toBeTruthy();
     expect(blocks[0].headerLines.some((h) => /\d{4}/.test(h))).toBe(false);
+  });
+
+  // x-aware builder: a long bullet wraps onto a marker-less second line that
+  // aligns with the bullet *text* (indented past the header margin).
+  function sectionX(lines: Array<{ text: string; x: number }>): PdfSection {
+    return {
+      name: "projects",
+      lines: lines.map((l, i) => ({
+        page: 1,
+        y: 72 + i * 14,
+        x: l.x,
+        items: [],
+        text: l.text,
+        maxFontSize: 11,
+        allCaps: false,
+      })),
+    };
+  }
+
+  it("treats an indented wrapped-bullet line as a continuation, not a new entry", () => {
+    // Headers sit at the section margin (x=50); the bullet text (and thus a
+    // wrapped continuation of it) is indented to x=73. The two wrap lines must
+    // not open phantom entries, and the real header that follows a wrap must
+    // still be recovered (it would be lost by a naive "prev is a bullet" rule).
+    const blocks = parseEntryBlocks(
+      sectionX([
+        { text: "Revenue Forecasting Project", x: 50 },
+        { text: "● Used five forecasting methods, and", x: 64 },
+        { text: "TAF on deseasonalized revenue data", x: 73 }, // wrap
+        { text: "● Identified the most suitable method among all", x: 64 },
+        { text: "methods", x: 73 }, // wrap
+        { text: "Global Entry Strategy Project", x: 50 }, // real header after wrap
+        { text: "● Evaluated market potential", x: 64 },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks.map((b) => b.headerLines[0])).toEqual([
+      "Revenue Forecasting Project",
+      "Global Entry Strategy Project",
+    ]);
   });
 });

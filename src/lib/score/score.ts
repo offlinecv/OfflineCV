@@ -42,7 +42,10 @@ export const WEIGHTS = {
  * - 1.1 (2026-06-18): Word-template parsing + scoring fixes (#29/#30/#31) —
  *   stacked-name / en-dash-phone / column-skills recovery shifts completeness;
  *   bulleted skills leave the experience-bullet pool; redacted role dates earn
- *   partial completeness credit instead of zero.
+ *   partial completeness credit instead of zero. Also: LinkedIn/GitHub identity
+ *   links are recovered document-wide (can lift completeness when a footer link
+ *   was previously missed); wrapped-bullet lines no longer split into phantom
+ *   project/achievement entries.
  */
 export const ATS_SCORE_ALGO_VERSION = "1.1";
 
