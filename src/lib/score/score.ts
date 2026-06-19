@@ -39,8 +39,12 @@ export const WEIGHTS = {
  *
  * Changelog:
  * - 1.0 (2026-04-28): initial release.
+ * - 1.1 (2026-06-18): Word-template parsing + scoring fixes (#29/#30/#31) —
+ *   stacked-name / en-dash-phone / column-skills recovery shifts completeness;
+ *   bulleted skills leave the experience-bullet pool; redacted role dates earn
+ *   partial completeness credit instead of zero.
  */
-export const ATS_SCORE_ALGO_VERSION = "1.0";
+export const ATS_SCORE_ALGO_VERSION = "1.1";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -91,6 +95,29 @@ const STRONG_METRIC_PATTERNS = [
 // register as quantified outcomes.
 const YEAR_TOKEN = /\b(19|20)\d{2}\b/g;
 const ANY_DIGIT = /\d/;
+
+/** Month names (incl. "Sept"), for anchoring redaction tokens to a date slot. */
+const MONTH_NAME =
+  "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?";
+
+/**
+ * Year-position redaction placeholders in a *date* context (#31). Résumé
+ * templates ship dates as redaction stubs the parser can't read as a year:
+ *   - `20XX` / `20--` (with any dash) — unambiguous year stubs, matched bare.
+ *   - `XXXX` / `####` — only when anchored to a month ("August XXXX") or a
+ *     range dash ("XXXX – XXXX"), so a stray `####` elsewhere doesn't trip it.
+ * Detecting these lets completeness score a redacted date distinctly from a
+ * wholly-missing one and surface "use 4-digit years" guidance.
+ */
+const REDACTED_DATE_RE = new RegExp(
+  [
+    "\\b20XX\\b",
+    "\\b20[-\\u2012\\u2013\\u2014]{2}",
+    `${MONTH_NAME}\\s+(?:XXXX|####)`,
+    "(?:XXXX|####)\\s*[-\\u2012\\u2013\\u2014]\\s*(?:XXXX|####|20XX|Present|Current)",
+  ].join("|"),
+  "i",
+);
 
 function bulletHasMetric(text: string): boolean {
   if (STRONG_METRIC_PATTERNS.some((p) => p.test(text))) return true;
@@ -435,6 +462,10 @@ export interface AnonymousAtsScore {
   };
   completeness: AnonymousAtsScoreDimension & {
     missing: string[];
+    /** True when at least one role's date is a redaction stub (e.g. "20XX")
+     *  rather than wholly absent (#31). Drives the "use 4-digit years" UI
+     *  hint; the date check still counts as incomplete. */
+    redactedDates?: boolean;
   };
   layout: {
     triggers: readonly string[];
@@ -622,8 +653,15 @@ export function computeAnonymousAtsScore(
   // Mirrors scoreCompleteness in spirit but works on cascade-shaped data.
   // 5 contact fields (10 pts), summary (3), experience+dates (10), education (4),
   // skills (3). Contact fields are gated by confidence; the rest by presence.
-  const completenessChecks: { key: string; passed: boolean; label: string }[] =
-    [];
+  // `credit` defaults to 1 when passed, 0 when not — but a partially-satisfied
+  // check (e.g. a redacted date, #31) can earn fractional credit while still
+  // counting as "not passed" so it surfaces in `missing`.
+  const completenessChecks: {
+    key: string;
+    passed: boolean;
+    label: string;
+    credit?: number;
+  }[] = [];
   for (const f of ANON_CONTACT_FIELDS) {
     const value = input.parsed[f.key];
     const conf = input.fieldConfidence[f.key] ?? 0;
@@ -661,18 +699,27 @@ export function computeAnonymousAtsScore(
   // Date completeness — pass if the majority of experience entries carry a
   // start date. We don't know which entry is current vs past at the cascade
   // tier so we don't penalize missing end_date.
+  let redactedDates = false;
   if (expEntries.length > 0) {
     const withStart = expEntries.filter((e) => !!e.start_date).length;
+    const datesPass = withStart / expEntries.length >= 0.5;
+    // A failing date check is "redacted" rather than wholly-missing when the
+    // text carries a year-position redaction stub (#31). It stays incomplete
+    // but earns half credit and triggers "use 4-digit years" guidance.
+    redactedDates = !datesPass && REDACTED_DATE_RE.test(input.rawText);
     completenessChecks.push({
       key: "dates",
-      passed: withStart / expEntries.length >= 0.5,
+      passed: datesPass,
       label: "role dates",
+      credit: datesPass ? 1 : redactedDates ? 0.5 : 0,
     });
   }
 
   const completenessRatio =
-    completenessChecks.filter((c) => c.passed).length /
-    completenessChecks.length;
+    completenessChecks.reduce(
+      (sum, c) => sum + (c.credit ?? (c.passed ? 1 : 0)),
+      0,
+    ) / completenessChecks.length;
   const completenessScore = Math.round(completenessRatio * 30);
   const completenessMissing = completenessChecks
     .filter((c) => !c.passed)
@@ -714,6 +761,7 @@ export function computeAnonymousAtsScore(
       max: 30,
       gradable: true,
       missing: completenessMissing,
+      ...(redactedDates ? { redactedDates: true } : {}),
     },
     layout: {
       triggers: input.triggers.slice(),

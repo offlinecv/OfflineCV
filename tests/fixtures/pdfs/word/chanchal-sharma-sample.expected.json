@@ -34,8 +34,8 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 21,
-    "preLayoutOverall": 21,
+    "overall": 23,
+    "preLayoutOverall": 23,
     "specificity": {
       "score": 0,
       "max": 40,
@@ -51,7 +51,7 @@
       "totalBullets": 0
     },
     "completeness": {
-      "score": 21,
+      "score": 23,
       "max": 30,
       "gradable": true,
       "missing": [
@@ -66,6 +66,6 @@
       "scanned": false
     },
     "bulletCount": 0,
-    "algoVersion": "1.0"
+    "algoVersion": "1.1"
   }
 }

@@ -545,4 +545,59 @@ describe("computeAnonymousAtsScore", () => {
       expect(result.bullets ?? []).toHaveLength(0);
     });
   });
+
+  describe("redacted role dates (#31)", () => {
+    // A role whose date is a redaction stub ("August 20XX") stays incomplete,
+    // but must score distinctly from a role with no date text at all and drive
+    // the "use 4-digit years" guidance.
+    const undatedRole = [{ title: "Office Manager", company: "Acme" }];
+    function inputWith(rawText: string): AnonymousAtsScoreInput {
+      return makeAnonInput({
+        parsed: {
+          full_name: "Jane Doe",
+          email: "jane@example.com",
+          phone: "555-0100",
+          location: "San Francisco, CA",
+          linkedin_url: "https://www.linkedin.com/in/janedoe",
+          summary: "Backend engineer with ten years of distributed systems work.",
+          skills: ["TypeScript", "Go", "PostgreSQL"],
+          experience: undatedRole,
+          education: [{ degree: "BS CS", institution: "MIT" }],
+        },
+        rawText,
+      });
+    }
+
+    it("flags redacted dates incomplete but scores above wholly-missing dates", () => {
+      const redacted = computeAnonymousAtsScore(
+        inputWith("Office Manager, Acme\nAugust 20XX – March 20XX"),
+      );
+      const missing = computeAnonymousAtsScore(
+        inputWith("Office Manager, Acme"),
+      );
+      expect(redacted.completeness.redactedDates).toBe(true);
+      expect(redacted.completeness.missing).toContain("role dates");
+      expect(missing.completeness.redactedDates).toBeFalsy();
+      expect(redacted.completeness.score).toBeGreaterThan(
+        missing.completeness.score,
+      );
+    });
+
+    it.each([
+      "August 20XX – March 20XX",
+      "Jan XXXX – Dec XXXX",
+      "Mar #### – Jun ####",
+      "August 20-- – March 20--",
+    ])("detects the redaction token family in %s", (dateLine) => {
+      const result = computeAnonymousAtsScore(inputWith(`Role, Co\n${dateLine}`));
+      expect(result.completeness.redactedDates).toBe(true);
+    });
+
+    it("does not flag a bare XXXX outside a date context", () => {
+      const result = computeAnonymousAtsScore(
+        inputWith("Office Manager, Acme\nBadge ID XXXX-7 issued on site"),
+      );
+      expect(result.completeness.redactedDates).toBeFalsy();
+    });
+  });
 });
