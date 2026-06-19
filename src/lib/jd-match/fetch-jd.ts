@@ -358,8 +358,19 @@ export function classifyUnsupportedHost(url: string): UnsupportedHost | null {
 
 /**
  * Fetch a job description as plaintext from a supported ATS URL.
- * Returns null if the URL isn't a supported ATS or the API call fails.
- * Analytics capture is a separate intern task (#75) — not emitted here.
+ *
+ * Two distinct failure modes, surfaced separately so the caller can route to
+ * the right user-facing copy and the right telemetry bucket (#75):
+ *   - **`null`** — the URL did not parse to any supported ATS host; the
+ *     callee should consult `classifyUnsupportedHost` to pick the message.
+ *     No network call was made.
+ *   - **throws** — the URL parsed, but the platform's API call failed
+ *     (non-2xx, network error, JSON parse, "job not found"). The thrown
+ *     error preserves the underlying failure on its `cause`. The caller's
+ *     catch is the `network_error` funnel state.
+ *
+ * Analytics are wired in the caller (see `JdInput`), not here, so this
+ * module stays pure (#75).
  */
 export async function fetchJdFromUrl(
   url: string,
@@ -367,22 +378,17 @@ export async function fetchJdFromUrl(
   const parsed = parseAtsUrl(url);
   if (!parsed) return null;
 
-  try {
-    const result = await FETCHERS[parsed.platform](parsed.company, parsed.jobId);
+  const result = await FETCHERS[parsed.platform](parsed.company, parsed.jobId);
 
-    const text =
-      result.descriptionText ??
-      (result.descriptionHtml ? htmlToPlaintext(result.descriptionHtml) : null) ??
-      [result.title, result.company].filter(Boolean).join(" — ");
+  const text =
+    result.descriptionText ??
+    (result.descriptionHtml ? htmlToPlaintext(result.descriptionHtml) : null) ??
+    [result.title, result.company].filter(Boolean).join(" — ");
 
-    return {
-      text,
-      title: result.title,
-      company: result.company,
-      source: parsed.platform,
-    };
-  } catch (err) {
-    console.warn(`[fetch-jd] ${parsed.platform} fetch failed:`, err);
-    return null;
-  }
+  return {
+    text,
+    title: result.title,
+    company: result.company,
+    source: parsed.platform,
+  };
 }

@@ -3,6 +3,7 @@
 
 import type { LayoutTrigger, ParseEvent } from "./heuristics/types";
 import type { WebGpuCapability } from "./webllm/types";
+import type { AtsPlatform } from "./jd-match/fetch-jd";
 
 type PostHog = {
   capture: (event: string, props?: Record<string, unknown>) => void;
@@ -227,7 +228,7 @@ export type JdUrlOutcome =
 export function trackJdUrlFetch(args: {
   outcome: JdUrlOutcome;
   /** Set when `outcome === "ok"`; otherwise null. */
-  platform: string | null;
+  platform: AtsPlatform | null;
 }): void {
   track("jd_url_fetch", {
     outcome: args.outcome,
