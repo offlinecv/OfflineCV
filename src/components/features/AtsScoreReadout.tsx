@@ -86,9 +86,12 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
   const specificityHint = `${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`;
   const structureHint = `${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`;
   const completenessHint =
-    score.completeness.missing.length === 0
+    (score.completeness.missing.length === 0
       ? "All expected fields present"
-      : `Missing: ${score.completeness.missing.join(", ")}`;
+      : `Missing: ${score.completeness.missing.join(", ")}`) +
+    (score.completeness.redactedDates
+      ? " · Dates appear redacted — use 4-digit years for best results."
+      : "");
 
   const dimensions: VerdictDimension[] = [
     {

@@ -25,7 +25,7 @@ function makeCascade(
 }
 
 describe("buildContactFields", () => {
-  it("returns 5 rows in the correct order", () => {
+  it("returns the 5 required rows (no GitHub) when GitHub is absent", () => {
     const fields = buildContactFields(makeCascade());
     expect(fields).toHaveLength(5);
     expect(fields.map((f) => f.key)).toEqual([
@@ -35,6 +35,37 @@ describe("buildContactFields", () => {
       "linkedin_url",
       "location",
     ]);
+  });
+
+  it("includes the GitHub row only when it is confidently detected", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        { github_url: "https://github.com/jane" },
+        { github_url: 0.95 },
+      ),
+    );
+    expect(fields.map((f) => f.key)).toEqual([
+      "full_name",
+      "email",
+      "phone",
+      "linkedin_url",
+      "github_url",
+      "location",
+    ]);
+    const gh = fields.find((f) => f.key === "github_url")!;
+    expect(gh.gated).toBe(false);
+    expect(gh.value).toBe("https://github.com/jane");
+  });
+
+  it("omits the GitHub row when present but below the confidence floor", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        { github_url: "https://github.com/jane" },
+        { github_url: CONTACT_DISPLAY_CONFIDENCE_FLOOR - 0.01 },
+      ),
+    );
+    expect(fields.some((f) => f.key === "github_url")).toBe(false);
+    expect(fields).toHaveLength(5);
   });
 
   it("shows a field (gated=false) when value is present and confidence is above the floor", () => {
@@ -69,7 +100,7 @@ describe("buildContactFields", () => {
     expect(phoneField.value).toBe("");
   });
 
-  it("shows all five fields when all are present and above the confidence floor", () => {
+  it("shows all six fields when all are present and above the confidence floor", () => {
     const fields = buildContactFields(
       makeCascade(
         {
@@ -77,6 +108,7 @@ describe("buildContactFields", () => {
           email: "jane@example.com",
           phone: "555-0100",
           linkedin_url: "https://linkedin.com/in/jane",
+          github_url: "https://github.com/jane",
           location: "San Francisco, CA",
         },
         {
@@ -84,6 +116,7 @@ describe("buildContactFields", () => {
           email: 0.95,
           phone: 0.85,
           linkedin_url: 0.8,
+          github_url: 0.8,
           location: 0.75,
         },
       ),
@@ -94,6 +127,7 @@ describe("buildContactFields", () => {
       "jane@example.com",
       "555-0100",
       "https://linkedin.com/in/jane",
+      "https://github.com/jane",
       "San Francisco, CA",
     ]);
   });

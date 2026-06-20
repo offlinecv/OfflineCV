@@ -40,11 +40,18 @@ export const WEIGHTS = {
  * Changelog:
  * - 1.0 (2026-04-28): initial release.
  * - 1.1 (2026-06-17): separator-less month-year date ranges now anchor experience entries (#119).
+ * - 1.2 (2026-06-19): Word-template parsing + scoring fixes (#29/#30/#31) —
+ *   stacked-name / en-dash-phone / column-skills recovery shifts completeness;
+ *   bulleted skills leave the experience-bullet pool; redacted role dates earn
+ *   partial completeness credit instead of zero. Also: LinkedIn/GitHub identity
+ *   links are recovered document-wide; multi-degree education sections extract
+ *   every entry; and wrapped-bullet tails no longer leak into the next
+ *   experience entry's header.
  */
 // Internal-only: surfaced to the UI via the `algoVersion` score field, not
 // imported by name anywhere — so it stays unexported to satisfy the dead-code
 // gate (fallow flags exported symbols with no external consumer).
-const ATS_SCORE_ALGO_VERSION = "1.1";
+const ATS_SCORE_ALGO_VERSION = "1.2";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -95,6 +102,29 @@ const STRONG_METRIC_PATTERNS = [
 // register as quantified outcomes.
 const YEAR_TOKEN = /\b(19|20)\d{2}\b/g;
 const ANY_DIGIT = /\d/;
+
+/** Month names (incl. "Sept"), for anchoring redaction tokens to a date slot. */
+const MONTH_NAME =
+  "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?";
+
+/**
+ * Year-position redaction placeholders in a *date* context (#31). Résumé
+ * templates ship dates as redaction stubs the parser can't read as a year:
+ *   - `20XX` / `20--` (with any dash) — unambiguous year stubs, matched bare.
+ *   - `XXXX` / `####` — only when anchored to a month ("August XXXX") or a
+ *     range dash ("XXXX – XXXX"), so a stray `####` elsewhere doesn't trip it.
+ * Detecting these lets completeness score a redacted date distinctly from a
+ * wholly-missing one and surface "use 4-digit years" guidance.
+ */
+const REDACTED_DATE_RE = new RegExp(
+  [
+    "\\b20XX\\b",
+    "\\b20[-\\u2012\\u2013\\u2014]{2}",
+    `${MONTH_NAME}\\s+(?:XXXX|####)`,
+    "(?:XXXX|####)\\s*[-\\u2012\\u2013\\u2014]\\s*(?:XXXX|####|20XX|Present|Current)",
+  ].join("|"),
+  "i",
+);
 
 function bulletHasMetric(text: string): boolean {
   if (STRONG_METRIC_PATTERNS.some((p) => p.test(text))) return true;
@@ -439,6 +469,10 @@ export interface AnonymousAtsScore {
   };
   completeness: AnonymousAtsScoreDimension & {
     missing: string[];
+    /** True when at least one role's date is a redaction stub (e.g. "20XX")
+     *  rather than wholly absent (#31). Drives the "use 4-digit years" UI
+     *  hint; the date check still counts as incomplete. */
+    redactedDates?: boolean;
   };
   layout: {
     triggers: readonly string[];
@@ -491,6 +525,11 @@ export interface AnonymousAtsScoreInput {
   triggers: readonly string[];
   /** Concatenated text from Tier 0. Used for bullet-level analysis. */
   rawText: string;
+  /** Newline-joined text of the detected skills section, if any. Lines here are
+   *  kept out of the experience-bullet pool so skills are never judged by the
+   *  action-verb / metric / length rules (#30). Supplied by the cascade, which
+   *  owns section detection — the pure scorer does not re-derive sections. */
+  skillsSectionText?: string;
 }
 
 const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
@@ -517,6 +556,42 @@ const ANON_CONTACT_FIELDS: readonly {
   { key: "linkedin_url", label: "LinkedIn" },
 ];
 
+/** A line that is *only* a bullet glyph (no text after it). Word tables can
+ *  place the glyph and its text in separate cells, so pdfjs/pdftotext emit the
+ *  marker on its own line followed by the text on the next — see #30. Dash-style
+ *  markers are excluded here: a lone "-"/"–" line is far more often a divider
+ *  than a bullet whose text wandered onto the next line. */
+const LONE_BULLET_RE = /^\s*[•●▪◦‣▶►·�]\s*$/;
+
+/** Marker-strip a single line (bullet glyph or numbered prefix) and trim. The
+ *  key both `extractBulletsFromText` and the skills-exclusion set match on. */
+function stripBulletMarker(line: string): string {
+  return line
+    .replace(BULLET_MARKER_RE, "")
+    .replace(NUMBERED_BULLET_RE, "")
+    .trim();
+}
+
+/**
+ * Build the set of skills-section lines (marker-stripped) to keep out of the
+ * experience-bullet pool. A skill like "Project management" is not an
+ * accomplishment bullet and must not be judged by the action-verb / metric /
+ * length rules or surfaced in per-bullet feedback (#30). The text is supplied
+ * by the cascade, which owns section detection; the pure scorer never has to
+ * re-derive sections from `rawText`.
+ */
+function buildSkillsExclusion(
+  skillsSectionText: string | undefined,
+): ReadonlySet<string> | undefined {
+  if (!skillsSectionText) return undefined;
+  const set = new Set<string>();
+  for (const line of skillsSectionText.split(/\r?\n/)) {
+    const key = stripBulletMarker(line);
+    if (key) set.add(key);
+  }
+  return set.size > 0 ? set : undefined;
+}
+
 /**
  * Pull bullet-like lines out of raw resume text. A line counts as a bullet
  * when it starts with a recognized bullet marker (`-`, `•`, etc.) or a
@@ -530,11 +605,29 @@ const ANON_CONTACT_FIELDS: readonly {
  * resumes use markers, and grading paragraphs would either over-count
  * narrative summary lines or require the experience-section detection we
  * don't have without an LLM.
+ *
+ * `excludeStripped` (optional) is the marker-stripped skills-section line set;
+ * matching lines are dropped so bulleted skills never enter the pool (#30).
  */
-function extractBulletsFromText(text: string): string[] {
+function extractBulletsFromText(
+  text: string,
+  excludeStripped?: ReadonlySet<string>,
+): string[] {
   if (!text) return [];
+  const lines = text.split(/\r?\n/);
   const out: string[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
+  for (let i = 0; i < lines.length; i++) {
+    let rawLine = lines[i];
+    // Lone-bullet merge (#30): a marker-only line adopts the next non-empty
+    // line as its text, recovering Word-table layouts that split the glyph and
+    // its text into separate cells (and thus separate extracted lines).
+    if (LONE_BULLET_RE.test(rawLine)) {
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      if (j >= lines.length) break;
+      rawLine = `${rawLine.trimEnd()} ${lines[j].trim()}`;
+      i = j;
+    }
     let stripped = rawLine.replace(BULLET_MARKER_RE, "");
     if (stripped === rawLine) {
       stripped = rawLine.replace(NUMBERED_BULLET_RE, "");
@@ -542,6 +635,8 @@ function extractBulletsFromText(text: string): string[] {
     }
     const trimmed = stripped.trim();
     if (trimmed.split(/\s+/).filter(Boolean).length < ANON_BULLET_MIN_WORDS) continue;
+    // Section-aware (#30): skills entries are not experience bullets.
+    if (excludeStripped?.has(trimmed)) continue;
     out.push(trimmed);
   }
   return out;
@@ -553,7 +648,8 @@ export function computeAnonymousAtsScore(
   // ── Bullet-level dimensions (Specificity 40, Structure 30) ─────────────
   // Same scoreBulletPool the authed scorer uses — guarantees the two
   // surfaces apply identical per-bullet rules.
-  const bullets = extractBulletsFromText(input.rawText);
+  const skillsExclude = buildSkillsExclusion(input.skillsSectionText);
+  const bullets = extractBulletsFromText(input.rawText, skillsExclude);
   const pool = scoreBulletPool(bullets);
   const observations = analyzeBullets(bullets);
   const gradable = pool.total >= ANON_MIN_BULLETS_TO_GRADE;
@@ -564,8 +660,15 @@ export function computeAnonymousAtsScore(
   // Mirrors scoreCompleteness in spirit but works on cascade-shaped data.
   // 5 contact fields (10 pts), summary (3), experience+dates (10), education (4),
   // skills (3). Contact fields are gated by confidence; the rest by presence.
-  const completenessChecks: { key: string; passed: boolean; label: string }[] =
-    [];
+  // `credit` defaults to 1 when passed, 0 when not — but a partially-satisfied
+  // check (e.g. a redacted date, #31) can earn fractional credit while still
+  // counting as "not passed" so it surfaces in `missing`.
+  const completenessChecks: {
+    key: string;
+    passed: boolean;
+    label: string;
+    credit?: number;
+  }[] = [];
   for (const f of ANON_CONTACT_FIELDS) {
     const value = input.parsed[f.key];
     const conf = input.fieldConfidence[f.key] ?? 0;
@@ -603,18 +706,27 @@ export function computeAnonymousAtsScore(
   // Date completeness — pass if the majority of experience entries carry a
   // start date. We don't know which entry is current vs past at the cascade
   // tier so we don't penalize missing end_date.
+  let redactedDates = false;
   if (expEntries.length > 0) {
     const withStart = expEntries.filter((e) => !!e.start_date).length;
+    const datesPass = withStart / expEntries.length >= 0.5;
+    // A failing date check is "redacted" rather than wholly-missing when the
+    // text carries a year-position redaction stub (#31). It stays incomplete
+    // but earns half credit and triggers "use 4-digit years" guidance.
+    redactedDates = !datesPass && REDACTED_DATE_RE.test(input.rawText);
     completenessChecks.push({
       key: "dates",
-      passed: withStart / expEntries.length >= 0.5,
+      passed: datesPass,
       label: "role dates",
+      credit: datesPass ? 1 : redactedDates ? 0.5 : 0,
     });
   }
 
   const completenessRatio =
-    completenessChecks.filter((c) => c.passed).length /
-    completenessChecks.length;
+    completenessChecks.reduce(
+      (sum, c) => sum + (c.credit ?? (c.passed ? 1 : 0)),
+      0,
+    ) / completenessChecks.length;
   const completenessScore = Math.round(completenessRatio * 30);
   const completenessMissing = completenessChecks
     .filter((c) => !c.passed)
@@ -656,6 +768,7 @@ export function computeAnonymousAtsScore(
       max: 30,
       gradable: true,
       missing: completenessMissing,
+      ...(redactedDates ? { redactedDates: true } : {}),
     },
     layout: {
       triggers: input.triggers.slice(),

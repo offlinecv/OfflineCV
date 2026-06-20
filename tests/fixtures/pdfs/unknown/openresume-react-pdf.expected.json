@@ -42,14 +42,14 @@
       "max": 40,
       "gradable": true,
       "metricBullets": 9,
-      "totalBullets": 14
+      "totalBullets": 12
     },
     "structure": {
       "score": 17,
       "max": 30,
       "gradable": true,
-      "goodBullets": 8,
-      "totalBullets": 14
+      "goodBullets": 7,
+      "totalBullets": 12
     },
     "completeness": {
       "score": 27,
@@ -64,7 +64,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 14,
-    "algoVersion": "1.1"
+    "bulletCount": 12,
+    "algoVersion": "1.2"
   }
 }

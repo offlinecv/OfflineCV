@@ -19,6 +19,7 @@
       "experience",
       "family_name",
       "full_name",
+      "github_url",
       "given_name",
       "heuristic_achievements",
       "linkedin_url",
@@ -71,6 +72,6 @@
       "scanned": false
     },
     "bulletCount": 8,
-    "algoVersion": "1.1"
+    "algoVersion": "1.2"
   }
 }

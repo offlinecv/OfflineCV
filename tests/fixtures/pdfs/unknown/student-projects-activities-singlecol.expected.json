@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.86,
+    "confidence": 0.88,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -27,7 +27,7 @@
     "skillsCount": 13,
     "experienceCount": 3,
     "educationCount": 2,
-    "projectsCount": 4,
+    "projectsCount": 2,
     "achievementsCount": 0,
     "rawTextCharCount": 2331,
     "pageCount": 2,
@@ -36,21 +36,21 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 55,
-    "preLayoutOverall": 55,
+    "overall": 58,
+    "preLayoutOverall": 58,
     "specificity": {
-      "score": 17,
+      "score": 18,
       "max": 40,
       "gradable": true,
-      "metricBullets": 6,
-      "totalBullets": 23
+      "metricBullets": 5,
+      "totalBullets": 19
     },
     "structure": {
-      "score": 11,
+      "score": 13,
       "max": 30,
       "gradable": true,
-      "goodBullets": 9,
-      "totalBullets": 23
+      "goodBullets": 8,
+      "totalBullets": 19
     },
     "completeness": {
       "score": 27,
@@ -65,7 +65,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 23,
-    "algoVersion": "1.1"
+    "bulletCount": 19,
+    "algoVersion": "1.2"
   }
 }

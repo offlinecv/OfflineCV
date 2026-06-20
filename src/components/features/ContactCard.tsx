@@ -4,9 +4,10 @@
 /**
  * ContactCard — displays extracted contact fields as a chip strip.
  *
- * Detected fields show the value with a success chip; undetected fields
- * show a warning chip with a "not detected" label. Always renders all 5
- * fields so the reader can spot gaps at a glance.
+ * Detected fields show the value with a success chip; undetected required
+ * fields show a warning chip with a "not detected" label so the reader can
+ * spot gaps at a glance. Optional fields (e.g. GitHub) render only when
+ * detected — see `buildContactFields`.
  *
  * Edit mode (#58): when `overrides` and `onFieldChange` are provided, each
  * field chip gains an inline EditableField affordance. Edited values replace
@@ -74,7 +75,7 @@ export function ContactCard({
   return (
     <Card id="contact" className="scroll-mt-6">
       <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-content-muted">
-        Contact — {detectedCount} of 5 detected
+        Contact — {detectedCount} of {displayFields.length} detected
       </h2>
       <div className="flex flex-wrap gap-2">
         {displayFields.map((field) => {

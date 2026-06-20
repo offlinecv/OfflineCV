@@ -185,8 +185,14 @@ export function normalizePhone(
  * India `098765 43210`) do not match PHONE_RE and carry no `+` prefix.
  */
 function mightHavePhone(text: string, region: CountryCode): boolean {
+  // Some templates (Word/LaTeX) use a Unicode dash as the digit-group
+  // separator, e.g. "(718) 555–0100" with an en-dash (U+2013). PHONE_RE's
+  // separator class is ASCII-only, so fold en/em/figure dashes to "-" for
+  // this cheap pre-gate only. `findPhoneNumbersInText` parses the Unicode
+  // forms natively, so the matcher itself needs no change.
+  const ascii = text.replace(/[‒–—]/g, "-");
   PHONE_RE.lastIndex = 0;
-  const byUs = PHONE_RE.test(text);
+  const byUs = PHONE_RE.test(ascii);
   PHONE_RE.lastIndex = 0;
   if (byUs) return true;
   if (/\+\d/.test(text)) return true;

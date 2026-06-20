@@ -77,6 +77,24 @@ describe("findFirstPhone — extraction from text", () => {
     expect(result!.formatted).toBe("(408) 372-6626");
   });
 
+  it("finds a US number whose digit groups are split by a Unicode en-dash (#29)", () => {
+    // Word/LaTeX templates render the separator as U+2013, e.g. "(718) 555–0100".
+    // The ASCII-only PHONE_RE pre-filter used to gate this out before the
+    // libphonenumber call ever ran; mightHavePhone now folds Unicode dashes.
+    const result = findFirstPhone("Phone: (718) 555–0100");
+    expect(result).toBeDefined();
+    expect(result!.formatted).toBe("(718) 555-0100");
+  });
+
+  it("finds a US number split by an em-dash and a figure-dash (#29)", () => {
+    expect(findFirstPhone("(718) 555—0100")?.formatted).toBe(
+      "(718) 555-0100",
+    );
+    expect(findFirstPhone("(718) 555‒0100")?.formatted).toBe(
+      "(718) 555-0100",
+    );
+  });
+
   it("finds a UK number with country code in text", () => {
     // +44 20 7946 0958 is a UK Ofcom-reserved documentation number.
     const result = findFirstPhone("London office: +44 20 7946 0958");

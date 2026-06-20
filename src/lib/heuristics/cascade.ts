@@ -195,6 +195,9 @@ export async function runCascade(
     tiers,
     rawText: extract.text,
     markdown,
+    ...(heuristic.skillsSectionLines?.length
+      ? { skillsSectionText: heuristic.skillsSectionLines.join("\n") }
+      : {}),
     linkAnnotations: extract.linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,
@@ -402,6 +405,9 @@ export async function runCascadeFromMarkdown(
     tiers,
     rawText,
     markdown,
+    ...(heuristic.skillsSectionLines?.length
+      ? { skillsSectionText: heuristic.skillsSectionLines.join("\n") }
+      : {}),
     // DOCX cascade has no PDF annotations.
     linkAnnotations: [],
     diagnostics: {
