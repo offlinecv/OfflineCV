@@ -20,7 +20,6 @@
       "full_name",
       "github_url",
       "given_name",
-      "heuristic_achievements",
       "linkedin_url",
       "location",
       "phone",
@@ -31,8 +30,8 @@
     "skillsCount": 18,
     "experienceCount": 3,
     "educationCount": 1,
-    "projectsCount": 2,
-    "achievementsCount": 1,
+    "projectsCount": 1,
+    "achievementsCount": 0,
     "rawTextCharCount": 1722,
     "pageCount": 1,
     "linkAnnotationCount": 0,
@@ -40,21 +39,21 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 46,
-    "preLayoutOverall": 54,
+    "overall": 53,
+    "preLayoutOverall": 62,
     "specificity": {
-      "score": 17,
+      "score": 22,
       "max": 40,
       "gradable": true,
       "metricBullets": 6,
-      "totalBullets": 23
+      "totalBullets": 18
     },
     "structure": {
-      "score": 10,
+      "score": 13,
       "max": 30,
       "gradable": true,
       "goodBullets": 8,
-      "totalBullets": 23
+      "totalBullets": 18
     },
     "completeness": {
       "score": 27,
@@ -71,7 +70,7 @@
       "multiplier": 0.85,
       "scanned": false
     },
-    "bulletCount": 23,
-    "algoVersion": "1.1"
+    "bulletCount": 18,
+    "algoVersion": "1.2"
   }
 }

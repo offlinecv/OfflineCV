@@ -153,6 +153,10 @@ export interface HeuristicResult {
    *  font-size-promoted heading passed the emitter's promotion gate) from
    *  regex-on-line parses. Optional; missing is treated as "regex". */
   sectionSource?: "markdown" | "regex";
+  /** Raw text lines of the detected skills section, if any. The scorer keeps
+   *  these out of the experience-bullet pool so bulleted skills are not judged
+   *  by the action-verb / metric / length rules (#30). */
+  skillsSectionLines?: string[];
 }
 
 // ── Cascade output ──────────────────────────────────────────────────────────
@@ -180,6 +184,9 @@ export interface CascadeResult {
    *  scanned PDFs or when the emitter could not produce useful structure.
    *  Section splitters prefer this over `rawText` when present. */
   markdown?: string;
+  /** Newline-joined text of the detected skills section, if any. Passed to the
+   *  scorer so bulleted skills stay out of the experience-bullet pool (#30). */
+  skillsSectionText?: string;
   /** Link annotations Tier 0 lifted off the PDF. Surfaces URLs hyperlinked
    *  behind visible words; also the only credible recovered signal on
    *  `fonts_unmappable` PDFs where the text path came back empty. Empty

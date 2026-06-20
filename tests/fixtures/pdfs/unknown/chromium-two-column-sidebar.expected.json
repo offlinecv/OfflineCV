@@ -27,10 +27,10 @@
       "summary",
       "website_url"
     ],
-    "skillsCount": 10,
+    "skillsCount": 18,
     "experienceCount": 5,
     "educationCount": 1,
-    "projectsCount": 2,
+    "projectsCount": 3,
     "achievementsCount": 1,
     "rawTextCharCount": 3905,
     "pageCount": 2,
@@ -71,6 +71,6 @@
       "scanned": false
     },
     "bulletCount": 27,
-    "algoVersion": "1.1"
+    "algoVersion": "1.2"
   }
 }

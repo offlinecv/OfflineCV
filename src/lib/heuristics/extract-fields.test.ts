@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractContact,
   extractName,
+  extractSkills,
   extractEducation,
   extractExperience,
   extractProjects,
@@ -18,7 +19,7 @@ import {
   type PdfSection,
 } from "./sections.ts";
 import { US_LOCATION_RE } from "./regex.ts";
-import type { PdfLinkAnnotation } from "./types.ts";
+import type { PdfLinkAnnotation, PdfTextItem } from "./types.ts";
 import { mkItems, mkDefaultPages } from "./__test-utils__/mkItem.ts";
 
 void mkDefaultPages; // imported for parity with sibling tests
@@ -72,36 +73,12 @@ describe("extractContact — annotation fallback for hyperlinked URLs", () => {
     expect(contact.email).toBe("mohinp@uw.edu");
   });
 
-  it("does not pull a footer LinkedIn annotation into the candidate's profile", () => {
-    // A LinkedIn URL that lives in the body of a project section (e.g.
-    // referenced as a citation) should not be misattributed as the
-    // candidate's profile. The y-band filter restricts the lookup to
-    // annotations above the first section header.
-    const { lines, profile } = buildContext([
-      { text: "Jane Doe", fontSize: 18 },
-      { text: "jane@example.com", fontSize: 10 },
-      { text: "" },
-      { text: "EXPERIENCE", fontSize: 13 },
-      { text: "Recommendation from LinkedIn at https://linkedin.com/in/someone-else", fontSize: 11 },
-    ]);
-    const annotations: PdfLinkAnnotation[] = [
-      {
-        page: 1,
-        // y past the EXPERIENCE header — outside the profile band.
-        url: "https://www.linkedin.com/in/someone-else/",
-        rect: [200, 200, 300, 215],
-        yTop: 600,
-      },
-    ];
-    const contact = extractContact(profile, lines, annotations);
-    // The text version above the regex would catch it from the body line,
-    // but the location/profile annotation logic specifically should not
-    // adopt the URL as the candidate's. Since `LINKEDIN_RE` can match the
-    // URL in the experience body line via fallback scan, we accept that —
-    // the regression we're guarding is that the annotation system does
-    // not contribute its own band-violating hit. Validate by removing
-    // the visible URL and checking annotation alone is rejected.
-    void contact; // suppress unused
+  it("recovers a LinkedIn annotation below a section header (identity links are doc-wide)", () => {
+    // A candidate's LinkedIn/GitHub is commonly hyperlinked behind an icon in a
+    // footer or a "Links" block placed after Skills. The `linkedin.com/in/<user>`
+    // predicate is specific enough to adopt document-wide — and this already
+    // matches the text fallback, which scans the whole document. Losing the
+    // link entirely is worse than the rare misattribution of a cited profile.
     const annotationsOnly = buildContext([
       { text: "Jane Doe", fontSize: 18 },
       { text: "jane@example.com", fontSize: 10 },
@@ -115,14 +92,14 @@ describe("extractContact — annotation fallback for hyperlinked URLs", () => {
       [
         {
           page: 1,
-          url: "https://www.linkedin.com/in/footer-only/",
+          url: "https://www.linkedin.com/in/jane-doe/",
           rect: [200, 200, 300, 215],
-          yTop: 600, // below EXPERIENCE header
+          yTop: 600, // below the EXPERIENCE header
         },
       ],
     );
-    expect(result.linkedin_url).toBeUndefined();
-    expect(result.confidence.linkedin_url).toBe(0);
+    expect(result.linkedin_url).toBe("https://www.linkedin.com/in/jane-doe/");
+    expect(result.confidence.linkedin_url).toBeGreaterThan(0);
   });
 
   it("never overwrites a text-extracted URL with an annotation hit", () => {
@@ -142,6 +119,39 @@ describe("extractContact — annotation fallback for hyperlinked URLs", () => {
       },
     ]);
     expect(result.linkedin_url).toContain("from-text");
+  });
+
+  it("recovers a vanity LinkedIn hyperlink that omits the /in/ path", () => {
+    // Some resumes hyperlink "LinkedIn" to a bare vanity host
+    // (linkedin.com/<handle>) rather than the canonical /in/<handle>. GitHub
+    // links of this shape were already detected; LinkedIn must be symmetric.
+    const { lines, profile } = buildContext([
+      { text: "John Doe", fontSize: 18 },
+      { text: "john.doe@example.com | LinkedIn | GitHub", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Role", fontSize: 11 },
+    ]);
+    const result = extractContact(profile, lines, [
+      { page: 1, url: "https://linkedin.com/johndoe", rect: [0, 0, 100, 20], yTop: 80 },
+      { page: 1, url: "https://github.com/johndoe", rect: [0, 0, 100, 20], yTop: 80 },
+    ]);
+    expect(result.linkedin_url).toBe("https://linkedin.com/johndoe");
+    expect(result.github_url).toBe("https://github.com/johndoe");
+  });
+
+  it("does not treat a LinkedIn company/feed link as a personal profile", () => {
+    const { lines, profile } = buildContext([
+      { text: "John Doe", fontSize: 18 },
+      { text: "john.doe@example.com", fontSize: 10 },
+      { text: "" },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Role", fontSize: 11 },
+    ]);
+    const result = extractContact(profile, lines, [
+      { page: 1, url: "https://www.linkedin.com/company/acme", rect: [0, 0, 100, 20], yTop: 80 },
+    ]);
+    expect(result.linkedin_url).toBeUndefined();
   });
 });
 
@@ -436,6 +446,162 @@ describe("extractName — single-word (mononym) names (issue #107)", () => {
   });
 });
 
+describe("extractName — stacked single-word name lines (#29)", () => {
+  it("merges adjacent given/family-name lines a tagline cannot outscore", () => {
+    // Word résumé templates render the name as two single-word lines
+    // ("Chanchal" / "Sharma"); each is individually rejected by the 2-word
+    // guard, so a two-word tagline below ("Office Manager") used to win the
+    // slot. The merged candidate must take it back.
+    const { profile } = buildContext([
+      { text: "Chanchal", fontSize: 20 },
+      { text: "Sharma", fontSize: 20 },
+      { text: "Office Manager", fontSize: 12 },
+      { text: "chanchals@example.com · (718) 555-0100", fontSize: 10 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBe("Chanchal Sharma");
+    // Must clear the scorer's 0.5 contact-confidence floor.
+    expect(result.confidence).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("does not merge a single name word with doc-title boilerplate", () => {
+    // "Jane" / "Resume" must not glue into "Jane Resume".
+    const { profile } = buildContext([
+      { text: "Jane", fontSize: 20 },
+      { text: "Resume", fontSize: 20 },
+      { text: "jane@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).not.toBe("Jane Resume");
+  });
+
+  it("leaves a normal two-word name line unchanged (no spurious merge)", () => {
+    const { profile } = buildContext([
+      { text: "Jane Smith", fontSize: 20 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+});
+
+describe("extractSkills — borderless multi-column tables (#29)", () => {
+  // pdfjs fills the inter-column gap of a Word/LaTeX skills table with a wide
+  // blank "spacer" item, so the whole row arrives as one PdfLine. The geometry
+  // below mirrors the Chanchal Word fixture: three columns at x≈122/266/423.
+  function skillsSection(
+    runs: Array<{ x: number; str: string; w: number }>,
+    text: string,
+  ): PdfSection {
+    const items: PdfTextItem[] = runs.map((r) => ({
+      page: 1,
+      str: r.str,
+      x: r.x,
+      y: 300,
+      width: r.w,
+      height: 11,
+      fontSize: 11,
+      fontName: "font-11",
+      hasEOL: true,
+    }));
+    const line: PdfLine = {
+      page: 1,
+      y: 300,
+      x: runs[0].x,
+      items,
+      text,
+      maxFontSize: 11,
+      allCaps: false,
+    };
+    return { name: "skills", lines: [line] };
+  }
+
+  it("splits a row on wide blank spacer items into one skill per column", () => {
+    const section = skillsSection(
+      [
+        { x: 122, str: "Project management", w: 85 },
+        { x: 207, str: " ", w: 59 },
+        { x: 266, str: "Data analysis", w: 53 },
+        { x: 319, str: " ", w: 105 },
+        { x: 423, str: "Communication", w: 64 },
+      ],
+      "Project management Data analysis Communication",
+    );
+    expect(extractSkills(section).value).toEqual([
+      "Project management",
+      "Data analysis",
+      "Communication",
+    ]);
+  });
+
+  it("keeps a multi-word skill intact when the internal gap is ordinary", () => {
+    // A single narrow space between "Machine" and "Learning" is NOT a column
+    // spacer, so the cell stays whole instead of shredding into two tokens.
+    const section = skillsSection(
+      [{ x: 122, str: "Machine Learning", w: 80 }],
+      "Machine Learning",
+    );
+    expect(extractSkills(section).value).toEqual(["Machine Learning"]);
+  });
+
+  it("still splits an ordinary comma-separated single-column line", () => {
+    const section = skillsSection(
+      [{ x: 122, str: "Python, Java, SQL", w: 90 }],
+      "Python, Java, SQL",
+    );
+    expect(extractSkills(section).value).toEqual(["Python", "Java", "SQL"]);
+  });
+
+  it("excludes profile links and their bare heading words from skills", () => {
+    // GitHub/LinkedIn that surface as link headings swept into the Skills area
+    // must not be classified as skills — they belong only in contact.
+    const mkLine = (str: string): PdfLine => ({
+      page: 1,
+      y: 300,
+      x: 122,
+      items: [
+        {
+          page: 1,
+          str,
+          x: 122,
+          y: 300,
+          width: 100,
+          height: 11,
+          fontSize: 11,
+          fontName: "font-11",
+          hasEOL: true,
+        },
+      ],
+      text: str,
+      maxFontSize: 11,
+      allCaps: false,
+    });
+    const section: PdfSection = {
+      name: "skills",
+      lines: [
+        mkLine("Python, React, Docker"),
+        mkLine("GitHub"),
+        mkLine("LinkedIn"),
+        mkLine("github.com/janesmith"),
+        mkLine("linkedin.com/in/janesmith"),
+        mkLine("https://janesmith.dev/portfolio"),
+      ],
+    };
+    expect(extractSkills(section).value).toEqual(["Python", "React", "Docker"]);
+  });
+
+  it("does not over-reject dotted real skills that resemble domains", () => {
+    const section = skillsSection(
+      [{ x: 122, str: "Node.js, Socket.io, ASP.NET, GitHub Actions", w: 200 }],
+      "Node.js, Socket.io, ASP.NET, GitHub Actions",
+    );
+    expect(extractSkills(section).value).toEqual([
+      "Node.js",
+      "Socket.io",
+      "ASP.NET",
+      "GitHub Actions",
+    ]);
+  });
+});
+
 describe("US_LOCATION_RE — preposition-phrase city rejection", () => {
   it("does not eat lowercase prepositions like 'and' / 'of' inside the city capture", () => {
     // Pre-fix the regex captured "CS and Engineering Seattle" (26 chars
@@ -519,6 +685,48 @@ describe("extractEducation — date-range parsing (issue #97)", () => {
     expect(value[0].year).toBe("2023");
   });
 
+  it("extracts every degree in a multi-qualification section (degree-first)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Ph.D. in Computer Science",
+        "Stanford University",
+        "2020 - 2024",
+        "M.S. in Electrical Engineering",
+        "MIT",
+        "2018 - 2020",
+        "B.S. in Computer Engineering",
+        "UC Berkeley",
+        "2014 - 2018",
+      ]),
+    );
+    expect(value).toHaveLength(3);
+    expect(value.map((e) => e.degree)).toEqual(["Ph.D.", "M.S.", "B.S."]);
+    // Acronym schools with no "University"/"College" word are still recovered.
+    expect(value.map((e) => e.institution)).toEqual([
+      "Stanford University",
+      "MIT",
+      "UC Berkeley",
+    ]);
+    expect(value.map((e) => e.end_date)).toEqual(["2024", "2020", "2018"]);
+  });
+
+  it("extracts every degree when institution leads each entry", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Stanford University",
+        "Ph.D. in Computer Science, 2020 - 2024",
+        "University of Washington",
+        "B.S. in Informatics, 2016 - 2020",
+      ]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value.map((e) => e.institution)).toEqual([
+      "Stanford University",
+      "University of Washington",
+    ]);
+    expect(value.map((e) => e.degree)).toEqual(["Ph.D.", "B.S."]);
+  });
+
   it("maps a single graduation date to end_date with NO spurious start", () => {
     const { value } = extractEducation(
       mkEduSection([
@@ -588,6 +796,43 @@ describe("extractExperience", () => {
 
   it("returns empty + zero confidence for an absent section", () => {
     expect(extractExperience(undefined)).toEqual({ value: [], confidence: 0 });
+  });
+
+  it("identifies the university as company, not title, in a stacked student-role header", () => {
+    // Reported bug: "Designation / University / Dates" stacked the wrong way —
+    // the university won the title slot because it carries no "Inc"/"LLC" suffix
+    // and "Assistant" was not a recognized title keyword.
+    const section = mkSection("experience", [
+      { text: "Student Technology Assistant" },
+      { text: "North Carolina A&T State University" },
+      { text: "Jan 2024 - May 2025" },
+      { text: "• Provided technical support for classrooms and computer labs." },
+      { text: "• Assisted with desktop deployments and troubleshooting." },
+      { text: "• Collaborated with endpoint management and security teams." },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].title).toBe("Student Technology Assistant");
+    expect(value[0].company).toBe("North Carolina A&T State University");
+    expect(value[0].start_date).toBe("Jan 2024");
+    expect(value[0].end_date).toBe("May 2025");
+    expect(value[0].description).toContain("Provided technical support");
+    // The three bullets are responsibilities, not separate entries.
+    expect(value[0].description?.split("\n")).toHaveLength(3);
+  });
+
+  it("keeps a designation that contains an institution word as the title", () => {
+    // "University Lecturer" is a job title, not the employer — the company is the
+    // suffixed line.
+    const section = mkSection("experience", [
+      { text: "University Lecturer" },
+      { text: "Globex Corporation" },
+      { text: "2021 - 2023" },
+      { text: "• Taught undergraduate courses." },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value[0].title).toBe("University Lecturer");
+    expect(value[0].company).toBe("Globex Corporation");
   });
 });
 

@@ -17,8 +17,9 @@ import type {
   HeuristicAchievement,
 } from "../score/types.ts";
 import type { PdfLine, PdfSection } from "./sections.ts";
+import { mergeItemText } from "./sections.ts";
 import { matchSectionHeader } from "./regex.ts";
-import type { PdfLinkAnnotation } from "./types.ts";
+import type { PdfLinkAnnotation, PdfTextItem } from "./types.ts";
 import {
   EMAIL_RE,
   PHONE_RE,
@@ -130,6 +131,25 @@ function looksLikeMononymName(text: string, line: PdfLine, maxFontSize: number):
   return true;
 }
 
+/**
+ * True when `raw` is a single title-cased (or all-caps) letter token that could
+ * be one half of a stacked name. Word résumé templates render the given name and
+ * family name as separate single-word lines ("Chanchal" / "Sharma"); each is
+ * individually rejected by `extractName`'s ≥2-word guard, so an adjacent pair is
+ * merged into one candidate. Section headers ("SUMMARY") and document-title
+ * boilerplate ("Resume") are excluded so neither ever glues onto a name.
+ */
+function isSingleNameWord(raw: string): boolean {
+  const text = raw.trim();
+  if (!text || text.length > 30) return false;
+  if (/\s/.test(text)) return false; // must be exactly one token
+  if (/\d/.test(text) || text.includes("@")) return false;
+  if (!/^[A-Z][A-Za-z.\-']*$/.test(text)) return false;
+  if (matchSectionHeader(text)) return false;
+  if (looksLikeDocTitleBoilerplate([text])) return false;
+  return true;
+}
+
 /** y-position of the first line in `lines` matching any of the contact regexes,
  *  or undefined if no contact-bearing line is found. Used as a soft signal —
  *  candidate names close to this y get a small bonus. */
@@ -181,7 +201,7 @@ export function extractName(
     profile.lines.reduce((s, l) => s + l.maxFontSize, 0) / profile.lines.length;
   const contactY = findContactClusterY(profile.lines);
 
-  let best: { line: PdfLine; score: number } | null = null;
+  let best: { text: string; score: number } | null = null;
   // Index of the first eligible candidate after rejections. When the literal
   // first line is rejected as boilerplate (e.g. "Functional Resume Sample"),
   // the next surviving line is effectively the header — it inherits the
@@ -191,9 +211,38 @@ export function extractName(
   // "missing" in completeness scoring.
   let firstEligibleIdx: number | null = null;
 
-  for (let i = 0; i < Math.min(profile.lines.length, 5); i++) {
+  // Candidate list: each of the top lines, plus a synthetic merge of any two
+  // adjacent single-word name lines. Word templates stack the given and family
+  // name on separate lines ("Chanchal" / "Sharma"); each is individually
+  // rejected as a lone word, so the pair is offered as one two-word candidate.
+  // The merge keeps its first line's index so it can win the first-line bonus
+  // over a tagline ("Office Manager") sitting just below it. With no stacked
+  // single-word lines, the list is exactly the top-N lines in order, so
+  // single-line layouts score byte-identically to before.
+  const scan = Math.min(profile.lines.length, 5);
+  const candidates: { text: string; line: PdfLine; idx: number }[] = [];
+  for (let i = 0; i < scan; i++) {
     const line = profile.lines[i];
-    const text = line.text.trim();
+    candidates.push({ text: line.text.trim(), line, idx: i });
+    const next = profile.lines[i + 1];
+    if (
+      i <= 1 &&
+      next &&
+      isSingleNameWord(line.text) &&
+      isSingleNameWord(next.text)
+    ) {
+      candidates.push({
+        text: `${line.text.trim()} ${next.text.trim()}`,
+        line: {
+          ...line,
+          maxFontSize: Math.max(line.maxFontSize, next.maxFontSize),
+        },
+        idx: i,
+      });
+    }
+  }
+
+  for (const { text, line, idx } of candidates) {
     if (!text || text.length > 60) continue;
     if (/\d/.test(text)) continue;
     if (text.includes("@")) continue;
@@ -216,10 +265,10 @@ export function extractName(
     if (letterRatio < 0.7) continue;
     if (looksLikeDocTitleBoilerplate(words)) continue;
 
-    if (firstEligibleIdx === null) firstEligibleIdx = i;
+    if (firstEligibleIdx === null) firstEligibleIdx = idx;
 
     let score = 0;
-    if (i === firstEligibleIdx) score += 0.4;
+    if (idx === firstEligibleIdx) score += 0.4;
     if (line.maxFontSize >= maxFontSize - 0.5) score += 0.3;
     if (line.maxFontSize > averageFontSize + 1) score += 0.1;
     const titleCase = words.every((w) => /^[A-Z][a-zA-Z.\-']*$/.test(w));
@@ -229,9 +278,9 @@ export function extractName(
       // First eligible line near contact: soft confirmation. A *later* line
       // near contact: a recovery bonus large enough to overtake a higher /
       // larger line that won only on position/size — the mode-2 case in #16.
-      // Gating the strong bonus on `i !== firstEligibleIdx` keeps the #14
+      // Gating the strong bonus on `idx !== firstEligibleIdx` keeps the #14
       // mode-1 fixture (first-eligible name) byte-identical.
-      score += i === firstEligibleIdx ? 0.15 : 0.4;
+      score += idx === firstEligibleIdx ? 0.15 : 0.4;
     }
     // A job-title tagline ("Product Designer", "Senior Marketing Lead") must
     // not win the name slot on position/size. Real names never match the
@@ -243,11 +292,11 @@ export function extractName(
     // strong mononym still clears the scorer's 0.5 contact-confidence floor.
     if (isMononym) score -= 0.1;
 
-    if (!best || score > best.score) best = { line, score };
+    if (!best || score > best.score) best = { text, score };
   }
 
   if (!best) return { confidence: 0 };
-  return { value: best.line.text.trim(), confidence: Math.min(best.score, 1) };
+  return { value: best.text, confidence: Math.min(best.score, 1) };
 }
 
 // ── Contact (email, phone, urls, location) ──────────────────────────────────
@@ -289,6 +338,21 @@ export interface ContactExtractionResult {
  * confidence, matching the text-hit confidence, because the URL is
  * structurally guaranteed by the PDF.
  */
+/** LinkedIn paths that are NOT a personal profile — feed, company pages, job
+ *  posts, articles, etc. Everything else under `linkedin.com/<handle>` (the
+ *  `/in/<handle>` canonical form AND bare-vanity hosts) is treated as a
+ *  profile, mirroring GitHub's "any `github.com/<user>`" rule. */
+const LINKEDIN_NONPROFILE_RE =
+  /linkedin\.com\/(company|jobs|feed|school|learning|pulse|posts|groups|showcase|games|events|help|legal|search|signup|login|home)\b/i;
+
+/** True when `u` is a LinkedIn personal-profile URL. Accepts the canonical
+ *  `linkedin.com/in/<handle>` and `linkedin.com/pub/...` as well as a vanity
+ *  `linkedin.com/<handle>` that omits `/in/` — the latter is what makes a
+ *  hyperlinked "LinkedIn" anchor resolve even when the target drops `/in/`. */
+function isLinkedinProfileUrl(u: string): boolean {
+  return /linkedin\.com\/[A-Za-z0-9]/i.test(u) && !LINKEDIN_NONPROFILE_RE.test(u);
+}
+
 export function extractContact(
   profile: PdfSection,
   allLines: PdfLine[],
@@ -323,7 +387,13 @@ export function extractContact(
     const phoneRegion = regionFromLocation(location) ?? "US";
     const phoneResult = findFirstPhone(joined, phoneRegion);
     const phone = phoneResult?.formatted;
-    const linkedin = firstMatch(LINKEDIN_RE, joined);
+    // LinkedIn profile URLs are usually `/in/<handle>` (LINKEDIN_RE), but some
+    // resumes link a bare vanity host (`linkedin.com/<handle>`). Fall back to
+    // any linkedin.com URL that is a profile (not /company, /jobs, … sections)
+    // so a hyperlinked "LinkedIn" anchor resolves regardless of the path shape.
+    const linkedin =
+      firstMatch(LINKEDIN_RE, joined) ??
+      allMatches(URL_RE, joined).find(isLinkedinProfileUrl);
     const github = firstMatch(GITHUB_RE, joined);
 
     // Other URLs that aren't linkedin/github → portfolio/website bucket.
@@ -367,21 +437,22 @@ export function extractContact(
   const fallback = scan(allLines, fullText);
 
   // Annotation fallback: URLs hyperlinked behind a visible word
-  // ("LinkedIn", "GitHub") only show up here. Y-band-filter to the profile
-  // section so a footer LinkedIn in a project description doesn't get
-  // misattributed as the candidate's profile.
-  const headerEndY = findFirstHeaderY(allLines);
-  const inProfileBand = (ann: PdfLinkAnnotation) =>
-    ann.page === 1 &&
-    (headerEndY === undefined ||
-      headerEndY.page !== 1 ||
-      ann.yTop < headerEndY.y);
-  // Portfolio/website use a slightly looser band — some design templates
+  // ("LinkedIn", "GitHub") only show up here. LinkedIn/GitHub are matched
+  // document-wide (see `anywhereOnDoc` below); only the looser-but-still-bounded
+  // portfolio/website lookup keeps a Y-band.
+  // Portfolio/website use a header-region band — some design templates
   // place the portfolio link in a sidebar or under the name block. "Top
   // third of page 1" approximated with a fixed PDF-points cutoff that
   // works for both Letter (792pt) and A4 (842pt).
   const inHeaderRegion = (ann: PdfLinkAnnotation) =>
     ann.page === 1 && ann.yTop < 280;
+  // LinkedIn / GitHub identity links are commonly hyperlinked behind an icon
+  // placed in a footer or a "Links"/"Contact" block below a later heading
+  // (e.g. after Skills), so the profile-band filter dropped them. The
+  // `linkedin.com/in/<user>` / `github.com/<user>` predicates are specific
+  // enough that a document-wide match is safe — a stray profile link in a
+  // project description is rare and low-stakes vs. silently losing the link.
+  const anywhereOnDoc = () => true;
 
   const findAnnotationUrl = (
     predicate: (url: string) => boolean,
@@ -394,7 +465,7 @@ export function extractContact(
     return undefined;
   };
 
-  const isLinkedinUrl = (u: string) => /linkedin\.com\/(in|pub)\//i.test(u);
+  const isLinkedinUrl = isLinkedinProfileUrl;
   const isGithubUrl = (u: string) =>
     /github\.com\//i.test(u) && !/github\.com\/(orgs|topics|search)/i.test(u);
   const isPortfolioUrl = (u: string) =>
@@ -419,8 +490,8 @@ export function extractContact(
     return { value: undefined, confidence: 0 };
   };
 
-  const linkedin = pickUrl("linkedin_url", isLinkedinUrl, inProfileBand);
-  const github = pickUrl("github_url", isGithubUrl, inProfileBand);
+  const linkedin = pickUrl("linkedin_url", isLinkedinUrl, anywhereOnDoc);
+  const github = pickUrl("github_url", isGithubUrl, anywhereOnDoc);
   const portfolio = pickUrl(
     "portfolio_url",
     (u) => isPortfolioUrl(u) && !isLinkedinUrl(u) && !isGithubUrl(u),
@@ -461,22 +532,6 @@ export function extractContact(
       location: primary.confidence.location,
     },
   };
-}
-
-/**
- * Find the first line in `allLines` that is a canonical section header.
- * Used as the y-band cutoff for annotation-based contact fallback —
- * annotations above this line are in the profile region.
- */
-function findFirstHeaderY(
-  allLines: PdfLine[],
-): { page: number; y: number } | undefined {
-  for (const line of allLines) {
-    if (matchSectionHeader(line.text)) {
-      return { page: line.page, y: line.y };
-    }
-  }
-  return undefined;
 }
 
 function normalizeUrl(raw: string | undefined): string | undefined {
@@ -525,14 +580,77 @@ const SKILL_SPLIT_RE = /[,;·•|/]+|\s{2,}/;
  * Note: trailing punctuation is stripped by the caller before this check, so
  * "AWS." → "AWS" passes without special-casing single-word tokens.
  */
+/** A bare profile-link heading word — these show up as standalone "headings
+ *  with hyperlinks" after Skills and get swept into the skills pool. Exact-match
+ *  only, so a real multi-word skill like "GitHub Actions" or "Portfolio
+ *  Management" is never caught. */
+const PROFILE_LABEL_RE =
+  /^(linkedin|github|gitlab|portfolio|website|behance|dribbble)$/i;
+/** A known social/profile host, with or without a path ("github.com",
+ *  "linkedin.com/in/x"). */
+const PROFILE_HOST_RE =
+  /\b(linkedin|github|gitlab|behance|dribbble|medium|twitter|facebook|instagram|stackoverflow|kaggle|gitlab)\.[a-z]{2,}/i;
+/** A generic URL: an explicit scheme, a `www.` prefix, or a domain followed by
+ *  a path slash. The path-slash requirement is deliberate — it distinguishes a
+ *  link ("mysite.com/portfolio") from a dotted real skill ("Node.js",
+ *  "Socket.io", "ASP.NET") that has no slash. */
+const URLISH_RE = /(https?:\/\/|www\.|\b[a-z0-9-]+\.[a-z]{2,}\/\S)/i;
+
+/** True when a candidate skill token is really a professional-profile link
+ *  (GitHub / LinkedIn / portfolio, etc.) or its bare heading word. Such links
+ *  belong only in the contact/profile section, never in Skills. */
+function looksLikeContactLink(tok: string): boolean {
+  const t = tok.trim();
+  return PROFILE_LABEL_RE.test(t) || PROFILE_HOST_RE.test(t) || URLISH_RE.test(t);
+}
+
 function isSkillToken(tok: string): boolean {
   if (tok.length < 2 || tok.length > 40) return false;
   if (/^\d+$/.test(tok)) return false;
+  // A professional-profile link (or its bare "GitHub" / "LinkedIn" heading) is
+  // contact info, not a skill — drop it wherever in the doc it surfaced.
+  if (looksLikeContactLink(tok)) return false;
   // Reject date-range runs: "1985 - 1989", "04/2021 - Present" etc.
   if (/\d{4}\s*[-–]\s*(\d{4}|present)/i.test(tok)) return false;
   // Reject tokens that span more than 4 words — real skills are terse.
   if (tok.split(/\s+/).length > 4) return false;
   return true;
+}
+
+/**
+ * Word/LaTeX résumés often lay skills out in a borderless multi-column table.
+ * pdfjs renders each inter-column gap as a wide blank "spacer" item rather than
+ * a large x-gap between glyph runs, so `groupIntoLines` (which splits only on
+ * gaps between item *edges* — see COLUMN_GAP_THRESHOLD) keeps the whole row as
+ * one PdfLine, e.g. "Project management Data analysis Communication". Splitting
+ * the line at those spacer items recovers one cell per column without resorting
+ * to a blind `\s+` split that would shred multi-word skills.
+ *
+ * A spacer must be meaningfully wider than an ordinary inter-word space (one em,
+ * 10pt floor) so normal prose spacing never triggers a split. Returns one string
+ * per column cell, or `[line.text]` when the line has no column spacers —
+ * byte-identical to the pre-column behavior for ordinary single-column lines.
+ */
+function splitColumnCells(line: PdfLine): string[] {
+  const cells: PdfTextItem[][] = [];
+  let cur: PdfTextItem[] = [];
+  for (const item of line.items) {
+    const isSpacer =
+      item.str.trim() === "" && item.width > Math.max(item.fontSize, 10);
+    if (isSpacer) {
+      if (cur.length > 0) cells.push(cur);
+      cur = [];
+      continue;
+    }
+    cur.push(item);
+  }
+  if (cur.length > 0) cells.push(cur);
+  if (cells.length <= 1) return [line.text];
+  // Collapse any whitespace a narrow (non-splitting) spacer item left inside a
+  // cell — e.g. a " \n" run between "REST" and "API" → "REST API".
+  return cells
+    .map((c) => mergeItemText(c).replace(/\s+/g, " ").trim())
+    .filter((t) => t.length > 0);
 }
 
 export function extractSkills(
@@ -542,14 +660,20 @@ export function extractSkills(
 
   const tokens = new Set<string>();
   for (const line of skills.lines) {
-    const clean = stripBullet(line.text).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
-    for (const raw of clean.split(SKILL_SPLIT_RE)) {
-      // Strip trailing sentence punctuation that can appear at line-end (e.g.
-      // "Python, JavaScript, Git, SQL, Linux, AWS." → the period is a list
-      // terminator, not part of the skill name).
-      const tok = raw.trim().replace(/[.!?,;]+$/, "");
-      if (isSkillToken(tok)) {
-        tokens.add(tok);
+    for (const cell of splitColumnCells(line)) {
+      const clean = stripBullet(cell).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
+      // A whole cell that is a profile link ("github.com/janesmith") must be
+      // dropped before SKILL_SPLIT_RE — which splits on "/" (for "HTML/CSS") —
+      // shreds the URL and leaves its path segment ("janesmith") as a token.
+      if (looksLikeContactLink(clean)) continue;
+      for (const raw of clean.split(SKILL_SPLIT_RE)) {
+        // Strip trailing sentence punctuation that can appear at line-end (e.g.
+        // "Python, JavaScript, Git, SQL, Linux, AWS." → the period is a list
+        // terminator, not part of the skill name).
+        const tok = raw.trim().replace(/[.!?,;]+$/, "");
+        if (isSkillToken(tok)) {
+          tokens.add(tok);
+        }
       }
     }
   }
@@ -912,7 +1036,7 @@ function educationDateFields(
  * as the title.
  */
 const TITLE_KEYWORDS_RE =
-  /\b(Engineer|Engineering|Developer|Manager|Director|Lead|Consultant|Analyst|Specialist|Associate|Architect|Principal|Officer|Designer|Scientist|Researcher|Administrator|Founder|Co-?founder|President|VP|Vice President|Head|Chief|CTO|CEO|COO|CFO|CIO|PM|TPM|SRE|DevOps)\b/i;
+  /\b(Engineer|Engineering|Developer|Manager|Director|Lead|Consultant|Analyst|Specialist|Associate|Architect|Principal|Officer|Designer|Scientist|Researcher|Administrator|Founder|Co-?founder|President|VP|Vice President|Head|Chief|CTO|CEO|COO|CFO|CIO|PM|TPM|SRE|DevOps|Assistant|Intern|Internship|Trainee|Apprentice|Coordinator|Technician|Representative|Supervisor|Strategist|Advisor|Adviser|Counselor|Recruiter|Accountant|Auditor|Editor|Writer|Producer|Teacher|Instructor|Lecturer|Professor|Tutor|Agent|Clerk|Ambassador|Volunteer|Fellow)\b/i;
 
 /** Heuristic: text contains title-like keywords but no company suffix. */
 function looksLikeTitle(text: string): boolean {
@@ -920,10 +1044,25 @@ function looksLikeTitle(text: string): boolean {
   return TITLE_KEYWORDS_RE.test(text);
 }
 
+/** Employer signal: a legal suffix ("Inc", "LLC") OR an institution word
+ *  ("University", "College") — and NOT itself a job-title line, so a designation
+ *  like "University Lecturer" or "School Counselor" stays a title rather than
+ *  being mistaken for the company. */
+function looksLikeCompany(text: string): boolean {
+  return (
+    (COMPANY_SUFFIX_RE.test(text) || INSTITUTION_HINTS.test(text)) &&
+    !looksLikeTitle(text)
+  );
+}
+
 /**
  * Given 1..3 header lines, decide which is the company and which is the title.
  * Heuristics (in priority order):
- *   - If one contains COMPANY_SUFFIX_RE, that's the company.
+ *   - If one looks like a company/institution (legal suffix OR "University",
+ *     "College", … — see `looksLikeCompany`) and is not itself a title, that's
+ *     the company; the rest is the title. This fires on the common stacked
+ *     "Designation / University / Dates" student-resume shape, which the old
+ *     suffix-only check missed (it has no "Inc"/"LLC").
  *   - Else if one looks like a title (role/level keyword) and the other
  *     doesn't, the title-keyword one is the title.
  *   - Otherwise the first line (top of the entry) is the company.
@@ -948,7 +1087,7 @@ export function disambiguateCompanyTitle(headers: string[]): {
     }
   });
 
-  const companyIdx = splits.findIndex((s) => COMPANY_SUFFIX_RE.test(s.text));
+  const companyIdx = splits.findIndex((s) => looksLikeCompany(s.text));
   let company: string | undefined;
   let title: string | undefined;
   let team: string | undefined;
@@ -985,76 +1124,111 @@ export function disambiguateCompanyTitle(headers: string[]): {
 
 // ── Education ───────────────────────────────────────────────────────────────
 
+/** A line that is essentially just a date / date-range (a bare year or
+ *  month-year), so it must not be mistaken for the institution inside an
+ *  education chunk. */
+function isDateOnlyLine(text: string): boolean {
+  const stripped = text
+    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?/gi, "")
+    .replace(/\b\d{4}\b/g, "")
+    .replace(/\b(?:present|current|expected|graduation|graduated|anticipated)\b/gi, "")
+    .replace(/[\s,–\-—|/().:]+/g, "")
+    .trim();
+  return stripped.length === 0;
+}
+
+/** Map one education chunk (the degree + institution + date lines of a single
+ *  qualification) to a `ResumeEducation` and its confidence. */
+function educationFromChunk(chunk: string[]): {
+  entry: ResumeEducation;
+  score: number;
+} {
+  const joined = chunk.join(" | ");
+  const degreeMatch = DEGREE_RE.exec(joined);
+  const degree = degreeMatch ? degreeMatch[0].trim() : "";
+
+  // Institution: an explicit institution-hint line first; else the first line
+  // that is neither the degree-bearing line nor a bare date — this recovers
+  // acronym schools ("MIT", "UC Berkeley") that carry no "University"/"College"
+  // word; else strip the degree off its own line (degree + school on one line).
+  let institution = "";
+  const instLine = chunk.find((l) => INSTITUTION_HINTS.test(l));
+  if (instLine) {
+    institution = instLine.trim();
+  } else {
+    const cand = chunk.find((l) => !DEGREE_RE.test(l) && !isDateOnlyLine(l));
+    if (cand) {
+      institution = cand.trim();
+    } else if (degreeMatch) {
+      institution = joined
+        .replace(degreeMatch[0], "")
+        .replace(/\s*\|\s*/g, " ")
+        .replace(/[,|]+$/, "")
+        .trim();
+    }
+  }
+
+  // Shared date primitive (via the education wrapper) so a range like
+  // "Sep 2024 - July 2025" keeps both halves and a lone graduation date lands in
+  // `end_date` (#97).
+  const dates = parseEducationDates(joined);
+  const hasDate = !!(dates.start_date || dates.end_date);
+
+  let score = 0;
+  if (institution) score += 0.3;
+  if (degree) score += 0.4;
+  if (hasDate) score += 0.3;
+
+  return {
+    entry: { institution, degree, ...educationDateFields(dates) },
+    score: Math.min(score, 1),
+  };
+}
+
 export function extractEducation(
   education: PdfSection | undefined,
 ): { value: ResumeEducation[]; confidence: number } {
   if (!education || education.lines.length === 0)
     return { value: [], confidence: 0 };
 
-  const lines = education.lines.filter((l) => !isBulletLine(l));
+  const lines = education.lines
+    .filter((l) => !isBulletLine(l))
+    .map((l) => l.text)
+    .filter((t) => t.trim().length > 0);
   if (lines.length === 0) return { value: [], confidence: 0 };
 
-  // Anchor on institution-hint lines; walk forward to collect degree + year.
-  const entries: ResumeEducation[] = [];
-  const perEntryScores: number[] = [];
-
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (!INSTITUTION_HINTS.test(line.text)) {
-      i++;
-      continue;
-    }
-
-    const chunk: string[] = [line.text];
-    let j = i + 1;
-    while (j < lines.length && j < i + 3 && !INSTITUTION_HINTS.test(lines[j].text)) {
-      chunk.push(lines[j].text);
-      j++;
-    }
-
-    const joined = chunk.join(" | ");
-    const institution = line.text.trim();
-    const degreeMatch = DEGREE_RE.exec(joined);
-    const degree = degreeMatch ? degreeMatch[0].trim() : "";
-    // Use the shared date primitive (via the education-specific wrapper) so a
-    // range like "Sep 2024 - July 2025" keeps both halves and a lone graduation
-    // date lands in `end_date` — the old `YEAR_RE.exec(joined)[0]` took only the
-    // first year and dropped the end (#97).
-    const dates = parseEducationDates(joined);
-    const hasDate = !!(dates.start_date || dates.end_date);
-
-    let score = 0;
-    if (institution) score += 0.3;
-    if (degree) score += 0.4;
-    if (hasDate) score += 0.3;
-
-    entries.push({
-      institution,
-      degree,
-      ...educationDateFields(dates),
-    });
-    perEntryScores.push(Math.min(score, 1));
-    i = j;
+  // Group into one chunk per qualification. A new chunk begins when the current
+  // one already holds a degree and the next line introduces another degree, or
+  // already holds an institution and the next line introduces another. This
+  // keeps multi-degree sections from collapsing into a single entry (only the
+  // first degree was ever extracted before) and works for both
+  // "Degree / School / Dates" and "School / Degree / Dates" orderings.
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let hasDegree = false;
+  let hasInstitution = false;
+  const flush = () => {
+    if (current.length > 0) chunks.push(current);
+    current = [];
+    hasDegree = false;
+    hasInstitution = false;
+  };
+  for (const text of lines) {
+    const isDeg = DEGREE_RE.test(text);
+    const isInst = INSTITUTION_HINTS.test(text);
+    if ((isDeg && hasDegree) || (isInst && hasInstitution)) flush();
+    current.push(text);
+    if (isDeg) hasDegree = true;
+    if (isInst) hasInstitution = true;
   }
+  flush();
 
-  if (entries.length === 0) {
-    // Fallback: scan for degrees in any line.
-    for (const line of lines) {
-      const degreeMatch = DEGREE_RE.exec(line.text);
-      if (!degreeMatch) continue;
-      const dates = parseEducationDates(line.text);
-      entries.push({
-        degree: degreeMatch[0].trim(),
-        institution: line.text.replace(degreeMatch[0], "").trim().replace(/[,|]+$/, ""),
-        ...educationDateFields(dates),
-      });
-      perEntryScores.push(0.5);
-    }
-  }
-
-  const avg =
-    perEntryScores.reduce((a, b) => a + b, 0) /
-    Math.max(perEntryScores.length, 1);
-  return { value: entries, confidence: entries.length ? avg : 0 };
+  const built = chunks
+    .map(educationFromChunk)
+    .filter((b) => b.entry.degree || b.entry.institution);
+  if (built.length === 0) return { value: [], confidence: 0 };
+  return {
+    value: built.map((b) => b.entry),
+    confidence: avgScore(built.map((b) => b.score)),
+  };
 }
