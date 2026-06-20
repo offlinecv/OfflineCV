@@ -7,16 +7,10 @@
  */
 
 export { extractName } from "./extract/name.ts";
-export {
-  extractContact,
-  type ContactExtractionResult,
-} from "./extract/contact.ts";
+export { extractContact } from "./extract/contact.ts";
 export { extractSummary } from "./extract/summary.ts";
 export { extractSkills } from "./extract/skills.ts";
-export {
-  extractExperience,
-  disambiguateCompanyTitle,
-} from "./extract/experience.ts";
+export { extractExperience } from "./extract/experience.ts";
 export { extractProjects } from "./extract/projects.ts";
 export { extractAchievements } from "./extract/achievements.ts";
 export { extractEducation } from "./extract/education.ts";

@@ -88,7 +88,7 @@ function experienceFromBlock(block: EntryBlock): {
  *   - Otherwise the first line (top of the entry) is the company.
  *   - Team is an optional third piece, often separated by "—", ",", or "|".
  */
-export function disambiguateCompanyTitle(headers: string[]): {
+function disambiguateCompanyTitle(headers: string[]): {
   company?: string;
   title?: string;
   team?: string;

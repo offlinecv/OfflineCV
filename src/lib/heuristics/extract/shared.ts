@@ -32,7 +32,7 @@ export function allMatches(re: RegExp, text: string): string[] {
  * Manager (L7)**` header as the company and `**Alphabet / Google Fiber**`
  * as the title.
  */
-export const TITLE_KEYWORDS_RE =
+const TITLE_KEYWORDS_RE =
   /\b(Engineer|Engineering|Developer|Manager|Director|Lead|Consultant|Analyst|Specialist|Associate|Architect|Principal|Officer|Designer|Scientist|Researcher|Administrator|Founder|Co-?founder|President|VP|Vice President|Head|Chief|CTO|CEO|COO|CFO|CIO|PM|TPM|SRE|DevOps|Assistant|Intern|Internship|Trainee|Apprentice|Coordinator|Technician|Representative|Supervisor|Strategist|Advisor|Adviser|Counselor|Recruiter|Accountant|Auditor|Editor|Writer|Producer|Teacher|Instructor|Lecturer|Professor|Tutor|Agent|Clerk|Ambassador|Volunteer|Fellow)\b/i;
 
 /** Heuristic: text contains title-like keywords but no company suffix. */

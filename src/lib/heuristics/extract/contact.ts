@@ -16,7 +16,7 @@ import { firstMatch, allMatches } from "./shared.ts";
 
 // ── Contact (email, phone, urls, location) ──────────────────────────────────
 
-export interface ContactExtractionResult {
+interface ContactExtractionResult {
   email?: string;
   phone?: string;
   linkedin_url?: string;

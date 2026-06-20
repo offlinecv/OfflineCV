@@ -118,6 +118,99 @@ function findContactClusterY(lines: PdfLine[]): number | undefined {
 }
 
 /**
+ * Top-N candidate name lines, plus a synthetic merge of any two adjacent
+ * single-word name lines. Word templates stack the given and family name on
+ * separate lines ("Chanchal" / "Sharma"); each is individually rejected as a
+ * lone word, so the pair is offered as one two-word candidate. The merge keeps
+ * its first line's index so it can win the first-line bonus over a tagline
+ * ("Office Manager") sitting just below it. With no stacked single-word lines,
+ * the list is exactly the top-N lines in order, so single-line layouts score
+ * byte-identically to before.
+ */
+function buildNameCandidates(
+  lines: PdfLine[],
+): { text: string; line: PdfLine; idx: number }[] {
+  const scan = Math.min(lines.length, 5);
+  const candidates: { text: string; line: PdfLine; idx: number }[] = [];
+  for (let i = 0; i < scan; i++) {
+    const line = lines[i];
+    candidates.push({ text: line.text.trim(), line, idx: i });
+    const next = lines[i + 1];
+    if (
+      i <= 1 &&
+      next &&
+      isSingleNameWord(line.text) &&
+      isSingleNameWord(next.text)
+    ) {
+      candidates.push({
+        text: `${line.text.trim()} ${next.text.trim()}`,
+        line: {
+          ...line,
+          maxFontSize: Math.max(line.maxFontSize, next.maxFontSize),
+        },
+        idx: i,
+      });
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Position/size/proximity score for one already-eligible name candidate. Pure
+ * arithmetic — see `extractName`'s doc comment for each signal's rationale.
+ * Extracted so the main scan loop stays under the complexity gate without
+ * changing any weight.
+ */
+function scoreNameCandidate(args: {
+  text: string;
+  line: PdfLine;
+  words: string[];
+  idx: number;
+  firstEligibleIdx: number;
+  isMononym: boolean;
+  maxFontSize: number;
+  averageFontSize: number;
+  contactY: number | undefined;
+}): number {
+  const {
+    text,
+    line,
+    words,
+    idx,
+    firstEligibleIdx,
+    isMononym,
+    maxFontSize,
+    averageFontSize,
+    contactY,
+  } = args;
+  let score = 0;
+  if (idx === firstEligibleIdx) score += 0.4;
+  if (line.maxFontSize >= maxFontSize - 0.5) score += 0.3;
+  if (line.maxFontSize > averageFontSize + 1) score += 0.1;
+  const titleCase = words.every((w) => /^[A-Z][a-zA-Z.\-']*$/.test(w));
+  if (line.allCaps || titleCase) score += 0.2;
+  if (words.length >= 2 && words.length <= 4) score += 0.1;
+  if (contactY !== undefined && Math.abs(line.y - contactY) < 80) {
+    // First eligible line near contact: soft confirmation. A *later* line
+    // near contact: a recovery bonus large enough to overtake a higher /
+    // larger line that won only on position/size — the mode-2 case in #16.
+    // Gating the strong bonus on `idx !== firstEligibleIdx` keeps the #14
+    // mode-1 fixture (first-eligible name) byte-identical.
+    score += idx === firstEligibleIdx ? 0.15 : 0.4;
+  }
+  // A job-title tagline ("Product Designer", "Senior Marketing Lead") must
+  // not win the name slot on position/size. Real names never match the
+  // title-keyword set, so this only ever penalizes non-name lines.
+  if (looksLikeTitle(text)) score -= 0.6;
+  // Small mononym penalty (#107): a single-word pick is inherently weaker
+  // signal than a two-word name, so a genuine two-word name on the same
+  // résumé always outranks a lone-word candidate. Kept small (0.1) so a
+  // strong mononym still clears the scorer's 0.5 contact-confidence floor.
+  if (isMononym) score -= 0.1;
+  return score;
+}
+
+/**
  * Resume names almost always appear at the very top, in the largest font, with
  * 2–4 words that are all letters (plus maybe a period or hyphen). Score:
  *   +0.4 first line of profile
@@ -157,36 +250,7 @@ export function extractName(
   // "missing" in completeness scoring.
   let firstEligibleIdx: number | null = null;
 
-  // Candidate list: each of the top lines, plus a synthetic merge of any two
-  // adjacent single-word name lines. Word templates stack the given and family
-  // name on separate lines ("Chanchal" / "Sharma"); each is individually
-  // rejected as a lone word, so the pair is offered as one two-word candidate.
-  // The merge keeps its first line's index so it can win the first-line bonus
-  // over a tagline ("Office Manager") sitting just below it. With no stacked
-  // single-word lines, the list is exactly the top-N lines in order, so
-  // single-line layouts score byte-identically to before.
-  const scan = Math.min(profile.lines.length, 5);
-  const candidates: { text: string; line: PdfLine; idx: number }[] = [];
-  for (let i = 0; i < scan; i++) {
-    const line = profile.lines[i];
-    candidates.push({ text: line.text.trim(), line, idx: i });
-    const next = profile.lines[i + 1];
-    if (
-      i <= 1 &&
-      next &&
-      isSingleNameWord(line.text) &&
-      isSingleNameWord(next.text)
-    ) {
-      candidates.push({
-        text: `${line.text.trim()} ${next.text.trim()}`,
-        line: {
-          ...line,
-          maxFontSize: Math.max(line.maxFontSize, next.maxFontSize),
-        },
-        idx: i,
-      });
-    }
-  }
+  const candidates = buildNameCandidates(profile.lines);
 
   for (const { text, line, idx } of candidates) {
     if (!text || text.length > 60) continue;
@@ -213,30 +277,17 @@ export function extractName(
 
     if (firstEligibleIdx === null) firstEligibleIdx = idx;
 
-    let score = 0;
-    if (idx === firstEligibleIdx) score += 0.4;
-    if (line.maxFontSize >= maxFontSize - 0.5) score += 0.3;
-    if (line.maxFontSize > averageFontSize + 1) score += 0.1;
-    const titleCase = words.every((w) => /^[A-Z][a-zA-Z.\-']*$/.test(w));
-    if (line.allCaps || titleCase) score += 0.2;
-    if (words.length >= 2 && words.length <= 4) score += 0.1;
-    if (contactY !== undefined && Math.abs(line.y - contactY) < 80) {
-      // First eligible line near contact: soft confirmation. A *later* line
-      // near contact: a recovery bonus large enough to overtake a higher /
-      // larger line that won only on position/size — the mode-2 case in #16.
-      // Gating the strong bonus on `idx !== firstEligibleIdx` keeps the #14
-      // mode-1 fixture (first-eligible name) byte-identical.
-      score += idx === firstEligibleIdx ? 0.15 : 0.4;
-    }
-    // A job-title tagline ("Product Designer", "Senior Marketing Lead") must
-    // not win the name slot on position/size. Real names never match the
-    // title-keyword set, so this only ever penalizes non-name lines.
-    if (looksLikeTitle(text)) score -= 0.6;
-    // Small mononym penalty (#107): a single-word pick is inherently weaker
-    // signal than a two-word name, so a genuine two-word name on the same
-    // résumé always outranks a lone-word candidate. Kept small (0.1) so a
-    // strong mononym still clears the scorer's 0.5 contact-confidence floor.
-    if (isMononym) score -= 0.1;
+    const score = scoreNameCandidate({
+      text,
+      line,
+      words,
+      idx,
+      firstEligibleIdx,
+      isMononym,
+      maxFontSize,
+      averageFontSize,
+      contactY,
+    });
 
     if (!best || score > best.score) best = { text, score };
   }
