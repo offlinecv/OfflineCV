@@ -490,4 +490,117 @@ describe("computeAnonymousAtsScore", () => {
       expect(metricCount).toBe(result.specificity.metricBullets);
     });
   });
+
+  describe("skills bullets excluded from the experience pool (#30)", () => {
+    // A bulleted skills section ("• Project management, Data analysis") must not
+    // be judged by the action-verb / metric / length rules. The cascade supplies
+    // the skills-section text; matching lines are kept out of the bullet pool.
+    const skillsRaw = [
+      "• Project management, Data analysis",
+      "• Communication, Problem-solving",
+    ].join("\n");
+
+    it("drops skills-section lines from the pool when skillsSectionText is supplied", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: skillsRaw, skillsSectionText: skillsRaw }),
+      );
+      expect(result.bullets ?? []).toHaveLength(0);
+    });
+
+    it("would otherwise count them — proving the exclusion is what drops them", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: skillsRaw }),
+      );
+      expect((result.bullets ?? []).length).toBe(2);
+    });
+
+    it("does not exclude genuine experience bullets outside the skills section", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: STRONG_BULLETS, skillsSectionText: skillsRaw }),
+      );
+      expect(result.bullets!.length).toBe(6);
+    });
+  });
+
+  describe("lone-bullet glyph merge (Word-table layout, #30)", () => {
+    // pdfjs/pdftotext can split a table-cell bullet so the "•" lands on its own
+    // line and the text on the next. The extractor merges them before scoring.
+    it("merges a marker-only line with the following non-empty text line", () => {
+      const raw = [
+        "•",
+        "",
+        "Led migration of 3 microservices reducing latency by 40%",
+      ].join("\n");
+      const result = computeAnonymousAtsScore(makeAnonInput({ rawText: raw }));
+      expect(result.bullets!.map((b) => b.text)).toEqual([
+        "Led migration of 3 microservices reducing latency by 40%",
+      ]);
+    });
+
+    it("still excludes a lone-bullet skills entry after the merge", () => {
+      const raw = ["•", "Project management, Data analysis"].join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          rawText: raw,
+          skillsSectionText: "Project management, Data analysis",
+        }),
+      );
+      expect(result.bullets ?? []).toHaveLength(0);
+    });
+  });
+
+  describe("redacted role dates (#31)", () => {
+    // A role whose date is a redaction stub ("August 20XX") stays incomplete,
+    // but must score distinctly from a role with no date text at all and drive
+    // the "use 4-digit years" guidance.
+    const undatedRole = [{ title: "Office Manager", company: "Acme" }];
+    function inputWith(rawText: string): AnonymousAtsScoreInput {
+      return makeAnonInput({
+        parsed: {
+          full_name: "Jane Doe",
+          email: "jane@example.com",
+          phone: "555-0100",
+          location: "San Francisco, CA",
+          linkedin_url: "https://www.linkedin.com/in/janedoe",
+          summary: "Backend engineer with ten years of distributed systems work.",
+          skills: ["TypeScript", "Go", "PostgreSQL"],
+          experience: undatedRole,
+          education: [{ degree: "BS CS", institution: "MIT" }],
+        },
+        rawText,
+      });
+    }
+
+    it("flags redacted dates incomplete but scores above wholly-missing dates", () => {
+      const redacted = computeAnonymousAtsScore(
+        inputWith("Office Manager, Acme\nAugust 20XX – March 20XX"),
+      );
+      const missing = computeAnonymousAtsScore(
+        inputWith("Office Manager, Acme"),
+      );
+      expect(redacted.completeness.redactedDates).toBe(true);
+      expect(redacted.completeness.missing).toContain("role dates");
+      expect(missing.completeness.redactedDates).toBeFalsy();
+      expect(redacted.completeness.score).toBeGreaterThan(
+        missing.completeness.score,
+      );
+    });
+
+    it.each([
+      "August 20XX – March 20XX",
+      "Jan XXXX – Dec XXXX",
+      "Mar #### – Jun ####",
+      "August 20-- – March 20--",
+    ])("detects the redaction token family in %s", (dateLine) => {
+      const result = computeAnonymousAtsScore(inputWith(`Role, Co\n${dateLine}`));
+      expect(result.completeness.redactedDates).toBe(true);
+    });
+
+    it("does not flag a bare XXXX outside a date context", () => {
+      const result = computeAnonymousAtsScore(
+        inputWith("Office Manager, Acme\nBadge ID XXXX-7 issued on site"),
+      );
+      expect(result.completeness.redactedDates).toBeFalsy();
+    });
+  });
 });

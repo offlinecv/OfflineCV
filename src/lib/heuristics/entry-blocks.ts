@@ -131,16 +131,51 @@ function isAnchorLine(line: PdfLine, anchor: EntryAnchor): boolean {
  */
 function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
   const anchors: number[] = [];
+  // Reference indent for the `first_line` anchor: the x of the bullet markers.
+  // Entry headers sit at (or left of) this margin, but when a long bullet wraps
+  // onto a second, marker-less line that continuation aligns with the bullet
+  // *text* — i.e. to the RIGHT of the marker. That x relationship (not an
+  // absolute point tolerance, which fails on tightly-indented layouts) is what
+  // separates a wrapped continuation from a real new header. Only the
+  // `first_line` anchor needs it, so the others skip the scan (Infinity).
+  const markerX = anchor === "first_line" ? bulletMarkerX(lines) : Infinity;
   for (let i = 0; i < lines.length; i++) {
     if (!isAnchorLine(lines[i], anchor)) continue;
-    if (anchor === "first_line") {
-      const prevIsBullet = i > 0 && isBulletLine(lines[i - 1]);
-      const isFirst = i === 0;
-      if (!isFirst && !prevIsBullet) continue; // mid-header line, not a new entry
+    if (anchor === "first_line" && i > 0) {
+      // Indented past the bullet marker → a wrapped bullet line, not a header.
+      if (lines[i].x > markerX) continue;
+      // Directly below another header-level (marker-or-left) non-bullet line →
+      // the 2nd line of a multi-line header ("Title" / "Company"), not a new
+      // entry. (A header that follows a wrapped bullet or a bullet still opens
+      // one, so real headers after a wrap aren't lost.)
+      const prev = lines[i - 1];
+      if (!isBulletLine(prev) && prev.x <= markerX) continue;
     }
     anchors.push(i);
   }
   return anchors;
+}
+
+/** Leftmost x of any bullet line in the section — the bullet *marker* margin.
+ *  `Infinity` when the section has no bullets. */
+function bulletMarkerX(lines: PdfLine[]): number {
+  let x = Infinity;
+  for (const l of lines) if (isBulletLine(l)) x = Math.min(x, l.x);
+  return x;
+}
+
+/**
+ * True when a non-bullet line is the marker-less continuation of a wrapped
+ * bullet — it sits indented to the right of the bullet *marker* margin (where
+ * bullet TEXT wraps), whereas a real entry header sits at or left of that
+ * margin. This is the structural signal (also used by `collectAnchors`) that
+ * keeps a wrapped bullet's tail ("…and informing / them of resources") from
+ * contaminating the next entry's company / designation. A no-op when the
+ * section has no bullets (markerX = Infinity) or carries no x positions
+ * (markdown, all x = 0).
+ */
+function isWrappedContinuation(line: PdfLine, markerX: number): boolean {
+  return Number.isFinite(markerX) && line.x > markerX + 2;
 }
 
 /**
@@ -185,14 +220,18 @@ function buildEntryBlock(
   const anchorIdx = anchors[a];
   const nextAnchorIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
   const prevAnchorIdx = a === 0 ? 0 : anchors[a - 1] + 1;
+  const markerX = bulletMarkerX(lines);
 
   // Header candidates above the anchor (e.g. "Title\nCompany <dates>").
-  // Bounded by the previous entry's window and the configured lookback;
-  // bullets from the previous entry are skipped.
+  // Bounded by the previous entry's window and the configured lookback; bullets
+  // and wrapped-bullet tails (indented past the marker) from the previous entry
+  // are skipped so they never leak into this entry's header (#boundary).
   const aboveStart = Math.max(prevAnchorIdx, anchorIdx - lookback);
   const aboveLines =
     lookback > 0
-      ? lines.slice(aboveStart, anchorIdx).filter((l) => !isBulletLine(l))
+      ? lines
+          .slice(aboveStart, anchorIdx)
+          .filter((l) => !isBulletLine(l) && !isWrappedContinuation(l, markerX))
       : [];
 
   const anchorLine = lines[anchorIdx];
@@ -201,9 +240,11 @@ function buildEntryBlock(
 
   // Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
   // consecutive non-bullet lines until the first bullet or the next anchor.
+  // A wrapped-bullet tail is skipped (not a header) but does not end the run.
   const belowHeaderLines: PdfLine[] = [];
   for (let i = anchorIdx + 1; i < nextAnchorIdx; i++) {
     if (isBulletLine(lines[i])) break;
+    if (isWrappedContinuation(lines[i], markerX)) continue;
     belowHeaderLines.push(lines[i]);
   }
 

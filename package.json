@@ -19,6 +19,7 @@
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
     "@mlc-ai/web-llm": "0.2.84",
+    "jszip": "^3.10.1",
     "libphonenumber-js": "^1.13.6",
     "mammoth": "^1.12.0",
     "pdfjs-dist": "^4.10.38",

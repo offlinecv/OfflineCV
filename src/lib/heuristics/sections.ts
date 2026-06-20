@@ -199,7 +199,7 @@ function groupLinesSingle(items: PdfTextItem[]): PdfLine[] {
  * glyph run as a separate item, so naively joining with spaces over-pads
  * and joining without spaces under-pads.
  */
-function mergeItemText(items: PdfTextItem[]): string {
+export function mergeItemText(items: PdfTextItem[]): string {
   if (items.length === 0) return "";
   let out = items[0].str;
   for (let i = 1; i < items.length; i++) {
