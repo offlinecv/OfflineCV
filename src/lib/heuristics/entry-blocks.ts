@@ -136,22 +136,20 @@ function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
   // onto a second, marker-less line that continuation aligns with the bullet
   // *text* — i.e. to the RIGHT of the marker. That x relationship (not an
   // absolute point tolerance, which fails on tightly-indented layouts) is what
-  // separates a wrapped continuation from a real new header.
-  let bulletMarkerX = Infinity;
-  if (anchor === "first_line") {
-    for (const l of lines) if (isBulletLine(l)) bulletMarkerX = Math.min(bulletMarkerX, l.x);
-  }
+  // separates a wrapped continuation from a real new header. Only the
+  // `first_line` anchor needs it, so the others skip the scan (Infinity).
+  const markerX = anchor === "first_line" ? bulletMarkerX(lines) : Infinity;
   for (let i = 0; i < lines.length; i++) {
     if (!isAnchorLine(lines[i], anchor)) continue;
     if (anchor === "first_line" && i > 0) {
       // Indented past the bullet marker → a wrapped bullet line, not a header.
-      if (lines[i].x > bulletMarkerX) continue;
+      if (lines[i].x > markerX) continue;
       // Directly below another header-level (marker-or-left) non-bullet line →
       // the 2nd line of a multi-line header ("Title" / "Company"), not a new
       // entry. (A header that follows a wrapped bullet or a bullet still opens
       // one, so real headers after a wrap aren't lost.)
       const prev = lines[i - 1];
-      if (!isBulletLine(prev) && prev.x <= bulletMarkerX) continue;
+      if (!isBulletLine(prev) && prev.x <= markerX) continue;
     }
     anchors.push(i);
   }

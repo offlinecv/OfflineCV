@@ -124,6 +124,15 @@ describe("parseHeaderFooterHyperlinks", () => {
     expect(links[0].url).toBe("https://example.com/p?a=1&b=2");
   });
 
+  it("decodes numeric (decimal + hex) character references in the target URL", () => {
+    const links = parseHeaderFooterHyperlinks(
+      hyperlinkHeaderXml("rId1", "Profile"),
+      // &#38; = '&' (decimal), &#x3D; = '=' (hex)
+      relsXml([{ id: "rId1", target: "https://example.com/p?a=1&#38;b&#x3D;2" }]),
+    );
+    expect(links[0].url).toBe("https://example.com/p?a=1&b=2");
+  });
+
   it("ignores internal anchors with no external relationship", () => {
     const xml = `<w:hdr ${W_NS}><w:p><w:hyperlink w:anchor="_Top"><w:r><w:t>Top</w:t></w:r></w:hyperlink></w:p></w:hdr>`;
     expect(parseHeaderFooterHyperlinks(xml, relsXml([]))).toEqual([]);

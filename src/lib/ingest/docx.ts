@@ -85,7 +85,17 @@ const XML_ENTITIES: Record<string, string> = {
   "&apos;": "'",
 };
 function decodeXml(s: string): string {
-  return s.replace(/&(amp|lt|gt|quot|apos);/g, (m) => XML_ENTITIES[m] ?? m);
+  // Numeric character references (`&#38;`, `&#xA0;`) are valid XML and emitted
+  // by some Word save paths / templating tools, esp. inside URL `Target`
+  // attributes. Decode them before the named pass (so a double-encoded
+  // `&amp;#38;` still reduces) — mirrors the htmlToPlaintext fix in
+  // jd-match/fetch-jd.ts (#117).
+  return s
+    .replace(/&#(\d+);/g, (_m, n: string) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h: string) =>
+      String.fromCodePoint(parseInt(h, 16)),
+    )
+    .replace(/&(amp|lt|gt|quot|apos);/g, (m) => XML_ENTITIES[m] ?? m);
 }
 
 export interface HeaderFooterLink {

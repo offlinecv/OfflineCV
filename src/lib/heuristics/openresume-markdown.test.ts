@@ -357,4 +357,23 @@ describe("parseHeuristicFromMarkdown — promoted-link de-duplication", () => {
       "github.com/janesmith/cool-app",
     );
   });
+
+  it("preserves a different, longer handle that shares the promoted slug's prefix", () => {
+    // Contact github is github.com/jane; a bullet citing github.com/jane-doe is a
+    // DIFFERENT handle. The strip lookahead must reject the trailing "-" so the
+    // longer handle is not chopped to "-doe".
+    const markdown = [
+      "# Jane Smith",
+      "jane.smith@example.com | github.com/jane",
+      "## Projects",
+      "**Cool App** · 2024",
+      "- Contributed to github.com/jane-doe/awesome serving many active users daily",
+    ].join("\n");
+    const result = parseHeuristicFromMarkdown(markdown, markdown);
+
+    expect(result.parsed.github_url).toBe("https://github.com/jane");
+    expect(result.parsed.projects?.[0]?.description).toContain(
+      "github.com/jane-doe/awesome",
+    );
+  });
 });

@@ -126,27 +126,30 @@ const PROMOTED_LABEL_RE =
 
 /** Remove every occurrence of `slugs` (and any orphaned label they leave
  *  behind) from a newline-joined bullet body. A slug matches the exact identity
- *  link, NOT a deeper path under it — a real bullet mentioning
- *  "github.com/x/some-repo" is preserved. Returns undefined when nothing
- *  survives. */
+ *  link, NOT a deeper path or longer handle under it — a real bullet mentioning
+ *  "github.com/x/some-repo" or a different handle "github.com/x-team" is
+ *  preserved (the lookahead rejects a following `\w`, `/`, `.` or `-`). Returns
+ *  undefined when nothing survives. */
 function stripPromotedUrls(
   text: string | undefined,
   slugs: string[],
 ): string | undefined {
   if (!text || slugs.length === 0) return text;
+  // Compile one matcher per slug, hoisted out of the per-line loop. The `g`
+  // flag strips every occurrence on a line (String.replace resets lastIndex
+  // between calls, so reusing the object across lines is safe).
+  const matchers = slugs.map(
+    (slug) =>
+      new RegExp(
+        `(?:https?:\\/\\/)?(?:www\\.)?${escapeRegex(slug)}\\/?(?![\\w./-])`,
+        "ig",
+      ),
+  );
   const kept = text
     .split("\n")
     .map((line) => {
       let l = line;
-      for (const slug of slugs) {
-        l = l.replace(
-          new RegExp(
-            `(?:https?:\\/\\/)?(?:www\\.)?${escapeRegex(slug)}\\/?(?![\\w/])`,
-            "ig",
-          ),
-          " ",
-        );
-      }
+      for (const re of matchers) l = l.replace(re, " ");
       return l.replace(/\s{2,}/g, " ").trim();
     })
     .filter((l) => l.length > 0 && !PROMOTED_LABEL_RE.test(l));
