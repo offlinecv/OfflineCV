@@ -6,6 +6,7 @@ import { applyOverrides } from "./apply-overrides.ts";
 import { groupBulletsByExperience } from "../score/group-bullets.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { BulletObservation } from "../score/score.ts";
+import type { SectionedResume } from "../heuristics/sections.ts";
 
 /** Minimal BulletObservation factory — only `text` and `index` matter here. */
 function obs(index: number, text: string): BulletObservation {
@@ -16,6 +17,18 @@ function obs(index: number, text: string): BulletObservation {
     startsWithActionVerb: false,
     wellFormedLength: false,
     wordCount: text.split(/\s+/).filter(Boolean).length,
+  };
+}
+
+/** Minimal SectionedResume — bullet edits target the experience section, so
+ *  put any bullet lines (with their leading markers) there. */
+function makeSections(experience: readonly string[] = []): SectionedResume {
+  const byName = new Map<string, readonly string[]>();
+  if (experience.length > 0) byName.set("experience", experience);
+  return {
+    byName: byName as SectionedResume["byName"],
+    accomplishmentSections: ["experience", "projects", "achievements"],
+    source: "regex",
   };
 }
 
@@ -43,6 +56,7 @@ describe("applyOverrides", () => {
     const { parsed: out } = applyOverrides(
       parsed,
       "raw",
+      makeSections(),
       { full_name: "John Smith", email: "john@example.com" },
       {},
       {},
@@ -59,6 +73,7 @@ describe("applyOverrides", () => {
     const { parsed: out } = applyOverrides(
       baseParsed(),
       "raw",
+      makeSections(),
       { full_name: "" },
       {},
       {},
@@ -72,6 +87,7 @@ describe("applyOverrides", () => {
     const { parsed: out } = applyOverrides(
       parsed,
       "raw",
+      makeSections(),
       {},
       { 0: { title: "Senior Engineer", company: "Globex" } },
       {},
@@ -84,12 +100,18 @@ describe("applyOverrides", () => {
     expect(parsed.experience[0].title).toBe("Engineer");
   });
 
-  it("propagates a bullet edit to BOTH rawText and the matching description", () => {
+  it("propagates a bullet edit to rawText, sections, and the matching description", () => {
     const parsed = baseParsed();
     const rawText = "• Built a thing\n• Shipped another thing";
-    const { parsed: out, rawText: outRaw } = applyOverrides(
+    const sections = makeSections(["• Built a thing", "• Shipped another thing"]);
+    const {
+      parsed: out,
+      rawText: outRaw,
+      sections: outSections,
+    } = applyOverrides(
       parsed,
       rawText,
+      sections,
       {},
       {},
       { 0: "Built a thing that increased revenue by 30%" },
@@ -98,6 +120,17 @@ describe("applyOverrides", () => {
     // rawText: marker preserved, body swapped → still extracts as a bullet.
     expect(outRaw).toContain("• Built a thing that increased revenue by 30%");
     expect(outRaw).not.toContain("• Built a thing\n");
+    // sections (#133): the anonymous scorer pools from here, so the edited line
+    // must land in the experience section — marker preserved.
+    expect(outSections.byName.get("experience")).toEqual([
+      "• Built a thing that increased revenue by 30%",
+      "• Shipped another thing",
+    ]);
+    // Original section view untouched (immutability).
+    expect(sections.byName.get("experience")).toEqual([
+      "• Built a thing",
+      "• Shipped another thing",
+    ]);
     // description: line swapped so JD coverage corpus re-grades.
     expect(out.experience[0].description).toBe(
       "Built a thing that increased revenue by 30%\nShipped another thing",
@@ -124,6 +157,7 @@ describe("applyOverrides", () => {
         ],
       },
       rawText,
+      makeSections(["- Led the migration effort"]),
       {},
       {},
       { 5: "Led the migration of 12 services to k8s" },
@@ -141,6 +175,7 @@ describe("applyOverrides", () => {
     const { parsed: out, rawText: outRaw } = applyOverrides(
       parsed,
       rawText,
+      makeSections(),
       {},
       {},
       {},
@@ -155,6 +190,7 @@ describe("applyOverrides", () => {
     const { rawText: outRaw } = applyOverrides(
       baseParsed(),
       rawText,
+      makeSections(["• Built a thing"]),
       {},
       {},
       { 0: "Built a thing" },
@@ -169,6 +205,7 @@ describe("applyOverrides", () => {
     const { rawText: outRaw, parsed: out } = applyOverrides(
       parsed,
       rawText,
+      makeSections(["• Built a thing"]),
       {},
       {},
       { 0: "   " },
@@ -186,6 +223,7 @@ describe("applyOverrides", () => {
     applyOverrides(
       parsed,
       "• Built a thing",
+      makeSections(["• Built a thing"]),
       { full_name: "X" },
       { 0: { title: "Y" } },
       { 0: "Built a different thing" },
@@ -244,6 +282,11 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
     const result = applyOverrides(
       parsed,
       rawText,
+      makeSections([
+        "• Built event-driven data pipeline.",
+        "• Reduced deploy time by 50%.",
+        "• Migrated legacy monolith.",
+      ]),
       {},
       {},
       { 1: editedText },
@@ -301,6 +344,7 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
     applyOverrides(
       parsed,
       "• Reduced deploy time by 50%.",
+      makeSections(["• Reduced deploy time by 50%."]),
       {},
       {},
       { 0: editedText },

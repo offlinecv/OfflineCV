@@ -36,20 +36,24 @@ export default function App() {
   const edited = useMemo(() => {
     if (state.phase !== "done") return null;
     const observations = state.score.bullets ?? [];
-    const { parsed, rawText } = applyOverrides(
+    const { parsed, rawText, sections } = applyOverrides(
       state.result.parsed,
       state.result.rawText,
+      state.result.sections,
       edit.contactOverrides,
       edit.experienceOverrides,
       edit.bulletOverrides,
       observations,
     );
+    // The anonymous scorer pools its bullet set from `sections` (#133), so the
+    // edited section view — not the original — must feed re-grading or a live
+    // bullet edit would not move Specificity / Structure.
     const score = computeAnonymousAtsScore({
       parsed,
       fieldConfidence: state.result.fieldConfidence,
       triggers: state.result.triggers,
       rawText,
-      sections: state.result.sections,
+      sections,
     });
     return { parsed, rawText, score };
   }, [
