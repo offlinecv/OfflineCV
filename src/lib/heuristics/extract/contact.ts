@@ -11,12 +11,13 @@ import {
   US_LOCATION_RE,
   INTL_LOCATION_RE,
 } from "../regex.ts";
+import { escapeRegex } from "../../jd-match/regex-utils.ts";
 import { findFirstPhone, regionFromLocation } from "../phone.ts";
 import { firstMatch, allMatches } from "./shared.ts";
 
 // ── Contact (email, phone, urls, location) ──────────────────────────────────
 
-interface ContactExtractionResult {
+export interface ContactExtractionResult {
   email?: string;
   phone?: string;
   linkedin_url?: string;
@@ -34,7 +35,29 @@ interface ContactExtractionResult {
     website_url: number;
     location: number;
   };
+  /**
+   * Provenance / ownership signal (#134). The `PdfLine`s document-wide whose
+   * ENTIRE content was a promoted identity link (LinkedIn/GitHub) the contact
+   * card claimed — optionally fronted by an introducing label ("LinkedIn:",
+   * "Links —"). The caller removes these lines from every section's candidate
+   * pool BEFORE the body extractors run, so a footer "Links" line lifted into
+   * the contact card never also renders as a phantom project/achievement entry.
+   *
+   * Only *pure* identity-link lines are owned: a line that also carries real
+   * prose (a bullet that merely mentions a repo, a deeper path under the same
+   * handle, or a different longer handle) is NOT in this set and survives in the
+   * body — the same identity boundary the retired `stripPromotedUrls` enforced,
+   * now applied to whole-line ownership instead of after-the-fact slug
+   * subtraction.
+   */
+  consumedLines: ReadonlySet<PdfLine>;
 }
+
+/** Result of a single regex scan over a text region — the contact fields and
+ *  their confidences, before ownership is computed. `extractContact` combines a
+ *  profile scan and a full-document scan into the public {@link
+ *  ContactExtractionResult} (which adds `consumedLines`). */
+type ContactScanResult = Omit<ContactExtractionResult, "consumedLines">;
 
 /** LinkedIn paths that are NOT a personal profile — feed, company pages, job
  *  posts, articles, etc. Everything else under `linkedin.com/<handle>` (the
@@ -56,6 +79,89 @@ function normalizeUrl(raw: string | undefined): string | undefined {
   const trimmed = raw.replace(/[,;.)]$/, "").trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
+}
+
+// ── Promoted-identity-link ownership (#134) ─────────────────────────────────
+// LinkedIn/GitHub identity links are matched document-wide (see `anywhereOnDoc`
+// below), so an identity link sitting in a "Links"/footer block that segmented
+// into a body section is promoted into the contact card. That same line would
+// otherwise survive as a phantom entry whose only content is the bare URL.
+// Instead of scrubbing the URL out of every rendered body after extraction
+// (the retired `stripPromotedUrls`), the contact extractor CLAIMS the lines it
+// consumed: any line that is nothing but the promoted identity link(s) — plus
+// an optional introducing label — is reported on `consumedLines`, and the
+// caller drops those lines from the candidate pools before the body extractors
+// run. Ownership is recorded here, at the single point the link is promoted.
+
+/** Host+path of a URL, lowercased, with scheme / `www.` / trailing punctuation
+ *  removed — the comparable identity of a link across "https://github.com/x",
+ *  "github.com/x" and "github.com/x/". */
+function urlSlug(u: string | undefined): string | undefined {
+  if (!u) return undefined;
+  const s = u
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/[/.,;:)\]]+$/, "")
+    .toLowerCase();
+  return s.length > 0 ? s : undefined;
+}
+
+/** Leading introducing label that a bare identity link sits behind ("LinkedIn:",
+ *  "GitHub —", "Links", "Find me online") — stripped before testing whether a
+ *  line is nothing but its promoted URL(s). */
+const PROMOTED_LABEL_PREFIX_RE =
+  /^[•\-–—*\s]*(?:linkedin|github|profile|portfolio|links?|find me(?: online)?|connect|social(?: media)?|online|website)\b[\s:|/–—-]*/i;
+
+/**
+ * Decide which `lines` the contact card has consumed: a line is OWNED iff,
+ * after removing every promoted identity URL AT THE EXACT-IDENTITY BOUNDARY and
+ * then stripping an optional introducing label, nothing else remains. (URLs are
+ * removed before the label so the label regex — whose alternatives include
+ * "github"/"linkedin" — cannot chew the host out of the URL itself.)
+ *
+ * The `(?![\w./-])` lookahead is the load-bearing precision rule (carried over
+ * from the retired `stripPromotedUrls`): the slug matches the identity link
+ * itself, NOT a deeper path or longer handle under it. So a bare
+ * "github.com/x" line is owned and dropped, while a real bullet mentioning
+ * "github.com/x/some-repo" or a different handle "github.com/x-team" leaves a
+ * residue and is therefore NOT owned — it survives in the body.
+ */
+function findConsumedLines(
+  lines: PdfLine[],
+  promotedSlugs: string[],
+): Set<PdfLine> {
+  const consumed = new Set<PdfLine>();
+  if (promotedSlugs.length === 0) return consumed;
+  const matchers = promotedSlugs.map(
+    (slug) =>
+      new RegExp(
+        `(?:https?:\\/\\/)?(?:www\\.)?${escapeRegex(slug)}\\/?(?![\\w./-])`,
+        "ig",
+      ),
+  );
+  for (const line of lines) {
+    // Remove the identity URL(s) FIRST — before any label strip — so the label
+    // regex (whose alternatives include "github"/"linkedin") can never chew the
+    // host out of the URL itself ("github.com/x"). Each matcher's `(?![\w./-])`
+    // boundary keeps a deeper path / longer handle intact (#134 precision rule).
+    let residue = line.text;
+    let hadMatch = false;
+    for (const re of matchers) {
+      re.lastIndex = 0;
+      if (re.test(residue)) hadMatch = true;
+      re.lastIndex = 0;
+      residue = residue.replace(re, " ");
+    }
+    if (!hadMatch) continue;
+    // With the URL(s) gone, strip an introducing label ("LinkedIn:", "Links —").
+    residue = residue.replace(PROMOTED_LABEL_PREFIX_RE, "");
+    // Owned only when the URL(s) (and the label) were the WHOLE line — any real
+    // prose left over means this is a genuine body line, not a phantom.
+    const leftover = residue.replace(/[•\-–—*\s|/]+/g, "");
+    if (leftover.length === 0) consumed.add(line);
+  }
+  return consumed;
 }
 
 /**
@@ -100,7 +206,7 @@ function extractOtherUrls(joined: string): {
   return { portfolio, website: websiteCandidates[0] };
 }
 
-function scan(lines: PdfLine[], joined: string): ContactExtractionResult {
+function scan(lines: PdfLine[], joined: string): ContactScanResult {
   const email = firstMatch(EMAIL_RE, joined);
 
   // Extract location BEFORE phone so we can derive the parse region.
@@ -178,13 +284,26 @@ export function extractContact(
   // Annotation fallback: URLs hyperlinked behind a visible word
   // ("LinkedIn", "GitHub") only show up here. LinkedIn/GitHub are matched
   // document-wide (see `anywhereOnDoc` below); only the looser-but-still-bounded
-  // portfolio/website lookup keeps a Y-band.
-  // Portfolio/website use a header-region band — some design templates
-  // place the portfolio link in a sidebar or under the name block. "Top
-  // third of page 1" approximated with a fixed PDF-points cutoff that
-  // works for both Letter (792pt) and A4 (842pt).
-  const inHeaderRegion = (ann: PdfLinkAnnotation) =>
-    ann.page === 1 && ann.yTop < 280;
+  // portfolio/website lookup keeps a section-based region filter.
+  // Portfolio/website use the profile-section boundary — the profile section
+  // covers everything above the first recognized header, which is exactly
+  // the contact/links block. Annotations whose top edge falls within (or just
+  // below) the last profile line are accepted; this replaces the old fixed
+  // 280-PDF-points proxy (#135).
+  //
+  // Implementation: collect the max y of any profile line and add a small
+  // slack (12 pts ≈ one line-height) so an annotation rect whose anchor
+  // sits a hair below the last text line is still accepted. When the profile
+  // has no lines (edge case: empty document / single-section resume) we
+  // accept any annotation on page 1 as a conservative fallback.
+  const profileLineMaxY: number = profile.lines.length > 0
+    ? Math.max(...profile.lines.map((l) => l.y))
+    : Infinity; // Infinity → accept everything on page 1
+  const PROFILE_REGION_SLACK_PTS = 12;
+  const inProfileSection = (ann: PdfLinkAnnotation): boolean =>
+    ann.page === 1 &&
+    ann.yTop <= profileLineMaxY + PROFILE_REGION_SLACK_PTS;
+
   // LinkedIn / GitHub identity links are commonly hyperlinked behind an icon
   // placed in a footer or a "Links"/"Contact" block below a later heading
   // (e.g. after Skills), so the profile-band filter dropped them. The
@@ -234,7 +353,7 @@ export function extractContact(
   const portfolio = pickUrl(
     "portfolio_url",
     (u) => isPortfolioUrl(u) && !isLinkedinUrl(u) && !isGithubUrl(u),
-    inHeaderRegion,
+    inProfileSection,
   );
   // Website is the catch-all: any remaining annotation URL not already
   // claimed by linkedin/github/portfolio.
@@ -249,8 +368,21 @@ export function extractContact(
       !isGithubUrl(u) &&
       !u.startsWith("mailto:") &&
       !u.startsWith("tel:"),
-    inHeaderRegion,
+    inProfileSection,
   );
+
+  // Ownership (#134): claim the document-wide body lines that are nothing but a
+  // promoted identity link. Slugs are derived from the *claimed* linkedin/github
+  // values — whether they came from the profile, the full-doc fallback, or an
+  // annotation — so the line that carried the link is removed from the body
+  // pools and never renders a second time. Only LinkedIn/GitHub participate:
+  // those are the identity links matched document-wide and thus the only ones
+  // that produce phantom body entries (portfolio/website stay header-banded).
+  const promotedSlugs = [
+    urlSlug(linkedin.value),
+    urlSlug(github.value),
+  ].filter((s): s is string => s !== undefined);
+  const consumedLines = findConsumedLines(allLines, promotedSlugs);
 
   return {
     email: primary.email ?? fallback.email,
@@ -270,5 +402,6 @@ export function extractContact(
       website_url: website.confidence,
       location: primary.confidence.location,
     },
+    consumedLines,
   };
 }
