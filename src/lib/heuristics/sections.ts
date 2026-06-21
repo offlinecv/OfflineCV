@@ -75,7 +75,7 @@ export interface SectionedResume {
 
 /** Canonical policy: these sections contribute experience-bullet lines. Encoded
  *  once here rather than duplicated across the authed/anonymous scorers. */
-const ACCOMPLISHMENT_SECTION_NAMES: readonly SectionName[] = [
+export const ACCOMPLISHMENT_SECTION_NAMES: readonly SectionName[] = [
   "experience",
   "projects",
   "achievements",

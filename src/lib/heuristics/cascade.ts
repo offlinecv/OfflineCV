@@ -30,6 +30,7 @@ import type {
   TierEngagementReason,
 } from "./types.ts";
 import { CASCADE_VERSION } from "./types.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
 import { computeConfidence } from "./confidence.ts";
 
 export interface RunCascadeOptions {
@@ -354,7 +355,7 @@ export async function runCascadeFromMarkdown(
         // No Tier 1 ran (no markdown) — empty section view, inert (#132).
         sections: {
           byName: new Map(),
-          accomplishmentSections: [],
+          accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
           source: "regex",
         },
       };
@@ -473,7 +474,11 @@ function buildScannedResult(
     // Scanned-abandon path: no Tier 1 ran, so there are no detected sections.
     // An empty view yields `byName.get("skills") === undefined`, exactly the
     // inert behaviour the absent `skillsSectionText` gave here before (#132).
-    sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
+    sections: {
+      byName: new Map(),
+      accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+      source: "regex",
+    },
     linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,

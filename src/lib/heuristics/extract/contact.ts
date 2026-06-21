@@ -36,23 +36,6 @@ interface ContactExtractionResult {
   };
 }
 
-/**
- * Walks the profile section (and optionally the full document as a fallback)
- * gathering contact fields. Regex-driven; very high precision.
- *
- * `location` is intentionally NOT subject to the document-wide fallback —
- * a non-header city/state is almost always an employer or school location,
- * not the candidate's. Names, emails, phones, and URLs can survive being
- * outside the profile (footer placement is common); location cannot.
- *
- * When PDF Link annotations are available, they're consulted as
- * a last-chance signal for `linkedin_url`, `github_url`, `portfolio_url`,
- * and `website_url` — these are the URL fields that resumes most often
- * hyperlink behind a visible word ("LinkedIn" / "GitHub" / "Portfolio")
- * rather than rendering as full text. Annotation hits report 0.95
- * confidence, matching the text-hit confidence, because the URL is
- * structurally guaranteed by the PDF.
- */
 /** LinkedIn paths that are NOT a personal profile — feed, company pages, job
  *  posts, articles, etc. Everything else under `linkedin.com/<handle>` (the
  *  `/in/<handle>` canonical form AND bare-vanity hosts) is treated as a
@@ -161,12 +144,28 @@ function scan(lines: PdfLine[], joined: string): ContactExtractionResult {
   };
 }
 
+/**
+ * Walks the profile section (and optionally the full document as a fallback)
+ * gathering contact fields. Regex-driven; very high precision.
+ *
+ * `location` is intentionally NOT subject to the document-wide fallback —
+ * a non-header city/state is almost always an employer or school location,
+ * not the candidate's. Names, emails, phones, and URLs can survive being
+ * outside the profile (footer placement is common); location cannot.
+ *
+ * When PDF Link annotations are available, they're consulted as
+ * a last-chance signal for `linkedin_url`, `github_url`, `portfolio_url`,
+ * and `website_url` — these are the URL fields that resumes most often
+ * hyperlink behind a visible word ("LinkedIn" / "GitHub" / "Portfolio")
+ * rather than rendering as full text. Annotation hits report 0.95
+ * confidence, matching the text-hit confidence, because the URL is
+ * structurally guaranteed by the PDF.
+ */
 export function extractContact(
   profile: PdfSection,
   allLines: PdfLine[],
   annotations: PdfLinkAnnotation[] = [],
 ): ContactExtractionResult {
-
   const profileText = profile.lines.map((l) => l.text).join(" ");
   const primary = scan(profile.lines, profileText);
 
