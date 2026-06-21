@@ -29,7 +29,8 @@ import type {
  * line breaks vanish on LaTeX/Word/macOS-Preview exports. Walking the same
  * items through `groupIntoLines` (the helper Tier 1 already uses) preserves
  * one `\n` per visual line and keeps bullet glyphs at line start so the
- * downstream bullet detector (score.ts:extractBulletsFromText) can see them.
+ * downstream bullet detector (score.ts:extractBulletsFromSections, via the
+ * per-section line arrays) can see them.
  */
 export function assembleTextFromLines(
   items: PdfTextItem[],
