@@ -96,7 +96,7 @@ export function useResumeAnalysis(): ResumeAnalysis {
         fieldConfidence: result.fieldConfidence,
         triggers: result.triggers,
         rawText: result.rawText,
-        skillsSectionText: result.skillsSectionText,
+        sections: result.sections,
       });
 
       trackParseCompleted({

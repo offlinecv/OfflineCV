@@ -15,6 +15,7 @@ import type {
   ResumeExperience,
   ResumeEducation,
 } from "../score/types.ts";
+import type { SectionedResume } from "./sections.ts";
 
 // ── PDF primitives ──────────────────────────────────────────────────────────
 
@@ -153,10 +154,11 @@ export interface HeuristicResult {
    *  font-size-promoted heading passed the emitter's promotion gate) from
    *  regex-on-line parses. Optional; missing is treated as "regex". */
   sectionSource?: "markdown" | "regex";
-  /** Raw text lines of the detected skills section, if any. The scorer keeps
-   *  these out of the experience-bullet pool so bulleted skills are not judged
-   *  by the action-verb / metric / length rules (#30). */
-  skillsSectionLines?: string[];
+  /** Typed view of the detected section structure (#132). The cascade carries
+   *  this onto `CascadeResult.sections`; the scorer derives the skills-exclusion
+   *  set from `sections.byName.get("skills")` rather than a hand-serialized
+   *  `skillsSectionText` slice. Single source of truth for section membership. */
+  sections: SectionedResume;
 }
 
 // ── Cascade output ──────────────────────────────────────────────────────────
@@ -184,9 +186,11 @@ export interface CascadeResult {
    *  scanned PDFs or when the emitter could not produce useful structure.
    *  Section splitters prefer this over `rawText` when present. */
   markdown?: string;
-  /** Newline-joined text of the detected skills section, if any. Passed to the
-   *  scorer so bulleted skills stay out of the experience-bullet pool (#30). */
-  skillsSectionText?: string;
+  /** Typed view of the detected section structure (#132). The scorer reads
+   *  `sections.byName.get("skills")` to keep bulleted skills out of the
+   *  experience-bullet pool (#30); replaces the retired `skillsSectionText`
+   *  side-channel. Always present (built from the `PdfSection[]` Tier 1 holds). */
+  sections: SectionedResume;
   /** Link annotations Tier 0 lifted off the PDF. Surfaces URLs hyperlinked
    *  behind visible words; also the only credible recovered signal on
    *  `fonts_unmappable` PDFs where the text path came back empty. Empty

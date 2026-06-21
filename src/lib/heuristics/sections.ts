@@ -46,6 +46,73 @@ export interface PdfSection {
   lines: PdfLine[];
 }
 
+/**
+ * Typed, scorer-facing view of the detected section structure (spike #127 §2.1,
+ * issue #132). Promotes the `PdfSection[]` the cascade already computes into a
+ * minimal contract: section name → trimmed, non-empty text lines, in document
+ * order. The pure scorer reads this instead
+ * of receiving a hand-serialized `skillsSectionText` slice, so the cascade is
+ * the single source of truth for "which lines belong to which section" and we
+ * never add a per-bug side-channel again.
+ *
+ * Kept dependency-light on purpose: `ReadonlyMap<name, string[]>` rather than
+ * `PdfSection[]`, so `score.ts` need not import `PdfLine`/`PdfTextItem`
+ * geometry types.
+ */
+export interface SectionedResume {
+  /** Section name → trimmed, non-empty text lines, in document order.
+   *  "profile" (anything above the first header) is included so contact/name
+   *  consumers can share the same view. */
+  readonly byName: ReadonlyMap<SectionName | "profile", readonly string[]>;
+  /** Sections whose lines pool into the experience-bullet set, in canonical
+   *  policy order. A convenience accessor over `byName` for the scorer; not yet
+   *  consumed by the pool sourcing (that is the next issue — see #132 Notes). */
+  readonly accomplishmentSections: readonly SectionName[];
+  /** Which splitter produced the section boundaries — provenance for
+   *  confidence tuning / telemetry. */
+  readonly source: "markdown" | "regex";
+}
+
+/** Canonical policy: these sections contribute experience-bullet lines. Encoded
+ *  once here rather than duplicated across the authed/anonymous scorers. */
+export const ACCOMPLISHMENT_SECTION_NAMES: readonly SectionName[] = [
+  "experience",
+  "projects",
+  "achievements",
+];
+
+/**
+ * Build the typed {@link SectionedResume} view from the raw `PdfSection[]` the
+ * heuristic parser holds. Each section's lines are trimmed and emptied-out,
+ * exactly as the retired `skillsSectionLines` slice was
+ * (`lines.map(l => l.text.trim()).filter(t => t.length > 0)`) — so the
+ * skills-exclusion set the scorer derives is byte-for-byte what it derived from
+ * `skillsSectionText`, keeping the corpus goldens unchanged (#132).
+ */
+export function toSectionedResume(
+  sections: PdfSection[],
+  source: "markdown" | "regex",
+): SectionedResume {
+  // Accumulate (don't overwrite) when a name repeats — a resume can split one
+  // logical section across continuation headers, and `findSection` flattened
+  // all matches' lines in document order. Mirroring that here keeps
+  // `byName.get("skills")` byte-identical to the retired `skillsSectionLines`.
+  const byName = new Map<SectionName | "profile", string[]>();
+  for (const section of sections) {
+    const lines = section.lines
+      .map((l) => l.text.trim())
+      .filter((t) => t.length > 0);
+    const existing = byName.get(section.name);
+    if (existing) existing.push(...lines);
+    else byName.set(section.name, lines);
+  }
+  return {
+    byName,
+    accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+    source,
+  };
+}
+
 /** Items within this vertical distance (PDF points) are treated as same line. */
 const LINE_Y_EPS = 3.5;
 

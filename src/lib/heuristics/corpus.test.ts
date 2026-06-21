@@ -105,7 +105,7 @@ describe("corpus snapshots", () => {
             fieldConfidence: cascade.fieldConfidence,
             triggers: cascade.triggers,
             rawText: cascade.rawText,
-            skillsSectionText: cascade.skillsSectionText,
+            sections: cascade.sections,
           });
 
           const snapshot = {

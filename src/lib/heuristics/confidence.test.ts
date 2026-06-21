@@ -37,6 +37,9 @@ function mkHeuristic(
       skills: 0.7,
       ...fcOverrides,
     },
+    // computeConfidence does not read sections; an empty view satisfies the
+    // required field on HeuristicResult without affecting the result (#132).
+    sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
   };
 }
 
