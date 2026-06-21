@@ -11,13 +11,25 @@ import type { AnonymousAtsScoreInput } from "./score";
 import type { ResumeData } from "./types";
 import type { SectionedResume } from "../heuristics/sections";
 
-/** Build the typed section view the anonymous scorer now consumes (#132). With
- *  no skills lines, `byName` is empty so `byName.get("skills")` is undefined —
- *  the inert default. Pass trimmed, non-empty lines (as the cascade would) to
- *  populate the skills section the exclusion set is derived from. */
-function makeSections(skillsLines?: readonly string[]): SectionedResume {
+/** Build the typed section view the anonymous scorer now consumes (#133). The
+ *  scorer pools bullets from the accomplishment sections (experience /
+ *  projects / achievements) and never from skills, so populate `byName` per the
+ *  options. Lines are passed exactly as the cascade would supply them: trimmed,
+ *  non-empty, leading bullet markers intact. */
+function makeSections(opts: {
+  experience?: readonly string[];
+  skills?: readonly string[];
+  projects?: readonly string[];
+  achievements?: readonly string[];
+} = {}): SectionedResume {
   const byName = new Map<string, readonly string[]>();
-  if (skillsLines && skillsLines.length > 0) byName.set("skills", skillsLines);
+  if (opts.experience && opts.experience.length > 0)
+    byName.set("experience", opts.experience);
+  if (opts.projects && opts.projects.length > 0)
+    byName.set("projects", opts.projects);
+  if (opts.achievements && opts.achievements.length > 0)
+    byName.set("achievements", opts.achievements);
+  if (opts.skills && opts.skills.length > 0) byName.set("skills", opts.skills);
   return {
     byName: byName as SectionedResume["byName"],
     accomplishmentSections: ["experience", "projects", "achievements"],
@@ -234,7 +246,7 @@ describe("computeAnonymousAtsScore", () => {
   function makeAnonInput(
     overrides: Partial<AnonymousAtsScoreInput> = {},
   ): AnonymousAtsScoreInput {
-    return {
+    const base: AnonymousAtsScoreInput = {
       parsed: {
         full_name: "Jane Doe",
         email: "jane@example.com",
@@ -258,9 +270,23 @@ describe("computeAnonymousAtsScore", () => {
       },
       triggers: [],
       rawText: STRONG_BULLETS,
+      // Placeholder; replaced below from the (post-override) rawText unless the
+      // caller explicitly passes its own sections.
       sections: makeSections(),
       ...overrides,
     };
+    // The bullet pool now comes from the experience section (#133), not rawText.
+    // To keep the legacy `makeAnonInput({ rawText: ... })` tests working, route
+    // the rawText bullet lines into the experience section by default — but only
+    // when the caller didn't supply its own `sections`.
+    if (overrides.sections === undefined) {
+      const expLines = base.rawText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+      base.sections = makeSections({ experience: expLines });
+    }
+    return base;
   }
 
   it("scores near-100 for a clean resume with strong bullets", () => {
@@ -376,8 +402,10 @@ describe("computeAnonymousAtsScore", () => {
   });
 
   it("flags missing sections in completeness", () => {
-    // rawText must be empty so bullets.length === 0; Part C passes the
-    // experience check when bullets are present even if expEntries is empty.
+    // With empty parsed.experience AND no experience section, the experience
+    // completeness check fails (#133 — it now asks "is there a non-empty
+    // experience section?", not "did we see any bullet anywhere?"). rawText is
+    // empty so the default makeAnonInput builds an empty experience section.
     const result = computeAnonymousAtsScore(
       makeAnonInput({
         rawText: "",
@@ -507,35 +535,44 @@ describe("computeAnonymousAtsScore", () => {
     });
   });
 
-  describe("skills bullets excluded from the experience pool (#30)", () => {
+  describe("skills are never in the experience pool — by construction (#133)", () => {
     // A bulleted skills section ("• Project management, Data analysis") must not
-    // be judged by the action-verb / metric / length rules. The cascade supplies
-    // the skills-section text; matching lines are kept out of the bullet pool.
+    // be judged by the action-verb / metric / length rules. Under #133 the pool
+    // is sourced from the accomplishment sections only, so skills lines can
+    // never enter it — there is no subtraction step. Section membership, not a
+    // subtraction set, is what determines pooling.
     const skillsLines = [
       "• Project management, Data analysis",
       "• Communication, Problem-solving",
     ];
-    const skillsRaw = skillsLines.join("\n");
 
-    it("drops skills-section lines from the pool when the skills section is supplied", () => {
+    it("drops skills-section lines from the pool", () => {
+      // Skills lines live only in the skills section (no experience section) →
+      // nothing pools.
       const result = computeAnonymousAtsScore(
-        makeAnonInput({ rawText: skillsRaw, sections: makeSections(skillsLines) }),
+        makeAnonInput({ sections: makeSections({ skills: skillsLines }) }),
       );
       expect(result.bullets ?? []).toHaveLength(0);
     });
 
-    it("would otherwise count them — proving the exclusion is what drops them", () => {
+    it("counts the SAME lines when placed in the experience section — proving section membership is what pools them", () => {
+      // The exact lines that were dropped from the skills section DO count when
+      // they sit in the experience section. This pins that pooling is by section
+      // identity, not by a subtraction set.
       const result = computeAnonymousAtsScore(
-        makeAnonInput({ rawText: skillsRaw }),
+        makeAnonInput({ sections: makeSections({ experience: skillsLines }) }),
       );
       expect((result.bullets ?? []).length).toBe(2);
     });
 
     it("does not exclude genuine experience bullets outside the skills section", () => {
+      const expLines = STRONG_BULLETS.split("\n");
       const result = computeAnonymousAtsScore(
         makeAnonInput({
-          rawText: STRONG_BULLETS,
-          sections: makeSections(skillsLines),
+          sections: makeSections({
+            experience: expLines,
+            skills: skillsLines,
+          }),
         }),
       );
       expect(result.bullets!.length).toBe(6);
@@ -544,25 +581,31 @@ describe("computeAnonymousAtsScore", () => {
 
   describe("lone-bullet glyph merge (Word-table layout, #30)", () => {
     // pdfjs/pdftotext can split a table-cell bullet so the "•" lands on its own
-    // line and the text on the next. The extractor merges them before scoring.
-    it("merges a marker-only line with the following non-empty text line", () => {
-      const raw = [
-        "•",
-        "",
-        "Led migration of 3 microservices reducing latency by 40%",
-      ].join("\n");
-      const result = computeAnonymousAtsScore(makeAnonInput({ rawText: raw }));
+    // line and the text on the next. toSectionedResume filters blank lines, so
+    // within a section the glyph line is immediately followed by its text line;
+    // the extractor merges them before scoring.
+    it("merges a marker-only line with the following text line in the same section", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({
+            experience: [
+              "•",
+              "Led migration of 3 microservices reducing latency by 40%",
+            ],
+          }),
+        }),
+      );
       expect(result.bullets!.map((b) => b.text)).toEqual([
         "Led migration of 3 microservices reducing latency by 40%",
       ]);
     });
 
-    it("still excludes a lone-bullet skills entry after the merge", () => {
-      const raw = ["•", "Project management, Data analysis"].join("\n");
+    it("a lone-bullet skills entry never enters the pool (skills is not an accomplishment section)", () => {
       const result = computeAnonymousAtsScore(
         makeAnonInput({
-          rawText: raw,
-          sections: makeSections(["Project management, Data analysis"]),
+          sections: makeSections({
+            skills: ["•", "Project management, Data analysis"],
+          }),
         }),
       );
       expect(result.bullets ?? []).toHaveLength(0);

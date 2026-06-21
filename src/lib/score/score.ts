@@ -48,11 +48,20 @@ export const WEIGHTS = {
  *   links are recovered document-wide; multi-degree education sections extract
  *   every entry; and wrapped-bullet tails no longer leak into the next
  *   experience entry's header.
+ * - 1.3 (2026-06-20): the anonymous scorer now pools experience bullets from
+ *   the accomplishment sections (experience / projects / achievements) via
+ *   SectionedResume instead of walking all of rawText and subtracting skills
+ *   (#133). Bullets outside those sections (e.g. in summary / education / an
+ *   un-segmented "other" region) no longer enter the Specificity / Structure
+ *   pool; skills are excluded by construction (skills is not an accomplishment
+ *   section), so the retired "pool everything, subtract skills" side-channel is
+ *   gone. The experience-completeness check now asks "is there a non-empty
+ *   experience section?" rather than "did we see any bullet anywhere?".
  */
 // Internal-only: surfaced to the UI via the `algoVersion` score field, not
 // imported by name anywhere — so it stays unexported to satisfy the dead-code
 // gate (fallow flags exported symbols with no external consumer).
-const ATS_SCORE_ALGO_VERSION = "1.2";
+const ATS_SCORE_ALGO_VERSION = "1.3";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -60,7 +69,7 @@ const ATS_SCORE_ALGO_VERSION = "1.2";
 // apply. Hoisted out of the per-scorer functions so the two surfaces can never
 // silently disagree (e.g. authed counting `-` as a bullet but anonymous also
 // counting `–`). When tuning these, every consumer that calls scoreBulletPool,
-// splitBullets, or extractBulletsFromText sees the change.
+// splitBullets, or extractBulletsFromSections sees the change.
 
 /** Bullet markers we recognize at the start of a line. Wider than typical to
  *  catch en-dash / mid-dot resumes alongside the common dash/asterisk/bullet.
@@ -171,9 +180,10 @@ function splitBullets(description: string): string[] {
  * Specificity." Same three checks scoreBulletPool aggregates, kept per-bullet.
  */
 export interface BulletObservation {
-  /** Original text of the bullet, as extracted from rawText. */
+  /** Original text of the bullet, as extracted from the accomplishment sections. */
   text: string;
-  /** Index in the order bullets were extracted from rawText. Stable for UI lists. */
+  /** Index in the order bullets were extracted from the accomplishment sections.
+   *  Stable for UI lists. */
   index: number;
   hasMetric: boolean;
   startsWithActionVerb: boolean;
@@ -438,9 +448,12 @@ export function getScoreLabel(tier: ScoreTier): string {
 // / Structure 30 / Completeness 30) so the anonymous /ats-resume-check page produces
 // a number close to what a signed-in user would see. The only inputs we don't
 // have without the LLM are per-role bullet attribution and skill extraction —
-// the authed scorer walks `experience[i].description` per role; we walk the
-// raw text once and treat all detected bullets as a single pool. This loses
-// the per-role flagging but keeps the aggregate score honest.
+// the authed scorer walks `experience[i].description` per role; we pool bullets
+// from the accomplishment sections (experience / projects / achievements) of
+// the typed `SectionedResume` and treat them as a single pool (#133). This
+// loses the per-role flagging but keeps the aggregate score honest, and — by
+// pooling from the sections rather than walking all of rawText and subtracting
+// skills — keeps skills out of the pool by construction.
 //
 // Layout becomes a multiplier (penalty), not a free additive dimension:
 // scanned PDFs zero the score, one non-scanned trigger applies a 15% cap,
@@ -524,20 +537,24 @@ export interface AnonymousAtsScoreInput {
    *  a layout failure regardless of other triggers because the parser can't
    *  read image-only / un-decodable text. */
   triggers: readonly string[];
-  /** Concatenated text from Tier 0. Used for bullet-level analysis. */
+  /** Concatenated text from Tier 0. No longer the bullet pool source (#133 —
+   *  bullets now come from `sections`); retained only for the redacted-date
+   *  scan (`REDACTED_DATE_RE`), which checks the whole document for year-stub
+   *  tokens like "August 20XX" regardless of section. */
   rawText: string;
   /** Typed view of the detected section structure, supplied by the cascade
-   *  (which owns section detection). The scorer reads
-   *  `sections.byName.get("skills")` to keep skills lines out of the
-   *  experience-bullet pool so they are never judged by the action-verb /
-   *  metric / length rules (#30). Replaces the retired `skillsSectionText`
-   *  side-channel (#132); the pure scorer still does not re-derive sections. */
+   *  (which owns section detection). The scorer pools experience bullets from
+   *  `sections.accomplishmentSections` (experience / projects / achievements)
+   *  via `extractBulletsFromSections` (#133). Skills are excluded by
+   *  construction — skills is not an accomplishment section, so its lines are
+   *  never in the pool and never judged by the action-verb / metric / length
+   *  rules. The pure scorer does not re-derive sections from `rawText`. */
   sections: SectionedResume;
 }
 
 const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
 const ANON_MIN_BULLETS_TO_GRADE = 3;
-/** Word-count floor for raw-text bullet extraction. Set to 1 so the displayed
+/** Word-count floor for section bullet extraction. Set to 1 so the displayed
  *  bullet count matches what the user can see in the PDF — every line that
  *  begins with a recognised marker AND has at least one non-empty word is a
  *  bullet. Quality grading (well-formed length window, action verb, metric)
@@ -566,70 +583,34 @@ const ANON_CONTACT_FIELDS: readonly {
  *  than a bullet whose text wandered onto the next line. */
 const LONE_BULLET_RE = /^\s*[•●▪◦‣▶►·�]\s*$/;
 
-/** Marker-strip a single line (bullet glyph or numbered prefix) and trim. The
- *  key both `extractBulletsFromText` and the skills-exclusion set match on. */
-function stripBulletMarker(line: string): string {
-  return line
-    .replace(BULLET_MARKER_RE, "")
-    .replace(NUMBERED_BULLET_RE, "")
-    .trim();
-}
-
 /**
- * Build the set of skills-section lines (marker-stripped) to keep out of the
- * experience-bullet pool. A skill like "Project management" is not an
- * accomplishment bullet and must not be judged by the action-verb / metric /
- * length rules or surfaced in per-bullet feedback (#30). The lines are supplied
- * by the cascade's typed section view (`sections.byName.get("skills")`), which
- * owns section detection; the pure scorer never has to re-derive sections from
- * `rawText`. (#132 — replaces the retired `skillsSectionText` slice; the set is
- * byte-identical because the lines are the same trimmed, non-empty section
- * lines, just no longer round-tripped through join/split.)
- */
-function buildSkillsExclusion(
-  skillsSectionLines: readonly string[] | undefined,
-): ReadonlySet<string> | undefined {
-  if (!skillsSectionLines || skillsSectionLines.length === 0) return undefined;
-  const set = new Set<string>();
-  for (const line of skillsSectionLines) {
-    const key = stripBulletMarker(line);
-    if (key) set.add(key);
-  }
-  return set.size > 0 ? set : undefined;
-}
-
-/**
- * Pull bullet-like lines out of raw resume text. A line counts as a bullet
- * when it starts with a recognized bullet marker (`-`, `•`, etc.) or a
- * numbered list prefix and the stripped line contains at least one word.
- * The displayed count is meant to match what a reader sees in the PDF —
- * short or low-quality bullets are still bullets, they just get flagged
- * by the downstream length / verb / metric checks in `scoreBulletPool`
- * and `analyzeBullets`.
+ * Pull bullet-like lines out of one section's line array. A line counts as a
+ * bullet when it starts with a recognized bullet marker (`-`, `•`, etc.) or a
+ * numbered list prefix and the stripped line contains at least one word. The
+ * displayed count is meant to match what a reader sees in the PDF — short or
+ * low-quality bullets are still bullets, they just get flagged by the
+ * downstream length / verb / metric checks in `scoreBulletPool` and
+ * `analyzeBullets`.
  *
- * We deliberately do NOT try to grade unmarked indented lines — most modern
- * resumes use markers, and grading paragraphs would either over-count
- * narrative summary lines or require the experience-section detection we
- * don't have without an LLM.
+ * `lines` is one section's already trimmed, non-empty text lines (as produced
+ * by `toSectionedResume` in sections.ts), so we don't skip blanks — but the
+ * lone-bullet merge still looks at the NEXT element in the same array.
  *
- * `excludeStripped` (optional) is the marker-stripped skills-section line set;
- * matching lines are dropped so bulleted skills never enter the pool (#30).
+ * We deliberately do NOT grade unmarked lines — pooling unmarked lines would
+ * over-count narrative role-summary lines. The section boundary is what scopes
+ * the pool to accomplishment content; marker detection scopes it to bullets.
  */
-function extractBulletsFromText(
-  text: string,
-  excludeStripped?: ReadonlySet<string>,
-): string[] {
-  if (!text) return [];
-  const lines = text.split(/\r?\n/);
+function extractBulletsFromLines(lines: readonly string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < lines.length; i++) {
     let rawLine = lines[i];
-    // Lone-bullet merge (#30): a marker-only line adopts the next non-empty
-    // line as its text, recovering Word-table layouts that split the glyph and
-    // its text into separate cells (and thus separate extracted lines).
+    // Lone-bullet merge (#30): a marker-only line adopts the next line in this
+    // same section as its text, recovering Word-table layouts that split the
+    // glyph and its text into separate cells (and thus separate extracted
+    // lines). The section lines are already non-empty, so the next element is
+    // the text — no blank-skipping needed.
     if (LONE_BULLET_RE.test(rawLine)) {
-      let j = i + 1;
-      while (j < lines.length && lines[j].trim() === "") j++;
+      const j = i + 1;
       if (j >= lines.length) break;
       rawLine = `${rawLine.trimEnd()} ${lines[j].trim()}`;
       i = j;
@@ -641,9 +622,30 @@ function extractBulletsFromText(
     }
     const trimmed = stripped.trim();
     if (trimmed.split(/\s+/).filter(Boolean).length < ANON_BULLET_MIN_WORDS) continue;
-    // Section-aware (#30): skills entries are not experience bullets.
-    if (excludeStripped?.has(trimmed)) continue;
     out.push(trimmed);
+  }
+  return out;
+}
+
+/**
+ * Pool experience bullets from the accomplishment sections (experience /
+ * projects / achievements) of the typed {@link SectionedResume}, in canonical
+ * policy order (#133). This is what the authed scorer already does per-role
+ * (`scoreSpecificity` walks `experience[i].description` then pools project /
+ * achievement bullets); pooling directly from the sections aligns the two
+ * surfaces and removes the last raw-text re-derivation.
+ *
+ * Skills are excluded by construction — skills is not an accomplishment
+ * section, so its lines never enter the pool and are never judged by the
+ * action-verb / metric / length rules. This is the structural replacement for
+ * the retired "pool all of rawText, subtract a skills-line set" shape (#30 /
+ * #132), which was the reason a skills side-channel was needed at all.
+ */
+function extractBulletsFromSections(sections: SectionedResume): string[] {
+  const out: string[] = [];
+  for (const name of sections.accomplishmentSections) {
+    const lines = sections.byName.get(name);
+    if (lines && lines.length > 0) out.push(...extractBulletsFromLines(lines));
   }
   return out;
 }
@@ -654,8 +656,7 @@ export function computeAnonymousAtsScore(
   // ── Bullet-level dimensions (Specificity 40, Structure 30) ─────────────
   // Same scoreBulletPool the authed scorer uses — guarantees the two
   // surfaces apply identical per-bullet rules.
-  const skillsExclude = buildSkillsExclusion(input.sections.byName.get("skills"));
-  const bullets = extractBulletsFromText(input.rawText, skillsExclude);
+  const bullets = extractBulletsFromSections(input.sections);
   const pool = scoreBulletPool(bullets);
   const observations = analyzeBullets(bullets);
   const gradable = pool.total >= ANON_MIN_BULLETS_TO_GRADE;
@@ -701,7 +702,13 @@ export function computeAnonymousAtsScore(
   });
   completenessChecks.push({
     key: "experience",
-    passed: expEntries.length > 0 || bullets.length > 0,
+    // Pass when the parser found experience entries OR there is a non-empty
+    // experience section (#133, spike §1.5 — ask the typed section structure
+    // directly instead of guessing from the global bullet count, the same
+    // re-derive-from-rawText anti-pattern this PR retires).
+    passed:
+      expEntries.length > 0 ||
+      (input.sections.byName.get("experience")?.length ?? 0) > 0,
     label: "work experience",
   });
   completenessChecks.push({
