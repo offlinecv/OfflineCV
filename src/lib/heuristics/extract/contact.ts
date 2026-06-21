@@ -36,23 +36,6 @@ interface ContactExtractionResult {
   };
 }
 
-/**
- * Walks the profile section (and optionally the full document as a fallback)
- * gathering contact fields. Regex-driven; very high precision.
- *
- * `location` is intentionally NOT subject to the document-wide fallback —
- * a non-header city/state is almost always an employer or school location,
- * not the candidate's. Names, emails, phones, and URLs can survive being
- * outside the profile (footer placement is common); location cannot.
- *
- * When PDF Link annotations are available, they're consulted as
- * a last-chance signal for `linkedin_url`, `github_url`, `portfolio_url`,
- * and `website_url` — these are the URL fields that resumes most often
- * hyperlink behind a visible word ("LinkedIn" / "GitHub" / "Portfolio")
- * rather than rendering as full text. Annotation hits report 0.95
- * confidence, matching the text-hit confidence, because the URL is
- * structurally guaranteed by the PDF.
- */
 /** LinkedIn paths that are NOT a personal profile — feed, company pages, job
  *  posts, articles, etc. Everything else under `linkedin.com/<handle>` (the
  *  `/in/<handle>` canonical form AND bare-vanity hosts) is treated as a
@@ -75,80 +58,114 @@ function normalizeUrl(raw: string | undefined): string | undefined {
   return `https://${trimmed}`;
 }
 
+/**
+ * Scans `lines` for a candidate location string, checking US patterns first
+ * then international. Returns the first match found, or `undefined`.
+ *
+ * `location` is intentionally not subject to the document-wide fallback —
+ * see the doc-comment on `extractContact` for the reasoning.
+ */
+function extractLocation(lines: PdfLine[]): string | undefined {
+  for (const line of lines) {
+    const us = US_LOCATION_RE.exec(line.text);
+    if (us) return us[0];
+  }
+  for (const line of lines) {
+    const intl = INTL_LOCATION_RE.exec(line.text);
+    if (intl && !/@/.test(intl[0])) return intl[0];
+  }
+  return undefined;
+}
+
+/**
+ * Collects URLs from `joined` that are not LinkedIn or GitHub links and
+ * splits them into `portfolio` and `website` buckets.
+ *
+ * "Other URLs" are those whose lowercased form does not include `linkedin.com`
+ * or `github.com`. Portfolio wins if the URL matches a portfolio-indicator
+ * pattern; the first remaining URL becomes the website candidate.
+ */
+function extractOtherUrls(joined: string): {
+  portfolio: string | undefined;
+  website: string | undefined;
+} {
+  const others = allMatches(URL_RE, joined).filter((u) => {
+    const lower = u.toLowerCase();
+    return !lower.includes("linkedin.com") && !lower.includes("github.com");
+  });
+  const portfolio = others.find((u) =>
+    /(portfolio|\.me\b|\.io\b|\.dev\b|behance|dribbble|medium)/i.test(u),
+  );
+  const websiteCandidates = others.filter((u) => u !== portfolio);
+  return { portfolio, website: websiteCandidates[0] };
+}
+
+function scan(lines: PdfLine[], joined: string): ContactExtractionResult {
+  const email = firstMatch(EMAIL_RE, joined);
+
+  // Extract location BEFORE phone so we can derive the parse region.
+  const location = extractLocation(lines);
+
+  // Derive the phone parse region from the extracted location; fall back to
+  // "US" when the location is absent or the country is not in our mapping.
+  const phoneRegion = regionFromLocation(location) ?? "US";
+  const phoneResult = findFirstPhone(joined, phoneRegion);
+  const phone = phoneResult?.formatted;
+
+  // LinkedIn profile URLs are usually `/in/<handle>` (LINKEDIN_RE), but some
+  // resumes link a bare vanity host (`linkedin.com/<handle>`). Fall back to
+  // any linkedin.com URL that is a profile (not /company, /jobs, … sections)
+  // so a hyperlinked "LinkedIn" anchor resolves regardless of the path shape.
+  const linkedin =
+    firstMatch(LINKEDIN_RE, joined) ??
+    allMatches(URL_RE, joined).find(isLinkedinProfileUrl);
+  const github = firstMatch(GITHUB_RE, joined);
+
+  // Other URLs that aren't linkedin/github → portfolio/website bucket.
+  const { portfolio, website } = extractOtherUrls(joined);
+
+  return {
+    email,
+    phone,
+    linkedin_url: normalizeUrl(linkedin),
+    github_url: normalizeUrl(github),
+    portfolio_url: normalizeUrl(portfolio),
+    website_url: normalizeUrl(website),
+    location,
+    confidence: {
+      email: email ? 0.98 : 0,
+      phone: phone ? 0.85 : 0,
+      linkedin_url: linkedin ? 0.95 : 0,
+      github_url: github ? 0.95 : 0,
+      portfolio_url: portfolio ? 0.6 : 0,
+      website_url: website ? 0.55 : 0,
+      location: location ? 0.75 : 0,
+    },
+  };
+}
+
+/**
+ * Walks the profile section (and optionally the full document as a fallback)
+ * gathering contact fields. Regex-driven; very high precision.
+ *
+ * `location` is intentionally NOT subject to the document-wide fallback —
+ * a non-header city/state is almost always an employer or school location,
+ * not the candidate's. Names, emails, phones, and URLs can survive being
+ * outside the profile (footer placement is common); location cannot.
+ *
+ * When PDF Link annotations are available, they're consulted as
+ * a last-chance signal for `linkedin_url`, `github_url`, `portfolio_url`,
+ * and `website_url` — these are the URL fields that resumes most often
+ * hyperlink behind a visible word ("LinkedIn" / "GitHub" / "Portfolio")
+ * rather than rendering as full text. Annotation hits report 0.95
+ * confidence, matching the text-hit confidence, because the URL is
+ * structurally guaranteed by the PDF.
+ */
 export function extractContact(
   profile: PdfSection,
   allLines: PdfLine[],
   annotations: PdfLinkAnnotation[] = [],
 ): ContactExtractionResult {
-  const scan = (lines: PdfLine[], joined: string): ContactExtractionResult => {
-    const email = firstMatch(EMAIL_RE, joined);
-
-    // Extract location BEFORE phone so we can derive the parse region.
-    // `location` is intentionally not subject to the document-wide fallback —
-    // see the doc-comment on `extractContact` for the reasoning.
-    let location: string | undefined;
-    for (const line of lines) {
-      const us = US_LOCATION_RE.exec(line.text);
-      if (us) {
-        location = us[0];
-        break;
-      }
-    }
-    if (!location) {
-      for (const line of lines) {
-        const intl = INTL_LOCATION_RE.exec(line.text);
-        if (intl && !/@/.test(intl[0])) {
-          location = intl[0];
-          break;
-        }
-      }
-    }
-
-    // Derive the phone parse region from the extracted location; fall back to
-    // "US" when the location is absent or the country is not in our mapping.
-    const phoneRegion = regionFromLocation(location) ?? "US";
-    const phoneResult = findFirstPhone(joined, phoneRegion);
-    const phone = phoneResult?.formatted;
-    // LinkedIn profile URLs are usually `/in/<handle>` (LINKEDIN_RE), but some
-    // resumes link a bare vanity host (`linkedin.com/<handle>`). Fall back to
-    // any linkedin.com URL that is a profile (not /company, /jobs, … sections)
-    // so a hyperlinked "LinkedIn" anchor resolves regardless of the path shape.
-    const linkedin =
-      firstMatch(LINKEDIN_RE, joined) ??
-      allMatches(URL_RE, joined).find(isLinkedinProfileUrl);
-    const github = firstMatch(GITHUB_RE, joined);
-
-    // Other URLs that aren't linkedin/github → portfolio/website bucket.
-    const others = allMatches(URL_RE, joined).filter((u) => {
-      const lower = u.toLowerCase();
-      return !lower.includes("linkedin.com") && !lower.includes("github.com");
-    });
-    const portfolio = others.find((u) =>
-      /(portfolio|\.me\b|\.io\b|\.dev\b|behance|dribbble|medium)/i.test(u),
-    );
-    const websiteCandidates = others.filter((u) => u !== portfolio);
-    const website = websiteCandidates[0];
-
-    return {
-      email,
-      phone,
-      linkedin_url: normalizeUrl(linkedin),
-      github_url: normalizeUrl(github),
-      portfolio_url: normalizeUrl(portfolio),
-      website_url: normalizeUrl(website),
-      location,
-      confidence: {
-        email: email ? 0.98 : 0,
-        phone: phone ? 0.85 : 0,
-        linkedin_url: linkedin ? 0.95 : 0,
-        github_url: github ? 0.95 : 0,
-        portfolio_url: portfolio ? 0.6 : 0,
-        website_url: website ? 0.55 : 0,
-        location: location ? 0.75 : 0,
-      },
-    };
-  };
-
   const profileText = profile.lines.map((l) => l.text).join(" ");
   const primary = scan(profile.lines, profileText);
 

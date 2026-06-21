@@ -15,6 +15,7 @@ import type {
   ResumeExperience,
   ResumeData,
 } from "./types.ts";
+import type { SectionedResume } from "../heuristics/sections.ts";
 
 // Re-export types for convenience
 export type { AtsScore, AtsScoreDimensions, ScoreTier };
@@ -525,11 +526,13 @@ export interface AnonymousAtsScoreInput {
   triggers: readonly string[];
   /** Concatenated text from Tier 0. Used for bullet-level analysis. */
   rawText: string;
-  /** Newline-joined text of the detected skills section, if any. Lines here are
-   *  kept out of the experience-bullet pool so skills are never judged by the
-   *  action-verb / metric / length rules (#30). Supplied by the cascade, which
-   *  owns section detection — the pure scorer does not re-derive sections. */
-  skillsSectionText?: string;
+  /** Typed view of the detected section structure, supplied by the cascade
+   *  (which owns section detection). The scorer reads
+   *  `sections.byName.get("skills")` to keep skills lines out of the
+   *  experience-bullet pool so they are never judged by the action-verb /
+   *  metric / length rules (#30). Replaces the retired `skillsSectionText`
+   *  side-channel (#132); the pure scorer still does not re-derive sections. */
+  sections: SectionedResume;
 }
 
 const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
@@ -576,16 +579,19 @@ function stripBulletMarker(line: string): string {
  * Build the set of skills-section lines (marker-stripped) to keep out of the
  * experience-bullet pool. A skill like "Project management" is not an
  * accomplishment bullet and must not be judged by the action-verb / metric /
- * length rules or surfaced in per-bullet feedback (#30). The text is supplied
- * by the cascade, which owns section detection; the pure scorer never has to
- * re-derive sections from `rawText`.
+ * length rules or surfaced in per-bullet feedback (#30). The lines are supplied
+ * by the cascade's typed section view (`sections.byName.get("skills")`), which
+ * owns section detection; the pure scorer never has to re-derive sections from
+ * `rawText`. (#132 — replaces the retired `skillsSectionText` slice; the set is
+ * byte-identical because the lines are the same trimmed, non-empty section
+ * lines, just no longer round-tripped through join/split.)
  */
 function buildSkillsExclusion(
-  skillsSectionText: string | undefined,
+  skillsSectionLines: readonly string[] | undefined,
 ): ReadonlySet<string> | undefined {
-  if (!skillsSectionText) return undefined;
+  if (!skillsSectionLines || skillsSectionLines.length === 0) return undefined;
   const set = new Set<string>();
-  for (const line of skillsSectionText.split(/\r?\n/)) {
+  for (const line of skillsSectionLines) {
     const key = stripBulletMarker(line);
     if (key) set.add(key);
   }
@@ -648,7 +654,7 @@ export function computeAnonymousAtsScore(
   // ── Bullet-level dimensions (Specificity 40, Structure 30) ─────────────
   // Same scoreBulletPool the authed scorer uses — guarantees the two
   // surfaces apply identical per-bullet rules.
-  const skillsExclude = buildSkillsExclusion(input.skillsSectionText);
+  const skillsExclude = buildSkillsExclusion(input.sections.byName.get("skills"));
   const bullets = extractBulletsFromText(input.rawText, skillsExclude);
   const pool = scoreBulletPool(bullets);
   const observations = analyzeBullets(bullets);

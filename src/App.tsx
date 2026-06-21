@@ -49,7 +49,7 @@ export default function App() {
       fieldConfidence: state.result.fieldConfidence,
       triggers: state.result.triggers,
       rawText,
-      skillsSectionText: state.result.skillsSectionText,
+      sections: state.result.sections,
     });
     return { parsed, rawText, score };
   }, [
