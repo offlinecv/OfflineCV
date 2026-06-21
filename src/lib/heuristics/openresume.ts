@@ -33,7 +33,6 @@ import {
   type PdfSection,
 } from "./sections.ts";
 import { sectionizeMarkdown } from "./markdown-lines.ts";
-import { escapeRegex } from "../jd-match/regex-utils.ts";
 import {
   extractName,
   extractContact,
@@ -96,72 +95,28 @@ export function parseHeuristicFromMarkdown(
   return buildHeuristicResult(lines, sections, "markdown");
 }
 
-// ── Promoted-identity-link de-duplication ───────────────────────────────────
-// LinkedIn/GitHub are detected document-wide (see `extractContact`), so an
-// identity link sitting in a "Links"/footer block at the bottom of the résumé
-// is promoted into the contact card. The same line also survives in whatever
-// section it fell into — most often as a phantom project/achievement entry
-// whose only content is the bare URL. We strip the promoted URLs out of the
-// rendered section bodies and drop any entry left empty, so the reconstructed
-// résumé never shows the same link twice (once in contact, once in the body it
-// was lifted from).
-
-/** Host+path of a URL, lowercased, with scheme / `www.` / trailing punctuation
- *  removed — the comparable identity of a link across "https://github.com/x",
- *  "github.com/x" and "github.com/x/". */
-function urlSlug(u: string | undefined): string | undefined {
-  if (!u) return undefined;
-  const s = u
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/[/.,;:)\]]+$/, "")
-    .toLowerCase();
-  return s.length > 0 ? s : undefined;
-}
-
-/** A line left as nothing but an introducing label ("LinkedIn:", "GitHub —",
- *  "Find me online") once its URL has been stripped. */
-const PROMOTED_LABEL_RE =
-  /^[•\-–—*\s]*(?:linkedin|github|profile|portfolio|links?|find me(?: online)?|connect|social(?: media)?|online|website)\b[\s:|/–—-]*$/i;
-
-/** Remove every occurrence of `slugs` (and any orphaned label they leave
- *  behind) from a newline-joined bullet body. A slug matches the exact identity
- *  link, NOT a deeper path or longer handle under it — a real bullet mentioning
- *  "github.com/x/some-repo" or a different handle "github.com/x-team" is
- *  preserved (the lookahead rejects a following `\w`, `/`, `.` or `-`). Returns
- *  undefined when nothing survives. */
-function stripPromotedUrls(
-  text: string | undefined,
-  slugs: string[],
-): string | undefined {
-  if (!text || slugs.length === 0) return text;
-  // Compile one matcher per slug, hoisted out of the per-line loop. The `g`
-  // flag strips every occurrence on a line (String.replace resets lastIndex
-  // between calls, so reusing the object across lines is safe).
-  const matchers = slugs.map(
-    (slug) =>
-      new RegExp(
-        `(?:https?:\\/\\/)?(?:www\\.)?${escapeRegex(slug)}\\/?(?![\\w./-])`,
-        "ig",
-      ),
-  );
-  const kept = text
-    .split("\n")
-    .map((line) => {
-      let l = line;
-      for (const re of matchers) l = l.replace(re, " ");
-      return l.replace(/\s{2,}/g, " ").trim();
-    })
-    .filter((l) => l.length > 0 && !PROMOTED_LABEL_RE.test(l));
-  return kept.length > 0 ? kept.join("\n") : undefined;
-}
-
-/** True when `url` IS one of the promoted identity links (exact, not a deeper
- *  path), so a phantom entry's header url can be cleared. */
-function isPromotedUrl(url: string | undefined, slugs: string[]): boolean {
-  const s = urlSlug(url);
-  return s !== undefined && slugs.includes(s);
+/**
+ * Remove the lines the contact extractor consumed from every section's
+ * candidate pool (#134). A promoted identity link (LinkedIn/GitHub) lifted into
+ * the contact card sits on its own line in whatever body section it fell into;
+ * `extractContact` reports those `PdfLine`s on `consumedLines`, and dropping
+ * them here — BEFORE the body extractors run — is what keeps the link from
+ * rendering a second time as a phantom project/achievement entry. Identity
+ * (referential equality) is the ownership key: the same `PdfLine` objects flow
+ * into both `extractContact` and the body extractors, so a consumed line is
+ * recognized regardless of its text. Sections whose lines are untouched are
+ * returned as-is (no new array) so the common no-promotion case is allocation-
+ * free.
+ */
+function stripConsumedLines(
+  sections: PdfSection[],
+  consumed: ReadonlySet<PdfLine>,
+): PdfSection[] {
+  if (consumed.size === 0) return sections;
+  return sections.map((section) => {
+    if (!section.lines.some((l) => consumed.has(l))) return section;
+    return { ...section, lines: section.lines.filter((l) => !consumed.has(l)) };
+  });
 }
 
 function buildHeuristicResult(
@@ -175,80 +130,30 @@ function buildHeuristicResult(
     name: "profile" as const,
     lines: [],
   };
-  const summarySection = findSection(sections, "summary");
-  const experienceSection = findSection(sections, "experience");
-  const educationSection = findSection(sections, "education");
-  const skillsSection = findSection(sections, "skills");
-  const projectsSection = findSection(sections, "projects");
-  const achievementsSection = findSection(sections, "achievements");
 
+  // Name + contact run FIRST, on the original sections — the contact extractor
+  // must see the promoted identity link to claim it. It reports the body lines
+  // it consumed (a footer "Links" line lifted into the contact card); those are
+  // stripped from every section's candidate pool BEFORE the body extractors run
+  // (#134), so the link never re-renders as a phantom project/achievement entry.
   const name = extractName(profile);
   const contact = extractContact(profile, lines, annotations);
+
+  const ownedSections = stripConsumedLines(sections, contact.consumedLines);
+
+  const summarySection = findSection(ownedSections, "summary");
+  const experienceSection = findSection(ownedSections, "experience");
+  const educationSection = findSection(ownedSections, "education");
+  const skillsSection = findSection(ownedSections, "skills");
+  const projectsSection = findSection(ownedSections, "projects");
+  const achievementsSection = findSection(ownedSections, "achievements");
+
   const summary = extractSummary(summarySection);
   const skills = extractSkills(skillsSection);
   const experience = extractExperience(experienceSection);
   const education = extractEducation(educationSection);
   const projects = extractProjects(projectsSection);
   const achievements = extractAchievements(achievementsSection);
-
-  // Strip promoted LinkedIn/GitHub links out of the rendered body so they don't
-  // render twice — once in the contact card, once in the section they were
-  // lifted from (see helpers above).
-  const promotedSlugs = [
-    urlSlug(contact.linkedin_url),
-    urlSlug(contact.github_url),
-  ].filter((s): s is string => s !== undefined);
-
-  const experienceValue =
-    promotedSlugs.length === 0
-      ? experience.value
-      : experience.value
-          .map((e) => ({
-            ...e,
-            description: stripPromotedUrls(e.description, promotedSlugs),
-          }))
-          .filter((e) => e.title.trim() || e.company.trim() || e.description);
-
-  const educationValue =
-    promotedSlugs.length === 0
-      ? education.value
-      : education.value
-          .map((e) => ({
-            ...e,
-            description: stripPromotedUrls(e.description, promotedSlugs),
-          }))
-          .filter((e) => e.institution.trim() || e.degree.trim() || e.description);
-
-  const projectsValue =
-    promotedSlugs.length === 0
-      ? projects.value
-      : projects.value
-          .map((p) => ({
-            ...p,
-            description: stripPromotedUrls(p.description, promotedSlugs),
-            url: isPromotedUrl(p.url, promotedSlugs) ? undefined : p.url,
-          }))
-          .filter((p) => p.name.trim() || p.description || p.url);
-
-  const achievementsValue =
-    promotedSlugs.length === 0
-      ? achievements.value
-      : achievements.value
-          .map((a) => ({
-            ...a,
-            description: stripPromotedUrls(a.description, promotedSlugs),
-            url: isPromotedUrl(a.url, promotedSlugs) ? undefined : a.url,
-          }))
-          .filter((a) => a.title.trim() || a.description || a.url);
-
-  const skillsValue =
-    promotedSlugs.length === 0
-      ? skills.value
-      : skills.value.filter(
-          (s) => !promotedSlugs.some((slug) => s.toLowerCase().includes(slug)),
-        );
-
-  const summaryValue = stripPromotedUrls(summary.value, promotedSlugs);
 
   const parsed: HeuristicParsedResume = {
     ...(name.value ? { full_name: name.value } : {}),
@@ -260,19 +165,21 @@ function buildHeuristicResult(
     ...(contact.github_url ? { github_url: contact.github_url } : {}),
     ...(contact.portfolio_url ? { portfolio_url: contact.portfolio_url } : {}),
     ...(contact.website_url ? { website_url: contact.website_url } : {}),
-    ...(summaryValue ? { summary: summaryValue } : {}),
-    skills: skillsValue,
+    ...(summary.value ? { summary: summary.value } : {}),
+    skills: skills.value,
     skills_explicit: [],
     skills_inferred: [],
-    experience: experienceValue,
-    education: educationValue,
-    ...(projectsValue.length > 0 ? { projects: projectsValue } : {}),
-    ...(achievementsValue.length > 0
-      ? { heuristic_achievements: achievementsValue }
+    experience: experience.value,
+    education: education.value,
+    ...(projects.value.length > 0 ? { projects: projects.value } : {}),
+    ...(achievements.value.length > 0
+      ? { heuristic_achievements: achievements.value }
       : {}),
     // Best-effort current role derivation.
-    ...(experienceValue[0]?.title ? { current_title: experienceValue[0].title } : {}),
-    ...(experienceValue[0]?.company ? { current_company: experienceValue[0].company } : {}),
+    ...(experience.value[0]?.title ? { current_title: experience.value[0].title } : {}),
+    ...(experience.value[0]?.company
+      ? { current_company: experience.value[0].company }
+      : {}),
   };
 
   const fieldConfidence: FieldConfidence = {
@@ -296,7 +203,9 @@ function buildHeuristicResult(
     parsed,
     fieldConfidence,
     sectionSource,
-    sections: toSectionedResume(sections, sectionSource),
+    // The scorer-facing view is built from the OWNED sections so the consumed
+    // identity-link lines don't double-count there either (#134).
+    sections: toSectionedResume(ownedSections, sectionSource),
   };
 }
 
