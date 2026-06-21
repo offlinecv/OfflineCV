@@ -95,6 +95,29 @@ function splitColumnCells(line: { text: string; items: PdfTextItem[] }): string[
     .filter((t) => t.length > 0);
 }
 
+/**
+ * Tokenizes a single column cell into valid skill tokens and adds them to
+ * `out`. Drops the cell entirely when it looks like a contact/profile link —
+ * this must happen before `SKILL_SPLIT_RE` (which splits on `/`) would shred
+ * the URL and leave its path segment as a spurious token.
+ */
+function tokenizeCell(cell: string, out: Set<string>): void {
+  const clean = stripBullet(cell).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
+  // A whole cell that is a profile link ("github.com/janesmith") must be
+  // dropped before SKILL_SPLIT_RE — which splits on "/" (for "HTML/CSS") —
+  // shreds the URL and leaves its path segment ("janesmith") as a token.
+  if (looksLikeContactLink(clean)) return;
+  for (const raw of clean.split(SKILL_SPLIT_RE)) {
+    // Strip trailing sentence punctuation that can appear at line-end (e.g.
+    // "Python, JavaScript, Git, SQL, Linux, AWS." → the period is a list
+    // terminator, not part of the skill name).
+    const tok = raw.trim().replace(/[.!?,;]+$/, "");
+    if (isSkillToken(tok)) {
+      out.add(tok);
+    }
+  }
+}
+
 export function extractSkills(
   skills: PdfSection | undefined,
 ): { value: string[]; confidence: number } {
@@ -103,20 +126,7 @@ export function extractSkills(
   const tokens = new Set<string>();
   for (const line of skills.lines) {
     for (const cell of splitColumnCells(line)) {
-      const clean = stripBullet(cell).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
-      // A whole cell that is a profile link ("github.com/janesmith") must be
-      // dropped before SKILL_SPLIT_RE — which splits on "/" (for "HTML/CSS") —
-      // shreds the URL and leaves its path segment ("janesmith") as a token.
-      if (looksLikeContactLink(clean)) continue;
-      for (const raw of clean.split(SKILL_SPLIT_RE)) {
-        // Strip trailing sentence punctuation that can appear at line-end (e.g.
-        // "Python, JavaScript, Git, SQL, Linux, AWS." → the period is a list
-        // terminator, not part of the skill name).
-        const tok = raw.trim().replace(/[.!?,;]+$/, "");
-        if (isSkillToken(tok)) {
-          tokens.add(tok);
-        }
-      }
+      tokenizeCell(cell, tokens);
     }
   }
   const value = [...tokens];

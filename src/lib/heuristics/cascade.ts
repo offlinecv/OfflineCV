@@ -20,6 +20,7 @@
 
 import type {
   CascadeResult,
+  HeuristicResult,
   LayoutProbes,
   LayoutTrigger,
   PdfLinkAnnotation,
@@ -29,6 +30,7 @@ import type {
   TierEngagementReason,
 } from "./types.ts";
 import { CASCADE_VERSION } from "./types.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
 import { computeConfidence } from "./confidence.ts";
 
 export interface RunCascadeOptions {
@@ -177,7 +179,7 @@ export async function runCascade(
   // ── Confidence + escalation routing ───────────────────────────────────────
 
   const { confidence, suggestedEscalation } = computeConfidence({
-    heuristic: { parsed, fieldConfidence },
+    heuristic: { parsed, fieldConfidence, sections: heuristic.sections },
     layout,
     rawCharCount: extract.rawCharCount,
     extractedCharCount,
@@ -195,9 +197,7 @@ export async function runCascade(
     tiers,
     rawText: extract.text,
     markdown,
-    ...(heuristic.skillsSectionLines?.length
-      ? { skillsSectionText: heuristic.skillsSectionLines.join("\n") }
-      : {}),
+    sections: heuristic.sections,
     linkAnnotations: extract.linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,
@@ -347,9 +347,18 @@ export async function runCascadeFromMarkdown(
   emit(tierEngaged(userType, "1", "initial", start));
   const t1Start = Date.now();
   const { parseHeuristicFromMarkdown } = await import("./openresume.ts");
-  const heuristic = haveMarkdown
+  const heuristic: HeuristicResult = haveMarkdown
     ? parseHeuristicFromMarkdown(markdown as string, rawText)
-    : { parsed: emptyParsed(), fieldConfidence: {} };
+    : {
+        parsed: emptyParsed(),
+        fieldConfidence: {},
+        // No Tier 1 ran (no markdown) — empty section view, inert (#132).
+        sections: {
+          byName: new Map(),
+          accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+          source: "regex",
+        },
+      };
   const t1Duration = Date.now() - t1Start;
 
   let parsed = heuristic.parsed;
@@ -383,7 +392,7 @@ export async function runCascadeFromMarkdown(
   };
 
   const { confidence, suggestedEscalation } = computeConfidence({
-    heuristic: { parsed, fieldConfidence },
+    heuristic: { parsed, fieldConfidence, sections: heuristic.sections },
     layout,
     // We pass rawCharCount=0 so the "low extraction ratio" hard-fail can't
     // fire — DOCX text extraction from mammoth is effectively complete by
@@ -405,9 +414,7 @@ export async function runCascadeFromMarkdown(
     tiers,
     rawText,
     markdown,
-    ...(heuristic.skillsSectionLines?.length
-      ? { skillsSectionText: heuristic.skillsSectionLines.join("\n") }
-      : {}),
+    sections: heuristic.sections,
     // DOCX cascade has no PDF annotations.
     linkAnnotations: [],
     diagnostics: {
@@ -464,6 +471,14 @@ function buildScannedResult(
     suggestedEscalation: "ocr",
     tiers: ["t0_layout"],
     rawText: extract.text,
+    // Scanned-abandon path: no Tier 1 ran, so there are no detected sections.
+    // An empty view yields `byName.get("skills") === undefined`, exactly the
+    // inert behaviour the absent `skillsSectionText` gave here before (#132).
+    sections: {
+      byName: new Map(),
+      accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+      source: "regex",
+    },
     linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,
