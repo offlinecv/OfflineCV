@@ -196,10 +196,86 @@ export function parseEntryBlocks(
 
   const lines = section.lines;
   const anchors = collectAnchors(lines, cfg.anchor);
-  if (anchors.length === 0) return [];
+  if (anchors.length === 0) {
+    // A `first_line` section with no anchorable header line is a flat bullet
+    // list (an awards / achievements list where every item is itself a bullet,
+    // so there is no name-led header for `collectAnchors` to latch onto). Rather
+    // than drop the whole section, fall back to anchoring on the bullets. The
+    // other anchors have no such list shape, so they keep returning [].
+    return cfg.anchor === "first_line" ? parseBulletList(lines, cfg) : [];
+  }
 
   const lookback = cfg.headerLookback ?? 0;
   return anchors.map((_, a) => buildEntryBlock(lines, anchors, a, cfg, lookback));
+}
+
+/**
+ * Fallback parser for a `first_line` section that is a flat bullet list — every
+ * entry is itself a bullet ("• Award name, 2023"), so `collectAnchors` found no
+ * non-bullet header line and returned zero anchors. Each TOP-LEVEL bullet (one
+ * sitting at the bullet-marker margin) becomes its own entry; any marker-less
+ * lines below it (a year on its own line, a wrapped award name) fold into that
+ * entry's title, and deeper-indented sub-bullets become its body.
+ *
+ * This assumes upstream column banding (`detectColumnBoundaries` in
+ * `pdf-extract.ts`) has already separated a two-column layout into single-column
+ * sections, so the lines here are one column's list — not two bullet margins
+ * interleaved. That banding is what makes a single per-section bullet margin a
+ * valid assumption (see #131).
+ */
+function parseBulletList(lines: PdfLine[], cfg: EntryBlockConfig): EntryBlock[] {
+  const markerX = bulletMarkerX(lines);
+  if (!Number.isFinite(markerX)) return [];
+  const anchors: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    // Top-level bullets only: a deeper-indented bullet is a sub-item of the
+    // entry above it, not a new entry.
+    if (isBulletLine(lines[i]) && lines[i].x <= markerX + 2) anchors.push(i);
+  }
+  if (anchors.length === 0) return [];
+  return anchors.map((_, a) => buildBulletEntry(lines, anchors, a, cfg));
+}
+
+/**
+ * Build the single bullet-list `EntryBlock` anchored at `anchors[a]`. The entry
+ * spans to just before the next top-level bullet: the anchor bullet's text plus
+ * any marker-less continuation lines below it form the title (date stripped off,
+ * parsed onto `dates`); deeper sub-bullets form the body. Extracted from
+ * `parseBulletList` to keep each function below the cognitive-complexity bar.
+ */
+function buildBulletEntry(
+  lines: PdfLine[],
+  anchors: number[],
+  a: number,
+  cfg: EntryBlockConfig,
+): EntryBlock {
+  const anchorIdx = anchors[a];
+  const nextIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
+
+  const titleParts = [stripBullet(lines[anchorIdx].text)];
+  const bodyBullets: PdfLine[] = [];
+  for (let i = anchorIdx + 1; i < nextIdx; i++) {
+    if (isBulletLine(lines[i])) bodyBullets.push(lines[i]);
+    else titleParts.push(lines[i].text.trim());
+  }
+
+  const combined = titleParts.join(" ").replace(/\s+/g, " ").trim();
+  const dates = parseDateRange(combined);
+  const title = stripDateRange(combined);
+
+  const body = cfg.collectBody
+    ? bodyBullets
+        .map((l) => stripBullet(l.text))
+        .join("\n")
+        .trim() || undefined
+    : undefined;
+
+  return {
+    headerLines: title ? [title] : [],
+    dates,
+    body,
+    bulletCount: cfg.collectBody ? bodyBullets.length : 0,
+  };
 }
 
 /**
