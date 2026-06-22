@@ -73,7 +73,14 @@ let serialChain: Promise<unknown> = Promise.resolve();
  * Lazily import and construct the WebLLM engine for `modelId`.
  *
  * Fast paths (no chaining):
- *   - Same model already loaded → returns the engine immediately.
+ *   - Same model already loaded → returns the engine immediately. NOTE: a
+ *     queued cross-model load can subsequently `evictAllExcept` + `.unload()`
+ *     this engine before the caller awaits inference on it. Unreachable with
+ *     the current single-picker consumer (rows are disabled while a load is
+ *     in-flight, so two cross-model loads can't be in flight while a third
+ *     caller is mid-stream on the loaded model), but a future multi-consumer
+ *     caller would need to acquire a lock around `chat.completions.create()`
+ *     to be safe.
  *   - Same model already pending → returns the in-flight promise.
  *
  * New cross-model load:

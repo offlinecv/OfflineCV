@@ -14,6 +14,11 @@
  * `close()` so the browser's modality lifecycle stays in sync with React state.
  * The dialog's own `onClose` event (fires on Esc or programmatic close) is
  * forwarded to the `onClose` prop so consumers don't need a separate listener.
+ * A programmatic-close ref flag swallows the redundant `close` event the
+ * effect's own `dialog.close()` would otherwise re-emit — without it, a
+ * consumer that does work in `onClose` (toggle state, abort a request) would
+ * see it fire twice per user gesture (once from `handleCancel`, once from the
+ * effect's close).
  *
  * Design rules (CLAUDE.md):
  *   – Semantic tokens only; no hardcoded hex or raw palette classes.
@@ -56,6 +61,10 @@ export function Dialog({
   children,
 }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
+  // True while the effect's own `dialog.close()` runs, so the close event it
+  // emits isn't re-forwarded to the caller's `onClose` (which already fired
+  // upstream — `handleCancel` for Esc, a consumer button handler otherwise).
+  const isProgrammaticCloseRef = useRef(false);
   const titleId = useId();
 
   useEffect(() => {
@@ -66,6 +75,7 @@ export function Dialog({
       // on an already-open dialog throws (InvalidStateError), so guard.
       dialog.showModal();
     } else if (!open && dialog.open) {
+      isProgrammaticCloseRef.current = true;
       dialog.close();
     }
   }, [open]);
@@ -78,6 +88,14 @@ export function Dialog({
     onClose();
   }
 
+  function handleClose(): void {
+    if (isProgrammaticCloseRef.current) {
+      isProgrammaticCloseRef.current = false;
+      return;
+    }
+    onClose();
+  }
+
   const labelledBy = title ? titleId : undefined;
   const cls = className ? `${CHROME} ${className}` : CHROME;
 
@@ -85,7 +103,7 @@ export function Dialog({
     <dialog
       ref={ref}
       onCancel={handleCancel}
-      onClose={onClose}
+      onClose={handleClose}
       aria-labelledby={labelledBy}
       aria-label={!title ? ariaLabel : undefined}
       className={cls}

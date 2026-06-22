@@ -24,11 +24,18 @@
  *      previously selected model in place (spec: "return the user to the
  *      picker on load failure").
  *
- * Cache awareness: `hasModelInCache` from `@mlc-ai/web-llm` is probed on
- * mount and after every successful load, so the picker can label each row
- * as "already downloaded" vs "will download (~N GB, one-time)". The spec's
- * "download-size warning fires only on a fresh download" is satisfied by
- * showing the size + "will download" status only on uncached rows.
+ * Cache awareness: `hasModelInCache` from `@mlc-ai/web-llm` labels each row
+ * as "already downloaded" vs "will download (~N GB, one-time)". The probe is
+ * deferred to the first picker interaction (pointer enter / focus / click) so
+ * the multi-MB WebLLM chunk does NOT download for users who never engage with
+ * the picker — webllm was previously fetched only on rewrite click, and an
+ * eager probe would defeat that lazy-load design. Until first interaction
+ * every row reads "Will download" (degrades gracefully for returning users).
+ * After interaction the probe also re-runs on every successful load via
+ * `lastCompletedAt`, so newly-cached rows flip to "Downloaded · runs offline".
+ * The spec's "download-size warning fires only on a fresh download" is
+ * satisfied by showing the size + "will download" status only on uncached
+ * rows.
  *
  * Reuse analysis (CLAUDE.md 3-tier rule):
  *   - Primitive: `Button` for every interactive control (model rows are
@@ -91,16 +98,20 @@ export function ModelSelector() {
     };
   }, []);
 
-  // Probe IndexedDB once we know WebGPU is available so the picker can
-  // label cached vs uncached rows. Re-probes are gated on the transition
-  // BACK to `idle` so we don't read IndexedDB while WebLLM is actively
-  // writing weights into it during a download — a same-store concurrent
-  // read can briefly return inconsistent state and would make a row flip
-  // to "Downloaded · runs offline" mid-download. `lastCompletedAt` is
-  // bumped only after `loadEngine` resolves successfully (see startLoad).
+  // Probe IndexedDB on first picker interaction (lazy: importing
+  // `@mlc-ai/web-llm` pulls the multi-MB chunk, so an eager mount-time probe
+  // would defeat the lazy-load design for users who never rewrite). Re-probes
+  // are gated on the transition BACK to `idle` so we don't read IndexedDB
+  // while WebLLM is actively writing weights into it during a download — a
+  // same-store concurrent read can briefly return inconsistent state and
+  // would make a row flip to "Downloaded · runs offline" mid-download.
+  // `lastCompletedAt` is bumped only after `loadEngine` resolves successfully
+  // (see startLoad), and a successful load implies prior interaction so
+  // `probed` is already true by then.
+  const [probed, setProbed] = useState(false);
   const [lastCompletedAt, setLastCompletedAt] = useState(0);
   useEffect(() => {
-    if (capability !== "available") return;
+    if (capability !== "available" || !probed) return;
     let cancelled = false;
     void probeCachedIds(MODEL_REGISTRY).then((ids) => {
       if (!cancelled) setCachedIds(ids);
@@ -108,7 +119,11 @@ export function ModelSelector() {
     return () => {
       cancelled = true;
     };
-  }, [capability, lastCompletedAt]);
+  }, [capability, probed, lastCompletedAt]);
+
+  const probeOnce = useCallback(() => {
+    setProbed(true);
+  }, []);
 
   const startLoad = useCallback(
     async (model: ModelMetadata) => {
@@ -152,6 +167,10 @@ export function ModelSelector() {
 
   const onPick = useCallback(
     (model: ModelMetadata) => {
+      // Defense-in-depth: a touch tap or programmatic focus path may bypass
+      // pointer-enter / focus on the container, but a click is an
+      // unambiguous engagement signal.
+      setProbed(true);
       if (model.id === selectedModelId && loadState.kind === "idle") return;
       // Restricted-Community models route through the consent gate the
       // first time. Type-level persistence: accepting once covers every
@@ -186,7 +205,11 @@ export function ModelSelector() {
   if (capability !== "available") return null;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div
+      className="flex flex-col gap-2"
+      onPointerEnter={probeOnce}
+      onFocus={probeOnce}
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
           Rewrite model
