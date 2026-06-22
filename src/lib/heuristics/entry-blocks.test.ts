@@ -281,6 +281,66 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
     };
   }
 
+  it("splits a flat bullet list (awards) into one entry per top-level bullet (#131)", () => {
+    // An achievements/awards section where every item is itself a bullet — there
+    // is no non-bullet header line for the first_line anchor to latch onto. Each
+    // bullet must become its own entry, with a marker-less year line below it
+    // (a wrapped tail at x=54 > the bullet margin x=48) folding into that entry.
+    const blocks = parseEntryBlocks(
+      sectionX([
+        { text: "• Globex Engineering Excellence,", x: 48 },
+        { text: "2021", x: 54 },
+        { text: "• Acme Innovation Prize, 2023", x: 48 },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].headerLines).toEqual(["Globex Engineering Excellence"]);
+    expect(blocks[0].dates.start_date).toBe("2021");
+    expect(blocks[1].headerLines).toEqual(["Acme Innovation Prize"]);
+    expect(blocks[1].dates.start_date).toBe("2023");
+  });
+
+  it("keeps a deeper sub-bullet as the entry body, not a new entry (#131)", () => {
+    // A top-level award bullet (x=48) with a deeper-indented detail bullet
+    // (x=72) under it: the sub-bullet is the body of that one award, not a
+    // second entry.
+    const blocks = parseEntryBlocks(
+      sectionX([
+        { text: "• Employee of the Year, 2024", x: 48 },
+        { text: "• Recognized for cross-team leadership.", x: 72 },
+        { text: "• Best Demo Award, 2023", x: 48 },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].headerLines).toEqual(["Employee of the Year"]);
+    expect(blocks[0].body).toContain("cross-team leadership");
+    expect(blocks[0].bulletCount).toBe(1);
+    expect(blocks[1].headerLines).toEqual(["Best Demo Award"]);
+  });
+
+  it("keeps a sub-bullet's wrapped tail in the body, not the title (#131)", () => {
+    // A deeper sub-bullet (x=72) whose text wraps onto a marker-less line (x=80):
+    // that tail must join its sub-bullet in the body, not fold into the award
+    // title. (A marker-less line is only a title continuation before the first
+    // sub-bullet — the year case in the test above.)
+    const blocks = parseEntryBlocks(
+      sectionX([
+        { text: "• Employee of the Year, 2024", x: 48 },
+        { text: "• Recognized for sustained cross-team", x: 72 },
+        { text: "leadership and mentorship", x: 80 }, // wrapped tail of sub-bullet
+        { text: "• Best Demo Award, 2023", x: 48 },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].headerLines).toEqual(["Employee of the Year"]);
+    expect(blocks[0].bulletCount).toBe(1);
+    expect(blocks[0].body).toContain("cross-team leadership and mentorship");
+    expect(blocks[0].body).not.toContain("\n"); // single logical bullet, tail joined
+  });
+
   it("treats an indented wrapped-bullet line as a continuation, not a new entry", () => {
     // Headers sit at the section margin (x=50); the bullet text (and thus a
     // wrapped continuation of it) is indented to x=73. The two wrap lines must
