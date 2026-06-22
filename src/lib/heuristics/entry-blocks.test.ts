@@ -320,6 +320,27 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
     expect(blocks[1].headerLines).toEqual(["Best Demo Award"]);
   });
 
+  it("keeps a sub-bullet's wrapped tail in the body, not the title (#131)", () => {
+    // A deeper sub-bullet (x=72) whose text wraps onto a marker-less line (x=80):
+    // that tail must join its sub-bullet in the body, not fold into the award
+    // title. (A marker-less line is only a title continuation before the first
+    // sub-bullet — the year case in the test above.)
+    const blocks = parseEntryBlocks(
+      sectionX([
+        { text: "• Employee of the Year, 2024", x: 48 },
+        { text: "• Recognized for sustained cross-team", x: 72 },
+        { text: "leadership and mentorship", x: 80 }, // wrapped tail of sub-bullet
+        { text: "• Best Demo Award, 2023", x: 48 },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].headerLines).toEqual(["Employee of the Year"]);
+    expect(blocks[0].bulletCount).toBe(1);
+    expect(blocks[0].body).toContain("cross-team leadership and mentorship");
+    expect(blocks[0].body).not.toContain("\n"); // single logical bullet, tail joined
+  });
+
   it("treats an indented wrapped-bullet line as a continuation, not a new entry", () => {
     // Headers sit at the section margin (x=50); the bullet text (and thus a
     // wrapped continuation of it) is indented to x=73. The two wrap lines must

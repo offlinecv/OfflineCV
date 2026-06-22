@@ -253,10 +253,22 @@ function buildBulletEntry(
   const nextIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
 
   const titleParts = [stripBullet(lines[anchorIdx].text)];
-  const bodyBullets: PdfLine[] = [];
+  const bodyLines: string[] = []; // one entry per logical sub-bullet
+  let sawBullet = false;
   for (let i = anchorIdx + 1; i < nextIdx; i++) {
-    if (isBulletLine(lines[i])) bodyBullets.push(lines[i]);
-    else titleParts.push(lines[i].text.trim());
+    if (isBulletLine(lines[i])) {
+      bodyLines.push(stripBullet(lines[i].text));
+      sawBullet = true;
+    } else if (sawBullet) {
+      // A marker-less line *after* a sub-bullet is that bullet's wrapped tail —
+      // keep it in the body, joined onto its bullet, not folded into the title.
+      bodyLines[bodyLines.length - 1] += " " + lines[i].text.trim();
+    } else {
+      // A marker-less line *before* any sub-bullet is a continuation of the
+      // top-level award header (e.g. a year on its own line, which is itself
+      // indented like a wrapped bullet) — fold it into the title.
+      titleParts.push(lines[i].text.trim());
+    }
   }
 
   const combined = titleParts.join(" ").replace(/\s+/g, " ").trim();
@@ -264,17 +276,14 @@ function buildBulletEntry(
   const title = stripDateRange(combined);
 
   const body = cfg.collectBody
-    ? bodyBullets
-        .map((l) => stripBullet(l.text))
-        .join("\n")
-        .trim() || undefined
+    ? bodyLines.join("\n").trim() || undefined
     : undefined;
 
   return {
     headerLines: title ? [title] : [],
     dates,
     body,
-    bulletCount: cfg.collectBody ? bodyBullets.length : 0,
+    bulletCount: cfg.collectBody ? bodyLines.length : 0,
   };
 }
 
