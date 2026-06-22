@@ -118,6 +118,17 @@ function tokenizeCell(cell: string, out: Set<string>): void {
   }
 }
 
+/** Tokenize a raw skill-list string (may carry an inline `Label:` prefix)
+ *  into validated skill tokens. The inline-label strip and split/filter logic
+ *  is identical to tokenizeCell — this export lets the inline-label re-route in
+ *  openresume.ts share the logic without duplicating it or exposing private
+ *  internals. */
+export function tokenizeSkillLine(raw: string): string[] {
+  const out = new Set<string>();
+  tokenizeCell(raw, out);
+  return [...out];
+}
+
 export function extractSkills(
   skills: PdfSection | undefined,
 ): { value: string[]; confidence: number } {
