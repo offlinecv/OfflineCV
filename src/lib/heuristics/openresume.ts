@@ -43,6 +43,7 @@ import {
   extractProjects,
   extractAchievements,
 } from "./extract-fields.ts";
+import { tokenizeSkillLine } from "./extract/skills.ts";
 
 /**
  * PDF-side Tier 1 entry point.
@@ -117,6 +118,43 @@ function stripConsumedLines(
     if (!section.lines.some((l) => consumed.has(l))) return section;
     return { ...section, lines: section.lines.filter((l) => !consumed.has(l)) };
   });
+}
+
+/**
+ * Scan boundary-only "other" buckets (opened by unrecognized headers like
+ * ADDITIONAL) for inline-labeled skill lines — e.g.
+ * "Technical Skills: SQL, PHP, JavaScript, HTML/CSS".
+ *
+ * These lines land in the `other` bucket when the section header is not in
+ * the recognized keyword list; `extractSkills(undefined)` then returns []
+ * and the completeness check flags skills as missing (#122).
+ *
+ * The label pattern is intentionally broad (any word-sequence ending in
+ * a skills/competencies/technologies keyword) so we catch common variants:
+ * "Technical Skills:", "Key Competencies:", "Core Technologies:", etc.
+ * tokenizeSkillLine strips the label prefix and passes through the same
+ * isSkillToken filter as the normal skills extractor, so the re-route
+ * produces exactly the same quality of tokens as a dedicated section.
+ */
+const INLINE_SKILL_LABEL_RE =
+  /^[A-Za-z ]+\b(skills|competencies|technologies)\s*:/i;
+
+function harvestInlineLabeledSkills(sections: PdfSection[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const section of sections) {
+    if (section.name !== "other") continue;
+    for (const line of section.lines) {
+      if (!INLINE_SKILL_LABEL_RE.test(line.text)) continue;
+      for (const tok of tokenizeSkillLine(line.text)) {
+        if (!seen.has(tok)) {
+          seen.add(tok);
+          result.push(tok);
+        }
+      }
+    }
+  }
+  return result;
 }
 
 function buildHeuristicResult(
@@ -198,6 +236,20 @@ function buildHeuristicResult(
     projects: projects.confidence,
     achievements: achievements.confidence,
   };
+
+  // #122 — ADDITIONAL/inline-label skills re-route. When the recognized SKILLS
+  // section produced nothing, scan boundary-only `other` buckets (opened by
+  // unrecognized headers like ADDITIONAL) for inline-labeled skill lines and
+  // re-route them through the shared tokenizer. Guarded on empty parsed.skills
+  // so a real SKILLS section is never touched and a truly skill-less resume
+  // still reports skills missing (no false positive).
+  if (skills.value.length === 0) {
+    const extraSkills = harvestInlineLabeledSkills(ownedSections);
+    if (extraSkills.length > 0) {
+      parsed.skills = extraSkills;
+      fieldConfidence.skills = 0.65; // modest, consistent with a recovery path
+    }
+  }
 
   return {
     parsed,
