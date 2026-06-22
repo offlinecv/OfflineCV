@@ -127,8 +127,11 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
       </p>
     ) : null;
 
+  // Inline-level trigger: `align-middle` + `ml-1` keep it next to the trailing
+  // check badge in the bullet's inline flow (the row is no longer a flexbox, so
+  // `self-baseline`/flex `gap` no longer apply).
   const compactButtonCls =
-    "group inline-flex min-h-[28px] min-w-[28px] shrink-0 items-center justify-center self-baseline rounded-md text-content-tertiary hover:text-brand-amber disabled:cursor-not-allowed disabled:opacity-60";
+    "group ml-1 inline-flex min-h-[28px] min-w-[28px] shrink-0 items-center justify-center align-middle rounded-md text-content-tertiary hover:text-brand-amber disabled:cursor-not-allowed disabled:opacity-60";
 
   return (
     // `contents` in compact mode so the trigger and the expansion participate

@@ -33,6 +33,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { detectWebGpu } from "../../lib/webllm/capability.ts";
 import { loadEngine } from "../../lib/webllm/web-llm.ts";
 import { rewriteSectionWithLlm } from "../../lib/webllm/rewrite-section.ts";
@@ -45,9 +46,17 @@ import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 import { useSectionRewriteLock } from "../../hooks/useSectionRewriteLock.ts";
 import { Button } from "@design-system";
 
-interface SectionRewriteProps {
-  /** The role's bullets, as currently displayed (after #82 overrides). */
-  bullets: readonly string[];
+/** What `useSectionRewrite` hands back so the caller can place the trigger and
+ *  the result panel in separate slots (trigger beside the role title, panel
+ *  full-width below the bullets). Both are `null` when the feature is
+ *  unavailable (no WebGPU) or there are no non-blank bullets — preserving the
+ *  "silent absence" rule from issue #63. */
+export interface SectionRewriteParts {
+  /** The "Rewrite section" button. Render it next to the role heading. */
+  trigger: ReactNode;
+  /** The loading/proposed/error result surface, or null when idle. Render it
+   *  full-width below the role's bullet list. */
+  panel: ReactNode;
 }
 
 export type Status =
@@ -75,7 +84,16 @@ function bulletsEqual(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
-export function SectionRewrite({ bullets }: SectionRewriteProps) {
+/**
+ * Section-rewrite controller. Owns all the WebLLM state and returns the trigger
+ * button and the result panel as separate nodes so the caller can position them
+ * independently — the trigger sits beside the role title, the panel spans full
+ * width under the bullets. (Previously this was a single `SectionRewrite`
+ * component that stacked button-over-panel at the bottom of the role.)
+ */
+export function useSectionRewrite(
+  bullets: readonly string[],
+): SectionRewriteParts {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [copied, setCopied] = useState(false);
@@ -172,52 +190,58 @@ export function SectionRewrite({ bullets }: SectionRewriteProps) {
     }
   }, [status]);
 
-  if (capability !== "available") return null;
-  if (trimmedBullets.length === 0) return null;
+  if (capability !== "available" || trimmedBullets.length === 0) {
+    return { trigger: null, panel: null };
+  }
 
   const myBusy = status.kind === "loading" || status.kind === "rewriting";
   const lockedByOther = isLocked && !myBusy;
 
-  return (
-    <div className="mt-1 flex flex-col gap-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onClick}
-        disabled={isLocked}
-        aria-label="Rewrite all bullets in this role"
-        className="self-start rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-[11px] text-content-secondary hover:border-border hover:bg-surface-hover"
-      >
-        {labelFor(status, lockedByOther)}
-      </Button>
-
-      {status.kind === "loading" && (
-        <LoadingPanel progress={status.progress} />
-      )}
-
-      {status.kind === "rewriting" && (
-        <p className="text-[11px] text-content-muted">
-          Rewriting the section…
-        </p>
-      )}
-
-      {status.kind === "proposed" && (
-        <ProposedSection
-          original={trimmedBullets}
-          result={status.result}
-          copied={copied}
-          onCopyAll={onCopyAll}
-          onReject={onReject}
-        />
-      )}
-
-      {status.kind === "error" && (
-        <p role="alert" className="text-[11px] text-feedback-error-text">
-          {status.message}
-        </p>
-      )}
-    </div>
+  const trigger = (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={onClick}
+      disabled={isLocked}
+      aria-label="Rewrite all bullets in this role"
+      className="shrink-0 rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-[11px] text-content-secondary hover:border-border hover:bg-surface-hover"
+    >
+      {labelFor(status, lockedByOther)}
+    </Button>
   );
+
+  const panel =
+    status.kind === "idle" ? null : (
+      <div className="mt-1 flex flex-col gap-2">
+        {status.kind === "loading" && (
+          <LoadingPanel progress={status.progress} />
+        )}
+
+        {status.kind === "rewriting" && (
+          <p className="text-[11px] text-content-muted">
+            Rewriting the section…
+          </p>
+        )}
+
+        {status.kind === "proposed" && (
+          <ProposedSection
+            original={trimmedBullets}
+            result={status.result}
+            copied={copied}
+            onCopyAll={onCopyAll}
+            onReject={onReject}
+          />
+        )}
+
+        {status.kind === "error" && (
+          <p role="alert" className="text-[11px] text-feedback-error-text">
+            {status.message}
+          </p>
+        )}
+      </div>
+    );
+
+  return { trigger, panel };
 }
 
 // Helpers exported for unit tests (see SectionRewrite.test.ts). The component
