@@ -29,7 +29,7 @@ import type {
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 import { RewriteButton } from "./RewriteButton.tsx";
-import { SectionRewrite } from "./SectionRewrite.tsx";
+import { useSectionRewrite } from "./SectionRewrite.tsx";
 
 // ── Bullet flags ──────────────────────────────────────────────────────────────
 
@@ -90,11 +90,14 @@ function FlagChip({
   title,
   ariaLabel,
   decorative = false,
+  className = "",
   children,
 }: {
   title: string;
   ariaLabel: string;
   decorative?: boolean;
+  /** Extra layout classes (e.g. inline spacing/alignment at the call site). */
+  className?: string;
   children: ReactNode;
 }) {
   const a11y = decorative
@@ -103,7 +106,7 @@ function FlagChip({
   return (
     <span
       {...a11y}
-      className="inline-flex shrink-0 items-center justify-center rounded px-1 py-0.5 bg-feedback-warning-bg text-feedback-warning-text"
+      className={`inline-flex shrink-0 items-center justify-center rounded px-1 py-0.5 bg-feedback-warning-bg text-feedback-warning-text ${className}`}
     >
       {children}
     </span>
@@ -180,43 +183,52 @@ export function ResumeBulletRow({
   const flagged = needsAttention(bullet);
   const editable = onBulletChange !== undefined;
   const displayText = override ?? bullet.text;
+  /*
+    The row is a single inline formatting context (a plain block `<li>`, NOT a
+    flexbox). The bullet text, the check badges, and the rewrite trigger are all
+    inline-level, so the badges flow right after the *last word* of the text and
+    wrap with it — instead of breaking to a new full-width flex line at the far
+    left when the bullet is long (the prior `flex flex-wrap` regression). The
+    editable text uses `display="inline"` so it wraps as real text rather than
+    sitting as an atomic `inline-flex` box. The compact RewriteButton's
+    expansion panel is block-level, so it still breaks to its own row below.
+  */
   return (
-    <li className="flex flex-wrap items-center gap-x-1 gap-y-1 py-1">
-      <p className="min-w-0 text-sm leading-snug text-content-secondary">
-        <span aria-hidden="true" className="mr-1.5 text-content-muted">
-          •
-        </span>
-        {editable ? (
-          <EditableField
-            value={displayText || undefined}
-            placeholder="empty bullet"
-            label="Bullet text"
-            textSize="sm"
-            revealOn="hover"
-            className="align-baseline text-content-secondary"
-            onCommit={(v) => onBulletChange(v)}
-          />
-        ) : (
-          displayText
-        )}
-      </p>
-      {/*
-        Flagged controls flow inline directly after the bullet text — no
-        `flex-1` on the text above, so the text sizes to its content and the
-        check badges + rewrite icon sit right next to it (not flushed into a
-        right-hand column). On a long bullet the text shrinks (`min-w-0`) and
-        wraps; the badges/icon wrap with it. The compact RewriteButton's
-        expansion panel breaks to its own full-width row.
-      */}
+    <li className="py-1 text-sm leading-snug text-content-secondary">
+      <span aria-hidden="true" className="mr-1.5 text-content-muted">
+        •
+      </span>
+      {editable ? (
+        <EditableField
+          value={displayText || undefined}
+          placeholder="empty bullet"
+          label="Bullet text"
+          textSize="sm"
+          revealOn="hover"
+          display="inline"
+          className="text-content-secondary"
+          onCommit={(v) => onBulletChange(v)}
+        />
+      ) : (
+        displayText
+      )}
       {flagged && (
         <>
           {!bullet.hasMetric && (
-            <FlagChip title="No metric" ariaLabel="No metric">
+            <FlagChip
+              title="No metric"
+              ariaLabel="No metric"
+              className="ml-1 align-middle"
+            >
               <MetricIcon />
             </FlagChip>
           )}
           {!bullet.startsWithActionVerb && (
-            <FlagChip title="Weak opening verb" ariaLabel="Weak opening verb">
+            <FlagChip
+              title="Weak opening verb"
+              ariaLabel="Weak opening verb"
+              className="ml-1 align-middle"
+            >
               <BoltIcon />
             </FlagChip>
           )}
@@ -224,6 +236,7 @@ export function ResumeBulletRow({
             <FlagChip
               title={lengthTitle(bullet)}
               ariaLabel={lengthTitle(bullet)}
+              className="ml-1 align-middle"
             >
               <span className="text-[11px] font-medium tabular-nums">
                 {lengthToken(bullet)}
@@ -401,13 +414,20 @@ export function RoleEntry({
   const sectionBullets = group.bullets.map(
     (b) => bulletOverrides?.[b.index] ?? b.text,
   );
+  // The "Rewrite section" trigger sits on the header row (right of the title);
+  // its result panel renders full-width below the bullet list.
+  const { trigger: rewriteTrigger, panel: rewritePanel } =
+    useSectionRewrite(sectionBullets);
   return (
     <div className="flex flex-col gap-1.5">
-      <RoleHeader
-        group={group}
-        overrides={overrides}
-        onFieldChange={onFieldChange}
-      />
+      <div className="flex items-start justify-between gap-2">
+        <RoleHeader
+          group={group}
+          overrides={overrides}
+          onFieldChange={onFieldChange}
+        />
+        {rewriteTrigger}
+      </div>
       {group.bullets.length > 0 ? (
         <>
           <ul className="list-none">
@@ -424,7 +444,7 @@ export function RoleEntry({
               />
             ))}
           </ul>
-          <SectionRewrite bullets={sectionBullets} />
+          {rewritePanel}
         </>
       ) : (
         <p className="text-sm text-content-tertiary">

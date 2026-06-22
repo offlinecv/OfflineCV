@@ -48,6 +48,16 @@ interface EditableFieldProps {
    *             a resume bullet) where a reserved pencil leaves an awkward gap.
    */
   revealOn?: "reserve" | "hover";
+  /**
+   * Read-mode root box model:
+   *   flex   — `inline-flex` atom; value + pencil stay on one line, the box
+   *            never breaks across lines. Default — right for short fields
+   *            (title, company, contact chips).
+   *   inline — `inline` flow; the value wraps as real text and following inline
+   *            siblings (e.g. bullet check badges) flow right after the last
+   *            word. Use for long-form prose like a resume bullet.
+   */
+  display?: "flex" | "inline";
 }
 
 export function EditableField({
@@ -59,6 +69,7 @@ export function EditableField({
   textWeight = "normal",
   textSize = "sm",
   revealOn = "reserve",
+  display = "flex",
 }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -158,16 +169,27 @@ export function EditableField({
     </span>
   );
 
+  const inlineFlow = display === "inline";
+
   // reserve: opacity-0 keeps the pencil in flow + focusable (no shift).
   // hover: display:none collapses its width; the value text covers keyboard a11y.
-  const pencilCls = hoverReveal
-    ? "shrink-0 hidden group-hover:inline-flex group-focus-within:inline-flex text-content-muted hover:text-content-secondary"
-    : "shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 text-content-muted hover:text-content-secondary";
+  // Inline flow has no flex `gap`, so the pencil carries its own left margin.
+  const pencilSpacing = inlineFlow ? "ml-1 align-middle " : "";
+  const pencilCls =
+    pencilSpacing +
+    (hoverReveal
+      ? "shrink-0 hidden group-hover:inline-flex group-focus-within:inline-flex text-content-muted hover:text-content-secondary"
+      : "shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 text-content-muted hover:text-content-secondary");
+
+  // Inline mode: plain `inline` so the value wraps as text and trailing siblings
+  // flow after the last word. Flex mode: `inline-flex` atom (value + pencil never
+  // split). `min-w-0`/`items-center`/`gap-1` only bite in flex mode.
+  const rootBox = inlineFlow
+    ? "inline"
+    : "inline-flex min-w-0 items-center gap-1";
 
   return (
-    <span
-      className={`group inline-flex min-w-0 items-center gap-1 ${className ?? ""}`}
-    >
+    <span className={`group ${rootBox} ${className ?? ""}`}>
       {valueText}
       {/* Pencil-icon edit button — hover bonus in hover mode, primary in reserve mode */}
       <Button
