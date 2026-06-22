@@ -23,12 +23,12 @@ import { useCallback, useEffect, useState } from "react";
 import { detectWebGpu } from "../../lib/webllm/capability.ts";
 import { loadEngine } from "../../lib/webllm/web-llm.ts";
 import { rewriteBulletWithLlm } from "../../lib/webllm/rewrite-bullet.ts";
-import { DEFAULT_MODEL_ID } from "../../lib/webllm/models.ts";
 import type {
   ProgressUpdate,
   WebGpuCapability,
 } from "../../lib/webllm/types.ts";
-import { Button } from "@design-system";
+import { useModelSelection } from "../../hooks/useModelSelection.ts";
+import { Button, ModelLoadProgress } from "@design-system";
 
 interface RewriteButtonProps {
   bullet: string;
@@ -52,6 +52,7 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [copied, setCopied] = useState(false);
+  const { selectedModelId } = useModelSelection();
 
   useEffect(() => {
     let cancelled = false;
@@ -70,17 +71,14 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
         kind: "loading",
         progress: { progress: 0, text: "Starting…" },
       });
-      // PR A scope: the picker (#64 Step 6) doesn't exist yet, so every
-      // rewrite uses the Apache-2.0 default. PR B will replace this with
-      // the user's persisted localStorage selection.
-      const engine = await loadEngine(DEFAULT_MODEL_ID, (progress) => {
+      const engine = await loadEngine(selectedModelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
       setStatus({ kind: "rewriting" });
       const rewritten = await rewriteBulletWithLlm(
         bullet,
         engine,
-        DEFAULT_MODEL_ID,
+        selectedModelId,
       );
       setStatus({ kind: "done", rewritten });
     } catch (err) {
@@ -90,7 +88,7 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
           err instanceof Error ? err.message : "Couldn't load the rewrite model",
       });
     }
-  }, [bullet]);
+  }, [bullet, selectedModelId]);
 
   const onCopy = useCallback(async () => {
     if (status.kind !== "done") return;
@@ -112,7 +110,12 @@ export function RewriteButton({ bullet, compact = false }: RewriteButtonProps) {
   // standalone (labelled) mode it stacks under the button, right-aligned.
   const expansion =
     status.kind === "loading" ? (
-      <LoadingPanel progress={status.progress} />
+      <ModelLoadProgress
+        progress={status.progress.progress}
+        text={status.progress.text}
+        label="Loading the bullet-rewrite model (one-time download)"
+        showExplainer
+      />
     ) : status.kind === "rewriting" ? (
       <p className="text-[11px] text-content-muted">Rewriting…</p>
     ) : status.kind === "done" ? (
@@ -190,47 +193,6 @@ function SparkleIcon({ className }: { className?: string }) {
     >
       <path d="M12 2l1.9 5.6a4 4 0 0 0 2.5 2.5L22 12l-5.6 1.9a4 4 0 0 0-2.5 2.5L12 22l-1.9-5.6a4 4 0 0 0-2.5-2.5L2 12l5.6-1.9a4 4 0 0 0 2.5-2.5L12 2z" />
     </svg>
-  );
-}
-
-function LoadingPanel({ progress }: { progress: ProgressUpdate }) {
-  const pct = Math.max(0, Math.min(100, Math.round(progress.progress * 100)));
-  return (
-    <div className="flex flex-col gap-1 rounded border border-border-light bg-surface-subtle p-2">
-      <div className="flex items-center justify-between text-[11px] text-content-secondary">
-        <span>Loading the bullet-rewrite model (~1.2GB, one-time download)</span>
-        <span className="font-mono">{pct}%</span>
-      </div>
-      <div
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Model download progress"
-        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-base"
-      >
-        <div
-          className="h-full bg-feedback-success-icon transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {progress.text && (
-        <p className="font-mono text-[10px] text-content-muted">
-          {progress.text}
-        </p>
-      )}
-      <details className="mt-1">
-        <summary className="cursor-pointer text-[10px] text-content-tertiary hover:underline">
-          What's happening?
-        </summary>
-        <p className="mt-1 max-w-prose text-[10px] leading-relaxed text-content-tertiary">
-          A small open-source language model (Qwen2.5-1.5B) is downloading to
-          your browser. It runs entirely on your device — your bullet text
-          never leaves this tab. The download takes about a minute on a
-          typical connection and is cached for next time.
-        </p>
-      </details>
-    </div>
   );
 }
 

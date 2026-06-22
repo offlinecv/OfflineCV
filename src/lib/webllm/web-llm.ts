@@ -7,46 +7,49 @@ import type { ProgressUpdate, WebLlmEngine } from "./types.ts";
 /**
  * Per-model WebLLM engine cache + loader.
  *
- * #64 moves us off a single pinned `MODEL_ID` constant and onto a registry
- * (see `models.ts`). Every cache slot, every progress-callback subscription,
- * and every one-shot telemetry flag is now keyed by model id.
+ * The picker (PR B of #64) lets the user switch between three models at
+ * runtime. Two correctness constraints follow:
  *
- * Cache shape: at most one entry per model id; in steady state (no concurrent
- * cross-model calls) at most one entry total. Multi-GB quantized models held
- * concurrently in WebGPU memory will OOM consumer hardware, so each new
- * cross-model load evicts the prior entry FIRST and asks the prior engine to
- * `.unload()` itself — see `evictAllExcept` for the resource-release path
- * and the spec note about "if exposes one, otherwise delete the Map entry
- * and let GC reclaim it." Two trade-offs follow:
+ *   1. **At most one engine resident.** Holding 2–3 multi-GB quantized
+ *      models in WebGPU memory will OOM consumer hardware. Each cross-model
+ *      load EVICTS prior loaded engines and asks the prior engine to
+ *      `.unload()` itself before starting the new download. The spec is
+ *      explicit: "call teardown/unload/dispose if it exposes one, otherwise
+ *      delete the Map entry and let GC reclaim it."
+ *   2. **Cross-model loads serialize.** Two `loadEngine` calls for
+ *      different model ids issued in the same microtask must NOT both
+ *      start downloading concurrently (the spec's "PR B's picker MUST
+ *      serialize"). PR A initially documented this as an unfixed race
+ *      because PR A's consumers only ever passed `DEFAULT_MODEL_ID`; PR B
+ *      introduces the picker, so this file now actually serializes the
+ *      cross-model path via a chained promise.
  *
- *   1. **Failure-during-switch leaves no engine.** If the user is on model A
- *      and asks for model B, A is evicted+unloaded before B starts. If B's
- *      load then fails (OOM, dropped network), the user is stuck with neither
- *      engine; the retry path is "click Y again", which starts fresh. The
- *      alternative (defer eviction until B resolves) doubles peak VRAM and
- *      can itself OOM mid-swap on a 4 GB GPU, which is the failure we're
- *      guarding against. The picker in PR B should surface this trade-off
- *      ("loading Y will unload X; if Y fails, click X to reload X").
- *   2. **Concurrent cross-model loads bypass the eviction guard.** Two
- *      `loadEngine(A,...)` and `loadEngine(B,...)` calls issued in the same
- *      microtask (before either populates the cache) each see an empty cache
- *      and each begin a load — two engines downloading concurrently. PR A
- *      consumers (RewriteButton, SectionRewrite) only ever pass
- *      `DEFAULT_MODEL_ID`, so this race is currently unreachable. PR B's
- *      picker MUST serialize cross-model `loadEngine` calls (e.g., chain
- *      them through a single in-flight promise) before exposing the
- *      multi-model surface.
+ * Implementation shape:
+ *   - `loadedEngines: Map<modelId, engine>` holds engines whose `.reload()`
+ *     finished. Only these are candidates for eviction's `.unload()` call.
+ *   - `pendingByModelId: Map<modelId, Promise<engine>>` dedupes concurrent
+ *     same-id calls — every caller for the same model gets the same
+ *     promise.
+ *   - `serialChain: Promise<unknown>` is the cross-model rate-limit. Every
+ *     NEW load chains onto it; the chain entry's body only starts the
+ *     actual download once its turn arrives. Errors in prior entries are
+ *     swallowed by a `.catch` on the chain so a failed load doesn't block
+ *     subsequent ones.
  *
- * Both behaviors have explicit tests in `web-llm.test.ts` to pin them so a
- * future refactor doesn't accidentally change them silently.
+ * Failure-during-switch is a documented trade-off: if the user is on model
+ * A and asks for B, A's `.unload()` is called when B's turn arrives. If B
+ * then fails, A is gone — the retry path is "click Y again." Deferring
+ * eviction would double peak VRAM and can OOM on a 4 GB GPU, which is the
+ * exact failure we're guarding against. PR B's picker surfaces a per-model
+ * failure message and lets the user pick again.
  *
  * Telemetry rules (per #64 AC):
- *   - `webllm_download_started({ model })` fires once per model id, ever
- *     (per page). Retries of a previously-failed model do NOT double-fire.
+ *   - `webllm_download_started({ model })` fires once per model id, ever.
+ *     Retries of a previously-failed model do NOT double-fire.
  *   - `webllm_loaded({ model })` fires once per model id, ever.
- *   - The per-rewrite first-success flags (`webllm_first_rewrite`,
- *     `webllm_first_section_rewrite`) are model-dimensioned in their own
- *     modules; this file owns only download/loaded.
+ *   - The per-rewrite first-success flags
+ *     (`webllm_first_rewrite`/`webllm_first_section_rewrite`) live in
+ *     `rewrite-bullet.ts` / `rewrite-section.ts` respectively.
  */
 
 interface CacheableEngine extends WebLlmEngine {
@@ -60,104 +63,141 @@ interface CacheableEngine extends WebLlmEngine {
   unload?: () => Promise<void>;
 }
 
-const engineCache = new Map<string, Promise<CacheableEngine>>();
+const loadedEngines = new Map<string, CacheableEngine>();
+const pendingByModelId = new Map<string, Promise<WebLlmEngine>>();
 const downloadStartedFiredFor = new Set<string>();
 const loadedFiredFor = new Set<string>();
+let serialChain: Promise<unknown> = Promise.resolve();
 
 /**
  * Lazily import and construct the WebLLM engine for `modelId`.
  *
- * The dynamic `import("@mlc-ai/web-llm")` keeps the entry chunk small:
- * Rollup emits the WebLLM module as its own chunk, and the browser only
- * downloads it on first call. The constructed engine is cached for the page
- * lifetime under its model id, so subsequent calls (and concurrent calls
- * from multiple `SectionRewrite` instances for the SAME model id) all share
- * one load.
+ * Fast paths (no chaining):
+ *   - Same model already loaded → returns the engine immediately.
+ *   - Same model already pending → returns the in-flight promise.
  *
- * Switching models: if `modelId` is NOT cached, every other entry is evicted
- * (and its engine `.unload()`'d, if exposed) before the new load begins.
- * See the file docstring for the failure-during-switch and concurrent-
- * cross-model trade-offs that follow from "evict first."
+ * New cross-model load:
+ *   - Reserves a slot in `pendingByModelId` so concurrent same-id calls
+ *     dedup immediately, even before our turn in the chain.
+ *   - Chains after the current `serialChain` tail. Our chain entry's body
+ *     waits its turn, then evicts loaded engines, fires telemetry, calls
+ *     `CreateMLCEngine`, and resolves the slot's promise.
  *
- * On failure (OOM, dropped network, etc.) only the failing model's slot is
- * reset so the UI's "Try again" can re-attempt that model. The original
- * promise still rejects to the caller — the `.catch` here only resets the
- * slot. `downloadStartedFiredFor` deliberately keeps the model's flag set,
- * so a retry doesn't double-fire `webllm_download_started` for the same
- * logical attempt (per #64 AC).
+ * On failure (OOM, dropped network, etc.) the failing slot is cleared and
+ * the original error rejects to the caller's await. The chain continues —
+ * a queued next load proceeds regardless. `downloadStartedFiredFor`
+ * deliberately keeps the model's flag set so a retry doesn't double-fire
+ * `webllm_download_started` (per #64 AC).
  */
 export function loadEngine(
   modelId: string,
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<WebLlmEngine> {
-  const existing = engineCache.get(modelId);
-  if (existing) return existing;
+  // Fast path A: this model is already loaded.
+  const loaded = loadedEngines.get(modelId);
+  if (loaded) return Promise.resolve(loaded);
 
-  // Evict before starting the new load (not after) so peak VRAM stays at
-  // one model's footprint, not the sum. See file docstring for the
-  // failure-during-switch trade-off this creates.
-  evictAllExcept(modelId);
+  // Fast path B: this model is already being loaded (concurrent same-id
+  // calls share one load).
+  const pending = pendingByModelId.get(modelId);
+  if (pending) return pending;
 
-  if (!downloadStartedFiredFor.has(modelId)) {
-    downloadStartedFiredFor.add(modelId);
-    trackWebllmDownloadStarted({ model: modelId });
-  }
-
-  const pending = (async (): Promise<CacheableEngine> => {
-    const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
-    const engine = (await CreateMLCEngine(modelId, {
-      initProgressCallback: (report) => onProgress(report),
-    })) as unknown as CacheableEngine;
-    if (!loadedFiredFor.has(modelId)) {
-      loadedFiredFor.add(modelId);
-      trackWebllmLoaded({ model: modelId });
-    }
-    return engine;
-  })();
-
-  engineCache.set(modelId, pending);
-  pending.catch(() => {
-    if (engineCache.get(modelId) === pending) engineCache.delete(modelId);
+  // Slow path: chain onto the serial tail. The promise we hand back
+  // resolves once our chain entry's body actually finishes loading.
+  let resolveOut!: (engine: WebLlmEngine) => void;
+  let rejectOut!: (err: unknown) => void;
+  const slot = new Promise<WebLlmEngine>((res, rej) => {
+    resolveOut = res;
+    rejectOut = rej;
   });
-  return pending;
+  pendingByModelId.set(modelId, slot);
+
+  const chainEntry = serialChain
+    .catch(() => {
+      // Prior load failed. Don't block us — proceed to our turn.
+    })
+    .then(async () => {
+      try {
+        // Re-check: an intervening chain entry may have already loaded our
+        // model (unlikely with current consumers but cheap to guard).
+        const alreadyLoaded = loadedEngines.get(modelId);
+        if (alreadyLoaded) {
+          resolveOut(alreadyLoaded);
+          return;
+        }
+
+        // It's our turn — evict any prior loaded engines so peak VRAM
+        // stays at one model's footprint.
+        evictAllExcept(modelId);
+
+        if (!downloadStartedFiredFor.has(modelId)) {
+          downloadStartedFiredFor.add(modelId);
+          trackWebllmDownloadStarted({ model: modelId });
+        }
+
+        const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
+        const engine = (await CreateMLCEngine(modelId, {
+          initProgressCallback: (report) => onProgress(report),
+        })) as unknown as CacheableEngine;
+
+        if (!loadedFiredFor.has(modelId)) {
+          loadedFiredFor.add(modelId);
+          trackWebllmLoaded({ model: modelId });
+        }
+
+        loadedEngines.set(modelId, engine);
+        if (pendingByModelId.get(modelId) === slot) {
+          pendingByModelId.delete(modelId);
+        }
+        resolveOut(engine);
+      } catch (err) {
+        if (pendingByModelId.get(modelId) === slot) {
+          pendingByModelId.delete(modelId);
+        }
+        rejectOut(err);
+      }
+    });
+
+  serialChain = chainEntry;
+  return slot;
 }
 
 /**
- * Drop every cached engine except `keepId` and ask each to release its
+ * Drop every loaded engine except `keepId` and ask each to release its
  * WebGPU resources via `.unload()` if it exposes one — JS GC doesn't free
  * WebGPU allocations on its own.
  *
- * The spec covers both cases: "call teardown/unload/dispose if it exposes
- * one, otherwise delete the Map entry and let GC reclaim it." Map deletion
- * is unconditional; `unload()` is best-effort.
+ * Only iterates `loadedEngines` (engines whose load actually finished).
+ * In-flight loads are NOT evicted here — they're queued via the chain and
+ * will evict themselves when their turn comes.
  *
- * Unload is fire-and-forget on the resolved promise — if a load was in
- * flight when eviction hit, we wait for it to finish before unloading
- * (and silently swallow a failed load; nothing to unload in that case).
- * Errors from `unload()` itself are also swallowed to keep them from
- * surfacing as unhandled rejections; eviction is fire-and-forget by
- * design.
+ * The spec covers both unload paths: "call teardown/unload/dispose if it
+ * exposes one, otherwise delete the Map entry and let GC reclaim it." Map
+ * deletion is unconditional; `unload()` is best-effort. Errors from
+ * `unload()` itself are swallowed so a flaky teardown doesn't surface as
+ * an unhandled rejection.
  */
 function evictAllExcept(keepId: string): void {
-  for (const [id, enginePromise] of engineCache) {
+  for (const [id, engine] of loadedEngines) {
     if (id === keepId) continue;
-    engineCache.delete(id);
-    enginePromise.then(
-      (engine) => {
-        // Best-effort unload. Silence any rejection so a flaky unload
-        // doesn't trigger an unhandled-promise-rejection warning.
-        engine.unload?.().catch(() => {});
-      },
-      () => {
-        // Load already failed — no engine to unload.
-      },
-    );
+    loadedEngines.delete(id);
+    engine.unload?.().catch((err: unknown) => {
+      // Silently swallow at the promise level so a flaky teardown doesn't
+      // surface as an unhandled rejection, but surface a console warning
+      // so an OOM-after-switch bug report has something to investigate.
+      console.warn(
+        `[webllm] unload failed for evicted model ${id}:`,
+        err,
+      );
+    });
   }
 }
 
 /** Test-only: drop caches and one-shot flags between tests. */
 export function _resetEngineCacheForTesting(): void {
-  engineCache.clear();
+  loadedEngines.clear();
+  pendingByModelId.clear();
   downloadStartedFiredFor.clear();
   loadedFiredFor.clear();
+  serialChain = Promise.resolve();
 }

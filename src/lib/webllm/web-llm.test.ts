@@ -160,24 +160,33 @@ describe("loadEngine", () => {
     expect(mockCreateMLCEngine).toHaveBeenCalledTimes(3);
   });
 
-  // NOTE: a pinning test for the cross-model concurrent-load race was
-  // attempted here and removed. Two `loadEngine` calls in the same
-  // microtask for DIFFERENT model ids passes when web-llm.test.ts runs in
-  // isolation (`npx vitest run src/lib/webllm/web-llm.test.ts`) but fails
-  // intermittently in the full parallel-worker suite. Under load, vitest's
-  // `vi.mock` of `@mlc-ai/web-llm` races with the concurrent dynamic
-  // `import("@mlc-ai/web-llm")` calls inside `loadEngine`'s IIFEs, and one
-  // call falls through to the real `MLCEngine.reload()` (which then throws
-  // `globalThis.location.origin` undefined in Node).
-  //
-  // The behavior the test was trying to pin — that both `loadEngine` calls
-  // bypass the eviction guard and start concurrent loads — is documented
-  // explicitly in `web-llm.ts`'s file docstring (trade-off #2). The race
-  // is unreachable in PR A scope because both consumers
-  // (`RewriteButton`, `SectionRewrite`) pass `DEFAULT_MODEL_ID` only. PR B
-  // introduces a picker that CAN trigger the race; serializing
-  // cross-model loads through a single in-flight promise chain is part of
-  // PR B's scope and will land with its own coverage.
+  it("cross-model concurrent loadEngine calls are serialized through the chain (PR A's TODO, picked up in PR B)", async () => {
+    // Two `loadEngine` calls for DIFFERENT model ids issued in the same
+    // microtask. With the PR B serialization in place, they execute
+    // sequentially through `serialChain` — A starts first (since A's
+    // chain entry was created first), then B starts AFTER A's load
+    // completes. The observable proof is that `CreateMLCEngine` is
+    // called in the order A then B, with `mockResolvedValueOnce`'s queue
+    // matching that order; if the chain were broken, the queue would
+    // dispatch racy and one of the two would get the wrong engine.
+    const engineA = fakeEngine(MODEL_A);
+    const engineB = fakeEngine(MODEL_B);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineB);
+
+    const [a, b] = await Promise.all([
+      loadEngine(MODEL_A, noop),
+      loadEngine(MODEL_B, noop),
+    ]);
+
+    expect(a).toBe(engineA);
+    expect(b).toBe(engineB);
+    expect(mockCreateMLCEngine).toHaveBeenCalledTimes(2);
+    // Sequencing: A came first, then B. The first call's modelId arg is
+    // MODEL_A, the second's is MODEL_B.
+    expect(mockCreateMLCEngine.mock.calls[0]![0]).toBe(MODEL_A);
+    expect(mockCreateMLCEngine.mock.calls[1]![0]).toBe(MODEL_B);
+  });
 
   it("forwards initProgressCallback reports to the supplied onProgress", async () => {
     let captured: { progress: number; text: string } | null = null;
