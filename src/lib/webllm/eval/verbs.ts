@@ -40,7 +40,10 @@ const EVAL_ONLY_EXTENSIONS: readonly string[] = [
   "shipping", "scaling", "owning",
 ];
 
-export const ACTION_VERBS: ReadonlySet<string> = new Set([
+// Module-internal: only `startsWithActionVerb` is consumed by the rubric.
+// Not exported — keeping it local avoids a dead public export and a
+// name collision with `score.ts`'s `ACTION_VERBS` (both flagged by fallow).
+const ACTION_VERBS: ReadonlySet<string> = new Set([
   ...SCORER_ACTION_VERBS,
   ...EVAL_ONLY_EXTENSIONS,
 ]);
