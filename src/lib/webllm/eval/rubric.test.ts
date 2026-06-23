@@ -126,6 +126,53 @@ describe("scoreRubric — canned bad outputs", () => {
     expect(r.noPreambleLeak).toBe(true);
   });
 
+  // ── #151: preamble-as-bullet blind spot ─────────────────────────────
+  // Llama 3.2 (3B) emits "Here are the rewritten bullets:" as its own
+  // line; the runner's line-splitter then makes it `outputBullets[0]`.
+  // Before #151, the raw-minus-bullets scan would erase the leaked
+  // preamble (because the leaked preamble IS one of the bullets) and the
+  // rubric would falsely report `noPreambleLeak = true`. Pin both shapes
+  // so a regression here is caught immediately.
+  it("flags a preamble line that survived as a bullet (#151)", () => {
+    const input = ["Worked on marketing."];
+    const output = out(
+      [
+        "Here are the rewritten bullets:",
+        "Drove a 4-touchpoint nurture sequence that lifted MQL conversion 12%.",
+      ],
+      "Here are the rewritten bullets:\nDrove a 4-touchpoint nurture sequence that lifted MQL conversion 12%.",
+    );
+    const r = scoreRubric({ input, output, fixtureKind: "weak" });
+    expect(r.noPreambleLeak).toBe(false);
+  });
+
+  it("flags a preamble-as-bullet even when raw text is empty (#151)", () => {
+    // Synthetic edge case: a test-supplied output that splits "weirdly"
+    // and produces a preamble bullet without any matching raw text. The
+    // per-bullet check must still catch it independently of the raw scan.
+    const input = ["A"];
+    const output = out(
+      ["Here is the rewritten bullets:", "Shipped a real bullet about something concrete."],
+      "",
+    );
+    const r = scoreRubric({ input, output, fixtureKind: "weak" });
+    expect(r.noPreambleLeak).toBe(false);
+  });
+
+  it("does NOT flag a legitimate bullet that contains a preamble phrase mid-text (#151)", () => {
+    // Defensive: the per-bullet check uses `startsWith`, not `includes`,
+    // so a bullet that mentions one of the leak phrases inside its body
+    // shouldn't trip the rubric. Without this anchor, "Worked as an AI
+    // engineer …" would false-positive on the "as an ai" phrase.
+    const input = ["W"];
+    const output = out([
+      "Worked as an AI engineer on the recommendation model pipeline for 3 teams.",
+      "Built the alerting system: 12 services, 99.9% uptime over the last 2 quarters.",
+    ]);
+    const r = scoreRubric({ input, output, fixtureKind: "weak" });
+    expect(r.noPreambleLeak).toBe(true);
+  });
+
   it("flags a redundant fixture whose output did NOT collapse", () => {
     const input = ["A", "B", "C"];
     const output = out([

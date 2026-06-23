@@ -117,16 +117,37 @@ export function scoreRubric({
     outputBullets.length > 0 && lengthResults.every((v) => v);
 
   // ── (5) No preamble leakage ───────────────────────────────────────────
-  // Scan the RAW response (pre-split) with the bullet text stripped out
-  // so a phrase like "rules:" inside a legitimate bullet doesn't trip.
-  // Lowercased substring match; the phrase list is conservative.
+  // Two failure modes; we have to catch both.
+  //
+  // (a) Preamble survived in the raw response between/around bullets.
+  //     Scan the RAW response with the bullet text stripped so a phrase
+  //     like "rules:" embedded in a legitimate bullet doesn't trip.
+  //
+  // (b) Preamble survived AS a bullet — e.g. Llama emitting
+  //     "Here are the rewritten bullets:" as its own line, which the
+  //     line-splitter then treats as outputBullets[0]. Without an
+  //     explicit per-bullet check, the raw-minus-bullets scan in (a)
+  //     would erase the leaked preamble from rawMinusBullets and report
+  //     a false-positive pass.
+  //
+  // The per-bullet check uses `startsWith`, not `includes`: a preamble
+  // is always at the START of a line by shape (it's what the model
+  // emits BEFORE the real bullets). `includes` would false-positive on
+  // legitimate bullets like "Worked as an AI engineer on …" (which
+  // contains the "as an ai" phrase mid-bullet).
+  //
+  // Fix for #151. Both checks must pass for `noPreambleLeak` to be true.
   let rawMinusBullets = output.raw.toLowerCase();
   for (const b of outputBullets) {
     rawMinusBullets = rawMinusBullets.replace(b.toLowerCase(), "");
   }
-  const noPreambleLeak = !PREAMBLE_LEAK_PHRASES.some((p) =>
-    rawMinusBullets.includes(p),
-  );
+  const anyBulletIsPreamble = outputBullets.some((b) => {
+    const lower = b.trim().toLowerCase();
+    return PREAMBLE_LEAK_PHRASES.some((p) => lower.startsWith(p));
+  });
+  const noPreambleLeak =
+    !anyBulletIsPreamble &&
+    !PREAMBLE_LEAK_PHRASES.some((p) => rawMinusBullets.includes(p));
 
   // ── (6) Dedup effectiveness ───────────────────────────────────────────
   // Only meaningful for fixtures that explicitly stage redundancy. For
