@@ -5,6 +5,16 @@
  * `useModelSelection` — drives the user's persisted WebLLM model choice and
  * the per-license-type consent state that gates Restricted-Community models.
  *
+ * State is held in a MODULE-LEVEL store (not per-hook-instance `useState`) and
+ * consumed via `useSyncExternalStore`. Three independent consumers call this
+ * hook on the same page — `ModelSelector`, `RewriteButton` (one per bullet),
+ * `SectionRewrite` (one per role). With per-instance `useState`, a write in
+ * the picker would NOT propagate to the rewrite buttons in the same tab: the
+ * `storage` event only fires in OTHER same-origin tabs, never in the writing
+ * tab. The module-level store fixes that — every write calls `notify()`
+ * synchronously so all subscribers re-render with the new snapshot. The
+ * cross-tab `storage` listener folds into the same notify path.
+ *
  * Persisted to `localStorage` so the picker reflects the same selection
  * across page reloads. Both reads and writes are wrapped in try/catch so a
  * locked-down or full storage doesn't crash the picker — we fall back to
@@ -22,7 +32,7 @@
  * `useSectionRewriteLock`.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import {
   DEFAULT_MODEL_ID,
   isRegisteredModelId,
@@ -77,6 +87,12 @@ export function writePersistedConsent(licenseType: LicenseType): void {
   safeSet(CONSENT_KEY_PREFIX + licenseType, CONSENT_VALUE);
 }
 
+function readAllConsent(): Record<LicenseType, boolean> {
+  const map = {} as Record<LicenseType, boolean>;
+  for (const t of LICENSE_TYPES) map[t] = hasPersistedConsent(t);
+  return map;
+}
+
 export interface ModelSelectionState {
   /** The currently chosen model id (always a valid registry entry). */
   selectedModelId: string;
@@ -88,48 +104,114 @@ export interface ModelSelectionState {
   recordConsent: (licenseType: LicenseType) => void;
 }
 
-function readAllConsent(): Record<LicenseType, boolean> {
+// ─── Module-level shared store ─────────────────────────────────────────────
+// State lives at the module level so a write in any consumer notifies every
+// other consumer in the same tab. Snapshot functions return the same object
+// reference between writes, satisfying useSyncExternalStore's stability
+// contract; mutations replace the reference wholesale.
+
+let currentModelId: string = readPersistedModelId();
+let currentConsentMap: Record<LicenseType, boolean> = readAllConsent();
+const listeners = new Set<() => void>();
+
+function notify(): void {
+  for (const l of listeners) l();
+}
+
+function subscribe(listener: () => void): () => void {
+  ensureStorageListener();
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function getModelIdSnapshot(): string {
+  return currentModelId;
+}
+
+function getConsentMapSnapshot(): Record<LicenseType, boolean> {
+  return currentConsentMap;
+}
+
+// SSR safety: `useSyncExternalStore` demands a server snapshot. We don't
+// SSR, but the fallback shape still has to satisfy referential stability
+// across calls — so use frozen module-level constants.
+const SERVER_CONSENT_MAP: Record<LicenseType, boolean> = (() => {
   const map = {} as Record<LicenseType, boolean>;
-  for (const t of LICENSE_TYPES) map[t] = hasPersistedConsent(t);
+  for (const t of LICENSE_TYPES) map[t] = false;
   return map;
+})();
+function getServerModelIdSnapshot(): string {
+  return DEFAULT_MODEL_ID;
+}
+function getServerConsentMapSnapshot(): Record<LicenseType, boolean> {
+  return SERVER_CONSENT_MAP;
+}
+
+// Cross-tab sync: when another tab writes a new selection or consent, mirror
+// it into THIS tab's store. Registered lazily once per page so every
+// subscribe doesn't pile on listeners.
+let storageListenerWired = false;
+function ensureStorageListener(): void {
+  if (storageListenerWired) return;
+  if (typeof globalThis.addEventListener !== "function") return;
+  storageListenerWired = true;
+  globalThis.addEventListener("storage", (event: StorageEvent) => {
+    if (event.key === null) {
+      // localStorage.clear() — refresh both.
+      currentModelId = readPersistedModelId();
+      currentConsentMap = readAllConsent();
+      notify();
+      return;
+    }
+    if (event.key === MODEL_ID_KEY) {
+      currentModelId = readPersistedModelId();
+      notify();
+    } else if (event.key.startsWith(CONSENT_KEY_PREFIX)) {
+      currentConsentMap = readAllConsent();
+      notify();
+    }
+  });
+}
+
+function setSelectedModelIdInternal(id: string): void {
+  // Defensive — a stale id (e.g. from a deleted registry entry) silently
+  // falls back to default rather than poisoning the picker.
+  const validated = isRegisteredModelId(id) ? id : DEFAULT_MODEL_ID;
+  if (validated === currentModelId) {
+    // Idempotent — still persist in case the localStorage value drifted from
+    // the in-memory store (it shouldn't, but the cost is a single write).
+    writePersistedModelId(validated);
+    return;
+  }
+  currentModelId = validated;
+  writePersistedModelId(validated);
+  notify();
+}
+
+function recordConsentInternal(licenseType: LicenseType): void {
+  if (currentConsentMap[licenseType] === true) {
+    // Idempotent — already accepted; nothing to notify.
+    writePersistedConsent(licenseType);
+    return;
+  }
+  currentConsentMap = { ...currentConsentMap, [licenseType]: true };
+  writePersistedConsent(licenseType);
+  notify();
 }
 
 export function useModelSelection(): ModelSelectionState {
-  const [selectedModelId, setSelectedModelIdState] = useState<string>(
-    readPersistedModelId,
+  const selectedModelId = useSyncExternalStore(
+    subscribe,
+    getModelIdSnapshot,
+    getServerModelIdSnapshot,
   );
-  // Mirror consent into React state so consumer re-reads of `hasConsent`
-  // are driven by re-renders, not by incidental coupling with other state
-  // changes. Without this mirror, a future refactor that calls
-  // `recordConsent` without immediately changing some other state would
-  // leave the consumer holding a stale view ("no consent yet") even though
-  // localStorage said yes — and the consent gate would silently re-fire.
-  const [consentMap, setConsentMap] = useState<Record<LicenseType, boolean>>(
-    readAllConsent,
+  const consentMap = useSyncExternalStore(
+    subscribe,
+    getConsentMapSnapshot,
+    getServerConsentMapSnapshot,
   );
-
-  // Cross-tab sync: when another tab writes a new selection or consent,
-  // mirror it into this tab's React state. Without the listener, Tab B
-  // keeps showing Tab A's old selection / unaware that consent was given.
-  useEffect(() => {
-    function onStorage(event: StorageEvent): void {
-      if (event.key === null) {
-        // localStorage.clear() — refresh both.
-        setSelectedModelIdState(readPersistedModelId());
-        setConsentMap(readAllConsent());
-        return;
-      }
-      if (event.key === "resumelint:webllm:modelId") {
-        setSelectedModelIdState(readPersistedModelId());
-      } else if (event.key.startsWith("resumelint:webllm:consent:")) {
-        setConsentMap(readAllConsent());
-      }
-    }
-    globalThis.addEventListener?.("storage", onStorage);
-    return () => {
-      globalThis.removeEventListener?.("storage", onStorage);
-    };
-  }, []);
 
   const hasConsent = useCallback(
     (licenseType: LicenseType) => consentMap[licenseType] === true,
@@ -137,21 +219,11 @@ export function useModelSelection(): ModelSelectionState {
   );
 
   const recordConsent = useCallback((licenseType: LicenseType) => {
-    writePersistedConsent(licenseType);
-    setConsentMap((prev) => ({ ...prev, [licenseType]: true }));
+    recordConsentInternal(licenseType);
   }, []);
 
   const setSelectedModelId = useCallback((id: string) => {
-    if (!isRegisteredModelId(id)) {
-      // Defensive — caller should validate before calling, but a stale id
-      // (e.g. from a deleted registry entry) silently falls back to default
-      // rather than poisoning the picker.
-      setSelectedModelIdState(DEFAULT_MODEL_ID);
-      writePersistedModelId(DEFAULT_MODEL_ID);
-      return;
-    }
-    setSelectedModelIdState(id);
-    writePersistedModelId(id);
+    setSelectedModelIdInternal(id);
   }, []);
 
   return {
@@ -162,7 +234,11 @@ export function useModelSelection(): ModelSelectionState {
   };
 }
 
-/** Test-only: wipe persisted selection + consent so each test starts clean. */
+/**
+ * Test-only: wipe persisted selection + consent AND reset the module-level
+ * store so subsequent tests start clean. Notifies subscribers so any
+ * still-mounted consumer from a prior test gets a fresh snapshot.
+ */
 export function _resetPersistedModelSelectionForTesting(): void {
   try {
     globalThis.localStorage?.removeItem(MODEL_ID_KEY);
@@ -175,4 +251,7 @@ export function _resetPersistedModelSelectionForTesting(): void {
   } catch {
     // ignore
   }
+  currentModelId = readPersistedModelId();
+  currentConsentMap = readAllConsent();
+  notify();
 }

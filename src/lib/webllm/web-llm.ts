@@ -70,17 +70,32 @@ const loadedFiredFor = new Set<string>();
 let serialChain: Promise<unknown> = Promise.resolve();
 
 /**
+ * Per-model count of in-flight `engine.chat.completions.create()` calls.
+ * `evictAllExcept` consults this before invoking `.unload()` so an engine
+ * mid-inference doesn't get torn down underneath its caller — which is
+ * reachable in PR B because `RewriteButton` / `SectionRewrite` are separate
+ * consumers from the picker, not disabled by its loading state. While the
+ * picker is downloading model B, a rewrite caller can fast-path to loaded
+ * engine A; the picker's chain then arrives at `evictAllExcept(B)` and would
+ * call `A.unload()` mid-stream. With this tracker, the unload is deferred
+ * into `pendingUnload` until `releaseInference` drains it on completion.
+ */
+const inflightInferenceCount = new Map<string, number>();
+const pendingUnload = new Map<string, CacheableEngine>();
+
+/**
  * Lazily import and construct the WebLLM engine for `modelId`.
  *
  * Fast paths (no chaining):
- *   - Same model already loaded → returns the engine immediately. NOTE: a
- *     queued cross-model load can subsequently `evictAllExcept` + `.unload()`
- *     this engine before the caller awaits inference on it. Unreachable with
- *     the current single-picker consumer (rows are disabled while a load is
- *     in-flight, so two cross-model loads can't be in flight while a third
- *     caller is mid-stream on the loaded model), but a future multi-consumer
- *     caller would need to acquire a lock around `chat.completions.create()`
- *     to be safe.
+ *   - Same model already loaded → returns the engine immediately. The
+ *     post-return eviction race (a queued cross-model load running
+ *     `evictAllExcept` + `.unload()` mid-inference) IS reachable in PR B:
+ *     `RewriteButton` / `SectionRewrite` are separate consumers from the
+ *     picker, not disabled by its loading state, so a bullet rewrite can
+ *     fast-path to engine A while the picker is downloading B. Callers must
+ *     wrap their `chat.completions.create()` in `acquireInference(modelId)`
+ *     / `releaseInference(modelId)` — `evictAllExcept` consults the
+ *     in-flight counter and defers `.unload()` for any engine still in use.
  *   - Same model already pending → returns the in-flight promise.
  *
  * New cross-model load:
@@ -183,11 +198,25 @@ export function loadEngine(
  * deletion is unconditional; `unload()` is best-effort. Errors from
  * `unload()` itself are swallowed so a flaky teardown doesn't surface as
  * an unhandled rejection.
+ *
+ * In-flight inference: if the engine has callers mid-`chat.completions.create()`
+ * (tracked via `inflightInferenceCount`), its `.unload()` is parked in
+ * `pendingUnload`. `releaseInference` drains it when the last in-flight call
+ * finishes. The engine has already been removed from `loadedEngines`, so any
+ * subsequent `loadEngine` for the same id goes through the chain and gets a
+ * fresh download — the parked engine handle is solely for the deferred
+ * `.unload()` call, not for serving new callers.
  */
 function evictAllExcept(keepId: string): void {
   for (const [id, engine] of loadedEngines) {
     if (id === keepId) continue;
     loadedEngines.delete(id);
+    if ((inflightInferenceCount.get(id) ?? 0) > 0) {
+      // Park the unload — releaseInference will drain it when the last
+      // mid-flight inference call finishes.
+      pendingUnload.set(id, engine);
+      continue;
+    }
     engine.unload?.().catch((err: unknown) => {
       // Silently swallow at the promise level so a flaky teardown doesn't
       // surface as an unhandled rejection, but surface a console warning
@@ -200,11 +229,52 @@ function evictAllExcept(keepId: string): void {
   }
 }
 
+/**
+ * Bracket an `engine.chat.completions.create()` call with `acquire` /
+ * `release`. Callers MUST pair: every `acquireInference(id)` must be
+ * matched by exactly one `releaseInference(id)`, even on error paths
+ * (use `try { … } finally { releaseInference(id); }`). While the count is
+ * positive, `evictAllExcept` parks the engine in `pendingUnload` rather
+ * than calling `.unload()` — the deferred unload runs the moment the
+ * count returns to zero.
+ *
+ * The model id passed here is the same id the caller used to acquire the
+ * engine via `loadEngine`. We don't infer it from the engine handle
+ * because `@mlc-ai/web-llm`'s `MLCEngine` doesn't expose its `modelId`.
+ */
+export function acquireInference(modelId: string): void {
+  inflightInferenceCount.set(
+    modelId,
+    (inflightInferenceCount.get(modelId) ?? 0) + 1,
+  );
+}
+
+export function releaseInference(modelId: string): void {
+  const next = (inflightInferenceCount.get(modelId) ?? 0) - 1;
+  if (next <= 0) {
+    inflightInferenceCount.delete(modelId);
+    const parked = pendingUnload.get(modelId);
+    if (parked) {
+      pendingUnload.delete(modelId);
+      parked.unload?.().catch((err: unknown) => {
+        console.warn(
+          `[webllm] deferred unload failed for evicted model ${modelId}:`,
+          err,
+        );
+      });
+    }
+    return;
+  }
+  inflightInferenceCount.set(modelId, next);
+}
+
 /** Test-only: drop caches and one-shot flags between tests. */
 export function _resetEngineCacheForTesting(): void {
   loadedEngines.clear();
   pendingByModelId.clear();
   downloadStartedFiredFor.clear();
   loadedFiredFor.clear();
+  inflightInferenceCount.clear();
+  pendingUnload.clear();
   serialChain = Promise.resolve();
 }

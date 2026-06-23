@@ -80,7 +80,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     globals: true,
     coverage: {
       // v8 provider; emit lcov so `fallow audit --coverage` can compute

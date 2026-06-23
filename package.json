@@ -39,6 +39,7 @@
     "eslint-plugin-react": "^7.37.5",
     "fallow": "^2.96.0",
     "globals": "^16.2.0",
+    "jsdom": "^26.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.3.1",
     "typescript": "~5.8.3",

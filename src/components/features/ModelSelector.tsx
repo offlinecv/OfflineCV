@@ -85,7 +85,16 @@ export function ModelSelector() {
     recordConsent,
   } = useModelSelection();
   const [loadState, setLoadState] = useState<LoadState>({ kind: "idle" });
+  // Split the consent dialog's open-ness from the model data so we can drive
+  // the Dialog primitive's `open` prop to false BEFORE the React tree
+  // unmounts the dialog node. The Dialog effect's `dialog.close()` is what
+  // restores focus to the previously-focused element; an unmount-while-open
+  // path skips that and strands the focus ring. `consentModel` stays set
+  // for one extra frame after `consentOpen` flips to false (see the rAF
+  // effect below) so the dialog has its model data through the close
+  // lifecycle.
   const [consentModel, setConsentModel] = useState<ModelMetadata | null>(null);
+  const [consentOpen, setConsentOpen] = useState(false);
   const [cachedIds, setCachedIds] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
@@ -97,6 +106,18 @@ export function ModelSelector() {
       cancelled = true;
     };
   }, []);
+
+  // After the consent dialog closes, defer the `consentModel` null-out one
+  // frame so the Dialog primitive's effect has time to call
+  // `dialog.close()` (which restores focus) before React unmounts the
+  // <dialog> node.
+  useEffect(() => {
+    if (consentOpen || consentModel === null) return;
+    const handle = requestAnimationFrame(() => {
+      setConsentModel(null);
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [consentOpen, consentModel]);
 
   // Probe IndexedDB on first picker interaction (lazy: importing
   // `@mlc-ai/web-llm` pulls the multi-MB chunk, so an eager mount-time probe
@@ -180,6 +201,7 @@ export function ModelSelector() {
         !hasConsent(model.licenseType)
       ) {
         setConsentModel(model);
+        setConsentOpen(true);
         return;
       }
       void startLoad(model);
@@ -191,7 +213,8 @@ export function ModelSelector() {
     if (!consentModel) return;
     recordConsent(consentModel.licenseType);
     const model = consentModel;
-    setConsentModel(null);
+    // Close (focus restores), then the rAF effect nulls out consentModel.
+    setConsentOpen(false);
     void startLoad(model);
   }, [consentModel, recordConsent, startLoad]);
 
@@ -199,7 +222,7 @@ export function ModelSelector() {
     // Spec: decline must NOT start the download and must leave the
     // previously-selected model in place. `selectedModelId` was never
     // touched, so closing the dialog is the entire revert.
-    setConsentModel(null);
+    setConsentOpen(false);
   }, []);
 
   if (capability !== "available") return null;
@@ -245,7 +268,7 @@ export function ModelSelector() {
       {consentModel && (
         <ConsentDialog
           model={consentModel}
-          open={true}
+          open={consentOpen}
           onAccept={onConsentAccept}
           onDecline={onConsentDecline}
         />

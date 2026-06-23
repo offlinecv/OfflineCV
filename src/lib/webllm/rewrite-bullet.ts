@@ -4,6 +4,7 @@
 import { trackWebllmFirstRewrite } from "../analytics.ts";
 import { cleanRewriteLine } from "./post-process.ts";
 import type { WebLlmEngine } from "./types.ts";
+import { acquireInference, releaseInference } from "./web-llm.ts";
 
 /**
  * Prompt template. Single source of truth — the UI's "What's happening?"
@@ -54,24 +55,31 @@ export async function rewriteBulletWithLlm(
   engine: WebLlmEngine,
   modelId: string,
 ): Promise<string> {
-  const response = await engine.chat.completions.create({
-    messages: [
-      { role: "system", content: BULLET_REWRITE_SYSTEM_PROMPT },
-      { role: "user", content: buildUserPrompt(bullet) },
-    ],
-    temperature: 0.3,
-    max_tokens: 120,
-  });
-  const raw = response.choices[0]?.message?.content ?? "";
-  const cleaned = postProcess(raw);
-  // Only count it as a "first rewrite" when the model actually returned
-  // usable output. A null/empty response is a failure mode, not a funnel
-  // step worth measuring against download conversion.
-  if (!firstRewriteFiredFor.has(modelId) && cleaned.length > 0) {
-    firstRewriteFiredFor.add(modelId);
-    trackWebllmFirstRewrite({ model: modelId });
+  // Acquire so a concurrent picker switch can't `.unload()` this engine
+  // mid-stream. Paired in `finally` so an error path still releases.
+  acquireInference(modelId);
+  try {
+    const response = await engine.chat.completions.create({
+      messages: [
+        { role: "system", content: BULLET_REWRITE_SYSTEM_PROMPT },
+        { role: "user", content: buildUserPrompt(bullet) },
+      ],
+      temperature: 0.3,
+      max_tokens: 120,
+    });
+    const raw = response.choices[0]?.message?.content ?? "";
+    const cleaned = postProcess(raw);
+    // Only count it as a "first rewrite" when the model actually returned
+    // usable output. A null/empty response is a failure mode, not a funnel
+    // step worth measuring against download conversion.
+    if (!firstRewriteFiredFor.has(modelId) && cleaned.length > 0) {
+      firstRewriteFiredFor.add(modelId);
+      trackWebllmFirstRewrite({ model: modelId });
+    }
+    return cleaned;
+  } finally {
+    releaseInference(modelId);
   }
-  return cleaned;
 }
 
 function postProcess(raw: string): string {
