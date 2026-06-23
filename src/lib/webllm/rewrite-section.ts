@@ -9,6 +9,7 @@ import {
 import { cleanRewriteLine } from "./post-process.ts";
 import { checkNumbersPreserved } from "./preserve-numbers.ts";
 import type { WebLlmEngine } from "./types.ts";
+import { acquireInference, releaseInference } from "./web-llm.ts";
 
 /**
  * System prompt for whole-section rewrite.
@@ -109,44 +110,54 @@ export async function rewriteSectionWithLlm(
     inputBulletCount: bullets.length,
   });
 
-  const response = await engine.chat.completions.create({
-    messages: [
-      { role: "system", content: SECTION_REWRITE_SYSTEM_PROMPT },
-      { role: "user", content: buildSectionUserPrompt(bullets) },
-    ],
-    temperature: 0.3,
-    max_tokens: sectionMaxTokens(bullets.length),
-  });
+  // Acquire so a concurrent picker switch can't `.unload()` this engine
+  // mid-stream. Paired in `finally` so an error path still releases.
+  acquireInference(modelId);
+  try {
+    const response = await engine.chat.completions.create({
+      messages: [
+        { role: "system", content: SECTION_REWRITE_SYSTEM_PROMPT },
+        { role: "user", content: buildSectionUserPrompt(bullets) },
+      ],
+      temperature: 0.3,
+      max_tokens: sectionMaxTokens(bullets.length),
+    });
 
-  const raw = response.choices[0]?.message?.content ?? "";
-  const rewrittenBullets = raw
-    .split("\n")
-    .map((line) => cleanRewriteLine(line))
-    .filter((line) => line.length > 0);
+    const raw = response.choices[0]?.message?.content ?? "";
+    const rewrittenBullets = raw
+      .split("\n")
+      .map((line) => cleanRewriteLine(line))
+      .filter((line) => line.length > 0);
 
-  const preservation = checkNumbersPreserved(bullets, rewrittenBullets);
+    const preservation = checkNumbersPreserved(bullets, rewrittenBullets);
 
-  trackWebllmSectionRewriteCompleted({
-    model: modelId,
-    inputBulletCount: bullets.length,
-    outputBulletCount: rewrittenBullets.length,
-    numbersPreserved: preservation.ok,
-  });
+    trackWebllmSectionRewriteCompleted({
+      model: modelId,
+      inputBulletCount: bullets.length,
+      outputBulletCount: rewrittenBullets.length,
+      numbersPreserved: preservation.ok,
+    });
 
-  // Same gating as the per-bullet path: only count the first *successful*
-  // section rewrite (one with at least one bullet) so a null/empty model
-  // response doesn't pollute the conversion funnel.
-  if (!firstSectionRewriteFiredFor.has(modelId) && rewrittenBullets.length > 0) {
-    firstSectionRewriteFiredFor.add(modelId);
-    trackWebllmFirstSectionRewrite({ model: modelId });
+    // Same gating as the per-bullet path: only count the first *successful*
+    // section rewrite (one with at least one bullet) so a null/empty model
+    // response doesn't pollute the conversion funnel.
+    if (
+      !firstSectionRewriteFiredFor.has(modelId) &&
+      rewrittenBullets.length > 0
+    ) {
+      firstSectionRewriteFiredFor.add(modelId);
+      trackWebllmFirstSectionRewrite({ model: modelId });
+    }
+
+    return {
+      bullets: rewrittenBullets,
+      numbersPreserved: preservation.ok,
+      droppedNumbers: preservation.dropped,
+      addedNumbers: preservation.added,
+    };
+  } finally {
+    releaseInference(modelId);
   }
-
-  return {
-    bullets: rewrittenBullets,
-    numbersPreserved: preservation.ok,
-    droppedNumbers: preservation.dropped,
-    addedNumbers: preservation.added,
-  };
 }
 
 /** Test-only: drop the per-model one-shot telemetry flags between tests. */

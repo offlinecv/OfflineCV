@@ -37,14 +37,14 @@ import type { ReactNode } from "react";
 import { detectWebGpu } from "../../lib/webllm/capability.ts";
 import { loadEngine } from "../../lib/webllm/web-llm.ts";
 import { rewriteSectionWithLlm } from "../../lib/webllm/rewrite-section.ts";
-import { DEFAULT_MODEL_ID } from "../../lib/webllm/models.ts";
 import type {
   ProgressUpdate,
   WebGpuCapability,
 } from "../../lib/webllm/types.ts";
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 import { useSectionRewriteLock } from "../../hooks/useSectionRewriteLock.ts";
-import { Button } from "@design-system";
+import { useModelSelection } from "../../hooks/useModelSelection.ts";
+import { Button, ModelLoadProgress } from "@design-system";
 
 /** What `useSectionRewrite` hands back so the caller can place the trigger and
  *  the result panel in separate slots (trigger beside the role title, panel
@@ -98,6 +98,7 @@ export function useSectionRewrite(
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [copied, setCopied] = useState(false);
   const { isLocked, acquire } = useSectionRewriteLock();
+  const { selectedModelId } = useModelSelection();
 
   // Trim blank bullets here once — passed to both the model (so it doesn't
   // see empties) and the before/after panel (so the original column matches
@@ -144,17 +145,14 @@ export function useSectionRewrite(
         kind: "loading",
         progress: { progress: 0, text: "Starting…" },
       });
-      // PR A scope: the picker (#64 Step 6) doesn't exist yet, so every
-      // section rewrite uses the Apache-2.0 default. PR B will replace this
-      // with the user's persisted localStorage selection.
-      const engine = await loadEngine(DEFAULT_MODEL_ID, (progress) => {
+      const engine = await loadEngine(selectedModelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
       setStatus({ kind: "rewriting" });
       const result = await rewriteSectionWithLlm(
         trimmedBullets,
         engine,
-        DEFAULT_MODEL_ID,
+        selectedModelId,
       );
       if (result.bullets.length === 0) {
         setStatus({
@@ -173,7 +171,7 @@ export function useSectionRewrite(
     } finally {
       release();
     }
-  }, [trimmedBullets, acquire]);
+  }, [trimmedBullets, acquire, selectedModelId]);
 
   const onReject = useCallback(() => {
     setStatus({ kind: "idle" });
@@ -214,7 +212,11 @@ export function useSectionRewrite(
     status.kind === "idle" ? null : (
       <div className="mt-1 flex flex-col gap-2">
         {status.kind === "loading" && (
-          <LoadingPanel progress={status.progress} />
+          <ModelLoadProgress
+            progress={status.progress.progress}
+            text={status.progress.text}
+            label="Loading the rewrite model (one-time download)"
+          />
         )}
 
         {status.kind === "rewriting" && (
@@ -263,36 +265,6 @@ export function labelFor(status: Status, lockedByOther: boolean): string {
     default:
       return "Rewrite section";
   }
-}
-
-function LoadingPanel({ progress }: { progress: ProgressUpdate }) {
-  const pct = Math.max(0, Math.min(100, Math.round(progress.progress * 100)));
-  return (
-    <div className="flex flex-col gap-1 rounded border border-border-light bg-surface-subtle p-2">
-      <div className="flex items-center justify-between text-[11px] text-content-secondary">
-        <span>Loading the rewrite model (~1.2GB, one-time download)</span>
-        <span className="font-mono">{pct}%</span>
-      </div>
-      <div
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Model download progress"
-        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-base"
-      >
-        <div
-          className="h-full bg-feedback-success-icon transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {progress.text && (
-        <p className="font-mono text-[10px] text-content-muted">
-          {progress.text}
-        </p>
-      )}
-    </div>
-  );
 }
 
 export function ProposedSection({
