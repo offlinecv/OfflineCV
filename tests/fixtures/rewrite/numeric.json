@@ -1,0 +1,12 @@
+{
+  "id": "numeric-growth-pm",
+  "kind": "numeric",
+  "description": "Growth-PM bullets dense with concrete numbers — currency, percent, magnitude, headcount, years. The number-preservation guardrail must catch any drop or invention.",
+  "bullets": [
+    "Grew weekly active users from 120K to 1.8M between 2022 and 2024 by shipping 7 onboarding experiments, lifting day-7 retention 14%.",
+    "Led a 6-person growth squad that drove $4.2M incremental ARR through pricing-page experiments and a 2-tier paywall redesign.",
+    "Reduced free-to-paid conversion friction with a checkout overhaul that lifted conversion 23% and cut median time-to-purchase from 4.5 minutes to 90 seconds.",
+    "Owned 3 quarterly OKRs spanning acquisition, activation, and retention; hit 100% of activation targets and 85% of acquisition targets in FY2023.",
+    "Negotiated a $250K co-marketing budget with 2 partner brands, delivering 11.5M impressions and 38K signups across a 6-week campaign."
+  ]
+}

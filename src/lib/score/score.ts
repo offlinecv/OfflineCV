@@ -142,7 +142,19 @@ function bulletHasMetric(text: string): boolean {
   return ANY_DIGIT.test(stripped);
 }
 
-const ACTION_VERBS = new Set([
+/**
+ * Curated past-tense action verbs used to grade the user's *existing*
+ * bullets. Exported so the rewrite eval (`src/lib/webllm/eval/verbs.ts`)
+ * can reuse this as the base set without duplicating it — the eval set
+ * adds present-tense and IC-discipline verbs on top, but the scorer's
+ * specificity-dimension semantics stay anchored here.
+ *
+ * Kept narrow on purpose: weak generic verbs ("worked", "helped",
+ * "supported", "responsible", "assisted", "participated") are deliberately
+ * NOT here. A bullet leading with one of those SHOULD fail the
+ * specificity check.
+ */
+export const ACTION_VERBS: ReadonlySet<string> = new Set([
   "led", "managed", "developed", "built", "designed", "implemented",
   "created", "launched", "drove", "increased", "reduced", "improved",
   "delivered", "established", "optimized", "architected", "scaled",

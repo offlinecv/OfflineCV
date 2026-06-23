@@ -1,0 +1,12 @@
+{
+  "id": "redundant-support-lead",
+  "kind": "redundant",
+  "description": "Support-lead bullets with deliberate overlap — three near-duplicate descriptions of the same ticket-triage work, plus an unrelated onboarding bullet that should survive. A good rewrite should collapse the overlap to one or two strong bullets, so output count must drop below input count.",
+  "bullets": [
+    "Triaged 200+ inbound customer support tickets per week across email and chat channels.",
+    "Managed a 200/week ticket queue across email and chat, prioritizing by SLA and severity.",
+    "Handled customer support tickets at a rate of around 200 per week from email and chat sources.",
+    "Resolved escalated billing disputes for 40 enterprise accounts, recovering $85K in disputed charges.",
+    "Onboarded 8 new support representatives with a 3-week training program that cut ramp time from 60 days to 28 days."
+  ]
+}
