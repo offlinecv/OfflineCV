@@ -46,6 +46,7 @@ import {
   ResumeBulletRow,
   BulletFlagLegend,
 } from "./ReconstructedRole.tsx";
+import { ModelSelector } from "./ModelSelector.tsx";
 import type {
   ResumeProject,
   HeuristicAchievement,
@@ -260,6 +261,11 @@ function ExperienceSection({
         <SectionHeading>Experience</SectionHeading>
         {hasBullets && <BulletFlagLegend />}
       </div>
+      {/* Picker mounted at the top of Experience — "inline near SectionRewrite,
+          visible only in the rewrite context" per the #64 step 6 spec. Returns
+          null when WebGPU is unavailable, so non-WebGPU browsers see no
+          picker chrome at all (matches RewriteButton + SectionRewrite). */}
+      {hasBullets && <ModelSelector />}
       {roleCount === 0 ? (
         <NotDetected what="roles" />
       ) : (

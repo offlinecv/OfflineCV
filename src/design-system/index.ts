@@ -16,8 +16,10 @@
 
 export * from "./primitives/Button.tsx";
 export * from "./primitives/Chip.tsx";
+export * from "./primitives/Dialog.tsx";
 export * from "./primitives/EditableField.tsx";
 export * from "./shared/Card.tsx";
+export * from "./shared/ModelLoadProgress.tsx";
 export * from "./shared/StatusBadge.tsx";
 export * from "./shared/ErrorState.tsx";
 export * from "./shared/ErrorBoundary.tsx";
