@@ -1,0 +1,844 @@
+{
+  "startedAt": "2026-06-23T19:01:41.578Z",
+  "appVersion": "8c12fb0",
+  "modelIds": [
+    "gemma-2-2b-it-q4f16_1-MLC"
+  ],
+  "variantIds": [
+    "baseline",
+    "terse",
+    "examples-led"
+  ],
+  "fixtureIds": [
+    "weak-marketing-generalist",
+    "strong-backend-engineer",
+    "numeric-growth-pm",
+    "redundant-support-lead"
+  ],
+  "judgeEnabled": false,
+  "records": [
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Oversaw marketing tasks, ensuring seamless team support and efficient daily operations.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Developed and executed social media campaigns that boosted engagement by 20% across multiple platforms.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Contributed to content creation, email blasts, and promotional materials, driving brand awareness and lead generation.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Supported senior team members in planning and coordinating marketing events, resulting in a 15% increase in attendance.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Provided strategic input and creative direction during weekly meetings, contributing to a 10% improvement in campaign effectiveness.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "20%",
+          "15%",
+          "10%"
+        ]
+      },
+      "rewriteDurationMs": 6847,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Led a Kafka-based migration that reduced median latency across 12 downstream services by 38% while achieving operational efficiency.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Designed a horizontally-sharded Postgres architecture that absorbed a 4x traffic surge during the 2024 product launch without requiring read-replica failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Mentored five engineers through code review and pairing sessions, contributing to the successful delivery of 23 production features across two quarters with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Reduced cloud spending by $180,000 annually through rightsizing 60 underutilized instances and consolidating three staging environments into a single tenant-isolated environment.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Built a deterministic load generator that replicated 24 hours of production traffic in 90 minutes, enabling four teams to conduct regression checks with increased efficiency.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "5",
+          "$180K"
+        ],
+        "addedNumbers": [
+          "$180,000"
+        ]
+      },
+      "rewriteDurationMs": 9768,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Increased weekly active users by 1500% to 1.8 million users between 2022 and 2024, successfully launching 7 onboarding experiments.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded a growth team that generated $4.2 million in incremental ARR through pricing-page experiments and a 2-tier paywall redesign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Successfully reduced free-to-paid conversion friction by 23%, decreasing median time-to-purchase from 4.5 minutes to 90 seconds through a checkout overhaul.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Successfully achieved 100% activation targets and 85% acquisition targets across three quarterly OKRs in FY2023.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Secured a $250,000 co-marketing budget with two partner brands, generating 11.5 million impressions and 38,000 signups through a six-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "120K",
+          "1.8M",
+          "14%",
+          "$4.2M",
+          "$250K",
+          "11.5M",
+          "38K"
+        ],
+        "addedNumbers": [
+          "1500%",
+          "1.8",
+          "$4.2",
+          "$250,000",
+          "11.5",
+          "38,000"
+        ]
+      },
+      "rewriteDurationMs": 11274,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Triaged and resolved an average of 200+ inbound customer support tickets per week across email and chat channels.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Successfully managed a 200/week ticket queue, prioritizing customer support requests by SLA and severity.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Handled a consistent flow of 200+ customer support tickets per week from email and chat sources.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Successfully resolved escalated billing disputes for 40 enterprise accounts, recovering a total of $85,000 in disputed charges.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Developed and implemented a new onboarding program for new support representatives, reducing ramp time from 60 days to 28 days.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "$85K"
+        ],
+        "addedNumbers": [
+          "$85,000"
+        ]
+      },
+      "rewriteDurationMs": 7641,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Spearheaded marketing tasks, providing essential support to the team and ensuring seamless daily operations.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Developed and executed social media campaigns that significantly boosted engagement across various channels.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Contributed to content creation, email blasts, and other promotional initiatives, effectively driving brand awareness and visibility.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Collaborated with senior team members to plan and coordinate marketing events and initiatives, ensuring successful execution and alignment with overall goals.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Actively participated in weekly meetings, offering strategic input and creative direction to optimize marketing efforts.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 6173,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Reduced latency across 12 downstream services by 38% through the migration of the order-processing pipeline to event-driven Kafka topics.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Designed and implemented a horizontally-sharded Postgres layout that absorbed a 4x traffic surge during the 2024 product launch, maintaining consistent performance without requiring read-replica failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Mentored five engineers through code review and pairing sessions, resulting in the successful delivery of 23 production features over two quarters with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Optimized cloud infrastructure, reducing annual cloud spend by $180K through rightsizing 60 underutilized instances and consolidating three staging environments into a single tenant-isolated environment.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Developed a deterministic load generator that replicated 24 hours of production traffic in 90 minutes, enabling four teams to conduct regression checks with greater efficiency.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "5"
+        ],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 10886,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "**Increased** weekly active users by 1500% (120,000 to 1.8 million) by implementing seven onboarding experiments and driving a 14% improvement in day-7 retention.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "**Spearheaded** a growth team of six individuals, generating $4.2 million in incremental ARR through pricing-page experiments and a two-tier paywall redesign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "**Streamlined** the checkout process, resulting in a 23% conversion rate increase and a 90% reduction in median time-to-purchase from 4.5 minutes to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "**Successfully** owned and achieved 100% of activation targets and 85% of acquisition targets across three quarterly objectives in FY2023.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "**Negotiated** a $250,000 co-marketing budget with two partner brands, generating 11.5 million impressions and 38,000 signups through a six-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "120K",
+          "1.8M",
+          "2022",
+          "2024",
+          "$4.2M",
+          "$250K",
+          "11.5M",
+          "38K"
+        ],
+        "addedNumbers": [
+          "1500%",
+          "120,000",
+          "1.8",
+          "$4.2",
+          "90%",
+          "$250,000",
+          "11.5",
+          "38,000"
+        ]
+      },
+      "rewriteDurationMs": 13653,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "**Triaged** an average of 200+ inbound customer support tickets per week across email and chat channels, efficiently routing them to appropriate channels and escalating critical issues.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "**Oversaw** a 200/week ticket queue, prioritizing customer support requests based on SLA and severity, ensuring timely resolution and customer satisfaction.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "**Successfully resolved** approximately 200 customer support tickets per week from email and chat sources, consistently exceeding customer expectations and minimizing support ticket backlog.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "**Successfully resolved** escalated billing disputes for 40 enterprise accounts, recovering a total of $85,000 in disputed charges.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "**Developed and implemented** a 3-week onboarding program for new support representatives, resulting in a 32-day reduction in ramp time from 60 days to 28 days.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "$85K"
+        ],
+        "addedNumbers": [
+          "$85,000"
+        ]
+      },
+      "rewriteDurationMs": 11664,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Spearheaded social media campaigns that increased engagement by 25% and boosted website traffic by 15%.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Contributed to content creation, including blog posts and email newsletters, resulting in a 10% increase in email open rates.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Supported marketing team efforts by developing and executing promotional materials for product launches, driving a 12% lift in sales conversion.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Collaborated with senior team members to plan and coordinate marketing events, resulting in a 20% increase in attendance and a 15% improvement in lead generation.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Actively participated in weekly marketing meetings, providing strategic input and creative direction, and contributing to a 5% improvement in campaign performance.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "25%",
+          "15%",
+          "10%",
+          "12%",
+          "20%",
+          "15%",
+          "5%"
+        ]
+      },
+      "rewriteDurationMs": 10743,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Led a Kafka-based migration of the order-processing pipeline, reducing median latency by 38% across 12 downstream services.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Designed a horizontally-sharded Postgres layout that absorbed a 4x traffic surge during the 2024 product launch without requiring read-replica failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Mentored five engineers through code review and pairing sessions, contributing to the successful delivery of 23 production features over two quarters with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Optimized cloud infrastructure, reducing annual cloud spend by $180,000 through rightsizing 60 underused instances and consolidating three staging environments into a single tenant-isolated environment.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Developed a deterministic load generator that replays 24 hours of production traffic in 90 minutes, enabling four teams to conduct regression checks with greater efficiency.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "5",
+          "$180K"
+        ],
+        "addedNumbers": [
+          "$180,000"
+        ]
+      },
+      "rewriteDurationMs": 13974,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Increased weekly active users by 1500% (120,000 to 1.8 million) between 2022 and 2024 by shipping seven onboarding experiments, boosting day-7 retention by 14%.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Led a six-person growth team that generated $4.2 million in incremental ARR through pricing-page experiments and a two-tier paywall redesign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Optimized the checkout process, resulting in a 23% increase in free-to-paid conversion rates and a 90% reduction in median time-to-purchase from 4.5 minutes to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Successfully achieved 100% activation targets and 85% acquisition targets across three quarterly objectives in FY2023.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Secured a $250,000 co-marketing budget with two partner brands, generating 11.5 million impressions and 38,000 signups through a six-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "120K",
+          "1.8M",
+          "$4.2M",
+          "$250K",
+          "11.5M",
+          "38K"
+        ],
+        "addedNumbers": [
+          "1500%",
+          "120,000",
+          "1.8",
+          "$4.2",
+          "90%",
+          "$250,000",
+          "11.5",
+          "38,000"
+        ]
+      },
+      "rewriteDurationMs": 18374,
+      "error": null
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Triaged an average of 200+ customer support tickets per week across email and chat channels, ensuring timely resolution.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Optimized a 200/week ticket queue by prioritizing support requests based on SLA and severity, achieving a 10% reduction in average resolution time.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Handled an average of 200 customer support tickets per week, effectively resolving inquiries and addressing escalations from email and chat sources.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Successfully resolved escalated billing disputes for 40 enterprise accounts, recovering a total of $85,000 in disputed charges.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Developed and implemented a comprehensive onboarding program for 8 new support representatives, significantly reducing ramp time from 60 days to 28 days.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "$85K"
+        ],
+        "addedNumbers": [
+          "10%",
+          "$85,000"
+        ]
+      },
+      "rewriteDurationMs": 13875,
+      "error": null
+    }
+  ],
+  "aggregates": [
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "baseline",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0,
+      "oneLineRate": 1,
+      "actionVerbRate": 0.25,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.5416666666666666
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "terse",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0.25,
+      "oneLineRate": 1,
+      "actionVerbRate": 0.25,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.5833333333333334
+    },
+    {
+      "modelId": "gemma-2-2b-it-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0,
+      "oneLineRate": 1,
+      "actionVerbRate": 0.25,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.5416666666666666
+    }
+  ]
+}

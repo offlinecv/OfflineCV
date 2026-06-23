@@ -1,0 +1,865 @@
+{
+  "startedAt": "2026-06-23T19:06:32.946Z",
+  "appVersion": "8c12fb0",
+  "modelIds": [
+    "Llama-3.2-3B-Instruct-q4f16_1-MLC"
+  ],
+  "variantIds": [
+    "baseline",
+    "terse",
+    "examples-led"
+  ],
+  "fixtureIds": [
+    "weak-marketing-generalist",
+    "strong-backend-engineer",
+    "numeric-growth-pm",
+    "redundant-support-lead"
+  ],
+  "judgeEnabled": false,
+  "records": [
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Developed and executed comprehensive marketing strategies to drive business growth and team productivity.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Led social media campaigns that increased engagement by 25% and expanded brand reach to 100,000 new followers.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Created high-quality content, including email blasts and promotional materials, that resulted in a 50% increase in sales leads.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Planned and coordinated marketing events, including trade shows and product launches, that exceeded revenue projections by 15%.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Facilitated strategic discussions and provided creative input at weekly team meetings, driving 90% alignment on marketing objectives.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "25%",
+          "100,000",
+          "50%",
+          "15%",
+          "90%"
+        ]
+      },
+      "rewriteDurationMs": 7361,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Led the migration of the order-processing pipeline to event-driven Kafka topics, achieving a 38% reduction in median latency across 12 downstream services.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Designed a horizontally-sharded Postgres layout that successfully absorbed a 4x traffic surge during a 2024 product launch, without read-replica failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Mentored 5 engineers through code-review and pairing sessions, resulting in the delivery of 23 production features over 2 quarters, with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Rightsized cloud instances, reducing annualized spend by $180K by consolidating 60 underused instances into a single tenant-isolated environment.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Developed a deterministic load generator that can replay 24 hours of production traffic in just 90 minutes, used by 4 teams for rigorous regression checks.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 10349,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Expanded weekly active users to 1.8M between 2022 and 2024 through a series of 7 onboarding experiments, resulting in a 14% increase in day-7 retention.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded a 6-person growth squad that drove $4.2M in incremental revenue through pricing-page experiments and a 2-tier paywall redesign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Streamlined checkout processes, lifting conversion rates by 23% and reducing median time-to-purchase to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Achieved 100% of activation targets and 85% of acquisition targets across 3 quarterly OKRs spanning acquisition, activation, and retention in FY2023.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Secured a $250K co-marketing budget with 2 partner brands, delivering 11.5M impressions and 38K signups across a 6-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "120K",
+          "4.5"
+        ],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 10896,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Triaged and resolved 200+ high-priority inbound customer support tickets per week, achieving a 95% first-response rate across email and chat channels.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Prioritized and managed a 200/week ticket queue, ensuring 99% of tickets were resolved within the SLA, and 95% were resolved within 2 hours.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Streamlined customer support operations, handling 200+ tickets per week from email and chat sources, with a 98% customer satisfaction rate.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Resolved escalated billing disputes for 40 enterprise accounts, recovering $85K in disputed charges and achieving a 100% customer satisfaction rate.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Developed and implemented a comprehensive onboarding program for 8 new support representatives, reducing ramp time from 60 days to 28 days and achieving a 90% onboarding success rate.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "95%",
+          "99%",
+          "95%",
+          "98%",
+          "100%",
+          "90%"
+        ]
+      },
+      "rewriteDurationMs": 10396,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded marketing task management, ensuring seamless execution of campaigns and daily team operations.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Developed and executed social media campaigns, resulting in 25% increase in engagement and 50% growth in followers.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Crafted high-quality content for email blasts, blog posts, and promotional materials, driving a 30% open rate and 20% conversion rate.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Collaborated with senior team members to plan and coordinate 5 marketing events, resulting in a 90% attendance rate and 25% sales boost.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Contributed to weekly strategy meetings, providing actionable insights that informed marketing decisions and drove a 20% increase in sales.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "25%",
+          "50%",
+          "30%",
+          "20%",
+          "90%",
+          "25%",
+          "20%"
+        ]
+      },
+      "rewriteDurationMs": 8554,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded the migration of the order-processing pipeline to event-driven Kafka topics, resulting in a 38% reduction in median latency across 12 downstream services.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Designed and implemented a horizontally-sharded Postgres layout that successfully absorbed a 4x traffic surge during a 2024 product launch, without any read-replica failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Mentored and guided 5 engineers through code-review and pairing sessions, driving the delivery of 23 production features over 2 quarters with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Spearheaded a cloud cost optimization initiative, reducing annualized cloud spend by $180K by rightsizing 60 underutilized instances and consolidating 3 staging environments into a single tenant-isolated one.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Developed and deployed a deterministic load generator that can replay 24 hours of production traffic in just 90 minutes, used by 4 teams for rigorous regression checks.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 12100,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded a 15-month experiment series, launching 7 onboarding experiments that collectively grew weekly active users from 120K to 1.8M by 2024.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Led a 6-person growth squad, driving $4.2M in incremental ARR through A/B testing and pricing-page redesigns that resulted in a 2-tier paywall.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Spearheaded a checkout overhaul, reducing free-to-paid conversion friction by 23% and slashing median time-to-purchase from 4.5 minutes to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Owned and executed 3 quarterly OKRs, achieving 100% of activation targets and 85% of acquisition targets in FY2023, with a 25% increase in overall customer engagement.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Negotiated a $250K co-marketing budget with 2 partner brands, delivering 11.5M impressions and 38K signups across a 6-week campaign that outperformed projections by 15%.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "2022",
+          "14%"
+        ],
+        "addedNumbers": [
+          "25%",
+          "15%"
+        ]
+      },
+      "rewriteDurationMs": 14087,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded a high-volume inbound customer support operation, triaging over 200 tickets per week across multiple channels to ensure timely resolutions.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Spearheaded a 200-ticket-per-week ticket queue, expertly prioritizing by SLA and severity to minimize wait times and maximize customer satisfaction.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Spearheaded a high-volume email and chat support operation, handling over 200 tickets per week from these sources to deliver exceptional customer service.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Resolved complex escalated billing disputes for 40 enterprise accounts, recovering $85,000 in disputed charges and ensuring timely payment resolutions.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Designed and executed a 3-week training program for 8 new support representatives, significantly reducing ramp time from 60 days to just 28 days and ensuring seamless onboarding.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "$85K"
+        ],
+        "addedNumbers": [
+          "$85,000"
+        ]
+      },
+      "rewriteDurationMs": 11520,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded a 30% increase in team productivity through efficient task delegation and prioritization.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Conceptualized and executed a 6-month social media campaign that drove a 25% boost in followers and a 15% increase in engagement.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Authored and edited 12 high-quality blog posts, resulting in a 50% increase in website traffic and a 20% boost in lead generation.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Collaborated with senior team members to plan and execute a 3-day brand awareness event, resulting in a 90% positive social media sentiment score.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Contributed to weekly strategy sessions, providing actionable insights that informed creative direction and drove a 12% increase in sales-qualified leads.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "30%",
+          "25%",
+          "15%",
+          "50%",
+          "20%",
+          "90%",
+          "12%"
+        ]
+      },
+      "rewriteDurationMs": 12204,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded a 38% latency reduction by migrating the order-processing pipeline to event-driven Kafka topics, resulting in a 12% boost in downstream service performance.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Designed a highly available Postgres layout that withstood a 4x traffic surge during the 2024 product launch, without read-replica failover and minimal downtime.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Coached 5 engineers through rigorous code-review and pairing sessions, delivering 23 production features over 2 quarters with zero rollback incidents and significant team productivity gains.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Streamlined cloud spend by $180K annually through rightsizing 60 underutilized instances and consolidating 3 staging environments into a single, tenant-isolated environment.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Developed a deterministic load generator that can replay 24 hours of production traffic in just 90 minutes, enabling 4 teams to perform comprehensive regression checks.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "12%"
+        ]
+      },
+      "rewriteDurationMs": 16311,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Spearheaded a 15x growth in weekly active users, driving 1.8M new users to the platform between 2022 and 2024 through 7 onboarding experiments that boosted day-7 retention by 14%.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Spearheaded a 6-person growth squad that executed 12 pricing-page experiments and a 2-tier paywall redesign, generating $4.2M in incremental ARR.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Streamlined checkout processes, reducing conversion friction by 23% and median time-to-purchase from 4.5 minutes to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Set and achieved 100% of quarterly activation targets and 85% of acquisition targets across 3 OKRs in FY2023, driving business growth and customer acquisition.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Secured a $250K co-marketing budget with 2 partner brands, delivering 11.5M impressions and 38K signups across a 6-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "120K"
+        ],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 19272,
+      "error": null
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 6,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Here are the rewritten bullets:",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Streamlined customer support operations, triaging 200+ tickets per week across email and chat channels.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Optimized ticket queue management, prioritizing 200 tickets per week across email and chat, ensuring 95% SLA compliance.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Processed 200+ customer support tickets per week from email and chat sources, achieving a 98% first-response rate.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Resolved 40 escalated billing disputes for enterprise accounts, recovering $85K in disputed charges and reducing customer churn by 25%.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 5,
+            "text": "Designed and executed a 3-week onboarding program for 8 new support representatives, cutting ramp time from 60 days to 28 days and achieving 90% team productivity within 6 weeks.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "95%",
+          "98%",
+          "25%",
+          "90%"
+        ]
+      },
+      "rewriteDurationMs": 16390,
+      "error": null
+    }
+  ],
+  "aggregates": [
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0.25,
+      "oneLineRate": 1,
+      "actionVerbRate": 0.25,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.5833333333333334
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0.25,
+      "oneLineRate": 1,
+      "actionVerbRate": 0,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.5416666666666666
+    },
+    {
+      "modelId": "Llama-3.2-3B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0,
+      "oneLineRate": 1,
+      "actionVerbRate": 0,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.5
+    }
+  ]
+}

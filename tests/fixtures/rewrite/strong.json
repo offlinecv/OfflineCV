@@ -1,0 +1,12 @@
+{
+  "id": "strong-backend-engineer",
+  "kind": "strong",
+  "description": "Already-strong backend-engineer bullets with action verbs, concrete metrics, and tight phrasing. A good rewrite should leave these largely intact and must not silently drop any number.",
+  "bullets": [
+    "Led migration of the order-processing pipeline to event-driven Kafka topics, cutting median latency by 38% across 12 downstream services.",
+    "Designed a horizontally-sharded Postgres layout that absorbed a 4x traffic surge during a 2024 product launch without read-replica failover.",
+    "Mentored 5 engineers through code-review and pairing sessions, shipping 23 production features over 2 quarters with zero rollback incidents.",
+    "Reduced cloud spend $180K annualized by rightsizing 60 underused instances and consolidating 3 staging environments into a single tenant-isolated one.",
+    "Built a deterministic load generator that replays 24 hours of production traffic in 90 minutes, used by 4 teams for regression checks."
+  ]
+}

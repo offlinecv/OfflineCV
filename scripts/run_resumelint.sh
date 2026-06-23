@@ -8,16 +8,17 @@ set -euo pipefail
 #   Commands:    ./scripts/run_resumelint.sh <command> [args]
 #
 # Commands:
-#   dev         Start Vite dev server (http://localhost:5173)
-#   build       Build static bundle into dist/
-#   preview     Serve the built bundle (builds first if dist/ is missing)
-#   test        Run vitest
-#   test:watch  Run vitest in watch mode
-#   typecheck   tsc -b --noEmit  (lint alias)
-#   install     npm install
-#   clean       Remove dist/ and node_modules/  (asks for confirmation)
-#   deploy      Build and deploy to GCS — forwards args to deploy_resumelint.sh
-#               (e.g.  ./scripts/run_resumelint.sh deploy --dry-run)
+#   dev           Start Vite dev server (http://localhost:5173)
+#   build         Build static bundle into dist/
+#   preview       Serve the built bundle (builds first if dist/ is missing)
+#   test          Run vitest
+#   test:watch    Run vitest in watch mode
+#   typecheck     tsc -b --noEmit  (lint alias)
+#   install       npm install
+#   clean         Remove dist/ and node_modules/  (asks for confirmation)
+#   eval:rewrite  Open the dev-only rewrite-quality eval page (#65). WebGPU required.
+#   deploy        Build and deploy to GCS — forwards args to deploy_resumelint.sh
+#                 (e.g.  ./scripts/run_resumelint.sh deploy --dry-run)
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -85,6 +86,14 @@ cmd_clean() {
   npm_clean "$WEB_DIR"
 }
 
+cmd_eval_rewrite() {
+  cd "$WEB_DIR"
+  ensure_npm_deps "$WEB_DIR"
+  log_info "Opening rewrite-eval page on http://localhost:$DEV_PORT/resumelint/eval-rewrite.html"
+  log_info "Ctrl+C to stop the dev server when done. WebGPU required to run inference."
+  npm run eval:rewrite
+}
+
 cmd_deploy() {
   # Forward any remaining args (e.g. --dry-run, --mode=modified) verbatim.
   if [[ ! -x "$DEPLOY_SCRIPT" ]]; then
@@ -111,6 +120,7 @@ ${BLUE}4)${NC} Run tests          (vitest run)
 ${BLUE}5)${NC} Test watch         (vitest, watch mode)
 ${BLUE}6)${NC} Typecheck          (tsc -b --noEmit)
 ${BLUE}7)${NC} Install deps       (npm install)
+${BLUE}e)${NC} Rewrite eval page  (dev-only, WebGPU; issue #65)
 ${BLUE}d)${NC} Deploy to GCS      (scripts/deploy_resumelint.sh)
 ${BLUE}p)${NC} Deploy --dry-run   (preview what would upload)
 ${BLUE}c)${NC} Clean              (rm -rf dist/ node_modules/)
@@ -134,6 +144,7 @@ interactive_menu() {
       5) cmd_test_watch || true ;;
       6) cmd_typecheck || true ;;
       7) cmd_install || true ;;
+      e|E) cmd_eval_rewrite || true ;;
       d|D) cmd_deploy || true ;;
       p|P) cmd_deploy --dry-run || true ;;
       c|C) cmd_clean || true ;;
@@ -142,7 +153,7 @@ interactive_menu() {
     esac
     # Skip the Enter-prompt for foregrounded long-runners — they already
     # blocked until the user was ready to come back.
-    if [[ ! "$choice" =~ ^[135]$ ]] && [[ "${choice:-}" != "p" ]] && [[ "${choice:-}" != "P" ]]; then
+    if [[ ! "$choice" =~ ^[135]$ ]] && [[ "${choice:-}" != "p" ]] && [[ "${choice:-}" != "P" ]] && [[ "${choice:-}" != "e" ]] && [[ "${choice:-}" != "E" ]]; then
       echo ""
       read -rp "Press Enter to continue..."
     fi
@@ -167,13 +178,14 @@ else
     typecheck|lint) cmd_typecheck ;;
     install)      cmd_install ;;
     clean)        cmd_clean ;;
+    eval:rewrite|eval-rewrite) cmd_eval_rewrite ;;
     deploy)       cmd_deploy "$@" ;;
     -h|--help|help)
       sed -n '3,21p' "${BASH_SOURCE[0]}"
       ;;
     *)
       log_error "Unknown command: $subcommand"
-      echo "Usage: $0 [dev|build|preview|test|test:watch|typecheck|install|clean|deploy [args...]]"
+      echo "Usage: $0 [dev|build|preview|test|test:watch|typecheck|install|clean|eval:rewrite|deploy [args...]]"
       echo "       $0          (interactive menu)"
       exit 1
       ;;

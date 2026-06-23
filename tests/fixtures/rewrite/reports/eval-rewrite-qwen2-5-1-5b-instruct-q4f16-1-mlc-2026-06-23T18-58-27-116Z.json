@@ -1,0 +1,784 @@
+{
+  "startedAt": "2026-06-23T18:57:10.380Z",
+  "appVersion": "8c12fb0",
+  "modelIds": [
+    "Qwen2.5-1.5B-Instruct-q4f16_1-MLC"
+  ],
+  "variantIds": [
+    "baseline",
+    "terse",
+    "examples-led"
+  ],
+  "fixtureIds": [
+    "weak-marketing-generalist",
+    "strong-backend-engineer",
+    "numeric-growth-pm",
+    "redundant-support-lead"
+  ],
+  "judgeEnabled": false,
+  "records": [
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Managed marketing tasks and supported team with day-to-day activities.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Led social media campaigns to increase engagement.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Coordinated content creation, email marketing, and promotional efforts for the brand.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Assisted senior team members in planning and executing marketing events and initiatives.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Participated in weekly meetings to provide input on strategy and creative direction as needed.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 3598,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Streamlined order-processing pipeline to Kafka topics, reducing median latency by 38% across 12 services.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Designed horizontally-sharded Postgres layout that handled a 4x traffic surge during launch without failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Mentored engineers through code reviews and pair programming, shipping 23 production features over 2 quarters with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Reduced cloud spend $180K annually by rightsizing underused instances and consolidating staging environments.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Built a deterministic load generator for regression checks, used by 4 teams in 90 minutes.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "2024",
+          "5"
+        ],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 5698,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Achieved a 14x increase in weekly active users from 120K to 1.8M between 2022 and 2024 by shipping 7 onboarding experiments, boosting day-7 retention.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Led a growth squad that drove $4.2M incremental annual recurring revenue through pricing-page experiments and a 2-tier paywall redesign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Reduced free-to-paid conversion friction with an overhaul of the checkout process, lifting conversion 23% and cutting median time-to-purchase from 4.5 minutes to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Managed quarterly OKRs spanning acquisition, activation, and retention; hit 100% of activation targets and 85% of acquisition targets in FY2023.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Negotiated a $250K co-marketing budget with two partner brands, delivering 11.5M impressions and 38K signups across a 6-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "14%"
+        ],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 9487,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Streamlined customer support operations, triaging and resolving 200+ inbound tickets weekly across email and chat channels.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Managed a high-volume ticket queue of up to 200 per week from email and chat sources, prioritizing by SLA and severity.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Handled customer support requests at an average rate of around 200 per week from email and chat sources.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Successfully resolved escalated billing disputes for 40 enterprise accounts, recovering $85K in disputed charges.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Led the onboarding process for new support representatives, reducing ramp time from 60 days to 28 days with a 3-week training program.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 6185,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Managed marketing tasks and supported day-to-day activities, handling various campaigns.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Coordinated social media efforts to increase engagement on channels like Facebook and Twitter.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Wrote content for email blasts and other promotional materials.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Assisted in planning and coordinating marketing events and initiatives with senior team members.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Participated in weekly meetings to provide input on strategy and creative direction as appropriate.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 3385,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Streamlined the order-processing pipeline to Kafka topics, reducing median latency by 38% across 12 downstream services.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Designed a horizontally-sharded Postgres layout that absorbed a 4x traffic surge during a product launch without failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Mentored engineers through code reviews and pairing sessions, shipping 23 production features over two quarters with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Reduced cloud spend $180K annually by rightsizing underused instances and consolidating staging environments into a single tenant-isolated one.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Built a deterministic load generator for regression checks used by four teams in 90 minutes after replaying 24 hours of production traffic.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "2024",
+          "5"
+        ],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 6038,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": true,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Achieved a 7x increase in weekly active users from 120K to 1.8M between 2022 and 2024 by shipping seven onboarding experiments, resulting in an 14% uplift in day-7 retention.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Led a growth squad of six members that generated $4.2 million in incremental annual recurring revenue through pricing-page experiments and a two-tier paywall redesign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Reduced free-to-paid conversion friction with a checkout overhaul that lifted conversion rates by 23% and decreased median time-to-purchase from 4.5 minutes to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Managed three quarterly Objectives and Key Results (OKRs) across acquisition, activation, and retention; hit 100% of activation targets and 85% of acquisition targets during FY2023.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Negotiated a $250,000 co-marketing budget with two partner brands, achieving 11.5 million impressions and 38,000 signups over a six-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "$4.2M",
+          "$250K",
+          "11.5M",
+          "38K"
+        ],
+        "addedNumbers": [
+          "$4.2",
+          "$250,000",
+          "11.5",
+          "38,000"
+        ]
+      },
+      "rewriteDurationMs": 10013,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Streamlined customer support operations, triaging and resolving 200+ inbound tickets weekly across email and chat channels.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Managed a high-volume ticket queue of up to 200 per week from email and chat sources, prioritizing by SLA and severity.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Handled customer support requests at an average rate of around 200 per week from email and chat sources.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Successfully resolved escalated billing disputes for 40 enterprise accounts, recovering $85K in disputed charges.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Led the onboarding process for new support representatives, reducing ramp time from 60 days to 28 days with a 3-week training program.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 5754,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "weak-marketing-generalist",
+      "fixtureKind": "weak",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Spearheaded marketing efforts, enhancing engagement through 40% increase in social media reach.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Crafted and launched successful campaigns on multiple platforms to boost brand awareness by 35%.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Coordinated content creation for email newsletters and promotional materials, driving open rates up to 60%.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Collaborated with senior team members to plan and execute impactful events, resulting in a 20% uplift in event attendance.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Regularly attended meetings to align strategy with creative direction, contributing valuable input throughout the quarter.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": [
+          "40%",
+          "35%",
+          "60%",
+          "20%"
+        ]
+      },
+      "rewriteDurationMs": 4820,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "strong-backend-engineer",
+      "fixtureKind": "strong",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": false,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Led the migration of the order-processing pipeline to event-driven Kafka, reducing median latency by 38% across 12 downstream services.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Designed a horizontally-sharded Postgres layout that absorbed a 4x traffic surge during a product launch without failover.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Mentored engineers through code reviews and pairing sessions, shipping 23 production features over two quarters with zero rollback incidents.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Rightsized cloud infrastructure, saving $180K annually by consolidating underused instances and migrating staging environments.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Built a deterministic load generator for regression checks used by four teams.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [
+          "2024",
+          "5"
+        ],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 5653,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "numeric-growth-pm",
+      "fixtureKind": "numeric",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": null,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Oversaw a 10x growth in weekly active users from 120K to 1.8M between 2022 and 2024, implementing 7 onboarding experiments that increased day-7 retention by 14%.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Led the team responsible for driving $4.2M incremental Annual Recurring Revenue (ARR) through pricing-page experiments and a 2-tier paywall redesign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Reduced free-to-paid conversion friction with an overhaul of the checkout process, lifting conversion rates by 23% while cutting median time-to-purchase from 4.5 minutes to 90 seconds.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Managed quarterly OKRs across acquisition, activation, and retention; hit 100% of activation targets and 85% of acquisition targets during FY2023.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Negotiated a $250K co-marketing budget with two partner brands, achieving 11.5M impressions and 38K signups over a 6-week campaign.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 10343,
+      "error": null
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "fixtureId": "redundant-support-lead",
+      "fixtureKind": "redundant",
+      "inputBulletCount": 5,
+      "outputBulletCount": 5,
+      "rubric": {
+        "numbersPreserved": true,
+        "oneLinePerBullet": true,
+        "actionVerbLead": false,
+        "lengthSanity": true,
+        "noPreambleLeak": true,
+        "dedupEffective": false,
+        "judgeCoherence": null,
+        "perBullet": [
+          {
+            "index": 0,
+            "text": "Streamlined customer support response time, triaging 200+ tickets per week across email and chat channels.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 1,
+            "text": "Managed a high-volume ticket queue with a 200/week rate, prioritizing by SLA and severity.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 2,
+            "text": "Handled customer support requests at an average of 200 per week from email and chat sources.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 3,
+            "text": "Resolved escalated billing disputes for 40 enterprise accounts, recovering $85K in disputed charges.",
+            "startsWithActionVerb": true,
+            "lengthOk": true,
+            "oneLine": true
+          },
+          {
+            "index": 4,
+            "text": "Successfully onboarded 8 new support representatives within a 3-week training program, reducing ramp time to 28 days.",
+            "startsWithActionVerb": false,
+            "lengthOk": true,
+            "oneLine": true
+          }
+        ],
+        "droppedNumbers": [],
+        "addedNumbers": []
+      },
+      "rewriteDurationMs": 5758,
+      "error": null
+    }
+  ],
+  "aggregates": [
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "baseline",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0.5,
+      "oneLineRate": 1,
+      "actionVerbRate": 0.5,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.6666666666666666
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "terse",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0.5,
+      "oneLineRate": 1,
+      "actionVerbRate": 0.5,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.6666666666666666
+    },
+    {
+      "modelId": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+      "variantId": "examples-led",
+      "scoredFixtures": 4,
+      "numbersPreservedRate": 0.5,
+      "oneLineRate": 1,
+      "actionVerbRate": 0,
+      "lengthSanityRate": 1,
+      "noPreambleLeakRate": 1,
+      "dedupEffectiveRate": 0,
+      "judgeMean": null,
+      "aggregateScore": 0.5833333333333334
+    }
+  ]
+}
