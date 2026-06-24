@@ -41,20 +41,20 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 60,
-    "preLayoutOverall": 70,
+    "overall": 74,
+    "preLayoutOverall": 87,
     "specificity": {
-      "score": 26,
+      "score": 40,
       "max": 40,
       "gradable": true,
-      "metricBullets": 5,
+      "metricBullets": 9,
       "totalBullets": 13
     },
     "structure": {
-      "score": 17,
+      "score": 20,
       "max": 30,
       "gradable": true,
-      "goodBullets": 8,
+      "goodBullets": 9,
       "totalBullets": 13
     },
     "completeness": {

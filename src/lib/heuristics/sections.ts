@@ -15,6 +15,7 @@
  */
 
 import type { PdfTextItem } from "./types.ts";
+import { mergeWrappedContinuations } from "./entry-blocks.ts";
 import {
   matchSectionHeader,
   matchSectionAnchorToken,
@@ -99,7 +100,15 @@ export function toSectionedResume(
   // `byName.get("skills")` byte-identical to the retired `skillsSectionLines`.
   const byName = new Map<SectionName | "profile", string[]>();
   for (const section of sections) {
-    const lines = section.lines
+    // Fold wrapped-continuation lines (a long bullet that wrapped onto a
+    // second, marker-less line indented past the bullet marker) into the line
+    // they continue BEFORE flattening to strings — the x the fold needs is gone
+    // once these are trimmed text. This makes the string-level bullet pool
+    // (`extractBulletsFromLines`, which drops a glyph-less continuation as
+    // truncation) agree by construction with the merged
+    // `experience[]/projects[].description` the entry-block parser produces, for
+    // every section incl. untyped ones (volunteer/coursework). See #162.
+    const lines = mergeWrappedContinuations(section.lines)
       .map((l) => l.text.trim())
       .filter((t) => t.length > 0);
     const existing = byName.get(section.name);
@@ -183,6 +192,156 @@ export function orderItemsByColumn(
   return bands;
 }
 
+// ── Localized multi-column reading-order reconstruction (#164) ───────────────
+
+/**
+ * Minimum number of consecutive multi-column rows for a run to count as a real
+ * embedded multi-column band. One isolated multi-column row is the common
+ * single-column case — a header line with a right-aligned date rail, a
+ * "Title  …  dates" line — not a column block, so a single row never triggers
+ * the reorder. A genuine coursework/skills grid runs ≥2 rows deep.
+ */
+const MULTI_COLUMN_MIN_RUN_ROWS = 2;
+
+/** A row is "multi-column" when its x-sorted items carry a column-sized
+ *  horizontal gap (the same `COLUMN_GAP_THRESHOLD` the line splitter uses). */
+function rowIsMultiColumn(row: PdfTextItem[]): boolean {
+  if (row.length < 2) return false;
+  const sorted = [...row].sort((a, b) => a.x - b.x);
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const gap = sorted[i].x - (prev.x + prev.width);
+    if (gap > COLUMN_GAP_THRESHOLD) return true;
+  }
+  return false;
+}
+
+/**
+ * Cluster a run's items into vertical columns by x-start. Sort the distinct
+ * x-starts ascending and cut a new column wherever the jump between adjacent
+ * starts exceeds `COLUMN_GAP_THRESHOLD`. A wrapped continuation (e.g. a course
+ * name's second line, indented a few points past its bullet marker) lands in
+ * the same column as its parent because its x sits inside that column's band,
+ * far from the next column's start. Returns the column-start x boundaries (the
+ * left edge of each column), ascending.
+ */
+function columnStartsForRun(run: PdfTextItem[]): number[] {
+  const xs = [...new Set(run.map((it) => it.x))].sort((a, b) => a - b);
+  const starts: number[] = [];
+  for (let i = 0; i < xs.length; i++) {
+    if (i === 0 || xs[i] - xs[i - 1] > COLUMN_GAP_THRESHOLD) starts.push(xs[i]);
+  }
+  return starts;
+}
+
+/** Index of the column an item belongs to: the last column-start at or left of
+ *  the item's x (continuations indented within a column band stay in it). */
+function columnIndexOf(x: number, starts: number[]): number {
+  let idx = 0;
+  for (let i = 0; i < starts.length; i++) {
+    if (x >= starts[i] - 0.5) idx = i;
+    else break;
+  }
+  return idx;
+}
+
+/**
+ * Reorder the items of a single same-page band so that any *embedded*
+ * multi-column block (e.g. a 3-column "Relevant Coursework" grid sitting inside
+ * an otherwise single-column page) reads column-by-column instead of zig-zag
+ * row-by-row.
+ *
+ * Why here and not the page-level column probe: `detectColumnBoundaries`
+ * (`pdf-layout.ts`) is a *page-wide* vertical ink projection — it only fires
+ * when a gutter runs the full height of the page, so a localized few-row grid
+ * inside single-column body text is invisible to it (the body inks straight
+ * across the grid's gutters). This pass works at the item level over one band,
+ * detecting contiguous runs of column-split rows and emitting each run's items
+ * in column-major (left column top-to-bottom, then the next) order. Everything
+ * outside such a run passes through in its original order, so single-column
+ * input and already-banded page-level two-column input are untouched — within
+ * an `orderItemsByColumn` band there is only one column, hence no multi-column
+ * row and no run.
+ *
+ * Operates per page (a band is single-page after `orderItemsByColumn`, but the
+ * top-level rawText path groups all items at once, so guard on page anyway).
+ * Runs BEFORE line grouping / sectionizing / `mergeWrappedContinuations`, so
+ * those later passes see the corrected column order (#162 ordering constraint).
+ */
+function reorderEmbeddedColumns(items: PdfTextItem[]): PdfTextItem[] {
+  // Baseline line order (page-major, then y top-to-bottom, then x left-to-right)
+  // — what `groupLinesSingle` used to compute itself. We now own the ordering so
+  // a reordered multi-column run survives to line grouping; the single-column /
+  // already-banded case returns this sorted baseline unchanged.
+  const sorted = [...items].sort((a, b) => {
+    if (a.page !== b.page) return a.page - b.page;
+    if (Math.abs(a.y - b.y) > LINE_Y_EPS) return a.y - b.y;
+    return a.x - b.x;
+  });
+  if (sorted.length < 2 * MULTI_COLUMN_MIN_RUN_ROWS) return sorted;
+
+  const rows = groupItemsIntoRows(sorted);
+  const multi = rows.map(rowIsMultiColumn);
+  let changed = false;
+  const out: PdfTextItem[] = [];
+  for (let i = 0; i < rows.length; ) {
+    if (!multi[i]) {
+      out.push(...rows[i]);
+      i++;
+      continue;
+    }
+    // Extend a maximal run of consecutive multi-column rows, then either reorder
+    // it column-major or pass it through unchanged (run too short / one column).
+    let j = i;
+    while (j < rows.length && multi[j]) j++;
+    const reordered = reorderColumnRun(rows.slice(i, j));
+    out.push(...reordered.items);
+    changed ||= reordered.changed;
+    i = j;
+  }
+
+  return changed ? out : sorted;
+}
+
+/** Group y-sorted items into rows: contiguous items sharing a page and baseline
+ *  (within `LINE_Y_EPS`) form one row, so a run is a contiguous slice of rows. */
+function groupItemsIntoRows(sorted: PdfTextItem[]): PdfTextItem[][] {
+  const rows: PdfTextItem[][] = [];
+  for (const it of sorted) {
+    const last = rows[rows.length - 1];
+    if (
+      last &&
+      last[0].page === it.page &&
+      Math.abs(last[0].y - it.y) <= LINE_Y_EPS
+    ) {
+      last.push(it);
+    } else {
+      rows.push([it]);
+    }
+  }
+  return rows;
+}
+
+/** Reorder one maximal run of multi-column rows into column-major order. Returns
+ *  the run unchanged (`changed:false`) when it's too short to be a real grid or
+ *  resolves to a single column; otherwise buckets items by column (each column
+ *  top-to-bottom, since `runItems` already ascend by y) and emits column-major. */
+function reorderColumnRun(runRows: PdfTextItem[][]): {
+  items: PdfTextItem[];
+  changed: boolean;
+} {
+  const runItems = runRows.flat();
+  const starts =
+    runRows.length < MULTI_COLUMN_MIN_RUN_ROWS
+      ? []
+      : columnStartsForRun(runItems);
+  if (starts.length < 2) return { items: runItems, changed: false };
+
+  const buckets: PdfTextItem[][] = starts.map(() => []);
+  for (const it of runItems) buckets[columnIndexOf(it.x, starts)].push(it);
+  return { items: buckets.flat(), changed: true };
+}
+
 // ── Line grouping ───────────────────────────────────────────────────────────
 
 export function groupIntoLines(
@@ -194,13 +353,18 @@ export function groupIntoLines(
 }
 
 /** Single-pass line grouping over one band of items (no column awareness). */
-function groupLinesSingle(items: PdfTextItem[]): PdfLine[] {
-  // Sort by page, then by y (top to bottom), then by x (left to right).
-  const sorted = [...items].sort((a, b) => {
-    if (a.page !== b.page) return a.page - b.page;
-    if (Math.abs(a.y - b.y) > LINE_Y_EPS) return a.y - b.y;
-    return a.x - b.x;
-  });
+function groupLinesSingle(bandItems: PdfTextItem[]): PdfLine[] {
+  // De-interleave any embedded multi-column block (e.g. a coursework grid) so
+  // its items read column-by-column before we cluster into lines (#164). A
+  // no-op for single-column input and for already-banded page-level two-column
+  // input — neither carries a multi-row column-split run within a band.
+  // `reorderEmbeddedColumns` returns items already in line order (page-major,
+  // y top-to-bottom, x left-to-right) — with any embedded multi-column run
+  // rewritten to column-major. We must NOT re-sort here: a global (y, x) sort
+  // would re-interleave the very columns we just de-zig-zagged. The streaming
+  // grouper below flushes on any y change, so it clusters this order correctly
+  // even where a column-major run jumps y backward at a column boundary.
+  const sorted = reorderEmbeddedColumns(bandItems);
 
   const lines: PdfLine[] = [];
   let current: PdfTextItem[] = [];
@@ -294,23 +458,28 @@ export function mergeItemText(items: PdfTextItem[]): string {
  * `H2_RATIO` (1.25): a job title or company name rendered bold but only
  * slightly larger than body (≈1.05–1.15×) must NOT promote to a boundary, or it
  * would split mid-experience and strand every following role into the `other`
- * sink. 1.2 clears the slightly-bold-title FP class while still catching the
- * genuinely-larger invented-label headers ("Career Journey") this path exists
- * to segment.
+ * sink. 1.15 clears the slightly-bold-title FP class (≈1.1× titles) while still
+ * catching the genuinely-larger invented-label headers ("Career Journey") this
+ * path exists to segment.
  *
- * Font distinction is the SOLE visual signal here. The issue (#112) also listed
- * `allCaps` as an alternative, but a full-corpus pass showed bare body-size
- * all-caps is dominated by NON-headers a boundary must never open on: acronyms
- * and skill tokens ("HTML", "CSS", "C++", "CI/CD"), inline values ("GPA: 3.5"),
- * and two-column sidebar labels ("STRENGTHS", "Leadership") whose flattened
- * position mid-document would strand every following role into the `other`
- * sink — the same hazard that keeps `skills`/`other` out of the L2 anchor
- * fallback. Genuine all-caps *section* headers ("OBJECTIVE", "EDUCATION",
- * "VOLUNTEER EXPERIENCE") are already caught by the keyword/anchor path before
- * the visual path runs, so the all-caps branch added only false positives and
- * was dropped. See the L3 corpus regression notes on #112.
+ * Lowered 1.2 → 1.15 in #163: the Skia/Chrome renderer (Google Docs → PDF)
+ * flattens an h2 down to ≈1.09–1.18× body, so a real invented header can sit
+ * just under 1.2. 1.15 still sits safely above the pinned ≈1.1× bold-title FP
+ * (`sections.test.ts`), so no role-stranding regression — verified against the
+ * full corpus snapshot.
+ *
+ * Font distinction is the PRIMARY visual signal here, but not the only one: a
+ * font-metadata-independent text-pattern fallback (`isTextPatternHeader`, #163)
+ * runs alongside it for renderers that strip or flatten font size below even
+ * 1.15. The #112 note that bare body-size all-caps is dominated by NON-headers
+ * (single-token acronyms/skill tokens "HTML"/"CSS"/"C++", inline values
+ * "GPA: 3.5") still holds — so that fallback is tightly shaped (multi-word,
+ * clean, ALL CAPS only; see `isTextPatternHeader`) to exclude exactly those
+ * classes. Genuine all-caps *section* headers ("OBJECTIVE", "EDUCATION") are
+ * still caught by the keyword/anchor path first, before either visual branch
+ * runs.
  */
-const VISUAL_HEADER_FONT_RATIO = 1.2;
+const VISUAL_HEADER_FONT_RATIO = 1.15;
 
 /** Max characters for a line to still read as a header (not a prose line). */
 const VISUAL_HEADER_MAX_CHARS = 40;
@@ -366,15 +535,95 @@ function isHeaderShort(text: string): boolean {
 }
 
 /**
- * True when a line is *visually* a header: header-shaped (`isHeaderShort`) and
- * meaningfully larger than the body baseline. This is the L3 fallback signal —
- * it fires only after `matchSectionHeader` has already declined the line
- * (keyword path), so a line passing this test opens a boundary-only `other`
- * section (terminates the prior section without rendering).
+ * Max whitespace-separated words for the font-metadata-independent text-pattern
+ * header (#163). Slightly looser than the font path's `VISUAL_HEADER_MAX_WORDS`
+ * (4) because invented multi-word labels ("VOLUNTEER EXPERIENCE & SERVICE")
+ * run a touch longer than the qualifier+head-noun shape the anchor fallback
+ * targets; capped at 6 so a short prose fragment can't slip through.
+ */
+const TEXT_PATTERN_HEADER_MAX_WORDS = 6;
+
+/**
+ * Characters that mark a line as content rather than a bare section label:
+ * digits (dates / metrics / GPA), commas and pipes / mid-dots / dashes / slashes
+ * (company–location, "ACME CORP | REMOTE", "SEP 2024 - JULY 2025"), and colons
+ * (inline labels "GPA: 3.5"). A genuine invented header ("VOLUNTEER WORK",
+ * "ADDITIONAL INFORMATION") carries none of these.
+ */
+const TEXT_PATTERN_DIRTY_RE = /[0-9,:·|—–/]/;
+
+/**
+ * Font-metadata-independent header test (#163). Some renderers (Skia/Chrome via
+ * Google Docs → PDF) strip or flatten a section header's font-size lift so far
+ * it doesn't clear even the lowered `VISUAL_HEADER_FONT_RATIO` (1.15). This
+ * detects a header purely from text *shape* — independent of font size: a short
+ * (≤ `VISUAL_HEADER_MAX_CHARS` chars, 2–`TEXT_PATTERN_HEADER_MAX_WORDS` words),
+ * non-bullet, non-terminal-punctuation, ALL-CAPS line carrying none of the
+ * `TEXT_PATTERN_DIRTY_RE` content markers.
+ *
+ * ALL CAPS *only* — deliberately NOT Title Case. The #112 corpus pass showed
+ * Title-Case shape is dominated on the regex path by NON-header content a
+ * boundary must never split on: job titles ("Sr Software Engineer", "Staff
+ * Software Engineer"), company names ("Globex Corporation", "Acme Corp"), and
+ * institutions ("Springfield State University") — all Title Case, all rendered
+ * at or barely above body size, so neither a font-ratio floor nor a column gate
+ * separates them from a real flattened header (the coursework reproducers sit
+ * mid-band among them). Promoting any of them opens an `other` sink that strands
+ * the role/degree beneath it. ALL CAPS multi-word lines, by contrast, are
+ * reliably section labels in this corpus — the only all-caps clean ≥2-word
+ * non-keyword lines are institution names on the *markdown* path
+ * ("CORNELL UNIVERSITY"), which never reaches this splitter. So the title-cased
+ * "Relevant Coursework" reproducer is fixed by its `education` keyword alias
+ * (#163 sub-problem 1), and this path generalizes the boundary-termination to
+ * any unknown ALL-CAPS header a metadata-stripping renderer flattens.
+ *
+ * The remaining gates kill the FP classes the bare-all-caps #112 experiment
+ * tripped on: ≥ 2 words excludes single-token skill/acronym tokens ("HTML",
+ * "CSS", "C++", "PHP"); `TEXT_PATTERN_DIRTY_RE` excludes date / location-comma /
+ * separator / colon-bearing inline values ("GPA: 3.5").
+ *
+ * Like the font path it only runs after `matchSectionHeader` declines the line,
+ * and (in `classifyLine`) only past the leading name/contact block — so a real
+ * header it fires on opens the boundary-only `other` sink, terminating the prior
+ * section. Verified zero-regression against the full corpus snapshot.
+ */
+function isTextPatternHeader(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0 || t.length > VISUAL_HEADER_MAX_CHARS) return false;
+  if (VISUAL_BULLET_RE.test(t)) return false;
+  if (TERMINAL_PUNCT_RE.test(t)) return false;
+  if (TEXT_PATTERN_DIRTY_RE.test(t)) return false;
+  const words = t.split(/\s+/).filter((w) => w.length > 0);
+  // ≥ 2 words: a single token is a skill/acronym ("HTML", "GRADUATE"), not a
+  // section header — bare single-token all-caps is the FP class #112 dropped.
+  if (words.length < 2 || words.length > TEXT_PATTERN_HEADER_MAX_WORDS) {
+    return false;
+  }
+  return isAllCapsHeader(t);
+}
+
+/** True when every letter-bearing char is uppercase (and at least one exists). */
+function isAllCapsHeader(t: string): boolean {
+  const letters = t.replace(/[^A-Za-z]/g, "");
+  return letters.length > 0 && letters === letters.toUpperCase();
+}
+
+/**
+ * True when a line is *visually* a header. Two orthogonal signals, either of
+ * which qualifies (after `matchSectionHeader` has already declined the line, so
+ * a pass opens the boundary-only `other` sink that terminates the prior section):
+ *   - font path: header-shaped (`isHeaderShort`) AND meaningfully larger than
+ *     the body baseline (≥ `VISUAL_HEADER_FONT_RATIO`); or
+ *   - text-pattern path (#163): font-metadata-independent — a short clean-shaped
+ *     ALL-CAPS line (`isTextPatternHeader`), for renderers that flatten font
+ *     size below the ratio gate.
  */
 function isVisualHeader(line: PdfLine, bodyBaseline: number): boolean {
-  if (!isHeaderShort(line.text)) return false;
-  return line.maxFontSize >= bodyBaseline * VISUAL_HEADER_FONT_RATIO;
+  if (isHeaderShort(line.text) &&
+      line.maxFontSize >= bodyBaseline * VISUAL_HEADER_FONT_RATIO) {
+    return true;
+  }
+  return isTextPatternHeader(line.text);
 }
 
 // Non-global clones of the contact REs for stateless boolean checks. The

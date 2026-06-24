@@ -303,6 +303,106 @@ describe("splitIntoSections — visual-primary boundary path (#112)", () => {
   });
 });
 
+describe("splitIntoSections — coursework header termination (#163)", () => {
+  // A "Relevant Coursework" header (now an `education` keyword alias, #163
+  // sub-problem 1) must OPEN an education section and thereby TERMINATE the
+  // prior section, so the coursework block stops bleeding into the last
+  // experience entry's description (and stops leaking into the bullet pool).
+  it("opens an `education` section at 'Relevant Coursework' and does NOT append it to the prior entry", () => {
+    const sections = build([
+      { text: "Jane Smith", fontSize: 18 }, // name
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 11 }, // contact
+      { text: "Activities", fontSize: 12 }, // experience alias (font-distinct)
+      { text: "Discussion Group Facilitator  Aug 2025 - Present", fontSize: 11 },
+      { text: "• Planned meeting agendas and material for 20+ meetings", fontSize: 11 },
+      { text: "• Led and moderated discussions for all participants", fontSize: 11 },
+      { text: "Relevant Coursework", fontSize: 12 }, // unrecognized-by-text header → education alias
+      { text: "• Financial Accounting", fontSize: 11 },
+      { text: "• Microeconomics", fontSize: 11 },
+    ]);
+
+    // (1) A coursework section opened and is mapped to the `education` type.
+    // The "Relevant Coursework" header line itself is consumed as the boundary
+    // (it opens the section, so it isn't stored in any section's `lines`), so we
+    // assert on the coursework *items* that landed inside the opened section.
+    const coursework = sectionContaining(sections, "Financial Accounting");
+    expect(coursework).toBeDefined();
+    expect(coursework!.name).toBe("education");
+
+    // A second `education` section opened at the coursework header — distinct
+    // from any degree section above it — confirming the header opened a boundary
+    // rather than being appended to the prior (experience) section.
+    expect(names(sections).filter((n) => n === "education").length).toBe(1);
+
+    // (2) The prior experience entry's lines do NOT carry the coursework header
+    // or items — the section terminated cleanly, no bleed into the description.
+    const experience = sectionContaining(
+      sections,
+      "Discussion Group Facilitator",
+    );
+    expect(experience!.name).toBe("experience");
+    expect(
+      experience!.lines.some((l) => l.text.includes("Relevant Coursework")),
+    ).toBe(false);
+    expect(
+      experience!.lines.some((l) => l.text.includes("Financial Accounting")),
+    ).toBe(false);
+    expect(
+      experience!.lines.some((l) => l.text.includes("Microeconomics")),
+    ).toBe(false);
+
+    // The boundary opened as `education` via the keyword path — never the
+    // `other` sink (which would drop coursework out of education completeness).
+    expect(names(sections)).not.toContain("other");
+  });
+
+  it("font-metadata-independent ALL-CAPS fallback terminates the prior section for an unknown header", () => {
+    // A renderer that flattens font metadata (every line body-size) still must
+    // terminate a section at an unrecognized ALL-CAPS header via the text-pattern
+    // path (#163 sub-problem 2) — generalizing the boundary fix beyond coursework.
+    const sections = build([
+      { text: "Jane Smith", fontSize: 11 }, // name (no font lift — flattened)
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 11 },
+      { text: "EXPERIENCE", fontSize: 11 },
+      { text: "Engineer, Acme  01/2021 - Present", fontSize: 11 },
+      { text: "• Shipped the billing rewrite handling 2M daily events", fontSize: 11 },
+      { text: "VOLUNTEER WORK", fontSize: 11 }, // unknown ALL-CAPS header, body-size
+      { text: "• Mentored five first-generation students weekly", fontSize: 11 },
+    ]);
+
+    // The unknown ALL-CAPS header opened a boundary (the `other` sink — not a
+    // known keyword), so its content did not bleed into the experience entry.
+    const volunteer = sectionContaining(sections, "Mentored five");
+    expect(volunteer).toBeDefined();
+    expect(volunteer!.name).toBe("other");
+    const experience = sectionContaining(sections, "Engineer, Acme");
+    expect(
+      experience!.lines.some((l) => l.text.includes("Mentored five")),
+    ).toBe(false);
+  });
+
+  it("does NOT promote a body-size Title-Case job title via the text-pattern path", () => {
+    // The text-pattern fallback is ALL-CAPS only: a body-size Title-Case line
+    // ("Sr Software Engineer") is a job title / company / institution, never a
+    // section header — promoting it would strand the role beneath it.
+    const sections = build([
+      { text: "Jane Smith", fontSize: 11 },
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 11 },
+      { text: "EXPERIENCE", fontSize: 11 },
+      { text: "Sr Software Engineer", fontSize: 11 }, // Title Case, body size
+      { text: "Acme Corp  01/2020 - Present", fontSize: 11 },
+      { text: "• Built the deploy pipeline cutting release time by 40%", fontSize: 11 },
+    ]);
+
+    expect(names(sections).filter((n) => n === "other")).toHaveLength(0);
+    const exp = sectionContaining(sections, "Sr Software Engineer");
+    expect(exp!.name).toBe("experience");
+    expect(exp!.lines.some((l) => l.text.includes("Built the deploy"))).toBe(
+      true,
+    );
+  });
+});
+
 /**
  * Section-count regression on a sample of real corpus fixtures (#112 AC).
  *
