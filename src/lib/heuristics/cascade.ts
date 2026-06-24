@@ -505,6 +505,7 @@ function countExtractedChars(parsed: CascadeResult["parsed"]): number {
   for (const e of parsed.experience ?? []) {
     n += (e.company ?? "").length;
     n += (e.title ?? "").length;
+    n += (e.team ?? "").length;
     n += (e.description ?? "").length;
   }
   for (const e of parsed.education ?? []) {

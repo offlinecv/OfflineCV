@@ -32,6 +32,7 @@ import {
   parseDateRange,
   stripDateRange,
   isBulletLine,
+  isProseLine,
   stripBullet,
 } from "./line-primitives.ts";
 
@@ -179,6 +180,49 @@ function isWrappedContinuation(line: PdfLine, markerX: number): boolean {
 }
 
 /**
+ * A description paragraph begins after a vertical gap wider than this multiple
+ * of the section's single line-height. Word/Office templates write the role
+ * description as a glyph-less prose paragraph set off by paragraph spacing, so
+ * the blank-line gap — not a bullet glyph or a sentence period — is the
+ * structural signal that the header has ended and the body has begun.
+ */
+const BODY_GAP_FACTOR = 1.4;
+
+/**
+ * Median of the positive consecutive y-gaps in a section — its baseline single
+ * line-height. Returns 0 when the lines carry no usable y (markdown / DOCX
+ * extraction sets every `y` equal, so no positive gaps), which disables the
+ * gap-based body signal and leaves `isProseLine` as the sole text fallback.
+ */
+function sectionLineHeight(lines: PdfLine[]): number {
+  const gaps: number[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const g = lines[i].y - lines[i - 1].y;
+    if (g > 0) gaps.push(g);
+  }
+  if (gaps.length === 0) return 0;
+  gaps.sort((a, b) => a - b);
+  const mid = Math.floor(gaps.length / 2);
+  return gaps.length % 2 === 0 ? (gaps[mid - 1] + gaps[mid]) / 2 : gaps[mid];
+}
+
+/**
+ * True when line `i` starts a body paragraph by the y-gap signal: it is set off
+ * from the line above by a paragraph-sized gap (> `BODY_GAP_FACTOR`× the section
+ * line-height) and reads like prose (carries a lowercase letter). This is the
+ * PDF-path primary for glyph-less descriptions — it catches a periodless
+ * paragraph that `isProseLine` (which needs a sentence break) misses. A no-op
+ * when `baseline` is 0 (no usable y data), so the DOCX/markdown path falls back
+ * to `isProseLine` unchanged.
+ */
+function startsBodyByGap(lines: PdfLine[], i: number, baseline: number): boolean {
+  if (baseline <= 0 || i <= 0) return false;
+  const gap = lines[i].y - lines[i - 1].y;
+  if (gap <= BODY_GAP_FACTOR * baseline) return false;
+  return /[a-z]/.test(lines[i].text);
+}
+
+/**
  * Split a section into entry blocks per `cfg`. Returns an empty array for an
  * absent/empty section or one with no anchors.
  *
@@ -206,7 +250,10 @@ export function parseEntryBlocks(
   }
 
   const lookback = cfg.headerLookback ?? 0;
-  return anchors.map((_, a) => buildEntryBlock(lines, anchors, a, cfg, lookback));
+  const baseline = sectionLineHeight(lines);
+  return anchors.map((_, a) =>
+    buildEntryBlock(lines, anchors, a, cfg, lookback, baseline),
+  );
 }
 
 /**
@@ -288,6 +335,45 @@ function buildBulletEntry(
 }
 
 /**
+ * Index where the NEXT entry's header run begins — the boundary the current
+ * entry's content window must not cross. Walks up from just below `nextAnchorIdx`,
+ * claiming up to `lookback` consecutive header-shaped lines (non-bullet,
+ * non-prose, non-wrapped) for the next entry. Returns `nextAnchorIdx` unchanged
+ * for the last entry (no next header) or when `lookback` is 0 (anchors below
+ * carry no above-header, e.g. institution/first_line styles).
+ */
+function nextHeaderStart(
+  lines: PdfLine[],
+  anchorIdx: number,
+  nextAnchorIdx: number,
+  lookback: number,
+  markerX: number,
+  baseline: number,
+): number {
+  if (lookback <= 0 || nextAnchorIdx >= lines.length) return nextAnchorIdx;
+  let start = nextAnchorIdx;
+  let claimed = 0;
+  for (let i = nextAnchorIdx - 1; i > anchorIdx && claimed < lookback; i--) {
+    const l = lines[i];
+    if (isBulletLine(l) || isProseLine(l.text) || isWrappedContinuation(l, markerX)) {
+      break;
+    }
+    // y-gap backstop: once a header line is claimed, a paragraph-sized gap
+    // between this candidate and the line just claimed below it means we've
+    // stepped up out of the next entry's tight header run into the previous
+    // entry's description — stop before claiming a periodless body line that
+    // `isProseLine` would not catch.
+    if (claimed > 0 && baseline > 0) {
+      const gapToClaimed = lines[i + 1].y - lines[i].y;
+      if (gapToClaimed > BODY_GAP_FACTOR * baseline) break;
+    }
+    start = i;
+    claimed++;
+  }
+  return start;
+}
+
+/**
  * Build the single `EntryBlock` anchored at `anchors[a]`. The entry spans from
  * just after the previous anchor to just before the next: header lines are the
  * (lookback) non-bullet lines above the anchor, the anchor line with its dates
@@ -301,6 +387,7 @@ function buildEntryBlock(
   a: number,
   cfg: EntryBlockConfig,
   lookback: number,
+  baseline: number,
 ): EntryBlock {
   const anchorIdx = anchors[a];
   const nextAnchorIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
@@ -308,27 +395,69 @@ function buildEntryBlock(
   const markerX = bulletMarkerX(lines);
 
   // Header candidates above the anchor (e.g. "Title\nCompany <dates>").
-  // Bounded by the previous entry's window and the configured lookback; bullets
-  // and wrapped-bullet tails (indented past the marker) from the previous entry
-  // are skipped so they never leak into this entry's header (#boundary).
+  // Bounded by the previous entry's window and the configured lookback; bullets,
+  // wrapped-bullet tails (indented past the marker), and prose description lines
+  // from the previous entry are skipped so they never leak into this entry's
+  // header (#boundary). The prose filter matters for glyph-less templates whose
+  // description paragraph sits directly above the next role's date — and the
+  // y-gap exclusion is its structural twin: a line set off from the line below
+  // it (toward the anchor) by a paragraph-sized gap is the previous entry's
+  // description tail, not this entry's header, even when it carries no period.
   const aboveStart = Math.max(prevAnchorIdx, anchorIdx - lookback);
-  const aboveLines =
-    lookback > 0
-      ? lines
-          .slice(aboveStart, anchorIdx)
-          .filter((l) => !isBulletLine(l) && !isWrappedContinuation(l, markerX))
-      : [];
+  const aboveLines: PdfLine[] = [];
+  if (lookback > 0) {
+    for (let i = aboveStart; i < anchorIdx; i++) {
+      const l = lines[i];
+      if (
+        isBulletLine(l) ||
+        isWrappedContinuation(l, markerX) ||
+        isProseLine(l.text)
+      ) {
+        continue;
+      }
+      if (baseline > 0) {
+        const gapBelow = lines[i + 1].y - lines[i].y;
+        if (gapBelow > BODY_GAP_FACTOR * baseline) continue;
+      }
+      aboveLines.push(l);
+    }
+  }
+
+  // The next entry claims up to `lookback` header-shaped lines directly above
+  // its anchor (the "Title\nCompany <dates>" lead). This entry's content window
+  // must stop before them, or a glyph-less description would swallow the next
+  // role's company/title as a trailing body line. Walk up from just below the
+  // next anchor, claiming consecutive header-shaped lines for the next entry.
+  const windowEnd = nextHeaderStart(
+    lines,
+    anchorIdx,
+    nextAnchorIdx,
+    lookback,
+    markerX,
+    baseline,
+  );
 
   const anchorLine = lines[anchorIdx];
   const dates = parseDateRange(anchorLine.text);
   const anchorTextWithoutDates = stripDateRange(anchorLine.text);
 
   // Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
-  // consecutive non-bullet lines until the first bullet or the next anchor.
-  // A wrapped-bullet tail is skipped (not a header) but does not end the run.
+  // consecutive non-bullet lines until the body begins or the next anchor. The
+  // body begins at the first bullet OR the first prose paragraph — a glyph-less
+  // description line (Word/Office templates write the description as prose, not
+  // a bulleted list), which must not be folded into company/title. A
+  // wrapped-bullet tail is skipped (not a header) but does not end the run.
   const belowHeaderLines: PdfLine[] = [];
-  for (let i = anchorIdx + 1; i < nextAnchorIdx; i++) {
-    if (isBulletLine(lines[i])) break;
+  let bodyStart = windowEnd;
+  for (let i = anchorIdx + 1; i < windowEnd; i++) {
+    if (
+      isBulletLine(lines[i]) ||
+      isProseLine(lines[i].text) ||
+      startsBodyByGap(lines, i, baseline)
+    ) {
+      bodyStart = i;
+      break;
+    }
     if (isWrappedContinuation(lines[i], markerX)) continue;
     belowHeaderLines.push(lines[i]);
   }
@@ -341,17 +470,36 @@ function buildEntryBlock(
     .map((t) => t.trim())
     .filter(Boolean);
 
-  // Body: bullets after the below-header run, until the next anchor.
-  const bodyStart = anchorIdx + 1 + belowHeaderLines.length;
-  const bulletLines = cfg.collectBody
-    ? lines.slice(bodyStart, nextAnchorIdx).filter((l) => isBulletLine(l))
-    : [];
-  const body = cfg.collectBody
-    ? bulletLines
-        .map((l) => stripBullet(l.text))
-        .join("\n")
-        .trim() || undefined
-    : undefined;
+  // Body: every bullet or prose paragraph from where the body began to the next
+  // anchor. Bullet glyphs are stripped; a wrapped tail folds onto its bullet.
+  // Two fold signals: an x-indent past the bullet marker (wrapped glyph bullet),
+  // or — for marker-less prose, which has no marker to wrap past — a line that
+  // sits a baseline (sub-paragraph) gap below its predecessor, i.e. the same
+  // paragraph continued onto the next visual line. A paragraph-sized gap (or a
+  // real bullet glyph) instead starts a new unit, so one prose blurb stays one
+  // bullet rather than splitting mid-sentence.
+  const bodyUnits: string[] = [];
+  if (cfg.collectBody) {
+    for (let i = bodyStart; i < windowEnd; i++) {
+      const text = stripBullet(lines[i].text).trim();
+      if (!text) continue;
+      const foldsAsProseWrap =
+        baseline > 0 &&
+        i > bodyStart &&
+        !isBulletLine(lines[i]) &&
+        lines[i].y - lines[i - 1].y > 0 &&
+        lines[i].y - lines[i - 1].y <= BODY_GAP_FACTOR * baseline;
+      if (
+        bodyUnits.length > 0 &&
+        (isWrappedContinuation(lines[i], markerX) || foldsAsProseWrap)
+      ) {
+        bodyUnits[bodyUnits.length - 1] += " " + text;
+      } else {
+        bodyUnits.push(text);
+      }
+    }
+  }
+  const body = cfg.collectBody ? bodyUnits.join("\n").trim() || undefined : undefined;
 
-  return { headerLines, dates, body, bulletCount: bulletLines.length };
+  return { headerLines, dates, body, bulletCount: bodyUnits.length };
 }

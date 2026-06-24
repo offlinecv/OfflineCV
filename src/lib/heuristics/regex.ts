@@ -66,14 +66,25 @@ export const YEAR_RE = /\b(19|20)\d{2}\b/g;
 /** "Present" / "Current" / "Now" — open-ended end dates. */
 export const PRESENT_RE = /\b(Present|Current|Now|Ongoing)\b/i;
 
+// Year-position forms a date anchor may carry. Beyond real years (4-digit and
+// apostrophe-2-digit) this includes the redacted placeholder stubs Word/Office
+// templates ship — `20XX`, `XXXX`, `####` — so a redacted role header like
+// "March 20XX – December 20XX" still parses as a date range and the role isn't
+// dropped (#31 handles redaction at the completeness layer; this is the parser
+// recognizing the structure). `XXXX`/`####` are admitted ONLY here, in the
+// month-anchored slot, so they never anchor a date bare — mirrors the same
+// false-positive guard `REDACTED_DATE_RE` uses in score.ts.
+const YEAR_FORMS = `\\d{4}|'\\d{2}|20XX|XXXX|####`;
+
 // Shared fragment for one date anchor (Mmm YYYY | 'YY, mm/yyyy, YYYY).
 // Reused by DATE_RANGE_RE's start and end groups. Apostrophe-year keeps
-// DOCX parsing compatible with older resumes that use "Dec '00".
-const DATE_ANCHOR = `${MONTH}\\.?\\s+(?:\\d{4}|'\\d{2})|\\d{1,2}[\\/\\-]\\d{4}|\\d{4}`;
+// DOCX parsing compatible with older resumes that use "Dec '00". The bare-year
+// tail admits `20XX` (unambiguous) but NOT bare `XXXX`/`####` (too weak alone).
+const DATE_ANCHOR = `${MONTH}\\.?\\s+(?:${YEAR_FORMS})|\\d{1,2}[\\/\\-]\\d{4}|20XX|\\d{4}`;
 
 // Strict month-year anchor (no bare-year / numeric-slash forms) for the
 // separator-less branch — bare years adjacent are too weak a signal.
-const MONTH_YEAR_ANCHOR = `${MONTH}\\.?\\s+(?:\\d{4}|'\\d{2})`;
+const MONTH_YEAR_ANCHOR = `${MONTH}\\.?\\s+(?:${YEAR_FORMS})`;
 
 /**
  * Date range between two anchors. Captures both halves. Tolerant of spacing,
