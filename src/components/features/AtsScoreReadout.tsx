@@ -9,9 +9,9 @@
 
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import { getScoreTier } from "../../lib/score/score.ts";
+import { getScoreRecommendation } from "../../lib/score/recommendation.ts";
 import { ScoreRing } from "./ScoreRing.tsx";
 import { VerdictHeader } from "./VerdictHeader.tsx";
-import type { VerdictDimension } from "./VerdictHeader.tsx";
 import { scoreBandBgClass, scoreBandTextClass } from "./scoreBand.ts";
 import { timeAgo } from "../../lib/date-utils.ts";
 
@@ -82,7 +82,7 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
   // timestamp is unparseable or somehow in the future.
   const buildAgo = timeAgo(__BUILD_DATE__) || buildDate;
 
-  // Compute hint strings once — shared between VerdictHeader and Dimension cards.
+  // Hint strings for the three Dimension cards.
   const specificityHint = `${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`;
   const structureHint = `${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`;
   const completenessHint =
@@ -93,29 +93,8 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
       ? " · Dates appear redacted — use 4-digit years for best results."
       : "");
 
-  const dimensions: VerdictDimension[] = [
-    {
-      label: "Specificity",
-      score: score.specificity.score,
-      max: score.specificity.max,
-      gradable: score.specificity.gradable,
-      hint: specificityHint,
-    },
-    {
-      label: "Structure",
-      score: score.structure.score,
-      max: score.structure.max,
-      gradable: score.structure.gradable,
-      hint: structureHint,
-    },
-    {
-      label: "Completeness",
-      score: score.completeness.score,
-      max: score.completeness.max,
-      gradable: score.completeness.gradable,
-      hint: completenessHint,
-    },
-  ];
+  // One actionable next-step sentence for the verdict band (#42).
+  const recommendation = getScoreRecommendation(score);
 
   return (
     <section className="flex flex-col gap-2">
@@ -145,7 +124,7 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
       <div className="flex flex-col gap-4 md:flex-row md:items-start">
         <div className="flex items-center gap-4 md:min-w-0 md:flex-1">
           <ScoreRing score={score.overall} />
-          <VerdictHeader score={score.overall} dimensions={dimensions} />
+          <VerdictHeader score={score.overall} recommendation={recommendation} />
         </div>
         <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-xs sm:grid-cols-3">
           <Dimension
