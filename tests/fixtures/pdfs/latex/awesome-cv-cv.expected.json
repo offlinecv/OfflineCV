@@ -22,6 +22,7 @@
       "linkedin_url",
       "location",
       "phone",
+      "phoneIsValid",
       "skills",
       "website_url"
     ],
@@ -67,6 +68,6 @@
       "scanned": false
     },
     "bulletCount": 52,
-    "algoVersion": "1.3"
+    "algoVersion": "1.4"
   }
 }

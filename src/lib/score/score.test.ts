@@ -666,4 +666,59 @@ describe("computeAnonymousAtsScore", () => {
       expect(result.completeness.redactedDates).toBeFalsy();
     });
   });
+
+  describe("validity-aware phone completeness (#70)", () => {
+    it("awards full credit for a phone that is present, confident, and valid", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          parsed: { ...makeAnonInput().parsed, phone: "(312) 555-0123", phoneIsValid: true },
+          fieldConfidence: { ...makeAnonInput().fieldConfidence, phone: 0.9 },
+        }),
+      );
+      expect(result.completeness.missing).not.toContain("phone");
+    });
+
+    it("awards full credit when phoneIsValid is absent (backward-compatible)", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          parsed: { ...makeAnonInput().parsed, phone: "(312) 555-0123", phoneIsValid: undefined },
+          fieldConfidence: { ...makeAnonInput().fieldConfidence, phone: 0.9 },
+        }),
+      );
+      expect(result.completeness.missing).not.toContain("phone");
+    });
+
+    it("awards half credit for a phone that is present but invalid (phoneIsValid===false)", () => {
+      const withPhone = makeAnonInput();
+      const withoutPhone = makeAnonInput({
+        parsed: { ...makeAnonInput().parsed, phone: undefined },
+        fieldConfidence: { ...makeAnonInput().fieldConfidence, phone: 0 },
+      });
+      const invalidPhone = makeAnonInput({
+        parsed: { ...makeAnonInput().parsed, phone: "555-invalid", phoneIsValid: false },
+        fieldConfidence: { ...makeAnonInput().fieldConfidence, phone: 0.85 },
+      });
+      // Half credit: invalid phone scores above absent (0) but below valid (1)
+      expect(invalidPhone.parsed.phoneIsValid).toBe(false);
+      const invalidResult = computeAnonymousAtsScore(invalidPhone);
+      const absentResult = computeAnonymousAtsScore(withoutPhone);
+      const validResult = computeAnonymousAtsScore(withPhone);
+      // Invalid phone is still in missing (passed: false)
+      expect(invalidResult.completeness.missing).toContain("phone");
+      // But it earns more completeness score than absent phone
+      expect(invalidResult.completeness.score).toBeGreaterThan(absentResult.completeness.score);
+      // And less than or equal to a fully valid phone
+      expect(invalidResult.completeness.score).toBeLessThanOrEqual(validResult.completeness.score);
+    });
+
+    it("does not credit phone when confidence is below the floor", () => {
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          parsed: { ...makeAnonInput().parsed, phone: "(312) 555-0123", phoneIsValid: true },
+          fieldConfidence: { ...makeAnonInput().fieldConfidence, phone: 0.3 },
+        }),
+      );
+      expect(result.completeness.missing).toContain("phone");
+    });
+  });
 });

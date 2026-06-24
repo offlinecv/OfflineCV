@@ -198,6 +198,9 @@ function buildHeuristicResult(
     ...splitGivenFamilyName(name.value),
     ...(contact.email ? { email: contact.email } : {}),
     ...(contact.phone ? { phone: contact.phone } : {}),
+    ...(contact.phone && contact.phoneIsValid !== undefined
+      ? { phoneIsValid: contact.phoneIsValid }
+      : {}),
     ...(contact.location ? { location: contact.location } : {}),
     ...(contact.linkedin_url ? { linkedin_url: contact.linkedin_url } : {}),
     ...(contact.github_url ? { github_url: contact.github_url } : {}),
