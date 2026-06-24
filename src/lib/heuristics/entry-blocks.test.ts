@@ -364,3 +364,56 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
     ]);
   });
 });
+
+describe("parseEntryBlocks — wrapped multi-line role header (#166)", () => {
+  it("reassembles a 3-line wrapped header (org tail + date-year wrap) into one dated block", () => {
+    // The Docent shape from
+    // google-docs-skia-proxy-multiline-bullets-coursework.pdf: the org name and
+    // the closing date year each wrap onto a second physical row — the org tail
+    // ("Museum") to the left margin, the date tail ("2024") to the far right.
+    const section = xSection("experience", [
+      {
+        text: "Docent, Library Collections Assistant | Community Heritage May 2023 - June",
+        x: 70.5,
+      },
+      { text: "Museum", x: 70.5 }, // left-column org tail
+      { text: "2024", x: 438 }, // right-column date tail
+      { text: "● Represented and promoted the museum at community events.", x: 81 },
+      { text: "● Conducted tours for museum guests.", x: 81 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(1);
+    const [b] = blocks;
+    // Date range reassembled across the wrap: "May 2023 - June" + "2024".
+    expect(b.dates.start_date).toBe("May 2023");
+    expect(b.dates.end_date).toBe("June 2024");
+    // Org tail folded back: "Community Heritage" + "Museum".
+    expect(b.headerLines.join(" ")).toContain("Community Heritage Museum");
+    // Both bullets attribute to the role (no longer stranded in "Other").
+    expect(b.bulletCount).toBe(2);
+  });
+
+  it("does not fold a complete single-line header (no regression on the common shape)", () => {
+    // A "Company Dates / Title / bullets" stack already carries a full range on
+    // the anchor line; the fold's complete-range gate must leave it untouched so
+    // the title stays a separate header line rather than collapsing into the date.
+    const section = xSection("experience", [
+      { text: "Acme Corp  Jan 2020 - Dec 2021", x: 70 },
+      { text: "Senior Engineer", x: 70 },
+      { text: "● Shipped the billing service.", x: 81 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].dates.start_date).toBe("Jan 2020");
+    expect(blocks[0].dates.end_date).toBe("Dec 2021");
+    expect(blocks[0].headerLines).toContain("Senior Engineer");
+  });
+});

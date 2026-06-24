@@ -27,7 +27,14 @@
  */
 
 import type { PdfLine, PdfSection } from "./sections.ts";
-import { DATE_RANGE_RE, PRESENT_RE, INSTITUTION_HINTS } from "./regex.ts";
+import {
+  DATE_RANGE_RE,
+  PRESENT_RE,
+  INSTITUTION_HINTS,
+  MONTH_YEAR_RE,
+  NUMERIC_MONTH_YEAR_RE,
+  YEAR_RE,
+} from "./regex.ts";
 import {
   parseDateRange,
   stripDateRange,
@@ -179,6 +186,131 @@ function isWrappedContinuation(line: PdfLine, markerX: number): boolean {
   return Number.isFinite(markerX) && line.x > markerX + 2;
 }
 
+/** True when `text` carries a complete, parseable date RANGE — i.e. it would
+ *  anchor a `date_range` entry on its own. `DATE_RANGE_RE` is non-global but
+ *  `.test` advances `lastIndex` on some engines; reset so calls are idempotent. */
+function hasCompleteDateRange(text: string): boolean {
+  const hit = DATE_RANGE_RE.test(text) || PRESENT_RE.test(text);
+  DATE_RANGE_RE.lastIndex = 0;
+  return hit;
+}
+
+/** Index of the earliest date-region token (month-year, numeric month/year, or
+ *  a bare year) in `text`, or -1 if none. Marks where the right-hand date column
+ *  begins so a wrapped header's left (org) and right (date) continuations fold
+ *  back onto the correct side. The three source regexes are global; reset
+ *  `lastIndex` before each scan so repeated calls are idempotent. */
+function dateRegionStart(text: string): number {
+  let idx = -1;
+  for (const re of [MONTH_YEAR_RE, NUMERIC_MONTH_YEAR_RE, YEAR_RE]) {
+    re.lastIndex = 0;
+    const m = re.exec(text);
+    re.lastIndex = 0;
+    if (m && (idx === -1 || m.index < idx)) idx = m.index;
+  }
+  return idx;
+}
+
+/** A continuation fragment belongs to the right-hand date column when it sits
+ *  past the bullet-marker margin (geometry) OR reads as a bare date tail — just
+ *  a year / month-year / "Present" (content). The content test rescues the
+ *  no-bullet case (`markerX` = Infinity) where geometry can't classify. */
+function isDateColumnFragment(line: PdfLine, markerX: number): boolean {
+  if (Number.isFinite(markerX) && line.x > markerX + 2) return true;
+  const t = line.text.trim();
+  return /^(?:\d{4}|'\d{2})$/.test(t) || hasCompleteDateRange(t) || PRESENT_RE.test(t);
+}
+
+/**
+ * Fold a wrapped multi-line ROLE HEADER back into one logical header line so a
+ * `date_range` entry block opens for it. The motivating shape (#166): a header
+ * whose org and date span two physical rows, where the date's closing year
+ * wraps onto its own far-right line —
+ *
+ *     "Docent … | Community Heritage   May 2023 - June"   ← anchor row (no full range)
+ *     "Museum"                                            ← left-column org tail
+ *     "2024"                                              ← right-column date tail
+ *
+ * Because the anchor row reads "… May 2023 - June" (an incomplete range),
+ * `DATE_RANGE_RE` misses it, no anchor forms, no entry is built, and the role's
+ * bullets fall into the unmatched "Other" group. This pass reassembles the three
+ * rows into "… Community Heritage Museum   May 2023 - June 2024", which DOES
+ * match, so the block opens normally and the bullets attribute to the role.
+ *
+ * The fold is the role-header analogue of {@link mergeWrappedContinuations}
+ * (which folds wrapped *bullet bodies*). It fires ONLY when:
+ *   - the candidate row is a non-bullet line that does NOT already carry a
+ *     complete range (so a normal "Company Jan 2020 - Dec 2021" header, or a
+ *     "Company Dates / Title / bullets" stack, never folds — no regression), and
+ *   - it carries a date-region start (the dangling "… - June"), and
+ *   - folding the continuation rows directly below it (consecutive non-bullet,
+ *     non-anchor lines before the first bullet) yields text that NOW matches
+ *     `DATE_RANGE_RE`.
+ * The final match gate is the safety net: if the continuations don't complete a
+ * range, the rows are left untouched.
+ *
+ * Left-column fragments (at/left of the bullet-marker margin, e.g. "Museum")
+ * append to the text before the date; right-column fragments ("2024") append to
+ * the date region — keyed off `dateRegionStart` so "June" and "2024" reassemble
+ * adjacently rather than "June Museum 2024".
+ */
+export function mergeWrappedHeaderRows(lines: PdfLine[]): PdfLine[] {
+  if (lines.length === 0) return lines;
+  const markerX = bulletMarkerX(lines);
+  const out: PdfLine[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const dateIdx = dateRegionStart(line.text);
+    if (
+      !isBulletLine(line) &&
+      !hasCompleteDateRange(line.text) &&
+      dateIdx >= 0
+    ) {
+      // Gather continuation rows directly below: non-bullet, non-anchor lines
+      // before the first bullet / next complete-date anchor.
+      const conts: PdfLine[] = [];
+      let j = i + 1;
+      while (
+        j < lines.length &&
+        !isBulletLine(lines[j]) &&
+        !hasCompleteDateRange(lines[j].text)
+      ) {
+        conts.push(lines[j]);
+        j++;
+      }
+      if (conts.length > 0) {
+        const textPart = line.text.slice(0, dateIdx).trim();
+        const datePart = line.text.slice(dateIdx).trim();
+        const leftFrags: string[] = [];
+        const rightFrags: string[] = [];
+        for (const c of conts) {
+          (isDateColumnFragment(c, markerX) ? rightFrags : leftFrags).push(
+            c.text.trim(),
+          );
+        }
+        const folded = [textPart, ...leftFrags, datePart, ...rightFrags]
+          .filter(Boolean)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (hasCompleteDateRange(folded)) {
+          out.push({
+            ...line,
+            text: folded,
+            items: [...line.items, ...conts.flatMap((c) => c.items)],
+          });
+          i = j;
+          continue;
+        }
+      }
+    }
+    out.push(line);
+    i++;
+  }
+  return out;
+}
+
 /**
  * A description paragraph begins after a vertical gap wider than this multiple
  * of the section's single line-height. Word/Office templates write the role
@@ -238,7 +370,15 @@ export function parseEntryBlocks(
 ): EntryBlock[] {
   if (!section || section.lines.length === 0) return [];
 
-  const lines = section.lines;
+  // Fold wrapped multi-line role headers (an org/date that spilled onto extra
+  // physical rows) back into one logical header BEFORE anchor detection, so a
+  // header whose closing date-year wrapped still opens a `date_range` entry
+  // (#166). Scoped to `date_range`: the other anchors key off an institution
+  // hint / first line, not a date range that can wrap incomplete.
+  const lines =
+    cfg.anchor === "date_range"
+      ? mergeWrappedHeaderRows(section.lines)
+      : section.lines;
   const anchors = collectAnchors(lines, cfg.anchor);
   if (anchors.length === 0) {
     // A `first_line` section with no anchorable header line is a flat bullet
