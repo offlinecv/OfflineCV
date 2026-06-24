@@ -507,36 +507,57 @@ const TYPED_FIELD_SECTIONS = new Set<string>([
   "skills",
 ]);
 
-/** Sum visible character counts across the heuristic parse output. */
-function countExtractedChars(
-  parsed: CascadeResult["parsed"],
-  sections: HeuristicResult["sections"],
-): number {
+/** Length of an optional string field; 0 when absent. */
+const fieldLen = (s: string | null | undefined): number => (s ?? "").length;
+
+/** Chars from the typed scalar contact + summary fields. */
+function scalarFieldChars(parsed: CascadeResult["parsed"]): number {
+  return (
+    fieldLen(parsed.full_name) +
+    fieldLen(parsed.email) +
+    fieldLen(parsed.phone) +
+    fieldLen(parsed.location) +
+    fieldLen(parsed.summary)
+  );
+}
+
+/** Chars from the typed list fields (skills, experience, education). */
+function listFieldChars(parsed: CascadeResult["parsed"]): number {
   let n = 0;
-  n += (parsed.full_name ?? "").length;
-  n += (parsed.email ?? "").length;
-  n += (parsed.phone ?? "").length;
-  n += (parsed.location ?? "").length;
-  n += (parsed.summary ?? "").length;
   for (const s of parsed.skills ?? []) n += s.length;
   for (const e of parsed.experience ?? []) {
-    n += (e.company ?? "").length;
-    n += (e.title ?? "").length;
-    n += (e.team ?? "").length;
-    n += (e.description ?? "").length;
+    n += fieldLen(e.company) + fieldLen(e.title) + fieldLen(e.team) + fieldLen(e.description);
   }
   for (const e of parsed.education ?? []) {
-    n += (e.institution ?? "").length;
-    n += (e.degree ?? "").length;
+    n += fieldLen(e.institution) + fieldLen(e.degree);
   }
-  // Untyped sections (projects, certifications, achievements, `other`) carry
-  // real extracted text that no typed field counts. Without them, correctly
-  // terminating an unknown section — e.g. a coursework block (#164) — drops
-  // the extracted/raw ratio toward EXTRACTION_RATIO_FLOOR and falsely trips
-  // `low_extraction_ratio` → OCR escalation (#165 review).
+  return n;
+}
+
+/**
+ * Chars from sections that no typed field counts — projects, certifications,
+ * achievements, the `other` catch-all. Without them, correctly terminating an
+ * unknown section (e.g. a coursework block, #164) drops the extracted/raw ratio
+ * toward EXTRACTION_RATIO_FLOOR and falsely trips `low_extraction_ratio` → OCR
+ * escalation (#165 review).
+ */
+function untypedSectionChars(sections: HeuristicResult["sections"]): number {
+  let n = 0;
   for (const [name, lines] of sections.byName) {
     if (TYPED_FIELD_SECTIONS.has(name)) continue;
     for (const line of lines) n += line.length;
   }
   return n;
+}
+
+/** Sum visible character counts across the heuristic parse output. */
+function countExtractedChars(
+  parsed: CascadeResult["parsed"],
+  sections: HeuristicResult["sections"],
+): number {
+  return (
+    scalarFieldChars(parsed) +
+    listFieldChars(parsed) +
+    untypedSectionChars(sections)
+  );
 }
