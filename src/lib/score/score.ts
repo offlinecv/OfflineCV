@@ -533,6 +533,9 @@ export interface AnonymousAtsScoreInput {
       start_date?: string;
       end_date?: string;
       is_current?: boolean;
+      /** Role body. Used as a fallback bullet source for glyph-less prose
+       *  templates whose accomplishment sections yield no marker bullets. */
+      description?: string;
     }[];
     education?: { degree?: string; institution?: string }[];
   };
@@ -662,13 +665,45 @@ function extractBulletsFromSections(sections: SectionedResume): string[] {
   return out;
 }
 
+/**
+ * Fallback bullet pool for marker-less prose templates: each parsed role's
+ * `description` (one paragraph per line, the shape the entry-block parser folds
+ * wrapped prose into) becomes one or more bullets via `splitBullets`. Only used
+ * when the section pool is empty, so glyph resumes never double-count.
+ *
+ * Scope note: pools experience descriptions only — not project (#95) or
+ * achievement (#96) descriptions, which the authed scorer also pools. A
+ * glyph-less template whose prose lives solely in a projects/achievements
+ * section (with an empty accomplishment-section pool) still grades 0; broaden
+ * the fallback source if such a fixture surfaces.
+ */
+function poolExperienceDescriptions(
+  experience: { description?: string }[] | undefined,
+): string[] {
+  const out: string[] = [];
+  for (const e of experience ?? []) {
+    if (e.description) out.push(...splitBullets(e.description));
+  }
+  return out;
+}
+
 export function computeAnonymousAtsScore(
   input: AnonymousAtsScoreInput,
 ): AnonymousAtsScore {
   // ── Bullet-level dimensions (Specificity 40, Structure 30) ─────────────
   // Same scoreBulletPool the authed scorer uses — guarantees the two
   // surfaces apply identical per-bullet rules.
-  const bullets = extractBulletsFromSections(input.sections);
+  // Primary bullet source: marker-bearing lines pooled from the accomplishment
+  // sections. Fallback: glyph-less prose templates (Word / Office) write each
+  // role's description as a marker-less paragraph, so the section pool comes back
+  // empty — pool the parsed per-role descriptions instead (mirrors the authed
+  // scorer's per-role `splitBullets`). The description lines split exactly as
+  // `groupBulletsByExperience` keys on them, so the UI attributes each pooled
+  // bullet to its role.
+  let bullets = extractBulletsFromSections(input.sections);
+  if (bullets.length === 0) {
+    bullets = poolExperienceDescriptions(input.parsed.experience);
+  }
   const pool = scoreBulletPool(bullets);
   const observations = analyzeBullets(bullets);
   const gradable = pool.total >= ANON_MIN_BULLETS_TO_GRADE;

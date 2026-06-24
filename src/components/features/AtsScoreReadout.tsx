@@ -143,11 +143,11 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
         </p>
       </details>
       <div className="flex flex-col gap-4 md:flex-row md:items-start">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 md:min-w-0 md:flex-1">
           <ScoreRing score={score.overall} />
           <VerdictHeader score={score.overall} dimensions={dimensions} />
         </div>
-        <dl className="grid flex-1 grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+        <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-xs sm:grid-cols-3">
           <Dimension
             label="Specificity"
             value={score.specificity.score}

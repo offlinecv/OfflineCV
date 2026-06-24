@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.9,
+    "confidence": 0.89,
     "triggers": [],
     "tiers": [
       "t0_layout",
