@@ -337,6 +337,64 @@ function foldHeaderText(
 }
 
 /**
+ * Fold every wrapped-bullet continuation line in a section into the `PdfLine`
+ * it continues, returning a new line array where each bullet carries its full
+ * text on one line. This is the upstream twin of the body-fold logic inside
+ * {@link buildEntryBlock}, narrowed to the one fold signal that is
+ * geometrically unambiguous across all section types: an x-indent past the
+ * bullet *marker* margin (`isWrappedContinuation`), where a long glyph bullet's
+ * tail wraps onto a marker-less second line that aligns with the bullet TEXT.
+ *
+ * Why a separate pass: `SectionedResume.byName` flattens each section's
+ * `PdfLine`s to trimmed strings (`toSectionedResume`), discarding the x the
+ * fold needs. Running the fold here — before that flatten — lets the
+ * string-level bullet pool (`extractBulletsFromLines`, which keeps only
+ * marker-led lines and would otherwise drop a glyph-less continuation, leaving
+ * the bullet truncated at the wrap) recover the full bullet text for EVERY
+ * section, including untyped ones (volunteer, coursework) that never reach
+ * `experience[]`. By construction the pool then agrees with the merged
+ * `experience[]/projects[].description` the entry-block parser produces. See
+ * #162.
+ *
+ * The prose-wrap y-gap signal `buildEntryBlock` also uses is deliberately NOT
+ * applied here: the bullet pool is bullet-marker-gated, so a marker-less prose
+ * template never contributes pool lines for a prose continuation to extend —
+ * the signal would add no pool benefit while collaterally collapsing
+ * paragraph-spaced header/contact/education lines (which sit at or left of the
+ * margin and are NOT continuations) into one another. The x-indent signal
+ * touches only lines that wrapped past a real bullet marker, so headers, entry
+ * titles, and contact blocks are left one-to-one.
+ *
+ * A no-op when the section has no bullets (markerX = Infinity) or carries no
+ * usable x (markdown/DOCX, every x = 0 → nothing indents past the marker): the
+ * array is returned one line per input, byte-identical to the pre-merge flatten.
+ */
+export function mergeWrappedContinuations(lines: PdfLine[]): PdfLine[] {
+  if (lines.length === 0) return lines;
+  const markerX = bulletMarkerX(lines);
+  const out: PdfLine[] = [];
+  for (const line of lines) {
+    if (
+      out.length > 0 &&
+      !isBulletLine(line) &&
+      isWrappedContinuation(line, markerX)
+    ) {
+      // Fold this continuation onto the line it wraps from: clone the previous
+      // emitted line and append the continuation's text + items.
+      const prev = out[out.length - 1];
+      out[out.length - 1] = {
+        ...prev,
+        text: `${prev.text.trimEnd()} ${line.text.trim()}`.trim(),
+        items: [...prev.items, ...line.items],
+      };
+    } else {
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+/**
  * A description paragraph begins after a vertical gap wider than this multiple
  * of the section's single line-height. Word/Office templates write the role
  * description as a glyph-less prose paragraph set off by paragraph spacing, so
