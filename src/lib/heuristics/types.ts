@@ -123,6 +123,10 @@ export type HeuristicParsedResume = Partial<ParsedResume> & {
   skills: string[];
   experience: ResumeExperience[];
   education: ResumeEducation[];
+  /** libphonenumber isValid() result for the extracted phone — plumbed from
+   *  the extraction layer so the scorer can apply validity-aware credit without
+   *  importing libphonenumber-js (which would break the entry-chunk budget). */
+  phoneIsValid?: boolean;
 };
 
 /** Confidence per extracted field (0..1). Fields not in the map default to 0. */

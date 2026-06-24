@@ -20,6 +20,9 @@ import { firstMatch, allMatches } from "./shared.ts";
 export interface ContactExtractionResult {
   email?: string;
   phone?: string;
+  /** libphonenumber isValid() result for the extracted phone. Undefined when
+   *  no phone was found or the caller did not supply validity signal. */
+  phoneIsValid?: boolean;
   linkedin_url?: string;
   github_url?: string;
   portfolio_url?: string;
@@ -233,6 +236,7 @@ function scan(lines: PdfLine[], joined: string): ContactScanResult {
   return {
     email,
     phone,
+    ...(phone !== undefined ? { phoneIsValid: phoneResult?.isValid } : {}),
     linkedin_url: normalizeUrl(linkedin),
     github_url: normalizeUrl(github),
     portfolio_url: normalizeUrl(portfolio),
@@ -387,6 +391,7 @@ export function extractContact(
   return {
     email: primary.email ?? fallback.email,
     phone: primary.phone ?? fallback.phone,
+    phoneIsValid: primary.phone ? primary.phoneIsValid : fallback.phoneIsValid,
     linkedin_url: normalizeUrl(linkedin.value),
     github_url: normalizeUrl(github.value),
     portfolio_url: normalizeUrl(portfolio.value),

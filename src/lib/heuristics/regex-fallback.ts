@@ -80,6 +80,7 @@ export function runRegexFallback(
     const phoneResult = findFirstPhone(rawText, region);
     if (phoneResult) {
       parsed.phone = phoneResult.formatted;
+      parsed.phoneIsValid = phoneResult.isValid;
       fieldConfidence.phone = 0.6;
       fieldsFilled.push("phone");
     }
