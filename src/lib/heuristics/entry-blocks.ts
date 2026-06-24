@@ -227,7 +227,7 @@ export function mergeWrappedContinuations(lines: PdfLine[]): PdfLine[] {
       const prev = out[out.length - 1];
       out[out.length - 1] = {
         ...prev,
-        text: `${prev.text} ${line.text.trim()}`.trim(),
+        text: `${prev.text.trimEnd()} ${line.text.trim()}`.trim(),
         items: [...prev.items, ...line.items],
       };
     } else {

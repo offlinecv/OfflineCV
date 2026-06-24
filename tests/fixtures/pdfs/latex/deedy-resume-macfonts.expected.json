@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.64,
     "triggers": [
       "two_column"
     ],
@@ -10,7 +10,7 @@
       "t1_openresume",
       "t1_5_regex"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "ner",
     "fieldsPopulated": [
       "current_company",
       "current_title",
