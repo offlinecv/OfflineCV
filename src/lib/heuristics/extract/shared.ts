@@ -56,3 +56,23 @@ export function looksLikeCompany(text: string): boolean {
 export function avgScore(scores: number[]): number {
   return scores.reduce((a, b) => a + b, 0) / Math.max(scores.length, 1);
 }
+
+/**
+ * Drop entries the parser couldn't label — a date-only / title-less block whose
+ * header reduced to "" (#145) — then package the survivors as the standard
+ * `{ value, confidence }` pair the three entry extractors return. Filtering on
+ * the built entry's label (not on empty `headerLines`) also catches a URL-only
+ * header, which `liftHeaderLabel` collapses to an empty label. Keeping the
+ * phantom out of the list also keeps its score 0 out of the `avgScore`
+ * denominator, so it no longer dilutes section confidence.
+ */
+export function finalizeEntries<T>(
+  built: { entry: T; score: number }[],
+  hasLabel: (entry: T) => boolean,
+): { value: T[]; confidence: number } {
+  const kept = built.filter((b) => hasLabel(b.entry));
+  return {
+    value: kept.map((b) => b.entry),
+    confidence: avgScore(kept.map((b) => b.score)),
+  };
+}

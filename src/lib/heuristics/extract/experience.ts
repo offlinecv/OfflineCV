@@ -6,7 +6,7 @@ import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { US_LOCATION_RE, INTL_LOCATION_RE } from "../regex.ts";
-import { looksLikeTitle, looksLikeCompany, avgScore } from "./shared.ts";
+import { looksLikeTitle, looksLikeCompany, finalizeEntries } from "./shared.ts";
 
 // ── Experience ──────────────────────────────────────────────────────────────
 
@@ -35,12 +35,12 @@ export function extractExperience(
     collectBody: true,
     headerLookback: 2,
   });
-  if (blocks.length === 0) return { value: [], confidence: 0 };
-  const built = blocks.map(experienceFromBlock);
-  return {
-    value: built.map((b) => b.entry),
-    confidence: avgScore(built.map((b) => b.score)),
-  };
+  // Drop a date-only phantom — a block with neither title nor company (#145).
+  // Experience has no single title axis, so we keep a role that has either.
+  return finalizeEntries(
+    blocks.map(experienceFromBlock),
+    (e) => e.title !== "" || e.company !== "",
+  );
 }
 
 /** Map one dated entry block to a `ResumeExperience` and its confidence score.
