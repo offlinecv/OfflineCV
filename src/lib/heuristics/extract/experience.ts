@@ -5,6 +5,7 @@ import type { ResumeExperience } from "../../score/types.ts";
 import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
+import { US_LOCATION_RE, INTL_LOCATION_RE } from "../regex.ts";
 import { looksLikeTitle, looksLikeCompany, avgScore } from "./shared.ts";
 
 // ── Experience ──────────────────────────────────────────────────────────────
@@ -75,6 +76,50 @@ function experienceFromBlock(block: EntryBlock): {
   };
 }
 
+/** Legal-entity suffix that must NOT be cleaved off as a separate field by the
+ *  comma split — "Acme, Inc" is one employer, not "Acme" + a role "Inc". */
+const LEGAL_SUFFIX_RE =
+  /^(inc\.?|llc|l\.l\.c\.?|ltd\.?|corp\.?|co\.?|gmbh|plc|lp|llp|pc|s\.a\.?|n\.a\.?|sa)$/i;
+
+/** Bare city/region names (no "City, ST" state tail, so `US_LOCATION_RE` misses
+ *  them) that show up as a `"Title, Location"` header tail — must NOT be cleaved
+ *  off as the company. Exact whole-string match keeps a real company that merely
+ *  contains a city word ("New York Times", "Boston Consulting") splittable. */
+const BARE_LOCATION_RE =
+  /^(remote|hybrid|on-?site|san francisco|san diego|san jose|san antonio|los angeles|las vegas|new york|new york city|new orleans|salt lake city|washington|washington d\.?c\.?|boston|chicago|seattle|austin|denver|portland|atlanta|dallas|houston|phoenix|miami|detroit|philadelphia|pittsburgh|minneapolis|nashville|charlotte|columbus|indianapolis|baltimore|sacramento|raleigh|london|paris|berlin|munich|tokyo|singapore|bangalore|bengaluru|mumbai|delhi|hyderabad|toronto|vancouver|sydney|melbourne|dublin|amsterdam)$/i;
+
+/** True when the comma tail reads like a location rather than an employer —
+ *  either a "City, ST"/"City, Country" shape or a bare well-known city. Used to
+ *  veto the `"Title, Location"` split so a city is never recorded as company. */
+function looksLikeLocationTail(after: string): boolean {
+  return (
+    BARE_LOCATION_RE.test(after) ||
+    US_LOCATION_RE.test(after) ||
+    INTL_LOCATION_RE.test(after)
+  );
+}
+
+/**
+ * Split a single "Role, Company" header line into [title, company]. Guarded so
+ * it only fires when the part before the comma reads like a job title
+ * (`looksLikeTitle`), the part after is not a bare legal suffix, and the part
+ * after does not read like a location — so "Office manager, The Phone Company"
+ * splits, but "Acme, Inc", "Acme Analytics (…) New York, NY" (no title keyword
+ * before the comma), and "Marketing Manager, San Francisco" (location tail) do
+ * not. Returns null when no guarded split applies.
+ */
+function splitRoleComma(h: string): [string, string] | null {
+  const comma = h.indexOf(",");
+  if (comma <= 0) return null;
+  const before = h.slice(0, comma).trim();
+  const after = h.slice(comma + 1).trim();
+  if (!before || !after) return null;
+  if (!looksLikeTitle(before)) return null;
+  if (LEGAL_SUFFIX_RE.test(after)) return null;
+  if (looksLikeLocationTail(after)) return null;
+  return [before, after];
+}
+
 /**
  * Given 1..3 header lines, decide which is the company and which is the title.
  * Heuristics (in priority order):
@@ -96,15 +141,21 @@ function disambiguateCompanyTitle(headers: string[]): {
   const filtered = headers.filter((h) => h.length > 0);
   if (filtered.length === 0) return {};
 
-  // Split any header that has an obvious "Title, Company" or "Title @ Company" pattern.
+  // Split any header that has an obvious "Title @ Company", "Title — Company",
+  // "Title | Company", or guarded "Title, Company" pattern.
   const splits: Array<{ text: string; source: number }> = [];
   filtered.forEach((h, idx) => {
     const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s+/);
     if (atSplit.length > 1) {
       atSplit.forEach((s) => splits.push({ text: s.trim(), source: idx }));
-    } else {
-      splits.push({ text: h, source: idx });
+      return;
     }
+    const roleComma = splitRoleComma(h);
+    if (roleComma) {
+      roleComma.forEach((s) => splits.push({ text: s, source: idx }));
+      return;
+    }
+    splits.push({ text: h, source: idx });
   });
 
   const companyIdx = splits.findIndex((s) => looksLikeCompany(s.text));

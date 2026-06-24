@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.9,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "none",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -23,7 +23,7 @@
       "website_url"
     ],
     "skillsCount": 6,
-    "experienceCount": 1,
+    "experienceCount": 3,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 0,
@@ -34,29 +34,28 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 23,
-    "preLayoutOverall": 23,
+    "overall": 79,
+    "preLayoutOverall": 79,
     "specificity": {
-      "score": 0,
+      "score": 40,
       "max": 40,
-      "gradable": false,
-      "metricBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "metricBullets": 2,
+      "totalBullets": 3
     },
     "structure": {
-      "score": 0,
+      "score": 15,
       "max": 30,
-      "gradable": false,
-      "goodBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "goodBullets": 2,
+      "totalBullets": 3
     },
     "completeness": {
-      "score": 23,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
         "LinkedIn",
-        "role dates",
         "summary"
       ]
     },
@@ -65,7 +64,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 0,
+    "bulletCount": 3,
     "algoVersion": "1.3"
   }
 }
