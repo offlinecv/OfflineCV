@@ -25,6 +25,34 @@ export function stripBullet(text: string): string {
   return text.replace(/^\s*[•‣▪●◦⁃*\-–—]\s*/, "").trim();
 }
 
+/**
+ * True when a line reads like a description sentence rather than an entry
+ * header (company / title / institution). Some templates — notably the Word /
+ * Office résumé templates — write the role description as a glyph-less prose
+ * paragraph instead of a bulleted list, so `isBulletLine` alone can't tell the
+ * description apart from the header lines around the date.
+ *
+ * Two signals, both required, plus a word floor:
+ *   - a lowercase letter (a long ALL-CAPS company/title isn't prose), and
+ *   - an INTERNAL sentence break ("…accomplishments. Where…") — a period
+ *     between two letters followed by a capitalized word. This is what keeps a
+ *     long-but-header line like "Acme Analytics (8 employee venture-backed
+ *     startup) New York, NY" out: it has commas and parentheses but no
+ *     sentence period, so it stays a header (and its company is preserved).
+ * The 8-word floor sits just under the scorer's 8-30-word bullet window, so a
+ * paragraph the scorer would grade as a bullet is captured as body here too.
+ * Glyph-less descriptions WITHOUT a sentence period (e.g. indented one-line
+ * bullets) are left to the bullet/indent path, unchanged by this predicate.
+ */
+const PROSE_MIN_WORDS = 8;
+const SENTENCE_BREAK_RE = /[a-z]{2}\.\s+[A-Z]/;
+export function isProseLine(text: string): boolean {
+  const trimmed = text.trim();
+  if (!/[a-z]/.test(trimmed)) return false;
+  if (!SENTENCE_BREAK_RE.test(trimmed)) return false;
+  return trimmed.split(/\s+/).filter(Boolean).length >= PROSE_MIN_WORDS;
+}
+
 /** Collapse internal whitespace and trim — the canonical date-token normalizer. */
 export function normalizeDate(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
