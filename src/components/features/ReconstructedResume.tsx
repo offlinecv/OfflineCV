@@ -60,6 +60,8 @@ import {
   buildProjectDates,
   buildEducationDates,
 } from "../../lib/score/entry-dates.ts";
+import { Button } from "@design-system";
+import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 
 // ── Rollup strip ──────────────────────────────────────────────────────────────
 
@@ -428,6 +430,11 @@ function EducationSection({
                 {dates && (
                   <span className="text-content-tertiary"> · {dates}</span>
                 )}
+                {edu.coursework && edu.coursework.length > 0 && (
+                  <span className="block text-content-tertiary">
+                    Coursework: {edu.coursework.join(" · ")}
+                  </span>
+                )}
               </li>
             );
           })}
@@ -502,6 +509,11 @@ export function ReconstructedResume({
     ? [...experienceGroups, other]
     : experienceGroups;
 
+  // Download the reconstructed (possibly edited) résumé as an ATS-safe,
+  // text-only PDF — built fully client-side from the already-parsed fields,
+  // so no PDF bytes ever leave the browser (#171).
+  const { download, isGenerating } = useDownloadPdf(result, score, edit);
+
   const achievementsSection = achievements.length > 0 && (
     <AchievementsSection
       achievements={achievements}
@@ -516,9 +528,19 @@ export function ReconstructedResume({
       className="scroll-mt-6 flex flex-col gap-6"
     >
       <div className="flex flex-col gap-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-          Reconstructed resume
-        </h2>
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+            Reconstructed resume
+          </h2>
+          <Button
+            variant="primary"
+            onClick={download}
+            disabled={isGenerating}
+            aria-label="Download the reconstructed resume as an ATS-friendly PDF"
+          >
+            {isGenerating ? "Generating…" : "Download PDF"}
+          </Button>
+        </div>
         <p className="max-w-prose text-sm text-content-tertiary">
           What the parser recognized, in resume shape. Each bullet is checked
           against three rules — an action verb, the 8–30-word length window, and
