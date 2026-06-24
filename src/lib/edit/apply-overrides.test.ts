@@ -82,6 +82,48 @@ describe("applyOverrides", () => {
     expect(out.full_name).toBeUndefined();
   });
 
+  it("clears a stale phoneIsValid flag when the phone is overridden (#70 review)", () => {
+    const parsed: HeuristicParsedResume = {
+      ...baseParsed(),
+      phone: "555-invalid",
+      phoneIsValid: false,
+    };
+    // User fixes the number → the old `false` must not survive, else the
+    // scorer keeps awarding half credit on the corrected phone.
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      { phone: "(312) 555-0123" },
+      {},
+      {},
+      [],
+    );
+    expect(out.phone).toBe("(312) 555-0123");
+    expect(out.phoneIsValid).toBeUndefined();
+    // Original untouched.
+    expect(parsed.phoneIsValid).toBe(false);
+  });
+
+  it("clears a stale phoneIsValid flag when the phone is cleared (#70 review)", () => {
+    const parsed: HeuristicParsedResume = {
+      ...baseParsed(),
+      phone: "555-invalid",
+      phoneIsValid: false,
+    };
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      { phone: "" },
+      {},
+      {},
+      [],
+    );
+    expect(out.phone).toBeUndefined();
+    expect(out.phoneIsValid).toBeUndefined();
+  });
+
   it("replaces experience header fields by index", () => {
     const parsed = baseParsed();
     const { parsed: out } = applyOverrides(

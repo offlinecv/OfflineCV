@@ -707,8 +707,10 @@ describe("computeAnonymousAtsScore", () => {
       expect(invalidResult.completeness.missing).toContain("phone");
       // But it earns more completeness score than absent phone
       expect(invalidResult.completeness.score).toBeGreaterThan(absentResult.completeness.score);
-      // And less than or equal to a fully valid phone
-      expect(invalidResult.completeness.score).toBeLessThanOrEqual(validResult.completeness.score);
+      // And strictly less than a fully valid phone — a <= bound would stay
+      // green even if invalid phones were granted full credit (the exact way
+      // the feature would break). (#70 review)
+      expect(invalidResult.completeness.score).toBeLessThan(validResult.completeness.score);
     });
 
     it("does not credit phone when confidence is below the floor", () => {

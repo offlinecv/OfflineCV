@@ -211,6 +211,11 @@ export function applyOverrides(
     } else {
       nextParsed[key] = ov;
     }
+    // The original `phoneIsValid` flag is now stale — it described the parsed
+    // phone, not the user-supplied one. Drop it so the scorer re-grades the
+    // edited number as validity-unknown (backward-compatible full credit)
+    // instead of carrying the old false → permanent half credit. (#70 review)
+    if (key === "phone") delete nextParsed.phoneIsValid;
   }
 
   // ── Experience headers ──────────────────────────────────────────────────
