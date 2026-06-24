@@ -280,7 +280,32 @@ function reorderEmbeddedColumns(items: PdfTextItem[]): PdfTextItem[] {
   });
   if (sorted.length < 2 * MULTI_COLUMN_MIN_RUN_ROWS) return sorted;
 
-  // Build rows from the sorted items so a run is a contiguous slice of rows.
+  const rows = groupItemsIntoRows(sorted);
+  const multi = rows.map(rowIsMultiColumn);
+  let changed = false;
+  const out: PdfTextItem[] = [];
+  for (let i = 0; i < rows.length; ) {
+    if (!multi[i]) {
+      out.push(...rows[i]);
+      i++;
+      continue;
+    }
+    // Extend a maximal run of consecutive multi-column rows, then either reorder
+    // it column-major or pass it through unchanged (run too short / one column).
+    let j = i;
+    while (j < rows.length && multi[j]) j++;
+    const reordered = reorderColumnRun(rows.slice(i, j));
+    out.push(...reordered.items);
+    changed ||= reordered.changed;
+    i = j;
+  }
+
+  return changed ? out : sorted;
+}
+
+/** Group y-sorted items into rows: contiguous items sharing a page and baseline
+ *  (within `LINE_Y_EPS`) form one row, so a run is a contiguous slice of rows. */
+function groupItemsIntoRows(sorted: PdfTextItem[]): PdfTextItem[][] {
   const rows: PdfTextItem[][] = [];
   for (const it of sorted) {
     const last = rows[rows.length - 1];
@@ -294,43 +319,27 @@ function reorderEmbeddedColumns(items: PdfTextItem[]): PdfTextItem[] {
       rows.push([it]);
     }
   }
+  return rows;
+}
 
-  const multi = rows.map(rowIsMultiColumn);
-  let changed = false;
-  const out: PdfTextItem[] = [];
-  for (let i = 0; i < rows.length; ) {
-    if (!multi[i]) {
-      out.push(...rows[i]);
-      i++;
-      continue;
-    }
-    // Extend a maximal run of consecutive multi-column rows.
-    let j = i;
-    while (j < rows.length && multi[j]) j++;
-    const runRows = rows.slice(i, j);
-    if (runRows.length < MULTI_COLUMN_MIN_RUN_ROWS) {
-      // Too short to be a real grid — leave these rows in row order.
-      for (const r of runRows) out.push(...r);
-      i = j;
-      continue;
-    }
-    const runItems = runRows.flat();
-    const starts = columnStartsForRun(runItems);
-    if (starts.length < 2) {
-      for (const r of runRows) out.push(...r);
-      i = j;
-      continue;
-    }
-    // Bucket items by column, preserving each column's top-to-bottom order
-    // (runItems already ascend by y within the run), then emit column-major.
-    const buckets: PdfTextItem[][] = starts.map(() => []);
-    for (const it of runItems) buckets[columnIndexOf(it.x, starts)].push(it);
-    for (const bucket of buckets) out.push(...bucket);
-    changed = true;
-    i = j;
-  }
+/** Reorder one maximal run of multi-column rows into column-major order. Returns
+ *  the run unchanged (`changed:false`) when it's too short to be a real grid or
+ *  resolves to a single column; otherwise buckets items by column (each column
+ *  top-to-bottom, since `runItems` already ascend by y) and emits column-major. */
+function reorderColumnRun(runRows: PdfTextItem[][]): {
+  items: PdfTextItem[];
+  changed: boolean;
+} {
+  const runItems = runRows.flat();
+  const starts =
+    runRows.length < MULTI_COLUMN_MIN_RUN_ROWS
+      ? []
+      : columnStartsForRun(runItems);
+  if (starts.length < 2) return { items: runItems, changed: false };
 
-  return changed ? out : sorted;
+  const buckets: PdfTextItem[][] = starts.map(() => []);
+  for (const it of runItems) buckets[columnIndexOf(it.x, starts)].push(it);
+  return { items: buckets.flat(), changed: true };
 }
 
 // ── Line grouping ───────────────────────────────────────────────────────────
