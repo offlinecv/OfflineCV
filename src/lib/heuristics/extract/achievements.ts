@@ -6,7 +6,7 @@ import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { YEAR_RE } from "../regex.ts";
-import { firstMatch, avgScore } from "./shared.ts";
+import { firstMatch, finalizeEntries } from "./shared.ts";
 import { liftHeaderLabel } from "./projects.ts";
 
 // ── Achievements ──────────────────────────────────────────────────────────────
@@ -39,12 +39,11 @@ export function extractAchievements(
     anchor: "first_line",
     collectBody: true,
   });
-  if (blocks.length === 0) return { value: [], confidence: 0 };
-  const built = blocks.map(achievementFromBlock);
-  return {
-    value: built.map((b) => b.entry),
-    confidence: avgScore(built.map((b) => b.score)),
-  };
+  // Drop any date-only / title-less block (#145) before scoring.
+  return finalizeEntries(
+    blocks.map(achievementFromBlock),
+    (e) => e.title !== "",
+  );
 }
 
 /** Map one entry block to a `HeuristicAchievement` and its confidence score.
