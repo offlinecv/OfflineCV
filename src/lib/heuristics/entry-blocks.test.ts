@@ -491,4 +491,67 @@ describe("parseEntryBlocks — wrapped multi-line role header (#166)", () => {
     expect(blocks[0].dates.end_date).toBe("Dec 2021");
     expect(blocks[0].headerLines).toContain("Senior Engineer");
   });
+
+  it("reassembles a wrapped open-ended range (date sep on the header, 'Present' wrapped)", () => {
+    // "… Jan 2022 -" with "Present" wrapped onto its own line. `Present` reads as
+    // a complete range on its own, so the gather must treat it as a wrapped tail
+    // (not a new anchor) for the fold to close.
+    const section = xSection("experience", [
+      { text: "Lead Organizer | Mutual Aid Network Jan 2022 -", x: 70 },
+      { text: "Present", x: 438 }, // right-column date tail
+      { text: "● Coordinated 30+ volunteers across the city.", x: 81 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].dates.start_date).toBe("Jan 2022");
+    expect(blocks[0].dates.is_current).toBe(true);
+    expect(blocks[0].headerLines.join(" ")).toContain("Mutual Aid Network");
+    expect(blocks[0].bulletCount).toBe(1);
+  });
+
+  it("does not fold across a role boundary — a wrapped header followed by a complete next role", () => {
+    // Back-to-back roles: the first wraps its date year; the second is a complete
+    // single-line anchor. The gather must STOP at the second role (a new
+    // standalone anchor), yielding two distinct entries — not one swallowed pair.
+    const section = xSection("experience", [
+      { text: "Docent | Community Heritage May 2023 - June", x: 70 },
+      { text: "2024", x: 438 }, // wraps the first role's date
+      { text: "● Led museum tours.", x: 81 },
+      { text: "After School Counselor | Youth Center Sep 2021 - April 2022", x: 70 },
+      { text: "● Ran the homework program.", x: 81 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].dates.end_date).toBe("June 2024");
+    expect(blocks[0].bulletCount).toBe(1);
+    expect(blocks[1].dates.start_date).toBe("Sep 2021");
+    expect(blocks[1].headerLines.join(" ")).toContain("Youth Center");
+    expect(blocks[1].bulletCount).toBe(1);
+  });
+
+  it("leaves the rows untouched when the continuations do not complete a range", () => {
+    // A dangling date start whose follow-on lines never supply a closing date:
+    // the match gate must reject the fold and pass every line through unchanged,
+    // so no spurious single-role block forms.
+    const section = xSection("experience", [
+      { text: "Volunteer Coordinator since May 2023", x: 70 },
+      { text: "Local Community Center", x: 70 },
+      { text: "● Organized weekend food drives.", x: 81 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    // No complete range anywhere → no date_range anchor → no entries.
+    expect(blocks).toEqual([]);
+  });
 });

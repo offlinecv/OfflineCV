@@ -187,12 +187,25 @@ function isWrappedContinuation(line: PdfLine, markerX: number): boolean {
 }
 
 /** True when `text` carries a complete, parseable date RANGE — i.e. it would
- *  anchor a `date_range` entry on its own. `DATE_RANGE_RE` is non-global but
- *  `.test` advances `lastIndex` on some engines; reset so calls are idempotent. */
+ *  anchor a `date_range` entry on its own. `DATE_RANGE_RE` and `PRESENT_RE` are
+ *  non-global and non-sticky, so `.test` leaves `lastIndex` at 0 per spec; the
+ *  reset is a defensive no-op kept only in case the flags change later. */
 function hasCompleteDateRange(text: string): boolean {
   const hit = DATE_RANGE_RE.test(text) || PRESENT_RE.test(text);
   DATE_RANGE_RE.lastIndex = 0;
   return hit;
+}
+
+/** True when a following line should STOP the continuation gather — it is a NEW
+ *  standalone role anchor (a complete range PLUS its own header text), not a
+ *  wrapped tail. A bare date tail ("Present", "2024", "Jan 2020") carries only
+ *  the date once stripped, so it is consumed as a continuation rather than read
+ *  as the next role — which is what lets a wrapped "… Jan 2022 -" / "Present"
+ *  reassemble (without this, `hasCompleteDateRange("Present")` would halt the
+ *  gather before the tail folds). */
+function startsNewAnchor(text: string): boolean {
+  if (!hasCompleteDateRange(text)) return false;
+  return stripDateRange(text).replace(PRESENT_RE, "").trim().length > 0;
 }
 
 /** Index of the earliest date-region token (month-year, numeric month/year, or
@@ -243,24 +256,28 @@ function isDateColumnFragment(line: PdfLine, markerX: number): boolean {
  *     complete range (so a normal "Company Jan 2020 - Dec 2021" header, or a
  *     "Company Dates / Title / bullets" stack, never folds — no regression), and
  *   - it carries a date-region start (the dangling "… - June"), and
- *   - folding the continuation rows directly below it (consecutive non-bullet,
- *     non-anchor lines before the first bullet) yields text that NOW matches
- *     `DATE_RANGE_RE`.
+ *   - folding up to `maxConts` continuation rows directly below it (consecutive
+ *     non-bullet lines that aren't a new standalone anchor, before the first
+ *     bullet) yields text that NOW matches `DATE_RANGE_RE`.
  * The final match gate is the safety net: if the continuations don't complete a
- * range, the rows are left untouched.
+ * range, the rows are left untouched. `maxConts` bounds how many physical rows a
+ * single header may absorb (so a stray subtitle + description can't be vacuumed
+ * into a header just because a bare year sits a few lines down) — it tracks the
+ * section's `headerLookback`, the same bounded-window intent the above-anchor
+ * header lookup already uses.
  *
  * Left-column fragments (at/left of the bullet-marker margin, e.g. "Museum")
- * append to the text before the date; right-column fragments ("2024") append to
- * the date region — keyed off `dateRegionStart` so "June" and "2024" reassemble
- * adjacently rather than "June Museum 2024".
+ * append to the text before the date; right-column fragments ("2024", a wrapped
+ * "Present") append to the date region — keyed off `dateRegionStart` so "June"
+ * and "2024" reassemble adjacently rather than "June Museum 2024".
  */
-function mergeWrappedHeaderRows(lines: PdfLine[]): PdfLine[] {
+function mergeWrappedHeaderRows(lines: PdfLine[], maxConts: number): PdfLine[] {
   if (lines.length === 0) return lines;
   const markerX = bulletMarkerX(lines);
   const out: PdfLine[] = [];
   let i = 0;
   while (i < lines.length) {
-    const folded = tryFoldHeaderAt(lines, i, markerX);
+    const folded = tryFoldHeaderAt(lines, i, markerX, maxConts);
     if (folded) {
       out.push(folded.line);
       i = folded.next;
@@ -283,20 +300,25 @@ function tryFoldHeaderAt(
   lines: PdfLine[],
   i: number,
   markerX: number,
+  maxConts: number,
 ): { line: PdfLine; next: number } | null {
   const line = lines[i];
   const dateIdx = dateRegionStart(line.text);
   if (isBulletLine(line) || hasCompleteDateRange(line.text) || dateIdx < 0) {
     return null;
   }
-  // Continuation rows directly below: non-bullet, non-anchor lines before the
-  // first bullet / next complete-date anchor.
+  // Continuation rows directly below: up to `maxConts` non-bullet lines that
+  // aren't a new standalone role anchor, before the first bullet. The cap stops
+  // a fold from vacuuming a subtitle + description into the header when a bare
+  // year happens to sit a few lines down; `startsNewAnchor` lets a bare wrapped
+  // tail ("Present", "2024") through while still halting at the next real role.
   const conts: PdfLine[] = [];
   let j = i + 1;
   while (
     j < lines.length &&
+    conts.length < maxConts &&
     !isBulletLine(lines[j]) &&
-    !hasCompleteDateRange(lines[j].text)
+    !startsNewAnchor(lines[j].text)
   ) {
     conts.push(lines[j]);
     j++;
@@ -460,7 +482,7 @@ export function parseEntryBlocks(
   // hint / first line, not a date range that can wrap incomplete.
   const lines =
     cfg.anchor === "date_range"
-      ? mergeWrappedHeaderRows(section.lines)
+      ? mergeWrappedHeaderRows(section.lines, cfg.headerLookback || 2)
       : section.lines;
   const anchors = collectAnchors(lines, cfg.anchor);
   if (anchors.length === 0) {
