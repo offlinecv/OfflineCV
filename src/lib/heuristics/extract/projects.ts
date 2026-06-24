@@ -6,7 +6,7 @@ import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { URL_RE } from "../regex.ts";
-import { firstMatch, avgScore } from "./shared.ts";
+import { firstMatch, finalizeEntries } from "./shared.ts";
 
 // ── Projects ────────────────────────────────────────────────────────────────
 
@@ -36,12 +36,8 @@ export function extractProjects(
     anchor: "first_line",
     collectBody: true,
   });
-  if (blocks.length === 0) return { value: [], confidence: 0 };
-  const built = blocks.map(projectFromBlock);
-  return {
-    value: built.map((b) => b.entry),
-    confidence: avgScore(built.map((b) => b.score)),
-  };
+  // Drop any date-only / name-less block (#145) before scoring.
+  return finalizeEntries(blocks.map(projectFromBlock), (e) => e.name !== "");
 }
 
 /**

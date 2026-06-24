@@ -888,3 +888,53 @@ describe("extractAchievements", () => {
     expect(extractAchievements(undefined)).toEqual({ value: [], confidence: 0 });
   });
 });
+
+// A header/anchor line whose entire text is a date leaves nothing after
+// stripDateRange, so the block carries no title. Such a phantom must be dropped
+// before it reaches the score, not emitted as a `{ title: "" }` entry (#145).
+describe("empty-title (date-only) block filtering (#145)", () => {
+  it("drops a date-only bullet in an achievements flat list", () => {
+    // Flat-list fallback path: a bullet whose only text is a year.
+    expect(extractAchievements(mkSection("achievements", [{ text: "• 2023" }]))).toEqual({
+      value: [],
+      confidence: 0,
+    });
+  });
+
+  it("drops a date-only header in achievements (buildEntryBlock path)", () => {
+    expect(extractAchievements(mkSection("achievements", [{ text: "2023" }]))).toEqual({
+      value: [],
+      confidence: 0,
+    });
+  });
+
+  it("drops a date-only project, leaving no name-less entry", () => {
+    expect(extractProjects(mkSection("projects", [{ text: "• 2023" }]))).toEqual({
+      value: [],
+      confidence: 0,
+    });
+  });
+
+  it("drops a date-only experience block with neither title nor company", () => {
+    expect(extractExperience(mkSection("experience", [{ text: "2020 - 2022" }]))).toEqual({
+      value: [],
+      confidence: 0,
+    });
+  });
+
+  it("keeps the real entry and confidence is not diluted by a dropped phantom", () => {
+    const section = mkSection("experience", [
+      { text: "Acme Corporation" },
+      { text: "Senior Software Engineer" },
+      { text: "Jan 2020 - Mar 2022" },
+      { text: "• Shipped the thing" },
+      { text: "2018 - 2019" }, // date-only phantom anchor, no header above
+    ]);
+    const { value, confidence } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].company).toBe("Acme Corporation");
+    expect(value[0].title).toBe("Senior Software Engineer");
+    // Phantom (score 0) is gone, so the average reflects only the real entry.
+    expect(confidence).toBeGreaterThan(0.8);
+  });
+});
