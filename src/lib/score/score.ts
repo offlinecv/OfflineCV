@@ -670,6 +670,12 @@ function extractBulletsFromSections(sections: SectionedResume): string[] {
  * `description` (one paragraph per line, the shape the entry-block parser folds
  * wrapped prose into) becomes one or more bullets via `splitBullets`. Only used
  * when the section pool is empty, so glyph resumes never double-count.
+ *
+ * Scope note: pools experience descriptions only — not project (#95) or
+ * achievement (#96) descriptions, which the authed scorer also pools. A
+ * glyph-less template whose prose lives solely in a projects/achievements
+ * section (with an empty accomplishment-section pool) still grades 0; broaden
+ * the fallback source if such a fixture surfaces.
  */
 function poolExperienceDescriptions(
   experience: { description?: string }[] | undefined,
