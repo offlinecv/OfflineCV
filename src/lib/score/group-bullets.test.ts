@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
+import { promises as fsp } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   groupBulletsByExperience,
@@ -9,6 +12,11 @@ import {
   type BulletExperience,
 } from "./group-bullets.ts";
 import type { BulletObservation } from "./score.ts";
+import { runCascade } from "../heuristics/cascade.ts";
+import { computeAnonymousAtsScore } from "./score.ts";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -214,5 +222,81 @@ describe("formatExperienceHeader", () => {
 
   it("empty experience — returns empty string", () => {
     expect(formatExperienceHeader({})).toBe("");
+  });
+});
+
+// ── Wrapped-bullet pool + attribution (#162) ──────────────────────────────────
+
+describe("multi-line bullet pool is fully merged and correctly attributed (#162)", () => {
+  // A long bullet that wraps onto a marker-less second line used to be TRUNCATED
+  // in the per-bullet pool (`extractBulletsFromLines` drops the glyph-less
+  // continuation) and the truncated text then no longer matched the merged
+  // `projects[]/experience[].description`, so the bullet fell into "Other".
+  // Merging wrapped continuations upstream (`mergeWrappedContinuations` in
+  // `toSectionedResume`) makes the pool carry each bullet's full text, so it
+  // matches its role by construction.
+  it("recovers full wrapped-bullet text and attributes it to its role, not Other", async () => {
+    const bytes = await fsp.readFile(
+      join(
+        FIXTURE_ROOT,
+        "google-docs/google-docs-skia-proxy-multiline-bullets-coursework.pdf",
+      ),
+    );
+    const cascade = await runCascade(new Uint8Array(bytes));
+    const score = computeAnonymousAtsScore({
+      parsed: cascade.parsed,
+      fieldConfidence: cascade.fieldConfidence,
+      triggers: cascade.triggers,
+      rawText: cascade.rawText,
+      sections: cascade.sections,
+    });
+    const pool = score.bullets ?? [];
+
+    // (1) The pool carries each previously-truncated bullet's FULL merged text —
+    //     the wrap tail (after the marker-less second line) is present, not cut.
+    const poolText = pool.map((b) => b.text);
+    const fullText = [
+      "Collected company revenue from past four years using data from 10-K and 10-Q filings across several reporting periods",
+      "Used five different forecasting methods including MA3, Weighted MA, Exponential Smoothing, Linear Trend, and TAF on deseasonalized and reseasonalized revenue data",
+      "Identified the most suitable method through a comparison of average forecasting error among all methods evaluated",
+      "Conducted tours for museum guests from a variety of backgrounds, explaining exhibits and informing them of available resources",
+    ];
+    for (const t of fullText) {
+      expect(poolText).toContain(t);
+    }
+
+    // (2) The merged project bullets attribute to their project entry — NOT the
+    //     null "Other" group — through the same combined experience+projects
+    //     array the reconstructed-resume UI feeds `groupBulletsByExperience`.
+    const toBE = (
+      entries: ReadonlyArray<{
+        title?: string;
+        name?: string;
+        description?: string;
+        start_date?: string;
+        end_date?: string;
+        is_current?: boolean;
+      }>,
+    ): BulletExperience[] =>
+      entries.map((e) => ({
+        title: e.title ?? e.name,
+        description: e.description,
+        start_date: e.start_date,
+        end_date: e.end_date,
+        is_current: e.is_current,
+      }));
+    const combined = [
+      ...toBE(cascade.parsed.experience ?? []),
+      ...toBE(cascade.parsed.projects ?? []),
+    ];
+    const groups = groupBulletsByExperience(pool, combined);
+
+    const other = groups.find((g) => g.experienceIndex === null);
+    const otherText = new Set((other?.bullets ?? []).map((b) => b.text));
+    // The Revenue-Forecasting project's three (now-merged) bullets land on a
+    // real project entry, not Other — the symptom the issue cited for [13]/[14].
+    for (const t of fullText.slice(0, 3)) {
+      expect(otherText.has(t)).toBe(false);
+    }
   });
 });

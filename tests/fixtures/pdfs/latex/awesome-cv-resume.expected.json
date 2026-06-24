@@ -38,20 +38,20 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 68,
-    "preLayoutOverall": 68,
+    "overall": 71,
+    "preLayoutOverall": 71,
     "specificity": {
-      "score": 18,
+      "score": 24,
       "max": 40,
       "gradable": true,
-      "metricBullets": 8,
+      "metricBullets": 11,
       "totalBullets": 30
     },
     "structure": {
-      "score": 23,
+      "score": 20,
       "max": 30,
       "gradable": true,
-      "goodBullets": 23,
+      "goodBullets": 20,
       "totalBullets": 30
     },
     "completeness": {

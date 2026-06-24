@@ -151,7 +151,7 @@ export async function runCascade(
 
   let parsed = heuristic.parsed;
   let fieldConfidence = heuristic.fieldConfidence;
-  let extractedCharCount = countExtractedChars(parsed);
+  let extractedCharCount = countExtractedChars(parsed, heuristic.sections);
 
   // ── Tier 1.5: regex fallback for missing contact basics ───────────────────
 
@@ -173,7 +173,7 @@ export async function runCascade(
     parsed = fallback.parsed;
     fieldConfidence = fallback.fieldConfidence;
     t15Fields.push(...fallback.fieldsFilled);
-    extractedCharCount = countExtractedChars(parsed);
+    extractedCharCount = countExtractedChars(parsed, heuristic.sections);
   }
 
   // ── Confidence + escalation routing ───────────────────────────────────────
@@ -363,7 +363,7 @@ export async function runCascadeFromMarkdown(
 
   let parsed = heuristic.parsed;
   let fieldConfidence = heuristic.fieldConfidence;
-  let extractedCharCount = countExtractedChars(parsed);
+  let extractedCharCount = countExtractedChars(parsed, heuristic.sections);
 
   const t15Fields: string[] = [];
   let t15Duration = 0;
@@ -378,7 +378,7 @@ export async function runCascadeFromMarkdown(
     parsed = fallback.parsed;
     fieldConfidence = fallback.fieldConfidence;
     t15Fields.push(...fallback.fieldsFilled);
-    extractedCharCount = countExtractedChars(parsed);
+    extractedCharCount = countExtractedChars(parsed, heuristic.sections);
   }
 
   // Neutral layout probes — DOCX cascade has no x/y positional data, so
@@ -493,24 +493,71 @@ function buildScannedResult(
   };
 }
 
-/** Sum visible character counts across the heuristic parse output. */
-function countExtractedChars(parsed: CascadeResult["parsed"]): number {
+/**
+ * Section names whose text is already tallied through a typed `parsed` field
+ * (profile → contact, summary, skills, experience, education). Everything else
+ * in `byName` — projects, certifications, achievements, the `other` catch-all —
+ * lands only in `sections.byName`, so it must be counted separately below.
+ */
+const TYPED_FIELD_SECTIONS = new Set<string>([
+  "profile",
+  "summary",
+  "experience",
+  "education",
+  "skills",
+]);
+
+/** Length of an optional string field; 0 when absent. */
+const fieldLen = (s: string | null | undefined): number => (s ?? "").length;
+
+/** Chars from the typed scalar contact + summary fields. */
+function scalarFieldChars(parsed: CascadeResult["parsed"]): number {
+  return (
+    fieldLen(parsed.full_name) +
+    fieldLen(parsed.email) +
+    fieldLen(parsed.phone) +
+    fieldLen(parsed.location) +
+    fieldLen(parsed.summary)
+  );
+}
+
+/** Chars from the typed list fields (skills, experience, education). */
+function listFieldChars(parsed: CascadeResult["parsed"]): number {
   let n = 0;
-  n += (parsed.full_name ?? "").length;
-  n += (parsed.email ?? "").length;
-  n += (parsed.phone ?? "").length;
-  n += (parsed.location ?? "").length;
-  n += (parsed.summary ?? "").length;
   for (const s of parsed.skills ?? []) n += s.length;
   for (const e of parsed.experience ?? []) {
-    n += (e.company ?? "").length;
-    n += (e.title ?? "").length;
-    n += (e.team ?? "").length;
-    n += (e.description ?? "").length;
+    n += fieldLen(e.company) + fieldLen(e.title) + fieldLen(e.team) + fieldLen(e.description);
   }
   for (const e of parsed.education ?? []) {
-    n += (e.institution ?? "").length;
-    n += (e.degree ?? "").length;
+    n += fieldLen(e.institution) + fieldLen(e.degree);
   }
   return n;
+}
+
+/**
+ * Chars from sections that no typed field counts — projects, certifications,
+ * achievements, the `other` catch-all. Without them, correctly terminating an
+ * unknown section (e.g. a coursework block, #164) drops the extracted/raw ratio
+ * toward EXTRACTION_RATIO_FLOOR and falsely trips `low_extraction_ratio` → OCR
+ * escalation (#165 review).
+ */
+function untypedSectionChars(sections: HeuristicResult["sections"]): number {
+  let n = 0;
+  for (const [name, lines] of sections.byName) {
+    if (TYPED_FIELD_SECTIONS.has(name)) continue;
+    for (const line of lines) n += line.length;
+  }
+  return n;
+}
+
+/** Sum visible character counts across the heuristic parse output. */
+function countExtractedChars(
+  parsed: CascadeResult["parsed"],
+  sections: HeuristicResult["sections"],
+): number {
+  return (
+    scalarFieldChars(parsed) +
+    listFieldChars(parsed) +
+    untypedSectionChars(sections)
+  );
 }

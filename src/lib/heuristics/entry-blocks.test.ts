@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from "vitest";
 import { groupIntoLines, splitIntoSections, findSection } from "./sections.ts";
-import { parseEntryBlocks } from "./entry-blocks.ts";
+import { parseEntryBlocks, mergeWrappedContinuations } from "./entry-blocks.ts";
 import { mkItems } from "./__test-utils__/mkItem.ts";
 import type { PdfSection, PdfLine } from "./sections.ts";
 
@@ -362,6 +362,81 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
       "Revenue Forecasting Project",
       "Global Entry Strategy Project",
     ]);
+  });
+});
+
+describe("mergeWrappedContinuations (#162)", () => {
+  // x-aware line builder: text + left-x, document-ordered y. Mirrors the real
+  // PdfLine geometry the merge keys on (the bullet marker margin vs. the wrapped
+  // bullet-text indent).
+  function lines(rows: Array<{ text: string; x: number }>): PdfLine[] {
+    return rows.map((r, i) => ({
+      page: 1,
+      y: 72 + i * 14,
+      x: r.x,
+      items: [],
+      text: r.text,
+      maxFontSize: 11,
+      allCaps: false,
+    }));
+  }
+
+  it("returns the array unchanged for an empty section", () => {
+    expect(mergeWrappedContinuations([])).toEqual([]);
+  });
+
+  it("folds a marker-less continuation (indented past the marker) into its bullet", () => {
+    // Marker at x=81; the wrapped tail at x=90 aligns with the bullet TEXT, so
+    // it folds onto the bullet rather than surviving as a standalone (and thus
+    // marker-less, droppable) line.
+    const merged = mergeWrappedContinuations(
+      lines([
+        { text: "Project A", x: 70 },
+        { text: "● Collected revenue using 10-K and 10-Q filings", x: 81 },
+        { text: "across several reporting periods", x: 90 }, // wrap
+        { text: "● Used five forecasting methods including MA3", x: 81 },
+        { text: "on deseasonalized revenue data", x: 90 }, // wrap
+      ]),
+    );
+    expect(merged.map((l) => l.text)).toEqual([
+      "Project A",
+      "● Collected revenue using 10-K and 10-Q filings across several reporting periods",
+      "● Used five forecasting methods including MA3 on deseasonalized revenue data",
+    ]);
+    // Items from both physical lines are carried onto the merged line.
+    expect(merged.map((l) => l.x)).toEqual([70, 81, 81]); // anchor x preserved
+  });
+
+  it("does NOT fold header / non-continuation lines at or left of the marker margin", () => {
+    // Headers (x≤marker) and a fresh bullet are continuations of nothing — they
+    // must each stay their own line so titles and new bullets are preserved.
+    const merged = mergeWrappedContinuations(
+      lines([
+        { text: "Revenue Forecasting Project", x: 70 },
+        { text: "● First bullet that does not wrap", x: 81 },
+        { text: "Global Entry Strategy Project", x: 70 }, // real header, not a wrap
+        { text: "● Second bullet", x: 81 },
+      ]),
+    );
+    expect(merged.map((l) => l.text)).toEqual([
+      "Revenue Forecasting Project",
+      "● First bullet that does not wrap",
+      "Global Entry Strategy Project",
+      "● Second bullet",
+    ]);
+  });
+
+  it("is a no-op for a markerless section (markerX = Infinity)", () => {
+    // No bullet glyph anywhere → no marker margin → nothing folds, even though
+    // the lines carry distinct x. Profile / education-degree blocks rely on this
+    // so paragraph-spaced header lines are never collapsed into one another.
+    const rows = [
+      { text: "Jane Smith", x: 253 },
+      { text: "San Jose, CA", x: 276 },
+      { text: "(312) 555-0123 | jane.smith@example.com", x: 125 },
+    ];
+    const merged = mergeWrappedContinuations(lines(rows));
+    expect(merged.map((l) => l.text)).toEqual(rows.map((r) => r.text));
   });
 });
 

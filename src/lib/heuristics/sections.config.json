@@ -45,9 +45,11 @@
         "education",
         "academic background",
         "academics",
-        "qualifications"
+        "qualifications",
+        "coursework",
+        "relevant coursework"
       ],
-      "anchors": ["education", "academics", "qualifications"],
+      "anchors": ["education", "academics", "qualifications", "coursework"],
       "splitLetterNormalizable": true,
       "anchorFallback": true
     },
