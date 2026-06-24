@@ -751,6 +751,84 @@ describe("extractEducation — date-range parsing (issue #97)", () => {
   });
 });
 
+describe("extractEducation — relevant-coursework recovery (#164)", () => {
+  const mkLine = (text: string): PdfLine => ({
+    page: 0,
+    y: 0,
+    x: 0,
+    items: [],
+    text,
+    maxFontSize: 11,
+    allCaps: false,
+  });
+  const mkEduSection = (texts: string[]): PdfSection => ({
+    name: "education",
+    lines: texts.map(mkLine),
+  });
+
+  it("collects bullet coursework items onto the primary (first) entry", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "San Jose State University",
+        "B.S. Business Administration — Expected Graduation: May 2027",
+        "● Financial Accounting",
+        "● Microeconomics",
+        "● Macroeconomics",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].coursework).toEqual([
+      "Financial Accounting",
+      "Microeconomics",
+      "Macroeconomics",
+    ]);
+  });
+
+  it("rejoins a coursework cell that wrapped onto a following non-bullet line", () => {
+    // A de-interleaved grid cell ("● Global Dimensions of" + "Business") must be
+    // joined back into one item, not truncated at the wrap and not mistaken for
+    // an institution.
+    const { value } = extractEducation(
+      mkEduSection([
+        "San Jose State University",
+        "B.S. Business Administration — May 2027",
+        "● Global Dimensions of",
+        "Business",
+        "● Legal Environment of",
+        "Business",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("San Jose State University");
+    expect(value[0].coursework).toEqual([
+      "Global Dimensions of Business",
+      "Legal Environment of Business",
+    ]);
+  });
+
+  it("drops a lowercase degree sub-note bullet — not a course title", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Kwansei Gakuin University",
+        "Study Abroad in Japan — Sep 2024 - July 2025",
+        "-including courses taught in Japanese",
+        "● Financial Accounting",
+      ]),
+    );
+    expect(value[0].coursework).toEqual(["Financial Accounting"]);
+  });
+
+  it("leaves coursework undefined when the section has no bullets", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Stanford University",
+        "B.S. Computer Science, 2019 - 2023",
+      ]),
+    );
+    expect(value[0].coursework).toBeUndefined();
+  });
+});
+
 // ── Entry-block extractors (experience / projects / achievements) ─────────────
 // Cover the per-block mapping helpers (`experienceFromBlock`, `projectFromBlock`,
 // `achievementFromBlock`) directly: fully-populated entries exercise every

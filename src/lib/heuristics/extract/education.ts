@@ -13,6 +13,7 @@ import {
   isBulletLine,
   parseDateRange,
   normalizeDate,
+  stripBullet,
 } from "../line-primitives.ts";
 import { avgScore } from "./shared.ts";
 
@@ -196,8 +197,49 @@ export function extractEducation(
   if (!education || education.lines.length === 0)
     return { value: [], confidence: 0 };
 
-  const lines = education.lines
-    .filter((l) => !isBulletLine(l))
+  // Bullet lines inside an education section are relevant-coursework items
+  // (a "Relevant Coursework" block, #164) — not degree/institution lines, so
+  // they were dropped before. Recover them as section-level coursework and
+  // attach to the primary entry below.
+  //
+  // Two wrinkles from real grids (the de-interleaved 3-column reproducer):
+  //   - A cell can wrap: "● Global Dimensions of" + a following non-bullet
+  //     "Business" line. The continuation is joined back into the item and
+  //     excluded from entry detection (`consumed`) so it is not mistaken for
+  //     an institution.
+  //   - A degree sub-note ("-including courses taught in Japanese") is also a
+  //     bullet but reads as lowercase prose, not a course title. The Title-case
+  //     guard drops it; course titles lead uppercase.
+  const ls = education.lines;
+  const coursework: string[] = [];
+  const consumed = new Set<number>();
+  for (let i = 0; i < ls.length; i++) {
+    if (!isBulletLine(ls[i])) continue;
+    let item = stripBullet(ls[i].text);
+    const span = [i];
+    let j = i + 1;
+    while (
+      j < ls.length &&
+      !isBulletLine(ls[j]) &&
+      !DEGREE_RE.test(ls[j].text) &&
+      !INSTITUTION_HINTS.test(ls[j].text) &&
+      !isDateOnlyLine(ls[j].text)
+    ) {
+      item += ` ${ls[j].text.trim()}`;
+      span.push(j);
+      j++;
+    }
+    item = item.trim();
+    if (/^[A-Z0-9]/.test(item)) {
+      coursework.push(item);
+      for (const k of span) consumed.add(k);
+    }
+    i = j - 1;
+  }
+
+  const lines = ls
+    .map((l, idx) => ({ text: l.text, bullet: isBulletLine(l), idx }))
+    .filter((l) => !l.bullet && !consumed.has(l.idx))
     .map((l) => l.text)
     .filter((t) => t.trim().length > 0);
   if (lines.length === 0) return { value: [], confidence: 0 };
@@ -232,8 +274,14 @@ export function extractEducation(
     .map(educationFromChunk)
     .filter((b) => b.entry.degree || b.entry.institution);
   if (built.length === 0) return { value: [], confidence: 0 };
+
+  const value = built.map((b) => b.entry);
+  // Attach section-level coursework to the primary (first) entry — per-degree
+  // attribution is ambiguous when the block sits in its own sub-section (#164).
+  if (coursework.length > 0) value[0].coursework = coursework;
+
   return {
-    value: built.map((b) => b.entry),
+    value,
     confidence: avgScore(built.map((b) => b.score)),
   };
 }

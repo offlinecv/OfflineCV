@@ -428,6 +428,11 @@ function EducationSection({
                 {dates && (
                   <span className="text-content-tertiary"> · {dates}</span>
                 )}
+                {edu.coursework && edu.coursework.length > 0 && (
+                  <span className="block text-content-tertiary">
+                    Coursework: {edu.coursework.join(" · ")}
+                  </span>
+                )}
               </li>
             );
           })}

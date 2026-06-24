@@ -143,6 +143,11 @@ export interface ResumeEducation {
   end_date?: string;
   end_date_precision?: "day" | "month" | "year" | null;
   description?: string;
+  /** Relevant-coursework items recovered from bullet lines inside the education
+   *  section (e.g. a "Relevant Coursework" block, #164). Section-level by nature
+   *  — attribution to a specific degree is ambiguous, so the heuristic parser
+   *  attaches the whole list to the first (primary) entry. */
+  coursework?: string[];
 }
 
 // ── Projects ───────────────────────────────────────────────────────────────
