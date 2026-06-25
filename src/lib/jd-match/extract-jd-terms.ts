@@ -198,7 +198,7 @@ const NOUN_STOP_PHRASES = new Set<string>([
  *     Responsibilities"). No real skill phrase ends in one of these, so the
  *     tail guard catches the open-ended adjective families without enumeration.
  */
-export const SECTION_HEADING_STOP_PHRASES = new Set<string>([
+const SECTION_HEADING_STOP_PHRASES = new Set<string>([
   // Summary / overview / description / title headers
   "job summary",
   "job description",
