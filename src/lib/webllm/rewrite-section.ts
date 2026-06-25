@@ -58,6 +58,46 @@ export function buildSectionUserPrompt(bullets: readonly string[]): string {
   return `Original bullets:\n${numbered}\n\nRewritten bullets:`;
 }
 
+/**
+ * System-prompt builder. The base rules are constant; the chain-of-sections
+ * orchestrator (#67) optionally appends a "context from earlier sections"
+ * block that the model must treat as reference-only.
+ *
+ * Why the system message and not the user message: when the rolling
+ * context sat alongside `Original bullets:` in the user message, small
+ * instruct models (Qwen2.5-1.5B in particular) read the prior section's
+ * preview line as another bullet to echo into the output. Moving it to
+ * the system message — wrapped in an explicit "reference only, never echo
+ * into your output" guardrail — makes the boundary categorical: the user
+ * message is the input to rewrite, the system message is the world the
+ * model rewrites within. See #67 follow-up where this misfire was caught.
+ */
+export function buildSectionSystemPrompt(context?: string): string {
+  if (!context || context.trim().length === 0) {
+    return SECTION_REWRITE_SYSTEM_PROMPT;
+  }
+  return `${SECTION_REWRITE_SYSTEM_PROMPT}
+
+Earlier sections of this résumé have already been rewritten. The user's NEXT message contains a NEW section's bullets — only rewrite THOSE. Do not include content from earlier sections in your output.
+
+Context from earlier sections (reference only — never echo into your output):
+${context.trim()}`;
+}
+
+/**
+ * Optional knobs the chain-of-sections orchestrator (#67) threads through to
+ * each per-section call. Today only `context` is wired — a single
+ * pre-formatted brief (used-verb constraint + used-phrase constraint + a
+ * prior-section preview) that gets folded into the SYSTEM message as
+ * reference-only context. Defaults to undefined, so every existing call site
+ * (single-section rewrite, eval harness) behaves bit-identically to the
+ * Phase 1 path.
+ */
+export interface SectionRewriteOptions {
+  /** Rolling soft-constraint brief from earlier sections in the chain. */
+  context?: string;
+}
+
 export interface SectionRewriteResult {
   /** The rewritten bullets (M may differ from N). */
   bullets: string[];
@@ -104,6 +144,7 @@ export async function rewriteSectionWithLlm(
   bullets: readonly string[],
   engine: WebLlmEngine,
   modelId: string,
+  options: SectionRewriteOptions = {},
 ): Promise<SectionRewriteResult> {
   trackWebllmSectionRewriteStarted({
     model: modelId,
@@ -116,7 +157,10 @@ export async function rewriteSectionWithLlm(
   try {
     const response = await engine.chat.completions.create({
       messages: [
-        { role: "system", content: SECTION_REWRITE_SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: buildSectionSystemPrompt(options.context),
+        },
         { role: "user", content: buildSectionUserPrompt(bullets) },
       ],
       temperature: 0.3,

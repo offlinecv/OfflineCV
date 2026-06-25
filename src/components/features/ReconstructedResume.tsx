@@ -47,6 +47,8 @@ import {
   BulletFlagLegend,
 } from "./ReconstructedRole.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
+import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
+import type { SectionInput } from "../../lib/webllm/rewrite-resume.ts";
 import type {
   ResumeProject,
   HeuristicAchievement,
@@ -250,6 +252,7 @@ const EXPERIENCE_FIELD_MAP: Record<
 
 function ExperienceSection({
   groups,
+  resumeSections,
   hasBullets,
   experienceOverrides,
   onExperienceFieldChange,
@@ -264,6 +267,8 @@ function ExperienceSection({
 }: {
   /** Pre-built experience groups + the shared "Other" group appended last. */
   groups: BulletGroup[];
+  /** Chain-of-sections input for the whole-résumé rewrite CTA (#67). */
+  resumeSections: readonly SectionInput[];
   hasBullets: boolean;
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
   onExperienceFieldChange: (
@@ -284,6 +289,12 @@ function ExperienceSection({
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
+  // The whole-résumé rewrite CTA (#67) lives at the top of Experience next to
+  // the picker. Trigger + panel render only when WebGPU is available AND
+  // there's at least one rewriteable section — same silent-absence rule as
+  // SectionRewrite. The hook owns the WebGPU/empty-input gating.
+  const { trigger: resumeRewriteTrigger, panel: resumeRewritePanel } =
+    useResumeRewriteUi(resumeSections);
   return (
     <section className="flex flex-col gap-3">
       {/* Heading row: the flag legend sits beside the Experience title (next to
@@ -293,11 +304,18 @@ function ExperienceSection({
         <SectionHeading>Experience</SectionHeading>
         {hasBullets && <BulletFlagLegend />}
       </div>
-      {/* Picker mounted at the top of Experience — "inline near SectionRewrite,
-          visible only in the rewrite context" per the #64 step 6 spec. Returns
-          null when WebGPU is unavailable, so non-WebGPU browsers see no
-          picker chrome at all (matches RewriteButton + SectionRewrite). */}
-      {hasBullets && <ModelSelector />}
+      {/* Picker + whole-résumé CTA mounted at the top of Experience —
+          "inline near SectionRewrite, visible only in the rewrite context"
+          per the #64 step 6 spec. Both return null when WebGPU is
+          unavailable, so non-WebGPU browsers see no rewrite chrome at all
+          (matches RewriteButton + SectionRewrite). */}
+      {hasBullets && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <ModelSelector />
+          {resumeRewriteTrigger}
+        </div>
+      )}
+      {hasBullets && resumeRewritePanel}
       {roleCount === 0 ? (
         <NotDetected what="roles" />
       ) : (
@@ -553,6 +571,65 @@ function AchievementsSection({
 // Education + Skills are now editable (#176) and live in their own feature file
 // (ReconstructedEducationSkills.tsx) so this container stays under ~200 LOC.
 
+// ── Whole-résumé rewrite (issue #67) ─────────────────────────────────────────
+
+/**
+ * Build the chain-of-sections input the orchestrator (#67) sees.
+ *
+ * Summary (when non-empty) is section 0; every real experience role is then
+ * appended in display order. Bullets honor #82 overrides so the model sees
+ * the user's latest edits, not stale parsed text. The "Other bullets" group
+ * (`experienceIndex === null`) is intentionally excluded — it has no parsed
+ * role to anchor the prompt to, and rewriting it would produce orphan
+ * bullets the panel has nowhere to attribute.
+ *
+ * Section ids are stable across renders for the same parse — `summary` for
+ * the summary, `experience:<index>` for each role — so the hook's
+ * stale-source guard (which compares ids) can tell "the section list
+ * changed" from "react re-rendered with the same data."
+ */
+function buildResumeSections(
+  summary: string | undefined,
+  experienceGroups: readonly BulletGroup[],
+  bulletOverrides: BulletOverrides,
+): readonly SectionInput[] {
+  const out: SectionInput[] = [];
+  const trimmedSummary = summary?.trim();
+  if (trimmedSummary) {
+    out.push({
+      kind: "summary",
+      id: "summary",
+      label: "Summary",
+      text: trimmedSummary,
+    });
+  }
+  for (const group of experienceGroups) {
+    if (group.experienceIndex === null) continue;
+    if (group.bullets.length === 0) continue;
+    const exp = group.experience;
+    const label = roleLabel(exp);
+    const sectionBullets = group.bullets.map(
+      (b) => bulletOverrides?.[b.index] ?? b.text,
+    );
+    out.push({
+      kind: "experience",
+      id: `experience:${group.experienceIndex}`,
+      label,
+      bullets: sectionBullets,
+    });
+  }
+  return out;
+}
+
+function roleLabel(exp: BulletGroup["experience"]): string {
+  if (exp === null) return "Other bullets";
+  const { title, company } = exp;
+  if (title && company) return `${title} — ${company}`;
+  if (title) return title;
+  if (company) return company;
+  return "Untitled role";
+}
+
 // ── Container ─────────────────────────────────────────────────────────────────
 
 // Presentational container: cyclomatic (10) and cognitive (9) are both under
@@ -637,6 +714,17 @@ export function ReconstructedResume({
   // so no PDF bytes ever leave the browser (#171).
   const { download, isGenerating } = useDownloadPdf(result, score, edit);
 
+  // Build the chain-of-sections input for the whole-résumé rewrite CTA (#67).
+  // Summary first (when present), then every real role in display order — the
+  // "Other" bullets group is excluded because it has no parsed role to anchor
+  // the prompt to. Bullets honor #82 overrides so the model sees the user's
+  // edits, not stale parsed text.
+  const resumeSections = buildResumeSections(
+    parsed.summary,
+    experienceGroups,
+    bulletOverrides,
+  );
+
   // Always rendered (even with zero parsed achievements) so the "+ Add
   // achievement" affordance is reachable on every resume — matching Education /
   // Skills, which also render an add affordance unconditionally.
@@ -692,6 +780,7 @@ export function ReconstructedResume({
       {achievementsAbove && achievementsSection}
       <ExperienceSection
         groups={experienceRenderGroups}
+        resumeSections={resumeSections}
         hasBullets={bullets.length > 0}
         experienceOverrides={experienceOverrides}
         onExperienceFieldChange={(index, field, value) =>

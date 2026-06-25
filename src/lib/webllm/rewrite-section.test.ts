@@ -29,6 +29,7 @@ vi.mock("../analytics.ts", async (importOriginal) => {
 
 import {
   _resetSectionRewriteFlagsForTesting,
+  buildSectionSystemPrompt,
   buildSectionUserPrompt,
   rewriteSectionWithLlm,
   sectionMaxTokens,
@@ -88,6 +89,44 @@ describe("buildSectionUserPrompt", () => {
     ).toBe(
       "Original bullets:\n1. first bullet\n2. second bullet\n\nRewritten bullets:",
     );
+  });
+
+  it("does not accept a context parameter — context belongs to the system prompt builder", () => {
+    // Regression guard: the chain-of-sections orchestrator (#67) used to
+    // thread context through the user prompt, which caused small instruct
+    // models to echo the prior-section preview line as a bullet. Context
+    // moved to buildSectionSystemPrompt. The user prompt stays pure input.
+    const baseline = buildSectionUserPrompt(["first", "second"]);
+    expect(baseline).toBe(
+      "Original bullets:\n1. first\n2. second\n\nRewritten bullets:",
+    );
+  });
+});
+
+describe("buildSectionSystemPrompt", () => {
+  it("returns the base rules verbatim when no context is given", () => {
+    expect(buildSectionSystemPrompt()).toBe(SECTION_REWRITE_SYSTEM_PROMPT);
+    expect(buildSectionSystemPrompt(undefined)).toBe(
+      SECTION_REWRITE_SYSTEM_PROMPT,
+    );
+  });
+
+  it("returns the base rules verbatim for a whitespace-only context", () => {
+    expect(buildSectionSystemPrompt("   ")).toBe(SECTION_REWRITE_SYSTEM_PROMPT);
+  });
+
+  it("appends a reference-only context block when context is set", () => {
+    const out = buildSectionSystemPrompt(
+      "Verbs already used in prior bullets: built, led.",
+    );
+    expect(out.startsWith(SECTION_REWRITE_SYSTEM_PROMPT)).toBe(true);
+    expect(out).toContain("reference only");
+    expect(out).toContain("Verbs already used in prior bullets: built, led.");
+  });
+
+  it("instructs the model to ignore earlier-section content", () => {
+    const out = buildSectionSystemPrompt("any context");
+    expect(out).toMatch(/Do not include content from earlier sections/i);
   });
 });
 
@@ -263,5 +302,31 @@ describe("rewriteSectionWithLlm", () => {
     await expect(rewriteSectionWithLlm(["a"], engine, TEST_MODEL)).rejects.toBe(
       boom,
     );
+  });
+
+  it("folds a context brief into the SYSTEM message — never the user message — when options.context is passed", async () => {
+    const { engine, spy } = makeEngine(async () => reply("Shipped Foo."));
+    await rewriteSectionWithLlm(["a"], engine, TEST_MODEL, {
+      context: "Verbs already used in prior bullets: built, led.",
+    });
+    const req = spy.mock.calls[0]![0] as ChatCompletionRequest;
+    // System message: carries the context block.
+    expect(req.messages[0]?.role).toBe("system");
+    expect(req.messages[0]?.content).toContain(
+      "Verbs already used in prior bullets: built, led.",
+    );
+    expect(req.messages[0]?.content).toContain("reference only");
+    // User message: stays pure input — never carries the context.
+    expect(req.messages[1]?.role).toBe("user");
+    expect(req.messages[1]?.content).not.toContain("Verbs already used");
+    expect(req.messages[1]?.content?.startsWith("Original bullets:")).toBe(true);
+  });
+
+  it("uses the base system prompt verbatim when called with no options (regression guard)", async () => {
+    const { engine, spy } = makeEngine(async () => reply("Shipped Foo."));
+    await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
+    const req = spy.mock.calls[0]![0] as ChatCompletionRequest;
+    expect(req.messages[0]?.content).toBe(SECTION_REWRITE_SYSTEM_PROMPT);
+    expect(req.messages[1]?.content?.startsWith("Original bullets:")).toBe(true);
   });
 });

@@ -219,6 +219,64 @@ export function trackWebllmFirstSectionRewrite(args: { model: string }): void {
   track("webllm_first_section_rewrite", { model: args.model });
 }
 
+// Resume-rewrite funnel (issue #67 — chain-of-sections whole-resume pipeline).
+// Kept distinct from the per-bullet / per-section keys above so each path's
+// first-rewrite conversion remains independently measurable. Same env-gating
+// semantics as the rest of the WebLLM events; when VITE_POSTHOG_KEY is unset,
+// these compile away to no-ops.
+//
+// Section kinds map 1:1 to the orchestrator's SectionInput.kind discriminator
+// so the funnel can be sliced by "did the model rewrite the summary OK and
+// then drop a bullet in role 3?" without a separate JOIN.
+
+export type ResumeRewriteSectionKind = "summary" | "experience";
+
+export function trackWebllmResumeRewriteStarted(args: {
+  model: string;
+  sectionCount: number;
+}): void {
+  track("webllm_resume_rewrite_started", {
+    model: args.model,
+    section_count: args.sectionCount,
+  });
+}
+
+export function trackWebllmResumeRewriteSectionCompleted(args: {
+  model: string;
+  sectionIndex: number;
+  sectionKind: ResumeRewriteSectionKind;
+  /** Bullets in for "experience"; 1 for "summary" (the paragraph itself). */
+  inputUnitCount: number;
+  /** Bullets out for "experience"; 0 or 1 for "summary" (empty model output → 0). */
+  outputUnitCount: number;
+  numbersPreserved: boolean;
+}): void {
+  track("webllm_resume_rewrite_section_completed", {
+    model: args.model,
+    section_index: args.sectionIndex,
+    section_kind: args.sectionKind,
+    input_unit_count: args.inputUnitCount,
+    output_unit_count: args.outputUnitCount,
+    numbers_preserved: args.numbersPreserved,
+  });
+}
+
+export function trackWebllmResumeRewriteCompleted(args: {
+  model: string;
+  sectionCount: number;
+  allNumbersPreserved: boolean;
+}): void {
+  track("webllm_resume_rewrite_completed", {
+    model: args.model,
+    section_count: args.sectionCount,
+    all_numbers_preserved: args.allNumbersPreserved,
+  });
+}
+
+export function trackWebllmFirstResumeRewrite(args: { model: string }): void {
+  track("webllm_first_resume_rewrite", { model: args.model });
+}
+
 // JD URL ingestion funnel (#72 / #75). Fires on every user-initiated fetch
 // from the JD URL input. The `outcome` enum lets us tell apart the four
 // platform-relevant funnel states without ever recording the URL itself —
