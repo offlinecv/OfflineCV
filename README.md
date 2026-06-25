@@ -50,13 +50,19 @@ when `VITE_POSTHOG_KEY` is set at build time. In an OSS build (no env vars),
 the PostHog branch is dead-code-eliminated by Vite/Rollup and the dep does
 not appear in the output bundle.
 
-The hosted build at recruidea.com sets `VITE_POSTHOG_KEY` and emits three
-events: `file_accepted`, `parse_completed`, `parse_failed`. The payloads are
-listed in `src/lib/analytics.ts` and contain only file size, page count,
+The hosted build at recruidea.com sets `VITE_POSTHOG_KEY` and emits events
+such as `file_accepted`, `parse_completed`, and `parse_failed`. The payloads
+are listed in `src/lib/analytics.ts` and contain only file size, page count,
 parse duration, score breakdown, layout triggers, and error name — never
-PDF bytes, never extracted text, never names, emails, or URLs. Session
-recording and autocapture are disabled; the distinct ID is in-memory and
-reset on tab close.
+PDF bytes, never extracted text, never names or URLs. Session recording and
+autocapture are disabled; the distinct ID is in-memory and reset on tab close.
+
+The one exception is the optional feedback panel (`feedback_submitted`): it
+carries a 1–5 `rating` plus, **only when the user chooses to fill them**, a
+`category`, free-text `feedback_text`, and an `email`. That email is the single
+piece of user-supplied PII any event can carry — it is opt-in (the field is
+blank by default and is never sent as an empty string; see `buildFeedbackProps`),
+and the whole panel is hidden in builds where `VITE_POSTHOG_KEY` is unset.
 
 `.env` and `.env.example` are gitignored, so the only documented surface
 for the env vars is this section. To enable telemetry in a local build,
