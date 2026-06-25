@@ -84,7 +84,7 @@ describe("runCascadeFromMarkdown — clean DOCX resume", () => {
 });
 
 describe("runCascadeFromMarkdown — real-world DOCX fixtures", () => {
-  // Fixture mirrors the shape of the `srinivas-annam-sr-software-engineer.docx`
+  // Fixture mirrors the shape of the `jordan-lee-sr-software-engineer.docx`
   // file that hit 0.76 in production (below canonical threshold → LLM ran):
   // turndown-escaped email, 2-digit apostrophe years, `•` bullets,
   // italic date markers. After the cleanup fixes all these should clear
@@ -94,7 +94,7 @@ describe("runCascadeFromMarkdown — real-world DOCX fixtures", () => {
     "",
     "Sr. Software Engineer",
     "",
-    "Cupertino, CA | Lee\\_Jordan@hotmail.com | 408-555-0100",
+    "Cupertino, CA | Jordan\\_Lee@outlook.com | 408-555-0100",
     "",
     "**SUMMARY**",
     "",

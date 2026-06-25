@@ -48,14 +48,14 @@ describe("runRegexFallback", () => {
 
   it("guesses a title-case name only when Tier 1 had none", () => {
     const rawText = [
-      "Jordan Lee",
+      "Jordan Rivera",
       "Senior Software Engineer",
       "jordan@example.com",
     ].join("\n");
     const result = runRegexFallback(emptyParsed(), {}, rawText);
-    expect(result.parsed.full_name).toBe("Jordan Lee");
-    expect(result.parsed.given_name).toBe("Lee");
-    expect(result.parsed.family_name).toBe("Jordan");
+    expect(result.parsed.full_name).toBe("Jordan Rivera");
+    expect(result.parsed.given_name).toBe("Jordan");
+    expect(result.parsed.family_name).toBe("Rivera");
   });
 
   it("skips the name guess when the first line has digits", () => {
