@@ -262,6 +262,19 @@ const SECTION_HEADING_STOP_PHRASES = new Set<string>([
   "working conditions",
   "work environment",
   "working environment",
+  // "… Experience" section headers (resume + JD section names, #156). Listed
+  // exactly rather than via a tail word: "experience" alone would wrongly drop
+  // real competency phrases ("User Experience", "Customer Experience",
+  // "Developer Experience"). The first three mirror the issue's own examples.
+  "work experience",
+  "additional experience",
+  "performance experience",
+  "involvement experience",
+  "professional experience",
+  "relevant experience",
+  "industry experience",
+  "prior experience",
+  "previous experience",
 ]);
 
 /**
@@ -446,6 +459,11 @@ function extractNounPass(body: string, snippetChars: number): ExtractedTerm[] {
     // Drop JD structural section headings ("Minimum Qualifications",
     // "Physical Demands", …) — document structure, not a competency (#156).
     if (isSectionHeading(key)) continue;
+    // Drop "The …" sentence/title openers ("The Summer Music Intern", "The
+    // Ideal Candidate") — the capitalized run after a leading "The" is almost
+    // always a title or sentence subject, not a skill (#156). Real skill
+    // phrases don't lead with an article.
+    if (key.startsWith("the ")) continue;
     if (seen.has(key)) continue;
     seen.set(key, {
       id: key,

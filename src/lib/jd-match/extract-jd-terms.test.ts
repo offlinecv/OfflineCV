@@ -210,6 +210,39 @@ Up to 10% travel.
     expect(displays).toContain("Backend Services");
   });
 
+  it("drops '… Experience' section headers but keeps real *Experience skills (#156)", () => {
+    const jd = `
+Work Experience:
+You will own the Backend Platform.
+
+Performance Experience:
+Comfort on stage helps.
+
+We care deeply about User Experience and Customer Experience.
+`;
+    const { nouns } = extractJdTerms(jd);
+    const displays = nouns.map((n) => n.display);
+    // Section headers gone…
+    expect(displays).not.toContain("Work Experience");
+    expect(displays).not.toContain("Performance Experience");
+    // …but real competency phrases ending in "Experience" survive.
+    expect(displays).toEqual(
+      expect.arrayContaining(["User Experience", "Customer Experience"]),
+    );
+  });
+
+  it("drops 'The …' title/sentence openers (#156)", () => {
+    const jd = `
+The Summer Music Intern will support rehearsals.
+You'll work on Distributed Systems daily.
+`;
+    const { nouns } = extractJdTerms(jd);
+    const displays = nouns.map((n) => n.display);
+    expect(displays).not.toContain("The Summer Music Intern");
+    // A genuine phrase in the same JD is unaffected.
+    expect(displays).toContain("Distributed Systems");
+  });
+
   it("does not over-strip skill phrases that share a heading tail word (#156)", () => {
     // "Cloud Functions" ends in "functions" but is a real skill phrase, not a
     // heading — the tail guard deliberately omits "functions" to protect it.
