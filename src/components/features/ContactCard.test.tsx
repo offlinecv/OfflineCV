@@ -8,7 +8,7 @@
  * (grouping, gating, slug formatting) is covered in `src/lib/contact.test.ts`;
  * this file covers the React surface — that each `group`/`gated`/`reason`
  * combination paints the right DOM: name heading vs. muted fallback, the
- * pipe-joined contact line with quiet "not found" tokens, low-confidence dotted
+ * pipe-joined contact line with discernible "not detected" tokens, low-confidence dotted
  * values, clickable slug links, and the audit footer.
  *
  * Runs in jsdom (per the `@vitest-environment jsdom` pragma) so React +
@@ -45,12 +45,18 @@ function makeResult(
 let container: HTMLDivElement | undefined;
 let root: Root | undefined;
 
-function render(result: CascadeResult): HTMLDivElement {
+function render(
+  result: CascadeResult,
+  editProps?: Pick<
+    Parameters<typeof ContactCard>[0],
+    "overrides" | "onFieldChange"
+  >,
+): HTMLDivElement {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root!.render(createElement(ContactCard, { result }));
+    root!.render(createElement(ContactCard, { result, ...editProps }));
   });
   return container;
 }
@@ -76,14 +82,15 @@ describe("ContactCard", () => {
     expect(el.querySelector("h2")?.textContent).toBe("Name not detected");
   });
 
-  it("renders present contact values and a quiet 'not found' token for a missing required field", () => {
+  it("renders present contact values and a discernible 'not detected' token for a missing required field", () => {
     const el = render(
       makeResult({ email: "jane@example.com" }, { email: 0.95 }),
     );
     const text = el.textContent ?? "";
     expect(text).toContain("jane@example.com");
-    // Phone is required but absent → quiet inline token, not a warning chip.
-    expect(text).toContain("phone not found");
+    // Phone is required but absent → discernible warning token (set apart so the
+    // gap is spotted at a glance), not a loud chip.
+    expect(text).toContain("Phone not detected");
   });
 
   it("marks a low-confidence value with a dotted underline + tooltip", () => {
@@ -109,7 +116,51 @@ describe("ContactCard", () => {
     );
     expect(anchor?.getAttribute("target")).toBe("_blank");
     expect(anchor?.getAttribute("rel")).toBe("noopener noreferrer");
-    expect(anchor?.textContent).toBe("in/jane-doe");
+    expect(anchor?.textContent).toBe("linkedin.com/in/jane-doe");
+  });
+
+  it("gives a present LinkedIn a navigate-and-edit dual affordance when editable", () => {
+    const el = render(
+      makeResult(
+        { linkedin_url: "https://www.linkedin.com/in/jane-doe" },
+        { linkedin_url: 0.9 },
+      ),
+      { overrides: {}, onFieldChange: () => {} },
+    );
+    // Slug is the click-to-edit target (operates on the full URL)…
+    const edit = el.querySelector('[aria-label="Edit LinkedIn"]');
+    expect(edit?.textContent).toBe("linkedin.com/in/jane-doe");
+    // …and a separate ↗ anchor still opens the real URL in a new tab.
+    const open = el.querySelector('a[aria-label="Open LinkedIn in a new tab"]');
+    expect(open?.getAttribute("href")).toBe(
+      "https://www.linkedin.com/in/jane-doe",
+    );
+    expect(open?.getAttribute("target")).toBe("_blank");
+  });
+
+  it("makes a detected github link editable with the dual affordance", () => {
+    const el = render(
+      makeResult(
+        { github_url: "https://github.com/janedoe" },
+        { github_url: 0.9 },
+      ),
+      { overrides: {}, onFieldChange: () => {} },
+    );
+    expect(el.querySelector('[aria-label="Edit GitHub"]')?.textContent).toBe(
+      "github.com/janedoe",
+    );
+    expect(
+      el.querySelector('a[aria-label="Open GitHub in a new tab"]'),
+    ).not.toBeNull();
+  });
+
+  it("keeps a missing required field discernible even while editable", () => {
+    const el = render(
+      makeResult({ email: "jane@example.com" }, { email: 0.95 }),
+      { overrides: {}, onFieldChange: () => {} },
+    );
+    expect(el.textContent).toContain("Phone not detected");
+    expect(el.querySelector('[aria-label="Edit Phone"]')).not.toBeNull();
   });
 
   it("renders the audit footer with the detected/total ratio", () => {

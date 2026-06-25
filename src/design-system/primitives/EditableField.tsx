@@ -46,12 +46,19 @@ interface EditableFieldProps {
   placeholder?: string;
   label: string;
   onCommit: (newValue: string) => void;
+  /**
+   * Read-mode display override (ADDITIVE, opt-in). When set, read mode shows
+   * this instead of `value`, while edit mode still seeds and commits the raw
+   * `value`. Lets a field display a derived form (e.g. a LinkedIn slug) yet edit
+   * the underlying URL. Omitting it preserves the original behavior exactly.
+   */
+  displayValue?: string;
   /** Extra classes on the root wrapper. */
   className?: string;
   /** Visual weight of the read-mode text. Defaults to "normal". */
   textWeight?: "normal" | "semibold";
   /** Text size of the read-mode text. Defaults to "sm". */
-  textSize?: "xs" | "sm" | "base";
+  textSize?: "xs" | "sm" | "base" | "lg";
   /**
    * Read-mode root box model:
    *   flex   — `inline-flex` atom; value + pencil stay on one line, the box
@@ -85,6 +92,7 @@ export function EditableField({
   placeholder = "not detected",
   label,
   onCommit,
+  displayValue,
   className,
   textWeight = "normal",
   textSize = "sm",
@@ -130,7 +138,13 @@ export function EditableField({
   const weightCls =
     textWeight === "semibold" ? "font-semibold" : "font-normal";
   const sizeCls =
-    textSize === "xs" ? "text-xs" : textSize === "base" ? "text-base" : "text-sm";
+    textSize === "xs"
+      ? "text-xs"
+      : textSize === "lg"
+        ? "text-lg"
+        : textSize === "base"
+          ? "text-base"
+          : "text-sm";
 
   // ── Multiline edit mode ───────────────────────────────────────────────────
 
@@ -266,7 +280,7 @@ export function EditableField({
         .filter(Boolean)
         .join(" ")}
     >
-      {hasValue ? value : placeholder}
+      {hasValue ? (displayValue ?? value) : placeholder}
     </span>
   );
 }

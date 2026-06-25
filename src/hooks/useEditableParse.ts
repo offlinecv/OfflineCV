@@ -32,6 +32,12 @@ export interface ContactOverrides {
   phone?: string;
   linkedin_url?: string;
   location?: string;
+  /** Link fields are editable too: a detected GitHub/portfolio/personal-site URL
+   *  can be corrected in place. They only surface for editing when the parser
+   *  detected them (optional rows render only when present). */
+  github_url?: string;
+  portfolio_url?: string;
+  website_url?: string;
 }
 
 // ── Experience overrides ──────────────────────────────────────────────────────
