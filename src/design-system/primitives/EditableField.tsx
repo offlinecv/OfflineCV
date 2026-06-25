@@ -7,8 +7,12 @@
  * Renders in one of two modes:
  *   • read  — shows the current value (or a "not detected" placeholder when
  *             value is absent). Clicking the pencil icon enters edit mode.
- *   • edit  — inline <input> pre-filled with the current value; blurring or
- *             pressing Enter/Escape commits/cancels.
+ *   • edit  — inline <input> (default) or auto-growing <textarea> (multiline)
+ *             pre-filled with the current value.
+ *             Single-line: blurring or pressing Enter/Escape commits/cancels.
+ *             Multiline: explicit Save / Cancel buttons; blur does NOT commit
+ *             (a multi-line paste that accidentally defocuses shouldn't lose
+ *             the draft). Enter submits a newline; Escape cancels.
  *
  * Design rules (CLAUDE.md):
  *   – Semantic tokens only; no hardcoded hex or raw palette classes.
@@ -22,9 +26,15 @@
  *   label       — accessible label for the input (aria-label).
  *   onCommit    — called with the trimmed new string (or "" on clear).
  *   className   — extra classes on the root wrapper (layout stays with caller).
+ *   multiline   — opt-in: renders a full-width auto-growing <textarea> with an
+ *                 explicit Save / Cancel action row. ADDITIVE — existing
+ *                 single-line callers are byte-for-byte unchanged.
+ *   onRework    — opt-in (multiline only): renders a "Rework" action in the
+ *                 Save/Cancel row. The callback receives the current draft text
+ *                 so the caller can trigger AI rewrite on the live draft.
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Button } from "./Button.tsx";
 
@@ -58,6 +68,31 @@ interface EditableFieldProps {
    *            word. Use for long-form prose like a resume bullet.
    */
   display?: "flex" | "inline";
+  /**
+   * Multiline variant (opt-in, ADDITIVE).
+   *
+   * When true:
+   *   – Renders a full-width auto-growing <textarea> instead of <input>.
+   *   – Edit mode breaks out of the inline flow and takes a block layout (full
+   *     width of the parent container).
+   *   – Commit requires an explicit "Save" button click (or Ctrl/Cmd+Enter).
+   *     Blur and Enter do NOT commit — a multi-line paste that accidentally
+   *     defocuses shouldn't lose the draft. Escape still cancels.
+   *   – An explicit "Cancel" button discards the draft.
+   *
+   * Existing single-line callers omitting this prop are byte-for-byte
+   * unchanged in behavior.
+   */
+  multiline?: boolean;
+  /**
+   * Rework callback (multiline only, opt-in).
+   *
+   * When provided alongside `multiline`, a "Rework" action appears next to
+   * Save/Cancel. The callback receives the current draft text so the caller
+   * can trigger an AI-rewrite pass on the live draft (e.g. thread through
+   * RewriteButton's engine). The EditableField itself has no rewrite logic.
+   */
+  onRework?: (currentDraft: string) => void;
 }
 
 export function EditableField({
@@ -70,20 +105,32 @@ export function EditableField({
   textSize = "sm",
   revealOn = "reserve",
   display = "flex",
+  multiline = false,
+  onRework,
 }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const startEdit = useCallback(() => {
     setDraft(value ?? "");
     setEditing(true);
-    // Focus after the next paint so the input is mounted.
+    // Focus after the next paint so the element is mounted.
     requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select();
+      if (multiline) {
+        textareaRef.current?.focus();
+        // Place cursor at end.
+        const ta = textareaRef.current;
+        if (ta) {
+          ta.selectionStart = ta.selectionEnd = ta.value.length;
+        }
+      } else {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
     });
-  }, [value]);
+  }, [value, multiline]);
 
   const commit = useCallback(() => {
     setEditing(false);
@@ -101,6 +148,82 @@ export function EditableField({
     textWeight === "semibold" ? "font-semibold" : "font-normal";
   const sizeCls =
     textSize === "xs" ? "text-xs" : textSize === "base" ? "text-base" : "text-sm";
+
+  // ── Multiline edit mode ───────────────────────────────────────────────────
+
+  // Auto-grow: sync textarea height to scroll height on every draft change.
+  useEffect(() => {
+    if (!multiline || !editing) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [draft, multiline, editing]);
+
+  if (editing && multiline) {
+    return (
+      <div className={`flex w-full flex-col gap-1.5 ${className ?? ""}`}>
+        <textarea
+          ref={textareaRef}
+          aria-label={label}
+          value={draft}
+          rows={2}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            // Ctrl/Cmd+Enter commits; bare Enter inserts a newline.
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancel();
+            }
+          }}
+          className={[
+            "w-full resize-none overflow-hidden rounded border border-border",
+            "bg-surface-card px-2 py-1.5",
+            sizeCls,
+            weightCls,
+            "text-content-primary leading-snug",
+            "outline-hidden focus:ring-1 focus:ring-brand-amber",
+          ].join(" ")}
+        />
+        {/* Save / Cancel / Rework action row */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={commit}
+            aria-label={`Save ${label}`}
+          >
+            Save
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={cancel}
+            aria-label={`Cancel editing ${label}`}
+          >
+            Cancel
+          </Button>
+          {onRework && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onRework(draft)}
+              aria-label={`Rework ${label} with AI`}
+              className="ml-auto flex items-center gap-1 text-content-tertiary hover:text-brand-amber"
+            >
+              <ReworkSparkleIcon />
+              Rework
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Single-line edit mode (original behavior, unchanged) ──────────────────
 
   if (editing) {
     return (
@@ -132,6 +255,8 @@ export function EditableField({
       </span>
     );
   }
+
+  // ── Read mode (shared by both variants) ───────────────────────────────────
 
   const hoverReveal = revealOn === "hover";
 
@@ -211,5 +336,19 @@ export function EditableField({
         </svg>
       </Button>
     </span>
+  );
+}
+
+/** Small sparkle icon for the Rework action in the multiline action row. */
+function ReworkSparkleIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="h-3 w-3 shrink-0"
+      fill="currentColor"
+    >
+      <path d="M12 2l1.9 5.6a4 4 0 0 0 2.5 2.5L22 12l-5.6 1.9a4 4 0 0 0-2.5 2.5L12 22l-1.9-5.6a4 4 0 0 0-2.5-2.5L2 12l5.6-1.9a4 4 0 0 0 2.5-2.5L12 2z" />
+    </svg>
   );
 }

@@ -19,11 +19,12 @@
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
  */
 
+import { useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
-import { EditableField } from "@design-system";
+import { EditableField, Button } from "@design-system";
 import type {
   ExperienceFieldOverrides,
   BulletOverrides,
@@ -166,8 +167,12 @@ export function BulletFlagLegend() {
  * (#82) via the shared EditableField primitive — committing an edit feeds the
  * authoritative re-grade in App (rawText + description), so the inline check
  * badges below re-evaluate live. Flagged bullets show the checks they failed;
- * passing bullets render plain. #59 (per-bullet rewrite) hooks in on the
- * flagged branch.
+ * passing bullets render plain.
+ *
+ * Issue #174: the EditableField is now wired with `multiline` + `onRework`.
+ * Clicking "Rework" in the Save/Cancel action row captures the current draft
+ * and surfaces a RewriteButton pane beneath the textarea — the existing AI
+ * rewrite path, no new code.
  */
 export function ResumeBulletRow({
   bullet,
@@ -183,67 +188,108 @@ export function ResumeBulletRow({
   const flagged = needsAttention(bullet);
   const editable = onBulletChange !== undefined;
   const displayText = override ?? bullet.text;
+
+  // Rework pane: when the user clicks "Rework" in the multiline action row,
+  // we capture the draft text and show a RewriteButton driven by that snapshot.
+  // The rework pane is dismissed when editing ends (commit or cancel), so it
+  // never shows stale proposals alongside a different text.
+  const [reworkDraft, setReworkDraft] = useState<string | null>(null);
+
+  const handleRework = useCallback((currentDraft: string) => {
+    setReworkDraft(currentDraft);
+  }, []);
+
+  const handleCommit = useCallback(
+    (v: string) => {
+      setReworkDraft(null);
+      onBulletChange?.(v);
+    },
+    [onBulletChange],
+  );
+
   /*
-    The row is a single inline formatting context (a plain block `<li>`, NOT a
-    flexbox). The bullet text, the check badges, and the rewrite trigger are all
-    inline-level, so the badges flow right after the *last word* of the text and
-    wrap with it — instead of breaking to a new full-width flex line at the far
-    left when the bullet is long (the prior `flex flex-wrap` regression). The
-    editable text uses `display="inline"` so it wraps as real text rather than
-    sitting as an atomic `inline-flex` box. The compact RewriteButton's
-    expansion panel is block-level, so it still breaks to its own row below.
+    Read-mode layout: single inline formatting context (a plain block `<li>`,
+    NOT a flexbox). The bullet text, the check badges, and the rewrite trigger
+    are all inline-level, so the badges flow right after the *last word* of the
+    text and wrap with it.
+
+    Edit-mode layout: the multiline EditableField breaks to a block (full-width
+    <div>) so the textarea + action row have room. The rework pane (if open)
+    stacks below the action row as a block child of the `<li>`.
   */
   return (
     <li className="py-1 text-sm leading-snug text-content-secondary">
-      <span aria-hidden="true" className="mr-1.5 text-content-muted">
-        •
-      </span>
       {editable ? (
-        <EditableField
-          value={displayText || undefined}
-          placeholder="empty bullet"
-          label="Bullet text"
-          textSize="sm"
-          revealOn="hover"
-          display="inline"
-          className="text-content-secondary"
-          onCommit={(v) => onBulletChange(v)}
-        />
+        /* Multiline edit mode: block layout, full-width textarea + Save/Cancel/Rework */
+        <div className="flex gap-1.5">
+          <span aria-hidden="true" className="mt-1.5 shrink-0 text-content-muted">
+            •
+          </span>
+          <div className="min-w-0 flex-1">
+            <EditableField
+              value={displayText || undefined}
+              placeholder="empty bullet"
+              label="Bullet text"
+              textSize="sm"
+              revealOn="hover"
+              display="inline"
+              multiline
+              onCommit={handleCommit}
+              onRework={handleRework}
+            />
+            {/* Rework pane — visible once user clicks "Rework" in the action row.
+                RewriteButton is the existing AI-rewrite component; we hand it the
+                draft snapshot so it rewrites what the user actually typed, not the
+                committed text. Dismissed on next commit/cancel (handleCommit above
+                clears reworkDraft). */}
+            {reworkDraft !== null && (
+              <div className="mt-2">
+                <RewriteButton bullet={reworkDraft} />
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
-        displayText
-      )}
-      {flagged && (
+        /* Read-only: inline flow — bullet text then trailing check badges inline */
         <>
-          {!bullet.hasMetric && (
-            <FlagChip
-              title="No metric"
-              ariaLabel="No metric"
-              className="ml-1 align-middle"
-            >
-              <MetricIcon />
-            </FlagChip>
+          <span aria-hidden="true" className="mr-1.5 text-content-muted">
+            •
+          </span>
+          {displayText}
+          {flagged && (
+            <>
+              {!bullet.hasMetric && (
+                <FlagChip
+                  title="No metric"
+                  ariaLabel="No metric"
+                  className="ml-1 align-middle"
+                >
+                  <MetricIcon />
+                </FlagChip>
+              )}
+              {!bullet.startsWithActionVerb && (
+                <FlagChip
+                  title="Weak opening verb"
+                  ariaLabel="Weak opening verb"
+                  className="ml-1 align-middle"
+                >
+                  <BoltIcon />
+                </FlagChip>
+              )}
+              {!bullet.wellFormedLength && (
+                <FlagChip
+                  title={lengthTitle(bullet)}
+                  ariaLabel={lengthTitle(bullet)}
+                  className="ml-1 align-middle"
+                >
+                  <span className="text-[11px] font-medium tabular-nums">
+                    {lengthToken(bullet)}
+                  </span>
+                </FlagChip>
+              )}
+              <RewriteButton bullet={displayText} compact />
+            </>
           )}
-          {!bullet.startsWithActionVerb && (
-            <FlagChip
-              title="Weak opening verb"
-              ariaLabel="Weak opening verb"
-              className="ml-1 align-middle"
-            >
-              <BoltIcon />
-            </FlagChip>
-          )}
-          {!bullet.wellFormedLength && (
-            <FlagChip
-              title={lengthTitle(bullet)}
-              ariaLabel={lengthTitle(bullet)}
-              className="ml-1 align-middle"
-            >
-              <span className="text-[11px] font-medium tabular-nums">
-                {lengthToken(bullet)}
-              </span>
-            </FlagChip>
-          )}
-          <RewriteButton bullet={displayText} compact />
         </>
       )}
     </li>
@@ -268,12 +314,20 @@ interface RoleHeaderProps {
  * Read-only mode: renders "Title — Company · start_date – end_date" (or
  * "Other bullets" / "Untitled role" for partial/absent parses).
  *
- * Edit mode: replaces the flat header with four EditableField rows — title,
- * company, start date, end date — each committed individually. Cleared fields
- * show "not detected" in the read view.
+ * Edit mode: when `overrides` + `onFieldChange` are provided the header gains
+ * a persistent "Edit role" toggle button. Activating it expands four
+ * EditableField rows — title (multiline), company (multiline), start date, end
+ * date — each committed individually. A "Done" button collapses back to the
+ * compact read view. Cleared fields show "not detected" in the read view.
+ *
+ * The "Edit role" button is the discoverable affordance (#175). Individual
+ * field pencils use revealOn="hover" inside the expanded editor so the gutter
+ * stays clean. The existing single-line revealOn="reserve" default for
+ * ContactCard is unaffected — the new behaviour is purely opt-in here.
  */
 function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
   const editable = overrides !== undefined && onFieldChange !== undefined;
+  const [editOpen, setEditOpen] = useState(false);
 
   // For the "Other bullets" bucket there is no experience entry to edit.
   if (group.experience === null) {
@@ -315,7 +369,57 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
     );
   }
 
-  // Edit mode: four independent EditableField lines.
+  // Treat empty string as "not present" for display purposes.
+  const toDisplay = (v: string | undefined): string | undefined =>
+    v || undefined;
+
+  // Collapsed editable: composite label + persistent "Edit role" toggle.
+  if (!editOpen) {
+    const title = overrides.title !== undefined ? overrides.title : exp.title;
+    const company =
+      overrides.company !== undefined ? overrides.company : exp.company;
+    const startDate =
+      overrides.start_date !== undefined ? overrides.start_date : exp.start_date;
+    const endDate =
+      overrides.end_date !== undefined ? overrides.end_date : exp.end_date;
+
+    const start = toDisplay(startDate);
+    const end =
+      exp.is_current && overrides.end_date === undefined
+        ? "Present"
+        : toDisplay(endDate);
+    let dates: string | undefined;
+    if (start && end) dates = `${start} – ${end}`;
+    else if (start) dates = start;
+    else if (end) dates = end;
+
+    let label = "";
+    if (toDisplay(title) && toDisplay(company))
+      label = `${toDisplay(title)} — ${toDisplay(company)}`;
+    else if (toDisplay(title)) label = toDisplay(title)!;
+    else if (toDisplay(company)) label = toDisplay(company)!;
+    if (dates) label = label ? `${label} · ${dates}` : dates;
+
+    return (
+      <div className="flex items-start gap-2">
+        <h3 className="flex-1 text-sm font-semibold text-content-primary">
+          {label || "Untitled role"}
+        </h3>
+        {/* Persistent discoverable affordance — always visible, not hover-gated */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setEditOpen(true)}
+          aria-label="Edit role header fields"
+          className="shrink-0 text-xs text-content-tertiary hover:text-content-secondary"
+        >
+          Edit role
+        </Button>
+      </div>
+    );
+  }
+
+  // Expanded editor: four independent EditableField rows.
   const title = overrides.title !== undefined ? overrides.title : exp.title;
   const company =
     overrides.company !== undefined ? overrides.company : exp.company;
@@ -324,36 +428,37 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
   const endDate =
     overrides.end_date !== undefined ? overrides.end_date : exp.end_date;
 
-  // Treat empty string as "not present" for display purposes.
-  const toDisplay = (v: string | undefined): string | undefined =>
-    v || undefined;
-
   return (
-    <div className="flex flex-col gap-0.5">
-      {/* Title */}
+    <div className="flex flex-col gap-1 rounded border border-border-light bg-surface-card p-2">
+      {/* Title — multiline variant for long role titles */}
       <EditableField
         value={toDisplay(title)}
         placeholder="title not detected"
         label="Job title"
         textWeight="semibold"
         textSize="sm"
+        multiline
+        revealOn="hover"
         onCommit={(v) => onFieldChange("title", v)}
       />
-      {/* Company */}
+      {/* Company — multiline variant for long company names */}
       <EditableField
         value={toDisplay(company)}
         placeholder="company not detected"
         label="Company"
         textSize="sm"
+        multiline
+        revealOn="hover"
         onCommit={(v) => onFieldChange("company", v)}
       />
-      {/* Date range row */}
+      {/* Date range row — single-line fields, hover-revealed pencils */}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <EditableField
           value={toDisplay(startDate)}
           placeholder="start date"
           label="Start date"
           textSize="xs"
+          revealOn="hover"
           className="text-content-tertiary"
           onCommit={(v) => onFieldChange("start_date", v)}
         />
@@ -369,9 +474,22 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
           placeholder="end date"
           label="End date"
           textSize="xs"
+          revealOn="hover"
           className="text-content-tertiary"
           onCommit={(v) => onFieldChange("end_date", v)}
         />
+      </div>
+      {/* Done button — collapses the editor back to the compact read view */}
+      <div className="mt-0.5 flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setEditOpen(false)}
+          aria-label="Close role editor"
+          className="text-xs text-content-tertiary hover:text-content-secondary"
+        >
+          Done
+        </Button>
       </div>
     </div>
   );

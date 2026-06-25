@@ -56,10 +56,11 @@ import type {
   ExperienceFieldOverrides,
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
+import { buildProjectDates } from "../../lib/score/entry-dates.ts";
 import {
-  buildProjectDates,
-  buildEducationDates,
-} from "../../lib/score/entry-dates.ts";
+  EducationSection,
+  SkillsSection,
+} from "./ReconstructedEducationSkills.tsx";
 import { Button } from "@design-system";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 
@@ -405,59 +406,8 @@ function AchievementsSection({
   );
 }
 
-function EducationSection({
-  education,
-}: {
-  education: NonNullable<CascadeResult["parsed"]["education"]>;
-}) {
-  return (
-    <section className="flex flex-col gap-2">
-      <SectionHeading>Education</SectionHeading>
-      {education.length === 0 ? (
-        <NotDetected what="education" />
-      ) : (
-        <ul className="flex flex-col gap-1.5 list-none">
-          {education.map((edu, i) => {
-            const head = [edu.degree, edu.institution]
-              .filter(Boolean)
-              .join(" — ");
-            const dates = buildEducationDates(edu);
-            return (
-              <li key={i} className="text-sm text-content-secondary">
-                <span className="font-medium text-content-primary">
-                  {head || "Untitled entry"}
-                </span>
-                {dates && (
-                  <span className="text-content-tertiary"> · {dates}</span>
-                )}
-                {edu.coursework && edu.coursework.length > 0 && (
-                  <span className="block text-content-tertiary">
-                    Coursework: {edu.coursework.join(" · ")}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function SkillsSection({ skills }: { skills: string[] }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <SectionHeading>Skills</SectionHeading>
-      {skills.length === 0 ? (
-        <NotDetected what="skills" />
-      ) : (
-        <p className="text-sm leading-relaxed text-content-secondary">
-          {skills.join(" · ")}
-        </p>
-      )}
-    </section>
-  );
-}
+// Education + Skills are now editable (#176) and live in their own feature file
+// (ReconstructedEducationSkills.tsx) so this container stays under ~200 LOC.
 
 // ── Container ─────────────────────────────────────────────────────────────────
 
@@ -497,6 +447,10 @@ export function ReconstructedResume({
     setExperienceField,
     bulletOverrides,
     setBulletField,
+    educationOverrides,
+    setEducationField,
+    addSkill,
+    removeSkill,
   } = edit;
 
   // One grouping pass over experiences + projects + achievements so their
@@ -573,8 +527,18 @@ export function ReconstructedResume({
         />
       )}
       {!achievementsAbove && achievementsSection}
-      <EducationSection education={parsed.education} />
-      <SkillsSection skills={parsed.skills} />
+      <EducationSection
+        education={parsed.education}
+        educationOverrides={educationOverrides}
+        onEducationFieldChange={(index, field, value) =>
+          setEducationField(index, field, value)
+        }
+      />
+      <SkillsSection
+        skills={parsed.skills}
+        onAddSkill={addSkill}
+        onRemoveSkill={removeSkill}
+      />
     </section>
   );
 }

@@ -36,6 +36,8 @@ import { normalizeBulletText } from "../score/group-bullets.ts";
 import type {
   ContactOverrides,
   ExperienceFieldOverrides,
+  EducationFieldOverrides,
+  SkillsOverride,
 } from "../../hooks/useEditableParse.ts";
 
 /** Bullet overrides keyed by `BulletObservation.index` (stable rawText order). */
@@ -181,6 +183,12 @@ const LEADING_MARKER_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)]) 
  * @param observations the `score.bullets` array — links a bullet override index
  *                  back to the original bullet text it should replace. Pass `[]`
  *                  when there are no bullet overrides.
+ * @param education education-field overrides keyed by education array index
+ *                  (degree/institution/start_date/end_date). Empty string clears
+ *                  a field. Default `{}`.
+ * @param skills    add/remove edits against `parsed.skills`. `removed` keys
+ *                  (lower-cased) drop parsed skills; `added` are appended,
+ *                  de-duplicated. Default `{ removed: [], added: [] }`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -190,12 +198,17 @@ export function applyOverrides(
   experience: Record<number, ExperienceFieldOverrides>,
   bullets: BulletOverrides,
   observations: readonly BulletObservation[],
+  education: Record<number, EducationFieldOverrides> = {},
+  skills: SkillsOverride = { removed: [], added: [] },
 ): ApplyOverridesResult {
-  // Clone so the original parse is never mutated. experience entries are cloned
-  // individually because we rewrite description strings on them.
+  // Clone so the original parse is never mutated. experience + education entries
+  // are cloned individually because we rewrite fields on them; skills is cloned
+  // because we rebuild the array from removed/added edits.
   const nextParsed: HeuristicParsedResume = {
     ...parsed,
     experience: parsed.experience.map((e) => ({ ...e })),
+    education: parsed.education.map((e) => ({ ...e })),
+    skills: [...parsed.skills],
   };
   let nextRawText = rawText;
   let nextSections = sections;
@@ -246,6 +259,39 @@ export function applyOverrides(
     nextRawText = replaceBulletInRawText(nextRawText, obs.text, edited);
     nextSections = replaceBulletInSections(nextSections, obs.text, edited);
     replaceBulletInDescriptions(nextParsed.experience, obs.text, edited);
+  }
+
+  // ── Education fields ──────────────────────────────────────────────────────
+  // Mirror the experience-header fold: an empty string clears the field (the UI
+  // renders "not detected" and the scorer/PDF read the blank). degree and
+  // institution are required string fields on ResumeEducation, so a clear writes
+  // "" rather than deleting the key.
+  for (const [idxStr, fields] of Object.entries(education)) {
+    const idx = Number(idxStr);
+    const edu = nextParsed.education[idx];
+    if (!edu) continue;
+    if (fields.degree !== undefined) edu.degree = fields.degree;
+    if (fields.institution !== undefined) edu.institution = fields.institution;
+    if (fields.start_date !== undefined) edu.start_date = fields.start_date;
+    if (fields.end_date !== undefined) edu.end_date = fields.end_date;
+  }
+
+  // ── Skills (add / remove) ─────────────────────────────────────────────────
+  // Final list = parsed skills minus `removed` (by lower-cased key), then
+  // `added` appended, de-duplicated case-insensitively against the survivors.
+  if (skills.removed.length > 0 || skills.added.length > 0) {
+    const removedSet = new Set(skills.removed.map((s) => s.toLowerCase()));
+    const kept = nextParsed.skills.filter(
+      (s) => !removedSet.has(s.toLowerCase()),
+    );
+    const present = new Set(kept.map((s) => s.toLowerCase()));
+    for (const add of skills.added) {
+      const key = add.toLowerCase();
+      if (present.has(key)) continue;
+      present.add(key);
+      kept.push(add);
+    }
+    nextParsed.skills = kept;
   }
 
   return { parsed: nextParsed, rawText: nextRawText, sections: nextSections };
