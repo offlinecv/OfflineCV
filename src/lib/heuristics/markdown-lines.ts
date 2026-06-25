@@ -17,8 +17,8 @@
  *     embedded images this way and they can bloat markdown 3× with zero
  *     signal for parsing.
  *   - Unescape turndown's backslash-escapes (`\_`, `\*`, `\[`, `\.`). These
- *     would otherwise break email / URL regex (e.g. `Annam\_Srinivas@foo`
- *     parses as `_Srinivas@foo`).
+ *     would otherwise break email / URL regex (e.g. `Jordan\_Lee@foo`
+ *     parses as `_Lee@foo`).
  *   - Join split-letter headers like `S UMMARY` / `E XPERIENCE` that come
  *     from Word's icon-letter decorations.
  *   - Strip inline italic markers `_text_` / `*text*` in addition to bold.

@@ -162,16 +162,16 @@ describe("parseHeuristicFromMarkdown — ATX heading section labels", () => {
 
 describe("parseHeuristicFromMarkdown — real-world DOCX artefacts", () => {
   it("unescapes turndown's backslash-escaped underscores in emails", () => {
-    // Mammoth+turndown produces `Annam\_Srinivas@hotmail.com` from a DOCX
+    // Mammoth+turndown produces `Jordan\_Lee@example.com` from a DOCX
     // where the email contains an underscore. Without preprocessing the
     // email regex skipped the escaped prefix and extracted
-    // `_Srinivas@hotmail.com`. See investigation on 2026-04-23.
+    // `_Lee@example.com`. See investigation on 2026-04-23.
     const markdown = [
       "**Jordan Lee**",
       "",
       "Sr. Software Engineer",
       "",
-      "Cupertino, CA | Annam\\_Srinivas@hotmail.com | 408-555-0100",
+      "Cupertino, CA | Jordan\\_Lee@example.com | 408-555-0100",
       "",
       "**EXPERIENCE**",
       "",
@@ -191,7 +191,7 @@ describe("parseHeuristicFromMarkdown — real-world DOCX artefacts", () => {
 
     const result = parseHeuristicFromMarkdown(markdown, markdown);
 
-    expect(result.parsed.email).toBe("Jordan_Lee@outlook.com");
+    expect(result.parsed.email).toBe("Jordan_Lee@example.com");
     expect(result.fieldConfidence.email ?? 0).toBeGreaterThanOrEqual(
       FIELD_CONFIDENCE_TARGETS.email,
     );
