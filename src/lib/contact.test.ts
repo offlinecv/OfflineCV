@@ -167,20 +167,22 @@ describe("buildContactFields", () => {
 });
 
 describe("formatLinkDisplay", () => {
-  it("collapses a LinkedIn profile to in/<slug>", () => {
+  it("keeps the host+path for a LinkedIn profile (protocol/www/slash stripped)", () => {
     expect(formatLinkDisplay("https://www.linkedin.com/in/jane-doe")).toBe(
-      "in/jane-doe",
+      "linkedin.com/in/jane-doe",
     );
     expect(formatLinkDisplay("https://linkedin.com/in/jane-doe/")).toBe(
-      "in/jane-doe",
+      "linkedin.com/in/jane-doe",
     );
   });
 
-  it("collapses a GitHub profile to gh/<slug>", () => {
-    expect(formatLinkDisplay("https://github.com/javery")).toBe("gh/javery");
+  it("keeps the host+path for a GitHub profile", () => {
+    expect(formatLinkDisplay("https://github.com/javery")).toBe(
+      "github.com/javery",
+    );
   });
 
-  it("falls back to the stripped host+path for other links", () => {
+  it("strips protocol/www/trailing-slash for other links", () => {
     expect(formatLinkDisplay("https://www.jane.dev/")).toBe("jane.dev");
     expect(formatLinkDisplay("http://janedoe.com/portfolio")).toBe(
       "janedoe.com/portfolio",
