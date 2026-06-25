@@ -38,10 +38,10 @@ import type {
   ExperienceFieldOverrides,
   EducationFieldOverrides,
   SkillsOverride,
+  AddedEntry,
+  AddedBullets,
+  BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
-
-/** Bullet overrides keyed by `BulletObservation.index` (stable rawText order). */
-export type BulletOverrides = Record<number, string>;
 
 export interface ApplyOverridesResult {
   parsed: HeuristicParsedResume;
@@ -189,6 +189,13 @@ const LEADING_MARKER_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)]) 
  * @param skills    add/remove edits against `parsed.skills`. `removed` keys
  *                  (lower-cased) drop parsed skills; `added` are appended,
  *                  de-duplicated. Default `{ removed: [], added: [] }`.
+ * @param addedEntries user-added entries appended to their section arrays
+ *                  (experience/education/projects/achievements). Default `[]`.
+ * @param addedBullets bullet lines a user appended to an entry, keyed by entry
+ *                  key — `"<section>:<index>"` for a parsed entry or an added
+ *                  entry's id. Folded into the entry description AND the graded
+ *                  bullet pool so an addition moves Specificity / Structure.
+ *                  Default `{}`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -200,6 +207,8 @@ export function applyOverrides(
   observations: readonly BulletObservation[],
   education: Record<number, EducationFieldOverrides> = {},
   skills: SkillsOverride = { removed: [], added: [] },
+  addedEntries: readonly AddedEntry[] = [],
+  addedBullets: AddedBullets = {},
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -292,6 +301,112 @@ export function applyOverrides(
       kept.push(add);
     }
     nextParsed.skills = kept;
+  }
+
+  // ── Added entries + bullets ────────────────────────────────────────────────
+  // Append user-added entries to their section arrays and fold added bullet
+  // lines into BOTH the entry description (display / PDF / grouping / fallback
+  // grading) and the graded bullet pool (Specificity / Structure). Pool lines
+  // land in the LAST accomplishment section so they sort after every existing
+  // bullet — keeping prior BulletObservation indices (which bulletOverrides are
+  // keyed by) stable.
+  const hasAdds =
+    addedEntries.length > 0 || Object.keys(addedBullets).length > 0;
+  if (hasAdds) {
+    // projects + heuristic_achievements weren't cloned above (only experience /
+    // education / skills were). Clone them — and their entries — before we push
+    // or mutate descriptions, so the original parse is never touched.
+    nextParsed.projects = (nextParsed.projects ?? []).map((p) => ({ ...p }));
+    nextParsed.heuristic_achievements = (
+      nextParsed.heuristic_achievements ?? []
+    ).map((a) => ({ ...a }));
+
+    // "• "-prefixed copies of every added bullet, pooled for grading.
+    const poolLines: string[] = [];
+
+    // Added entries: build each from its header fields, with description from
+    // its own added bullets (keyed by the entry id).
+    for (const entry of addedEntries) {
+      const entryBullets = addedBullets[entry.id] ?? [];
+      const description = entryBullets.join("\n") || undefined;
+      if (entry.section === "experience") {
+        nextParsed.experience.push({
+          title: entry.title,
+          company: entry.subtitle ?? "",
+          start_date: entry.start_date,
+          end_date: entry.end_date,
+          description,
+        });
+      } else if (entry.section === "education") {
+        nextParsed.education.push({
+          degree: entry.title,
+          institution: entry.subtitle ?? "",
+          start_date: entry.start_date,
+          end_date: entry.end_date,
+        });
+      } else if (entry.section === "projects") {
+        nextParsed.projects.push({ name: entry.title, description });
+      } else {
+        nextParsed.heuristic_achievements.push({
+          title: entry.title,
+          year: entry.year,
+          description,
+        });
+      }
+      for (const b of entryBullets) poolLines.push(`• ${b}`);
+    }
+
+    // Resolve a parsed-entry bullet key ("<section>:<index>") to the cloned
+    // entry whose description carries the bullet. Added-entry keys ("added:<n>")
+    // are handled above and skipped here. Education carries no bullets.
+    const parsedDescTarget = (
+      key: string,
+    ): { description?: string } | undefined => {
+      const colon = key.indexOf(":");
+      if (colon < 0) return undefined;
+      const section = key.slice(0, colon);
+      const index = Number(key.slice(colon + 1));
+      if (!Number.isInteger(index)) return undefined;
+      if (section === "experience") return nextParsed.experience[index];
+      if (section === "projects") return nextParsed.projects![index];
+      if (section === "achievements")
+        return nextParsed.heuristic_achievements![index];
+      return undefined;
+    };
+
+    // Added bullets on EXISTING parsed entries: append to that entry's
+    // description (cloned) and to the pool.
+    for (const [key, lines] of Object.entries(addedBullets)) {
+      if (key.startsWith("added:")) continue; // added entries handled above
+      if (lines.length === 0) continue;
+      const target = parsedDescTarget(key);
+      if (!target) continue;
+      const existing = target.description ? [target.description] : [];
+      target.description = [...existing, ...lines].join("\n");
+      for (const b of lines) poolLines.push(`• ${b}`);
+    }
+
+    if (poolLines.length > 0) {
+      const order = nextSections.accomplishmentSections;
+      // Last accomplishment section in canonical order — its lines pool last, so
+      // appended bullets get the highest indices. Fall back to "achievements".
+      const tail: SectionName =
+        order.length > 0 ? order[order.length - 1] : "achievements";
+      const nextByName = new Map<
+        SectionName | "profile",
+        readonly string[]
+      >(nextSections.byName);
+      const existing = nextByName.get(tail) ?? [];
+      nextByName.set(tail, [...existing, ...poolLines]);
+      const accomplishmentSections = order.includes(tail)
+        ? order
+        : [...order, tail];
+      nextSections = {
+        ...nextSections,
+        byName: nextByName,
+        accomplishmentSections,
+      };
+    }
   }
 
   return { parsed: nextParsed, rawText: nextRawText, sections: nextSections };

@@ -31,6 +31,7 @@ import type {
 } from "../../hooks/useEditableParse.ts";
 import { RewriteButton } from "./RewriteButton.tsx";
 import { useSectionRewrite } from "./SectionRewrite.tsx";
+import { InlineBulletAdd, RemoveButton } from "./ReconstructedAdd.tsx";
 
 // ── Bullet flags ──────────────────────────────────────────────────────────────
 
@@ -449,6 +450,12 @@ interface RoleEntryProps {
   bulletOverrides?: BulletOverrides;
   /** Commit a bullet edit, keyed by BulletObservation.index (#82). */
   onBulletChange?: (index: number, value: string) => void;
+  /** Append a new bullet to this role (#180-followup). Renders a "+ Add bullet"
+   *  affordance under the bullet list when provided. */
+  onAddBullet?: (text: string) => void;
+  /** Remove this role (only set for user-ADDED roles). Renders an X control in
+   *  the header row when provided. */
+  onRemove?: () => void;
 }
 
 /**
@@ -462,6 +469,8 @@ export function RoleEntry({
   onFieldChange,
   bulletOverrides,
   onBulletChange,
+  onAddBullet,
+  onRemove,
 }: RoleEntryProps) {
   // Bullet display text honors #82 overrides — section rewrite must see the
   // text the user actually edited, not the stale parsed text.
@@ -480,7 +489,12 @@ export function RoleEntry({
           overrides={overrides}
           onFieldChange={onFieldChange}
         />
-        {rewriteTrigger}
+        <div className="flex shrink-0 items-center gap-1">
+          {rewriteTrigger}
+          {onRemove && (
+            <RemoveButton label="Remove role" onClick={onRemove} />
+          )}
+        </div>
       </div>
       {group.bullets.length > 0 ? (
         <>
@@ -501,10 +515,17 @@ export function RoleEntry({
           {rewritePanel}
         </>
       ) : (
-        <p className="text-sm text-content-tertiary">
-          No bullet-shaped lines detected.
-        </p>
+        // A user-added role (onRemove set) starts empty — the "+ Add bullet"
+        // affordance below is its call to action, so suppress the note for it.
+        // A PARSED role with no bullets still shows the note: that the parser
+        // found none is the diagnostic signal this surface exists to expose.
+        !onRemove && (
+          <p className="text-sm text-content-tertiary">
+            No bullet-shaped lines detected.
+          </p>
+        )
       )}
+      {onAddBullet && <InlineBulletAdd onAdd={onAddBullet} />}
     </div>
   );
 }
