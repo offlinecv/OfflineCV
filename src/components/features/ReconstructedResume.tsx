@@ -498,7 +498,10 @@ export function ReconstructedResume({
         <p className="max-w-prose text-sm text-content-tertiary">
           What the parser recognized, in resume shape. Each bullet is checked
           against three rules — an action verb, the 8–30-word length window, and
-          a metric — and flagged inline where it falls short.
+          a metric — and flagged inline where it falls short.{" "}
+          <span className="text-content-secondary">
+            Click any field to edit it.
+          </span>
         </p>
         {bullets.length > 0 && <RollupStrip bullets={bullets} />}
       </div>

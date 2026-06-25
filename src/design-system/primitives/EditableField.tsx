@@ -6,7 +6,13 @@
  *
  * Renders in one of two modes:
  *   • read  — shows the current value (or a "not detected" placeholder when
- *             value is absent). Clicking the pencil icon enters edit mode.
+ *             value is absent). The value itself is the edit affordance: a text
+ *             cursor + a subtle hover tint signal editability; clicking/tapping
+ *             it (or focusing it and pressing Enter/Space) enters edit mode.
+ *             No pencil icon — one icon per field reads as clutter on a
+ *             document-shaped surface, and a hover-only pencil is invisible on
+ *             touch. The quiet hover affordance works with mouse, keyboard, and
+ *             touch alike (Notion/Linear/Docs pattern).
  *   • edit  — inline <input> (default) or auto-growing <textarea> (multiline)
  *             pre-filled with the current value.
  *             Single-line: blurring or pressing Enter/Escape commits/cancels.
@@ -49,15 +55,6 @@ interface EditableFieldProps {
   textWeight?: "normal" | "semibold";
   /** Text size of the read-mode text. Defaults to "sm". */
   textSize?: "xs" | "sm" | "base";
-  /**
-   * How the edit affordance is revealed in read mode:
-   *   reserve — pencil always occupies layout (opacity-0 → visible on hover).
-   *             Keeps the affordance focusable; no layout shift. Default.
-   *   hover   — pencil takes no layout space until hover/focus; the value text
-   *             itself becomes the click/keyboard edit trigger. Use inline (e.g.
-   *             a resume bullet) where a reserved pencil leaves an awkward gap.
-   */
-  revealOn?: "reserve" | "hover";
   /**
    * Read-mode root box model:
    *   flex   — `inline-flex` atom; value + pencil stay on one line, the box
@@ -103,7 +100,6 @@ export function EditableField({
   className,
   textWeight = "normal",
   textSize = "sm",
-  revealOn = "reserve",
   display = "flex",
   multiline = false,
   onRework,
@@ -258,83 +254,44 @@ export function EditableField({
 
   // ── Read mode (shared by both variants) ───────────────────────────────────
 
-  const hoverReveal = revealOn === "hover";
+  // Quiet inline-edit affordance: the value itself is the click/keyboard/tap
+  // target. No pencil icon — a text cursor + a subtle hover tint signal
+  // editability, which (unlike a hover-revealed pencil) also works on touch.
+  const inlineFlow = display === "inline";
 
-  // hover mode: the value text is the primary edit trigger (so the pencil can
-  // take zero layout space without losing keyboard access). reserve mode: plain
-  // text, pencil owns the affordance.
-  const valueText = (
+  // Inline mode: plain `inline` so the value wraps as text and trailing siblings
+  // flow after the last word. Flex mode: `inline-flex` atom. The negative margin
+  // offsets the hover-tint padding so the tinted box doesn't shift the layout.
+  const rootBox = inlineFlow
+    ? "inline"
+    : "inline-flex min-w-0 items-center";
+
+  return (
     <span
-      {...(hoverReveal
-        ? {
-            role: "button" as const,
-            tabIndex: 0,
-            "aria-label": `Edit ${label}`,
-            onClick: startEdit,
-            onKeyDown: (e: ReactKeyboardEvent) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                startEdit();
-              }
-            },
-          }
-        : {})}
+      role="button"
+      tabIndex={0}
+      aria-label={`Edit ${label}`}
+      onClick={startEdit}
+      onKeyDown={(e: ReactKeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          startEdit();
+        }
+      }}
       className={[
+        rootBox,
+        "cursor-text rounded px-1 -mx-1 transition-colors",
+        "hover:bg-surface-subtle",
+        "outline-hidden focus-visible:ring-1 focus-visible:ring-brand-amber",
         sizeCls,
         weightCls,
         hasValue ? "text-content-primary" : "text-content-muted italic",
-        hoverReveal
-          ? "cursor-text rounded-xs outline-hidden focus-visible:ring-1 focus-visible:ring-brand-amber"
-          : "",
+        className ?? "",
       ]
         .filter(Boolean)
         .join(" ")}
     >
       {hasValue ? value : placeholder}
-    </span>
-  );
-
-  const inlineFlow = display === "inline";
-
-  // reserve: opacity-0 keeps the pencil in flow + focusable (no shift).
-  // hover: display:none collapses its width; the value text covers keyboard a11y.
-  // Inline flow has no flex `gap`, so the pencil carries its own left margin.
-  const pencilSpacing = inlineFlow ? "ml-1 align-middle " : "";
-  const pencilCls =
-    pencilSpacing +
-    (hoverReveal
-      ? "shrink-0 hidden group-hover:inline-flex group-focus-within:inline-flex text-content-muted hover:text-content-secondary"
-      : "shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 text-content-muted hover:text-content-secondary");
-
-  // Inline mode: plain `inline` so the value wraps as text and trailing siblings
-  // flow after the last word. Flex mode: `inline-flex` atom (value + pencil never
-  // split). `min-w-0`/`items-center`/`gap-1` only bite in flex mode.
-  const rootBox = inlineFlow
-    ? "inline"
-    : "inline-flex min-w-0 items-center gap-1";
-
-  return (
-    <span className={`group ${rootBox} ${className ?? ""}`}>
-      {valueText}
-      {/* Pencil-icon edit button — hover bonus in hover mode, primary in reserve mode */}
-      <Button
-        variant="icon"
-        aria-label={`Edit ${label}`}
-        onClick={startEdit}
-        tabIndex={hoverReveal ? -1 : undefined}
-        className={pencilCls}
-      >
-        {/* Pencil SVG — 12×12 */}
-        <svg
-          aria-hidden="true"
-          width="12"
-          height="12"
-          viewBox="0 0 16 16"
-          fill="currentColor"
-        >
-          <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354l-1.086-1.086zM11.189 6.25 9.75 4.81l-6.286 6.287a.25.25 0 0 0-.064.108l-.558 1.953 1.953-.558a.25.25 0 0 0 .108-.064L11.19 6.25z" />
-        </svg>
-      </Button>
     </span>
   );
 }

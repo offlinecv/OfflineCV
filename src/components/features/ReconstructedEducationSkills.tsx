@@ -96,6 +96,12 @@ function EducationEntry({
   const { degree, institution, startDate, endDate, dates, coursework } =
     resolveEducationDisplay(edu, overrides);
 
+  // The editable start/end fields ARE the date display, so the compact `dates`
+  // string would duplicate them. Show it ONLY in the legacy year-only fallback
+  // (no start/end parsed, just a graduation `year`), where no editable field
+  // surfaces it otherwise.
+  const yearOnly = !startDate && !endDate && Boolean(dates);
+
   return (
     <li className="flex flex-col gap-0.5 text-sm">
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
@@ -130,7 +136,7 @@ function EducationEntry({
           textSize="xs"
           onCommit={(v) => onFieldChange("end_date", v)}
         />
-        {dates && <span className="text-content-muted">· {dates}</span>}
+        {yearOnly && <span className="text-content-muted">{dates}</span>}
       </div>
       {coursework.length > 0 && (
         <span className="block text-content-tertiary">

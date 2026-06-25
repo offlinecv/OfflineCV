@@ -24,7 +24,7 @@ import type { ReactNode } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
-import { EditableField, Button } from "@design-system";
+import { EditableField } from "@design-system";
 import type {
   ExperienceFieldOverrides,
   BulletOverrides,
@@ -231,7 +231,6 @@ export function ResumeBulletRow({
               placeholder="empty bullet"
               label="Bullet text"
               textSize="sm"
-              revealOn="hover"
               display="inline"
               multiline
               onCommit={handleCommit}
@@ -314,20 +313,21 @@ interface RoleHeaderProps {
  * Read-only mode: renders "Title — Company · start_date – end_date" (or
  * "Other bullets" / "Untitled role" for partial/absent parses).
  *
- * Edit mode: when `overrides` + `onFieldChange` are provided the header gains
- * a persistent "Edit role" toggle button. Activating it expands four
- * EditableField rows — title (multiline), company (multiline), start date, end
- * date — each committed individually. A "Done" button collapses back to the
- * compact read view. Cleared fields show "not detected" in the read view.
- *
- * The "Edit role" button is the discoverable affordance (#175). Individual
- * field pencils use revealOn="hover" inside the expanded editor so the gutter
- * stays clean. The existing single-line revealOn="reserve" default for
- * ContactCard is unaffected — the new behaviour is purely opt-in here.
+ * Edit mode: when `overrides` + `onFieldChange` are provided the header renders
+ * inline EditableField affordances — title (multiline), company (multiline),
+ * start date, end date — each committed individually. Every field uses the same
+ * paradigm as the rest of the reconstructed résumé: the value itself is the
+ * click/keyboard/tap target (quiet inline affordance). Cleared fields show
+ * "not detected".
  */
 function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
-  const editable = overrides !== undefined && onFieldChange !== undefined;
-  const [editOpen, setEditOpen] = useState(false);
+  // Editability hinges on the commit handler alone — `overrides` is `undefined`
+  // for any role the user hasn't edited yet (the per-index map starts empty), so
+  // gating on it would wrongly fall back to the read-only composite for every
+  // un-edited role. Mirror EducationEntry: render fields whenever the section is
+  // editable, treating a missing override map as "no overrides applied yet".
+  const editable = onFieldChange !== undefined;
+  const ov = overrides ?? {};
 
   // For the "Other bullets" bucket there is no experience entry to edit.
   if (group.experience === null) {
@@ -373,123 +373,59 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
   const toDisplay = (v: string | undefined): string | undefined =>
     v || undefined;
 
-  // Collapsed editable: composite label + persistent "Edit role" toggle.
-  if (!editOpen) {
-    const title = overrides.title !== undefined ? overrides.title : exp.title;
-    const company =
-      overrides.company !== undefined ? overrides.company : exp.company;
-    const startDate =
-      overrides.start_date !== undefined ? overrides.start_date : exp.start_date;
-    const endDate =
-      overrides.end_date !== undefined ? overrides.end_date : exp.end_date;
-
-    const start = toDisplay(startDate);
-    const end =
-      exp.is_current && overrides.end_date === undefined
-        ? "Present"
-        : toDisplay(endDate);
-    let dates: string | undefined;
-    if (start && end) dates = `${start} – ${end}`;
-    else if (start) dates = start;
-    else if (end) dates = end;
-
-    let label = "";
-    if (toDisplay(title) && toDisplay(company))
-      label = `${toDisplay(title)} — ${toDisplay(company)}`;
-    else if (toDisplay(title)) label = toDisplay(title)!;
-    else if (toDisplay(company)) label = toDisplay(company)!;
-    if (dates) label = label ? `${label} · ${dates}` : dates;
-
-    return (
-      <div className="flex items-start gap-2">
-        <h3 className="flex-1 text-sm font-semibold text-content-primary">
-          {label || "Untitled role"}
-        </h3>
-        {/* Persistent discoverable affordance — always visible, not hover-gated */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setEditOpen(true)}
-          aria-label="Edit role header fields"
-          className="shrink-0 text-xs text-content-tertiary hover:text-content-secondary"
-        >
-          Edit role
-        </Button>
-      </div>
-    );
-  }
-
-  // Expanded editor: four independent EditableField rows.
-  const title = overrides.title !== undefined ? overrides.title : exp.title;
-  const company =
-    overrides.company !== undefined ? overrides.company : exp.company;
-  const startDate =
-    overrides.start_date !== undefined ? overrides.start_date : exp.start_date;
+  // Inline editable: quiet click-to-edit, mirroring the Education section.
+  const title = toDisplay(ov.title !== undefined ? ov.title : exp.title);
+  const company = toDisplay(
+    ov.company !== undefined ? ov.company : exp.company,
+  );
+  const startDate = toDisplay(
+    ov.start_date !== undefined ? ov.start_date : exp.start_date,
+  );
   const endDate =
-    overrides.end_date !== undefined ? overrides.end_date : exp.end_date;
+    exp.is_current && ov.end_date === undefined
+      ? "Present"
+      : toDisplay(ov.end_date !== undefined ? ov.end_date : exp.end_date);
 
   return (
-    <div className="flex flex-col gap-1 rounded border border-border-light bg-surface-card p-2">
-      {/* Title — multiline variant for long role titles */}
-      <EditableField
-        value={toDisplay(title)}
-        placeholder="title not detected"
-        label="Job title"
-        textWeight="semibold"
-        textSize="sm"
-        multiline
-        revealOn="hover"
-        onCommit={(v) => onFieldChange("title", v)}
-      />
-      {/* Company — multiline variant for long company names */}
-      <EditableField
-        value={toDisplay(company)}
-        placeholder="company not detected"
-        label="Company"
-        textSize="sm"
-        multiline
-        revealOn="hover"
-        onCommit={(v) => onFieldChange("company", v)}
-      />
-      {/* Date range row — single-line fields, hover-revealed pencils */}
+    <div className="flex flex-col gap-0.5">
+      {/* Title — Company row (multiline fields for long titles/names) */}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <EditableField
-          value={toDisplay(startDate)}
+          value={title}
+          placeholder="title not detected"
+          label="Job title"
+          textWeight="semibold"
+          textSize="sm"
+          multiline
+          onCommit={(v) => onFieldChange("title", v)}
+        />
+        {(title || company) && <span className="text-content-muted">—</span>}
+        <EditableField
+          value={company}
+          placeholder="company not detected"
+          label="Company"
+          textSize="sm"
+          multiline
+          onCommit={(v) => onFieldChange("company", v)}
+        />
+      </div>
+      {/* Date range row — single-line quiet-edit fields */}
+      <div className="flex flex-wrap items-center gap-x-1.5 text-content-tertiary">
+        <EditableField
+          value={startDate}
           placeholder="start date"
           label="Start date"
           textSize="xs"
-          revealOn="hover"
-          className="text-content-tertiary"
           onCommit={(v) => onFieldChange("start_date", v)}
         />
-        {(toDisplay(startDate) !== undefined || toDisplay(endDate) !== undefined) && (
-          <span className="text-xs text-content-muted">–</span>
-        )}
+        <span aria-hidden="true">–</span>
         <EditableField
-          value={
-            exp.is_current && overrides.end_date === undefined
-              ? "Present"
-              : toDisplay(endDate)
-          }
+          value={endDate}
           placeholder="end date"
           label="End date"
           textSize="xs"
-          revealOn="hover"
-          className="text-content-tertiary"
           onCommit={(v) => onFieldChange("end_date", v)}
         />
-      </div>
-      {/* Done button — collapses the editor back to the compact read view */}
-      <div className="mt-0.5 flex justify-end">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setEditOpen(false)}
-          aria-label="Close role editor"
-          className="text-xs text-content-tertiary hover:text-content-secondary"
-        >
-          Done
-        </Button>
       </div>
     </div>
   );

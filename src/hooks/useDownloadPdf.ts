@@ -59,6 +59,14 @@ export function useDownloadPdf(
       document.body.appendChild(a);
       a.click();
       a.remove();
+      // Defer the revoke: a.click() only SCHEDULES the download — the browser
+      // reads the object URL asynchronously afterward. Revoking synchronously
+      // (e.g. in finally) invalidates the URL before the fetch starts, which
+      // silently kills the download on slower/remote contexts and on
+      // Firefox/Safari. Hand the URL off, then revoke on a later task.
+      const settledUrl = url;
+      url = null;
+      setTimeout(() => URL.revokeObjectURL(settledUrl), 60_000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate PDF.");
     } finally {
