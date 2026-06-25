@@ -35,9 +35,6 @@
  *   multiline   — opt-in: renders a full-width auto-growing <textarea> with an
  *                 explicit Save / Cancel action row. ADDITIVE — existing
  *                 single-line callers are byte-for-byte unchanged.
- *   onRework    — opt-in (multiline only): renders a "Rework" action in the
- *                 Save/Cancel row. The callback receives the current draft text
- *                 so the caller can trigger AI rewrite on the live draft.
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
@@ -81,15 +78,6 @@ interface EditableFieldProps {
    * unchanged in behavior.
    */
   multiline?: boolean;
-  /**
-   * Rework callback (multiline only, opt-in).
-   *
-   * When provided alongside `multiline`, a "Rework" action appears next to
-   * Save/Cancel. The callback receives the current draft text so the caller
-   * can trigger an AI-rewrite pass on the live draft (e.g. thread through
-   * RewriteButton's engine). The EditableField itself has no rewrite logic.
-   */
-  onRework?: (currentDraft: string) => void;
 }
 
 export function EditableField({
@@ -102,7 +90,6 @@ export function EditableField({
   textSize = "sm",
   display = "flex",
   multiline = false,
-  onRework,
 }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -184,7 +171,7 @@ export function EditableField({
             "outline-hidden focus:ring-1 focus:ring-brand-amber",
           ].join(" ")}
         />
-        {/* Save / Cancel / Rework action row */}
+        {/* Save / Cancel action row */}
         <div className="flex items-center gap-2">
           <Button
             variant="primary"
@@ -202,18 +189,6 @@ export function EditableField({
           >
             Cancel
           </Button>
-          {onRework && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onRework(draft)}
-              aria-label={`Rework ${label} with AI`}
-              className="ml-auto flex items-center gap-1 text-content-tertiary hover:text-brand-amber"
-            >
-              <ReworkSparkleIcon />
-              Rework
-            </Button>
-          )}
         </div>
       </div>
     );
@@ -296,16 +271,3 @@ export function EditableField({
   );
 }
 
-/** Small sparkle icon for the Rework action in the multiline action row. */
-function ReworkSparkleIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className="h-3 w-3 shrink-0"
-      fill="currentColor"
-    >
-      <path d="M12 2l1.9 5.6a4 4 0 0 0 2.5 2.5L22 12l-5.6 1.9a4 4 0 0 0-2.5 2.5L12 22l-1.9-5.6a4 4 0 0 0-2.5-2.5L2 12l5.6-1.9a4 4 0 0 0 2.5-2.5L12 2z" />
-    </svg>
-  );
-}

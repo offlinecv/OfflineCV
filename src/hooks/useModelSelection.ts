@@ -7,9 +7,9 @@
  *
  * State is held in a MODULE-LEVEL store (not per-hook-instance `useState`) and
  * consumed via `useSyncExternalStore`. Three independent consumers call this
- * hook on the same page — `ModelSelector`, `RewriteButton` (one per bullet),
- * `SectionRewrite` (one per role). With per-instance `useState`, a write in
- * the picker would NOT propagate to the rewrite buttons in the same tab: the
+ * hook on the same page — `ModelSelector`, `SectionRewrite` (one per role),
+ * and `ResumeRewrite`. With per-instance `useState`, a write in
+ * the picker would NOT propagate to the rewrite surfaces in the same tab: the
  * `storage` event only fires in OTHER same-origin tabs, never in the writing
  * tab. The module-level store fixes that — every write calls `notify()`
  * synchronously so all subscribers re-render with the new snapshot. The

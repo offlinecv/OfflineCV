@@ -7,7 +7,7 @@
  * Integration test for `useModelSelection`'s cross-instance propagation
  * contract. The bug this guards against: per-instance `useState` would mean
  * a write in one consumer (the picker) isn't observed by other consumers
- * (already-mounted `RewriteButton` / `SectionRewrite` instances) in the
+ * (already-mounted `SectionRewrite` / `ResumeRewrite` instances) in the
  * same tab — because the `storage` event fires only in OTHER same-origin
  * tabs, not the writing one. Two consumers mount in one root; writes from
  * one are asserted on the other.
@@ -115,7 +115,7 @@ describe("useModelSelection — cross-instance propagation (same tab)", () => {
       stateA!.setSelectedModelId(restrictedModel.id);
     });
 
-    // Consumer B (e.g. a `RewriteButton` mounted before the pick) MUST see
+    // Consumer B (e.g. a `SectionRewrite` mounted before the pick) MUST see
     // the new selection. This is the contract PR B's reviewer flagged as
     // broken under per-instance useState — fixed by the module-level store.
     expect(stateA?.selectedModelId).toBe(restrictedModel.id);

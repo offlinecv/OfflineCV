@@ -104,6 +104,13 @@ export const MODEL_REGISTRY: readonly ModelMetadata[] = [
  * MUST be Apache-2.0 — every install gets this without triggering a
  * Restricted-Community consent modal. A user-persisted `localStorage`
  * selection (PR B) is the ONLY override; no hardware auto-routing.
+ *
+ * Confirmed by the Phase 3 rewrite-quality eval (#65): Qwen2.5-1.5B scored
+ * the highest aggregate (67%, Baseline prompt variant) of the three registry
+ * models — vs Llama-3.2-3B at 58% and Gemma-2-2B at 54% — see
+ * tests/fixtures/rewrite/reports/. It is also the only Apache-2.0 entry and
+ * the smallest download (1630 MB), so measurement and licensing agree.
+ * No bump needed.
  */
 export const DEFAULT_MODEL_ID = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
 

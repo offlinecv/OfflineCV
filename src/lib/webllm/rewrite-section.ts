@@ -112,8 +112,7 @@ export interface SectionRewriteResult {
 /**
  * Per-model one-shot guard for `webllm_first_section_rewrite`. Each model's
  * first successful section rewrite fires the event exactly once per page so
- * the funnel can compare "X loads → Y first section rewrites" per model,
- * mirroring the per-bullet `firstRewriteFiredFor` in rewrite-bullet.ts.
+ * the funnel can compare "X loads → Y first section rewrites" per model.
  */
 const firstSectionRewriteFiredFor = new Set<string>();
 
