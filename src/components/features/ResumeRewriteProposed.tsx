@@ -23,7 +23,7 @@
  */
 
 import { useMemo } from "react";
-import { Button } from "@design-system";
+import { Button, InlineResult } from "@design-system";
 import type {
   ResumeRewriteResult,
   SectionOutcome,
@@ -38,15 +38,11 @@ export function ProposedPanel({
   onDismiss: () => void;
 }) {
   const aggregated = useMemo(() => aggregateDrift(result), [result]);
-  const borderClass = result.allNumbersPreserved
-    ? "border-feedback-success-border"
-    : "border-feedback-warning-border";
-  const bgClass = result.allNumbersPreserved
-    ? "bg-feedback-success-bg"
-    : "bg-feedback-warning-bg";
-
   return (
-    <div className={`flex flex-col gap-4 rounded border p-3 ${borderClass} ${bgClass}`}>
+    <InlineResult
+      tone={result.allNumbersPreserved ? "success" : "warning"}
+      className="flex flex-col gap-4"
+    >
       {!result.allNumbersPreserved && (
         <NumberPreservationWarning
           dropped={aggregated.dropped}
@@ -70,7 +66,7 @@ export function ProposedPanel({
           Discard
         </Button>
       </div>
-    </div>
+    </InlineResult>
   );
 }
 

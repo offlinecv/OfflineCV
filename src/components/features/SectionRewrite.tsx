@@ -11,7 +11,7 @@
  *
  * Non-negotiable rules from issue #63:
  *   - On browsers without WebGPU, returns null. Silent absence — matches
- *     `RewriteButton`. Not a greyed CTA, not a banner.
+ *     `InlineResult`. Not a greyed CTA, not a banner.
  *   - Model weights download on click only. The shared `loadEngine()` cache
  *     means clicking section-rewrite after per-bullet (or in a sibling role)
  *     reuses the same engine — no second multi-GB download.
@@ -23,10 +23,10 @@
  * Reuse analysis (CLAUDE.md 3-tier rule):
  *   - Primitive: `Button` from `@design-system` for every interactive
  *     control. No raw `<button>` in this file.
- *   - Shared: the inline before/after panel follows the same inline-result
- *     pattern as `RewriteButton`'s `RewriteResult` (rounded border + feedback
- *     bg). Top-level `Card` would be the wrong chrome — Cards own panel
- *     framing on the page; this is a result strip *inside* the role list.
+ *   - Shared: the inline before/after panel uses the `InlineResult` primitive
+ *     from `@design-system` (rounded border + feedback bg + tone). Top-level
+ *     `Card` would be the wrong chrome — Cards own panel framing on the page;
+ *     this is a result strip *inside* the role list.
  *
  * Concurrency: see `useSectionRewriteLock` for the synchronous atomic lock
  * that gates concurrent `engine.chat.completions.create()` calls.
@@ -44,7 +44,7 @@ import type {
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 import { useSectionRewriteLock } from "../../hooks/useSectionRewriteLock.ts";
 import { useModelSelection } from "../../hooks/useModelSelection.ts";
-import { Button, ModelLoadProgress } from "@design-system";
+import { Button, ModelLoadProgress, InlineResult } from "@design-system";
 
 /** What `useSectionRewrite` hands back so the caller can place the trigger and
  *  the result panel in separate slots (trigger beside the role title, panel
@@ -280,16 +280,10 @@ export function ProposedSection({
   onCopyAll: () => void;
   onReject: () => void;
 }) {
-  const borderClass = result.numbersPreserved
-    ? "border-feedback-success-border"
-    : "border-feedback-warning-border";
-  const bgClass = result.numbersPreserved
-    ? "bg-feedback-success-bg"
-    : "bg-feedback-warning-bg";
-
   return (
-    <div
-      className={`flex flex-col gap-3 rounded border p-3 ${borderClass} ${bgClass}`}
+    <InlineResult
+      tone={result.numbersPreserved ? "success" : "warning"}
+      className="flex flex-col gap-3"
     >
       {!result.numbersPreserved && (
         <NumberPreservationWarning
@@ -329,7 +323,7 @@ export function ProposedSection({
           Discard
         </Button>
       </div>
-    </div>
+    </InlineResult>
   );
 }
 
