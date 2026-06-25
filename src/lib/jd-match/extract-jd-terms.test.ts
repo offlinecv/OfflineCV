@@ -149,6 +149,112 @@ Kubernetes is a core piece of the platform.
     expect(out.nounsDropped).toBeGreaterThan(0);
   });
 
+  it("drops JD structural section headings from the noun pass (#156)", () => {
+    // Mirrors the reported music-intern JD: structural headings were surfaced
+    // as "missing keywords" ("Minimum Qualifications", "Physical Demands") even
+    // though nobody puts those on a resume. A real competency in the same block
+    // ("Music Theory") must still come through.
+    const jd = `
+Music Intern
+
+Job Summary:
+Support the studio across rehearsals and performances.
+
+Minimum Qualifications:
+Knowledge of Music Theory and Sound Design.
+
+Preferred Qualifications:
+Experience with Live Performance.
+
+Physical Demands:
+Able to stand for three hours and lift heavy equipment.
+
+Essential Functions:
+Coordinate Stage Setup before each show.
+`;
+    const { nouns } = extractJdTerms(jd);
+    const displays = nouns.map((n) => n.display);
+    // Structural headings must not surface.
+    for (const heading of [
+      "Job Summary",
+      "Minimum Qualifications",
+      "Preferred Qualifications",
+      "Physical Demands",
+      "Essential Functions",
+    ]) {
+      expect(displays).not.toContain(heading);
+    }
+    // Real competencies in the same JD still come through the noun pass.
+    expect(displays).toEqual(
+      expect.arrayContaining(["Music Theory", "Sound Design"]),
+    );
+  });
+
+  it("catches adjective variants of heading families via the tail word (#156)", () => {
+    const jd = `
+Basic Qualifications:
+Java and SQL.
+
+Key Responsibilities:
+Own the Backend Services.
+
+Travel Requirements:
+Up to 10% travel.
+`;
+    const { nouns } = extractJdTerms(jd);
+    const displays = nouns.map((n) => n.display);
+    expect(displays).not.toContain("Basic Qualifications");
+    expect(displays).not.toContain("Key Responsibilities");
+    expect(displays).not.toContain("Travel Requirements");
+    // A real phrase that merely lives under a stripped heading survives.
+    expect(displays).toContain("Backend Services");
+  });
+
+  it("drops '… Experience' section headers but keeps real *Experience skills (#156)", () => {
+    const jd = `
+Work Experience:
+You will own the Backend Platform.
+
+Performance Experience:
+Comfort on stage helps.
+
+We care deeply about User Experience and Customer Experience.
+`;
+    const { nouns } = extractJdTerms(jd);
+    const displays = nouns.map((n) => n.display);
+    // Section headers gone…
+    expect(displays).not.toContain("Work Experience");
+    expect(displays).not.toContain("Performance Experience");
+    // …but real competency phrases ending in "Experience" survive.
+    expect(displays).toEqual(
+      expect.arrayContaining(["User Experience", "Customer Experience"]),
+    );
+  });
+
+  it("drops 'The …' title/sentence openers (#156)", () => {
+    const jd = `
+The Summer Music Intern will support rehearsals.
+You'll work on Distributed Systems daily.
+`;
+    const { nouns } = extractJdTerms(jd);
+    const displays = nouns.map((n) => n.display);
+    expect(displays).not.toContain("The Summer Music Intern");
+    // A genuine phrase in the same JD is unaffected.
+    expect(displays).toContain("Distributed Systems");
+  });
+
+  it("does not over-strip skill phrases that share a heading tail word (#156)", () => {
+    // "Cloud Functions" ends in "functions" but is a real skill phrase, not a
+    // heading — the tail guard deliberately omits "functions" to protect it.
+    const { nouns } = extractJdTerms(
+      "We deploy on Cloud Functions and Lambda Functions across the stack.",
+    );
+    const displays = nouns.map((n) => n.display);
+    expect(displays).toEqual(
+      expect.arrayContaining(["Cloud Functions", "Lambda Functions"]),
+    );
+  });
+
   it("ranks informative noun phrases past a marketing-heavy opener instead of slicing in document order", () => {
     // A marketing opener spends the first 25+ capitalized phrases on
     // single-occurrence company fluff. Two informative phrases ("Event

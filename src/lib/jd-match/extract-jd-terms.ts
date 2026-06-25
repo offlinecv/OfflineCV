@@ -174,6 +174,131 @@ const NOUN_STOP_PHRASES = new Set<string>([
   "about us",
 ]);
 
+/**
+ * JD *structural* section headings the noun-phrase regex would otherwise
+ * surface as "keywords" — e.g. "Minimum Qualifications", "Physical Demands",
+ * "Essential Functions" (#156). These describe the JD's own document
+ * structure, not a competency, so listing them as "missing from your resume"
+ * is noise — nobody writes "Physical Demands" on a resume. They are filtered
+ * out of the noun pass entirely (before ranking, so they can't even win a
+ * requirements-section bonus).
+ *
+ * This only touches the noun pass: a phrase that is a real dictionary skill
+ * comes through the skill pass and is never subject to this list, so we can be
+ * aggressive here without dropping genuine competencies.
+ *
+ * Two layers:
+ *   - `SECTION_HEADING_STOP_PHRASES` — exact lowercased headings whose tail
+ *     word is ambiguous (e.g. "Essential Functions": "functions" alone would
+ *     also drop the "Cloud Functions" / "Lambda Functions" skills, so the
+ *     heading is listed in full instead).
+ *   - `SECTION_HEADING_TAIL_WORDS` — structural nouns that, as the LAST word of
+ *     a captured phrase, mark it a heading regardless of the leading adjective
+ *     ("Minimum/Preferred/Basic/Required … Qualifications"; "Key/Primary/Core …
+ *     Responsibilities"). No real skill phrase ends in one of these, so the
+ *     tail guard catches the open-ended adjective families without enumeration.
+ */
+const SECTION_HEADING_STOP_PHRASES = new Set<string>([
+  // Summary / overview / description / title headers
+  "job summary",
+  "job description",
+  "job overview",
+  "job details",
+  "job title",
+  "job type",
+  "job location",
+  "job posting",
+  "job function",
+  "job functions",
+  "position summary",
+  "position overview",
+  "position description",
+  "position details",
+  "role overview",
+  "role summary",
+  "role description",
+  "company overview",
+  "company description",
+  "company background",
+  "team overview",
+  // "Essential functions" family — tail "functions" is deliberately NOT a
+  // tail-word (protects the Cloud/Lambda Functions skills), so list it in full.
+  "essential functions",
+  "essential job functions",
+  // Process / apply headers
+  "how to apply",
+  "to apply",
+  "application process",
+  "application instructions",
+  "application deadline",
+  "hiring process",
+  "interview process",
+  "selection process",
+  // Framing headers ("about us" / "what we offer" handled by NOUN_STOP_PHRASES
+  // and BOILERPLATE_ANCHORS respectively)
+  "what you",
+  "who you are",
+  "who we are",
+  "what we do",
+  "what to expect",
+  "why join us",
+  "why work here",
+  "about the role",
+  "about the team",
+  "about the company",
+  "about the position",
+  "about the job",
+  "about you",
+  "about the opportunity",
+  // Logistics headers
+  "reports to",
+  "direct reports",
+  "employment type",
+  "work schedule",
+  "work location",
+  "start date",
+  "compensation package",
+  "benefits package",
+  "working conditions",
+  "work environment",
+  "working environment",
+  // "… Experience" section headers (resume + JD section names, #156). Listed
+  // exactly rather than via a tail word: "experience" alone would wrongly drop
+  // real competency phrases ("User Experience", "Customer Experience",
+  // "Developer Experience"). The first three mirror the issue's own examples.
+  "work experience",
+  "additional experience",
+  "performance experience",
+  "involvement experience",
+  "professional experience",
+  "relevant experience",
+  "industry experience",
+  "prior experience",
+  "previous experience",
+]);
+
+/**
+ * Structural nouns that mark a captured phrase as a JD section heading when
+ * they are its LAST word — see `SECTION_HEADING_STOP_PHRASES`. "functions" is
+ * intentionally excluded (would swallow "Cloud Functions" / "Lambda
+ * Functions"); those headings are listed in full above instead.
+ */
+const SECTION_HEADING_TAIL_WORDS = new Set<string>([
+  "qualifications",
+  "responsibilities",
+  "requirements",
+  "demands",
+  "duties",
+]);
+
+/** True when a captured noun phrase is a JD structural heading (#156) rather
+ *  than a competency — by exact match or by its structural tail word. */
+function isSectionHeading(keyLower: string): boolean {
+  if (SECTION_HEADING_STOP_PHRASES.has(keyLower)) return true;
+  const lastWord = keyLower.slice(keyLower.lastIndexOf(" ") + 1);
+  return SECTION_HEADING_TAIL_WORDS.has(lastWord);
+}
+
 /** Single-token acronyms we never want as a noun-pass term. Matches things
  *  the regex would otherwise sweep up from JD copy. */
 const ACRONYM_STOPLIST = new Set<string>([
@@ -331,6 +456,14 @@ function extractNounPass(body: string, snippetChars: number): ExtractedTerm[] {
     const phrase = m[1].trim();
     const key = phrase.toLowerCase();
     if (NOUN_STOP_PHRASES.has(key)) continue;
+    // Drop JD structural section headings ("Minimum Qualifications",
+    // "Physical Demands", …) — document structure, not a competency (#156).
+    if (isSectionHeading(key)) continue;
+    // Drop "The …" sentence/title openers ("The Summer Music Intern", "The
+    // Ideal Candidate") — the capitalized run after a leading "The" is almost
+    // always a title or sentence subject, not a skill (#156). Real skill
+    // phrases don't lead with an article.
+    if (key.startsWith("the ")) continue;
     if (seen.has(key)) continue;
     seen.set(key, {
       id: key,
