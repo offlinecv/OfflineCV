@@ -4,10 +4,9 @@
 import { useState } from "react";
 import type { CascadeResult, LayoutTrigger } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
-import { getScoreLabel, getScoreTier } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, Tabs, TabList, Tab, TabPanel } from "@design-system";
-import { FeedbackControl } from "./features/FeedbackControl.tsx";
+import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
 import { ReconstructedResume } from "./features/ReconstructedResume.tsx";
 import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
 import { LayoutFlagsList } from "./features/LayoutFlagsList.tsx";
@@ -88,9 +87,6 @@ function ParsedCard({
             {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
             {result.diagnostics.elapsedMs} ms
           </span>
-          <FeedbackControl
-            verdictBand={getScoreLabel(getScoreTier(score.overall))}
-          />
         </div>
         <div className="flex items-center gap-3">
           {edit.hasEdits && (
@@ -105,6 +101,7 @@ function ParsedCard({
       </header>
 
       <AtsScoreReadout score={score} />
+      <FeedbackPanel />
 
       {/* Score stays pinned above; the detail sits behind tabs so only one
           panel shows at a time and every panel is advertised by a label
