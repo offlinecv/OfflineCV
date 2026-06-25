@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import type { CascadeResult } from "../lib/heuristics/types.ts";
+import { useState } from "react";
+import type { CascadeResult, LayoutTrigger } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { getScoreLabel, getScoreTier } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
-import { Card, StatusBadge, Button } from "@design-system";
+import { Card, StatusBadge, Button, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { FeedbackControl } from "./features/FeedbackControl.tsx";
 import { ReconstructedResume } from "./features/ReconstructedResume.tsx";
 import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
-import { EvidencePanel } from "./features/EvidencePanel.tsx";
+import { LayoutFlagsList } from "./features/LayoutFlagsList.tsx";
+import {
+  SourcePdfPanel,
+  ExtractedTextPanel,
+} from "./features/EvidencePanel.tsx";
 
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
@@ -70,6 +75,8 @@ function ParsedCard({
   onReset: () => void;
   edit: EditableParse;
 }) {
+  const [tab, setTab] = useState("reconstructed");
+  const triggerCount = result.triggers.length;
   return (
     <Card className="flex flex-col gap-6 shadow-xs">
       <header className="flex items-center justify-between">
@@ -98,15 +105,39 @@ function ParsedCard({
       </header>
 
       <AtsScoreReadout score={score} />
-      <ReconstructedResume result={result} score={score} edit={edit} />
 
-      {/* Evidence — how a generic extractor read this file. Reference
-          material, so it sits below the score and per-bullet findings.
-          Layout flags head the block (the verdict); the preview and
-          extracted-text panes are the raw material under it. Both panes are
-          height-bounded so a two-page resume scrolls inside the row instead
-          of pushing it open. */}
-      <EvidencePanel result={result} bytes={bytes} sourceKind={sourceKind} />
+      {/* Score stays pinned above; the detail sits behind tabs so only one
+          panel shows at a time and every panel is advertised by a label
+          (issue #177). All panels stay mounted (hidden when inactive) so the
+          reconstructed resume keeps any local UI state across tab switches —
+          overrides themselves live above in App/useEditableParse. */}
+      <Tabs id="result" value={tab} onValueChange={setTab}>
+        <TabList aria-label="Parsed result views">
+          <Tab id="reconstructed">Reconstructed resume</Tab>
+          <Tab id="source">Source PDF</Tab>
+          <Tab id="extracted">Extracted text</Tab>
+          <Tab id="flags" count={triggerCount}>
+            Layout flags
+          </Tab>
+        </TabList>
+
+        <div className="pt-4">
+          <TabPanel id="reconstructed">
+            <ReconstructedResume result={result} score={score} edit={edit} />
+          </TabPanel>
+          <TabPanel id="source">
+            <SourcePdfPanel bytes={bytes} sourceKind={sourceKind} />
+          </TabPanel>
+          <TabPanel id="extracted">
+            <ExtractedTextPanel result={result} />
+          </TabPanel>
+          <TabPanel id="flags">
+            <LayoutFlagsList
+              triggers={result.triggers as readonly LayoutTrigger[]}
+            />
+          </TabPanel>
+        </div>
+      </Tabs>
     </Card>
   );
 }
