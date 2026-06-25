@@ -67,6 +67,14 @@ function emitVersionJson(version: string): Plugin {
 
 export default defineConfig({
   base: "/resumelint/",
+  server: {
+    // Bind 0.0.0.0 so the dev server is reachable from other machines on the
+    // LAN (e.g. http://<your-host>.local:5173/resumelint/), not just loopback.
+    host: true,
+    // Allow LAN mDNS hostnames through Vite's DNS-rebind host check.
+    // ".local" matches any *.local host.
+    allowedHosts: [".local"],
+  },
   plugins: [tailwindcss(), react(), emitVersionJson(APP_VERSION)],
   resolve: {
     alias: {
