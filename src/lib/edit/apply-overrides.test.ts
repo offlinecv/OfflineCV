@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { applyOverrides } from "./apply-overrides.ts";
+import { computeAnonymousAtsScore } from "../score/score.ts";
 import { groupBulletsByExperience } from "../score/group-bullets.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { BulletObservation } from "../score/score.ts";
@@ -568,5 +569,133 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
     // The edited bullet falls into Other — confirming what the user reported.
     expect(groups.find((g) => g.experienceIndex === 0)?.bullets ?? []).toEqual([]);
     expect(groups.find((g) => g.experienceIndex === null)?.bullets).toHaveLength(1);
+  });
+});
+
+describe("applyOverrides — added entries + bullets", () => {
+  it("appends an added experience entry with its bullets in the description", () => {
+    const parsed = baseParsed();
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      undefined,
+      [
+        {
+          id: "added:0",
+          section: "experience",
+          title: "PM",
+          subtitle: "Google",
+          start_date: "2019",
+          end_date: "2021",
+        },
+      ],
+      { "added:0": ["Led a team of five to ship the launch on time"] },
+    );
+    expect(out.experience).toHaveLength(2);
+    expect(out.experience[1]).toMatchObject({
+      title: "PM",
+      company: "Google",
+      description: "Led a team of five to ship the launch on time",
+    });
+    // Original parse untouched.
+    expect(parsed.experience).toHaveLength(1);
+  });
+
+  it("appends added education / project / achievement entries to their arrays", () => {
+    const { parsed: out } = applyOverrides(
+      baseParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      undefined,
+      [
+        { id: "added:0", section: "education", title: "BS CS", subtitle: "MIT" },
+        { id: "added:1", section: "projects", title: "Side project" },
+        { id: "added:2", section: "achievements", title: "Patent", year: "2021" },
+      ],
+      {},
+    );
+    expect(out.education).toHaveLength(1);
+    expect(out.education[0]).toMatchObject({ degree: "BS CS", institution: "MIT" });
+    expect(out.projects).toHaveLength(1);
+    expect(out.projects?.[0]).toMatchObject({ name: "Side project" });
+    expect(out.heuristic_achievements).toHaveLength(1);
+    expect(out.heuristic_achievements?.[0]).toMatchObject({
+      title: "Patent",
+      year: "2021",
+    });
+  });
+
+  it("folds an added bullet on an existing role into description AND the pool", () => {
+    const parsed = baseParsed();
+    const { parsed: out, sections } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(["• Built a thing"]),
+      {},
+      {},
+      {},
+      [],
+      {},
+      undefined,
+      [],
+      { "experience:0": ["Cut latency by 40% across the fleet"] },
+    );
+    // Appended to the existing role's description.
+    expect(out.experience[0].description).toContain(
+      "Cut latency by 40% across the fleet",
+    );
+    // And pooled (with a marker) into the last accomplishment section so it grades.
+    const pooled = sections.byName.get("achievements") ?? [];
+    expect(pooled).toContain("• Cut latency by 40% across the fleet");
+    // Original untouched.
+    expect(parsed.experience[0].description).toBe(
+      "Built a thing\nShipped another thing",
+    );
+  });
+
+  it("raises Completeness when an education entry is added (counts toward score)", () => {
+    const base = baseParsed();
+    const sections = makeSections();
+    const before = computeAnonymousAtsScore({
+      parsed: base,
+      fieldConfidence: {},
+      triggers: [],
+      rawText: "raw",
+      sections,
+    });
+    const { parsed: out, sections: outSections } = applyOverrides(
+      base,
+      "raw",
+      sections,
+      {},
+      {},
+      {},
+      [],
+      {},
+      undefined,
+      [{ id: "added:0", section: "education", title: "BS", subtitle: "MIT" }],
+      {},
+    );
+    const after = computeAnonymousAtsScore({
+      parsed: out,
+      fieldConfidence: {},
+      triggers: [],
+      rawText: "raw",
+      sections: outSections,
+    });
+    expect(before.completeness.missing).toContain("education");
+    expect(after.completeness.missing).not.toContain("education");
+    expect(after.completeness.score).toBeGreaterThan(before.completeness.score);
   });
 });

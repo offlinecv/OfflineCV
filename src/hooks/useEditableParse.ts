@@ -21,7 +21,7 @@
  * state boilerplate (CLAUDE.md §Data & Hooks).
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
 
 // ── Contact overrides ─────────────────────────────────────────────────────────
@@ -58,6 +58,65 @@ export interface EducationFieldOverrides {
   institution?: string;
   start_date?: string;
   end_date?: string;
+}
+
+// ── Added entries + bullets ─────────────────────────────────────────────────
+// Edit overrides above CORRECT what the parser found; these ADD what it missed
+// entirely — a whole role/degree/project/achievement, or a bullet under any
+// entry. applyOverrides appends added entries to the parsed arrays and folds
+// added bullets into BOTH the entry description and the graded bullet pool, so
+// an addition moves Completeness (entries) and Specificity / Structure (bullets)
+// AND flows into the downloaded PDF — same authoritative path as the edits.
+
+/** Sections that accept a user-added entry. Education carries no bullets. */
+export type AddableSection =
+  | "experience"
+  | "education"
+  | "projects"
+  | "achievements";
+
+/**
+ * A user-added entry appended to a section. Header fields share one flat shape
+ * so a single list holds every added entry, mapped per section in applyOverrides:
+ *   - experience:   title, subtitle (company), start_date, end_date
+ *   - education:    title (degree), subtitle (institution), start_date, end_date
+ *   - projects:     title (name)
+ *   - achievements: title, year
+ * `id` is a stable per-session key (`"added:<n>"`) so the entry's bullets (in
+ * `addedBullets`) and inline header edits track it without relying on array
+ * position.
+ */
+export interface AddedEntry {
+  id: string;
+  section: AddableSection;
+  /** Primary header: job title / degree / project name / achievement title. */
+  title: string;
+  /** Secondary header: company / institution. Unused for projects/achievements. */
+  subtitle?: string;
+  start_date?: string;
+  end_date?: string;
+  /** Achievement year (achievements carry a single year, not a range). */
+  year?: string;
+}
+
+/** Editable header fields on an added entry. */
+export type AddedEntryField =
+  | "title"
+  | "subtitle"
+  | "start_date"
+  | "end_date"
+  | "year";
+
+/**
+ * Bullet lines a user appended to an entry, keyed by entry key. A PARSED entry's
+ * key is `"<section>:<index>"` (see {@link parsedEntryKey}); an ADDED entry's key
+ * is its `id`. The two namespaces never collide (added ids are `"added:<n>"`).
+ */
+export type AddedBullets = Record<string, string[]>;
+
+/** The stable bullet key for a PARSED entry at `index` within `section`. */
+export function parsedEntryKey(section: AddableSection, index: number): string {
+  return `${section}:${index}`;
 }
 
 // ── Skills override ───────────────────────────────────────────────────────────
@@ -106,6 +165,20 @@ export interface EditableParse {
     field: keyof EducationFieldOverrides,
     value: string | undefined,
   ) => void;
+  /** User-added entries across all sections, in insertion order. */
+  addedEntries: AddedEntry[];
+  /** Append a new (empty-header) entry to a section. Returns its stable id. */
+  addEntry: (section: AddableSection) => string;
+  /** Remove a previously-added entry by id (also drops its added bullets). */
+  removeEntry: (id: string) => void;
+  /** Edit one header field on an added entry. */
+  setEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  /** Bullet lines appended to entries, keyed by entry key (parsedEntryKey or
+   *  an added entry's id). */
+  addedBullets: AddedBullets;
+  /** Append a bullet line to an entry. No-op on blank text. An added entry's
+   *  bullets are dropped wholesale when the entry is removed. */
+  addBullet: (entryKey: string, text: string) => void;
   /** Add/remove edits against parsed.skills. */
   skillsOverride: SkillsOverride;
   /** Add a (canonicalized) skill. No-op for blank input or an exact dupe of an
@@ -135,6 +208,12 @@ export function useEditableParse(): EditableParse {
   const [skillsOverride, setSkillsOverride] = useState<SkillsOverride>(
     EMPTY_SKILLS_OVERRIDE,
   );
+  const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
+  const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
+  // Monotonic source of stable added-entry ids. A ref (not state) because a new
+  // id must not itself trigger a re-render, and the value need only be unique
+  // within the session — never reset, even across resetAll.
+  const idCounter = useRef(0);
 
   const setContactField = useCallback(
     (key: keyof ContactOverrides, value: string | undefined) => {
@@ -233,12 +312,48 @@ export function useEditableParse(): EditableParse {
     });
   }, []);
 
+  const addEntry = useCallback((section: AddableSection) => {
+    const id = `added:${idCounter.current++}`;
+    setAddedEntries((prev) => [...prev, { id, section, title: "" }]);
+    return id;
+  }, []);
+
+  const removeEntry = useCallback((id: string) => {
+    setAddedEntries((prev) => prev.filter((e) => e.id !== id));
+    setAddedBullets((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
+
+  const setEntryField = useCallback(
+    (id: string, field: AddedEntryField, value: string) => {
+      setAddedEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)),
+      );
+    },
+    [],
+  );
+
+  const addBullet = useCallback((entryKey: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setAddedBullets((prev) => ({
+      ...prev,
+      [entryKey]: [...(prev[entryKey] ?? []), trimmed],
+    }));
+  }, []);
+
   const resetAll = useCallback(() => {
     setContactOverrides({});
     setExperienceOverrides({});
     setBulletOverrides({});
     setEducationOverrides({});
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
+    setAddedEntries([]);
+    setAddedBullets({});
   }, []);
 
   const hasEdits = useMemo(() => {
@@ -246,6 +361,8 @@ export function useEditableParse(): EditableParse {
     if (Object.keys(bulletOverrides).length > 0) return true;
     if (skillsOverride.removed.length > 0 || skillsOverride.added.length > 0)
       return true;
+    if (addedEntries.length > 0) return true;
+    if (Object.keys(addedBullets).length > 0) return true;
     if (
       Object.values(educationOverrides).some(
         (entry) => Object.keys(entry).length > 0,
@@ -261,6 +378,8 @@ export function useEditableParse(): EditableParse {
     bulletOverrides,
     educationOverrides,
     skillsOverride,
+    addedEntries,
+    addedBullets,
   ]);
 
   return {
@@ -272,6 +391,12 @@ export function useEditableParse(): EditableParse {
     setBulletField,
     educationOverrides,
     setEducationField,
+    addedEntries,
+    addEntry,
+    removeEntry,
+    setEntryField,
+    addedBullets,
+    addBullet,
     skillsOverride,
     addSkill,
     removeSkill,

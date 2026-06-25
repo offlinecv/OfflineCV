@@ -55,13 +55,17 @@ import type {
   EditableParse,
   ExperienceFieldOverrides,
   BulletOverrides,
+  AddedEntry,
+  AddedEntryField,
 } from "../../hooks/useEditableParse.ts";
+import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
+import { AddPill, RemoveButton, InlineBulletAdd } from "./ReconstructedAdd.tsx";
 import { buildProjectDates } from "../../lib/score/entry-dates.ts";
 import {
   EducationSection,
   SkillsSection,
 } from "./ReconstructedEducationSkills.tsx";
-import { Button } from "@design-system";
+import { Button, EditableField } from "@design-system";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 
 // ── Rollup strip ──────────────────────────────────────────────────────────────
@@ -233,6 +237,17 @@ function buildEntryGroups(
   return { experienceGroups, projectGroups, achievementGroups, other };
 }
 
+/** Map a RoleHeader field name to the flat AddedEntry field it edits. */
+const EXPERIENCE_FIELD_MAP: Record<
+  keyof ExperienceFieldOverrides,
+  AddedEntryField
+> = {
+  title: "title",
+  company: "subtitle",
+  start_date: "start_date",
+  end_date: "end_date",
+};
+
 function ExperienceSection({
   groups,
   hasBullets,
@@ -240,6 +255,12 @@ function ExperienceSection({
   onExperienceFieldChange,
   bulletOverrides,
   onBulletChange,
+  addedExperience,
+  originalCount,
+  onAddEntry,
+  onRemoveEntry,
+  onEntryField,
+  onAddBullet,
 }: {
   /** Pre-built experience groups + the shared "Other" group appended last. */
   groups: BulletGroup[];
@@ -252,6 +273,14 @@ function ExperienceSection({
   ) => void;
   bulletOverrides: BulletOverrides;
   onBulletChange: (index: number, value: string) => void;
+  /** User-added experience entries, append-aligned to indices ≥ originalCount. */
+  addedExperience: AddedEntry[];
+  /** Count of PARSED experience roles; indices at/above this are user-added. */
+  originalCount: number;
+  onAddEntry: () => void;
+  onRemoveEntry: (id: string) => void;
+  onEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  onAddBullet: (entryKey: string, text: string) => void;
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
@@ -275,44 +304,79 @@ function ExperienceSection({
         <div className="flex flex-col gap-4">
           {groups.map((group, i) => {
             const idx = group.experienceIndex;
+            if (idx === null) {
+              return (
+                <RoleEntry
+                  key={`other-${i}`}
+                  group={group}
+                  experienceIndex={null}
+                  bulletOverrides={bulletOverrides}
+                  onBulletChange={onBulletChange}
+                />
+              );
+            }
+            const added =
+              idx >= originalCount
+                ? addedExperience[idx - originalCount]
+                : undefined;
             return (
               <RoleEntry
-                key={idx ?? `other-${i}`}
+                key={added ? added.id : idx}
                 group={group}
                 experienceIndex={idx}
-                overrides={idx !== null ? experienceOverrides[idx] : undefined}
-                onFieldChange={
-                  idx !== null
-                    ? (field, value) =>
-                        onExperienceFieldChange(idx, field, value)
-                    : undefined
+                overrides={added ? undefined : experienceOverrides[idx]}
+                onFieldChange={(field, value) =>
+                  added
+                    ? onEntryField(added.id, EXPERIENCE_FIELD_MAP[field], value)
+                    : onExperienceFieldChange(idx, field, value)
                 }
                 bulletOverrides={bulletOverrides}
                 onBulletChange={onBulletChange}
+                onAddBullet={(text) =>
+                  onAddBullet(
+                    added ? added.id : parsedEntryKey("experience", idx),
+                    text,
+                  )
+                }
+                onRemove={added ? () => onRemoveEntry(added.id) : undefined}
               />
             );
           })}
         </div>
       )}
+      <AddPill label="Add experience" onClick={onAddEntry} />
     </section>
   );
 }
 
 /**
  * Projects render as their OWN section (#95) — a name-led header + the same
- * graded bullet rows used everywhere else (`ResumeBulletRow`), so project
- * bullets are checked and flagged the same way experience bullets are. Read-only:
- * the edit affordances (#82) target experience/contact, not projects.
+ * graded bullet rows used everywhere else (`ResumeBulletRow`). Parsed projects
+ * stay read-only; user-ADDED projects expose an editable name, a "+ Add bullet"
+ * affordance, and a remove control (#180-followup), so an added project's
+ * bullets grade and export like any other.
  */
 function ProjectsSection({
   projects,
   groups,
   bulletOverrides,
+  addedProjects,
+  originalCount,
+  onAddEntry,
+  onRemoveEntry,
+  onEntryField,
+  onAddBullet,
 }: {
   projects: ResumeProject[];
   /** Pre-built project groups, index-aligned with `projects`. */
   groups: BulletGroup[];
   bulletOverrides: BulletOverrides;
+  addedProjects: AddedEntry[];
+  originalCount: number;
+  onAddEntry: () => void;
+  onRemoveEntry: (id: string) => void;
+  onEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  onAddBullet: (entryKey: string, text: string) => void;
 }) {
   return (
     <section className="flex flex-col gap-3">
@@ -320,14 +384,36 @@ function ProjectsSection({
       <div className="flex flex-col gap-4">
         {projects.map((project, i) => {
           const group = groups[i];
+          const added =
+            i >= originalCount ? addedProjects[i - originalCount] : undefined;
           const header = [project.name, buildProjectDates(project)]
             .filter(Boolean)
             .join(" · ");
           return (
-            <div key={i} className="flex flex-col gap-1.5">
-              <h3 className="text-sm font-semibold text-content-primary">
-                {header || "Untitled project"}
-              </h3>
+            <div key={added ? added.id : i} className="flex flex-col gap-1.5">
+              <div className="flex items-start justify-between gap-2">
+                {added ? (
+                  <EditableField
+                    value={project.name || undefined}
+                    placeholder="project name"
+                    label="Project name"
+                    textWeight="semibold"
+                    textSize="sm"
+                    multiline
+                    onCommit={(v) => onEntryField(added.id, "title", v)}
+                  />
+                ) : (
+                  <h3 className="text-sm font-semibold text-content-primary">
+                    {header || "Untitled project"}
+                  </h3>
+                )}
+                {added && (
+                  <RemoveButton
+                    label="Remove project"
+                    onClick={() => onRemoveEntry(added.id)}
+                  />
+                )}
+              </div>
               {group && group.bullets.length > 0 ? (
                 <ul className="list-none">
                   {group.bullets.map((b) => (
@@ -339,14 +425,20 @@ function ProjectsSection({
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-content-tertiary">
-                  No bullet-shaped lines detected.
-                </p>
+                !added && (
+                  <p className="text-sm text-content-tertiary">
+                    No bullet-shaped lines detected.
+                  </p>
+                )
+              )}
+              {added && (
+                <InlineBulletAdd onAdd={(text) => onAddBullet(added.id, text)} />
               )}
             </div>
           );
         })}
       </div>
+      <AddPill label="Add project" onClick={onAddEntry} />
     </section>
   );
 }
@@ -363,11 +455,23 @@ function AchievementsSection({
   achievements,
   groups,
   bulletOverrides,
+  addedAchievements,
+  originalCount,
+  onAddEntry,
+  onRemoveEntry,
+  onEntryField,
+  onAddBullet,
 }: {
   achievements: HeuristicAchievement[];
   /** Pre-built achievement groups, index-aligned with `achievements`. */
   groups: BulletGroup[];
   bulletOverrides: BulletOverrides;
+  addedAchievements: AddedEntry[];
+  originalCount: number;
+  onAddEntry: () => void;
+  onRemoveEntry: (id: string) => void;
+  onEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  onAddBullet: (entryKey: string, text: string) => void;
 }) {
   return (
     <section className="flex flex-col gap-3">
@@ -375,14 +479,48 @@ function AchievementsSection({
       <div className="flex flex-col gap-4">
         {achievements.map((achievement, i) => {
           const group = groups[i];
+          const added =
+            i >= originalCount
+              ? addedAchievements[i - originalCount]
+              : undefined;
           const header = [achievement.title, achievement.year]
             .filter(Boolean)
             .join(" · ");
           return (
-            <div key={i} className="flex flex-col gap-1.5">
-              <h3 className="text-sm font-semibold text-content-primary">
-                {header || "Untitled achievement"}
-              </h3>
+            <div key={added ? added.id : i} className="flex flex-col gap-1.5">
+              <div className="flex items-start justify-between gap-2">
+                {added ? (
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <EditableField
+                      value={achievement.title || undefined}
+                      placeholder="achievement title"
+                      label="Achievement title"
+                      textWeight="semibold"
+                      textSize="sm"
+                      multiline
+                      onCommit={(v) => onEntryField(added.id, "title", v)}
+                    />
+                    <span className="text-content-muted">·</span>
+                    <EditableField
+                      value={achievement.year || undefined}
+                      placeholder="year"
+                      label="Year"
+                      textSize="xs"
+                      onCommit={(v) => onEntryField(added.id, "year", v)}
+                    />
+                  </div>
+                ) : (
+                  <h3 className="text-sm font-semibold text-content-primary">
+                    {header || "Untitled achievement"}
+                  </h3>
+                )}
+                {added && (
+                  <RemoveButton
+                    label="Remove achievement"
+                    onClick={() => onRemoveEntry(added.id)}
+                  />
+                )}
+              </div>
               {group && group.bullets.length > 0 ? (
                 <ul className="list-none">
                   {group.bullets.map((b) => (
@@ -394,14 +532,20 @@ function AchievementsSection({
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-content-tertiary">
-                  No bullet-shaped lines detected.
-                </p>
+                !added && (
+                  <p className="text-sm text-content-tertiary">
+                    No bullet-shaped lines detected.
+                  </p>
+                )
+              )}
+              {added && (
+                <InlineBulletAdd onAdd={(text) => onAddBullet(added.id, text)} />
               )}
             </div>
           );
         })}
       </div>
+      <AddPill label="Add achievement" onClick={onAddEntry} />
     </section>
   );
 }
@@ -449,9 +593,34 @@ export function ReconstructedResume({
     setBulletField,
     educationOverrides,
     setEducationField,
+    addEntry,
+    removeEntry,
+    setEntryField,
+    addBullet,
     addSkill,
     removeSkill,
   } = edit;
+
+  // Added entries are appended to their parsed array by applyOverrides (so they
+  // grade + export), which means they already arrive here inside `parsed.*`. We
+  // split them back out by section to (a) render their indices ≥ originalCount
+  // with edit/remove affordances and (b) map an appended index → its stable id.
+  const addedExperience = edit.addedEntries.filter(
+    (e) => e.section === "experience",
+  );
+  const addedEducation = edit.addedEntries.filter(
+    (e) => e.section === "education",
+  );
+  const addedProjects = edit.addedEntries.filter(
+    (e) => e.section === "projects",
+  );
+  const addedAchievements = edit.addedEntries.filter(
+    (e) => e.section === "achievements",
+  );
+  const originalExpCount = parsed.experience.length - addedExperience.length;
+  const originalEduCount = parsed.education.length - addedEducation.length;
+  const originalProjCount = projects.length - addedProjects.length;
+  const originalAchCount = achievements.length - addedAchievements.length;
 
   // One grouping pass over experiences + projects + achievements so their
   // bullets are attributed to their own entry and never leak into the experience
@@ -468,11 +637,20 @@ export function ReconstructedResume({
   // so no PDF bytes ever leave the browser (#171).
   const { download, isGenerating } = useDownloadPdf(result, score, edit);
 
-  const achievementsSection = achievements.length > 0 && (
+  // Always rendered (even with zero parsed achievements) so the "+ Add
+  // achievement" affordance is reachable on every resume — matching Education /
+  // Skills, which also render an add affordance unconditionally.
+  const achievementsSection = (
     <AchievementsSection
       achievements={achievements}
       groups={achievementGroups}
       bulletOverrides={bulletOverrides}
+      addedAchievements={addedAchievements}
+      originalCount={originalAchCount}
+      onAddEntry={() => addEntry("achievements")}
+      onRemoveEntry={removeEntry}
+      onEntryField={setEntryField}
+      onAddBullet={addBullet}
     />
   );
 
@@ -521,14 +699,24 @@ export function ReconstructedResume({
         }
         bulletOverrides={bulletOverrides}
         onBulletChange={(index, value) => setBulletField(index, value)}
+        addedExperience={addedExperience}
+        originalCount={originalExpCount}
+        onAddEntry={() => addEntry("experience")}
+        onRemoveEntry={removeEntry}
+        onEntryField={setEntryField}
+        onAddBullet={addBullet}
       />
-      {projects.length > 0 && (
-        <ProjectsSection
-          projects={projects}
-          groups={projectGroups}
-          bulletOverrides={bulletOverrides}
-        />
-      )}
+      <ProjectsSection
+        projects={projects}
+        groups={projectGroups}
+        bulletOverrides={bulletOverrides}
+        addedProjects={addedProjects}
+        originalCount={originalProjCount}
+        onAddEntry={() => addEntry("projects")}
+        onRemoveEntry={removeEntry}
+        onEntryField={setEntryField}
+        onAddBullet={addBullet}
+      />
       {!achievementsAbove && achievementsSection}
       <EducationSection
         education={parsed.education}
@@ -536,6 +724,11 @@ export function ReconstructedResume({
         onEducationFieldChange={(index, field, value) =>
           setEducationField(index, field, value)
         }
+        addedEducation={addedEducation}
+        originalCount={originalEduCount}
+        onAddEntry={() => addEntry("education")}
+        onRemoveEntry={removeEntry}
+        onEntryField={setEntryField}
       />
       <SkillsSection
         skills={parsed.skills}

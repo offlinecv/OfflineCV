@@ -11,8 +11,9 @@
  * override model (useEditableParse):
  *   - Education: degree / institution / dates editable via the shared
  *     EditableField. A cleared field shows "not detected".
- *   - Skills: each skill is a removable chip; an "Add skill" input accepts a
- *     typed skill with canonical-name normalization + suggestions.
+ *   - Skills: each skill is a removable chip; a "+ Add skill" pill expands
+ *     inline into an input (canonical-name normalization + suggestions),
+ *     collapsing back on Escape or empty blur.
  *
  * The override maps live in App and feed applyOverrides → re-grade → PDF, so an
  * edit here moves the ATS score AND the downloaded PDF, not just the display.
@@ -20,10 +21,26 @@
 
 import { useMemo, useState } from "react";
 import type { ResumeEducation } from "../../lib/score/types.ts";
-import type { EducationFieldOverrides } from "../../hooks/useEditableParse.ts";
+import type {
+  EducationFieldOverrides,
+  AddedEntry,
+  AddedEntryField,
+} from "../../hooks/useEditableParse.ts";
 import { buildEducationDates } from "../../lib/score/entry-dates.ts";
 import { suggestSkills } from "../../lib/edit/skill-canonical.ts";
 import { Button, EditableField } from "@design-system";
+import { AddPill, RemoveButton } from "./ReconstructedAdd.tsx";
+
+/** Map an EducationEntry field name to the flat AddedEntry field it edits. */
+const EDUCATION_FIELD_MAP: Record<
+  keyof EducationFieldOverrides,
+  AddedEntryField
+> = {
+  degree: "title",
+  institution: "subtitle",
+  start_date: "start_date",
+  end_date: "end_date",
+};
 
 // ── Shared section chrome (mirrors ReconstructedResume's local helpers) ────────
 
@@ -88,10 +105,13 @@ function EducationEntry({
   edu,
   overrides,
   onFieldChange,
+  onRemove,
 }: {
   edu: ResumeEducation;
   overrides: EducationFieldOverrides | undefined;
   onFieldChange: (field: keyof EducationFieldOverrides, value: string) => void;
+  /** Remove this entry (only set for user-ADDED entries). */
+  onRemove?: () => void;
 }) {
   const { degree, institution, startDate, endDate, dates, coursework } =
     resolveEducationDisplay(edu, overrides);
@@ -104,21 +124,26 @@ function EducationEntry({
 
   return (
     <li className="flex flex-col gap-0.5 text-sm">
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-        <EditableField
-          value={degree}
-          placeholder="degree not detected"
-          label="Degree"
-          textWeight="semibold"
-          onCommit={(v) => onFieldChange("degree", v)}
-        />
-        <span className="text-content-muted">—</span>
-        <EditableField
-          value={institution}
-          placeholder="institution not detected"
-          label="Institution"
-          onCommit={(v) => onFieldChange("institution", v)}
-        />
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          <EditableField
+            value={degree}
+            placeholder="degree not detected"
+            label="Degree"
+            textWeight="semibold"
+            onCommit={(v) => onFieldChange("degree", v)}
+          />
+          <span className="text-content-muted">—</span>
+          <EditableField
+            value={institution}
+            placeholder="institution not detected"
+            label="Institution"
+            onCommit={(v) => onFieldChange("institution", v)}
+          />
+        </div>
+        {onRemove && (
+          <RemoveButton label="Remove education" onClick={onRemove} />
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-x-1.5 text-content-tertiary">
         <EditableField
@@ -151,6 +176,11 @@ export function EducationSection({
   education,
   educationOverrides,
   onEducationFieldChange,
+  addedEducation,
+  originalCount,
+  onAddEntry,
+  onRemoveEntry,
+  onEntryField,
 }: {
   education: ResumeEducation[];
   educationOverrides: Record<number, EducationFieldOverrides>;
@@ -159,6 +189,13 @@ export function EducationSection({
     field: keyof EducationFieldOverrides,
     value: string,
   ) => void;
+  /** User-added education entries, append-aligned to indices ≥ originalCount. */
+  addedEducation: AddedEntry[];
+  /** Count of PARSED education entries; indices at/above this are user-added. */
+  originalCount: number;
+  onAddEntry: () => void;
+  onRemoveEntry: (id: string) => void;
+  onEntryField: (id: string, field: AddedEntryField, value: string) => void;
 }) {
   return (
     <section className="flex flex-col gap-2">
@@ -167,18 +204,28 @@ export function EducationSection({
         <NotDetected what="education" />
       ) : (
         <ul className="flex flex-col gap-2.5 list-none">
-          {education.map((edu, i) => (
-            <EducationEntry
-              key={i}
-              edu={edu}
-              overrides={educationOverrides[i]}
-              onFieldChange={(field, value) =>
-                onEducationFieldChange(i, field, value)
-              }
-            />
-          ))}
+          {education.map((edu, i) => {
+            const added =
+              i >= originalCount
+                ? addedEducation[i - originalCount]
+                : undefined;
+            return (
+              <EducationEntry
+                key={added ? added.id : i}
+                edu={edu}
+                overrides={added ? undefined : educationOverrides[i]}
+                onFieldChange={(field, value) =>
+                  added
+                    ? onEntryField(added.id, EDUCATION_FIELD_MAP[field], value)
+                    : onEducationFieldChange(i, field, value)
+                }
+                onRemove={added ? () => onRemoveEntry(added.id) : undefined}
+              />
+            );
+          })}
         </ul>
       )}
+      <AddPill label="Add education" onClick={onAddEntry} />
     </section>
   );
 }
@@ -231,6 +278,8 @@ function AddSkillInput({
     [draft, skills],
   );
 
+  const [expanded, setExpanded] = useState(false);
+
   const commit = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
@@ -238,12 +287,43 @@ function AddSkillInput({
     setDraft("");
   };
 
+  // Collapsed: a chip-shaped "+ Add skill" pill that sits inline with the
+  // skill chips. Progressive disclosure — the input only exists while adding,
+  // so it doesn't sit heavy under the lightweight chip cluster (#180-followup).
+  if (!expanded) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setExpanded(true)}
+        aria-label="Add skill"
+        className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-brand-amber"
+      >
+        + Add skill
+      </Button>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-1.5">
+    <div
+      className="flex flex-col gap-1.5"
+      onBlur={(e) => {
+        // Collapse back to the pill when focus leaves the editor entirely and
+        // nothing is typed. relatedTarget within the container (suggestion or
+        // Add button click) keeps it open.
+        if (
+          !e.currentTarget.contains(e.relatedTarget as Node | null) &&
+          draft.trim().length === 0
+        ) {
+          setExpanded(false);
+        }
+      }}
+    >
       <div className="flex items-center gap-2">
         <input
           type="text"
           value={draft}
+          autoFocus
           aria-label="Add skill"
           placeholder="Add a skill…"
           onChange={(e) => setDraft(e.target.value)}
@@ -254,6 +334,7 @@ function AddSkillInput({
             } else if (e.key === "Escape") {
               e.preventDefault();
               setDraft("");
+              setExpanded(false);
             }
           }}
           className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-brand-amber"
