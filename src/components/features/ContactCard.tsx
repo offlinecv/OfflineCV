@@ -80,7 +80,7 @@ export function ContactCard({ result }: ContactCardProps) {
 
       {/* Contact line: location / email / phone, pipe-joined, present-only. */}
       {contactLine.length > 0 && (
-        <p className="mt-2 inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
+        <p className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
           {contactLine.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">|</span>}
@@ -96,7 +96,7 @@ export function ContactCard({ result }: ContactCardProps) {
 
       {/* Links line: clickable slugs, middot-separated, license-safe (no logos). */}
       {links.length > 0 && (
-        <p className="mt-2 inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
+        <p className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
           {links.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">·</span>}
