@@ -42,12 +42,46 @@ function NotDetected({ what }: { what: string }) {
 // ── Education ──────────────────────────────────────────────────────────────────
 
 /** Resolve a field's display value, applying the override ("" = cleared). */
-function resolveEduValue(
+export function resolveEduValue(
   parsed: string | undefined,
   override: string | undefined,
 ): string | undefined {
   if (override === undefined) return parsed || undefined;
   return override || undefined; // "" clears
+}
+
+/** The resolved education fields an entry renders, after applying overrides. */
+export interface EducationDisplay {
+  degree: string | undefined;
+  institution: string | undefined;
+  startDate: string | undefined;
+  endDate: string | undefined;
+  /** Compact display string (e.g. "2018 – 2022"), reflecting date edits. */
+  dates: string;
+  coursework: string[];
+}
+
+/**
+ * Fold an education entry's overrides into the display values. Pure (no JSX) so
+ * the resolution/clearing/date branches are unit-tested directly — this is the
+ * risk-bearing logic; the component is then render-only.
+ */
+export function resolveEducationDisplay(
+  edu: ResumeEducation,
+  overrides: EducationFieldOverrides | undefined,
+): EducationDisplay {
+  // Dates: the override fields feed buildEducationDates so the compact display
+  // string reflects edits; the read-only display still falls back to `year`.
+  const startDate = resolveEduValue(edu.start_date, overrides?.start_date);
+  const endDate = resolveEduValue(edu.end_date, overrides?.end_date);
+  return {
+    degree: resolveEduValue(edu.degree, overrides?.degree),
+    institution: resolveEduValue(edu.institution, overrides?.institution),
+    startDate,
+    endDate,
+    dates: buildEducationDates({ ...edu, start_date: startDate, end_date: endDate }),
+    coursework: edu.coursework ?? [],
+  };
 }
 
 function EducationEntry({
@@ -59,16 +93,8 @@ function EducationEntry({
   overrides: EducationFieldOverrides | undefined;
   onFieldChange: (field: keyof EducationFieldOverrides, value: string) => void;
 }) {
-  const degree = resolveEduValue(edu.degree, overrides?.degree);
-  const institution = resolveEduValue(edu.institution, overrides?.institution);
-  // Dates: the override fields feed buildEducationDates so the compact display
-  // string reflects edits; the read-only display still falls back to `year`.
-  const datesEdu: ResumeEducation = {
-    ...edu,
-    start_date: resolveEduValue(edu.start_date, overrides?.start_date),
-    end_date: resolveEduValue(edu.end_date, overrides?.end_date),
-  };
-  const dates = buildEducationDates(datesEdu);
+  const { degree, institution, startDate, endDate, dates, coursework } =
+    resolveEducationDisplay(edu, overrides);
 
   return (
     <li className="flex flex-col gap-0.5 text-sm">
@@ -90,7 +116,7 @@ function EducationEntry({
       </div>
       <div className="flex flex-wrap items-center gap-x-1.5 text-content-tertiary">
         <EditableField
-          value={datesEdu.start_date}
+          value={startDate}
           placeholder="start"
           label="Education start date"
           textSize="xs"
@@ -98,19 +124,17 @@ function EducationEntry({
         />
         <span aria-hidden="true">–</span>
         <EditableField
-          value={datesEdu.end_date}
+          value={endDate}
           placeholder="end"
           label="Education end date"
           textSize="xs"
           onCommit={(v) => onFieldChange("end_date", v)}
         />
-        {dates && (
-          <span className="text-content-muted">· {dates}</span>
-        )}
+        {dates && <span className="text-content-muted">· {dates}</span>}
       </div>
-      {edu.coursework && edu.coursework.length > 0 && (
+      {coursework.length > 0 && (
         <span className="block text-content-tertiary">
-          Coursework: {edu.coursework.join(" · ")}
+          Coursework: {coursework.join(" · ")}
         </span>
       )}
     </li>
