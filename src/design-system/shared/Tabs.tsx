@@ -109,7 +109,7 @@ export function TabList({ "aria-label": ariaLabel, children }: TabListProps) {
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={onKeyDown}
-      className="flex flex-wrap gap-1 overflow-x-auto border-b border-border-light"
+      className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border-light"
     >
       {children}
     </div>
@@ -127,8 +127,8 @@ export function Tab({ id, children, count }: TabProps) {
   const { value, onValueChange, baseId } = useTabsContext("Tab");
   const isActive = value === id;
   const activeCls = isActive
-    ? "border-brand-amber text-content-primary"
-    : "border-transparent text-content-muted hover:text-content-secondary";
+    ? "border-brand-amber text-content-primary font-semibold"
+    : "border-transparent text-content-secondary font-medium hover:text-content-primary";
 
   return (
     <Button
@@ -140,7 +140,7 @@ export function Tab({ id, children, count }: TabProps) {
       aria-controls={panelId(baseId, id)}
       tabIndex={isActive ? 0 : -1}
       onClick={() => onValueChange(id)}
-      className={`-mb-px rounded-none border-b-2 px-3 py-2 text-sm hover:bg-transparent ${activeCls}`}
+      className={`-mb-px rounded-none border-b-2 px-3 py-2 text-base hover:bg-transparent ${activeCls}`}
     >
       {children}
       {count != null && count > 0 && (

@@ -77,65 +77,72 @@ function ParsedCard({
   const [tab, setTab] = useState("reconstructed");
   const triggerCount = result.triggers.length;
   return (
-    <Card className="flex flex-col gap-6 shadow-xs">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <StatusBadge tone="ok">Parsed</StatusBadge>
-          {edit.hasEdits && <StatusBadge tone="warning">Edited</StatusBadge>}
-          <span className="text-xs text-content-muted">
-            {result.diagnostics.pages} page
-            {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
-            {result.diagnostics.elapsedMs} ms
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          {edit.hasEdits && (
-            <Button variant="link" onClick={edit.resetAll}>
-              Reset to parsed
+    // Two stacked surfaces: the score "summary" card on top, the tabbed detail
+    // card below. The gap + each card's own border draws the separator the
+    // single-card layout lacked (the tab strip reads as its own section).
+    <div className="flex flex-col gap-4">
+      <Card className="flex flex-col gap-6 shadow-xs">
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <StatusBadge tone="ok">Parsed</StatusBadge>
+            {edit.hasEdits && <StatusBadge tone="warning">Edited</StatusBadge>}
+            <span className="text-xs text-content-muted">
+              {result.diagnostics.pages} page
+              {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
+              {result.diagnostics.elapsedMs} ms
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            {edit.hasEdits && (
+              <Button variant="link" onClick={edit.resetAll}>
+                Reset to parsed
+              </Button>
+            )}
+            <Button variant="link" onClick={onReset}>
+              Try another file
             </Button>
-          )}
-          <Button variant="link" onClick={onReset}>
-            Try another file
-          </Button>
-        </div>
-      </header>
+          </div>
+        </header>
 
-      <AtsScoreReadout score={score} />
-      <FeedbackPanel />
+        <AtsScoreReadout score={score} />
+        <FeedbackPanel />
+      </Card>
 
-      {/* Score stays pinned above; the detail sits behind tabs so only one
-          panel shows at a time and every panel is advertised by a label
-          (issue #177). All panels stay mounted (hidden when inactive) so the
-          reconstructed resume keeps any local UI state across tab switches —
-          overrides themselves live above in App/useEditableParse. */}
-      <Tabs id="result" value={tab} onValueChange={setTab}>
-        <TabList aria-label="Parsed result views">
-          <Tab id="reconstructed">Reconstructed resume</Tab>
-          <Tab id="source">Source PDF</Tab>
-          <Tab id="extracted">Extracted text</Tab>
-          <Tab id="flags" count={triggerCount}>
-            Layout flags
-          </Tab>
-        </TabList>
+      {/* Detail sits behind tabs in its own card so only one panel shows at a
+          time and every panel is advertised by a label (issue #177). All panels
+          stay mounted (hidden when inactive) so the reconstructed resume keeps
+          any local UI state across tab switches — overrides themselves live in
+          App/useEditableParse. */}
+      <Card className="flex flex-col shadow-xs">
+        <Tabs id="result" value={tab} onValueChange={setTab}>
+          <TabList aria-label="Parsed result views">
+            <Tab id="reconstructed">Reconstructed resume</Tab>
+            <Tab id="source">Source PDF</Tab>
+            <Tab id="extracted">Extracted text</Tab>
+            <Tab id="flags" count={triggerCount}>
+              Layout flags
+            </Tab>
+          </TabList>
 
-        <div className="pt-4">
-          <TabPanel id="reconstructed">
-            <ReconstructedResume result={result} score={score} edit={edit} />
-          </TabPanel>
-          <TabPanel id="source">
-            <SourcePdfPanel bytes={bytes} sourceKind={sourceKind} />
-          </TabPanel>
-          <TabPanel id="extracted">
-            <ExtractedTextPanel result={result} />
-          </TabPanel>
-          <TabPanel id="flags">
-            <LayoutFlagsList
-              triggers={result.triggers as readonly LayoutTrigger[]}
-            />
-          </TabPanel>
-        </div>
-      </Tabs>
-    </Card>
+          <div className="pt-4">
+            <TabPanel id="reconstructed">
+              <ReconstructedResume result={result} score={score} edit={edit} />
+            </TabPanel>
+            <TabPanel id="source">
+              <SourcePdfPanel bytes={bytes} sourceKind={sourceKind} />
+            </TabPanel>
+            <TabPanel id="extracted">
+              <ExtractedTextPanel result={result} />
+            </TabPanel>
+            <TabPanel id="flags">
+              <LayoutFlagsList
+                triggers={result.triggers as readonly LayoutTrigger[]}
+              />
+            </TabPanel>
+          </div>
+        </Tabs>
+      </Card>
+    </div>
   );
 }
 

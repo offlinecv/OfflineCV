@@ -60,7 +60,7 @@ export function FeedbackPanel() {
 
   if (submitted) {
     return (
-      <Card className="flex flex-col gap-1">
+      <Card className="flex flex-col gap-1 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
         <div ref={thanksRef} tabIndex={-1} className="outline-hidden">
           <p className="text-sm font-semibold text-content-primary">
             Thanks for your feedback!
@@ -97,7 +97,7 @@ export function FeedbackPanel() {
   }
 
   return (
-    <Card className="flex flex-col gap-4">
+    <Card className="flex flex-col gap-4 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
       <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
         {/* Collapsed line: heading + inline rating on one row. */}
         <div className="flex flex-col gap-1">
