@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildContactFields,
+  formatLinkDisplay,
   CONTACT_DISPLAY_CONFIDENCE_FLOOR,
 } from "./contact.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
@@ -81,7 +82,7 @@ describe("buildContactFields", () => {
     expect(nameField.reason).toBeUndefined();
   });
 
-  it("gates a field with reason=low_confidence when value exists but confidence is below the floor", () => {
+  it("gates a low-confidence field but retains its value for subtle display (#146)", () => {
     const conf = CONTACT_DISPLAY_CONFIDENCE_FLOOR - 0.01;
     const fields = buildContactFields(
       makeCascade({ email: "jane@example.com" }, { email: conf }),
@@ -89,7 +90,9 @@ describe("buildContactFields", () => {
     const emailField = fields.find((f) => f.key === "email")!;
     expect(emailField.gated).toBe(true);
     expect(emailField.reason).toBe("low_confidence");
-    expect(emailField.value).toBe("");
+    // Retained (not blanked) so the card can render it dotted/muted; `gated`
+    // still keeps it out of the detected count and score-facing consumers.
+    expect(emailField.value).toBe("jane@example.com");
   });
 
   it("gates a field with reason=absent when no value is present", () => {
@@ -130,5 +133,57 @@ describe("buildContactFields", () => {
       "https://github.com/jane",
       "San Francisco, CA",
     ]);
+  });
+
+  it("tags each row with its visual group (#146)", () => {
+    const fields = buildContactFields(makeCascade());
+    const byKey = Object.fromEntries(fields.map((f) => [f.key, f.group]));
+    expect(byKey.full_name).toBe("identity");
+    expect(byKey.email).toBe("contact");
+    expect(byKey.phone).toBe("contact");
+    expect(byKey.location).toBe("contact");
+    expect(byKey.linkedin_url).toBe("link");
+  });
+
+  it("includes portfolio and website link rows only when confidently detected (#146)", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        {
+          portfolio_url: "https://jane.dev",
+          website_url: "https://janedoe.com",
+        },
+        { portfolio_url: 0.9, website_url: 0.9 },
+      ),
+    );
+    const portfolio = fields.find((f) => f.key === "portfolio_url");
+    const website = fields.find((f) => f.key === "website_url");
+    expect(portfolio?.group).toBe("link");
+    expect(portfolio?.gated).toBe(false);
+    expect(website?.gated).toBe(false);
+    // Absent by default — no gap, no penalty.
+    expect(buildContactFields(makeCascade()).some((f) => f.key === "portfolio_url")).toBe(false);
+    expect(buildContactFields(makeCascade()).some((f) => f.key === "website_url")).toBe(false);
+  });
+});
+
+describe("formatLinkDisplay", () => {
+  it("collapses a LinkedIn profile to in/<slug>", () => {
+    expect(formatLinkDisplay("https://www.linkedin.com/in/jane-doe")).toBe(
+      "in/jane-doe",
+    );
+    expect(formatLinkDisplay("https://linkedin.com/in/jane-doe/")).toBe(
+      "in/jane-doe",
+    );
+  });
+
+  it("collapses a GitHub profile to gh/<slug>", () => {
+    expect(formatLinkDisplay("https://github.com/javery")).toBe("gh/javery");
+  });
+
+  it("falls back to the stripped host+path for other links", () => {
+    expect(formatLinkDisplay("https://www.jane.dev/")).toBe("jane.dev");
+    expect(formatLinkDisplay("http://janedoe.com/portfolio")).toBe(
+      "janedoe.com/portfolio",
+    );
   });
 });

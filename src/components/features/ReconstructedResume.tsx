@@ -661,9 +661,10 @@ export function ReconstructedResume({
   const achievementsAbove =
     parsed.achievements_placement === "above_experience";
 
+  // Contact overrides remain owned by the edit hook (they still feed re-scoring
+  // in App), but the ContactCard is display-only as of #146 — inline contact
+  // edit is deferred to a follow-up, so it no longer receives edit props.
   const {
-    contactOverrides,
-    setContactField,
     experienceOverrides,
     setExperienceField,
     bulletOverrides,
@@ -772,11 +773,7 @@ export function ReconstructedResume({
         {bullets.length > 0 && <RollupStrip bullets={bullets} />}
       </div>
 
-      <ContactCard
-        result={result}
-        overrides={contactOverrides}
-        onFieldChange={(key, value) => setContactField(key, value)}
-      />
+      <ContactCard result={result} />
       {achievementsAbove && achievementsSection}
       <ExperienceSection
         groups={experienceRenderGroups}
