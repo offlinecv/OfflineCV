@@ -5,12 +5,12 @@
  * ModelLoadProgress — the shared WebLLM model-download progress panel.
  *
  * Replaces the two near-identical `LoadingPanel` functions previously
- * hand-rolled in `RewriteButton.tsx` and `SectionRewrite.tsx` (issue #130).
+ * hand-rolled in `SectionRewrite.tsx` (issue #130).
  * Owns the chrome (rounded border + subtle bg + padding) and the progress-
  * bar markup; consumers thread the progress fraction + label + optional
  * loader status line.
  *
- * Used today by per-bullet rewrite, section rewrite, and the model picker
+ * Used today by section rewrite, resume rewrite, and the model picker
  * (`ModelSelector` in PR B of #64). When PR B's picker drives a model
  * switch, the same panel renders for the new model's download — same
  * chrome, different `label`.

@@ -308,7 +308,7 @@ function ExperienceSection({
           "inline near SectionRewrite, visible only in the rewrite context"
           per the #64 step 6 spec. Both return null when WebGPU is
           unavailable, so non-WebGPU browsers see no rewrite chrome at all
-          (matches RewriteButton + SectionRewrite). */}
+          (matches SectionRewrite + ResumeRewrite). */}
       {hasBullets && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <ModelSelector />

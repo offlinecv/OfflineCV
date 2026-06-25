@@ -9,12 +9,10 @@ const {
   trackStartedMock,
   trackCompletedMock,
   trackFirstSectionMock,
-  trackFirstRewriteMock,
 } = vi.hoisted(() => ({
   trackStartedMock: vi.fn(),
   trackCompletedMock: vi.fn(),
   trackFirstSectionMock: vi.fn(),
-  trackFirstRewriteMock: vi.fn(),
 }));
 vi.mock("../analytics.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../analytics.ts")>();
@@ -23,7 +21,6 @@ vi.mock("../analytics.ts", async (importOriginal) => {
     trackWebllmSectionRewriteStarted: trackStartedMock,
     trackWebllmSectionRewriteCompleted: trackCompletedMock,
     trackWebllmFirstSectionRewrite: trackFirstSectionMock,
-    trackWebllmFirstRewrite: trackFirstRewriteMock,
   };
 });
 
@@ -279,12 +276,6 @@ describe("rewriteSectionWithLlm", () => {
     const { engine } = makeEngine(async () => reply(null));
     await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
     expect(trackFirstSectionMock).not.toHaveBeenCalled();
-  });
-
-  it("does NOT fire the per-bullet webllm_first_rewrite key", async () => {
-    const { engine } = makeEngine(async () => reply("Shipped Foo."));
-    await rewriteSectionWithLlm(["a"], engine, TEST_MODEL);
-    expect(trackFirstRewriteMock).not.toHaveBeenCalled();
   });
 
   it("returns an empty bullets array on null model content without throwing", async () => {

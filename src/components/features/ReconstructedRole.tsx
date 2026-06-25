@@ -12,14 +12,10 @@
  * provided, `RoleHeader` exposes inline EditableField affordances for title,
  * company, start_date, and end_date. Overrides are in-memory only.
  *
- * Component boundaries for follow-on issues:
- *   - `ResumeBulletRow` is where #59 re-attaches the per-bullet rewrite
- *     affordance — specifically on the flagged branch (`flagged === true`).
- *
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
  */
 
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import type { ReactNode } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
@@ -29,7 +25,6 @@ import type {
   ExperienceFieldOverrides,
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
-import { RewriteButton } from "./RewriteButton.tsx";
 import { useSectionRewrite } from "./SectionRewrite.tsx";
 import { InlineBulletAdd, RemoveButton } from "./ReconstructedAdd.tsx";
 
@@ -169,11 +164,6 @@ export function BulletFlagLegend() {
  * authoritative re-grade in App (rawText + description), so the inline check
  * badges below re-evaluate live. Flagged bullets show the checks they failed;
  * passing bullets render plain.
- *
- * Issue #174: the EditableField is now wired with `multiline` + `onRework`.
- * Clicking "Rework" in the Save/Cancel action row captures the current draft
- * and surfaces a RewriteButton pane beneath the textarea — the existing AI
- * rewrite path, no new code.
  */
 export function ResumeBulletRow({
   bullet,
@@ -190,19 +180,8 @@ export function ResumeBulletRow({
   const editable = onBulletChange !== undefined;
   const displayText = override ?? bullet.text;
 
-  // Rework pane: when the user clicks "Rework" in the multiline action row,
-  // we capture the draft text and show a RewriteButton driven by that snapshot.
-  // The rework pane is dismissed when editing ends (commit or cancel), so it
-  // never shows stale proposals alongside a different text.
-  const [reworkDraft, setReworkDraft] = useState<string | null>(null);
-
-  const handleRework = useCallback((currentDraft: string) => {
-    setReworkDraft(currentDraft);
-  }, []);
-
   const handleCommit = useCallback(
     (v: string) => {
-      setReworkDraft(null);
       onBulletChange?.(v);
     },
     [onBulletChange],
@@ -221,7 +200,7 @@ export function ResumeBulletRow({
   return (
     <li className="py-1 text-sm leading-snug text-content-secondary">
       {editable ? (
-        /* Multiline edit mode: block layout, full-width textarea + Save/Cancel/Rework */
+        /* Multiline edit mode: block layout, full-width textarea + Save/Cancel */
         <div className="flex gap-1.5">
           <span aria-hidden="true" className="mt-1.5 shrink-0 text-content-muted">
             •
@@ -235,18 +214,7 @@ export function ResumeBulletRow({
               display="inline"
               multiline
               onCommit={handleCommit}
-              onRework={handleRework}
             />
-            {/* Rework pane — visible once user clicks "Rework" in the action row.
-                RewriteButton is the existing AI-rewrite component; we hand it the
-                draft snapshot so it rewrites what the user actually typed, not the
-                committed text. Dismissed on next commit/cancel (handleCommit above
-                clears reworkDraft). */}
-            {reworkDraft !== null && (
-              <div className="mt-2">
-                <RewriteButton bullet={reworkDraft} />
-              </div>
-            )}
           </div>
         </div>
       ) : (
@@ -287,7 +255,6 @@ export function ResumeBulletRow({
                   </span>
                 </FlagChip>
               )}
-              <RewriteButton bullet={displayText} compact />
             </>
           )}
         </>

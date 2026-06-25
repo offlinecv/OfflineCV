@@ -47,9 +47,9 @@ import type { ProgressUpdate, WebLlmEngine } from "./types.ts";
  *   - `webllm_download_started({ model })` fires once per model id, ever.
  *     Retries of a previously-failed model do NOT double-fire.
  *   - `webllm_loaded({ model })` fires once per model id, ever.
- *   - The per-rewrite first-success flags
- *     (`webllm_first_rewrite`/`webllm_first_section_rewrite`) live in
- *     `rewrite-bullet.ts` / `rewrite-section.ts` respectively.
+ *   - The first-success flags (`webllm_first_section_rewrite`,
+ *     `webllm_first_resume_rewrite`) live in `rewrite-section.ts` /
+ *     `rewrite-resume.ts` respectively.
  */
 
 interface CacheableEngine extends WebLlmEngine {
@@ -73,7 +73,7 @@ let serialChain: Promise<unknown> = Promise.resolve();
  * Per-model count of in-flight `engine.chat.completions.create()` calls.
  * `evictAllExcept` consults this before invoking `.unload()` so an engine
  * mid-inference doesn't get torn down underneath its caller — which is
- * reachable in PR B because `RewriteButton` / `SectionRewrite` are separate
+ * reachable in PR B because `SectionRewrite` / `ResumeRewrite` are separate
  * consumers from the picker, not disabled by its loading state. While the
  * picker is downloading model B, a rewrite caller can fast-path to loaded
  * engine A; the picker's chain then arrives at `evictAllExcept(B)` and would
@@ -90,8 +90,8 @@ const pendingUnload = new Map<string, CacheableEngine>();
  *   - Same model already loaded → returns the engine immediately. The
  *     post-return eviction race (a queued cross-model load running
  *     `evictAllExcept` + `.unload()` mid-inference) IS reachable in PR B:
- *     `RewriteButton` / `SectionRewrite` are separate consumers from the
- *     picker, not disabled by its loading state, so a bullet rewrite can
+ *     `SectionRewrite` / `ResumeRewrite` are separate consumers from the
+ *     picker, not disabled by its loading state, so a rewrite caller can
  *     fast-path to engine A while the picker is downloading B. Callers must
  *     wrap their `chat.completions.create()` in `acquireInference(modelId)`
  *     / `releaseInference(modelId)` — `evictAllExcept` consults the
