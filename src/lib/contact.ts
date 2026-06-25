@@ -108,20 +108,15 @@ export function buildContactFields(
 /**
  * Shorten a link URL to a compact, human-readable slug for the card's links
  * line (#146). Strips the protocol, a leading `www.`, and any trailing slash,
- * then collapses the two common profile hosts to a host-relative form:
- * `linkedin.com/in/<slug>` → `in/<slug>`, `github.com/<slug>` → `gh/<slug>`.
- * Anything else (portfolio / personal site) falls back to the stripped
- * host+path, which stays unambiguous. The original URL remains the `href`.
+ * leaving the host + path — e.g. `https://www.linkedin.com/in/jane-doe` →
+ * `linkedin.com/in/jane-doe`, `https://github.com/janedoe` → `github.com/janedoe`,
+ * `https://jane.dev/` → `jane.dev`. Keeping the host makes the platform obvious
+ * at a glance while staying compact; the original URL remains the `href`.
  */
 export function formatLinkDisplay(url: string): string {
-  const stripped = url
+  return url
     .trim()
     .replace(/^https?:\/\//i, "")
     .replace(/^www\./i, "")
     .replace(/\/+$/, "");
-  const linkedin = stripped.match(/^linkedin\.com\/in\/(.+)$/i);
-  if (linkedin) return `in/${linkedin[1]}`;
-  const github = stripped.match(/^github\.com\/(.+)$/i);
-  if (github) return `gh/${github[1]}`;
-  return stripped;
 }

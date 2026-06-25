@@ -55,13 +55,18 @@ export interface ApplyOverridesResult {
 
 // ── Contact ────────────────────────────────────────────────────────────────
 
-/** The five editable contact keys, all string-valued on the parsed object. */
+/** The editable contact keys, all optional string-valued on the parsed object.
+ *  Link fields (github/portfolio/website) join the original five so a corrected
+ *  URL re-grades Completeness + JD coverage like any other field. */
 const CONTACT_KEYS: readonly (keyof ContactOverrides)[] = [
   "full_name",
   "email",
   "phone",
   "linkedin_url",
   "location",
+  "github_url",
+  "portfolio_url",
+  "website_url",
 ];
 
 // ── Bullet line replacement ──────────────────────────────────────────────────
