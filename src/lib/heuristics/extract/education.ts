@@ -143,6 +143,26 @@ function isDateOnlyLine(text: string): boolean {
   return stripped.length === 0;
 }
 
+/** Whether `line` reads as a *wrapped continuation* of the preceding coursework
+ *  bullet (e.g. the `Business` half of `● Global Dimensions of` + `Business`)
+ *  rather than a standalone field that merely follows the bullet. The recovery
+ *  loop is opt-in on this guard so it never swallows the next entry's school or
+ *  a trailing prose note into the prior course (#184). Rejects:
+ *   - degree / institution-hint / date-only lines (already field-bearing),
+ *   - `GPA: …` / `Minor …` / `Major …` prose labels,
+ *   - acronym schools — any all-caps token of 2+ chars (`MIT`, `UC Berkeley`).
+ *  A single Title-case word like `Business` carries no such token and passes,
+ *  so genuine multi-column wraps still merge. */
+function isCourseworkContinuation(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (DEGREE_RE.test(t) || INSTITUTION_HINTS.test(t) || isDateOnlyLine(t))
+    return false;
+  if (/^(GPA[:\s]|Minor\b|Major\b)/i.test(t)) return false;
+  if (/\b[A-Z]{2,}\b/.test(t)) return false;
+  return true;
+}
+
 /** Map one education chunk (the degree + institution + date lines of a single
  *  qualification) to a `ResumeEducation` and its confidence. */
 function educationFromChunk(chunk: string[]): {
@@ -218,12 +238,15 @@ export function extractEducation(
     let item = stripBullet(ls[i].text);
     const span = [i];
     let j = i + 1;
-    while (
+    // Absorb at most ONE wrapped continuation line, and only when it actually
+    // reads as a continuation (#184). A wrapped grid cell almost never spills
+    // past one line; the single-line cap plus the opt-in `isCourseworkContinuation`
+    // guard stop the loop from swallowing an acronym school or trailing prose
+    // (`GPA: 3.8`) from the next entry into the prior course.
+    if (
       j < ls.length &&
       !isBulletLine(ls[j]) &&
-      !DEGREE_RE.test(ls[j].text) &&
-      !INSTITUTION_HINTS.test(ls[j].text) &&
-      !isDateOnlyLine(ls[j].text)
+      isCourseworkContinuation(ls[j].text)
     ) {
       item += ` ${ls[j].text.trim()}`;
       span.push(j);
@@ -260,10 +283,29 @@ export function extractEducation(
     hasDegree = false;
     hasInstitution = false;
   };
-  for (const text of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const text = lines[li];
     const isDeg = DEGREE_RE.test(text);
     const isInst = INSTITUTION_HINTS.test(text);
-    if ((isDeg && hasDegree) || (isInst && hasInstitution)) flush();
+    // A bare line (no degree/institution-hint, not a date) that arrives once the
+    // current chunk already holds BOTH a degree and an institution, AND is
+    // immediately followed by a degree, begins a new entry whose school is
+    // acronym-only / hint-less (`MIT`, `UC Berkeley`) — School / Degree ordering
+    // where the hint-based flush below can't see the boundary (#184). The
+    // next-line-is-a-degree lookahead distinguishes a real new school from a
+    // trailing prose note (`GPA: 3.8`, `Minor in Economics`), which carries no
+    // following degree and so must stay inside the current entry.
+    const next = lines[li + 1];
+    const startsHintlessEntry =
+      !isDeg &&
+      !isInst &&
+      hasDegree &&
+      hasInstitution &&
+      !isDateOnlyLine(text) &&
+      next !== undefined &&
+      DEGREE_RE.test(next);
+    if ((isDeg && hasDegree) || (isInst && hasInstitution) || startsHintlessEntry)
+      flush();
     current.push(text);
     if (isDeg) hasDegree = true;
     if (isInst) hasInstitution = true;
