@@ -44,6 +44,8 @@ export default function App() {
       edit.experienceOverrides,
       edit.bulletOverrides,
       observations,
+      edit.educationOverrides,
+      edit.skillsOverride,
     );
     // The anonymous scorer pools its bullet set from `sections` (#133), so the
     // edited section view — not the original — must feed re-grading or a live
@@ -61,6 +63,8 @@ export default function App() {
     edit.contactOverrides,
     edit.experienceOverrides,
     edit.bulletOverrides,
+    edit.educationOverrides,
+    edit.skillsOverride,
   ]);
 
   // Clear edits whenever a fresh parse lands (new file or reset).

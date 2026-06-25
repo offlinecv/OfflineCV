@@ -275,6 +275,171 @@ describe("applyOverrides", () => {
   });
 });
 
+// ── Education + skills overrides (#176) ───────────────────────────────────────
+
+function eduParsed(): HeuristicParsedResume {
+  return {
+    full_name: "Jane Doe",
+    email: "jane@example.com",
+    skills: ["TypeScript", "Python"],
+    experience: [],
+    education: [
+      { degree: "B.S. Computer Science", institution: "State University" },
+      { degree: "M.S. Data Science", institution: "Tech Institute" },
+    ],
+  };
+}
+
+describe("applyOverrides — education", () => {
+  it("replaces an education field by index on a clone", () => {
+    const parsed = eduParsed();
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      { 0: { degree: "B.S. Software Engineering", institution: "MIT" } },
+    );
+    expect(out.education[0].degree).toBe("B.S. Software Engineering");
+    expect(out.education[0].institution).toBe("MIT");
+    // Untouched entry.
+    expect(out.education[1].degree).toBe("M.S. Data Science");
+    // Original untouched.
+    expect(parsed.education[0].degree).toBe("B.S. Computer Science");
+  });
+
+  it("writes education dates so buildEducationDates reflects them", () => {
+    const { parsed: out } = applyOverrides(
+      eduParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      { 0: { start_date: "2018", end_date: "2022" } },
+    );
+    expect(out.education[0].start_date).toBe("2018");
+    expect(out.education[0].end_date).toBe("2022");
+  });
+
+  it("treats an empty education field override as cleared ('not detected')", () => {
+    const { parsed: out } = applyOverrides(
+      eduParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      { 1: { institution: "" } },
+    );
+    expect(out.education[1].institution).toBe("");
+  });
+
+  it("ignores an education override for an out-of-range index", () => {
+    const parsed = eduParsed();
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      { 5: { degree: "PhD" } },
+    );
+    expect(out.education).toHaveLength(2);
+    expect(out.education[0].degree).toBe("B.S. Computer Science");
+  });
+});
+
+describe("applyOverrides — skills", () => {
+  it("removes a parsed skill by lower-cased key", () => {
+    const parsed = eduParsed();
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      { removed: ["python"], added: [] },
+    );
+    expect(out.skills).toEqual(["TypeScript"]);
+    // Original untouched.
+    expect(parsed.skills).toEqual(["TypeScript", "Python"]);
+  });
+
+  it("appends an added skill, de-duplicated case-insensitively", () => {
+    const { parsed: out } = applyOverrides(
+      eduParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      { removed: [], added: ["Go", "typescript"] }, // "typescript" already present
+    );
+    expect(out.skills).toEqual(["TypeScript", "Python", "Go"]);
+  });
+
+  it("applies removal then addition together", () => {
+    const { parsed: out } = applyOverrides(
+      eduParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      { removed: ["typescript"], added: ["Rust"] },
+    );
+    expect(out.skills).toEqual(["Python", "Rust"]);
+  });
+
+  it("is a no-op when the skills override is empty", () => {
+    const parsed = eduParsed();
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      { removed: [], added: [] },
+    );
+    expect(out.skills).toEqual(["TypeScript", "Python"]);
+  });
+
+  it("does not mutate the input parsed object across education + skills edits", () => {
+    const parsed = eduParsed();
+    const snapshot = JSON.parse(JSON.stringify(parsed));
+    applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      { 0: { degree: "Changed" } },
+      { removed: ["python"], added: ["Rust"] },
+    );
+    expect(parsed).toEqual(snapshot);
+  });
+});
+
 // ── Regression: edit + re-group attribution ──────────────────────────────────
 
 /**
