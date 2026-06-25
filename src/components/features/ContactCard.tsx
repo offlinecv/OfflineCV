@@ -2,127 +2,129 @@
 // Copyright 2026 The resumelint Authors
 
 /**
- * ContactCard — displays extracted contact fields as a chip strip.
+ * ContactCard — a centered visual contact card (#146).
  *
- * Detected fields show the value with a success chip; undetected required
- * fields show a warning chip with a "not detected" label so the reader can
- * spot gaps at a glance. Optional fields (e.g. GitHub) render only when
- * detected — see `buildContactFields`.
+ * Evolves the old chip strip into a compact, centered stack that doubles as a
+ * preview of the future regenerated-PDF header while keeping resumelint's
+ * parser-audit value: detection gaps stay visible, just quiet instead of loud.
  *
- * Edit mode (#58): when `overrides` and `onFieldChange` are provided, each
- * field chip gains an inline EditableField affordance. Edited values replace
- * the parser-detected value in the display (in memory only; lost on reset).
- * A cleared field reverts to the "not detected" chip state.
+ *   Name                       ← card heading (largest, semibold)
+ *   location · email · phone   ← pipe-joined contact line, present-only
+ *   in/slug   ·   gh/slug      ← links line, glyph-free clickable slugs
+ *   N of M fields detected     ← muted audit footer
+ *
+ * A missing *required* field shows a quiet muted token ("phone not found")
+ * rather than a warning chip; a missing *optional* link renders nothing. A
+ * low-confidence field shows its value with a dotted underline + tooltip.
+ *
+ * Display-only: inline editing of contact fields is deferred to a follow-up
+ * issue, so this version takes no edit props and renders purely from `result`.
+ * Gating still flows through `buildContactFields` + the confidence floor — no
+ * second copy of that logic lives here.
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
-import { buildContactFields } from "../../lib/contact.ts";
-import { Chip, Card, EditableField } from "@design-system";
-import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
+import {
+  buildContactFields,
+  formatLinkDisplay,
+  type ContactDisplayField,
+} from "../../lib/contact.ts";
+import { Card } from "@design-system";
 
 interface ContactCardProps {
   result: CascadeResult;
-  /** In-memory overrides for contact fields. When provided, each field gains
-   *  an inline edit affordance. */
-  overrides?: ContactOverrides;
-  /** Called when the user commits an edit on a contact field. */
-  onFieldChange?: (key: keyof ContactOverrides, newValue: string) => void;
 }
 
-/** Map from ContactOverrides key → display label. */
-const FIELD_LABELS: Record<keyof ContactOverrides, string> = {
-  full_name: "Name",
-  email: "Email",
-  phone: "Phone",
-  linkedin_url: "LinkedIn",
-  location: "Location",
-};
+/** A detected value, shown muted + dotted when the parser was unsure of it. */
+function FieldValue({ field }: { field: ContactDisplayField }) {
+  if (field.reason === "low_confidence") {
+    return (
+      <span
+        className="text-content-muted underline decoration-dotted underline-offset-2"
+        title="low confidence"
+      >
+        {field.value}
+      </span>
+    );
+  }
+  return <span className="text-content-secondary">{field.value}</span>;
+}
 
-/** Map from ContactDisplayField.key → ContactOverrides key (only the 5 editable ones). */
-const KEY_MAP: Record<string, keyof ContactOverrides> = {
-  full_name: "full_name",
-  email: "email",
-  phone: "phone",
-  linkedin_url: "linkedin_url",
-  location: "location",
-};
+/** Quiet inline marker for a missing required field — not a warning chip. */
+function MissingToken({ label }: { label: string }) {
+  return (
+    <span className="text-content-muted">{label.toLowerCase()} not found</span>
+  );
+}
 
-export function ContactCard({
-  result,
-  overrides,
-  onFieldChange,
-}: ContactCardProps) {
+export function ContactCard({ result }: ContactCardProps) {
   const fields = buildContactFields(result);
-  const editable = overrides !== undefined && onFieldChange !== undefined;
+  const detectedCount = fields.filter((f) => !f.gated).length;
 
-  // Apply in-memory overrides: a non-empty override replaces the parsed value;
-  // an empty string means "user cleared it" → treat as absent.
-  const displayFields = fields.map((field) => {
-    const overrideKey = KEY_MAP[field.key];
-    if (!editable || overrideKey === undefined) return field;
-    const ov = overrides[overrideKey];
-    if (ov === undefined) return field; // no override yet
-    if (ov === "") {
-      // User cleared → show as absent.
-      return { ...field, value: "", gated: true, reason: "absent" as const };
-    }
-    // User set a value → show as detected.
-    return { ...field, value: ov, gated: false, reason: undefined };
-  });
-
-  const detectedCount = displayFields.filter((f) => !f.gated).length;
+  const name = fields.find((f) => f.group === "identity");
+  const contactLine = fields.filter((f) => f.group === "contact");
+  const links = fields.filter((f) => f.group === "link");
 
   return (
-    <Card id="contact" className="scroll-mt-6">
-      <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-content-muted">
-        Contact — {detectedCount} of {displayFields.length} detected
+    <Card id="contact" className="scroll-mt-6 text-center">
+      {/* Name heading — the immediate "whose resume" anchor. */}
+      <h2 className="text-lg font-semibold text-content-primary">
+        {name && !name.gated ? (
+          name.value
+        ) : (
+          <span className="font-normal text-content-muted">
+            Name not detected
+          </span>
+        )}
       </h2>
-      <div className="flex flex-wrap gap-2">
-        {displayFields.map((field) => {
-          const overrideKey = KEY_MAP[field.key] as
-            | keyof ContactOverrides
-            | undefined;
 
-          if (!editable || overrideKey === undefined) {
-            // Read-only rendering (no edit hooks provided).
-            return field.gated ? (
-              <Chip key={field.key} tone="warning" icon="⚠">
-                {field.label} not detected
-                {field.reason === "low_confidence" && " (low confidence)"}
-              </Chip>
-            ) : (
-              <Chip key={field.key} tone="success" icon="✓">
-                {field.value}
-              </Chip>
-            );
-          }
-
-          // Editable chip: wraps value in EditableField inside a chip-shaped shell.
-          const fieldLabel = FIELD_LABELS[overrideKey];
-          const currentValue = field.gated ? "" : field.value;
-
-          return (
-            <span
-              key={field.key}
-              className={[
-                "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs",
-                field.gated
-                  ? "bg-feedback-warning-bg text-feedback-warning-text"
-                  : "bg-feedback-success-bg text-feedback-success-text",
-              ].join(" ")}
-            >
-              <span aria-hidden="true">{field.gated ? "⚠" : "✓"}</span>
-              <EditableField
-                value={currentValue || undefined}
-                placeholder={`${field.label} not detected`}
-                label={fieldLabel}
-                textSize="xs"
-                onCommit={(v) => onFieldChange(overrideKey, v)}
-              />
+      {/* Contact line: location / email / phone, pipe-joined, present-only. */}
+      {contactLine.length > 0 && (
+        <p className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
+          {contactLine.map((field, i) => (
+            <span key={field.key} className="inline-flex items-center gap-x-2">
+              {i > 0 && <span className="text-content-muted">|</span>}
+              {field.gated && field.reason === "absent" ? (
+                <MissingToken label={field.label} />
+              ) : (
+                <FieldValue field={field} />
+              )}
             </span>
-          );
-        })}
-      </div>
+          ))}
+        </p>
+      )}
+
+      {/* Links line: clickable slugs, middot-separated, license-safe (no logos). */}
+      {links.length > 0 && (
+        <p className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
+          {links.map((field, i) => (
+            <span key={field.key} className="inline-flex items-center gap-x-2">
+              {i > 0 && <span className="text-content-muted">·</span>}
+              {field.gated ? (
+                field.reason === "low_confidence" ? (
+                  <FieldValue field={field} />
+                ) : (
+                  <MissingToken label={field.label} />
+                )
+              ) : (
+                <a
+                  href={field.value}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-amber hover:underline"
+                >
+                  {formatLinkDisplay(field.value)}
+                </a>
+              )}
+            </span>
+          ))}
+        </p>
+      )}
+
+      {/* Subtle audit footer — the parser-audit signal, made unobtrusive. */}
+      <p className="mt-3 text-xs text-content-muted">
+        {detectedCount} of {fields.length} fields detected
+      </p>
     </Card>
   );
 }
