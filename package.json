@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "bake-fixtures": "UPDATE_FIXTURES=1 vitest run src/lib/heuristics/corpus.test.ts",
     "eval:rewrite": "vite --open=/resumelint/eval-rewrite.html",
+    "eval:jd-spike": "vite --open=/resumelint/jd-spike.html",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "deploy": "./scripts/deploy_resumelint.sh",
