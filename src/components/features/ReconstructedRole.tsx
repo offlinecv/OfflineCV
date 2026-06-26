@@ -159,6 +159,46 @@ export function BulletFlagLegend() {
   );
 }
 
+/**
+ * The trailing check badges for one bullet — "no metric" / "weak verb" /
+ * length. Shared by both the read-only and editable bullet layouts so the
+ * flags never disappear when the reconstructed résumé is editable (the edit
+ * branch previously rendered none). Renders nothing for a passing bullet.
+ * Inline-level so the chips flow right after the bullet text and wrap with it.
+ */
+function BulletFlagsInline({ bullet }: { bullet: BulletObservation }) {
+  if (!needsAttention(bullet)) return null;
+  return (
+    <>
+      {!bullet.hasMetric && (
+        <FlagChip title="No metric" ariaLabel="No metric" className="ml-1 align-middle">
+          <MetricIcon />
+        </FlagChip>
+      )}
+      {!bullet.startsWithActionVerb && (
+        <FlagChip
+          title="Weak opening verb"
+          ariaLabel="Weak opening verb"
+          className="ml-1 align-middle"
+        >
+          <BoltIcon />
+        </FlagChip>
+      )}
+      {!bullet.wellFormedLength && (
+        <FlagChip
+          title={lengthTitle(bullet)}
+          ariaLabel={lengthTitle(bullet)}
+          className="ml-1 align-middle"
+        >
+          <span className="text-[11px] font-medium tabular-nums">
+            {lengthToken(bullet)}
+          </span>
+        </FlagChip>
+      )}
+    </>
+  );
+}
+
 // ── Bullet row ────────────────────────────────────────────────────────────────
 
 /**
@@ -179,7 +219,6 @@ export function ResumeBulletRow({
   /** Commit an edit on this bullet (keyed by bullet.index in the caller). */
   onBulletChange?: (value: string) => void;
 }) {
-  const flagged = needsAttention(bullet);
   const editable = onBulletChange !== undefined;
   const displayText = override ?? bullet.text;
 
@@ -218,6 +257,9 @@ export function ResumeBulletRow({
               multiline
               onCommit={handleCommit}
             />
+            {/* Check badges trail the field inline (read mode) so the flags
+                stay visible while the résumé is editable. */}
+            <BulletFlagsInline bullet={bullet} />
           </div>
         </div>
       ) : (
@@ -227,39 +269,7 @@ export function ResumeBulletRow({
             •
           </span>
           {displayText}
-          {flagged && (
-            <>
-              {!bullet.hasMetric && (
-                <FlagChip
-                  title="No metric"
-                  ariaLabel="No metric"
-                  className="ml-1 align-middle"
-                >
-                  <MetricIcon />
-                </FlagChip>
-              )}
-              {!bullet.startsWithActionVerb && (
-                <FlagChip
-                  title="Weak opening verb"
-                  ariaLabel="Weak opening verb"
-                  className="ml-1 align-middle"
-                >
-                  <BoltIcon />
-                </FlagChip>
-              )}
-              {!bullet.wellFormedLength && (
-                <FlagChip
-                  title={lengthTitle(bullet)}
-                  ariaLabel={lengthTitle(bullet)}
-                  className="ml-1 align-middle"
-                >
-                  <span className="text-[11px] font-medium tabular-nums">
-                    {lengthToken(bullet)}
-                  </span>
-                </FlagChip>
-              )}
-            </>
-          )}
+          <BulletFlagsInline bullet={bullet} />
         </>
       )}
     </li>

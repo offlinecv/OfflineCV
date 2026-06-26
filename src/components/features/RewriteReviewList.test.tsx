@@ -128,8 +128,18 @@ describe("RewriteReviewList", () => {
       }),
     );
 
-    expect(el.textContent).toContain("Accepted");
-    expect(el.textContent).toContain("Rejected");
+    // Accept/Reject are icon toggles: state shows via aria-pressed + title,
+    // not visible label text.
+    const acceptedBtn = el.querySelector(
+      'button[aria-label="Accept this edited bullet"]',
+    ) as HTMLButtonElement;
+    expect(acceptedBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(acceptedBtn.getAttribute("title")).toBe("Accepted");
+    const rejectedBtn = el.querySelector(
+      'button[aria-label="Reject this removed bullet"]',
+    ) as HTMLButtonElement;
+    expect(rejectedBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(rejectedBtn.getAttribute("title")).toBe("Rejected");
     // One accepted → Apply enabled and counts.
     const apply = el.querySelector(
       'button[aria-label="Apply accepted changes to the resume"]',
