@@ -10,7 +10,7 @@ resumelint is a browser-side PDF parser stress test for resumes: drop a PDF in, 
 
 - Vite 7 + React 19 + TypeScript 5.8 + Tailwind 3.4. Vitest runs against `vite.config.ts` (Node env, globals on).
 - pdfjs-dist 4.x; the worker is configured once at app boot in `src/main.tsx` via Vite's `?url` import.
-- No router (single-page app), no SSR/prerender. Analytics are env-gated (`VITE_POSTHOG_KEY`) and dead-code-eliminated when unset — see `src/lib/analytics.ts` and the README's Telemetry section. `.env` and `.env.example` are gitignored so the repo ships zero env-file PostHog surface.
+- No router (single-page app), no SSR/prerender. Analytics are env-gated (`VITE_POSTHOG_KEY`) and dead-code-eliminated when unset — see `src/lib/analytics.ts` and the README's Telemetry section, which also documents the functional `localStorage` keys (`rl_*`) and the unauthenticated `api.github.com` star-count call (discloses the user's IP to GitHub on load). `.env` and `.env.example` are gitignored so the repo ships zero env-file PostHog surface.
 
 ```bash
 npm install

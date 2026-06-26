@@ -200,6 +200,14 @@ export default function App() {
           >
             Further reading: HBS Hidden Workers
           </a>
+          <a
+            href="https://github.com/resumelint-org/resumelint/blob/main/README.md#telemetry"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="hover:underline"
+          >
+            Privacy &amp; data
+          </a>
         </div>
       </footer>
     </main>
