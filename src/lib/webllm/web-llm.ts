@@ -86,16 +86,36 @@ const pendingUnload = new Map<string, CacheableEngine>();
 /**
  * Lazily import and construct the WebLLM engine for `modelId`.
  *
+ * ## Inference callers MUST acquire BEFORE awaiting (issue #148)
+ *
+ * The fast path returns `Promise.resolve(engine)`, but `await` still yields
+ * to the microtask queue. A concurrent picker switch's chain entry can run
+ * `evictAllExcept(otherId)` in that gap, see `inflightInferenceCount[id]`
+ * is 0, and call `engine.unload()` immediately — tearing the engine down
+ * before the caller's continuation gets to use it.
+ *
+ * Inference callers therefore MUST wrap the whole load-and-use sequence with
+ * `acquireInference(modelId)` / `releaseInference(modelId)`:
+ *
+ *     acquireInference(modelId);
+ *     try {
+ *       const engine = await loadEngine(modelId, onProgress);
+ *       await rewriteSectionWithLlm(bullets, engine, modelId); // or similar
+ *     } finally {
+ *       releaseInference(modelId);
+ *     }
+ *
+ * With a positive count, `evictAllExcept` parks the engine in `pendingUnload`
+ * and the deferred `.unload()` only runs once the caller releases. The inner
+ * `acquireInference` inside the rewrite primitives is defensive belt — it
+ * does not close the load→use gap on its own.
+ *
+ * Non-inference callers (the model picker preloading a model) do NOT need
+ * the wrapper — the gap is harmless if no inference is about to run on the
+ * returned engine.
+ *
  * Fast paths (no chaining):
- *   - Same model already loaded → returns the engine immediately. The
- *     post-return eviction race (a queued cross-model load running
- *     `evictAllExcept` + `.unload()` mid-inference) IS reachable in PR B:
- *     `SectionRewrite` / `ResumeRewrite` are separate consumers from the
- *     picker, not disabled by its loading state, so a rewrite caller can
- *     fast-path to engine A while the picker is downloading B. Callers must
- *     wrap their `chat.completions.create()` in `acquireInference(modelId)`
- *     / `releaseInference(modelId)` — `evictAllExcept` consults the
- *     in-flight counter and defers `.unload()` for any engine still in use.
+ *   - Same model already loaded → returns the engine immediately.
  *   - Same model already pending → returns the in-flight promise.
  *
  * New cross-model load:

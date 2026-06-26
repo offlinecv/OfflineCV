@@ -35,7 +35,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { detectWebGpu } from "../../lib/webllm/capability.ts";
-import { loadEngine } from "../../lib/webllm/web-llm.ts";
+import {
+  acquireInference,
+  loadEngine,
+  releaseInference,
+} from "../../lib/webllm/web-llm.ts";
 import { rewriteSectionWithLlm } from "../../lib/webllm/rewrite-section.ts";
 import type {
   ProgressUpdate,
@@ -195,19 +199,27 @@ export function useSectionRewrite(
     // (and updates one render late, so it can't be relied on alone).
     const release = acquire();
     if (release === null) return;
+    // Snapshot the model id so the same id is released that we acquired —
+    // ModelSelector could in principle update `selectedModelId` mid-run.
+    const modelId = selectedModelId;
+    // Acquire the inference guard SYNCHRONOUSLY, before any await — closes
+    // the load→use TOCTOU window from #148. A concurrent picker switch's
+    // eviction will see the positive count and park `.unload()` until the
+    // matching release runs in `finally`.
+    acquireInference(modelId);
     try {
       setStatus({
         kind: "loading",
         progress: { progress: 0, text: "Starting…" },
       });
-      const engine = await loadEngine(selectedModelId, (progress) => {
+      const engine = await loadEngine(modelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
       setStatus({ kind: "rewriting" });
       const result = await rewriteSectionWithLlm(
         trimmedBullets,
         engine,
-        selectedModelId,
+        modelId,
       );
       if (result.bullets.length === 0) {
         setStatus({
@@ -224,6 +236,7 @@ export function useSectionRewrite(
           err instanceof Error ? err.message : "Couldn't load the rewrite model",
       });
     } finally {
+      releaseInference(modelId);
       release();
     }
   }, [trimmedBullets, acquire, selectedModelId]);

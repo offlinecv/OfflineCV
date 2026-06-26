@@ -37,7 +37,11 @@ import {
   sectionMaxTokens,
 } from "../rewrite-section.ts";
 import { MODEL_REGISTRY, getModelById } from "../models.ts";
-import { loadEngine } from "../web-llm.ts";
+import {
+  acquireInference,
+  loadEngine,
+  releaseInference,
+} from "../web-llm.ts";
 import { detectWebGpu } from "../capability.ts";
 import type { WebLlmEngine } from "../types.ts";
 
@@ -141,55 +145,68 @@ async function runForModel(refs: DomRefs, modelId: string): Promise<void> {
 
   appendLog(refs, `loading model ${modelId}`);
   setStatus(refs, `Loading ${display} …`);
-  const engine = await loadEngine(modelId, (update) => {
-    refs.progress.textContent = `${display}: ${(update.progress * 100).toFixed(0)}% — ${update.text}`;
-  });
-  appendLog(
-    refs,
-    `model loaded; running ${PROMPT_VARIANTS.length} variants × ${REWRITE_FIXTURES.length} fixtures`,
-  );
-  // Refresh the status line so it reflects "running" instead of staying
-  // on "Loading …" for the whole cell loop.
-  setStatus(refs, `Running ${display} (${PROMPT_VARIANTS.length} variants × ${REWRITE_FIXTURES.length} fixtures) …`);
+  // Acquire the inference guard SYNCHRONOUSLY, before any await — closes
+  // the load→use TOCTOU window from #148. This path is the most exposed of
+  // all call sites: `makeRealRewriteFn` calls `engine.chat.completions.create`
+  // directly, bypassing the rewrite primitives' internal acquire/release
+  // belt, so the engine has NO inflight tracking during the eval loop
+  // without this wrapper. Held across the whole eval (load + N × variant
+  // × fixture rewrites + report wiring) so a re-click of the run button
+  // with a different model can't tear down our engine mid-eval.
+  acquireInference(modelId);
+  try {
+    const engine = await loadEngine(modelId, (update) => {
+      refs.progress.textContent = `${display}: ${(update.progress * 100).toFixed(0)}% — ${update.text}`;
+    });
+    appendLog(
+      refs,
+      `model loaded; running ${PROMPT_VARIANTS.length} variants × ${REWRITE_FIXTURES.length} fixtures`,
+    );
+    // Refresh the status line so it reflects "running" instead of staying
+    // on "Loading …" for the whole cell loop.
+    setStatus(refs, `Running ${display} (${PROMPT_VARIANTS.length} variants × ${REWRITE_FIXTURES.length} fixtures) …`);
 
-  const report = await runEval({
-    modelIds: [modelId],
-    variantIds: PROMPT_VARIANTS.map((v) => v.id),
-    fixtures: REWRITE_FIXTURES,
-    rewriteFn: makeRealRewriteFn(engine),
-    appVersion: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : null,
-    onProgress: (done, total, cell) => {
-      refs.progress.textContent = `${display}: ${done}/${total} — ${cell.variantId} × ${cell.fixtureId}`;
-    },
-  });
+    const report = await runEval({
+      modelIds: [modelId],
+      variantIds: PROMPT_VARIANTS.map((v) => v.id),
+      fixtures: REWRITE_FIXTURES,
+      rewriteFn: makeRealRewriteFn(engine),
+      appVersion: typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : null,
+      onProgress: (done, total, cell) => {
+        refs.progress.textContent = `${display}: ${done}/${total} — ${cell.variantId} × ${cell.fixtureId}`;
+      },
+    });
 
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  // Slugify the model id for the filename so it's filesystem-safe and
-  // easy to read in the reports/ directory.
-  const slug = modelId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  // Explicit `;charset=utf-8` so the saved files don't get re-decoded as
-  // Latin-1 by some text viewers — without it, multi-byte chars like
-  // `×` and `—` in the markdown render as mojibake.
-  wireDownload(
-    refs.downloadJson,
-    `eval-rewrite-${slug}-${stamp}.json`,
-    renderJsonReport(report),
-    "application/json;charset=utf-8",
-  );
-  wireDownload(
-    refs.downloadMd,
-    `eval-rewrite-${slug}-${stamp}.md`,
-    renderMarkdownReport(report),
-    "text/markdown;charset=utf-8",
-  );
-  setStatus(
-    refs,
-    `Done. ${report.records.length} records scored for ${display}.`,
-  );
-  appendLog(
-    refs,
-    "report ready — download below and commit under tests/fixtures/rewrite/reports/",
-  );
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    // Slugify the model id for the filename so it's filesystem-safe and
+    // easy to read in the reports/ directory.
+    const slug = modelId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    // Explicit `;charset=utf-8` so the saved files don't get re-decoded as
+    // Latin-1 by some text viewers — without it, multi-byte chars like
+    // `×` and `—` in the markdown render as mojibake.
+    wireDownload(
+      refs.downloadJson,
+      `eval-rewrite-${slug}-${stamp}.json`,
+      renderJsonReport(report),
+      "application/json;charset=utf-8",
+    );
+    wireDownload(
+      refs.downloadMd,
+      `eval-rewrite-${slug}-${stamp}.md`,
+      renderMarkdownReport(report),
+      "text/markdown;charset=utf-8",
+    );
+    setStatus(
+      refs,
+      `Done. ${report.records.length} records scored for ${display}.`,
+    );
+    appendLog(
+      refs,
+      "report ready — download below and commit under tests/fixtures/rewrite/reports/",
+    );
+  } finally {
+    releaseInference(modelId);
+  }
 }
 
 async function main(): Promise<void> {

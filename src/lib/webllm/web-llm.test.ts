@@ -27,7 +27,9 @@ vi.mock("../analytics.ts", async (importOriginal) => {
 
 import {
   _resetEngineCacheForTesting,
+  acquireInference,
   loadEngine,
+  releaseInference,
 } from "./web-llm.ts";
 import { DEFAULT_MODEL_ID, MODEL_REGISTRY } from "./models.ts";
 import type { WebLlmEngine } from "./types.ts";
@@ -244,5 +246,128 @@ describe("loadEngine", () => {
     expect(trackLoadedMock).toHaveBeenCalledTimes(2);
     expect(trackLoadedMock).toHaveBeenNthCalledWith(1, { model: MODEL_A });
     expect(trackLoadedMock).toHaveBeenNthCalledWith(2, { model: MODEL_B });
+  });
+});
+
+// ── #148 — acquire-before-load TOCTOU regression ────────────────────────────
+//
+// Background. `loadEngine` + `acquireInference` had a time-of-check-to-
+// time-of-use gap. When a rewrite caller hit `loadEngine`'s fast path for an
+// already-loaded engine A, the returned promise resolved synchronously, but
+// the `await` yielded to the microtask queue before `acquireInference(A)`
+// could run (acquire happened INSIDE the rewrite primitive, not before
+// loadEngine). In that gap, a concurrent picker switch to B could run its
+// chain entry → `evictAllExcept(B)` → see `inflightInferenceCount[A] === 0`
+// → call `A.unload()` immediately. The rewrite caller's continuation then
+// tried to use a torn-down engine.
+//
+// Fix. Consumers acquireInference(modelId) BEFORE awaiting loadEngine, paired
+// with releaseInference in finally. Then evictAllExcept sees the positive
+// count and parks A in `pendingUnload`; the deferred `.unload()` runs the
+// moment the caller releases. The pair below pins both halves: the negative
+// shape (without the contract, the race is real) and the positive shape
+// (with the contract, the engine survives until release).
+describe("acquire-before-load TOCTOU (#148)", () => {
+  beforeEach(() => {
+    _resetEngineCacheForTesting();
+    mockCreateMLCEngine.mockReset();
+  });
+
+  it("WITHOUT acquireInference before loadEngine: a concurrent eviction unloads the engine — this is the #148 race", async () => {
+    // Pre-load A so `loadEngine(A)` hits the fast path.
+    const engineA = fakeEngine(MODEL_A);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA);
+    await loadEngine(MODEL_A, noop);
+
+    // Queue a concurrent switch to B. Its chain entry runs eviction inside
+    // a microtask — exactly the window the bug exploits.
+    const engineB = fakeEngine(MODEL_B);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineB);
+    const bLoadPromise = loadEngine(MODEL_B, noop);
+
+    // Simulate the buggy consumer pattern: await loadEngine, then acquire.
+    const engine = await loadEngine(MODEL_A, noop);
+    expect(engine).toBe(engineA);
+
+    // Drain microtasks so the B chain entry's eviction runs.
+    await bLoadPromise;
+
+    // Without the fix, A.unload was called between the await resolving and
+    // the (would-be later) acquireInference call. Count was 0 at eviction
+    // time, so eviction proceeded to unload immediately rather than parking.
+    expect(engineA.unload).toHaveBeenCalledTimes(1);
+  });
+
+  it("WITH acquireInference before loadEngine: eviction parks the engine and defers .unload() until releaseInference", async () => {
+    // Pre-load A.
+    const engineA = fakeEngine(MODEL_A);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA);
+    await loadEngine(MODEL_A, noop);
+
+    // The CORRECT consumer pattern — acquire SYNCHRONOUSLY, before any await
+    // that could yield to a queued chain entry. The acquire pairs with a
+    // release in `finally` (here split out at the bottom for clarity).
+    acquireInference(MODEL_A);
+
+    // Queue the concurrent switch to B — same shape as the negative test.
+    const engineB = fakeEngine(MODEL_B);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineB);
+    const bLoadPromise = loadEngine(MODEL_B, noop);
+
+    // Await the fast-path resolve. The microtask gap is open — but the
+    // count is already 1, so the chain entry's eviction parks A.
+    const engine = await loadEngine(MODEL_A, noop);
+    expect(engine).toBe(engineA);
+
+    // Drain microtasks so the B chain entry's eviction runs.
+    await bLoadPromise;
+
+    // A is parked in pendingUnload — NOT unloaded yet.
+    expect(engineA.unload).not.toHaveBeenCalled();
+
+    // The engine handle remains usable for inference here (in production
+    // this is where rewriteSectionWithLlm / rewriteSummaryWithLlm would
+    // call engine.chat.completions.create()).
+    expect(engine).toBe(engineA);
+
+    // Release. Count drops to 0 → pending unload drains.
+    releaseInference(MODEL_A);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(engineA.unload).toHaveBeenCalledTimes(1);
+  });
+
+  it("WITH acquireInference before loadEngine: nested acquire from a rewrite primitive does not change the deferral semantics (count rises to 2, both releases drain to 0)", async () => {
+    // Belt-and-suspenders: the rewrite primitives still call acquire/release
+    // INTERNALLY. With the outer pair from the fix, count goes 1 → 2 → 1 → 0.
+    // The unload must still defer to the final release.
+    const engineA = fakeEngine(MODEL_A);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineA);
+    await loadEngine(MODEL_A, noop);
+
+    // Outer pair — added by the #148 fix at consumer call sites.
+    acquireInference(MODEL_A);
+
+    const engineB = fakeEngine(MODEL_B);
+    mockCreateMLCEngine.mockResolvedValueOnce(engineB);
+    const bLoadPromise = loadEngine(MODEL_B, noop);
+    await loadEngine(MODEL_A, noop);
+    await bLoadPromise;
+    expect(engineA.unload).not.toHaveBeenCalled();
+
+    // Inner pair — mirrors what rewriteSectionWithLlm / rewriteSummaryWithLlm
+    // do today around the model call. Count rises to 2.
+    acquireInference(MODEL_A);
+    // Inner release — back to 1. Still parked, not drained.
+    releaseInference(MODEL_A);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(engineA.unload).not.toHaveBeenCalled();
+
+    // Outer release — back to 0. Park drains.
+    releaseInference(MODEL_A);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(engineA.unload).toHaveBeenCalledTimes(1);
   });
 });
