@@ -58,6 +58,15 @@ export function normalizeDate(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();
 }
 
+/** True when a parsed date anchor is an unfilled Word/Office template placeholder
+ *  ("Month Year", or a bare "Month"/"Year") rather than a real date. `DATE_RANGE_RE`
+ *  admits these word placeholders so a template role still anchors/splits and the
+ *  placeholder strips off the title — but the placeholder must NOT be recorded as a
+ *  real date, or completeness would stop flagging the missing role dates. */
+function isPlaceholderDate(token: string): boolean {
+  return /^(?:month(?:\s+year)?|year)$/i.test(token.trim());
+}
+
 /** Parse a date range (start/end) from a line. Tolerates M/YYYY, Mmm YYYY, YYYY. */
 export function parseDateRange(text: string): {
   start_date?: string;
@@ -69,11 +78,18 @@ export function parseDateRange(text: string): {
   DATE_RANGE_RE.lastIndex = 0;
   if (m) {
     const start = normalizeDate(m[1] ?? m[3]);
+    // An unfilled template range ("Month Year - ...") matched only to anchor and
+    // strip the role header — it carries no real date, so report none. (A real
+    // start with a placeholder end still keeps the start; see below.)
+    if (isPlaceholderDate(start)) return {};
     const endRaw = m[2] ?? m[4];
     if (/^(present|current|now|ongoing)$/i.test(endRaw)) {
       return { start_date: start, is_current: true };
     }
-    return { start_date: start, end_date: normalizeDate(endRaw) };
+    const end = normalizeDate(endRaw);
+    return isPlaceholderDate(end)
+      ? { start_date: start }
+      : { start_date: start, end_date: end };
   }
   // Fall back to loose detection: first year.
   const year = YEAR_RE.exec(text);
