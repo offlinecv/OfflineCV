@@ -1,1 +1,0 @@
-/Users/annam/tools/scripts/load_env.sh

@@ -42,3 +42,10 @@ __pycache__/
 
 # Playwright MCP snapshot artifacts
 .playwright-mcp/
+
+# Local symlinks into ~/tools/scripts/ (shared bash helpers). Tracked as
+# absolute-path symlinks they leaked the maintainer's home dir and were dead
+# for anyone else. Keep them on disk for local dev/deploy; don't track them.
+/scripts/common.sh
+/scripts/deploy_web_utils.sh
+/scripts/load_env.sh
