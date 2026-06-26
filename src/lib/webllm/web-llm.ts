@@ -275,8 +275,11 @@ export function releaseInference(modelId: string): void {
  * has callers mid-`chat.completions.create()` the `.unload()` is parked in
  * `pendingUnload` and drained by `releaseInference`. No-op when the id isn't
  * resident.
+ *
+ * Module-local — `clearModel` is the only caller (mirrors `evictAllExcept`,
+ * which is likewise unexported).
  */
-export function unloadEngine(modelId: string): void {
+function unloadEngine(modelId: string): void {
   const engine = loadedEngines.get(modelId);
   if (!engine) return;
   loadedEngines.delete(modelId);
