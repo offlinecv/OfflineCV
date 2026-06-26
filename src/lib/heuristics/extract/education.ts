@@ -219,8 +219,9 @@ export function extractEducation(
 
   // Bullet lines inside an education section are relevant-coursework items
   // (a "Relevant Coursework" block, #164) — not degree/institution lines, so
-  // they were dropped before. Recover them as section-level coursework and
-  // attach to the primary entry below.
+  // they were dropped before. Recover them as coursework and attribute each to
+  // the entry it sits under by line position (#190); a section with one entry
+  // reduces to the original "attach to the primary entry" behavior.
   //
   // Two wrinkles from real grids (the de-interleaved 3-column reproducer):
   //   - A cell can wrap: "● Global Dimensions of" + a following non-bullet
@@ -230,8 +231,10 @@ export function extractEducation(
   //   - A degree sub-note ("-including courses taught in Japanese") is also a
   //     bullet but reads as lowercase prose, not a course title. The Title-case
   //     guard drops it; course titles lead uppercase.
+  // Each recovered course keeps the source-line `idx` so it can be attributed
+  // to the nearest preceding degree below.
   const ls = education.lines;
-  const coursework: string[] = [];
+  const coursework: { text: string; idx: number }[] = [];
   const consumed = new Set<number>();
   for (let i = 0; i < ls.length; i++) {
     if (!isBulletLine(ls[i])) continue;
@@ -254,17 +257,18 @@ export function extractEducation(
     }
     item = item.trim();
     if (/^[A-Z0-9]/.test(item)) {
-      coursework.push(item);
+      coursework.push({ text: item, idx: i });
       for (const k of span) consumed.add(k);
     }
     i = j - 1;
   }
 
+  // Keep the source-line `idx` on each entry line so a built chunk's start
+  // position is known — that anchor is what coursework is attributed against.
   const lines = ls
     .map((l, idx) => ({ text: l.text, bullet: isBulletLine(l), idx }))
-    .filter((l) => !l.bullet && !consumed.has(l.idx))
-    .map((l) => l.text)
-    .filter((t) => t.trim().length > 0);
+    .filter((l) => !l.bullet && !consumed.has(l.idx) && l.text.trim().length > 0)
+    .map((l) => ({ text: l.text, idx: l.idx }));
   if (lines.length === 0) return { value: [], confidence: 0 };
 
   // Group into one chunk per qualification. A new chunk begins when the current
@@ -273,8 +277,8 @@ export function extractEducation(
   // keeps multi-degree sections from collapsing into a single entry (only the
   // first degree was ever extracted before) and works for both
   // "Degree / School / Dates" and "School / Degree / Dates" orderings.
-  const chunks: string[][] = [];
-  let current: string[] = [];
+  const chunks: { text: string; idx: number }[][] = [];
+  let current: { text: string; idx: number }[] = [];
   let hasDegree = false;
   let hasInstitution = false;
   const flush = () => {
@@ -284,7 +288,7 @@ export function extractEducation(
     hasInstitution = false;
   };
   for (let li = 0; li < lines.length; li++) {
-    const text = lines[li];
+    const text = lines[li].text;
     const isDeg = DEGREE_RE.test(text);
     const isInst = INSTITUTION_HINTS.test(text);
     // A bare line (no degree/institution-hint, not a date) that arrives once the
@@ -295,7 +299,7 @@ export function extractEducation(
     // next-line-is-a-degree lookahead distinguishes a real new school from a
     // trailing prose note (`GPA: 3.8`, `Minor in Economics`), which carries no
     // following degree and so must stay inside the current entry.
-    const next = lines[li + 1];
+    const next = lines[li + 1]?.text;
     const startsHintlessEntry =
       !isDeg &&
       !isInst &&
@@ -306,21 +310,37 @@ export function extractEducation(
       DEGREE_RE.test(next);
     if ((isDeg && hasDegree) || (isInst && hasInstitution) || startsHintlessEntry)
       flush();
-    current.push(text);
+    current.push(lines[li]);
     if (isDeg) hasDegree = true;
     if (isInst) hasInstitution = true;
   }
   flush();
 
+  // Carry each entry's start line index (its anchor) past the build/filter so
+  // coursework can be attributed to it by position.
   const built = chunks
-    .map(educationFromChunk)
+    .map((chunk) => ({
+      ...educationFromChunk(chunk.map((c) => c.text)),
+      startIdx: chunk[0].idx,
+    }))
     .filter((b) => b.entry.degree || b.entry.institution);
   if (built.length === 0) return { value: [], confidence: 0 };
 
   const value = built.map((b) => b.entry);
-  // Attach section-level coursework to the primary (first) entry — per-degree
-  // attribution is ambiguous when the block sits in its own sub-section (#164).
-  if (coursework.length > 0) value[0].coursework = coursework;
+  // Attribute each coursework item to the nearest *preceding* entry by line
+  // position (#190): a course listed under the Master's stays with the Master's,
+  // one under the Bachelor's with the Bachelor's. A block that appears before
+  // any degree (or a single-entry section) falls to the first entry — the
+  // original #164 behavior. `built` is in document order, so its `startIdx`
+  // values are monotonic and the scan can stop at the first entry past `idx`.
+  for (const course of coursework) {
+    let target = 0;
+    for (let e = 0; e < built.length; e++) {
+      if (built[e].startIdx <= course.idx) target = e;
+      else break;
+    }
+    (value[target].coursework ??= []).push(course.text);
+  }
 
   return {
     value,
