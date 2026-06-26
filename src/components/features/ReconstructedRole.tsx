@@ -15,7 +15,7 @@
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
  */
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
@@ -25,7 +25,10 @@ import type {
   ExperienceFieldOverrides,
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
-import { useSectionRewrite } from "./SectionRewrite.tsx";
+import {
+  useSectionRewrite,
+  type SectionRewriteApply,
+} from "./SectionRewrite.tsx";
 import { InlineBulletAdd, RemoveButton } from "./ReconstructedAdd.tsx";
 
 // ── Bullet flags ──────────────────────────────────────────────────────────────
@@ -420,6 +423,10 @@ interface RoleEntryProps {
   /** Append a new bullet to this role (#180-followup). Renders a "+ Add bullet"
    *  affordance under the bullet list when provided. */
   onAddBullet?: (text: string) => void;
+  /** Drop a parsed bullet by its BulletObservation.index (#211). Required —
+   *  alongside onBulletChange + onAddBullet — to wire the section-rewrite
+   *  per-bullet Apply (accept/reject/edit writes back here). */
+  onRemoveBullet?: (index: number) => void;
   /** Remove this role (only set for user-ADDED roles). Renders an X control in
    *  the header row when provided. */
   onRemove?: () => void;
@@ -437,6 +444,7 @@ export function RoleEntry({
   bulletOverrides,
   onBulletChange,
   onAddBullet,
+  onRemoveBullet,
   onRemove,
 }: RoleEntryProps) {
   // Bullet display text honors #82 overrides — section rewrite must see the
@@ -444,10 +452,28 @@ export function RoleEntry({
   const sectionBullets = group.bullets.map(
     (b) => bulletOverrides?.[b.index] ?? b.text,
   );
+  // Wire the per-bullet rewrite review/apply (#211) only when the full editable
+  // surface is present (replace + add + remove). The obsIndices are parallel to
+  // sectionBullets so an accepted change maps back to its BulletObservation.
+  // Memoized so the proposal's decision state doesn't reset on every render.
+  const obsIndices = group.bullets.map((b) => b.index);
+  const obsIndicesKey = obsIndices.join(",");
+  const rewriteApply = useMemo<SectionRewriteApply | undefined>(() => {
+    if (!onBulletChange || !onAddBullet || !onRemoveBullet) return undefined;
+    return {
+      obsIndices,
+      onReplace: (index, text) => onBulletChange(index, text),
+      onRemove: (index) => onRemoveBullet(index),
+      onAdd: (text) => onAddBullet(text),
+    };
+    // obsIndices identity churns each render; key on its stable string form.
+  }, [obsIndicesKey, onBulletChange, onAddBullet, onRemoveBullet]);
   // The "Rewrite section" trigger sits on the header row (right of the title);
   // its result panel renders full-width below the bullet list.
-  const { trigger: rewriteTrigger, panel: rewritePanel } =
-    useSectionRewrite(sectionBullets);
+  const { trigger: rewriteTrigger, panel: rewritePanel } = useSectionRewrite(
+    sectionBullets,
+    rewriteApply,
+  );
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-start justify-between gap-2">

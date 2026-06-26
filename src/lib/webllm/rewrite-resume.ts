@@ -45,6 +45,7 @@ import {
   rewriteSummaryWithLlm,
   type SummaryRewriteResult,
 } from "./rewrite-summary.ts";
+import type { RewriteSteering } from "./steering.ts";
 import type { WebLlmEngine } from "./types.ts";
 import { accumulatePhrases, buildPhraseBrief } from "./phrase-tracking.ts";
 import { accumulateVerbs, buildVerbBrief } from "./verb-tracking.ts";
@@ -213,6 +214,7 @@ export async function rewriteResumeWithLlm(
   engine: WebLlmEngine,
   modelId: string,
   onProgress: (progress: ResumeRewriteProgress) => void,
+  steering?: RewriteSteering,
 ): Promise<ResumeRewriteResult> {
   const rewriteable = sections.filter(isNonEmptySection);
   const totalSections = rewriteable.length;
@@ -233,7 +235,7 @@ export async function rewriteResumeWithLlm(
     });
 
     const context = buildResumeContext(completed, usedVerbs, usedPhrases);
-    const outcome = await runOne(section, engine, modelId, context);
+    const outcome = await runOne(section, engine, modelId, context, steering);
     completed.push(outcome);
     accumulateOutcomeSignals(outcome, usedVerbs, usedPhrases);
 
@@ -286,13 +288,24 @@ async function runOne(
   engine: WebLlmEngine,
   modelId: string,
   context: string | undefined,
+  steering: RewriteSteering | undefined,
 ): Promise<SectionOutcome> {
+  // `context` and `steering` are independently optional; build the options
+  // object with only the keys that are set so a no-steering / first-section
+  // call stays bit-identical to the pre-#210 / pre-context path.
+  const options =
+    context !== undefined || steering !== undefined
+      ? {
+          ...(context !== undefined ? { context } : {}),
+          ...(steering !== undefined ? { steering } : {}),
+        }
+      : undefined;
   if (section.kind === "summary") {
     const data = await rewriteSummaryWithLlm(
       section.text,
       engine,
       modelId,
-      context !== undefined ? { context } : undefined,
+      options,
     );
     return { kind: "summary", input: section, data };
   }
@@ -300,7 +313,7 @@ async function runOne(
     section.bullets,
     engine,
     modelId,
-    context !== undefined ? { context } : undefined,
+    options,
   );
   return { kind: "experience", input: section, data };
 }

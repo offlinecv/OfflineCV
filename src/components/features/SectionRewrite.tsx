@@ -50,6 +50,34 @@ import { useSectionRewriteLock } from "../../hooks/useSectionRewriteLock.ts";
 import { useModelSelection } from "../../hooks/useModelSelection.ts";
 import { Button, ModelLoadProgress, InlineResult, InlineDiff } from "@design-system";
 import { computeTextDiff } from "../../lib/diff/text-diff.ts";
+import {
+  alignBullets,
+  type AlignedPair,
+} from "../../lib/rewrite-review/align-bullets.ts";
+import { resolveBulletActions } from "../../lib/rewrite-review/apply-accepted.ts";
+import { useRewriteReview } from "../../hooks/useRewriteReview.ts";
+import { RewriteReviewList } from "./RewriteReviewList.tsx";
+
+/**
+ * Wiring a per-role rewrite to the reconstructed-résumé edit model so accepted
+ * bullets can be written back (#211). `obsIndices` is parallel to the `bullets`
+ * passed to `useSectionRewrite` (same order/length, BEFORE blank-trimming), so
+ * an accepted change at trimmed position i resolves to its
+ * BulletObservation.index. When omitted, the proposed panel keeps its legacy
+ * copy-all/discard surface (used by callers without an edit model).
+ */
+export interface SectionRewriteApply {
+  obsIndices: readonly number[];
+  /** Replace a parsed bullet's text (→ setBulletField). */
+  onReplace: (obsIndex: number, text: string) => void;
+  /** Drop a parsed bullet (→ removeBullet). */
+  onRemove: (obsIndex: number) => void;
+  /** Append a new bullet to this role (→ addBullet on the role's entry key). */
+  onAdd: (text: string) => void;
+}
+
+/** Stable empty alignment so the review hook doesn't reset on every idle render. */
+const NO_PAIRS: AlignedPair[] = [];
 
 /** What `useSectionRewrite` hands back so the caller can place the trigger and
  *  the result panel in separate slots (trigger beside the role title, panel
@@ -98,6 +126,7 @@ function bulletsEqual(a: readonly string[], b: readonly string[]): boolean {
  */
 export function useSectionRewrite(
   bullets: readonly string[],
+  apply?: SectionRewriteApply,
 ): SectionRewriteParts {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -107,11 +136,36 @@ export function useSectionRewrite(
 
   // Trim blank bullets here once — passed to both the model (so it doesn't
   // see empties) and the before/after panel (so the original column matches
-  // what the model actually saw).
-  const trimmedBullets = useMemo(
-    () => bullets.filter((b) => b.trim().length > 0),
-    [bullets],
+  // what the model actually saw). When an edit model is wired (`apply`), the
+  // surviving bullets' BulletObservation indices are kept parallel so an
+  // accepted change at trimmed position i maps back to the right bullet.
+  const { trimmedBullets, keptObsIndices } = useMemo(() => {
+    const texts: string[] = [];
+    const idxs: number[] = [];
+    bullets.forEach((b, i) => {
+      if (b.trim().length === 0) return;
+      texts.push(b);
+      if (apply) idxs.push(apply.obsIndices[i] ?? -1);
+    });
+    return { trimmedBullets: texts, keptObsIndices: idxs };
+  }, [bullets, apply]);
+
+  // Per-bullet review state (#211). Aligned against the snapshot the model
+  // actually saw (stable per proposal) — not the live bullets — so the rows and
+  // the decision map don't churn under unrelated re-renders.
+  const pairs = useMemo<AlignedPair[]>(
+    () =>
+      status.kind === "proposed"
+        ? alignBullets(status.snapshot, status.result.bullets)
+        : NO_PAIRS,
+    [status],
   );
+  const review = useRewriteReview(pairs);
+  const { reset: resetReview } = review;
+  // A fresh proposal (new aligned pairs) starts with a clean decision slate.
+  useEffect(() => {
+    resetReview();
+  }, [pairs, resetReview]);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,6 +246,27 @@ export function useSectionRewrite(
     setCopied(false);
   }, []);
 
+  // Apply accepted decisions back into the reconstructed résumé via the edit
+  // model, then dismiss the proposal. Each action's `originalIndex` is a
+  // position in the trimmed snapshot, mapped to its BulletObservation.index
+  // through `keptObsIndices`.
+  const onApply = useCallback(() => {
+    if (!apply) return;
+    const actions = resolveBulletActions(pairs, review.decisions, review.edits);
+    for (const action of actions) {
+      if (action.kind === "add") {
+        apply.onAdd(action.text);
+        continue;
+      }
+      const obsIndex = keptObsIndices[action.originalIndex];
+      if (obsIndex === undefined || obsIndex < 0) continue;
+      if (action.kind === "replace") apply.onReplace(obsIndex, action.text);
+      else apply.onRemove(obsIndex);
+    }
+    setStatus({ kind: "idle" });
+    setCopied(false);
+  }, [apply, pairs, review.decisions, review.edits, keptObsIndices]);
+
   const onCopyAll = useCallback(async () => {
     if (status.kind !== "proposed") return;
     try {
@@ -239,15 +314,36 @@ export function useSectionRewrite(
           </p>
         )}
 
-        {status.kind === "proposed" && (
-          <ProposedSection
-            original={trimmedBullets}
-            result={status.result}
-            copied={copied}
-            onCopyAll={onCopyAll}
-            onReject={onReject}
-          />
-        )}
+        {status.kind === "proposed" &&
+          (apply ? (
+            <InlineResult
+              tone={status.result.numbersPreserved ? "success" : "warning"}
+              className="flex flex-col gap-3"
+            >
+              <RewriteReviewList
+                pairs={pairs}
+                review={review}
+                onApply={onApply}
+                onDiscard={onReject}
+                warning={
+                  status.result.numbersPreserved ? undefined : (
+                    <NumberPreservationWarning
+                      dropped={status.result.droppedNumbers}
+                      added={status.result.addedNumbers}
+                    />
+                  )
+                }
+              />
+            </InlineResult>
+          ) : (
+            <ProposedSection
+              original={trimmedBullets}
+              result={status.result}
+              copied={copied}
+              onCopyAll={onCopyAll}
+              onReject={onReject}
+            />
+          ))}
 
         {status.kind === "error" && (
           <p role="alert" className="text-[11px] text-feedback-error-text">
