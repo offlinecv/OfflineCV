@@ -24,9 +24,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # common.sh resolves PROJECT_ROOT via `git rev-parse --show-toplevel`, which
 # correctly returns the worktree root in linked worktrees too.
-readonly WEB_DIR="$PROJECT_ROOT"
+#
+# WEB_DIR is the checkout every command operates on. It defaults to the current
+# worktree (PROJECT_ROOT) — the right answer for non-interactive CLI dispatch.
+# The interactive menu may repoint it via select_worktree() when this repo has
+# more than one usable worktree, so it is intentionally NOT readonly.
+WEB_DIR="$PROJECT_ROOT"
 readonly DEV_PORT=5173
-readonly DEPLOY_SCRIPT="$PROJECT_ROOT/scripts/deploy_resumelint.sh"
 
 # =============================================================================
 # COMMANDS (callable from CLI dispatch or the interactive menu)
@@ -95,13 +99,16 @@ cmd_eval_rewrite() {
 }
 
 cmd_deploy() {
+  # Resolve the deploy script from WEB_DIR so a worktree picked in the menu
+  # deploys its own build, not the main checkout's.
+  local deploy_script="$WEB_DIR/scripts/deploy_resumelint.sh"
   # Forward any remaining args (e.g. --dry-run, --mode=modified) verbatim.
-  if [[ ! -x "$DEPLOY_SCRIPT" ]]; then
-    log_error "$DEPLOY_SCRIPT not found or not executable"
+  if [[ ! -x "$deploy_script" ]]; then
+    log_error "$deploy_script not found or not executable"
     return 1
   fi
   log_info "Delegating to scripts/deploy_resumelint.sh..."
-  "$DEPLOY_SCRIPT" "$@"
+  "$deploy_script" "$@"
 }
 
 # =============================================================================
@@ -129,6 +136,17 @@ ${CYAN}============================================${NC}"
 }
 
 interactive_menu() {
+  # Worktree-aware: when this repo has more than one usable worktree, let the
+  # user pick which checkout the whole session operates on. Single worktree →
+  # no prompt (current behavior). CLI dispatch never reaches here, so it always
+  # runs against the current worktree.
+  local picked
+  picked=$(select_worktree "$PROJECT_ROOT") || { log_error "Worktree selection failed"; exit 1; }
+  WEB_DIR="$picked"
+  if [[ "$WEB_DIR" != "$PROJECT_ROOT" ]]; then
+    log_info "Operating on worktree: $WEB_DIR"
+  fi
+
   check_node_prereqs "$WEB_DIR"
   while true; do
     print_menu
