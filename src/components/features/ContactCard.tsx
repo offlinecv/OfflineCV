@@ -8,11 +8,15 @@
  *   Name                       ← card heading (largest, semibold)
  *   location · email · phone   ← pipe-joined contact line, present-only
  *   in/slug   ·   gh/slug      ← links line, glyph-free clickable slugs
- *   N of M fields detected     ← muted audit footer
  *
- * This component owns the card chrome, the name heading, and the audit footer;
- * the per-segment contact/links rendering (and its inline-edit affordances)
- * lives in `ContactDetails` so the card stays within the ~200 LOC budget.
+ * The detected/total completeness summary no longer lives here — it moved up
+ * into the AttentionStrip (top of the reconstructed resume) so every "needs
+ * your attention" signal is co-located; the inline "not detected" pills stay in
+ * the contact line, where the field is fixed.
+ *
+ * This component owns the card chrome and the name heading; the per-segment
+ * contact/links rendering (and its inline-edit affordances) lives in
+ * `ContactDetails` so the card stays within the ~200 LOC budget.
  *
  * Editing (#147): when BOTH `overrides` and `onFieldChange` are provided, the
  * five editable fields (`full_name`, `email`, `phone`, `linkedin_url`,
@@ -24,10 +28,10 @@
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
-import { buildContactFields, type ContactDisplayField } from "../../lib/contact.ts";
+import { applyContactOverrides, buildContactFields } from "../../lib/contact.ts";
 import { Card, EditableField } from "@design-system";
 import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
-import { ContactDetails, EDITABLE_KEYS } from "./ContactDetails.tsx";
+import { ContactDetails } from "./ContactDetails.tsx";
 
 interface ContactCardProps {
   result: CascadeResult;
@@ -43,23 +47,15 @@ export function ContactCard({
   overrides,
   onFieldChange,
 }: ContactCardProps) {
-  const fields = buildContactFields(result);
   const editable = overrides !== undefined && onFieldChange !== undefined;
 
-  // Apply in-memory overrides onto the editable fields: a non-empty override
-  // replaces the parsed value (becomes detected); an empty string means the
-  // user cleared it → revert to the gated "not found" state. Mirrors the
-  // pre-#146 behavior; non-editable fields pass through untouched.
-  const displayFields = fields.map((field): ContactDisplayField => {
-    const ovKey = EDITABLE_KEYS[field.key];
-    if (!editable || ovKey === undefined) return field;
-    const ov = overrides[ovKey];
-    if (ov === undefined) return field;
-    if (ov === "") return { ...field, value: "", gated: true, reason: "absent" };
-    return { ...field, value: ov, gated: false, reason: undefined };
-  });
+  // Resolve overrides against the parsed fields via the shared helper — the same
+  // path the AttentionStrip uses to count gaps, so card and strip never disagree.
+  const displayFields = applyContactOverrides(
+    buildContactFields(result),
+    editable ? overrides : undefined,
+  );
 
-  const detectedCount = displayFields.filter((f) => !f.gated).length;
   const name = displayFields.find((f) => f.group === "identity");
   const contactLine = displayFields.filter((f) => f.group === "contact");
   const links = displayFields.filter((f) => f.group === "link");
@@ -95,11 +91,6 @@ export function ContactCard({
         editable={editable}
         commit={commit}
       />
-
-      {/* Subtle audit footer — the parser-audit signal, made unobtrusive. */}
-      <p className="mt-3 text-xs text-content-muted">
-        {detectedCount} of {displayFields.length} fields detected
-      </p>
     </Card>
   );
 }

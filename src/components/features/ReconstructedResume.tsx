@@ -5,7 +5,7 @@
  * ReconstructedResume — the primary post-parse surface. A faithful, read-only
  * render of `result.parsed` in resume shape:
  *
- *   rollup strip → contact → roles (header + all bullets, flagged inline) →
+ *   attention strip → contact → roles (header + all bullets, flagged inline) →
  *   education → skills
  *
  * "Faithful" is the contract: the point is to expose the parser↔PDF gap, not to
@@ -42,6 +42,12 @@ import {
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import {
+  applyContactOverrides,
+  buildContactFields,
+  contactCompleteness,
+  type ContactDisplayField,
+} from "../../lib/contact.ts";
+import {
   RoleEntry,
   ResumeBulletRow,
   BulletFlagLegend,
@@ -70,30 +76,30 @@ import {
 import { Button, EditableField } from "@design-system";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 
-// ── Rollup strip ──────────────────────────────────────────────────────────────
+// ── Attention strip ────────────────────────────────────────────────────────────
 
 /**
- * One-line check rollup over the full graded bullet pool. Retained from the old
- * PerBulletFeedback as a header above the resume so the per-check totals stay
- * visible even though individual flags now live inline next to each bullet.
+ * The bullet-check segment of the AttentionStrip — the per-check rollup over the
+ * full graded bullet pool, retained from the old PerBulletFeedback so the totals
+ * stay visible above the resume even though individual flags live inline next to
+ * each bullet. Returns null when every bullet passes (the strip handles the
+ * all-clear line itself).
  */
-function RollupStrip({ bullets }: { bullets: readonly BulletObservation[] }) {
+function BulletSegment({
+  bullets,
+}: {
+  bullets: readonly BulletObservation[];
+}) {
   const total = bullets.length;
   const flagged = bullets.filter(needsAttention).length;
+  if (flagged === 0) return null;
+
   const missingMetric = bullets.filter((b) => !b.hasMetric).length;
   const lengthIssues = bullets.filter((b) => !b.wellFormedLength).length;
   const weakVerb = bullets.filter((b) => !b.startsWithActionVerb).length;
 
-  if (flagged === 0) {
-    return (
-      <p className="text-sm font-medium text-feedback-success-text">
-        All {total} bullet{total === 1 ? "" : "s"} pass every check.
-      </p>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle px-3 py-2.5">
+    <div className="flex flex-col gap-1.5 text-left">
       <p className="text-sm font-medium text-content-primary">
         {flagged} of {total} bullet{total === 1 ? "" : "s"} need attention
       </p>
@@ -123,6 +129,76 @@ function RollupStrip({ bullets }: { bullets: readonly BulletObservation[] }) {
           </li>
         )}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * The contact-completeness segment — the parser-audit signal moved up from the
+ * ContactCard footer (#146 redesign) so it sits with the bullet rollup as one
+ * "needs your attention" triage strip. Names the missing required fields rather
+ * than a bare ratio so it reads parallel to the bullet segment. Renders only
+ * when something is missing; a complete contact block shows no segment.
+ */
+function ContactSegment({ missing }: { missing: ContactDisplayField[] }) {
+  if (missing.length === 0) return null;
+  const count = missing.length;
+  return (
+    <div className="flex flex-col gap-1.5 text-left">
+      <p className="text-sm font-medium text-content-primary">
+        {count} contact field{count === 1 ? "" : "s"} missing
+      </p>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-content-secondary">
+        {missing.map((f) => (
+          <li key={f.key}>
+            <span className="font-semibold text-feedback-warning-text">
+              {f.label}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Centered triage strip co-locating every "needs your attention" signal above
+ * the reconstructed resume: the bullet-check rollup and the contact-completeness
+ * gap, divided by a vertical rule when both are present. Each segment omits
+ * itself when clean; when both are clean it collapses to a single all-clear line
+ * (only when there were bullets to check — a contact-only resume with no parsed
+ * bullets renders nothing).
+ */
+function AttentionStrip({
+  bullets,
+  contactMissing,
+}: {
+  bullets: readonly BulletObservation[];
+  contactMissing: ContactDisplayField[];
+}) {
+  const total = bullets.length;
+  const hasBulletGap = bullets.some(needsAttention);
+  const hasContactGap = contactMissing.length > 0;
+
+  if (!hasBulletGap && !hasContactGap) {
+    if (total === 0) return null;
+    return (
+      <p className="text-sm font-medium text-feedback-success-text">
+        All {total} bullet{total === 1 ? "" : "s"} pass every check.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-stretch justify-center gap-x-6 gap-y-3 rounded-lg border border-border-light bg-surface-subtle px-4 py-2.5">
+      <BulletSegment bullets={bullets} />
+      {hasBulletGap && hasContactGap && (
+        <div
+          aria-hidden="true"
+          className="self-stretch border-l border-border-light"
+        />
+      )}
+      <ContactSegment missing={contactMissing} />
     </div>
   );
 }
@@ -678,6 +754,13 @@ export function ReconstructedResume({
     removeSkill,
   } = edit;
 
+  // Contact completeness for the AttentionStrip — resolved through the same
+  // override-applied path the ContactCard renders from, so the strip's missing
+  // count and the card's inline "not detected" pills can never disagree.
+  const contactMissing = contactCompleteness(
+    applyContactOverrides(buildContactFields(result), contactOverrides),
+  ).missing;
+
   // Added entries are appended to their parsed array by applyOverrides (so they
   // grade + export), which means they already arrive here inside `parsed.*`. We
   // split them back out by section to (a) render their indices ≥ originalCount
@@ -769,7 +852,9 @@ export function ReconstructedResume({
             Click any field to edit it.
           </span>
         </p>
-        {bullets.length > 0 && <RollupStrip bullets={bullets} />}
+        {(bullets.length > 0 || contactMissing.length > 0) && (
+          <AttentionStrip bullets={bullets} contactMissing={contactMissing} />
+        )}
       </div>
 
       <ContactCard

@@ -268,6 +268,52 @@ export function releaseInference(modelId: string): void {
   inflightInferenceCount.set(modelId, next);
 }
 
+/**
+ * Tear down a single resident engine: drop it from `loadedEngines` and
+ * release its WebGPU resources via `.unload()`. The targeted analogue of
+ * `evictAllExcept` — same in-flight-inference deferral, so if the engine
+ * has callers mid-`chat.completions.create()` the `.unload()` is parked in
+ * `pendingUnload` and drained by `releaseInference`. No-op when the id isn't
+ * resident.
+ */
+export function unloadEngine(modelId: string): void {
+  const engine = loadedEngines.get(modelId);
+  if (!engine) return;
+  loadedEngines.delete(modelId);
+  if ((inflightInferenceCount.get(modelId) ?? 0) > 0) {
+    // Park the unload — releaseInference drains it when the last mid-flight
+    // inference call finishes (same contract as evictAllExcept).
+    pendingUnload.set(modelId, engine);
+    return;
+  }
+  engine.unload?.().catch((err: unknown) => {
+    console.warn(`[webllm] unload failed for cleared model ${modelId}:`, err);
+  });
+}
+
+/**
+ * Clear a downloaded model from BOTH layers:
+ *   1. The resident WebGPU/RAM engine — ours, via `unloadEngine`.
+ *   2. The on-disk IndexedDB cache — WebLLM's `deleteModelAllInfoInCache`,
+ *      which drops the model tensors + tokenizer + wasm + chat config (the
+ *      same `prebuiltAppConfig` scope our `CreateMLCEngine` loads write).
+ *
+ * Resets the per-model one-shot telemetry flags so a later re-download fires
+ * `webllm_download_started` / `webllm_loaded` again rather than silently
+ * skipping (the flags exist to dedupe *retries of a live session*, not to
+ * mask a genuine fresh download after the user wiped the cache).
+ *
+ * `clearModel` targets a model the picker shows as already cached and idle,
+ * so no load is in flight for it; pending loads are therefore not cancelled.
+ */
+export async function clearModel(modelId: string): Promise<void> {
+  unloadEngine(modelId);
+  const { deleteModelAllInfoInCache } = await import("@mlc-ai/web-llm");
+  await deleteModelAllInfoInCache(modelId);
+  downloadStartedFiredFor.delete(modelId);
+  loadedFiredFor.delete(modelId);
+}
+
 /** Test-only: drop caches and one-shot flags between tests. */
 export function _resetEngineCacheForTesting(): void {
   loadedEngines.clear();

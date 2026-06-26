@@ -3,7 +3,9 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  applyContactOverrides,
   buildContactFields,
+  contactCompleteness,
   formatLinkDisplay,
   CONTACT_DISPLAY_CONFIDENCE_FLOOR,
 } from "./contact.ts";
@@ -163,6 +165,76 @@ describe("buildContactFields", () => {
     // Absent by default — no gap, no penalty.
     expect(buildContactFields(makeCascade()).some((f) => f.key === "portfolio_url")).toBe(false);
     expect(buildContactFields(makeCascade()).some((f) => f.key === "website_url")).toBe(false);
+  });
+});
+
+describe("applyContactOverrides", () => {
+  it("passes fields through untouched when no overrides given", () => {
+    const fields = buildContactFields(makeCascade());
+    expect(applyContactOverrides(fields, undefined)).toBe(fields);
+  });
+
+  it("a non-empty override marks an absent field detected", () => {
+    const fields = buildContactFields(makeCascade());
+    const out = applyContactOverrides(fields, { email: "jane@example.com" });
+    const email = out.find((f) => f.key === "email");
+    expect(email?.value).toBe("jane@example.com");
+    expect(email?.gated).toBe(false);
+    expect(email?.reason).toBeUndefined();
+  });
+
+  it("an empty-string override clears a detected field back to gated/absent", () => {
+    const fields = buildContactFields(
+      makeCascade({ email: "jane@example.com" }, { email: 0.95 }),
+    );
+    const out = applyContactOverrides(fields, { email: "" });
+    const email = out.find((f) => f.key === "email");
+    expect(email?.value).toBe("");
+    expect(email?.gated).toBe(true);
+    expect(email?.reason).toBe("absent");
+  });
+});
+
+describe("contactCompleteness", () => {
+  it("counts detected vs total and lists the gated required fields", () => {
+    const fields = buildContactFields(
+      makeCascade({ email: "jane@example.com" }, { email: 0.95 }),
+    );
+    const { detected, total, missing } = contactCompleteness(fields);
+    // 5 required rows, only email detected.
+    expect(total).toBe(5);
+    expect(detected).toBe(1);
+    expect(missing.map((f) => f.key)).toEqual([
+      "full_name",
+      "phone",
+      "linkedin_url",
+      "location",
+    ]);
+  });
+
+  it("reports zero missing when every required field is detected", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        {
+          full_name: "Jane Doe",
+          email: "jane@example.com",
+          phone: "(312) 555-0100",
+          linkedin_url: "https://linkedin.com/in/jane",
+          location: "Chicago, IL",
+        },
+        {
+          full_name: 0.9,
+          email: 0.95,
+          phone: 0.9,
+          linkedin_url: 0.8,
+          location: 0.8,
+        },
+      ),
+    );
+    const { detected, total, missing } = contactCompleteness(fields);
+    expect(detected).toBe(5);
+    expect(total).toBe(5);
+    expect(missing).toHaveLength(0);
   });
 });
 

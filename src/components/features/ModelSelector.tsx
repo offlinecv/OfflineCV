@@ -56,7 +56,7 @@ import {
   type ModelMetadata,
 } from "../../lib/webllm/models.ts";
 import { detectWebGpu } from "../../lib/webllm/capability.ts";
-import { loadEngine } from "../../lib/webllm/web-llm.ts";
+import { clearModel, loadEngine } from "../../lib/webllm/web-llm.ts";
 import type {
   ProgressUpdate,
   WebGpuCapability,
@@ -96,6 +96,11 @@ export function ModelSelector() {
   const [consentModel, setConsentModel] = useState<ModelMetadata | null>(null);
   const [consentOpen, setConsentOpen] = useState(false);
   const [cachedIds, setCachedIds] = useState<ReadonlySet<string>>(new Set());
+  // Progressive disclosure: the picker collapses to a one-line summary by
+  // default so the rewrite-model config does not eat permanent vertical space
+  // above the first role when the user is happy with the default. The full
+  // row list reveals on "Change". (See #64 follow-up — picker placement.)
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +150,14 @@ export function ModelSelector() {
   const probeOnce = useCallback(() => {
     setProbed(true);
   }, []);
+
+  // Auto-expand when a non-default model is the active selection (e.g. a
+  // returning user who previously switched) so their choice stays visible
+  // rather than hidden behind the collapsed summary. Fires only on an actual
+  // selection change, so a manual collapse afterward sticks.
+  useEffect(() => {
+    if (selectedModelId !== DEFAULT_MODEL_ID) setExpanded(true);
+  }, [selectedModelId]);
 
   const startLoad = useCallback(
     async (model: ModelMetadata) => {
@@ -209,6 +222,30 @@ export function ModelSelector() {
     [selectedModelId, loadState.kind, hasConsent, startLoad],
   );
 
+  // Download-ahead: warm the cache for the already-selected model so the
+  // first rewrite is instant. The model is already selected, so any consent
+  // gate was cleared at selection time — go straight to `startLoad`, which
+  // re-commits the same id (no-op) and flips the row to cached on success.
+  const onDownloadAhead = useCallback(() => {
+    setProbed(true);
+    const model =
+      MODEL_REGISTRY.find((m) => m.id === selectedModelId) ?? MODEL_REGISTRY[0];
+    void startLoad(model);
+  }, [selectedModelId, startLoad]);
+
+  // Clear a downloaded model from disk + VRAM. After it resolves, bump the
+  // probe trigger so the just-cleared row flips back to "Will download". A
+  // failure leaves the cache intact; the re-probe re-confirms the true state
+  // either way, so we swallow + log rather than surface a row error.
+  const onClearModel = useCallback(async (modelId: string) => {
+    try {
+      await clearModel(modelId);
+    } catch (err) {
+      console.warn("[webllm] clear failed:", err);
+    }
+    setLastCompletedAt(Date.now());
+  }, []);
+
   const onConsentAccept = useCallback(() => {
     if (!consentModel) return;
     recordConsent(consentModel.licenseType);
@@ -227,21 +264,92 @@ export function ModelSelector() {
 
   if (capability !== "available") return null;
 
+  // A load forces the rows open so the inline `ModelLoadProgress` stays
+  // visible even if the user collapsed mid-download.
+  const showRows = expanded || loadState.kind === "loading";
+  const selectedModel =
+    MODEL_REGISTRY.find((m) => m.id === selectedModelId) ?? MODEL_REGISTRY[0];
+
   return (
     <div
       className="flex flex-col gap-2"
       onPointerEnter={probeOnce}
       onFocus={probeOnce}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
-          Rewrite model
-        </h3>
-        <p className="text-[11px] text-content-tertiary">
-          Picks here apply to every "Rewrite" button below.
-        </p>
-      </div>
+      {showRows ? (
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
+              Rewrite model
+            </h3>
+            <p className="text-[11px] text-content-tertiary">
+              Picks here apply to every "Rewrite" button below.
+            </p>
+          </div>
+          <Button
+            variant="link"
+            size="sm"
+            onClick={() => setExpanded((v) => !v)}
+            disabled={loadState.kind === "loading"}
+            aria-expanded={true}
+            className="text-xs"
+          >
+            Done
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-xs text-content-tertiary">
+            Rewrite model via{" "}
+            <span className="font-semibold text-content-primary">
+              {selectedModel.name}
+            </span>
+          </p>
+          <div className="flex flex-wrap items-baseline gap-3">
+            {loadState.kind === "error" &&
+            loadState.modelId === selectedModel.id ? (
+              <span className="flex items-baseline gap-2">
+                <span className="text-[11px] text-feedback-error-text">
+                  Couldn't download.
+                </span>
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={onDownloadAhead}
+                  className="text-xs"
+                >
+                  Try again
+                </Button>
+              </span>
+            ) : cachedIds.has(selectedModel.id) ? (
+              <span className="text-[11px] text-feedback-success-text">
+                ✓ Ready · runs offline
+              </span>
+            ) : (
+              <Button
+                variant="link"
+                size="sm"
+                onClick={onDownloadAhead}
+                className="text-xs"
+              >
+                Download now · ~{(selectedModel.downloadSizeMb / 1024).toFixed(1)}{" "}
+                GB
+              </Button>
+            )}
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={false}
+              className="text-xs"
+            >
+              Edit
+            </Button>
+          </div>
+        </div>
+      )}
 
+      {showRows && (
       <ul className="flex flex-col gap-1.5 list-none">
         {MODEL_REGISTRY.map((model) => (
           <ModelRow
@@ -261,9 +369,11 @@ export function ModelSelector() {
                 : null
             }
             onPick={() => onPick(model)}
+            onClear={() => void onClearModel(model.id)}
           />
         ))}
       </ul>
+      )}
 
       {consentModel && (
         <ConsentDialog
@@ -289,6 +399,7 @@ export function ModelRow({
   error,
   loadingProgress,
   onPick,
+  onClear,
 }: {
   model: ModelMetadata;
   selected: boolean;
@@ -297,7 +408,14 @@ export function ModelRow({
   error: { message: string; detail?: string } | null;
   loadingProgress: ProgressUpdate | null;
   onPick: () => void;
+  onClear: () => void;
 }) {
+  // Two-step inline confirm for the destructive Clear: first click reveals
+  // the "Remove? · Cancel" row, second commits. Kept inline (not a modal) so
+  // a routine cache-cleanup doesn't yank a dialog over the picker. On success
+  // the parent re-probe flips `cached` false and unmounts this whole block,
+  // which resets `confirming` for free.
+  const [confirming, setConfirming] = useState(false);
   const sizeGb = (model.downloadSizeMb / 1024).toFixed(1);
   const isDefault = model.id === DEFAULT_MODEL_ID;
   const downloadLabel = cached
@@ -365,6 +483,41 @@ export function ModelRow({
             </details>
           )}
         </div>
+      )}
+
+      {cached && !disabled && (
+        confirming ? (
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="text-content-tertiary">
+              Remove {model.name}? Frees ~{sizeGb} GB · re-downloads next use.
+            </span>
+            <Button
+              variant="link"
+              size="sm"
+              onClick={onClear}
+              className="text-[11px] text-feedback-error-text"
+            >
+              Remove
+            </Button>
+            <Button
+              variant="link"
+              size="sm"
+              onClick={() => setConfirming(false)}
+              className="text-[11px] text-content-tertiary"
+            >
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="link"
+            size="sm"
+            onClick={() => setConfirming(true)}
+            className="mt-1 text-[11px] text-content-tertiary"
+          >
+            Clear download
+          </Button>
+        )
       )}
     </li>
   );

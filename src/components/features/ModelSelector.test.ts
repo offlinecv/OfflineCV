@@ -36,6 +36,7 @@ const baseRow = {
   error: null,
   loadingProgress: null,
   onPick: () => {},
+  onClear: () => {},
 };
 
 describe("licenseLabel", () => {
@@ -72,6 +73,27 @@ describe("ModelRow — cached vs fresh-download labels", () => {
   it("uses the right size for Llama 3.2 (2264 MB → 2.2 GB)", () => {
     const html = render({ ...baseRow, model: llama, cached: false });
     expect(html).toContain("2.2 GB");
+  });
+});
+
+describe("ModelRow — clear-download affordance", () => {
+  it("offers 'Clear download' only when the model is cached", () => {
+    expect(render({ ...baseRow, model: qwen, cached: true })).toContain(
+      "Clear download",
+    );
+    expect(render({ ...baseRow, model: qwen, cached: false })).not.toContain(
+      "Clear download",
+    );
+  });
+
+  it("hides Clear while a load is in flight (disabled row)", () => {
+    const html = render({
+      ...baseRow,
+      model: qwen,
+      cached: true,
+      disabled: true,
+    });
+    expect(html).not.toContain("Clear download");
   });
 });
 

@@ -163,7 +163,7 @@ describe("ContactCard", () => {
     expect(el.querySelector('[aria-label="Edit Phone"]')).not.toBeNull();
   });
 
-  it("renders the audit footer with the detected/total ratio", () => {
+  it("no longer renders the detected/total completeness footer (moved to the AttentionStrip)", () => {
     const el = render(
       makeResult(
         {
@@ -182,7 +182,6 @@ describe("ContactCard", () => {
         },
       ),
     );
-    // All five required rows detected, none gated.
-    expect(el.textContent).toContain("5 of 5 fields detected");
+    expect(el.textContent).not.toContain("fields detected");
   });
 });

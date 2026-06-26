@@ -10,6 +10,7 @@
  */
 
 import type { CascadeResult } from "./heuristics/types.ts";
+import type { ContactOverrides } from "../hooks/useEditableParse.ts";
 
 export const CONTACT_DISPLAY_CONFIDENCE_FLOOR = 0.5;
 
@@ -103,6 +104,52 @@ export function buildContactFields(
     }
   }
   return rows;
+}
+
+/**
+ * Apply the inline-edit overrides onto the parsed display fields — the single
+ * source of truth shared by the ContactCard (which renders the fields) and the
+ * AttentionStrip (which counts the gaps). A non-empty override replaces the
+ * parsed value and marks it detected; an empty string is an explicit clear →
+ * revert to the gated "absent" state; `undefined` keeps the parsed value.
+ *
+ * Field keys map 1:1 onto `ContactOverrides` keys, so a field is override-
+ * applicable iff its key exists on the overrides object. Pass `undefined` for a
+ * pure-display card (no overrides) and the fields pass through untouched.
+ */
+export function applyContactOverrides(
+  fields: ContactDisplayField[],
+  overrides: ContactOverrides | undefined,
+): ContactDisplayField[] {
+  if (overrides === undefined) return fields;
+  return fields.map((field): ContactDisplayField => {
+    const ov = overrides[field.key as keyof ContactOverrides];
+    if (ov === undefined) return field;
+    if (ov === "")
+      return { ...field, value: "", gated: true, reason: "absent" };
+    return { ...field, value: ov, gated: false, reason: undefined };
+  });
+}
+
+export interface ContactCompleteness {
+  detected: number;
+  total: number;
+  /** Required rows still gated (absent / low-confidence). Optional link rows
+   *  never appear here — they don't render when absent, so they're not a gap. */
+  missing: ContactDisplayField[];
+}
+
+/** Derive the detected/total ratio and the list of missing required fields from
+ *  override-resolved display fields. */
+export function contactCompleteness(
+  displayFields: ContactDisplayField[],
+): ContactCompleteness {
+  const missing = displayFields.filter((f) => f.gated);
+  return {
+    detected: displayFields.length - missing.length,
+    total: displayFields.length,
+    missing,
+  };
 }
 
 /**
