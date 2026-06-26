@@ -6,7 +6,9 @@
  *
  * This file owns:
  *   - The single primary CTA (mounted next to the model picker at the
- *     top of the Experience section)
+ *     top of the Experience section), which opens a steering dialog
+ *   - The steering dialog (#210 page-length chips + instructions), shown
+ *     before the run; "Run rewrite" starts it and closes the dialog
  *   - The status-to-UI routing (loading → running → proposed → error)
  *   - The in-flight `StepIndicator` + `CompletedList`
  *
@@ -28,7 +30,8 @@
  * résumé). Silent absence — matches `RewriteButton` and `SectionRewrite`.
  */
 
-import { Button, ModelLoadProgress, TextAreaField } from "@design-system";
+import { useState } from "react";
+import { Button, Dialog, ModelLoadProgress, TextAreaField } from "@design-system";
 import {
   labelForResumeRewrite,
   useResumeRewrite,
@@ -40,9 +43,9 @@ import type { PageTarget } from "../../lib/webllm/steering.ts";
 import { ProposedPanel } from "./ResumeRewriteProposed.tsx";
 
 export interface ResumeRewriteParts {
+  /** The CTA button; opens the steering dialog (#210 steering box now lives
+   *  inside that dialog, not inline). */
   trigger: React.ReactNode;
-  /** The steering box (freeform instructions + page-length chips), #210. */
-  controls: React.ReactNode;
   panel: React.ReactNode;
 }
 
@@ -53,11 +56,16 @@ export interface ResumeRewriteParts {
  * human-readable hint so the user sees what was applied. The label drives the
  * chip; the `hint` is what lands in the freeform box.
  */
-const PAGE_PRESETS: { target: PageTarget; label: string; hint: string }[] = [
+const PAGE_PRESETS: { target: PageTarget | null; label: string; hint: string }[] = [
+  { target: null, label: "No limit", hint: "" },
   { target: 1, label: "1 page", hint: "Trim this résumé to a single page." },
   { target: 2, label: "2 pages", hint: "Keep this résumé to about two pages." },
   { target: 3, label: "3 pages", hint: "Allow up to three pages of detail." },
 ];
+
+/** A page-length hint string the chips prefill, used to tell a chip-prefilled
+ *  box from one the user typed (so "No limit" / toggle-off can clear it). */
+const PRESET_HINTS = new Set(PAGE_PRESETS.map((p) => p.hint).filter(Boolean));
 
 export function useResumeRewriteUi(
   sections: readonly SectionInput[],
@@ -65,31 +73,72 @@ export function useResumeRewriteUi(
   const controller = useResumeRewrite(sections);
 
   if (!controller.isAvailable) {
-    return { trigger: null, controls: null, panel: null };
+    return { trigger: null, panel: null };
   }
 
-  const trigger = (
-    <Button
-      variant="primary"
-      size="sm"
-      onClick={() => {
-        void controller.start();
-      }}
-      disabled={controller.isLocked}
-      aria-label="Rewrite every section of the résumé"
-    >
-      {labelForResumeRewrite(controller.status, controller.isLockedByOther)}
-    </Button>
-  );
-
-  const controls = <RewriteSteeringBox controller={controller} />;
+  const trigger = <RewriteLauncher controller={controller} />;
 
   const panel =
     controller.status.kind === "idle" ? null : (
       <ResumeRewritePanel status={controller.status} onDismiss={controller.dismiss} />
     );
 
-  return { trigger, controls, panel };
+  return { trigger, panel };
+}
+
+/**
+ * The CTA button + its steering dialog. Clicking the button opens a modal that
+ * collects the rewrite options (page-length chips + freeform instructions);
+ * "Run rewrite" starts the rewrite and closes the dialog — progress then renders
+ * inline via {@link ResumeRewritePanel} (option (a): dialog is options-only, it
+ * doesn't host the run). Disabled while a rewrite is locked/in flight.
+ */
+function RewriteLauncher({
+  controller,
+}: {
+  controller: ResumeRewriteController;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={() => setOpen(true)}
+        disabled={controller.isLocked}
+        aria-label="Rewrite every section of the résumé"
+      >
+        {labelForResumeRewrite(controller.status, controller.isLockedByOther)}
+      </Button>
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Rewrite full résumé"
+        className="fixed left-1/2 top-1/2 w-[min(28rem,90vw)] -translate-x-1/2 -translate-y-1/2"
+      >
+        <div className="flex flex-col gap-4">
+          <RewriteSteeringBox controller={controller} />
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                void controller.start();
+                setOpen(false);
+              }}
+              aria-label="Run the full-résumé rewrite"
+            >
+              Run rewrite
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </>
+  );
 }
 
 /**
@@ -109,6 +158,13 @@ function RewriteSteeringBox({
   const disabled = controller.isLocked;
 
   const onChipClick = (preset: (typeof PAGE_PRESETS)[number]) => {
+    // "No limit" (target null): clear the page target and drop any
+    // chip-prefilled hint, but never clobber text the user typed themselves.
+    if (preset.target === null) {
+      setPageTarget(null);
+      if (PRESET_HINTS.has(userInstructions.trim())) setUserInstructions("");
+      return;
+    }
     if (pageTarget === preset.target) {
       // Toggle off. Clear the prefilled hint too, but never clobber text the
       // user has since edited away from the preset's hint.
@@ -131,7 +187,7 @@ function RewriteSteeringBox({
           const selected = pageTarget === preset.target;
           return (
             <Button
-              key={preset.target}
+              key={preset.label}
               variant={selected ? "primary" : "ghost"}
               size="sm"
               disabled={disabled}

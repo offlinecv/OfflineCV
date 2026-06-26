@@ -374,7 +374,6 @@ function ExperienceSection({
   // SectionRewrite. The hook owns the WebGPU/empty-input gating.
   const {
     trigger: resumeRewriteTrigger,
-    controls: resumeRewriteControls,
     panel: resumeRewritePanel,
   } = useResumeRewriteUi(resumeSections);
   return (
@@ -397,7 +396,6 @@ function ExperienceSection({
           {resumeRewriteTrigger}
         </div>
       )}
-      {hasBullets && resumeRewriteControls}
       {hasBullets && resumeRewritePanel}
       {roleCount === 0 ? (
         <NotDetected what="roles" />

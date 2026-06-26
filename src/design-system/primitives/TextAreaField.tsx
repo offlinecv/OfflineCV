@@ -50,12 +50,15 @@ export function TextAreaField({
 }: TextAreaFieldProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  // Auto-grow: sync height to scroll height on every value change.
+  // Auto-grow: sync height to scroll height on every value change. Skip the
+  // pin when the element is detached/hidden (scrollHeight 0) — e.g. mounted
+  // inside a closed <dialog> — so it doesn't collapse to 0px; the natural
+  // `rows` height then shows once the field becomes visible.
   useEffect(() => {
     const ta = ref.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = `${ta.scrollHeight}px`;
+    if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
   }, [value]);
 
   return (
