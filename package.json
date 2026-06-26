@@ -15,7 +15,6 @@
     "eval:jd-spike": "vite --open=/resumelint/jd-spike.html",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
-    "deploy": "./scripts/deploy_resumelint.sh",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {

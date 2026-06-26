@@ -19,11 +19,10 @@ npm run build      # tsc -b && vite build → dist/
 npm run preview    # serve the built bundle
 npm run test       # vitest run
 npm run typecheck  # tsc -b --noEmit
-npm run lint       # alias for typecheck (no ESLint yet)
-npm run deploy     # ./scripts/deploy_resumelint.sh — needs .env.deploy
+npm run lint       # eslint .
 ```
 
-`./scripts/run_resumelint.sh` is the interactive entry point. With no args it shows a menu over dev/build/preview/test/typecheck/install/clean/deploy; with a command (`./scripts/run_resumelint.sh deploy --dry-run`) it dispatches non-interactively. It sources `scripts/common.sh` for shared helpers (`log_*`, `npm_*`, `check_node_prereqs`, `PROJECT_ROOT` detection via `git rev-parse`).
+The `npm` scripts above are the portable, supported entry point and work on any checkout. A maintainer convenience wrapper (`scripts/run_resumelint.sh`, an interactive menu) and a GCS deploy script (`scripts/deploy_resumelint.sh`) exist locally but are **not tracked** — they `source` shared bash helpers symlinked from `~/tools/scripts/` (`common.sh`, `deploy_web_utils.sh`, `load_env.sh`) that only exist on the maintainer's machine, so they're gitignored rather than shipped broken. Don't reintroduce them to the repo; build/deploy guidance for contributors lives in the README's Deploy section.
 
 ## Pipeline shape
 
@@ -95,9 +94,11 @@ We enforce this with a Claude hook (`scripts/hooks/reuse_surface_reminder.sh`) t
 
 ## Deploy
 
-`scripts/deploy_resumelint.sh` builds and uploads `dist/` to a GCS bucket. Project and bucket come from `.env.deploy` (gitignored, loaded by `scripts/load_env.sh::load_env_file`) or `--project=` / `--bucket=` flags. The script sources `scripts/deploy_web_utils.sh` for the macOS `gsutil` multiprocessing wrapper, dry-run mode, and modified-file detection. When a second host target lands (Cloudflare Pages, Vercel, etc.), add a sibling `scripts/deploy_resumelint_<target>.sh` rather than adding a `--target` flag here.
+`npm run build` emits a self-contained static `dist/` that hosts on any static-file host — the portable, contributor-facing deploy path documented in the README's Deploy section.
 
-The hosted preview is published to GitHub Pages via `.github/workflows/deploy-pages.yml`.
+The hosted preview is published to GitHub Pages via `.github/workflows/deploy-pages.yml` (the canonical, in-repo deploy example).
+
+The maintainer also keeps an **untracked, local-only** `scripts/deploy_resumelint.sh` that uploads `dist/` to a GCS bucket (config from a gitignored `.env.deploy`; sources the `~/tools/scripts/` symlinked helpers). It's gitignored alongside `run_resumelint.sh` because it depends on machine-local tooling — don't recommend it to contributors or recreate it as a tracked file.
 
 ## License
 

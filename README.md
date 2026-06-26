@@ -34,13 +34,8 @@ npm run test       # vitest run
 npm run typecheck  # tsc --noEmit across the project
 ```
 
-Or use the interactive menu, which wraps all of the above plus deploy:
-
-```bash
-./scripts/run_resumelint.sh           # interactive menu
-./scripts/run_resumelint.sh dev       # same commands non-interactively
-./scripts/run_resumelint.sh deploy --dry-run
-```
+The `npm` scripts above are the supported entry point — everything you
+need to develop, test, and build runs through them on any machine.
 
 ## Telemetry
 
@@ -210,23 +205,28 @@ Your replacement module must export the same component API the features consume:
 - **`ErrorState`** — props: `{ tone?: "error" | "warning", children,
   className? }`.
 
-## Deploy (GCS)
+## Deploy
 
-resumelint builds to a static `dist/` directory and can be hosted on any
-static-file host. We ship a script for Google Cloud Storage; adapt or
-replace it for your platform.
+`npm run build` emits a self-contained static `dist/` directory — plain
+HTML, JS, and CSS with no server runtime. Host it on any static-file host
+(GitHub Pages, Netlify, Cloudflare Pages, S3, GCS, …):
 
-1. Copy `.env.deploy.example` to `.env.deploy` and fill in `PROJECT_ID`
-   and `BUCKET_NAME`.
-2. (Optional) Set `VITE_POSTHOG_KEY` in `.env.deploy` to enable telemetry
-   for the deployed build — see the [Telemetry](#telemetry) section.
-3. Run `./scripts/run_resumelint.sh deploy` (or `... deploy --dry-run` to
-   preview). The interactive menu has a "Deploy --dry-run" entry too.
+```bash
+npm run build
+# then upload dist/ with your host's CLI, e.g.
+npx wrangler pages deploy dist        # Cloudflare Pages
+netlify deploy --dir dist --prod      # Netlify
+aws s3 sync dist s3://your-bucket     # S3
+```
 
-Flags: `--skip-build` reuses the existing `dist/`. `--mode=modified`
-re-deploys only files changed since the last successful deploy. Pass
-`--project=` / `--bucket=` to override `.env.deploy` for a one-off
-deploy to a different bucket.
+The hosted preview at the top of this README is published from `dist/`
+to GitHub Pages by `.github/workflows/deploy-pages.yml` — read that
+workflow for a working end-to-end example.
+
+To bake telemetry into a deployed build, set `VITE_POSTHOG_KEY` (and
+optionally `VITE_POSTHOG_HOST`) in the build environment — see the
+[Telemetry](#telemetry) section. With it unset, the build ships zero
+analytics.
 
 ## License
 

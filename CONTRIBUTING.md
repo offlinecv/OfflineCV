@@ -18,8 +18,8 @@ npm run typecheck  # tsc -b --noEmit
 
 Requires Node 20+. `.env` and `.env.deploy` are both gitignored; neither
 is needed to develop, run tests, or build. They only matter for opt-in
-PostHog telemetry and the GCS deploy — see the [Telemetry](./README.md#telemetry)
-and [Deploy](./README.md#deploy-gcs) sections of the README if you need
+PostHog telemetry and deploying a build — see the [Telemetry](./README.md#telemetry)
+and [Deploy](./README.md#deploy) sections of the README if you need
 those.
 
 ## Branch workflow
