@@ -72,6 +72,30 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     ]);
   });
 
+  it("attributes coursework to its own degree across multiple entries (#190)", () => {
+    // Two degrees, each with its OWN coursework bullet. Pre-fix, both lines
+    // pooled onto entry[0] and entry[1] got none.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Lakeside Institute of Technology",
+        "M.S. Computer Science, 2022 - 2024",
+        "● Incoming Courses: Deep Learning, Machine Learning",
+        "Northgate State University",
+        "B.S. Computer Science, 2018 - 2022",
+        "● Relevant Coursework: Data Structures, Algorithms",
+      ]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value[0].institution).toBe("Lakeside Institute of Technology");
+    expect(value[0].coursework).toEqual([
+      "Incoming Courses: Deep Learning, Machine Learning",
+    ]);
+    expect(value[1].institution).toBe("Northgate State University");
+    expect(value[1].coursework).toEqual([
+      "Relevant Coursework: Data Structures, Algorithms",
+    ]);
+  });
+
   it("still merges a genuine wrapped coursework cell (regression guard)", () => {
     const { value } = extractEducation(
       mkEduSection([
