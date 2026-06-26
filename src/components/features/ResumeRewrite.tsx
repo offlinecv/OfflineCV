@@ -99,7 +99,7 @@ export function useResumeRewriteUi(
  * the user can't change steering mid-run. Reuses the `TextAreaField` and
  * `Button` primitives — no raw `<textarea>` / `<button>`.
  */
-export function RewriteSteeringBox({
+function RewriteSteeringBox({
   controller,
 }: {
   controller: ResumeRewriteController;
