@@ -110,6 +110,11 @@ export interface EntryBlock {
 function isAnchorLine(line: PdfLine, anchor: EntryAnchor): boolean {
   switch (anchor) {
     case "date_range": {
+      // A bullet line is never a role-header anchor — guard against PRESENT_RE
+      // (or a stray date) matching an ordinary word inside bullet prose
+      // ("learn about current issues" → "current"), which would split a bullet
+      // off as a phantom role and strip the word from the bullet text.
+      if (isBulletLine(line)) return false;
       const hit = DATE_RANGE_RE.test(line.text) || PRESENT_RE.test(line.text);
       // DATE_RANGE_RE is non-global, but `.test` still advances lastIndex on
       // some engines; reset so repeated calls are idempotent. Mirrors the
@@ -162,6 +167,20 @@ function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
     anchors.push(i);
   }
   return anchors;
+}
+
+/** True when the whole trimmed line is JUST a "City, ST" location — a pure city
+ *  (1–2 capitalized words) followed by a 2-letter state, nothing else. A
+ *  two-column entry header bands the right-column location onto its own line,
+ *  between the date anchor and the left-column company/title; such a line is
+ *  never the company/title, so the header walks skip it without spending budget.
+ *  Deliberately STRICTER than `US_LOCATION_RE` (which allows up to three leading
+ *  words and matches anywhere): a merged "Northwind Labs Bellevue, WA" company +
+ *  city line at the left margin must NOT be mistaken for a pure location and
+ *  dropped — that would lose the company. */
+const PURE_LOCATION_RE = /^[A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)?,\s*[A-Z]{2}$/;
+function isLocationLine(text: string): boolean {
+  return PURE_LOCATION_RE.test(text.trim());
 }
 
 /** Leftmost x of any bullet line in the section — the bullet *marker* margin.
@@ -600,6 +619,19 @@ function nextHeaderStart(
   let claimed = 0;
   for (let i = nextAnchorIdx - 1; i > anchorIdx && claimed < lookback; i--) {
     const l = lines[i];
+    // Blank spacer / pure-location lines belong to the next entry's header block
+    // (a two-column header bands the location onto its own line above the date
+    // anchor). Fold them into the next-header region so this entry's body window
+    // stops below them — but don't spend the lookback budget, or the real
+    // company/title above them would leak into this entry's description. Checked
+    // BEFORE the wrapped-continuation break: a right-column location sits past
+    // the bullet-marker margin, so `isWrappedContinuation` would otherwise
+    // misread it as a wrapped bullet tail and halt the walk on it.
+    const text = l.text.trim();
+    if (!text || isLocationLine(text)) {
+      start = i;
+      continue;
+    }
     if (isBulletLine(l) || isProseLine(l.text) || isWrappedContinuation(l, markerX)) {
       break;
     }
@@ -648,23 +680,32 @@ function buildEntryBlock(
   // y-gap exclusion is its structural twin: a line set off from the line below
   // it (toward the anchor) by a paragraph-sized gap is the previous entry's
   // description tail, not this entry's header, even when it carries no period.
-  const aboveStart = Math.max(prevAnchorIdx, anchorIdx - lookback);
+  // Walk UP from just above the anchor, claiming up to `lookback` real header
+  // lines (company / title). A bullet, prose paragraph, or paragraph-sized gap
+  // marks the previous entry's body (or this entry's own description above a
+  // bottom-anchored date) — stop. Blank spacer lines, wrapped-bullet tails, and
+  // pure "City, ST" location lines are noise that never carry the company/title,
+  // so skip them WITHOUT spending the lookback budget. A two-column header bands
+  // as [Company, Title, blank, blank, Location, Date] — the date anchor landing
+  // last, far from its title; a fixed index window of `lookback` lines would be
+  // exhausted on the blanks and the location before reaching company/title.
   const aboveLines: PdfLine[] = [];
   if (lookback > 0) {
-    for (let i = aboveStart; i < anchorIdx; i++) {
+    let claimed = 0;
+    let lastKeptY: number | null = null;
+    for (let i = anchorIdx - 1; i >= prevAnchorIdx && claimed < lookback; i--) {
       const l = lines[i];
-      if (
-        isBulletLine(l) ||
-        isWrappedContinuation(l, markerX) ||
-        isProseLine(l.text)
-      ) {
+      if (isBulletLine(l) || isProseLine(l.text)) break;
+      const text = l.text.trim();
+      if (!text || isWrappedContinuation(l, markerX) || isLocationLine(text)) {
         continue;
       }
-      if (baseline > 0) {
-        const gapBelow = lines[i + 1].y - lines[i].y;
-        if (gapBelow > BODY_GAP_FACTOR * baseline) continue;
+      if (baseline > 0 && lastKeptY !== null && lastKeptY - l.y > BODY_GAP_FACTOR * baseline) {
+        break;
       }
-      aboveLines.push(l);
+      aboveLines.unshift(l);
+      lastKeptY = l.y;
+      claimed++;
     }
   }
 

@@ -74,17 +74,33 @@ export const PRESENT_RE = /\b(Present|Current|Now|Ongoing)\b/i;
 // recognizing the structure). `XXXX`/`####` are admitted ONLY here, in the
 // month-anchored slot, so they never anchor a date bare — mirrors the same
 // false-positive guard `REDACTED_DATE_RE` uses in score.ts.
-const YEAR_FORMS = `\\d{4}|'\\d{2}|20XX|XXXX|####`;
+//
+// Beyond the redaction stubs, this also admits the literal WORD placeholder
+// `Year` that Word/Office templates ship in an unfilled date slot —
+// "Month Year - Month Year" / "Month Year - Present". Like `XXXX`/`####`, it is
+// admitted ONLY in the month-anchored slot (never bare), so it cannot anchor a
+// date on its own. `parseDateRange` then DROPS a placeholder token rather than
+// recording "Month Year" as a real date, so the role still anchors/splits and
+// the placeholder strips off the title — but completeness still flags the role
+// dates as missing. Without this, an unfilled-template role either fails to
+// split (no "Present") or leaks "Month Year" into company/title.
+const YEAR_FORMS = `\\d{4}|'\\d{2}|20XX|XXXX|####|Year`;
+
+// Month token for the range anchors, extended with the literal `Month` word
+// placeholder (see YEAR_FORMS note). Scoped to the anchors only — the shared
+// `MONTH` const and `MONTH_YEAR_RE` are left untouched so education/date-region
+// detection keep requiring a real month name.
+const MONTH_OR_PLACEHOLDER = `(?:${MONTH}|Month)`;
 
 // Shared fragment for one date anchor (Mmm YYYY | 'YY, mm/yyyy, YYYY).
 // Reused by DATE_RANGE_RE's start and end groups. Apostrophe-year keeps
 // DOCX parsing compatible with older resumes that use "Dec '00". The bare-year
 // tail admits `20XX` (unambiguous) but NOT bare `XXXX`/`####` (too weak alone).
-const DATE_ANCHOR = `${MONTH}\\.?\\s+(?:${YEAR_FORMS})|\\d{1,2}[\\/\\-]\\d{4}|20XX|\\d{4}`;
+const DATE_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})|\\d{1,2}[\\/\\-]\\d{4}|20XX|\\d{4}`;
 
 // Strict month-year anchor (no bare-year / numeric-slash forms) for the
 // separator-less branch — bare years adjacent are too weak a signal.
-const MONTH_YEAR_ANCHOR = `${MONTH}\\.?\\s+(?:${YEAR_FORMS})`;
+const MONTH_YEAR_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})`;
 
 /**
  * Date range between two anchors. Captures both halves. Tolerant of spacing,

@@ -555,3 +555,75 @@ describe("parseEntryBlocks — wrapped multi-line role header (#166)", () => {
     expect(blocks).toEqual([]);
   });
 });
+
+/** Build a section from explicit (text, x, y) rows — for two-column banded
+ *  headers where left-column company/title and right-column location/date land
+ *  on separate banded lines that share a visual row (same y). */
+function xySection(
+  rows: Array<{ text: string; x: number; y: number }>,
+): PdfSection {
+  const lines: PdfLine[] = rows.map(({ text, x, y }) => ({
+    page: 1,
+    y,
+    x,
+    items: [],
+    text,
+    maxFontSize: 11,
+    allCaps: false,
+  }));
+  return { name: "experience", lines };
+}
+
+describe("parseEntryBlocks — two-column banded header + placeholder dates (music_resume25)", () => {
+  // Reproduces the structure that broke music_resume25.pdf: column banding
+  // splits each header row by column, so the date anchor (right column) lands
+  // last, separated from its left-column company/title by a banded location and
+  // blank spacer lines — well past a lookback of 2. Plus the dates are unfilled
+  // "Month Year" template placeholders. Synthetic persona per the PII policy.
+  const section = xySection([
+    { text: "Acme Opera", x: 36, y: 219 }, // company (left col, row 1)
+    { text: "Production Intern", x: 36, y: 231 }, // title (left col, row 2)
+    { text: "", x: 104, y: 219 }, // banded blank spacer
+    { text: "", x: 115, y: 231 },
+    { text: "Springfield, IL", x: 522, y: 219 }, // location (right col, row 1)
+    { text: "Month Year - Present", x: 483, y: 231 }, // date anchor (right col, row 2)
+    { text: "• Supported departmental ticketing during productions", x: 54, y: 245 },
+    { text: "• Assisted with audio systems in the performance halls", x: 54, y: 258 },
+    { text: "• Learned about current issues in the industry at seminars", x: 54, y: 272 },
+    { text: "Beta Music Center", x: 36, y: 311 }, // next entry company
+    { text: "Sales Associate", x: 36, y: 324 },
+    { text: "", x: 172, y: 311 },
+    { text: "", x: 133, y: 324 },
+    { text: "Centerville, OH", x: 523, y: 311 },
+    { text: "Month Year - Month Year", x: 463, y: 324 }, // placeholder-placeholder
+    { text: "• Built relationships with customers to match products", x: 54, y: 337 },
+  ]);
+  const blocks = parseEntryBlocks(section, {
+    anchor: "date_range",
+    collectBody: true,
+    headerLookback: 2,
+  });
+
+  it("splits both roles even though one has no real date at all", () => {
+    expect(blocks).toHaveLength(2);
+  });
+
+  it("recovers company + title across the banded location/blank rows", () => {
+    expect(blocks[0].headerLines).toEqual(["Acme Opera", "Production Intern"]);
+    expect(blocks[1].headerLines).toEqual(["Beta Music Center", "Sales Associate"]);
+  });
+
+  it("drops the unfilled placeholder dates rather than recording them", () => {
+    expect(blocks[0].dates).toEqual({});
+    expect(blocks[1].dates).toEqual({});
+  });
+
+  it("does not let a bullet's 'current' word anchor a phantom role, and keeps every bullet with its role", () => {
+    // "current issues" must not split the third bullet off as its own entry.
+    expect(blocks[0].bulletCount).toBe(3);
+    expect(blocks[0].body).toContain("current issues");
+    // The next role's header must not leak into this role's description.
+    expect(blocks[0].body).not.toContain("Beta Music Center");
+    expect(blocks[1].bulletCount).toBe(1);
+  });
+});

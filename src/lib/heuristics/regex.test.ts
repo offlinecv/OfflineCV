@@ -190,6 +190,38 @@ describe("DATE_RANGE_RE — separator-less month-year pairs (#119)", () => {
   });
 });
 
+describe("parseDateRange — unfilled template placeholders (music_resume25)", () => {
+  // Word/Office templates ship the date slot as the literal words "Month Year"
+  // when unfilled. DATE_RANGE_RE recognizes them so the role still anchors and
+  // the placeholder strips off the title — but parseDateRange must NOT report
+  // "Month Year" as a real date, or completeness would stop flagging the dates
+  // as missing.
+  it("anchors a placeholder range but reports no dates (both placeholders)", () => {
+    expect(DATE_RANGE_RE.test("Month Year - Month Year")).toBe(true);
+    DATE_RANGE_RE.lastIndex = 0;
+    expect(parseDateRange("Music Camp Counselor Month Year - Month Year")).toEqual(
+      {},
+    );
+  });
+
+  it("anchors a placeholder-to-Present range but reports no dates", () => {
+    expect(DATE_RANGE_RE.test("Month Year - Present")).toBe(true);
+    DATE_RANGE_RE.lastIndex = 0;
+    expect(parseDateRange("Production Intern Month Year - Present")).toEqual({});
+  });
+
+  it("keeps a real start when only the end is a placeholder", () => {
+    expect(parseDateRange("Jan 2020 - Month Year")).toEqual({
+      start_date: "Jan 2020",
+    });
+  });
+
+  it("does not let the bare word 'Year' anchor a date on its own", () => {
+    expect(DATE_RANGE_RE.test("Five Year Plan, Member")).toBe(false);
+    DATE_RANGE_RE.lastIndex = 0;
+  });
+});
+
 describe("matchSectionAnchorToken — visual-path trailing anchor (#117)", () => {
   it("recovers a section from a sidebar artifact glued onto the header", () => {
     // The two-column flatten that motivates #117: a sidebar value `20%` is
