@@ -22,7 +22,7 @@
  * `useModelSelection.integration.test.tsx`.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
@@ -53,6 +53,31 @@ async function mountPanel(opts: {
   return container;
 }
 
+// Persisted render-state keys FeedbackPanel writes (#193/#194). The CI
+// localStorage shim has no .clear(), so remove them individually; wrap in
+// try/catch to match the component's own fail-silent storage access.
+function resetFeedbackStorage() {
+  for (const k of [
+    "rl_feedback_seen",
+    "rl_feedback_submitted",
+    "rl_star_cta_seen",
+    "rl_gh_stars_cache",
+  ]) {
+    try {
+      localStorage.removeItem(k);
+    } catch {
+      /* shim/private-mode — ignore */
+    }
+  }
+}
+
+// Start each test from clean persisted state — CI shares localStorage across
+// test files too, so another file's FeedbackPanel mount could otherwise leak
+// rl_feedback_submitted / rl_feedback_seen into this file's first test.
+beforeEach(() => {
+  resetFeedbackStorage();
+});
+
 afterEach(() => {
   if (root) act(() => root!.unmount());
   container?.remove();
@@ -60,6 +85,12 @@ afterEach(() => {
   container = undefined;
   vi.resetModules();
   vi.clearAllMocks();
+  // FeedbackPanel persists render-state to localStorage (rl_feedback_seen /
+  // rl_feedback_submitted, #193). jsdom localStorage is shared across tests in
+  // a file, so without this the submit test flips later mounts into "done"
+  // (renders null) and the seen counter accumulates into "compact" mode —
+  // both hide the form. Clear it so every test starts in the fresh "full" state.
+  resetFeedbackStorage();
 });
 
 describe("FeedbackPanel", () => {
