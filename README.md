@@ -69,6 +69,32 @@ for the env vars is this section. To enable telemetry in a local build,
 set `VITE_POSTHOG_KEY` (and optionally `VITE_POSTHOG_HOST`, defaulting to
 `https://us.i.posthog.com`) in the environment at build time.
 
+### Browser storage
+
+Beyond PostHog, the app writes a few functional `localStorage` keys to
+remember UX state across reloads. These are **first-party**, carry **no PII**,
+hold **no tracking or profiling identifier**, and are **not HTTP cookies**
+(`document.cookie` is never touched) — they are boolean/counter UX state
+scoped to your browser:
+
+| Key | Purpose |
+|---|---|
+| `rl_feedback_seen` | counts how many times the feedback ask has rendered; after 2 the panel switches from the full card to a quiet compact star strip |
+| `rl_feedback_submitted` | set after a successful feedback submit so the panel never re-asks in that browser |
+| `rl_star_cta_seen` | one-time flag so the post-feedback GitHub-star prompt shows only once per browser |
+| `rl_gh_stars_cache` | caches the fetched star count (~1h TTL) to avoid re-hitting the GitHub API on every parse |
+
+### GitHub star count
+
+The footer shows the live repo star count via an unauthenticated call to
+`https://api.github.com/repos/resumelint-org/resumelint` (`src/hooks/useGitHubStars.ts`).
+It runs from your browser on app load whenever the ~1h cache
+(`rl_gh_stars_cache`) is stale, and is **fail-silent** — on network error or
+rate-limit (GitHub allows 60 req/hr/IP unauthenticated) the count is hidden
+and the rest of the UI is unaffected. Because the request originates in your
+browser, **your IP address is seen by GitHub** (a US third party) as a result
+of loading the app.
+
 ## Theming
 
 Colors are plain CSS custom properties split into two layers:
