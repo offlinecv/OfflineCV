@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>resumelint — JD spike (dev only)</title>
+    <meta
+      name="description"
+      content="Dev-only spike harness for JD requirement extraction + evidence judging (issue #198 / #156). Not part of the production bundle."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      Dev-only tool page; not subject to the design-token policy that
+      governs feature code under src/components/**. CSS keeps to system
+      colors (Canvas / CanvasText) so the page renders standalone without
+      loading the app's design system.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      body {
+        max-width: 880px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+        color: CanvasText;
+        background: Canvas;
+      }
+      h1 { margin-bottom: 0.25rem; }
+      .subtitle { color: GrayText; margin-top: 0; }
+      label { margin-right: 0.4rem; }
+      select, input[type="number"] {
+        font-size: 1rem;
+        padding: 0.3rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid GrayText;
+        background: Canvas;
+        color: CanvasText;
+      }
+      input[type="number"] { width: 4rem; margin-left: 0.75rem; }
+      button {
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        cursor: pointer;
+        border-radius: 6px;
+        margin-left: 0.75rem;
+      }
+      button[disabled] { opacity: 0.5; cursor: not-allowed; }
+      #status { font-weight: 600; margin: 1rem 0 0.25rem; }
+      #progress { font-family: ui-monospace, monospace; color: GrayText; }
+      #log {
+        background: color-mix(in srgb, CanvasText 92%, Canvas);
+        color: Canvas;
+        padding: 0.75rem;
+        border-radius: 6px;
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+        height: 360px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        margin-top: 1rem;
+      }
+      .downloads {
+        margin-top: 1rem;
+        display: flex;
+        gap: 0.75rem;
+      }
+      .downloads a[hidden] { display: none; }
+      .downloads a {
+        padding: 0.5rem 0.9rem;
+        border: 1px solid currentColor;
+        border-radius: 6px;
+        text-decoration: none;
+      }
+      .note {
+        font-size: 0.9rem;
+        color: GrayText;
+        margin-top: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>JD spike harness</h1>
+    <p class="subtitle">
+      Issue #198 · dev-only · WebGPU required · not bundled into production.
+    </p>
+    <p>
+      Validates Qwen2.5-1.5B for JD requirement-extraction (call 1) and
+      per-requirement evidence-judging (call 2) against 3 inline fixtures:
+      <code>music-intern</code>, <code>software-engineer</code>,
+      <code>years-mismatch</code>. Measures JSON reliability, token budget
+      headroom, and latency over R repeats.
+    </p>
+    <p>
+      One model per tab on purpose: cycling multi-GB models in a single tab
+      is fragile on consumer GPUs. Run each model in a fresh tab, download
+      its report, then open a new tab for the next model.
+    </p>
+    <p>
+      <label for="model">Model:</label>
+      <select id="model"></select>
+      <label for="repeats">Repeats:</label>
+      <input id="repeats" type="number" min="1" max="10" value="3" />
+      <button id="run" type="button">Run spike</button>
+    </p>
+    <p id="status">Idle. Click &ldquo;Run spike&rdquo; to start.</p>
+    <p id="progress">&nbsp;</p>
+    <div class="downloads">
+      <a id="download-json" hidden>Download JSON report</a>
+      <a id="download-md" hidden>Download Markdown report</a>
+    </div>
+    <pre id="log"></pre>
+    <p class="note">
+      Download the Markdown report and paste findings into
+      <a href="https://github.com/resumelint-org/resumelint/issues/156" target="_blank"
+        >issue #156</a
+      >. This page is not committed to <code>dist/</code> — see
+      <code>src/lib/webllm/spike/README.md</code> for details.
+    </p>
+    <script type="module" src="/src/lib/webllm/spike/jd-spike-browser.ts"></script>
+  </body>
+</html>
