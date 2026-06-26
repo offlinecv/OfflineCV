@@ -260,6 +260,12 @@ describe("ResumeRewritePanel", () => {
   });
 
   it("renders every section's before/after in the proposed status", () => {
+    // The proposed view now renders an inline diff (red struck-through removed
+    // text + green added text) instead of a two-column "Original | Proposed"
+    // grid. The section labels and the diff chrome classes must be present;
+    // original/proposed text may be split across multiple diff spans so we
+    // check for the stable substrings that appear as full segments in these
+    // fixtures and the action button.
     const status: ResumeRewriteStatus = {
       kind: "proposed",
       result: okResult,
@@ -268,11 +274,16 @@ describe("ResumeRewritePanel", () => {
     const html = renderToStaticMarkup(
       createElement(ResumeRewritePanel, { status, onDismiss: () => {} }),
     );
+    // Section labels (h4 headings) are unaffected by the diff swap.
     expect(html).toContain("Summary");
-    expect(html).toContain("Engineer with 10 years.");
-    expect(html).toContain("Senior engineer.");
     expect(html).toContain("Engineer — Acme");
+    // Diff chrome classes must exist for the summary and bullet diffs.
+    expect(html).toContain("bg-feedback-error-bg");
+    expect(html).toContain("bg-feedback-success-bg");
+    // "Shipped Foo to 10M users." replaces a single "a" bullet — the full
+    // proposed string appears as one added segment (no shared prefix/suffix).
     expect(html).toContain("Shipped Foo to 10M users.");
+    // Action button.
     expect(html).toContain("Discard");
   });
 

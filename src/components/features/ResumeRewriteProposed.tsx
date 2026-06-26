@@ -23,7 +23,8 @@
  */
 
 import { useMemo } from "react";
-import { Button, InlineResult } from "@design-system";
+import { Button, InlineResult, InlineDiff } from "@design-system";
+import { computeTextDiff } from "../../lib/diff/text-diff.ts";
 import type {
   ResumeRewriteResult,
   SectionOutcome,
@@ -77,24 +78,12 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
         <h4 className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
           {outcome.input.label}
         </h4>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wider text-content-muted">
-              Original
-            </span>
-            <p className="text-xs leading-snug text-content-secondary">
-              {outcome.input.text}
-            </p>
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wider text-content-muted">
-              Proposed
-            </span>
-            <p className="text-xs leading-snug text-content-primary">
-              {outcome.data.text || "(no rewrite returned)"}
-            </p>
-          </div>
-        </div>
+        <InlineDiff
+          segments={computeTextDiff(
+            outcome.input.text,
+            outcome.data.text || "",
+          )}
+        />
       </div>
     );
   }
@@ -106,46 +95,12 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
       <h4 className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
         {outcome.input.label}
       </h4>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <BulletList
-          label={`Original (${originalBullets.length})`}
-          bullets={originalBullets}
-          textClass="text-content-secondary"
-        />
-        <BulletList
-          label={`Proposed (${outcome.data.bullets.length})`}
-          bullets={outcome.data.bullets}
-          textClass="text-content-primary"
-        />
-      </div>
-    </div>
-  );
-}
-
-function BulletList({
-  label,
-  bullets,
-  textClass,
-}: {
-  label: string;
-  bullets: readonly string[];
-  textClass: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <h5 className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
-        {label}
-      </h5>
-      <ul className={`flex flex-col gap-1.5 text-xs leading-snug list-none ${textClass}`}>
-        {bullets.map((b, i) => (
-          <li key={i} className="flex gap-1.5">
-            <span aria-hidden="true" className="font-mono text-content-muted">
-              •
-            </span>
-            <span>{b}</span>
-          </li>
-        ))}
-      </ul>
+      <InlineDiff
+        segments={computeTextDiff(
+          originalBullets.map((b) => `• ${b}`).join("\n"),
+          outcome.data.bullets.map((b) => `• ${b}`).join("\n"),
+        )}
+      />
     </div>
   );
 }

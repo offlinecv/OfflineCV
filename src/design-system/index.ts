@@ -28,3 +28,4 @@ export * from "./shared/ErrorState.tsx";
 export * from "./shared/ErrorBoundary.tsx";
 export * from "./shared/UpdateBanner.tsx";
 export * from "./shared/GitHubStarCta.tsx";
+export * from "./shared/InlineDiff.tsx";
