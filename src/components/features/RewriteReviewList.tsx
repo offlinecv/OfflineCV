@@ -38,8 +38,10 @@ function oldSideText(pair: AlignedPair): string {
   return pair.kind === "added" ? "" : pair.original;
 }
 
-/** One reviewable bullet: redline + accept/reject + (for non-removals) edit. */
-function BulletReviewRow({
+/** One reviewable bullet: redline + accept/reject + (for non-removals) edit.
+ *  Exported so the whole-résumé review (ResumeRewriteProposed) can reuse the
+ *  same row under section headers — the single reviewable-bullet primitive. */
+export function BulletReviewRow({
   pair,
   review,
 }: {

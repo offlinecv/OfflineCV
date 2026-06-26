@@ -137,6 +137,47 @@ export function resolveBulletActions(
   return actions;
 }
 
+/** A write resolved against a real `BulletObservation.index`. The whole-résumé
+ *  review (`ResumeRewriteProposed`) reviews many sections under one combined
+ *  decision map, then resolves each section's accepted actions to these — the
+ *  section-relative `originalIndex` is joined to `obsIndices` here, and any
+ *  unmapped index (no observation, or a `-1` placeholder) is dropped. */
+export type ResolvedWrite =
+  | { kind: "replace"; obsIndex: number; text: string }
+  | { kind: "remove"; obsIndex: number }
+  | { kind: "add"; text: string };
+
+/**
+ * Resolve one section's accepted decisions into concrete writes against the
+ * reconstructed-résumé edit model. `obsIndices` is parallel to the section's
+ * bullet list (the same order `alignBullets` saw), so `originalIndex` indexes
+ * straight into it; an absent or negative index drops the write rather than
+ * editing the wrong bullet. `add` actions carry no index and always pass
+ * through. Pure — no I/O, the caller dispatches the returned writes.
+ */
+export function resolveSectionWrites(
+  pairs: readonly AlignedPair[],
+  obsIndices: readonly number[],
+  decisions: Decisions,
+  edits: Edits = new Map(),
+): ResolvedWrite[] {
+  const writes: ResolvedWrite[] = [];
+  for (const action of resolveBulletActions(pairs, decisions, edits)) {
+    if (action.kind === "add") {
+      writes.push({ kind: "add", text: action.text });
+      continue;
+    }
+    const obsIndex = obsIndices[action.originalIndex];
+    if (obsIndex === undefined || obsIndex < 0) continue;
+    writes.push(
+      action.kind === "replace"
+        ? { kind: "replace", obsIndex, text: action.text }
+        : { kind: "remove", obsIndex },
+    );
+  }
+  return writes;
+}
+
 /** Count of pairs the user has accepted — drives the global "Apply N" bar. */
 export function acceptedCount(
   pairs: readonly AlignedPair[],

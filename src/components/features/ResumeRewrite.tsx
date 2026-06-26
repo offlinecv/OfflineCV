@@ -40,7 +40,10 @@ import {
 } from "../../hooks/useResumeRewrite.ts";
 import type { SectionInput, SectionOutcome } from "../../lib/webllm/rewrite-resume.ts";
 import type { PageTarget } from "../../lib/webllm/steering.ts";
-import { ProposedPanel } from "./ResumeRewriteProposed.tsx";
+import {
+  ProposedPanel,
+  type ResumeRewriteApply,
+} from "./ResumeRewriteProposed.tsx";
 
 export interface ResumeRewriteParts {
   /** The CTA button; opens the steering dialog (#210 steering box now lives
@@ -69,6 +72,7 @@ const PRESET_HINTS = new Set(PAGE_PRESETS.map((p) => p.hint).filter(Boolean));
 
 export function useResumeRewriteUi(
   sections: readonly SectionInput[],
+  applyBySection?: ResumeRewriteApply,
 ): ResumeRewriteParts {
   const controller = useResumeRewrite(sections);
 
@@ -80,7 +84,11 @@ export function useResumeRewriteUi(
 
   const panel =
     controller.status.kind === "idle" ? null : (
-      <ResumeRewritePanel status={controller.status} onDismiss={controller.dismiss} />
+      <ResumeRewritePanel
+        status={controller.status}
+        onDismiss={controller.dismiss}
+        applyBySection={applyBySection}
+      />
     );
 
   return { trigger, panel };
@@ -214,9 +222,11 @@ function RewriteSteeringBox({
 export function ResumeRewritePanel({
   status,
   onDismiss,
+  applyBySection,
 }: {
   status: ResumeRewriteStatus;
   onDismiss: () => void;
+  applyBySection?: ResumeRewriteApply;
 }) {
   if (status.kind === "idle") return null;
   if (status.kind === "loading") {
@@ -253,7 +263,13 @@ export function ResumeRewritePanel({
       </div>
     );
   }
-  return <ProposedPanel result={status.result} onDismiss={onDismiss} />;
+  return (
+    <ProposedPanel
+      result={status.result}
+      onDismiss={onDismiss}
+      applyBySection={applyBySection}
+    />
+  );
 }
 
 export function StepIndicator({
