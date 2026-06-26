@@ -44,7 +44,8 @@ import type {
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 import { useSectionRewriteLock } from "../../hooks/useSectionRewriteLock.ts";
 import { useModelSelection } from "../../hooks/useModelSelection.ts";
-import { Button, ModelLoadProgress, InlineResult } from "@design-system";
+import { Button, ModelLoadProgress, InlineResult, InlineDiff } from "@design-system";
+import { computeTextDiff } from "../../lib/diff/text-diff.ts";
 
 /** What `useSectionRewrite` hands back so the caller can place the trigger and
  *  the result panel in separate slots (trigger beside the role title, panel
@@ -292,18 +293,12 @@ export function ProposedSection({
         />
       )}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <BulletColumn
-          label={`Original (${original.length})`}
-          bullets={original}
-          textClass="text-content-secondary"
-        />
-        <BulletColumn
-          label={`Proposed (${result.bullets.length})`}
-          bullets={result.bullets}
-          textClass="text-content-primary"
-        />
-      </div>
+      <InlineDiff
+        segments={computeTextDiff(
+          original.map((b) => `• ${b}`).join("\n"),
+          result.bullets.map((b) => `• ${b}`).join("\n"),
+        )}
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -324,34 +319,6 @@ export function ProposedSection({
         </Button>
       </div>
     </InlineResult>
-  );
-}
-
-function BulletColumn({
-  label,
-  bullets,
-  textClass,
-}: {
-  label: string;
-  bullets: readonly string[];
-  textClass: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
-        {label}
-      </h4>
-      <ul className={`flex flex-col gap-1.5 text-xs leading-snug list-none ${textClass}`}>
-        {bullets.map((b, i) => (
-          <li key={i} className="flex gap-1.5">
-            <span className="font-mono text-content-muted" aria-hidden="true">
-              •
-            </span>
-            <span>{b}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

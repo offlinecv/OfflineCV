@@ -160,15 +160,23 @@ describe("ProposedSection", () => {
     expect(html).toContain('role="alert"');
   });
 
-  it("renders the original and proposed bullet counts in the column headings", () => {
+  it("renders the original and proposed bullet text in the inline diff", () => {
+    // The inline diff replaces the two-column "Original (N) | Proposed (N)"
+    // view — both original and proposed text appear as diff spans, not column
+    // headings. Verify the diff output contains the bullet text and the
+    // correct diff chrome classes.
     const html = render({
       bullets: ["one", "two", "three"],
       numbersPreserved: true,
       droppedNumbers: [],
       addedNumbers: [],
     });
-    expect(html).toContain("Original (2)");
-    expect(html).toContain("Proposed (3)");
+    // Original bullets came from ["Original bullet 1.", "Original bullet 2."].
+    // At least removed-text spans (original) and added-text spans (proposed) must exist.
+    expect(html).toContain("bg-feedback-error-bg");
+    expect(html).toContain("bg-feedback-success-bg");
+    // "two" and "three" appear as proposed (added) segments in the diff output.
+    expect(html).toContain("two");
   });
 
   it("flips the copy button label after a successful copy-all", () => {
