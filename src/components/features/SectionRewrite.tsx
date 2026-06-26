@@ -79,6 +79,46 @@ export interface SectionRewriteApply {
 /** Stable empty alignment so the review hook doesn't reset on every idle render. */
 const NO_PAIRS: AlignedPair[] = [];
 
+/** Sparkle glyph for the (idle) rewrite trigger. Decorative — the button owns
+ *  the label/title. */
+function WandIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 1.5l1 2.7 2.7 1-2.7 1-1 2.7-1-2.7-2.7-1 2.7-1z" />
+      <path d="M3.8 9.3l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z" />
+    </svg>
+  );
+}
+
+/** Spinner shown on the trigger while the model loads / rewrites. */
+function SpinnerIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="animate-spin"
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <circle cx="8" cy="8" r="6" className="opacity-25" />
+      <path d="M8 2a6 6 0 016 6" strokeLinecap="round" className="opacity-90" />
+    </svg>
+  );
+}
+
 /** What `useSectionRewrite` hands back so the caller can place the trigger and
  *  the result panel in separate slots (trigger beside the role title, panel
  *  full-width below the bullets). Both are `null` when the feature is
@@ -284,16 +324,17 @@ export function useSectionRewrite(
   const myBusy = status.kind === "loading" || status.kind === "rewriting";
   const lockedByOther = isLocked && !myBusy;
 
+  const triggerTitle = labelFor(status, lockedByOther);
   const trigger = (
     <Button
-      variant="ghost"
-      size="sm"
+      variant="icon"
       onClick={onClick}
       disabled={isLocked}
-      aria-label="Rewrite all bullets in this role"
-      className="shrink-0 rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-[11px] text-content-secondary hover:border-border hover:bg-surface-hover"
+      aria-label={`${triggerTitle} — rewrites every bullet in this role`}
+      title={triggerTitle}
+      className="h-7 w-7 shrink-0 rounded-md text-content-muted hover:text-brand-amber disabled:opacity-50"
     >
-      {labelFor(status, lockedByOther)}
+      {myBusy ? <SpinnerIcon /> : <WandIcon />}
     </Button>
   );
 

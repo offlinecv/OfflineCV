@@ -12,15 +12,21 @@
  *
  * Reuse (CLAUDE.md 3-tier rule):
  *   - `Button` primitive for every control — no raw `<button>`.
- *   - `InlineDiff` + `computeTextDiff` (#209) for each row's redline.
+ *   - `InlineDiff` + `computeWordDiff` (#209) for each row's redline.
  *   - `EditableField` (multiline) for edit-in-place — the one inline-edit
  *     primitive, never a hand-rolled textarea.
  *   - Wrapped by the caller in the shared `InlineResult` strip, so this owns no
  *     panel chrome of its own.
+ *
+ * Row layout (readability, #211 follow-up): the clean *final* bullet is the
+ * primary line (the editable field), with the redline demoted to a collapsed
+ * "Show changes" disclosure underneath. Accept / Reject are icon-only toggles
+ * (✓ / ✗) so a long list of rows reads as content, not a wall of buttons —
+ * each keeps its descriptive `aria-label` + a hover `title`.
  */
 
 import { Button, EditableField, InlineDiff } from "@design-system";
-import { computeTextDiff } from "../../lib/diff/text-diff.ts";
+import { computeWordDiff } from "../../lib/diff/text-diff.ts";
 import type { AlignedPair } from "../../lib/rewrite-review/align-bullets.ts";
 import type { RewriteReview } from "../../hooks/useRewriteReview.ts";
 
@@ -36,6 +42,63 @@ function newSideText(pair: AlignedPair, review: RewriteReview): string {
 
 function oldSideText(pair: AlignedPair): string {
   return pair.kind === "added" ? "" : pair.original;
+}
+
+/** ✓ glyph for the Accept toggle. Decorative — the button owns the label. */
+function CheckIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="12"
+      height="12"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 8.5l3.5 3.5L13 4" />
+    </svg>
+  );
+}
+
+/** ✗ glyph for the Reject toggle. Decorative — the button owns the label. */
+function CrossIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="11"
+      height="11"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M3 3l10 10M13 3L3 13" />
+    </svg>
+  );
+}
+
+/** Disclosure chevron; rotates 90° when the parent <details> is open. */
+function DisclosureChevron() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="10"
+      height="10"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="transition-transform [details[open]_&]:rotate-90"
+    >
+      <path d="M6 4l4 4-4 4" />
+    </svg>
+  );
 }
 
 /** One reviewable bullet: redline + accept/reject + (for non-removals) edit.
@@ -60,54 +123,76 @@ export function BulletReviewRow({
         ? "Removed bullet"
         : "Edited bullet";
 
+  const lower = kindLabel.toLowerCase();
+
   return (
     <li className="flex flex-col gap-1.5 rounded border border-border-light bg-surface-card p-2.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
           {kindLabel}
         </span>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           <Button
-            variant={accepted ? "primary" : "ghost"}
-            size="sm"
+            variant={accepted ? "primary" : "icon"}
             onClick={() => review.accept(pair.id)}
             aria-pressed={accepted}
-            aria-label={`Accept this ${kindLabel.toLowerCase()}`}
-            className="rounded-md px-2 py-0.5 text-[11px]"
-          >
-            {accepted ? "Accepted" : "Accept"}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => review.reject(pair.id)}
-            aria-pressed={rejected}
-            aria-label={`Reject this ${kindLabel.toLowerCase()}`}
-            className={`rounded-md px-2 py-0.5 text-[11px] ${
-              rejected
-                ? "border border-border bg-surface-hover text-content-secondary"
-                : "text-content-tertiary"
+            aria-label={`Accept this ${lower}`}
+            title={accepted ? "Accepted" : "Accept"}
+            className={`h-7 w-7 rounded-md ${
+              accepted ? "" : "text-content-tertiary hover:text-feedback-success-text"
             }`}
           >
-            {rejected ? "Rejected" : "Reject"}
+            <CheckIcon />
+          </Button>
+          <Button
+            variant="icon"
+            onClick={() => review.reject(pair.id)}
+            aria-pressed={rejected}
+            aria-label={`Reject this ${lower}`}
+            title={rejected ? "Rejected" : "Reject"}
+            className={`h-7 w-7 rounded-md ${
+              rejected
+                ? "border border-border bg-surface-hover text-content-secondary"
+                : "text-content-tertiary hover:text-feedback-error-text"
+            }`}
+          >
+            <CrossIcon />
           </Button>
         </div>
       </div>
 
-      <InlineDiff
-        segments={computeTextDiff(oldSideText(pair), newSideText(pair, review))}
-      />
-
-      {editable && (
-        <EditableField
-          value={newSideText(pair, review)}
-          placeholder="edit this bullet"
-          label="Edit proposed bullet"
-          textSize="xs"
-          display="inline"
-          multiline
-          onCommit={(v) => review.setEdit(pair.id, v)}
-        />
+      {editable ? (
+        <>
+          {/* Primary line: the clean, finished bullet — editable in place. */}
+          <EditableField
+            value={newSideText(pair, review)}
+            placeholder="edit this bullet"
+            label="Edit proposed bullet"
+            textSize="sm"
+            display="inline"
+            multiline
+            onCommit={(v) => review.setEdit(pair.id, v)}
+          />
+          {/* Secondary: the redline, collapsed by default. Word-level so it
+              reads as whole words, not the char-level "SupportLed" mash-up. */}
+          <details className="mt-0.5">
+            <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary list-none [&::-webkit-details-marker]:hidden">
+              <DisclosureChevron />
+              Show changes
+            </summary>
+            <div className="mt-1.5">
+              <InlineDiff
+                segments={computeWordDiff(
+                  oldSideText(pair),
+                  newSideText(pair, review),
+                )}
+              />
+            </div>
+          </details>
+        </>
+      ) : (
+        /* Removed bullet — no final version; show the struck original. */
+        <InlineDiff segments={computeWordDiff(pair.original, "")} />
       )}
     </li>
   );

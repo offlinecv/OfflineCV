@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import { computeTextDiff } from "./text-diff.ts";
+import { computeTextDiff, computeWordDiff } from "./text-diff.ts";
 
 describe("computeTextDiff", () => {
   it("(a) equal strings → single equal segment", () => {
@@ -45,5 +45,54 @@ describe("computeTextDiff", () => {
       .map((s) => s.text)
       .join("");
     expect(reconstructedOld).toBe(oldText);
+  });
+});
+
+describe("computeWordDiff", () => {
+  it("snaps changes to whole-word boundaries (no char-level mash-up)", () => {
+    // The bug it fixes: char diff turns "Support"→"Led" into "SupportLed".
+    const segments = computeWordDiff(
+      "Support departmental assignments",
+      "Led departmental assignments",
+    );
+    // The first word is a clean whole-word remove + add; the shared tail stays
+    // a single equal segment — no segment splits inside a word.
+    expect(segments).toContainEqual({ type: "removed", text: "Support" });
+    expect(segments).toContainEqual({ type: "added", text: "Led" });
+    expect(
+      segments.some(
+        (s) => s.type === "equal" && s.text.includes(" departmental assignments"),
+      ),
+    ).toBe(true);
+    // No segment is a partial word fragment like "Suppor" / "Led".
+    expect(segments.some((s) => s.text === "Suppor" || s.text === "t")).toBe(
+      false,
+    );
+  });
+
+  it("round-trips both sides exactly (whitespace preserved)", () => {
+    const oldText = "Led a team of 3 engineers";
+    const newText = "Managed a team of 5 engineers and shipped 2 features";
+    const segments = computeWordDiff(oldText, newText);
+    expect(
+      segments
+        .filter((s) => s.type !== "removed")
+        .map((s) => s.text)
+        .join(""),
+    ).toBe(newText);
+    expect(
+      segments
+        .filter((s) => s.type !== "added")
+        .map((s) => s.text)
+        .join(""),
+    ).toBe(oldText);
+  });
+
+  it("handles the degenerate edges like computeTextDiff", () => {
+    expect(computeWordDiff("same", "same")).toEqual([
+      { type: "equal", text: "same" },
+    ]);
+    expect(computeWordDiff("", "x")).toEqual([{ type: "added", text: "x" }]);
+    expect(computeWordDiff("x", "")).toEqual([{ type: "removed", text: "x" }]);
   });
 });
