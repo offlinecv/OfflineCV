@@ -20,8 +20,7 @@
       "location",
       "phone",
       "phoneIsValid",
-      "skills",
-      "website_url"
+      "skills"
     ],
     "skillsCount": 6,
     "experienceCount": 2,

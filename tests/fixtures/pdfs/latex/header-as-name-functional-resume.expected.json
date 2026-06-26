@@ -21,8 +21,7 @@
       "location",
       "phone",
       "phoneIsValid",
-      "summary",
-      "website_url"
+      "summary"
     ],
     "skillsCount": 0,
     "experienceCount": 2,
