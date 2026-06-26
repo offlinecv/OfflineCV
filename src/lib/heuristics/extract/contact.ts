@@ -186,6 +186,27 @@ function extractLocation(lines: PdfLine[]): string | undefined {
   return undefined;
 }
 
+/** TLDs we accept on a *scheme-less* bare-domain website/portfolio candidate.
+ *  `URL_RE`'s domain branch matches any `token.token`, so a skill like
+ *  `Node.js`, a sentence's `etc.`, or a filename looks like a domain. Requiring
+ *  a recognized TLD keeps real bare hosts (`jane.dev`) while rejecting those
+ *  false positives. URLs that carry an explicit scheme or `www.` bypass this. */
+const COMMON_WEBSITE_TLDS = new Set([
+  "com", "org", "net", "io", "dev", "me", "co", "app", "ai", "xyz", "tech",
+  "page", "site", "info", "blog", "design", "edu", "gov", "us", "uk", "ca",
+  "in", "au", "de", "fr", "nl", "eu",
+]);
+
+/** True when a `URL_RE` hit is plausibly a real website, not a `Node.js`-style
+ *  token that merely contains a dot. A scheme or `www.` is sufficient; a bare
+ *  host must end in a recognized TLD. */
+function looksLikeRealWebsite(u: string): boolean {
+  if (/^https?:\/\//i.test(u) || /^www\./i.test(u)) return true;
+  const host = u.toLowerCase().split("/")[0];
+  const tld = host.slice(host.lastIndexOf(".") + 1);
+  return COMMON_WEBSITE_TLDS.has(tld);
+}
+
 /**
  * Collects URLs from `joined` that are not LinkedIn or GitHub links and
  * splits them into `portfolio` and `website` buckets.
@@ -198,9 +219,18 @@ function extractOtherUrls(joined: string): {
   portfolio: string | undefined;
   website: string | undefined;
 } {
-  const others = allMatches(URL_RE, joined).filter((u) => {
+  // Blank out emails first: an address like `jane@uw.edu` carries a bare domain
+  // (`uw.edu`) and `URL_RE`'s domain branch matches it (the `@` is a word
+  // boundary), phantom-promoting the email's host to a website. LinkedIn/GitHub
+  // and portfolio/website all want real links, never the email domain.
+  const withoutEmails = joined.replace(EMAIL_RE, " ");
+  const others = allMatches(URL_RE, withoutEmails).filter((u) => {
     const lower = u.toLowerCase();
-    return !lower.includes("linkedin.com") && !lower.includes("github.com");
+    if (lower.includes("linkedin.com") || lower.includes("github.com")) {
+      return false;
+    }
+    // Reject `token.token` false positives (skills like `Node.js`, `etc.`).
+    return looksLikeRealWebsite(u);
   });
   const portfolio = others.find((u) =>
     /(portfolio|\.me\b|\.io\b|\.dev\b|behance|dribbble|medium)/i.test(u),

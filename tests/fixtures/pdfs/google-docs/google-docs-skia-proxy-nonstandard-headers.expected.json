@@ -21,8 +21,7 @@
       "phoneIsValid",
       "projects",
       "skills",
-      "summary",
-      "website_url"
+      "summary"
     ],
     "skillsCount": 9,
     "experienceCount": 3,
