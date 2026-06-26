@@ -52,8 +52,11 @@ import {
   ResumeBulletRow,
   BulletFlagLegend,
 } from "./ReconstructedRole.tsx";
+import { useMemo } from "react";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
+import type { SectionRewriteApply } from "./SectionRewrite.tsx";
+import type { ResumeRewriteApply } from "./ResumeRewriteProposed.tsx";
 import type { SectionInput } from "../../lib/webllm/rewrite-resume.ts";
 import type {
   ResumeProject,
@@ -334,6 +337,7 @@ function ExperienceSection({
   onExperienceFieldChange,
   bulletOverrides,
   onBulletChange,
+  onRemoveBullet,
   addedExperience,
   originalCount,
   onAddEntry,
@@ -354,6 +358,8 @@ function ExperienceSection({
   ) => void;
   bulletOverrides: BulletOverrides;
   onBulletChange: (index: number, value: string) => void;
+  /** Drop a parsed bullet by BulletObservation.index (rewrite-review apply, #211). */
+  onRemoveBullet: (index: number) => void;
   /** User-added experience entries, append-aligned to indices ≥ originalCount. */
   addedExperience: AddedEntry[];
   /** Count of PARSED experience roles; indices at/above this are user-added. */
@@ -365,12 +371,37 @@ function ExperienceSection({
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
+  // Per-section write-back handlers for the whole-résumé review (#211 apply on
+  // the whole-résumé path), keyed by the same `experience:<index>` id
+  // `buildResumeSections` mints. `obsIndices` is parallel to each section's
+  // bullet list (same order the model saw); adds target that role's entry key
+  // (its added id, or the parsed-entry key). Mirrors `RoleEntry`'s per-role
+  // `SectionRewriteApply` so both rewrite paths write through one edit model.
+  const rewriteApplyBySection = useMemo<ResumeRewriteApply>(() => {
+    const map = new Map<string, SectionRewriteApply>();
+    for (const group of groups) {
+      const idx = group.experienceIndex;
+      if (idx === null) continue;
+      const added =
+        idx >= originalCount ? addedExperience[idx - originalCount] : undefined;
+      const entryKey = added ? added.id : parsedEntryKey("experience", idx);
+      map.set(`experience:${idx}`, {
+        obsIndices: group.bullets.map((b) => b.index),
+        onReplace: (obsIndex, text) => onBulletChange(obsIndex, text),
+        onRemove: (obsIndex) => onRemoveBullet(obsIndex),
+        onAdd: (text) => onAddBullet(entryKey, text),
+      });
+    }
+    return map;
+  }, [groups, originalCount, addedExperience, onBulletChange, onRemoveBullet, onAddBullet]);
   // The whole-résumé rewrite CTA (#67) lives at the top of Experience next to
   // the picker. Trigger + panel render only when WebGPU is available AND
   // there's at least one rewriteable section — same silent-absence rule as
   // SectionRewrite. The hook owns the WebGPU/empty-input gating.
-  const { trigger: resumeRewriteTrigger, panel: resumeRewritePanel } =
-    useResumeRewriteUi(resumeSections);
+  const {
+    trigger: resumeRewriteTrigger,
+    panel: resumeRewritePanel,
+  } = useResumeRewriteUi(resumeSections, rewriteApplyBySection);
   return (
     <section className="flex flex-col gap-3">
       {/* Heading row: the flag legend sits beside the Experience title (next to
@@ -426,6 +457,7 @@ function ExperienceSection({
                 }
                 bulletOverrides={bulletOverrides}
                 onBulletChange={onBulletChange}
+                onRemoveBullet={onRemoveBullet}
                 onAddBullet={(text) =>
                   onAddBullet(
                     added ? added.id : parsedEntryKey("experience", idx),
@@ -744,6 +776,7 @@ export function ReconstructedResume({
     setExperienceField,
     bulletOverrides,
     setBulletField,
+    removeBullet,
     educationOverrides,
     setEducationField,
     addEntry,
@@ -873,6 +906,7 @@ export function ReconstructedResume({
         }
         bulletOverrides={bulletOverrides}
         onBulletChange={(index, value) => setBulletField(index, value)}
+        onRemoveBullet={(index) => removeBullet(index)}
         addedExperience={addedExperience}
         originalCount={originalExpCount}
         onAddEntry={() => addEntry("experience")}

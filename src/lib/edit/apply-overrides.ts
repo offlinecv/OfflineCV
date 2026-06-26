@@ -168,6 +168,80 @@ function replaceBulletInDescriptions(
   }
 }
 
+/**
+ * Remove the first rawText line whose normalised form equals `originalText`.
+ * Returns the text unchanged when no line matches. Mirrors
+ * `replaceBulletInRawText`'s first-match contract, but drops the line entirely
+ * (the rewrite-review "accept this removal" path, #211).
+ */
+function removeBulletFromRawText(
+  rawText: string,
+  originalText: string,
+): string {
+  const target = normalizeBulletText(originalText);
+  if (!target) return rawText;
+  const lines = rawText.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (normalizeBulletText(lines[i]) !== target) continue;
+    lines.splice(i, 1);
+    return lines.join("\n");
+  }
+  return rawText;
+}
+
+/**
+ * Remove the first accomplishment-section line whose normalised form equals
+ * `originalText`, returning a NEW {@link SectionedResume} with only the mutated
+ * section's array cloned. This is the pool the anonymous scorer grades from
+ * (#133), so an accepted removal must drop the line here to move the score.
+ */
+function removeBulletFromSections(
+  sections: SectionedResume,
+  originalText: string,
+): SectionedResume {
+  const target = normalizeBulletText(originalText);
+  if (!target) return sections;
+  for (const name of sections.accomplishmentSections) {
+    const lines = sections.byName.get(name);
+    if (!lines) continue;
+    for (let i = 0; i < lines.length; i++) {
+      if (normalizeBulletText(lines[i]) !== target) continue;
+      const nextLines = lines.slice();
+      nextLines.splice(i, 1);
+      const nextByName = new Map<SectionName | "profile", readonly string[]>(
+        sections.byName,
+      );
+      nextByName.set(name, nextLines);
+      return { ...sections, byName: nextByName };
+    }
+  }
+  return sections;
+}
+
+/**
+ * Remove the first description line (in any role) whose normalised form equals
+ * `originalText`, mutating the cloned experience entries in place. Mirrors
+ * `replaceBulletInDescriptions`' first-match tiebreak.
+ */
+function removeBulletFromDescriptions(
+  experience: HeuristicParsedResume["experience"],
+  originalText: string,
+): void {
+  const target = normalizeBulletText(originalText);
+  if (!target) return;
+  for (const exp of experience) {
+    if (!exp.description) continue;
+    const descLines = exp.description.split("\n");
+    for (let i = 0; i < descLines.length; i++) {
+      if (normalizeBulletText(descLines[i]) === target) {
+        descLines.splice(i, 1);
+        exp.description = descLines.join("\n");
+        return; // first-match tiebreak
+      }
+    }
+  }
+}
+
 /** Leading bullet/numbered markers — mirrors group-bullets.ts LEADING_MARKER_RE. */
 const LEADING_MARKER_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)]) */;
 
@@ -214,6 +288,7 @@ export function applyOverrides(
   skills: SkillsOverride = { removed: [], added: [] },
   addedEntries: readonly AddedEntry[] = [],
   addedBullets: AddedBullets = {},
+  removedBullets: ReadonlySet<number> = new Set(),
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -273,6 +348,20 @@ export function applyOverrides(
     nextRawText = replaceBulletInRawText(nextRawText, obs.text, edited);
     nextSections = replaceBulletInSections(nextSections, obs.text, edited);
     replaceBulletInDescriptions(nextParsed.experience, obs.text, edited);
+  }
+
+  // ── Removed bullets — drop the line from the pool, rawText, description ────
+  // Accepted "this bullet was removed" decisions from the rewrite review (#211).
+  // Removal changes the bullet COUNT, so re-grading produces fresh
+  // BulletObservation indices; that's fine because removals are applied as a
+  // batch and the proposal is dismissed afterward (the override maps that key
+  // by index are reconciled on the next render against the new observations).
+  for (const idx of removedBullets) {
+    const obs = byIndex.get(idx);
+    if (!obs) continue;
+    nextRawText = removeBulletFromRawText(nextRawText, obs.text);
+    nextSections = removeBulletFromSections(nextSections, obs.text);
+    removeBulletFromDescriptions(nextParsed.experience, obs.text);
   }
 
   // ── Education fields ──────────────────────────────────────────────────────

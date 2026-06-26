@@ -41,9 +41,12 @@ interface DialogProps {
   /** Required when `title` is omitted — the accessible name for the dialog. */
   ariaLabel?: string;
   /**
-   * Optional class for the inner panel layout (caller-side flex/gap,
-   * max-width, etc.). Chrome (radius/border/bg/padding) stays owned by the
-   * primitive.
+   * Optional classes appended to the `<dialog>` element itself — caller-side
+   * positioning/sizing (e.g. `fixed left-1/2 -translate-x-1/2`, max-width).
+   * Use positioning/layout utilities only: the chrome (radius/border/bg/
+   * padding) and the UA `dialog:not([open]){display:none}` rule that hides a
+   * closed dialog stay owned by the primitive, so don't pass `display`/`hidden`
+   * utilities here — they'd break the closed-state hide.
    */
   className?: string;
   children: ReactNode;

@@ -3,6 +3,7 @@
 
 import { cleanRewriteLine } from "./post-process.ts";
 import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import { buildSteeringSuffix, type RewriteSteering } from "./steering.ts";
 import type { WebLlmEngine } from "./types.ts";
 import { acquireInference, releaseInference } from "./web-llm.ts";
 
@@ -55,21 +56,31 @@ export function buildSummaryUserPrompt(summary: string): string {
  * SYSTEM message, not the user message, so small instruct models don't
  * read the prior-section preview as content to echo.
  */
-export function buildSummarySystemPrompt(context?: string): string {
-  if (!context || context.trim().length === 0) {
-    return SUMMARY_REWRITE_SYSTEM_PROMPT;
-  }
-  return `${SUMMARY_REWRITE_SYSTEM_PROMPT}
+export function buildSummarySystemPrompt(
+  context?: string,
+  steering?: RewriteSteering,
+): string {
+  const base =
+    !context || context.trim().length === 0
+      ? SUMMARY_REWRITE_SYSTEM_PROMPT
+      : `${SUMMARY_REWRITE_SYSTEM_PROMPT}
 
 Other sections of this résumé will be rewritten next. The user's NEXT message contains the summary paragraph — only rewrite THAT. Do not include content from later sections in your output.
 
 Context for tone consistency (reference only — never echo into your output):
 ${context.trim()}`;
+  return `${base}${buildSteeringSuffix(steering)}`;
 }
 
 export interface SummaryRewriteOptions {
   /** Rolling soft-constraint brief from the chain-of-sections orchestrator. */
   context?: string;
+  /**
+   * User-supplied rewrite steering (#210): freeform instructions + an optional
+   * page-length target, appended to the SYSTEM message after the guardrails.
+   * Undefined → no behaviour change.
+   */
+  steering?: RewriteSteering;
 }
 
 export interface SummaryRewriteResult {
@@ -107,7 +118,7 @@ export async function rewriteSummaryWithLlm(
       messages: [
         {
           role: "system",
-          content: buildSummarySystemPrompt(options.context),
+          content: buildSummarySystemPrompt(options.context, options.steering),
         },
         { role: "user", content: buildSummaryUserPrompt(summary) },
       ],
