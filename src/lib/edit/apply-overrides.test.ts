@@ -212,6 +212,52 @@ describe("applyOverrides", () => {
     );
   });
 
+  it("removes a bullet from rawText, sections, and the role description", () => {
+    const rawText = "• Built a thing\n• Shipped another thing";
+    const {
+      parsed: out,
+      rawText: outRaw,
+      sections: outSections,
+    } = applyOverrides(
+      baseParsed(),
+      rawText,
+      makeSections(["• Built a thing", "• Shipped another thing"]),
+      {},
+      {},
+      {},
+      [obs(0, "Built a thing"), obs(1, "Shipped another thing")],
+      {},
+      undefined,
+      [],
+      {},
+      new Set([0]),
+    );
+    expect(outRaw).toBe("• Shipped another thing");
+    expect(out.experience[0].description).toBe("Shipped another thing");
+    expect(outSections.byName.get("experience")).toEqual([
+      "• Shipped another thing",
+    ]);
+  });
+
+  it("removal is a no-op when the index has no matching observation", () => {
+    const rawText = "• Built a thing\n• Shipped another thing";
+    const { rawText: outRaw } = applyOverrides(
+      baseParsed(),
+      rawText,
+      makeSections(["• Built a thing", "• Shipped another thing"]),
+      {},
+      {},
+      {},
+      [obs(0, "Built a thing")],
+      {},
+      undefined,
+      [],
+      {},
+      new Set([99]), // index not in observations
+    );
+    expect(outRaw).toBe(rawText);
+  });
+
   it("is a no-op when overrides are empty", () => {
     const parsed = baseParsed();
     const rawText = "• Built a thing";

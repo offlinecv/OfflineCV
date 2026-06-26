@@ -8,6 +8,7 @@ import {
 } from "../analytics.ts";
 import { cleanRewriteLine } from "./post-process.ts";
 import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import { buildSteeringSuffix, type RewriteSteering } from "./steering.ts";
 import type { WebLlmEngine } from "./types.ts";
 import { acquireInference, releaseInference } from "./web-llm.ts";
 
@@ -72,16 +73,20 @@ export function buildSectionUserPrompt(bullets: readonly string[]): string {
  * message is the input to rewrite, the system message is the world the
  * model rewrites within. See #67 follow-up where this misfire was caught.
  */
-export function buildSectionSystemPrompt(context?: string): string {
-  if (!context || context.trim().length === 0) {
-    return SECTION_REWRITE_SYSTEM_PROMPT;
-  }
-  return `${SECTION_REWRITE_SYSTEM_PROMPT}
+export function buildSectionSystemPrompt(
+  context?: string,
+  steering?: RewriteSteering,
+): string {
+  const base =
+    !context || context.trim().length === 0
+      ? SECTION_REWRITE_SYSTEM_PROMPT
+      : `${SECTION_REWRITE_SYSTEM_PROMPT}
 
 Earlier sections of this résumé have already been rewritten. The user's NEXT message contains a NEW section's bullets — only rewrite THOSE. Do not include content from earlier sections in your output.
 
 Context from earlier sections (reference only — never echo into your output):
 ${context.trim()}`;
+  return `${base}${buildSteeringSuffix(steering)}`;
 }
 
 /**
@@ -96,6 +101,12 @@ ${context.trim()}`;
 export interface SectionRewriteOptions {
   /** Rolling soft-constraint brief from earlier sections in the chain. */
   context?: string;
+  /**
+   * User-supplied rewrite steering (#210): freeform instructions + an optional
+   * page-length target. Folded into the SYSTEM message as a suffix after the
+   * guardrails. Undefined → no behaviour change.
+   */
+  steering?: RewriteSteering;
 }
 
 export interface SectionRewriteResult {
@@ -158,7 +169,7 @@ export async function rewriteSectionWithLlm(
       messages: [
         {
           role: "system",
-          content: buildSectionSystemPrompt(options.context),
+          content: buildSectionSystemPrompt(options.context, options.steering),
         },
         { role: "user", content: buildSectionUserPrompt(bullets) },
       ],

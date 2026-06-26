@@ -28,19 +28,36 @@
  * résumé). Silent absence — matches `RewriteButton` and `SectionRewrite`.
  */
 
-import { Button, ModelLoadProgress } from "@design-system";
+import { Button, ModelLoadProgress, TextAreaField } from "@design-system";
 import {
   labelForResumeRewrite,
   useResumeRewrite,
+  type ResumeRewriteController,
   type ResumeRewriteStatus,
 } from "../../hooks/useResumeRewrite.ts";
 import type { SectionInput, SectionOutcome } from "../../lib/webllm/rewrite-resume.ts";
+import type { PageTarget } from "../../lib/webllm/steering.ts";
 import { ProposedPanel } from "./ResumeRewriteProposed.tsx";
 
 export interface ResumeRewriteParts {
   trigger: React.ReactNode;
+  /** The steering box (freeform instructions + page-length chips), #210. */
+  controls: React.ReactNode;
   panel: React.ReactNode;
 }
+
+/**
+ * Page-length presets (#210). Selecting a chip sets the controller's
+ * `pageTarget` (which drives the precise length budget injected into the
+ * prompt) and — only when the box is empty — prefills a short, editable
+ * human-readable hint so the user sees what was applied. The label drives the
+ * chip; the `hint` is what lands in the freeform box.
+ */
+const PAGE_PRESETS: { target: PageTarget; label: string; hint: string }[] = [
+  { target: 1, label: "1 page", hint: "Trim this résumé to a single page." },
+  { target: 2, label: "2 pages", hint: "Keep this résumé to about two pages." },
+  { target: 3, label: "3 pages", hint: "Allow up to three pages of detail." },
+];
 
 export function useResumeRewriteUi(
   sections: readonly SectionInput[],
@@ -48,7 +65,7 @@ export function useResumeRewriteUi(
   const controller = useResumeRewrite(sections);
 
   if (!controller.isAvailable) {
-    return { trigger: null, panel: null };
+    return { trigger: null, controls: null, panel: null };
   }
 
   const trigger = (
@@ -65,12 +82,77 @@ export function useResumeRewriteUi(
     </Button>
   );
 
+  const controls = <RewriteSteeringBox controller={controller} />;
+
   const panel =
     controller.status.kind === "idle" ? null : (
       <ResumeRewritePanel status={controller.status} onDismiss={controller.dismiss} />
     );
 
-  return { trigger, panel };
+  return { trigger, controls, panel };
+}
+
+/**
+ * Freeform "Instructions for the rewrite" box with page-length preset chips
+ * (#210). One input: the chips prefill editable guidance into the same box and
+ * set the page-length target. Inputs disable while any rewrite is in flight so
+ * the user can't change steering mid-run. Reuses the `TextAreaField` and
+ * `Button` primitives — no raw `<textarea>` / `<button>`.
+ */
+export function RewriteSteeringBox({
+  controller,
+}: {
+  controller: ResumeRewriteController;
+}) {
+  const { pageTarget, setPageTarget, userInstructions, setUserInstructions } =
+    controller;
+  const disabled = controller.isLocked;
+
+  const onChipClick = (preset: (typeof PAGE_PRESETS)[number]) => {
+    if (pageTarget === preset.target) {
+      // Toggle off. Clear the prefilled hint too, but never clobber text the
+      // user has since edited away from the preset's hint.
+      setPageTarget(null);
+      if (userInstructions.trim() === preset.hint) setUserInstructions("");
+      return;
+    }
+    setPageTarget(preset.target);
+    // Prefill only when the box is empty — don't overwrite custom text.
+    if (userInstructions.trim().length === 0) setUserInstructions(preset.hint);
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium text-content-secondary">
+          Target length:
+        </span>
+        {PAGE_PRESETS.map((preset) => {
+          const selected = pageTarget === preset.target;
+          return (
+            <Button
+              key={preset.target}
+              variant={selected ? "primary" : "ghost"}
+              size="sm"
+              disabled={disabled}
+              aria-pressed={selected}
+              onClick={() => onChipClick(preset)}
+              className="rounded-full border border-border-light px-2.5 py-0.5 text-[11px]"
+            >
+              {preset.label}
+            </Button>
+          );
+        })}
+      </div>
+      <TextAreaField
+        label="Instructions for the rewrite (optional)"
+        value={userInstructions}
+        onChange={setUserInstructions}
+        placeholder="e.g. 'target a staff engineer role' or 'keep bullets under 20 words'"
+        disabled={disabled}
+      />
+    </div>
+  );
 }
 
 export function ResumeRewritePanel({

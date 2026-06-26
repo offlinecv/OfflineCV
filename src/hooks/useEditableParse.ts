@@ -162,6 +162,12 @@ export interface EditableParse {
   bulletOverrides: BulletOverrides;
   /** Set the override text for one bullet. Pass undefined to clear it. */
   setBulletField: (index: number, value: string | undefined) => void;
+  /** Indices of parsed bullets the user dropped (rewrite-review removals, #211),
+   *  keyed by BulletObservation.index — folded by applyOverrides to drop the
+   *  line from the graded pool, rawText, and the role description. */
+  removedBullets: ReadonlySet<number>;
+  /** Drop a parsed bullet by its BulletObservation.index. Idempotent. */
+  removeBullet: (index: number) => void;
   /** Override map for education entries, keyed by education array index. */
   educationOverrides: Record<number, EducationFieldOverrides>;
   /** Update one field on a specific education entry by its array index.
@@ -208,6 +214,9 @@ export function useEditableParse(): EditableParse {
     Record<number, ExperienceFieldOverrides>
   >({});
   const [bulletOverrides, setBulletOverrides] = useState<BulletOverrides>({});
+  const [removedBullets, setRemovedBullets] = useState<ReadonlySet<number>>(
+    () => new Set(),
+  );
   const [educationOverrides, setEducationOverrides] = useState<
     Record<number, EducationFieldOverrides>
   >({});
@@ -269,6 +278,15 @@ export function useEditableParse(): EditableParse {
     },
     [],
   );
+
+  const removeBullet = useCallback((index: number) => {
+    setRemovedBullets((prev) => {
+      if (prev.has(index)) return prev;
+      const next = new Set(prev);
+      next.add(index);
+      return next;
+    });
+  }, []);
 
   const setEducationField = useCallback(
     (
@@ -356,6 +374,7 @@ export function useEditableParse(): EditableParse {
     setContactOverrides({});
     setExperienceOverrides({});
     setBulletOverrides({});
+    setRemovedBullets(new Set());
     setEducationOverrides({});
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
     setAddedEntries([]);
@@ -365,6 +384,7 @@ export function useEditableParse(): EditableParse {
   const hasEdits = useMemo(() => {
     if (Object.keys(contactOverrides).length > 0) return true;
     if (Object.keys(bulletOverrides).length > 0) return true;
+    if (removedBullets.size > 0) return true;
     if (skillsOverride.removed.length > 0 || skillsOverride.added.length > 0)
       return true;
     if (addedEntries.length > 0) return true;
@@ -382,6 +402,7 @@ export function useEditableParse(): EditableParse {
     contactOverrides,
     experienceOverrides,
     bulletOverrides,
+    removedBullets,
     educationOverrides,
     skillsOverride,
     addedEntries,
@@ -395,6 +416,8 @@ export function useEditableParse(): EditableParse {
     setExperienceField,
     bulletOverrides,
     setBulletField,
+    removedBullets,
+    removeBullet,
     educationOverrides,
     setEducationField,
     addedEntries,

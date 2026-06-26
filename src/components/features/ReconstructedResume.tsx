@@ -334,6 +334,7 @@ function ExperienceSection({
   onExperienceFieldChange,
   bulletOverrides,
   onBulletChange,
+  onRemoveBullet,
   addedExperience,
   originalCount,
   onAddEntry,
@@ -354,6 +355,8 @@ function ExperienceSection({
   ) => void;
   bulletOverrides: BulletOverrides;
   onBulletChange: (index: number, value: string) => void;
+  /** Drop a parsed bullet by BulletObservation.index (rewrite-review apply, #211). */
+  onRemoveBullet: (index: number) => void;
   /** User-added experience entries, append-aligned to indices ≥ originalCount. */
   addedExperience: AddedEntry[];
   /** Count of PARSED experience roles; indices at/above this are user-added. */
@@ -369,8 +372,11 @@ function ExperienceSection({
   // the picker. Trigger + panel render only when WebGPU is available AND
   // there's at least one rewriteable section — same silent-absence rule as
   // SectionRewrite. The hook owns the WebGPU/empty-input gating.
-  const { trigger: resumeRewriteTrigger, panel: resumeRewritePanel } =
-    useResumeRewriteUi(resumeSections);
+  const {
+    trigger: resumeRewriteTrigger,
+    controls: resumeRewriteControls,
+    panel: resumeRewritePanel,
+  } = useResumeRewriteUi(resumeSections);
   return (
     <section className="flex flex-col gap-3">
       {/* Heading row: the flag legend sits beside the Experience title (next to
@@ -391,6 +397,7 @@ function ExperienceSection({
           {resumeRewriteTrigger}
         </div>
       )}
+      {hasBullets && resumeRewriteControls}
       {hasBullets && resumeRewritePanel}
       {roleCount === 0 ? (
         <NotDetected what="roles" />
@@ -426,6 +433,7 @@ function ExperienceSection({
                 }
                 bulletOverrides={bulletOverrides}
                 onBulletChange={onBulletChange}
+                onRemoveBullet={onRemoveBullet}
                 onAddBullet={(text) =>
                   onAddBullet(
                     added ? added.id : parsedEntryKey("experience", idx),
@@ -744,6 +752,7 @@ export function ReconstructedResume({
     setExperienceField,
     bulletOverrides,
     setBulletField,
+    removeBullet,
     educationOverrides,
     setEducationField,
     addEntry,
@@ -873,6 +882,7 @@ export function ReconstructedResume({
         }
         bulletOverrides={bulletOverrides}
         onBulletChange={(index, value) => setBulletField(index, value)}
+        onRemoveBullet={(index) => removeBullet(index)}
         addedExperience={addedExperience}
         originalCount={originalExpCount}
         onAddEntry={() => addEntry("experience")}

@@ -38,11 +38,26 @@ import {
   type SectionInput,
 } from "../lib/webllm/rewrite-resume.ts";
 import type {
+  PageTarget,
+  RewriteSteering,
+} from "../lib/webllm/steering.ts";
+import type {
   ProgressUpdate,
   WebGpuCapability,
 } from "../lib/webllm/types.ts";
 import { useModelSelection } from "./useModelSelection.ts";
+import { usePersistentFlag } from "./usePersistentFlag.ts";
 import { useSectionRewriteLock } from "./useSectionRewriteLock.ts";
+
+/** localStorage keys for the last-used steering (issue #210). */
+const INSTRUCTIONS_KEY = "rl_rewrite_instructions";
+const PAGE_TARGET_KEY = "rl_rewrite_page_target";
+
+function parsePageTarget(stored: string): PageTarget | null {
+  return stored === "1" || stored === "2" || stored === "3"
+    ? (Number(stored) as PageTarget)
+    : null;
+}
 
 export type ResumeRewriteStatus =
   | { kind: "idle" }
@@ -78,6 +93,14 @@ export interface ResumeRewriteController {
   start: () => Promise<void>;
   /** Drop a proposed/error state back to idle. */
   dismiss: () => void;
+  /** Freeform "what I want from this rewrite" text (#210). Persisted. */
+  userInstructions: string;
+  /** Update the freeform instructions (persists to localStorage). */
+  setUserInstructions: (value: string) => void;
+  /** Selected page-length target, or null when none is chosen (#210). */
+  pageTarget: PageTarget | null;
+  /** Set/clear the page-length target (persists to localStorage). */
+  setPageTarget: (target: PageTarget | null) => void;
 }
 
 export function labelForResumeRewrite(
@@ -129,6 +152,20 @@ export function useResumeRewrite(
   const { isLocked, acquire } = useSectionRewriteLock();
   const { selectedModelId } = useModelSelection();
 
+  // Steering (#210): freeform instructions + page-length target, persisted so a
+  // re-run keeps the user's last intent. pageTarget round-trips through a string
+  // key ("" | "1" | "2" | "3").
+  const [userInstructions, setUserInstructionsRaw] =
+    usePersistentFlag(INSTRUCTIONS_KEY);
+  const [pageTargetRaw, setPageTargetRaw] = usePersistentFlag(PAGE_TARGET_KEY);
+  const pageTarget = parsePageTarget(pageTargetRaw);
+  const setPageTarget = useCallback(
+    (target: PageTarget | null) => {
+      setPageTargetRaw(target === null ? "" : String(target));
+    },
+    [setPageTargetRaw],
+  );
+
   const rewriteableSections = useMemo(
     () => sections.filter(isNonEmptyForUi),
     [sections],
@@ -163,6 +200,16 @@ export function useResumeRewrite(
       const engine = await loadEngine(selectedModelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
+      const trimmedInstructions = userInstructions.trim();
+      const steering: RewriteSteering | undefined =
+        trimmedInstructions || pageTarget !== null
+          ? {
+              ...(trimmedInstructions
+                ? { userInstructions: trimmedInstructions }
+                : {}),
+              ...(pageTarget !== null ? { pageTarget } : {}),
+            }
+          : undefined;
       const result = await rewriteResumeWithLlm(
         rewriteableSections,
         engine,
@@ -170,6 +217,7 @@ export function useResumeRewrite(
         (progress) => {
           setStatus({ kind: "running", progress });
         },
+        steering,
       );
       if (result.sections.length === 0) {
         setStatus({
@@ -192,7 +240,7 @@ export function useResumeRewrite(
     } finally {
       release();
     }
-  }, [acquire, rewriteableSections, selectedModelId]);
+  }, [acquire, rewriteableSections, selectedModelId, userInstructions, pageTarget]);
 
   const dismiss = useCallback(() => {
     setStatus({ kind: "idle" });
@@ -212,6 +260,10 @@ export function useResumeRewrite(
     isLockedByOther,
     start,
     dismiss,
+    userInstructions,
+    setUserInstructions: setUserInstructionsRaw,
+    pageTarget,
+    setPageTarget,
   };
 }
 
