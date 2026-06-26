@@ -30,7 +30,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { detectWebGpu } from "../lib/webllm/capability.ts";
-import { loadEngine } from "../lib/webllm/web-llm.ts";
+import {
+  acquireInference,
+  loadEngine,
+  releaseInference,
+} from "../lib/webllm/web-llm.ts";
 import {
   rewriteResumeWithLlm,
   type ResumeRewriteProgress,
@@ -155,18 +159,28 @@ export function useResumeRewrite(
   const start = useCallback(async () => {
     const release = acquire();
     if (release === null) return;
+    // Snapshot the model id so the same id is released that we acquired —
+    // ModelSelector could in principle update `selectedModelId` mid-run.
+    const modelId = selectedModelId;
+    // Acquire the inference guard SYNCHRONOUSLY, before any await — closes
+    // the load→use TOCTOU window from #148. Held across the WHOLE chain
+    // (summary + every experience role) so the engine cannot be torn down
+    // by a concurrent picker switch at any step boundary, not just at the
+    // first loadEngine. Released in `finally` whether the run completes
+    // successfully or errors out.
+    acquireInference(modelId);
     try {
       setStatus({
         kind: "loading",
         progress: { progress: 0, text: "Starting…" },
       });
-      const engine = await loadEngine(selectedModelId, (progress) => {
+      const engine = await loadEngine(modelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
       const result = await rewriteResumeWithLlm(
         rewriteableSections,
         engine,
-        selectedModelId,
+        modelId,
         (progress) => {
           setStatus({ kind: "running", progress });
         },
@@ -190,6 +204,7 @@ export function useResumeRewrite(
           err instanceof Error ? err.message : "Couldn't load the rewrite model",
       });
     } finally {
+      releaseInference(modelId);
       release();
     }
   }, [acquire, rewriteableSections, selectedModelId]);
