@@ -125,7 +125,12 @@ export default defineConfig({
         "src/**/*.test.ts",
         "src/**/__test-utils__/**",
         "src/**/*.d.ts",
-        "src/main.tsx",
+        // App entry points (root + per-surface, e.g. src/jd-fit/main.tsx). These
+        // are untested boot shims, and v8 instrumentation has emitted bogus
+        // source-map columns for them (negative `end.column`) that crash
+        // `fallow audit`'s u32 coverage parser, silently zeroing the whole
+        // fallow report. The glob excludes every `main.tsx` so the gate stays live.
+        "src/**/main.tsx",
       ],
     },
     // Force pdfjs-dist to its legacy build during tests so the Node 20+
