@@ -1,6 +1,6 @@
 # resumelint
 
-**Live preview:** <https://resumelint-org.github.io/resumelint/>
+**Live preview:** <https://resumelint.org>
 
 A PDF parser stress test for resumes. Drop a PDF in; see what a generic
 text extractor reads back. It is diagnostic, not prescriptive — the tool
@@ -221,7 +221,14 @@ aws s3 sync dist s3://your-bucket     # S3
 
 The hosted preview at the top of this README is published from `dist/`
 to GitHub Pages by `.github/workflows/deploy-pages.yml` — read that
-workflow for a working end-to-end example.
+workflow for a working end-to-end example. The canonical production URL
+is the custom domain **<https://resumelint.org>**; the project-Pages URL
+<https://resumelint-org.github.io/resumelint/> remains as a fallback (built
+with `VITE_BASE_PATH=/resumelint/`).
+
+The build emits two root pages — `/` (the parser audit) and `/jd-fit`
+(JD-match + JD-driven rewrite) — as a multi-entry Vite build, so both ship
+in the same self-contained `dist/`.
 
 To bake telemetry into a deployed build, set `VITE_POSTHOG_KEY` (and
 optionally `VITE_POSTHOG_HOST`) in the build environment — see the

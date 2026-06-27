@@ -73,8 +73,10 @@ const PRESET_HINTS = new Set(PAGE_PRESETS.map((p) => p.hint).filter(Boolean));
 export function useResumeRewriteUi(
   sections: readonly SectionInput[],
   applyBySection?: ResumeRewriteApply,
+  /** Optional JD-driven rewrite steering (#226). Undefined on `/` → generic. */
+  jdContext?: string,
 ): ResumeRewriteParts {
-  const controller = useResumeRewrite(sections);
+  const controller = useResumeRewrite(sections, jdContext);
 
   if (!controller.isAvailable) {
     return { trigger: null, panel: null };

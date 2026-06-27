@@ -150,6 +150,14 @@ export function sectionsEqual(
 
 export function useResumeRewrite(
   sections: readonly SectionInput[],
+  /**
+   * Optional JD-driven steering text (#226). On `/jd-fit` this names the JD's
+   * missing terms so the rewrite prioritizes them; it is folded INTO the
+   * steering's `userInstructions` (alongside the user's own freeform text), so
+   * the engine stays single. On `/` it's undefined → byte-identical generic
+   * rewrite prompt.
+   */
+  jdContext?: string,
 ): ResumeRewriteController {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<ResumeRewriteStatus>({ kind: "idle" });
@@ -214,12 +222,20 @@ export function useResumeRewrite(
       const engine = await loadEngine(modelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
-      const trimmedInstructions = userInstructions.trim();
+      // Combine the user's freeform instructions with the optional JD-driven
+      // steering (#226) into ONE userInstructions string. The JD context leads
+      // (it sets the tailoring intent); the user's own text follows so it stays
+      // the most-salient, last instruction. Both empty → no userInstructions.
+      const jd = jdContext?.trim();
+      const userText = userInstructions.trim();
+      const combinedInstructions = [jd, userText]
+        .filter((s): s is string => !!s)
+        .join("\n\n");
       const steering: RewriteSteering | undefined =
-        trimmedInstructions || pageTarget !== null
+        combinedInstructions || pageTarget !== null
           ? {
-              ...(trimmedInstructions
-                ? { userInstructions: trimmedInstructions }
+              ...(combinedInstructions
+                ? { userInstructions: combinedInstructions }
                 : {}),
               ...(pageTarget !== null ? { pageTarget } : {}),
             }
@@ -255,7 +271,7 @@ export function useResumeRewrite(
       releaseInference(modelId);
       release();
     }
-  }, [acquire, rewriteableSections, selectedModelId, userInstructions, pageTarget]);
+  }, [acquire, rewriteableSections, selectedModelId, userInstructions, pageTarget, jdContext]);
 
   const dismiss = useCallback(() => {
     setStatus({ kind: "idle" });
