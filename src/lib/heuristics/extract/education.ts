@@ -8,6 +8,8 @@ import {
   INSTITUTION_HINTS,
   MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
+  US_STATE_CODE_RE,
+  COUNTRY_GAZETTEER,
 } from "../regex.ts";
 import {
   isBulletLine,
@@ -223,6 +225,119 @@ function isInlineDatedProgram(line: string): boolean {
   return remainder.length >= 3;
 }
 
+/** Trim a parsed field string down to the subject, cutting any trailing date,
+ *  column break, pipe, or GPA/Minor/Major note that rode along on the degree
+ *  line ("Computer Science   Sep. 2024 - Jun. 2027" → "Computer Science").
+ *  Returns undefined when nothing substantive survives. */
+function cleanField(raw: string): string | undefined {
+  let f = raw
+    // A column break (2+ spaces from the PDF grid) or an explicit pipe ends the
+    // field — the date / location column starts after it.
+    .split(/\s{2,}|\s*\|\s*/)[0]
+    .trim();
+  // Cut a trailing graduation / attendance date ("— May 2027", ", 2022 - 2024",
+  // "Expected 2026", "Class of 2025") — the date belongs to the entry, not the
+  // field.
+  f = f.replace(
+    /\s*[-–—,;]?\s*(?:(?:expected|anticipated|graduat\w*|class of|present|current)\b\s*)*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*)?\(?(?:19|20)\d{2}\b.*$/i,
+    "",
+  );
+  // Cut a trailing "… , Minor in Economics" / "… , GPA: 3.8" note — a sub-field,
+  // not part of the subject.
+  f = f.replace(/[,;]\s*(?:minor|major|gpa|concentration)\b.*$/i, "");
+  // Strip leftover edge punctuation.
+  f = f.replace(/^[\s,;:–\-—]+|[\s,;:–\-—]+$/g, "").trim();
+  return f.length > 0 ? f : undefined;
+}
+
+/** Parse a degree-bearing line into a bare credential + its subject field.
+ *
+ * `DEGREE_RE` either matches just the credential ("B.S.") or — via its optional
+ * `of <subject>` branch — greedily swallows an "… in <field>" tail
+ * ("Bachelor of Science in Biology"). Either way the field is recovered from the
+ * ORIGINAL line (not the truncated match) so an ampersand/comma in the subject
+ * ("Computer Science & Engineering") is never lost. The credential is split off
+ * at the " in " connective when the match swallowed it; otherwise the field is
+ * whatever text follows the credential, with dates/notes stripped by
+ * `cleanField`. Connective-less shapes ("M.S. Computer Science", "B.S. Business
+ * Administration — May 2027") are handled too: the field is the post-credential
+ * remainder. */
+function parseDegreeAndField(line: string): {
+  degree: string;
+  field?: string;
+} {
+  const dm = DEGREE_RE.exec(line);
+  if (!dm) return { degree: "" };
+  const matched = dm[0];
+  // If the `of`-branch swallowed an " in <field>", the credential ends at that
+  // " in " — split it there and let the field be read from the original line so
+  // characters DEGREE_RE can't match (e.g. "&") aren't truncated.
+  const inIdx = matched.search(/\s+in\s+/i);
+  let degree: string;
+  let fieldStart: number;
+  if (inIdx >= 0) {
+    degree = matched.slice(0, inIdx).trim();
+    fieldStart = dm.index + inIdx;
+  } else {
+    degree = matched.trim();
+    fieldStart = dm.index + matched.length;
+  }
+  const fieldRaw = line
+    .slice(fieldStart)
+    // Drop a leading "in "/"of " connective or a "-"/"—"/":"/"," separator.
+    .replace(/^\s*(?:in|of)\s+/i, "")
+    .replace(/^\s*[-–—,:]\s*/, "")
+    .replace(/^\s*(?:in|of)\s+/i, "");
+  return { degree, field: cleanField(fieldRaw) };
+}
+
+/** Peel a trailing "City, ST" (US) or "City, Country" (international) location
+ *  off an institution string, returning the cleaned institution and the
+ *  location. Mirrors experience's `stripLocationSuffix` (same closed-vocabulary
+ *  guards: `US_STATE_CODE_RE` for US, `COUNTRY_GAZETTEER` for intl), specialized
+ *  for the institution line where the city is usually separated by a column gap
+ *  ("… Engineering   Seattle, WA") rather than a comma. Stripping must leave a
+ *  non-empty institution, so the whole string is never consumed. */
+function stripInstitutionLocation(s: string): {
+  institution: string;
+  location?: string;
+} {
+  // US "…, City, ST" (comma boundary → multi-word city) or "… City, ST"
+  // (column-gap/space boundary → single-token city).
+  const COMMA_US_RE =
+    /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
+  // Require a 2+ space column gap (not a single word-space) so a normal space
+  // inside the institution name isn't read as a city boundary — otherwise
+  // "Stanford University, CA" (state-only, no city) wrongly yields
+  // institution "Stanford" + location "University, CA".
+  const SPACE_US_RE = /\s{2,}([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
+  const mUS = s.match(COMMA_US_RE) ?? s.match(SPACE_US_RE);
+  if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
+    const before = s
+      .slice(0, mUS.index)
+      .replace(/,\s*$/, "")
+      .trim();
+    if (before) return { institution: before, location: `${mUS[1]}, ${mUS[2]}` };
+  }
+
+  // International "…, City, Country" — country validated against the gazetteer.
+  if (COUNTRY_GAZETTEER.size > 0) {
+    const INTL_RE =
+      /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
+    const mIntl = s.match(INTL_RE);
+    if (mIntl && COUNTRY_GAZETTEER.has(mIntl[2].toLowerCase())) {
+      const before = s
+        .slice(0, mIntl.index)
+        .replace(/,\s*$/, "")
+        .trim();
+      if (before)
+        return { institution: before, location: `${mIntl[1]}, ${mIntl[2]}` };
+    }
+  }
+
+  return { institution: s };
+}
+
 /** Map one education chunk (the degree + institution + date lines of a single
  *  qualification) to a `ResumeEducation` and its confidence. */
 function educationFromChunk(chunk: string[]): {
@@ -230,8 +345,13 @@ function educationFromChunk(chunk: string[]): {
   score: number;
 } {
   const joined = chunk.join(" | ");
+  // Parse degree + field off the specific degree-bearing line (cleaner than the
+  // joined chunk, whose " | " separators would confuse the field tail).
+  const degreeLine = chunk.find((l) => DEGREE_RE.test(l));
   const degreeMatch = DEGREE_RE.exec(joined);
-  const degree = degreeMatch ? degreeMatch[0].trim() : "";
+  const { degree, field } = degreeLine
+    ? parseDegreeAndField(degreeLine)
+    : { degree: "", field: undefined };
 
   // Institution: an explicit institution-hint line first; else the first line
   // that is neither the degree-bearing line nor a bare date — this recovers
@@ -254,6 +374,13 @@ function educationFromChunk(chunk: string[]): {
     }
   }
 
+  // Peel a trailing "City, ST" / "City, Country" off the institution so it isn't
+  // glued on ("University of Example, …   Seattle, WA" → institution without the
+  // location, location surfaced separately).
+  const { institution: instClean, location } =
+    stripInstitutionLocation(institution);
+  institution = instClean;
+
   // Shared date primitive (via the education wrapper) so a range like
   // "Sep 2024 - July 2025" keeps both halves and a lone graduation date lands in
   // `end_date` (#97).
@@ -266,7 +393,13 @@ function educationFromChunk(chunk: string[]): {
   if (hasDate) score += 0.3;
 
   return {
-    entry: { institution, degree, ...educationDateFields(dates) },
+    entry: {
+      institution,
+      degree,
+      ...(field ? { field } : {}),
+      ...(location ? { location } : {}),
+      ...educationDateFields(dates),
+    },
     score: Math.min(score, 1),
   };
 }

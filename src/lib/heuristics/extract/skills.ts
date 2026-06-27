@@ -159,6 +159,19 @@ function splitColumnCells(line: { text: string; items: PdfTextItem[] }): string[
     .filter((t) => t.length > 0);
 }
 
+/** A Skills-section sub-label whose contents are NOT professional skills — a
+ *  hobbies/interests list that must never flow into `skills`. Matched against
+ *  the captured `Label` of a leading `Label:` cell prefix, so it sees only the
+ *  label phrase (never the items). An optional leading qualifier ("Personal",
+ *  "Other") is allowed so "Personal Interests:" / "Other Hobbies:" are caught;
+ *  a real skill sub-label like "Languages:" / "Frameworks:" never matches. */
+const NON_SKILL_SUBLABEL_RE =
+  /^(?:personal\s+|other\s+)?(?:interests?|hobbies|hobby|activities|pastimes)\s*$/i;
+
+/** Leading `Label:` prefix of a skills cell — captures the label phrase so it
+ *  can be checked against the non-skill denylist before being stripped. */
+const SUBLABEL_PREFIX_RE = /^([A-Z][A-Za-z ]+):\s*/;
+
 /**
  * Tokenizes a single column cell into valid skill tokens and adds them to
  * `out`. Drops the cell entirely when it looks like a contact/profile link —
@@ -166,7 +179,14 @@ function splitColumnCells(line: { text: string; items: PdfTextItem[] }): string[
  * segment as a spurious token.
  */
 function tokenizeCell(cell: string, out: Set<string>): void {
-  const clean = stripBullet(cell).replace(/^[A-Z][A-Za-z ]+:\s*/, "");
+  const debulleted = stripBullet(cell);
+  // A non-skill sub-label inside a Skills section (e.g. "Interests: Tennis,
+  // Gardening" or "Hobbies: Reading") must NOT bleed into `skills`. Inspect the
+  // leading `Label:` prefix and drop the whole cell when it names a
+  // hobbies/interests list — before the label is stripped and the items split.
+  const labelMatch = debulleted.match(SUBLABEL_PREFIX_RE);
+  if (labelMatch && NON_SKILL_SUBLABEL_RE.test(labelMatch[1])) return;
+  const clean = debulleted.replace(SUBLABEL_PREFIX_RE, "");
   // A whole cell that is a profile link ("github.com/janesmith") must be
   // dropped before splitting — a path slash would otherwise leave the path
   // segment ("janesmith") as a spurious token.
