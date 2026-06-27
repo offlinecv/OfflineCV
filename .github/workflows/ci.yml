@@ -45,14 +45,19 @@ jobs:
           if [ ! -s fallow.sarif ]; then
             echo '{"$schema":"https://json.schemastore.org/sarif-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"fallow"}},"results":[]}]}' > fallow.sarif
           fi
-          # fallow emits one SARIF run per sub-analysis (dead-code/health/dupes)
-          # with an empty category; CodeQL rejects multiple runs sharing a
-          # category, so stamp each run with a distinct automationDetails.id.
-          # CodeQL also rejects any result lacking a physical location
-          # ("locationFromSarifResult: expected at least one location"); some
-          # fallow findings (project-wide health/dupe summaries) carry no
-          # location, so drop those results before upload.
-          node -e 'const fs=require("fs");const f="fallow.sarif";const j=JSON.parse(fs.readFileSync(f,"utf8"));j.runs.forEach((r,i)=>{r.automationDetails={...(r.automationDetails||{}),id:`fallow/${i}/`};if(Array.isArray(r.results))r.results=r.results.filter(x=>Array.isArray(x.locations)&&x.locations.length>0)});fs.writeFileSync(f,JSON.stringify(j))'
+          # fallow emits one SARIF run per sub-analysis (dead-code/health/dupes),
+          # and the run COUNT varies per branch (the audit is a diff gate vs
+          # origin/main). A positional category id (`fallow/<index>/`) is
+          # therefore unstable: a config registered on main can be "not found"
+          # on a PR whose audit emitted fewer runs, which makes code scanning
+          # warn it can't diff that category. Collapse all runs into ONE run
+          # with a single FIXED category `fallow/` — always present on every
+          # branch, and one run sidesteps CodeQL's "multiple runs same
+          # category" rule entirely. CodeQL also rejects any result lacking a
+          # physical location ("locationFromSarifResult: expected at least one
+          # location"); some fallow findings (project-wide health/dupe
+          # summaries) carry no location, so drop those before upload.
+          node -e 'const fs=require("fs");const f="fallow.sarif";const j=JSON.parse(fs.readFileSync(f,"utf8"));const runs=j.runs||[];const driver=runs[0]&&runs[0].tool&&runs[0].tool.driver?runs[0].tool.driver:{name:"fallow"};const rules=[],results=[];for(const r of runs){if(r.tool&&r.tool.driver&&Array.isArray(r.tool.driver.rules))rules.push(...r.tool.driver.rules);if(Array.isArray(r.results))results.push(...r.results.filter(x=>Array.isArray(x.locations)&&x.locations.length>0))}j.runs=[{tool:{driver:{...driver,rules}},automationDetails:{id:"fallow/"},results}];fs.writeFileSync(f,JSON.stringify(j))'
       - name: upload fallow SARIF
         uses: github/codeql-action/upload-sarif@v3
         with:

@@ -332,6 +332,7 @@ const EXPERIENCE_FIELD_MAP: Record<
 function ExperienceSection({
   groups,
   resumeSections,
+  jdContext,
   hasBullets,
   experienceOverrides,
   onExperienceFieldChange,
@@ -349,6 +350,8 @@ function ExperienceSection({
   groups: BulletGroup[];
   /** Chain-of-sections input for the whole-résumé rewrite CTA (#67). */
   resumeSections: readonly SectionInput[];
+  /** Optional JD-driven rewrite steering (#226). Undefined on `/` → generic. */
+  jdContext?: string;
   hasBullets: boolean;
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
   onExperienceFieldChange: (
@@ -401,7 +404,7 @@ function ExperienceSection({
   const {
     trigger: resumeRewriteTrigger,
     panel: resumeRewritePanel,
-  } = useResumeRewriteUi(resumeSections, rewriteApplyBySection);
+  } = useResumeRewriteUi(resumeSections, rewriteApplyBySection, jdContext);
   return (
     <section className="flex flex-col gap-3">
       {/* Heading row: the flag legend sits beside the Experience title (next to
@@ -751,6 +754,7 @@ export function ReconstructedResume({
   result,
   score,
   edit,
+  jdContext,
 }: {
   result: CascadeResult;
   /** EDITED score — re-graded by App from the current overrides. Its
@@ -759,6 +763,8 @@ export function ReconstructedResume({
   score: AnonymousAtsScore;
   /** Lifted edit state (#82) — owned by App so overrides feed scoring/JD. */
   edit: EditableParse;
+  /** Optional JD-driven rewrite steering (#226). Set only on `/jd-fit`. */
+  jdContext?: string;
 }) {
   const parsed = result.parsed;
   const bullets = score.bullets ?? [];
@@ -899,6 +905,7 @@ export function ReconstructedResume({
       <ExperienceSection
         groups={experienceRenderGroups}
         resumeSections={resumeSections}
+        jdContext={jdContext}
         hasBullets={bullets.length > 0}
         experienceOverrides={experienceOverrides}
         onExperienceFieldChange={(index, field, value) =>

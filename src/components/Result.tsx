@@ -31,6 +31,8 @@ interface ResultProps {
   onReset: () => void;
   /** Lifted edit state (#82) — threaded to ReconstructedResume for inline edits. */
   edit: EditableParse;
+  /** Optional JD-driven rewrite steering (#226). Set only on `/jd-fit`. */
+  jdContext?: string;
 }
 
 export function Result({
@@ -40,6 +42,7 @@ export function Result({
   sourceKind,
   onReset,
   edit,
+  jdContext,
 }: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
   if (isFontsUnmappable) {
@@ -53,6 +56,7 @@ export function Result({
       sourceKind={sourceKind}
       onReset={onReset}
       edit={edit}
+      jdContext={jdContext}
     />
   );
 }
@@ -66,6 +70,7 @@ function ParsedCard({
   sourceKind,
   onReset,
   edit,
+  jdContext,
 }: {
   result: CascadeResult;
   score: AnonymousAtsScore;
@@ -73,6 +78,7 @@ function ParsedCard({
   sourceKind: SourceKind;
   onReset: () => void;
   edit: EditableParse;
+  jdContext?: string;
 }) {
   const [tab, setTab] = useState("reconstructed");
   const triggerCount = result.triggers.length;
@@ -126,7 +132,12 @@ function ParsedCard({
 
           <div className="pt-4">
             <TabPanel id="reconstructed">
-              <ReconstructedResume result={result} score={score} edit={edit} />
+              <ReconstructedResume
+                result={result}
+                score={score}
+                edit={edit}
+                jdContext={jdContext}
+              />
             </TabPanel>
             <TabPanel id="source">
               <SourcePdfPanel bytes={bytes} sourceKind={sourceKind} />

@@ -84,6 +84,19 @@ export default defineConfig({
     allowedHosts: [".local"],
   },
   plugins: [tailwindcss(), react(), emitVersionJson(APP_VERSION)],
+  build: {
+    // Two root HTML entries (#226): `/` (parser audit) and `/jd-fit` (JD match
+    // + JD-driven rewrite). Declaring `input` explicitly means the build ships
+    // exactly these two pages — the dev-only `jd-spike.html` / `eval-rewrite.html`
+    // harnesses (which Vite's default auto-discovery would otherwise bundle) are
+    // no longer emitted into dist/, which is the intended production surface.
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        jdFit: fileURLToPath(new URL("./jd-fit.html", import.meta.url)),
+      },
+    },
+  },
   resolve: {
     alias: {
       "@design-tokens": DESIGN_TOKENS_DEFAULT,
