@@ -321,3 +321,89 @@ describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
     expect(result.parsed.skills).not.toContain("Machine Learning Data Analysis");
   });
 });
+
+// ── Issue #221: Interests/Hobbies sub-labels must not bleed into skills ───────
+
+describe("tokenizeSkillLine — issue #221 non-skill sub-labels", () => {
+  it("drops an Interests: sub-label cell entirely", () => {
+    const result = tokenizeSkillLine(
+      "Interests: Science Fiction Novels, Weightlifting, Gardening, Tennis",
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("drops a Hobbies: sub-label cell entirely", () => {
+    expect(tokenizeSkillLine("Hobbies: Reading, Cooking, Hiking")).toEqual([]);
+  });
+
+  it("drops an Activities: sub-label cell entirely", () => {
+    expect(tokenizeSkillLine("Activities: Basketball, Chess")).toEqual([]);
+  });
+
+  it("drops a qualified 'Personal Interests:' / 'Other Hobbies:' cell", () => {
+    expect(tokenizeSkillLine("Personal Interests: Eating, Travel")).toEqual([]);
+    expect(tokenizeSkillLine("Other Hobbies: Painting")).toEqual([]);
+  });
+
+  it("keeps skill sub-labels (Languages/Technologies/Tools/Frameworks)", () => {
+    expect(tokenizeSkillLine("Languages: Python, Go, C++, Java")).toEqual(
+      expect.arrayContaining(["Python", "Go", "C++", "Java"]),
+    );
+    expect(tokenizeSkillLine("Technologies: Linux, AWS, Docker, iOS")).toEqual(
+      expect.arrayContaining(["Linux", "AWS", "Docker", "iOS"]),
+    );
+    expect(tokenizeSkillLine("Tools: Git, Vim")).toEqual(
+      expect.arrayContaining(["Git", "Vim"]),
+    );
+    expect(tokenizeSkillLine("Frameworks: React, Vue")).toEqual(
+      expect.arrayContaining(["React", "Vue"]),
+    );
+  });
+
+  it("does not catch a real skill that merely starts with a denylist word", () => {
+    // "Interest Rate Modeling" is a legitimate skill, not an "Interests:" label
+    // — the denylist matches the WHOLE label phrase, so this survives.
+    const result = tokenizeSkillLine("Interest Rate Modeling, Risk Analysis");
+    expect(result).toEqual(
+      expect.arrayContaining(["Interest Rate Modeling", "Risk Analysis"]),
+    );
+  });
+});
+
+describe("parseHeuristic — issue #221 Interests sub-label in SKILLS section", () => {
+  it("excludes Interests items while keeping Languages/Technologies skills", () => {
+    // Repro from the issue: a Technical Skills section internally sub-labeled
+    // with Languages / Technologies / Interests. Only the genuine skill
+    // sub-labels should reach parsed.skills.
+    const items = mkItems([
+      { text: "Jordan Lee", fontSize: 18 },
+      { text: "jordan.lee@example.com  (312) 555-0123  Chicago, IL", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      { text: "TECHNICAL SKILLS", fontSize: 13 },
+      { text: "Languages: Python, Go, C++, Java, JavaScript", fontSize: 10 },
+      { text: "Technologies: Linux, AWS, Docker, iOS", fontSize: 10 },
+      {
+        text: "Interests: Science Fiction Novels, Weightlifting, Gardening, Eating, Tennis, Basketball",
+        fontSize: 10,
+      },
+    ]);
+    const pages = mkDefaultPages(items);
+    const result = parseHeuristic(items, pages);
+
+    // Genuine skills survive.
+    expect(result.parsed.skills).toEqual(
+      expect.arrayContaining(["Python", "Go", "Java", "Linux", "AWS", "Docker"]),
+    );
+    // Hobbies must NOT be scored/displayed as professional skills.
+    for (const hobby of [
+      "Science Fiction Novels",
+      "Weightlifting",
+      "Gardening",
+      "Eating",
+      "Tennis",
+      "Basketball",
+    ]) {
+      expect(result.parsed.skills).not.toContain(hobby);
+    }
+  });
+});

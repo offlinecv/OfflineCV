@@ -116,3 +116,87 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     ]);
   });
 });
+
+describe("extractEducation — degree/field split + location peel (#222)", () => {
+  it("splits 'B.S. in Computer Science' into bare degree + field and peels City, ST", () => {
+    // The issue's exact reproducer: degree+field+dates on the second line,
+    // institution+location on the first (column gap before the city).
+    const { value } = extractEducation(
+      mkEduSection([
+        "University of Example, Allen School of CS and Engineering   Seattle, WA",
+        "B.S. in Computer Science   Sep. 2024 - Jun. 2027",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+    expect(value[0].institution).toBe(
+      "University of Example, Allen School of CS and Engineering",
+    );
+    expect(value[0].location).toBe("Seattle, WA");
+  });
+
+  it("keeps an ampersand subject when DEGREE_RE's 'of' branch swallows the 'in' tail", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Indian Institute of Technology",
+        "Bachelor of Technology in Computer Science & Engineering, 2018 - 2022",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("Bachelor of Technology");
+    expect(value[0].field).toBe("Computer Science & Engineering");
+  });
+
+  it("recovers a connective-less '<credential> <Field>' subject without the trailing date", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Stanford University",
+        "M.S. Computer Science, 2022 - 2024",
+      ]),
+    );
+    expect(value[0].degree).toBe("M.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("peels an international 'City, Country' off the institution", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "University of Example, London, United Kingdom",
+        "M.S. in Data Science   2021",
+      ]),
+    );
+    expect(value[0].institution).toBe("University of Example");
+    expect(value[0].location).toBe("London, United Kingdom");
+    expect(value[0].field).toBe("Data Science");
+  });
+
+  it("leaves field/location absent when the degree line carries neither", () => {
+    const { value } = extractEducation(
+      mkEduSection(["Massachusetts Institute of Technology", "Bachelor of Science, 2020"]),
+    );
+    expect(value[0].degree).toBe("Bachelor of Science");
+    expect(value[0].field).toBeUndefined();
+    expect(value[0].location).toBeUndefined();
+  });
+
+  it("does not split a state-only 'Institution, ST' (no city) at a normal word space", () => {
+    // A single space inside the institution name must not be read as a city
+    // boundary — only a 2+ space column gap separates a city. #222 follow-up.
+    const { value } = extractEducation(
+      mkEduSection(["Stanford University, CA", "M.S. in Statistics   2021 - 2023"]),
+    );
+    expect(value[0].institution).toBe("Stanford University, CA");
+    expect(value[0].location).toBeUndefined();
+  });
+
+  it("parses an 'M.Sc.' credential without stranding 'c.' into the field", () => {
+    // DEGREE_RE must prefer the longer 'M.Sc.' over 'M.S.' so the credential
+    // isn't truncated to 'M.S' with 'c. in Data Science' bleeding into field.
+    const { value } = extractEducation(
+      mkEduSection(["University of Example", "M.Sc. in Data Science, 2021 - 2023"]),
+    );
+    expect(value[0].degree).toBe("M.Sc.");
+    expect(value[0].field).toBe("Data Science");
+  });
+});

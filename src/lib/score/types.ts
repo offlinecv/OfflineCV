@@ -129,7 +129,18 @@ export interface ResumeExperience {
 export interface ResumeEducation {
   id?: string;
   degree: string;
+  /** Subject / field of study parsed from the degree line — the "Computer
+   *  Science" in "B.S. in Computer Science" or "Bachelor of Technology in
+   *  Computer Science & Engineering". `degree` keeps only the bare credential
+   *  ("B.S.", "Bachelor of Technology"); the subject lives here. Absent when the
+   *  degree line carries no parseable field. */
+  field?: string;
   institution: string;
+  /** Institution location ("City, ST" / "City, Country") peeled off the
+   *  institution line so `institution` is free of trailing location text.
+   *  Mirrors `ResumeExperience.location`; distinct from top-level candidate
+   *  address. */
+  location?: string;
   /**
    * Lead year of the education entry, kept for back-compat with consumers that
    * only show a single year (`looksLikeStudent`, the reconstructed view). When a

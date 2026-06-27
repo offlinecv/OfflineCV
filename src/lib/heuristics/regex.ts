@@ -372,7 +372,10 @@ export function matchSectionHeader(text: string): SectionName | null {
 // ── Degree patterns ─────────────────────────────────────────────────────────
 
 export const DEGREE_RE =
-  /\b(B\.?A\.?|B\.?S\.?|B\.?Sc\.?|B\.?E\.?|B\.?Eng\.?|B\.?Tech\.?|M\.?A\.?|M\.?S\.?|M\.?Sc\.?|M\.?Eng\.?|M\.?B\.?A\.?|Ph\.?D\.?|M\.?D\.?|J\.?D\.?|Bachelor|Master|Doctor|Associate)(?:\s+of\s+[A-Za-z ]{2,40})?/;
+  // NOTE: longer credential variants precede their prefixes (`B.Sc.` before
+  // `B.S.`, `M.Sc.` before `M.S.`) so alternation picks the full token — else
+  // `M.Sc.` matches only `M.S`, stranding `c.` to bleed into the parsed field.
+  /\b(B\.?A\.?|B\.?Sc\.?|B\.?S\.?|B\.?Eng\.?|B\.?E\.?|B\.?Tech\.?|M\.?A\.?|M\.?Sc\.?|M\.?S\.?|M\.?Eng\.?|M\.?B\.?A\.?|Ph\.?D\.?|M\.?D\.?|J\.?D\.?|Bachelor|Master|Doctor|Associate)(?:\s+of\s+[A-Za-z ]{2,40})?/;
 
 export const INSTITUTION_HINTS =
   /\b(University|College|Institute|School|Academy|Polytechnic)s?\b/i;
