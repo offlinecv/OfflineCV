@@ -85,6 +85,26 @@ describe("#225 — recognized Certifications section must not be dropped", () =>
     // structured output rather than vanishing.
     expect(JSON.stringify(parsed)).toContain("AWS Certified Solutions Architect");
   });
+
+  // #234 review: the achievements + certifications buckets fold in DOCUMENT
+  // order, not a hardcoded achievements-first order. A resume that places
+  // Certifications above Awards must read certs-first.
+  it("folds certifications before awards when Certifications precedes Awards", () => {
+    const parsed = parse([
+      { text: "Jane Doe", fontSize: 18 },
+      { text: "jane.doe@example.com" },
+      { text: "CERTIFICATIONS", fontSize: 14 },
+      { text: "AWS Certified Solutions Architect 2022" },
+      { text: "AWARDS", fontSize: 14 },
+      { text: "Best Paper Award 2021" },
+    ]);
+    const titles = (parsed.heuristic_achievements ?? []).map((a) => a.title);
+    const certIdx = titles.findIndex((t) => t.includes("AWS Certified"));
+    const awardIdx = titles.findIndex((t) => t.includes("Best Paper"));
+    expect(certIdx).toBeGreaterThanOrEqual(0);
+    expect(awardIdx).toBeGreaterThanOrEqual(0);
+    expect(certIdx).toBeLessThan(awardIdx);
+  });
 });
 
 describe("#225 — Honors/Awards under sub-headings must not collapse to one entry", () => {

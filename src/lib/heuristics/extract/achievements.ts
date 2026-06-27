@@ -25,12 +25,22 @@ import { liftHeaderLabel } from "./projects.ts";
  */
 // NB: `\b` is unreliable around the accented `é` (not a `\w` char in JS regex),
 // so we anchor on the ASCII-letter side only: `(?<![A-Za-z])` … `(?![A-Za-z])`.
+// These spelled-out forms are rare inside an award title, so a letter boundary
+// is a safe key.
 const PAGE_FURNITURE_RE =
-  /(?<![A-Za-z])(r[ée]sum[ée]|curriculum\s+vitae|cv)(?![A-Za-z])/i;
+  /(?<![A-Za-z])(r[ée]sum[ée]|curriculum\s+vitae)(?![A-Za-z])/i;
+
+// The bare two-letter "CV" is far easier to hit by accident inside content — a
+// parenthesised domain acronym ("Cardiovascular (CV) Fellowship"), a hyphenated
+// code ("CV-204"), a journal short-name — so it strips a real entry if keyed on
+// a letter boundary alone. Require it to stand alone between whitespace / line
+// ends, which the running-header form ("Jane Doe · CV", "Name CV 2") satisfies
+// but a punctuation-adjacent in-content "CV" does not.
+const CV_FURNITURE_RE = /(?:^|\s)cv(?:$|\s)/i;
 
 /** True when the line is page running-header/footer furniture, not content. */
 function isPageFurniture(line: PdfLine): boolean {
-  return PAGE_FURNITURE_RE.test(line.text);
+  return PAGE_FURNITURE_RE.test(line.text) || CV_FURNITURE_RE.test(line.text);
 }
 
 /**
@@ -110,7 +120,12 @@ function isAwardContinuation(text: string): boolean {
   const t = text.trim();
   if (t.length === 0) return true;
   if (/^(?:st|nd|rd|th)$/i.test(t)) return true; // stray superscript ordinal
-  return !/^[A-Z0-9]/.test(t); // not proper-noun / date led ⇒ a wrapped tail
+  // Opens a new award when it leads with a letter in ANY script (`Lu`/`Lt`
+  // upper-/title-case, `Lo` for caseless scripts like CJK) or a digit; anything
+  // else — a lowercase wrapped tail, a "[2]" citation marker, bare punctuation —
+  // is a continuation. ASCII-only `^[A-Z0-9]` wrongly folded an accented
+  // proper-noun award ("École …", "Üniversitäts-Preis") into the line above.
+  return !/^[\p{Lu}\p{Lt}\p{Lo}\p{N}]/u.test(t);
 }
 
 /**

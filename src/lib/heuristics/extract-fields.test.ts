@@ -969,6 +969,37 @@ describe("extractAchievements", () => {
   it("returns empty for an absent section", () => {
     expect(extractAchievements(undefined)).toEqual({ value: [], confidence: 0 });
   });
+
+  // Page furniture strip must not swallow a real award whose text merely
+  // carries a "CV" domain acronym adjacent to punctuation (#234 review). The
+  // bare "CV" furniture key only fires on a whitespace/line-bounded token.
+  it("keeps an award containing a parenthesised 'CV' acronym, strips a 'CV' running header", () => {
+    const { value } = extractAchievements(
+      mkSection("achievements", [
+        { text: "Cardiovascular (CV) Research Fellowship 2021" },
+        { text: "Jane Doe CV" },
+      ]),
+    );
+    const titles = value.map((v) => v.title);
+    expect(titles).toContain("Cardiovascular (CV) Research Fellowship");
+    expect(titles).not.toContain("Jane Doe CV");
+  });
+
+  // A flat-list award led by a non-ASCII uppercase letter must open its own
+  // entry, not fold into the award above it (#234 review). ASCII-only
+  // `^[A-Z0-9]` silently merged accented proper-noun awards.
+  it("opens a new entry for an award led by a non-ASCII uppercase letter", () => {
+    const { value } = extractAchievements(
+      mkSection("achievements", [
+        { text: "Dean's List" },
+        { text: "École Polytechnique Excellence Prize" },
+      ]),
+    );
+    expect(value.map((v) => v.title)).toEqual([
+      "Dean's List",
+      "École Polytechnique Excellence Prize",
+    ]);
+  });
 });
 
 // A header/anchor line whose entire text is a date leaves nothing after

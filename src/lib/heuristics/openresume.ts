@@ -157,6 +157,44 @@ function harvestInlineLabeledSkills(sections: PdfSection[]): string[] {
   return result;
 }
 
+/**
+ * True when section `a` opens before section `b` in document order — earlier
+ * page first, then higher on the page (`y` increases downward in the line
+ * geometry). A missing section never precedes a present one. Used to fold the
+ * achievements + certifications buckets in the order they actually appear,
+ * since `findSection` locates each independently of page position.
+ */
+function sectionPrecedes(
+  a: PdfSection | undefined,
+  b: PdfSection | undefined,
+): boolean {
+  const la = a?.lines[0];
+  const lb = b?.lines[0];
+  if (!la) return false;
+  if (!lb) return true;
+  return la.page !== lb.page ? la.page < lb.page : la.y < lb.y;
+}
+
+/**
+ * Confidence for the merged achievements + certifications bucket. Each
+ * extractor returns the unweighted mean score over its own entries, so the
+ * combined confidence is the count-weighted mean of the two — `Math.max` would
+ * overclaim (a perfect 2-entry cert list would drag a weak 5-entry award list
+ * up to 1.0). Falls back to 0 when both buckets are empty.
+ */
+function mergedConfidence(
+  achievements: { value: unknown[]; confidence: number },
+  certifications: { value: unknown[]; confidence: number },
+): number {
+  const total = achievements.value.length + certifications.value.length;
+  if (total === 0) return 0;
+  return (
+    (achievements.confidence * achievements.value.length +
+      certifications.confidence * certifications.value.length) /
+    total
+  );
+}
+
 function buildHeuristicResult(
   lines: PdfLine[],
   sections: PdfSection[],
@@ -191,9 +229,10 @@ function buildHeuristicResult(
   // items — structurally the same shape as achievements — so we route them
   // through the same extractor and fold them into `heuristic_achievements`.
   // That bucket already renders and pools into the scorer, so certs surface in
-  // display and scoring with no new parallel surface (the reuse gate). Concat
-  // (achievements first, then certs) keeps document order: an Awards section
-  // precedes Certifications on the resumes that carry both.
+  // display and scoring with no new parallel surface (the reuse gate). The two
+  // buckets are concatenated in document order — `findSection` locates each
+  // independently of page position, so a resume that places Certifications
+  // above Awards must still read certs-first (see `sectionsInDocumentOrder`).
   const certificationsSection = findSection(ownedSections, "certifications");
 
   const summary = extractSummary(summarySection);
@@ -203,7 +242,9 @@ function buildHeuristicResult(
   const projects = extractProjects(projectsSection);
   const achievements = extractAchievements(achievementsSection);
   const certifications = extractAchievements(certificationsSection);
-  const allAchievements = [...achievements.value, ...certifications.value];
+  const allAchievements = sectionPrecedes(certificationsSection, achievementsSection)
+    ? [...certifications.value, ...achievements.value]
+    : [...achievements.value, ...certifications.value];
 
   const parsed: HeuristicParsedResume = {
     ...(name.value ? { full_name: name.value } : {}),
@@ -249,7 +290,7 @@ function buildHeuristicResult(
     experience: experience.confidence,
     education: education.confidence,
     projects: projects.confidence,
-    achievements: Math.max(achievements.confidence, certifications.confidence),
+    achievements: mergedConfidence(achievements, certifications),
   };
 
   // #122 — ADDITIONAL/inline-label skills re-route. When the recognized SKILLS
