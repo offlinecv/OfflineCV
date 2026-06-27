@@ -185,6 +185,16 @@ function buildHeuristicResult(
   const skillsSection = findSection(ownedSections, "skills");
   const projectsSection = findSection(ownedSections, "projects");
   const achievementsSection = findSection(ownedSections, "achievements");
+  // A recognized Certifications section reaches a `certifications` PdfSection but
+  // had no extractor wired, so its content sat in rawText and never surfaced in
+  // `parsed` (#225). Certifications are name-led, often single-line credential
+  // items — structurally the same shape as achievements — so we route them
+  // through the same extractor and fold them into `heuristic_achievements`.
+  // That bucket already renders and pools into the scorer, so certs surface in
+  // display and scoring with no new parallel surface (the reuse gate). Concat
+  // (achievements first, then certs) keeps document order: an Awards section
+  // precedes Certifications on the resumes that carry both.
+  const certificationsSection = findSection(ownedSections, "certifications");
 
   const summary = extractSummary(summarySection);
   const skills = extractSkills(skillsSection);
@@ -192,6 +202,8 @@ function buildHeuristicResult(
   const education = extractEducation(educationSection);
   const projects = extractProjects(projectsSection);
   const achievements = extractAchievements(achievementsSection);
+  const certifications = extractAchievements(certificationsSection);
+  const allAchievements = [...achievements.value, ...certifications.value];
 
   const parsed: HeuristicParsedResume = {
     ...(name.value ? { full_name: name.value } : {}),
@@ -213,8 +225,8 @@ function buildHeuristicResult(
     experience: experience.value,
     education: education.value,
     ...(projects.value.length > 0 ? { projects: projects.value } : {}),
-    ...(achievements.value.length > 0
-      ? { heuristic_achievements: achievements.value }
+    ...(allAchievements.length > 0
+      ? { heuristic_achievements: allAchievements }
       : {}),
     // Best-effort current role derivation.
     ...(experience.value[0]?.title ? { current_title: experience.value[0].title } : {}),
@@ -237,7 +249,7 @@ function buildHeuristicResult(
     experience: experience.confidence,
     education: education.confidence,
     projects: projects.confidence,
-    achievements: achievements.confidence,
+    achievements: Math.max(achievements.confidence, certifications.confidence),
   };
 
   // #122 — ADDITIONAL/inline-label skills re-route. When the recognized SKILLS

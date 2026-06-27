@@ -2,12 +2,13 @@
 // Copyright 2026 The resumelint Authors
 
 /**
- * Repro regressions for two section-routing parser bugs, reproduced from the
- * parser walkthrough and isolated to synthetic inputs (no PII, per the fixture
- * policy). Both assertions use `it.fails` — they encode the CORRECT behavior,
- * which the current parser does NOT yet satisfy, so they pass today as
- * documented-known-failures and will TRIP (turn red) the moment the bug is
- * fixed, forcing the fixer to flip them to a plain `it`.
+ * Repro regressions for section-routing parser bugs, reproduced from the parser
+ * walkthrough and isolated to synthetic inputs (no PII, per the fixture policy).
+ * Each block was first landed as a documented-known-failure (`it.fails`)
+ * encoding the CORRECT behavior the parser did not yet satisfy; once the fix
+ * landed, the block was flipped to a plain `it` so it guards the fix going
+ * forward. All three (#223, both #225 halves) are now fixed and assert as plain
+ * `it`.
  *
  *   #223 — coursework duplicated: `findSection` merges every section whose name
  *          resolves to `education`. "coursework" / "relevant coursework" are
@@ -46,9 +47,7 @@ function parse(
 }
 
 describe("#223 — coursework must not duplicate across merged education sections", () => {
-  // KNOWN FAILURE until #223 is fixed. When the section-merge dedupes
-  // coursework, this starts passing and `it.fails` turns red — flip to `it`.
-  it.fails(
+  it(
     "does not repeat coursework when inline + a standalone Coursework section coexist",
     () => {
       const parsed = parse([
@@ -71,10 +70,10 @@ describe("#223 — coursework must not duplicate across merged education section
 });
 
 describe("#225 — recognized Certifications section must not be dropped", () => {
-  // KNOWN FAILURE until #225 is fixed. When a certifications extractor is wired
-  // (or certs route to an extracted bucket), the content surfaces and this turns
-  // red — flip to `it`.
-  it.fails("surfaces Certifications content in the parsed output", () => {
+  // FIXED (#225): `buildHeuristicResult` now wires the recognized `certifications`
+  // PdfSection through the achievements extractor and folds the result into
+  // `heuristic_achievements`, so the content surfaces in the parsed output.
+  it("surfaces Certifications content in the parsed output", () => {
     const parsed = parse([
       { text: "Jane Doe", fontSize: 18 },
       { text: "jane.doe@example.com" },
@@ -89,11 +88,10 @@ describe("#225 — recognized Certifications section must not be dropped", () =>
 });
 
 describe("#225 — Honors/Awards under sub-headings must not collapse to one entry", () => {
-  // KNOWN FAILURE until the achievements extractor stops collapsing a
-  // multi-subheading, page-split Honors section into a single entry. When each
-  // award line survives (and the page footer is stripped), this turns red — flip
-  // to a plain `it`.
-  it.fails(
+  // FIXED (#225): a bullet-less achievements-family section is now parsed
+  // one-entry-per-line, so each award survives a multi-subheading + page-break
+  // layout, and the page running-header/footer line is stripped before parsing.
+  it(
     "keeps every award line and drops the page-footer when Honors has sub-headings + a page break",
     () => {
       const parsed = parse([

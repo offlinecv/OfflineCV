@@ -542,6 +542,17 @@ export function extractEducation(
     (value[target].coursework ??= []).push(course.text);
   }
 
+  // Deduplicate coursework on each entry (#223). When a standalone "Relevant
+  // Coursework" section is an education alias, `findSection` merges its lines
+  // into the education section, so bullets that appear both inline under the
+  // degree AND in the standalone section are collected twice. Dedupe by exact
+  // text, preserving first-occurrence order.
+  for (const entry of value) {
+    if (entry.coursework && entry.coursework.length > 1) {
+      entry.coursework = [...new Set(entry.coursework)];
+    }
+  }
+
   return {
     value,
     confidence: avgScore(built.map((b) => b.score)),
