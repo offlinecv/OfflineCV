@@ -306,7 +306,11 @@ function stripInstitutionLocation(s: string): {
   // (column-gap/space boundary → single-token city).
   const COMMA_US_RE =
     /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
-  const SPACE_US_RE = /\s+([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
+  // Require a 2+ space column gap (not a single word-space) so a normal space
+  // inside the institution name isn't read as a city boundary — otherwise
+  // "Stanford University, CA" (state-only, no city) wrongly yields
+  // institution "Stanford" + location "University, CA".
+  const SPACE_US_RE = /\s{2,}([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
   const mUS = s.match(COMMA_US_RE) ?? s.match(SPACE_US_RE);
   if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
     const before = s

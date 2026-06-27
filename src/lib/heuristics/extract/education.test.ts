@@ -179,4 +179,24 @@ describe("extractEducation — degree/field split + location peel (#222)", () =>
     expect(value[0].field).toBeUndefined();
     expect(value[0].location).toBeUndefined();
   });
+
+  it("does not split a state-only 'Institution, ST' (no city) at a normal word space", () => {
+    // A single space inside the institution name must not be read as a city
+    // boundary — only a 2+ space column gap separates a city. #222 follow-up.
+    const { value } = extractEducation(
+      mkEduSection(["Stanford University, CA", "M.S. in Statistics   2021 - 2023"]),
+    );
+    expect(value[0].institution).toBe("Stanford University, CA");
+    expect(value[0].location).toBeUndefined();
+  });
+
+  it("parses an 'M.Sc.' credential without stranding 'c.' into the field", () => {
+    // DEGREE_RE must prefer the longer 'M.Sc.' over 'M.S.' so the credential
+    // isn't truncated to 'M.S' with 'c. in Data Science' bleeding into field.
+    const { value } = extractEducation(
+      mkEduSection(["University of Example", "M.Sc. in Data Science, 2021 - 2023"]),
+    );
+    expect(value[0].degree).toBe("M.Sc.");
+    expect(value[0].field).toBe("Data Science");
+  });
 });
