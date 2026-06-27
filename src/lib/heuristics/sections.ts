@@ -39,6 +39,18 @@ export interface PdfLine {
   maxFontSize: number;
   /** True if every item on the line is all-caps (names + headers). */
   allCaps: boolean;
+  /**
+   * Vertical distance (PDF points) from the previous line's baseline on the
+   * same page to this line's — i.e. the gap *above* this line. `0` for the
+   * first line on each page (no line above ⇒ no gap signal). This is the
+   * font-independent header cue (#216): a section header sits below a
+   * paragraph break, so its gap-above runs visibly larger than the body
+   * line-height even on font-flattening renderers (Google Docs/Skia,
+   * WeasyPrint/Cairo) where the font-ratio signal collapses to ≈1.0–1.09.
+   * Cross-page transitions reset to `0` so a page break is never read as a
+   * header gap.
+   */
+  gapAbove: number;
 }
 
 export interface PdfSection {
@@ -349,7 +361,30 @@ export function groupIntoLines(
   boundaries?: Map<number, number>,
 ): PdfLine[] {
   const bands = orderItemsByColumn(items, boundaries);
-  return bands.flatMap(groupLinesSingle);
+  const lines = bands.flatMap(groupLinesSingle);
+  assignGapAbove(lines);
+  return lines;
+}
+
+/**
+ * Fill each line's `gapAbove` from the line above it in final document order
+ * (#216). The previous line must share a page — a cross-page transition leaves
+ * `gapAbove` at its `0` default, so a page break never registers as a header
+ * gap. Band ordering (`orderItemsByColumn`) already emits the left column fully
+ * before the right on a split page, so within a band the y-deltas are
+ * monotonic; at a band boundary on the SAME page the y jumps backward (right
+ * column starts back at the top), which yields a negative delta — clamped to
+ * `0`, again no false header gap. So the signal is only ever positive within a
+ * single reading column, exactly where paragraph spacing is meaningful.
+ */
+function assignGapAbove(lines: PdfLine[]): void {
+  for (let i = 1; i < lines.length; i++) {
+    const prev = lines[i - 1];
+    const cur = lines[i];
+    if (cur.page !== prev.page) continue;
+    const gap = cur.y - prev.y;
+    if (gap > 0) cur.gapAbove = gap;
+  }
 }
 
 /** Single-pass line grouping over one band of items (no column awareness). */
@@ -382,6 +417,9 @@ function groupLinesSingle(bandItems: PdfTextItem[]): PdfLine[] {
       text,
       maxFontSize: Math.max(...run.map((i) => i.fontSize)),
       allCaps: text.replace(/[^A-Za-z]/g, "").length > 0 && text === text.toUpperCase(),
+      // Filled in document order by `assignGapAbove` after all bands are
+      // flattened; a per-band builder has no view of the line above it.
+      gapAbove: 0,
     };
   };
 
@@ -518,6 +556,46 @@ function computeBodyBaseline(lines: PdfLine[]): number {
 }
 
 /**
+ * Ratio of a line's gap-above to the document body line-height at which the gap
+ * reads as a *paragraph break* (a section boundary cue), not ordinary
+ * within-paragraph leading (#216). Calibrated against the two font-flattening
+ * `nonstandard-headers` fixtures: body line-height there is ≈18pt, real section
+ * headers sit at a gap-above of ≈26–29.5pt (ratio ≈1.44–1.64), while the
+ * tightest non-header cue — the company/role line directly under a header —
+ * sits at ≈21.5–22.5pt (ratio ≈1.19–1.25). 1.4 (threshold ≈25.2pt) clears every
+ * real header with margin while staying above that sub-header band, so the gap
+ * cue never fires on a role/company/degree line.
+ */
+const HEADER_GAP_RATIO = 1.4;
+
+/**
+ * Character-weighted mode of the positive `gapAbove` values across lines — the
+ * document's typical within-paragraph line-height, the baseline the
+ * vertical-gap header cue (#216) measures against. Mirrors the weighting in
+ * `computeBodyBaseline` (weight each gap bin by the line's character count) so
+ * long body paragraphs dominate the mode and a handful of wider header gaps
+ * never become the baseline. Gaps are binned to 0.5pt. Returns a 14pt default
+ * for a document with no measurable gaps (≤1 line, or all first-on-page).
+ */
+function computeBodyLineHeight(lines: PdfLine[]): number {
+  const bins = new Map<number, number>();
+  for (const line of lines) {
+    if (line.gapAbove <= 0) continue;
+    const bin = Math.round(line.gapAbove * 2) / 2;
+    bins.set(bin, (bins.get(bin) ?? 0) + line.text.trim().length);
+  }
+  let mode = 0;
+  let maxChars = 0;
+  for (const [gap, chars] of bins.entries()) {
+    if (chars > maxChars) {
+      maxChars = chars;
+      mode = gap;
+    }
+  }
+  return mode > 0 ? mode : 14;
+}
+
+/**
  * Header *shape* test, independent of font: short (≤ `VISUAL_HEADER_MAX_CHARS`
  * chars, ≤ `VISUAL_HEADER_MAX_WORDS` words), not a bullet line, and not ending
  * in terminal sentence punctuation. This is the structural half of
@@ -589,17 +667,67 @@ const TEXT_PATTERN_DIRTY_RE = /[0-9,:·|—–/]/;
  */
 function isTextPatternHeader(text: string): boolean {
   const t = text.trim();
-  if (t.length === 0 || t.length > VISUAL_HEADER_MAX_CHARS) return false;
-  if (VISUAL_BULLET_RE.test(t)) return false;
-  if (TERMINAL_PUNCT_RE.test(t)) return false;
-  if (TEXT_PATTERN_DIRTY_RE.test(t)) return false;
-  const words = t.split(/\s+/).filter((w) => w.length > 0);
+  const words = textPatternCleanWords(t);
+  if (words === null) return false;
   // ≥ 2 words: a single token is a skill/acronym ("HTML", "GRADUATE"), not a
   // section header — bare single-token all-caps is the FP class #112 dropped.
-  if (words.length < 2 || words.length > TEXT_PATTERN_HEADER_MAX_WORDS) {
-    return false;
-  }
-  return isAllCapsHeader(t);
+  // The single-word case is handled separately, gated on a vertical-gap cue
+  // (`isGapIsolatedSingleWordHeader`, #216), so it is excluded here.
+  return words >= 2 && words <= TEXT_PATTERN_HEADER_MAX_WORDS;
+}
+
+/**
+ * Shared shape gate for the font-metadata-independent ALL-CAPS header tests:
+ * a short, non-bullet, non-terminal-punctuation, dirty-marker-free, ALL-CAPS
+ * line. Returns its whitespace-word count when the shape passes, else `null`.
+ * Both the multi-word `isTextPatternHeader` and the single-word, gap-gated
+ * `isGapIsolatedSingleWordHeader` derive their word-count rule from this one
+ * predicate so the two can never drift on what "clean ALL-CAPS header shape"
+ * means.
+ */
+function textPatternCleanWords(text: string): number | null {
+  const t = text.trim();
+  if (t.length === 0 || t.length > VISUAL_HEADER_MAX_CHARS) return null;
+  if (VISUAL_BULLET_RE.test(t)) return null;
+  if (TERMINAL_PUNCT_RE.test(t)) return null;
+  if (TEXT_PATTERN_DIRTY_RE.test(t)) return null;
+  if (!isAllCapsHeader(t)) return null;
+  return t.split(/\s+/).filter((w) => w.length > 0).length;
+}
+
+/**
+ * Single-word, ALL-CAPS, unknown-vocabulary header recovered by a vertical-gap
+ * cue (#216). This is the narrow relaxation of `isTextPatternHeader`'s `≥2
+ * words` gate (the #112 single-token FP guard) for the one renderer class where
+ * it loses a real boundary: a font-flattening renderer (Google Docs/Skia,
+ * WeasyPrint/Cairo) emits a real single-word header like `INTERNSHIPS` at body
+ * font size, so neither the font-ratio path nor the multi-word text-pattern path
+ * fires, and the header is silently absorbed into the section above it.
+ *
+ * The `≥2 words` gate stays the default precisely because a bare single ALL-CAPS
+ * token is dominated by NON-headers — skill/acronym tokens ("HTML", "CSS",
+ * "PHP", "AWS") and lone words ("GRADUATE"). Those appear *inside* a packed
+ * section (skills list, a bullet's lead word), so they carry an ordinary
+ * within-paragraph gap above. A genuine section header sits below a paragraph
+ * break, so its gap-above runs ≥ `HEADER_GAP_RATIO`× the body line-height. That
+ * orthogonal geometric cue — not vocabulary, not font, not casing — is what
+ * separates the two, so it (and ONLY it) re-admits the single-word case while
+ * keeping the #112 FP class closed: an inline acronym never clears the gate.
+ *
+ * Caller (`classifyLine`) applies the same name/contact-block suppression and
+ * post-`matchSectionHeader` ordering as the other visual paths, so a fired
+ * header opens the boundary-only `other` sink. It also gates this path on the
+ * line NOT immediately following a boundary: the first content line under a
+ * header inherits an inflated gap-above (measured against the header line), so a
+ * column-reordered skills grid's lead token (`HTML` right under `SKILLS`) would
+ * otherwise clear the ratio — the #112 inline-acronym FP this guard keeps shut.
+ */
+function isGapIsolatedSingleWordHeader(
+  line: PdfLine,
+  bodyLineHeight: number,
+): boolean {
+  if (textPatternCleanWords(line.text) !== 1) return false;
+  return line.gapAbove >= bodyLineHeight * HEADER_GAP_RATIO;
 }
 
 /** True when every letter-bearing char is uppercase (and at least one exists). */
@@ -615,10 +743,19 @@ function isAllCapsHeader(t: string): boolean {
  *   - font path: header-shaped (`isHeaderShort`) AND meaningfully larger than
  *     the body baseline (≥ `VISUAL_HEADER_FONT_RATIO`); or
  *   - text-pattern path (#163): font-metadata-independent — a short clean-shaped
- *     ALL-CAPS line (`isTextPatternHeader`), for renderers that flatten font
- *     size below the ratio gate.
+ *     multi-word ALL-CAPS line (`isTextPatternHeader`), for renderers that
+ *     flatten font size below the ratio gate.
+ *
+ * The single-word vertical-gap path (#216, `isGapIsolatedSingleWordHeader`) is
+ * NOT folded in here — it needs an adjacency guard the caller holds (a header
+ * never immediately follows another header), so `classifyLine` checks it
+ * separately. Keeping it out leaves this predicate (and its #112/#163 callers)
+ * byte-identical.
  */
-function isVisualHeader(line: PdfLine, bodyBaseline: number): boolean {
+function isVisualHeader(
+  line: PdfLine,
+  bodyBaseline: number,
+): boolean {
   if (isHeaderShort(line.text) &&
       line.maxFontSize >= bodyBaseline * VISUAL_HEADER_FONT_RATIO) {
     return true;
@@ -702,11 +839,20 @@ export function splitIntoSections(
 ): PdfSection[] {
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
   const bodyBaseline = computeBodyBaseline(lines);
+  const bodyLineHeight = computeBodyLineHeight(lines);
   // True until the first non-profile section (keyword or visual) opens.
   let openedRealSection = false;
   // True once the leading name/title block has ended — signalled by the first
   // contact-shaped line inside the profile region.
   let seenContactInProfile = false;
+  // True when the immediately-preceding line opened a section boundary. The
+  // single-word gap-cue header path (#216) is suppressed right after a boundary:
+  // a real header never directly follows another header, and the first content
+  // line under a header inherits an inflated gap-above (it's measured against the
+  // header), e.g. the first ALL-CAPS skill token `HTML` directly under `SKILLS`
+  // in a column-reordered skills grid — the #112 inline-acronym FP this guard
+  // keeps closed.
+  let prevLineOpenedBoundary = false;
 
   for (const line of lines) {
     // Per-line column split-x (undefined for single-column pages / docs).
@@ -714,15 +860,19 @@ export function splitIntoSections(
     const action = classifyLine(
       line,
       bodyBaseline,
+      bodyLineHeight,
       openedRealSection,
       seenContactInProfile,
+      prevLineOpenedBoundary,
       columnSplitX,
     );
     if (action.kind === "open") {
       sections.push({ name: action.name, lines: [] });
       openedRealSection = true;
+      prevLineOpenedBoundary = true;
       continue;
     }
+    prevLineOpenedBoundary = false;
     if (action.marksContactEnd) seenContactInProfile = true;
     sections[sections.length - 1].lines.push(line);
   }
@@ -746,8 +896,10 @@ type LineAction =
 function classifyLine(
   line: PdfLine,
   bodyBaseline: number,
+  bodyLineHeight: number,
   openedRealSection: boolean,
   seenContactInProfile: boolean,
+  prevLineOpenedBoundary: boolean,
   columnSplitX: number | undefined,
 ): LineAction {
   const header = matchSectionHeader(line.text);
@@ -755,7 +907,16 @@ function classifyLine(
 
   const contactShaped = hasContactShape(line.text);
 
-  if (isVisualHeader(line, bodyBaseline)) {
+  // Visual header (font path #112 / multi-word ALL-CAPS text-pattern #163), OR
+  // the single-word vertical-gap path (#216) — the latter suppressed when the
+  // previous line opened a boundary, so the first content line under a header
+  // (an inflated gap-above artifact, e.g. `HTML` under `SKILLS`) is never
+  // mis-promoted (keeps the #112 inline-acronym FP class closed).
+  if (
+    isVisualHeader(line, bodyBaseline) ||
+    (!prevLineOpenedBoundary &&
+      isGapIsolatedSingleWordHeader(line, bodyLineHeight))
+  ) {
     // Inside the leading name/title block (no contact line seen yet, no section
     // open) — a font-distinct line here is the name or a title/tagline, never a
     // section header. Keep it in the profile; the contact line ends the block.

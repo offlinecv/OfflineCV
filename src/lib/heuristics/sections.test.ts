@@ -26,7 +26,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
 
 function build(
-  specs: Array<{ text: string; fontSize?: number; x?: number }>,
+  specs: Array<{ text: string; fontSize?: number; x?: number; lineIndex?: number }>,
   columnBoundaries?: Map<number, number>,
 ): PdfSection[] {
   const items = mkItems(specs);
@@ -403,6 +403,102 @@ describe("splitIntoSections — coursework header termination (#163)", () => {
   });
 });
 
+describe("splitIntoSections — single-word vertical-gap header path (#216)", () => {
+  // Line-level coverage for the font-independent gap cue that re-admits a
+  // single-word, ALL-CAPS, unknown-vocabulary header (`INTERNSHIPS`) the
+  // multi-word text-pattern gate (#163) and the font-ratio gate (#112) both
+  // drop on font-flattening renderers. `mkItems` spaces consecutive lines 14pt
+  // apart (the body line-height the gap cue measures against); SKIPPING a
+  // `lineIndex` opens a wider gap above a line (e.g. a jump of 2 ⇒ 28pt gap,
+  // ratio 2.0 > the 1.4 threshold), modelling the paragraph break above a real
+  // section header. Every line here is body font-size (11pt) so ONLY the gap
+  // signal — never the font path — can fire.
+
+  it("opens a boundary at a single-word ALL-CAPS header with a prominent gap above", () => {
+    const sections = build([
+      { text: "Jane Smith", fontSize: 11, lineIndex: 0 },
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 11, lineIndex: 1 },
+      { text: "EXPERIENCE", fontSize: 11, lineIndex: 2 },
+      { text: "Engineer, Acme  01/2021 - Present", fontSize: 11, lineIndex: 3 },
+      { text: "• Shipped the billing rewrite handling 2M events", fontSize: 11, lineIndex: 4 },
+      // 28pt gap above (lineIndex jumps 4 → 6) — the paragraph break before a
+      // real header. Single word, ALL CAPS, unknown vocabulary.
+      { text: "INTERNSHIPS", fontSize: 11, lineIndex: 6 },
+      { text: "Acme Corp Jun 2025 - Aug 2025", fontSize: 11, lineIndex: 7 },
+      { text: "• Implemented a metrics dashboard for an internal service", fontSize: 11, lineIndex: 8 },
+    ]);
+
+    // The unknown single-word header opened a boundary (the `other` sink — no
+    // keyword/anchor name), so its block stopped being absorbed into experience.
+    const internships = sectionContaining(sections, "Acme Corp Jun 2025");
+    expect(internships).toBeDefined();
+    expect(internships!.name).toBe("other");
+    const experience = sectionContaining(sections, "Engineer, Acme");
+    expect(experience!.name).toBe("experience");
+    expect(
+      experience!.lines.some((l) => l.text.includes("Acme Corp Jun 2025")),
+    ).toBe(false);
+  });
+
+  it("does NOT promote a single-word ALL-CAPS token with an ORDINARY gap (inline acronym — #112 FP)", () => {
+    // A body-size single-token acronym inside a packed skills list carries only
+    // the ordinary within-paragraph gap (14pt, ratio 1.0) — the gap cue must NOT
+    // fire, keeping the #112 single-token FP class closed.
+    const sections = build([
+      { text: "Jane Smith", fontSize: 11, lineIndex: 0 },
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 11, lineIndex: 1 },
+      { text: "EXPERIENCE", fontSize: 11, lineIndex: 2 },
+      { text: "Engineer, Acme  01/2021 - Present", fontSize: 11, lineIndex: 3 },
+      { text: "• Built the deploy pipeline cutting release time", fontSize: 11, lineIndex: 4 },
+      // Single-word ALL-CAPS, but ordinary 14pt gap (lineIndex 5) — an inline
+      // acronym, not a header.
+      { text: "HTML", fontSize: 11, lineIndex: 5 },
+      { text: "CSS", fontSize: 11, lineIndex: 6 },
+    ]);
+
+    expect(names(sections).filter((n) => n === "other")).toHaveLength(0);
+  });
+
+  it("does NOT promote a single-word ALL-CAPS token immediately AFTER a header (inflated post-header gap)", () => {
+    // The first content token directly under a real header inherits a gap-above
+    // measured against the header, which can clear the ratio — but a header
+    // never directly follows another header, so the adjacency guard suppresses
+    // it. Models a column-reordered skills grid's lead token (`HTML` under
+    // `SKILLS`) with a wide gap.
+    const sections = build([
+      { text: "Jane Smith", fontSize: 11, lineIndex: 0 },
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 11, lineIndex: 1 },
+      { text: "SKILLS", fontSize: 11, lineIndex: 3 }, // keyword header, wide gap above
+      // Wide 28pt gap above this first skill token (lineIndex 3 → 5), but it
+      // directly follows the SKILLS boundary — the guard must keep it in skills.
+      { text: "HTML", fontSize: 11, lineIndex: 5 },
+      { text: "CSS", fontSize: 11, lineIndex: 6 },
+    ]);
+
+    expect(names(sections).filter((n) => n === "other")).toHaveLength(0);
+    const skills = sectionContaining(sections, "HTML");
+    expect(skills!.name).toBe("skills");
+  });
+
+  it("does NOT promote a single-word Title-Case line even with a prominent gap", () => {
+    // The gap cue is ALL-CAPS only (shares `textPatternCleanWords`): a Title-Case
+    // single word ("Internships") is a label/heading shape this path deliberately
+    // leaves to vocabulary, since lone Title-Case tokens are dominated by content
+    // (company / role fragments). Only the casing differs from the firing case.
+    const sections = build([
+      { text: "Jane Smith", fontSize: 11, lineIndex: 0 },
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 11, lineIndex: 1 },
+      { text: "EXPERIENCE", fontSize: 11, lineIndex: 2 },
+      { text: "Engineer, Acme  01/2021 - Present", fontSize: 11, lineIndex: 3 },
+      { text: "• Shipped the billing rewrite handling 2M events", fontSize: 11, lineIndex: 4 },
+      { text: "Internships", fontSize: 11, lineIndex: 6 }, // Title case, wide gap
+      { text: "Acme Corp Jun 2025 - Aug 2025", fontSize: 11, lineIndex: 7 },
+    ]);
+
+    expect(names(sections).filter((n) => n === "other")).toHaveLength(0);
+  });
+});
+
 /**
  * Section-count regression on a sample of real corpus fixtures (#112 AC).
  *
@@ -448,12 +544,20 @@ describe("splitIntoSections — corpus section-count regression (#112)", () => {
     },
     {
       // Non-standard headers — "ON CAMPUS INVOLVEMENT" and "VOLUNTEER
-      // EXPERIENCE" now route to experience (Part A, issue #19); "INTERNSHIPS"
-      // was already an experience alias via anchor-fallback. Education drops
-      // to 1 (the single degree entry; prior count of 2 included involvement
-      // content misrouted into education).
+      // EXPERIENCE" route to experience (Part A, issue #19). "INTERNSHIPS" is a
+      // single-word, ALL-CAPS, unknown-vocabulary header this font-flattening
+      // renderer emits at body font (ratio ≈1.09) — below the 1.15 font gate
+      // and short of the multi-word text-pattern path. Pre-#216 it was silently
+      // absorbed into the VOLUNTEER experience block (so its Acme entry still
+      // counted toward experience, giving experience=3). The #216 vertical-gap
+      // cue now OPENS a boundary at INTERNSHIPS; with no keyword/anchor name it
+      // opens the `other` sink (naming an unnamed boundary is a separate
+      // follow-on), so the Acme intern entry moves out of experience →
+      // experience drops to 2. The boundary is recovered (no more cross-section
+      // absorption); the score trade-off (its 2 bullets leave the experience
+      // pool) is the deferred-naming consequence the issue scopes out.
       file: "google-docs/google-docs-skia-proxy-nonstandard-headers.pdf",
-      experience: 3,
+      experience: 2,
       education: 1,
       hasLocation: false,
     },

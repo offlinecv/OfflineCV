@@ -15,6 +15,7 @@ function mkLine(text: string, y = 0): PdfLine {
     text,
     maxFontSize: 12,
     allCaps: false,
+    gapAbove: 0,
   };
 }
 

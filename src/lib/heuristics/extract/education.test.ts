@@ -23,6 +23,7 @@ const mkLine = (text: string): PdfLine => ({
   text,
   maxFontSize: 11,
   allCaps: false,
+  gapAbove: 0,
 });
 const mkEduSection = (texts: string[]): PdfSection => ({
   name: "education",

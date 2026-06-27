@@ -510,6 +510,7 @@ describe("extractSkills — borderless multi-column tables (#29)", () => {
       text,
       maxFontSize: 11,
       allCaps: false,
+    gapAbove: 0,
     };
     return { name: "skills", lines: [line] };
   }
@@ -573,6 +574,7 @@ describe("extractSkills — borderless multi-column tables (#29)", () => {
       text: str,
       maxFontSize: 11,
       allCaps: false,
+    gapAbove: 0,
     });
     const section: PdfSection = {
       name: "skills",
@@ -649,6 +651,7 @@ describe("extractEducation — date-range parsing (issue #97)", () => {
     text,
     maxFontSize: 11,
     allCaps: false,
+    gapAbove: 0,
   });
   const mkEduSection = (texts: string[]): PdfSection => ({
     name: "education",
@@ -760,6 +763,7 @@ describe("extractEducation — relevant-coursework recovery (#164)", () => {
     text,
     maxFontSize: 11,
     allCaps: false,
+    gapAbove: 0,
   });
   const mkEduSection = (texts: string[]): PdfSection => ({
     name: "education",

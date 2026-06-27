@@ -107,6 +107,9 @@ export interface ResumeExperience {
   title: string;
   company: string;
   team?: string;
+  /** Role location extracted from header — "City, ST" or "City, Country".
+   *  Distinct from top-level `ResumeData.location` (candidate address). */
+  location?: string;
   start_date?: string;
   /** Precision the source carried for `start_date`. Consumers that care about
    *  honest rendering ("Apr 2021" vs "Apr 1, 2021") honor this. */

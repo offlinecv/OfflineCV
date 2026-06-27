@@ -285,6 +285,10 @@ function buildLine(
     allCaps:
       text.replace(/[^A-Za-z]/g, "").length > 0 &&
       text === text.toUpperCase(),
+    // Synthetic mammoth-markdown lines carry no real PDF geometry, so there is
+    // no meaningful vertical gap to measure; the gap-cue header path (#216) is
+    // inert here by design (this path uses the markdown-anchored splitter).
+    gapAbove: 0,
   };
 }
 

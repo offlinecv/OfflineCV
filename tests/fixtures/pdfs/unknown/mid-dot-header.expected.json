@@ -17,39 +17,38 @@
       "family_name",
       "full_name",
       "given_name",
+      "location",
       "phone",
       "phoneIsValid",
-      "projects",
-      "skills",
       "summary"
     ],
-    "skillsCount": 9,
-    "experienceCount": 2,
+    "skillsCount": 0,
+    "experienceCount": 3,
     "educationCount": 1,
-    "projectsCount": 1,
+    "projectsCount": 0,
     "achievementsCount": 0,
-    "rawTextCharCount": 1530,
+    "rawTextCharCount": 806,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 80,
-    "preLayoutOverall": 80,
+    "overall": 91,
+    "preLayoutOverall": 91,
     "specificity": {
-      "score": 33,
+      "score": 40,
       "max": 40,
       "gradable": true,
-      "metricBullets": 3,
-      "totalBullets": 6
+      "metricBullets": 5,
+      "totalBullets": 5
     },
     "structure": {
-      "score": 23,
+      "score": 27,
       "max": 30,
       "gradable": true,
       "goodBullets": 5,
-      "totalBullets": 6
+      "totalBullets": 5
     },
     "completeness": {
       "score": 24,
@@ -57,7 +56,7 @@
       "gradable": true,
       "missing": [
         "LinkedIn",
-        "location"
+        "skills"
       ]
     },
     "layout": {
@@ -65,7 +64,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 6,
+    "bulletCount": 5,
     "algoVersion": "1.4"
   }
 }

@@ -45,6 +45,12 @@ export const US_LOCATION_RE =
 export const INTL_LOCATION_RE =
   /\b([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+){0,2}),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+){0,2})\b/;
 
+/** Bare two-letter USPS state/territory abbreviation — used to detect a lone
+ *  state code that a header comma-split peeled off from a "City, ST" tail so
+ *  the state code is not mis-routed into `team`. */
+export const US_STATE_CODE_RE =
+  /^(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|PR|GU|VI|AS|MP)$/;
+
 // ── Date patterns ───────────────────────────────────────────────────────────
 
 const MONTH =

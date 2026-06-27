@@ -5,7 +5,7 @@ import type { ResumeExperience } from "../../score/types.ts";
 import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
-import { US_LOCATION_RE, INTL_LOCATION_RE } from "../regex.ts";
+import { US_LOCATION_RE, INTL_LOCATION_RE, US_STATE_CODE_RE } from "../regex.ts";
 import { looksLikeTitle, looksLikeCompany, finalizeEntries } from "./shared.ts";
 
 // ── Experience ──────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ function experienceFromBlock(block: EntryBlock): {
   score: number;
 } {
   const { dates } = block;
-  const { title, company, team } = disambiguateCompanyTitle(block.headerLines);
+  const { title, company, team, location } = disambiguateCompanyTitle(block.headerLines);
   const description = block.body;
 
   // Score the entry.
@@ -67,6 +67,7 @@ function experienceFromBlock(block: EntryBlock): {
       title: title ?? "",
       company: company ?? "",
       ...(team ? { team } : {}),
+      ...(location ? { location } : {}),
       ...(dates.start_date ? { start_date: dates.start_date } : {}),
       ...(dates.end_date ? { end_date: dates.end_date } : {}),
       ...(dates.is_current ? { is_current: true } : {}),
@@ -89,14 +90,68 @@ const BARE_LOCATION_RE =
   /^(remote|hybrid|on-?site|san francisco|san diego|san jose|san antonio|los angeles|las vegas|new york|new york city|new orleans|salt lake city|washington|washington d\.?c\.?|boston|chicago|seattle|austin|denver|portland|atlanta|dallas|houston|phoenix|miami|detroit|philadelphia|pittsburgh|minneapolis|nashville|charlotte|columbus|indianapolis|baltimore|sacramento|raleigh|london|paris|berlin|munich|tokyo|singapore|bangalore|bengaluru|mumbai|delhi|hyderabad|toronto|vancouver|sydney|melbourne|dublin|amsterdam)$/i;
 
 /** True when the comma tail reads like a location rather than an employer —
- *  either a "City, ST"/"City, Country" shape or a bare well-known city. Used to
- *  veto the `"Title, Location"` split so a city is never recorded as company. */
+ *  either a "City, ST"/"City, Country" shape, a bare well-known city, or a
+ *  lone 2-letter US state code (which occurs when a "City, ST" suffix was
+ *  split at the first comma, leaving the city on the title and the state
+ *  code as the comma tail). */
 function looksLikeLocationTail(after: string): boolean {
   return (
     BARE_LOCATION_RE.test(after) ||
     US_LOCATION_RE.test(after) ||
-    INTL_LOCATION_RE.test(after)
+    INTL_LOCATION_RE.test(after) ||
+    US_STATE_CODE_RE.test(after)
   );
+}
+
+/**
+ * Strip a trailing US "City, ST" location segment from a header string and
+ * return both the cleaned string and the extracted location.
+ *
+ * Two separator shapes are supported:
+ *   - Comma-prefixed: "Acme Corp, Springfield, IL"           → strips ", Springfield, IL"
+ *   - Space-only:     "Senior Engineer Bellevue, WA"          → strips " Bellevue, WA"
+ *
+ * Two separator shapes, each with its own city rule:
+ *   - Comma-delimited ("Acme Corp, Mountain View, CA"): the comma before the
+ *     city is a clean boundary, so the city may be MULTI-WORD ("Mountain View",
+ *     "Santa Clara") — a single-token rule here truncated the city and glued its
+ *     leading word(s) onto the company ("Google, Mountain" / "View, CA").
+ *   - Space-delimited ("…Risk Team Bellevue, WA"): no comma marks where the role
+ *     text ends, so the city is the SINGLE token before ", ST" — a greedy
+ *     multi-word match would consume role keywords ("Engineer Portland, OR" must
+ *     extract "Portland", not "Engineer Portland").
+ *
+ * Conservative design choices to avoid false positives:
+ *   - The state must be a valid 2-letter USPS abbreviation.
+ *   - Stripping must leave a non-empty remainder so the entire string is
+ *     never consumed.
+ *
+ * International "City, Country" tails (e.g. "Google, Hyderabad, India") are NOT
+ * stripped here — this is the US-state complement; the intl case is covered by
+ * `INTL_LOCATION_RE`/`BARE_LOCATION_RE` full-string checks used elsewhere.
+ */
+function stripLocationSuffix(s: string): {
+  text: string;
+  location: string | undefined;
+} {
+  // Pass A — comma-delimited "…, City, ST": comma boundary lets the city be
+  // multi-word (one+ capitalized words).
+  const COMMA_LOCATION_RE =
+    /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
+  // Pass B — space-delimited "Role … City, ST": single-token city only.
+  const SPACE_LOCATION_RE = /\s+([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
+  const m = s.match(COMMA_LOCATION_RE) ?? s.match(SPACE_LOCATION_RE);
+  if (!m) return { text: s, location: undefined };
+  // Validate the 2-letter suffix is a real USPS state code, not a random abbrev.
+  if (!US_STATE_CODE_RE.test(m[2])) return { text: s, location: undefined };
+  // Guard: stripping must leave a non-empty remainder. Drop any dangling comma
+  // left when the city was the only thing after a "Company," boundary.
+  const before = s
+    .slice(0, m.index)
+    .replace(/,\s*$/, "")
+    .trim();
+  if (!before) return { text: s, location: undefined };
+  return { text: before, location: `${m[1]}, ${m[2]}` };
 }
 
 /**
@@ -132,20 +187,28 @@ function splitRoleComma(h: string): [string, string] | null {
  *     doesn't, the title-keyword one is the title.
  *   - Otherwise the first line (top of the entry) is the company.
  *   - Team is an optional third piece, often separated by "—", ",", or "|".
+ *
+ * Single-line `·`-delimited headers ("Title · Company, City, ST · Team", #217)
+ * are tokenized here into up to three segments before the tiebreaker runs, so
+ * the title and company are extracted rather than staying glued together. The
+ * location embedded in the company segment ("Company, City, ST") is left for
+ * #218 to strip.
  */
 function disambiguateCompanyTitle(headers: string[]): {
   company?: string;
   title?: string;
   team?: string;
+  location?: string;
 } {
   const filtered = headers.filter((h) => h.length > 0);
   if (filtered.length === 0) return {};
 
   // Split any header that has an obvious "Title @ Company", "Title — Company",
-  // "Title | Company", or guarded "Title, Company" pattern.
+  // "Title | Company", "Title · Company" (mid-dot, #217), or guarded
+  // "Title, Company" pattern.
   const splits: Array<{ text: string; source: number }> = [];
   filtered.forEach((h, idx) => {
-    const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s+/);
+    const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s+|\s+·\s+/);
     if (atSplit.length > 1) {
       atSplit.forEach((s) => splits.push({ text: s.trim(), source: idx }));
       return;
@@ -190,5 +253,45 @@ function disambiguateCompanyTitle(headers: string[]): {
     }
   }
 
-  return { company, title, team };
+  // ── Location stripping ────────────────────────────────────────────────────
+  // (1) Strip trailing ", City, ST" from company — covers the · case where
+  //     "Acme Corp, Springfield, IL" landed wholesale in company.
+  let location: string | undefined;
+  if (company) {
+    const r = stripLocationSuffix(company);
+    if (r.location) {
+      company = r.text;
+      location = r.location;
+    }
+  }
+
+  // (2) Strip trailing " City, ST" from title — covers the two-line case where
+  //     the title line carries a trailing location ("Software Eng Intern Bellevue, WA").
+  //     The guard in looksLikeLocationTail now also catches a bare state-code tail,
+  //     so the comma-split no longer fires on "...Bellevue, WA" — but the location
+  //     is still embedded in the title string and needs to be peeled off here.
+  if (title && !location) {
+    const r = stripLocationSuffix(title);
+    if (r.location) {
+      title = r.text;
+      location = r.location;
+    }
+  }
+
+  // (3) If team is a bare location segment (e.g. a state code peeled off before
+  //     looksLikeLocationTail was fixed, or a "City, ST" segment from a ·-split),
+  //     rescue it as location and clear team.  Only fire when we have no location yet.
+  if (!location && team) {
+    if (
+      US_STATE_CODE_RE.test(team) ||
+      US_LOCATION_RE.test(team) ||
+      INTL_LOCATION_RE.test(team) ||
+      BARE_LOCATION_RE.test(team)
+    ) {
+      location = team;
+      team = undefined;
+    }
+  }
+
+  return { company, title, team, location };
 }

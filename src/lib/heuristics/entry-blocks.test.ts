@@ -38,6 +38,7 @@ function xSection(
     text,
     maxFontSize: 11,
     allCaps: false,
+    gapAbove: 0,
   }));
   return { name, lines };
 }
@@ -226,6 +227,7 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
         text: l.text,
         maxFontSize: 11,
         allCaps: false,
+    gapAbove: 0,
       })),
     };
   }
@@ -277,6 +279,7 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
         text: l.text,
         maxFontSize: 11,
         allCaps: false,
+    gapAbove: 0,
       })),
     };
   }
@@ -378,6 +381,7 @@ describe("mergeWrappedContinuations (#162)", () => {
       text: r.text,
       maxFontSize: 11,
       allCaps: false,
+    gapAbove: 0,
     }));
   }
 
@@ -570,6 +574,7 @@ function xySection(
     text,
     maxFontSize: 11,
     allCaps: false,
+    gapAbove: 0,
   }));
   return { name: "experience", lines };
 }
