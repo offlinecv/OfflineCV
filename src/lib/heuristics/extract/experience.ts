@@ -5,7 +5,7 @@ import type { ResumeExperience } from "../../score/types.ts";
 import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
-import { US_LOCATION_RE, INTL_LOCATION_RE, US_STATE_CODE_RE } from "../regex.ts";
+import { US_LOCATION_RE, INTL_LOCATION_RE, US_STATE_CODE_RE, COUNTRY_GAZETTEER } from "../regex.ts";
 import { looksLikeTitle, looksLikeCompany, finalizeEntries } from "./shared.ts";
 
 // ── Experience ──────────────────────────────────────────────────────────────
@@ -104,31 +104,26 @@ function looksLikeLocationTail(after: string): boolean {
 }
 
 /**
- * Strip a trailing US "City, ST" location segment from a header string and
- * return both the cleaned string and the extracted location.
+ * Strip a trailing location segment from a header string and return both the
+ * cleaned string and the extracted location.
  *
- * Two separator shapes are supported:
- *   - Comma-prefixed: "Acme Corp, Springfield, IL"           → strips ", Springfield, IL"
- *   - Space-only:     "Senior Engineer Bellevue, WA"          → strips " Bellevue, WA"
+ * Three passes, tried in order (US state first — tighter closed vocabulary):
  *
- * Two separator shapes, each with its own city rule:
- *   - Comma-delimited ("Acme Corp, Mountain View, CA"): the comma before the
- *     city is a clean boundary, so the city may be MULTI-WORD ("Mountain View",
- *     "Santa Clara") — a single-token rule here truncated the city and glued its
- *     leading word(s) onto the company ("Google, Mountain" / "View, CA").
- *   - Space-delimited ("…Risk Team Bellevue, WA"): no comma marks where the role
- *     text ends, so the city is the SINGLE token before ", ST" — a greedy
- *     multi-word match would consume role keywords ("Engineer Portland, OR" must
- *     extract "Portland", not "Engineer Portland").
+ *   Pass A — comma-delimited US "…, City, ST": comma boundary lets the city be
+ *     multi-word ("Mountain View", "Santa Clara").
+ *   Pass B — space-delimited US "Role … City, ST": single-token city only (no
+ *     comma boundary means greedy multi-word would consume role keywords).
+ *   Pass C — comma-delimited international "…, City, Country": validates the
+ *     trailing token against `COUNTRY_GAZETTEER` (closed ~249-entry ISO set +
+ *     colloquial aliases) to avoid false-matching any capitalized word.
+ *     Space-delimited intl is NOT attempted here — multi-word countries make
+ *     space boundaries too ambiguous (deferred to a follow-up issue).
  *
- * Conservative design choices to avoid false positives:
- *   - The state must be a valid 2-letter USPS abbreviation.
- *   - Stripping must leave a non-empty remainder so the entire string is
- *     never consumed.
- *
- * International "City, Country" tails (e.g. "Google, Hyderabad, India") are NOT
- * stripped here — this is the US-state complement; the intl case is covered by
- * `INTL_LOCATION_RE`/`BARE_LOCATION_RE` full-string checks used elsewhere.
+ * Conservative design choices shared by all passes:
+ *   - The state/country suffix must be in a closed vocabulary (US_STATE_CODE_RE
+ *     for A/B; COUNTRY_GAZETTEER for C) — open-shape regex is not enough.
+ *   - Stripping must leave a non-empty remainder so the entire string is never
+ *     consumed into location.
  */
 function stripLocationSuffix(s: string): {
   text: string;
@@ -140,18 +135,35 @@ function stripLocationSuffix(s: string): {
     /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
   // Pass B — space-delimited "Role … City, ST": single-token city only.
   const SPACE_LOCATION_RE = /\s+([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
-  const m = s.match(COMMA_LOCATION_RE) ?? s.match(SPACE_LOCATION_RE);
-  if (!m) return { text: s, location: undefined };
-  // Validate the 2-letter suffix is a real USPS state code, not a random abbrev.
-  if (!US_STATE_CODE_RE.test(m[2])) return { text: s, location: undefined };
-  // Guard: stripping must leave a non-empty remainder. Drop any dangling comma
-  // left when the city was the only thing after a "Company," boundary.
-  const before = s
-    .slice(0, m.index)
-    .replace(/,\s*$/, "")
-    .trim();
-  if (!before) return { text: s, location: undefined };
-  return { text: before, location: `${m[1]}, ${m[2]}` };
+
+  const mUS = s.match(COMMA_LOCATION_RE) ?? s.match(SPACE_LOCATION_RE);
+  if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
+    // Guard: stripping must leave a non-empty remainder.
+    const before = s
+      .slice(0, mUS.index)
+      .replace(/,\s*$/, "")
+      .trim();
+    if (before) return { text: before, location: `${mUS[1]}, ${mUS[2]}` };
+  }
+
+  // Pass C — comma-delimited "…, City, Country" (international). Only fires
+  // when the COUNTRY_GAZETTEER is non-empty (graceful fallback when Intl APIs
+  // are unavailable keeps this a no-op rather than a false-positive risk).
+  if (COUNTRY_GAZETTEER.size > 0) {
+    // Country may be multi-word ("United Kingdom", "New Zealand", "South Korea").
+    const INTL_SUFFIX_RE =
+      /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
+    const mIntl = s.match(INTL_SUFFIX_RE);
+    if (mIntl && COUNTRY_GAZETTEER.has(mIntl[2].toLowerCase())) {
+      const before = s
+        .slice(0, mIntl.index)
+        .replace(/,\s*$/, "")
+        .trim();
+      if (before) return { text: before, location: `${mIntl[1]}, ${mIntl[2]}` };
+    }
+  }
+
+  return { text: s, location: undefined };
 }
 
 /**
@@ -191,8 +203,8 @@ function splitRoleComma(h: string): [string, string] | null {
  * Single-line `·`-delimited headers ("Title · Company, City, ST · Team", #217)
  * are tokenized here into up to three segments before the tiebreaker runs, so
  * the title and company are extracted rather than staying glued together. The
- * location embedded in the company segment ("Company, City, ST") is left for
- * #218 to strip.
+ * location embedded in the company segment ("Company, City, ST" or intl
+ * "Company, City, Country") is stripped by `stripLocationSuffix`.
  */
 function disambiguateCompanyTitle(headers: string[]): {
   company?: string;
@@ -282,12 +294,42 @@ function disambiguateCompanyTitle(headers: string[]): {
   //     looksLikeLocationTail was fixed, or a "City, ST" segment from a ·-split),
   //     rescue it as location and clear team.  Only fire when we have no location yet.
   if (!location && team) {
-    if (
+    // (3a) Try stripping a trailing location suffix from team — handles the case
+    //      where `looksLikeCompany` mis-routed a "Group"/"Systems"/"Labs" segment
+    //      as company (e.g. "Platform Group" in
+    //      "Title · Globex, Hyderabad, India · Platform Group"), pushing
+    //      "Globex, Hyderabad, India" into the team slot. If strip succeeds and
+    //      the team isn't itself a bare whole-string location (which the step-3b
+    //      check below handles), rotate: remainder → company, old company → team.
+    //
+    //      Bare-location guard: a string like "Mountain View, CA" would also
+    //      satisfy stripLocationSuffix (Pass B yields "Mountain" + "View, CA"),
+    //      but it IS already a bare location (US_LOCATION_RE covers the whole
+    //      string). Exclude these by checking whether any location regex matches
+    //      the FULL string (not just a substring), so "Mountain View, CA"
+    //      (full match) vs. "Globex, Hyderabad, India" (INTL_LOCATION_RE only
+    //      matches "Globex, Hyderabad", not the full "…India" tail) are
+    //      distinguished correctly.
+    const teamStrip = stripLocationSuffix(team);
+    const _usLoc = US_LOCATION_RE.exec(team);
+    const _intlLoc = INTL_LOCATION_RE.exec(team);
+    const teamIsBareLocation =
+      US_STATE_CODE_RE.test(team) ||
+      BARE_LOCATION_RE.test(team) ||
+      (_usLoc !== null && _usLoc[0].length === team.length) ||
+      (_intlLoc !== null && _intlLoc[0].length === team.length);
+    if (teamStrip.location && !teamIsBareLocation) {
+      location = teamStrip.location;
+      // Rotate: real-company (strip remainder) → company, old company → team.
+      team = company;
+      company = teamStrip.text;
+    } else if (
       US_STATE_CODE_RE.test(team) ||
       US_LOCATION_RE.test(team) ||
       INTL_LOCATION_RE.test(team) ||
       BARE_LOCATION_RE.test(team)
     ) {
+      // (3b) Whole-string bare location check (original behavior).
       location = team;
       team = undefined;
     }
