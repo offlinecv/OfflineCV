@@ -11,8 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bake-fixtures": "UPDATE_FIXTURES=1 vitest run src/lib/heuristics/corpus.test.ts",
-    "eval:rewrite": "vite --open=/resumelint/eval-rewrite.html",
-    "eval:jd-spike": "vite --open=/resumelint/jd-spike.html",
+    "eval:rewrite": "vite --open=/eval-rewrite.html",
+    "eval:jd-spike": "vite --open=/jd-spike.html",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test:coverage": "vitest run --coverage"

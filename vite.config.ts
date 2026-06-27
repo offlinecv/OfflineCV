@@ -48,6 +48,14 @@ function resolveAppVersion(): string {
 
 const APP_VERSION = resolveAppVersion();
 
+// Base path. The custom domain (resumelint.org) and the GCS bucket root both
+// serve at "/"; the bare github.io project-Pages fallback
+// (resumelint-org.github.io/resumelint/) needs "/resumelint/". Env-driven so
+// each deploy target builds with its own prefix without a code edit — set
+// VITE_BASE_PATH to override. Default "/" is the custom-domain production
+// target and local dev.
+const BASE_PATH = process.env.VITE_BASE_PATH ?? "/";
+
 // Emit dist/version.json at build time only. Unhashed + at the site root so the
 // proactive update checker can poll a stable URL. GitHub Pages forces its own
 // short-lived Cache-Control, so the client cache-busts the fetch anyway.
@@ -66,10 +74,10 @@ function emitVersionJson(version: string): Plugin {
 }
 
 export default defineConfig({
-  base: "/resumelint/",
+  base: BASE_PATH,
   server: {
     // Bind 0.0.0.0 so the dev server is reachable from other machines on the
-    // LAN (e.g. http://<your-host>.local:5173/resumelint/), not just loopback.
+    // LAN (e.g. http://<your-host>.local:5173/), not just loopback.
     host: true,
     // Allow LAN mDNS hostnames through Vite's DNS-rebind host check.
     // ".local" matches any *.local host.
