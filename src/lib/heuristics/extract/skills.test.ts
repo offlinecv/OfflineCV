@@ -12,8 +12,12 @@ describe("tokenizeSkillLine", () => {
   it("splits a bare comma-separated list into skill tokens", () => {
     const result = tokenizeSkillLine("SQL, PHP, Javascript, HTML/CSS");
     expect(result).toEqual(expect.arrayContaining(["SQL", "PHP", "Javascript"]));
-    // HTML/CSS splits on the slash — both tokens must survive isSkillToken
-    expect(result).toEqual(expect.arrayContaining(["HTML", "CSS"]));
+    // HTML/CSS has word chars on both sides of the slash — the fix (issue #220)
+    // keeps it as one token rather than splitting. "HTML" and "CSS" do NOT
+    // appear as separate tokens.
+    expect(result).toEqual(expect.arrayContaining(["HTML/CSS"]));
+    expect(result).not.toContain("HTML");
+    expect(result).not.toContain("CSS");
   });
 
   it("strips an inline Label: prefix before tokenizing", () => {
@@ -133,10 +137,11 @@ describe("parseHeuristic — ADDITIONAL section inline-label skills re-route (#1
 
     // Skills must be populated from the ADDITIONAL inline-labeled line
     expect(result.parsed.skills.length).toBeGreaterThan(0);
-    // The SKILL_SPLIT_RE splits on comma/semicolon, giving multi-word phrases:
-    //   "Advanced in SQL", "PHP", "Javascript", "HTML", "CSS",
+    // Splitting on comma/semicolon gives multi-word phrases:
+    //   "Advanced in SQL", "PHP", "Javascript", "HTML/CSS" (kept whole — #220
+    //   fix: slash between word chars no longer splits),
     //   "Proficient in MATLAB", "Python"
-    // Assert on the tokens that actually survive isSkillToken (≤4 words each).
+    // Assert on the tokens that actually survive isSkillToken (≤6 words each).
     expect(result.parsed.skills).toEqual(
       expect.arrayContaining(["PHP", "Python", "Proficient in MATLAB"]),
     );
@@ -167,5 +172,118 @@ describe("parseHeuristic — ADDITIONAL section inline-label skills re-route (#1
       expect.arrayContaining(["Leadership", "Agile", "Scrum", "Docker", "Kubernetes"]),
     );
     expect(result.fieldConfidence.skills).toBe(0.65);
+  });
+});
+
+// ── Issue #220: comma-in-parens, AI/ML slash, 5-word skill, soft-wrap ────────
+
+describe("tokenizeSkillLine — issue #220 fixes", () => {
+  it("does not split on a comma inside balanced parentheses", () => {
+    // "Cloud Infrastructure (GCP, Hybrid Cloud)" must be ONE token, not two.
+    const result = tokenizeSkillLine(
+      "Distributed Systems Architecture, Cloud Infrastructure (GCP, Hybrid Cloud), AI/ML Orchestration",
+    );
+    expect(result).toContain("Cloud Infrastructure (GCP, Hybrid Cloud)");
+    expect(result).toContain("Distributed Systems Architecture");
+    expect(result).toContain("AI/ML Orchestration");
+    // The in-parens comma must NOT produce orphan tokens
+    expect(result).not.toContain("Cloud Infrastructure (GCP");
+    expect(result).not.toContain("Hybrid Cloud)");
+  });
+
+  it("keeps AI/ML, CI/CD, TCP/IP as single tokens (slash between word chars)", () => {
+    const result = tokenizeSkillLine("AI/ML Orchestration, CI/CD Pipelines, TCP/IP Networking");
+    expect(result).toContain("AI/ML Orchestration");
+    expect(result).toContain("CI/CD Pipelines");
+    expect(result).toContain("TCP/IP Networking");
+    // Must NOT split any of them on the slash
+    expect(result).not.toContain("AI");
+    expect(result).not.toContain("ML Orchestration");
+    expect(result).not.toContain("CI");
+    expect(result).not.toContain("CD Pipelines");
+  });
+
+  it("still splits on a standalone slash flanked by spaces (e.g. Python / JavaScript)", () => {
+    // A slash that is NOT flanked by word chars (spaces on both sides) IS a
+    // separator — this is intentional and must not regress.
+    const result = tokenizeSkillLine("Python / JavaScript");
+    expect(result).toEqual(expect.arrayContaining(["Python", "JavaScript"]));
+    expect(result).not.toContain("Python / JavaScript");
+  });
+
+  it("allows 5-word skill phrases through the word-count filter", () => {
+    // "LLM Architectures & Prompt Engineering" is 5 words — the old >4 filter
+    // dropped it; the new >6 filter retains it.
+    const result = tokenizeSkillLine(
+      "LLM Architectures & Prompt Engineering, Cloud Infrastructure (GCP, Hybrid Cloud)",
+    );
+    expect(result).toContain("LLM Architectures & Prompt Engineering");
+    expect(result).toContain("Cloud Infrastructure (GCP, Hybrid Cloud)");
+  });
+
+  it("still rejects obvious sentence fragments (7+ words)", () => {
+    // The word-count cap moved from >4 to >6. A 7-word sentence fragment must
+    // still be rejected.
+    const result = tokenizeSkillLine(
+      "Python, Over 200 technical interviews for senior engineering roles, SQL",
+    );
+    // "Over 200 technical interviews for senior engineering roles" is 8 words →
+    // dropped. The short tokens survive.
+    expect(result).toContain("Python");
+    expect(result).toContain("SQL");
+    expect(result).not.toContain("Over 200 technical interviews for senior engineering roles");
+  });
+});
+
+describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
+  it("rejoins a skill name that pdfjs broke across two lines", () => {
+    // Simulates: "..., ISP Network" on line N and "Engineering, ..." on line N+1.
+    // After rejoin: "ISP Network Engineering" is one token.
+    // Synthetic resume persona: Jordan Lee, jordan.lee@example.com, (415) 555-0147
+    const items = mkItems([
+      { text: "Jordan Lee", fontSize: 18 },
+      { text: "jordan.lee@example.com  (415) 555-0147  San Francisco, CA", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      { text: "SKILLS", fontSize: 13 },
+      // Line 1 of a comma list that wraps: ends mid-skill-name "ISP Network"
+      { text: "Distributed Systems Architecture, Cloud Infrastructure (GCP, Hybrid Cloud), ISP Network", fontSize: 10 },
+      // Line 2: continuation — "Engineering" completes "ISP Network Engineering"
+      { text: "Engineering, AI/ML Orchestration, LLM Architectures & Prompt Engineering", fontSize: 10 },
+    ]);
+    const pages = mkDefaultPages(items);
+    const result = parseHeuristic(items, pages);
+
+    // The rejoined skill must appear
+    expect(result.parsed.skills).toContain("ISP Network Engineering");
+    // The parenthetical form must not be split
+    expect(result.parsed.skills).toContain("Cloud Infrastructure (GCP, Hybrid Cloud)");
+    // AI/ML slash stays together
+    expect(result.parsed.skills).toContain("AI/ML Orchestration");
+    // 5-word skill survives the word filter
+    expect(result.parsed.skills).toContain("LLM Architectures & Prompt Engineering");
+    // Orphan half-tokens must NOT appear
+    expect(result.parsed.skills).not.toContain("ISP Network");
+    expect(result.parsed.skills).not.toContain("Engineering");
+  });
+
+  it("does not merge label-prefixed sub-lines into a continuation", () => {
+    // "Databases: MySQL" must NOT be joined to the previous "Languages: Python, JS" line.
+    const items = mkItems([
+      { text: "Casey Kim", fontSize: 18 },
+      { text: "casey.kim@example.com  (312) 555-0182  Chicago, IL", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      { text: "SKILLS", fontSize: 13 },
+      { text: "Languages: Python, JavaScript", fontSize: 10 },
+      { text: "Databases: MySQL, PostgreSQL", fontSize: 10 },
+    ]);
+    const pages = mkDefaultPages(items);
+    const result = parseHeuristic(items, pages);
+
+    // Each label group is a separate logical cell — tokens from both survive
+    expect(result.parsed.skills).toEqual(
+      expect.arrayContaining(["Python", "JavaScript", "MySQL", "PostgreSQL"]),
+    );
+    // "JavaScript Databases" must NOT appear (it would if the lines were naively joined)
+    expect(result.parsed.skills).not.toContain("JavaScript Databases");
   });
 });

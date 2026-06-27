@@ -2,10 +2,9 @@
 // Copyright 2026 The resumelint Authors
 
 /**
- * Regression tests for role location extraction (#218).
+ * Regression tests for role location extraction (#218, #229).
  *
- * Covers two header shapes where `City, ST` was previously swallowed or
- * mis-routed:
+ * Covers header shapes where location was previously swallowed or mis-routed:
  *
  *   1. Two-line header: "Company  DATE" / "Title  City, ST"
  *      — city and state were split at the comma, city glued to title,
@@ -13,6 +12,11 @@
  *
  *   2. Single-line `·`-delimited header: "Title · Company, City, ST · Team"
  *      — location embedded in company; `location` stayed null.
+ *
+ *   3. International "City, Country" in `·`-delimited header (#229):
+ *      "Title · Company, City, Country · Team"
+ *      — country is not a 2-letter USPS code so Pass A/B missed it;
+ *        Pass C (COUNTRY_GAZETTEER) now strips it.
  *
  * Synthetic personas only, per the fixtures PII policy.
  */
@@ -209,6 +213,104 @@ describe("role location extraction (#218)", () => {
       // Company must not contain location text
       expect(role.company).toBe("MegaCorp");
       expect(role.location).toBe("Austin, TX");
+    });
+  });
+
+  describe("international City, Country extraction (Pass C, #229)", () => {
+    it("extracts 'Hyderabad, India' from mid-dot header (primary AC)", () => {
+      // "Regional Engineering Lead · Globex, Hyderabad, India · Platform Group"
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        {
+          text: "Regional Engineering Lead · Globex, Hyderabad, India · Platform Group",
+          fontSize: 11,
+        },
+        { text: "03/2021 - 12/2023", fontSize: 11 },
+        { text: "• Led platform reliability for 5M daily active users.", fontSize: 11 },
+      ]);
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      const role = roles[0];
+
+      expect(role.title?.toLowerCase()).toContain("engineering lead");
+      expect(role.company).toBe("Globex");
+      expect(role.company).not.toContain("Hyderabad");
+      expect(role.team).toBe("Platform Group");
+      expect(role.location).toBe("Hyderabad, India");
+    });
+
+    it("extracts 'London, United Kingdom' (multi-word country) from mid-dot header", () => {
+      // "Staff Engineer · Meridian Systems, London, United Kingdom · Infrastructure"
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        {
+          text: "Staff Engineer · Meridian Systems, London, United Kingdom · Infrastructure",
+          fontSize: 11,
+        },
+        { text: "06/2019 - 08/2022", fontSize: 11 },
+        { text: "• Reduced build times by 40%.", fontSize: 11 },
+      ]);
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      const role = roles[0];
+
+      expect(role.company).toBe("Meridian Systems");
+      expect(role.company).not.toContain("London");
+      expect(role.team).toBe("Infrastructure");
+      expect(role.location).toBe("London, United Kingdom");
+    });
+
+    it("extracts 'Berlin, Germany' (no team) from mid-dot header", () => {
+      // "Backend Engineer · Sigma Analytics, Berlin, Germany"
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        {
+          text: "Backend Engineer · Sigma Analytics, Berlin, Germany",
+          fontSize: 11,
+        },
+        { text: "01/2020 - 05/2023", fontSize: 11 },
+        { text: "• Built streaming data pipeline processing 10M events/day.", fontSize: 11 },
+      ]);
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      const role = roles[0];
+
+      expect(role.company).toBe("Sigma Analytics");
+      expect(role.company).not.toContain("Berlin");
+      expect(role.team).toBeUndefined();
+      expect(role.location).toBe("Berlin, Germany");
+    });
+
+    it("US City, ST still wins over Pass C (Mountain View, CA not mis-read as intl)", () => {
+      // Regression: Pass A must fire before Pass C for US locations.
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        { text: "Engineering Lead · Google, Mountain View, CA", fontSize: 11 },
+        { text: "01/2018 - 12/2020", fontSize: 11 },
+        { text: "• Led the GFiber platform team.", fontSize: 11 },
+      ]);
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      const role = roles[0];
+      expect(role.company).toBe("Google");
+      expect(role.location).toBe("Mountain View, CA");
+    });
+
+    it("non-empty-remainder guard: does not consume entire string into location", () => {
+      // If company = "Hyderabad, India" (no company name before city), the guard
+      // must block stripping and leave the string intact rather than setting
+      // company = "" and location = "Hyderabad, India".
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        {
+          text: "Software Engineer · Hyderabad, India",
+          fontSize: 11,
+        },
+        { text: "05/2022 - Present", fontSize: 11 },
+        { text: "• Built microservices for e-commerce platform.", fontSize: 11 },
+      ]);
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      const role = roles[0];
+      // Either the location is extracted with a non-empty company, or the
+      // entire "Hyderabad, India" remains as company — either way company must
+      // be non-empty and we must not have eaten all text into location.
+      expect(role.company).toBeTruthy();
     });
   });
 });

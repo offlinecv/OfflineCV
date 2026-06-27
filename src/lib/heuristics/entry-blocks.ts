@@ -141,6 +141,13 @@ function isAnchorLine(line: PdfLine, anchor: EntryAnchor): boolean {
  * each header run (a non-bullet line whose predecessor is a bullet, or the
  * first line of the section) — so a multi-line project header opens exactly
  * one entry, not one per line.
+ *
+ * For `"date_range"`, a second pass also recovers a DATELESS entry — a role
+ * whose header carries no `MM/YYYY - MM/YYYY` range (so no date anchor formed)
+ * yet which clearly opens a new entry because it introduces its own bullet run.
+ * See {@link collectDatelessAnchors} for the precise, conservative signature.
+ * Without this, a trailing dateless role (the page-2 "Early Career: …" shape,
+ * #219) is folded into the previous dated role's body window and lost.
  */
 function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
   const anchors: number[] = [];
@@ -166,7 +173,84 @@ function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
     }
     anchors.push(i);
   }
+
+  if (anchor === "date_range" && anchors.length > 0) {
+    // Merge in dateless-header anchors (a new role whose header has no date
+    // range, #219). Gated on `anchors.length > 0` so a section with bullets but
+    // ZERO real dates still returns [] (the "no date range ⇒ []" contract — a
+    // truly date-optional section routes through the `first_line` anchor, not
+    // here). The merged list is re-sorted so the generic windowing in
+    // `buildEntryBlock` sees anchors in document order.
+    const dateless = collectDatelessAnchors(lines, anchors);
+    if (dateless.length > 0) {
+      const merged = [...anchors, ...dateless];
+      merged.sort((p, q) => p - q);
+      return merged;
+    }
+  }
   return anchors;
+}
+
+/**
+ * Extra `date_range` anchors for DATELESS role headers (#219).
+ *
+ * Signature of a dateless role header that must open its own entry — kept
+ * deliberately strict, because the hazard is a WRAPPED-BULLET TAIL (a marker-less
+ * continuation line of the previous role's last bullet) masquerading as a header:
+ * such a tail also sits "non-bullet line between two bullets," so a loose rule
+ * splits a sentence fragment off as a phantom role (empty title, a bullet-tail
+ * fragment as company). All of these must hold:
+ *   - a non-bullet, non-date line whose immediate predecessor is a bullet (the
+ *     previous role's body just ended — not a header that's already mid-entry), and
+ *   - it sits at or LEFT of the bullet-marker margin — a real header sits at the
+ *     header margin, whereas a wrapped bullet tail indents past the marker
+ *     ({@link isWrappedContinuation}); a no-op for markerless markdown/DOCX
+ *     (markerX = Infinity), where the lead-capital + prose filters below carry it, and
+ *   - it LEADS WITH A CAPITAL / digit — a role header is a proper noun
+ *     ("Early Career: …", "Acme Co"); a wrapped bullet tail is lowercase-led
+ *     sentence prose ("infrastructure cost by 28%", "and social change"). This is
+ *     the decisive filter for the no-x DOCX path, and
+ *   - it does NOT read as prose ({@link isProseLine} — a mid-thought sentence
+ *     fragment), and
+ *   - it introduces at least one bullet before the next anchor / section end (a
+ *     header with no body is a stray line, not a recoverable role).
+ *
+ * Anchoring on the FIRST line of the run (predecessor is a bullet) and skipping
+ * subsequent header lines (predecessor is a non-bullet header) means a two-line
+ * dateless header ("Title" / "Company") opens exactly one entry, mirroring the
+ * `first_line` anchor's run discipline. A dated role's own multi-line header is
+ * unaffected: its lines sit between a date anchor with no bullets between them,
+ * so the "introduces a bullet" gate rejects them.
+ */
+function collectDatelessAnchors(lines: PdfLine[], dateAnchors: number[]): number[] {
+  const isDate = new Set(dateAnchors);
+  const markerX = bulletMarkerX(lines);
+  const out: number[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (isBulletLine(line) || isDate.has(i)) continue;
+    // First non-bullet line of a header run: predecessor must be a bullet.
+    if (!isBulletLine(lines[i - 1])) continue;
+    // Reject a wrapped-bullet tail (indented past the marker) or sentence prose.
+    if (isWrappedContinuation(line, markerX) || isProseLine(line.text)) continue;
+    // A role header is a proper noun (capital/digit lead); a bullet tail that
+    // slipped past the geometry/prose filters is lowercase-led sentence prose.
+    if (!/^[A-Z0-9]/.test(line.text.trim())) continue;
+    // Must introduce a bullet body before the next header/anchor line. Scan
+    // forward over the (non-bullet) header run; the run must reach a bullet
+    // without first hitting a real date anchor (which would own that bullet).
+    let sawBullet = false;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (isDate.has(j)) break;
+      if (isBulletLine(lines[j])) {
+        sawBullet = true;
+        break;
+      }
+      // a non-bullet line continues the header run — keep walking
+    }
+    if (sawBullet) out.push(i);
+  }
+  return out;
 }
 
 /** True when the whole trimmed line is JUST a "City, ST" location — a pure city

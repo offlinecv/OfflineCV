@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.88,
+    "confidence": 0.86,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -25,7 +25,7 @@
       "skills",
       "website_url"
     ],
-    "skillsCount": 13,
+    "skillsCount": 4,
     "experienceCount": 3,
     "educationCount": 2,
     "projectsCount": 2,

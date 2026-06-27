@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.9,
+    "confidence": 0.83,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "none",
+    "suggestedEscalation": "llm",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -24,7 +24,7 @@
       "skills"
     ],
     "skillsCount": 20,
-    "experienceCount": 1,
+    "experienceCount": 3,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 0,
@@ -35,8 +35,8 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 84,
-    "preLayoutOverall": 84,
+    "overall": 81,
+    "preLayoutOverall": 81,
     "specificity": {
       "score": 40,
       "max": 40,
@@ -52,10 +52,11 @@
       "totalBullets": 8
     },
     "completeness": {
-      "score": 27,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
+        "role dates",
         "summary"
       ]
     },

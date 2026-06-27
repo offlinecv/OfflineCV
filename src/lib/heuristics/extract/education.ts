@@ -163,6 +163,53 @@ function isCourseworkContinuation(line: string): boolean {
   return true;
 }
 
+/** Whether `line` is a hint-less, degree-less PROGRAM NAME that carries its own
+ *  graduation year inline — the second-school shape from #219, e.g.
+ *  "MIT Applied Data Science (2023)" or "Google Data Analytics Certificate 2022".
+ *  Used to split a NEW education entry off a chunk that already holds a full
+ *  degree + institution, when the program carries no `DEGREE_RE`/`INSTITUTION_HINTS`
+ *  token and so the keyword-based flush can't see the boundary. The inline year
+ *  is exactly what the old whole-chunk date scan would bleed onto the preceding
+ *  school; splitting here keeps it with its own program. Requires ALL of:
+ *   - a Title-case / digit lead (a program label, not lowercase prose), and
+ *   - NOT a `GPA:` / `Minor` / `Major` note, and
+ *   - a 4-digit year token present, and
+ *   - real program TEXT besides the date — once the year(s) and connective date
+ *     words are stripped, a non-trivial remainder must survive. This rejects a
+ *     bare date range on its own line ("Fall 2013 – Spring 2014", an honors-block
+ *     date) while keeping "MIT Applied Data Science (2023)" (the "MIT Applied
+ *     Data Science" remainder survives). `isDateOnlyLine` at the call site is the
+ *     first such guard; this is the stricter companion that also rejects a
+ *     season-qualified range whose only words ARE date words. */
+function isInlineDatedProgram(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (/^(GPA[:\s]|Minor\b|Major\b)/i.test(t)) return false;
+  if (!/^[A-Z0-9]/.test(t)) return false;
+  if (!/\b(19|20)\d{2}\b/.test(t)) return false;
+  // A graduation-date line ("Grad. May 2011 | Kolkata, India", "Expected
+  // Graduation: 2026", "Class of 2025") is the DATE of an existing school, not a
+  // new program — it leads with a graduation/date-context word. Reject so a
+  // school's own grad-date line never splits off as a phantom entry.
+  if (/^(grad(?:\.|uat\w*)?|expected|anticipated|class of|completed)\b/i.test(t))
+    return false;
+  // Drop a trailing "| City, Region" location segment before measuring the
+  // program remainder — a date+location line ("… 2011 | Kolkata, India") must
+  // not pass on the strength of its city words.
+  const noLocation = t.replace(/[|,]\s*[A-Z][A-Za-z.\-]+(?:\s*,\s*[A-Za-z.\-]+)*$/, "");
+  // Strip years and date connective words (seasons / months / range words); a
+  // real program name leaves substantive text, a bare date line leaves nothing.
+  const remainder = noLocation
+    .replace(/\b(19|20)\d{2}\b/g, "")
+    .replace(
+      /\b(?:spring|summer|fall|autumn|winter|present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi,
+      "",
+    )
+    .replace(/[\s,–\-—|/().:]+/g, "")
+    .trim();
+  return remainder.length >= 3;
+}
+
 /** Map one education chunk (the degree + institution + date lines of a single
  *  qualification) to a `ResumeEducation` and its confidence. */
 function educationFromChunk(chunk: string[]): {
@@ -306,8 +353,15 @@ export function extractEducation(
       hasDegree &&
       hasInstitution &&
       !isDateOnlyLine(text) &&
-      next !== undefined &&
-      DEGREE_RE.test(next);
+      ((next !== undefined && DEGREE_RE.test(next)) ||
+        // …or the boundary line is itself a hint-less, degree-less PROGRAM NAME
+        // carrying its own graduation year inline ("MIT Applied Data Science
+        // (2023)", #219). The inline year is what the old code would bleed onto
+        // the preceding school; splitting here keeps it with its own program.
+        // Requires a Title-case program lead (not a `GPA:`/`Minor` note, not a
+        // bare "Fall 2013 – Spring 2014" date range — which `isDateOnlyLine`
+        // already excluded above) so an honors/awards line never splits.
+        isInlineDatedProgram(text));
     if ((isDeg && hasDegree) || (isInst && hasInstitution) || startsHintlessEntry)
       flush();
     current.push(lines[li]);

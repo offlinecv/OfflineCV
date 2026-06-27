@@ -51,6 +51,72 @@ export const INTL_LOCATION_RE =
 export const US_STATE_CODE_RE =
   /^(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|PR|GU|VI|AS|MP)$/;
 
+/**
+ * Closed country gazetteer for international suffix stripping (Pass C of
+ * `stripLocationSuffix`). Built from ISO 3166-1 alpha-2 names via
+ * `Intl.DisplayNames` when `Intl.supportedValuesOf('region')` is available;
+ * otherwise falls back to a hardcoded set of the ~50 most common country names
+ * on resumes so Pass C still works on Node versions that don't support that key.
+ *
+ * Colloquial aliases not in ISO English names (`uk`, `usa`, `uae`, …) are
+ * always included from the alias map.
+ *
+ * Graceful degradation guarantee: if both paths fail, the export is an empty
+ * set and Pass C simply never matches — it degrades to "no intl strip" rather
+ * than throwing at module load.
+ */
+const _COUNTRY_ALIASES: ReadonlyArray<string> = [
+  "uk",
+  "usa",
+  "us",
+  "uae",
+  "south korea",
+  "north korea",
+];
+
+// Hardcoded fallback covering the most common country names on resumes — used
+// when Intl.supportedValuesOf('region') is unavailable (e.g. Node ≤18 / v25).
+const _FALLBACK_COUNTRIES: ReadonlyArray<string> = [
+  "india", "germany", "france", "united kingdom", "canada", "australia",
+  "japan", "china", "brazil", "mexico", "singapore", "netherlands",
+  "sweden", "norway", "denmark", "finland", "switzerland", "austria",
+  "spain", "italy", "portugal", "poland", "ireland", "belgium",
+  "new zealand", "south africa", "nigeria", "kenya", "egypt",
+  "israel", "pakistan", "bangladesh", "indonesia", "malaysia",
+  "thailand", "philippines", "vietnam", "argentina", "chile",
+  "colombia", "ghana", "saudi arabia", "hong kong", "taiwan",
+  "ukraine", "russia", "turkey", "greece", "czech republic",
+  "hungary", "romania", "croatia", "serbia", "slovakia",
+];
+
+function _buildGazetteer(): Set<string> {
+  const out = new Set<string>(_COUNTRY_ALIASES);
+  try {
+    if (typeof Intl === "undefined" || !("DisplayNames" in Intl)) {
+      _FALLBACK_COUNTRIES.forEach((c) => out.add(c));
+      return out;
+    }
+    const region = new Intl.DisplayNames(["en"], { type: "region" });
+    const codes = (Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] })
+      .supportedValuesOf?.("region");
+    if (codes) {
+      codes
+        .filter((c) => /^[A-Z]{2}$/.test(c))
+        .forEach((c) => {
+          const name = region.of(c);
+          if (name) out.add(name.toLowerCase());
+        });
+    } else {
+      _FALLBACK_COUNTRIES.forEach((c) => out.add(c));
+    }
+  } catch {
+    _FALLBACK_COUNTRIES.forEach((c) => out.add(c));
+  }
+  return out;
+}
+
+export const COUNTRY_GAZETTEER: ReadonlySet<string> = _buildGazetteer();
+
 // ── Date patterns ───────────────────────────────────────────────────────────
 
 const MONTH =
