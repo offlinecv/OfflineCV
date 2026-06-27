@@ -222,6 +222,33 @@ function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
  * unaffected: its lines sit between a date anchor with no bullets between them,
  * so the "introduces a bullet" gate rejects them.
  */
+/** A bullet line that ends on a dangling conjunction / article / preposition
+ *  ("…Board of Directors and", "…reported to") has WRAPPED onto the next line —
+ *  that next line is its tail, not a new header. The decisive signal for the
+ *  no-geometry x=0 DOCX path, where {@link isWrappedContinuation} is a no-op and
+ *  a short capital-led wrap ("Senior Leadership on strategic planning") would
+ *  otherwise be promoted as a phantom role (#219). A real role's last bullet ends
+ *  on a metric / noun, not a dangling word, so genuine dateless headers survive. */
+const DANGLING_BULLET_TAIL_RE =
+  /\b(and|or|with|the|to|of|for|a|an|in|on|at|by|as|&)\s*$/i;
+
+/** Whether the (non-bullet) header run starting at `i` introduces a bullet body
+ *  before the next real date anchor — a header with no body is a stray line, not
+ *  a recoverable role. Walks forward over the header run; reaching a date anchor
+ *  first means that anchor owns the bullets, not this candidate. */
+function introducesBulletBody(
+  lines: PdfLine[],
+  i: number,
+  isDate: Set<number>,
+): boolean {
+  for (let j = i + 1; j < lines.length; j++) {
+    if (isDate.has(j)) return false;
+    if (isBulletLine(lines[j])) return true;
+    // a non-bullet line continues the header run — keep walking
+  }
+  return false;
+}
+
 function collectDatelessAnchors(lines: PdfLine[], dateAnchors: number[]): number[] {
   const isDate = new Set(dateAnchors);
   const markerX = bulletMarkerX(lines);
@@ -231,24 +258,17 @@ function collectDatelessAnchors(lines: PdfLine[], dateAnchors: number[]): number
     if (isBulletLine(line) || isDate.has(i)) continue;
     // First non-bullet line of a header run: predecessor must be a bullet.
     if (!isBulletLine(lines[i - 1])) continue;
+    // A predecessor bullet that ends on a dangling conjunction/article/prep has
+    // wrapped — this line is its tail, not a header. Decisive when geometry is
+    // degenerate (all x=0), where the indent filter below can't tell them apart.
+    if (DANGLING_BULLET_TAIL_RE.test(lines[i - 1].text.trim())) continue;
     // Reject a wrapped-bullet tail (indented past the marker) or sentence prose.
     if (isWrappedContinuation(line, markerX) || isProseLine(line.text)) continue;
     // A role header is a proper noun (capital/digit lead); a bullet tail that
     // slipped past the geometry/prose filters is lowercase-led sentence prose.
     if (!/^[A-Z0-9]/.test(line.text.trim())) continue;
-    // Must introduce a bullet body before the next header/anchor line. Scan
-    // forward over the (non-bullet) header run; the run must reach a bullet
-    // without first hitting a real date anchor (which would own that bullet).
-    let sawBullet = false;
-    for (let j = i + 1; j < lines.length; j++) {
-      if (isDate.has(j)) break;
-      if (isBulletLine(lines[j])) {
-        sawBullet = true;
-        break;
-      }
-      // a non-bullet line continues the header run — keep walking
-    }
-    if (sawBullet) out.push(i);
+    // Must introduce a bullet body before the next header/anchor line.
+    if (introducesBulletBody(lines, i, isDate)) out.push(i);
   }
   return out;
 }

@@ -101,6 +101,29 @@ describe("dateless trailing experience role (#219)", () => {
     expect(value[0].title).toBe("Senior Software Engineer");
   });
 
+  it("does NOT split a CAPITAL-led wrapped bullet tail when geometry is degenerate (x=0 DOCX)", () => {
+    // DOCX→PDF conversions collapse every glyph to x=0, so the indent-based
+    // wrapped-continuation filter is a no-op and a short, Title-case wrap tail
+    // ("Senior Leadership on strategic planning") slips past the prose/capital
+    // gates. The predecessor bullet ends on a dangling conjunction ("…and"),
+    // which is the decisive signal that this line is its wrap, not a new header.
+    const { value } = extractExperience(
+      mkSection("experience", [
+        ["Acme Corp — Senior Engineer", 0, 100],
+        ["Jan 2020 - Mar 2023", 0, 90],
+        ["• Collaborated with the Board of Directors and", 0, 80],
+        ["Senior Leadership on strategic planning", 0, 70],
+        ["• Reduced cloud spend by 30%", 0, 60],
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].title).toBe("Senior Engineer");
+    expect(value[0].company).toBe("Acme Corp");
+    // The wrap tail stays inside the role body — not promoted to a phantom role.
+    expect(value[0].description).toContain("Senior Leadership on strategic planning");
+    expect(value[0].description).toContain("Reduced cloud spend by 30%");
+  });
+
   it("returns no entries for a section with bullets but zero dated anchors", () => {
     // The "no date range ⇒ []" contract for the date_range anchor still holds:
     // a fully dateless section routes through the first_line anchor elsewhere,
@@ -156,4 +179,30 @@ describe("education year mis-attribution across entries (#219)", () => {
     const cornell = value.find((e) => e.institution.includes("Cornell"));
     expect(cornell?.year).toBe("2014");
   });
+
+  it.each([
+    ["Dean's List 2020, 2021, 2022"],
+    ["Awards and Honors 2023"],
+    ["Honors Thesis: AI Systems (2024)"],
+    ["Teaching Assistant for Web (2022 - 2023)"],
+    ["Study Abroad, Florence 2021"],
+  ])(
+    "does not split an in-chunk honors/awards annotation with an inline year into a phantom entry: %s",
+    (annotation) => {
+      // An honors/awards/activity line that happens to carry a year is a
+      // sub-field of the school above it, NOT a second program. The
+      // inline-dated-program split must not fire on it (it would create a
+      // degree-less phantom education entry whose institution is the annotation).
+      const { value } = extractEducation(
+        mkSection("education", [
+          "Bachelor of Science in Computer Science",
+          "Stanford University",
+          "Sep 2018 - Jun 2022",
+          annotation,
+        ]),
+      );
+      expect(value).toHaveLength(1);
+      expect(value[0].institution).toContain("Stanford");
+    },
+  );
 });

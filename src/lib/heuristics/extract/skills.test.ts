@@ -233,6 +233,18 @@ describe("tokenizeSkillLine — issue #220 fixes", () => {
     expect(result).toContain("SQL");
     expect(result).not.toContain("Over 200 technical interviews for senior engineering roles");
   });
+
+  it("does not swallow items after an unbalanced open paren (OCR artifact)", () => {
+    // "C++ (advanced" never closes its paren, so depth-tracked comma-splitting
+    // would suppress every comma after it and absorb the trailing items into one
+    // token. The unbalanced-paren fallback re-splits paren-blind so "Node" is
+    // still recovered as its own token.
+    const result = tokenizeSkillLine("React, C++ (advanced, Node");
+    expect(result).toContain("React");
+    expect(result).toContain("Node");
+    // The whole tail is not glued into one swallowed token.
+    expect(result).not.toContain("C++ (advanced, Node");
+  });
 });
 
 describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
@@ -285,5 +297,27 @@ describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
     );
     // "JavaScript Databases" must NOT appear (it would if the lines were naively joined)
     expect(result.parsed.skills).not.toContain("JavaScript Databases");
+  });
+
+  it("does not merge a comma-less standalone skill into a following comma-list", () => {
+    // A single-skill line with no comma ("Machine Learning") followed by an
+    // independent comma-list ("Data Analysis, Python, SQL") must NOT be treated
+    // as a soft-wrap continuation — the old Condition B merged them into
+    // "Machine Learning Data Analysis", losing both as standalone skills.
+    const items = mkItems([
+      { text: "Riley Park", fontSize: 18 },
+      { text: "riley.park@example.com  (206) 555-0133  Seattle, WA", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      { text: "SKILLS", fontSize: 13 },
+      { text: "Machine Learning", fontSize: 10 },
+      { text: "Data Analysis, Python, SQL", fontSize: 10 },
+    ]);
+    const pages = mkDefaultPages(items);
+    const result = parseHeuristic(items, pages);
+
+    expect(result.parsed.skills).toEqual(
+      expect.arrayContaining(["Machine Learning", "Data Analysis", "Python", "SQL"]),
+    );
+    expect(result.parsed.skills).not.toContain("Machine Learning Data Analysis");
   });
 });

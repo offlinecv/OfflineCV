@@ -193,6 +193,19 @@ function isInlineDatedProgram(line: string): boolean {
   // school's own grad-date line never splits off as a phantom entry.
   if (/^(grad(?:\.|uat\w*)?|expected|anticipated|class of|completed)\b/i.test(t))
     return false;
+  // An honors / awards / activity annotation that happens to carry a year
+  // ("Dean's List 2021", "Honors Thesis: … (2024)", "Teaching Assistant for …
+  // (2022 - 2023)", "Study Abroad, Florence 2021") is a sub-field of the current
+  // school, NOT a new program — it must not split off a phantom degree-less
+  // entry (#219). These read as annotations, not program names, so an exact
+  // keyword denylist is safe: a real second program ("MIT Applied Data Science
+  // (2023)", "Google Data Analytics Certificate 2022") carries none of them.
+  if (
+    /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude)\b/i.test(
+      t,
+    )
+  )
+    return false;
   // Drop a trailing "| City, Region" location segment before measuring the
   // program remainder — a date+location line ("… 2011 | Kolkata, India") must
   // not pass on the strength of its city words.

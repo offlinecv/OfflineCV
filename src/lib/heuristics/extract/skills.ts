@@ -50,6 +50,16 @@ function splitRespectingParens(text: string): string[] {
   }
   commaParts.push(text.slice(start));
 
+  // Unbalanced open paren (an OCR artifact like "C++ (advanced, Node"): depth
+  // never returned to 0, so every comma after the stray "(" was suppressed and
+  // the trailing items were swallowed into one token. Fall back to a paren-blind
+  // comma split so those items aren't lost — the malformed token keeps its stray
+  // glyph, but the items after it are recovered.
+  if (depth > 0) {
+    commaParts.length = 0;
+    for (const seg of text.split(",")) commaParts.push(seg);
+  }
+
   // Step 2: apply the remaining delimiters inside each comma-segment.
   const parts: string[] = [];
   for (const segment of commaParts) {
@@ -213,9 +223,18 @@ function isSoftWrapContinuation(pending: string, nextText: string): boolean {
   // Condition A: pending ends with an explicit continuation glyph.
   if (/[&\-–+]\s*$/.test(pending)) return true;
 
-  // Condition B: next line contains a comma (it's mid-list) AND pending doesn't
-  // end with a comma (which would mean a complete list item terminated cleanly).
-  if (nextText.includes(",") && !/[,;]\s*$/.test(pending)) return true;
+  // Condition B: a comma-separated list wrapped across two lines — the NEXT line
+  // is mid-list (has a comma) AND the PENDING line is itself an unterminated list
+  // fragment (already has a comma, and doesn't end on a clean comma). Requiring a
+  // comma in `pending` is what keeps a comma-less standalone skill ("Machine
+  // Learning") from being merged into a following independent list ("Data
+  // Analysis, Python, SQL") — only a line that is already part of a list rejoins.
+  if (
+    nextText.includes(",") &&
+    pending.includes(",") &&
+    !/[,;]\s*$/.test(pending)
+  )
+    return true;
 
   return false;
 }
