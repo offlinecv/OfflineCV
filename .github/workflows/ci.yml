@@ -62,3 +62,14 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: fallow.sarif
+          # Pin the analysis category explicitly (not only via the SARIF's
+          # automationDetails). Code scanning diffs a PR against the base branch
+          # PER CATEGORY: a category registered on `main` but absent on a PR
+          # surfaces as a neutral "configuration not found" warning. A single
+          # fixed `fallow` category — set here at the action level so it can't
+          # drift from the SARIF injection — keeps every branch on the same
+          # category, so the PR-vs-main diff always lines up. (One-time legacy
+          # `fallow/0`/`fallow/1` configs from the pre-collapse scheme were
+          # purged from `main`'s code-scanning history so they stop being
+          # expected.)
+          category: fallow
