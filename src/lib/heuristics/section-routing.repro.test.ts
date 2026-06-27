@@ -22,6 +22,16 @@
  *          education / skills / projects / achievements. No certifications
  *          extractor runs, so the section's content never reaches the structured
  *          parsed output.
+ *
+ *   #225 — Honors/Awards collapsed: an Honors & Awards section whose items are
+ *          grouped under sub-headings (International Awards / Domestic Awards /
+ *          Community) and split by a page break collapses to a SINGLE
+ *          `heuristic_achievements` entry — the first award line becomes the
+ *          title and every later line is either dropped or mashed into one
+ *          `description` blob, page footer included. Reproduced end-to-end from
+ *          a real multi-page CV (subheadings + page-break footer are the
+ *          trigger; a flat single-page Honors list parses fine, which is why
+ *          earlier single-block repros missed it).
  */
 
 import { describe, it, expect } from "vitest";
@@ -76,4 +86,34 @@ describe("#225 — recognized Certifications section must not be dropped", () =>
     // structured output rather than vanishing.
     expect(JSON.stringify(parsed)).toContain("AWS Certified Solutions Architect");
   });
+});
+
+describe("#225 — Honors/Awards under sub-headings must not collapse to one entry", () => {
+  // KNOWN FAILURE until the achievements extractor stops collapsing a
+  // multi-subheading, page-split Honors section into a single entry. When each
+  // award line survives (and the page footer is stripped), this turns red — flip
+  // to a plain `it`.
+  it.fails(
+    "keeps every award line and drops the page-footer when Honors has sub-headings + a page break",
+    () => {
+      const parsed = parse([
+        { text: "Jane Doe", fontSize: 18 },
+        { text: "jane.doe@example.com" },
+        { text: "HONORS & AWARDS", fontSize: 14 },
+        { text: "International Awards", fontSize: 12 },
+        { text: "2021 2nd Place, AWS AI/ML GameDay Online" },
+        { text: "2020 Finalist, DEFCON 28 CTF World Final" },
+        { text: "2018 Finalist, DEFCON 26 CTF World Final" },
+        { text: "Domestic Awards", fontSize: 12 },
+        { text: "June 10, 2026 Jane Doe Resume 2", page: 2 },
+        { text: "2021 2nd Place, AWS Korea GameDay", page: 2 },
+        { text: "2015 3rd Place, WITHCON Final", page: 2 },
+      ]);
+      const blob = JSON.stringify(parsed.heuristic_achievements ?? []);
+      // Correct behavior: a later award line survives (not dropped or buried),
+      // and the running-header/page-footer never contaminates an entry.
+      expect(blob).toContain("DEFCON 28");
+      expect(blob).not.toContain("Jane Doe Resume 2");
+    },
+  );
 });
