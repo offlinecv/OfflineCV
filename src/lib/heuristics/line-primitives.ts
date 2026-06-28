@@ -105,6 +105,9 @@ export function stripDateRange(text: string): string {
   cleaned = cleaned.replace(/\b(Present|Current|Now|Ongoing)\b/gi, "").trim();
   cleaned = cleaned.replace(YEAR_RE, "").trim();
   YEAR_RE.lastIndex = 0;
+  // After year removal, bracket/paren pairs that held only the year are now
+  // empty (e.g. "[2019]" → "[]", "(2019)" → "()"). Strip them.
+  cleaned = cleaned.replace(/\[\s*\]|\(\s*\)/g, "").trim();
   cleaned = cleaned.replace(/^[-–—,|\s]+|[-–—,|\s]+$/g, "");
   return cleaned;
 }

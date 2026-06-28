@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   groupBulletsByExperience,
+  suppressTitleOwnedBullets,
   formatExperienceHeader,
   normalizeBulletText,
   type BulletExperience,
@@ -298,5 +299,50 @@ describe("multi-line bullet pool is fully merged and correctly attributed (#162)
     for (const t of fullText.slice(0, 3)) {
       expect(otherText.has(t)).toBe(false);
     }
+  });
+});
+
+// ── suppressTitleOwnedBullets (#224) ────────────────────────────────────────────
+
+describe("suppressTitleOwnedBullets (#224)", () => {
+  const titleOnly = (title: string): BulletExperience => ({ title });
+
+  it("drops a bullet owned by a title-only entry — '[year]' bracket shape", () => {
+    // Achievement title is date-stripped to a "[]" residue; the pooled bullet
+    // keeps "[2019]". The residue-tolerant key reconciles them.
+    const entries = [titleOnly("Patent · Ranking e-commerce catalogs. []")];
+    const bullets = [
+      makeBullet("Patent · Ranking e-commerce catalogs. [2019]", 0),
+    ];
+    expect(suppressTitleOwnedBullets(bullets, entries)).toEqual([]);
+  });
+
+  it("drops a bullet owned by a title-only entry — 'Label, year' shape", () => {
+    const entries = [titleOnly("Globex Engineering Excellence")];
+    const bullets = [makeBullet("Globex Engineering Excellence, 2021", 0)];
+    expect(suppressTitleOwnedBullets(bullets, entries)).toEqual([]);
+  });
+
+  it("keeps a genuinely-unmatched bullet that only shares a prefix", () => {
+    const entries = [titleOnly("Globex Engineering Excellence")];
+    const bullets = [
+      makeBullet("Globex Engineering Excellence Award committee chair", 0),
+    ];
+    expect(suppressTitleOwnedBullets(bullets, entries)).toHaveLength(1);
+  });
+
+  it("never suppresses against an entry that has a real description", () => {
+    // An entry WITH a bullet body attributes through the description path; its
+    // header text must not become an ownership key that strands a similar bullet.
+    const entries: BulletExperience[] = [
+      { title: "Built a thing, 2021", description: "Did real work here." },
+    ];
+    const bullets = [makeBullet("Built a thing, 2021", 0)];
+    expect(suppressTitleOwnedBullets(bullets, entries)).toHaveLength(1);
+  });
+
+  it("returns the list unchanged when there are no title-only entries", () => {
+    const bullets = [makeBullet("Shipped feature X across the org", 0)];
+    expect(suppressTitleOwnedBullets(bullets, [])).toEqual(bullets);
   });
 });

@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.91,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "none",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -34,21 +34,21 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 24,
-    "preLayoutOverall": 24,
+    "overall": 48,
+    "preLayoutOverall": 48,
     "specificity": {
       "score": 0,
       "max": 40,
-      "gradable": false,
+      "gradable": true,
       "metricBullets": 0,
-      "totalBullets": 1
+      "totalBullets": 8
     },
     "structure": {
-      "score": 0,
+      "score": 24,
       "max": 30,
-      "gradable": false,
-      "goodBullets": 0,
-      "totalBullets": 1
+      "gradable": true,
+      "goodBullets": 7,
+      "totalBullets": 8
     },
     "completeness": {
       "score": 24,
@@ -64,7 +64,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 1,
+    "bulletCount": 8,
     "algoVersion": "1.4"
   }
 }

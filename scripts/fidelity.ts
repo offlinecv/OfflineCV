@@ -28,7 +28,10 @@ import { join } from "node:path";
 
 import { runCascade } from "../src/lib/heuristics/cascade.ts";
 import { computeAnonymousAtsScore } from "../src/lib/score/score.ts";
-import { groupBulletsByExperience } from "../src/lib/score/group-bullets.ts";
+import {
+  groupBulletsByExperience,
+  suppressTitleOwnedBullets,
+} from "../src/lib/score/group-bullets.ts";
 
 const args = process.argv.slice(2);
 const strict = args.includes("--strict");
@@ -99,7 +102,10 @@ async function diagnose(pdfPath: string): Promise<Finding> {
   ];
   const grouped = groupBulletsByExperience([...(score.bullets ?? [])], combined);
   const other = grouped.find((g) => g.experienceIndex === null);
-  const otherBullets = other?.bullets ?? [];
+  // Mirror ReconstructedResume.buildEntryGroups: title-only entries' own source
+  // lines are suppressed from "Other" so the diagnostic reflects what the
+  // reconstruction actually renders (#224).
+  const otherBullets = suppressTitleOwnedBullets(other?.bullets ?? [], combined);
 
   // Rendered entry headers — what each section visibly shows.
   const renderedTitles = [

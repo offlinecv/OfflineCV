@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.9,
+    "confidence": 0.89,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -18,54 +18,53 @@
       "full_name",
       "given_name",
       "heuristic_achievements",
+      "linkedin_url",
       "location",
       "phone",
       "phoneIsValid",
-      "skills"
+      "skills",
+      "summary"
     ],
-    "skillsCount": 8,
-    "experienceCount": 1,
+    "skillsCount": 12,
+    "experienceCount": 2,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 3,
-    "rawTextCharCount": 572,
+    "rawTextCharCount": 1370,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
-    "sectionSource": "markdown"
+    "sectionSource": "regex"
   },
   "score": {
-    "overall": 24,
-    "preLayoutOverall": 24,
+    "overall": 67,
+    "preLayoutOverall": 67,
     "specificity": {
-      "score": 0,
+      "score": 22,
       "max": 40,
-      "gradable": false,
-      "metricBullets": 2,
-      "totalBullets": 2
+      "gradable": true,
+      "metricBullets": 1,
+      "totalBullets": 3
     },
     "structure": {
-      "score": 0,
-      "max": 30,
-      "gradable": false,
-      "goodBullets": 2,
-      "totalBullets": 2
-    },
-    "completeness": {
-      "score": 24,
+      "score": 15,
       "max": 30,
       "gradable": true,
-      "missing": [
-        "LinkedIn",
-        "summary"
-      ]
+      "goodBullets": 2,
+      "totalBullets": 3
+    },
+    "completeness": {
+      "score": 30,
+      "max": 30,
+      "gradable": true,
+      "missing": []
     },
     "layout": {
       "triggers": [],
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 2,
+    "bulletCount": 3,
     "algoVersion": "1.4"
   }
 }

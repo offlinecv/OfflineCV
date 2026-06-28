@@ -137,6 +137,65 @@ export function groupBulletsByExperience(
   return result;
 }
 
+// ── Title-owned bullet suppression (#224) ──────────────────────────────────────
+
+/**
+ * Normalize a title / bullet for OWNERSHIP comparison — stricter than
+ * {@link normalizeBulletText}: on top of the marker-strip + lowercase + whitespace
+ * collapse, it drops the bracket/date residue that makes a title-only entry's
+ * header and its own pooled source line fail an exact match.
+ *
+ * The coupling this defuses (#224): a one-line achievement/project — the
+ * `• Label · text [year]` or `Label, year` shape — parses as a TITLE-ONLY entry
+ * (whole line in `title`, empty `description`) with the date peeled into a
+ * separate field. The scorer still pools that raw line as a bullet. With no
+ * `description` to key on, {@link groupBulletsByExperience} can't attribute the
+ * bullet, so it lands in the "Other" group and the content renders twice — once
+ * as the entry's title, once under "Other bullets". The title is date-stripped
+ * (`… catalogs. []`) while the pooled bullet keeps its date (`… catalogs. [2019]`),
+ * so the residue strip below is what lets the two reconcile.
+ */
+function normalizeTitleKey(s: string): string {
+  return (
+    normalizeBulletText(s)
+      // Trailing "[2019]" / "[]" bracket residue (with or without a year inside).
+      .replace(/\s*\[[^\]]*\]\s*$/, "")
+      // Trailing bare year or ", 2021" / "· 2021" date suffix.
+      .replace(/[\s,;·|–—-]*\b(?:19|20)\d{2}\b\s*$/, "")
+      .replace(/[\s,;·|–—-]+$/, "")
+      .trim()
+  );
+}
+
+/**
+ * Drop from a bullet list every bullet whose content is already OWNED by a
+ * title-only entry — i.e. a `• Label … [year]` achievement/project that renders
+ * its whole line as a header and carries no `description` for the grouper to
+ * match against (#224). Such a bullet, left in the "Other bullets" group, shows
+ * the same content twice. We suppress it from "Other" rather than re-attributing
+ * it to the entry: the entry's own title already IS that content, so rendering it
+ * again as the entry's bullet would just move the duplicate, not remove it.
+ *
+ * Ownership is exact on the residue-tolerant {@link normalizeTitleKey} — a tight
+ * key, not substring containment — so a genuinely-unmatched bullet that merely
+ * shares a prefix with some title is NOT suppressed. Only title-only entries
+ * (empty description) are candidates; an entry with a real bullet body attributes
+ * through the normal description path and never strands its bullets here.
+ */
+export function suppressTitleOwnedBullets(
+  bullets: readonly BulletObservation[],
+  entries: readonly BulletExperience[],
+): BulletObservation[] {
+  const ownedKeys = new Set<string>();
+  for (const e of entries) {
+    if (e.description?.trim()) continue; // not title-only
+    const key = normalizeTitleKey(e.title ?? "");
+    if (key) ownedKeys.add(key);
+  }
+  if (ownedKeys.size === 0) return [...bullets];
+  return bullets.filter((b) => !ownedKeys.has(normalizeTitleKey(b.text)));
+}
+
 // ── Header formatting ─────────────────────────────────────────────────────────
 
 /**

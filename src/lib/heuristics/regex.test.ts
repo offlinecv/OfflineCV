@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { matchSectionHeader, matchSectionAnchorToken, DATE_RANGE_RE } from "./regex.ts";
-import { parseDateRange } from "./line-primitives.ts";
+import { parseDateRange, stripDateRange } from "./line-primitives.ts";
 
 describe("matchSectionHeader — split-letter headers (#56)", () => {
   it("matches a clean header unchanged", () => {
@@ -246,5 +246,37 @@ describe("matchSectionAnchorToken — visual-path trailing anchor (#117)", () =>
 
   it("returns null when the last token is not an anchor", () => {
     expect(matchSectionAnchorToken("just some prose")).toBeNull();
+  });
+});
+
+describe("stripDateRange — bracket/paren residue (#236)", () => {
+  it("strips a bare year in brackets, leaving no [] residue", () => {
+    expect(stripDateRange("Patent · Improved caching. [2019]")).toBe(
+      "Patent · Improved caching.",
+    );
+  });
+
+  it("strips a bare year in parens, leaving no () residue", () => {
+    expect(stripDateRange("Web Accessibility initiative. (2021)")).toBe(
+      "Web Accessibility initiative.",
+    );
+  });
+
+  it("strips a bare year with no brackets (existing behaviour preserved)", () => {
+    expect(stripDateRange("Acquired by NASDAQ-listed company. 2020")).toBe(
+      "Acquired by NASDAQ-listed company.",
+    );
+  });
+
+  it("strips a full date range in brackets", () => {
+    expect(stripDateRange("Open-source contribution [Jan 2018 – Mar 2020]")).toBe(
+      "Open-source contribution",
+    );
+  });
+
+  it("leaves text untouched when there is no date", () => {
+    expect(stripDateRange("Outstanding Performer Award")).toBe(
+      "Outstanding Performer Award",
+    );
   });
 });

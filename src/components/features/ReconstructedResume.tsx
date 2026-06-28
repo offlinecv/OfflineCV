@@ -39,6 +39,7 @@ import type {
 import {
   groupBulletsByExperience,
   needsAttention,
+  suppressTitleOwnedBullets,
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import {
@@ -286,6 +287,15 @@ function buildEntryGroups(
   for (const g of grouped) {
     if (g.experienceIndex === null) other = g;
     else byIndex.set(g.experienceIndex, g);
+  }
+
+  // Suppress from "Other" any bullet already owned by a title-only entry — a
+  // one-line achievement/project whose whole line renders as its header but
+  // carries no description for the grouper to match (#224). Left in "Other" it
+  // shows the same content twice. Drop the now-empty group entirely.
+  if (other) {
+    const kept = suppressTitleOwnedBullets(other.bullets, combined);
+    other = kept.length > 0 ? { ...other, bullets: kept } : null;
   }
 
   // Each source slices its own window out of the combined index space, falling
