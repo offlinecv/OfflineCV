@@ -959,6 +959,11 @@ function buildEntryBlock(
       // Experience" title), not a bullet — stop collecting so it never becomes a
       // body unit. Guarded to the glyph-less mode (`bodyMarginX` finite) so glyph
       // sections and no-geometry markdown are unaffected.
+      // A blank/whitespace-only spacer line (pdfjs emits zero-width or space-only
+      // items, and `mergeItemText` trims them to "") must NOT end the body run —
+      // it carries no x signal worth trusting and would otherwise truncate every
+      // bullet after it. Skip it before the indent-drop break below.
+      if (!lines[i].text.trim()) continue;
       if (
         Number.isFinite(bodyMarginX) &&
         !isBulletLine(lines[i]) &&
