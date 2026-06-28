@@ -13,7 +13,7 @@ import {
 } from "../regex.ts";
 import { escapeRegex } from "../../jd-match/regex-utils.ts";
 import { findFirstPhone, regionFromLocation } from "../phone.ts";
-import { firstMatch, allMatches } from "./shared.ts";
+import { firstMatch, allMatches, isStandaloneUrl } from "./shared.ts";
 
 // ── Contact (email, phone, urls, location) ──────────────────────────────────
 
@@ -214,6 +214,12 @@ function looksLikeRealWebsite(u: string): boolean {
  * "Other URLs" are those whose lowercased form does not include `linkedin.com`
  * or `github.com`. Portfolio wins if the URL matches a portfolio-indicator
  * pattern; the first remaining URL becomes the website candidate.
+ *
+ * A bare domain is only accepted as a contact link when it is positionally
+ * standalone in the text — not flanked by word characters on both sides. A
+ * domain mid-sentence ("sold return2india.com to Satyam") is prose, not a
+ * contact URL (#237). URLs with an explicit scheme or `www.` are always
+ * accepted regardless of position.
  */
 function extractOtherUrls(joined: string): {
   portfolio: string | undefined;
@@ -230,7 +236,10 @@ function extractOtherUrls(joined: string): {
       return false;
     }
     // Reject `token.token` false positives (skills like `Node.js`, `etc.`).
-    return looksLikeRealWebsite(u);
+    if (!looksLikeRealWebsite(u)) return false;
+    // Reject a bare domain mid-sentence in prose (e.g. "sold return2india.com
+    // to Satyam"). A URL with an explicit scheme or www. is always standalone.
+    return isStandaloneUrl(u, withoutEmails);
   });
   const portfolio = others.find((u) =>
     /(portfolio|\.me\b|\.io\b|\.dev\b|behance|dribbble|medium)/i.test(u),

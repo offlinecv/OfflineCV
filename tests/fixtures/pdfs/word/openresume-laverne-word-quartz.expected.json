@@ -1,14 +1,14 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.87,
+    "confidence": 0.84,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume",
       "t1_5_regex"
     ],
-    "suggestedEscalation": "none",
+    "suggestedEscalation": "llm",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -23,7 +23,7 @@
       "summary"
     ],
     "skillsCount": 8,
-    "experienceCount": 2,
+    "experienceCount": 3,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 0,
