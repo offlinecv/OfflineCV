@@ -335,6 +335,7 @@ const EXPERIENCE_FIELD_MAP: Record<
 > = {
   title: "title",
   company: "subtitle",
+  location: "location",
   start_date: "start_date",
   end_date: "end_date",
 };

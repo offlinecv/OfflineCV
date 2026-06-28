@@ -56,6 +56,7 @@ export function needsAttention(b: BulletObservation): boolean {
 export interface BulletExperience {
   title?: string;
   company?: string;
+  location?: string;
   start_date?: string;
   end_date?: string;
   is_current?: boolean;

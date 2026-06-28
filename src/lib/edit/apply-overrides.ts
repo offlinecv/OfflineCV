@@ -327,6 +327,9 @@ export function applyOverrides(
     if (!exp) continue;
     if (fields.title !== undefined) exp.title = fields.title;
     if (fields.company !== undefined) exp.company = fields.company;
+    // `location` is optional; a clear ("") drops it so render/PDF treat it as
+    // absent rather than emitting an empty location segment.
+    if (fields.location !== undefined) exp.location = fields.location || undefined;
     if (fields.start_date !== undefined) exp.start_date = fields.start_date;
     if (fields.end_date !== undefined) exp.end_date = fields.end_date;
   }
@@ -430,6 +433,7 @@ export function applyOverrides(
         nextParsed.experience.push({
           title: entry.title,
           company: entry.subtitle ?? "",
+          ...(entry.location ? { location: entry.location } : {}),
           start_date: entry.start_date,
           end_date: entry.end_date,
           description,

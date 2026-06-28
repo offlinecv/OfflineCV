@@ -45,6 +45,9 @@ export interface ContactOverrides {
 export interface ExperienceFieldOverrides {
   title?: string;
   company?: string;
+  /** Role location ("City, ST" / "City, Country") peeled off the header by the
+   *  parser. Editable like the other header fields; empty string clears it. */
+  location?: string;
   start_date?: string;
   end_date?: string;
 }
@@ -102,6 +105,8 @@ export interface AddedEntry {
   title: string;
   /** Secondary header: company / institution. Unused for projects/achievements. */
   subtitle?: string;
+  /** Role location ("City, ST"). Experience only; ignored by other sections. */
+  location?: string;
   start_date?: string;
   end_date?: string;
   /** Achievement year (achievements carry a single year, not a range). */
@@ -112,6 +117,7 @@ export interface AddedEntry {
 export type AddedEntryField =
   | "title"
   | "subtitle"
+  | "location"
   | "start_date"
   | "end_date"
   | "year";

@@ -143,6 +143,34 @@ describe("applyOverrides", () => {
     expect(parsed.experience[0].title).toBe("Engineer");
   });
 
+  it("applies an experience location override and clears it on empty string", () => {
+    const parsed = baseParsed();
+    parsed.experience[0].location = "Springfield, IL";
+    const { parsed: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { location: "Santa Clara, CA" } },
+      {},
+      [],
+    );
+    expect(out.experience[0].location).toBe("Santa Clara, CA");
+
+    const { parsed: cleared } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { location: "" } },
+      {},
+      [],
+    );
+    expect(cleared.experience[0].location).toBeUndefined();
+    // Original untouched.
+    expect(parsed.experience[0].location).toBe("Springfield, IL");
+  });
+
   it("propagates a bullet edit to rawText, sections, and the matching description", () => {
     const parsed = baseParsed();
     const rawText = "• Built a thing\n• Shipped another thing";

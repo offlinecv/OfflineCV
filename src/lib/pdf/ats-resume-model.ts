@@ -227,7 +227,8 @@ export function buildAtsResumeModel(
 
   // ── Experience ──
   const experienceEntries: AtsEntry[] = experiences.map((exp, i) => ({
-    headerLine: joinHeader([exp.title, exp.company], " · ") || "Experience",
+    headerLine:
+      joinHeader([exp.title, exp.company, exp.location], " · ") || "Experience",
     subLine: experienceDateRange(exp) || undefined,
     bullets: resolveBullets(
       bulletsByIndex.get(expOffset + i),

@@ -322,9 +322,10 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
   const exp = group.experience;
 
   if (!editable) {
-    // Read-only: composite "Title — Company · dates" line (original behaviour).
+    // Read-only: composite "Title — Company · Location · dates" line.
     const title = exp.title || undefined;
     const company = exp.company || undefined;
+    const location = exp.location || undefined;
 
     // Build date segment.
     let dates: string | undefined;
@@ -336,11 +337,17 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
     else if (start) dates = start;
     else if (end) dates = end;
 
+    // Location rides inline with the company, comma-joined ("Company, City, ST").
+    const companyLoc =
+      company && location
+        ? `${company}, ${location}`
+        : company || location || undefined;
+
     // Build composite label.
     let label = "";
-    if (title && company) label = `${title} — ${company}`;
+    if (title && companyLoc) label = `${title} — ${companyLoc}`;
     else if (title) label = title;
-    else if (company) label = company;
+    else if (companyLoc) label = companyLoc;
     if (dates) label = label ? `${label} · ${dates}` : dates;
 
     return (
@@ -359,6 +366,9 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
   const company = toDisplay(
     ov.company !== undefined ? ov.company : exp.company,
   );
+  const location = toDisplay(
+    ov.location !== undefined ? ov.location : exp.location,
+  );
   const startDate = toDisplay(
     ov.start_date !== undefined ? ov.start_date : exp.start_date,
   );
@@ -368,45 +378,64 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
       : toDisplay(ov.end_date !== undefined ? ov.end_date : exp.end_date);
 
   return (
-    <div className="flex flex-col gap-0.5">
-      {/* Title — Company row (multiline fields for long titles/names) */}
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-        <EditableField
-          value={title}
-          placeholder="title not detected"
-          label="Job title"
-          textWeight="semibold"
-          textSize="sm"
-          multiline
-          onCommit={(v) => onFieldChange("title", v)}
-        />
-        {(title || company) && <span className="text-content-muted">—</span>}
-        <EditableField
-          value={company}
-          placeholder="company not detected"
-          label="Company"
-          textSize="sm"
-          multiline
-          onCommit={(v) => onFieldChange("company", v)}
-        />
-      </div>
-      {/* Date range row — single-line quiet-edit fields */}
-      <div className="flex flex-wrap items-center gap-x-1.5 text-content-tertiary">
-        <EditableField
-          value={startDate}
-          placeholder="start date"
-          label="Start date"
-          textSize="xs"
-          onCommit={(v) => onFieldChange("start_date", v)}
-        />
-        <span aria-hidden="true">–</span>
-        <EditableField
-          value={endDate}
-          placeholder="end date"
-          label="End date"
-          textSize="xs"
-          onCommit={(v) => onFieldChange("end_date", v)}
-        />
+    <div className="flex min-w-0 grow flex-col gap-0.5">
+      {/* Single header line: "Title — Company, Location" on the left, the date
+          range flush-right (mirrors the résumé layout). justify-between pins the
+          dates to the right edge; the left group flex-wraps for long values. */}
+      <div className="flex w-full items-baseline justify-between gap-x-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+          <EditableField
+            value={title}
+            placeholder="title not detected"
+            label="Job title"
+            textWeight="semibold"
+            textSize="sm"
+            multiline
+            onCommit={(v) => onFieldChange("title", v)}
+          />
+          {(title || company) && <span className="text-content-muted">—</span>}
+          {/* Company + its trailing comma are grouped with NO gap so the comma
+              hugs the company name ("Acme Inc.,"); the location then follows
+              after the normal gap, reading "Company, City, ST" on one line. */}
+          <span className="inline-flex items-baseline">
+            <EditableField
+              value={company}
+              placeholder="company not detected"
+              label="Company"
+              textSize="sm"
+              multiline
+              onCommit={(v) => onFieldChange("company", v)}
+            />
+            {(company || location) && (
+              <span className="text-content-muted">,</span>
+            )}
+          </span>
+          <EditableField
+            value={location}
+            placeholder="location not detected"
+            label="Location"
+            textSize="sm"
+            onCommit={(v) => onFieldChange("location", v)}
+          />
+        </div>
+        {/* Date range, flush-right and in the tertiary metadata colour. */}
+        <span className="flex shrink-0 items-baseline gap-x-1.5 text-content-tertiary">
+          <EditableField
+            value={startDate}
+            placeholder="start date"
+            label="Start date"
+            textSize="xs"
+            onCommit={(v) => onFieldChange("start_date", v)}
+          />
+          <span aria-hidden="true">–</span>
+          <EditableField
+            value={endDate}
+            placeholder="end date"
+            label="End date"
+            textSize="xs"
+            onCommit={(v) => onFieldChange("end_date", v)}
+          />
+        </span>
       </div>
     </div>
   );
