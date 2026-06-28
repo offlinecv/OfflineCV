@@ -380,6 +380,17 @@ export const DEGREE_RE =
 export const INSTITUTION_HINTS =
   /\b(University|College|Institute|School|Academy|Polytechnic)s?\b/i;
 
+/** A sub-field NOTE line that rides under an entry — a GPA / Minor / Major /
+ *  concentration / coursework annotation — rather than a new entry header. Used
+ *  by the shared {@link isEntryHeaderShape} predicate (entry-blocks.ts) to reject
+ *  such a line as an entry-boundary lead: "GPA: 3.8", "Minor in Economics",
+ *  "Relevant Coursework: …" are properties of the school/role above them, not a
+ *  new title/program/institution. Anchored to the line start so a legitimate
+ *  program named with one of these words mid-line ("Major League Operations
+ *  Program") is unaffected. */
+export const PROGRAM_NOTE_RE =
+  /^(?:GPA[:\s]|Minor\b|Major\b|Concentration\b|Relevant Coursework\b|Coursework\b)/i;
+
 // ── Company suffix hints ────────────────────────────────────────────────────
 
 export const COMPANY_SUFFIX_RE =

@@ -24,6 +24,41 @@ export function allMatches(re: RegExp, text: string): string[] {
 }
 
 /**
+ * True when `url` is positionally a link in `sourceText` — not embedded as a
+ * bare domain mid-sentence in prose.
+ *
+ * A URL is treated as standalone when it does NOT have a word character
+ * immediately before AND a word character immediately after its occurrence in
+ * the source text. Mid-sentence prose embeds a domain between words on both
+ * sides ("sold return2india.com to Satyam"), while a genuine link line or a
+ * header URL sits at a boundary (start/end of line, or adjacent to separators
+ * like ` | `, `·`, `—`).
+ *
+ * A URL with an explicit scheme (`https?://`) or `www.` prefix is always
+ * treated as standalone — the scheme is unambiguous intent.
+ *
+ * @param url        - The URL string as matched (e.g. "return2india.com").
+ * @param sourceText - The text to search within for positional context.
+ */
+export function isStandaloneUrl(url: string, sourceText: string): boolean {
+  // An explicit scheme or www. is always intentional — treat as standalone.
+  if (/^https?:\/\//i.test(url) || /^www\./i.test(url)) return true;
+  const idx = sourceText.indexOf(url);
+  if (idx === -1) return true; // can't find it — assume standalone
+  // Trim surrounding whitespace to look at the nearest non-space char on each
+  // side. "sold return2india.com to" has a space immediately before/after, but
+  // the nearest non-space chars are word chars — so it is mid-sentence prose.
+  const before = sourceText.slice(0, idx).trimEnd();
+  const after = sourceText.slice(idx + url.length).trimStart();
+  // Mid-sentence: word chars on BOTH sides (after trimming whitespace) →
+  // embedded in prose. A domain at start/end of text, or adjacent to
+  // separators (|, ·, —), has no word char on at least one side.
+  const wordBefore = /\w$/.test(before);
+  const wordAfter = /^\w/.test(after);
+  return !(wordBefore && wordAfter);
+}
+
+/**
  * Keywords that commonly appear in a job title. Used as a tiebreaker when
  * neither header line carries a company suffix:
  * modern resumes often flip the "Company first, then Title" convention

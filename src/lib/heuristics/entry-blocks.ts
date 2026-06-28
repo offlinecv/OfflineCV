@@ -34,6 +34,7 @@ import {
   MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
   YEAR_RE,
+  PROGRAM_NOTE_RE,
 } from "./regex.ts";
 import {
   parseDateRange,
@@ -42,6 +43,70 @@ import {
   isProseLine,
   stripBullet,
 } from "./line-primitives.ts";
+
+// ── Shared entry-header shape recognition ───────────────────────────────────
+//
+// The anchor-on-shape family (#238 education, #239 experience; cf #31, #145):
+// a valid entry is missed when it lacks the field the section anchors on — a
+// degree keyword for education, a date range for experience. The fix is to
+// recognize an entry by the SHAPE of its header line rather than requiring that
+// one field. `isEntryHeaderShape` is that shared, field-agnostic shape test:
+// "does this line read like the LEAD of an entry (a role title, an org/program
+// name, an institution) — as opposed to body prose, a bare date, or a sub-field
+// note?" Geometry signals (indent past the bullet margin, a dangling wrapped
+// tail) stay in the callers, which own the layout; this predicate is pure text
+// shape so education (no geometry) and experience (full geometry) share it.
+
+/** True when the whole trimmed line is essentially JUST a date / date-range — a
+ *  bare year, a month-year, or a season/graduation-qualified range — so it must
+ *  not be mistaken for an entry header or an institution. Strips date tokens and
+ *  connective/season/graduation words; an empty remainder means the line carried
+ *  nothing but a date. Shared by education chunking and {@link isEntryHeaderShape}. */
+export function isDateOnlyLine(text: string): boolean {
+  const stripped = text
+    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?/gi, "")
+    .replace(/\b(?:spring|summer|fall|autumn|winter)\b/gi, "")
+    .replace(/\b\d{4}\b/g, "")
+    .replace(/\b(?:present|current|expected|graduation|graduated|anticipated)\b/gi, "")
+    .replace(/[\s,–\-—|/().:]+/g, "")
+    .trim();
+  return stripped.length === 0;
+}
+
+/**
+ * True when `text` reads like the HEADER LEAD of a resume entry — a role title,
+ * an organization, a program/certificate name, or an institution — rather than
+ * description prose, a bare date line, or a sub-field note (GPA / Minor / etc.).
+ *
+ * This is the shared "entry-boundary shape" predicate behind the anchor-on-shape
+ * fixes: education recognizes a degree-keyword-less program entry by it (#238),
+ * and experience recognizes a dateless role header by it (#239). It is
+ * intentionally TEXT-ONLY — it makes no use of x/y geometry — so a section with
+ * no layout data (education chunking runs on flattened strings) and one with full
+ * geometry (experience) can both rely on it; each caller layers its own geometry
+ * guards (wrapped-tail indent, dangling-connective predecessor) on top.
+ *
+ * A line qualifies when ALL hold:
+ *   - it carries substantive text (non-empty after trim), and
+ *   - it LEADS WITH A CAPITAL OR DIGIT — a proper-noun / numbered entry lead, not
+ *     a lowercase-led sentence fragment (a wrapped bullet tail), and
+ *   - it does NOT read as a date-only line ({@link isDateOnlyLine}) — a bare
+ *     graduation year / attendance range is the date OF an entry, not a new one, and
+ *   - it does NOT read as prose ({@link isProseLine}) — a mid-thought description
+ *     sentence, and
+ *   - it is NOT a sub-field note ({@link PROGRAM_NOTE_RE}) — "GPA: 3.8",
+ *     "Minor in Economics", "Relevant Coursework: …" are properties of the entry
+ *     above, not a new entry head.
+ */
+export function isEntryHeaderShape(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (!/^[A-Z0-9]/.test(t)) return false;
+  if (isDateOnlyLine(t)) return false;
+  if (isProseLine(t)) return false;
+  if (PROGRAM_NOTE_RE.test(t)) return false;
+  return true;
+}
 
 /**
  * How a section's entry blocks are anchored — i.e. what marks the start of a
@@ -249,6 +314,38 @@ function introducesBulletBody(
   return false;
 }
 
+/** Whether the line at `i-1` closes the previous role's BULLET BODY — i.e. the
+ *  candidate header at `i` genuinely follows a bullet run, not a header/lead line.
+ *  True when the predecessor is a bullet, OR a wrapped-bullet continuation
+ *  (marker-less line indented past `markerX`) whose run traces back to a bullet
+ *  with no intervening header-level line. A real role's last bullet often wraps
+ *  onto a marker-less continuation ("…used by / millions of users."), so the
+ *  next role's dateless header sits below that wrap, not below the bullet marker
+ *  itself (#239). Walking back over wrapped continuations recovers that case
+ *  without loosening the gate to allow a header to follow a non-bullet header
+ *  line (which would re-split a multi-line dateless header). A no-op for the
+ *  glyphless x=0 path (markerX = Infinity ⇒ no line is a wrapped continuation),
+ *  where the predecessor must still be a bullet outright — the dangling-tail and
+ *  shape gates carry phantom-split protection there. */
+function precededByBulletBody(
+  lines: PdfLine[],
+  i: number,
+  markerX: number,
+): boolean {
+  let j = i - 1;
+  while (j >= 0) {
+    if (isBulletLine(lines[j])) return true;
+    // A marker-less line indented past the bullet text margin is the wrap of the
+    // bullet above it — keep walking back through the wrapped run.
+    if (isWrappedContinuation(lines[j], markerX)) {
+      j--;
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
 function collectDatelessAnchors(lines: PdfLine[], dateAnchors: number[]): number[] {
   const isDate = new Set(dateAnchors);
   const markerX = bulletMarkerX(lines);
@@ -256,17 +353,24 @@ function collectDatelessAnchors(lines: PdfLine[], dateAnchors: number[]): number
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
     if (isBulletLine(line) || isDate.has(i)) continue;
-    // First non-bullet line of a header run: predecessor must be a bullet.
-    if (!isBulletLine(lines[i - 1])) continue;
+    // First non-bullet line of a header run: it must follow the previous role's
+    // bullet body — a bullet, or a wrapped continuation of one (#239). A header
+    // following another non-bullet header line is the 2nd line of a multi-line
+    // header, not a new entry, and is skipped (mirrors the first_line run rule).
+    if (!precededByBulletBody(lines, i, markerX)) continue;
     // A predecessor bullet that ends on a dangling conjunction/article/prep has
     // wrapped — this line is its tail, not a header. Decisive when geometry is
     // degenerate (all x=0), where the indent filter below can't tell them apart.
     if (DANGLING_BULLET_TAIL_RE.test(lines[i - 1].text.trim())) continue;
-    // Reject a wrapped-bullet tail (indented past the marker) or sentence prose.
-    if (isWrappedContinuation(line, markerX) || isProseLine(line.text)) continue;
-    // A role header is a proper noun (capital/digit lead); a bullet tail that
-    // slipped past the geometry/prose filters is lowercase-led sentence prose.
-    if (!/^[A-Z0-9]/.test(line.text.trim())) continue;
+    // Reject a wrapped-bullet tail (indented past the marker) — a geometry
+    // signal this caller owns.
+    if (isWrappedContinuation(line, markerX)) continue;
+    // The remaining content gates — capital/digit lead, not prose, not a bare
+    // date, not a sub-field note — are the shared entry-header SHAPE test, the
+    // same one education uses to recognize a degree-less program entry (#238).
+    // A bullet tail that slipped past the geometry filter is lowercase-led
+    // sentence prose and fails the shape test here.
+    if (!isEntryHeaderShape(line.text)) continue;
     // Must introduce a bullet body before the next header/anchor line.
     if (introducesBulletBody(lines, i, isDate)) out.push(i);
   }

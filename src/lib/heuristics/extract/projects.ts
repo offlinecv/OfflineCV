@@ -6,7 +6,7 @@ import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { URL_RE } from "../regex.ts";
-import { firstMatch, finalizeEntries } from "./shared.ts";
+import { allMatches, finalizeEntries, isStandaloneUrl } from "./shared.ts";
 
 // ── Projects ────────────────────────────────────────────────────────────────
 
@@ -45,15 +45,33 @@ export function extractProjects(
  * (repo / live demo / publication link) may appear anywhere in the header; it
  * is removed from the first line and trailing separators are trimmed. Shared by
  * `projectFromBlock` and `achievementFromBlock` — the SAME header shape (#96).
+ *
+ * A URL is only lifted when it is positionally a link — standalone on the
+ * line, or at a word boundary (adjacent to whitespace / separators, not
+ * flanked by word characters on BOTH sides). A bare domain mid-sentence (e.g.
+ * "sold return2india.com to Satyam") is left in the label text and not
+ * promoted to the `url` field (#237).
  */
 export function liftHeaderLabel(headerLines: string[]): {
   label: string;
   url?: string;
 } {
   const headerJoined = headerLines.join(" ");
-  const url = firstMatch(URL_RE, headerJoined);
+  // Lift the FIRST positionally-standalone URL — not merely the first URL_RE
+  // hit. A header can carry a bare domain mid-prose BEFORE a genuine link
+  // ("Sold acme.com to buyer | github.com/me/repo"); gating only firstMatch on
+  // isStandaloneUrl would reject the prose domain and never examine the real
+  // link. Mirror contact.ts::extractOtherUrls — scan all hits, keep the first
+  // standalone one. A URL with an explicit scheme or www. prefix is always
+  // standalone (#237).
+  const url = allMatches(URL_RE, headerJoined).find((u) =>
+    isStandaloneUrl(u, headerJoined),
+  );
   const raw = headerLines[0] ?? "";
-  const label = (url ? raw.replace(URL_RE, "") : raw)
+  // Strip THAT specific lifted url's occurrence — not the first URL_RE match —
+  // so a single prose-domain header (nothing lifted) keeps the domain in its
+  // label (#237).
+  const label = (url ? raw.replace(url, "") : raw)
     .replace(/[\s|•·\-–—]+$/g, "")
     .trim();
   URL_RE.lastIndex = 0;

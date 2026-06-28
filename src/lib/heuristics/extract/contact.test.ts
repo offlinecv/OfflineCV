@@ -65,3 +65,66 @@ describe("extractContact — email domain is not a website", () => {
     expect(result.website_url).toBe("https://janedoe.com");
   });
 });
+
+describe("extractContact — mid-sentence domain is not promoted to website_url (#237)", () => {
+  // Regression: a bare domain embedded in achievement/body prose (e.g. "sold
+  // return2india.com to Satyam Infoway") was being picked up by the full-doc
+  // fallback scan and promoted to website_url. The standalone check in
+  // extractOtherUrls now rejects domains that appear mid-sentence.
+
+  it("does not promote a domain mid-sentence to website_url", () => {
+    const contactLine = mkLine(
+      "Jane Doe | jane@example.com | (312) 555-0123",
+      0,
+    );
+    // Body line that contains a domain mid-sentence
+    const bodyLine = mkLine(
+      "Exit · Founded and sold return2india.com to Satyam Infoway (NASDAQ: SIFY). 200K monthly visits.",
+      100,
+    );
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const allLines: PdfLine[] = [contactLine, bodyLine];
+
+    const result = extractContact(profile, allLines);
+
+    expect(result.website_url).toBeUndefined();
+  });
+
+  it("does not promote a domain with surrounding words to website_url", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
+    const bodyLine = mkLine("Launched mysite.com for 10K users in 2023", 100);
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const allLines: PdfLine[] = [contactLine, bodyLine];
+
+    const result = extractContact(profile, allLines);
+
+    expect(result.website_url).toBeUndefined();
+  });
+
+  it("still promotes a standalone domain on its own line to website_url", () => {
+    const contactLine = mkLine(
+      "Jane Doe | jane@example.com | janedoe.com",
+      0,
+    );
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+
+    const result = extractContact(profile, [contactLine]);
+
+    expect(result.website_url).toBe("https://janedoe.com");
+  });
+
+  it("still promotes an https:// URL even when mid-sentence text surrounds it", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
+    // An explicit https:// URL is always a link regardless of surrounding text
+    const bodyLine = mkLine(
+      "Sold https://return2india.com to Satyam Infoway",
+      100,
+    );
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const allLines: PdfLine[] = [contactLine, bodyLine];
+
+    const result = extractContact(profile, allLines);
+
+    expect(result.website_url).toBe("https://return2india.com");
+  });
+});

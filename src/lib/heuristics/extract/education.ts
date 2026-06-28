@@ -17,6 +17,7 @@ import {
   normalizeDate,
   stripBullet,
 } from "../line-primitives.ts";
+import { isDateOnlyLine, isEntryHeaderShape } from "../entry-blocks.ts";
 import { avgScore } from "./shared.ts";
 
 // ── Education ───────────────────────────────────────────────────────────────
@@ -132,19 +133,6 @@ function educationDateFields(
   };
 }
 
-/** A line that is essentially just a date / date-range (a bare year or
- *  month-year), so it must not be mistaken for the institution inside an
- *  education chunk. */
-function isDateOnlyLine(text: string): boolean {
-  const stripped = text
-    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?/gi, "")
-    .replace(/\b\d{4}\b/g, "")
-    .replace(/\b(?:present|current|expected|graduation|graduated|anticipated)\b/gi, "")
-    .replace(/[\s,–\-—|/().:]+/g, "")
-    .trim();
-  return stripped.length === 0;
-}
-
 /** Whether `line` reads as a *wrapped continuation* of the preceding coursework
  *  bullet (e.g. the `Business` half of `● Global Dimensions of` + `Business`)
  *  rather than a standalone field that merely follows the bullet. The recovery
@@ -223,6 +211,43 @@ function isInlineDatedProgram(line: string): boolean {
     .replace(/[\s,–\-—|/().:]+/g, "")
     .trim();
   return remainder.length >= 3;
+}
+
+/** Whether `text` reads as an INSTITUTION line for a degree-less program entry —
+ *  an explicit institution-hint line ("MIT Sloan School of Management") OR a
+ *  hint-less proper-noun line that is the school's own name ("MIT Professional
+ *  Education"). It must be entry-header-shaped (proper-noun lead, not prose, not a
+ *  bare date, not a GPA/Minor note) and must NOT itself be a degree line — a
+ *  following degree opens a NEW entry, it is not the program's institution. Used
+ *  only to confirm a program-title lead is followed by its own school, so the
+ *  pair forms one entry that splits cleanly off the next (#238). */
+function isInstitutionLine(text: string): boolean {
+  if (DEGREE_RE.test(text)) return false;
+  if (INSTITUTION_HINTS.test(text)) return true;
+  return isEntryHeaderShape(text);
+}
+
+/** Whether the lines at [`i`, `i+1`] form a DEGREE-LESS PROGRAM ENTRY — a
+ *  program/certificate title carrying its own inline graduation year
+ *  ("Applied Data Science Program: … 2023"), immediately followed by its own
+ *  institution line ("MIT Professional Education"). This is the #238 shape: an
+ *  education entry recognized by entry-boundary SHAPE (a header-like program line
+ *  + an institution line) rather than a degree keyword. The lead reuses the
+ *  well-tested {@link isInlineDatedProgram} (a real program name with an inline
+ *  year, not an honors/GPA/grad-date annotation); the partner reuses
+ *  {@link isInstitutionLine}. Recognizing this pair lets the chunker bind the
+ *  program's year to the program's own entry and stops it bleeding onto a
+ *  neighbouring degree that has no date of its own (C2). */
+function isProgramLeadAt(
+  lines: { text: string }[],
+  i: number,
+): boolean {
+  const lead = lines[i]?.text;
+  const partner = lines[i + 1]?.text;
+  if (lead === undefined || partner === undefined) return false;
+  if (DEGREE_RE.test(lead) || INSTITUTION_HINTS.test(lead)) return false;
+  if (!isInlineDatedProgram(lead)) return false;
+  return isInstitutionLine(partner);
 }
 
 /** Trim a parsed field string down to the subject, cutting any trailing date,
@@ -349,28 +374,43 @@ function educationFromChunk(chunk: string[]): {
   // joined chunk, whose " | " separators would confuse the field tail).
   const degreeLine = chunk.find((l) => DEGREE_RE.test(l));
   const degreeMatch = DEGREE_RE.exec(joined);
-  const { degree, field } = degreeLine
+  let { degree, field } = degreeLine
     ? parseDegreeAndField(degreeLine)
-    : { degree: "", field: undefined };
+    : { degree: "", field: undefined as string | undefined };
 
-  // Institution: an explicit institution-hint line first; else the first line
-  // that is neither the degree-bearing line nor a bare date — this recovers
-  // acronym schools ("MIT", "UC Berkeley") that carry no "University"/"College"
-  // word; else strip the degree off its own line (degree + school on one line).
+  // Degree-less PROGRAM ENTRY (#238): a program/certificate title carrying its
+  // own inline year, followed by its institution line — recognized by SHAPE, not
+  // a degree keyword. The program title is the subject (`field`); the institution
+  // is the following line; there is no credential, so `degree` stays empty. Done
+  // before the generic institution scan so the program title is NOT mistaken for
+  // the institution (the first non-degree, non-date line). Scoped to a chunk with
+  // no degree line so a normal degree entry is untouched.
   let institution = "";
-  const instLine = chunk.find((l) => INSTITUTION_HINTS.test(l));
-  if (instLine) {
-    institution = instLine.trim();
+  if (!degreeLine && chunk.length >= 2 && isProgramLeadAt(
+    chunk.map((text) => ({ text })),
+    0,
+  )) {
+    field = cleanField(chunk[0]) ?? field;
+    institution = chunk[1].trim();
   } else {
-    const cand = chunk.find((l) => !DEGREE_RE.test(l) && !isDateOnlyLine(l));
-    if (cand) {
-      institution = cand.trim();
-    } else if (degreeMatch) {
-      institution = joined
-        .replace(degreeMatch[0], "")
-        .replace(/\s*\|\s*/g, " ")
-        .replace(/[,|]+$/, "")
-        .trim();
+    // Institution: an explicit institution-hint line first; else the first line
+    // that is neither the degree-bearing line nor a bare date — this recovers
+    // acronym schools ("MIT", "UC Berkeley") that carry no "University"/"College"
+    // word; else strip the degree off its own line (degree + school on one line).
+    const instLine = chunk.find((l) => INSTITUTION_HINTS.test(l));
+    if (instLine) {
+      institution = instLine.trim();
+    } else {
+      const cand = chunk.find((l) => !DEGREE_RE.test(l) && !isDateOnlyLine(l));
+      if (cand) {
+        institution = cand.trim();
+      } else if (degreeMatch) {
+        institution = joined
+          .replace(degreeMatch[0], "")
+          .replace(/\s*\|\s*/g, " ")
+          .replace(/[,|]+$/, "")
+          .trim();
+      }
     }
   }
 
@@ -474,16 +514,29 @@ export function extractEducation(
   let current: { text: string; idx: number }[] = [];
   let hasDegree = false;
   let hasInstitution = false;
+  // True once the current chunk holds a complete DEGREE-LESS PROGRAM ENTRY
+  // (a program-title lead + its institution line, #238). It becomes the
+  // boundary signal a degree-keyword-less entry otherwise lacks: a following
+  // degree / institution-hint / new program-lead then opens a fresh chunk,
+  // instead of merging in and dragging the program's inline year onto the next
+  // (dateless) school. Set only AFTER the program's own institution line is
+  // consumed (`programLeadInstIdx`), so that institution line is not itself
+  // mistaken for the start of a new entry.
+  let hasProgramLead = false;
+  let programLeadInstIdx = -1;
   const flush = () => {
     if (current.length > 0) chunks.push(current);
     current = [];
     hasDegree = false;
     hasInstitution = false;
+    hasProgramLead = false;
+    programLeadInstIdx = -1;
   };
   for (let li = 0; li < lines.length; li++) {
     const text = lines[li].text;
     const isDeg = DEGREE_RE.test(text);
     const isInst = INSTITUTION_HINTS.test(text);
+    const isProgramLead = isProgramLeadAt(lines, li);
     // A bare line (no degree/institution-hint, not a date) that arrives once the
     // current chunk already holds BOTH a degree and an institution, AND is
     // immediately followed by a degree, begins a new entry whose school is
@@ -508,11 +561,26 @@ export function extractEducation(
         // bare "Fall 2013 – Spring 2014" date range — which `isDateOnlyLine`
         // already excluded above) so an honors/awards line never splits.
         isInlineDatedProgram(text));
-    if ((isDeg && hasDegree) || (isInst && hasInstitution) || startsHintlessEntry)
+    // Once the current chunk is a complete degree-less program entry (#238), a
+    // new entry lead — a degree, an institution-hint, or another program lead —
+    // closes it. The program's own institution line (`programLeadInstIdx`) is
+    // excluded because `hasProgramLead` is not yet set when it arrives.
+    const startsAfterProgramLead =
+      hasProgramLead && (isDeg || isInst || isProgramLead);
+    if (
+      (isDeg && hasDegree) ||
+      (isInst && hasInstitution) ||
+      startsHintlessEntry ||
+      startsAfterProgramLead
+    )
       flush();
     current.push(lines[li]);
     if (isDeg) hasDegree = true;
     if (isInst) hasInstitution = true;
+    // A program lead claims the NEXT line as its institution; mark the chunk a
+    // complete program entry only once that institution line has been consumed.
+    if (isProgramLead) programLeadInstIdx = li + 1;
+    if (li === programLeadInstIdx) hasProgramLead = true;
   }
   flush();
 
