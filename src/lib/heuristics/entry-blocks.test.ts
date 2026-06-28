@@ -632,3 +632,74 @@ describe("parseEntryBlocks — two-column banded header + placeholder dates (mus
     expect(blocks[1].bulletCount).toBe(1);
   });
 });
+
+describe("parseEntryBlocks — role-first glyph-less experience (#215)", () => {
+  // The shape that orphaned bullets in #215: a role-first Google-Docs export
+  // (Role title → Dates → Company–Location → bullets) whose bullets carry NO
+  // leading glyph (plain paragraphs indented past the header margin). With no
+  // marker, `bulletMarkerX` is Infinity and the marker-geometry body signal is
+  // disabled, so the body never formed and every bullet leaked to "Other".
+  // The fix derives the body indent from geometry instead (glyphlessBodyMarginX).
+  // Header/date/company sit at the header margin (x=50); bullets indent to x=68.
+  const section = xySection([
+    { text: "Software Engineer", x: 50, y: 100 }, // role title (role-first: above date)
+    { text: "Jan 2022 - Dec 2023", x: 50, y: 114 }, // date anchor at header margin
+    { text: "Northwind Robotics, Springfield, IL", x: 50, y: 128 }, // company below date
+    { text: "Scaled the ingestion pipeline to 4x throughput.", x: 68, y: 142 }, // glyph-less bullet
+    { text: "Reduced p99 latency by 40% with a read cache.", x: 68, y: 156 }, // glyph-less bullet
+    { text: "Product Manager", x: 50, y: 188 }, // next role
+    { text: "Jun 2020 - Dec 2021", x: 50, y: 202 }, // next date anchor
+    { text: "Initiated the roadmap planning program.", x: 68, y: 216 }, // next role's bullet
+  ]);
+  const blocks = parseEntryBlocks(section, {
+    anchor: "date_range",
+    collectBody: true,
+    headerLookback: 2,
+  });
+
+  it("splits both role-first roles at their date anchors", () => {
+    expect(blocks).toHaveLength(2);
+  });
+
+  it("keeps the role title and company in the header (not orphaned)", () => {
+    expect(blocks[0].headerLines).toContain("Software Engineer");
+    expect(blocks[0].headerLines.some((h) => h.includes("Northwind Robotics"))).toBe(
+      true,
+    );
+    expect(blocks[0].headerLines.some((h) => /\d{4}/.test(h))).toBe(false); // dates stripped
+  });
+
+  it("attributes the glyph-less bullets to their role as distinct body units", () => {
+    expect(blocks[0].bulletCount).toBe(2);
+    expect(blocks[0].body).toContain("ingestion pipeline");
+    expect(blocks[0].body).toContain("p99 latency");
+    // The next role's header/bullet must not leak into this role's body.
+    expect(blocks[0].body).not.toContain("Product Manager");
+    expect(blocks[0].body).not.toContain("roadmap");
+    expect(blocks[1].bulletCount).toBe(1);
+  });
+
+  it("does not let a blank spacer line between glyph-less bullets truncate the body", () => {
+    // Regression: pdfjs / DOCX-to-PDF pipelines emit zero-width or space-only
+    // items between bullets; `mergeItemText` trims them to "". A blank line at
+    // the header margin must NOT end the body run (it satisfies neither bullet
+    // nor glyph-less-body, so the indent-drop break would otherwise fire and
+    // drop every bullet after it).
+    const spaced = xySection([
+      { text: "Software Engineer", x: 50, y: 100 },
+      { text: "Jan 2022 - Dec 2023", x: 50, y: 114 },
+      { text: "Northwind Robotics, Springfield, IL", x: 50, y: 128 },
+      { text: "Scaled the ingestion pipeline to 4x throughput.", x: 68, y: 142 },
+      { text: "", x: 50, y: 150 }, // blank spacer at header margin between bullets
+      { text: "Reduced p99 latency by 40% with a read cache.", x: 68, y: 156 },
+    ]);
+    const [b] = parseEntryBlocks(spaced, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(b.bulletCount).toBe(2);
+    expect(b.body).toContain("ingestion pipeline");
+    expect(b.body).toContain("p99 latency");
+  });
+});
