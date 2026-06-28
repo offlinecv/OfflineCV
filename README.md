@@ -37,6 +37,28 @@ npm run typecheck  # tsc --noEmit across the project
 The `npm` scripts above are the supported entry point — everything you
 need to develop, test, and build runs through them on any machine.
 
+## Debugging the parser
+
+```bash
+npm run fidelity path/to/resume.pdf        # one résumé
+npm run fidelity path/to/dir               # every *.pdf under a directory
+npm run fidelity path/to/resume.pdf --strict   # exit 1 if a duplication leak is found
+```
+
+`fidelity` runs the full pipeline — `runCascade` → scoring → the **same bullet
+grouping the reconstructed-résumé UI uses** — and reports what the UI would
+actually render: per-section counts, the bullet pool, the **"Other bullets"**
+group (bullets matched to no entry), and any content that renders **twice**
+(a bullet that also appears under a section header — the kind of
+reconstruction-layer duplication a parser-struct dump misses). It also flags
+title-only entries (empty description) that can't attract their bullets.
+
+It reads a path you give it and only prints to the terminal — it writes
+nothing and hardcodes no path, so running it against your own (private)
+résumés is safe. Use it to reproduce and characterize a parse bug before
+filing an issue; pair the finding with a synthetic, PII-free fixture under
+`tests/fixtures/pdfs/` (see that directory's README) for a regression test.
+
 ## Telemetry
 
 resumelint ships with no analytics by default. `package.json` declares

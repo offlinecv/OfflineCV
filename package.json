@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bake-fixtures": "UPDATE_FIXTURES=1 vitest run src/lib/heuristics/corpus.test.ts",
+    "fidelity": "vite-node scripts/fidelity.ts --",
     "eval:rewrite": "vite --open=/eval-rewrite.html",
     "eval:jd-spike": "vite --open=/jd-spike.html",
     "typecheck": "tsc -b --noEmit",
