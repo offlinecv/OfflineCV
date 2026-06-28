@@ -10,7 +10,7 @@
  * small hand-curated alias map to a canonical display form (e.g. "JS" →
  * "JavaScript", "reactjs" → "React"), and offers cheap prefix/substring
  * suggestions over the union of (a) that canonical vocabulary and (b) the
- * skills already parsed off the current resume. @s-annam can swap `CANONICAL`
+ * skills already parsed off the current resume. The maintainer can swap `CANONICAL`
  * + `ALIASES` for the real taxonomy port without touching the call sites — the
  * exported function surface is the contract.
  *

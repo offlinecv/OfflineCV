@@ -64,7 +64,7 @@ export function isStandaloneUrl(url: string, sourceText: string): boolean {
  * modern resumes often flip the "Company first, then Title" convention
  * and put Title on the top (H2) with Company below (H3). Without this
  * heuristic the default fallback misattributes a `**Sr. Engineering
- * Manager (L7)**` header as the company and `**Alphabet / Google Fiber**`
+ * Manager (L7)**` header as the company and `**Globex / CloudWave**`
  * as the title.
  */
 const TITLE_KEYWORDS_RE =

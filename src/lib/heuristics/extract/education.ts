@@ -183,6 +183,21 @@ function isInlineDatedProgram(line: string): boolean {
   // school's own grad-date line never splits off as a phantom entry.
   if (/^(grad(?:\.|uat\w*)?|expected|anticipated|class of|completed)\b/i.test(t))
     return false;
+  // A line that LEADS with a date — a bare year, a "2001 - 2005" range, or a
+  // "May 2011" month-year — is the attendance/graduation DATE of the entry above
+  // it, not a program name. A genuine inline-dated program leads with its program
+  // text and carries the year inline/trailing ("MIT Applied Data Science (2023)").
+  // The trailing-location strip below only peels a ",/| City, Region" tail, so it
+  // can't rescue a "2001 - 2005  City, Country" attendance line — worse when a
+  // stray location glyph glues the city to the date ("2001 - 2005 eSpringfield,
+  // Freedonia"), where the surviving city token would pass the remainder test and
+  // split off a phantom degree-less entry. Guard on the date-lead shape directly.
+  if (
+    /^(?:(?:19|20)\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(?:19|20)\d{2}|\d{1,2}\/\d{4})/i.test(
+      t,
+    )
+  )
+    return false;
   // An honors / awards / activity annotation that happens to carry a year
   // ("Dean's List 2021", "Honors Thesis: … (2024)", "Teaching Assistant for …
   // (2022 - 2023)", "Study Abroad, Florence 2021") is a sub-field of the current
@@ -498,10 +513,35 @@ export function extractEducation(
 
   // Keep the source-line `idx` on each entry line so a built chunk's start
   // position is known — that anchor is what coursework is attributed against.
-  const lines = ls
+  const rawEntryLines = ls
     .map((l, idx) => ({ text: l.text, bullet: isBulletLine(l), idx }))
     .filter((l) => !l.bullet && !consumed.has(l.idx) && l.text.trim().length > 0)
     .map((l) => ({ text: l.text, idx: l.idx }));
+  // Re-join a degree subject that wrapped across two visual lines. A degree line
+  // ending in a dangling connective ("… Computer Science &", "… Electrical and")
+  // continues on the next line — PDFs wrap a long field this way. Merge the single
+  // following continuation back so the field is not truncated at the wrap point
+  // and the orphan tail ("Engineering") is not mistaken for an institution. Only a
+  // degree line with a dangling connective absorbs, and only a continuation that is
+  // not itself a new entry lead (degree / institution-hint / bare date).
+  const lines: { text: string; idx: number }[] = [];
+  for (let i = 0; i < rawEntryLines.length; i++) {
+    const cur = rawEntryLines[i];
+    const next = rawEntryLines[i + 1];
+    if (
+      next &&
+      DEGREE_RE.test(cur.text) &&
+      /(?:&|\band)\s*$/i.test(cur.text.trim()) &&
+      !DEGREE_RE.test(next.text) &&
+      !INSTITUTION_HINTS.test(next.text) &&
+      !isDateOnlyLine(next.text)
+    ) {
+      lines.push({ text: `${cur.text.trim()} ${next.text.trim()}`, idx: cur.idx });
+      i++; // continuation consumed
+    } else {
+      lines.push(cur);
+    }
+  }
   if (lines.length === 0) return { value: [], confidence: 0 };
 
   // Group into one chunk per qualification. A new chunk begins when the current

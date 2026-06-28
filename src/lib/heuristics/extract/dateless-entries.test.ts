@@ -128,29 +128,29 @@ describe("dateless trailing experience role (#219)", () => {
     // #239's exact shape: a trailing role whose ONE-LINE header carries the org
     // inline (`Title · Org, Location`) but no date range, after a dated role
     // whose header puts everything on one line. Pre-fix the dateless header and
-    // its bullets were absorbed into the AOL/Netscape role's description (6 of 7
+    // its bullets were absorbed into the prior role's description (6 of 7
     // roles parsed); it must now open its own entry with empty dates.
     const { value } = extractExperience(
       mkSection("experience", [
         [
-          "Sr. Software Engineer · America Online / Netscape, MV, CA            07/2004 - 11/2006",
+          "Sr. Software Engineer · Initech / WebPortal, Rivertown, CA          07/2004 - 11/2006",
           0,
           100,
         ],
-        ["• Architected the foundational accessibility layer for Boxely UI", 10, 90],
+        ["• Architected the foundational accessibility layer for an in-house UI framework", 10, 90],
         [
-          "Early Career: IC & Consultant · Microsoft, Soylent, Siemens ICN, HCL R&D, E-Z Data",
+          "Early Career: IC & Consultant · Soylent, Nimbus, Orion Systems, Vertex R&D, Acme Data",
           0,
           70,
         ],
-        ["• Pioneered Indian-language input on Windows through Soylent", 10, 60],
+        ["• Pioneered an input-method engine for a desktop platform", 10, 60],
         ["• Developed an innovative point-and-click tool", 10, 50],
       ]),
     );
     expect(value).toHaveLength(2);
     expect(value[0]).toMatchObject({
       title: "Sr. Software Engineer",
-      company: "America Online / Netscape",
+      company: "Initech / WebPortal",
       start_date: "07/2004",
       end_date: "11/2006",
     });
@@ -159,7 +159,7 @@ describe("dateless trailing experience role (#219)", () => {
     expect(value[1].start_date).toBeUndefined();
     expect(value[1].end_date).toBeUndefined();
     expect(value[1].description).toBe(
-      "Pioneered Indian-language input on Windows through Soylent\nDeveloped an innovative point-and-click tool",
+      "Pioneered an input-method engine for a desktop platform\nDeveloped an innovative point-and-click tool",
     );
   });
 
@@ -173,22 +173,22 @@ describe("dateless trailing experience role (#219)", () => {
     const { value } = extractExperience(
       mkSection("experience", [
         [
-          "Sr. Software Engineer · America Online / Netscape, MV, CA   07/2004 - 11/2006",
+          "Sr. Software Engineer · Initech / WebPortal, Rivertown, CA 07/2004 - 11/2006",
           0,
           100,
         ],
         [
-          "• Architected the foundational accessibility layer for AOL's Boxely UI used by",
+          "• Architected the foundational accessibility layer for the portal's UI framework used by",
           10,
           90,
         ],
         ["millions of users across the product suite.", 14, 83],
         [
-          "Early Career: IC & Consultant · Microsoft, Soylent, Siemens ICN, HCL R&D",
+          "Early Career: IC & Consultant · Soylent, Nimbus, Orion Systems, Vertex R&D",
           0,
           70,
         ],
-        ["• Pioneered Indian-language input on Windows through Soylent", 10, 60],
+        ["• Pioneered an input-method engine for a desktop platform", 10, 60],
         ["• Developed an innovative point-and-click tool", 10, 50],
       ]),
     );
@@ -198,7 +198,7 @@ describe("dateless trailing experience role (#219)", () => {
     expect(value[0].description).toContain("millions of users across the product suite.");
     expect(value[1].title).toBe("Early Career: IC & Consultant");
     expect(value[1].description).toBe(
-      "Pioneered Indian-language input on Windows through Soylent\nDeveloped an innovative point-and-click tool",
+      "Pioneered an input-method engine for a desktop platform\nDeveloped an innovative point-and-click tool",
     );
   });
 
@@ -258,6 +258,48 @@ describe("education year mis-attribution across entries (#219)", () => {
     expect(cornell?.year).toBe("2014");
   });
 
+  it("does not split a year-range + location date line into a phantom entry", () => {
+    // The entry's date line is a bare "YYYY - YYYY  City, Country", and a stray
+    // location-pin glyph rendered as "e" glues onto the city ("eSpringfield").
+    // The trailing-location strip only peels ", Freedonia", leaving
+    // "2001 - 2005 eSpringfield", whose surviving city token used to pass the
+    // inline-dated-program remainder test and split the date line off as a
+    // phantom degree-less entry (institution = the date string, real entry
+    // stripped of its dates). A line LEADING with a date is the attendance date
+    // of the entry above, never a program name.
+    const { value } = extractEducation(
+      mkSection("education", [
+        "Bachelor of Science in Data Science",
+        "Example Institute of Technology, Springfield",
+        "2001 - 2005 eSpringfield, Freedonia",
+      ]),
+    );
+    // One entry — no phantom whose institution is the date line.
+    expect(value).toHaveLength(1);
+    expect(value.some((e) => /^\d{4}\b/.test(e.institution.trim()))).toBe(false);
+    expect(value[0].institution).toContain("Example Institute of Technology");
+    expect(value[0].degree).toContain("Bachelor of Science");
+    expect(value[0].end_date).toBe("2005");
+  });
+
+  it("re-joins a degree subject that wrapped after a dangling '&'", () => {
+    // A degree whose subject wraps across two visual lines ("… Data &" + "Society")
+    // must keep the full subject — the dangling "&" signals the field continues on
+    // the next line; that continuation is not a separate institution. Without the
+    // re-join the field truncates at "Data &" and the orphan "Society" is dropped.
+    const { value } = extractEducation(
+      mkSection("education", [
+        "Bachelor of Science in Data &",
+        "Society",
+        "Example Institute of Technology, Springfield",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toContain("Bachelor of Science");
+    expect(value[0].field).toBe("Data & Society");
+    expect(value[0].institution).toContain("Example Institute of Technology");
+  });
+
   it.each([
     ["Dean's List 2020, 2021, 2022"],
     ["Awards and Honors 2023"],
@@ -290,23 +332,23 @@ describe("degree-less program entry dropped + year orphaned (#238)", () => {
   // a program TITLE with an inline year (no degree keyword) followed by its own
   // institution line, sitting ABOVE a normal degree entry that has NO date of its
   // own. Pre-fix, the program entry was dropped (it lacked the degree keyword the
-  // chunker anchored on) and its 2023 leaked onto the Example University degree below it.
+  // chunker anchored on) and its 2023 leaked onto the degree entry below it.
   it("keeps the degree-less program entry AND binds its year to itself, not the next entry", () => {
     const { value } = extractEducation(
       mkSection("education", [
         "Applied Data Science Program: Leveraging AI for Effective Decision-Making        2023",
         "MIT Professional Education",
-        "Bachelor of Technology in Computer Science & Engineering",
-        "Example University College Of Engineering, Hyderabad",
+        "Bachelor of Science in Software Engineering",
+        "Example Institute of Technology, Springfield",
       ]),
     );
     // Both entries survive — the program entry is no longer dropped.
     expect(value).toHaveLength(2);
 
     const mit = value.find((e) => e.institution.includes("MIT"));
-    const jntu = value.find((e) => e.institution.includes("Example University"));
+    const eit = value.find((e) => e.institution.includes("Example Institute"));
     expect(mit).toBeDefined();
-    expect(jntu).toBeDefined();
+    expect(eit).toBeDefined();
 
     // The program entry: institution is its OWN school, the program title lands in
     // `field` (no credential keyword), and the inline 2023 stays with it.
@@ -315,27 +357,27 @@ describe("degree-less program entry dropped + year orphaned (#238)", () => {
     expect(mit?.field).toContain("Applied Data Science Program");
     expect(mit?.year).toBe("2023");
 
-    // The Example University degree keeps its own degree/field and — crucially (C2) — does NOT
+    // The degree entry keeps its own degree/field and — crucially (C2) — does NOT
     // inherit the program's 2023; it genuinely has no date.
-    expect(jntu?.degree).toBe("Bachelor of Technology");
-    expect(jntu?.field).toBe("Computer Science & Engineering");
-    expect(jntu?.year).toBeUndefined();
+    expect(eit?.degree).toBe("Bachelor of Science");
+    expect(eit?.field).toBe("Software Engineering");
+    expect(eit?.year).toBeUndefined();
   });
 
   it("works regardless of order — program entry BELOW the dated-less degree entry", () => {
     const { value } = extractEducation(
       mkSection("education", [
-        "Bachelor of Technology in Computer Science & Engineering",
-        "Example University College Of Engineering, Hyderabad",
+        "Bachelor of Science in Software Engineering",
+        "Example Institute of Technology, Springfield",
         "Applied Data Science Program: Leveraging AI for Effective Decision-Making        2023",
         "MIT Professional Education",
       ]),
     );
     expect(value).toHaveLength(2);
     const mit = value.find((e) => e.institution.includes("MIT"));
-    const jntu = value.find((e) => e.institution.includes("Example University"));
+    const eit = value.find((e) => e.institution.includes("Example Institute"));
     expect(mit?.year).toBe("2023");
     expect(mit?.field).toContain("Applied Data Science Program");
-    expect(jntu?.year).toBeUndefined();
+    expect(eit?.year).toBeUndefined();
   });
 });

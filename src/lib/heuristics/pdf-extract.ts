@@ -51,6 +51,49 @@ export function assembleTextFromLines(
   return parts.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** Whether `s` contains a Private-Use-Area codepoint (U+E000–U+F8FF) — where
+ *  icon fonts (FontAwesome / Flaticon) place pictographic glyphs that carry no
+ *  real ToUnicode mapping. */
+function hasPuaChar(s: string): boolean {
+  for (const c of s) {
+    const p = c.codePointAt(0) ?? 0;
+    if (p >= 0xe000 && p <= 0xf8ff) return true;
+  }
+  return false;
+}
+
+/**
+ * Drop decorative icon-font glyphs from the positioned-item stream.
+ *
+ * Icon fonts (FontAwesome / Flaticon-style) embed pictographic marks with no
+ * usable ToUnicode: some glyphs decode to Private-Use-Area codepoints, the rest
+ * are mis-mapped to stray ASCII letters ("e", "b", "u"). Left in, these single
+ * glyphs concatenate onto neighbouring real words during line grouping — a
+ * location-pin glyph rendered "e" sitting between a date and a city turns
+ * "2001 - 2005 " + "e" + "Springfield" into "2001 - 2005 eSpringfield".
+ *
+ * A font is classified decorative when EVERY item it emits is a single visible
+ * glyph (trimmed length ≤ 1) AND at least one of its items is a PUA codepoint.
+ * Real text fonts emit multi-character words and never carry PUA, so they never
+ * qualify and their items pass through untouched. When no font qualifies the
+ * original array is returned by reference (no allocation).
+ */
+export function dropDecorativeGlyphs(items: PdfTextItem[]): PdfTextItem[] {
+  const stats = new Map<string, { maxLen: number; pua: number }>();
+  for (const it of items) {
+    const st = stats.get(it.fontName) ?? { maxLen: 0, pua: 0 };
+    st.maxLen = Math.max(st.maxLen, it.str.trim().length);
+    if (hasPuaChar(it.str)) st.pua++;
+    stats.set(it.fontName, st);
+  }
+  const decorative = new Set<string>();
+  for (const [font, st] of stats) {
+    if (st.maxLen <= 1 && st.pua > 0) decorative.add(font);
+  }
+  if (decorative.size === 0) return items;
+  return items.filter((it) => !decorative.has(it.fontName));
+}
+
 /**
  * pdfjs-dist TextItem shape. We intentionally avoid a direct type import so
  * the package is consumable even when consumers haven't installed pdfjs-dist
@@ -199,12 +242,24 @@ export async function extractFromPdfBytes(
     });
   }
 
+  // Drop decorative icon-font glyphs before any line grouping so they can't glue
+  // onto adjacent real words (a location-pin "e" → "eSpringfield"). Recompute each
+  // page's char count from the kept items so the extraction ratio doesn't credit
+  // the dropped glyphs. A PDF with no icon font is unchanged (same array).
+  const keptItems = dropDecorativeGlyphs(items);
+  if (keptItems.length !== items.length) {
+    const perPage = new Map<number, number>();
+    for (const it of keptItems)
+      perPage.set(it.page, (perPage.get(it.page) ?? 0) + it.str.length);
+    for (const p of pages) p.charCount = perPage.get(p.page) ?? 0;
+  }
+
   // Detect two-column layout once, here, then thread the per-page split-x map
   // through every downstream line-grouping path (rawText below, plus markdown
   // emission and the Tier-1 parser via the cascade) so the columns are read in
   // column order instead of interleaved by a global (y, x) sort.
-  const columnBoundaries = detectColumnBoundaries(items, pages);
-  const text = assembleTextFromLines(items, columnBoundaries);
+  const columnBoundaries = detectColumnBoundaries(keptItems, pages);
+  const text = assembleTextFromLines(keptItems, columnBoundaries);
   const rawCharCount = pages.reduce((s, p) => s + p.charCount, 0);
 
   // Distinguish "no text in the source" (true scan) from "text exists but
@@ -216,12 +271,12 @@ export async function extractFromPdfBytes(
   // link annotation, which is rare enough that the better message is the
   // right tradeoff.
   const extractionFailureReason =
-    items.length === 0 && pages.length > 0 && linkAnnotations.length > 0
+    keptItems.length === 0 && pages.length > 0 && linkAnnotations.length > 0
       ? ("fonts_unmappable" as const)
       : undefined;
 
   return {
-    items,
+    items: keptItems,
     pages,
     text,
     rawCharCount,

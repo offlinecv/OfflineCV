@@ -2,7 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, expect, it } from "vitest";
-import { assembleTextFromLines } from "./pdf-extract.ts";
+import { assembleTextFromLines, dropDecorativeGlyphs } from "./pdf-extract.ts";
 import type { PdfTextItem } from "./types.ts";
 
 function item(
@@ -101,5 +101,49 @@ describe("assembleTextFromLines", () => {
       item("Senior Engineer", 160, 100, 1, 100),  // ~15pt gap
     ];
     expect(assembleTextFromLines(items)).toBe("Jane Smith Senior Engineer");
+  });
+});
+
+describe("dropDecorativeGlyphs", () => {
+  function fitem(str: string, fontName: string, x = 72, y = 100): PdfTextItem {
+    return { page: 1, str, x, y, width: 8, height: 12, fontSize: 11, fontName, hasEOL: false };
+  }
+
+  it("drops an icon font whose glyphs are single-char with PUA codepoints", () => {
+    // The icon font emits only single glyphs: some PUA (), some mis-mapped to
+    // stray ASCII letters ("e", "b"). Real text fonts emit multi-char words.
+    const items = [
+      fitem("2001 - 2005", "TextFont", 61, 100),
+      fitem("e", "IconFont", 110, 100), // location-pin glyph mis-mapped to "e"
+      fitem("Springfield, Freedonia", "TextFont", 120, 100),
+      fitem("", "IconFont", 360, 120), // proper PUA icon glyph
+      fitem("b", "IconFont", 360, 140), // another mis-mapped icon
+    ];
+    const kept = dropDecorativeGlyphs(items);
+    expect(kept.map((i) => i.str)).toEqual([
+      "2001 - 2005",
+      "Springfield, Freedonia",
+    ]);
+    // The mis-mapped "e" no longer glues onto the city during line grouping.
+    expect(assembleTextFromLines(kept)).not.toContain("eSpringfield");
+  });
+
+  it("returns the same array (no allocation) when no font is decorative", () => {
+    const items = [
+      fitem("Bachelor of Science", "TextFont"),
+      fitem("Example University", "TextFont"),
+    ];
+    expect(dropDecorativeGlyphs(items)).toBe(items);
+  });
+
+  it("keeps a single-char text item when its font also emits real words", () => {
+    // A normal font occasionally emits a lone glyph (a stray "&"); it must NOT be
+    // dropped — the font emits multi-char words and carries no PUA, so it is not
+    // decorative.
+    const items = [
+      fitem("Engineering", "Body"),
+      fitem("&", "Body"),
+    ];
+    expect(dropDecorativeGlyphs(items)).toBe(items);
   });
 });
