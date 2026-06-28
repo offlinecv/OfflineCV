@@ -107,6 +107,33 @@ describe("buildAtsResumeModel", () => {
     expect(skills.headerLine).toContain("TypeScript");
   });
 
+  it("surfaces the major (field) joined to the degree, and a degree-less program's title alone", () => {
+    const result = makeResult({
+      education: [
+        {
+          degree: "Bachelor of Science",
+          field: "Mechanical Engineering",
+          institution: "Riverside College Of Engineering",
+        },
+        {
+          // Degree-less program (#238): title lives in `field`, no credential.
+          degree: "",
+          field: "Applied Robotics Program",
+          institution: "ACME Professional Education",
+          year: "2024",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const edu = model.sections.find((s) => s.heading === "Education")!;
+    expect(edu.entries[0].headerLine).toBe(
+      "Bachelor of Science, Mechanical Engineering — Riverside College Of Engineering",
+    );
+    expect(edu.entries[1].headerLine).toBe(
+      "Applied Robotics Program — ACME Professional Education",
+    );
+  });
+
   it("falls back to description split when no graded bullets are attributed", () => {
     const result = makeResult();
     const model = buildAtsResumeModel(result, makeScore([]));

@@ -31,9 +31,11 @@ import { suggestSkills } from "../../lib/edit/skill-canonical.ts";
 import { Button, EditableField } from "@design-system";
 import { AddPill, RemoveButton } from "./ReconstructedAdd.tsx";
 
-/** Map an EducationEntry field name to the flat AddedEntry field it edits. */
+/** Map an EducationEntry field name to the flat AddedEntry field it edits.
+ *  `field` (major) is intentionally omitted — added entries carry no major slot,
+ *  so the major affordance renders on PARSED entries only and never routes here. */
 const EDUCATION_FIELD_MAP: Record<
-  keyof EducationFieldOverrides,
+  Exclude<keyof EducationFieldOverrides, "field">,
   AddedEntryField
 > = {
   degree: "title",
@@ -70,6 +72,9 @@ export function resolveEduValue(
 /** The resolved education fields an entry renders, after applying overrides. */
 export interface EducationDisplay {
   degree: string | undefined;
+  /** Subject of study ("Computer Science & Engineering"); for a degree-less
+   *  program (#238) this holds the program title and degree is absent. */
+  field: string | undefined;
   institution: string | undefined;
   startDate: string | undefined;
   endDate: string | undefined;
@@ -93,6 +98,7 @@ export function resolveEducationDisplay(
   const endDate = resolveEduValue(edu.end_date, overrides?.end_date);
   return {
     degree: resolveEduValue(edu.degree, overrides?.degree),
+    field: resolveEduValue(edu.field, overrides?.field),
     institution: resolveEduValue(edu.institution, overrides?.institution),
     startDate,
     endDate,
@@ -106,15 +112,26 @@ function EducationEntry({
   overrides,
   onFieldChange,
   onRemove,
+  isAdded = false,
 }: {
   edu: ResumeEducation;
   overrides: EducationFieldOverrides | undefined;
   onFieldChange: (field: keyof EducationFieldOverrides, value: string) => void;
   /** Remove this entry (only set for user-ADDED entries). */
   onRemove?: () => void;
+  /** User-added entries carry no `field` (major) slot, so the major affordance
+   *  renders on PARSED entries only. */
+  isAdded?: boolean;
 }) {
-  const { degree, institution, startDate, endDate, dates, coursework } =
+  const { degree, field, institution, startDate, endDate, dates, coursework } =
     resolveEducationDisplay(edu, overrides);
+
+  // A degree-less program (#238, e.g. "ACME Applied Robotics") keeps its
+  // title in `field`; promote it into the primary (semibold) slot so the entry
+  // doesn't read as an empty "degree not detected". Otherwise the major follows
+  // the degree after a comma ("Bachelor of Science, Mechanical Engineering & …").
+  const majorInPrimary = !degree && Boolean(field);
+  const showMajor = !isAdded && Boolean(field);
 
   // The editable start/end fields ARE the date display, so the compact `dates`
   // string would duplicate them. Show it ONLY in the legacy year-only fallback
@@ -126,13 +143,27 @@ function EducationEntry({
     <li className="flex flex-col gap-0.5 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-          <EditableField
-            value={degree}
-            placeholder="degree not detected"
-            label="Degree"
-            textWeight="semibold"
-            onCommit={(v) => onFieldChange("degree", v)}
-          />
+          {!majorInPrimary && (
+            <EditableField
+              value={degree}
+              placeholder="degree not detected"
+              label="Degree"
+              textWeight="semibold"
+              onCommit={(v) => onFieldChange("degree", v)}
+            />
+          )}
+          {showMajor && (
+            <>
+              {degree && <span className="text-content-muted">,</span>}
+              <EditableField
+                value={field}
+                placeholder="major"
+                label="Field of study"
+                textWeight={majorInPrimary ? "semibold" : undefined}
+                onCommit={(v) => onFieldChange("field", v)}
+              />
+            </>
+          )}
           <span className="text-content-muted">—</span>
           <EditableField
             value={institution}
@@ -216,10 +247,12 @@ export function EducationSection({
                 overrides={added ? undefined : educationOverrides[i]}
                 onFieldChange={(field, value) =>
                   added
-                    ? onEntryField(added.id, EDUCATION_FIELD_MAP[field], value)
+                    ? field !== "field" &&
+                      onEntryField(added.id, EDUCATION_FIELD_MAP[field], value)
                     : onEducationFieldChange(i, field, value)
                 }
                 onRemove={added ? () => onRemoveEntry(added.id) : undefined}
+                isAdded={Boolean(added)}
               />
             );
           })}

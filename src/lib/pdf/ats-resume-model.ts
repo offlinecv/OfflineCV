@@ -265,8 +265,12 @@ export function buildAtsResumeModel(
     if (edu.coursework && edu.coursework.length > 0) {
       bullets.push(`Coursework: ${edu.coursework.join(", ")}`);
     }
+    // Degree + major share the primary slot ("Bachelor of Science, Mechanical
+    // Engineering"); a degree-less program (#238) shows its title (in
+    // `field`) alone. Then " — institution".
+    const degreeField = [edu.degree, edu.field].filter(Boolean).join(", ");
     return {
-      headerLine: joinHeader([edu.degree, edu.institution], " — ") ||
+      headerLine: joinHeader([degreeField, edu.institution], " — ") ||
         "Education",
       subLine: buildEducationDates(edu) || undefined,
       bullets,

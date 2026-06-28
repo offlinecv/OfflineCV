@@ -298,6 +298,17 @@ function matchAnchorFallback(
     const first = w[0];
     if (!/[A-Z]/.test(first)) return null;
   }
+  // Guard 8: an organization / institution name, not a heading. A line that
+  // mixes an ALL-CAPS acronym token (an org initialism — "ACME", "QSU", "ZTU")
+  // with Title-case words reads as a proper-noun entity whose trailing category
+  // word is part of the NAME, not a section header — "ACME Professional
+  // Education", "QSU School of Law". A genuine qualified header is either wholly
+  // Title-case ("Relevant Experience") or wholly ALL CAPS ("PROFESSIONAL
+  // EXPERIENCE"); only the mixed acronym+Title-case shape is an entity, so an
+  // institution line ending in an anchor word ("Education") is no longer eaten
+  // as a header and dropped (its whole entry with it).
+  const allCaps = rawWords.every((w) => w === w.toUpperCase());
+  if (!allCaps && rawWords.some((w) => /^[A-Z]{2,}$/.test(w))) return null;
   const last = tokens[tokens.length - 1];
   // Guard 3 + 6: last token must be an anchor of a fallback-enabled section.
   for (const [name, anchors] of Object.entries(SECTION_ANCHORS) as Array<

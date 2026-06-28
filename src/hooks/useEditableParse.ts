@@ -56,11 +56,14 @@ export type BulletOverrides = Record<number, string>;
 
 // ── Education overrides ───────────────────────────────────────────────────────
 
-/** Editable education fields (degree, institution, dates). Mirrors the
- *  experience-header override shape. An empty string clears the field
- *  (rendered as "not detected"); undefined means "no override". */
+/** Editable education fields (degree, field/major, institution, dates). Mirrors
+ *  the experience-header override shape. An empty string clears the field
+ *  (rendered as "not detected"); undefined means "no override". `field` is the
+ *  subject of study ("Computer Science & Engineering") parsed off the degree
+ *  line — editable only on PARSED entries; user-added entries carry no major. */
 export interface EducationFieldOverrides {
   degree?: string;
+  field?: string;
   institution?: string;
   start_date?: string;
   end_date?: string;

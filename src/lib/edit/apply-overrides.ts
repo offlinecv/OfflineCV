@@ -374,6 +374,9 @@ export function applyOverrides(
     const edu = nextParsed.education[idx];
     if (!edu) continue;
     if (fields.degree !== undefined) edu.degree = fields.degree;
+    // `field` (major) is optional; a clear ("") drops it so render/PDF treat it
+    // as absent rather than emitting an empty subject after the degree comma.
+    if (fields.field !== undefined) edu.field = fields.field || undefined;
     if (fields.institution !== undefined) edu.institution = fields.institution;
     if (fields.start_date !== undefined) edu.start_date = fields.start_date;
     if (fields.end_date !== undefined) edu.end_date = fields.end_date;

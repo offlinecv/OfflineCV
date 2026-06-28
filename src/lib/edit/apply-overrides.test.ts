@@ -387,6 +387,32 @@ describe("applyOverrides — education", () => {
     expect(out.education[1].institution).toBe("");
   });
 
+  it("writes the major (field) override, and a clear drops it to undefined", () => {
+    const { parsed: set } = applyOverrides(
+      eduParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      { 0: { field: "Computer Science & Engineering" } },
+    );
+    expect(set.education[0].field).toBe("Computer Science & Engineering");
+
+    const { parsed: cleared } = applyOverrides(
+      eduParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      { 0: { field: "" } },
+    );
+    expect(cleared.education[0].field).toBeUndefined();
+  });
+
   it("ignores an education override for an out-of-range index", () => {
     const parsed = eduParsed();
     const { parsed: out } = applyOverrides(

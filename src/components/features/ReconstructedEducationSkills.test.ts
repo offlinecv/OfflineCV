@@ -62,6 +62,21 @@ describe("resolveEducationDisplay", () => {
     expect(d.institution).toBeUndefined();
   });
 
+  it("surfaces the major (field), passing it through and applying its override", () => {
+    const withMajor: ResumeEducation = {
+      ...base,
+      field: "Computer Science & Engineering",
+    };
+    expect(resolveEducationDisplay(withMajor, undefined).field).toBe(
+      "Computer Science & Engineering",
+    );
+    // Override replaces; an empty-string override clears the major.
+    expect(resolveEducationDisplay(withMajor, { field: "Data Science" }).field).toBe(
+      "Data Science",
+    );
+    expect(resolveEducationDisplay(withMajor, { field: "" }).field).toBeUndefined();
+  });
+
   it("collapses the dates string when both dates are cleared", () => {
     const noYear: ResumeEducation = { ...base, year: undefined };
     const d = resolveEducationDisplay(noYear, { start_date: "", end_date: "" });

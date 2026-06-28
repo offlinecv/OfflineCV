@@ -92,6 +92,19 @@ describe("matchSectionHeader — head-noun anchor fallback (#108 / #111)", () =>
     expect(matchSectionHeader("20% Experience")).toBeNull();
   });
 
+  it("rejects an institution name ending in an anchor word (acronym + Title-case)", () => {
+    // FP #8: "ACME Professional Education" is a SCHOOL name, not an education
+    // header. A mixed ALL-CAPS-acronym + Title-case line reads as an org entity
+    // whose trailing anchor word is part of the name; eating it as a header drops
+    // the whole entry. ALL-CAPS headers and plain Title-case headers still match.
+    expect(matchSectionHeader("ACME Professional Education")).toBeNull();
+    // Trailing anchor is "Academics" — would match without Guard 8.
+    expect(matchSectionHeader("QSU Graduate Academics")).toBeNull();
+    // Genuine headers are unaffected: wholly ALL CAPS, or wholly Title-case.
+    expect(matchSectionHeader("PROFESSIONAL EXPERIENCE")).toBe("experience");
+    expect(matchSectionHeader("Professional Experience")).toBe("experience");
+  });
+
   it("rejects a header-shaped line ending in terminal punctuation", () => {
     // FP #4: terminal sentence punctuation marks prose, not a heading.
     expect(matchSectionHeader("Gained Relevant Experience.")).toBeNull();
