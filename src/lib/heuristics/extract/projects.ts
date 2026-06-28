@@ -6,7 +6,11 @@ import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { URL_RE } from "../regex.ts";
-import { allMatches, finalizeEntries, isStandaloneUrl } from "./shared.ts";
+import {
+  allMatchesWithIndex,
+  finalizeEntries,
+  isStandaloneUrl,
+} from "./shared.ts";
 
 // ── Projects ────────────────────────────────────────────────────────────────
 
@@ -64,16 +68,42 @@ export function liftHeaderLabel(headerLines: string[]): {
   // link. Mirror contact.ts::extractOtherUrls — scan all hits, keep the first
   // standalone one. A URL with an explicit scheme or www. prefix is always
   // standalone (#237).
-  const url = allMatches(URL_RE, headerJoined).find((u) =>
-    isStandaloneUrl(u, headerJoined),
+  //
+  // Use allMatchesWithIndex so we pass the exact regex match position to
+  // isStandaloneUrl — avoids the substring-aliasing bug where indexOf("site.com")
+  // lands inside "mysite.com" instead of at the genuine standalone occurrence
+  // (#249, Class 1).
+  const liftedMatch = allMatchesWithIndex(URL_RE, headerJoined).find((m) =>
+    isStandaloneUrl(m.text, headerJoined, m.index),
   );
+  const url = liftedMatch?.text;
   const raw = headerLines[0] ?? "";
-  // Strip THAT specific lifted url's occurrence — not the first URL_RE match —
-  // so a single prose-domain header (nothing lifted) keeps the domain in its
-  // label (#237).
-  const label = (url ? raw.replace(url, "") : raw)
-    .replace(/[\s|•·\-–—]+$/g, "")
-    .trim();
+  // Strip ALL occurrences of the lifted URL from the first header line (#249,
+  // Class 2). Use the regex to locate each occurrence by position rather than
+  // string.replace(url, …), which only removes the first textual occurrence and
+  // may corrupt a different token that contains url as a substring
+  // (e.g. "mysite.com" when url = "site.com").
+  //
+  // Strategy: re-scan raw with URL_RE, collect positions of every hit whose
+  // trimmed text equals the lifted url, then splice them out right-to-left so
+  // earlier offsets remain valid.
+  let stripped = raw;
+  if (url) {
+    URL_RE.lastIndex = 0;
+    const positions: { start: number; end: number }[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = URL_RE.exec(raw)) !== null) {
+      if (m[0].trim() === url) {
+        positions.push({ start: m.index, end: m.index + m[0].length });
+      }
+    }
+    // Remove right-to-left so each splice doesn't shift earlier offsets.
+    for (let i = positions.length - 1; i >= 0; i--) {
+      const { start, end } = positions[i]!;
+      stripped = stripped.slice(0, start) + stripped.slice(end);
+    }
+  }
+  const label = stripped.replace(/[\s|•·\-–—]+$/g, "").trim();
   URL_RE.lastIndex = 0;
   return { label, ...(url ? { url } : {}) };
 }

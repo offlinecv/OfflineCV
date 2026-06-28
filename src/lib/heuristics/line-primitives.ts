@@ -67,7 +67,8 @@ function isPlaceholderDate(token: string): boolean {
   return /^(?:month(?:\s+year)?|year)$/i.test(token.trim());
 }
 
-/** Parse a date range (start/end) from a line. Tolerates M/YYYY, Mmm YYYY, YYYY. */
+/** Parse a date range (start/end) from a line. Tolerates M/YYYY, Mmm YYYY, YYYY,
+ *  and Season YYYY[, YYYY] (branch (c) of DATE_RANGE_RE). */
 export function parseDateRange(text: string): {
   start_date?: string;
   end_date?: string;
@@ -77,6 +78,10 @@ export function parseDateRange(text: string): {
   const m = DATE_RANGE_RE.exec(text);
   DATE_RANGE_RE.lastIndex = 0;
   if (m) {
+    // Branch (c): Season YYYY, YYYY — m[5] is start ("Summer 2013"), m[6] is end year.
+    if (m[5] !== undefined) {
+      return { start_date: normalizeDate(m[5]), end_date: normalizeDate(m[6]) };
+    }
     const start = normalizeDate(m[1] ?? m[3]);
     // An unfilled template range ("Month Year - ...") matched only to anchor and
     // strip the role header — it carries no real date, so report none. (A real

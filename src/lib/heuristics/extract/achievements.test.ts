@@ -74,3 +74,30 @@ describe("liftHeaderLabel — standalone URL IS lifted", () => {
     expect(label).not.toContain("github.com/me/repo");
   });
 });
+
+describe("liftHeaderLabel — substring/duplicate URL aliasing (#249)", () => {
+  it("lifts standalone site.com even when mysite.com precedes it in prose", () => {
+    // Class 1 aliasing: indexOf("site.com") lands inside "mysite.com" (position 2)
+    // rather than at the genuine standalone occurrence after the separator.
+    // With the index-passing fix, isStandaloneUrl receives the regex match index
+    // (position of the real standalone "site.com"), not a re-derived indexOf.
+    const header = "Built mysite.com for client | site.com";
+    const { label, url } = liftHeaderLabel([header]);
+    expect(url).toBe("site.com");
+    // The prose-embedded mysite.com stays in the label; only the standalone
+    // site.com is stripped.
+    expect(label).toContain("mysite.com");
+    expect(label).not.toContain("| site.com");
+  });
+
+  it("strips a duplicated link cleanly with no dangling separator or raw URL", () => {
+    // Class 2 aliasing: raw.replace(url, "") only removes the first occurrence.
+    // The second copy of github.com/a/b would be left in the label as a raw URL.
+    // With the slice-based strip, ALL regex-matched occurrences are removed.
+    const header = "Repo | github.com/a/b | github.com/a/b";
+    const { label, url } = liftHeaderLabel([header]);
+    expect(url).toBe("github.com/a/b");
+    // Label must not contain a raw URL or a dangling separator run.
+    expect(label).toBe("Repo");
+  });
+});

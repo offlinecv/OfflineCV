@@ -200,15 +200,21 @@ function isInlineDatedProgram(line: string): boolean {
     return false;
   // An honors / awards / activity annotation that happens to carry a year
   // ("Dean's List 2021", "Honors Thesis: … (2024)", "Teaching Assistant for …
-  // (2022 - 2023)", "Study Abroad, Florence 2021") is a sub-field of the current
-  // school, NOT a new program — it must not split off a phantom degree-less
-  // entry (#219). These read as annotations, not program names, so an exact
-  // keyword denylist is safe: a real second program ("MIT Applied Data Science
-  // (2023)", "Google Data Analytics Certificate 2022") carries none of them.
+  // (2022 - 2023)", "Study Abroad, Florence 2021", "Capstone Project: Sentiment
+  // Analysis (2023)") is a sub-field of the current school, NOT a new program —
+  // it must not split off a phantom degree-less entry (#219, #251). These read as
+  // annotations, not program names, so an exact keyword denylist is safe: a real
+  // second program ("MIT Applied Data Science (2023)", "Google Data Analytics
+  // Certificate 2022") carries none of them. NOTE: "project" is denied only in its
+  // annotation shape — a qualifier-led "Senior/Final/… Project" or a "Project: …"
+  // sub-line — NOT bare anywhere, so a genuine credential title that merely contains
+  // the word ("Project Management Certificate 2022", PMP) still splits into its own
+  // program entry (#251 adversarial review).
   if (
-    /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude)\b/i.test(
+    /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project)\b/i.test(
       t,
-    )
+    ) ||
+    /\bproject\s*:/i.test(t)
   )
     return false;
   // Drop a trailing "| City, Region" location segment before measuring the

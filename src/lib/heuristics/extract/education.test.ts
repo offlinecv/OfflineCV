@@ -117,6 +117,66 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
   });
 });
 
+describe("extractEducation — capstone/project sub-line stays annotation, not sibling entry (#251)", () => {
+  it("does NOT split a capstone project sub-line into a phantom education entry", () => {
+    // A line like "Capstone Project: Real-time Sentiment Analysis (2023)" sits
+    // under a degree and must remain an annotation, not become a second entry.
+    const { value } = extractEducation(
+      mkEduSection([
+        "University of Example",
+        "B.S. Computer Science   2020 - 2024",
+        "Capstone Project: Real-time Sentiment Analysis (2023)",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("University of Example");
+    expect(value[0].degree).toBe("B.S.");
+  });
+
+  it("does NOT split a 'Senior Project' sub-line into a phantom education entry", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Lakeside Institute of Technology",
+        "Bachelor of Science in Electrical Engineering   2019 - 2023",
+        "Senior Project: Autonomous Drone Navigation (2023)",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Lakeside Institute of Technology");
+  });
+
+  it("still recognizes a genuine program entry that carries no capstone/project keyword", () => {
+    // "Applied Data Science Program" carries no denylist word, so a genuine
+    // certificate/program entry on its own line must still be recognized.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Massachusetts Institute of Technology",
+        "B.S. Computer Science   2018 - 2022",
+        "Applied Data Science (2023)",
+      ]),
+    );
+    // The inline-dated program "Applied Data Science (2023)" should produce a
+    // second entry since it carries no denylist keyword and has a year.
+    expect(value).toHaveLength(2);
+    expect(value[0].institution).toBe("Massachusetts Institute of Technology");
+  });
+
+  it("still splits a credential title that merely contains the word 'project'", () => {
+    // "Project Management Certificate" is a genuine standalone credential, not an
+    // annotation — the denylist must not swallow it just because it contains
+    // "project" (bare-word breadth was a #251 adversarial-review blocking finding).
+    const { value } = extractEducation(
+      mkEduSection([
+        "Cornell University",
+        "B.S. Information Science   2017 - 2021",
+        "Project Management Certificate 2022",
+      ]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value[0].institution).toBe("Cornell University");
+  });
+});
+
 describe("extractEducation — degree/field split + location peel (#222)", () => {
   it("splits 'B.S. in Computer Science' into bare degree + field and peels City, ST", () => {
     // The issue's exact reproducer: degree+field+dates on the second line,

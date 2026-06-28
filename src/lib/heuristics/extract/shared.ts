@@ -24,6 +24,27 @@ export function allMatches(re: RegExp, text: string): string[] {
 }
 
 /**
+ * All regex hits with their match positions. Unlike `allMatches`, this does NOT
+ * deduplicate — every occurrence is returned in order, so callers can reason
+ * about which specific occurrence of a repeated token they are dealing with.
+ *
+ * Use this instead of `allMatches` when you need to pass the match index to
+ * `isStandaloneUrl` (avoids substring aliasing — see #249).
+ */
+export function allMatchesWithIndex(
+  re: RegExp,
+  text: string,
+): { text: string; index: number }[] {
+  re.lastIndex = 0;
+  const out: { text: string; index: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ text: m[0].trim(), index: m.index });
+  }
+  return out;
+}
+
+/**
  * True when `url` is positionally a link in `sourceText` — not embedded as a
  * bare domain mid-sentence in prose.
  *
@@ -39,11 +60,25 @@ export function allMatches(re: RegExp, text: string): string[] {
  *
  * @param url        - The URL string as matched (e.g. "return2india.com").
  * @param sourceText - The text to search within for positional context.
+ * @param knownIndex - The exact byte-offset of `url` within `sourceText` as
+ *                     returned by `RegExp.exec` (i.e. `match.index`). When
+ *                     provided, it is used directly instead of `indexOf`, which
+ *                     eliminates the substring-aliasing bug where
+ *                     `"site.com".indexOf("site.com")` would land inside
+ *                     `"mysite.com"` rather than at the genuine standalone
+ *                     occurrence (#249).
  */
-export function isStandaloneUrl(url: string, sourceText: string): boolean {
+export function isStandaloneUrl(
+  url: string,
+  sourceText: string,
+  knownIndex?: number,
+): boolean {
   // An explicit scheme or www. is always intentional — treat as standalone.
   if (/^https?:\/\//i.test(url) || /^www\./i.test(url)) return true;
-  const idx = sourceText.indexOf(url);
+  // Use the caller-supplied regex match index when available — avoids the
+  // substring-aliasing problem of indexOf (see #249). Fall back to indexOf
+  // only for backward-compat with callers that don't supply the index.
+  const idx = knownIndex ?? sourceText.indexOf(url);
   if (idx === -1) return true; // can't find it — assume standalone
   // Trim surrounding whitespace to look at the nearest non-space char on each
   // side. "sold return2india.com to" has a space immediately before/after, but

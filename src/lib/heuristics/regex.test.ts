@@ -280,3 +280,53 @@ describe("stripDateRange — bracket/paren residue (#236)", () => {
     );
   });
 });
+
+describe("parseDateRange — season-comma dates (#250)", () => {
+  // "Summer 2013, 2014" = branch (c): Season YYYY, YYYY.
+  it("recognises 'Summer 2013, 2014' as a date range", () => {
+    expect(DATE_RANGE_RE.test("Summer 2013, 2014")).toBe(true);
+    DATE_RANGE_RE.lastIndex = 0;
+  });
+
+  it("parses 'Summer 2013, 2014' — start is season+year, end is second year", () => {
+    const result = parseDateRange("Summer 2013, 2014");
+    expect(result.start_date).toBe("Summer 2013");
+    expect(result.end_date).toBe("2014");
+    expect(result.is_current).toBeUndefined();
+  });
+
+  it("parses a role line containing 'Summer 2013, 2014'", () => {
+    const result = parseDateRange("Volunteer Swim Coach Summer 2013, 2014");
+    expect(result.start_date).toBe("Summer 2013");
+    expect(result.end_date).toBe("2014");
+  });
+
+  it("recognises other season words (Spring, Fall, Winter, Autumn)", () => {
+    for (const season of ["Spring", "Fall", "Winter", "Autumn"]) {
+      const text = `${season} 2022, 2023`;
+      expect(DATE_RANGE_RE.test(text)).toBe(true);
+      DATE_RANGE_RE.lastIndex = 0;
+      const result = parseDateRange(text);
+      expect(result.start_date).toBe(`${season} 2022`);
+      expect(result.end_date).toBe("2023");
+    }
+  });
+
+  it("recognises 'Summer 2013 – 2014' via the classic dash separator (branch a)", () => {
+    // Season YYYY is now in DATE_ANCHOR, so branch (a) fires too.
+    const result = parseDateRange("Summer 2013 – 2014");
+    expect(result.start_date).toBe("Summer 2013");
+    expect(result.end_date).toBe("2014");
+  });
+
+  it("does NOT match a bare season word without a year", () => {
+    expect(DATE_RANGE_RE.test("Summer internship")).toBe(false);
+    DATE_RANGE_RE.lastIndex = 0;
+  });
+
+  it("strips a season-comma date from a role line", () => {
+    expect(stripDateRange("Volunteer Swim Coach Summer 2013, 2014")).toBe(
+      "Volunteer Swim Coach",
+    );
+  });
+});

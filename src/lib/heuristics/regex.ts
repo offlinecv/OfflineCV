@@ -122,6 +122,9 @@ export const COUNTRY_GAZETTEER: ReadonlySet<string> = _buildGazetteer();
 const MONTH =
   "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*";
 
+/** Academic / seasonal period words. Case-insensitive at use site. */
+const SEASON = "(?:Spring|Summer|Fall|Autumn|Winter)";
+
 /** "Jan 2020", "January 2020", "Jan. 2020", "Jan '20". 2-digit apostrophe
  *  form (`'20`) covers older resumes that use AP-style short dates. */
 export const MONTH_YEAR_RE = new RegExp(
@@ -164,11 +167,13 @@ const YEAR_FORMS = `\\d{4}|'\\d{2}|20XX|XXXX|####|Year`;
 // detection keep requiring a real month name.
 const MONTH_OR_PLACEHOLDER = `(?:${MONTH}|Month)`;
 
-// Shared fragment for one date anchor (Mmm YYYY | 'YY, mm/yyyy, YYYY).
+// Shared fragment for one date anchor (Mmm YYYY | 'YY, mm/yyyy, YYYY, Season YYYY).
 // Reused by DATE_RANGE_RE's start and end groups. Apostrophe-year keeps
 // DOCX parsing compatible with older resumes that use "Dec '00". The bare-year
 // tail admits `20XX` (unambiguous) but NOT bare `XXXX`/`####` (too weak alone).
-const DATE_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})|\\d{1,2}[\\/\\-]\\d{4}|20XX|\\d{4}`;
+// Season YYYY (e.g. "Summer 2013") is admitted so a season date participates in
+// branch (a) when an explicit separator (–/-/to) is present.
+const DATE_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})|${SEASON}\\s+\\d{4}|\\d{1,2}[\\/\\-]\\d{4}|20XX|\\d{4}`;
 
 // Strict month-year anchor (no bare-year / numeric-slash forms) for the
 // separator-less branch — bare years adjacent are too weak a signal.
@@ -178,18 +183,23 @@ const MONTH_YEAR_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})`;
  * Date range between two anchors. Captures both halves. Tolerant of spacing,
  * dashes (—, –, -, to, through).
  *
- * Two branches:
+ * Three branches:
  *   (a) classic — any anchor, explicit separator (–/—/-/to/through), any anchor or Present.
  *       Groups: m[1] = start, m[2] = end.
  *   (b) separator-less — month-year WS month-year (or Present), no dash.
  *       Covers LaTeX/Awesome-CV where pdfjs drops the dash glyph.
  *       Groups: m[3] = start, m[4] = end.
+ *   (c) season-comma — "Season YYYY, YYYY" (e.g. "Summer 2013, 2014").
+ *       Comma is the range separator; season + first year is start, second year is end.
+ *       Groups: m[5] = start ("Summer 2013"), m[6] = end ("2014").
  */
 export const DATE_RANGE_RE = new RegExp(
   // (a) classic: any anchor, explicit separator, any anchor|Present
   `(?:(${DATE_ANCHOR})\\s*(?:–|—|-|to|through)\\s*(${DATE_ANCHOR}|Present|Current|Now|Ongoing))` +
     // (b) separator-less: month-year WS month-year (or Present)
-    `|(?:(${MONTH_YEAR_ANCHOR})\\s+(${MONTH_YEAR_ANCHOR}|Present|Current|Now|Ongoing))`,
+    `|(?:(${MONTH_YEAR_ANCHOR})\\s+(${MONTH_YEAR_ANCHOR}|Present|Current|Now|Ongoing))` +
+    // (c) season-comma: "Season YYYY, YYYY" (e.g. "Summer 2013, 2014")
+    `|(?:(${SEASON}\\s+\\d{4}),\\s*(\\d{4}))`,
   "i",
 );
 
