@@ -309,6 +309,60 @@ function isWrappedContinuation(line: PdfLine, markerX: number): boolean {
   return Number.isFinite(markerX) && line.x > markerX + 2;
 }
 
+/** x tolerance (pt) for treating two lines as sitting at the same left margin. */
+const MARGIN_TOL = 2;
+
+/**
+ * The entry-header left margin of a `date_range` section — the x at which the
+ * dated anchor lines (and the company / title lines that band with them) sit.
+ * Taken as the minimum x over the anchor lines: in a single-column résumé every
+ * role header starts at the same left edge, so the dates mark it reliably.
+ * `Infinity` when the section carries no usable x (markdown / DOCX, every x = 0
+ * collapses to 0 → min 0, which is fine as a margin; only truly empty input
+ * returns Infinity). Used only to derive {@link glyphlessBodyMarginX}.
+ */
+function entryHeaderMarginX(lines: PdfLine[], anchors: number[]): number {
+  let x = Infinity;
+  for (const a of anchors) x = Math.min(x, lines[a].x);
+  return x;
+}
+
+/**
+ * The body-text indent margin for a GLYPH-LESS section — one whose bullets carry
+ * no leading marker (so `bulletMarkerX` is Infinity and the marker-based
+ * {@link isWrappedContinuation} body signal is disabled), as produced by some
+ * Google-Docs / PDF exporters that render bullets as plain indented paragraphs.
+ *
+ * It is the leftmost x among lines that sit strictly RIGHT of the entry-header
+ * margin (`headerMarginX`) — i.e. the indented body run. A role's bullets are
+ * indented past its company / title; this recovers that indent as the body
+ * signal the missing glyph would otherwise provide. Returns `Infinity` (a no-op
+ * predicate) when no line is indented past the header margin — markdown/DOCX
+ * (all x equal) and single-indent layouts then fall back to the
+ * `isProseLine` / y-gap signals unchanged, so the glyph and no-geometry paths
+ * are untouched.
+ */
+function glyphlessBodyMarginX(lines: PdfLine[], headerMarginX: number): number {
+  if (!Number.isFinite(headerMarginX)) return Infinity;
+  let x = Infinity;
+  for (const l of lines) {
+    if (l.x > headerMarginX + MARGIN_TOL) x = Math.min(x, l.x);
+  }
+  return x;
+}
+
+/**
+ * True when a non-bullet line is an indented body line in a glyph-less section —
+ * it sits at or right of the derived body-indent margin. The marker-less analogue
+ * of {@link isWrappedContinuation}, used to find where a role's body begins (and
+ * ends, when the indent drops back to the header margin) when the bullets carry
+ * no glyph. A no-op when `bodyMarginX` is Infinity (glyph sections, which use the
+ * marker margin instead; and no-geometry markdown).
+ */
+function isGlyphlessBody(line: PdfLine, bodyMarginX: number): boolean {
+  return Number.isFinite(bodyMarginX) && line.x >= bodyMarginX - MARGIN_TOL;
+}
+
 /** True when `text` carries a complete, parseable date RANGE — i.e. it would
  *  anchor a `date_range` entry on its own. `DATE_RANGE_RE` and `PRESENT_RE` are
  *  non-global and non-sticky, so `.test` leaves `lastIndex` at 0 per spec; the
@@ -619,8 +673,16 @@ export function parseEntryBlocks(
 
   const lookback = cfg.headerLookback ?? 0;
   const baseline = sectionLineHeight(lines);
+  // Glyph-less body-indent margin (#215): in a section whose bullets carry no
+  // leading marker, the role's bullets are recognizable only by their indent
+  // past the role header. Derive that margin once so each block can window its
+  // body on it. Infinity (a no-op) for glyph sections and no-geometry markdown.
+  const bodyMarginX =
+    cfg.anchor === "date_range" && !Number.isFinite(bulletMarkerX(lines))
+      ? glyphlessBodyMarginX(lines, entryHeaderMarginX(lines, anchors))
+      : Infinity;
   return anchors.map((_, a) =>
-    buildEntryBlock(lines, anchors, a, cfg, lookback, baseline),
+    buildEntryBlock(lines, anchors, a, cfg, lookback, baseline, bodyMarginX),
   );
 }
 
@@ -717,6 +779,7 @@ function nextHeaderStart(
   lookback: number,
   markerX: number,
   baseline: number,
+  bodyMarginX: number,
 ): number {
   if (lookback <= 0 || nextAnchorIdx >= lines.length) return nextAnchorIdx;
   let start = nextAnchorIdx;
@@ -736,7 +799,15 @@ function nextHeaderStart(
       start = i;
       continue;
     }
-    if (isBulletLine(l) || isProseLine(l.text) || isWrappedContinuation(l, markerX)) {
+    if (
+      isBulletLine(l) ||
+      isProseLine(l.text) ||
+      isWrappedContinuation(l, markerX) ||
+      // Glyph-less body line (#215): an indented marker-less bullet of THIS
+      // entry, sitting just above the next role's header. Stop — it belongs to
+      // this entry's body, not the next entry's header run.
+      isGlyphlessBody(l, bodyMarginX)
+    ) {
       break;
     }
     // y-gap backstop: once a header line is claimed, a paragraph-sized gap
@@ -769,6 +840,7 @@ function buildEntryBlock(
   cfg: EntryBlockConfig,
   lookback: number,
   baseline: number,
+  bodyMarginX: number,
 ): EntryBlock {
   const anchorIdx = anchors[a];
   const nextAnchorIdx = a + 1 < anchors.length ? anchors[a + 1] : lines.length;
@@ -799,7 +871,12 @@ function buildEntryBlock(
     let lastKeptY: number | null = null;
     for (let i = anchorIdx - 1; i >= prevAnchorIdx && claimed < lookback; i--) {
       const l = lines[i];
-      if (isBulletLine(l) || isProseLine(l.text)) break;
+      // A bullet, a prose paragraph, or — for a glyph-less section — an indented
+      // marker-less body line (#215) marks the previous entry's body. Stop: it is
+      // never this entry's company/title.
+      if (isBulletLine(l) || isProseLine(l.text) || isGlyphlessBody(l, bodyMarginX)) {
+        break;
+      }
       const text = l.text.trim();
       if (!text || isWrappedContinuation(l, markerX) || isLocationLine(text)) {
         continue;
@@ -825,6 +902,7 @@ function buildEntryBlock(
     lookback,
     markerX,
     baseline,
+    bodyMarginX,
   );
 
   const anchorLine = lines[anchorIdx];
@@ -835,15 +913,19 @@ function buildEntryBlock(
   // consecutive non-bullet lines until the body begins or the next anchor. The
   // body begins at the first bullet OR the first prose paragraph — a glyph-less
   // description line (Word/Office templates write the description as prose, not
-  // a bulleted list), which must not be folded into company/title. A
-  // wrapped-bullet tail is skipped (not a header) but does not end the run.
+  // a bulleted list), which must not be folded into company/title — OR, in a
+  // glyph-less section, the first INDENTED marker-less bullet (#215: a role-first
+  // Google-Docs export where the company/title sit at the header margin and the
+  // bullets are plain paragraphs indented past it). A wrapped-bullet tail is
+  // skipped (not a header) but does not end the run.
   const belowHeaderLines: PdfLine[] = [];
   let bodyStart = windowEnd;
   for (let i = anchorIdx + 1; i < windowEnd; i++) {
     if (
       isBulletLine(lines[i]) ||
       isProseLine(lines[i].text) ||
-      startsBodyByGap(lines, i, baseline)
+      startsBodyByGap(lines, i, baseline) ||
+      isGlyphlessBody(lines[i], bodyMarginX)
     ) {
       bodyStart = i;
       break;
@@ -871,14 +953,50 @@ function buildEntryBlock(
   const bodyUnits: string[] = [];
   if (cfg.collectBody) {
     for (let i = bodyStart; i < windowEnd; i++) {
+      // Glyph-less body run ends when the indent drops back to the header margin
+      // (#215): a non-bullet, non-indented line inside the window is a stray
+      // header that leaked in (e.g. the next section's "Leadership and Work
+      // Experience" title), not a bullet — stop collecting so it never becomes a
+      // body unit. Guarded to the glyph-less mode (`bodyMarginX` finite) so glyph
+      // sections and no-geometry markdown are unaffected.
+      // A blank/whitespace-only spacer line (pdfjs emits zero-width or space-only
+      // items, and `mergeItemText` trims them to "") must NOT end the body run —
+      // it carries no x signal worth trusting and would otherwise truncate every
+      // bullet after it. Skip it before the indent-drop break below.
+      if (!lines[i].text.trim()) continue;
+      if (
+        Number.isFinite(bodyMarginX) &&
+        !isBulletLine(lines[i]) &&
+        !isGlyphlessBody(lines[i], bodyMarginX)
+      ) {
+        break;
+      }
       const text = stripBullet(lines[i].text).trim();
       if (!text) continue;
-      const foldsAsProseWrap =
+      let foldsAsProseWrap =
         baseline > 0 &&
         i > bodyStart &&
         !isBulletLine(lines[i]) &&
         lines[i].y - lines[i - 1].y > 0 &&
         lines[i].y - lines[i - 1].y <= BODY_GAP_FACTOR * baseline;
+      // Glyph-less new-bullet guard (#215): when the body is a run of marker-less
+      // indented bullets at one indent and one line-height (no glyph, no
+      // paragraph gap between bullets), the sub-paragraph y-gap above misreads
+      // every following bullet as a wrap of the first and folds the whole role
+      // into ONE bullet. A real wrap is a sentence cut mid-thought — a
+      // lowercase-led tail, or a predecessor ending on a dangling connective; a
+      // NEW bullet leads with a capital (an action verb: "Designed", "Reviewed").
+      // So in glyph-less mode, only fold a capital-led continuation when its
+      // predecessor dangles. Scoped to `bodyMarginX` finite, so the prose-template
+      // wrap fold and glyph paths are unchanged.
+      if (
+        foldsAsProseWrap &&
+        Number.isFinite(bodyMarginX) &&
+        /^[A-Z0-9]/.test(text) &&
+        !DANGLING_BULLET_TAIL_RE.test(stripBullet(lines[i - 1].text).trim())
+      ) {
+        foldsAsProseWrap = false;
+      }
       if (
         bodyUnits.length > 0 &&
         (isWrappedContinuation(lines[i], markerX) || foldsAsProseWrap)

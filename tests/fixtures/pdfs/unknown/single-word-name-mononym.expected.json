@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.86,
+    "confidence": 0.89,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -35,21 +35,21 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 30,
-    "preLayoutOverall": 30,
+    "overall": 100,
+    "preLayoutOverall": 100,
     "specificity": {
-      "score": 0,
+      "score": 40,
       "max": 40,
-      "gradable": false,
-      "metricBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "metricBullets": 4,
+      "totalBullets": 5
     },
     "structure": {
-      "score": 0,
+      "score": 30,
       "max": 30,
-      "gradable": false,
-      "goodBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "goodBullets": 5,
+      "totalBullets": 5
     },
     "completeness": {
       "score": 30,
@@ -62,7 +62,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 0,
+    "bulletCount": 5,
     "algoVersion": "1.4"
   }
 }

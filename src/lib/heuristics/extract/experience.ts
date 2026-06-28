@@ -125,6 +125,16 @@ function looksLikeLocationTail(after: string): boolean {
  *   - Stripping must leave a non-empty remainder so the entire string is never
  *     consumed into location.
  */
+/** Trim a trailing field separator (",", "–", "—", "-", "|", "·") left dangling
+ *  after a location suffix was peeled off — e.g. "Northwind Robotics – Springfield,
+ *  IL" → "Northwind Robotics –" → "Northwind Robotics" (#215, role-first layout
+ *  where the company and its city sit on one " – "-joined line below the date). A
+ *  legit company never ends in a bare separator, so this only ever cleans the
+ *  artifact, never real company text. */
+function stripDanglingSeparator(s: string): string {
+  return s.replace(/[\s,–—\-|·]+$/, "").trim();
+}
+
 function stripLocationSuffix(s: string): {
   text: string;
   location: string | undefined;
@@ -139,10 +149,7 @@ function stripLocationSuffix(s: string): {
   const mUS = s.match(COMMA_LOCATION_RE) ?? s.match(SPACE_LOCATION_RE);
   if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
     // Guard: stripping must leave a non-empty remainder.
-    const before = s
-      .slice(0, mUS.index)
-      .replace(/,\s*$/, "")
-      .trim();
+    const before = stripDanglingSeparator(s.slice(0, mUS.index));
     if (before) return { text: before, location: `${mUS[1]}, ${mUS[2]}` };
   }
 
@@ -155,10 +162,7 @@ function stripLocationSuffix(s: string): {
       /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
     const mIntl = s.match(INTL_SUFFIX_RE);
     if (mIntl && COUNTRY_GAZETTEER.has(mIntl[2].toLowerCase())) {
-      const before = s
-        .slice(0, mIntl.index)
-        .replace(/,\s*$/, "")
-        .trim();
+      const before = stripDanglingSeparator(s.slice(0, mIntl.index));
       if (before) return { text: before, location: `${mIntl[1]}, ${mIntl[2]}` };
     }
   }
