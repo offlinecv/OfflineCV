@@ -133,7 +133,13 @@ function tryParseJsonObject(raw: string): ParseOutcome {
  * Return the first balanced `{...}` substring of `s`, or null if there is no
  * balanced object. String literals (and their `\"` escapes) are skipped so a
  * brace inside a JSON string value never miscounts the depth.
+ *
+ * The branch count is irreducible for a correct scanner (string-literal skip +
+ * escape handling + depth tracking are the whole point); splitting it would add
+ * indirection without lowering risk. Branch coverage is asserted via
+ * parse-resume.test.ts ("balanced object" cases).
  */
+// fallow-ignore-next-line complexity
 function extractFirstBalancedObject(s: string): string | null {
   const start = s.indexOf("{");
   if (start === -1) return null;

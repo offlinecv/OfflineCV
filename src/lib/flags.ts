@@ -48,7 +48,11 @@ const envOn = (v: unknown): boolean => v === "true" || v === "1";
  *   The foundation (#241) owns this shared gating rule; UI wiring is out of
  *   scope here.
  */
-export const FLAG_DEFAULTS = {
+// Module-private: consumed only by `useFlag` and the `FlagName` type below.
+// Not exported — no other module reads the defaults map directly, and
+// `keyof typeof` works on a private const, so keeping it unexported avoids a
+// dead public export (fallow dead-code gate).
+const FLAG_DEFAULTS = {
   "jd-fit-banner": envOn(import.meta.env.VITE_ENABLE_JD_FIT),
   "llm": envOn(import.meta.env.VITE_ENABLE_LLM),
 } as const;

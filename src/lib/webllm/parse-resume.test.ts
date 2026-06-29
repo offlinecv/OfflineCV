@@ -134,6 +134,32 @@ describe("parseResumeWithLlm — JSON parse paths", () => {
     expect(result).toEqual(VALID_PARSED);
   });
 
+  it("does not miscount depth on a brace inside a string value", async () => {
+    // The closing `}` of the location string must not be read as the object's
+    // closing brace — exercises the in-string skip branch of the scanner.
+    const parsed = { ...VALID_PARSED, location: "Springfield {HQ}" };
+    const out = "Result: " + JSON.stringify(parsed) + " done.";
+    const engine = makeEngine(out);
+    const result = await parseResumeWithLlm({ rawText: "some resume" }, engine);
+    expect(result.location).toBe("Springfield {HQ}");
+  });
+
+  it("handles escaped quotes inside a string value when extracting", async () => {
+    // An escaped quote must not prematurely end the string scan.
+    const parsed = { ...VALID_PARSED, summary: 'Said \\"hi\\" — built {things}' };
+    const out = "Here you go: " + JSON.stringify(parsed) + " ok";
+    const engine = makeEngine(out);
+    const result = await parseResumeWithLlm({ rawText: "some resume" }, engine);
+    expect(result.summary).toContain("things");
+  });
+
+  it("returns safe empty shape for an unbalanced opening brace in prose", async () => {
+    // First `{` never closes → scanner returns null → safe empty shape.
+    const engine = makeEngine("prefix { unterminated object with no close");
+    const result = await parseResumeWithLlm({ rawText: "some resume" }, engine);
+    expect(result).toEqual(EMPTY_SHAPE);
+  });
+
   it("returns safe empty shape when output is a JSON array", async () => {
     const engine = makeEngine(JSON.stringify(["Python", "Go"]));
     const result = await parseResumeWithLlm({ rawText: "some resume" }, engine);

@@ -200,6 +200,10 @@ async function main(): Promise<void> {
   const refs = getDomRefs();
   populateModelPicker(refs);
 
+  // Dev-only eval harness click handler — not in the production bundle and
+  // not unit-tested (drives a real WebGPU run). CRAP is high only because
+  // coverage is 0; the branching is a flat try/guard/finally.
+  // fallow-ignore-next-line complexity
   refs.runBtn.addEventListener("click", async () => {
     refs.runBtn.disabled = true;
     refs.modelSelect.disabled = true;
