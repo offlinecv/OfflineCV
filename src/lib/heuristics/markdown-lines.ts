@@ -40,7 +40,7 @@
 
 import type { PdfLine, PdfSection } from "./sections.ts";
 import {
-  matchSectionHeader,
+  matchSectionHeaderDetailed,
   SECTION_KEYWORDS,
   SPLIT_LETTER_NORMALIZABLE_SECTIONS,
   SPLIT_LETTER_RE,
@@ -332,9 +332,17 @@ export function sectionizeMarkdownLines(lines: PdfLine[]): PdfSection[] {
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
 
   for (const line of lines) {
+    const detailed = matchSectionHeaderDetailed(line.text);
+    const current = sections[sections.length - 1].name;
+    // #258 Layer B (markdown/DOCX path): an L2 anchor-fallback line that
+    // re-matches the CURRENTLY open section is an institution entry under its
+    // own header ("ACME PROFESSIONAL EDUCATION" under EDUCATION), not a new
+    // boundary — retain it as content. Mirrors the PDF `classifyLine` gate;
+    // same current-section safety (a DIFFERENT-section L2 header still opens).
     const header =
-      matchSectionHeader(line.text) ??
-      matchLeadingSectionKeyword(line.text);
+      detailed && detailed.viaAnchorFallback && detailed.section === current
+        ? null
+        : (detailed?.section ?? matchLeadingSectionKeyword(line.text));
     if (header) {
       sections.push({ name: header, lines: [] });
       continue;

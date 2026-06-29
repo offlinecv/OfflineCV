@@ -18,6 +18,7 @@ import type { PdfTextItem } from "./types.ts";
 import { mergeWrappedContinuations } from "./entry-blocks.ts";
 import {
   matchSectionHeader,
+  matchSectionHeaderDetailed,
   matchSectionAnchorToken,
   EMAIL_RE,
   PHONE_RE,
@@ -865,6 +866,7 @@ export function splitIntoSections(
       seenContactInProfile,
       prevLineOpenedBoundary,
       columnSplitX,
+      sections[sections.length - 1].name,
     );
     if (action.kind === "open") {
       sections.push({ name: action.name, lines: [] });
@@ -901,9 +903,35 @@ function classifyLine(
   seenContactInProfile: boolean,
   prevLineOpenedBoundary: boolean,
   columnSplitX: number | undefined,
+  currentSection: SectionName | "profile",
 ): LineAction {
-  const header = matchSectionHeader(line.text);
-  if (header) return { kind: "open", name: header };
+  const header = matchSectionHeaderDetailed(line.text);
+  if (header) {
+    // #258 Layer B: a head-noun-anchor (L2) line that re-matches the CURRENTLY
+    // open section is an institution entry sitting under its own real header
+    // ("ACME PROFESSIONAL EDUCATION" directly under an open EDUCATION header) —
+    // shape-indistinguishable from a real header line-locally (the wholly-ALL-
+    // CAPS case Guard 8/9 in regex.ts cannot reach). Suppress the boundary so
+    // the line is RETAINED as content, not consumed as a label.
+    // SAFETY — gated on the CURRENT section, not "ever opened": only an L2 repeat
+    // of the section that is still open folds in, which is unambiguously correct
+    // (the line stays in the section it already belongs to). An L2 header for a
+    // DIFFERENT section than the current one still opens — so a genuine "Relevant
+    // Experience" appearing after an EDUCATION block opens its own experience
+    // section rather than bleeding into education. L1 exact-alias / split-letter
+    // headers (incl. multi-page "EXPERIENCE" continuation headers) are not
+    // viaAnchorFallback and always open.
+    if (!(header.viaAnchorFallback && header.section === currentSection)) {
+      return { kind: "open", name: header.section };
+    }
+    // Suppressed: retain the institution line as content. Return append
+    // directly rather than falling through to the visual-header path, which
+    // would re-promote a clean multi-word ALL-CAPS institution name ("ACME
+    // PROFESSIONAL EDUCATION") to an `other` boundary via isTextPatternHeader —
+    // re-dropping the very line this guard exists to keep. A section is already
+    // open here, so this line is never the contact line that ends a name block.
+    return { kind: "append", marksContactEnd: false };
+  }
 
   const contactShaped = hasContactShape(line.text);
 
