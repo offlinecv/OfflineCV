@@ -159,6 +159,17 @@ async function runForModel(refs: DomRefs, modelId: string): Promise<void> {
           `exp=${(fixtureScore.experienceAccuracy * 100).toFixed(0)}% ` +
           `edu=${(fixtureScore.educationAccuracy * 100).toFixed(0)}%`,
       );
+
+      // Name the scalar field(s) that missed so a sub-100% score is actionable
+      // live, not just in the downloaded report. Fixtures are synthetic, so
+      // printing expected/actual here cannot leak real PII.
+      for (const s of fixtureScore.scalarBreakdown) {
+        if (s.status === "match" || s.status === "skipped") continue;
+        appendLog(
+          refs,
+          `  ↳ ${s.field} ${s.status}: expected="${s.expected ?? ""}" actual="${s.actual ?? ""}"`,
+        );
+      }
     }
 
     const report = aggregateScores(modelId, startedAt, scores);

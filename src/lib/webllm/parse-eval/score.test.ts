@@ -116,6 +116,51 @@ describe("scoreFixture — scalar accuracy", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Scalar field breakdown (per-field verdicts)
+// ---------------------------------------------------------------------------
+
+describe("scoreFixture — scalarBreakdown", () => {
+  it("marks every applicable field 'match' on a perfect parse", () => {
+    const score = scoreFixture("f1", "label", FULL, FULL);
+    expect(score.scalarBreakdown).toHaveLength(5);
+    expect(score.scalarBreakdown.every((s) => s.status === "match")).toBe(true);
+  });
+
+  it("names the missing field when actual is null", () => {
+    const actual: LlmParsedResume = { ...FULL, location: null };
+    const score = scoreFixture("f1", "label", actual, FULL);
+    const loc = score.scalarBreakdown.find((s) => s.field === "location");
+    expect(loc).toEqual({
+      field: "location",
+      status: "missing",
+      expected: "Chicago, IL",
+      actual: null,
+    });
+  });
+
+  it("flags a mismatch with both expected and actual values", () => {
+    const actual: LlmParsedResume = { ...FULL, summary: "Different summary." };
+    const score = scoreFixture("f1", "label", actual, FULL);
+    const sum = score.scalarBreakdown.find((s) => s.field === "summary");
+    expect(sum).toEqual({
+      field: "summary",
+      status: "mismatch",
+      expected: "Experienced engineer.",
+      actual: "Different summary.",
+    });
+  });
+
+  it("marks a null-expected field 'skipped' (not counted in accuracy)", () => {
+    const expected: LlmParsedResume = { ...EMPTY, full_name: "Alex" };
+    const score = scoreFixture("f1", "label", { ...EMPTY, full_name: "Alex" }, expected);
+    const email = score.scalarBreakdown.find((s) => s.field === "email");
+    expect(email?.status).toBe("skipped");
+    // Only the one applicable field (full_name) drives accuracy.
+    expect(score.scalarAccuracy).toBe(1.0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Skills accuracy (Jaccard)
 // ---------------------------------------------------------------------------
 

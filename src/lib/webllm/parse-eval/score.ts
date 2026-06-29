@@ -35,6 +35,29 @@ import type { LlmParsedResume } from "../parse-resume.ts";
 // Per-fixture score record
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-field verdict for a single scalar field on one fixture.
+ *
+ * Capturing this (not just the rolled-up `scalarAccuracy`) is what lets a run
+ * name *which* scalar missed rather than reporting a bare "80%". Safe to keep
+ * the literal `expected`/`actual` strings here: the eval fixtures are synthetic
+ * personas only (see fixtures.ts / CLAUDE.md PII policy), so no real PII can
+ * flow into a report.
+ *
+ * - `match`    — actual equals expected (case-insensitive, trimmed).
+ * - `mismatch` — actual is non-null but differs from expected.
+ * - `missing`  — expected is non-null but the model returned null.
+ * - `skipped`  — expected is null (field not applicable); not counted in accuracy.
+ */
+export type ScalarFieldStatus = "match" | "mismatch" | "missing" | "skipped";
+
+export interface ScalarFieldResult {
+  field: "full_name" | "email" | "phone" | "location" | "summary";
+  status: ScalarFieldStatus;
+  expected: string | null;
+  actual: string | null;
+}
+
 export interface FixtureScore {
   fixtureId: string;
   fixtureLabel: string;
@@ -42,6 +65,8 @@ export interface FixtureScore {
   validJson: boolean;
   /** Fraction of non-null expected scalar fields that exactly matched (0–1). */
   scalarAccuracy: number;
+  /** Per-field scalar verdicts — names exactly which scalar matched/missed. */
+  scalarBreakdown: ScalarFieldResult[];
   /** Jaccard overlap of the skills sets (0–1). */
   skillsAccuracy: number;
   /**
@@ -112,21 +137,38 @@ const SCALAR_FIELDS = [
 
 type ScalarField = (typeof SCALAR_FIELDS)[number];
 
-function scoreScalars(actual: LlmParsedResume, expected: LlmParsedResume): number {
+function scoreScalars(
+  actual: LlmParsedResume,
+  expected: LlmParsedResume,
+): { accuracy: number; breakdown: ScalarFieldResult[] } {
   let total = 0;
   let matched = 0;
+  const breakdown: ScalarFieldResult[] = [];
 
   for (const field of SCALAR_FIELDS) {
     const exp = expected[field as ScalarField];
-    if (exp === null) continue; // null expected = not applicable; skip
-    total += 1;
     const act = actual[field as ScalarField];
-    if (act !== null && normalize(act) === normalize(exp)) {
-      matched += 1;
+
+    if (exp === null) {
+      // null expected = not applicable; not counted in accuracy.
+      breakdown.push({ field, status: "skipped", expected: null, actual: act });
+      continue;
     }
+
+    total += 1;
+    let status: ScalarFieldStatus;
+    if (act === null) {
+      status = "missing";
+    } else if (normalize(act) === normalize(exp)) {
+      status = "match";
+      matched += 1;
+    } else {
+      status = "mismatch";
+    }
+    breakdown.push({ field, status, expected: exp, actual: act });
   }
 
-  return total === 0 ? 1.0 : matched / total;
+  return { accuracy: total === 0 ? 1.0 : matched / total, breakdown };
 }
 
 // ---------------------------------------------------------------------------
@@ -195,11 +237,13 @@ export function scoreFixture(
   actual: LlmParsedResume,
   expected: LlmParsedResume,
 ): FixtureScore {
+  const scalar = scoreScalars(actual, expected);
   return {
     fixtureId,
     fixtureLabel,
     validJson: isValidJsonResult(actual),
-    scalarAccuracy: scoreScalars(actual, expected),
+    scalarAccuracy: scalar.accuracy,
+    scalarBreakdown: scalar.breakdown,
     skillsAccuracy: scoreSkills(actual, expected),
     experienceAccuracy: scoreExperience(actual, expected),
     educationAccuracy: scoreEducation(actual, expected),

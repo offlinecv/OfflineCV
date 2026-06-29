@@ -66,6 +66,31 @@ export function renderMarkdownReport(report: ParseEvalReport): string {
     );
   }
   lines.push("");
+
+  // Scalar field detail — only the fields that missed, so a sub-100% scalar
+  // score names exactly which field(s) the model got wrong instead of a bare
+  // percentage. Values are synthetic (PII-safe fixtures), so showing
+  // expected-vs-actual here cannot leak real PII.
+  const missRows: string[] = [];
+  for (const f of report.fixtures) {
+    for (const s of f.scalarBreakdown) {
+      if (s.status === "match" || s.status === "skipped") continue;
+      missRows.push(
+        `| ${f.fixtureLabel} | ${s.field} | ${s.status} | ${s.expected ?? "—"} | ${s.actual ?? "—"} |`,
+      );
+    }
+  }
+  lines.push("## Scalar field misses");
+  lines.push("");
+  if (missRows.length === 0) {
+    lines.push("_None — every expected scalar matched._");
+  } else {
+    lines.push("| Fixture | Field | Status | Expected | Actual |");
+    lines.push("| --- | --- | --- | --- | --- |");
+    lines.push(...missRows);
+  }
+  lines.push("");
+
   lines.push("---");
   lines.push("");
   lines.push(
