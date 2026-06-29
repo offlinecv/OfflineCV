@@ -17,9 +17,28 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { diffParses, type ParseDisagreement } from "./disagreement.ts";
+import { diffParses as rawDiffParses, type ParseDisagreement } from "./disagreement.ts";
 import type { HeuristicParsedResume, LayoutTrigger } from "./types.ts";
+import type { SectionName } from "./sections.config.ts";
 import type { LlmParsedResume } from "../webllm/parse-resume.ts";
+
+// All gateable sections present by default — most cases below exercise drop
+// *detection*, not the section-presence guard (that has its own describe block).
+// Tests that probe the guard call `rawDiffParses` directly with an explicit set.
+const ALL_SECTIONS: ReadonlySet<SectionName> = new Set([
+  "experience",
+  "education",
+  "skills",
+]);
+
+function diffParses(
+  heuristic: HeuristicParsedResume,
+  llm: LlmParsedResume,
+  triggers: LayoutTrigger[],
+  presentSections: ReadonlySet<SectionName> = ALL_SECTIONS,
+): ParseDisagreement[] {
+  return rawDiffParses(heuristic, llm, triggers, presentSections);
+}
 
 // ── Builders ─────────────────────────────────────────────────────────────────
 
@@ -180,6 +199,55 @@ describe("diffParses — dropped_section", () => {
       llm({ education: edu(3) }),
       [],
     );
+    expect(findKind(r, "education")).toBeUndefined();
+  });
+});
+
+// ── dropped_section credibility guard (section-presence) ─────────────────────
+
+describe("diffParses — dropped_section credibility guard", () => {
+  const none: ReadonlySet<SectionName> = new Set();
+
+  it("SUPPRESSES a skills drop when no skills header exists and no trigger is active", () => {
+    // The repro: clean extraction (no triggers), no skills section on the page,
+    // but the LLM mined 4 technologies out of experience/summary prose.
+    const r = rawDiffParses(
+      heuristic({ skills: [] }),
+      llm({ skills: ["Go", "Rust", "TS", "Py"] }),
+      [],
+      none,
+    );
+    expect(findKind(r, "skills")).toBeUndefined();
+  });
+
+  it("REPORTS a skills drop when the sectioner found the header (extraction failed)", () => {
+    const r = rawDiffParses(
+      heuristic({ skills: [] }),
+      llm({ skills: ["Go", "Rust"] }),
+      [],
+      new Set<SectionName>(["skills"]),
+    );
+    expect(findKind(r, "skills")?.kind).toBe("dropped_section");
+  });
+
+  it("REPORTS a skills drop with no header when a layout trigger ate it", () => {
+    const r = rawDiffParses(
+      heuristic({ skills: [] }),
+      llm({ skills: ["Go"] }),
+      ["fonts_unmappable"],
+      none,
+    );
+    expect(findKind(r, "skills")?.kind).toBe("dropped_section");
+  });
+
+  it("SUPPRESSES experience and education drops the same way", () => {
+    const r = rawDiffParses(
+      heuristic({ experience: [], education: [] }),
+      llm({ experience: exp(3), education: edu(2) }),
+      [],
+      none,
+    );
+    expect(findKind(r, "experience")).toBeUndefined();
     expect(findKind(r, "education")).toBeUndefined();
   });
 });

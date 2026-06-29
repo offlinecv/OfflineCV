@@ -50,6 +50,7 @@
  */
 
 import type { LayoutTrigger, HeuristicParsedResume } from "./types.ts";
+import type { SectionName } from "./sections.config.ts";
 import type { LlmParsedResume } from "../webllm/parse-resume.ts";
 
 /**
@@ -135,6 +136,39 @@ function withCause(
   return cause ? { ...base, likelyCause: cause } : base;
 }
 
+// ── Whole-section drop credibility ───────────────────────────────────────────
+
+/**
+ * A `dropped_section` is only credible when the section genuinely exists on the
+ * page. The heuristic sectioner is the ground truth on section *headers*: it
+ * detects a "Skills"/"Experience"/"Education" heading independent of whether the
+ * field extractor downstream recovered any entries. So a whole-section drop is
+ * honest only when:
+ *
+ *   - the sectioner found the header (`presentSections.has(name)`) — the section
+ *     is on the page but the extractor produced nothing, a real extraction
+ *     failure; OR
+ *   - a page-wide layout trigger is active (`scanned` / `two_column` /
+ *     `fonts_unmappable`) that plausibly ate the header along with the section.
+ *
+ * Absent both, the text layer extracted cleanly and no such header exists — an
+ * LLM that nonetheless returns entries for the section *synthesized* them from
+ * other prose (technologies named in experience bullets, the summary, etc.).
+ * That is not a section an ATS dropped, so it must not be reported. This is the
+ * deterministic backstop the parser prompt alone cannot enforce against a small
+ * in-browser model.
+ */
+function sectionDropCredible(
+  presentSections: ReadonlySet<SectionName>,
+  name: SectionName,
+  triggers: readonly LayoutTrigger[],
+): boolean {
+  return (
+    presentSections.has(name) ||
+    pickCause(triggers, /* preferTwoColumn */ false) !== undefined
+  );
+}
+
 // ── Detector ─────────────────────────────────────────────────────────────────
 
 /**
@@ -143,11 +177,17 @@ function withCause(
  * `SCALAR_FIELDS` order), then experience, education, and skills sections.
  *
  * Pure and deterministic — the same inputs always yield the same array.
+ *
+ * `presentSections` is the set of section headers the heuristic sectioner
+ * detected (`CascadeResult.sections.byName` keys). It gates whole-section drops
+ * so an LLM that synthesizes a section absent from the page does not surface a
+ * phantom `dropped_section` — see {@link sectionDropCredible}.
  */
 export function diffParses(
   heuristic: HeuristicParsedResume,
   llm: LlmParsedResume,
   triggers: LayoutTrigger[],
+  presentSections: ReadonlySet<SectionName>,
 ): ParseDisagreement[] {
   const out: ParseDisagreement[] = [];
 
@@ -174,7 +214,7 @@ export function diffParses(
   // ── Experience: dropped_section | merged_roles | dropped_role ──
   const hExp = heuristic.experience.length;
   const lExp = llm.experience.length;
-  if (hExp === 0 && lExp > 0) {
+  if (hExp === 0 && lExp > 0 && sectionDropCredible(presentSections, "experience", triggers)) {
     // The whole section vanished from the heuristic parse.
     out.push(
       withCause(
@@ -207,7 +247,11 @@ export function diffParses(
   }
 
   // ── Education: whole-section drop only ──
-  if (heuristic.education.length === 0 && llm.education.length > 0) {
+  if (
+    heuristic.education.length === 0 &&
+    llm.education.length > 0 &&
+    sectionDropCredible(presentSections, "education", triggers)
+  ) {
     out.push(
       withCause(
         {
@@ -222,7 +266,11 @@ export function diffParses(
   }
 
   // ── Skills: whole-section drop only ──
-  if (heuristic.skills.length === 0 && llm.skills.length > 0) {
+  if (
+    heuristic.skills.length === 0 &&
+    llm.skills.length > 0 &&
+    sectionDropCredible(presentSections, "skills", triggers)
+  ) {
     out.push(
       withCause(
         {

@@ -36,6 +36,7 @@ import type {
   CascadeResult,
   LayoutTrigger,
 } from "../lib/heuristics/types.ts";
+import type { SectionName } from "../lib/heuristics/sections.config.ts";
 
 export type DisagreementStatus =
   | { kind: "idle" }
@@ -146,7 +147,16 @@ export function useParseDisagreement(
       trackLlmParseRan({ model: modelId });
 
       const triggers = result.triggers as LayoutTrigger[];
-      const disagreements = diffParses(result.parsed, llm, triggers);
+      // The section headers the heuristic sectioner actually detected. Gates
+      // whole-section drops so an LLM that synthesizes a section absent from the
+      // page (e.g. mining skills out of experience bullets) doesn't surface a
+      // phantom dropped_section. "profile" is not a SectionName, so it's filtered.
+      const presentSections = new Set(
+        [...result.sections.byName.keys()].filter(
+          (n): n is SectionName => n !== "profile",
+        ),
+      );
+      const disagreements = diffParses(result.parsed, llm, triggers, presentSections);
       const tally = tallyKinds(disagreements);
       trackDisagreementsFound({
         model: modelId,
