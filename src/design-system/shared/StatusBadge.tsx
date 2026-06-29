@@ -11,13 +11,14 @@
  *   ok      — green / success feedback tokens (e.g. "Parsed")
  *   limited — amber / warning feedback tokens (e.g. "Limited parsing")
  *   warning — alias for limited; kept for callsite clarity
+ *   info    — blue / informational feedback tokens (e.g. "Recovered with on-device AI")
  *
  * Design rules (CLAUDE.md): semantic tokens only.
  */
 
 import type { ReactNode } from "react";
 
-export type StatusBadgeTone = "ok" | "limited" | "warning";
+type StatusBadgeTone = "ok" | "limited" | "warning" | "info";
 
 interface StatusBadgeProps {
   tone: StatusBadgeTone;
@@ -28,6 +29,7 @@ const TONE_CLS: Record<StatusBadgeTone, string> = {
   ok: "bg-feedback-success-bg text-feedback-success-text",
   limited: "bg-feedback-warning-bg text-feedback-warning-text",
   warning: "bg-feedback-warning-bg text-feedback-warning-text",
+  info: "bg-feedback-info-bg text-feedback-info-text",
 };
 
 export function StatusBadge({ tone, children }: StatusBadgeProps) {

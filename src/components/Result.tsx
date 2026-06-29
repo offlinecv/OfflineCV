@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CascadeResult, LayoutTrigger } from "../lib/heuristics/types.ts";
-import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import { computeAnonymousAtsScore, type AnonymousAtsScore } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
@@ -14,6 +14,14 @@ import {
   SourcePdfPanel,
   ExtractedTextPanel,
 } from "./features/EvidencePanel.tsx";
+import { DisagreementPanel } from "./features/DisagreementPanel.tsx";
+import { CritiquePanel } from "./features/CritiquePanel.tsx";
+import { useParseDisagreement } from "../hooks/useParseDisagreement.ts";
+import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
+import { useResumeCritique } from "../hooks/useResumeCritique.ts";
+import { LlmEscapeHatchBanner } from "./features/LlmEscapeHatchBanner.tsx";
+import type { LlmParsedResume } from "../lib/webllm/parse-resume.ts";
+import { mergeLlmParse } from "../lib/webllm/merge-override.ts";
 
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
@@ -82,16 +90,85 @@ function ParsedCard({
 }) {
   const [tab, setTab] = useState("reconstructed");
   const triggerCount = result.triggers.length;
+
+  // Opt-in WebLLM "what an ATS misses" comparison (#242). The controller is
+  // lifted here so the tab is only advertised on WebGPU-capable browsers with
+  // extractable text; on everything else the tab (and panel) are silently
+  // absent. The panel itself drives the opt-in run + diff.
+  const disagreement = useParseDisagreement(result);
+
+  // Characterized gaps to fold into a "Report a parsing gap" download (#245) —
+  // available only once the opt-in WebLLM comparison has completed. Kinds/fields
+  // only enter the artifact (never the recovered values); see repro-artifact.ts.
+  const reportableDisagreements =
+    disagreement.status.kind === "done"
+      ? disagreement.status.disagreements
+      : undefined;
+
+  // Degenerate-case LLM escape hatch (#243). Only available when
+  // `result.suggestedEscalation === "llm"` AND WebGPU is available AND there is
+  // text. When the user opts in and the pass completes, `llmOverride` is set and
+  // the entire result surface re-renders from the LLM-parsed fields.
+  const escapeHatch = useLlmEscapeHatch(result);
+  const [llmOverride, setLlmOverride] = useState<LlmParsedResume | null>(null);
+  const handleRecovered = useCallback((llmParsed: LlmParsedResume) => {
+    setLlmOverride(llmParsed);
+  }, []);
+
+  // When `llmOverride` is set, build a synthetic CascadeResult that merges the
+  // LLM-parsed fields into the original result. `rawText` / `markdown` / layout
+  // fields stay original — the override is parse-field only. `suggestedEscalation`
+  // is cleared to "none" since we've recovered. Score is re-derived from the
+  // overridden parse so the readout reflects the LLM result.
+  const activeResult: CascadeResult = useMemo(
+    () => (llmOverride === null ? result : mergeLlmParse(result, llmOverride)),
+    [result, llmOverride],
+  );
+
+  const activeScore: AnonymousAtsScore = useMemo(() => {
+    if (llmOverride === null) return score;
+    return computeAnonymousAtsScore({
+      parsed: activeResult.parsed,
+      fieldConfidence: activeResult.fieldConfidence,
+      triggers: activeResult.triggers,
+      rawText: activeResult.rawText,
+      sections: activeResult.sections,
+    });
+  }, [activeResult, llmOverride, score]);
+
+  const isLlmRecovered = llmOverride !== null;
+
+  // Opt-in WebLLM content-quality critique (#244). Runs on the active parsed
+  // result so that when the #243 escape hatch has recovered the parse, the
+  // critique judges the improved fields rather than the raw heuristic output.
+  // Must be called AFTER activeResult is computed (hooks ordering is stable
+  // because activeResult is a useMemo, not a conditional render path).
+  const critique = useResumeCritique(activeResult.parsed, activeResult.rawText);
+
   return (
     // Two stacked surfaces: the score "summary" card on top, the tabbed detail
     // card below. The gap + each card's own border draws the separator the
     // single-card layout lacked (the tab strip reads as its own section).
     <div className="flex flex-col gap-4">
+      {/* Escape hatch banner — shown above the score card when the cascade
+          flagged a degenerate result and WebGPU is available (#243). */}
+      {escapeHatch.isAvailable && (
+        <LlmEscapeHatchBanner
+          controller={escapeHatch}
+          onRecovered={handleRecovered}
+        />
+      )}
+
       <Card className="flex flex-col gap-6 shadow-xs">
         <header className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <StatusBadge tone="ok">Parsed</StatusBadge>
-            {edit.hasEdits && <StatusBadge tone="warning">Edited</StatusBadge>}
+            {isLlmRecovered && (
+              <StatusBadge tone="info">Recovered with on-device AI</StatusBadge>
+            )}
+            {!isLlmRecovered && edit.hasEdits && (
+              <StatusBadge tone="warning">Edited</StatusBadge>
+            )}
             <span className="text-xs text-content-muted">
               {result.diagnostics.pages} page
               {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
@@ -99,7 +176,7 @@ function ParsedCard({
             </span>
           </div>
           <div className="flex items-center gap-3">
-            {edit.hasEdits && (
+            {!isLlmRecovered && edit.hasEdits && (
               <Button variant="link" onClick={edit.resetAll}>
                 Reset to parsed
               </Button>
@@ -110,8 +187,15 @@ function ParsedCard({
           </div>
         </header>
 
-        <AtsScoreReadout score={score} />
-        <FeedbackPanel />
+        <AtsScoreReadout score={activeScore} />
+        {/* Feedback surface (#51) + "Report a parsing gap" (#245). The gap
+            report builds a structure-only repro artifact from the active parse;
+            when the user ran the opt-in WebLLM comparison (#242), the
+            characterized disagreements ride along (kinds only, never values). */}
+        <FeedbackPanel
+          result={activeResult}
+          disagreements={reportableDisagreements}
+        />
       </Card>
 
       {/* Detail sits behind tabs in its own card so only one panel shows at a
@@ -128,13 +212,19 @@ function ParsedCard({
             <Tab id="flags" count={triggerCount}>
               Layout flags
             </Tab>
+            {disagreement.isAvailable && (
+              <Tab id="disagreement">What an ATS misses</Tab>
+            )}
+            {critique.isAvailable && (
+              <Tab id="critique">Resume quality</Tab>
+            )}
           </TabList>
 
           <div className="pt-4">
             <TabPanel id="reconstructed">
               <ReconstructedResume
-                result={result}
-                score={score}
+                result={activeResult}
+                score={activeScore}
                 edit={edit}
                 jdContext={jdContext}
               />
@@ -150,6 +240,23 @@ function ParsedCard({
                 triggers={result.triggers as readonly LayoutTrigger[]}
               />
             </TabPanel>
+            {disagreement.isAvailable && (
+              <TabPanel id="disagreement">
+                <DisagreementPanel controller={disagreement} />
+              </TabPanel>
+            )}
+            {critique.isAvailable && (
+              <TabPanel id="critique">
+                {/* onGoToRewrite: switch back to reconstructed tab where the
+                    per-role wand button (#3 / useSectionRewrite) already lives.
+                    The critique panel links each flagged bullet to this affordance
+                    instead of building a parallel rewrite UI (issue #244). */}
+                <CritiquePanel
+                  controller={critique}
+                  onGoToRewrite={() => setTab("reconstructed")}
+                />
+              </TabPanel>
+            )}
           </div>
         </Tabs>
       </Card>

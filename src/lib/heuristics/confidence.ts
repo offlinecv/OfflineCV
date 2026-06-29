@@ -289,7 +289,10 @@ function chooseEscalation(
   confidence?: number,
 ): EscalationSuggestion {
   if (layout.isScanned) return "ocr";
-  if (hardReasons.includes("low_extraction_ratio")) return "ocr";
+  // `low_extraction_ratio` at this point means the PDF is NOT scanned (the
+  // isScanned guard above would have returned "ocr" first). A low extraction
+  // ratio on a text-layer PDF means the heuristic parser failed to capture the
+  // content — the right recovery is an on-device LLM pass, not OCR (#243).
   if (layout.isTwoColumn) return "ner";
   if (hardReasons.length > 0) return "llm";
   if (confidence != null && confidence < CANONICAL_CONFIDENCE_THRESHOLD) {

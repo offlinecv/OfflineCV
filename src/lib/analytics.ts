@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
+import { CASCADE_VERSION } from "./heuristics/types";
 import type { LayoutTrigger, ParseEvent } from "./heuristics/types";
 import type { WebGpuCapability } from "./webllm/types";
 import type { AtsPlatform } from "./jd-match/fetch-jd";
@@ -229,11 +230,62 @@ export function trackCascadeEvent(event: ParseEvent): void {
   }
 }
 
+/**
+ * The opt-in WebLLM parse pass ran (#242). The cascade's
+ * `cascade_parse_completed` event always carries `llm_ran: false` because the
+ * LLM pass runs AFTER the cascade returns — by the time the user opts in, that
+ * event has already fired. So re-emit the completion signal with `llm_ran: true`
+ * (same event name, so PostHog correlates the two on the same person/session)
+ * to satisfy the "set `llm_ran: true` on parse_completed when the LLM pass runs"
+ * contract. Carries only the model id + the flag — no field values, no PII.
+ */
+export function trackLlmParseRan(args: { model: string }): void {
+  track("cascade_parse_completed", {
+    cascade_version: CASCADE_VERSION,
+    llm_ran: true,
+    model: args.model,
+  });
+}
+
+/**
+ * The degenerate-case LLM escape hatch ran (#243). Re-emits `cascade_parse_completed`
+ * with `llm_ran: true` AND `final_source: "llm_fallback"` to distinguish the
+ * recovery-pass from the comparison-pass (#242, which uses `trackLlmParseRan`).
+ * Carries only the model id — no field values, no PII.
+ */
+export function trackLlmFallbackRan(args: { model: string }): void {
+  track("cascade_parse_completed", {
+    cascade_version: CASCADE_VERSION,
+    llm_ran: true,
+    final_source: "llm_fallback",
+    model: args.model,
+  });
+}
+
 export function trackRenderError(args: { errorName: string }): void {
   // Never pass the error message — it can echo text fragments from the file
   // being parsed and would violate the footer's privacy claim.
   track("render_error", {
     error_name: args.errorName,
+  });
+}
+
+/**
+ * The on-device LLM content-quality critique ran (#244). Emits a single
+ * anonymized event carrying the model id, the total bullet count judged, and
+ * the count of non-ok findings. No bullet text, no field values, no PII.
+ */
+export function trackCritiqueRan(args: {
+  model: string;
+  bulletCount: number;
+  flaggedCount: number;
+  missingSectionCount: number;
+}): void {
+  track("llm_critique_ran", {
+    model: args.model,
+    bullet_count: args.bulletCount,
+    flagged_count: args.flaggedCount,
+    missing_section_count: args.missingSectionCount,
   });
 }
 
@@ -348,6 +400,58 @@ export function trackWebllmResumeRewriteCompleted(args: {
 
 export function trackWebllmFirstResumeRewrite(args: { model: string }): void {
   track("webllm_first_resume_rewrite", { model: args.model });
+}
+
+// Disagreement detector funnel (#242 — heuristic vs LLM parse, headline). Fires
+// once after the opt-in WebLLM pass completes and the two parses are diffed.
+// Anonymized BY CONSTRUCTION: only the count of gaps and per-kind tallies leave
+// the browser — never a field value, name, email, or recovered text. Matches the
+// privacy contract the rest of the parse funnel upholds; compiles away to a
+// no-op when VITE_POSTHOG_KEY is unset.
+export function trackDisagreementsFound(args: {
+  model: string;
+  /** Total gaps the diff surfaced (0 is a meaningful "LLM agreed" datapoint). */
+  count: number;
+  /** Per-kind tally so the funnel can split "which gap kind drives engagement". */
+  droppedRole: number;
+  droppedSection: number;
+  missingField: number;
+  mergedRoles: number;
+  /** Active layout triggers — already anonymized (a fixed enum, no PII). */
+  triggers: readonly LayoutTrigger[];
+}): void {
+  track("disagreements_found", {
+    model: args.model,
+    count: args.count,
+    dropped_role: args.droppedRole,
+    dropped_section: args.droppedSection,
+    missing_field: args.missingField,
+    merged_roles: args.mergedRoles,
+    triggers: [...args.triggers],
+  });
+}
+
+/**
+ * The user reported a parsing gap (#245) — i.e. they generated and downloaded
+ * the structure-only repro artifact to attach to an issue manually. COUNT ONLY:
+ * a `gap_disagreements` integer (how many characterized gaps the report
+ * carried, 0 when the reporter had not run the WebLLM comparison) plus the
+ * active layout triggers (a fixed enum). NEVER the artifact contents, the
+ * résumé text, or any field value — the artifact itself is PII-free by
+ * construction (see `lib/heuristics/repro-artifact.ts`), and this event carries
+ * even less. Env-gated like every other tracker: no-op when VITE_POSTHOG_KEY is
+ * unset.
+ */
+export function trackGapReported(args: {
+  /** How many characterized disagreements the report carried (0 if none). */
+  disagreementCount: number;
+  /** Active layout triggers — already anonymized (a fixed enum, no PII). */
+  triggers: readonly LayoutTrigger[];
+}): void {
+  track("gap_reported", {
+    gap_disagreements: args.disagreementCount,
+    triggers: [...args.triggers],
+  });
 }
 
 // JD URL ingestion funnel (#72 / #75). Fires on every user-initiated fetch
