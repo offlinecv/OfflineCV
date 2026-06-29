@@ -109,6 +109,28 @@ describe("matchSectionHeader — head-noun anchor fallback (#108 / #111)", () =>
     expect(matchSectionHeader("HR Experience")).toBe("experience");
   });
 
+  it("rejects a wholly-Title-case institution name ending in an anchor word (#258)", () => {
+    // #258 residual hole 1: a wholly Title-case institution whose trailing word
+    // is a section anchor carries NO acronym, so Guard 8 never fires — yet the
+    // line is an org entity ("Harvard University Education"), not a header. The
+    // institution-type word ("University"/"College") sitting BEFORE the head noun
+    // is the line-local tell a genuine header never carries.
+    expect(matchSectionHeader("Harvard University Education")).toBeNull();
+    expect(matchSectionHeader("Riverside College Academics")).toBeNull();
+    // Genuine qualified headers carry no institution-type *name* word and still
+    // match, including a real L2 education header ("Academic Qualifications").
+    expect(matchSectionHeader("Relevant Experience")).toBe("experience");
+    expect(matchSectionHeader("Academic Qualifications")).toBe("education");
+    expect(matchSectionHeader("IT Experience")).toBe("experience");
+    // "School" is an interior header *qualifier*, not an org-name tell — Guard 9
+    // must not reject these common student-résumé headers (it uses the narrower
+    // INSTITUTION_NAME_HINTS set that drops "School").
+    expect(matchSectionHeader("High School Coursework")).toBe("education");
+    expect(matchSectionHeader("Business School Experience")).toBe("experience");
+    expect(matchSectionHeader("Law School Experience")).toBe("experience");
+    expect(matchSectionHeader("Summer School Projects")).toBe("projects");
+  });
+
   it("rejects a header-shaped line ending in terminal punctuation", () => {
     // FP #4: terminal sentence punctuation marks prose, not a heading.
     expect(matchSectionHeader("Gained Relevant Experience.")).toBeNull();

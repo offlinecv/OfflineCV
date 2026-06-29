@@ -573,3 +573,63 @@ describe("splitIntoSections — corpus section-count regression (#112)", () => {
     }, 15_000);
   }
 });
+
+describe("splitIntoSections — institution name ending in a section anchor (#258)", () => {
+  // #258 residual hole 2: a wholly ALL-CAPS institution whose trailing word is a
+  // section anchor ("ACME PROFESSIONAL EDUCATION") carries no institution-type
+  // word and no Title-case modifier, so it is shape-indistinguishable from a real
+  // header line-locally (the `allCaps` escape needed by real "PROFESSIONAL
+  // EXPERIENCE" headers lets Guard 8 NOT fire). When it appears UNDER an
+  // already-open `education` section, the second anchor-fallback open is the
+  // context tell: the line is an institution entry, not a header. It must be
+  // retained as content, not consumed as a boundary (which drops the name).
+  it("retains an institution line under an open education section instead of eating it as a 2nd header", () => {
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 }, // name
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 }, // contact
+      { text: "EDUCATION", fontSize: 13 }, // real header (L1 exact alias)
+      { text: "ACME PROFESSIONAL EDUCATION", fontSize: 11 }, // institution entry (wholly ALL-CAPS — Guard 8 cannot fire)
+      { text: "M.S. Data Science  2018 - 2020", fontSize: 11 }, // degree + date
+    ]);
+
+    // The institution line is retained as content inside the education section,
+    // not consumed as a boundary label (which would drop the institution name).
+    const inst = sectionContaining(sections, "ACME PROFESSIONAL EDUCATION");
+    expect(inst).toBeDefined();
+    expect(inst!.name).toBe("education");
+
+    // Exactly one education section — the institution line did NOT open a second.
+    expect(names(sections).filter((n) => n === "education").length).toBe(1);
+  });
+
+  it("still opens a genuine L2 header for a DIFFERENT section than the one currently open", () => {
+    // The suppression is gated on the CURRENTLY-open section, not "ever opened":
+    // a real "Relevant Experience" (L2) header appearing while EDUCATION is the
+    // open section must open its own experience section — its content must NOT
+    // bleed into education. (Regression guard for the cross-section bleed a naive
+    // "ever-opened" gate would cause.)
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 }, // name
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 }, // contact
+      { text: "PROFESSIONAL EXPERIENCE", fontSize: 13 }, // L1 — opens experience
+      { text: "Engineer, Globex  2019 - 2021", fontSize: 11 },
+      { text: "EDUCATION", fontSize: 13 }, // L1 — opens education (now current)
+      { text: "B.S. Computer Science, MIT  2019", fontSize: 11 },
+      { text: "Relevant Experience", fontSize: 11 }, // L2 experience ≠ current
+      { text: "Mentor, Local Shelter  2022 - Present", fontSize: 11 },
+    ]);
+
+    // The Mentor role landed in an experience section, not in education.
+    const mentor = sectionContaining(sections, "Mentor, Local Shelter");
+    expect(mentor).toBeDefined();
+    expect(mentor!.name).toBe("experience");
+
+    // Education holds only the degree line — no experience bleed.
+    const edu = sectionContaining(sections, "B.S. Computer Science");
+    expect(edu!.name).toBe("education");
+    expect(edu!.lines.some((l) => l.text.includes("Mentor"))).toBe(false);
+    expect(edu!.lines.some((l) => l.text.includes("Relevant Experience"))).toBe(
+      false,
+    );
+  });
+});

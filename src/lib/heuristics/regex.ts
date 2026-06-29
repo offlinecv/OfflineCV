@@ -320,6 +320,28 @@ function matchAnchorFallback(
       .some((w) => !isAcronym(w) && /^[A-Z]/.test(w));
     if (hasProperNounModifier) return null;
   }
+  // Guard 9: an institution name, not a heading — the wholly-Title-case case
+  // Guard 8 cannot reach (no acronym). An institution NAME pairs a proper noun
+  // with an institution-TYPE word ("University", "College", "Institute", …)
+  // before the trailing anchor — "Harvard University Education", "Riverside
+  // College Academics" — where the anchor is part of the org's name. The tell is
+  // an institution-type word in a NON-FIRST, non-final slot: something (the
+  // proper-noun name, "Harvard"/"Riverside") sits before it. When the
+  // institution-type word is itself the FIRST token it is a category qualifier
+  // of a genuine header, not a name — "University Projects", "College Athletics"
+  // — so those still classify. The head noun is the LAST token, so we scan the
+  // interior slots (index 1 .. second-to-last). A real L2 header like "Academic
+  // Qualifications" carries no institution-type word and is unaffected.
+  //
+  // Uses INSTITUTION_NAME_HINTS, a deliberately NARROWER set than
+  // INSTITUTION_HINTS: it drops "School", which routinely serves as an interior
+  // header qualifier ("High School Coursework", "Business School Experience",
+  // "Law School Experience") rather than an org-name tell. The remaining words
+  // (University / College / Institute / Academy / Polytechnic) do not pattern
+  // that way as header qualifiers, so an interior occurrence reliably marks a
+  // proper-noun institution name.
+  if (rawWords.slice(1, -1).some((w) => INSTITUTION_NAME_HINTS.test(w)))
+    return null;
   const last = tokens[tokens.length - 1];
   // Guard 3 + 6: last token must be an anchor of a fallback-enabled section.
   for (const [name, anchors] of Object.entries(SECTION_ANCHORS) as Array<
@@ -370,14 +392,26 @@ export function matchSectionAnchorToken(text: string): SectionName | null {
   return null;
 }
 
-/** True if the normalized line text matches any known section header. */
-export function matchSectionHeader(text: string): SectionName | null {
+/**
+ * Match a section header AND report which tier produced the match.
+ *
+ * `viaAnchorFallback` is true ONLY when the match came from the head-noun
+ * anchor-fallback (L2) path — the prose-adjacent tier whose qualified headers
+ * ("Relevant Experience") are a softer signal than an exact alias. It is false
+ * for the L1 exact-alias and split-letter matches, which are unambiguous header
+ * text. The splitter (sections.ts) uses this tier flag to suppress a SECOND L2
+ * open of an already-open section — that repeat is an institution entry sitting
+ * under its real header, not a new boundary (#258 Layer B).
+ */
+export function matchSectionHeaderDetailed(
+  text: string,
+): { section: SectionName; viaAnchorFallback: boolean } | null {
   const normalized = text.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
   if (normalized.length === 0 || normalized.length > 40) return null;
   for (const [name, keywords] of Object.entries(SECTION_KEYWORDS) as Array<
     [SectionName, readonly string[]]
   >) {
-    if (keywords.includes(normalized)) return name;
+    if (keywords.includes(normalized)) return { section: name, viaAnchorFallback: false };
   }
   // Split-letter headers: pdfjs reads a tracked/decorated `EXPERIENCE` as
   // `E XPERIENCE`. Rejoin single split letters and retry, gated to the
@@ -388,7 +422,7 @@ export function matchSectionHeader(text: string): SectionName | null {
       [SectionName, readonly string[]]
     >) {
       if (keywords.includes(rejoined) && SPLIT_LETTER_NORMALIZABLE_SECTIONS.has(name))
-        return name;
+        return { section: name, viaAnchorFallback: false };
     }
   }
   // Head-noun anchor fallback for qualified headers ("Relevant Experience").
@@ -396,9 +430,16 @@ export function matchSectionHeader(text: string): SectionName | null {
   // bullet glyph is normalized away. See matchAnchorFallback for the rest.
   if (!LEADING_BULLET_RE.test(text)) {
     const anchored = matchAnchorFallback(text, normalized);
-    if (anchored) return anchored;
+    if (anchored) return { section: anchored, viaAnchorFallback: true };
   }
   return null;
+}
+
+/** True if the normalized line text matches any known section header. Thin
+ *  wrapper over {@link matchSectionHeaderDetailed} that discards the tier flag —
+ *  signature and behavior are byte-identical to the pre-#258 function. */
+export function matchSectionHeader(text: string): SectionName | null {
+  return matchSectionHeaderDetailed(text)?.section ?? null;
 }
 
 // ── Degree patterns ─────────────────────────────────────────────────────────
@@ -411,6 +452,14 @@ export const DEGREE_RE =
 
 export const INSTITUTION_HINTS =
   /\b(University|College|Institute|School|Academy|Polytechnic)s?\b/i;
+
+// Narrower than INSTITUTION_HINTS: drops "School" (a common interior header
+// qualifier — "High School Coursework", "Law School Experience"). Used ONLY by
+// Guard 9 in matchAnchorFallback to tell a proper-noun institution name from a
+// genuine qualified header by an INTERIOR institution-type word. Not exported —
+// Guard 9 is its only consumer.
+const INSTITUTION_NAME_HINTS =
+  /\b(University|College|Institute|Academy|Polytechnic)s?\b/i;
 
 /** A sub-field NOTE line that rides under an entry — a GPA / Minor / Major /
  *  concentration / coursework annotation — rather than a new entry header. Used
