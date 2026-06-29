@@ -30,9 +30,27 @@ const envOn = (v: unknown): boolean => v === "true" || v === "1";
  * - `jd-fit-banner` (`VITE_ENABLE_JD_FIT`) — the "Check fit against a job"
  *   cross-sell to the `/jd-fit/` surface. Off by default: `/jd-fit/` is alpha
  *   and not ready to promote from the parser result.
+ *
+ * - `llm` (`VITE_ENABLE_LLM`) — two-layer gate for all WebLLM-backed
+ *   features: the disagreement detector (#242), escape hatch (#243), and
+ *   gap-report (#245).
+ *
+ *   Layer 1 (this entry, build-time kill-switch): off by default. Set
+ *   `VITE_ENABLE_LLM=true` at build time to enable for a deployment.
+ *
+ *   Layer 2 (optional PostHog `llm` flag): when PostHog is loaded, its
+ *   `isFeatureEnabled("llm")` verdict overrides this default — enables %
+ *   rollout / device targeting without a rebuild.
+ *
+ *   Each child feature (#242–#245) also gates independently on WebGPU
+ *   capability (via `detectWebGpu` from `src/lib/webllm/capability.ts`) so
+ *   devices without WebGPU never see the LLM path even when this flag is on.
+ *   The foundation (#241) owns this shared gating rule; UI wiring is out of
+ *   scope here.
  */
 export const FLAG_DEFAULTS = {
   "jd-fit-banner": envOn(import.meta.env.VITE_ENABLE_JD_FIT),
+  "llm": envOn(import.meta.env.VITE_ENABLE_LLM),
 } as const;
 
 export type FlagName = keyof typeof FLAG_DEFAULTS;

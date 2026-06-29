@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>resumelint — Parse-resume eval (dev only)</title>
+    <meta
+      name="description"
+      content="Dev-only eval harness for the LLM structured-parse provider (issue #241). Not part of the production bundle."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <!--
+      Dev-only tool page; not subject to the design-token policy that
+      governs feature code under src/components/**. CSS keeps to system
+      colors (Canvas / CanvasText) so the page renders standalone without
+      loading the app's design system.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+      }
+      body {
+        max-width: 880px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+        color: CanvasText;
+        background: Canvas;
+      }
+      h1 { margin-bottom: 0.25rem; }
+      .subtitle { color: GrayText; margin-top: 0; }
+      label { margin-right: 0.4rem; }
+      select {
+        font-size: 1rem;
+        padding: 0.3rem 0.5rem;
+        border-radius: 4px;
+        border: 1px solid GrayText;
+        background: Canvas;
+        color: CanvasText;
+      }
+      button {
+        padding: 0.6rem 1.2rem;
+        font-size: 1rem;
+        cursor: pointer;
+        border-radius: 6px;
+        margin-left: 0.75rem;
+      }
+      button[disabled] { opacity: 0.5; cursor: not-allowed; }
+      #status { font-weight: 600; margin: 1rem 0 0.25rem; }
+      #progress { font-family: ui-monospace, monospace; color: GrayText; }
+      #log {
+        background: color-mix(in srgb, CanvasText 92%, Canvas);
+        color: Canvas;
+        padding: 0.75rem;
+        border-radius: 6px;
+        font-family: ui-monospace, monospace;
+        font-size: 0.85rem;
+        height: 360px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        margin-top: 1rem;
+      }
+      .downloads {
+        margin-top: 1rem;
+        display: flex;
+        gap: 0.75rem;
+      }
+      .downloads a[hidden] { display: none; }
+      .downloads a {
+        padding: 0.5rem 0.9rem;
+        border: 1px solid currentColor;
+        border-radius: 6px;
+        text-decoration: none;
+      }
+      .note {
+        font-size: 0.9rem;
+        color: GrayText;
+        margin-top: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Parse-resume eval harness</h1>
+    <p class="subtitle">
+      Issue #241 · dev-only · WebGPU required · not bundled into production.
+    </p>
+    <p>
+      Runs <code>parseResumeWithLlm</code> over 3 inline PII-safe resume
+      fixtures (<code>software-engineer</code>,
+      <code>marketing-coordinator</code>, <code>recent-grad</code>) and scores
+      field-level accuracy. Results go into the PR #241 description eval table.
+    </p>
+    <p>
+      One model per tab on purpose: cycling multi-GB models in a single tab is
+      fragile on consumer GPUs. Run each model in a fresh tab, download its
+      report, then open a new tab for the next model.
+    </p>
+    <p>
+      <label for="model">Model:</label>
+      <select id="model"></select>
+      <button id="run" type="button">Run eval</button>
+    </p>
+    <p id="status">Idle. Click &ldquo;Run eval&rdquo; to start.</p>
+    <p id="progress">&nbsp;</p>
+    <div class="downloads">
+      <a id="download-json" hidden>Download JSON report</a>
+      <a id="download-md" hidden>Download Markdown report</a>
+    </div>
+    <pre id="log"></pre>
+    <p class="note">
+      Download the Markdown report and paste findings into
+      <a href="https://github.com/resumelint-org/resumelint/issues/241" target="_blank"
+        >issue #241</a
+      >
+      / PR #241 description. This page is not committed to <code>dist/</code> —
+      see <code>src/lib/webllm/parse-eval/README.md</code> for details.
+    </p>
+    <script type="module" src="/src/lib/webllm/parse-eval/parse-eval-browser.ts"></script>
+  </body>
+</html>
