@@ -153,11 +153,19 @@ export function DisagreementPanel({
             way the on-device model does.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2 list-none">
-            {status.disagreements.map((d, i) => (
-              <DisagreementRow key={`${d.kind}-${d.field}-${i}`} d={d} />
-            ))}
-          </ul>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-content-secondary">
+              Each card below is something the on-device model found on your
+              résumé that a generic ATS extractor missed — so an applicant
+              tracking system may never index it. These are gaps in your favor
+              to be aware of, not errors.
+            </p>
+            <ul className="flex flex-col gap-2 list-none">
+              {status.disagreements.map((d, i) => (
+                <DisagreementRow key={`${d.kind}-${d.field}-${i}`} d={d} />
+              ))}
+            </ul>
+          </div>
         ))}
     </section>
   );
@@ -212,10 +220,10 @@ const SIDE_VALUES: Record<
   dropped_role: roleSides,
   merged_roles: roleSides,
   dropped_section: (d) => ({
-    heuristic: "(not found)",
+    heuristic: "Nothing",
     llm: pluralize(d.llmValue ?? "—", "item"),
   }),
-  missing_field: (d) => ({ heuristic: "(not found)", llm: d.llmValue ?? "—" }),
+  missing_field: (d) => ({ heuristic: "Nothing", llm: d.llmValue ?? "—" }),
 };
 
 /** Copy for the two sides of the diff, tuned per kind so a count gap reads as
@@ -225,27 +233,43 @@ function sideValues(d: ParseDisagreement): DiffSides {
 }
 
 /**
- * Two-column "what an ATS read | what's on the page" comparison. Renders the
- * heuristic side muted/struck and the LLM side highlighted so the recovered
- * content stands out. Purely presentational; the values come straight off the
- * disagreement (in-browser only).
+ * "What a generic ATS extracted → what's on your résumé" comparison.
+ *
+ * The left (heuristic) side is styled NEUTRAL, not as an error: a generic
+ * extractor missing content is the *finding* this panel exists to surface, not
+ * an app failure — so red error tokens would invert the meaning (style rule
+ * `color-not-only`). The right (LLM) side is accented so the recovered content
+ * reads as the takeaway, and an explicit "→ missed by a generic ATS" caption
+ * carries the meaning without relying on color alone. Purely presentational;
+ * the values come straight off the disagreement (in-browser only).
  */
 function HeuristicVsLlm({ d }: { d: ParseDisagreement }) {
   const { heuristic, llm } = sideValues(d);
   return (
-    <div className="grid grid-cols-2 gap-2 text-xs">
-      <div className="flex flex-col gap-0.5 rounded border border-border-light bg-feedback-error-bg p-2">
-        <span className="font-semibold uppercase tracking-wide text-content-muted">
-          Generic ATS reads
-        </span>
-        <span className="font-mono text-feedback-error-text">{heuristic}</span>
+    <div className="flex flex-col gap-1">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 text-xs">
+        <div className="flex flex-col gap-0.5 rounded border border-border-light bg-surface-subtle p-2">
+          <span className="font-semibold uppercase tracking-wide text-content-muted">
+            Generic ATS extracted
+          </span>
+          <span className="font-mono text-content-tertiary">{heuristic}</span>
+        </div>
+        <div
+          className="flex items-center font-semibold text-content-muted"
+          aria-hidden="true"
+        >
+          →
+        </div>
+        <div className="flex flex-col gap-0.5 rounded border border-border-light bg-feedback-success-bg p-2">
+          <span className="font-semibold uppercase tracking-wide text-content-muted">
+            On your résumé
+          </span>
+          <span className="font-mono text-feedback-success-text">{llm}</span>
+        </div>
       </div>
-      <div className="flex flex-col gap-0.5 rounded border border-border-light bg-feedback-success-bg p-2">
-        <span className="font-semibold uppercase tracking-wide text-content-muted">
-          On the page
-        </span>
-        <span className="font-mono text-feedback-success-text">{llm}</span>
-      </div>
+      <p className="text-xs text-content-muted">
+        → the highlighted content is on your résumé but missed by a generic ATS.
+      </p>
     </div>
   );
 }

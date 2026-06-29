@@ -79,6 +79,7 @@ vi.mock("../lib/analytics.ts", () => ({
 import { useParseDisagreement } from "./useParseDisagreement.ts";
 import { useLlmEscapeHatch } from "./useLlmEscapeHatch.ts";
 import { useResumeCritique } from "./useResumeCritique.ts";
+import { acquireInference, releaseInference } from "../lib/webllm/web-llm.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -159,6 +160,10 @@ describe("useParseDisagreement", () => {
       await sink.current!.run();
     });
     expect(sink.current!.status.kind).toBe("done");
+    // The #148 snapshot-before-await contract: the controller acquires the
+    // inference slot for the selected model and releases the same id.
+    expect(acquireInference).toHaveBeenCalledWith("test-model");
+    expect(releaseInference).toHaveBeenCalledWith("test-model");
   });
 
   it("is unavailable without WebGPU", async () => {
@@ -184,6 +189,10 @@ describe("useLlmEscapeHatch", () => {
       await sink.current!.run();
     });
     expect(sink.current!.status.kind).toBe("done");
+    // The #148 snapshot-before-await contract: the controller acquires the
+    // inference slot for the selected model and releases the same id.
+    expect(acquireInference).toHaveBeenCalledWith("test-model");
+    expect(releaseInference).toHaveBeenCalledWith("test-model");
   });
 
   it("surfaces an error when the engine fails to load", async () => {
@@ -212,5 +221,9 @@ describe("useResumeCritique", () => {
       await sink.current!.run();
     });
     expect(sink.current!.status.kind).toBe("done");
+    // The #148 snapshot-before-await contract: the controller acquires the
+    // inference slot for the selected model and releases the same id.
+    expect(acquireInference).toHaveBeenCalledWith("test-model");
+    expect(releaseInference).toHaveBeenCalledWith("test-model");
   });
 });

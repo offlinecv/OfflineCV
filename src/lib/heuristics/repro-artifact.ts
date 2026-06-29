@@ -54,7 +54,7 @@
 import type { CascadeResult, LayoutTrigger } from "./types.ts";
 import { CASCADE_VERSION } from "./types.ts";
 import type { SectionName } from "./regex.ts";
-import type { ParseDisagreement } from "./disagreement.ts";
+import type { ParseDisagreement, ScalarField } from "./disagreement.ts";
 
 /** Bump when the artifact field shape changes, so a maintainer triaging an old
  *  attachment knows which builder produced it. Independent of CASCADE_VERSION. */
@@ -120,7 +120,7 @@ export interface ReproDisagreement {
   kind: ParseDisagreement["kind"];
   /** A section/field NAME (`"experience"`, `"email"`) — an enum-like key from
    *  the detector, never a value. */
-  field: string;
+  field: ScalarField | "experience" | "education" | "skills";
   likelyCause?: LayoutTrigger;
 }
 

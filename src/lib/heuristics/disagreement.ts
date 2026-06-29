@@ -63,8 +63,10 @@ import type { LlmParsedResume } from "../webllm/parse-resume.ts";
 export interface ParseDisagreement {
   kind: "dropped_role" | "dropped_section" | "missing_field" | "merged_roles";
   /** Which field/section the gap is about: a scalar name (`"email"`) or a
-   *  collection name (`"experience"`, `"education"`, `"skills"`). */
-  field: string;
+   *  collection name (`"experience"`, `"education"`, `"skills"`). The detector
+   *  only ever populates this from that fixed allow-list, so it is enum-typed
+   *  (no free `string` slot) — see the repro-artifact PII contract. */
+  field: ScalarField | "experience" | "education" | "skills";
   /** What the dumb (heuristic) parser saw — `null` when it recovered nothing. */
   heuristicValue: string | null;
   /** What the LLM recovered — `null` only in the (unreached) reverse direction. */
@@ -86,7 +88,7 @@ const SCALAR_FIELDS = [
   "summary",
 ] as const;
 
-type ScalarField = (typeof SCALAR_FIELDS)[number];
+export type ScalarField = (typeof SCALAR_FIELDS)[number];
 
 /** Normalize a scalar to a non-empty string, or `null` if absent/blank.
  *  Treats `undefined`, `null`, and whitespace-only as "the parser found

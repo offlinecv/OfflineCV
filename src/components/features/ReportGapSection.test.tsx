@@ -29,7 +29,7 @@ vi.mock("../../lib/analytics.ts", () => ({
   trackGapReported: vi.fn(),
 }));
 
-import { FeedbackPanel } from "./FeedbackPanel.tsx";
+import { ReportGapSection } from "./ReportGapSection.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -103,7 +103,9 @@ function mount() {
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root.render(<FeedbackPanel result={result()} disagreements={disagreements} />);
+    root.render(
+      <ReportGapSection result={result()} disagreements={disagreements} />,
+    );
   });
 }
 

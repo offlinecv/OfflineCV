@@ -248,7 +248,9 @@ const SYSTEM_PROMPT = `You are a resume parser. Extract structured data from the
 
 Rules:
 - Use null for any field not found in the resume.
-- skills: one item per skill, strings only, no duplicates, no empty strings.
+- Only extract what is explicitly present as its own section. Do NOT infer, synthesize, or collect a field from the prose of another section.
+- skills: extract ONLY from an explicit skills section (a "Skills", "Technical Skills", "Core Competencies", "Technologies", or "Expertise" heading). If the resume has no such heading, return an empty array []. Do NOT mine skills out of experience bullets, the summary, or job descriptions — a technology named inside a work-experience bullet is NOT a skills-section entry.
+- skills (when a section exists): one item per skill, strings only, no duplicates, no empty strings.
 - experience: one object per role; description is a brief (1–3 sentence) summary.
 - education: one object per degree/program.
 - Output ONLY the JSON object. Do not add any text before or after it.`;

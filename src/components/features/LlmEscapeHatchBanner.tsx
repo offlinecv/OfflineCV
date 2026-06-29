@@ -26,7 +26,7 @@
 import { Button, ModelLoadProgress } from "@design-system";
 import type { EscapeHatchController, EscapeHatchStatus } from "../../hooks/useLlmEscapeHatch.ts";
 import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /** CTA copy keyed off the status lifecycle (idle is the default fallback). */
 const CTA_LABELS: Record<EscapeHatchStatus["kind"], string> = {
@@ -57,10 +57,19 @@ export function LlmEscapeHatchBanner({
 }: LlmEscapeHatchBannerProps) {
   const { status } = controller;
 
-  // Notify parent whenever a successful LLM pass completes.
+  // Notify parent once per done-transition. The ref guard makes this one-shot:
+  // it fires the moment status enters `done` and resets when status leaves
+  // `done`, so a future inlined (non-memoized) `onRecovered` can't re-fire it on
+  // every render. Behavior is identical for the current useCallback([]) caller.
+  const notifiedDone = useRef(false);
   useEffect(() => {
     if (status.kind === "done") {
-      onRecovered(status.llmParsed);
+      if (!notifiedDone.current) {
+        notifiedDone.current = true;
+        onRecovered(status.llmParsed);
+      }
+    } else {
+      notifiedDone.current = false;
     }
   }, [status, onRecovered]);
 

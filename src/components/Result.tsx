@@ -15,6 +15,7 @@ import {
   ExtractedTextPanel,
 } from "./features/EvidencePanel.tsx";
 import { DisagreementPanel } from "./features/DisagreementPanel.tsx";
+import { ReportGapSection } from "./features/ReportGapSection.tsx";
 import { CritiquePanel } from "./features/CritiquePanel.tsx";
 import { useParseDisagreement } from "../hooks/useParseDisagreement.ts";
 import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
@@ -110,6 +111,11 @@ function ParsedCard({
   // text. When the user opts in and the pass completes, `llmOverride` is set and
   // the entire result surface re-renders from the LLM-parsed fields.
   const escapeHatch = useLlmEscapeHatch(result);
+  // `llmOverride` is NOT keyed/reset on `result` change. Safe today because a new
+  // file passes through the `parsing` phase, which unmounts `Result` and discards
+  // this state — so an override never leaks onto a different resume. A future
+  // keyed/persistent `Result` refactor that keeps this mounted across files must
+  // reset `llmOverride` on `result` change, or a stale override will bleed through.
   const [llmOverride, setLlmOverride] = useState<LlmParsedResume | null>(null);
   const handleRecovered = useCallback((llmParsed: LlmParsedResume) => {
     setLlmOverride(llmParsed);
@@ -188,14 +194,10 @@ function ParsedCard({
         </header>
 
         <AtsScoreReadout score={activeScore} />
-        {/* Feedback surface (#51) + "Report a parsing gap" (#245). The gap
-            report builds a structure-only repro artifact from the active parse;
-            when the user ran the opt-in WebLLM comparison (#242), the
-            characterized disagreements ride along (kinds only, never values). */}
-        <FeedbackPanel
-          result={activeResult}
-          disagreements={reportableDisagreements}
-        />
+        {/* Star-rating feedback (#51). The "Report a parsing gap" affordance
+            moved out of this header into the "What an ATS misses" tab, next to
+            the disagreements it characterizes (see the disagreement TabPanel). */}
+        <FeedbackPanel />
       </Card>
 
       {/* Detail sits behind tabs in its own card so only one panel shows at a
@@ -242,7 +244,17 @@ function ParsedCard({
             </TabPanel>
             {disagreement.isAvailable && (
               <TabPanel id="disagreement">
-                <DisagreementPanel controller={disagreement} />
+                <div className="flex flex-col gap-4">
+                  <DisagreementPanel controller={disagreement} />
+                  {/* The gap report lives here (moved out of the score header):
+                      it builds a structure-only repro artifact from the active
+                      parse; when the comparison has run (#242), the characterized
+                      disagreements ride along (kinds only, never values). */}
+                  <ReportGapSection
+                    result={activeResult}
+                    disagreements={reportableDisagreements}
+                  />
+                </div>
               </TabPanel>
             )}
             {critique.isAvailable && (
