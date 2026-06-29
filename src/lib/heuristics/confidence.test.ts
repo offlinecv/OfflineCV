@@ -103,7 +103,10 @@ describe("computeConfidence — hard failures force escalation", () => {
     expect(result.confidence).toBeGreaterThan(0);
   });
 
-  it("forces ocr escalation on low extraction ratio", () => {
+  it("forces llm escalation on low extraction ratio for non-scanned PDFs (#243)", () => {
+    // A text-layer PDF where the heuristic parser failed to capture most content
+    // (extraction ratio < EXTRACTION_RATIO_FLOOR) should suggest an on-device LLM
+    // recovery pass, not OCR — the bytes are extractable, just poorly structured.
     const result = computeConfidence({
       heuristic: mkHeuristic(),
       layout: cleanLayout,
@@ -111,7 +114,19 @@ describe("computeConfidence — hard failures force escalation", () => {
       extractedCharCount: 100,
     });
     expect(result.confidence).toBe(0);
-    expect(result.suggestedEscalation).toBe("ocr");
+    expect(result.suggestedEscalation).toBe("llm");
+  });
+
+  it("forces llm escalation when zero experience on non-student resume (#243)", () => {
+    const h = mkHeuristic({ experience: [], education: [] });
+    const result = computeConfidence({
+      heuristic: h,
+      layout: cleanLayout,
+      rawCharCount: 400,
+      extractedCharCount: 350,
+    });
+    expect(result.confidence).toBe(0);
+    expect(result.suggestedEscalation).toBe("llm");
   });
 });
 

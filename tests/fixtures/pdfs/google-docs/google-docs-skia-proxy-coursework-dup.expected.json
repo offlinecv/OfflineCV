@@ -7,7 +7,7 @@
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "ocr",
+    "suggestedEscalation": "llm",
     "fieldsPopulated": [
       "current_company",
       "current_title",

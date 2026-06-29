@@ -43,6 +43,9 @@ import {
   usePersistentCounter,
 } from "../../hooks/usePersistentFlag.ts";
 import { useGitHubStars } from "../../hooks/useGitHubStars.ts";
+import { useReportGap } from "../../hooks/useReportGap.ts";
+import type { CascadeResult } from "../../lib/heuristics/types.ts";
+import type { ParseDisagreement } from "../../lib/heuristics/disagreement.ts";
 
 /**
  * StarCtaOnce — renders the `card` variant of `GitHubStarCta` and fires
@@ -69,13 +72,46 @@ function StarCtaOnce({
 const CATEGORIES = ["Parsing", "Scoring", "UI", "Other"] as const;
 type Category = (typeof CATEGORIES)[number];
 
-// localStorage key constants (exported so sibling features can reference the same keys).
-export const LS_KEY_SEEN = "rl_feedback_seen";
-export const LS_KEY_SUBMITTED = "rl_feedback_submitted";
+// localStorage key constants (internal — only used within this module).
+const LS_KEY_SEEN = "rl_feedback_seen";
+const LS_KEY_SUBMITTED = "rl_feedback_submitted";
 // One-time star CTA seen flag (set when shown after a 4–5★ submission).
 const LS_KEY_STAR_CTA_SEEN = "rl_star_cta_seen";
 
-export function FeedbackPanel() {
+interface FeedbackPanelProps {
+  /** The active parse result. When provided, the "Report a parsing gap"
+   *  affordance is rendered (it builds a structure-only repro artifact from it).
+   *  Absent on surfaces that have no parse (the gap report needs one). */
+  result?: CascadeResult;
+  /** Characterized disagreements from the opt-in WebLLM pass (#242/#245), so a
+   *  WebLLM user reports a *characterized* gap. Empty/omitted when the user
+   *  hasn't run the comparison — the report still works, just without them. */
+  disagreements?: readonly ParseDisagreement[];
+}
+
+/**
+ * FeedbackPanel — the one owning feedback surface. Composes two independent
+ * sections:
+ *   - the star-rating form (analytics-gated: no sink → no form)
+ *   - the "Report a parsing gap" affordance (#245), which is a LOCAL download
+ *     and works regardless of analytics (only its count-only telemetry is gated)
+ *
+ * Reuse-gate: the gap-report extends THIS surface rather than adding a parallel
+ * feedback component (CLAUDE.md). The two sections render independently so the
+ * gap report still appears in a keyless OSS build where the rating form does not.
+ */
+export function FeedbackPanel({ result, disagreements }: FeedbackPanelProps = {}) {
+  return (
+    <>
+      <FeedbackRatingForm />
+      {result && (
+        <ReportGapSection result={result} disagreements={disagreements} />
+      )}
+    </>
+  );
+}
+
+function FeedbackRatingForm() {
   // ── Persistent state ──────────────────────────────────────────────────────
   const [persistedSubmitted, setPersistedSubmitted] = usePersistentFlag(
     LS_KEY_SUBMITTED,
@@ -362,6 +398,114 @@ export function FeedbackPanel() {
           </div>
         )}
       </form>
+    </Card>
+  );
+}
+
+/**
+ * ReportGapSection — "Report a parsing gap" affordance (#245).
+ *
+ * Generates a structure-only, PII-redacted repro artifact (see
+ * `lib/heuristics/repro-artifact.ts`) and downloads it LOCALLY so the user can
+ * attach it to a GitHub issue by hand. NOTHING is uploaded — the copy says so,
+ * and the implementation has no network path. Renders regardless of analytics
+ * (the download is local); only `trackGapReported` (count-only) is env-gated.
+ *
+ * Progressive disclosure: a quiet one-line trigger that unfolds into the
+ * explainer + download button, mirroring the rating form's collapsed-first feel.
+ * Built from `Card`/`Button` primitives; semantic tokens only.
+ */
+function ReportGapSection({
+  result,
+  disagreements,
+}: {
+  result: CascadeResult;
+  disagreements?: readonly ParseDisagreement[];
+}) {
+  const [open, setOpen] = useState(false);
+  const { report, reported, error } = useReportGap(result, disagreements ?? []);
+  const headingId = useId();
+
+  if (!open) {
+    return (
+      <div className="flex items-center justify-end gap-2 -mt-2">
+        <Button
+          variant="link"
+          size="sm"
+          onClick={() => setOpen(true)}
+          aria-expanded={false}
+        >
+          Parser missed something? Report a parsing gap
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Card className="flex flex-col gap-3 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
+      <div className="flex flex-col gap-1">
+        <h2
+          id={headingId}
+          className="text-sm font-semibold text-content-primary"
+        >
+          Report a parsing gap
+        </h2>
+        <p className="max-w-prose text-sm text-content-tertiary">
+          Download a small, <strong>structure-only</strong> diagnostic file —
+          section boundaries, counts, and layout flags. It carries{" "}
+          <strong>none of your résumé text</strong> (no name, email, phone, or
+          bullet content), so it's safe to attach to a public issue. Nothing is
+          uploaded; the download stays in this browser until you attach it
+          yourself.
+        </p>
+      </div>
+
+      {reported ? (
+        <div
+          role="status"
+          className="flex flex-col gap-1 rounded border border-border-light bg-surface-subtle p-3"
+        >
+          <p className="text-sm font-medium text-content-primary">
+            Diagnostic file downloaded.
+          </p>
+          <p className="text-sm text-content-tertiary">
+            Attach it to a new issue at{" "}
+            <a
+              href="https://github.com/resumelint-org/resumelint/issues/new"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline decoration-dotted hover:decoration-solid"
+            >
+              github.com/resumelint-org/resumelint
+            </a>{" "}
+            describing what the parser got wrong.
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={report}
+            aria-describedby={headingId}
+          >
+            Download diagnostic file
+          </Button>
+          {disagreements && disagreements.length > 0 && (
+            <span className="text-xs text-content-muted">
+              Includes {disagreements.length} characterized gap
+              {disagreements.length === 1 ? "" : "s"} from the on-device
+              comparison (kinds only — no recovered text).
+            </span>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p role="alert" className="text-xs text-feedback-error-text">
+          {error}
+        </p>
+      )}
     </Card>
   );
 }
