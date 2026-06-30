@@ -42,6 +42,6 @@ export type JdMatchResult =
     }
   | {
       path: "semantic";
-      verdicts: RequirementVerdict[];
+      verdicts: readonly RequirementVerdict[];
       summary: { matched: number; total: number };
     };
