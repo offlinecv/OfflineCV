@@ -72,7 +72,7 @@ export function tryParseJsonObject(raw: string): JsonParseOutcome {
  * indirection without lowering risk.
  */
 // fallow-ignore-next-line complexity
-export function extractFirstBalancedObject(s: string): string | null {
+function extractFirstBalancedObject(s: string): string | null {
   const start = s.indexOf("{");
   if (start === -1) return null;
   let depth = 0;
