@@ -288,26 +288,34 @@ function LimitedParsingCard({
   const links = result.linkAnnotations;
   const uniqueUrls = Array.from(new Set(links.map((l) => l.url)));
 
+  const pages = result.diagnostics.pages;
+
   return (
     <Card className="flex flex-col gap-5 shadow-xs">
+      {/* 1. Header row */}
       <header className="flex items-center justify-between">
-        <StatusBadge tone="limited">Limited parsing</StatusBadge>
+        <span className="flex items-center gap-3">
+          <StatusBadge tone="limited">Not machine-readable</StatusBadge>
+          <span className="text-xs text-content-muted">
+            {pages} page{pages === 1 ? "" : "s"}
+          </span>
+        </span>
         <Button variant="link" className="text-content-primary" onClick={onReset}>
           Try a different PDF
         </Button>
       </header>
 
-      <div>
-        <h2 className="text-base font-semibold">
-          Some text wasn't readable in this PDF
+      {/* 2. Verdict block */}
+      <div role="status">
+        <h2 className="text-lg font-semibold">
+          A generic parser read almost nothing from this PDF.
         </h2>
-        <p className="mt-1 text-sm text-content-tertiary">
-          {result.diagnostics.pages} page
-          {result.diagnostics.pages === 1 ? "" : "s"} scanned. Below is what we
-          could recover.
+        <p className="mt-2 text-sm text-content-secondary">
+          Most text-based résumé screeners face the same challenge — they see almost nothing.
         </p>
       </div>
 
+      {/* 3. Recovered links — visually primary content */}
       <section className="flex flex-col gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
           Recovered links
@@ -334,16 +342,21 @@ function LimitedParsingCard({
         )}
       </section>
 
-      <hr className="border-border-light" />
+      {/* 4. Fix hint — plain text, no second CTA button */}
+      <p className="text-sm text-content-tertiary">
+        Fix: re-export as a text-based PDF — not a scanned image or &ldquo;print to image&rdquo;.
+      </p>
 
-      <section className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-          What happened
-        </h3>
-        <p className="text-sm text-content-secondary">
+      {/* 5. "Why did this happen?" disclosure — collapsed by default */}
+      <hr className="border-border-light" />
+      <details className="text-sm">
+        <summary className="cursor-pointer text-content-secondary hover:text-content-primary">
+          Why did this happen?
+        </summary>
+        <p className="mt-2 text-content-secondary">
           {FONTS_UNMAPPABLE_BLURB}
         </p>
-      </section>
+      </details>
     </Card>
   );
 }

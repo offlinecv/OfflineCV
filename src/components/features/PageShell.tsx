@@ -85,7 +85,7 @@ export function PageShell({
       {children}
 
       <footer className="mt-auto flex flex-col gap-2 border-t border-border-light pt-6 text-xs text-content-tertiary">
-        <p>Your PDF stays in this browser tab.</p>
+        <p>Your PDF stays in this browser tab — it never enters an AI training pipeline.</p>
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <a
             href="https://github.com/resumelint-org/resumelint/blob/main/LICENSE"
