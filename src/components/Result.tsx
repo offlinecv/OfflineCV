@@ -311,7 +311,7 @@ function LimitedParsingCard({
           A generic parser read almost nothing from this PDF.
         </h2>
         <p className="mt-2 text-sm text-content-secondary">
-          Most text-based résumé screeners face the same challenge — they see almost nothing.
+          Most text-based resume screeners face the same challenge — they see almost nothing.
         </p>
       </div>
 

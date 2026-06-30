@@ -61,13 +61,12 @@ export default function App() {
                   nearly half of job seekers
                 </span>{" "}
                 say they&apos;ve lost trust in a process they can&apos;t see into.
-                <a
-                  href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
-                  target="_blank"
-                  rel="nofollow noopener noreferrer"
-                  className="align-super text-[0.7em] text-brand-amber hover:underline"
-                  aria-label="Source: Greenhouse 2025 AI in Hiring Report"
-                >1</a>
+                <span
+                  aria-hidden="true"
+                  className="align-super text-xs text-brand-amber"
+                >
+                  1
+                </span>
               </p>
               <p className="max-w-prose border-l-2 border-brand-amber pl-4 text-base font-medium text-content-primary sm:text-lg">
                 ResumeLint shows you what a generic parser reads back from your
