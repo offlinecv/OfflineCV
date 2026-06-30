@@ -23,7 +23,7 @@ import { JdInput } from "../components/features/JdInput.tsx";
 import { JdMatch } from "../components/features/JdMatch.tsx";
 import { useAnalyzedResume } from "../hooks/useAnalyzedResume.ts";
 import { useJdFitResume } from "./useJdFitResume.ts";
-import { extractJdTerms, computeCoverage } from "../lib/jd-match";
+import { extractJdTerms, computeCoverage, type JdMatchResult } from "../lib/jd-match";
 import { buildJdRewriteContext } from "../lib/jd-match/rewrite-context.ts";
 
 export default function JdFitApp() {
@@ -37,20 +37,28 @@ export default function JdFitApp() {
 
   // JD coverage memo — moved verbatim from App (#226). Runs only when there's
   // both JD text and a parsed résumé.
-  const jdMatch = useMemo(() => {
+  const jdMatch = useMemo<JdMatchResult | null>(() => {
     const trimmed = jdText.trim();
     if (trimmed.length === 0) return null;
     if (!resume) return null;
     const extracted = extractJdTerms(trimmed);
     if (extracted.all.length === 0) return null;
     const coverage = computeCoverage(resume.parsed, extracted.all);
-    return { extracted, coverage };
+    return {
+      path: "keyword",
+      coverage,
+      terms: extracted.all,
+      nounsDropped: extracted.nounsDropped,
+    };
   }, [jdText, resume]);
 
   // JD-driven rewrite steering — the missing-terms instruction folded into the
   // shared rewrite engine. Null when no JD / nothing missing → generic rewrite.
   const jdContext = useMemo(
-    () => (jdMatch ? buildJdRewriteContext(jdMatch.coverage) : null),
+    () =>
+      jdMatch?.path === "keyword"
+        ? buildJdRewriteContext(jdMatch.coverage)
+        : null,
     [jdMatch],
   );
 
@@ -104,13 +112,7 @@ export default function JdFitApp() {
         </ErrorState>
       )}
 
-      {jdMatch && (
-        <JdMatch
-          coverage={jdMatch.coverage}
-          terms={jdMatch.extracted.all}
-          nounsDropped={jdMatch.extracted.nounsDropped}
-        />
-      )}
+      {jdMatch && <JdMatch result={jdMatch} />}
 
       <ErrorBoundary onReset={resume?.reset ?? analyzed.reset}>
         {resume && (

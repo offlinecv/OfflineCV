@@ -11,18 +11,18 @@
  */
 
 import type { ExtractedTerm } from "../../lib/jd-match/extract-jd-terms.ts";
-import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
+import type { JdMatchResult } from "../../lib/jd-match";
 import { Card } from "@design-system";
 
 interface JdMatchProps {
-  coverage: CoverageResult;
-  terms: readonly ExtractedTerm[];
-  /** How many noun-pass terms the extractor silenced past its cap. When > 0,
-   *  the UI surfaces a footnote so the user knows the panel isn't exhaustive. */
-  nounsDropped?: number;
+  result: JdMatchResult;
 }
 
-export function JdMatch({ coverage, terms, nounsDropped = 0 }: JdMatchProps) {
+export function JdMatch({ result }: JdMatchProps) {
+  // Only the keyword path has a UI today; the semantic path (M6) renders nothing
+  // yet. Narrowing on `path` here keeps the consumer (JdFitApp) path-agnostic.
+  if (result.path !== "keyword") return null;
+  const { coverage, terms, nounsDropped } = result;
   const total = terms.length;
   const covered = coverage.covered.length;
 

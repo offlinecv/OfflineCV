@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { JdMatch } from "./JdMatch.tsx";
 import type { ExtractedTerm } from "../../lib/jd-match/extract-jd-terms.ts";
 import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
+import type { JdMatchResult } from "../../lib/jd-match";
 
 function term(
   id: string,
@@ -14,6 +15,15 @@ function term(
   source: ExtractedTerm["source"],
 ): ExtractedTerm {
   return { id, display, source, snippet: `…snippet for ${display}…` };
+}
+
+/** Wrap a keyword-path coverage result in the path-agnostic union (#199). */
+function kw(
+  coverage: CoverageResult,
+  terms: readonly ExtractedTerm[],
+  nounsDropped = 0,
+): JdMatchResult {
+  return { path: "keyword", coverage, terms, nounsDropped };
 }
 
 describe("JdMatch", () => {
@@ -30,7 +40,9 @@ describe("JdMatch", () => {
       score: 25,
       weights: { skill: 1, noun: 0.5 },
     };
-    const html = renderToStaticMarkup(createElement(JdMatch, { coverage, terms }));
+    const html = renderToStaticMarkup(
+      createElement(JdMatch, { result: kw(coverage, terms) }),
+    );
     expect(html).toContain("Your resume mentions 1 of 3 terms from this JD.");
     expect(html).not.toMatch(/\d+%\s*match/i);
   });
@@ -42,7 +54,9 @@ describe("JdMatch", () => {
       score: 0,
       weights: { skill: 1, noun: 0.5 },
     };
-    const html = renderToStaticMarkup(createElement(JdMatch, { coverage, terms: [] }));
+    const html = renderToStaticMarkup(
+      createElement(JdMatch, { result: kw(coverage, []) }),
+    );
     expect(html.toLowerCase()).toContain("diagnostic, not a verdict");
     expect(html.toLowerCase()).not.toMatch(/will\s+(pass|fail)/);
     expect(html.toLowerCase()).not.toContain("ats");
@@ -58,7 +72,9 @@ describe("JdMatch", () => {
       score: 50,
       weights: { skill: 1, noun: 0.5 },
     };
-    const html = renderToStaticMarkup(createElement(JdMatch, { coverage, terms }));
+    const html = renderToStaticMarkup(
+      createElement(JdMatch, { result: kw(coverage, terms) }),
+    );
     expect(html).toContain("Covered (1)");
     expect(html).toContain("Missing (1)");
     expect(html).toContain(">react<");
@@ -73,7 +89,7 @@ describe("JdMatch", () => {
       weights: { skill: 1, noun: 0.5 },
     };
     const html = renderToStaticMarkup(
-      createElement(JdMatch, { coverage, terms: [], nounsDropped: 7 }),
+      createElement(JdMatch, { result: kw(coverage, [], 7) }),
     );
     expect(html).toContain("+7 more capitalized phrases");
   });
@@ -86,7 +102,7 @@ describe("JdMatch", () => {
       weights: { skill: 1, noun: 0.5 },
     };
     const html = renderToStaticMarkup(
-      createElement(JdMatch, { coverage, terms: [], nounsDropped: 0 }),
+      createElement(JdMatch, { result: kw(coverage, [], 0) }),
     );
     expect(html).not.toContain("not surfaced");
     expect(html).not.toContain("not shown");
@@ -102,8 +118,18 @@ describe("JdMatch", () => {
       weights: { skill: 1, noun: 0.5 },
     };
     const html = renderToStaticMarkup(
-      createElement(JdMatch, { coverage, terms: [t] }),
+      createElement(JdMatch, { result: kw(coverage, [t]) }),
     );
     expect(html).toContain(`title="${t.snippet}"`);
+  });
+
+  it("renders nothing for a non-keyword (semantic) path until M6 builds its UI", () => {
+    const result: JdMatchResult = {
+      path: "semantic",
+      verdicts: [],
+      summary: { matched: 0, total: 0 },
+    };
+    const html = renderToStaticMarkup(createElement(JdMatch, { result }));
+    expect(html).toBe("");
   });
 });
