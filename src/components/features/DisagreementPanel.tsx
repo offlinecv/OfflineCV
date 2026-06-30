@@ -4,11 +4,15 @@
 /**
  * DisagreementPanel — the headline "what an ATS misses" surface (issue #242).
  *
- * Shows, on the opt-in WebLLM pass, the gap between what the deterministic
- * heuristic parse (a generic ATS text extractor) recovered and what the LLM
- * recovered — and names the likely layout cause. Detection is the pure
- * `diffParses` in `lib/heuristics/disagreement.ts`; engine + state glue is
- * `useParseDisagreement`. This file is display only.
+ * Shows, on the opt-in combined WebLLM pass (#262), the gap between what the
+ * deterministic heuristic parse (a generic ATS text extractor) recovered and
+ * what the LLM recovered — and names the likely layout cause. Detection is
+ * the pure `diffParses` in `lib/heuristics/disagreement.ts`; engine + state
+ * glue is `useResumeAnalysisLlm` (the single controller that also feeds the
+ * "Resume quality" tab from the same inference). This file is display only.
+ *
+ * The CTA and status are SHARED with the critique tab: clicking "Analyze" in
+ * either tab runs the one combined pass, after which both tabs populate.
  *
  * Reuse analysis (CLAUDE.md 3-tier rule):
  *   - Primitive: `Button` (the opt-in CTA) — no raw `<button>`.
@@ -21,9 +25,9 @@
 
 import { Button, StatusBadge, ModelLoadProgress } from "@design-system";
 import {
-  labelForDisagreement,
-  type DisagreementController,
-} from "../../hooks/useParseDisagreement.ts";
+  labelForAnalysis,
+  type AnalysisController,
+} from "../../hooks/useResumeAnalysisLlm.ts";
 import type { ParseDisagreement } from "../../lib/heuristics/disagreement.ts";
 import type { LayoutTrigger } from "../../lib/heuristics/types.ts";
 
@@ -98,7 +102,7 @@ const KIND_BADGE: Record<ParseDisagreement["kind"], string> = {
 export function DisagreementPanel({
   controller,
 }: {
-  controller: DisagreementController;
+  controller: AnalysisController;
 }) {
   const { status } = controller;
 
@@ -111,7 +115,8 @@ export function DisagreementPanel({
           </h2>
           <p className="max-w-prose text-sm text-content-tertiary">
             Run a small on-device model to compare what a generic ATS extractor
-            reads against what's actually on the page. Nothing leaves this tab.
+            reads against what's actually on the page, AND get a content quality
+            critique. Nothing leaves this tab.
           </p>
         </div>
         <Button
@@ -119,9 +124,9 @@ export function DisagreementPanel({
           size="sm"
           onClick={() => void controller.run()}
           disabled={controller.isBusy}
-          aria-label="Compare the heuristic parse against an on-device LLM parse"
+          aria-label="Analyze the resume with an on-device model"
         >
-          {labelForDisagreement(status)}
+          {labelForAnalysis(status)}
         </Button>
       </div>
 
@@ -129,14 +134,14 @@ export function DisagreementPanel({
         <ModelLoadProgress
           progress={status.progress.progress}
           text={status.progress.text}
-          label="Loading the comparison model (one-time download)"
+          label="Loading the on-device model (one-time download)"
           showExplainer
         />
       )}
 
       {status.kind === "running" && (
         <p className="text-sm text-content-secondary" role="status">
-          Comparing parses…
+          Analyzing…
         </p>
       )}
 

@@ -10,7 +10,7 @@
  * WebLLM pass that re-parses the resume with an on-device model and returns the
  * full `LlmParsedResume` for the caller to render in place of the heuristic parse.
  *
- * Mirrors `useParseDisagreement`'s shape (WebGPU-gated controller, `loadEngine` +
+ * Mirrors `useResumeAnalysisLlm`'s shape (WebGPU-gated controller, `loadEngine` +
  * inference guard, `ModelLoadProgress` progress UI). The key difference: instead
  * of diffing against the heuristic parse, it returns the LLM result directly so
  * the parent can re-render the full result surface with `final_source: "llm_fallback"`.

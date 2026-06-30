@@ -86,10 +86,14 @@
       Issue #241 · dev-only · WebGPU required · not bundled into production.
     </p>
     <p>
-      Runs <code>parseResumeWithLlm</code> over 3 inline PII-safe resume
+      Runs BOTH the SEPARATE pass (<code>parseResumeWithLlm</code> +
+      <code>critiqueResumeWithLlm</code>) AND the COMBINED pass
+      (<code>analyzeResumeWithLlm</code>) over 3 inline PII-safe resume
       fixtures (<code>software-engineer</code>,
       <code>marketing-coordinator</code>, <code>recent-grad</code>) and scores
-      field-level accuracy. Results go into the PR #241 description eval table.
+      field-level accuracy. Two reports come out: the original parse-only one
+      (PR #241) and a side-by-side comparison (PR #262, load-bearing quality
+      gate).
     </p>
     <p>
       One model per tab on purpose: cycling multi-GB models in a single tab is
@@ -104,17 +108,21 @@
     <p id="status">Idle. Click &ldquo;Run eval&rdquo; to start.</p>
     <p id="progress">&nbsp;</p>
     <div class="downloads">
-      <a id="download-json" hidden>Download JSON report</a>
-      <a id="download-md" hidden>Download Markdown report</a>
+      <a id="download-json" hidden>Download JSON report (parse-only, #241)</a>
+      <a id="download-md" hidden>Download Markdown report (parse-only, #241)</a>
+      <a id="download-combo-json" hidden>Download JSON report (combined comparison, #262)</a>
+      <a id="download-combo-md" hidden>Download Markdown report (combined comparison, #262)</a>
     </div>
     <pre id="log"></pre>
     <p class="note">
-      Download the Markdown report and paste findings into
-      <a href="https://github.com/resumelint-org/resumelint/issues/241" target="_blank"
-        >issue #241</a
+      The parse-only report goes in PR #241; the combined-comparison report
+      goes in
+      <a href="https://github.com/resumelint-org/resumelint/issues/262" target="_blank"
+        >PR #262</a
       >
-      / PR #241 description. This page is not committed to <code>dist/</code> —
-      see <code>src/lib/webllm/parse-eval/README.md</code> for details.
+      under the quality-measurement gate. This page is not committed to
+      <code>dist/</code> — see <code>src/lib/webllm/parse-eval/README.md</code>
+      for details.
     </p>
     <script type="module" src="/src/lib/webllm/parse-eval/parse-eval-browser.ts"></script>
   </body>

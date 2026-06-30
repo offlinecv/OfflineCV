@@ -28,9 +28,9 @@
  * PR writeup) may bump the default; update the comment and models.ts together.
  *
  * ## JSON repair
- * Small models often wrap valid JSON in markdown fences or add prose. This
- * file ships its own production-grade repair ladder (not imported from
- * spike/) because spike/ is dev-only and must not leak into the prod bundle.
+ * Small models often wrap valid JSON in markdown fences or add prose. The
+ * production-grade repair ladder lives in `./json-repair.ts` — shared with the
+ * combined `analyze-resume.ts` pass so both callers use identical logic.
  *
  * ## No network calls
  * This function only calls `engine.chat.completions.create()`. The engine
@@ -40,6 +40,7 @@
  */
 
 import type { WebLlmEngine } from "./types.ts";
+import { tryParseJsonObject } from "./json-repair.ts";
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -67,7 +68,8 @@ export interface LlmParsedResume {
 // Safe empty shape (returned on irrecoverable parse failure)
 // ---------------------------------------------------------------------------
 
-function emptyResume(): LlmParsedResume {
+/** The safe empty shape — exported for reuse by `analyze-resume.ts`. */
+export function emptyLlmParsedResume(): LlmParsedResume {
   return {
     full_name: null,
     email: null,
@@ -78,90 +80,6 @@ function emptyResume(): LlmParsedResume {
     experience: [],
     education: [],
   };
-}
-
-// ---------------------------------------------------------------------------
-// JSON repair ladder
-//
-// Mirror of the proven pattern in src/lib/webllm/spike/measure.ts
-// `tryParseJson`, adapted for object (not array) extraction and kept as a
-// production copy (spike/ is dev-only and must not be imported here).
-// ---------------------------------------------------------------------------
-
-type ParseOutcome =
-  | { ok: true; value: unknown }
-  | { ok: false };
-
-function tryParseJsonObject(raw: string): ParseOutcome {
-  const attempt = (s: string): ParseOutcome => {
-    try {
-      return { ok: true, value: JSON.parse(s) };
-    } catch {
-      return { ok: false };
-    }
-  };
-
-  // 1. Strict parse
-  const strict = attempt(raw);
-  if (strict.ok) return strict;
-
-  // 2. Strip ```json ... ``` (and bare ``` ... ```) fences
-  const stripped = raw
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/, "")
-    .trim();
-  const fenced = attempt(stripped);
-  if (fenced.ok) return fenced;
-
-  // 3. Extract the first *balanced* `{...}` span (handles prose/fences before
-  //    AND after the JSON). A greedy regex (`/\{[\s\S]*\}/`) would run to the
-  //    last `}` in the string and swallow trailing prose that happens to
-  //    contain a brace (e.g. "...}\nNote: use {name} as a placeholder"),
-  //    failing the parse and silently dropping otherwise-valid output. Walk
-  //    brace depth instead, skipping over string literals so a `}` inside a
-  //    value doesn't close the object early.
-  const span = extractFirstBalancedObject(stripped);
-  if (span !== null) {
-    const extracted = attempt(span);
-    if (extracted.ok) return extracted;
-  }
-
-  return { ok: false };
-}
-
-/**
- * Return the first balanced `{...}` substring of `s`, or null if there is no
- * balanced object. String literals (and their `\"` escapes) are skipped so a
- * brace inside a JSON string value never miscounts the depth.
- *
- * The branch count is irreducible for a correct scanner (string-literal skip +
- * escape handling + depth tracking are the whole point); splitting it would add
- * indirection without lowering risk. Branch coverage is asserted via
- * parse-resume.test.ts ("balanced object" cases).
- */
-// fallow-ignore-next-line complexity
-function extractFirstBalancedObject(s: string): string | null {
-  const start = s.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < s.length; i++) {
-    const ch = s[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === '"') inString = false;
-      continue;
-    }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return s.slice(start, i + 1);
-    }
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,9 +130,16 @@ function coerceEducation(
     }));
 }
 
-function coerceParsed(raw: unknown): LlmParsedResume {
+/**
+ * Coerce an arbitrary parsed value into a strict `LlmParsedResume`. Used both
+ * here and by `analyze-resume.ts` (combined parse+critique pass) so a single
+ * shape-coercion definition guards every LLM-derived parse on its way into the
+ * rest of the app. Always returns a non-throwing shape — invalid input maps to
+ * the safe empty shape.
+ */
+export function coerceLlmParsedResume(raw: unknown): LlmParsedResume {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    return emptyResume();
+    return emptyLlmParsedResume();
   }
   const obj = raw as Record<string, unknown>;
   return {
@@ -308,14 +233,14 @@ export async function parseResumeWithLlm(
   } catch (err) {
     // Engine error (OOM, context overflow, etc.) — return safe shape, no throw.
     console.warn("[parse-resume] engine.chat.completions.create failed:", err);
-    return emptyResume();
+    return emptyLlmParsedResume();
   }
 
   const parsed = tryParseJsonObject(raw);
   if (!parsed.ok) {
     console.warn("[parse-resume] JSON parse failed after repair attempts. Raw:", raw.slice(0, 200));
-    return emptyResume();
+    return emptyLlmParsedResume();
   }
 
-  return coerceParsed(parsed.value);
+  return coerceLlmParsedResume(parsed.value);
 }

@@ -5,7 +5,10 @@
  * CritiquePanel — the "Resume quality" tab panel (issue #244).
  *
  * Shows the results of the on-device LLM content-quality critique, one row
- * per flagged bullet and a list of missing sections.
+ * per flagged bullet and a list of missing sections. As of #262 the critique
+ * is one half of a single combined inference (the other half feeds the
+ * "What an ATS misses" tab) — this panel is display-only and reads its slice
+ * from the shared `AnalysisController`.
  *
  * Bullet finding rows include a "Suggest a rewrite" nudge that navigates the
  * user to the "Reconstructed resume" tab, where the per-role wand button
@@ -20,8 +23,10 @@
 
 import { Button, Card, ModelLoadProgress, StatusBadge } from "@design-system";
 import type { BulletFinding, ResumeCritique } from "../../lib/webllm/critique-resume.ts";
-import type { CritiqueController } from "../../hooks/useResumeCritique.ts";
-import { labelForCritique } from "../../hooks/useResumeCritique.ts";
+import {
+  labelForAnalysis,
+  type AnalysisController,
+} from "../../hooks/useResumeAnalysisLlm.ts";
 
 // ── Issue labels ──────────────────────────────────────────────────────────────
 
@@ -172,7 +177,7 @@ export function CritiquePanel({
   controller,
   onGoToRewrite,
 }: {
-  controller: CritiqueController;
+  controller: AnalysisController;
   /** Navigate to the "Reconstructed resume" tab so the user can use the wand. */
   onGoToRewrite: () => void;
 }) {
@@ -187,8 +192,8 @@ export function CritiquePanel({
           </h2>
           <p className="max-w-prose text-sm text-content-tertiary">
             Run a small on-device model to judge bullet quality — weak verbs,
-            missing metrics, vague language — and flag absent sections. Nothing
-            leaves this tab.
+            missing metrics, vague language — and flag absent sections. The same
+            run also surfaces "What an ATS misses." Nothing leaves this tab.
           </p>
         </div>
         <Button
@@ -196,9 +201,9 @@ export function CritiquePanel({
           size="sm"
           onClick={() => void controller.run()}
           disabled={controller.isBusy}
-          aria-label="Run on-device LLM content quality critique"
+          aria-label="Analyze the resume with an on-device model"
         >
-          {labelForCritique(status)}
+          {labelForAnalysis(status)}
         </Button>
       </div>
 
@@ -206,14 +211,14 @@ export function CritiquePanel({
         <ModelLoadProgress
           progress={status.progress.progress}
           text={status.progress.text}
-          label="Loading the critique model (one-time download)"
+          label="Loading the on-device model (one-time download)"
           showExplainer
         />
       )}
 
       {status.kind === "running" && (
         <p className="text-sm text-content-secondary" role="status">
-          Judging content…
+          Analyzing…
         </p>
       )}
 

@@ -4,14 +4,15 @@
 // @vitest-environment jsdom
 
 /**
- * Lifecycle coverage for the three WebGPU-gated WebLLM controllers (#242/#243/
- * #244): useParseDisagreement, useLlmEscapeHatch, useResumeCritique.
+ * Lifecycle coverage for the two WebGPU-gated WebLLM controllers (#262/#243):
+ * `useResumeAnalysisLlm` (the unified parse+critique controller that replaced
+ * `useParseDisagreement` + `useResumeCritique`) and `useLlmEscapeHatch`.
  *
- * The engine layer (capability probe, loadEngine, the parse/critique passes,
- * model selection, analytics) is mocked, so these tests exercise the React/
- * state glue only — availability gating, the idle→loading→done happy path, and
- * the error path — via a probe component (the project has no RTL; same pattern
- * as the other hook tests).
+ * The engine layer (capability probe, loadEngine, the combined analysis pass,
+ * the escape-hatch parse pass, model selection, analytics) is mocked, so these
+ * tests exercise the React/state glue only — availability gating, the
+ * idle→loading→done happy path, and the error path — via a probe component
+ * (the project has no RTL; same pattern as the other hook tests).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -40,6 +41,29 @@ vi.mock("../lib/webllm/web-llm.ts", () => ({
   releaseInference: vi.fn(),
 }));
 
+vi.mock("../lib/webllm/analyze-resume.ts", () => ({
+  analyzeResumeWithLlm: () =>
+    Promise.resolve({
+      parse: {
+        full_name: "LLM Name",
+        email: null,
+        phone: null,
+        location: null,
+        summary: null,
+        skills: [],
+        experience: [],
+        education: [],
+      },
+      critique: {
+        bulletFindings: [
+          { bullet: "x", issue: "weak_verb" },
+          { bullet: "y", issue: "ok" },
+        ],
+        missingSections: ["skills"],
+      },
+    }),
+}));
+
 vi.mock("../lib/webllm/parse-resume.ts", () => ({
   parseResumeWithLlm: () =>
     Promise.resolve({
@@ -54,17 +78,6 @@ vi.mock("../lib/webllm/parse-resume.ts", () => ({
     }),
 }));
 
-vi.mock("../lib/webllm/critique-resume.ts", () => ({
-  critiqueResumeWithLlm: () =>
-    Promise.resolve({
-      bulletFindings: [
-        { bullet: "x", issue: "weak_verb" },
-        { bullet: "y", issue: "ok" },
-      ],
-      missingSections: ["skills"],
-    }),
-}));
-
 vi.mock("./useModelSelection.ts", () => ({
   useModelSelection: () => ({ selectedModelId: "test-model" }),
 }));
@@ -76,10 +89,14 @@ vi.mock("../lib/analytics.ts", () => ({
   trackCritiqueRan: vi.fn(),
 }));
 
-import { useParseDisagreement } from "./useParseDisagreement.ts";
+import { useResumeAnalysisLlm } from "./useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "./useLlmEscapeHatch.ts";
-import { useResumeCritique } from "./useResumeCritique.ts";
 import { acquireInference, releaseInference } from "../lib/webllm/web-llm.ts";
+import {
+  trackLlmParseRan,
+  trackDisagreementsFound,
+  trackCritiqueRan,
+} from "../lib/analytics.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -148,31 +165,40 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("useParseDisagreement", () => {
-  it("runs the pass and reaches done", async () => {
+describe("useResumeAnalysisLlm", () => {
+  it("runs the combined pass and reaches done with both halves populated", async () => {
     const r = result();
-    const sink: { current: ReturnType<typeof useParseDisagreement> | null } = {
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
       current: null,
     };
-    await mount(() => useParseDisagreement(r), sink);
+    await mount(() => useResumeAnalysisLlm(r), sink);
     expect(sink.current!.isAvailable).toBe(true);
     await act(async () => {
       await sink.current!.run();
     });
-    expect(sink.current!.status.kind).toBe("done");
+    const status = sink.current!.status;
+    expect(status.kind).toBe("done");
+    if (status.kind !== "done") return;
+    // The diff and critique both populate from the single inference.
+    expect(status.disagreements).toBeDefined();
+    expect(status.critique.bulletFindings).toHaveLength(2);
     // The #148 snapshot-before-await contract: the controller acquires the
     // inference slot for the selected model and releases the same id.
     expect(acquireInference).toHaveBeenCalledWith("test-model");
     expect(releaseInference).toHaveBeenCalledWith("test-model");
+    // All three telemetry events fire from the single combined pass.
+    expect(trackLlmParseRan).toHaveBeenCalledTimes(1);
+    expect(trackDisagreementsFound).toHaveBeenCalledTimes(1);
+    expect(trackCritiqueRan).toHaveBeenCalledTimes(1);
   });
 
   it("is unavailable without WebGPU", async () => {
     webgpu = "unavailable";
     const r = result();
-    const sink: { current: ReturnType<typeof useParseDisagreement> | null } = {
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
       current: null,
     };
-    await mount(() => useParseDisagreement(r), sink);
+    await mount(() => useResumeAnalysisLlm(r), sink);
     expect(sink.current!.isAvailable).toBe(false);
   });
 });
@@ -206,24 +232,5 @@ describe("useLlmEscapeHatch", () => {
       await sink.current!.run();
     });
     expect(sink.current!.status.kind).toBe("error");
-  });
-});
-
-describe("useResumeCritique", () => {
-  it("runs the critique and reaches done", async () => {
-    const sink: { current: ReturnType<typeof useResumeCritique> | null } = {
-      current: null,
-    };
-    const r = result();
-    await mount(() => useResumeCritique(r.parsed, r.rawText), sink);
-    expect(sink.current!.isAvailable).toBe(true);
-    await act(async () => {
-      await sink.current!.run();
-    });
-    expect(sink.current!.status.kind).toBe("done");
-    // The #148 snapshot-before-await contract: the controller acquires the
-    // inference slot for the selected model and releases the same id.
-    expect(acquireInference).toHaveBeenCalledWith("test-model");
-    expect(releaseInference).toHaveBeenCalledWith("test-model");
   });
 });

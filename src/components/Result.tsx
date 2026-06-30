@@ -13,9 +13,8 @@ import { SourceDiagnosticsPanel } from "./features/SourceDiagnosticsPanel.tsx";
 import { DisagreementPanel } from "./features/DisagreementPanel.tsx";
 import { ReportGapSection } from "./features/ReportGapSection.tsx";
 import { CritiquePanel } from "./features/CritiquePanel.tsx";
-import { useParseDisagreement } from "../hooks/useParseDisagreement.ts";
+import { useResumeAnalysisLlm } from "../hooks/useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
-import { useResumeCritique } from "../hooks/useResumeCritique.ts";
 import { LlmEscapeHatchBanner } from "./features/LlmEscapeHatchBanner.tsx";
 import type { LlmParsedResume } from "../lib/webllm/parse-resume.ts";
 import { mergeLlmParse } from "../lib/webllm/merge-override.ts";
@@ -88,18 +87,20 @@ function ParsedCard({
   const [tab, setTab] = useState("reconstructed");
   const triggerCount = result.triggers.length;
 
-  // Opt-in WebLLM "what an ATS misses" comparison (#242). The controller is
-  // lifted here so the tab is only advertised on WebGPU-capable browsers with
-  // extractable text; on everything else the tab (and panel) are silently
-  // absent. The panel itself drives the opt-in run + diff.
-  const disagreement = useParseDisagreement(result);
+  // Opt-in combined WebLLM analysis (#262). One controller drives BOTH the
+  // "What an ATS misses" (#242) and "Resume quality" (#244) tabs from a single
+  // inference. The controller is lifted here so the two tabs are only advertised
+  // on WebGPU-capable browsers with extractable text; on everything else the
+  // tabs (and panels) are silently absent. Either panel's CTA triggers the same
+  // combined run; status (loading/running/done/error) is shared.
+  const analysis = useResumeAnalysisLlm(result);
 
   // Characterized gaps to fold into a "Report a parsing gap" download (#245) —
-  // available only once the opt-in WebLLM comparison has completed. Kinds/fields
+  // available only once the opt-in WebLLM analysis has completed. Kinds/fields
   // only enter the artifact (never the recovered values); see repro-artifact.ts.
   const reportableDisagreements =
-    disagreement.status.kind === "done"
-      ? disagreement.status.disagreements
+    analysis.status.kind === "done"
+      ? analysis.status.disagreements
       : undefined;
 
   // Degenerate-case LLM escape hatch (#243). Only available when
@@ -140,12 +141,20 @@ function ParsedCard({
 
   const isLlmRecovered = llmOverride !== null;
 
-  // Opt-in WebLLM content-quality critique (#244). Runs on the active parsed
-  // result so that when the #243 escape hatch has recovered the parse, the
-  // critique judges the improved fields rather than the raw heuristic output.
-  // Must be called AFTER activeResult is computed (hooks ordering is stable
-  // because activeResult is a useMemo, not a conditional render path).
-  const critique = useResumeCritique(activeResult.parsed, activeResult.rawText);
+  // Tab-visibility split (preserves the old per-controller availability gates
+  // even though one controller now drives both tabs, #262). The
+  // "What an ATS misses" tab shows whenever the analysis is available
+  // (WebGPU + extractable text). The "Resume quality" tab additionally requires
+  // something worth critiquing on the active parse — a bullet description or a
+  // summary. Without that gate, the critique tab would render "All bullets look
+  // strong" for a resume that has no bullets at all, which reads as a bug.
+  const hasBullets = (activeResult.parsed.experience ?? []).some(
+    (e) => typeof e.description === "string" && e.description.trim().length > 0,
+  );
+  const hasSummary =
+    typeof activeResult.parsed.summary === "string" &&
+    activeResult.parsed.summary.trim().length > 0;
+  const isCritiqueVisible = analysis.isAvailable && (hasBullets || hasSummary);
 
   return (
     // Two stacked surfaces: the score "summary" card on top, the tabbed detail
@@ -211,10 +220,10 @@ function ParsedCard({
               without opening it. */}
           <TabList aria-label="Parsed result views">
             <Tab id="reconstructed">Reconstructed resume</Tab>
-            {disagreement.isAvailable && (
+            {analysis.isAvailable && (
               <Tab id="disagreement">What an ATS misses</Tab>
             )}
-            {critique.isAvailable && (
+            {isCritiqueVisible && (
               <Tab id="critique">Resume quality</Tab>
             )}
             <Tab id="diagnostics" count={triggerCount}>
@@ -231,10 +240,10 @@ function ParsedCard({
                 jdContext={jdContext}
               />
             </TabPanel>
-            {disagreement.isAvailable && (
+            {analysis.isAvailable && (
               <TabPanel id="disagreement">
                 <div className="flex flex-col gap-4">
-                  <DisagreementPanel controller={disagreement} />
+                  <DisagreementPanel controller={analysis} />
                   {/* The gap report lives here (moved out of the score header):
                       it builds a structure-only repro artifact from the active
                       parse; when the comparison has run (#242), the characterized
@@ -246,14 +255,14 @@ function ParsedCard({
                 </div>
               </TabPanel>
             )}
-            {critique.isAvailable && (
+            {isCritiqueVisible && (
               <TabPanel id="critique">
                 {/* onGoToRewrite: switch back to reconstructed tab where the
                     per-role wand button (#3 / useSectionRewrite) already lives.
                     The critique panel links each flagged bullet to this affordance
                     instead of building a parallel rewrite UI (issue #244). */}
                 <CritiquePanel
-                  controller={critique}
+                  controller={analysis}
                   onGoToRewrite={() => setTab("reconstructed")}
                 />
               </TabPanel>

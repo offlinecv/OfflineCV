@@ -117,7 +117,12 @@ const ISSUE_VALUES = new Set<string>([
   "ok",
 ]);
 
-function coerceBulletFinding(
+/**
+ * Coerce one parsed JSON object into a `BulletFinding`. Exported for reuse by
+ * the combined `analyze-resume.ts` pass so both call sites apply identical
+ * issue-value validation and trimming.
+ */
+export function coerceBulletFindingObject(
   raw: Record<string, unknown>,
   fallbackBullet: string,
 ): BulletFinding {
@@ -134,7 +139,12 @@ function coerceBulletFinding(
   return { bullet, issue, suggestion };
 }
 
-function coerceMeta(raw: Record<string, unknown>): {
+/**
+ * Coerce one parsed JSON object into the meta half of `ResumeCritique`
+ * (missingSections + optional summaryFeedback). Exported for reuse by the
+ * combined `analyze-resume.ts` pass.
+ */
+export function coerceMetaCritique(raw: Record<string, unknown>): {
   missingSections: string[];
   summaryFeedback?: string;
 } {
@@ -199,7 +209,7 @@ function parseBulletResponse(
     if (bulletIdx >= bullets.length) break;
     const obj = tryParseJson(line);
     if (obj === null) continue;
-    findings.push(coerceBulletFinding(obj, bullets[bulletIdx]!));
+    findings.push(coerceBulletFindingObject(obj, bullets[bulletIdx]!));
     bulletIdx++;
   }
   // If the model returned fewer findings than bullets (truncation), pad with
@@ -263,7 +273,7 @@ function parseMetaResponse(metaRaw: string): {
   }
   const obj = tryParseJson(metaRaw.slice(firstBrace, lastBrace + 1));
   if (obj === null) return { missingSections: [] };
-  return coerceMeta(obj);
+  return coerceMetaCritique(obj);
 }
 
 /** Pass 2: meta critique (missing sections + summary feedback). */
