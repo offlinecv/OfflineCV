@@ -31,7 +31,7 @@ export function SourcePdfPanel({ bytes, sourceKind }: SourcePdfPanelProps) {
   }
   return (
     <p className="text-sm text-content-muted">
-      No source preview available for DOCX — see the Extracted text tab.
+      No source preview available for DOCX — see the Extracted text view.
     </p>
   );
 }

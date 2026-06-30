@@ -2,18 +2,14 @@
 // Copyright 2026 The resumelint Authors
 
 import { useCallback, useMemo, useState } from "react";
-import type { CascadeResult, LayoutTrigger } from "../lib/heuristics/types.ts";
+import type { CascadeResult } from "../lib/heuristics/types.ts";
 import { computeAnonymousAtsScore, type AnonymousAtsScore } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
 import { ReconstructedResume } from "./features/ReconstructedResume.tsx";
 import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
-import { LayoutFlagsList } from "./features/LayoutFlagsList.tsx";
-import {
-  SourcePdfPanel,
-  ExtractedTextPanel,
-} from "./features/EvidencePanel.tsx";
+import { SourceDiagnosticsPanel } from "./features/SourceDiagnosticsPanel.tsx";
 import { DisagreementPanel } from "./features/DisagreementPanel.tsx";
 import { ReportGapSection } from "./features/ReportGapSection.tsx";
 import { CritiquePanel } from "./features/CritiquePanel.tsx";
@@ -207,19 +203,23 @@ function ParsedCard({
           App/useEditableParse. */}
       <Card className="flex flex-col shadow-xs">
         <Tabs id="result" value={tab} onValueChange={setTab}>
+          {/* Primary tabs ordered by value: insight first, evidence last
+              (#263). The evidence tab is always present and always last, so the
+              "Source & diagnostics" tab no longer shifts position when the two
+              conditional insight tabs are absent. The layout-flag count badge is
+              promoted to this parent tab so the warning count stays visible
+              without opening it. */}
           <TabList aria-label="Parsed result views">
             <Tab id="reconstructed">Reconstructed resume</Tab>
-            <Tab id="source">Source PDF</Tab>
-            <Tab id="extracted">Extracted text</Tab>
-            <Tab id="flags" count={triggerCount}>
-              Layout flags
-            </Tab>
             {disagreement.isAvailable && (
               <Tab id="disagreement">What an ATS misses</Tab>
             )}
             {critique.isAvailable && (
               <Tab id="critique">Resume quality</Tab>
             )}
+            <Tab id="diagnostics" count={triggerCount}>
+              Source &amp; diagnostics
+            </Tab>
           </TabList>
 
           <div className="pt-4">
@@ -229,17 +229,6 @@ function ParsedCard({
                 score={activeScore}
                 edit={edit}
                 jdContext={jdContext}
-              />
-            </TabPanel>
-            <TabPanel id="source">
-              <SourcePdfPanel bytes={bytes} sourceKind={sourceKind} />
-            </TabPanel>
-            <TabPanel id="extracted">
-              <ExtractedTextPanel result={result} />
-            </TabPanel>
-            <TabPanel id="flags">
-              <LayoutFlagsList
-                triggers={result.triggers as readonly LayoutTrigger[]}
               />
             </TabPanel>
             {disagreement.isAvailable && (
@@ -269,6 +258,13 @@ function ParsedCard({
                 />
               </TabPanel>
             )}
+            <TabPanel id="diagnostics">
+              <SourceDiagnosticsPanel
+                result={result}
+                bytes={bytes}
+                sourceKind={sourceKind}
+              />
+            </TabPanel>
           </div>
         </Tabs>
       </Card>

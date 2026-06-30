@@ -30,6 +30,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Button } from "../primitives/Button.tsx";
+import { CountBadge } from "./CountBadge.tsx";
 
 interface TabsContextValue {
   value: string;
@@ -143,11 +144,7 @@ export function Tab({ id, children, count }: TabProps) {
       className={`-mb-px rounded-none border-b-2 px-3 py-2 text-base hover:bg-transparent ${activeCls}`}
     >
       {children}
-      {count != null && count > 0 && (
-        <span className="ml-1.5 rounded-full bg-surface-subtle px-1.5 text-xs text-content-secondary">
-          {count}
-        </span>
-      )}
+      <CountBadge count={count} />
     </Button>
   );
 }
