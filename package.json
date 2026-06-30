@@ -5,6 +5,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
+    "prepare": "node scripts/install-git-hooks.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
@@ -17,7 +18,8 @@
     "eval:parse": "vite --open=/parse-eval.html",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "verify": "tsc -b --noEmit && eslint . && vitest run --coverage && vite build && (fallow audit --base origin/main --coverage coverage/coverage-final.json || echo 'fallow audit exited non-zero (report-only, ignored)')"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",

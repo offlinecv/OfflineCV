@@ -20,7 +20,10 @@ npm run preview    # serve the built bundle
 npm run test       # vitest run
 npm run typecheck  # tsc -b --noEmit
 npm run lint       # eslint .
+npm run verify     # full local CI mirror: typecheck → lint → coverage → build → fallow
 ```
+
+`npm run verify` is the canonical local pre-push gate — the exact CI sequence (`fallow` report-only, mirroring `ci.yml`). `npm install` wires a git `pre-push` hook via the package's `prepare` script (`scripts/install-git-hooks.mjs`) that runs `npm run verify` before every push; the same gate also backs the Claude Stop hook (`scripts/hooks/lint_and_test.sh`). Bypass either with `RESUMELINT_SKIP_HOOKS=1`. The hook installer is idempotent and no-ops when `.git/` is absent (tarball / CI `npm ci`), so `prepare` never fails an install.
 
 The `npm` scripts above are the portable, supported entry point and work on any checkout. A maintainer convenience wrapper (`scripts/run_resumelint.sh`, an interactive menu) and a GCS deploy script (`scripts/deploy_resumelint.sh`) exist locally but are **not tracked** — they `source` shared bash helpers symlinked from `~/tools/scripts/` (`common.sh`, `deploy_web_utils.sh`, `load_env.sh`) that only exist on the maintainer's machine, so they're gitignored rather than shipped broken. Don't reintroduce them to the repo; build/deploy guidance for contributors lives in the README's Deploy section.
 

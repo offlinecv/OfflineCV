@@ -37,6 +37,23 @@ npm run typecheck  # tsc --noEmit across the project
 The `npm` scripts above are the supported entry point — everything you
 need to develop, test, and build runs through them on any machine.
 
+### Local pre-push gate
+
+`npm run verify` is the one local gate, and it mirrors CI exactly:
+typecheck → lint → coverage → build → `fallow` static analysis. Run it
+by hand any time, or let it run automatically — `npm install` installs a
+git `pre-push` hook (via the package's `prepare` script) that runs
+`npm run verify` before every push, so lint/type/test/build breaks surface
+locally instead of on the PR.
+
+- `fallow` is **report-only** locally (same non-blocking posture as CI):
+  its findings are printed but never fail the push. Typecheck, lint, test,
+  and build failures **do** block the push.
+- Bypass the hook for a single push with
+  `RESUMELINT_SKIP_HOOKS=1 git push`.
+- The hook install is a no-op on tarball installs and CI `npm ci` (no
+  `.git/` work tree), so it never breaks a non-developer install.
+
 ## Debugging the parser
 
 ```bash
