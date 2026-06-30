@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-import { Chip, ErrorState, ErrorBoundary, Button } from "@design-system";
+import { Card, Chip, ErrorState, ErrorBoundary, Button } from "@design-system";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
 import { PageShell } from "./components/features/PageShell.tsx";
@@ -40,16 +40,52 @@ export default function App() {
           <Chip icon="⚡">A few seconds</Chip>
           <Chip icon="🔒">Runs in your browser</Chip>
           <Chip icon="✓">No signup required</Chip>
+          <Chip icon="✉️">No email collected</Chip>
+          <Chip icon="📊">Score, not a verdict</Chip>
         </>
       }
     >
       {state.phase !== "done" && (
-        <section className="flex flex-col gap-3">
-          <p className="max-w-prose text-sm text-content-secondary">
-            Drop a resume PDF below to see what a generic text extractor reads
-            back. This is a diagnostic — not a verdict from any specific
-            applicant tracking system.
-          </p>
+        <section className="flex flex-col gap-6">
+          {(state.phase === "idle" || state.phase === "error") && (
+            <Card className="flex flex-col gap-5 bg-surface-card-warm">
+              <h2 className="max-w-prose text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
+                Screeners don&apos;t read your PDF.{" "}
+                <span className="font-normal text-content-secondary">
+                  They read what a parser pulls out of it.
+                </span>
+              </h2>
+              <p className="max-w-prose text-sm text-content-muted">
+                AI is now part of most hiring pipelines — and{" "}
+                <span className="font-medium text-content-secondary">
+                  nearly half of job seekers
+                </span>{" "}
+                say they&apos;ve lost trust in a process they can&apos;t see into.
+                <span
+                  aria-hidden="true"
+                  className="align-super text-xs text-brand-amber"
+                >
+                  1
+                </span>
+              </p>
+              <p className="max-w-prose border-l-2 border-brand-amber pl-4 text-base font-medium text-content-primary sm:text-lg">
+                ResumeLint shows you what a generic parser reads back from your
+                resume — free, private, open-source.
+              </p>
+              <p className="text-xs text-content-muted">
+                Source:{" "}
+                <a
+                  href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
+                  target="_blank"
+                  rel="nofollow noopener noreferrer"
+                  className="hover:underline"
+                >
+                  Greenhouse, 2025 AI in Hiring Report (4,100+ job seekers and hiring managers)
+                </a>
+              </p>
+            </Card>
+          )}
+
           <DropZone
             onFile={handleFile}
             disabled={state.phase === "parsing"}
