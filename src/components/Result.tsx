@@ -5,19 +5,16 @@ import { useCallback, useMemo, useState } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import { computeAnonymousAtsScore, type AnonymousAtsScore } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
-import { Card, StatusBadge, Button, Tabs, TabList, Tab, TabPanel } from "@design-system";
+import { Card, StatusBadge, Button } from "@design-system";
 import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
-import { ReconstructedResume } from "./features/ReconstructedResume.tsx";
 import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
-import { SourceDiagnosticsPanel } from "./features/SourceDiagnosticsPanel.tsx";
-import { DisagreementPanel } from "./features/DisagreementPanel.tsx";
-import { ReportGapSection } from "./features/ReportGapSection.tsx";
-import { CritiquePanel } from "./features/CritiquePanel.tsx";
 import { useResumeAnalysisLlm } from "../hooks/useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
 import { LlmEscapeHatchBanner } from "./features/LlmEscapeHatchBanner.tsx";
 import type { LlmParsedResume } from "../lib/webllm/parse-resume.ts";
 import { mergeLlmParse } from "../lib/webllm/merge-override.ts";
+import { ParsedHeader } from "./features/ParsedHeader.tsx";
+import { ResultDetailTabs } from "./features/ResultDetailTabs.tsx";
 
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
@@ -84,7 +81,6 @@ function ParsedCard({
   edit: EditableParse;
   jdContext?: string;
 }) {
-  const [tab, setTab] = useState("reconstructed");
   const triggerCount = result.triggers.length;
 
   // Opt-in combined WebLLM analysis (#262). One controller drives BOTH the
@@ -141,21 +137,6 @@ function ParsedCard({
 
   const isLlmRecovered = llmOverride !== null;
 
-  // Tab-visibility split (preserves the old per-controller availability gates
-  // even though one controller now drives both tabs, #262). The
-  // "What an ATS misses" tab shows whenever the analysis is available
-  // (WebGPU + extractable text). The "Resume quality" tab additionally requires
-  // something worth critiquing on the active parse — a bullet description or a
-  // summary. Without that gate, the critique tab would render "All bullets look
-  // strong" for a resume that has no bullets at all, which reads as a bug.
-  const hasBullets = (activeResult.parsed.experience ?? []).some(
-    (e) => typeof e.description === "string" && e.description.trim().length > 0,
-  );
-  const hasSummary =
-    typeof activeResult.parsed.summary === "string" &&
-    activeResult.parsed.summary.trim().length > 0;
-  const isCritiqueVisible = analysis.isAvailable && (hasBullets || hasSummary);
-
   return (
     // Two stacked surfaces: the score "summary" card on top, the tabbed detail
     // card below. The gap + each card's own border draws the separator the
@@ -171,32 +152,14 @@ function ParsedCard({
       )}
 
       <Card className="flex flex-col gap-6 shadow-xs">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <StatusBadge tone="ok">Parsed</StatusBadge>
-            {isLlmRecovered && (
-              <StatusBadge tone="info">Recovered with on-device AI</StatusBadge>
-            )}
-            {!isLlmRecovered && edit.hasEdits && (
-              <StatusBadge tone="warning">Edited</StatusBadge>
-            )}
-            <span className="text-xs text-content-muted">
-              {result.diagnostics.pages} page
-              {result.diagnostics.pages === 1 ? "" : "s"} ·{" "}
-              {result.diagnostics.elapsedMs} ms
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            {!isLlmRecovered && edit.hasEdits && (
-              <Button variant="link" onClick={edit.resetAll}>
-                Reset to parsed
-              </Button>
-            )}
-            <Button variant="link" onClick={onReset}>
-              Try another file
-            </Button>
-          </div>
-        </header>
+        <ParsedHeader
+          isLlmRecovered={isLlmRecovered}
+          hasEdits={edit.hasEdits}
+          pages={result.diagnostics.pages}
+          elapsedMs={result.diagnostics.elapsedMs}
+          onResetAll={edit.resetAll}
+          onReset={onReset}
+        />
 
         <AtsScoreReadout score={activeScore} />
         {/* Star-rating feedback (#51). The "Report a parsing gap" affordance
@@ -205,78 +168,18 @@ function ParsedCard({
         <FeedbackPanel />
       </Card>
 
-      {/* Detail sits behind tabs in its own card so only one panel shows at a
-          time and every panel is advertised by a label (issue #177). All panels
-          stay mounted (hidden when inactive) so the reconstructed resume keeps
-          any local UI state across tab switches — overrides themselves live in
-          App/useEditableParse. */}
-      <Card className="flex flex-col shadow-xs">
-        <Tabs id="result" value={tab} onValueChange={setTab}>
-          {/* Primary tabs ordered by value: insight first, evidence last
-              (#263). The evidence tab is always present and always last, so the
-              "Source & diagnostics" tab no longer shifts position when the two
-              conditional insight tabs are absent. The layout-flag count badge is
-              promoted to this parent tab so the warning count stays visible
-              without opening it. */}
-          <TabList aria-label="Parsed result views">
-            <Tab id="reconstructed">Reconstructed resume</Tab>
-            {analysis.isAvailable && (
-              <Tab id="disagreement">What an ATS misses</Tab>
-            )}
-            {isCritiqueVisible && (
-              <Tab id="critique">Resume quality</Tab>
-            )}
-            <Tab id="diagnostics" count={triggerCount}>
-              Source &amp; diagnostics
-            </Tab>
-          </TabList>
-
-          <div className="pt-4">
-            <TabPanel id="reconstructed">
-              <ReconstructedResume
-                result={activeResult}
-                score={activeScore}
-                edit={edit}
-                jdContext={jdContext}
-              />
-            </TabPanel>
-            {analysis.isAvailable && (
-              <TabPanel id="disagreement">
-                <div className="flex flex-col gap-4">
-                  <DisagreementPanel controller={analysis} />
-                  {/* The gap report lives here (moved out of the score header):
-                      it builds a structure-only repro artifact from the active
-                      parse; when the comparison has run (#242), the characterized
-                      disagreements ride along (kinds only, never values). */}
-                  <ReportGapSection
-                    result={activeResult}
-                    disagreements={reportableDisagreements}
-                  />
-                </div>
-              </TabPanel>
-            )}
-            {isCritiqueVisible && (
-              <TabPanel id="critique">
-                {/* onGoToRewrite: switch back to reconstructed tab where the
-                    per-role wand button (#3 / useSectionRewrite) already lives.
-                    The critique panel links each flagged bullet to this affordance
-                    instead of building a parallel rewrite UI (issue #244). */}
-                <CritiquePanel
-                  controller={analysis}
-                  onGoToRewrite={() => setTab("reconstructed")}
-                />
-              </TabPanel>
-            )}
-            <TabPanel id="diagnostics">
-              <SourceDiagnosticsPanel
-                result={result}
-                bytes={bytes}
-                sourceKind={sourceKind}
-              />
-            </TabPanel>
-          </div>
-        </Tabs>
-      </Card>
+      <ResultDetailTabs
+        activeResult={activeResult}
+        activeScore={activeScore}
+        result={result}
+        bytes={bytes}
+        sourceKind={sourceKind}
+        edit={edit}
+        jdContext={jdContext}
+        analysis={analysis}
+        reportableDisagreements={reportableDisagreements}
+        triggerCount={triggerCount}
+      />
     </div>
   );
 }
