@@ -5,9 +5,9 @@
  * DisagreementPanel — body-only "What an ATS misses" results (issue #242).
  *
  * Exports `DisagreementResults`, a display-only component that renders the
- * done-branch list body: intro paragraph + list of `DisagreementRow` cards.
- * Returns `null` when `disagreements.length === 0` (the parent gates the
- * whole section on gaps being present).
+ * list of `DisagreementRow` cards. Returns `null` when
+ * `disagreements.length === 0` (the parent gates the whole section — heading
+ * and intro paragraph included — on gaps being present).
  *
  * The shell (header, Analyze CTA, status lifecycle, empty-state copy) moved
  * into `ResumeQualityPanel`, which hosts both this component and
@@ -92,8 +92,9 @@ const KIND_BADGE: Record<ParseDisagreement["kind"], string> = {
 // ── Public component ──────────────────────────────────────────────────────────
 
 /**
- * Body-only disagreement results. Renders the intro paragraph + list of
- * `DisagreementRow` cards. Returns `null` when `disagreements` is empty —
+ * Body-only disagreement results. Renders the list of `DisagreementRow`
+ * cards (the heading and intro paragraph live in `ResumeQualityPanel`).
+ * Returns `null` when `disagreements` is empty —
  * the parent (`ResumeQualityPanel`) gates the entire "What an ATS misses"
  * section on `disagreements.length > 0`. Consumed by `ResumeQualityPanel`.
  */

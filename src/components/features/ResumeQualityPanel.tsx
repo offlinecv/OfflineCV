@@ -114,6 +114,7 @@ export function ResumeQualityPanel({
               <ReportGapSection
                 result={result}
                 disagreements={status.disagreements}
+                headingLevel={3}
               />
             </section>
           )}
