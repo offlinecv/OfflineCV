@@ -33,28 +33,33 @@ export default function App() {
 
   return (
     <PageShell
-      subtitle="PDF parser stress test for resumes"
+      subtitle="A parser audit for your resume — not a judge"
       badge="alpha"
       chips={
         <>
           <Chip icon="⚡">A few seconds</Chip>
-          <Chip icon="🔒">Never leaves your device</Chip>
+          <Chip icon="🔒">Your file never leaves your device</Chip>
           <Chip icon="✓">No account, no email</Chip>
-          <Chip icon="📊">A guide, not a gatekeeper</Chip>
+          <Chip icon="🔁">Same PDF, same score</Chip>
         </>
       }
     >
       {state.phase !== "done" && (
-        <section className="flex flex-col gap-6">
+        // Pre-drop landing column: narrower than the results view and centered
+        // so whitespace frames the composition symmetrically instead of
+        // pooling to the right of left-anchored text. Everything scannable
+        // (headline, stat, promise, source) centers on the drop-zone axis;
+        // multi-line prose (the agent block) stays left-aligned for reading.
+        <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
           {(state.phase === "idle" || state.phase === "error") && (
             <Card className="flex flex-col gap-5 bg-surface-card-warm">
-              <h2 className="max-w-prose text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
-                Screeners don&apos;t read your PDF.{" "}
+              <h2 className="text-balance text-center text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
+                Recruiters and screeners don&apos;t read your PDF.{" "}
                 <span className="font-normal text-content-secondary">
                   They read what a parser pulls out of it.
                 </span>
               </h2>
-              <p className="max-w-prose text-sm text-content-muted">
+              <p className="text-pretty text-center text-sm text-content-muted">
                 AI is now part of most hiring pipelines — and{" "}
                 <span className="font-medium text-content-secondary">
                   nearly half of job seekers
@@ -67,11 +72,11 @@ export default function App() {
                   1
                 </span>
               </p>
-              <p className="max-w-prose border-l-2 border-brand-amber pl-4 text-base font-medium text-content-primary sm:text-lg">
-                ResumeLint shows you what a generic parser reads back from your
+              <p className="text-pretty text-center text-base font-medium text-content-primary sm:text-lg">
+                resumelint shows you what a generic parser reads back from your
                 resume — free, private, open-source.
               </p>
-              <p className="text-xs text-content-muted">
+              <p className="text-center text-xs text-content-muted">
                 Source:{" "}
                 <a
                   href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
@@ -94,6 +99,28 @@ export default function App() {
                 : undefined
             }
           />
+
+          {(state.phase === "idle" || state.phase === "error") && (
+            // "Screened by an agent" framing (internal #21): the recruiter-side
+            // proof point that the mirror positioning stands on. Quiet block
+            // below the drop zone — context, never competing with the primary
+            // action. Claims stay scoped per the fact-check rulings: privacy is
+            // file-scoped, determinism is score-scoped. Per the public-copy
+            // policy (internal #24) we never name other products here — the
+            // trend is described generically, no links to specific tools.
+            <div className="rounded-lg border border-border-light bg-surface-subtle px-4 py-3">
+              <p className="text-pretty text-sm text-content-secondary">
+                <span className="font-medium text-content-primary">
+                  Recruiters are starting to run AI agents over resumes.
+                </span>{" "}
+                Several recent open-source projects score candidates for
+                recruiters. resumelint is the candidate-side mirror: it shows
+                you what survives the parse — before you hit submit. The
+                score isn&apos;t a verdict on you as a candidate — it measures
+                how well a machine can read your resume.
+              </p>
+            </div>
+          )}
         </section>
       )}
 
