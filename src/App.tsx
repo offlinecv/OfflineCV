@@ -38,10 +38,9 @@ export default function App() {
       chips={
         <>
           <Chip icon="⚡">A few seconds</Chip>
-          <Chip icon="🔒">Runs in your browser</Chip>
-          <Chip icon="✓">No signup required</Chip>
-          <Chip icon="✉️">No email collected</Chip>
-          <Chip icon="📊">Score, not a verdict</Chip>
+          <Chip icon="🔒">Never leaves your device</Chip>
+          <Chip icon="✓">No account, no email</Chip>
+          <Chip icon="📊">A guide, not a gatekeeper</Chip>
         </>
       }
     >
