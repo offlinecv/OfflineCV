@@ -83,21 +83,13 @@ function ParsedCard({
 }) {
   const triggerCount = result.triggers.length;
 
-  // Opt-in combined WebLLM analysis (#262). One controller drives BOTH the
-  // "What an ATS misses" (#242) and "Resume quality" (#244) tabs from a single
-  // inference. The controller is lifted here so the two tabs are only advertised
-  // on WebGPU-capable browsers with extractable text; on everything else the
-  // tabs (and panels) are silently absent. Either panel's CTA triggers the same
-  // combined run; status (loading/running/done/error) is shared.
+  // Opt-in combined WebLLM analysis (#262, #273). One controller feeds the
+  // single "Resume Quality" tab (the LLM critique plus "What an ATS misses" as
+  // a bottom section) from one inference. Lifted here so the tab is only
+  // advertised on WebGPU-capable browsers with extractable text; on everything
+  // else the tab (and panel) is silently absent. The panel's single CTA triggers
+  // the combined run; status (loading/running/done/error) is owned by the panel.
   const analysis = useResumeAnalysisLlm(result);
-
-  // Characterized gaps to fold into a "Report a parsing gap" download (#245) —
-  // available only once the opt-in WebLLM analysis has completed. Kinds/fields
-  // only enter the artifact (never the recovered values); see repro-artifact.ts.
-  const reportableDisagreements =
-    analysis.status.kind === "done"
-      ? analysis.status.disagreements
-      : undefined;
 
   // Degenerate-case LLM escape hatch (#243). Only available when
   // `result.suggestedEscalation === "llm"` AND WebGPU is available AND there is
@@ -163,8 +155,8 @@ function ParsedCard({
 
         <AtsScoreReadout score={activeScore} />
         {/* Star-rating feedback (#51). The "Report a parsing gap" affordance
-            moved out of this header into the "What an ATS misses" tab, next to
-            the disagreements it characterizes (see the disagreement TabPanel). */}
+            lives in the "What an ATS misses" bottom section of the Resume Quality
+            tab (#273), next to the disagreements it characterizes. */}
         <FeedbackPanel />
       </Card>
 
@@ -177,7 +169,6 @@ function ParsedCard({
         edit={edit}
         jdContext={jdContext}
         analysis={analysis}
-        reportableDisagreements={reportableDisagreements}
         triggerCount={triggerCount}
       />
     </div>

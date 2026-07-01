@@ -31,13 +31,22 @@ import type { ParseDisagreement } from "../../lib/heuristics/disagreement.ts";
 export function ReportGapSection({
   result,
   disagreements,
+  headingLevel = 2,
 }: {
   result: CascadeResult;
   disagreements?: readonly ParseDisagreement[];
+  /**
+   * Heading rank for "Report a parsing gap" (#273). Defaults to `2`; pass `3`
+   * when nested under an `h3` section (as in `ResumeQualityPanel`'s "What an
+   * ATS misses" subsection) so screen-reader heading navigation doesn't jump
+   * backward from h3 to h2.
+   */
+  headingLevel?: 2 | 3;
 }) {
   const [open, setOpen] = useState(false);
   const { report, reported, error } = useReportGap(result, disagreements ?? []);
   const headingId = useId();
+  const Heading = headingLevel === 3 ? "h3" : "h2";
 
   if (!open) {
     return (
@@ -57,12 +66,12 @@ export function ReportGapSection({
   return (
     <Card className="flex flex-col gap-3 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
       <div className="flex flex-col gap-1">
-        <h2
+        <Heading
           id={headingId}
           className="text-sm font-semibold text-content-primary"
         >
           Report a parsing gap
-        </h2>
+        </Heading>
         <p className="max-w-prose text-sm text-content-tertiary">
           Download a small, <strong>structure-only</strong> diagnostic file —
           section boundaries, counts, and layout flags. It carries{" "}

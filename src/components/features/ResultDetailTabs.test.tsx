@@ -4,13 +4,13 @@
 // @vitest-environment jsdom
 
 /**
- * Render coverage for ResultDetailTabs (#275) — the tabbed detail card extracted
- * out of ParsedCard. Renders both visibility regimes so every conditional tab /
- * panel branch executes: (1) analysis unavailable → only reconstructed +
- * diagnostics tabs; (2) analysis available with a summary → the "What an ATS
- * misses" and "Resume quality" insight tabs both mount. A tiny host component
- * supplies a real EditableParse via useEditableParse. Raw createRoot, matching
- * the other feature render tests.
+ * Render coverage for ResultDetailTabs (#275, consolidated in #273) — the
+ * tabbed detail card extracted out of ParsedCard. Renders both visibility
+ * regimes so every conditional tab / panel branch executes: (1) analysis
+ * unavailable → only reconstructed + diagnostics tabs; (2) analysis available →
+ * the single "Resume Quality" insight tab mounts (2nd position). A tiny host
+ * component supplies a real EditableParse via useEditableParse. Raw createRoot,
+ * matching the other feature render tests.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -69,7 +69,6 @@ function Host({ isAvailable, summary }: { isAvailable: boolean; summary?: string
     sourceKind: "pdf",
     edit,
     analysis: controller(isAvailable),
-    reportableDisagreements: undefined,
     triggerCount: res.triggers.length,
   });
 }
@@ -94,13 +93,18 @@ describe("ResultDetailTabs", () => {
     const el = render(false);
     expect(el.textContent).toContain("Reconstructed resume");
     expect(el.textContent).toContain("Source & diagnostics");
-    expect(el.textContent).not.toContain("What an ATS misses");
-    expect(el.textContent).not.toContain("Resume quality");
+    expect(el.textContent).not.toContain("Resume Quality");
   });
 
-  it("mounts the insight tabs when analysis is available and a summary exists", () => {
+  it("mounts the single Resume Quality tab (2nd position) when analysis is available", () => {
     const el = render(true, "Senior engineer with a track record of shipping.");
-    expect(el.textContent).toContain("What an ATS misses");
-    expect(el.textContent).toContain("Resume quality");
+    const labels = Array.from(el.querySelectorAll('[role="tab"]')).map(
+      (t) => t.textContent ?? "",
+    );
+    // Exactly three tabs, Resume Quality in the middle (2nd), diagnostics last.
+    expect(labels).toHaveLength(3);
+    expect(labels[0]).toContain("Reconstructed resume");
+    expect(labels[1]).toContain("Resume Quality");
+    expect(labels[2]).toContain("Source & diagnostics");
   });
 });

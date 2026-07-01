@@ -2,32 +2,28 @@
 // Copyright 2026 The resumelint Authors
 
 /**
- * DisagreementPanel — the headline "what an ATS misses" surface (issue #242).
+ * DisagreementPanel — body-only "What an ATS misses" results (issue #242).
  *
- * Shows, on the opt-in combined WebLLM pass (#262), the gap between what the
- * deterministic heuristic parse (a generic ATS text extractor) recovered and
- * what the LLM recovered — and names the likely layout cause. Detection is
- * the pure `diffParses` in `lib/heuristics/disagreement.ts`; engine + state
- * glue is `useResumeAnalysisLlm` (the single controller that also feeds the
- * "Resume quality" tab from the same inference). This file is display only.
+ * Exports `DisagreementResults`, a display-only component that renders the
+ * list of `DisagreementRow` cards. Returns `null` when
+ * `disagreements.length === 0` (the parent gates the whole section — heading
+ * and intro paragraph included — on gaps being present).
  *
- * The CTA and status are SHARED with the critique tab: clicking "Analyze" in
- * either tab runs the one combined pass, after which both tabs populate.
+ * The shell (header, Analyze CTA, status lifecycle, empty-state copy) moved
+ * into `ResumeQualityPanel`, which hosts both this component and
+ * `CritiqueResults` under a single "Resume Quality" tab (#273).
+ *
+ * All helpers remain here: `DisagreementRow`, `HeuristicVsLlm`,
+ * `headlineFor`, `sideValues`, `roleSides`, `pluralize`, and all the
+ * `*_LABELS`/`*_COPY`/`KIND_BADGE`/`HEADLINE_FOR`/`SIDE_VALUES` maps.
  *
  * Reuse analysis (CLAUDE.md 3-tier rule):
- *   - Primitive: `Button` (the opt-in CTA) — no raw `<button>`.
+ *   - Primitive: `Button` — no raw `<button>`.
  *   - Shared: `StatusBadge` (per-gap kind pill), `ModelLoadProgress` (download
  *     bar). No hand-rolled banners; no hardcoded colors — semantic tokens only.
- *
- * Returns `null` when the controller flags the feature unavailable (no WebGPU,
- * or no extractable text). Silent absence — matches the rewrite paths.
  */
 
-import { Button, StatusBadge, ModelLoadProgress } from "@design-system";
-import {
-  labelForAnalysis,
-  type AnalysisController,
-} from "../../hooks/useResumeAnalysisLlm.ts";
+import { StatusBadge } from "@design-system";
 import type { ParseDisagreement } from "../../lib/heuristics/disagreement.ts";
 import type { LayoutTrigger } from "../../lib/heuristics/types.ts";
 
@@ -93,86 +89,30 @@ const KIND_BADGE: Record<ParseDisagreement["kind"], string> = {
   missing_field: "Missing field",
 };
 
+// ── Public component ──────────────────────────────────────────────────────────
+
 /**
- * The panel body. The controller is owned by the parent (`Result.tsx` lifts the
- * hook so the tab strip can gate its label on availability), and the parent only
- * mounts this when `controller.isAvailable` — so no internal availability guard
- * is needed here.
+ * Body-only disagreement results. Renders the list of `DisagreementRow`
+ * cards (the heading and intro paragraph live in `ResumeQualityPanel`).
+ * Returns `null` when `disagreements` is empty —
+ * the parent (`ResumeQualityPanel`) gates the entire "What an ATS misses"
+ * section on `disagreements.length > 0`. Consumed by `ResumeQualityPanel`.
  */
-export function DisagreementPanel({
-  controller,
+export function DisagreementResults({
+  disagreements,
 }: {
-  controller: AnalysisController;
+  disagreements: readonly ParseDisagreement[];
 }) {
-  const { status } = controller;
+  if (disagreements.length === 0) return null;
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-            What an ATS misses
-          </h2>
-          <p className="max-w-prose text-sm text-content-tertiary">
-            Run a small on-device model to compare what a generic ATS extractor
-            reads against what's actually on the page, AND get a content quality
-            critique. Nothing leaves this tab.
-          </p>
-        </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => void controller.run()}
-          disabled={controller.isBusy}
-          aria-label="Analyze the resume with an on-device model"
-        >
-          {labelForAnalysis(status)}
-        </Button>
-      </div>
-
-      {status.kind === "loading" && (
-        <ModelLoadProgress
-          progress={status.progress.progress}
-          text={status.progress.text}
-          label="Loading the on-device model (one-time download)"
-          showExplainer
-        />
-      )}
-
-      {status.kind === "running" && (
-        <p className="text-sm text-content-secondary" role="status">
-          Analyzing…
-        </p>
-      )}
-
-      {status.kind === "error" && (
-        <p role="alert" className="text-sm text-feedback-error-text">
-          {status.message}
-        </p>
-      )}
-
-      {status.kind === "done" &&
-        (status.disagreements.length === 0 ? (
-          <p className="text-sm text-content-secondary">
-            No gaps found — a generic ATS extractor reads this résumé the same
-            way the on-device model does.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm text-content-secondary">
-              Each card below is something the on-device model found on your
-              résumé that a generic ATS extractor missed — so an applicant
-              tracking system may never index it. These are gaps in your favor
-              to be aware of, not errors.
-            </p>
-            <ul className="flex flex-col gap-2 list-none">
-              {status.disagreements.map((d, i) => (
-                <DisagreementRow key={`${d.kind}-${d.field}-${i}`} d={d} />
-              ))}
-            </ul>
-          </div>
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2 list-none">
+        {disagreements.map((d, i) => (
+          <DisagreementRow key={`${d.kind}-${d.field}-${i}`} d={d} />
         ))}
-    </section>
+      </ul>
+    </div>
   );
 }
 

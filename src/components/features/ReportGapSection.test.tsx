@@ -98,13 +98,17 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount() {
+function mount(headingLevel?: 2 | 3) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
     root.render(
-      <ReportGapSection result={result()} disagreements={disagreements} />,
+      <ReportGapSection
+        result={result()}
+        disagreements={disagreements}
+        headingLevel={headingLevel}
+      />,
     );
   });
 }
@@ -137,5 +141,20 @@ describe("ReportGapSection", () => {
 
     expect(anchorClicked).toBe(true);
     expect(container.textContent).toContain("Diagnostic file downloaded");
+  });
+
+  it("defaults the heading to h2", () => {
+    mount();
+    clickButton(/Report a parsing gap/);
+    const h2 = container.querySelector("h2");
+    expect(h2?.textContent).toBe("Report a parsing gap");
+  });
+
+  it("renders an h3 heading when headingLevel=3 (issue 273 nested section)", () => {
+    mount(3);
+    clickButton(/Report a parsing gap/);
+    expect(container.querySelector("h2")).toBeNull();
+    const h3 = container.querySelector("h3");
+    expect(h3?.textContent).toBe("Report a parsing gap");
   });
 });
