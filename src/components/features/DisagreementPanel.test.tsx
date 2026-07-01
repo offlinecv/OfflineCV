@@ -4,21 +4,19 @@
 // @vitest-environment jsdom
 
 /**
- * Render coverage for DisagreementPanel (#242) — the display-only "what an ATS
- * misses" surface. Drives a fake unified analysis controller (#262) through
- * each status so every render branch plus the per-kind copy builders
- * (`headlineFor`, `sideValues`) execute. Raw createRoot, matching the other
- * feature render tests.
+ * Render coverage for DisagreementResults (#242, #273) — body-only "What an ATS
+ * misses" display component. Drives the component directly with a `disagreements`
+ * prop so every render branch plus the per-kind copy builders (`headlineFor`,
+ * `sideValues`) execute. Raw createRoot, matching the other feature render tests.
+ * Loading/running/error/empty-state moved to ResumeQualityPanel.test.tsx.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { DisagreementPanel } from "./DisagreementPanel.tsx";
-import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
+import { DisagreementResults } from "./DisagreementPanel.tsx";
 import type { ParseDisagreement } from "../../lib/heuristics/disagreement.ts";
-import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -30,21 +28,15 @@ const allKinds: ParseDisagreement[] = [
   { kind: "missing_field", field: "email", heuristicValue: null, llmValue: "jane@example.com" },
 ];
 
-const EMPTY_CRITIQUE: ResumeCritique = { bulletFindings: [], missingSections: [] };
-
-function controller(status: AnalysisController["status"]): AnalysisController {
-  return { status, isAvailable: true, isBusy: false, run: () => Promise.resolve() };
-}
-
 let container: HTMLDivElement;
 let root: Root;
 
-function render(status: AnalysisController["status"]) {
+function render(disagreements: readonly ParseDisagreement[]) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root.render(createElement(DisagreementPanel, { controller: controller(status) }));
+    root.render(createElement(DisagreementResults, { disagreements }));
   });
   return container;
 }
@@ -55,9 +47,9 @@ afterEach(() => {
   container.remove();
 });
 
-describe("DisagreementPanel", () => {
-  it("renders all kinds in the done state", () => {
-    const el = render({ kind: "done", disagreements: allKinds, critique: EMPTY_CRITIQUE });
+describe("DisagreementResults", () => {
+  it("renders all kinds", () => {
+    const el = render(allKinds);
     expect(el.textContent).toContain("An ATS likely drops");
     expect(el.textContent).toContain("An ATS likely merges");
     expect(el.textContent).toContain("section");
@@ -66,18 +58,9 @@ describe("DisagreementPanel", () => {
     expect(el.textContent).toContain("role");
   });
 
-  it("renders the empty done state", () => {
-    const el = render({ kind: "done", disagreements: [], critique: EMPTY_CRITIQUE });
-    expect(el.textContent).toContain("No gaps found");
-  });
-
-  it("renders loading, running, and error states", () => {
-    expect(render({ kind: "loading", progress: { progress: 0.3, text: "…" } }).textContent).toBeTruthy();
-    act(() => root.unmount());
-    container.remove();
-    expect(render({ kind: "running" }).textContent).toContain("Analyzing");
-    act(() => root.unmount());
-    container.remove();
-    expect(render({ kind: "error", message: "boom" }).textContent).toContain("boom");
+  it("renders null for empty disagreements", () => {
+    const el = render([]);
+    // DisagreementResults returns null when empty — nothing in the container.
+    expect(el.textContent).toBe("");
   });
 });

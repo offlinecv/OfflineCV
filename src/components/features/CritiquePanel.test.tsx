@@ -4,38 +4,33 @@
 // @vitest-environment jsdom
 
 /**
- * Render coverage for CritiquePanel (#244) — display-only "Resume quality" tab.
- * Drives a fake unified analysis controller (#262) through each status so every
- * branch of CritiquePanel and CritiqueDonePanel (summary feedback, flagged
- * bullets, missing sections, all-ok) executes. Raw createRoot, matching the
- * other feature render tests.
+ * Render coverage for CritiqueResults (#244, #273) — body-only "Resume quality"
+ * display component. Drives the component directly with a `critique` prop so
+ * every render branch (summary feedback, flagged bullets, missing sections,
+ * all-ok neutral note) executes. Raw createRoot, matching the other feature
+ * render tests. Loading/running/error states moved to ResumeQualityPanel.test.tsx.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { CritiquePanel } from "./CritiquePanel.tsx";
-import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
+import { CritiqueResults } from "./CritiquePanel.tsx";
 import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-function controller(status: AnalysisController["status"]): AnalysisController {
-  return { status, isAvailable: true, isBusy: false, run: () => Promise.resolve() };
-}
-
 let container: HTMLDivElement;
 let root: Root;
 
-function render(status: AnalysisController["status"]) {
+function render(critique: ResumeCritique) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
     root.render(
-      createElement(CritiquePanel, { controller: controller(status), onGoToRewrite: () => {} }),
+      createElement(CritiqueResults, { critique, onGoToRewrite: () => {} }),
     );
   });
   return container;
@@ -46,7 +41,7 @@ afterEach(() => {
   container.remove();
 });
 
-describe("CritiquePanel", () => {
+describe("CritiqueResults", () => {
   it("renders flagged bullets, summary feedback, and missing sections", () => {
     const critique: ResumeCritique = {
       bulletFindings: [
@@ -57,7 +52,7 @@ describe("CritiquePanel", () => {
       missingSections: ["skills"],
       summaryFeedback: "Tighten the summary.",
     };
-    const el = render({ kind: "done", disagreements: [], critique });
+    const el = render(critique);
     expect(el.textContent).toContain("Weak verb");
     expect(el.textContent).toContain("Suggestion:");
     expect(el.textContent).toContain("Tighten the summary");
@@ -65,22 +60,23 @@ describe("CritiquePanel", () => {
     expect(el.textContent).toContain("skills");
   });
 
-  it("renders the all-ok done state", () => {
+  it("renders the all-ok neutral note (not the overclaim)", () => {
     const el = render({
-      kind: "done",
-      disagreements: [],
-      critique: { bulletFindings: [{ bullet: "x", issue: "ok" }], missingSections: [] },
+      bulletFindings: [{ bullet: "x", issue: "ok" }],
+      missingSections: [],
     });
-    expect(el.textContent).toContain("All bullets look strong");
+    expect(el.textContent).toContain("No specific bullet issues or missing sections were flagged");
+    expect(el.textContent).not.toContain("All bullets look strong");
   });
 
-  it("renders loading, running, and error states", () => {
-    expect(render({ kind: "loading", progress: { progress: 0.2, text: "…" } }).textContent).toBeTruthy();
-    act(() => root.unmount());
-    container.remove();
-    expect(render({ kind: "running" }).textContent).toContain("Analyzing");
-    act(() => root.unmount());
-    container.remove();
-    expect(render({ kind: "error", message: "nope" }).textContent).toContain("nope");
+  it("renders summaryFeedback even when all-ok", () => {
+    const el = render({
+      bulletFindings: [],
+      missingSections: [],
+      summaryFeedback: "Overall decent summary.",
+    });
+    expect(el.textContent).toContain("Overall decent summary.");
+    expect(el.textContent).toContain("No specific bullet issues");
+    expect(el.textContent).not.toContain("All bullets look strong");
   });
 });
