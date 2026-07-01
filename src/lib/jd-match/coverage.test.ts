@@ -4,7 +4,13 @@
 import { describe, it, expect } from "vitest";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import { extractJdTerms } from "./extract-jd-terms.ts";
-import { computeCoverage, buildCorpus, SKILL_WEIGHT, NOUN_WEIGHT } from "./coverage.ts";
+import {
+  computeCoverage,
+  buildCorpus,
+  buildResumeProjection,
+  SKILL_WEIGHT,
+  NOUN_WEIGHT,
+} from "./coverage.ts";
 
 function makeParsed(overrides: Partial<HeuristicParsedResume> = {}): HeuristicParsedResume {
   return {
@@ -14,6 +20,20 @@ function makeParsed(overrides: Partial<HeuristicParsedResume> = {}): HeuristicPa
     ...overrides,
   };
 }
+
+describe("buildResumeProjection", () => {
+  it("preserves case and equals buildCorpus once lowercased (#201)", () => {
+    const parsed = makeParsed({
+      summary: "Backend Engineer",
+      skills: ["TypeScript"],
+      experience: [{ title: "Staff Engineer", company: "Acme", description: "Owned Kafka" }],
+    });
+    const projection = buildResumeProjection(parsed);
+    expect(projection).toContain("TypeScript"); // not lowercased
+    expect(projection).toContain("Staff Engineer");
+    expect(buildCorpus(parsed)).toBe(projection.toLowerCase());
+  });
+});
 
 describe("buildCorpus", () => {
   it("flattens summary, skills, experience, and education into a single lowercased string", () => {

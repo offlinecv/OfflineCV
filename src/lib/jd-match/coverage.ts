@@ -93,28 +93,46 @@ export function computeCoverage(
 }
 
 /**
- * Flatten the parsed resume into a single lowercased searchable string.
+ * Flatten the parsed resume into a single newline-joined string — summary,
+ * skills, and each experience/education entry's text fields, in document order.
  * Sections are joined with newlines so word boundaries between fields stay
- * intact (a skill at the end of one bullet doesn't fuse with the start of
- * the next).
+ * intact (a skill at the end of one bullet doesn't fuse with the start of the
+ * next). Case is preserved: this is the human-readable projection. `buildCorpus`
+ * lowercases it for case-insensitive coverage matching; the WebLLM evidence
+ * judge (#201) reuses it verbatim as a reference block, where case matters for
+ * readable cited snippets.
  */
-export function buildCorpus(parsed: HeuristicParsedResume): string {
+export function buildResumeProjection(parsed: HeuristicParsedResume): string {
   const parts: string[] = [];
   if (parsed.summary) parts.push(parsed.summary);
   if (parsed.skills && parsed.skills.length > 0) {
     parts.push(parsed.skills.join("\n"));
   }
   for (const exp of parsed.experience ?? []) {
-    if (exp.title) parts.push(exp.title);
-    if (exp.company) parts.push(exp.company);
-    if (exp.description) parts.push(exp.description);
+    pushPresent(parts, exp.title, exp.company, exp.description);
   }
   for (const edu of parsed.education ?? []) {
-    if (edu.degree) parts.push(edu.degree);
-    if (edu.institution) parts.push(edu.institution);
-    if (edu.description) parts.push(edu.description);
+    pushPresent(parts, edu.degree, edu.institution, edu.description);
   }
-  return parts.join("\n").toLowerCase();
+  return parts.join("\n");
+}
+
+/** Append each defined, non-empty field to `parts`, preserving argument order. */
+function pushPresent(
+  parts: string[],
+  ...fields: Array<string | undefined>
+): void {
+  for (const field of fields) {
+    if (field) parts.push(field);
+  }
+}
+
+/**
+ * Flatten the parsed resume into a single lowercased searchable string — the
+ * projection above, lowercased for case-insensitive term coverage matching.
+ */
+export function buildCorpus(parsed: HeuristicParsedResume): string {
+  return buildResumeProjection(parsed).toLowerCase();
 }
 
 function corpusMentionsSkill(corpus: string, canonicalId: string): boolean {
