@@ -18,21 +18,24 @@
  */
 
 import type { WebLlmEngine } from "../../webllm/types.ts";
-import { parseJsonLoose } from "./parse-json.ts";
+import { tryParseJsonArray } from "../../webllm/json-repair.ts";
 import {
-  EXTRACT_REQUIREMENTS_SYSTEM_PROMPT,
-  buildExtractRequirementsUserPrompt,
+  EXTRACT_SYSTEM_PROMPT,
+  buildExtractUserPrompt,
 } from "./prompts.ts";
 
 export interface JdRequirement {
   /** Stable, sequential slug ("req-1", "req-2", …) that joins extract → judge. */
   id: string;
-  /** Normalized one-sentence requirement text. */
-  text: string;
   /** Semantic category of the requirement. */
   kind: "skill" | "experience" | "responsibility" | "qualification";
-  /** Minimum years of experience, when the JD states an explicit count. */
-  yearsRequired?: number;
+  /** Normalized one-sentence requirement text. */
+  text: string;
+  /**
+   * Minimum years of experience, when the JD states an explicit count. The
+   * model-facing key is `"years"`; the judge call (#201) reads this same field.
+   */
+  years?: number;
 }
 
 /**
@@ -69,8 +72,8 @@ export async function extractRequirements(
   try {
     const response = await engine.chat.completions.create({
       messages: [
-        { role: "system", content: EXTRACT_REQUIREMENTS_SYSTEM_PROMPT },
-        { role: "user", content: buildExtractRequirementsUserPrompt(jdText) },
+        { role: "system", content: EXTRACT_SYSTEM_PROMPT },
+        { role: "user", content: buildExtractUserPrompt(jdText) },
       ],
       temperature: 0,
       max_tokens: MAX_TOKENS,
@@ -84,7 +87,7 @@ export async function extractRequirements(
     );
   }
 
-  const parsed = parseJsonLoose(content);
+  const parsed = tryParseJsonArray(content);
   if (!parsed.ok || !Array.isArray(parsed.value)) {
     throw new RequirementExtractionError(
       "Requirement extraction returned no parseable JSON array",
@@ -97,8 +100,12 @@ export async function extractRequirements(
 /** Coerce a raw array into typed requirements, dropping unusable entries. */
 function coerceRequirements(items: unknown[]): JdRequirement[] {
   const out: JdRequirement[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const requirement = coerceRequirement(items[i], i);
+  for (const raw of items) {
+    // Number ids off the OUTPUT position so surviving requirements always carry
+    // a contiguous, unique `req-N` (the extract → judge join key). The model's
+    // own `id` is deliberately ignored — small models emit duplicate or gapped
+    // ids, which would silently collide the join in the judge call (#201).
+    const requirement = coerceRequirement(raw, out.length);
     if (requirement !== null) out.push(requirement);
   }
   return out;
@@ -106,36 +113,34 @@ function coerceRequirements(items: unknown[]): JdRequirement[] {
 
 /**
  * Coerce one raw element into a `JdRequirement`, or `null` to drop it. An entry
- * with no usable `text` is dropped; an unknown `kind` defaults to `"skill"`; a
- * missing `id` is backfilled deterministically from its position. Field-level
- * coercion lives in the small helpers below (house style — cf. `parse-resume.ts`
- * `coerceString` / `coerceStringArray`).
+ * with no usable `text` is dropped; an unknown `kind` defaults to `"skill"`; the
+ * `id` is assigned deterministically from `outputIndex` (see `coerceRequirements`).
+ * Field-level coercion lives in the small helpers below (house style — cf.
+ * `parse-resume.ts` `coerceString` / `coerceStringArray`).
  */
-function coerceRequirement(raw: unknown, index: number): JdRequirement | null {
+function coerceRequirement(
+  raw: unknown,
+  outputIndex: number,
+): JdRequirement | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
 
   const text = coerceText(obj["text"]);
   if (text === null) return null;
 
-  const id = coerceId(obj["id"], index);
+  const id = `req-${outputIndex + 1}`;
   const kind = coerceKind(obj["kind"]);
-  const yearsRequired = coerceYears(obj["years"]);
+  const years = coerceYears(obj["years"]);
 
-  return yearsRequired !== undefined
-    ? { id, text, kind, yearsRequired }
-    : { id, text, kind };
+  return years !== undefined
+    ? { id, kind, text, years }
+    : { id, kind, text };
 }
 
 /** Trimmed non-empty requirement text, or `null` when absent/blank. */
 function coerceText(raw: unknown): string | null {
   const text = typeof raw === "string" ? raw.trim() : "";
   return text.length > 0 ? text : null;
-}
-
-/** The model's `id` when usable, else a deterministic `req-N` from position. */
-function coerceId(raw: unknown, index: number): string {
-  return typeof raw === "string" && raw.trim() ? raw.trim() : `req-${index + 1}`;
 }
 
 /** A valid requirement kind, defaulting unknown/missing values to `"skill"`. */

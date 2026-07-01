@@ -18,28 +18,11 @@
 /**
  * A single requirement extracted from a job description (call 1 output).
  *
- * `id` must be stable across extract → judge (the judge receives the same
- * id list and returns verdicts keyed by it). Kebab-case, sequential.
+ * PROMOTED to the production path in #200 — the canonical definition now lives
+ * at `src/lib/jd-match/llm/extract-requirements.ts`. Re-exported here so the
+ * spike harness keeps compiling against one shared shape.
  */
-export interface JdRequirement {
-  /** Stable kebab-case identifier, e.g. "req-1". */
-  id: string;
-  /**
-   * Semantic category of the requirement.
-   * - `skill`          — a specific technology, language, or tool
-   * - `experience`     — years or domain of professional experience
-   * - `responsibility` — a duty or deliverable listed in the JD
-   * - `qualification`  — a degree, certification, or other credential
-   */
-  kind: "skill" | "experience" | "responsibility" | "qualification";
-  /** Verbatim or lightly cleaned requirement text from the JD. */
-  text: string;
-  /**
-   * Integer years extracted from the requirement, if stated.
-   * e.g. "3+ years of Python" → 3. `undefined` when no year count is given.
-   */
-  years?: number;
-}
+export type { JdRequirement } from "../../jd-match/llm/extract-requirements.ts";
 
 /**
  * The model's verdict on one requirement vs. the resume (call 2 output).

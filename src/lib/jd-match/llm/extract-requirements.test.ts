@@ -52,10 +52,10 @@ describe("extractRequirements", () => {
       id: "req-1",
       kind: "skill",
       text: "5+ years of TypeScript",
-      yearsRequired: 5,
+      years: 5,
     });
-    // years omitted on the source → no yearsRequired key at all.
-    expect("yearsRequired" in reqs[1]!).toBe(false);
+    // years omitted on the source → no years key at all.
+    expect("years" in reqs[1]!).toBe(false);
   });
 
   it("recovers an array from fenced + prose-wrapped output", async () => {
@@ -93,7 +93,7 @@ describe("extractRequirements", () => {
     );
   });
 
-  it("defaults an unknown kind to 'skill' and backfills a missing id", async () => {
+  it("defaults an unknown kind to 'skill' and assigns a sequential id", async () => {
     const engine = makeMockEngine([
       JSON.stringify([{ kind: "bogus", text: "Ship features" }]),
     ]);
@@ -101,17 +101,19 @@ describe("extractRequirements", () => {
     expect(reqs[0]).toEqual({ id: "req-1", kind: "skill", text: "Ship features" });
   });
 
-  it("drops elements with no usable text (and non-objects)", async () => {
+  it("drops unusable entries and renumbers survivors as contiguous req-N", async () => {
+    // The model's own ids ("req-1", "req-7") are ignored — ids come from the
+    // OUTPUT position so the extract → judge join key is always contiguous.
     const engine = makeMockEngine([
       JSON.stringify([
         { id: "req-1", kind: "skill", text: "" },
-        { id: "req-2", kind: "skill", text: "Go" },
+        { id: "req-7", kind: "skill", text: "Go" },
         "garbage",
         { kind: "skill" },
       ]),
     ]);
     await expect(extractRequirements("jd", engine)).resolves.toEqual([
-      { id: "req-2", kind: "skill", text: "Go" },
+      { id: "req-1", kind: "skill", text: "Go" },
     ]);
   });
 

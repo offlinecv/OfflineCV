@@ -28,48 +28,15 @@ export const JUDGE_BATCH_SIZE = 8;
 // Call 1 — Extract requirements from a job description
 // ---------------------------------------------------------------------------
 
-/**
- * System prompt for the extract call.
- *
- * Design notes:
- * - "JSON only, no markdown fences, no prose" addresses the most common
- *   small-model failure: wrapping JSON in ```json ... ``` or explaining
- *   itself before the array.
- * - The 4 kind values are spelled out verbatim so the model has no
- *   ambiguity about the enum.
- * - `years` is optional and integer-only; non-numeric phrases like
- *   "several years" must be omitted. This is intentional — we measure
- *   how often the model over-generates vs. under-generates this field.
- * - Requiring `id` in "req-N" form (sequential, 1-based) keeps the
- *   extract → judge id join deterministic.
- */
-export const EXTRACT_SYSTEM_PROMPT = `You are a structured information extractor. Your only job is to read a job description and output a JSON array of requirements.
-
-Output ONLY a valid JSON array — no prose, no markdown, no code fences, no explanation. The array must start with [ and end with ].
-
-Each element in the array must be a JSON object with these exact keys:
-- "id": a string like "req-1", "req-2", etc. (sequential, 1-based)
-- "kind": one of exactly these four strings: "skill", "experience", "responsibility", "qualification"
-- "text": a concise string capturing the requirement (keep it to one sentence)
-- "years": an integer (the minimum number of years stated) — ONLY include this key when the requirement explicitly states a year count; omit it entirely otherwise
-
-Classify each distinct requirement as:
-- "skill" — a specific technology, tool, programming language, or domain capability
-- "experience" — years or breadth of professional experience in a domain
-- "responsibility" — a duty, deliverable, or activity the role requires
-- "qualification" — a degree, certification, or formal credential
-
-Extract every materially distinct requirement. Skip generic filler ("strong communication skills", "team player") unless the JD frames them as explicit requirements.
-
-Output nothing except the JSON array.`;
-
-/**
- * Build the user message for the extract call.
- * @param jdText — The raw job description text.
- */
-export function buildExtractUserPrompt(jdText: string): string {
-  return `Job description:\n\n${jdText}`;
-}
+// The extract-half prompts were PROMOTED to the production path in #200 and now
+// live at `src/lib/jd-match/llm/prompts.ts` (single source of truth). Re-export
+// them here so the spike harness (`measure.ts`) keeps compiling against the same
+// tuned text it was validated on. The judge-half below stays spike-local until
+// #201 promotes it.
+export {
+  EXTRACT_SYSTEM_PROMPT,
+  buildExtractUserPrompt,
+} from "../../jd-match/llm/prompts.ts";
 
 // ---------------------------------------------------------------------------
 // Call 2 — Judge requirement evidence against a resume projection
