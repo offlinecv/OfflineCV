@@ -45,48 +45,53 @@ export default function App() {
       }
     >
       {state.phase !== "done" && (
-        // Pre-drop landing column: narrower than the results view and centered
-        // so whitespace frames the composition symmetrically instead of
-        // pooling to the right of left-anchored text. Everything scannable
-        // (headline, stat, promise, source) centers on the drop-zone axis;
-        // multi-line prose (the agent block) stays left-aligned for reading.
-        <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        // Pre-drop landing column fills the same width as the results view
+        // (PageShell's max-w-5xl) so dropping a resume doesn't jump the layout
+        // width. Prose inside each block is capped (max-w-2xl / max-w-3xl) and
+        // centered on the drop-zone axis so line length stays readable even
+        // though the surrounding cards span the full column.
+        <section className="flex w-full flex-col gap-6">
           {(state.phase === "idle" || state.phase === "error") && (
-            <Card className="flex flex-col gap-5 bg-surface-card-warm">
-              <h2 className="text-balance text-center text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
-                Recruiters and screeners don&apos;t read your PDF.{" "}
-                <span className="font-normal text-content-secondary">
-                  They read what a parser pulls out of it.
-                </span>
-              </h2>
-              <p className="text-pretty text-center text-sm text-content-muted">
-                AI is now part of most hiring pipelines — and{" "}
-                <span className="font-medium text-content-secondary">
-                  nearly half of job seekers
-                </span>{" "}
-                say they&apos;ve lost trust in a process they can&apos;t see into.
-                <span
-                  aria-hidden="true"
-                  className="align-super text-xs text-brand-amber"
-                >
-                  1
-                </span>
-              </p>
-              <p className="text-pretty text-center text-base font-medium text-content-primary sm:text-lg">
-                resumelint shows you what a generic parser reads back from your
-                resume — free, private, open-source.
-              </p>
-              <p className="text-center text-xs text-content-muted">
-                Source:{" "}
-                <a
-                  href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
-                  target="_blank"
-                  rel="nofollow noopener noreferrer"
-                  className="hover:underline"
-                >
-                  Greenhouse, 2025 AI in Hiring Report (4,100+ job seekers and hiring managers)
-                </a>
-              </p>
+            // One consolidated hero message (internal #265): a single,
+            // non-hyperbolic headline — no "they don't read your PDF" claim and
+            // no "parser" jargon — that says what resumelint does in one angle.
+            // The trust stat is the one supporting line; everything else (the
+            // recruiter-agent context) moves to the quiet block below the drop
+            // zone so the hero isn't three competing messages.
+            <Card className="flex flex-col items-center gap-5 bg-surface-card-warm">
+              <div className="flex max-w-2xl flex-col gap-4 text-center">
+                <h2 className="text-balance text-2xl font-normal leading-snug tracking-tight text-content-secondary sm:text-3xl">
+                  <span className="font-semibold text-content-primary">
+                    AI is now part of most hiring pipelines —
+                  </span>{" "}
+                  and nearly half of job seekers say they&apos;ve lost trust in
+                  a process they can&apos;t see into.
+                  <a
+                    href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
+                    target="_blank"
+                    rel="nofollow noopener noreferrer"
+                    aria-label="Source: Greenhouse, 2025 AI in Hiring Report"
+                    className="align-super text-xs text-brand-amber hover:underline"
+                  >
+                    1
+                  </a>
+                </h2>
+                <p className="text-pretty text-base font-medium text-content-primary sm:text-lg">
+                  resumelint shows you what a recruiter or screener reads back
+                  from your resume — free, private, and open-source.
+                </p>
+                <p className="text-xs text-content-muted">
+                  Source:{" "}
+                  <a
+                    href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
+                    target="_blank"
+                    rel="nofollow noopener noreferrer"
+                    className="hover:underline"
+                  >
+                    Greenhouse, 2025 AI in Hiring Report (4,100+ job seekers and hiring managers)
+                  </a>
+                </p>
+              </div>
             </Card>
           )}
 
@@ -109,15 +114,15 @@ export default function App() {
             // policy (internal #24) we never name other products here — the
             // trend is described generically, no links to specific tools.
             <div className="rounded-lg border border-border-light bg-surface-subtle px-4 py-3">
-              <p className="text-pretty text-sm text-content-secondary">
+              <p className="mx-auto max-w-3xl text-pretty text-sm text-content-secondary">
                 <span className="font-medium text-content-primary">
                   Recruiters are starting to run AI agents over resumes.
                 </span>{" "}
-                Several recent open-source projects score candidates for
-                recruiters. resumelint is the candidate-side mirror: it shows
-                you what survives the parse — before you hit submit. The
-                score isn&apos;t a verdict on you as a candidate — it measures
-                how well a machine can read your resume.
+                Several products score candidates for recruiters. resumelint is
+                the candidate-side
+                mirror: it shows you what survives the parse — before you hit
+                submit. The score isn&apos;t a verdict on you as a candidate —
+                it measures how well a machine can read your resume.
               </p>
             </div>
           )}
