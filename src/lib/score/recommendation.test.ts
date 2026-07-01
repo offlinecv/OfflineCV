@@ -110,7 +110,7 @@ describe("getScoreRecommendation", () => {
       }),
     );
     expect(msg).toMatch(/add metrics/i);
-    expect(msg).toContain("A generic parser gets most of this"); // overall 70 → medium tier
+    expect(msg).toContain("This is close"); // overall 70 → medium tier
   });
 
   it("points at Structure when it is the weakest gradable dimension", () => {
@@ -177,20 +177,62 @@ describe("getScoreRecommendation", () => {
       }),
     );
     expect(msg).toMatch(/add a few quantified bullets/i);
-    expect(msg).toContain("A generic extractor struggles here");
+    expect(msg).toContain("This has clear gaps to close");
   });
 
   it("uses the matching band opener for each tier", () => {
     const weakSpec = { specificity: { score: 8, max: 40 } };
     expect(
       getScoreRecommendation(makeScore({ overall: 85, ...weakSpec })),
-    ).toContain("Most generic parsers should read this cleanly");
+    ).toContain("This is in solid shape");
     expect(
       getScoreRecommendation(makeScore({ overall: 65, ...weakSpec })),
-    ).toContain("A generic parser gets most of this");
+    ).toContain("This is close");
     expect(
       getScoreRecommendation(makeScore({ overall: 40, ...weakSpec })),
-    ).toContain("A generic extractor struggles here");
+    ).toContain("This has clear gaps to close");
+  });
+
+  it("keeps content-only messages free of parser/extractor language on the no-layout-flag path (issue #214)", () => {
+    // Regression guard: earlier BAND_OPENER wording ("A generic extractor
+    // struggles here" etc.) misattributed pure content weakness to a parser
+    // failure — see #214. The layout-penalty branch of getScoreRecommendation
+    // legitimately mentions parsers ("scramble it for many parsers"); this
+    // test only exercises the content-only path (multiplier === 1, scanned
+    // false, no triggers — all defaults from makeScore) and asserts the
+    // returned sentence never mentions the parser or the extractor.
+    //
+    // Parametrized over every tier × every weakest-dimension path so a future
+    // edit reintroducing "parser" vocabulary in any BAND_OPENER value OR any
+    // dimensionStep() branch is caught on the same test.
+    const weakestBy: Record<
+      "specificity" | "structure" | "completeness",
+      Parameters<typeof makeScore>[0]
+    > = {
+      specificity: {
+        specificity: { score: 8, max: 40 },
+        structure: { score: 27, max: 30 },
+        completeness: { score: 27, max: 30, missing: [] },
+      },
+      structure: {
+        specificity: { score: 36, max: 40 },
+        structure: { score: 6, max: 30 },
+        completeness: { score: 27, max: 30, missing: [] },
+      },
+      completeness: {
+        specificity: { score: 36, max: 40 },
+        structure: { score: 27, max: 30 },
+        completeness: { score: 3, max: 30, missing: ["phone", "location"] },
+      },
+    };
+    for (const overall of [85, 65, 40]) {
+      for (const weakest of ["specificity", "structure", "completeness"] as const) {
+        const msg = getScoreRecommendation(makeScore({ overall, ...weakestBy[weakest] }));
+        expect(msg, `tier=${overall}, weakest=${weakest}`).not.toMatch(
+          /parser|extractor/i,
+        );
+      }
+    }
   });
 
   it("is deterministic — same input yields the same sentence", () => {

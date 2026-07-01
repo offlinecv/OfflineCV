@@ -21,11 +21,21 @@ import type { AnonymousAtsScore } from "./score.ts";
 import { getScoreTier } from "./score.ts";
 import type { ScoreTier } from "./types.ts";
 
-/** Band-opening clause (no trailing punctuation — the caller appends the step). */
+/**
+ * Band-opening clause (no trailing punctuation — the caller appends the step).
+ *
+ * These openers land on the CONTENT-ONLY path — the scanned and layout-penalty
+ * branches upstream short-circuit before reaching here. So copy must speak to
+ * content quality only and never blame a parser: a low score under this
+ * constant is always a real content weakness (missing metrics, weak verbs,
+ * missing fields), not a parsing failure. Copy is kept dimension-agnostic so
+ * every opener composes cleanly with every downstream step, and tab-agnostic
+ * so it doesn't couple to the tab-strip vocabulary.
+ */
 const BAND_OPENER: Record<ScoreTier, string> = {
-  high: "Most generic parsers should read this cleanly",
-  medium: "A generic parser gets most of this",
-  low: "A generic extractor struggles here",
+  high: "This is in solid shape",
+  medium: "This is close",
+  low: "This has clear gaps to close",
 };
 
 /** Short, friendly names for the layout triggers we penalize. Kept terse for
