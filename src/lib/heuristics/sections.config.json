@@ -60,7 +60,9 @@
         "core competencies",
         "competencies",
         "expertise",
-        "technologies"
+        "technologies",
+        "programs, skills, software",
+        "programs, skills & software"
       ],
       "anchors": ["skills", "competencies", "technologies", "expertise"],
       "splitLetterNormalizable": false,
