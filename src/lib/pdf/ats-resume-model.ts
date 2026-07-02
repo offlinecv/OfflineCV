@@ -232,7 +232,8 @@ export function buildAtsResumeModel(
   // ── Experience ──
   // Round-trip layout (#284): emit the STACKED shape the text-only parser is
   // tuned to re-segment — the role TITLE on the bold header line, and
-  // "Company · Location · Dates" on the sub-line. The date lives on the sub-line
+  // "Company · Location" followed by the dates after a whitespace gap (not a
+  // third " · " — see the join below) on the sub-line. The date lives there
   // so that line becomes the parser's `date_range` anchor (one anchor per role),
   // with the title one line above it (within the 2-line header lookback). The
   // old single combined "Title · Company · Location" header line (with the date
