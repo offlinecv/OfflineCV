@@ -53,6 +53,41 @@ export function isProseLine(text: string): boolean {
   return trimmed.split(/\s+/).filter(Boolean).length >= PROSE_MIN_WORDS;
 }
 
+/**
+ * A page running-header / footer line — the candidate's own name + "Resume" /
+ * "Résumé" / "CV" / "Curriculum Vitae" furniture a continuation page repeats at
+ * its top or bottom (often beside a date and a page number, e.g. "June 10, 2026
+ * Jane Doe Resume 2" / "Jane Doe · Résumé 1"). When an entry-style section
+ * (experience, projects, education, or an achievements-family section) spans a
+ * page break, that furniture line lands mid-section and would otherwise become
+ * an entry header (a role's company/title) or contaminate a description blob
+ * (#225, generalized #283). A genuine entry line never carries the word
+ * résumé/CV, so keying on it is a safe, content-free strip. Matched
+ * case-insensitively and accent-tolerantly (`Résumé`/`Resume`).
+ *
+ * NB: `\b` is unreliable around the accented `é` (not a `\w` char in JS regex),
+ * so we anchor on the ASCII-letter side only: `(?<![A-Za-z])` … `(?![A-Za-z])`.
+ * These spelled-out forms are rare inside an entry title, so a letter boundary
+ * is a safe key.
+ */
+const PAGE_FURNITURE_RE =
+  /(?<![A-Za-z])(r[ée]sum[ée]|curriculum\s+vitae)(?![A-Za-z])/i;
+
+// The bare two-letter "CV" is far easier to hit by accident inside content — a
+// parenthesised domain acronym ("Cardiovascular (CV) Fellowship"), a hyphenated
+// code ("CV-204"), a journal short-name — so it strips a real entry if keyed on
+// a letter boundary alone. Require it to stand alone between whitespace / line
+// ends, which the running-header form ("Jane Doe · CV", "Name CV 2") satisfies
+// but a punctuation-adjacent in-content "CV" does not.
+const CV_FURNITURE_RE = /(?:^|\s)cv(?:$|\s)/i;
+
+/** True when the line is page running-header/footer furniture, not content.
+ *  Shared by the achievements extractor and the entry-block parser so a footer
+ *  that lands mid-section on a page break is stripped on every entry path. */
+export function isPageFurniture(line: PdfLine): boolean {
+  return PAGE_FURNITURE_RE.test(line.text) || CV_FURNITURE_RE.test(line.text);
+}
+
 /** Collapse internal whitespace and trim — the canonical date-token normalizer. */
 export function normalizeDate(raw: string): string {
   return raw.replace(/\s+/g, " ").trim();

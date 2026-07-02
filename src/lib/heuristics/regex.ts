@@ -72,6 +72,13 @@ const _COUNTRY_ALIASES: ReadonlyArray<string> = [
   "uae",
   "south korea",
   "north korea",
+  // Abbreviated colloquial forms that appear as a folded right-column country in
+  // two-column templates (e.g. Awesome-CV's "City, S.Korea") — the ISO English
+  // name "South Korea" never matches these, so admit the abbreviations directly.
+  "s.korea",
+  "s. korea",
+  "n.korea",
+  "n. korea",
 ];
 
 // Hardcoded fallback covering the most common country names on resumes — used

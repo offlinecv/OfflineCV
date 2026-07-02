@@ -313,4 +313,72 @@ describe("role location extraction (#218)", () => {
       expect(role.company).toBeTruthy();
     });
   });
+
+  describe("two-column fold — space-delimited 'Company City, Country' (Pass D, #287)", () => {
+    function roleFromTwoLine(company: string) {
+      // Two-column templates (Awesome-CV) fold the right-column location onto the
+      // company line with no comma before the city: "Company City, Country".
+      return roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        { text: company, fontSize: 11 },
+        { text: "Jun. 2018 - Jan. 2021", fontSize: 11 },
+        { text: "Director of Infrastructure", fontSize: 11 },
+        { text: "• Built the platform team from scratch.", fontSize: 11 },
+      ])[0];
+    }
+
+    it("splits abbreviated country 'City, S.Korea' off the company (primary AC)", () => {
+      const role = roleFromTwoLine("Kasa Seoul, S.Korea");
+      expect(role.company).toBe("Kasa");
+      expect(role.company).not.toContain("Seoul");
+      expect(role.location).toBe("Seoul, S.Korea");
+    });
+
+    it("splits a folded location off a legal-suffix company", () => {
+      const role = roleFromTwoLine("Dunamu Inc. Seoul, S.Korea");
+      expect(role.company).toBe("Dunamu Inc.");
+      expect(role.location).toBe("Seoul, S.Korea");
+    });
+
+    it("keeps a legal-suffix tail with the company, not the location (Co., Ltd.)", () => {
+      // "Omnious. Co., Ltd. Seoul, S.Korea" — the comma after "Co." is
+      // company-internal ("Co., Ltd."), not a company/city boundary; only
+      // " Seoul, S.Korea" is the fold.
+      const role = roleFromTwoLine("Omnious. Co., Ltd. Seoul, S.Korea");
+      expect(role.company).toBe("Omnious. Co., Ltd.");
+      expect(role.location).toBe("Seoul, S.Korea");
+    });
+
+    it("splits a folded location past an internal comma in the company", () => {
+      // "R.O.K Cyber Command, MND Seoul, S.Korea" — the company itself has a
+      // comma; Pass D must peel only the trailing " Seoul, S.Korea".
+      const role = roleFromTwoLine("R.O.K Cyber Command, MND Seoul, S.Korea");
+      expect(role.company).toBe("R.O.K Cyber Command, MND");
+      expect(role.location).toBe("Seoul, S.Korea");
+    });
+
+    it("splits a full ISO-name country 'City, Germany' folded onto company", () => {
+      const role = roleFromTwoLine("Sigma Analytics Berlin, Germany");
+      expect(role.company).toBe("Sigma Analytics");
+      expect(role.location).toBe("Berlin, Germany");
+    });
+
+    it("no-regression: does not strip a non-country comma tail ('Acme, Systems')", () => {
+      // "Systems" is not in COUNTRY_GAZETTEER, so Pass D must not fire and the
+      // company stays intact.
+      const role = roleFromTwoLine("Acme, Systems");
+      expect(role.company).toContain("Acme");
+      expect(role.location).toBeUndefined();
+    });
+
+    it("defers a multi-word city with a locality-generic tail ('Mexico City') (#286 review)", () => {
+      // Single-token Pass D would grab "City" as the city and mis-split into
+      // company "Google Mexico" + location "City, Mexico". "City" is a locality
+      // generic (never a standalone city), so LOCALITY_SUFFIX_RE defers: the
+      // whole string stays with the company rather than fragmenting the city.
+      const role = roleFromTwoLine("Google Mexico City, Mexico");
+      expect(role.company).toContain("Mexico City");
+      expect(role.location).not.toBe("City, Mexico");
+    });
+  });
 });

@@ -33,7 +33,21 @@ const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const CONTENT_BOTTOM = MARGIN;
 
 // ── Type scale (points) ───────────────────────────────────────────────────────
-
+//
+// Font-signal stance (#284, Part 2 — documented limitation, not a fix here).
+// This engine DOES emit bold (Helvetica-Bold) and a real type scale — a role
+// header is bold at SIZE_HEADER, its date muted at SIZE_SUB, bullets at SIZE_BODY.
+// Those signals are, however, invisible to the round-trip: our own text-only
+// parser classifies role title / company / bullet purely from text shape and
+// x/y geometry — `groupIntoLines` collapses per-glyph `fontSize`/`fontName` away
+// before `parseEntryBlocks` runs, so re-introducing bold buys re-segmentation
+// nothing. That is why round-trip fidelity (#284) is carried entirely by the
+// TEXT LAYOUT the model emits (the stacked "Title" / "Company · Location  Dates"
+// shape in `ats-resume-model.ts`), not by these weights/sizes. Teaching the
+// parser to consume font weight/size as a role-header signal is a larger,
+// separate change (it would touch `groupIntoLines` retention + `entry-blocks`
+// anchoring) and is intentionally out of scope here; if we later want
+// font-aware parsing, file it as its own follow-up.
 const SIZE_NAME = 18;
 const SIZE_CONTACT = 9;
 const SIZE_SECTION = 11;
@@ -206,7 +220,7 @@ export async function renderAtsResumePdf(
 
   // ── Summary ──
   if (model.summary) {
-    drawSectionHeading(layout, "Summary");
+    drawSectionHeading(layout, model.summaryHeading ?? "Summary");
     layout.drawText(model.summary, { size: SIZE_BODY });
     layout.advance(GAP_BETWEEN_ENTRIES);
   }

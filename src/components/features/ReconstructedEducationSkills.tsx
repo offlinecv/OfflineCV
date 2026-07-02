@@ -204,6 +204,7 @@ function EducationEntry({
 }
 
 export function EducationSection({
+  heading,
   education,
   educationOverrides,
   onEducationFieldChange,
@@ -213,6 +214,8 @@ export function EducationSection({
   onRemoveEntry,
   onEntryField,
 }: {
+  /** Verbatim source heading (#285); falls back to "Education" when absent. */
+  heading?: string;
   education: ResumeEducation[];
   educationOverrides: Record<number, EducationFieldOverrides>;
   onEducationFieldChange: (
@@ -230,7 +233,7 @@ export function EducationSection({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <SectionHeading>Education</SectionHeading>
+      <SectionHeading>{heading ?? "Education"}</SectionHeading>
       {education.length === 0 ? (
         <NotDetected what="education" />
       ) : (
@@ -408,10 +411,13 @@ function AddSkillInput({
 }
 
 export function SkillsSection({
+  heading,
   skills,
   onAddSkill,
   onRemoveSkill,
 }: {
+  /** Verbatim source heading (#285); falls back to "Skills" when absent. */
+  heading?: string;
   /** The edited skills list (parsed minus removed, plus added) — what renders.
    *  App already folds skillsOverride into this via applyOverrides, so the
    *  section renders the resolved list directly. */
@@ -421,7 +427,7 @@ export function SkillsSection({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <SectionHeading>Skills</SectionHeading>
+      <SectionHeading>{heading ?? "Skills"}</SectionHeading>
       {skills.length === 0 ? (
         <NotDetected what="skills" />
       ) : (

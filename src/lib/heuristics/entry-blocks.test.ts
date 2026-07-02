@@ -266,6 +266,60 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
     expect(blocks[0].headerLines.some((h) => /\d{4}/.test(h))).toBe(false);
   });
 
+  // #283 false-positive guard: a legit project/role header that CONTAINS the
+  // word "Resume"/"CV" AND a pipe/mid-dot separator (a common "Name | Stack" or
+  // "Title · Company" shape) must NOT be mistaken for a "Name · Résumé N"
+  // footer and silently stripped — that dropped the whole entry. The positional
+  // guard now requires the separator ADJACENT to the résumé/CV keyword, which
+  // this header does not have ("Resume" is not next to the "|").
+  it("keeps a legit 'Resume Parser | Stack  <dates>' header — not footer furniture (#283)", () => {
+    const blocks = parseEntryBlocks(
+      section([
+        { text: "Resume Parser | Python, React  Jan 2024 - Present" },
+        { text: "• Built a browser-side PDF extraction cascade." },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].headerLines.some((h) => h.includes("Resume Parser"))).toBe(
+      true,
+    );
+    expect(blocks[0].body).toContain("extraction cascade");
+  });
+
+  // #286 review: the positional tell must be ADJACENT to the résumé/CV keyword.
+  // A real bullet that merely mentions our own domain ("resume") AND happens to
+  // carry an "N of M" ratio must NOT be stripped as furniture — the bare
+  // "N of M" / "page N" alternatives were dropped so this bullet survives.
+  it("keeps a real bullet mentioning 'resume' + an 'N of M' ratio (#286 review)", () => {
+    const blocks = parseEntryBlocks(
+      section([
+        { text: "Resume Linter" },
+        { text: "• Rebuilt the resume parser, improving 3 of 5 core metrics." },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].body).toContain("3 of 5 core metrics");
+  });
+
+  it("still strips a real 'Name · Résumé N' footer that lands mid-section (#283)", () => {
+    const blocks = parseEntryBlocks(
+      section([
+        { text: "June 3, 2026  Jane Smith · Résumé 1" }, // footer — stripped
+        { text: "Trip Planner" },
+        { text: "• Added the itinerary view." },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].headerLines).toContain("Trip Planner");
+    for (const b of blocks) {
+      expect(b.headerLines.join(" ")).not.toContain("Résumé");
+      expect(b.headerLines.join(" ")).not.toContain("Jane Smith");
+    }
+  });
+
   // x-aware builder: a long bullet wraps onto a marker-less second line that
   // aligns with the bullet *text* (indented past the header margin).
   function sectionX(lines: Array<{ text: string; x: number }>): PdfSection {

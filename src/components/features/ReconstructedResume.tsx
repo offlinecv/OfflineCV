@@ -341,6 +341,7 @@ const EXPERIENCE_FIELD_MAP: Record<
 };
 
 function ExperienceSection({
+  heading,
   groups,
   resumeSections,
   jdContext,
@@ -357,6 +358,8 @@ function ExperienceSection({
   onEntryField,
   onAddBullet,
 }: {
+  /** Verbatim source heading (#285); falls back to "Experience" when absent. */
+  heading?: string;
   /** Pre-built experience groups + the shared "Other" group appended last. */
   groups: BulletGroup[];
   /** Chain-of-sections input for the whole-résumé rewrite CTA (#67). */
@@ -422,7 +425,7 @@ function ExperienceSection({
           where the inline glyphs actually appear), not at the top of the
           section where it reads as detached. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <SectionHeading>Experience</SectionHeading>
+        <SectionHeading>{heading ?? "Experience"}</SectionHeading>
         {hasBullets && <BulletFlagLegend />}
       </div>
       {/* Picker + whole-résumé CTA mounted at the top of Experience —
@@ -497,6 +500,7 @@ function ExperienceSection({
  * bullets grade and export like any other.
  */
 function ProjectsSection({
+  heading,
   projects,
   groups,
   bulletOverrides,
@@ -507,6 +511,8 @@ function ProjectsSection({
   onEntryField,
   onAddBullet,
 }: {
+  /** Verbatim source heading (#285); falls back to "Projects" when absent. */
+  heading?: string;
   projects: ResumeProject[];
   /** Pre-built project groups, index-aligned with `projects`. */
   groups: BulletGroup[];
@@ -520,7 +526,7 @@ function ProjectsSection({
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeading>Projects</SectionHeading>
+      <SectionHeading>{heading ?? "Projects"}</SectionHeading>
       <div className="flex flex-col gap-4">
         {projects.map((project, i) => {
           const group = groups[i];
@@ -592,6 +598,7 @@ function ProjectsSection({
  * `buildProjectDates` is just the year string.
  */
 function AchievementsSection({
+  heading,
   achievements,
   groups,
   bulletOverrides,
@@ -602,6 +609,8 @@ function AchievementsSection({
   onEntryField,
   onAddBullet,
 }: {
+  /** Verbatim source heading (#285); falls back to "Achievements" when absent. */
+  heading?: string;
   achievements: HeuristicAchievement[];
   /** Pre-built achievement groups, index-aligned with `achievements`. */
   groups: BulletGroup[];
@@ -615,7 +624,7 @@ function AchievementsSection({
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <SectionHeading>Achievements</SectionHeading>
+      <SectionHeading>{heading ?? "Achievements"}</SectionHeading>
       <div className="flex flex-col gap-4">
         {achievements.map((achievement, i) => {
           const group = groups[i];
@@ -863,6 +872,7 @@ export function ReconstructedResume({
   // Skills, which also render an add affordance unconditionally.
   const achievementsSection = (
     <AchievementsSection
+      heading={result.sections?.sectionHeadings?.get("achievements")}
       achievements={achievements}
       groups={achievementGroups}
       bulletOverrides={bulletOverrides}
@@ -914,6 +924,7 @@ export function ReconstructedResume({
       />
       {achievementsAbove && achievementsSection}
       <ExperienceSection
+        heading={result.sections?.sectionHeadings?.get("experience")}
         groups={experienceRenderGroups}
         resumeSections={resumeSections}
         jdContext={jdContext}
@@ -933,6 +944,7 @@ export function ReconstructedResume({
         onAddBullet={addBullet}
       />
       <ProjectsSection
+        heading={result.sections?.sectionHeadings?.get("projects")}
         projects={projects}
         groups={projectGroups}
         bulletOverrides={bulletOverrides}
@@ -945,6 +957,7 @@ export function ReconstructedResume({
       />
       {!achievementsAbove && achievementsSection}
       <EducationSection
+        heading={result.sections?.sectionHeadings?.get("education")}
         education={parsed.education}
         educationOverrides={educationOverrides}
         onEducationFieldChange={(index, field, value) =>
@@ -957,6 +970,7 @@ export function ReconstructedResume({
         onEntryField={setEntryField}
       />
       <SkillsSection
+        heading={result.sections?.sectionHeadings?.get("skills")}
         skills={parsed.skills}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}

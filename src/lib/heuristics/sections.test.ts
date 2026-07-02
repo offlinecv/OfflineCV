@@ -18,7 +18,12 @@ import { promises as fsp } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import { groupIntoLines, splitIntoSections, type PdfSection } from "./sections.ts";
+import {
+  groupIntoLines,
+  splitIntoSections,
+  toSectionedResume,
+  type PdfSection,
+} from "./sections.ts";
 import { runCascade } from "./cascade.ts";
 import { mkItems } from "./__test-utils__/mkItem.ts";
 
@@ -631,5 +636,53 @@ describe("splitIntoSections — institution name ending in a section anchor (#25
     expect(edu!.lines.some((l) => l.text.includes("Relevant Experience"))).toBe(
       false,
     );
+  });
+});
+
+describe("PdfSection.rawHeading — verbatim source heading capture (#285)", () => {
+  it("captures the original heading text for a synonym mapped to a canonical section", () => {
+    // "Work History" is an alias for the canonical "experience" section —
+    // scoring stays keyed on "experience", but the section retains the user's
+    // own wording for display.
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 },
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 },
+      { text: "Work History", fontSize: 13 },
+      { text: "Engineer, Globex  2019 - 2021", fontSize: 11 },
+    ]);
+    const experience = sections.find((s) => s.name === "experience");
+    expect(experience?.rawHeading).toBe("Work History");
+  });
+
+  it("captures the original heading text for a skills synonym", () => {
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 },
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 },
+      { text: "Technical Skills", fontSize: 13 },
+      { text: "TypeScript, SQL, React", fontSize: 11 },
+    ]);
+    const skills = sections.find((s) => s.name === "skills");
+    expect(skills?.rawHeading).toBe("Technical Skills");
+  });
+
+  it("leaves rawHeading undefined for the profile section", () => {
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 },
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 },
+    ]);
+    const profile = sections.find((s) => s.name === "profile");
+    expect(profile?.rawHeading).toBeUndefined();
+  });
+
+  it("threads rawHeading into SectionedResume.sectionHeadings for the display layer", () => {
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 },
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 },
+      { text: "Work History", fontSize: 13 },
+      { text: "Engineer, Globex  2019 - 2021", fontSize: 11 },
+    ]);
+    const resume = toSectionedResume(sections, "regex");
+    expect(resume.sectionHeadings?.get("experience")).toBe("Work History");
+    expect(resume.sectionHeadings?.size).toBe(1);
   });
 });
