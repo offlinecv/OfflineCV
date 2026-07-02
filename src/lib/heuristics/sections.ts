@@ -57,6 +57,10 @@ export interface PdfLine {
 export interface PdfSection {
   /** "profile" covers anything above the first recognized header. */
   name: SectionName | "profile";
+  /** Verbatim heading text as it appeared in the source document, when this
+   *  section was opened by a recognized/other header (issue #285). Absent for
+   *  "profile" (content above the first header) and synthesized sections. */
+  rawHeading?: string;
   lines: PdfLine[];
 }
 
@@ -82,6 +86,13 @@ export interface SectionedResume {
    *  policy order. A convenience accessor over `byName` for the scorer; not yet
    *  consumed by the pool sourcing (that is the next issue — see #132 Notes). */
   readonly accomplishmentSections: readonly SectionName[];
+  /** Section name → verbatim source heading text, when the section was opened
+   *  by a recognized/other header (issue #285). Display-layer only — scoring
+   *  stays keyed on canonical `SectionName`; this is purely for the UI/export
+   *  to render the user's own wording instead of the hardcoded canonical word.
+   *  Absent entries — and an absent map entirely, for hand-built test fixtures
+   *  predating this field — fall back to the canonical word at the call site. */
+  readonly sectionHeadings?: ReadonlyMap<SectionName, string>;
   /** Which splitter produced the section boundaries — provenance for
    *  confidence tuning / telemetry. */
   readonly source: "markdown" | "regex";
@@ -112,6 +123,10 @@ export function toSectionedResume(
   // all matches' lines in document order. Mirroring that here keeps
   // `byName.get("skills")` byte-identical to the retired `skillsSectionLines`.
   const byName = new Map<SectionName | "profile", string[]>();
+  // First occurrence wins — a resume can split one logical section across
+  // continuation headers (e.g. "EXPERIENCE" repeated across a page break); the
+  // first header's wording is the representative one for display.
+  const sectionHeadings = new Map<SectionName, string>();
   for (const section of sections) {
     // Fold wrapped-continuation lines (a long bullet that wrapped onto a
     // second, marker-less line indented past the bullet marker) into the line
@@ -127,11 +142,19 @@ export function toSectionedResume(
     const existing = byName.get(section.name);
     if (existing) existing.push(...lines);
     else byName.set(section.name, lines);
+    if (
+      section.name !== "profile" &&
+      section.rawHeading &&
+      !sectionHeadings.has(section.name)
+    ) {
+      sectionHeadings.set(section.name, section.rawHeading);
+    }
   }
   return {
     byName,
     accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
     source,
+    sectionHeadings,
   };
 }
 
@@ -869,7 +892,11 @@ export function splitIntoSections(
       sections[sections.length - 1].name,
     );
     if (action.kind === "open") {
-      sections.push({ name: action.name, lines: [] });
+      sections.push({
+        name: action.name,
+        rawHeading: line.text.trim(),
+        lines: [],
+      });
       openedRealSection = true;
       prevLineOpenedBoundary = true;
       continue;
@@ -996,7 +1023,11 @@ export function findSection(
   const matches = sections.filter((s) => s.name === name);
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0];
-  return { name, lines: matches.flatMap((s) => s.lines) };
+  return {
+    name,
+    rawHeading: matches.find((s) => s.rawHeading)?.rawHeading,
+    lines: matches.flatMap((s) => s.lines),
+  };
 }
 
 // ── Markdown-anchored section splitting ──────────────────────────
@@ -1040,7 +1071,11 @@ export function splitIntoSectionsWithMarkdown(
     const key = normalizeHeaderText(line.text);
     const section = headerTexts.get(key);
     if (section && matchSectionHeader(line.text) === section) {
-      sections.push({ name: section, lines: [] });
+      sections.push({
+        name: section,
+        rawHeading: line.text.trim(),
+        lines: [],
+      });
       continue;
     }
     sections[sections.length - 1].lines.push(line);

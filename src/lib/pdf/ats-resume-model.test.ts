@@ -19,8 +19,12 @@ function bullet(text: string, index: number): BulletObservation {
 
 function makeResult(
   parsed: Partial<CascadeResult["parsed"]> = {},
+  sectionHeadings?: Partial<Record<string, string>>,
 ): CascadeResult {
   return {
+    ...(sectionHeadings
+      ? { sections: { sectionHeadings: new Map(Object.entries(sectionHeadings)) } }
+      : {}),
     parsed: {
       full_name: "Jane Candidate",
       email: "jane@example.com",
@@ -92,8 +96,11 @@ describe("buildAtsResumeModel", () => {
     expect(headings).toEqual(["Experience", "Education", "Skills"]);
 
     const exp = model.sections[0].entries[0];
-    expect(exp.headerLine).toBe("Senior PM · Acme");
-    expect(exp.subLine).toBe("2020 – 2024");
+    // Stacked round-trip shape (#284): title leads the bold header, the
+    // "Company · Location  Dates" line (carrying the parser's date anchor) sits
+    // on the sub-line so the emitted role re-segments back to one entry.
+    expect(exp.headerLine).toBe("Senior PM");
+    expect(exp.subLine).toBe("Acme  2020 – 2024");
     expect(exp.bullets).toEqual([
       "Led migration of legacy auth system to OAuth",
       "Drove 30% revenue growth across the platform",
@@ -191,5 +198,25 @@ describe("buildAtsResumeModel", () => {
     const model = buildAtsResumeModel(result, makeScore([]));
     expect(model.sections).toEqual([]);
     expect(model.summary).toBeUndefined();
+  });
+
+  it("uses the verbatim source heading when present, falling back to canonical otherwise (#285)", () => {
+    const result = makeResult({}, { experience: "Work History" });
+    const model = buildAtsResumeModel(result, makeScore([]));
+
+    const experienceSection = model.sections.find(
+      (s) => s.heading === "Work History",
+    );
+    expect(experienceSection).toBeDefined();
+    // Education had no rawHeading recorded — falls back to the canonical word.
+    expect(model.sections.some((s) => s.heading === "Education")).toBe(true);
+    // Summary heading falls back too when no rawHeading was recorded for it.
+    expect(model.summaryHeading).toBeUndefined();
+  });
+
+  it("uses the verbatim source heading for Summary when present", () => {
+    const result = makeResult({}, { summary: "Profile" });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    expect(model.summaryHeading).toBe("Profile");
   });
 });

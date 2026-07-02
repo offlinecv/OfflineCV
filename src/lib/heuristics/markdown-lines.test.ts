@@ -74,3 +74,35 @@ describe("sectionizeMarkdown — institution name ending in a section anchor (#2
     expect(edu!.lines.some((l) => l.text.includes("Mentor"))).toBe(false);
   });
 });
+
+describe("sectionizeMarkdown — rawHeading capture (#285)", () => {
+  it("captures the verbatim heading text, stripped of markdown decoration, for a synonym", () => {
+    const markdown = [
+      "**Dana Lopez**",
+      "",
+      "dana.lopez@example.com | (312) 555-0123",
+      "",
+      "**Work History**",
+      "",
+      "Engineer, Globex  2019 - 2021",
+    ].join("\n");
+
+    const { sections } = sectionizeMarkdown(markdown);
+
+    const experience = sections.find((s) => s.name === "experience");
+    expect(experience?.rawHeading).toBe("Work History");
+  });
+
+  it("leaves rawHeading undefined for the profile section", () => {
+    const markdown = [
+      "**Dana Lopez**",
+      "",
+      "dana.lopez@example.com | (312) 555-0123",
+    ].join("\n");
+
+    const { sections } = sectionizeMarkdown(markdown);
+
+    const profile = sections.find((s) => s.name === "profile");
+    expect(profile?.rawHeading).toBeUndefined();
+  });
+});

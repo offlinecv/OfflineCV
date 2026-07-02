@@ -344,7 +344,7 @@ export function sectionizeMarkdownLines(lines: PdfLine[]): PdfSection[] {
         ? null
         : (detailed?.section ?? matchLeadingSectionKeyword(line.text));
     if (header) {
-      sections.push({ name: header, lines: [] });
+      sections.push({ name: header, rawHeading: line.text.trim(), lines: [] });
       continue;
     }
     sections[sections.length - 1].lines.push(line);

@@ -64,6 +64,10 @@ export interface AtsSection {
 export interface AtsResumeModel {
   contact: AtsContact;
   summary?: string;
+  /** Verbatim source heading for the Summary section (#285); falls back to
+   *  "Summary" at draw time when absent. Only meaningful when `summary` is
+   *  set — the Summary heading is drawn separately from `sections`. */
+  summaryHeading?: string;
   sections: AtsSection[];
 }
 
@@ -226,16 +230,36 @@ export function buildAtsResumeModel(
   const sections: AtsSection[] = [];
 
   // ── Experience ──
-  const experienceEntries: AtsEntry[] = experiences.map((exp, i) => ({
-    headerLine:
-      joinHeader([exp.title, exp.company, exp.location], " · ") || "Experience",
-    subLine: experienceDateRange(exp) || undefined,
-    bullets: resolveBullets(
-      bulletsByIndex.get(expOffset + i),
-      bulletOverrides,
-      exp.description,
-    ),
-  }));
+  // Round-trip layout (#284): emit the STACKED shape the text-only parser is
+  // tuned to re-segment — the role TITLE on the bold header line, and
+  // "Company · Location · Dates" on the sub-line. The date lives on the sub-line
+  // so that line becomes the parser's `date_range` anchor (one anchor per role),
+  // with the title one line above it (within the 2-line header lookback). The
+  // old single combined "Title · Company · Location" header line (with the date
+  // on a separate bare line below) did NOT round-trip: a "Company Inc. Location"
+  // header trips the description-prose detector (an "Inc. Seoul"-style internal
+  // sentence break), so the parser folded the header into the previous role's
+  // body and dropped the role — and a bulletless role had no anchor at all.
+  const experienceEntries: AtsEntry[] = experiences.map((exp, i) => {
+    const title = (exp.title ?? "").trim();
+    // Company · Location joined with the dot; the date range is appended after a
+    // whitespace gap (the natural right-aligned-date shape) rather than another
+    // " · ", so stripping the date anchor leaves a clean "Company · Location"
+    // with no dangling separator leaking into the parsed company field.
+    const org = joinHeader([exp.company, exp.location], " · ");
+    const orgLine = [org, experienceDateRange(exp)].filter(Boolean).join("  ");
+    return {
+      // Title alone leads (bold); when a role has no title, the org/date line
+      // leads so it still carries the date anchor on the header line itself.
+      headerLine: title || orgLine || "Experience",
+      subLine: title ? orgLine || undefined : undefined,
+      bullets: resolveBullets(
+        bulletsByIndex.get(expOffset + i),
+        bulletOverrides,
+        exp.description,
+      ),
+    };
+  });
 
   // ── Projects ──
   const projectEntries: AtsEntry[] = projects.map((proj, i) => ({
@@ -286,27 +310,47 @@ export function buildAtsResumeModel(
 
   const achievementsAbove =
     parsed.achievements_placement === "above_experience";
+  // Verbatim source headings (#285) — display-only; scoring stays canonical-
+  // keyed. Falls back to the canonical word when a section wasn't opened by a
+  // recognized/other header (e.g. synthesized or profile-only content).
+  const headings = result.sections?.sectionHeadings;
   const achievementsSection: AtsSection | null =
     achievementEntries.length > 0
-      ? { heading: "Achievements", entries: achievementEntries }
+      ? {
+          heading: headings?.get("achievements") ?? "Achievements",
+          entries: achievementEntries,
+        }
       : null;
 
   if (achievementsAbove && achievementsSection)
     sections.push(achievementsSection);
   if (experienceEntries.length > 0)
-    sections.push({ heading: "Experience", entries: experienceEntries });
+    sections.push({
+      heading: headings?.get("experience") ?? "Experience",
+      entries: experienceEntries,
+    });
   if (projectEntries.length > 0)
-    sections.push({ heading: "Projects", entries: projectEntries });
+    sections.push({
+      heading: headings?.get("projects") ?? "Projects",
+      entries: projectEntries,
+    });
   if (!achievementsAbove && achievementsSection)
     sections.push(achievementsSection);
   if (educationEntries.length > 0)
-    sections.push({ heading: "Education", entries: educationEntries });
+    sections.push({
+      heading: headings?.get("education") ?? "Education",
+      entries: educationEntries,
+    });
   if (skillsEntries.length > 0)
-    sections.push({ heading: "Skills", entries: skillsEntries });
+    sections.push({
+      heading: headings?.get("skills") ?? "Skills",
+      entries: skillsEntries,
+    });
 
   return {
     contact,
     summary: parsed.summary?.trim() || undefined,
+    summaryHeading: headings?.get("summary"),
     sections,
   };
 }

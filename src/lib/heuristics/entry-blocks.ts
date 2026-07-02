@@ -40,6 +40,7 @@ import {
   parseDateRange,
   stripDateRange,
   isBulletLine,
+  isPageFurniture,
   isProseLine,
   stripBullet,
 } from "./line-primitives.ts";
@@ -98,6 +99,39 @@ export function isDateOnlyLine(text: string): boolean {
  *     "Minor in Economics", "Relevant Coursework: …" are properties of the entry
  *     above, not a new entry head.
  */
+/**
+ * A running-header/footer POSITION signal, required on the entry paths in
+ * addition to the {@link isPageFurniture} keyword before a line is stripped as
+ * furniture (#283). The keyword test alone over-matches on entry sections, where
+ * a legitimate project or role title routinely CONTAINS "Resume"/"CV" — "Resume
+ * Linter", "CV Toolkit", even "Resume Linter 2024 - 2025". A genuine page footer
+ * carries a structural tell such a title never does: a name↔label separator
+ * ("Jane Smith · Résumé"), the résumé/CV keyword immediately followed by a page
+ * number ("Résumé 1", "Resume 2"), or a "Page N" / "N of M" counter. The
+ * achievements path (#225) keeps the bare keyword test — an award line is far
+ * less likely to embed the word — so its behavior is unchanged.
+ */
+const FURNITURE_KEYWORD = "(?:r[ée]sum[ée]|resume|cv|curriculum\\s+vitae)";
+const FURNITURE_POSITION_RE = new RegExp(
+  // separator ADJACENT to the résumé/CV keyword ("Jane Smith · Résumé",
+  // "Résumé | Jane Smith") — a bare separator anywhere is NOT enough, or a
+  // legit "Resume Parser | Python" / "Company · Title" header would be stripped.
+  `${FURNITURE_KEYWORD}\\s*[·•‣|]|[·•‣|]\\s*${FURNITURE_KEYWORD}` +
+    // the résumé/CV keyword immediately followed by a page number ("Résumé 1")
+    `|${FURNITURE_KEYWORD}\\s+\\d` +
+    // an explicit page counter ("Page 2", "1 of 3", "2/5")
+    `|\\bpage\\s+\\d|\\b\\d+\\s*(?:\\/|of)\\s*\\d+\\b`,
+  "i",
+);
+
+/** True when a line is page running-header/footer furniture on an ENTRY path —
+ *  it carries both the résumé/CV keyword ({@link isPageFurniture}) AND a footer
+ *  position signal ({@link FURNITURE_POSITION_RE}), so a real project/role title
+ *  that merely contains "Resume"/"CV" is not stripped (#283). */
+function isEntryPageFurniture(line: PdfLine): boolean {
+  return isPageFurniture(line) && FURNITURE_POSITION_RE.test(line.text);
+}
+
 export function isEntryHeaderShape(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
@@ -756,6 +790,18 @@ export function parseEntryBlocks(
 ): EntryBlock[] {
   if (!section || section.lines.length === 0) return [];
 
+  // Strip page running-header/footer furniture (a repeated "Name · Résumé N"
+  // line a continuation page carries) BEFORE any anchor detection or header
+  // folding (#283, generalizing the achievements-only strip of #225). When an
+  // entry section spans a page break, that footer lands in reading order between
+  // the last role on one page and the first on the next; left in, it becomes the
+  // company/title of that first page-2 role (or mints a spurious dateless role),
+  // dropping the real title. Every entry path (experience `date_range`, projects
+  // / achievements `first_line`) filters here at once. Achievements already
+  // pre-filters its lines, so this is idempotent there.
+  const furnitureFiltered = section.lines.filter((l) => !isEntryPageFurniture(l));
+  if (furnitureFiltered.length === 0) return [];
+
   // Fold wrapped multi-line role headers (an org/date that spilled onto extra
   // physical rows) back into one logical header BEFORE anchor detection, so a
   // header whose closing date-year wrapped still opens a `date_range` entry
@@ -763,8 +809,8 @@ export function parseEntryBlocks(
   // hint / first line, not a date range that can wrap incomplete.
   const lines =
     cfg.anchor === "date_range"
-      ? mergeWrappedHeaderRows(section.lines, cfg.headerLookback || 2)
-      : section.lines;
+      ? mergeWrappedHeaderRows(furnitureFiltered, cfg.headerLookback || 2)
+      : furnitureFiltered;
   const anchors = collectAnchors(lines, cfg.anchor);
   if (anchors.length === 0) {
     // A `first_line` section with no anchorable header line is a flat bullet
