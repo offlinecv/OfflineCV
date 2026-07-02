@@ -29,8 +29,10 @@ import { act } from "react";
   true;
 
 import { AtsScoreReadout } from "./AtsScoreReadout.tsx";
+import { ContactCard } from "./ContactCard.tsx";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
+import type { CascadeResult } from "../../lib/heuristics/types.ts";
 
 function makeScore(): AnonymousAtsScore {
   return {
@@ -74,6 +76,21 @@ function render(score: AnonymousAtsScore): HTMLDivElement {
   return container;
 }
 
+/** Minimal CascadeResult so ContactCard renders its `id={SECTION_IDS.contact}`. */
+function renderContactCard(): HTMLDivElement {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  const result = {
+    parsed: { skills: [], experience: [], education: [] },
+    fieldConfidence: {},
+  } as unknown as CascadeResult;
+  act(() => {
+    root!.render(createElement(ContactCard, { result }));
+  });
+  return container;
+}
+
 afterEach(() => {
   act(() => root?.unmount());
   container?.remove();
@@ -107,5 +124,17 @@ describe("AtsScoreReadout tile anchors", () => {
     expect(tileAnchors(render(makeScore()))).not.toContain(
       "#per-bullet-feedback",
     );
+  });
+});
+
+describe("scroll-target render (end-to-end wiring)", () => {
+  // Membership in SECTION_IDS proves the anchor *side*. This proves a target
+  // *side* actually paints its id — a light-target end-to-end guard that would
+  // catch a hardcoded/mismatched id the type system can't (a raw `id="contactx"`
+  // instead of `id={SECTION_IDS.contact}`). ReconstructedResume is too heavy to
+  // stub here, so ContactCard stands in for the target side.
+  it("ContactCard renders a live #contact scroll target", () => {
+    const el = renderContactCard();
+    expect(el.querySelector(`#${SECTION_IDS.contact}`)).not.toBeNull();
   });
 });
