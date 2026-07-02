@@ -75,6 +75,12 @@ describe("LlmEscapeHatchBanner", () => {
     const text = render({ kind: "idle" }).textContent ?? "";
     expect(text).not.toMatch(/couldn'?t read much/i);
     expect(text).not.toMatch(/couldn'?t read this resume/i);
+    // Broader net: catch any future rewrite that attributes a *parser*
+    // failure to the resume ("we couldn't read/parse this", "we failed to
+    // read/parse it", "unable to read/parse …"), not just the two exact
+    // prior phrasings above. The headline should describe parse quality, not
+    // blame the parser.
+    expect(text).not.toMatch(/\b(couldn'?t|could not|can'?t|cannot|unable to|failed to)\s+(read|parse)\b/i);
   });
 
   it("renders loading, running, and error states", () => {
