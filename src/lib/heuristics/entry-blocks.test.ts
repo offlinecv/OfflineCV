@@ -287,6 +287,22 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
     expect(blocks[0].body).toContain("extraction cascade");
   });
 
+  // #286 review: the positional tell must be ADJACENT to the résumé/CV keyword.
+  // A real bullet that merely mentions our own domain ("resume") AND happens to
+  // carry an "N of M" ratio must NOT be stripped as furniture — the bare
+  // "N of M" / "page N" alternatives were dropped so this bullet survives.
+  it("keeps a real bullet mentioning 'resume' + an 'N of M' ratio (#286 review)", () => {
+    const blocks = parseEntryBlocks(
+      section([
+        { text: "Resume Linter" },
+        { text: "• Rebuilt the resume parser, improving 3 of 5 core metrics." },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].body).toContain("3 of 5 core metrics");
+  });
+
   it("still strips a real 'Name · Résumé N' footer that lands mid-section (#283)", () => {
     const blocks = parseEntryBlocks(
       section([

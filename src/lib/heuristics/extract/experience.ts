@@ -150,6 +150,19 @@ function cityStartsWithCompanyText(city: string): boolean {
   return LEGAL_SUFFIX_RE.test(first) || /^[A-Z]{2,}$/.test(first);
 }
 
+/** A single-token Pass-D "city" that is a locality-TYPE generic ("City", "Beach",
+ *  "Springs", "Heights", "Town", …) is never a standalone city — it is the
+ *  truncated tail of a multi-word place ("Mexico City", "Long Beach", "Cape
+ *  Town") whose earlier words the single-token space-fold regex left glued to the
+ *  company. Peeling it would mis-split "Google Mexico City, Mexico" into company
+ *  "Google Mexico" + location "City, Mexico" — both wrong (#286 review). Defer:
+ *  leave the whole string as company rather than fragment a real multi-word city.
+ *  (A proper-noun compound like "Buenos Aires" has no generic tell and stays a
+ *  known limitation — distinguishing it from a real company+city fold needs a
+ *  city gazetteer we don't carry.) */
+const LOCALITY_SUFFIX_RE =
+  /^(?:city|town|beach|springs?|heights|falls|hills|park|bay|harbou?r|grove|gardens?|valley|shores?)$/i;
+
 function stripLocationSuffix(s: string): {
   text: string;
   location: string | undefined;
@@ -191,9 +204,11 @@ function stripLocationSuffix(s: string): {
     // so Pass C (which needs a comma before the city) misses it. This is the
     // space-delimited intl case Pass C deferred: it's admissible here only under
     // the same tight guards Pass B uses for US "City, ST" —
-    //   - single-token city (space boundary; a multi-word space-fold city like
-    //     "Google Mexico City" is genuinely ambiguous with a subsidiary name and
-    //     stays deferred), and
+    //   - single-token city (space boundary). A multi-word space-fold city whose
+    //     last token is a locality generic ("…City", "…Beach") would otherwise be
+    //     truncated to that generic tail and mis-split, so LOCALITY_SUFFIX_RE
+    //     defers it ("Google Mexico City, Mexico" stays company, not fragmented),
+    //     and
     //   - a closed-vocabulary country (COUNTRY_GAZETTEER), not any capitalized
     //     word — so it fires on a real "City, Country" fold, not on a company
     //     that merely ends in a comma tail.
@@ -204,7 +219,11 @@ function stripLocationSuffix(s: string): {
     const SPACE_INTL_RE =
       /\s+([A-Z][A-Za-z.\-]+),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
     const mSpaceIntl = s.match(SPACE_INTL_RE);
-    if (mSpaceIntl && COUNTRY_GAZETTEER.has(mSpaceIntl[2].toLowerCase())) {
+    if (
+      mSpaceIntl &&
+      COUNTRY_GAZETTEER.has(mSpaceIntl[2].toLowerCase()) &&
+      !LOCALITY_SUFFIX_RE.test(mSpaceIntl[1])
+    ) {
       const before = stripDanglingSeparator(s.slice(0, mSpaceIntl.index));
       if (before)
         return { text: before, location: `${mSpaceIntl[1]}, ${mSpaceIntl[2]}` };

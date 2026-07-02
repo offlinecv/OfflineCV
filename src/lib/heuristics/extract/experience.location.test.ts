@@ -370,5 +370,15 @@ describe("role location extraction (#218)", () => {
       expect(role.company).toContain("Acme");
       expect(role.location).toBeUndefined();
     });
+
+    it("defers a multi-word city with a locality-generic tail ('Mexico City') (#286 review)", () => {
+      // Single-token Pass D would grab "City" as the city and mis-split into
+      // company "Google Mexico" + location "City, Mexico". "City" is a locality
+      // generic (never a standalone city), so LOCALITY_SUFFIX_RE defers: the
+      // whole string stays with the company rather than fragmenting the city.
+      const role = roleFromTwoLine("Google Mexico City, Mexico");
+      expect(role.company).toContain("Mexico City");
+      expect(role.location).not.toBe("City, Mexico");
+    });
   });
 });

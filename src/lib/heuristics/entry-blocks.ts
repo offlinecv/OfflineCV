@@ -106,8 +106,11 @@ export function isDateOnlyLine(text: string): boolean {
  * a legitimate project or role title routinely CONTAINS "Resume"/"CV" — "Resume
  * Linter", "CV Toolkit", even "Resume Linter 2024 - 2025". A genuine page footer
  * carries a structural tell such a title never does: a name↔label separator
- * ("Jane Smith · Résumé"), the résumé/CV keyword immediately followed by a page
- * number ("Résumé 1", "Resume 2"), or a "Page N" / "N of M" counter. The
+ * ("Jane Smith · Résumé"), or the résumé/CV keyword immediately followed by a
+ * page number ("Résumé 1", "Resume 2"). The positional tell must sit ADJACENT to
+ * the keyword — a bare "Page N" / "N of M" counter anywhere on the line is NOT
+ * enough, or a real bullet that merely mentions our own domain would be dropped
+ * ("Rebuilt the resume parser, improving 3 of 5 core metrics", #286 review). The
  * achievements path (#225) keeps the bare keyword test — an award line is far
  * less likely to embed the word — so its behavior is unchanged.
  */
@@ -118,9 +121,7 @@ const FURNITURE_POSITION_RE = new RegExp(
   // legit "Resume Parser | Python" / "Company · Title" header would be stripped.
   `${FURNITURE_KEYWORD}\\s*[·•‣|]|[·•‣|]\\s*${FURNITURE_KEYWORD}` +
     // the résumé/CV keyword immediately followed by a page number ("Résumé 1")
-    `|${FURNITURE_KEYWORD}\\s+\\d` +
-    // an explicit page counter ("Page 2", "1 of 3", "2/5")
-    `|\\bpage\\s+\\d|\\b\\d+\\s*(?:\\/|of)\\s*\\d+\\b`,
+    `|${FURNITURE_KEYWORD}\\s+\\d`,
   "i",
 );
 
