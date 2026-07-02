@@ -64,6 +64,25 @@ describe("LlmEscapeHatchBanner", () => {
     expect(render({ kind: "idle" }).textContent).toContain("Try a local AI pass");
   });
 
+  it("keeps the idle headline free of overstated parser-failure claims (issue 281)", () => {
+    // Regression guard: an earlier headline ("We couldn't read much of this
+    // resume") was a false claim on the soft-confidence firing path — the
+    // parser had actually recovered most fields, confidence just sat below
+    // the canonical threshold (e.g. missing dates on some roles). The banner
+    // must speak neutrally about the parse quality across every path that
+    // fires the escape hatch. Assert on the visible text so a future rewrite
+    // that reintroduces the failed phrasing is caught.
+    const text = render({ kind: "idle" }).textContent ?? "";
+    expect(text).not.toMatch(/couldn'?t read much/i);
+    expect(text).not.toMatch(/couldn'?t read this resume/i);
+    // Broader net: catch any future rewrite that attributes a *parser*
+    // failure to the resume ("we couldn't read/parse this", "we failed to
+    // read/parse it", "unable to read/parse …"), not just the two exact
+    // prior phrasings above. The headline should describe parse quality, not
+    // blame the parser.
+    expect(text).not.toMatch(/\b(couldn'?t|could not|can'?t|cannot|unable to|failed to)\s+(read|parse)\b/i);
+  });
+
   it("renders loading, running, and error states", () => {
     expect(render({ kind: "loading", progress: { progress: 0.4, text: "…" } }).textContent).toBeTruthy();
     act(() => root.unmount());

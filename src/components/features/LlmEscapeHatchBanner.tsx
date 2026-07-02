@@ -81,8 +81,21 @@ export function LlmEscapeHatchBanner({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-0.5">
+          {/*
+            Headline copy must stay honest across every firing path in
+            `chooseEscalation` (confidence.ts): hard failures (missing email,
+            low extraction ratio, etc.) AND soft confidence dips below the
+            canonical threshold. An earlier "We couldn't read much of this
+            resume" wording overstated the failure on the soft path — resumes
+            where the parser recovered most fields but confidence sat just
+            below 0.85 (e.g. missing dates on some roles) got a headline that
+            claimed the parser had failed. Speak to the parse quality
+            neutrally: "not everything parsed cleanly" is true across all
+            paths without misattributing content-quality issues to a parser
+            failure.
+          */}
           <p className="text-sm font-medium text-content-primary">
-            We couldn't read much of this resume.
+            Not everything parsed cleanly.
           </p>
           <p className="text-xs text-content-tertiary">
             Try a local AI pass? Runs entirely in your browser — nothing leaves
