@@ -168,9 +168,18 @@ function splitColumnCells(line: { text: string; items: PdfTextItem[] }): string[
 const NON_SKILL_SUBLABEL_RE =
   /^(?:personal\s+|other\s+)?(?:interests?|hobbies|hobby|activities|pastimes)\s*$/i;
 
+/** Body of a Skills sub-label — an initial-capitalised phrase of letters,
+ *  spaces, and the connector glyphs `&` / `/` that real sub-labels carry
+ *  ("Writing & Editing", "QA/Testing"). Kept as one source of truth so the
+ *  prefix-strip (`SUBLABEL_PREFIX_RE`) and the new-entry detector
+ *  (`SKILLS_NEW_ENTRY_RE`) agree on what counts as a label — a mismatch would
+ *  let a connector-glyph sub-line ("Writing & Editing:") escape one but not the
+ *  other and get soft-wrap-joined into the preceding cell (#282). */
+const SUBLABEL_BODY = "[A-Z][A-Za-z &/]+";
+
 /** Leading `Label:` prefix of a skills cell — captures the label phrase so it
  *  can be checked against the non-skill denylist before being stripped. */
-const SUBLABEL_PREFIX_RE = /^([A-Z][A-Za-z ]+):\s*/;
+const SUBLABEL_PREFIX_RE = new RegExp(`^(${SUBLABEL_BODY}):\\s*`);
 
 /**
  * Tokenizes a single column cell into valid skill tokens and adds them to
@@ -216,7 +225,7 @@ export function tokenizeSkillLine(raw: string): string[] {
 /** Matches a line that starts a new logical sub-list (label prefix or bullet).
  *  Used by collectSkillCells to decide whether a single-column line is a
  *  continuation of the previous one or a fresh entry. */
-const SKILLS_NEW_ENTRY_RE = /^(?:[•\-–*]\s|[A-Z][A-Za-z ]+:\s)/;
+const SKILLS_NEW_ENTRY_RE = new RegExp(`^(?:[•\\-–*]\\s|${SUBLABEL_BODY}:\\s)`);
 
 /**
  * True when the pending accumulated text and `nextText` together indicate a

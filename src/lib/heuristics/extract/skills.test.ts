@@ -407,3 +407,40 @@ describe("parseHeuristic — issue #221 Interests sub-label in SKILLS section", 
     }
   });
 });
+
+// ── Issue #282: "Programs, Skills, Software" header + connector-glyph sub-labels
+describe('parseHeuristic — "Programs, Skills, Software" section, all sub-lines (#282)', () => {
+  it("recognizes the comma-list header and recovers every sub-labeled line, incl. an & label", () => {
+    const items = mkItems([
+      { text: "Jordan Rivera", fontSize: 18 },
+      { text: "jordan.rivera@example.com · (408) 555-0142 · Berkeley, CA", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Acme Corp Jan 2022 - Present", fontSize: 11 },
+      { text: "• Led the thing", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      // Header is NOT a bare "Skills" — only recognized via the new alias (#282).
+      { text: "Programs, Skills, Software", fontSize: 13 },
+      { text: "Team Management: Asana, Notion, Trello", fontSize: 10 },
+      { text: "Technical Skills: G Suite, InDesign, Microsoft Word, Canva", fontSize: 10 },
+      // The `&` in this sub-label previously failed the label char-class, so the
+      // line was soft-wrap-joined into the preceding cell and its tokens dropped.
+      { text: "Writing & Editing: grammar, spelling, style", fontSize: 10 },
+    ]);
+    const pages = mkDefaultPages(items);
+    const result = parseHeuristic(items, pages);
+
+    // A token from EACH of the three sub-labeled lines must survive.
+    expect(result.parsed.skills).toEqual(
+      expect.arrayContaining([
+        "Asana", // Team Management
+        "Canva", // Technical Skills
+        "grammar", // Writing & Editing (the & line that used to be dropped)
+      ]),
+    );
+    // The `&` sub-label itself must not leak in as a skill token.
+    expect(result.parsed.skills).not.toContain("Writing & Editing");
+    // Real section path (≥5 tokens) → 0.85, not the recovery constant 0.65.
+    expect(result.fieldConfidence.skills).toBe(0.85);
+  });
+});
