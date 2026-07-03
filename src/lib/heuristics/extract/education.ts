@@ -357,7 +357,13 @@ function stripInstitutionLocation(s: string): {
   // "Stanford University, CA" (state-only, no city) wrongly yields
   // institution "Stanford" + location "University, CA".
   const SPACE_US_RE = /\s{2,}([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
-  const mUS = s.match(COMMA_US_RE) ?? s.match(SPACE_US_RE);
+  // " · City, ST" middot boundary — the shape the reconstructed education
+  // sub-line emits ("Institution · City, ST", #291/#294). `stripInstitutionDate`
+  // has already peeled any trailing dates by the time this runs.
+  const MIDDOT_US_RE =
+    /\s*·\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
+  const mUS =
+    s.match(COMMA_US_RE) ?? s.match(SPACE_US_RE) ?? s.match(MIDDOT_US_RE);
   if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
     const before = s
       .slice(0, mUS.index)
@@ -370,7 +376,11 @@ function stripInstitutionLocation(s: string): {
   if (COUNTRY_GAZETTEER.size > 0) {
     const INTL_RE =
       /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
-    const mIntl = s.match(INTL_RE);
+    // " · City, Country" middot boundary — the international counterpart of the
+    // reconstructed education sub-line (#294).
+    const MIDDOT_INTL_RE =
+      /\s*·\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
+    const mIntl = s.match(INTL_RE) ?? s.match(MIDDOT_INTL_RE);
     if (mIntl && COUNTRY_GAZETTEER.has(mIntl[2].toLowerCase())) {
       const before = s
         .slice(0, mIntl.index)
@@ -393,10 +403,20 @@ function stripInstitutionLocation(s: string): {
  *  range (or "… – Present"); requires leading whitespace and never consumes the
  *  whole string. */
 function stripInstitutionDate(s: string): string {
-  const DATE = `(?:${MONTH_YEAR_RE.source}|\\b\\d{4}\\b)`;
+  // A single date token: a month-year ("Mar. 2010"), a numeric "MM/YYYY", or a
+  // bare year optionally season-qualified ("Fall 2013"). The season prefix and
+  // the numeric form matter: without them a `$`-anchored strip lands on only the
+  // trailing YEAR of a "Fall 2013 – Spring 2014" range and leaves a corrupted
+  // "… Fall 2013 – Spring" glued onto the institution (#294 review) — worse than
+  // leaving the whole range intact.
+  const SEASON = `(?:spring|summer|fall|autumn|winter)`;
+  const DATE = `(?:${MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source}|(?:${SEASON}\\s+)?\\b\\d{4}\\b)`;
+  // Open-ended range tail: "Present"/"Current"/"Ongoing"/"Now" as well as a
+  // second date — so "… 2015 – Current" peels whole, not nothing.
+  const OPEN = `(?:present|current|ongoing|now)`;
   const SEP = `\\s*[–—-]\\s*`;
   const TRAILING_DATE_RE = new RegExp(
-    `\\s+${DATE}(?:${SEP}(?:${DATE}|Present))?\\s*$`,
+    `\\s+${DATE}(?:${SEP}(?:${DATE}|${OPEN}))?\\s*$`,
     "i",
   );
   const stripped = s.replace(TRAILING_DATE_RE, "").trim();

@@ -114,11 +114,12 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   "latex/deedy-resume-openfonts.pdf": ["experience", "skills"],
   "unknown/openresume-react-pdf.pdf": ["experience", "skills"],
 
-  // Multiple: experience swap, education institution pollution
-  // ("University of California" → "… · Berkeley Berkeley, CA"), skills +1.
+  // Multiple: experience swap, skills +1. (The education "institution
+  // pollution" — "University of California" → "… · Berkeley, CA" glued — was
+  // fixed by teaching `stripInstitutionLocation` the " · " middot boundary the
+  // reconstructed education sub-line emits, #294; education now round-trips.)
   "google-docs/google-docs-skia-proxy-programs-skills-software.pdf": [
     "experience",
-    "education",
     "skills",
   ],
 
@@ -154,22 +155,12 @@ function scoreFor(cascade: CascadeResult) {
 const same = (a: unknown, b: unknown) =>
   JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-/** Collect per-category failure messages for one round-trip. Empty array for a
- *  category ⇒ that invariant holds. */
-function invariantFailures(
-  p1: CascadeResult,
-  p3: CascadeResult,
-): Record<Exclude<Category, "render">, string[]> {
-  const c1 = p1.parsed;
-  const c3 = p3.parsed;
-  const fails: Record<Exclude<Category, "render">, string[]> = {
-    contact: [],
-    experience: [],
-    education: [],
-    skills: [],
-    summary: [],
-  };
-
+/** Contact scalar-field diffs (name/email/phone/location/linkedin). */
+function contactFails(
+  c1: CascadeResult["parsed"],
+  c3: CascadeResult["parsed"],
+): string[] {
+  const out: string[] = [];
   for (const k of [
     "full_name",
     "email",
@@ -178,48 +169,65 @@ function invariantFailures(
     "linkedin_url",
   ] as const) {
     if (!same(c1[k], c3[k]))
-      fails.contact.push(
-        `${k}: ${JSON.stringify(c1[k])} → ${JSON.stringify(c3[k])}`,
-      );
+      out.push(`${k}: ${JSON.stringify(c1[k])} → ${JSON.stringify(c3[k])}`);
   }
+  return out;
+}
 
-  const e1 = c1.experience ?? [];
-  const e3 = c3.experience ?? [];
-  if (e1.length !== e3.length) {
-    fails.experience.push(`role count ${e1.length} → ${e3.length}`);
-  } else {
-    e1.forEach((r, i) => {
-      for (const k of ["title", "company", "start_date", "end_date"] as const)
-        if (!same(r[k], e3[i]?.[k])) fails.experience.push(`role[${i}].${k}`);
-    });
-  }
+/** Ordered-entry-list diff (shared by experience and education): a count
+ *  mismatch, else per-field inequality at each index. */
+function entryListFails<T>(
+  a1: readonly T[],
+  a3: readonly T[],
+  keys: readonly (keyof T)[],
+  label: string,
+): string[] {
+  if (a1.length !== a3.length)
+    return [`${label} count ${a1.length} → ${a3.length}`];
+  const out: string[] = [];
+  a1.forEach((r, i) => {
+    for (const k of keys)
+      if (!same(r[k], a3[i]?.[k])) out.push(`${label}[${i}].${String(k)}`);
+  });
+  return out;
+}
 
-  const d1 = c1.education ?? [];
-  const d3 = c3.education ?? [];
-  if (d1.length !== d3.length) {
-    fails.education.push(`entry count ${d1.length} → ${d3.length}`);
-  } else {
-    d1.forEach((r, i) => {
-      for (const k of ["degree", "field", "institution"] as const)
-        if (!same(r[k], d3[i]?.[k])) fails.education.push(`entry[${i}].${k}`);
-    });
-  }
+/** Summary length drift ≥ 5% (the round-trip truncation signal, #292). */
+function summaryFails(s1: string, s3: string): string[] {
+  if (s1.length === 0) return [];
+  const deltaPct = (100 * Math.abs(s1.length - s3.length)) / s1.length;
+  return deltaPct >= 5
+    ? [`|Δ| ${deltaPct.toFixed(1)}% (${s1.length} → ${s3.length})`]
+    : [];
+}
 
+/** Collect per-category failure messages for one round-trip. Empty array for a
+ *  category ⇒ that invariant holds. */
+function invariantFailures(
+  p1: CascadeResult,
+  p3: CascadeResult,
+): Record<Exclude<Category, "render">, string[]> {
+  const c1 = p1.parsed;
+  const c3 = p3.parsed;
   const sk1 = (c1.skills ?? []).length;
   const sk3 = (c3.skills ?? []).length;
-  if (sk1 !== sk3) fails.skills.push(`count ${sk1} → ${sk3}`);
-
-  const s1 = c1.summary ?? "";
-  const s3 = c3.summary ?? "";
-  if (s1.length > 0) {
-    const deltaPct = (100 * Math.abs(s1.length - s3.length)) / s1.length;
-    if (deltaPct >= 5)
-      fails.summary.push(
-        `|Δ| ${deltaPct.toFixed(1)}% (${s1.length} → ${s3.length})`,
-      );
-  }
-
-  return fails;
+  return {
+    contact: contactFails(c1, c3),
+    experience: entryListFails(
+      c1.experience ?? [],
+      c3.experience ?? [],
+      ["title", "company", "start_date", "end_date"] as const,
+      "role",
+    ),
+    education: entryListFails(
+      c1.education ?? [],
+      c3.education ?? [],
+      ["degree", "field", "institution"] as const,
+      "entry",
+    ),
+    skills: sk1 !== sk3 ? [`count ${sk1} → ${sk3}`] : [],
+    summary: summaryFails(c1.summary ?? "", c3.summary ?? ""),
+  };
 }
 
 const CATEGORIES: Category[] = [

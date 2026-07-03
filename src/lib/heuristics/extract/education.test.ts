@@ -260,3 +260,51 @@ describe("extractEducation — degree/field split + location peel (#222)", () =>
     expect(value[0].field).toBe("Data Science");
   });
 });
+
+describe("extractEducation — trailing date peeled cleanly off one-line institution (#294)", () => {
+  // The reconstructed-résumé sub-line emits "Institution  Dates" on one line.
+  // `stripInstitutionDate` must peel the WHOLE date, not just its trailing year —
+  // a half-strip ("… Fall 2013 – Spring") corrupts the institution field.
+  it("peels a season-qualified range whole (not just the trailing year)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science",
+        "Some University  Fall 2013 – Spring 2014",
+      ]),
+    );
+    expect(value[0].institution).toBe("Some University");
+    expect(value[0].institution).not.toMatch(/Fall|Spring|\d{4}/);
+  });
+
+  it("peels a single season-qualified year whole", () => {
+    const { value } = extractEducation(
+      mkEduSection(["B.A. History", "Some University  Fall 2014"]),
+    );
+    expect(value[0].institution).toBe("Some University");
+  });
+
+  it("peels a numeric MM/YYYY range", () => {
+    const { value } = extractEducation(
+      mkEduSection(["B.S. Biology", "Example College  01/2020 – 05/2020"]),
+    );
+    expect(value[0].institution).toBe("Example College");
+  });
+
+  it("peels an open-ended '… – Current' range", () => {
+    const { value } = extractEducation(
+      mkEduSection(["B.S. Physics", "Example College  2015 – Current"]),
+    );
+    expect(value[0].institution).toBe("Example College");
+  });
+
+  it("strips a ' · City, ST' middot location off the institution", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science",
+        "University of Example · Seattle, WA  Sep 2020 – May 2024",
+      ]),
+    );
+    expect(value[0].institution).toBe("University of Example");
+    expect(value[0].location).toBe("Seattle, WA");
+  });
+});
