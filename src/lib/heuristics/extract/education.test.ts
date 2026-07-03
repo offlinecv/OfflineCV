@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { extractEducation } from "../extract/education.ts";
+import { extractEducation, splitDoubledCity } from "../extract/education.ts";
 import { type PdfLine, type PdfSection } from "../sections.ts";
 
 const mkLine = (text: string): PdfLine => ({
@@ -306,5 +306,130 @@ describe("extractEducation — trailing date peeled cleanly off one-line institu
     );
     expect(value[0].institution).toBe("University of Example");
     expect(value[0].location).toBe("Seattle, WA");
+  });
+});
+
+describe("splitDoubledCity — only collapse the concatenation artifact", () => {
+  // The Berkeley artifact: `before` (the institution) already ENDS in the
+  // repeated place token, so "Berkeley Berkeley" is the institution's own
+  // "Berkeley" glued onto the location's "Berkeley" — collapse to one.
+  it("collapses a doubled city when the institution already ends in that place", () => {
+    expect(splitDoubledCity("University of California, Berkeley", "Berkeley Berkeley")).toEqual({
+      institution: "University of California, Berkeley",
+      city: "Berkeley",
+    });
+  });
+
+  // A genuine doubled place-name city on an institution that does NOT end in
+  // that token must stay intact — collapsing "Walla Walla" → "Walla" would
+  // corrupt both the city and the institution.
+  it("leaves a genuine doubled place-name city untouched", () => {
+    expect(splitDoubledCity("Whitman College", "Walla Walla")).toEqual({
+      institution: "Whitman College",
+      city: "Walla Walla",
+    });
+  });
+
+  it("returns a non-doubled city unchanged", () => {
+    expect(splitDoubledCity("Some University", "San Francisco")).toEqual({
+      institution: "Some University",
+      city: "San Francisco",
+    });
+  });
+
+  // The MULTI-WORD artifact: the last-token-only guard saw only "Angeles" and
+  // missed the "Los Angeles Los Angeles" glue. Comparing `before`'s trailing
+  // N-word suffix against the repeated phrase collapses it correctly.
+  it("collapses a doubled MULTI-WORD city when the institution ends in that phrase", () => {
+    expect(
+      splitDoubledCity(
+        "University of California, Los Angeles",
+        "Los Angeles Los Angeles",
+      ),
+    ).toEqual({
+      institution: "University of California, Los Angeles",
+      city: "Los Angeles",
+    });
+  });
+
+  it("collapses a SUNY-style multi-word doubled campus city", () => {
+    expect(
+      splitDoubledCity("University at Buffalo, South Campus", "South Campus South Campus"),
+    ).toEqual({
+      institution: "University at Buffalo, South Campus",
+      city: "South Campus",
+    });
+  });
+
+  // Regression guard for the widened comparison: a genuine multi-word doubled
+  // place-name city whose institution does NOT end in the phrase must still stay
+  // intact — "Walla Walla" must not collapse to "Walla".
+  it("still leaves a genuine multi-word doubled place-name city untouched", () => {
+    expect(splitDoubledCity("Whitman College", "Walla Walla")).toEqual({
+      institution: "Whitman College",
+      city: "Walla Walla",
+    });
+  });
+});
+
+describe("education — redacted 20XX program dates (#297/#302)", () => {
+  // A degree-less program header carrying a redacted template date
+  // ("Sep 20XX – May 20XX") must still register as its own entry lead so the
+  // segmenter keeps the boundary — the redacted-date case of #302's entry loss.
+  it("segments a degree-less program with a redacted 20XX date as its own entry", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science",
+        "Stanford University · Palo Alto, CA  Sep 2018 – May 2022",
+        "Applied Robotics Program  Sep 20XX – May 20XX",
+        "MIT Professional Education",
+      ]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[1].degree).toBe("");
+    expect(value[1].field).toBe("Applied Robotics Program");
+    expect(value[1].institution).toBe("MIT Professional Education");
+  });
+
+  // A bare redacted-date annotation (no program text) must NOT split off a
+  // phantom degree-less entry. A season-led "Fall 20XX – Spring 20XX" line is
+  // keyword-free (it hits neither the grad-date-lead reject nor the honors
+  // denylist), so it genuinely exercises the remainder-emptying path in
+  // `isInlineDatedProgram`: the redacted-year (20XX) strip plus the season-word
+  // strip leave nothing substantive, so no split.
+  it("does not split a bare redacted-date annotation into a phantom entry", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science",
+        "Stanford University",
+        "Fall 20XX – Spring 20XX",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+  });
+});
+
+describe("education — adjacent identical-degree headers, distinct schools (#297 nit)", () => {
+  // The dup-degree sub-line guard (`isDupDegreeSubLine`, `li === degreeHeaderLi
+  // + 1`) suppresses the "second degree ⇒ new entry" flush for an entry's own
+  // polluted institution sub-line. It must NOT over-merge two REAL same-degree
+  // entries from different schools that happen to sit adjacent.
+  it("splits two adjacent identical-degree headers with distinct institutions", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science",
+        "Stanford University",
+        "B.S. Computer Science",
+        "University of Washington",
+      ]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value.map((e) => e.institution)).toEqual([
+      "Stanford University",
+      "University of Washington",
+    ]);
+    expect(value.map((e) => e.degree)).toEqual(["B.S.", "B.S."]);
   });
 });

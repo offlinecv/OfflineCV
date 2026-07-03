@@ -153,6 +153,50 @@ function isCourseworkContinuation(line: string): boolean {
   return true;
 }
 
+/** Redacted-year stub core ("20XX"/"19XX") Word/Office templates ship in place
+ *  of a real 4-digit year. Shared so `isInlineDatedProgram`'s year-presence gate
+ *  and `stripInstitutionDate`'s trailing-date strip admit the SAME form — one
+ *  source, no drifting second copy (#297). */
+const REDACTED_YEAR = String.raw`(?:19|20)XX`;
+/** A year token that may be real OR redacted — "2024" or "20XX" — as ONE regex
+ *  source fragment. `(?:19|20)(?:\d{2}|XX)` distributes to `(?:19|20)\d{2}` |
+ *  `(?:19|20)XX`, so every site that admits "either a real year or the redacted
+ *  stub" reuses this single source instead of hand-rolling a drifting copy
+ *  (#297): the year-presence gate below, `isInlineDatedProgram`'s date-lead
+ *  reject ({@link DATE_LEAD_RE}), and `cleanField`'s trailing-date strip
+ *  ({@link CLEAN_FIELD_DATE_RE}). */
+const YEAR_OR_REDACTED_SRC = String.raw`(?:19|20)(?:\d{2}|XX)`;
+/** Year-presence test that accepts either a real 4-digit year OR the redacted
+ *  `20XX` stub. */
+const YEAR_OR_REDACTED_RE = new RegExp(
+  String.raw`\b` + YEAR_OR_REDACTED_SRC + String.raw`\b`,
+  "i",
+);
+/** Date-LEAD reject for {@link isInlineDatedProgram}: a line beginning with a
+ *  bare (real or redacted) year, a "Month YYYY" / "Month 20XX", or a numeric
+ *  "MM/YYYY" is the attendance/graduation DATE of the entry above, not a program
+ *  name. Reuses {@link YEAR_OR_REDACTED_SRC} in both year slots so a redacted
+ *  lead ("20XX …", "Sep 20XX – May 20XX") is rejected on the same footing as a
+ *  real-year lead. */
+const DATE_LEAD_RE = new RegExp(
+  String.raw`^(?:` +
+    YEAR_OR_REDACTED_SRC +
+    String.raw`|(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+` +
+    YEAR_OR_REDACTED_SRC +
+    String.raw`|\d{1,2}\/\d{4})`,
+  "i",
+);
+/** Trailing graduation/attendance date strip for {@link cleanField}: an optional
+ *  separator + optional grad-context words + optional month + a (real or
+ *  redacted) year and everything after. Reuses {@link YEAR_OR_REDACTED_SRC} so
+ *  the redacted `20XX` stub ("Sep 20XX – May 20XX") strips like a real year. */
+const CLEAN_FIELD_DATE_RE = new RegExp(
+  String.raw`\s*[-–—,;]?\s*(?:(?:expected|anticipated|graduat\w*|class of|present|current)\b\s*)*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*)?\(?` +
+    YEAR_OR_REDACTED_SRC +
+    String.raw`\b.*$`,
+  "i",
+);
+
 /** Whether `line` is a hint-less, degree-less PROGRAM NAME that carries its own
  *  graduation year inline — the second-school shape from #219, e.g.
  *  "MIT Applied Data Science (2023)" or "Google Data Analytics Certificate 2022".
@@ -176,7 +220,7 @@ function isInlineDatedProgram(line: string): boolean {
   if (!t) return false;
   if (/^(GPA[:\s]|Minor\b|Major\b)/i.test(t)) return false;
   if (!/^[A-Z0-9]/.test(t)) return false;
-  if (!/\b(19|20)\d{2}\b/.test(t)) return false;
+  if (!YEAR_OR_REDACTED_RE.test(t)) return false;
   // A graduation-date line ("Grad. May 2011 | Kolkata, India", "Expected
   // Graduation: 2026", "Class of 2025") is the DATE of an existing school, not a
   // new program — it leads with a graduation/date-context word. Reject so a
@@ -192,12 +236,10 @@ function isInlineDatedProgram(line: string): boolean {
   // stray location glyph glues the city to the date ("2001 - 2005 eSpringfield,
   // Freedonia"), where the surviving city token would pass the remainder test and
   // split off a phantom degree-less entry. Guard on the date-lead shape directly.
-  if (
-    /^(?:(?:19|20)\d{2}|(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(?:19|20)\d{2}|\d{1,2}\/\d{4})/i.test(
-      t,
-    )
-  )
-    return false;
+  // Redacted year slots (via {@link DATE_LEAD_RE}) so a redacted-date lead
+  // ("20XX …", "Sep 20XX – May 20XX") is rejected on the same footing as a
+  // real-year lead.
+  if (DATE_LEAD_RE.test(t)) return false;
   // An honors / awards / activity annotation that happens to carry a year
   // ("Dean's List 2021", "Honors Thesis: … (2024)", "Teaching Assistant for …
   // (2022 - 2023)", "Study Abroad, Florence 2021", "Capstone Project: Sentiment
@@ -225,6 +267,7 @@ function isInlineDatedProgram(line: string): boolean {
   // real program name leaves substantive text, a bare date line leaves nothing.
   const remainder = noLocation
     .replace(/\b(19|20)\d{2}\b/g, "")
+    .replace(new RegExp(String.raw`\b` + REDACTED_YEAR + String.raw`\b`, "gi"), "")
     .replace(
       /\b(?:spring|summer|fall|autumn|winter|present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi,
       "",
@@ -283,11 +326,10 @@ function cleanField(raw: string): string | undefined {
     .trim();
   // Cut a trailing graduation / attendance date ("— May 2027", ", 2022 - 2024",
   // "Expected 2026", "Class of 2025") — the date belongs to the entry, not the
-  // field.
-  f = f.replace(
-    /\s*[-–—,;]?\s*(?:(?:expected|anticipated|graduat\w*|class of|present|current)\b\s*)*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*)?\(?(?:19|20)\d{2}\b.*$/i,
-    "",
-  );
+  // field. Also cut the redacted-year stub ("Sep 20XX – May 20XX") Word/Office
+  // templates ship, so a reconstructed institution sub-line that carries it
+  // (#297) normalizes to the same field as its degree header.
+  f = f.replace(CLEAN_FIELD_DATE_RE, "");
   // Cut a trailing "… , Minor in Economics" / "… , GPA: 3.8" note — a sub-field,
   // not part of the subject.
   f = f.replace(/[,;]\s*(?:minor|major|gpa|concentration)\b.*$/i, "");
@@ -337,6 +379,23 @@ function parseDegreeAndField(line: string): {
   return { degree, field: cleanField(fieldRaw) };
 }
 
+/** Normalized degree+field key for a degree-bearing line — used to detect when a
+ *  reconstructed entry's INSTITUTION sub-line is a near-duplicate of its own
+ *  degree header rather than a genuine second degree (#297). The Download-PDF
+ *  emitter places the parsed institution string on the sub-line; when that string
+ *  itself carries the degree text (a parse-1 pollution these fixtures exhibit),
+ *  the sub-line matches `DEGREE_RE`, so the segmenter's "second degree ⇒ new
+ *  entry" rule would promote it to a phantom entry. Two lines that parse to the
+ *  SAME degree and field are one entry's header + institution sub-line, not two
+ *  degrees — so the sub-line stays attached. Returns null for a non-degree line.
+ *  `cleanField` drops any trailing (incl. redacted `20XX`) date so the header and
+ *  its date-bearing sub-line normalize to the same field. */
+function degreeFieldKey(line: string): string | null {
+  if (!DEGREE_RE.test(line)) return null;
+  const { degree, field } = parseDegreeAndField(line);
+  return `${degree} ${field ?? ""}`.toLowerCase();
+}
+
 /** Peel a trailing "City, ST" (US) or "City, Country" (international) location
  *  off an institution string, returning the cleaned institution and the
  *  location. Mirrors experience's `stripLocationSuffix` (same closed-vocabulary
@@ -344,6 +403,47 @@ function parseDegreeAndField(line: string): {
  *  for the institution line where the city is usually separated by a column gap
  *  ("… Engineering   Seattle, WA") rather than a comma. Stripping must leave a
  *  non-empty institution, so the whole string is never consumed. */
+/** Collapse a city phrase that surfaces the same place name twice back-to-back
+ *  ("Berkeley Berkeley"). This happens when a bare location line is assembled
+ *  onto an institution that already ends in that place — "University of
+ *  California, Berkeley" + "Berkeley, CA" glue into one line, and the greedy
+ *  multi-word city capture grabs "Berkeley Berkeley" (#297). The first copy is
+ *  the institution's own campus/place and is pushed back onto `before`; the
+ *  second is the location's city. A non-doubled city ("San Francisco") is
+ *  returned unchanged. */
+export function splitDoubledCity(
+  before: string,
+  city: string,
+): { institution: string; city: string } {
+  const m = /^(\S+(?:\s+\S+)*?)\s+\1$/i.exec(city.trim());
+  if (m) {
+    const single = m[1];
+    // Only collapse when the doubling is the concatenation artifact this was
+    // written for: `before` (the institution) already ENDS in this exact place
+    // phrase, so the first copy is the institution's own campus/place and the
+    // second is the location's city ("University of California, Berkeley" +
+    // "Berkeley, CA"; "University of California, Los Angeles" + "Los Angeles Los
+    // Angeles"; SUNY campuses; etc.). The repeated `single` group may be
+    // MULTI-WORD ("Los Angeles"), so compare `before`'s trailing N-word suffix
+    // (N = the phrase's word count) against it — not just its last token, which
+    // would see only "Angeles" and miss the artifact. When `before` does NOT end
+    // in the phrase the repetition is a genuine doubled place-name city
+    // ("Whitman College" + "Walla Walla, WA"), which must stay intact —
+    // collapsing it would corrupt the city to "Walla".
+    const norm = (s: string) => s.toLowerCase().replace(/[.,]+/g, "");
+    const singleWords = single.trim().split(/\s+/);
+    const beforeTail = before
+      .trim()
+      .split(/\s+/)
+      .slice(-singleWords.length)
+      .join(" ");
+    if (norm(beforeTail) === norm(single)) {
+      return { institution: before, city: single };
+    }
+  }
+  return { institution: before, city };
+}
+
 function stripInstitutionLocation(s: string): {
   institution: string;
   location?: string;
@@ -369,7 +469,10 @@ function stripInstitutionLocation(s: string): {
       .slice(0, mUS.index)
       .replace(/,\s*$/, "")
       .trim();
-    if (before) return { institution: before, location: `${mUS[1]}, ${mUS[2]}` };
+    if (before) {
+      const dd = splitDoubledCity(before, mUS[1]);
+      return { institution: dd.institution, location: `${dd.city}, ${mUS[2]}` };
+    }
   }
 
   // International "…, City, Country" — country validated against the gazetteer.
@@ -386,8 +489,13 @@ function stripInstitutionLocation(s: string): {
         .slice(0, mIntl.index)
         .replace(/,\s*$/, "")
         .trim();
-      if (before)
-        return { institution: before, location: `${mIntl[1]}, ${mIntl[2]}` };
+      if (before) {
+        const dd = splitDoubledCity(before, mIntl[1]);
+        return {
+          institution: dd.institution,
+          location: `${dd.city}, ${mIntl[2]}`,
+        };
+      }
     }
   }
 
@@ -410,7 +518,12 @@ function stripInstitutionDate(s: string): string {
   // "… Fall 2013 – Spring" glued onto the institution (#294 review) — worse than
   // leaving the whole range intact.
   const SEASON = `(?:spring|summer|fall|autumn|winter)`;
-  const DATE = `(?:${MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source}|(?:${SEASON}\\s+)?\\b\\d{4}\\b)`;
+  // Redacted-year stub ("Sep 20XX", "Fall 20XX", bare "20XX") Word/Office
+  // templates ship — `MONTH_YEAR_RE` requires a real 4-digit year, so without
+  // this a reconstructed "Institution  Sep 20XX – May 20XX" sub-line keeps the
+  // date glued to the institution and never round-trips (#297).
+  const REDACTED = `(?:(?:${SEASON}|(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\\.?)\\s+)?${REDACTED_YEAR}`;
+  const DATE = `(?:${MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source}|${REDACTED}|(?:${SEASON}\\s+)?\\b\\d{4}\\b)`;
   // Open-ended range tail: "Present"/"Current"/"Ongoing"/"Now" as well as a
   // second date — so "… 2015 – Current" peels whole, not nothing.
   const OPEN = `(?:present|current|ongoing|now)`;
@@ -457,7 +570,14 @@ function educationFromChunk(chunk: string[]): {
     // that is neither the degree-bearing line nor a bare date — this recovers
     // acronym schools ("MIT", "UC Berkeley") that carry no "University"/"College"
     // word; else strip the degree off its own line (degree + school on one line).
-    const instLine = chunk.find((l) => INSTITUTION_HINTS.test(l));
+    // Prefer a hint line that is NOT the degree header: when the reconstructed
+    // header carries the degree AND an institution hint (parse-1 pollution,
+    // #297), the true institution is on the following sub-line — read it from
+    // there, not the degree header. Falls back to the header's own hint for a
+    // single-line "Degree, University" entry.
+    const instLine =
+      chunk.find((l) => INSTITUTION_HINTS.test(l) && l !== degreeLine) ??
+      chunk.find((l) => INSTITUTION_HINTS.test(l));
     if (instLine) {
       institution = instLine.trim();
     } else {
@@ -614,6 +734,15 @@ export function extractEducation(
   // mistaken for the start of a new entry.
   let hasProgramLead = false;
   let programLeadInstIdx = -1;
+  // Normalized degree+field key of the current chunk's degree header (and the
+  // line index it sits at), so a degree line IMMEDIATELY following it that is
+  // really this entry's INSTITUTION sub-line (same degree+field, #297) is kept
+  // attached instead of splitting off as a phantom entry. Adjacency is required:
+  // a same-degree second entry (two "B.S., Computer Science" from different
+  // schools) has its own institution line BETWEEN the two degree headers, so it
+  // is not adjacent and still splits correctly.
+  let currentDegreeKey: string | null = null;
+  let degreeHeaderLi = -1;
   const flush = () => {
     if (current.length > 0) chunks.push(current);
     current = [];
@@ -621,6 +750,8 @@ export function extractEducation(
     hasInstitution = false;
     hasProgramLead = false;
     programLeadInstIdx = -1;
+    currentDegreeKey = null;
+    degreeHeaderLi = -1;
   };
   for (let li = 0; li < lines.length; li++) {
     const text = lines[li].text;
@@ -657,15 +788,31 @@ export function extractEducation(
     // excluded because `hasProgramLead` is not yet set when it arrives.
     const startsAfterProgramLead =
       hasProgramLead && (isDeg || isInst || isProgramLead);
+    // A degree line that parses to the SAME degree+field as the current chunk's
+    // header is that entry's own institution SUB-LINE (the reconstructed
+    // "Institution" line polluted with the degree text, #297) — not a second
+    // degree. Keep it attached: suppress BOTH the degree-repeat and the
+    // institution-repeat flush this line would otherwise trigger.
+    const isDupDegreeSubLine =
+      isDeg &&
+      hasDegree &&
+      currentDegreeKey !== null &&
+      li === degreeHeaderLi + 1 &&
+      degreeFieldKey(text) === currentDegreeKey;
     if (
-      (isDeg && hasDegree) ||
-      (isInst && hasInstitution) ||
-      startsHintlessEntry ||
-      startsAfterProgramLead
+      !isDupDegreeSubLine &&
+      ((isDeg && hasDegree) ||
+        (isInst && hasInstitution) ||
+        startsHintlessEntry ||
+        startsAfterProgramLead)
     )
       flush();
     current.push(lines[li]);
     if (isDeg) hasDegree = true;
+    if (isDeg && currentDegreeKey === null) {
+      currentDegreeKey = degreeFieldKey(text);
+      degreeHeaderLi = li;
+    }
     if (isInst) hasInstitution = true;
     // A program lead claims the NEXT line as its institution; mark the chunk a
     // complete program entry only once that institution line has been consumed.

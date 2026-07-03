@@ -312,6 +312,22 @@ export function buildAtsResumeModel(
       }) ||
       edu.year ||
       "";
+    // Entry-boundary cue (#302). The re-parser's education segmenter opens a NEW
+    // entry when a line reads as an entry lead — a DEGREE line, an
+    // institution-hint line, or an `isInlineDatedProgram` header (a program/field
+    // title carrying its own inline year, extract/education.ts). A degree-BEARING
+    // entry leads with its degree, so the segmenter always sees the boundary and
+    // two of them round-trip cleanly. A degree-LESS entry's header is a bare
+    // program/field title with NO such cue: emitting the graduation date on the
+    // *sub-line* (with the institution) leaves the header cue-less, so two
+    // degree-less entries re-parse as ONE — the second glues onto the first
+    // (entry LOSS, 2 → 1). Keep the date INLINE on the degree-less header instead,
+    // so it reads as an `isInlineDatedProgram` lead, and drop the institution
+    // alone to the sub-line.
+    if (!edu.degree && edu.field) {
+      const headerLine = [edu.field, eduDates].filter(Boolean).join("  ");
+      return { headerLine, subLine: org || undefined, bullets };
+    }
     const orgLine = [org, eduDates].filter(Boolean).join("  ");
     return {
       headerLine: degreeField || orgLine || "Education",

@@ -142,8 +142,13 @@ describe("buildAtsResumeModel", () => {
       "Bachelor of Science, Mechanical Engineering",
     );
     expect(edu.entries[0].subLine).toBe("Riverside College Of Engineering");
-    expect(edu.entries[1].headerLine).toBe("Applied Robotics Program");
-    expect(edu.entries[1].subLine).toBe("ACME Professional Education  2024");
+    // Degree-less program (#302): the header carries NO degree cue, so the
+    // graduation date stays INLINE on the header (making it an
+    // `isInlineDatedProgram` entry lead the re-parser segments on) and the
+    // institution drops alone to the sub-line — otherwise two degree-less entries
+    // collapse to one on round-trip.
+    expect(edu.entries[1].headerLine).toBe("Applied Robotics Program  2024");
+    expect(edu.entries[1].subLine).toBe("ACME Professional Education");
   });
 
   it("falls back to description split when no graded bullets are attributed", () => {
