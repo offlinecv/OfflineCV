@@ -23,7 +23,6 @@ import type {
 // ── Thresholds (tuneable) ───────────────────────────────────────────────────
 
 const SCANNED_MIN_CHARS_PER_PAGE = 80;
-const SCANNED_MIN_ITEMS_PER_PAGE = 15;
 
 /**
  * Maximum share of a page's text *rows* that may paint ink at the gutter strip
@@ -36,7 +35,7 @@ const SCANNED_MIN_ITEMS_PER_PAGE = 15;
  * drop below 6.3% (their wide wrapped body text inks straight through the
  * would-be gutter). Set in the gap between those populations.
  */
-export const TWO_COLUMN_MAX_GUTTER_COVERAGE = 0.04;
+const TWO_COLUMN_MAX_GUTTER_COVERAGE = 0.04;
 
 /**
  * The gutter's center must fall inside this central band of the page
@@ -75,7 +74,7 @@ export function analyzeLayout(
   pages: PdfPageInfo[],
   extractionFailureReason?: ExtractionFailureReason,
 ): LayoutProbes {
-  const isScanned = probeScanned(items, pages);
+  const isScanned = probeScanned(pages);
   // If scanned, two-column probe is meaningless (no positional signal).
   const isTwoColumn = isScanned
     ? false
@@ -101,15 +100,21 @@ export function analyzeLayout(
   return { isScanned, isTwoColumn, triggers };
 }
 
-function probeScanned(items: PdfTextItem[], pages: PdfPageInfo[]): boolean {
+function probeScanned(pages: PdfPageInfo[]): boolean {
   if (pages.length === 0) return true;
   const avgChars =
     pages.reduce((s, p) => s + p.charCount, 0) / pages.length;
-  const avgItems = items.length / pages.length;
-  return (
-    avgChars < SCANNED_MIN_CHARS_PER_PAGE ||
-    avgItems < SCANNED_MIN_ITEMS_PER_PAGE
-  );
+  // Character sparsity is the reliable scanned/no-extractable-text signal: an
+  // image-only or fonts-unmappable page yields ~0 characters. Item count is NOT
+  // an independent scanned signal — item granularity is a property of how the
+  // producer laid out text, not of whether text exists. Our own reconstructed
+  // "Download PDF" emits one text item per line, so a short-but-real résumé
+  // (e.g. a compact single-role + single-degree doc) has only a handful of
+  // items yet hundreds of real characters. Gating on `avgItems` there
+  // false-positived as `scanned`, short-circuiting the cascade and zeroing an
+  // otherwise fully parseable document (#296). A page with real characters is
+  // real text regardless of how few items it split into.
+  return avgChars < SCANNED_MIN_CHARS_PER_PAGE;
 }
 
 /**

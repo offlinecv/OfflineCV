@@ -249,8 +249,22 @@ function isSoftWrapContinuation(pending: string, nextText: string): boolean {
   // Always skip if the next line starts a new sub-list (label or bullet).
   if (SKILLS_NEW_ENTRY_RE.test(nextText)) return false;
 
-  // Condition A: pending ends with an explicit continuation glyph.
-  if (/[&\-–+]\s*$/.test(pending)) return true;
+  // Condition A: pending ends with an explicit continuation glyph — the glyph
+  // must be its OWN whitespace-separated token ("Hiring &", "Data -"), not the
+  // tail of a compact skill name like "C++" or "PHP7+" (#301: our own
+  // middot-atomic wrap can legitimately end a rendered line on such a skill,
+  // and a false continuation match there merges it with the next line's first
+  // skill into one bogus multi-word token).
+  //
+  // The leading `\s` is deliberate and load-bearing: it is what distinguishes a
+  // standalone continuation glyph ("Hiring &") from a glyph glued to a word
+  // ("C++", "PHP7+"). Accepted symmetric hole: a real continuation glyph glued
+  // to a word with NO preceding space (a source line ending "Development&") is
+  // now NOT joined. This is a knowingly accepted tradeoff — the C++/PHP7+
+  // false-positive fix is more valuable and no corpus fixture regresses on the
+  // glued-continuation case. Do not drop the `\s` to close this hole without
+  // re-guarding the compact-skill false positive.
+  if (/\s[&\-–+]\s*$/.test(pending)) return true;
 
   // Condition B: a comma-separated list wrapped across two lines — the NEXT line
   // is mid-list (has a comma) AND the PENDING line is itself an unterminated list

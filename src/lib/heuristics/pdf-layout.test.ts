@@ -47,10 +47,26 @@ const singlePage: PdfPageInfo[] = [
 ];
 
 describe("analyzeLayout", () => {
-  it("flags scanned PDFs when item count is near zero", () => {
+  it("flags scanned PDFs when average characters per page is below the threshold", () => {
     const items = [mkItemAt(1, 100, 100, "logo")];
     const pages: PdfPageInfo[] = [
       { page: 1, width: 612, height: 792, charCount: 4 },
+    ];
+    const probes = analyzeLayout(items, pages);
+    expect(probes.isScanned).toBe(true);
+    expect(probes.triggers).toContain("scanned");
+  });
+
+  it("still flags scanned when item count is HIGH but characters are sparse (garbage/partial-glyph)", () => {
+    // A fonts-unmappable / partial-glyph page can shatter into many text items
+    // (one per stray glyph fragment) while yielding almost no real characters.
+    // The removed item-count arm would have treated this as text-bearing; the
+    // surviving avgChars arm must still catch it. Item count 200, but the page
+    // holds only 40 chars total — well under SCANNED_MIN_CHARS_PER_PAGE (80).
+    const items: PdfTextItem[] = [];
+    for (let i = 0; i < 200; i++) items.push(mkItemAt(1, 72 + i, 100, "."));
+    const pages: PdfPageInfo[] = [
+      { page: 1, width: 612, height: 792, charCount: 40 },
     ];
     const probes = analyzeLayout(items, pages);
     expect(probes.isScanned).toBe(true);

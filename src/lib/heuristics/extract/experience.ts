@@ -51,7 +51,10 @@ function experienceFromBlock(block: EntryBlock): {
   score: number;
 } {
   const { dates } = block;
-  const { title, company, team, location } = disambiguateCompanyTitle(block.headerLines);
+  const { title, company, team, location } = disambiguateCompanyTitle(
+    block.headerLines,
+    block.anchorHeaderIndex,
+  );
   const description = block.body;
 
   // Score the entry.
@@ -255,6 +258,36 @@ function splitRoleComma(h: string): [string, string] | null {
 }
 
 /**
+ * True when a date-anchor line carries the reconstructed-export org signature —
+ * used to gate the anchor-is-company positional tiebreak in
+ * {@link disambiguateCompanyTitle} so it fires ONLY on our own reconstructed
+ * "Download PDF" export shape, never on a genuine two-line real-résumé header.
+ *
+ * The ONLY signal is an edge/whitespace-bounded " · " middot marker. Our emit
+ * (ats-resume-model.ts) ALWAYS appends it to the company sub-line whenever a role
+ * has a title and a date anchor: "Company · Location  Dates" for the with-location
+ * case and "Company · Dates" for the location-less case. That middot is a
+ * sufficient and unambiguous round-trip signature.
+ *
+ * Location- and title-keyword-based signals were REMOVED (Phase 4b, #298): on a
+ * genuinely ambiguous two-line header ("Company (top) / Title + Dates (bottom)")
+ * the anchor line's shape alone can't disambiguate company from title, so every
+ * location/comma/keyword heuristic created a symmetric company↔title inversion on
+ * generic real résumés (three review rounds). None of them are needed for the
+ * round-trip goal — the middot marker covers every reconstructed/corpus case.
+ *
+ * A neutral anchor (no middot — e.g. "Relationship Banking" or "Acme Widgets,
+ * Austin, TX") returns false, so control falls through to the pre-#298 default
+ * (company = first line): generic real résumés behave exactly as they did before.
+ */
+function anchorCarriesOrgSignal(text: string): boolean {
+  // A " · " mid-dot (Company · Location) or a trailing " ·" marker (the
+  // reconstructed-export signature our own emit appends to a location-less
+  // company sub-line, ats-resume-model.ts) — either bounded by whitespace/edge.
+  return /(?:^|\s)·(?:\s|$)/.test(text);
+}
+
+/**
  * Given 1..3 header lines, decide which is the company and which is the title.
  * Heuristics (in priority order):
  *   - If one looks like a company/institution (legal suffix OR "University",
@@ -272,8 +305,27 @@ function splitRoleComma(h: string): [string, string] | null {
  * the title and company are extracted rather than staying glued together. The
  * location embedded in the company segment ("Company, City, ST" or intl
  * "Company, City, Country") is stripped by `stripLocationSuffix`.
+ *
+ * `anchorIdx` (optional) is the index within `headers` of the line that carried
+ * the date anchor — the company/org line in a stacked "Title \n Company Dates"
+ * header (see {@link EntryBlock.anchorHeaderIndex}). It is used ONLY as a
+ * structural TIEBREAK when the text-content heuristics above can't decide (the
+ * default `first-line-is-company` path, and the case where MORE THAN ONE header
+ * line reads as a company): the anchor line is the company and the line above it
+ * is the title. This is what lets our own reconstructed "Download PDF" export —
+ * whose experience block is a bare title header over a `Company · Location Dates`
+ * sub-line — re-segment back to the SAME title/company it was built from, even
+ * when neither content heuristic fires (both lines look like a company, e.g. a
+ * "Solutions Engineer" title carrying the soft company-suffix word "Solutions";
+ * or both look like a title, e.g. a two-column source parse that assigned the
+ * org name as the title). A decisive content signal (exactly one company suffix,
+ * or exactly one title keyword) still wins, so genuine source layouts are
+ * unaffected (#298).
  */
-function disambiguateCompanyTitle(headers: string[]): {
+function disambiguateCompanyTitle(
+  headers: string[],
+  anchorIdx?: number,
+): {
   company?: string;
   title?: string;
   team?: string;
@@ -300,10 +352,59 @@ function disambiguateCompanyTitle(headers: string[]): {
     splits.push({ text: h, source: idx });
   });
 
-  const companyIdx = splits.findIndex((s) => looksLikeCompany(s.text));
+  // Every split that reads like a company/institution (its index in `splits`).
+  const companyMatchIdxs = splits
+    .map((s, i) => (looksLikeCompany(s.text) ? i : -1))
+    .filter((i) => i >= 0);
+  // The stacked-header positional tiebreak is available only when the anchor
+  // (date) line is known AND at least one split sits ABOVE it (a title line) —
+  // i.e. a real two-line "Title \n Company Dates" shape, not a single header
+  // line where everything shares the anchor row.
+  const hasAbove =
+    anchorIdx !== undefined &&
+    anchorIdx > 0 &&
+    splits.some((s) => s.source < anchorIdx);
+
+  // The anchor-is-company positional tiebreak below (else-if) must NOT fire on a
+  // genuine "Company (top) / Title + Dates (bottom)" résumé where the anchor line
+  // is the TITLE and neither line carries any lexical tell — e.g. "Northern Trust"
+  // over "Relationship Banking  Jan 2019 – Mar 2021". There, treating the anchor
+  // as the company inverts the roles (company↔title swap, #298 review). Gate it on
+  // the anchor line carrying a positive "this line is the org/company" signal
+  // ({@link anchorCarriesOrgSignal}): a " · " reconstructed-export separator, an
+  // embedded location / country, or a role/title keyword (the anchor of the
+  // stacked shapes our own reconstructed export and dense/two-column source
+  // layouts produce). A fully neutral anchor (no separator, no location, no title
+  // keyword) has no such corroboration, so we fall through to the old default
+  // (company = first line) — the only case this narrows, and one no corpus fixture
+  // exercises, so every round-trip that relied on the tiebreak stays intact.
+  const anchorHasReconstructedSignature =
+    anchorIdx !== undefined &&
+    anchorIdx >= 0 &&
+    anchorIdx < filtered.length &&
+    anchorCarriesOrgSignal(filtered[anchorIdx]);
+
   let company: string | undefined;
   let title: string | undefined;
   let team: string | undefined;
+
+  // Choose which split is the company. A single company-suffix match is a
+  // decisive content signal (rule 1). When MULTIPLE splits look like a company,
+  // the plain findIndex would pick the topmost — which mis-labels the title line
+  // as the company whenever the title carries a soft company-suffix word
+  // ("Solutions Engineer"). Break that tie with the anchor position: the
+  // date-bearing line is the company (#298). No above line ⇒ keep findIndex.
+  const chooseCompanyIdx = (): number => {
+    if (companyMatchIdxs.length <= 1) return companyMatchIdxs[0] ?? -1;
+    if (hasAbove) {
+      const anchorMatch = companyMatchIdxs.find(
+        (i) => splits[i].source === anchorIdx,
+      );
+      if (anchorMatch !== undefined) return anchorMatch;
+    }
+    return companyMatchIdxs[0];
+  };
+  const companyIdx = chooseCompanyIdx();
 
   if (companyIdx !== -1) {
     company = splits[companyIdx].text;
@@ -324,8 +425,25 @@ function disambiguateCompanyTitle(headers: string[]): {
       company = splits[0]?.text;
       title = splits[1]?.text;
       team = splits[2]?.text;
+    } else if (hasAbove && anchorHasReconstructedSignature) {
+      // No title-keyword signal either way, but the anchor line carries the
+      // reconstructed-export signature (a " · " on the date line) — so this is
+      // our own "Title \n Company · Location Dates" export shape: the anchor
+      // (date) line is the company and the line(s) above it are the title. This
+      // preserves the mapping our reconstructed export was built from, WITHOUT
+      // the old blind "anchor line is company" swap that inverted a genuine
+      // "Company \n Title Dates" résumé lacking the signature (#298 review).
+      const anchorSplit = splits.find((s) => s.source === anchorIdx);
+      const titleSplit = splits.find((s) => s.source < anchorIdx!);
+      company = anchorSplit?.text;
+      title = titleSplit?.text;
+      // A leftover split (an extra anchor-row segment such as a location, or a
+      // second above line) becomes team — rescued to `location` below if it is
+      // one.
+      team = splits.find((s) => s !== anchorSplit && s !== titleSplit)?.text;
     } else {
-      // No title-keyword signal either way — assume top line is company.
+      // No title-keyword signal and no stacked-shape anchor — assume top line is
+      // company (single-line header default).
       company = splits[0]?.text;
       title = splits[1]?.text;
       team = splits[2]?.text;
@@ -401,6 +519,15 @@ function disambiguateCompanyTitle(headers: string[]): {
       team = undefined;
     }
   }
+
+  // (4) Strip the reconstructed-export " ·" org-signature marker that our own
+  //     "Download PDF" appends to a location-less company sub-line so the anchor
+  //     re-parses as the company (see `anchorCarriesOrgSignal` and the emit in
+  //     ats-resume-model.ts). It survives as a trailing dangling middot on an
+  //     otherwise clean company ("Leadership Experience ·"); peel it back off so
+  //     the round-tripped company field matches the source. A genuine company
+  //     never ends in a bare middot, so this only ever removes the marker.
+  if (company) company = company.replace(/\s*·\s*$/, "").trim() || undefined;
 
   return { company, title, team, location };
 }

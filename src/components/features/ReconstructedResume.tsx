@@ -40,6 +40,7 @@ import {
   groupBulletsByExperience,
   needsAttention,
   suppressTitleOwnedBullets,
+  toBulletExperience,
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import {
@@ -244,25 +245,6 @@ function NotDetected({ what }: { what: string }) {
  * We do NOT rely on groupBulletsByExperience's output alone: it omits entries
  * with no matched bullet, which would silently drop those roles/projects/items.
  */
-function toBulletExperience(
-  entries: ReadonlyArray<{
-    title?: string;
-    name?: string;
-    description?: string;
-    start_date?: string;
-    end_date?: string;
-    is_current?: boolean;
-  }>,
-): BulletExperience[] {
-  return entries.map((e) => ({
-    title: e.title ?? e.name,
-    description: e.description,
-    start_date: e.start_date,
-    end_date: e.end_date,
-    is_current: e.is_current,
-  }));
-}
-
 function buildEntryGroups(
   experiences: BulletExperience[],
   projects: ResumeProject[],

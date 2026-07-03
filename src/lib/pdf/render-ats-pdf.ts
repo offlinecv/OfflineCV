@@ -67,10 +67,221 @@ const GAP_AFTER_HEADER = 2;
 const BULLET_MARKER = "• ";
 const BULLET_INDENT = 12; // hanging-indent width for wrapped bullet lines
 
+// The middot list/org-line join separator emitted by ats-resume-model.ts
+// (skills, "Company · Location", "Institution · Location", ...). Wrap logic
+// treats each middot-delimited segment as atomic — see `wrap()` (#301).
+const MIDDOT_SEGMENT_SEP = " · ";
+
+// ── WinAnsi sanitization (#295) ───────────────────────────────────────────────
+//
+// pdf-lib's StandardFonts (Helvetica et al.) only encode WinAnsi (Windows-1252).
+// `PDFPage.drawText` throws `WinAnsi cannot encode "…"` on any code point
+// outside that codec — e.g. U+2192 (→) or U+2010 (the *Unicode* hyphen,
+// distinct from ASCII "-"). Parsed résumé text is arbitrary and routinely
+// contains such glyphs, so every string must be sanitized before it reaches
+// `drawText`.
+//
+// Windows-1252's upper range (0x80-0x9F) already assigns real Unicode code
+// points to en/em dash, curly quotes, bullet, and ellipsis (e.g. U+2014 em
+// dash IS valid WinAnsi) — those must pass through unchanged, not get
+// transliterated, or round-trip fidelity (#284) regresses. Only glyphs with
+// NO WinAnsi representation (arrows, the Unicode hyphen variants, ligatures,
+// exotic whitespace, zero-width marks) get transliterated to a safe ASCII
+// equivalent; anything left over is replaced with "?". Never throws.
+
+/** Code points WinAnsi (cp1252 0x80-0x9F) assigns to real Unicode glyphs. */
+const WINANSI_UPPER_RANGE = new Set([
+  0x20ac, // € euro
+  0x201a, // ‚ low single quote
+  0x0192, // ƒ florin
+  0x201e, // „ low double quote
+  0x2026, // … ellipsis
+  0x2020, // † dagger
+  0x2021, // ‡ double dagger
+  0x02c6, // ˆ circumflex
+  0x2030, // ‰ per mille
+  0x0160, // Š
+  0x2039, // ‹ single left angle quote
+  0x0152, // Œ
+  0x017d, // Ž
+  0x2018, // ‘ left single quote
+  0x2019, // ’ right single quote
+  0x201c, // “ left double quote
+  0x201d, // ” right double quote
+  0x2022, // • bullet
+  0x2013, // – en dash
+  0x2014, // — em dash
+  0x02dc, // ˜ small tilde
+  0x2122, // ™ trademark
+  0x0161, // š
+  0x203a, // › single right angle quote
+  0x0153, // œ
+  0x017e, // ž
+  0x0178, // Ÿ
+]);
+
+const WINANSI_TRANSLITERATIONS: Record<string, string> = {
+  "→": "->", // rightwards arrow (not in WinAnsi)
+  "←": "<-", // leftwards arrow
+  "↔": "<->", // left-right arrow
+  "‐": "-", // Unicode hyphen (distinct from ASCII "-", not in WinAnsi)
+  "‑": "-", // non-breaking hyphen
+  "‒": "-", // figure dash
+  "―": "-", // horizontal bar
+  "‣": "-", // triangular bullet
+  "◦": "-", // white bullet
+  " ": " ", // figure space
+  " ": " ", // en quad
+  " ": " ", // em quad
+  " ": " ", // en space
+  " ": " ", // em space
+  " ": " ", // three-per-em space
+  " ": " ", // four-per-em space
+  " ": " ", // six-per-em space
+  " ": " ", // punctuation space
+  " ": " ", // thin space
+  " ": " ", // hair space
+  " ": " ", // narrow NBSP
+  " ": " ", // medium math space
+  "　": " ", // ideographic space
+  "​": "", // zero-width space
+  "‌": "", // zero-width non-joiner
+  "‍": "", // zero-width joiner
+  "﻿": "", // BOM / zero-width no-break space
+  "ﬀ": "ff", // ff ligature
+  "ﬁ": "fi", // fi ligature
+  "ﬂ": "fl", // fl ligature
+  "ﬃ": "ffi", // ffi ligature
+  "ﬄ": "ffl", // ffl ligature
+};
+
+/**
+ * Sanitize `text` to the WinAnsi (Windows-1252) subset that pdf-lib's
+ * StandardFonts can encode. Glyphs WinAnsi already supports (en/em dash,
+ * curly quotes, bullet, ellipsis, NBSP, ...) pass through unchanged; glyphs
+ * with no WinAnsi representation are transliterated to a safe ASCII
+ * equivalent (see `WINANSI_TRANSLITERATIONS`); anything left is replaced
+ * with "?". Never throws.
+ */
+export function toWinAnsi(text: string): string {
+  if (!text) return text;
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+
+    // Printable ASCII + Latin-1 supplement: WinAnsi covers this range as-is
+    // (includes NBSP at U+00A0).
+    if (code >= 0x20 && code <= 0x7e) {
+      out += ch;
+      continue;
+    }
+    if (code >= 0xa0 && code <= 0xff) {
+      out += ch;
+      continue;
+    }
+    // Tab/newline/carriage-return: keep as-is (whitespace, harmless to draw).
+    if (code === 0x09 || code === 0x0a || code === 0x0d) {
+      out += ch;
+      continue;
+    }
+    // Real WinAnsi upper-range glyphs (en/em dash, curly quotes, bullet, ...)
+    // -- pass through unchanged so round-trip fidelity is preserved.
+    if (WINANSI_UPPER_RANGE.has(code)) {
+      out += ch;
+      continue;
+    }
+    const replacement = WINANSI_TRANSLITERATIONS[ch];
+    if (replacement !== undefined) {
+      out += replacement;
+      continue;
+    }
+    // Other C0/C1 control characters: drop silently.
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) continue;
+    // Anything else (other Unicode blocks, emoji, CJK, etc.) has no WinAnsi
+    // representation -- degrade the glyph instead of crashing.
+    out += "?";
+  }
+  return out;
+}
+
 type RGB = ReturnType<PdfLibParts["rgb"]>;
 type Doc = Awaited<ReturnType<PdfLibParts["PDFDocument"]["create"]>>;
 type Page = ReturnType<Doc["addPage"]>;
 type PdfFont = Awaited<ReturnType<Doc["embedFont"]>>;
+
+/**
+ * Plain `\s+`-word wrap — never breaks a word apart, just packs words up to
+ * `maxWidth`. A single word wider than `maxWidth` is emitted as its own line
+ * (never split mid-word), so this always terminates.
+ */
+function wrapWordsToLines(
+  words: string[],
+  font: PdfFont,
+  size: number,
+  maxWidth: number,
+): string[] {
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let current = words[0];
+  for (let i = 1; i < words.length; i++) {
+    const candidate = `${current} ${words[i]}`;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = words[i];
+    }
+  }
+  lines.push(current);
+  return lines;
+}
+
+/**
+ * Wrap a list of middot-delimited segments, keeping each segment intact.
+ * The wrap point only falls between segments (rejoined with
+ * `MIDDOT_SEGMENT_SEP`); a segment wider than `maxWidth` on its own falls
+ * back to `wrapWordsToLines` for that segment only. Exported for testing.
+ */
+export function wrapSegmentsToLines(
+  segments: string[],
+  font: PdfFont,
+  size: number,
+  maxWidth: number,
+): string[] {
+  if (segments.length === 0) return [];
+  const lines: string[] = [];
+  // Seed `current` from the empty string and run EVERY segment — including
+  // segments[0] — through the same width check + word-wrap fallback, so an
+  // overlong first segment (e.g. a long "Company · Location" org line whose
+  // company name alone exceeds maxWidth) is wrapped rather than emitted verbatim.
+  let current = "";
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const candidate =
+      current === "" ? seg : `${current}${MIDDOT_SEGMENT_SEP}${seg}`;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+    if (current !== "") lines.push(current);
+    if (font.widthOfTextAtSize(seg, size) > maxWidth) {
+      // `wrapWordsToLines` never loops on a single word wider than maxWidth
+      // (it emits it as its own line), so this terminates.
+      const subLines = wrapWordsToLines(
+        seg.split(/\s+/).filter(Boolean),
+        font,
+        size,
+        maxWidth,
+      );
+      lines.push(...subLines.slice(0, -1));
+      current = subLines[subLines.length - 1] ?? "";
+    } else {
+      current = seg;
+    }
+  }
+  lines.push(current);
+  return lines;
+}
 
 /**
  * Mutable cursor + page state threaded through the draw routines. We keep one
@@ -104,28 +315,39 @@ class Layout {
     this.y -= points;
   }
 
-  /** Word-wrap `text` to `maxWidth` using the given font/size. */
+  /**
+   * Word-wrap `text` to `maxWidth` using the given font/size.
+   *
+   * When `text` contains the middot segment separator (`" · "` — used to join
+   * skills, and "Company · Location" / "Institution · Location" org lines,
+   * see `ats-resume-model.ts`), each middot-delimited segment is wrapped as an
+   * ATOMIC unit: the wrap point can only fall BETWEEN segments, never inside
+   * one. Plain `\s+`-word wrapping used to let the break land mid-segment
+   * (e.g. inside the multi-word skill "Cloud Data Warehousing"), which
+   * re-parsed as two skills instead of one (#301). A single segment that
+   * alone exceeds `maxWidth` still falls back to per-word wrapping so a
+   * pathologically long segment doesn't overflow the page width.
+   */
   private wrap(
     text: string,
     font: PdfFont,
     size: number,
     maxWidth: number,
   ): string[] {
-    const words = text.split(/\s+/).filter(Boolean);
-    if (words.length === 0) return [];
-    const lines: string[] = [];
-    let current = words[0];
-    for (let i = 1; i < words.length; i++) {
-      const candidate = `${current} ${words[i]}`;
-      if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
-        current = candidate;
-      } else {
-        lines.push(current);
-        current = words[i];
-      }
+    if (text.includes(MIDDOT_SEGMENT_SEP)) {
+      return wrapSegmentsToLines(
+        text.split(MIDDOT_SEGMENT_SEP).filter((s) => s.length > 0),
+        font,
+        size,
+        maxWidth,
+      );
     }
-    lines.push(current);
-    return lines;
+    return wrapWordsToLines(
+      text.split(/\s+/).filter(Boolean),
+      font,
+      size,
+      maxWidth,
+    );
   }
 
   /**
@@ -149,7 +371,14 @@ class Layout {
     const color = opts.color ?? this.black;
     const x = opts.x ?? MARGIN;
     const hanging = opts.hangingIndent ?? 0;
-    const value = opts.uppercase ? text.toUpperCase() : text;
+    // Sanitize LAST — after the case transform — so a case-expansion can never
+    // produce an un-encodable glyph downstream. `toUpperCase()` maps some
+    // WinAnsi-native lowercase letters to glyphs with NO WinAnsi representation
+    // (e.g. µ U+00B5 → Μ U+039C Greek Capital Mu, ſ → S, ﬁ ligature → FI), so
+    // uppercasing BEFORE toWinAnsi would let `drawText` throw `WinAnsi cannot
+    // encode "Μ"` and reintroduce the #295 crash. Uppercase the raw text, then
+    // sanitize the result — toWinAnsi is the final step before measure/draw.
+    const value = toWinAnsi(opts.uppercase ? text.toUpperCase() : text);
     const maxWidth = CONTENT_WIDTH - (x - MARGIN);
 
     const lines = this.wrap(value, font, size, maxWidth);

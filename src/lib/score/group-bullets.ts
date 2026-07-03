@@ -63,6 +63,31 @@ export interface BulletExperience {
   description?: string;
 }
 
+/**
+ * Coerce a list of parsed entries (experiences, projects, achievements) into
+ * the `BulletExperience` shape: `name` falls back to `title`, and the date /
+ * currency fields pass through verbatim. Shared by the reconstruction surface
+ * and the ATS render-model builder so both derive the entry shape identically.
+ */
+export function toBulletExperience(
+  entries: ReadonlyArray<{
+    title?: string;
+    name?: string;
+    description?: string;
+    start_date?: string;
+    end_date?: string;
+    is_current?: boolean;
+  }>,
+): BulletExperience[] {
+  return entries.map((e) => ({
+    title: e.title ?? e.name,
+    description: e.description,
+    start_date: e.start_date,
+    end_date: e.end_date,
+    is_current: e.is_current,
+  }));
+}
+
 /** A group of flagged bullets under one parsed experience role (or "Other"). */
 export interface BulletGroup {
   /** Index into the experiences array, or null for unmatched bullets. */
