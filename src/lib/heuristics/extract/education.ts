@@ -384,6 +384,25 @@ function stripInstitutionLocation(s: string): {
   return { institution: s };
 }
 
+/** Peel a trailing date range / single date off an institution string. When the
+ *  institution and its dates land on ONE line — as the Download-PDF reconstructed
+ *  résumé emits them ("… University, S.Korea  Mar. 2010 – Aug. 2017") — the date
+ *  is still captured separately via `parseEducationDates(joined)`, but without
+ *  this strip it stayed glued onto `institution` and even blocked the trailing
+ *  location strip (#291). Matches a month-year or bare year, optionally as a
+ *  range (or "… – Present"); requires leading whitespace and never consumes the
+ *  whole string. */
+function stripInstitutionDate(s: string): string {
+  const DATE = `(?:${MONTH_YEAR_RE.source}|\\b\\d{4}\\b)`;
+  const SEP = `\\s*[–—-]\\s*`;
+  const TRAILING_DATE_RE = new RegExp(
+    `\\s+${DATE}(?:${SEP}(?:${DATE}|Present))?\\s*$`,
+    "i",
+  );
+  const stripped = s.replace(TRAILING_DATE_RE, "").trim();
+  return stripped || s;
+}
+
 /** Map one education chunk (the degree + institution + date lines of a single
  *  qualification) to a `ResumeEducation` and its confidence. */
 function educationFromChunk(chunk: string[]): {
@@ -434,6 +453,11 @@ function educationFromChunk(chunk: string[]): {
       }
     }
   }
+
+  // Peel a trailing date range off the institution first (a one-line
+  // "Institution  Dates" shape, e.g. the reconstructed-résumé emitter, #291),
+  // otherwise the date blocks the $-anchored location strip below.
+  institution = stripInstitutionDate(institution);
 
   // Peel a trailing "City, ST" / "City, Country" off the institution so it isn't
   // glued on ("University of Example, …   Seattle, WA" → institution without the

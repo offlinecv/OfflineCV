@@ -96,6 +96,36 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
     });
   });
 
+  it("re-parses education degree / field / institution back into the right fields (#291)", () => {
+    const origEdu = original.parsed.education ?? [];
+    const reEdu = reparsed.parsed.education ?? [];
+    // Baseline: the fixture parses to at least one education entry.
+    expect(origEdu.length).toBeGreaterThan(0);
+    expect(reEdu.length).toBe(origEdu.length);
+    origEdu.forEach((orig, i) => {
+      expect(reEdu[i]?.degree).toBe(orig.degree);
+      expect(reEdu[i]?.field).toBe(orig.field);
+      // Institution must round-trip clean — before the fix the reconstructed
+      // "Institution  Dates" one-liner glued the date range onto `institution`.
+      expect(reEdu[i]?.institution).toBe(orig.institution);
+      expect(reEdu[i]?.institution ?? "").not.toMatch(/\b\d{4}\s*$/);
+      expect(reEdu[i]?.start_date).toBe(orig.start_date);
+      expect(reEdu[i]?.end_date).toBe(orig.end_date);
+    });
+  });
+
+  it("preserves the summary text end to end (#292)", () => {
+    const s1 = original.parsed.summary ?? "";
+    const s3 = reparsed.parsed.summary ?? "";
+    expect(s1.length).toBeGreaterThan(0);
+    // The reconstructed-résumé renderer re-wraps prose, which can push a
+    // sentence-level en/em dash to the start of a line; the summary extractor
+    // used to drop that line as a "bullet" (#292), shrinking the summary.
+    // Round-trip must now preserve it within whitespace-normalization noise.
+    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+    expect(norm(s3)).toBe(norm(s1));
+  });
+
   it("leaves no role description ending with the NEXT role's header (AC#2)", () => {
     const reExp = reparsed.parsed.experience ?? [];
     // A swallowed next-role header manifests as a trailing description line that

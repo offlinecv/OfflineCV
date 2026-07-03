@@ -107,7 +107,10 @@ describe("buildAtsResumeModel", () => {
     ]);
 
     const edu = model.sections[1].entries[0];
-    expect(edu.headerLine).toBe("BS Computer Science — State University");
+    // Stacked shape (#291): degree leads the header, institution moves to the
+    // sub-line (mirroring experience) so it round-trips back through the parser.
+    expect(edu.headerLine).toBe("BS Computer Science");
+    expect(edu.subLine).toBe("State University  2016");
     expect(edu.bullets[0]).toMatch(/Coursework: Algorithms, Databases/);
 
     const skills = model.sections[2].entries[0];
@@ -133,12 +136,14 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const edu = model.sections.find((s) => s.heading === "Education")!;
+    // Stacked shape (#291): degree(+field) on the header, institution on the
+    // sub-line (with the date anchor appended after a whitespace gap).
     expect(edu.entries[0].headerLine).toBe(
-      "Bachelor of Science, Mechanical Engineering — Riverside College Of Engineering",
+      "Bachelor of Science, Mechanical Engineering",
     );
-    expect(edu.entries[1].headerLine).toBe(
-      "Applied Robotics Program — ACME Professional Education",
-    );
+    expect(edu.entries[0].subLine).toBe("Riverside College Of Engineering");
+    expect(edu.entries[1].headerLine).toBe("Applied Robotics Program");
+    expect(edu.entries[1].subLine).toBe("ACME Professional Education  2024");
   });
 
   it("falls back to description split when no graded bullets are attributed", () => {

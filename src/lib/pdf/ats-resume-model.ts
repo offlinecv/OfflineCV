@@ -29,7 +29,7 @@ import {
   groupBulletsByExperience,
   type BulletExperience,
 } from "../score/group-bullets.ts";
-import { buildEducationDates, buildProjectDates } from "../score/entry-dates.ts";
+import { buildProjectDates } from "../score/entry-dates.ts";
 import { buildContactFields } from "../contact.ts";
 import type {
   ContactOverrides,
@@ -292,13 +292,30 @@ export function buildAtsResumeModel(
       bullets.push(`Coursework: ${edu.coursework.join(", ")}`);
     }
     // Degree + major share the primary slot ("Bachelor of Science, Mechanical
-    // Engineering"); a degree-less program (#238) shows its title (in
-    // `field`) alone. Then " — institution".
+    // Engineering"); a degree-less program (#238) shows its title (in `field`)
+    // alone. Stacked shape (mirrors the experience fix in #284, and #291): the
+    // degree leads the (bold) header line, and "Institution · Location  Dates"
+    // sits on the sub-line — institution on the sub-line, the date after a
+    // whitespace gap so it becomes the entry's date anchor. Emitting the old
+    // glued "Degree — Institution" one-liner did not round-trip: re-parsing
+    // collapsed degree/field/institution into each other (#291).
     const degreeField = [edu.degree, edu.field].filter(Boolean).join(", ");
+    const org = joinHeader([edu.institution, edu.location], " · ");
+    // Spaced " – " range (the experience shape) so the re-parser recognizes and
+    // strips the date anchor off the institution line; `buildEducationDates`'
+    // unspaced en-dash was left glued into `institution` on round-trip (#291).
+    // Fall back to the bare year when only a single year is known.
+    const eduDates =
+      experienceDateRange({
+        start_date: edu.start_date,
+        end_date: edu.end_date,
+      }) ||
+      edu.year ||
+      "";
+    const orgLine = [org, eduDates].filter(Boolean).join("  ");
     return {
-      headerLine: joinHeader([degreeField, edu.institution], " — ") ||
-        "Education",
-      subLine: buildEducationDates(edu) || undefined,
+      headerLine: degreeField || orgLine || "Education",
+      subLine: degreeField ? orgLine || undefined : undefined,
       bullets,
     };
   });
