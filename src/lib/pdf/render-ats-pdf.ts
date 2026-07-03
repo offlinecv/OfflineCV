@@ -67,6 +67,138 @@ const GAP_AFTER_HEADER = 2;
 const BULLET_MARKER = "• ";
 const BULLET_INDENT = 12; // hanging-indent width for wrapped bullet lines
 
+// ── WinAnsi sanitization (#295) ───────────────────────────────────────────────
+//
+// pdf-lib's StandardFonts (Helvetica et al.) only encode WinAnsi (Windows-1252).
+// `PDFPage.drawText` throws `WinAnsi cannot encode "…"` on any code point
+// outside that codec — e.g. U+2192 (→) or U+2010 (the *Unicode* hyphen,
+// distinct from ASCII "-"). Parsed résumé text is arbitrary and routinely
+// contains such glyphs, so every string must be sanitized before it reaches
+// `drawText`.
+//
+// Windows-1252's upper range (0x80-0x9F) already assigns real Unicode code
+// points to en/em dash, curly quotes, bullet, and ellipsis (e.g. U+2014 em
+// dash IS valid WinAnsi) — those must pass through unchanged, not get
+// transliterated, or round-trip fidelity (#284) regresses. Only glyphs with
+// NO WinAnsi representation (arrows, the Unicode hyphen variants, ligatures,
+// exotic whitespace, zero-width marks) get transliterated to a safe ASCII
+// equivalent; anything left over is replaced with "?". Never throws.
+
+/** Code points WinAnsi (cp1252 0x80-0x9F) assigns to real Unicode glyphs. */
+const WINANSI_UPPER_RANGE = new Set([
+  0x20ac, // € euro
+  0x201a, // ‚ low single quote
+  0x0192, // ƒ florin
+  0x201e, // „ low double quote
+  0x2026, // … ellipsis
+  0x2020, // † dagger
+  0x2021, // ‡ double dagger
+  0x02c6, // ˆ circumflex
+  0x2030, // ‰ per mille
+  0x0160, // Š
+  0x2039, // ‹ single left angle quote
+  0x0152, // Œ
+  0x017d, // Ž
+  0x2018, // ‘ left single quote
+  0x2019, // ’ right single quote
+  0x201c, // “ left double quote
+  0x201d, // ” right double quote
+  0x2022, // • bullet
+  0x2013, // – en dash
+  0x2014, // — em dash
+  0x02dc, // ˜ small tilde
+  0x2122, // ™ trademark
+  0x0161, // š
+  0x203a, // › single right angle quote
+  0x0153, // œ
+  0x017e, // ž
+  0x0178, // Ÿ
+]);
+
+const WINANSI_TRANSLITERATIONS: Record<string, string> = {
+  "→": "->", // rightwards arrow (not in WinAnsi)
+  "←": "<-", // leftwards arrow
+  "↔": "<->", // left-right arrow
+  "‐": "-", // Unicode hyphen (distinct from ASCII "-", not in WinAnsi)
+  "‑": "-", // non-breaking hyphen
+  "‒": "-", // figure dash
+  "―": "-", // horizontal bar
+  "‣": "-", // triangular bullet
+  "◦": "-", // white bullet
+  " ": " ", // figure space
+  " ": " ", // en quad
+  " ": " ", // em quad
+  " ": " ", // en space
+  " ": " ", // em space
+  " ": " ", // three-per-em space
+  " ": " ", // four-per-em space
+  " ": " ", // six-per-em space
+  " ": " ", // punctuation space
+  " ": " ", // thin space
+  " ": " ", // hair space
+  " ": " ", // narrow NBSP
+  " ": " ", // medium math space
+  "　": " ", // ideographic space
+  "​": "", // zero-width space
+  "‌": "", // zero-width non-joiner
+  "‍": "", // zero-width joiner
+  "﻿": "", // BOM / zero-width no-break space
+  "ﬀ": "ff", // ff ligature
+  "ﬁ": "fi", // fi ligature
+  "ﬂ": "fl", // fl ligature
+  "ﬃ": "ffi", // ffi ligature
+  "ﬄ": "ffl", // ffl ligature
+};
+
+/**
+ * Sanitize `text` to the WinAnsi (Windows-1252) subset that pdf-lib's
+ * StandardFonts can encode. Glyphs WinAnsi already supports (en/em dash,
+ * curly quotes, bullet, ellipsis, NBSP, ...) pass through unchanged; glyphs
+ * with no WinAnsi representation are transliterated to a safe ASCII
+ * equivalent (see `WINANSI_TRANSLITERATIONS`); anything left is replaced
+ * with "?". Never throws.
+ */
+export function toWinAnsi(text: string): string {
+  if (!text) return text;
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+
+    // Printable ASCII + Latin-1 supplement: WinAnsi covers this range as-is
+    // (includes NBSP at U+00A0).
+    if (code >= 0x20 && code <= 0x7e) {
+      out += ch;
+      continue;
+    }
+    if (code >= 0xa0 && code <= 0xff) {
+      out += ch;
+      continue;
+    }
+    // Tab/newline/carriage-return: keep as-is (whitespace, harmless to draw).
+    if (code === 0x09 || code === 0x0a || code === 0x0d) {
+      out += ch;
+      continue;
+    }
+    // Real WinAnsi upper-range glyphs (en/em dash, curly quotes, bullet, ...)
+    // -- pass through unchanged so round-trip fidelity is preserved.
+    if (WINANSI_UPPER_RANGE.has(code)) {
+      out += ch;
+      continue;
+    }
+    const replacement = WINANSI_TRANSLITERATIONS[ch];
+    if (replacement !== undefined) {
+      out += replacement;
+      continue;
+    }
+    // Other C0/C1 control characters: drop silently.
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) continue;
+    // Anything else (other Unicode blocks, emoji, CJK, etc.) has no WinAnsi
+    // representation -- degrade the glyph instead of crashing.
+    out += "?";
+  }
+  return out;
+}
+
 type RGB = ReturnType<PdfLibParts["rgb"]>;
 type Doc = Awaited<ReturnType<PdfLibParts["PDFDocument"]["create"]>>;
 type Page = ReturnType<Doc["addPage"]>;
@@ -149,7 +281,14 @@ class Layout {
     const color = opts.color ?? this.black;
     const x = opts.x ?? MARGIN;
     const hanging = opts.hangingIndent ?? 0;
-    const value = opts.uppercase ? text.toUpperCase() : text;
+    // Sanitize LAST — after the case transform — so a case-expansion can never
+    // produce an un-encodable glyph downstream. `toUpperCase()` maps some
+    // WinAnsi-native lowercase letters to glyphs with NO WinAnsi representation
+    // (e.g. µ U+00B5 → Μ U+039C Greek Capital Mu, ſ → S, ﬁ ligature → FI), so
+    // uppercasing BEFORE toWinAnsi would let `drawText` throw `WinAnsi cannot
+    // encode "Μ"` and reintroduce the #295 crash. Uppercase the raw text, then
+    // sanitize the result — toWinAnsi is the final step before measure/draw.
+    const value = toWinAnsi(opts.uppercase ? text.toUpperCase() : text);
     const maxWidth = CONTENT_WIDTH - (x - MARGIN);
 
     const lines = this.wrap(value, font, size, maxWidth);

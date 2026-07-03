@@ -195,6 +195,19 @@ export interface EntryBlock {
    * line is title / company / institution / project name.
    */
   headerLines: string[];
+  /**
+   * Index into {@link headerLines} of the line that carried the date anchor
+   * (the anchor line with its dates stripped), or -1 when that line reduced to
+   * empty (date-only anchor) or the block came from a non-date anchor path.
+   * A structural signal the caller can use to disambiguate title vs company:
+   * in a stacked "Title \n Company Dates" header the anchor line is the
+   * company/org line and the line(s) above it are the title. Lets a caller
+   * (experience) recover the right mapping when text-content heuristics can't
+   * decide — notably our own reconstructed "Download PDF" export, whose
+   * experience sub-line is `Company · Location  Dates` under a bare title
+   * header (#298).
+   */
+  anchorHeaderIndex?: number;
   /** Parsed start/end/is_current off the anchor line (empty object if none). */
   dates: ReturnType<typeof parseDateRange>;
   /**
@@ -1085,13 +1098,20 @@ function buildEntryBlock(
     belowHeaderLines.push(lines[i]);
   }
 
+  // Assemble header lines in document order — above lines, the anchor line
+  // (dates stripped), then below lines — tracking where the anchor line lands
+  // in the trimmed/filtered array so the caller can use it as a title/company
+  // structural signal (#298). Each group is trimmed and de-blanked
+  // independently so the anchor index stays accurate after empties drop.
+  const aboveTexts = aboveLines.map((l) => l.text.trim()).filter(Boolean);
+  const anchorText = anchorTextWithoutDates.trim();
+  const belowTexts = belowHeaderLines.map((l) => l.text.trim()).filter(Boolean);
   const headerLines = [
-    ...aboveLines.map((l) => l.text),
-    anchorTextWithoutDates,
-    ...belowHeaderLines.map((l) => l.text),
-  ]
-    .map((t) => t.trim())
-    .filter(Boolean);
+    ...aboveTexts,
+    ...(anchorText ? [anchorText] : []),
+    ...belowTexts,
+  ];
+  const anchorHeaderIndex = anchorText ? aboveTexts.length : -1;
 
   // Body: every bullet or prose paragraph from where the body began to the next
   // anchor. Bullet glyphs are stripped; a wrapped tail folds onto its bullet.
@@ -1160,5 +1180,5 @@ function buildEntryBlock(
   }
   const body = cfg.collectBody ? bodyUnits.join("\n").trim() || undefined : undefined;
 
-  return { headerLines, dates, body, bulletCount: bodyUnits.length };
+  return { headerLines, anchorHeaderIndex, dates, body, bulletCount: bodyUnits.length };
 }

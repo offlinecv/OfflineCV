@@ -248,12 +248,31 @@ export function buildAtsResumeModel(
     // " · ", so stripping the date anchor leaves a clean "Company · Location"
     // with no dangling separator leaking into the parsed company field.
     const org = joinHeader([exp.company, exp.location], " · ");
-    const orgLine = [org, experienceDateRange(exp)].filter(Boolean).join("  ");
+    // Re-parse company/title tiebreak signature (#298 round-trip). When this role
+    // has a TITLE, the org+date line becomes the parser's date-anchor sub-line, and
+    // the re-parser only treats a bare, neutral anchor as the company (rather than
+    // the title) when the line carries a positive org signal. A `Company · Location`
+    // org already carries the " · " tell; a location-less `Company` does NOT, so a
+    // neutral company ("Leadership Experience", "Books for Life") would re-parse
+    // inverted (company↔title swap). Emit the " · " signature on the sub-line for
+    // that location-less-with-title case so the anchor is recognizably the company;
+    // the re-parser strips the trailing marker back to a clean company field.
+    const dateRange = experienceDateRange(exp);
+    const needsOrgSignature =
+      Boolean(title) && Boolean(org) && Boolean(dateRange) && !org.includes(" · ");
+    // Location-less-with-title: put the date after a " · " so the re-parse anchor
+    // carries the org signature (reads "Company · Dates"). Otherwise keep the date
+    // after the whitespace gap so a "Company · Location" org stays clean on strip.
+    const subLine = needsOrgSignature
+      ? [org, dateRange].filter(Boolean).join(" · ") || undefined
+      : [org, dateRange].filter(Boolean).join("  ") || undefined;
+    const headerOrgLine = [org, dateRange].filter(Boolean).join("  ") || undefined;
     return {
       // Title alone leads (bold); when a role has no title, the org/date line
-      // leads so it still carries the date anchor on the header line itself.
-      headerLine: title || orgLine || "Experience",
-      subLine: title ? orgLine || undefined : undefined,
+      // leads so it still carries the date anchor on the header line itself (and
+      // needs no signature — a title-less header is not disambiguated).
+      headerLine: title || headerOrgLine || "Experience",
+      subLine: title ? subLine : undefined,
       bullets: resolveBullets(
         bulletsByIndex.get(expOffset + i),
         bulletOverrides,

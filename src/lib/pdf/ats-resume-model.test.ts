@@ -98,9 +98,12 @@ describe("buildAtsResumeModel", () => {
     const exp = model.sections[0].entries[0];
     // Stacked round-trip shape (#284): title leads the bold header, the
     // "Company · Location  Dates" line (carrying the parser's date anchor) sits
-    // on the sub-line so the emitted role re-segments back to one entry.
+    // on the sub-line so the emitted role re-segments back to one entry. With no
+    // location the company is bare, so the date is joined with a " · " org-signature
+    // marker (#298 review) — "Company · Dates" — so the re-parse anchor is
+    // recognizably the company, not the title.
     expect(exp.headerLine).toBe("Senior PM");
-    expect(exp.subLine).toBe("Acme  2020 – 2024");
+    expect(exp.subLine).toBe("Acme · 2020 – 2024");
     expect(exp.bullets).toEqual([
       "Led migration of legacy auth system to OAuth",
       "Drove 30% revenue growth across the platform",
