@@ -67,6 +67,11 @@ const GAP_AFTER_HEADER = 2;
 const BULLET_MARKER = "• ";
 const BULLET_INDENT = 12; // hanging-indent width for wrapped bullet lines
 
+// The middot list/org-line join separator emitted by ats-resume-model.ts
+// (skills, "Company · Location", "Institution · Location", ...). Wrap logic
+// treats each middot-delimited segment as atomic — see `wrap()` (#301).
+const MIDDOT_SEGMENT_SEP = " · ";
+
 // ── WinAnsi sanitization (#295) ───────────────────────────────────────────────
 //
 // pdf-lib's StandardFonts (Helvetica et al.) only encode WinAnsi (Windows-1252).
@@ -205,6 +210,80 @@ type Page = ReturnType<Doc["addPage"]>;
 type PdfFont = Awaited<ReturnType<Doc["embedFont"]>>;
 
 /**
+ * Plain `\s+`-word wrap — never breaks a word apart, just packs words up to
+ * `maxWidth`. A single word wider than `maxWidth` is emitted as its own line
+ * (never split mid-word), so this always terminates.
+ */
+function wrapWordsToLines(
+  words: string[],
+  font: PdfFont,
+  size: number,
+  maxWidth: number,
+): string[] {
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let current = words[0];
+  for (let i = 1; i < words.length; i++) {
+    const candidate = `${current} ${words[i]}`;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = words[i];
+    }
+  }
+  lines.push(current);
+  return lines;
+}
+
+/**
+ * Wrap a list of middot-delimited segments, keeping each segment intact.
+ * The wrap point only falls between segments (rejoined with
+ * `MIDDOT_SEGMENT_SEP`); a segment wider than `maxWidth` on its own falls
+ * back to `wrapWordsToLines` for that segment only. Exported for testing.
+ */
+export function wrapSegmentsToLines(
+  segments: string[],
+  font: PdfFont,
+  size: number,
+  maxWidth: number,
+): string[] {
+  if (segments.length === 0) return [];
+  const lines: string[] = [];
+  // Seed `current` from the empty string and run EVERY segment — including
+  // segments[0] — through the same width check + word-wrap fallback, so an
+  // overlong first segment (e.g. a long "Company · Location" org line whose
+  // company name alone exceeds maxWidth) is wrapped rather than emitted verbatim.
+  let current = "";
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const candidate =
+      current === "" ? seg : `${current}${MIDDOT_SEGMENT_SEP}${seg}`;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+    if (current !== "") lines.push(current);
+    if (font.widthOfTextAtSize(seg, size) > maxWidth) {
+      // `wrapWordsToLines` never loops on a single word wider than maxWidth
+      // (it emits it as its own line), so this terminates.
+      const subLines = wrapWordsToLines(
+        seg.split(/\s+/).filter(Boolean),
+        font,
+        size,
+        maxWidth,
+      );
+      lines.push(...subLines.slice(0, -1));
+      current = subLines[subLines.length - 1] ?? "";
+    } else {
+      current = seg;
+    }
+  }
+  lines.push(current);
+  return lines;
+}
+
+/**
  * Mutable cursor + page state threaded through the draw routines. We keep one
  * "current page" and append new pages as the cursor overflows.
  */
@@ -236,28 +315,39 @@ class Layout {
     this.y -= points;
   }
 
-  /** Word-wrap `text` to `maxWidth` using the given font/size. */
+  /**
+   * Word-wrap `text` to `maxWidth` using the given font/size.
+   *
+   * When `text` contains the middot segment separator (`" · "` — used to join
+   * skills, and "Company · Location" / "Institution · Location" org lines,
+   * see `ats-resume-model.ts`), each middot-delimited segment is wrapped as an
+   * ATOMIC unit: the wrap point can only fall BETWEEN segments, never inside
+   * one. Plain `\s+`-word wrapping used to let the break land mid-segment
+   * (e.g. inside the multi-word skill "Cloud Data Warehousing"), which
+   * re-parsed as two skills instead of one (#301). A single segment that
+   * alone exceeds `maxWidth` still falls back to per-word wrapping so a
+   * pathologically long segment doesn't overflow the page width.
+   */
   private wrap(
     text: string,
     font: PdfFont,
     size: number,
     maxWidth: number,
   ): string[] {
-    const words = text.split(/\s+/).filter(Boolean);
-    if (words.length === 0) return [];
-    const lines: string[] = [];
-    let current = words[0];
-    for (let i = 1; i < words.length; i++) {
-      const candidate = `${current} ${words[i]}`;
-      if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
-        current = candidate;
-      } else {
-        lines.push(current);
-        current = words[i];
-      }
+    if (text.includes(MIDDOT_SEGMENT_SEP)) {
+      return wrapSegmentsToLines(
+        text.split(MIDDOT_SEGMENT_SEP).filter((s) => s.length > 0),
+        font,
+        size,
+        maxWidth,
+      );
     }
-    lines.push(current);
-    return lines;
+    return wrapWordsToLines(
+      text.split(/\s+/).filter(Boolean),
+      font,
+      size,
+      maxWidth,
+    );
   }
 
   /**

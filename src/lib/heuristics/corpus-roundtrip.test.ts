@@ -113,31 +113,30 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   //     company/title P1↔P3) after the Phase 4b middot-only anchor gate — the old
   //     location/keyword org-signal disjuncts were inverting a reconstructed role
   //     differently from the first parse, breaking fidelity; dropping them fixed
-  //     it. Only the skills-line token split remains, tracked in #299/#E.
-  "latex/deedy-resume-macfonts.pdf": ["skills"],
-  "latex/deedy-resume-openfonts.pdf": ["skills"],
+  //     it. The skills-line token split (#299/#E) is ALSO fixed now (#301 —
+  //     `wrap()` keeps each " · "-delimited skill atomic instead of breaking mid-
+  //     word), so these fixtures round-trip clean; no line remains here.
 
   //   - openresume-react-pdf: a dateless role whose title carries an inline year
   //     ("Software Engineer Intern Summer 2022") round-trips with the year split
   //     out as `start_date` ("… Summer" + 2022) — an inline-year-in-title
-  //     asymmetry, not the swap. (Plus the #299/#E skills split.)
-  "unknown/openresume-react-pdf.pdf": ["experience", "skills"],
+  //     asymmetry, not the swap. (The #299/#E skills split is fixed by #301.)
+  "unknown/openresume-react-pdf.pdf": ["experience"],
 
-  // Experience SWAP cleared by #298 (removed from these lines); only the
-  // skills-line token split remains, tracked in #299/#E. (For
-  // programs-skills-software the education "institution pollution" was already
-  // fixed in #294 — "University of California" → "… · Berkeley, CA" glued —
-  // via the " · " middot boundary; education round-trips.)
-  "google-docs/google-docs-skia-proxy-role-first-experience.pdf": ["skills"],
-  "google-docs/google-docs-skia-proxy-programs-skills-software.pdf": ["skills"],
+  // Experience SWAP cleared by #298 (removed from these lines). The skills-line
+  // token split (#299/#E) is fixed by #301, so google-docs-skia-proxy-role-first-
+  // experience and -programs-skills-software round-trip clean; no line remains
+  // for either. (For programs-skills-software the education "institution
+  // pollution" was already fixed in #294 — "University of California" → "… ·
+  // Berkeley, CA" glued — via the " · " middot boundary; education round-trips.)
 
-  // Total re-parse collapse: the reconstructed PDF reads back empty (contact,
-  // experience, and education all drop out).
-  "google-docs/google-docs-skia-proxy-coursework-dup.pdf": [
-    "contact",
-    "experience",
-    "education",
-  ],
+  // Total re-parse collapse (#296) — FIXED: the reconstructed PDF read back
+  // empty because the compact single-role + single-degree résumé rendered as
+  // only ~11 line-granular text items, tripping the `avgItems < 15` arm of the
+  // scanned probe despite 439 real characters. That arm short-circuited the
+  // whole cascade (contact, experience, and education all dropped). Removing the
+  // spurious item-count arm from `probeScanned` (character sparsity is the
+  // reliable scanned signal) restores the full round-trip; no line remains.
 };
 
 function walkPdfs(dir: string): string[] {
@@ -182,22 +181,37 @@ function contactFails(
   return out;
 }
 
-/** Ordered-entry-list diff (shared by experience and education): a count
- *  mismatch, else per-field inequality at each index. */
-function entryListFails<T>(
+/** Ordered-entry-list diff skeleton: a count mismatch short-circuits, else each
+ *  index/key inequality is rendered by `formatMismatch`. The two callers below
+ *  differ ONLY in that formatter — the PII-free corpus gate prints field names,
+ *  the harness prints before → after values. */
+function entryListDiff<T>(
   a1: readonly T[],
   a3: readonly T[],
   keys: readonly (keyof T)[],
   label: string,
+  formatMismatch: (i: number, k: keyof T, v1: T[keyof T], v3: T[keyof T] | undefined) => string,
 ): string[] {
   if (a1.length !== a3.length)
     return [`${label} count ${a1.length} → ${a3.length}`];
   const out: string[] = [];
   a1.forEach((r, i) => {
     for (const k of keys)
-      if (!same(r[k], a3[i]?.[k])) out.push(`${label}[${i}].${String(k)}`);
+      if (!same(r[k], a3[i]?.[k])) out.push(formatMismatch(i, k, r[k], a3[i]?.[k]));
   });
   return out;
+}
+
+/** Ordered-entry-list diff (shared by experience and education): a count
+ *  mismatch, else per-field inequality at each index. Prints field NAMES only,
+ *  so it stays PII-free (used by the corpus gate). */
+function entryListFails<T>(
+  a1: readonly T[],
+  a3: readonly T[],
+  keys: readonly (keyof T)[],
+  label: string,
+): string[] {
+  return entryListDiff(a1, a3, keys, label, (i, k) => `${label}[${i}].${String(k)}`);
 }
 
 /** Summary length drift ≥ 5% (the round-trip truncation signal, #292). */
@@ -344,17 +358,14 @@ function entryValueFails<T>(
   keys: readonly (keyof T)[],
   label: string,
 ): string[] {
-  if (a1.length !== a3.length)
-    return [`${label} count ${a1.length} → ${a3.length}`];
-  const out: string[] = [];
-  a1.forEach((r, i) => {
-    for (const k of keys)
-      if (!same(r[k], a3[i]?.[k]))
-        out.push(
-          `${label}[${i}].${String(k)}: ${JSON.stringify(r[k])} → ${JSON.stringify(a3[i]?.[k])}`,
-        );
-  });
-  return out;
+  return entryListDiff(
+    a1,
+    a3,
+    keys,
+    label,
+    (i, k, v1, v3) =>
+      `${label}[${i}].${String(k)}: ${JSON.stringify(v1)} → ${JSON.stringify(v3)}`,
+  );
 }
 
 /** Skills value diff: the count delta plus the added/removed tokens. */

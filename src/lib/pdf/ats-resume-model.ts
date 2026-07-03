@@ -27,7 +27,7 @@ import type {
 } from "../score/types.ts";
 import {
   groupBulletsByExperience,
-  type BulletExperience,
+  toBulletExperience,
 } from "../score/group-bullets.ts";
 import { buildProjectDates } from "../score/entry-dates.ts";
 import { buildContactFields } from "../contact.ts";
@@ -147,25 +147,6 @@ function resolveBullets(
   return bulletsFromDescription(description);
 }
 
-function asBulletExperience(
-  entries: ReadonlyArray<{
-    title?: string;
-    name?: string;
-    description?: string;
-    start_date?: string;
-    end_date?: string;
-    is_current?: boolean;
-  }>,
-): BulletExperience[] {
-  return entries.map((e) => ({
-    title: e.title ?? e.name,
-    description: e.description,
-    start_date: e.start_date,
-    end_date: e.end_date,
-    is_current: e.is_current,
-  }));
-}
-
 function experienceDateRange(exp: {
   start_date?: string;
   end_date?: string;
@@ -213,9 +194,9 @@ export function buildAtsResumeModel(
   // One grouping pass over experiences + projects + achievements, mirroring the
   // surface, so bullets are attributed to their own entry.
   const combined = [
-    ...asBulletExperience(experiences),
-    ...asBulletExperience(projects),
-    ...asBulletExperience(achievements),
+    ...toBulletExperience(experiences),
+    ...toBulletExperience(projects),
+    ...toBulletExperience(achievements),
   ];
   const grouped = groupBulletsByExperience([...bulletPool], combined);
   const bulletsByIndex = new Map<number, BulletObservation[]>();
