@@ -88,16 +88,6 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   "unknown/weasyprint-cairo-classic.pdf": ["render"],
   "word/openresume-laverne-word-quartz.pdf": ["render"],
 
-  // Education count inflation: reconstructed education emits a phantom extra
-  // entry (1→2, 2→3) on re-parse.
-  "google-docs/google-docs-skia-proxy-achievements-oneline.pdf": ["education"],
-  "google-docs/google-docs-skia-proxy-additional-skills.pdf": ["education"],
-  "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["education"],
-  "latex/header-as-name-functional-resume.pdf": ["education"],
-  "unknown/chromium-qualified-experience-headers.pdf": ["education"],
-  "word/chanchal-sharma-bulleted-skills.pdf": ["education"],
-  "word/chanchal-sharma-sample.pdf": ["education"],
-
   // Experience header re-segmentation: title/company (and sometimes dates) swap
   // or shift on re-parse in denser / multi-role / two-column layouts.
   "google-docs/google-docs-skia-proxy-certifications.pdf": ["experience"],
