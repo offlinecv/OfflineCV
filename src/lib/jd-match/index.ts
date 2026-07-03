@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 
-export {
-  extractJdTerms,
-  stripBoilerplate,
-  BOILERPLATE_ANCHORS,
-} from "./extract-jd-terms.ts";
+export { extractJdTerms, stripBoilerplate } from "./extract-jd-terms.ts";
 export type {
   ExtractedTerm,
   ExtractJdTermsResult,

@@ -7,39 +7,6 @@
  * standalone — no DB or remote-store assumptions reach this layer.
  */
 
-// ── Ambiguity types ────────────────────────────────────────────────────────
-
-export type AmbiguityCategory =
-  | "employment_gap"
-  | "employment_overlap"
-  | "title_normalization"
-  | "date_unclear"
-  | "content_vague"
-  | "format_suggestion"
-  | "tenure_structure"
-  | "graduation_year_visible"
-  | "explicit_tenure_claim"
-  | "dated_summary_language"
-  | "early_career_date_leak";
-
-export type AmbiguitySeverity = "error" | "warning" | "info";
-
-export interface AmbiguityFieldRef {
-  company?: string;
-  team?: string;
-  title?: string;
-  start_date?: string;
-  field: string;
-}
-
-export interface StructuredAmbiguity {
-  category: AmbiguityCategory;
-  severity: AmbiguitySeverity;
-  description: string;
-  field_ref?: AmbiguityFieldRef;
-  suggested_value?: string;
-}
-
 // ── ATS score types ────────────────────────────────────────────────────────
 
 export interface AtsScoreDimensions {

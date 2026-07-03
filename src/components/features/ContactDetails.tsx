@@ -26,7 +26,7 @@ import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
  *  key. Includes the link fields — a detected GitHub/portfolio/website URL is
  *  editable too (only optional links that the parser actually found render, so
  *  there is nothing to edit when absent). */
-export const EDITABLE_KEYS: Record<string, keyof ContactOverrides> = {
+const EDITABLE_KEYS: Record<string, keyof ContactOverrides> = {
   full_name: "full_name",
   email: "email",
   phone: "phone",

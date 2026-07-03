@@ -10,7 +10,6 @@
 
 import type {
   AtsScore,
-  AtsScoreDimensions,
   ScoreTier,
   ResumeExperience,
   ResumeData,
@@ -18,11 +17,11 @@ import type {
 import type { SectionedResume } from "../heuristics/sections.ts";
 
 // Re-export types for convenience
-export type { AtsScore, AtsScoreDimensions, ScoreTier };
+export type { AtsScore, ScoreTier };
 
 // ── Scoring weights ─────────────────────────────────────────────────────────
 
-export const WEIGHTS = {
+const WEIGHTS = {
   specificity: 0.4,
   structure: 0.3,
   completeness: 0.3,
@@ -94,7 +93,7 @@ const BULLET_LENGTH_MIN_WORDS = 8;
 const BULLET_LENGTH_MAX_WORDS = 30;
 
 /** Ratio of metric-bearing bullets that earns full Specificity credit (100). */
-export const SPECIFICITY_TARGET_RATIO = 0.6;
+const SPECIFICITY_TARGET_RATIO = 0.6;
 
 /** Completeness sub-thresholds — match the authed scorer historically. */
 const COMPLETENESS_SUMMARY_MIN_CHARS = 20;

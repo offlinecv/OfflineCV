@@ -152,7 +152,7 @@ function normalizeSplitLetterHeaders(markdown: string): string {
  * Pre-clean the raw markdown before line-by-line classification. Idempotent
  * and cheap — runs once per DOCX upload.
  */
-export function preprocessMarkdown(markdown: string): string {
+function preprocessMarkdown(markdown: string): string {
   let out = markdown;
   out = stripImages(out);
   out = unescapeBackslashes(out);
@@ -303,7 +303,7 @@ function buildLine(
  * Runs `preprocessMarkdown` first to strip base64 image blobs, undo
  * turndown escapes, and normalize split-letter section headers.
  */
-export function markdownToPseudoLines(markdown: string): PdfLine[] {
+function markdownToPseudoLines(markdown: string): PdfLine[] {
   const cleaned = preprocessMarkdown(markdown);
   const rawLines = cleaned.split(/\r?\n/);
   const out: PdfLine[] = [];
@@ -328,7 +328,7 @@ export function markdownToPseudoLines(markdown: string): PdfLine[] {
  * like `EXPERIENCE 04/2021 - Present` where the date run got joined into
  * the header line in mammoth output).
  */
-export function sectionizeMarkdownLines(lines: PdfLine[]): PdfSection[] {
+function sectionizeMarkdownLines(lines: PdfLine[]): PdfSection[] {
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
 
   for (const line of lines) {

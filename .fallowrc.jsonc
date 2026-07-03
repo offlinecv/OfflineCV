@@ -1,0 +1,74 @@
+{
+  // fallow static-analysis config (issue #15). Tunes out false positives so the
+  // diff-scoped `fallow audit` gate stays high-signal. See docs.fallow.tools.
+
+  // Dev-only browser harnesses (jd-spike.html / eval-rewrite.html / parse-eval.html)
+  // are real entry points kept in-repo but excluded from the production rollup
+  // `input` (vite.config.ts) so they never ship to dist/. Register them here so
+  // fallow follows them and stops reporting their browser `.ts` modules
+  // (jd-spike-browser.ts, run-eval-browser.ts, parse-eval-browser.ts and their
+  // spike/eval helpers) as unreachable dead code.
+  "entry": [
+    "jd-spike.html",
+    "eval-rewrite.html",
+    "parse-eval.html"
+  ],
+
+  // `@design-tokens` is a Vite CSS-import alias (vite.config.ts resolve.alias),
+  // not an npm package — it's `@import`ed from src/styles.css. Fallow's dependency
+  // scanner has no view of the Vite alias, so it reports an "unlisted dependency".
+  // Teach it the specifier is intentional.
+  "ignoreDependencies": [
+    "@design-tokens"
+  ],
+
+  // Complexity/CRAP thresholds only apply to shipped product code. The dev-only
+  // WebLLM harnesses (spike/eval/parse-eval, loaded via the dev HTML entries and
+  // never in the production rollup) score high CRAP purely because they carry no
+  // test coverage — that's not maintainability debt worth tracking.
+  "health": {
+    "ignore": [
+      "src/lib/webllm/spike/**",
+      "src/lib/webllm/eval/**",
+      "src/lib/webllm/parse-eval/**"
+    ]
+  },
+
+  "ignoreExports": [
+    // Design-system primitive variant types are the deliberate public surface of
+    // the `@design-system` seam (3-tier component architecture, CLAUDE.md). They
+    // are intended API for consumers even when no in-tree caller references the
+    // union type directly — not dead code.
+    { "file": "src/design-system/primitives/Button.tsx", "exports": ["ButtonVariant", "ButtonSize"] },
+    { "file": "src/design-system/primitives/Chip.tsx", "exports": ["ChipTone"] },
+    { "file": "src/design-system/shared/ErrorState.tsx", "exports": ["ErrorStateTone"] },
+
+    // Public-API barrels. Each file documents itself as THE consumer boundary
+    // for its module ("Public surface is intentionally small… Consumers should
+    // not import internals directly") and deliberately re-exports the result-shape
+    // types a caller needs to type `runCascade` / `extractJdTerms` — even where
+    // the in-tree app imports those types from deeper paths. Re-exports with no
+    // in-repo consumer are the intended external surface, not dead code.
+    { "file": "src/lib/heuristics/index.ts", "exports": ["*"] },
+    { "file": "src/lib/jd-match/index.ts", "exports": ["*"] },
+
+    // `ParseMetadata` is the telemetry metadata contract the heuristics barrel
+    // re-exports so a host can type the `ParseEvent` payloads it wires to the
+    // `onEvent` sink. It has no in-tree consumer (the app doesn't inspect
+    // metadata), and a barrel re-export whose barrel is itself ignored doesn't
+    // register as a consumer edge — so the source export must be marked here too.
+    { "file": "src/lib/heuristics/types.ts", "exports": ["ParseMetadata"] },
+
+    // `getThresholdsFor` is a deliberate extensibility stub (see its doc comment:
+    // "exists so we can diverge later without touching callers") re-exported by
+    // the heuristics barrel. Uncalled today by design; keep the seam.
+    { "file": "src/lib/heuristics/thresholds.ts", "exports": ["getThresholdsFor"] },
+
+    // Dev-only WebLLM spike/eval harnesses (loaded via the registered dev HTML
+    // entries above). Their type vocabulary documents the harness contract
+    // (README + prompt comments) even where no annotation consumes it; don't hold
+    // dev scaffolding to the production dead-surface bar.
+    { "file": "src/lib/webllm/spike/**", "exports": ["*"] },
+    { "file": "src/lib/webllm/eval/**", "exports": ["*"] }
+  ]
+}

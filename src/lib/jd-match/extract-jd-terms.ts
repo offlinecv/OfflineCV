@@ -39,7 +39,7 @@ import { getSkillIndex } from "./skills.ts";
  * If you add an anchor, lowercase it and keep it phrase-shaped — we match
  * with `.includes()` after whitespace normalization, not regex.
  */
-export const BOILERPLATE_ANCHORS: readonly string[] = [
+const BOILERPLATE_ANCHORS: readonly string[] = [
   "equal opportunity employer",
   "equal employment opportunity",
   "without regard to race",
@@ -115,7 +115,7 @@ export interface ExtractJdTermsResult {
  * at <10 noun-phrase hits after the skill-overlap filter, so a 25-cap leaves
  * comfortable headroom while protecting the UI from outliers.
  */
-export const NOUN_PASS_CAP = 25;
+const NOUN_PASS_CAP = 25;
 
 /**
  * Lines that the noun-phrase regex would otherwise pick up but that almost
@@ -537,7 +537,7 @@ function countOccurrences(haystackLower: string, phraseLower: string): number {
  * The sort is stable: ties keep the input's document order, so a JD with no
  * repetition degrades gracefully to the prior first-N behavior.
  */
-export function rankNounHits(
+function rankNounHits(
   hits: readonly ExtractedTerm[],
   body: string,
 ): ExtractedTerm[] {

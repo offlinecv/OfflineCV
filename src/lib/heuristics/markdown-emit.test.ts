@@ -16,7 +16,7 @@ import {
   stripBulletPrefix,
 } from "./markdown-emit.ts";
 import { mkDefaultPages, mkItems } from "./__test-utils__/mkItem.ts";
-import type { PdfLine } from "./markdown-emit.ts";
+import type { RenderLine } from "./markdown-emit.ts";
 
 describe("markdown-emit: groupItemsIntoLines", () => {
   it("returns empty array on empty input", () => {
@@ -61,7 +61,7 @@ describe("markdown-emit: computeBodyFontSize", () => {
   it("picks the character-weighted mode, not the line-count mode", () => {
     // Two short 18pt header lines and three long 11pt body lines. Character
     // weighting should pick 11pt even though there are almost equal counts.
-    const lines: PdfLine[] = [
+    const lines: RenderLine[] = [
       { page: 1, y: 72, x: 72, text: "HEAD", fontSize: 18 },
       { page: 1, y: 100, x: 72, text: "HEAD2", fontSize: 18 },
       {
@@ -109,7 +109,7 @@ describe("markdown-emit: isBulletLine / stripBulletPrefix", () => {
 
 describe("markdown-emit: renderLine", () => {
   const bodySize = 10;
-  const line = (text: string, fontSize: number): PdfLine => ({
+  const line = (text: string, fontSize: number): RenderLine => ({
     page: 1, y: 100, x: 72, text, fontSize,
   });
 
@@ -140,7 +140,7 @@ describe("markdown-emit: renderLine", () => {
 
 describe("markdown-emit: needsParagraphBreak", () => {
   const body = 10;
-  const line = (page: number, y: number, fontSize = body): PdfLine => ({
+  const line = (page: number, y: number, fontSize = body): RenderLine => ({
     page, y, x: 72, text: "x", fontSize,
   });
 

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
-// fallow-ignore-file unused-file
 
 /**
  * Report renderers for the separate-vs-combined comparison eval (issue #262).
@@ -18,7 +17,6 @@ import type {
   CombinedFixtureComparison,
 } from "./combined-score.ts";
 
-// fallow-ignore-next-line unused-export
 export function renderCombinedJsonReport(report: CombinedEvalReport): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
@@ -48,7 +46,6 @@ function tick(v: boolean): string {
   return v ? "PASS" : "fail";
 }
 
-// fallow-ignore-next-line unused-export
 export function renderCombinedMarkdownReport(report: CombinedEvalReport): string {
   const { separateMeans: sM, combinedMeans: cM } = report;
   const { separateCritiqueMeans: sC, combinedCritiqueMeans: cC } = report;

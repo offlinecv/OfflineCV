@@ -57,7 +57,7 @@ const LEADING_BULLET_RE =
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /** A single logical line produced by grouping items at matching y-coords. */
-export interface PdfLine {
+export interface RenderLine {
   page: number;
   y: number;
   /** Leftmost x of any item in this line (for future indentation logic). */
@@ -84,13 +84,13 @@ export interface PdfLine {
 export function groupItemsIntoLines(
   items: PdfTextItem[],
   boundaries?: Map<number, number>,
-): PdfLine[] {
+): RenderLine[] {
   const bands = orderItemsByColumn(items, boundaries);
   return bands.flatMap(groupLinesSingle);
 }
 
 /** Single-pass line grouping over one band of items (no column awareness). */
-function groupLinesSingle(items: PdfTextItem[]): PdfLine[] {
+function groupLinesSingle(items: PdfTextItem[]): RenderLine[] {
   if (items.length === 0) return [];
 
   const sorted = [...items].sort((a, b) => {
@@ -99,8 +99,8 @@ function groupLinesSingle(items: PdfTextItem[]): PdfLine[] {
     return a.x - b.x;
   });
 
-  const lines: PdfLine[] = [];
-  let current: PdfLine | null = null;
+  const lines: RenderLine[] = [];
+  let current: RenderLine | null = null;
 
   for (const item of sorted) {
     if (!item.str) continue;
@@ -140,7 +140,7 @@ function groupLinesSingle(items: PdfTextItem[]): PdfLine[] {
  * Returns the default 10pt when given no lines. Bins sizes to 0.1pt to
  * collapse near-equal floats that pdfjs sometimes emits.
  */
-export function computeBodyFontSize(lines: PdfLine[]): number {
+export function computeBodyFontSize(lines: RenderLine[]): number {
   if (lines.length === 0) return 10;
 
   const bins = new Map<number, number>();
@@ -174,7 +174,7 @@ export function stripBulletPrefix(text: string): string {
  * Render a single line to markdown: heading by font-size ratio, bullet by
  * leading glyph, plain prose otherwise.
  */
-export function renderLine(line: PdfLine, bodySize: number): string {
+export function renderLine(line: RenderLine, bodySize: number): string {
   const ratio = line.fontSize / bodySize;
   if (ratio >= H1_RATIO) return `# ${line.text}`;
   if (ratio >= H2_RATIO) return `## ${line.text}`;
@@ -188,8 +188,8 @@ export function renderLine(line: PdfLine, bodySize: number): string {
  * page break, large vertical gap, or font-size change (header transition).
  */
 export function needsParagraphBreak(
-  prev: PdfLine,
-  next: PdfLine,
+  prev: RenderLine,
+  next: RenderLine,
   bodySize: number,
 ): boolean {
   if (prev.page !== next.page) return true;
@@ -228,7 +228,7 @@ export function emitMarkdown(
   const bodySize = computeBodyFontSize(lines);
 
   const output: string[] = [];
-  let prev: PdfLine | null = null;
+  let prev: RenderLine | null = null;
 
   for (const line of lines) {
     const rendered = renderLine(line, bodySize);

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
-// fallow-ignore-file unused-file
 
 /**
  * Browser entry for the parse-resume eval harness (issues #241 + #262).

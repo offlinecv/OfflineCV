@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
-// fallow-ignore-file unused-file
 
 /**
  * Inline eval fixtures for the parse-resume provider (issue #241).
@@ -250,7 +249,6 @@ B.S. Statistics — Westbrook University (Expected May 2025)`,
 // ---------------------------------------------------------------------------
 
 /** All eval fixtures, in run order. */
-// fallow-ignore-next-line unused-export
 export const PARSE_EVAL_FIXTURES: readonly ParseEvalFixture[] = [
   SOFTWARE_ENGINEER,
   MARKETING_COORDINATOR,

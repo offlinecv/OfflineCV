@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
-// fallow-ignore-file unused-file
 
 /**
  * Report renderers for the parse-resume eval harness (issue #241).
@@ -17,7 +16,6 @@
 
 import type { ParseEvalReport } from "./score.ts";
 
-// fallow-ignore-next-line unused-export
 export function renderJsonReport(report: ParseEvalReport): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
@@ -30,7 +28,6 @@ function tick(v: boolean): string {
   return v ? "PASS" : "fail";
 }
 
-// fallow-ignore-next-line unused-export
 export function renderMarkdownReport(report: ParseEvalReport): string {
   const lines: string[] = [];
 

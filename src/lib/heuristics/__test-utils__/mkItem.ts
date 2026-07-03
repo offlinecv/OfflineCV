@@ -25,7 +25,7 @@ const LINE_HEIGHT = 14;
 const TOP_MARGIN = 72;
 
 /** Build a single `PdfTextItem` from a line spec (one text run per line). */
-export function mkItem(spec: LineSpec): PdfTextItem {
+function mkItem(spec: LineSpec): PdfTextItem {
   const fontSize = spec.fontSize ?? 11;
   const x = spec.x ?? 72;
   const y = TOP_MARGIN + spec.lineIndex * LINE_HEIGHT;
@@ -49,7 +49,7 @@ export function mkItems(
   return specs.map((s, i) => mkItem({ ...s, lineIndex: s.lineIndex ?? i }));
 }
 
-export function mkPage(
+function mkPage(
   page: number,
   items: PdfTextItem[],
   width = 612,
