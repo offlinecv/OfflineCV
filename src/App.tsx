@@ -5,13 +5,24 @@ import { Card, Chip, ErrorState, ErrorBoundary, Button } from "@design-system";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
 import { PageShell } from "./components/features/PageShell.tsx";
+import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
+import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { writeJdFitHandoff } from "./lib/jd-fit-handoff.ts";
 import { useFlag } from "./lib/flags.ts";
 
 export default function App() {
   const { state, edit, edited, handleFile, reset, formatBytes } =
     useAnalyzedResume();
+
+  // Once a parse is done the inline DropZone is gone; this restores drag-and-
+  // drop so a new resume can replace the current one (confirm-gated, since it
+  // discards the parse + edits). Only armed in "done" — idle/error already show
+  // the inline DropZone, which owns drops there.
+  const replaceDrop = useReplaceResumeOnDrop({
+    enabled: state.phase === "done",
+    onFile: handleFile,
+  });
 
   // Cross-sell to the `/jd-fit/` surface is gated (default off) — `/jd-fit/` is
   // alpha and not ready to promote from the parser result. See lib/flags.ts.
@@ -169,6 +180,13 @@ export default function App() {
           </>
         )}
       </ErrorBoundary>
+
+      <ReplaceResumeDropOverlay
+        isDragging={replaceDrop.isDragging}
+        pendingFile={replaceDrop.pendingFile}
+        onConfirm={replaceDrop.confirmReplace}
+        onCancel={replaceDrop.cancelReplace}
+      />
     </PageShell>
   );
 }
