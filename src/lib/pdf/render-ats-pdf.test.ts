@@ -98,6 +98,65 @@ describe("renderAtsResumePdf", () => {
     expect(doc.numPages).toBeGreaterThan(1);
   });
 
+  // #307 — a header line packing 3+ " · "-joined segments (e.g. an
+  // achievement's "keyword · statement · year") must WORD-WRAP, not wrap
+  // atomically per segment. Atomic wrapping is reserved for the skills entry
+  // (`AtsEntry.atomicSegments`), which needs whole-segment integrity to
+  // re-parse correctly (#301) — every other header/entry line's middot is a
+  // display joiner only, and atomic wrapping there strands the keyword/year
+  // alone on their own line.
+  it("word-wraps a 3-middot achievement header instead of stranding segments (#307)", async () => {
+    const longStatement =
+      "Issued Patent US0000000B1 for a distributed caching mechanism that " +
+      "reduced average request latency across the platform substantially";
+    const model: AtsResumeModel = {
+      contact: { name: "Jane Candidate", links: [] },
+      sections: [
+        {
+          heading: "Achievements",
+          entries: [
+            {
+              headerLine: `Patent · ${longStatement} · 2019`,
+              bullets: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    const bytes = await renderAtsResumePdf(model);
+    const pdfjs = await import("pdfjs-dist");
+    const doc = await pdfjs.getDocument({
+      data: bytes.slice(),
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      useSystemFonts: false,
+    }).promise;
+    const page = await doc.getPage(1);
+    const content = await page.getTextContent();
+    // Each `page.drawText()` call (one per wrapped line) becomes one text
+    // item here, so this is a per-LINE view, unlike `extractText()` above
+    // which joins everything into one flattened string.
+    const lines = content.items
+      .map((i) => ("str" in i ? (i as { str: string }).str : ""))
+      .filter((s) => s.trim().length > 0);
+
+    // The bug: atomic segment-wrapping stranded the bare keyword and bare
+    // year on their own line when the header overflowed.
+    expect(lines).not.toContain("Patent");
+    expect(lines).not.toContain("2019");
+
+    // The fix: word-wrap still renders the header across multiple lines (it
+    // does not fit on one), but every line carries more than a lone segment.
+    const headerLines = lines.filter((l) => /Patent|2019/.test(l));
+    expect(headerLines.length).toBeGreaterThan(1);
+    for (const line of headerLines) {
+      expect(line.trim().split(/\s+/).length).toBeGreaterThan(1);
+    }
+    expect(headerLines.join(" ")).toContain("Patent");
+    expect(headerLines.join(" ")).toContain("2019");
+  });
+
   // #295 — drawText must never throw on non-WinAnsi glyphs parsed résumé text
   // routinely contains (arrows, unicode hyphens/dashes, smart quotes, bullets,
   // NBSP, ligatures, emoji, CJK).

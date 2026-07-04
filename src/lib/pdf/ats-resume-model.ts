@@ -54,6 +54,15 @@ export interface AtsEntry {
   subLine?: string;
   /** Bullet body lines (already stripped of leading markers, non-empty). */
   bullets: string[];
+  /**
+   * When `true`, `headerLine` must wrap with each `" · "`-delimited segment
+   * kept atomic (never split mid-segment) — required for the skills list,
+   * where a multi-word skill re-parses as two skills if the wrap point lands
+   * inside it (#301). Every other entry's middot is a display joiner only
+   * (e.g. "keyword · statement · year" achievement headers, #307) and must
+   * word-wrap normally, so this defaults to `false`/unset everywhere else.
+   */
+  atomicSegments?: boolean;
 }
 
 export interface AtsSection {
@@ -339,7 +348,7 @@ export function buildAtsResumeModel(
   // ── Skills (one entry, no header line — bullets carry the joined list) ──
   const skillsEntries: AtsEntry[] =
     skills.length > 0
-      ? [{ headerLine: skills.join(" · "), bullets: [] }]
+      ? [{ headerLine: skills.join(" · "), bullets: [], atomicSegments: true }]
       : [];
 
   const achievementsAbove =
