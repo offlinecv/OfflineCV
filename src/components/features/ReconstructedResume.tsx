@@ -653,7 +653,7 @@ function AchievementsSection({
                   />
                 )}
               </div>
-              {group && group.bullets.length > 0 ? (
+              {group && group.bullets.length > 0 && (
                 <ul className="list-none">
                   {group.bullets.map((b) => (
                     <ResumeBulletRow
@@ -663,12 +663,6 @@ function AchievementsSection({
                     />
                   ))}
                 </ul>
-              ) : (
-                !added && (
-                  <p className="text-sm text-content-tertiary">
-                    No bullet-shaped lines detected.
-                  </p>
-                )
               )}
               {added && (
                 <InlineBulletAdd onAdd={(text) => onAddBullet(added.id, text)} />

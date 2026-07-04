@@ -916,6 +916,41 @@ describe("extractExperience", () => {
     expect(value[0].title).toBe("University Lecturer");
     expect(value[0].company).toBe("Globex Corporation");
   });
+
+  it("recovers dateless roles via the first_line fallback (#309)", () => {
+    // A dateless experience section (each role a title + company + bullets group,
+    // no date ranges anywhere) yields zero `date_range` blocks; without the
+    // `first_line` fallback the whole section collapses to 0 roles on re-parse.
+    const section = mkSection("experience", [
+      { text: "Production Intern" },
+      { text: "Example Opera Company" },
+      { text: "\u2022 Supported ticketing and stage assignments" },
+      { text: "\u2022 Maintained audio systems for performance halls" },
+      { text: "Community Outreach Coordinator" },
+      { text: "Example Arts Nonprofit Inc" },
+      { text: "\u2022 Organized volunteer schedules for seasonal events" },
+      { text: "\u2022 Tracked attendance and reported program outcomes" },
+      { text: "Retail Sales Associate" },
+      { text: "Example Music Store LLC" },
+      { text: "\u2022 Matched customers to products against their needs" },
+      { text: "\u2022 Completed the in-house product certification program" },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(3);
+    expect(value[0].title).toBe("Production Intern");
+    expect(value[0].company).toBe("Example Opera Company");
+    expect(value[1].title).toBe("Community Outreach Coordinator");
+    expect(value[1].company).toBe("Example Arts Nonprofit Inc");
+    expect(value[2].title).toBe("Retail Sales Associate");
+    expect(value[2].company).toBe("Example Music Store LLC");
+    // No dates anywhere — every role must be dateless, not phantom-dated.
+    for (const role of value) {
+      expect(role.start_date).toBeUndefined();
+      expect(role.end_date).toBeUndefined();
+    }
+    // Bullets attribute to their role, not merged into one.
+    expect(value[0].description?.split("\n")).toHaveLength(2);
+  });
 });
 
 describe("extractProjects", () => {

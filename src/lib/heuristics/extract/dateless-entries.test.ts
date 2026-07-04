@@ -202,17 +202,21 @@ describe("dateless trailing experience role (#219)", () => {
     );
   });
 
-  it("returns no entries for a section with bullets but zero dated anchors", () => {
-    // The "no date range ⇒ []" contract for the date_range anchor still holds:
-    // a fully dateless section routes through the first_line anchor elsewhere,
-    // not through experience's date_range path.
+  it("recovers a dateless section via the first_line fallback (#309)", () => {
+    // A section with zero date anchors used to collapse to [] (date_range path
+    // yields no blocks). Per #309, extractExperience now falls back to the
+    // first_line anchor when date_range returns 0 blocks, so a header + bullets
+    // group becomes one dateless role instead of vanishing on round-trip.
     const { value } = extractExperience(
       mkSection("experience", [
         ["Volunteer Lead", 0, 100],
         ["• Organized weekend events", 10, 90],
       ]),
     );
-    expect(value).toHaveLength(0);
+    expect(value).toHaveLength(1);
+    expect(value[0].title).toBe("Volunteer Lead");
+    expect(value[0].start_date).toBeUndefined();
+    expect(value[0].end_date).toBeUndefined();
   });
 });
 
