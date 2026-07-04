@@ -42,7 +42,7 @@ export function ReplaceResumeDropOverlay({
               Drop to analyze a new resume
             </p>
             <p className="text-xs text-content-muted">
-              This replaces the resume you&apos;re looking at now.
+              We&apos;ll swap out the one you&apos;re viewing now.
             </p>
           </div>
         </div>
@@ -51,22 +51,23 @@ export function ReplaceResumeDropOverlay({
       <Dialog
         open={pendingFile !== null}
         onClose={onCancel}
-        title="Replace this resume?"
-        className="w-[min(24rem,calc(100vw-2rem))]"
+        title="Analyze a different resume?"
+        className="fixed left-1/2 top-1/2 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2"
       >
         <p className="text-sm text-content-secondary">
-          Analyzing{" "}
+          We&apos;ll run a fresh analysis on{" "}
           <span className="font-medium text-content-primary">
             {pendingFile?.name}
           </span>{" "}
-          will clear the current result and any edits you&apos;ve made.
+          and clear the current result along with any edits you&apos;ve made
+          here. Your original file stays untouched.
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>
-            Cancel
+            Keep current
           </Button>
           <Button variant="primary" onClick={onConfirm}>
-            Replace
+            Analyze new resume
           </Button>
         </div>
       </Dialog>
