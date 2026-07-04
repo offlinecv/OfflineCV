@@ -157,6 +157,57 @@ describe("renderAtsResumePdf", () => {
     expect(headerLines.join(" ")).toContain("2019");
   });
 
+  // #301 regression guard (Rohith review, PR #329) — the inverse of #307.
+  // A "Company · Location  Dates" sub-line that overflows one line must wrap
+  // ATOMICALLY (break only at the middot), never mid-location. Word-wrapping
+  // inside a multi-word location re-parses it into fragmented location tokens.
+  // Unlike the achievement header above, the sub-line middot IS a
+  // re-parse-critical boundary, so `drawEntry` opts the sub-line into
+  // `atomicSegments`.
+  it("keeps a multi-word location intact on an overflowing sub-line (#301)", async () => {
+    const model: AtsResumeModel = {
+      contact: { name: "Jane Candidate", links: [] },
+      sections: [
+        {
+          heading: "Experience",
+          entries: [
+            {
+              headerLine: "Principal Engineer",
+              subLine:
+                "Global Interdisciplinary Research and Development Consortium " +
+                "International Institute Limited · " +
+                "San Francisco Bay Area  2020 – 2024",
+              bullets: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    const bytes = await renderAtsResumePdf(model);
+    const pdfjs = await import("pdfjs-dist");
+    const doc = await pdfjs.getDocument({
+      data: bytes.slice(),
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      useSystemFonts: false,
+    }).promise;
+    const page = await doc.getPage(1);
+    const content = await page.getTextContent();
+    const lines = content.items
+      .map((i) => ("str" in i ? (i as { str: string }).str : ""))
+      .filter((s) => s.trim().length > 0);
+
+    // The sub-line overflows: it wraps across more than one line.
+    const subLines = lines.filter((l) => /Consortium|Francisco/.test(l));
+    expect(subLines.length).toBeGreaterThan(1);
+    // The bug: word-wrapping breaks the location, so no single line carries the
+    // whole "San Francisco Bay Area". The fix keeps that segment atomic.
+    expect(subLines.some((l) => l.includes("San Francisco Bay Area"))).toBe(
+      true,
+    );
+  });
+
   // #295 — drawText must never throw on non-WinAnsi glyphs parsed résumé text
   // routinely contains (arrows, unicode hyphens/dashes, smart quotes, bullets,
   // NBSP, ligatures, emoji, CJK).

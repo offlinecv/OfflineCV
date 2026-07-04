@@ -329,12 +329,14 @@ class Layout {
    * long segment doesn't overflow the page width.
    *
    * Callers must opt IN to atomic wrapping — it is no longer decided by
-   * `text.includes(MIDDOT_SEGMENT_SEP)` alone. Most middot-joined lines
-   * (e.g. "keyword · statement · year" achievement headers, "Company ·
-   * Location" sub-lines) use the middot purely as a display joiner, not a
-   * re-parse-critical boundary; atomic wrapping there strands whole segments
-   * — like the keyword or year — alone on their own line (#307). Only the
-   * skills entry, which is re-parsed segment-by-segment, opts in.
+   * `text.includes(MIDDOT_SEGMENT_SEP)` alone. A 3+ segment "keyword ·
+   * statement · year" achievement HEADER uses the middot purely as a display
+   * joiner, so it opts OUT: atomic wrapping there would strand a whole segment
+   * — the lone keyword or year — on its own line (#307). But the skills entry
+   * (re-parsed segment-by-segment, #301) and the "Company · Location  Dates" /
+   * "Institution · Location  Dates" sub-lines opt IN — there the middot is a
+   * re-parse-critical boundary and word-wrapping inside a multi-word location
+   * would fragment it on re-parse.
    */
   private wrap(
     text: string,
@@ -503,7 +505,17 @@ function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
   }
   if (entry.subLine) {
     layout.advance(GAP_AFTER_HEADER);
-    layout.drawText(entry.subLine, { size: SIZE_SUB, color: mutedColor });
+    // Sub-lines are the "Company · Location  Dates" / "Institution · Location
+    // Dates" org lines (see `ats-resume-model.ts`) — the middot here is a
+    // re-parse-critical boundary, NOT a display joiner: word-wrapping inside a
+    // multi-word location (e.g. "San Francisco Bay Area") re-parses it into
+    // fragmented location tokens (#301). Unlike the 3+ segment achievement
+    // HEADER lines (#307), these must stay atomic, so opt in unconditionally.
+    layout.drawText(entry.subLine, {
+      size: SIZE_SUB,
+      color: mutedColor,
+      atomicSegments: true,
+    });
   }
   for (const bullet of entry.bullets) {
     layout.drawText(`${BULLET_MARKER}${bullet}`, {
