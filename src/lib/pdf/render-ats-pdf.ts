@@ -318,23 +318,34 @@ class Layout {
   /**
    * Word-wrap `text` to `maxWidth` using the given font/size.
    *
-   * When `text` contains the middot segment separator (`" · "` — used to join
-   * skills, and "Company · Location" / "Institution · Location" org lines,
-   * see `ats-resume-model.ts`), each middot-delimited segment is wrapped as an
-   * ATOMIC unit: the wrap point can only fall BETWEEN segments, never inside
-   * one. Plain `\s+`-word wrapping used to let the break land mid-segment
-   * (e.g. inside the multi-word skill "Cloud Data Warehousing"), which
-   * re-parsed as two skills instead of one (#301). A single segment that
-   * alone exceeds `maxWidth` still falls back to per-word wrapping so a
-   * pathologically long segment doesn't overflow the page width.
+   * When `atomicSegments` is `true` AND `text` contains the middot segment
+   * separator (`" · "` — used to join skills, see `ats-resume-model.ts`),
+   * each middot-delimited segment is wrapped as an ATOMIC unit: the wrap
+   * point can only fall BETWEEN segments, never inside one. Plain `\s+`-word
+   * wrapping used to let the break land mid-segment (e.g. inside the
+   * multi-word skill "Cloud Data Warehousing"), which re-parsed as two
+   * skills instead of one (#301). A single segment that alone exceeds
+   * `maxWidth` still falls back to per-word wrapping so a pathologically
+   * long segment doesn't overflow the page width.
+   *
+   * Callers must opt IN to atomic wrapping — it is no longer decided by
+   * `text.includes(MIDDOT_SEGMENT_SEP)` alone. A 3+ segment "keyword ·
+   * statement · year" achievement HEADER uses the middot purely as a display
+   * joiner, so it opts OUT: atomic wrapping there would strand a whole segment
+   * — the lone keyword or year — on its own line (#307). But the skills entry
+   * (re-parsed segment-by-segment, #301) and the "Company · Location  Dates" /
+   * "Institution · Location  Dates" sub-lines opt IN — there the middot is a
+   * re-parse-critical boundary and word-wrapping inside a multi-word location
+   * would fragment it on re-parse.
    */
   private wrap(
     text: string,
     font: PdfFont,
     size: number,
     maxWidth: number,
+    atomicSegments = false,
   ): string[] {
-    if (text.includes(MIDDOT_SEGMENT_SEP)) {
+    if (atomicSegments && text.includes(MIDDOT_SEGMENT_SEP)) {
       return wrapSegmentsToLines(
         text.split(MIDDOT_SEGMENT_SEP).filter((s) => s.length > 0),
         font,
@@ -352,8 +363,11 @@ class Layout {
 
   /**
    * Draw a wrapped block of text. `x` is the left edge; `hangingIndent`
-   * indents continuation lines (for bullet hanging indent). Returns nothing;
-   * mutates the cursor and paginates as needed.
+   * indents continuation lines (for bullet hanging indent). `atomicSegments`
+   * opts into segment-atomic middot wrapping (see `wrap()` above) — leave it
+   * unset/`false` for ordinary header/entry lines; the skills entry is the
+   * only caller that sets it `true` (#307).  Returns nothing; mutates the
+   * cursor and paginates as needed.
    */
   drawText(
     text: string,
@@ -364,6 +378,7 @@ class Layout {
       x?: number;
       hangingIndent?: number;
       uppercase?: boolean;
+      atomicSegments?: boolean;
     } = {},
   ) {
     const size = opts.size ?? SIZE_BODY;
@@ -381,7 +396,13 @@ class Layout {
     const value = toWinAnsi(opts.uppercase ? text.toUpperCase() : text);
     const maxWidth = CONTENT_WIDTH - (x - MARGIN);
 
-    const lines = this.wrap(value, font, size, maxWidth);
+    const lines = this.wrap(
+      value,
+      font,
+      size,
+      maxWidth,
+      opts.atomicSegments ?? false,
+    );
     const lineHeight = size * LINE_GAP;
     for (let i = 0; i < lines.length; i++) {
       this.ensure(lineHeight);
@@ -476,11 +497,25 @@ function drawSectionHeading(layout: Layout, heading: string) {
 
 function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
   if (entry.headerLine) {
-    layout.drawText(entry.headerLine, { bold: true, size: SIZE_HEADER });
+    layout.drawText(entry.headerLine, {
+      bold: true,
+      size: SIZE_HEADER,
+      atomicSegments: entry.atomicSegments,
+    });
   }
   if (entry.subLine) {
     layout.advance(GAP_AFTER_HEADER);
-    layout.drawText(entry.subLine, { size: SIZE_SUB, color: mutedColor });
+    // Sub-lines are the "Company · Location  Dates" / "Institution · Location
+    // Dates" org lines (see `ats-resume-model.ts`) — the middot here is a
+    // re-parse-critical boundary, NOT a display joiner: word-wrapping inside a
+    // multi-word location (e.g. "San Francisco Bay Area") re-parses it into
+    // fragmented location tokens (#301). Unlike the 3+ segment achievement
+    // HEADER lines (#307), these must stay atomic, so opt in unconditionally.
+    layout.drawText(entry.subLine, {
+      size: SIZE_SUB,
+      color: mutedColor,
+      atomicSegments: true,
+    });
   }
   for (const bullet of entry.bullets) {
     layout.drawText(`${BULLET_MARKER}${bullet}`, {

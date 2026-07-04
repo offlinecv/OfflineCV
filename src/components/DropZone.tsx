@@ -2,30 +2,17 @@
 // Copyright 2026 The resumelint Authors
 
 import { useCallback, useId, useRef, useState } from "react";
+import {
+  isAcceptedResumeFile,
+  RESUME_ACCEPT_ATTR,
+  RESUME_REJECT_HINT,
+} from "../lib/file-accept.ts";
 
 interface DropZoneProps {
   onFile: (file: File) => void;
   disabled?: boolean;
   /** Optional status line shown beneath the prompt (e.g. "Parsing…"). */
   status?: string;
-}
-
-function isPdf(f: File): boolean {
-  return (
-    f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")
-  );
-}
-
-function isDocx(f: File): boolean {
-  return (
-    f.type ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    f.name.toLowerCase().endsWith(".docx")
-  );
-}
-
-function isAccepted(f: File): boolean {
-  return isPdf(f) || isDocx(f);
 }
 
 export function DropZone({ onFile, disabled, status }: DropZoneProps) {
@@ -39,10 +26,8 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
       setError(null);
       if (!files || files.length === 0) return;
       const f = files[0];
-      if (!isAccepted(f)) {
-        setError(
-          "That doesn't look like a PDF or DOCX. Please drop a .pdf or .docx file.",
-        );
+      if (!isAcceptedResumeFile(f)) {
+        setError(RESUME_REJECT_HINT);
         return;
       }
       onFile(f);
@@ -80,7 +65,7 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
         ref={inputRef}
         id={inputId}
         type="file"
-        accept="application/pdf,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx"
+        accept={RESUME_ACCEPT_ATTR}
         className="sr-only"
         disabled={disabled}
         onChange={(e) => handleFiles(e.target.files)}

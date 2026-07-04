@@ -19,6 +19,12 @@ import { looksLikeTitle, looksLikeCompany, finalizeEntries } from "./shared.ts";
  *   - Bullet lines after the anchor, until the next anchor or section end,
  *     = the description.
  *
+ * Fallback for a DATELESS section (#309): when the section carries no date
+ * ranges at all, the `date_range` anchor finds nothing and yields zero blocks
+ * (the "no date range ⇒ []" contract in `parseEntryBlocks`), collapsing the
+ * whole section to zero roles. Re-run with the date-optional `"first_line"`
+ * anchor so each `header + bullets` group becomes one dateless role.
+ *
  * Confidence is per-entry, then averaged: we report the average of the
  * per-entry confidence as the section-level `experience` confidence.
  */
@@ -30,11 +36,24 @@ export function extractExperience(
   // windowing, date parsing, and bullet-body collection live in
   // `parseEntryBlocks`; this function owns only the experience-specific field
   // mapping (`disambiguateCompanyTitle`) and scoring.
-  const blocks = parseEntryBlocks(experience, {
+  let blocks = parseEntryBlocks(experience, {
     anchor: "date_range",
     collectBody: true,
     headerLookback: 2,
   });
+  // A dateless experience section yields zero `date_range` blocks. Fall back to
+  // the `"first_line"` anchor so each header-run + bullet-group is recovered as
+  // one dateless role instead of the whole section collapsing to nothing (#309).
+  // A résumé with ANY dated role produced ≥1 block above and never reaches here,
+  // so `date_range` stays the primary path and dated résumés cannot regress. The
+  // date-only-phantom drop and the `title || company` non-empty filter below
+  // apply to both paths uniformly.
+  if (blocks.length === 0) {
+    blocks = parseEntryBlocks(experience, {
+      anchor: "first_line",
+      collectBody: true,
+    });
+  }
   // Drop a date-only phantom — a block with neither title nor company (#145).
   // Experience has no single title axis, so we keep a role that has either.
   return finalizeEntries(
