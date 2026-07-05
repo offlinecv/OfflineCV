@@ -1,9 +1,12 @@
 ---
-name: roundtrip-probe
-description: Round-trip-audit any résumé PDF — including a real, PII-bearing one — through the parse→export→parse cycle to surface where the reconstructed "Download PDF" corrupts the parse. Prints per-hop before→after field-value diffs. Use when the user says "round-trip probe", "/roundtrip-probe", "audit this résumé's round-trip", "why does the downloaded PDF re-parse wrong", or hands you a real résumé to triage.
+name: probe-roundtrip
+description: Round-trip-audit any résumé PDF — including a real, PII-bearing one — through the parse→export→parse cycle to surface where the reconstructed "Download PDF" corrupts the parse. Prints per-hop before→after field-value diffs. One of the `probe-*` parser probes (see also `probe-contact`). Use when the user says "probe roundtrip", "/probe-roundtrip", "round-trip probe", "/roundtrip-probe", "audit this résumé's round-trip", "why does the downloaded PDF re-parse wrong", or hands you a real résumé to triage.
 ---
 
-# Round-trip Probe
+# Probe: Round-trip
+
+> One of the `probe-*` parser-probe family (sibling: `probe-contact`, which
+> isolates the contact section). Type `probe-` to list them all.
 
 Drop in **any** résumé PDF and run the parse→export→parse cycle to see exactly
 where our own reconstructed "Download PDF" corrupts the parse on re-read. This is
