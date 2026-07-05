@@ -92,26 +92,14 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   // distinct, separately-rooted round-trip bugs that the swap fix does not (and
   // should not) touch; each warrants its own follow-up:
   //
-  //   - chromium-two-column-sidebar (#324): count 5 → 7. A stray "20%" token
-  //     renders glued onto the "PROJECTS" section heading ("20% PROJECTS"), so
-  //     section recognition misses it and the projects block leaks into
-  //     EXPERIENCE as phantom roles. A RENDER-side heading-pollution bug, not
-  //     segmentation (distinct layer from the parse-side fix in closed #117).
-  "unknown/chromium-two-column-sidebar.pdf": ["experience"],
-
   //   - classic / weasyprint (#326, wontfix by-design): the ONLY diff is a
   //     Unicode glyph the #295 `toWinAnsi` sanitizer rewrites lossily — a role
   //     title "… Intern → Junior Engineer" round-trips as "… Intern -> Junior
   //     Engineer" (→ U+2192 → "->"). A #295 render-sanitizer artifact, not the
   //     header swap. Accepted tradeoff (no-crash > glyph fidelity); a real fix
   //     needs a Unicode-capable embedded font. See #326 for the decision record.
-  //   - word-quartz (#325): p1 has a role with an EMPTY title; the emit puts
-  //     "Company · Location  Dates" on the header line and re-parse assigns the
-  //     bare "City, ST" location as the title. An empty-title-role emit edge
-  //     (distinct from the score-path filter in closed #145).
   "google-docs/google-docs-skia-proxy-classic.pdf": ["experience"],
   "unknown/weasyprint-cairo-classic.pdf": ["experience"],
-  "word/openresume-laverne-word-quartz.pdf": ["experience"],
 
   //   - deedy macfonts/openfonts: experience now round-trips (all 6 roles, same
   //     company/title P1↔P3) after the Phase 4b middot-only anchor gate — the old
