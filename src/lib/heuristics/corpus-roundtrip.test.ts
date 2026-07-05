@@ -115,17 +115,6 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   //     asymmetry, not the swap. (The #299/#E skills split is fixed by #301.)
   "unknown/openresume-react-pdf.pdf": ["experience"],
 
-  //   - letter-spaced-name-heading (#330): the name heading is rendered with wide
-  //     letter-spacing, so pdfjs explodes it to per-glyph tokens
-  //     ("J O R D A N R E Y E S") and `mergeItemText` inserts a space between
-  //     every glyph; the name heuristic's `>5 words` guard then rejects it, so
-  //     parse1 has NO `full_name`. On round-trip the reconstructed single-column
-  //     PDF re-parses a nearby line as the name, so `contact` diverges
-  //     (undefined → "Software Engineer II"). This is the letter-spacing artifact
-  //     itself, tracked in #330 — remove this line when the collapse-single-char-
-  //     run fix lands and parse1 recovers the real name.
-  "unknown/letter-spaced-name-heading.pdf": ["contact"],
-
   // Experience SWAP cleared by #298 (removed from these lines). The skills-line
   // token split (#299/#E) is fixed by #301, so google-docs-skia-proxy-role-first-
   // experience and -programs-skills-software round-trip clean; no line remains
