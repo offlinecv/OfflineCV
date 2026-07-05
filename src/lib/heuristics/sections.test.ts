@@ -19,11 +19,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
+  collapseLetterSpacing,
   groupIntoLines,
+  mergeItemText,
   splitIntoSections,
   toSectionedResume,
   type PdfSection,
 } from "./sections.ts";
+import type { PdfTextItem } from "./types.ts";
 import { runCascade } from "./cascade.ts";
 import { mkItems } from "./__test-utils__/mkItem.ts";
 
@@ -684,5 +687,80 @@ describe("PdfSection.rawHeading — verbatim source heading capture (#285)", () 
     const resume = toSectionedResume(sections, "regex");
     expect(resume.sectionHeadings?.get("experience")).toBe("Work History");
     expect(resume.sectionHeadings?.size).toBe(1);
+  });
+});
+
+describe("collapseLetterSpacing — de-track tracked-out runs (#330)", () => {
+  it("collapses a letter-spaced word to one token", () => {
+    expect(collapseLetterSpacing("J O R D A N")).toBe("JORDAN");
+    expect(collapseLetterSpacing("r e s u m e")).toBe("resume");
+  });
+
+  it("leaves runs shorter than the min (< 4 letters) alone", () => {
+    // Initials, roman numerals, short spaced acronyms stay untouched.
+    expect(collapseLetterSpacing("J R R")).toBe("J R R");
+    expect(collapseLetterSpacing("I V X")).toBe("I V X");
+    expect(collapseLetterSpacing("A B C")).toBe("A B C");
+  });
+
+  it("collapses each word but preserves a trailing multi-char token", () => {
+    // The run anchors on a non-letter, so "Reyes" isn't swallowed.
+    expect(collapseLetterSpacing("J O R D A N Reyes")).toBe("JORDAN Reyes");
+  });
+
+  it("de-tracks accented (non-ASCII) letters", () => {
+    expect(collapseLetterSpacing("A N D R É S")).toBe("ANDRÉS");
+    expect(collapseLetterSpacing("J O S É")).toBe("JOSÉ");
+  });
+
+  it("preserves a >=2-space word gap as a boundary within one item", () => {
+    // A wider inter-word gap ends the single-space run, so the two words
+    // survive even when the whole heading is one item. collapseLetterSpacing
+    // itself only strips intra-run spaces; the surrounding gap is left as-is
+    // (mergeItemText's trailing \s+ collapse normalizes it to one space).
+    expect(collapseLetterSpacing("J O R D A N  R E Y E S")).toBe(
+      "JORDAN  REYES",
+    );
+  });
+
+  it("does not touch normal prose or digits", () => {
+    expect(collapseLetterSpacing("Globex Financial | New York, NY")).toBe(
+      "Globex Financial | New York, NY",
+    );
+    expect(collapseLetterSpacing("1 2 3 4 5")).toBe("1 2 3 4 5");
+  });
+});
+
+describe("mergeItemText — letter-spaced heading recovery (#330)", () => {
+  const line = (str: string, x: number, width: number): PdfTextItem => ({
+    page: 1,
+    str,
+    x,
+    y: 72,
+    width,
+    height: 24,
+    fontSize: 24,
+    fontName: "font-24",
+    hasEOL: true,
+  });
+
+  it("recovers a two-word name from per-glyph items, keeping the word break", () => {
+    // pdfjs emits each tracked-out word as one space-joined item and the real
+    // word boundary as a separate " " item. Per-item de-tracking must keep the
+    // boundary so the two words survive.
+    const items = [
+      line("J O R D A N", 100, 90),
+      line(" ", 195, 8),
+      line("R E Y E S", 205, 75),
+    ];
+    expect(mergeItemText(items)).toBe("JORDAN REYES");
+  });
+
+  it("leaves an un-tracked line unchanged", () => {
+    const items = [
+      line("Jordan Reyes", 100, 90),
+      line("Engineer", 205, 60),
+    ];
+    expect(mergeItemText(items)).toBe("Jordan Reyes Engineer");
   });
 });

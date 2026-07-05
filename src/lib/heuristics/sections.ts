@@ -487,6 +487,47 @@ function groupLinesSingle(bandItems: PdfTextItem[]): PdfLine[] {
 }
 
 /**
+ * Minimum single-letter run length that reads as letter-spacing (tracked-out
+ * type) rather than genuine single-char tokens. Four keeps initials ("J R R"),
+ * roman numerals ("I V X"), and short spaced acronyms out of the collapse.
+ */
+const LETTER_SPACING_MIN_RUN = 4;
+
+/**
+ * Regex for a maximal run of ≥`LETTER_SPACING_MIN_RUN` single letters each
+ * separated by exactly one space (`J O R D A N`). `\p{L}` (Unicode letter, `u`
+ * flag) so accented names de-track too (`A N D R É S` → `ANDRÉS`), not just
+ * ASCII. Anchored on both sides by a non-letter (or string edge) so a trailing
+ * multi-char word isn't swallowed ("J O R D A N Reyes" → only "J O R D A N"
+ * collapses). Requiring exactly one space per pair means a wider (≥2-space)
+ * inter-word gap ends the run, preserving that word boundary even inside one
+ * item (`"J O R D A N  R E Y E S"` → `"JORDAN REYES"`).
+ */
+const LETTER_SPACED_RUN = new RegExp(
+  `(?<!\\p{L})(?:\\p{L} ){${LETTER_SPACING_MIN_RUN - 1},}\\p{L}(?!\\p{L})`,
+  "gu",
+);
+
+/**
+ * Collapse letter-spaced (tracked-out) runs inside one pdfjs item string.
+ * A heading rendered with wide `letter-spacing` reaches us as glyphs joined by
+ * spaces *within a single item* (`"J O R D A N"`), while genuine word breaks
+ * arrive as separate items — so collapsing per item de-tracks each word yet
+ * preserves the real word boundary between items (#330). Every downstream
+ * extractor (name, contact, sections) then sees `"JORDAN"`, not `"J O R D A N"`.
+ *
+ * Scope: this recovers the word boundary when it surfaces as a separate item
+ * (the observed pdfjs shape) or as a ≥2-space gap within an item. The one case
+ * it cannot resolve is a whole multi-word heading emitted as a *single* item
+ * with a *single*-space word gap — then intra- and inter-word gaps are
+ * indistinguishable from the string alone and the words would weld. Not
+ * observed for pdfjs on the #330 corpus; a gap-magnitude split would be needed.
+ */
+export function collapseLetterSpacing(str: string): string {
+  return str.replace(LETTER_SPACED_RUN, (run) => run.replace(/ /g, ""));
+}
+
+/**
  * Concatenate items on a line, inserting a space when the horizontal gap
  * between runs is large enough to imply a word boundary. pdfjs emits each
  * glyph run as a separate item, so naively joining with spaces over-pads
@@ -494,7 +535,11 @@ function groupLinesSingle(bandItems: PdfTextItem[]): PdfLine[] {
  */
 export function mergeItemText(items: PdfTextItem[]): string {
   if (items.length === 0) return "";
-  let out = items[0].str;
+  // De-track each item first (geometry left untouched — gap math below still
+  // uses the original item widths). Collapsing per item keeps the word-boundary
+  // items intact, so `"J O R D A N"` + `" "` + `"R E Y E S"` → `"JORDAN REYES"`.
+  const strs = items.map((it) => collapseLetterSpacing(it.str));
+  let out = strs[0];
   for (let i = 1; i < items.length; i++) {
     const prev = items[i - 1];
     const cur = items[i];
@@ -502,10 +547,10 @@ export function mergeItemText(items: PdfTextItem[]): string {
     const avgCharW = prev.width / Math.max(prev.str.length, 1);
     // Gap wider than ~half a character triggers an inserted space.
     // Also always insert a space if either side already has trailing/leading ws.
-    const prevEndsWs = /\s$/.test(prev.str);
-    const curStartsWs = /^\s/.test(cur.str);
+    const prevEndsWs = /\s$/.test(strs[i - 1]);
+    const curStartsWs = /^\s/.test(strs[i]);
     const needSpace = !prevEndsWs && !curStartsWs && gap > avgCharW * 0.4;
-    out += (needSpace ? " " : "") + cur.str;
+    out += (needSpace ? " " : "") + strs[i];
   }
   return out.replace(/\s+/g, " ").trim();
 }
