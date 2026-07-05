@@ -931,7 +931,7 @@ type LineAction =
 function stripSidebarNoisePrefix(raw: string): string {
   const words = raw.trim().split(/\s+/).filter((w) => w.length > 0);
   let i = 0;
-  while (i < words.length - 1 && !/^[A-Z]/.test(words[i])) i++;
+  while (i < words.length - 1 && !/^\p{Lu}/u.test(words[i])) i++;
   return words.slice(i).join(" ");
 }
 
