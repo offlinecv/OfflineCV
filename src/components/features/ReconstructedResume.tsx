@@ -47,14 +47,16 @@ import {
   applyContactOverrides,
   buildContactFields,
   contactCompleteness,
+  criticalDownloadGate,
   type ContactDisplayField,
 } from "../../lib/contact.ts";
+import { DownloadGateDialog } from "./DownloadGateDialog.tsx";
 import {
   RoleEntry,
   ResumeBulletRow,
   BulletFlagLegend,
 } from "./ReconstructedRole.tsx";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
 import type { SectionRewriteApply } from "./SectionRewrite.tsx";
@@ -790,12 +792,14 @@ export function ReconstructedResume({
     removeSkill,
   } = edit;
 
-  // Contact completeness for the AttentionStrip — resolved through the same
-  // override-applied path the ContactCard renders from, so the strip's missing
-  // count and the card's inline "not detected" pills can never disagree.
-  const contactMissing = contactCompleteness(
-    applyContactOverrides(buildContactFields(result), contactOverrides),
-  ).missing;
+  // Contact display fields — the same override-applied path the ContactCard
+  // renders from, so every consumer (AttentionStrip's per-row gaps, the
+  // pre-download critical-field gate) agrees with what the card shows.
+  const contactDisplayFields = applyContactOverrides(
+    buildContactFields(result),
+    contactOverrides,
+  );
+  const contactMissing = contactCompleteness(contactDisplayFields).missing;
 
   // Added entries are appended to their parsed array by applyOverrides (so they
   // grade + export), which means they already arrive here inside `parsed.*`. We
@@ -832,6 +836,58 @@ export function ReconstructedResume({
   // text-only PDF — built fully client-side from the already-parsed fields,
   // so no PDF bytes ever leave the browser (#171).
   const { download, isGenerating } = useDownloadPdf(result, score, edit);
+
+  // Pre-download checklist popover (#312) — a soft guardrail, not a hard
+  // block. Download click re-derives the gate from the CURRENT (override-
+  // applied) fields every time, so an edit made via "Fix now" clears the item
+  // on the next click without any extra plumbing.
+  const [downloadGateOpen, setDownloadGateOpen] = useState(false);
+  const criticalMissing = criticalDownloadGate(
+    contactDisplayFields,
+    parsed.experience.length > 0,
+  );
+
+  function handleDownloadClick() {
+    if (criticalMissing.length > 0) {
+      setDownloadGateOpen(true);
+      return;
+    }
+    void download();
+  }
+
+  function handleDownloadAnyway() {
+    setDownloadGateOpen(false);
+    void download();
+  }
+
+  // Scroll to + enter edit mode on the first gated field the checklist named.
+  // Name/Contact both surface via `EditableField` inside ContactCard, whose
+  // accessible name is `Edit <label>` (see ContactDetails.tsx) — reused here
+  // rather than threading new refs through the contact-card tree. Experience
+  // has no single inline field to target (it's the "+ Add experience" pill),
+  // so a missing-experience-only gate just scrolls to the resume section.
+  function handleFixNow() {
+    setDownloadGateOpen(false);
+    const first = criticalMissing[0];
+    if (!first) return;
+    const targetLabel =
+      first.key === "full_name" ? "Name" : first.key === "contact" ? "Email" : null;
+    // Defer past the dialog's own close so focus isn't immediately stolen back.
+    requestAnimationFrame(() => {
+      if (!targetLabel) {
+        document
+          .getElementById(SECTION_IDS.reconstructed)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      const target = document.querySelector<HTMLElement>(
+        `[aria-label="Edit ${targetLabel}"]`,
+      );
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      target?.focus();
+      target?.click();
+    });
+  }
 
   // Build the chain-of-sections input for the whole-résumé rewrite CTA (#67).
   // Summary first (when present), then every real role in display order — the
@@ -874,7 +930,7 @@ export function ReconstructedResume({
           </h2>
           <Button
             variant="primary"
-            onClick={download}
+            onClick={handleDownloadClick}
             disabled={isGenerating}
             aria-label="Download the reconstructed resume as an ATS-friendly PDF"
           >
@@ -892,6 +948,13 @@ export function ReconstructedResume({
         {(bullets.length > 0 || contactMissing.length > 0) && (
           <AttentionStrip bullets={bullets} contactMissing={contactMissing} />
         )}
+        <DownloadGateDialog
+          open={downloadGateOpen}
+          missing={criticalMissing}
+          onFixNow={handleFixNow}
+          onDownloadAnyway={handleDownloadAnyway}
+          onClose={() => setDownloadGateOpen(false)}
+        />
       </div>
 
       <ContactCard

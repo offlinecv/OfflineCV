@@ -4,11 +4,14 @@
 /**
  * render-ats-pdf — the single-column, text-only ATS PDF draw engine (#171).
  *
- * Renders an `AtsResumeModel` to PDF bytes using ONLY pdf-lib's built-in
- * Helvetica / Helvetica-Bold (`StandardFonts`). No embedded custom fonts, no
- * images, no rasterization, no network — every glyph is selectable, searchable
- * text drawn with a standard PDF font, which is the most ATS-safe form and
- * guarantees zero egress.
+ * Renders an `AtsResumeModel` to PDF bytes using pdf-lib. The brand font
+ * (Poppins) is embedded when its vendored TTF bytes load and pdf-lib accepts
+ * them (#314); on ANY failure the engine falls back to pdf-lib's built-in
+ * Helvetica / Helvetica-Bold (`StandardFonts`), so a downloaded PDF is never
+ * blocked by a font problem. Either way: no images, no rasterization, no
+ * network egress — every glyph is selectable, searchable text, and the
+ * Poppins bytes are bundled locally + fetched from the app's own origin (see
+ * `loadFonts()` below), never a CDN.
  *
  * Layout: US Letter (612×792 pt), single column, ~54pt margins. The engine
  * tracks a `y` cursor from the top margin downward; when the next line would
@@ -23,6 +26,8 @@
 
 import { loadPdfLibOnce, type PdfLibParts } from "./load-pdf-lib.ts";
 import type { AtsResumeModel, AtsEntry } from "./ats-resume-model.ts";
+import poppinsRegularUrl from "../../assets/fonts/Poppins-Regular.ttf?url";
+import poppinsBoldUrl from "../../assets/fonts/Poppins-Bold.ttf?url";
 
 // ── Page geometry (points) ────────────────────────────────────────────────────
 
@@ -209,6 +214,69 @@ type Doc = Awaited<ReturnType<PdfLibParts["PDFDocument"]["create"]>>;
 type Page = ReturnType<Doc["addPage"]>;
 type PdfFont = Awaited<ReturnType<Doc["embedFont"]>>;
 
+// ── Poppins font embed (#314) ─────────────────────────────────────────────────
+//
+// The Poppins TTF bytes are bundled as Vite assets (imported via `?url` above
+// — the same mechanism `src/main.tsx` uses for the pdfjs worker) and fetched
+// from the app's own bundled-asset origin at download time. That `fetch()`
+// never leaves the browser's own origin, so it does NOT violate resumelint's
+// zero-egress guarantee — this is loading a local asset, not calling a font
+// CDN (e.g. `fonts.gstatic.com`), which is explicitly forbidden here.
+// Cached module-scoped so repeat downloads reuse the same fetched bytes.
+let poppinsBytesPromise: Promise<{
+  regular: ArrayBuffer;
+  bold: ArrayBuffer;
+}> | null = null;
+
+function loadPoppinsBytes(): Promise<{
+  regular: ArrayBuffer;
+  bold: ArrayBuffer;
+}> {
+  if (!poppinsBytesPromise) {
+    poppinsBytesPromise = Promise.all([
+      fetch(poppinsRegularUrl).then((res) => res.arrayBuffer()),
+      fetch(poppinsBoldUrl).then((res) => res.arrayBuffer()),
+    ]).then(([regular, bold]) => ({ regular, bold }));
+  }
+  return poppinsBytesPromise;
+}
+
+/**
+ * Load the `{ regular, bold }` font pair the renderer draws with. Tries
+ * embedding the vendored Poppins TTFs (registering `@pdf-lib/fontkit` first,
+ * since pdf-lib's built-in `embedFont` can only parse the 14 standard fonts
+ * without it); on ANY failure — fetch error, corrupt bytes, an embed
+ * rejection — falls back to pdf-lib's built-in Helvetica / Helvetica-Bold, so
+ * a font problem never blocks the download. `isEmbedded` tells the caller
+ * whether Poppins is actually in use: only then can `toWinAnsi()`
+ * sanitization be skipped (StandardFonts can only encode WinAnsi; embedded
+ * Poppins encodes the glyphs directly — see `toWinAnsi()` above).
+ */
+async function loadFonts(
+  doc: Doc,
+  parts: PdfLibParts,
+): Promise<{ regular: PdfFont; bold: PdfFont; isEmbedded: boolean }> {
+  try {
+    // `@pdf-lib/fontkit` ships no usable default-export `.d.ts` shape, so it
+    // is typed `unknown` in `PdfLibParts` and cast here at the one call site
+    // that hands it to pdf-lib's `registerFontkit` — the narrowest possible
+    // untyped surface, rather than threading `any` through load-pdf-lib.ts.
+    doc.registerFontkit(parts.fontkit as Parameters<Doc["registerFontkit"]>[0]);
+    const bytes = await loadPoppinsBytes();
+    const regular = await doc.embedFont(bytes.regular);
+    const bold = await doc.embedFont(bytes.bold);
+    return { regular, bold, isEmbedded: true };
+  } catch (err) {
+    console.warn(
+      "Poppins font embed failed, falling back to Helvetica:",
+      err,
+    );
+  }
+  const regular = await doc.embedFont(parts.StandardFonts.Helvetica);
+  const bold = await doc.embedFont(parts.StandardFonts.HelveticaBold);
+  return { regular, bold, isEmbedded: false };
+}
+
 /**
  * Plain `\s+`-word wrap — never breaks a word apart, just packs words up to
  * `maxWidth`. A single word wider than `maxWidth` is emitted as its own line
@@ -296,6 +364,13 @@ class Layout {
     private fonts: { regular: PdfFont; bold: PdfFont },
     private black: RGB,
     private gray: RGB,
+    // When true (the default — the Helvetica fallback), every string is run
+    // through `toWinAnsi()` before drawing, since StandardFonts can only
+    // encode WinAnsi (#295). When false (a custom font — Poppins — embedded
+    // successfully), sanitization is skipped: the embedded font encodes the
+    // glyphs directly, so skipping it avoids needlessly degrading
+    // Latin-Extended glyphs Poppins can render but WinAnsi can't (e.g. "ł").
+    private sanitize = true,
   ) {
     this.page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     this.y = PAGE_HEIGHT - MARGIN;
@@ -393,7 +468,10 @@ class Layout {
     // uppercasing BEFORE toWinAnsi would let `drawText` throw `WinAnsi cannot
     // encode "Μ"` and reintroduce the #295 crash. Uppercase the raw text, then
     // sanitize the result — toWinAnsi is the final step before measure/draw.
-    const value = toWinAnsi(opts.uppercase ? text.toUpperCase() : text);
+    // Skipped entirely on the embedded-Poppins path (`this.sanitize === false`
+    // — see the constructor doc) since Poppins encodes the glyphs directly.
+    const cased = opts.uppercase ? text.toUpperCase() : text;
+    const value = this.sanitize ? toWinAnsi(cased) : cased;
     const maxWidth = CONTENT_WIDTH - (x - MARGIN);
 
     const lines = this.wrap(
@@ -436,19 +514,19 @@ class Layout {
 export async function renderAtsResumePdf(
   model: AtsResumeModel,
 ): Promise<Uint8Array> {
-  const { PDFDocument, StandardFonts, rgb } = await loadPdfLibOnce();
+  const parts = await loadPdfLibOnce();
+  const { PDFDocument, rgb } = parts;
 
   const doc = await PDFDocument.create();
   doc.setTitle(model.contact.name || "Resume");
 
-  const regular = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { regular, bold, isEmbedded } = await loadFonts(doc, parts);
 
   const black = rgb(0.1, 0.1, 0.1);
   const gray = rgb(0.55, 0.55, 0.55);
   const muted = rgb(0.35, 0.35, 0.35);
 
-  const layout = new Layout(doc, { regular, bold }, black, gray);
+  const layout = new Layout(doc, { regular, bold }, black, gray, !isEmbedded);
 
   // ── Header: name + contact line ──
   if (model.contact.name) {

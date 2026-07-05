@@ -951,6 +951,97 @@ describe("extractExperience", () => {
     // Bullets attribute to their role, not merged into one.
     expect(value[0].description?.split("\n")).toHaveLength(2);
   });
+
+  it("does not absorb a second experience-category header as a role's company (#310, dateless)", () => {
+    // A résumé with two experience-category sections ("RELEVANT EXPERIENCE" then
+    // "INVOLVEMENT EXPERIENCE") folds the second header into the experience
+    // section as a content line (the splitter suppresses a duplicate L2 open,
+    // #258 Layer B). Without the boundary reject, the company-less role directly
+    // below the inner header took "INVOLVEMENT EXPERIENCE" as its company.
+    const section = mkSection("experience", [
+      { text: "Music Director" },
+      { text: "Example Festival Company" },
+      { text: "• Composed for an interactive-technology performance group" },
+      { text: "INVOLVEMENT EXPERIENCE" },
+      { text: "Student Composers Association" },
+      { text: "• Created work ranging from symphonic to electronic music" },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(2);
+    // First role parses normally.
+    expect(value[0].title).toBe("Music Director");
+    expect(value[0].company).toBe("Example Festival Company");
+    // Second role: the inner section header is NOT its company — it is dropped as
+    // a boundary, and the company-less lead line becomes the title.
+    expect(value[1].company).toBe("");
+    expect(value[1].title).toBe("Student Composers Association");
+    // The header string never surfaces as company OR body text on any role.
+    for (const role of value) {
+      expect(role.company).not.toBe("INVOLVEMENT EXPERIENCE");
+      expect(role.description ?? "").not.toContain("INVOLVEMENT EXPERIENCE");
+    }
+  });
+
+  it("does not absorb a second experience header as company on a dated role below it (#310)", () => {
+    // The date_range path pulls the inner header in via the 2-line above-anchor
+    // lookback instead of the first_line fallback; the boundary reject must catch
+    // both paths.
+    const section = mkSection("experience", [
+      { text: "Lead Engineer" },
+      { text: "Acme Corporation" },
+      { text: "Jan 2020 - Dec 2021" },
+      { text: "• Built the platform" },
+      { text: "INVOLVEMENT EXPERIENCE" },
+      { text: "Robotics Club" },
+      { text: "Jun 2019 - Aug 2019" },
+      { text: "• Mentored students" },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(2);
+    expect(value[0].company).toBe("Acme Corporation");
+    expect(value[0].title).toBe("Lead Engineer");
+    expect(value[1].company).toBe("");
+    expect(value[1].title).toBe("Robotics Club");
+    expect(value[1].start_date).toBe("Jun 2019");
+    for (const role of value) {
+      expect(role.company).not.toBe("INVOLVEMENT EXPERIENCE");
+    }
+  });
+
+  it("keeps a role whose TITLE is a short anchor-noun phrase (#310 false-positive)", () => {
+    // A legitimate role title that is a short Title-Case phrase ending in an
+    // anchor noun ("Clinical Research Experience") matches matchSectionHeader via
+    // the fuzzy anchor-fallback tier — but here it is a MID-BLOCK line (a company
+    // line sits above it within the entry), i.e. the role's own title, not a
+    // second section header. The boundary reject must fire ONLY on a LEADING
+    // header line of the block, or the whole role is dropped (#310 regression).
+    const section = mkSection("experience", [
+      { text: "Mass General Hospital" },
+      { text: "Clinical Research Experience" },
+      { text: "Jan 2020 - Dec 2021" },
+      { text: "• Assisted with patient intake" },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].company).toBe("Mass General Hospital");
+    expect(value[0].title).toBe("Clinical Research Experience");
+    expect(value[0].start_date).toBe("Jan 2020");
+    expect(value[0].end_date).toBe("Dec 2021");
+    expect(value[0].description).toContain("Assisted with patient intake");
+  });
+
+  it("parses a single-header experience section with one role (no boundary regression)", () => {
+    const section = mkSection("experience", [
+      { text: "Data Analyst" },
+      { text: "Globex Corporation" },
+      { text: "Feb 2021 - Present" },
+      { text: "• Built dashboards" },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].title).toBe("Data Analyst");
+    expect(value[0].company).toBe("Globex Corporation");
+  });
 });
 
 describe("extractProjects", () => {

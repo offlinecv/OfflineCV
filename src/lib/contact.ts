@@ -152,6 +152,51 @@ export function contactCompleteness(
   };
 }
 
+/** One gap in the pre-download critical-field checklist (#312). */
+export interface CriticalMissingItem {
+  key: "full_name" | "contact" | "experience";
+  label: string;
+}
+
+/**
+ * Pre-download gate predicate (#312) — the "is this résumé too broken to
+ * export" check, distinct from `contactCompleteness`'s per-row display gaps:
+ *
+ *   1. Name    — `full_name` gated (absent or low-confidence).
+ *   2. Contact — flagged only when BOTH email and phone are gated; either one
+ *                present is enough (unlike the AttentionStrip, which lists
+ *                email/phone as two separate gaps).
+ *   3. Experience — flagged when `hasExperience` is false (caller passes
+ *                   `parsed.experience.length > 0`, which already reflects
+ *                   any user-added entries merged in by `applyOverrides`).
+ *
+ * Returns an empty array when nothing critical is missing — the caller's
+ * signal to skip the checklist popover and download immediately.
+ */
+export function criticalDownloadGate(
+  displayFields: ContactDisplayField[],
+  hasExperience: boolean,
+): CriticalMissingItem[] {
+  const items: CriticalMissingItem[] = [];
+
+  const name = displayFields.find((f) => f.key === "full_name");
+  if (name?.gated) items.push({ key: "full_name", label: "Name" });
+
+  const email = displayFields.find((f) => f.key === "email");
+  const phone = displayFields.find((f) => f.key === "phone");
+  const emailGated = email?.gated ?? true;
+  const phoneGated = phone?.gated ?? true;
+  if (emailGated && phoneGated) {
+    items.push({ key: "contact", label: "Contact (email or phone)" });
+  }
+
+  if (!hasExperience) {
+    items.push({ key: "experience", label: "Experience" });
+  }
+
+  return items;
+}
+
 /**
  * Shorten a link URL to a compact, human-readable slug for the card's links
  * line (#146). Strips the protocol, a leading `www.`, and any trailing slash,

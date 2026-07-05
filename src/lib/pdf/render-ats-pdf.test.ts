@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { renderAtsResumePdf, toWinAnsi } from "./render-ats-pdf.ts";
+import { extractPdfText } from "./render-ats-pdf.test-utils.ts";
 import type { AtsResumeModel } from "./ats-resume-model.ts";
 
 const MODEL: AtsResumeModel = {
@@ -35,27 +36,6 @@ const MODEL: AtsResumeModel = {
   ],
 };
 
-/** Extract all text from PDF bytes using pdfjs-dist (proves selectable text). */
-async function extractText(bytes: Uint8Array): Promise<string> {
-  const pdfjs = await import("pdfjs-dist");
-  const doc = await pdfjs.getDocument({
-    data: bytes.slice(),
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    useSystemFonts: false,
-  }).promise;
-  let text = "";
-  for (let p = 1; p <= doc.numPages; p++) {
-    const page = await doc.getPage(p);
-    const content = await page.getTextContent();
-    text += content.items
-      .map((i) => ("str" in i ? (i as { str: string }).str : ""))
-      .join(" ");
-    text += " ";
-  }
-  return text;
-}
-
 describe("renderAtsResumePdf", () => {
   it("returns a non-trivial PDF with the %PDF magic header", async () => {
     const bytes = await renderAtsResumePdf(MODEL);
@@ -66,7 +46,7 @@ describe("renderAtsResumePdf", () => {
 
   it("produces selectable, searchable text (AC#3) for name + headings", async () => {
     const bytes = await renderAtsResumePdf(MODEL);
-    const text = await extractText(bytes);
+    const text = await extractPdfText(bytes);
     expect(text).toContain("Jane Candidate");
     expect(text).toMatch(/EXPERIENCE/i);
     expect(text).toMatch(/SKILLS/i);
