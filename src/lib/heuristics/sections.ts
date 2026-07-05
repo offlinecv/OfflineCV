@@ -894,7 +894,7 @@ export function splitIntoSections(
     if (action.kind === "open") {
       sections.push({
         name: action.name,
-        rawHeading: line.text.trim(),
+        rawHeading: action.rawHeading ?? line.text.trim(),
         lines: [],
       });
       openedRealSection = true;
@@ -911,8 +911,29 @@ export function splitIntoSections(
 
 /** What `classifyLine` decided to do with one line. */
 type LineAction =
-  | { kind: "open"; name: SectionName }
+  | { kind: "open"; name: SectionName; rawHeading?: string }
   | { kind: "append"; marksContactEnd: boolean };
+
+/**
+ * Strip a leading sidebar-value token glued onto a recovered header by the
+ * two-column flatten (#117's `matchSectionAnchorToken` recovery, e.g.
+ * `"20% Projects"`). Reuses Guard 7's own casing rule (regex.ts) — a genuine
+ * header word starts with an uppercase letter, so drop leading words that
+ * don't (the glued bar-value, "20%", "5", "10+", …) and keep the rest,
+ * always leaving at least the final (anchor) word. This both cleans up the
+ * `#285` verbatim-heading display and keeps the round-trip closed: the
+ * cleaned heading, re-emitted verbatim into the reconstructed single-column
+ * PDF (`ats-resume-model.ts`), no longer carries a digit-lead token that
+ * would fail Guard 7 on re-parse (#324) — the column signal that justified
+ * the unguarded recovery is gone in the reconstruction, so the stored
+ * heading must be guard-clean on its own.
+ */
+function stripSidebarNoisePrefix(raw: string): string {
+  const words = raw.trim().split(/\s+/).filter((w) => w.length > 0);
+  let i = 0;
+  while (i < words.length - 1 && !/^\p{Lu}/u.test(words[i])) i++;
+  return words.slice(i).join(" ");
+}
 
 /**
  * Decide whether a single line opens a section boundary or appends to the
@@ -997,7 +1018,12 @@ function classifyLine(
     isHeaderShort(line.text)
   ) {
     const recovered = matchSectionAnchorToken(line.text);
-    if (recovered) return { kind: "open", name: recovered };
+    if (recovered)
+      return {
+        kind: "open",
+        name: recovered,
+        rawHeading: stripSidebarNoisePrefix(line.text),
+      };
   }
 
   return { kind: "append", marksContactEnd: !openedRealSection && contactShaped };

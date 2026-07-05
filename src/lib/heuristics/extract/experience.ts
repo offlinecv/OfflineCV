@@ -307,6 +307,46 @@ function anchorCarriesOrgSignal(text: string): boolean {
 }
 
 /**
+ * True when `s` is ENTIRELY a bare location string — a lone US state code, a
+ * bare well-known city, or a "City, ST" / "City, Country" shape that spans the
+ * WHOLE string (not merely a trailing suffix). The full-length check on the
+ * US/intl matches distinguishes a self-contained location ("Pomona, CA",
+ * "Mountain View, CA") from a company that merely carries a trailing city
+ * ("Globex, Hyderabad, India", where INTL_LOCATION_RE matches only a substring).
+ *
+ * Shape is NOT sufficient — the comma-tail must resolve against a REAL location
+ * signal, not merely a "CapWords, CapWords" shape. `US_LOCATION_RE` /
+ * `INTL_LOCATION_RE` are generic Title-Case-pair matchers (regex.ts:42/45), so
+ * on their own they full-match a comma-formatted job title whose role word is
+ * outside the finite `looksLikeTitle` keyword list ("Buyer, Home Goods",
+ * "Merchandiser, Footwear", "Barista, Downtown Store"), silently erasing a real
+ * title into `location` (the #325 step-5 rescue false-positive class). So each
+ * shape branch additionally requires its tail to be in a CLOSED vocabulary — a
+ * valid 2-letter USPS code (`US_STATE_CODE_RE`) or a real country
+ * (`COUNTRY_GAZETTEER`) — the same closed-vocabulary discipline
+ * `stripLocationSuffix` already applies. A generic Title-Case tail
+ * ("Home Goods", "Footwear") is in neither set and stays a title.
+ *
+ * The single shared bare-location predicate in {@link disambiguateCompanyTitle}:
+ * the step-3a rotate-guard (negated — a rotatable "Company, City, Country" is
+ * NOT a whole-string location), the step-3b `team`→location rescue, and the
+ * step-5 `title`→location rescue all route through it, so the same closed-vocab
+ * discipline gates every path and no branch can reintroduce the shape-only leak.
+ */
+function isBareLocationString(s: string): boolean {
+  const usLoc = US_LOCATION_RE.exec(s);
+  const intlLoc = INTL_LOCATION_RE.exec(s);
+  return (
+    US_STATE_CODE_RE.test(s) ||
+    BARE_LOCATION_RE.test(s) ||
+    (usLoc !== null && usLoc[0].length === s.length && US_STATE_CODE_RE.test(usLoc[2])) ||
+    (intlLoc !== null &&
+      intlLoc[0].length === s.length &&
+      COUNTRY_GAZETTEER.has(intlLoc[2].toLowerCase()))
+  );
+}
+
+/**
  * Given 1..3 header lines, decide which is the company and which is the title.
  * Heuristics (in priority order):
  *   - If one looks like a company/institution (legal suffix OR "University",
@@ -515,25 +555,21 @@ function disambiguateCompanyTitle(
     //      matches "Globex, Hyderabad", not the full "…India" tail) are
     //      distinguished correctly.
     const teamStrip = stripLocationSuffix(team);
-    const _usLoc = US_LOCATION_RE.exec(team);
-    const _intlLoc = INTL_LOCATION_RE.exec(team);
-    const teamIsBareLocation =
-      US_STATE_CODE_RE.test(team) ||
-      BARE_LOCATION_RE.test(team) ||
-      (_usLoc !== null && _usLoc[0].length === team.length) ||
-      (_intlLoc !== null && _intlLoc[0].length === team.length);
+    const teamIsBareLocation = isBareLocationString(team);
     if (teamStrip.location && !teamIsBareLocation) {
       location = teamStrip.location;
       // Rotate: real-company (strip remainder) → company, old company → team.
       team = company;
       company = teamStrip.text;
-    } else if (
-      US_STATE_CODE_RE.test(team) ||
-      US_LOCATION_RE.test(team) ||
-      INTL_LOCATION_RE.test(team) ||
-      BARE_LOCATION_RE.test(team)
-    ) {
-      // (3b) Whole-string bare location check (original behavior).
+    } else if (teamIsBareLocation) {
+      // (3b) Whole-string bare location check. Uses the SAME shared
+      //      `isBareLocationString` predicate as step 3a's rotate-guard and
+      //      step 5 — closed-vocabulary (valid state code / gazetteer country),
+      //      full-length anchored — so a comma-formatted sub-team/department
+      //      whose tail is a generic Title-Case pair ("Buyer, Home Goods",
+      //      "Product Owner, Growth Team") is NOT erased into location the way a
+      //      raw shape-only `.test()` on US_LOCATION_RE/INTL_LOCATION_RE would
+      //      (the #325 false-positive class reached via `team` instead of `title`).
       location = team;
       team = undefined;
     }
@@ -547,6 +583,33 @@ function disambiguateCompanyTitle(
   //     the round-tripped company field matches the source. A genuine company
   //     never ends in a bare middot, so this only ever removes the marker.
   if (company) company = company.replace(/\s*·\s*$/, "").trim() || undefined;
+
+  // (5) A title that is ENTIRELY a bare location string is a title-less role, not
+  //     a real title. Our own empty-title-role export (ats-resume-model.ts) emits
+  //     "Company · City, ST" on a SINGLE header line for a role with no title (the
+  //     title-less branch of the experience map): the " · " split makes the
+  //     location the second segment, and with no title line above the date anchor
+  //     it lands in `title` here instead of `team`, so the `team`→location rescue
+  //     in step 3 never sees it and the location is lost while "City, ST" corrupts
+  //     the title (#325). A genuine job title is never a bare "City, ST" /
+  //     "City, Region" / bare city, so rescue it: the location is the location and
+  //     the role keeps no title (which `experienceFromBlock` renders as ""). The
+  //     `!location` guard leaves a normal titled role — whose "City, ST" already
+  //     became `team`→location above — untouched, and the FULL-string match (via
+  //     `isBareLocationString`) leaves a title with a mere trailing location
+  //     ("… Intern, Bellevue, WA", peeled by step 2) unaffected. The real
+  //     shape-vs-semantics guard lives inside `isBareLocationString`: it now
+  //     requires the comma tail to resolve against a CLOSED vocabulary (a valid
+  //     USPS code or a real country), so a "CapWords, CapWords" job title whose
+  //     role word is outside the finite `looksLikeTitle` list ("Buyer, Home
+  //     Goods", "Merchandiser, Footwear") no longer full-matches as a bare
+  //     location and keeps its title. The leading `!looksLikeTitle` check is a
+  //     cheap belt-and-suspenders early-out for the keyword-bearing titles
+  //     ("Marketing Manager, San Francisco").
+  if (title && !location && !looksLikeTitle(title) && isBareLocationString(title)) {
+    location = title;
+    title = undefined;
+  }
 
   return { company, title, team, location };
 }
