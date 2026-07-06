@@ -5,7 +5,13 @@ import type { ResumeExperience } from "../../score/types.ts";
 import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
-import { US_LOCATION_RE, INTL_LOCATION_RE, US_STATE_CODE_RE, COUNTRY_GAZETTEER } from "../regex.ts";
+import {
+  US_LOCATION_RE,
+  INTL_LOCATION_RE,
+  US_STATE_CODE_RE,
+  COUNTRY_GAZETTEER,
+  matchSectionHeader,
+} from "../regex.ts";
 import { looksLikeTitle, looksLikeCompany, finalizeEntries } from "./shared.ts";
 
 // ── Experience ──────────────────────────────────────────────────────────────
@@ -390,8 +396,42 @@ function disambiguateCompanyTitle(
   team?: string;
   location?: string;
 } {
-  const filtered = headers.filter((h) => h.length > 0);
+  let filtered = headers.filter((h) => h.length > 0);
   if (filtered.length === 0) return {};
+
+  // A header line that is itself a recognized SECTION HEADER (e.g. a second
+  // "INVOLVEMENT EXPERIENCE" / "RELEVANT EXPERIENCE" heading) is a section
+  // BOUNDARY the windower failed to split on — the section splitter retains a
+  // second same-category L2 header as content rather than opening a new section
+  // (#258 Layer B), so it lands in the header block of the role directly below
+  // it. It is neither company nor title: dropping it stops the role from
+  // absorbing the heading string as its company (#310).
+  //
+  // The boundary is admissible ONLY on a LEADING header line of the block — one
+  // with no non-header role content above it. `matchSectionHeader` falls through
+  // to the fuzzy anchor-fallback tier (regex.ts), which fires on ANY ≤4-word
+  // Title-Case / ALL-CAPS phrase whose last word is an anchor noun (experience,
+  // employment, education, …). So a legitimate role TITLE that is such a phrase
+  // ("Clinical Research Experience") also matches — but it sits MID-BLOCK, below
+  // its own company line ("Mass General Hospital"), whereas a genuine mis-merged
+  // inner section header LEADS the entry block (the role's own title/company/date
+  // follow below it). Matching only the contiguous leading run of header lines
+  // distinguishes the two: the genuine boundary is stripped, the mis-flagged
+  // mid-block title is kept so its role is not dropped (#310 false-positive).
+  // Everything at or above that leading boundary is the previous entry or the
+  // boundary itself, so keep only the lines below it as this role's header.
+  let leadsFreshEntry = false;
+  let lastBoundary = -1;
+  for (let i = 0; i < filtered.length; i++) {
+    if (matchSectionHeader(filtered[i]) === null) break;
+    lastBoundary = i;
+  }
+  if (lastBoundary !== -1) {
+    filtered = filtered.slice(lastBoundary + 1);
+    if (anchorIdx !== undefined) anchorIdx -= lastBoundary + 1;
+    leadsFreshEntry = true;
+    if (filtered.length === 0) return {};
+  }
 
   // Split any header that has an obvious "Title @ Company", "Title — Company",
   // "Title | Company", "Title · Company" (mid-dot, #217), or guarded
@@ -609,6 +649,19 @@ function disambiguateCompanyTitle(
   if (title && !location && !looksLikeTitle(title) && isBareLocationString(title)) {
     location = title;
     title = undefined;
+  }
+
+  // (6) A role that LEADS a fresh entry group — its header block began with a
+  //     section-header boundary we stripped in step 0 — has no company yet: the
+  //     sole remaining lead line is the role's title (its display name), not its
+  //     employer. Flip the default first-line-is-company assignment so a
+  //     company-less role under a second experience header keeps `company` empty
+  //     (#310). Guarded to the no-title default AND a lead line that carries no
+  //     company signal, so a genuinely company-suffixed lead ("Robotics Club
+  //     Inc") or a two-line role (title already set) is left untouched.
+  if (leadsFreshEntry && company && !title && !looksLikeCompany(company)) {
+    title = company;
+    company = undefined;
   }
 
   return { company, title, team, location };

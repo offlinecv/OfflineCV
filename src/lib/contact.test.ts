@@ -6,6 +6,7 @@ import {
   applyContactOverrides,
   buildContactFields,
   contactCompleteness,
+  criticalDownloadGate,
   formatLinkDisplay,
   CONTACT_DISPLAY_CONFIDENCE_FLOOR,
 } from "./contact.ts";
@@ -235,6 +236,68 @@ describe("contactCompleteness", () => {
     expect(detected).toBe(5);
     expect(total).toBe(5);
     expect(missing).toHaveLength(0);
+  });
+});
+
+describe("criticalDownloadGate", () => {
+  it("returns nothing when name, a contact method, and experience are all present", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        { full_name: "Jane Doe", email: "jane@example.com" },
+        { full_name: 0.9, email: 0.95 },
+      ),
+    );
+    expect(criticalDownloadGate(fields, true)).toEqual([]);
+  });
+
+  it("flags Name when full_name is gated (absent or low-confidence)", () => {
+    const fields = buildContactFields(
+      makeCascade({ email: "jane@example.com" }, { email: 0.95 }),
+    );
+    const items = criticalDownloadGate(fields, true);
+    expect(items).toEqual([{ key: "full_name", label: "Name" }]);
+  });
+
+  it("does NOT flag contact when only one of email/phone is present", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        { full_name: "Jane Doe", email: "jane@example.com" },
+        { full_name: 0.9, email: 0.95 },
+      ),
+    );
+    // phone absent, email present — should not trigger the contact gap.
+    expect(criticalDownloadGate(fields, true)).toEqual([]);
+  });
+
+  it("flags contact only when BOTH email and phone are gated", () => {
+    const fields = buildContactFields(
+      makeCascade({ full_name: "Jane Doe" }, { full_name: 0.9 }),
+    );
+    const items = criticalDownloadGate(fields, true);
+    expect(items).toEqual([
+      { key: "contact", label: "Contact (email or phone)" },
+    ]);
+  });
+
+  it("flags experience when hasExperience is false", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        { full_name: "Jane Doe", phone: "(312) 555-0100" },
+        { full_name: 0.9, phone: 0.9 },
+      ),
+    );
+    const items = criticalDownloadGate(fields, false);
+    expect(items).toEqual([{ key: "experience", label: "Experience" }]);
+  });
+
+  it("flags all three in order when nothing is present", () => {
+    const fields = buildContactFields(makeCascade());
+    const items = criticalDownloadGate(fields, false);
+    expect(items).toEqual([
+      { key: "full_name", label: "Name" },
+      { key: "contact", label: "Contact (email or phone)" },
+      { key: "experience", label: "Experience" },
+    ]);
   });
 });
 
