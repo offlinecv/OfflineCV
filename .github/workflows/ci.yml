@@ -5,6 +5,12 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Merge queue entries run on a temporary `gh-readonly-queue/*` branch and
+  # emit a `merge_group` event, not `pull_request`/`push`. Without this the
+  # required `verify` check never runs on the queue branch and every queued PR
+  # stalls forever. Keep this in lockstep with the "Require merge queue" branch
+  # protection on `main`.
+  merge_group:
 
 jobs:
   verify:
