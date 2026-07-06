@@ -64,17 +64,7 @@ describe.runIf(process.env.RL_EXPERIENCE_PDF)(
       const p = cascade.parsed;
 
       const score = computeAnonymousAtsScore({
-        parsed: {
-          full_name: p.full_name,
-          email: p.email,
-          phone: p.phone,
-          location: p.location,
-          linkedin_url: p.linkedin_url,
-          summary: p.summary,
-          skills: p.skills,
-          experience: p.experience,
-          education: p.education,
-        },
+        parsed: { ...p },
         fieldConfidence: cascade.fieldConfidence,
         triggers: cascade.triggers,
         rawText: cascade.rawText,
