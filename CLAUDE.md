@@ -4,7 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-resumelint is a browser-side PDF parser stress test for resumes: drop a PDF in, see what a generic text extractor reads back, and get an anonymous heuristic score. It is the open-source PDF-parser-audit lane of `recruidea.app/ats-resume-check`. Everything runs client-side — no PDF bytes leave the browser.
+resumelint started as a browser-side PDF parser stress test for resumes and is growing into a **private, no-login job-search workbench**: drop a PDF in, see what a generic text extractor reads back, get an anonymous heuristic score, fix the resume in place (inline edit + on-device LLM rewrite), download a clean ATS-safe PDF, match it against a job description, and discover relevant job postings. It is the open-source spinoff of `recruidea.app/ats-resume-check`. The non-negotiable product constraint: **everything runs client-side — no PDF bytes, resume text, or job-search queries leave the browser** (the only cloud path is the opt-in BYOK provider, keyed and initiated by the user).
+
+### Product lanes and entry points
+
+The build ships exactly two HTML entries (`vite.config.ts` `rollupOptions.input`):
+
+- **`/` (index.html)** — the parser-audit lane: drop → parse cascade → score → editable reconstructed resume (`ReconstructedResume` + `EditableField`) → Download PDF (`src/lib/pdf/render-ats-pdf.ts`). On-device WebLLM insights (parse disagreement, resume-quality critique, rewrite) layer on top when WebGPU is available (`src/lib/webllm/`), with a BYOK escape hatch planned (#320).
+- **`/jd-fit/` (jd-fit/index.html)** — the JD-match lane: paste a JD, get requirement/evidence coverage (`src/lib/jd-match/`, semantic via WebLLM with keyword fallback) and JD-driven section rewrites. Resume state hands off from `/` via `src/lib/jd-fit-handoff.ts`.
+- The **job-search lane** (`src/lib/job-search/`: query builder → provider search → rank by resume fit → deep links) rides inside the main page (`FindJobsPanel`), not a third entry.
+
+`jd-spike.html` and `eval-rewrite.html` are dev-only harnesses, deliberately excluded from the production build.
+
+### Roadmap (GitHub Milestones, resumelint-org)
+
+Release planning runs on GitHub Projects v2 + four milestones — check an issue's milestone before assuming priority:
+
+- **P1 · Friends & Family** — core loop trustworthy on normal resumes (drop → correct parse + score → safe download).
+- **P2 · Design Partner** — differentiators live (semantic JD-match, AI rewrite), reliability across diverse PDFs, score transparency.
+- **P3 · Public Launch** — polish + standards (JSON Resume export #334, profiles[] model #335, JD-match eval/telemetry/docs).
+- **P4 · Post-Public** — job-search lane maturation, local-first IndexedDB storage (#321), resume library (#322), job tracker (#323), blank-resume authoring (#313).
 
 ## Stack and commands
 
@@ -52,9 +71,15 @@ Verdict bands: overall ≥ 80 → "Strong", ≥ 60 → "Getting There", < 60 →
 3-label set vs. the authed scorer's tier names).
 ```
 
-Each tier in `src/lib/heuristics/` is dynamic-imported from `cascade.ts` so the entry chunk stays small and unused tiers don't ship.
+Each tier in `src/lib/heuristics/` is dynamic-imported from `cascade.ts` so the entry chunk stays small and unused tiers don't ship. The same lazy-load discipline applies to the heavier lanes: WebLLM model weights, `pdf-lib` (via `src/lib/pdf/load-pdf-lib.ts`), and jd-match/job-search modules load on demand.
 
-UI lives in `src/App.tsx` + `src/components/{DropZone,PdfPreview,Result}.tsx`. The `Result` component branches on `triggers.includes("fonts_unmappable")` to a consolidated `LimitedParsingCard` — recovered link annotations are the visually primary content, not the warning banner.
+Downstream of the cascade:
+
+- **Edit + export** — user overrides apply through `src/lib/edit/apply-overrides.ts`; `src/lib/pdf/ats-resume-model.ts` + `render-ats-pdf.ts` render the Download PDF. Round-trip fidelity (parse → export → re-parse) is a tested invariant (`corpus-roundtrip.test.ts`, `render-roundtrip.repro.test.ts`) — the exported PDF must re-parse to the same fields.
+- **WebLLM lane** (`src/lib/webllm/`) — on-device parse (`parse-resume.ts`), critique, and rewrite; capability/platform gating in `capability.ts`/`platform.ts`; heuristic-vs-LLM parse disagreement computed in `src/lib/heuristics/disagreement.ts`.
+- **JD-match** (`src/lib/jd-match/`) and **job-search** (`src/lib/job-search/`) consume the parsed resume, never the raw PDF.
+
+UI shell is `src/App.tsx` + `src/components/{DropZone,PdfPreview,Result}.tsx`; the real surface lives in `src/components/features/` (~30 components: `ReconstructedResume`, `AtsScoreReadout`, `ResultDetailTabs`, `JdMatch`, `FindJobsPanel`, `FeedbackPanel`, …). The `/jd-fit/` page has its own shell in `src/jd-fit/JdFitApp.tsx`.
 
 ## Component Architecture & Reuse
 
