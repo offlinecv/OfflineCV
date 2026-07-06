@@ -92,7 +92,16 @@ export function ResultDetailTabs({
             />
           </TabPanel>
           <TabPanel id="find-jobs">
-            <FindJobsPanel parsed={activeResult.parsed} />
+            {/* Key on parse identity so the LLM escape hatch (activeResult !==
+                result) remounts the panel and reseeds its once-seeded local
+                query from the recovered parse. Without this the panel keeps the
+                garbage-derived query while runSearch ranks against the fresh
+                parse — result set and fit scores would answer different
+                questions (PR #337 review). */}
+            <FindJobsPanel
+              key={activeResult === result ? "heuristic" : "recovered"}
+              parsed={activeResult.parsed}
+            />
           </TabPanel>
           {showQualityTab && (
             <TabPanel id="quality">
