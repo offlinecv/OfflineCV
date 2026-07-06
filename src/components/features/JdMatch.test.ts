@@ -127,7 +127,7 @@ describe("JdMatch", () => {
     const result: JdMatchResult = {
       path: "semantic",
       verdicts: [],
-      summary: { matched: 0, total: 0 },
+      summary: { met: 0, partial: 0, missing: 0, total: 0 },
     };
     const html = renderToStaticMarkup(createElement(JdMatch, { result }));
     expect(html).toBe("");

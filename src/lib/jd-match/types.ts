@@ -5,33 +5,35 @@
  * Path-agnostic JD-match result type (issue #199, anchor #156 — "JD Matching v2").
  *
  * One stable shape the renderer (`JdMatch.tsx`) can consume regardless of how the
- * match was produced. Today only the deterministic `keyword` path exists; M6 will
- * add a WebLLM `semantic` path. The `path` discriminant lets a consumer narrow
- * without branching on internals.
+ * match was produced. The `path` discriminant lets a consumer narrow without
+ * branching on internals.
  *
- * This first PR is tagging-only: the keyword arm wraps the existing
- * `extractJdTerms` + `computeCoverage` flow verbatim (no behavior change).
+ * The semantic arm carries the judge's verdicts verbatim (#201) — the
+ * `RequirementVerdict` import is TYPE-ONLY, so this module (reached statically
+ * through the `jd-match` barrel by the JD-fit entry) adds no runtime edge into
+ * the WebLLM chunk. The producer is `llm/run-llm-match.ts` (#202), which
+ * consumers dynamic-import.
  */
 
 import type { CoverageResult } from "./coverage.ts";
 import type { ExtractedTerm } from "./extract-jd-terms.ts";
+import type { RequirementVerdict } from "./llm/judge-evidence.ts";
 
-/**
- * Provisional M6 scaffolding for the semantic arm. Kept NON-exported: nothing
- * imports it yet, so exporting it would trip fallow's unused-export gate. The
- * semantic-path PR will flesh this out (and export it) when it adds a producer.
- */
-interface RequirementVerdict {
-  requirement: string;
-  met: boolean;
-  evidence?: string;
+/** Per-status verdict counts for the semantic arm — what a headline like
+ *  "6 met · 2 partial · 4 missing" renders from without re-tallying. */
+export interface SemanticMatchSummary {
+  met: number;
+  partial: number;
+  missing: number;
+  total: number;
 }
 
 /**
  * A JD-match result from either matching path.
  *
- * - `keyword`  — deterministic term coverage (the only path that exists today).
- * - `semantic` — WebLLM requirement matching (M6; no producer/UI yet).
+ * - `keyword`  — deterministic term coverage (also the semantic path's fallback).
+ * - `semantic` — WebLLM requirement matching (extract #200 → judge #201,
+ *                orchestrated by `runLlmMatch` #202).
  */
 export type JdMatchResult =
   | {
@@ -43,5 +45,5 @@ export type JdMatchResult =
   | {
       path: "semantic";
       verdicts: readonly RequirementVerdict[];
-      summary: { matched: number; total: number };
+      summary: SemanticMatchSummary;
     };

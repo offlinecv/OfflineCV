@@ -47,7 +47,7 @@
  */
 
 import { readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, basename } from "node:path";
+import { dirname, join, relative, basename, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
@@ -59,6 +59,14 @@ import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
+
+/** Fixture path relative to `FIXTURE_ROOT`, posix-separated on every platform.
+ *  `KNOWN_FAILURES` is keyed with `/`; Windows `relative()` yields `\`, which
+ *  both failed the stale-key check and silently voided every known-failure
+ *  exemption there (the three documented fixtures reported as regressions). */
+function relKey(fixture: string): string {
+  return relative(FIXTURE_ROOT, fixture).split(sep).join("/");
+}
 
 type Category =
   | "contact"
@@ -261,13 +269,13 @@ describe("corpus round-trip invariants (#293)", () => {
   });
 
   it("every KNOWN_FAILURES key names a real fixture", () => {
-    const rel = new Set(fixtures.map((f) => relative(FIXTURE_ROOT, f)));
+    const rel = new Set(fixtures.map(relKey));
     for (const key of Object.keys(KNOWN_FAILURES))
       expect(rel.has(key), `stale KNOWN_FAILURES key: ${key}`).toBe(true);
   });
 
   for (const fixture of fixtures) {
-    const rel = relative(FIXTURE_ROOT, fixture);
+    const rel = relKey(fixture);
     it(`round-trips: ${rel}`, async () => {
       const p1 = await runCascade(new Uint8Array(readFileSync(fixture)));
       const model = buildAtsResumeModel(p1, scoreFor(p1));
