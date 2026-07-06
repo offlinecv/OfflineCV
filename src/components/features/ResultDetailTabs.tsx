@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { Card, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { ReconstructedResume } from "./ReconstructedResume.tsx";
+import { FindJobsPanel } from "./FindJobsPanel.tsx";
 import { ResumeQualityPanel } from "./ResumeQualityPanel.tsx";
 import { SourceDiagnosticsPanel } from "./SourceDiagnosticsPanel.tsx";
 import { WebGpuUnavailableNotice } from "./WebGpuUnavailableNotice.tsx";
@@ -70,6 +71,7 @@ export function ResultDetailTabs({
             without opening it. */}
         <TabList aria-label="Parsed result views">
           <Tab id="reconstructed">Reconstructed resume</Tab>
+          <Tab id="find-jobs">Find jobs</Tab>
           {showQualityTab && (
             <Tab id="quality" warn={!analysis.isAvailable}>
               Resume Quality
@@ -87,6 +89,18 @@ export function ResultDetailTabs({
               score={activeScore}
               edit={edit}
               jdContext={jdContext}
+            />
+          </TabPanel>
+          <TabPanel id="find-jobs">
+            {/* Key on parse identity so the LLM escape hatch (activeResult !==
+                result) remounts the panel and reseeds its once-seeded local
+                query from the recovered parse. Without this the panel keeps the
+                garbage-derived query while runSearch ranks against the fresh
+                parse — result set and fit scores would answer different
+                questions (PR #337 review). */}
+            <FindJobsPanel
+              key={activeResult === result ? "heuristic" : "recovered"}
+              parsed={activeResult.parsed}
             />
           </TabPanel>
           {showQualityTab && (

@@ -30,9 +30,14 @@ import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
 
 const EMPTY_CRITIQUE: ResumeCritique = { bulletFindings: [], missingSections: [] };
 
-function result(summary?: string): CascadeResult {
+function result(summary?: string, title?: string): CascadeResult {
   return {
-    parsed: { skills: [], experience: [], education: [], ...(summary ? { summary } : {}) },
+    parsed: {
+      skills: [],
+      experience: title ? [{ title }] : [],
+      education: [],
+      ...(summary ? { summary } : {}),
+    },
     confidence: 0.6,
     fieldConfidence: {},
     triggers: ["two_column"],
@@ -103,6 +108,7 @@ describe("ResultDetailTabs", () => {
   it("hides the Resume Quality tab while capability is still detecting / no text", () => {
     const el = render({ isAvailable: false });
     expect(el.textContent).toContain("Reconstructed resume");
+    expect(el.textContent).toContain("Find jobs");
     expect(el.textContent).toContain("Source & diagnostics");
     expect(el.textContent).not.toContain("Resume Quality");
   });
@@ -115,11 +121,52 @@ describe("ResultDetailTabs", () => {
     const labels = Array.from(el.querySelectorAll('[role="tab"]')).map(
       (t) => t.textContent ?? "",
     );
-    // Exactly three tabs, Resume Quality in the middle (2nd), diagnostics last.
-    expect(labels).toHaveLength(3);
+    // Exactly four tabs: reconstructed, Find jobs (#318, always present),
+    // Resume Quality, diagnostics last.
+    expect(labels).toHaveLength(4);
     expect(labels[0]).toContain("Reconstructed resume");
-    expect(labels[1]).toContain("Resume Quality");
-    expect(labels[2]).toContain("Source & diagnostics");
+    expect(labels[1]).toContain("Find jobs");
+    expect(labels[2]).toContain("Resume Quality");
+    expect(labels[3]).toContain("Source & diagnostics");
+  });
+
+  it("reseeds the Find jobs query when the LLM escape hatch swaps activeResult (keyed remount)", () => {
+    // Original heuristic parse and a distinct recovered parse — same `result`
+    // (the pre-LLM cascade), different `activeResult` once recovery lands. The
+    // Find jobs panel seeds its query once from the parse; without the parse-
+    // identity key it would keep the heuristic title while runSearch ranks the
+    // recovered parse (PR #337 review). Keyed remount reseeds it.
+    const heuristic = result(undefined, "Heuristic Engineer");
+    const recovered = result(undefined, "Recovered Architect");
+    const opts: ControllerOpts = { isAvailable: false };
+
+    function RecoveryHost({ recover }: { recover: boolean }) {
+      const edit = useEditableParse();
+      return createElement(ResultDetailTabs, {
+        activeResult: recover ? recovered : heuristic,
+        activeScore: score,
+        result: heuristic,
+        sourceKind: "pdf",
+        edit,
+        analysis: controller(opts),
+        triggerCount: heuristic.triggers.length,
+      });
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(createElement(RecoveryHost, { recover: false }));
+    });
+    expect(container.textContent).toContain("Heuristic Engineer");
+
+    // Escape hatch recovers a better parse: activeResult now !== result.
+    act(() => {
+      root.render(createElement(RecoveryHost, { recover: true }));
+    });
+    expect(container.textContent).toContain("Recovered Architect");
+    expect(container.textContent).not.toContain("Heuristic Engineer");
   });
 
   it("keeps the Resume Quality tab (warn-marked) with the notice when WebGPU is unavailable", () => {

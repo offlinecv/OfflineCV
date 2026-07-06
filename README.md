@@ -151,6 +151,30 @@ and the rest of the UI is unaffected. Because the request originates in your
 browser, **your IP address is seen by GitHub** (a US third party) as a result
 of loading the app.
 
+### Job-search feeds (Find jobs tab)
+
+The **Find jobs** tab can fetch a sample of live postings from free, keyless,
+CORS-open job feeds and rank them against your parsed résumé. These requests
+fire **only when you click "Search jobs"** — never on drop, tab open, or query
+edit — and carry **only the derived search keywords** (the editable title/skills
+in the query block), never your résumé text. Each shipped feed is contacted
+directly from your browser, so **your IP address is seen by that third party**
+(same class of disclosure as the GitHub star-count call above):
+
+| Provider | Endpoint | Notes |
+| --- | --- | --- |
+| Remotive | `https://remotive.com/api/remote-jobs?search=<keywords>` | remote-only, tech-skewed; the feed ignores `search=`, so results are keyword-filtered client-side after fetch |
+| Arbeitnow | `https://www.arbeitnow.com/api/job-board-api?search=<keywords>` | EU-heavy board; the feed ignores `search=`, so results are keyword-filtered client-side after fetch |
+| Jobicy | `https://jobicy.com/api/v2/remote-jobs?tag=<keyword>` | remote-only, tech-skewed; `tag=` filters server-side |
+
+All three verified CORS-open (`Access-Control-Allow-Origin: *`) from a browser
+origin. Regardless of what each feed does with its query param, every fetched
+posting is keyword-filtered in your browser against the query title/skills
+before ranking, so only query-relevant postings are shown. A feed that fails
+(network, CORS, malformed response) degrades silently
+— its results are simply absent and the UI notes the missing source. Results are
+labeled in-app as a remote/tech-heavy **sample, not every job**.
+
 ## Theming
 
 Colors are plain CSS custom properties split into two layers:
