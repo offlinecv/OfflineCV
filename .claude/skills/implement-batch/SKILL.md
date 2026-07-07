@@ -35,8 +35,13 @@ skills.
   `npm run build` · `fallow`. `npm run verify` runs the whole CI mirror. Per
   issue, run only the **fast/affected** checks (typecheck + the affected tests +
   lint); the full suite is the PR gate (CI `verify`), not a per-issue gate.
-- **Reviewer agent:** `ecc:react-reviewer` (TS/React repo). Fall back to
-  `ecc:typescript-reviewer` or `ecc:code-reviewer` if unavailable.
+- **Reviewer agent:** `ecc:react-reviewer` (TS/React repo), falling back to
+  `ecc:typescript-reviewer` or `ecc:code-reviewer`. These are **maintainer-global**
+  (`~/.claude/agents/`), not in this repo — a fresh clone won't have them. On the
+  default (review-on) path, if no `ecc:*` reviewer resolves, fall back to a
+  **`general-purpose`** subagent (available to every clone) driving the built-in
+  `/code-review` skill; a fresh clone that wants to skip review entirely passes
+  `--no-review`.
 - **Fixture PII policy is non-negotiable** — if any issue adds/changes a fixture
   binary (PDF/image/doc), the persona MUST be synthetic (see `CLAUDE.md` → *Test
   fixtures*). `/open-pr` re-checks this at push time (its Step 3.5), but flag it
@@ -119,7 +124,16 @@ REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org
    resuming onto an existing branch that legitimately holds prior work.)
 7. **Create one feature branch** off `main`. Slug from the parent
    (`gh-<parent>-<short-kebab-of-title>`, e.g. `gh-71-design-system`) or the
-   user's name from the gate: `git switch -c <slug>`.
+   user's name from the gate. Switch-if-exists / create-if-new so a `--from`
+   resume (where the branch already holds prior work) doesn't error on
+   `switch -c`:
+   ```bash
+   if git show-ref --quiet --verify "refs/heads/<slug>"; then
+     git switch <slug>          # resume: branch already holds prior work
+   else
+     git switch -c <slug>       # fresh run: create off main
+   fi
+   ```
 8. **Create a `TodoWrite` list** — one item per issue, in order. Survives
    main-thread compaction; it's how the orchestrator tracks the sequence.
 
@@ -128,6 +142,11 @@ REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org
 Process issues **one at a time, in dependency order**, each in its own subagent.
 Mark each issue's todo `in_progress` when it starts. Spawn with the effort tier's
 `model` (Phase 1, step 5) and the **self-contained prompt contract** below.
+Spawn as a **fresh subagent type** (e.g. `general-purpose`), **not** `subagent_type:
+fork` — a `fork` inherits the orchestrator's model and **silently ignores the
+`model` override**, so the tier's opus/sonnet policy would no-op. (Context
+isolation still holds: a fresh subagent has its own context; it just doesn't
+inherit this conversation.) Same rule for every fix subagent below (Phase 4).
 
 **The spawn prompt MUST include, verbatim:**
 
@@ -204,8 +223,9 @@ Mark each issue's todo `in_progress` when it starts. Spawn with the effort tier'
 10. After the last issue, run the local checks **once over the whole
     accumulation** — `npm run typecheck` + the affected/scoped tests + `npm run
     lint`. This catches cross-issue interactions a per-issue run misses.
-    **Then run the whole-tree fallow pass** (`fallow audit --changed-since main`,
-    or the repo's fallow command) — this is the key cross-issue catch: two issues
+    **Then run the whole-tree fallow pass** (`fallow audit --base origin/main`,
+    matching the repo's `verify`/`ci.yml` convention against the remote ref) —
+    this is the key cross-issue catch: two issues
     that independently added the same helper only surface as a duplicate when
     fallow sees the merged tree. With review **on** (default), don't fix fallow
     findings here — hand them to the Phase 4 fix subagent so all repairs go
@@ -222,10 +242,13 @@ iterate freely and push **once** via `/open-pr`. (This is the same
 run-review-ourselves workflow Sri asked for — see the self-adversarial-review
 norm — turning overnight review latency into same-session throughput.)
 
-10a. **Review the accumulated diff.** Every issue ran uncommitted, so the
+11a. **Review the accumulated diff.** Every issue ran uncommitted, so the
     accumulation is the working tree on `<slug>` (`git diff HEAD` + `git status
     --porcelain` for new untracked files — review those too). Spawn one
-    **`ecc:react-reviewer`** subagent against the whole diff. It is **adversarial**:
+    **`ecc:react-reviewer`** subagent against the whole diff (falling back to
+    `ecc:typescript-reviewer`/`ecc:code-reviewer`, or a **`general-purpose`**
+    subagent running `/code-review` if no `ecc:*` reviewer resolves — see Repo
+    facts). It is **adversarial**:
     prompt it to *find bugs, regressions, unmet acceptance criteria, and reuse/
     token violations — and to try to break the change, not praise it*. Have it
     **reproduce suspected bugs end-to-end** (not just reason about the code) — a
@@ -237,13 +260,13 @@ norm — turning overnight review latency into same-session throughput.)
     guard violation that CI will fail; `nit` = clarity), each with `file:line` + a
     concrete fix, and `clean: true|false`.
 
-10b. **Triage and exit-check.** No blocking findings (`clean: true`) → the loop
+11b. **Triage and exit-check.** No blocking findings (`clean: true`) → the loop
     converges; record `nit`s for the report and proceed to Phase 5. If round `N`
     is reached with blocking findings still open, **halt before the PR** — report
     what shipped + the open findings; the user fixes-and-reruns or opens the PR
     manually. `nit`s never block.
 
-10c. **Fix the blocking findings in place.** Spawn **one** fix subagent on
+11c. **Fix the blocking findings in place.** Spawn **one** fix subagent on
     `<slug>` in the main checkout, same git invariants as a per-issue subagent
     (Phase 3): MAIN checkout, branch `<slug>`, tree holds all prior changes
     (build on top), no worktree/branch/commit/status-change; verify
@@ -253,18 +276,22 @@ norm — turning overnight review latency into same-session throughput.)
     `model: opus` — it reasons over cross-issue interactions. Require the same
     structured return (files changed, what was fixed, anything deferred + why).
 
-10d. **Re-verify, then re-review.** Re-run Phase 3b's local checks over the fixed
+11d. **Re-verify, then re-review.** Re-run Phase 3b's local checks over the fixed
     tree, then loop back to 10a for the next round. A round = review → (blocking?
     fix → verify) → review. Cap at `N` rounds total (default 2); never unbounded.
 
-10e. **Document the findings** — they're an audit artifact, not a transient gate.
+11e. **Document the findings** — they're an audit artifact, not a transient gate.
     Capture each round's blocking findings + how the fix resolved them + surviving
     `nit`s. Sinks: (1) always the run report (Phase 5); (2) after `/open-pr` opens
     the PR, append an `## Adversarial review` section to the PR body:
+    Guard on the marker so a resume (`--from`) or a Phase-5 re-finalize doesn't
+    append a **second** `## Adversarial review` block (non-idempotent-write class):
     ```bash
     body="$(gh pr view "$PR_NUM" --repo "$REPO" --json body -q .body)"
-    printf '%s\n\n## Adversarial review\n\n%s\n' "$body" "$FINDINGS_MD" \
-      | gh pr edit "$PR_NUM" --repo "$REPO" --body-file -
+    if ! grep -qF '## Adversarial review' <<<"$body"; then
+      printf '%s\n\n## Adversarial review\n\n%s\n' "$body" "$FINDINGS_MD" \
+        | gh pr edit "$PR_NUM" --repo "$REPO" --body-file -
+    fi
     ```
     (A top-level `gh pr comment` is an acceptable lighter alternative.)
     Convergence with zero blocking findings still documents "reviewed, clean" —
@@ -272,19 +299,24 @@ norm — turning overnight review latency into same-session throughput.)
 
 ### Phase 5 — Finalize via /open-pr (unless `--no-commit`)
 
-11. **Delegate to `/open-pr`** once. It branches-if-needed (already on `<slug>`),
+12. **Delegate to `/open-pr`** once. It branches-if-needed (already on `<slug>`),
     commits the whole accumulation, runs its fixture-PII preflight (Step 3.5),
     pushes, and opens one PR. Pass the **parent/epic issue number** so the PR
     links it; the body should summarize each sub-issue in one bullet (what shipped
     + its verification) and use `Closes #<parent>` only if this batch fully
-    resolves the epic (else `Refs`, and list each child `#N`). Capture the PR URL.
+    resolves the epic (else `Refs`, and list each child `#N`). **Capture both the
+    PR URL and `$PR_NUM`** — step 14's append reads `$PR_NUM`, so extract it now:
+    ```bash
+    PR_NUM="$(gh pr view "<slug>" --repo "$REPO" --json number -q .number)"
+    ```
     - **With `--no-commit`:** skip `/open-pr`. Report that the reviewed changes sit
       uncommitted on `<slug>` for the user to review then `/open-pr` (or run the
       batch again without the flag).
-12. **After the PR opens, append the `## Adversarial review` section** to its body
-    (Phase 4, step 10e) — the findings are in hand and the PR now exists to receive
-    them.
-13. **Report:** a per-issue outcome table (status, key files, criteria met), the
+13. **After the PR opens, append the `## Adversarial review` section** to its body
+    — run the **marker-guarded append from Phase 4 step 11e** (uses `$PR_NUM` from
+    step 12; don't re-inline the snippet — the guard makes a re-finalize
+    idempotent). The findings are in hand and the PR now exists to receive them.
+14. **Report:** a per-issue outcome table (status, key files, criteria met), the
     Phase 3b verification results, the **Phase 4 review outcome** (rounds taken,
     what the fix subagent changed, surviving `nit`s the human reviewer should
     eyeball), the **PR URL** (needs 1 approval + green `verify`), and any new
