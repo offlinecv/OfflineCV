@@ -864,6 +864,33 @@ describe("extractExperience", () => {
     expect(confidence).toBeGreaterThan(0.8);
   });
 
+  it("takes the title from the line BELOW a company+location+dates anchor (#342)", () => {
+    // Single-column "date-first" layout: the anchor row carries
+    // "Company [— Dept] — Location  Dates" and the job TITLE is the line BELOW
+    // it. Pre-fix, disambiguateCompanyTitle filled the title slot from an
+    // anchor-row segment (the location, or the department) and dropped the real
+    // below-anchor title — role 1 came back title="" and role 2 took the
+    // department "IT Service Desk" as its title.
+    const section = mkSection("experience", [
+      { text: "Brightwave Analytics LLC — Remote, USA   Jul 2024 - Present" },
+      { text: "Data Analyst Intern" },
+      { text: "• Built a quantitative evaluation framework with 300 labeled cases." },
+      { text: "• Profiled data quality on user and audio metadata in Supabase." },
+      { text: "Ohio Valley State University — IT Service Desk — Columbus, Ohio   Jan 2023 - May 2024" },
+      { text: "Data Analyst" },
+      { text: "• Analyzed IT support ticket data using SQL." },
+      { text: "• Built a Power BI dashboard tracking ticket KPIs." },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(2);
+    // Role 1: title from the line below; company + location from the anchor row.
+    expect(value[0].company).toBe("Brightwave Analytics LLC");
+    expect(value[0].title).toBe("Data Analyst Intern");
+    // Role 2: the department on the anchor row must NOT be taken as the title.
+    expect(value[1].company).toBe("Ohio Valley State University");
+    expect(value[1].title).toBe("Data Analyst");
+  });
+
   it("marks an open-ended role is_current (Present)", () => {
     const section = mkSection("experience", [
       { text: "Globex" },
