@@ -143,6 +143,21 @@ export function isEntryHeaderShape(text: string): boolean {
   return true;
 }
 
+/** The middot the Download-PDF renderer emits as the "Company · Location · Date"
+ *  org separator on a reconstructed sub-line (#284/#298). Matching the bare glyph
+ *  (not " · " with spaces) is robust to spacing collapse on re-extraction. */
+const MIDDOT_SEP = "·";
+
+/** True when the line's trailing token is a bare 4-digit year (1900–2099) — the
+ *  "…Company · Location 2022" year-only date tail. Used with
+ *  {@link isEntryHeaderShape} to admit a year-only role header as a `date_range`
+ *  anchor (#358) when no MM/YYYY range is present. A trailing "Present"/range is
+ *  already caught by `DATE_RANGE_RE`/`PRESENT_RE`, so this only adds the bare
+ *  year. Non-global regex → stateless `.test`. */
+function endsWithBareYear(text: string): boolean {
+  return /(?:^|\s)(?:19|20)\d{2}\s*$/.test(text.trim());
+}
+
 /**
  * How a section's entry blocks are anchored — i.e. what marks the start of a
  * new entry.
@@ -233,7 +248,23 @@ function isAnchorLine(line: PdfLine, anchor: EntryAnchor): boolean {
       // some engines; reset so repeated calls are idempotent. Mirrors the
       // reset extractExperience did inline.
       DATE_RANGE_RE.lastIndex = 0;
-      return hit;
+      if (hit) return true;
+      // #358: a role whose ONLY date is a bare YEAR ("Northwind Ensemble ·
+      // Boston, MA 2022") carries no MM/YYYY range, so DATE_RANGE_RE misses it
+      // and no `date_range` anchor forms. The role then re-parses dateless and,
+      // lacking the anchor-position tiebreak, its title/company swap (and the
+      // year drops, since `parseDateRange`'s bare-year fallback never runs
+      // without an anchor). Admit such a line as an anchor — but ONLY the
+      // reconstructed org sub-line shape: a bare trailing year on a header-shaped
+      // line that ALSO carries the `" · "` org separator our Download-PDF renderer
+      // emits ("Company · Location  Year"). The middot is the tight guard that
+      // keeps a plain role TITLE ending in a year ("Software Engineer Intern
+      // Summer 2022") or a wrapped-header fragment from becoming a phantom anchor.
+      return (
+        line.text.includes(MIDDOT_SEP) &&
+        endsWithBareYear(line.text) &&
+        isEntryHeaderShape(line.text)
+      );
     }
     case "institution":
       return INSTITUTION_HINTS.test(line.text);
