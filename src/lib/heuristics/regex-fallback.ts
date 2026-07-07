@@ -29,8 +29,9 @@ import type {
   FieldConfidence,
   PdfLinkAnnotation,
 } from "./types.ts";
-import { EMAIL_RE, LINKEDIN_RE } from "./regex.ts";
+import { EMAIL_RE, INSTITUTION_HINTS, LINKEDIN_RE } from "./regex.ts";
 import { findFirstPhone, regionFromLocation } from "./phone.ts";
+import { looksLikeTitle } from "./extract/shared.ts";
 
 export interface RegexFallbackResult {
   parsed: HeuristicParsedResume;
@@ -141,6 +142,18 @@ function normalizeUrl(url: string): string {
  * Scan the first ~8 non-empty lines of raw text looking for something that
  * syntactically looks like a name. Intentionally strict — a wrong name at
  * 0.5 confidence is worse than a missing name.
+ *
+ * On a two-column layout whose reading-order flatten pushes the centred name
+ * past the first education entries (Deedy — #349), the first survivor here is
+ * an all-caps institution line ("CORNELL UNIVERSITY"): 2 words, letter-only,
+ * both tokens match the loose title-case pattern. The `INSTITUTION_HINTS` gate
+ * — the same set the education extractor uses to recognize a school name —
+ * rejects any candidate carrying an institution-type word so an education
+ * institution can never be promoted to `full_name`. The `looksLikeTitle`
+ * companion gate keeps job-title lines out of the pool too — the reconstructed
+ * "Download PDF" for the same name-less Deedy input renders with no header, so
+ * the first title-case line on re-parse is the top experience title ("Software
+ * Engineer"), which without this guard would round-trip as a wrong name.
  */
 function guessNameFromFirstLines(rawText: string): string | undefined {
   const lines = rawText
@@ -158,6 +171,8 @@ function guessNameFromFirstLines(rawText: string): string | undefined {
     if (!titleCase) continue;
     const letterRatio = line.replace(/[^A-Za-z]/g, "").length / line.length;
     if (letterRatio < 0.7) continue;
+    if (INSTITUTION_HINTS.test(line)) continue;
+    if (looksLikeTitle(line)) continue;
     return line;
   }
   return undefined;

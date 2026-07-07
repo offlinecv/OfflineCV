@@ -7,6 +7,7 @@ import {
   EMAIL_RE,
   PHONE_RE,
   LINKEDIN_RE,
+  INSTITUTION_HINTS,
 } from "../regex.ts";
 import { looksLikeTitle } from "./shared.ts";
 
@@ -241,6 +242,12 @@ function nameCandidateWords(
     text.replace(/[^A-Za-z]/g, "").length / Math.max(text.length, 1);
   if (letterRatio < 0.7) return null;
   if (looksLikeDocTitleBoilerplate(words)) return null;
+  // #349 — a line carrying an institution-type word ("University", "College",
+  // "Institute", "School", "Academy", "Polytechnic") is an education entry, not
+  // a person's name. Real names never carry these words, so the guard only ever
+  // rejects false positives — the same INSTITUTION_HINTS the education
+  // extractor uses, kept in sync as a single source of truth.
+  if (INSTITUTION_HINTS.test(text)) return null;
   return words;
 }
 

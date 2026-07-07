@@ -105,4 +105,34 @@ describe("runRegexFallback", () => {
     ]);
     expect(result.parsed.linkedin_url).toContain("from-text");
   });
+
+  it("refuses to promote a job title to full_name (#349 round-trip)", () => {
+    // The reconstructed Download PDF for a name-less Deedy re-parses with
+    // "Software Engineer" as the first title-case candidate — the top role
+    // title moves into the header slot when no name is rendered above it.
+    // A job-title tagline is never a person's name.
+    const rawText = ["Software Engineer", "jane.smith@example.com"].join("\n");
+    const result = runRegexFallback(emptyParsed(), {}, rawText);
+    expect(result.parsed.full_name).toBeUndefined();
+    expect(result.fieldsFilled).not.toContain("full_name");
+  });
+
+  it("refuses to promote an education institution to full_name (#349)", () => {
+    // Deedy-style two-column flatten: the real name (centred at the top) is
+    // pushed past the first-lines window by the column reorder, leaving an
+    // all-caps education entry as the first title-case candidate. Both tokens
+    // match the loose title-case pattern and passed every other guard, so the
+    // fallback used to write "CORNELL UNIVERSITY" as full_name @ 0.5. A
+    // false-positive name is worse than a missing one — it earns undeserved
+    // completeness credit and displays a wrong name in the reconstructed PDF.
+    const rawText = [
+      "jane.smith@example.com | (312) 555-0123",
+      "EDUCATION",
+      "CORNELL UNIVERSITY",
+      "MEng in Computer Science",
+    ].join("\n");
+    const result = runRegexFallback(emptyParsed(), {}, rawText);
+    expect(result.parsed.full_name).toBeUndefined();
+    expect(result.fieldsFilled).not.toContain("full_name");
+  });
 });

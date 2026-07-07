@@ -483,6 +483,52 @@ describe("extractName — stacked single-word name lines (#29)", () => {
   });
 });
 
+describe("extractName — institution-line rejection (issue #349)", () => {
+  // Two-column layouts (Deedy) can flatten the reading order so an education
+  // institution ends up in the profile-adjacent candidate pool with the visible
+  // name still centred in the header. An all-caps institution line ("CORNELL
+  // UNIVERSITY") passes the loose title-case gate on its own and used to be
+  // promoted to `full_name` — a false-positive worse than an empty one. The
+  // fix rejects any candidate carrying an institution-type word, using the
+  // same INSTITUTION_HINTS the education extractor recognizes.
+  it("rejects 'CORNELL UNIVERSITY' as a name candidate and returns empty when nothing survives", () => {
+    const { profile } = buildContext([
+      { text: "jane.smith@example.com | (312) 555-0123", fontSize: 10 },
+      { text: "CORNELL UNIVERSITY", fontSize: 12 },
+      { text: "MEng in Computer Science", fontSize: 10 },
+    ]);
+    const result = extractName(profile);
+    expect(result.value).toBeUndefined();
+    expect(result.confidence).toBe(0);
+  });
+
+  it("still picks a real name over a nearby institution line", () => {
+    const { profile } = buildContext([
+      { text: "Jane Smith", fontSize: 20 },
+      { text: "jane.smith@example.com", fontSize: 10 },
+      { text: "CORNELL UNIVERSITY", fontSize: 12 },
+    ]);
+    expect(extractName(profile).value).toBe("Jane Smith");
+  });
+
+  it("rejects each institution keyword (University/College/Institute/School/Academy/Polytechnic)", () => {
+    for (const inst of [
+      "Harvard University",
+      "Riverside College",
+      "MIT Institute",
+      "St Mary School",
+      "Naval Academy",
+      "Rensselaer Polytechnic",
+    ]) {
+      const { profile } = buildContext([
+        { text: "jane.smith@example.com", fontSize: 10 },
+        { text: inst, fontSize: 12 },
+      ]);
+      expect(extractName(profile).value).toBeUndefined();
+    }
+  });
+});
+
 describe("extractSkills — borderless multi-column tables (#29)", () => {
   // pdfjs fills the inter-column gap of a Word/LaTeX skills table with a wide
   // blank "spacer" item, so the whole row arrives as one PdfLine. The geometry

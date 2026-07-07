@@ -7,8 +7,7 @@
     ],
     "tiers": [
       "t0_layout",
-      "t1_openresume",
-      "t1_5_regex"
+      "t1_openresume"
     ],
     "suggestedEscalation": "ner",
     "fieldsPopulated": [
