@@ -864,6 +864,53 @@ describe("extractExperience", () => {
     expect(confidence).toBeGreaterThan(0.8);
   });
 
+  it("segments two roles whose 'Title, Company. City, State' header runs 8+ words (#341)", () => {
+    // Two-column résumés commonly stack a single-line "Title, Company. City,
+    // State" header over a bare date line. When that header reaches 8 words —
+    // e.g. a two-word city + full state name — the period between company and
+    // city ("Technology. San Jose") used to read as a prose sentence break, so
+    // isProseLine mis-classified the header, its block was dropped as a
+    // date-only phantom, and the role's bullets were demoted to a neighbor / the
+    // "Other" pool (only the ≤7-word role survived). Both must now segment.
+    const section = mkSection("experience", [
+      { text: "Platform Engineering Intern, Northwind Technology. San Jose, California" },
+      { text: "May 2023 - Aug 2023" },
+      { text: "• Debugged and resolved front-end issues." },
+      { text: "• Reviewed code and improved quality." },
+      { text: "Data Services Intern, Brightex. Dayton, Ohio" },
+      { text: "May 2020 - Aug 2020" },
+      { text: "• Reduced database loading steps by 20%." },
+      { text: "• Built a Python validation script." },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(2);
+    // Each role keeps its OWN bullets — nothing merged into a neighbor.
+    expect(value[0].description).toContain("front-end issues");
+    expect(value[0].description).not.toContain("loading steps");
+    expect(value[1].description).toContain("loading steps");
+    expect(value[0].start_date).toBe("May 2023");
+    expect(value[1].start_date).toBe("May 2020");
+  });
+
+  it("still captures a genuine multi-sentence glyph-less prose description (#341 guard)", () => {
+    // Guard the other side of the #341 tightening: the SENTENCE_BREAK_RE now
+    // requires a lowercase continuation after the break, so make sure a real
+    // Word/Office-style prose description (no bullet glyph, a running second
+    // sentence) still classifies as prose and lands in `description` — it must
+    // not be over-narrowed into a header the way a "Company. City" tail is.
+    const section = mkSection("experience", [
+      { text: "Globex Corporation" },
+      { text: "Operations Analyst" },
+      { text: "Jan 2019 - Dec 2021" },
+      {
+        text: "Streamlined the reporting pipeline end to end. The team then adopted the new workflow across regions.",
+      },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].description).toContain("Streamlined the reporting pipeline");
+  });
+
   it("takes the title from the line BELOW a company+location+dates anchor (#342)", () => {
     // Single-column "date-first" layout: the anchor row carries
     // "Company [— Dept] — Location  Dates" and the job TITLE is the line BELOW
