@@ -892,6 +892,25 @@ describe("extractExperience", () => {
     expect(value[1].start_date).toBe("May 2020");
   });
 
+  it("still captures a genuine multi-sentence glyph-less prose description (#341 guard)", () => {
+    // Guard the other side of the #341 tightening: the SENTENCE_BREAK_RE now
+    // requires a lowercase continuation after the break, so make sure a real
+    // Word/Office-style prose description (no bullet glyph, a running second
+    // sentence) still classifies as prose and lands in `description` — it must
+    // not be over-narrowed into a header the way a "Company. City" tail is.
+    const section = mkSection("experience", [
+      { text: "Globex Corporation" },
+      { text: "Operations Analyst" },
+      { text: "Jan 2019 - Dec 2021" },
+      {
+        text: "Streamlined the reporting pipeline end to end. The team then adopted the new workflow across regions.",
+      },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].description).toContain("Streamlined the reporting pipeline");
+  });
+
   it("marks an open-ended role is_current (Present)", () => {
     const section = mkSection("experience", [
       { text: "Globex" },
