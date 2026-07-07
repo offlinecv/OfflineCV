@@ -129,7 +129,7 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   //     (16 → 17). That recovered role's header packs inline abbreviated dates
   //     ("Researcher … Mar. 2016 Exp. Jun. 2017"), so its title/start_date don't
   //     round-trip cleanly yet — a SEPARATE header-shape weakness tracked as a
-  //     follow-up. Recovering the role beats dropping it, so the experience
+  //     follow-up (#386). Recovering the role beats dropping it, so the experience
   //     round-trip is baselined here rather than blocking the #341 fix.
   "latex/awesome-cv-cv.pdf": ["experience"],
 
