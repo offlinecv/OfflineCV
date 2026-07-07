@@ -909,6 +909,11 @@ export function splitIntoSections(
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
   const bodyBaseline = computeBodyBaseline(lines);
   const bodyLineHeight = computeBodyLineHeight(lines);
+  // Single-column docs enable the #310/#311 second-experience-header boundary
+  // (see the adjacency note in `classifyLine`). Two-column layouts keep the
+  // stricter #258 suppression: a sidebar flatten interleaves recovered anchors
+  // mid-column, where a relaxed boundary would mint spurious sections.
+  const singleColumn = !columnBoundaries || columnBoundaries.size === 0;
   // True until the first non-profile section (keyword or visual) opens.
   let openedRealSection = false;
   // True once the leading name/title block has ended — signalled by the first
@@ -935,6 +940,7 @@ export function splitIntoSections(
       prevLineOpenedBoundary,
       columnSplitX,
       sections[sections.length - 1].name,
+      singleColumn,
     );
     if (action.kind === "open") {
       sections.push({
@@ -981,6 +987,47 @@ function stripSidebarNoisePrefix(raw: string): string {
 }
 
 /**
+ * #258 / #310-311 institution-repeat gate. A head-noun-anchor (L2) line that
+ * re-matches the CURRENTLY-open section is normally an institution/company
+ * entry sitting under its own real header ("ACME PROFESSIONAL EDUCATION" under
+ * an open EDUCATION header) — the boundary is suppressed so the line is
+ * RETAINED as content rather than consumed as a second label (which drops the
+ * institution name).
+ *
+ * The ADJACENCY relaxation (#310/#311, single-column only) — a same-canonical
+ * L2 header that is NOT the immediate first content line
+ * (`!prevLineOpenedBoundary`, i.e. a full entry block has intervened) opens a
+ * genuinely NEW group — is EXPERIENCE-only: only there does a second category
+ * header ("Teaching Experience" after a role under "Performance Experience")
+ * legitimately start its own section (#311). Every OTHER section type keeps the
+ * strict #258 suppression regardless of adjacency; otherwise a 2nd+ entry whose
+ * institution name ends in a section-anchor word ("... School of Education")
+ * wrongly opens a new section and the entry's content is lost (#258 regression).
+ * Two-column layouts also keep the strict suppression (`!singleColumn`): a
+ * sidebar flatten interleaves recovered anchors mid-column where the relaxation
+ * would mint spurious sections.
+ *
+ * L1 exact-alias / split-letter headers (incl. multi-page "EXPERIENCE"
+ * continuation headers) are not `viaAnchorFallback` and always open — they
+ * short-circuit to `false` here.
+ */
+function isInstitutionRepeat(
+  header: { section: SectionName; viaAnchorFallback: boolean },
+  currentSection: SectionName | "profile",
+  singleColumn: boolean,
+  prevLineOpenedBoundary: boolean,
+): boolean {
+  if (!header.viaAnchorFallback || header.section !== currentSection) {
+    return false;
+  }
+  // Non-experience sections: strict #258 suppression, adjacency ignored.
+  if (header.section !== "experience") return true;
+  // Experience: relax on a two-column flatten OR once a full entry block has
+  // intervened (the 2nd category header is a new group, not an institution line).
+  return !singleColumn || prevLineOpenedBoundary;
+}
+
+/**
  * Decide whether a single line opens a section boundary or appends to the
  * current section — the per-line core of `splitIntoSections`, extracted as a
  * pure function of the line plus the two carry-forward state flags so the
@@ -997,24 +1044,16 @@ function classifyLine(
   prevLineOpenedBoundary: boolean,
   columnSplitX: number | undefined,
   currentSection: SectionName | "profile",
+  singleColumn: boolean,
 ): LineAction {
   const header = matchSectionHeaderDetailed(line.text);
   if (header) {
-    // #258 Layer B: a head-noun-anchor (L2) line that re-matches the CURRENTLY
-    // open section is an institution entry sitting under its own real header
-    // ("ACME PROFESSIONAL EDUCATION" directly under an open EDUCATION header) —
-    // shape-indistinguishable from a real header line-locally (the wholly-ALL-
-    // CAPS case Guard 8/9 in regex.ts cannot reach). Suppress the boundary so
-    // the line is RETAINED as content, not consumed as a label.
-    // SAFETY — gated on the CURRENT section, not "ever opened": only an L2 repeat
-    // of the section that is still open folds in, which is unambiguously correct
-    // (the line stays in the section it already belongs to). An L2 header for a
-    // DIFFERENT section than the current one still opens — so a genuine "Relevant
-    // Experience" appearing after an EDUCATION block opens its own experience
-    // section rather than bleeding into education. L1 exact-alias / split-letter
-    // headers (incl. multi-page "EXPERIENCE" continuation headers) are not
-    // viaAnchorFallback and always open.
-    if (!(header.viaAnchorFallback && header.section === currentSection)) {
+    // #258 Layer B / #310-311: a head-noun-anchor (L2) line re-matching the
+    // CURRENTLY-open section is an institution entry under its own real header,
+    // not a second header — suppress the boundary and RETAIN it as content. The
+    // full gate (current-section safety, the experience-only adjacency
+    // relaxation, and the two-column carve-out) lives in `isInstitutionRepeat`.
+    if (!isInstitutionRepeat(header, currentSection, singleColumn, prevLineOpenedBoundary)) {
       return { kind: "open", name: header.section };
     }
     // Suppressed: retain the institution line as content. Return append

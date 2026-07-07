@@ -8,6 +8,7 @@ import {
   contactCompleteness,
   criticalDownloadGate,
   formatLinkDisplay,
+  isScoreRevealed,
   CONTACT_DISPLAY_CONFIDENCE_FLOOR,
 } from "./contact.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
@@ -298,6 +299,80 @@ describe("criticalDownloadGate", () => {
       { key: "contact", label: "Contact (email or phone)" },
       { key: "experience", label: "Experience" },
     ]);
+  });
+});
+
+describe("isScoreRevealed", () => {
+  // #313 — shared score-reveal predicate for both the upload path (Result)
+  // and the from-scratch authoring path (App's "authoring" branch).
+
+  it("is false for a blank/empty resume (no contact, no experience)", () => {
+    const cascade = makeCascade();
+    expect(isScoreRevealed(cascade, undefined)).toBe(false);
+  });
+
+  it("is false when experience is missing even though contact is complete", () => {
+    const cascade = makeCascade(
+      { full_name: "Jane Doe", email: "jane@example.com" },
+      { full_name: 0.9, email: 0.95 },
+    );
+    expect(isScoreRevealed(cascade, undefined)).toBe(false);
+  });
+
+  it("is false when contact is missing even though experience is present", () => {
+    const cascade = makeCascade({
+      experience: [
+        {
+          title: "Engineer",
+          company: "Acme",
+          start_date: "2020",
+          end_date: "2022",
+          description: "",
+        },
+      ],
+    });
+    expect(isScoreRevealed(cascade, undefined)).toBe(false);
+  });
+
+  it("is true once contact (name + email/phone) and experience are both present", () => {
+    const cascade = makeCascade(
+      {
+        full_name: "Jane Doe",
+        email: "jane@example.com",
+        experience: [
+          {
+            title: "Engineer",
+            company: "Acme",
+            start_date: "2020",
+            end_date: "2022",
+            description: "",
+          },
+        ],
+      },
+      { full_name: 0.9, email: 0.95 },
+    );
+    expect(isScoreRevealed(cascade, undefined)).toBe(true);
+  });
+
+  it("flips true once an inline edit fills the missing contact field", () => {
+    const cascade = makeCascade({
+      experience: [
+        {
+          title: "Engineer",
+          company: "Acme",
+          start_date: "2020",
+          end_date: "2022",
+          description: "",
+        },
+      ],
+    });
+    expect(isScoreRevealed(cascade, undefined)).toBe(false);
+    expect(
+      isScoreRevealed(cascade, {
+        full_name: "Jane Doe",
+        email: "jane@example.com",
+      }),
+    ).toBe(true);
   });
 });
 

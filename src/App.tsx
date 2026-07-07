@@ -4,16 +4,29 @@
 import { Card, Chip, ErrorState, ErrorBoundary, Button } from "@design-system";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
+import { ReconstructedResume } from "./components/features/ReconstructedResume.tsx";
+import { AtsScoreReadout } from "./components/features/AtsScoreReadout.tsx";
 import { PageShell } from "./components/features/PageShell.tsx";
 import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { writeJdFitHandoff } from "./lib/jd-fit-handoff.ts";
+import { isScoreRevealed } from "./lib/contact.ts";
 import { useFlag } from "./lib/flags.ts";
 
 export default function App() {
-  const { state, edit, edited, handleFile, reset, formatBytes } =
-    useAnalyzedResume();
+  const {
+    state,
+    edit,
+    edited,
+    displayResult,
+    handleFile,
+    reset,
+    formatBytes,
+    startBlank,
+    resumeDraft,
+    startOverBlank,
+  } = useAnalyzedResume();
 
   // Once a parse is done the inline DropZone is gone; this restores drag-and-
   // drop so a new resume can replace the current one (confirm-gated, since it
@@ -42,6 +55,12 @@ export default function App() {
     window.location.href = `${import.meta.env.BASE_URL}jd-fit/`;
   };
 
+  // #313 — an unresolved draft prompt (from-scratch authoring, reload with a
+  // saved draft present) blocks the editor until the user picks resume vs.
+  // start over.
+  const showingDraftPrompt =
+    state.phase === "authoring" && state.pendingDraft !== null;
+
   return (
     <PageShell
       subtitle="A parser audit for your resume — not a judge"
@@ -55,7 +74,9 @@ export default function App() {
         </>
       }
     >
-      {state.phase !== "done" && (
+      {(state.phase === "idle" ||
+        state.phase === "parsing" ||
+        state.phase === "error") && (
         // Pre-drop landing column fills the same width as the results view
         // (PageShell's max-w-5xl) so dropping a resume doesn't jump the layout
         // width. Prose inside each block is capped (max-w-2xl / max-w-3xl) and
@@ -117,6 +138,19 @@ export default function App() {
           />
 
           {(state.phase === "idle" || state.phase === "error") && (
+            // "Start from scratch" entry point (#313) — a clearly-secondary
+            // CTA for a user with no resume yet (or who wants a clean start).
+            // Reuses the existing editor/exporter surface (ReconstructedResume
+            // + useEditableParse + useDownloadPdf) via the "authoring" phase
+            // below; no new dropzone/editor/exporter is introduced.
+            <div className="flex justify-center">
+              <Button variant="ghost" onClick={startBlank}>
+                No resume yet? Build one from scratch →
+              </Button>
+            </div>
+          )}
+
+          {(state.phase === "idle" || state.phase === "error") && (
             // "Screened by an agent" framing (internal #21): the recruiter-side
             // proof point that the mirror positioning stands on. Quiet block
             // below the drop zone — context, never competing with the primary
@@ -145,7 +179,7 @@ export default function App() {
       )}
 
       <ErrorBoundary onReset={reset}>
-        {state.phase === "done" && edited && (
+        {state.phase === "done" && edited && displayResult && (
           <>
             <Result
               // `parsed` carries the edited experience descriptions so
@@ -156,7 +190,7 @@ export default function App() {
               // matches the edited bullet text. `rawText` stays original on
               // purpose — EvidencePanel shows "what the PDF extracted", not
               // "what the user typed."
-              result={{ ...state.result, parsed: edited.parsed }}
+              result={displayResult}
               score={edited.score}
               bytes={state.bytes}
               sourceKind={state.sourceKind}
@@ -179,6 +213,50 @@ export default function App() {
             )}
           </>
         )}
+
+        {state.phase === "authoring" && showingDraftPrompt && (
+          // #313 — a saved draft was detected on entry; never silently
+          // restored. The choice is blocking (no editor behind it yet).
+          <Card className="flex flex-col items-center gap-4 py-8 text-center">
+            <h2 className="text-lg font-semibold text-content-primary">
+              Resume your in-progress draft?
+            </h2>
+            <p className="max-w-prose text-sm text-content-secondary">
+              You have an unsaved from-scratch resume from a previous
+              session. Pick up where you left off, or start over with a
+              blank one.
+            </p>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={startOverBlank}>
+                Start over
+              </Button>
+              <Button variant="primary" onClick={resumeDraft}>
+                Resume draft
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {state.phase === "authoring" &&
+          !showingDraftPrompt &&
+          edited &&
+          displayResult && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <Button variant="link" size="sm" onClick={reset}>
+                  ← Back
+                </Button>
+              </div>
+              {isScoreRevealed(displayResult, edit.contactOverrides) && (
+                <AtsScoreReadout score={edited.score} />
+              )}
+              <ReconstructedResume
+                result={displayResult}
+                score={edited.score}
+                edit={edit}
+              />
+            </div>
+          )}
       </ErrorBoundary>
 
       <ReplaceResumeDropOverlay

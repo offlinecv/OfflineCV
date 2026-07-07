@@ -24,6 +24,7 @@ import type {
   ResumeProject,
   ResumeEducation,
   HeuristicAchievement,
+  ResumeExperience,
 } from "../score/types.ts";
 import {
   groupBulletsByExperience,
@@ -171,6 +172,52 @@ function experienceDateRange(exp: {
 
 function joinHeader(parts: Array<string | undefined>, sep: string): string {
   return parts.filter((p) => p && p.trim()).join(sep);
+}
+
+/**
+ * Group experience entries into one {@link AtsSection} per distinct
+ * experience-category section (#311), preserving document order. `experiences`
+ * and `entries` are parallel arrays (entry `i` renders role `i`); the grouping
+ * key is each role's verbatim `section_label`.
+ *
+ * When NO role carries a `section_label` — the common single-experience-section
+ * case — this returns exactly one section headed `fallbackHeading` (the #285
+ * verbatim heading, else the canonical "Experience"), byte-identical to the
+ * pre-#311 single push. When labels are present, each contiguous run of the same
+ * label becomes its own section headed by that verbatim label, so a
+ * "Performance Experience" + "Teaching Experience" résumé renders both headings
+ * above their own roles — and, re-parsed from the reconstructed PDF, re-opens
+ * two experience boundaries (round-trip 2 → 2).
+ *
+ * Roles are already emitted grouped-by-label and in document order by the
+ * parser (`extractGroupedExperience`), so a contiguous-run grouping reproduces
+ * the source section order exactly; an unlabeled trailing role (defensive, e.g.
+ * a user-added entry) folds into the current run rather than opening a stray
+ * heading.
+ */
+function groupExperienceEntriesByLabel(
+  experiences: ResumeExperience[],
+  entries: AtsEntry[],
+  fallbackHeading: string,
+): AtsSection[] {
+  if (entries.length === 0) return [];
+  const anyLabel = experiences.some((e) => e.section_label);
+  if (!anyLabel) return [{ heading: fallbackHeading, entries }];
+
+  const out: AtsSection[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const label = experiences[i]?.section_label;
+    const last = out[out.length - 1];
+    // Open a new section on the first entry, or whenever a present label differs
+    // from the current section's heading. An absent label continues the current
+    // section (never opens a heading of its own).
+    if (out.length === 0 || (label && label !== last.heading)) {
+      out.push({ heading: label ?? fallbackHeading, entries: [entries[i]] });
+    } else {
+      last.entries.push(entries[i]);
+    }
+  }
+  return out;
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -367,11 +414,17 @@ export function buildAtsResumeModel(
 
   if (achievementsAbove && achievementsSection)
     sections.push(achievementsSection);
-  if (experienceEntries.length > 0)
-    sections.push({
-      heading: headings?.get("experience") ?? "Experience",
-      entries: experienceEntries,
-    });
+  // Experience: one AtsSection per distinct experience-category group (#311),
+  // in document order, each with its own verbatim heading. Falls back to a
+  // single "Experience" section (the #285 verbatim heading, or the canonical
+  // word) when no role carries a `section_label` — byte-identical to pre-#311.
+  for (const group of groupExperienceEntriesByLabel(
+    experiences,
+    experienceEntries,
+    headings?.get("experience") ?? "Experience",
+  )) {
+    sections.push(group);
+  }
   if (projectEntries.length > 0)
     sections.push({
       heading: headings?.get("projects") ?? "Projects",

@@ -640,6 +640,32 @@ describe("splitIntoSections — institution name ending in a section anchor (#25
       false,
     );
   });
+
+  it("keeps a single-column EDUCATION with two anchor-ending institutions as ONE section (#311 relaxation is experience-only)", () => {
+    // #311 relaxed the #258 suppression so a SECOND same-canonical anchor-
+    // fallback header (no longer the immediate first content line) opens a new
+    // group — legitimate for multi-category EXPERIENCE, but for EDUCATION it
+    // reopens the #258 bug: the 2nd entry's institution name ("... EDUCATION")
+    // wrongly opens a 2nd education section and its content is lost. The
+    // relaxation must be gated to `experience`; every other section keeps the
+    // strict suppression regardless of adjacency.
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 }, // name
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 }, // contact
+      { text: "EDUCATION", fontSize: 13 }, // real header (L1 exact alias)
+      { text: "ACME PROFESSIONAL EDUCATION", fontSize: 11 }, // institution 1 (first content line)
+      { text: "M.S. Data Science  2018 - 2020", fontSize: 11 }, // degree + date (intervening content)
+      { text: "GLOBEX PROFESSIONAL EDUCATION", fontSize: 11 }, // institution 2 (NOT the first content line — the #311 trap)
+      { text: "B.A. Teaching  2012 - 2016", fontSize: 11 }, // degree + date
+    ]);
+
+    // Both institution lines are retained as content, not consumed as headers.
+    expect(sectionContaining(sections, "ACME PROFESSIONAL EDUCATION")).toBeDefined();
+    expect(sectionContaining(sections, "GLOBEX PROFESSIONAL EDUCATION")).toBeDefined();
+
+    // Exactly ONE education section — the 2nd institution did NOT open a 2nd.
+    expect(names(sections).filter((n) => n === "education").length).toBe(1);
+  });
 });
 
 describe("PdfSection.rawHeading — verbatim source heading capture (#285)", () => {

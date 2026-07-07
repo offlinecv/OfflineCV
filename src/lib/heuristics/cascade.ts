@@ -440,7 +440,10 @@ export async function runCascadeFromMarkdown(
   return result;
 }
 
-function emptyParsed(): CascadeResult["parsed"] {
+/** Exported for reuse by `empty-result.ts`'s `buildBlankResult()` (#313) — the
+ *  single source of truth for "empty parsed" so the blank-authoring factory
+ *  never re-inlines this literal. */
+export function emptyParsed(): CascadeResult["parsed"] {
   return {
     skills: [],
     skills_explicit: [],

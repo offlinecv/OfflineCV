@@ -8,6 +8,7 @@ import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button } from "@design-system";
 import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
 import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
+import { isScoreRevealed } from "../lib/contact.ts";
 import { useResumeAnalysisLlm } from "../hooks/useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
 import { LlmEscapeHatchBanner } from "./features/LlmEscapeHatchBanner.tsx";
@@ -129,6 +130,19 @@ function ParsedCard({
 
   const isLlmRecovered = llmOverride !== null;
 
+  // Score ring/verdict reveal (#313) — the threshold gate is BLANK-AUTHORING
+  // ONLY. `ParsedCard` is also the primary "drop a PDF → see your score" view
+  // for every ordinary upload, where a missing phone/email or zero experience
+  // is a common failure this app exists to FLAG — gating the score there would
+  // kill the diagnostic. So on the normal upload path (a real parsed result,
+  // `tiers.length > 0`) the score renders unconditionally; the reveal threshold
+  // applies only to a blank/authored result (`tiers.length === 0`), mirroring
+  // the same blank test `useDownloadPdf` uses. Re-evaluates every render so it
+  // live-updates as the user edits.
+  const isBlankAuthored = result.tiers.length === 0;
+  const scoreRevealed =
+    !isBlankAuthored || isScoreRevealed(activeResult, edit.contactOverrides);
+
   return (
     // Two stacked surfaces: the score "summary" card on top, the tabbed detail
     // card below. The gap + each card's own border draws the separator the
@@ -153,7 +167,17 @@ function ParsedCard({
           onReset={onReset}
         />
 
-        <AtsScoreReadout score={activeScore} />
+        {scoreRevealed ? (
+          <AtsScoreReadout score={activeScore} />
+        ) : (
+          // No half-populated/near-zero score flashed while contact/experience
+          // are still incomplete (#313) — a quiet placeholder instead of the
+          // ring, so the section doesn't just silently vanish.
+          <p className="text-sm text-content-tertiary">
+            Your score will appear once your contact info and at least one
+            role are filled in below.
+          </p>
+        )}
         {/* Star-rating feedback (#51). The "Report a parsing gap" affordance
             lives in the "What an ATS misses" bottom section of the Resume Quality
             tab (#273), next to the disagreements it characterizes. */}

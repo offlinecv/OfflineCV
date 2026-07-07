@@ -245,7 +245,7 @@ export {
 export const SPLIT_LETTER_RE = /\b([A-Za-z])\s+([A-Za-z]{3,})\b/g;
 
 /** Rejoin single split lead letters: `e xperience` → `experience`. */
-function rejoinSplitLetters(text: string): string {
+export function rejoinSplitLetters(text: string): string {
   return text.replace(SPLIT_LETTER_RE, (_m, a: string, b: string) => `${a}${b}`);
 }
 

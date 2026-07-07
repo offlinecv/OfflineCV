@@ -77,6 +77,14 @@ export interface ResumeExperience {
   /** Role location extracted from header — "City, ST" or "City, Country".
    *  Distinct from top-level `ResumeData.location` (candidate address). */
   location?: string;
+  /** Verbatim heading of the experience-category section this role came from
+   *  (#311) — e.g. "Performance Experience" vs "Teaching Experience" when a
+   *  résumé carries more than one experience section. Display/round-trip only;
+   *  scoring pools every role flat regardless of group. ABSENT for the common
+   *  single-experience-section case (back-compat): consumers fall back to the
+   *  canonical "Experience" heading, so output is unchanged when unset. Present
+   *  only when ≥2 distinct experience-category sections were detected. */
+  section_label?: string;
   start_date?: string;
   /** Precision the source carried for `start_date`. Consumers that care about
    *  honest rendering ("Apr 2021" vs "Apr 1, 2021") honor this. */

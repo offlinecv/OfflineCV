@@ -502,3 +502,27 @@ export function trackJdUrlFetch(args: {
     platform: args.platform,
   });
 }
+
+// Blank/from-scratch authoring funnel (#313). Fires once when a user enters
+// the no-upload authoring flow via the "Start from scratch" CTA.
+export function trackBlankResumeStarted(): void {
+  track("blank_resume_started", {});
+}
+
+/** Which flow produced the downloaded PDF (#313) — `"blank"` for a from-
+ *  scratch authored resume, `"upload"` for the existing parse→edit→export
+ *  path. Derived in `useDownloadPdf.ts` from the result's `tiers` (empty only
+ *  for `buildBlankResult()`'s output), not threaded as an extra prop, since
+ *  `ReconstructedResume` (which owns the download click) is out of scope for
+ *  this change. */
+export type DownloadSource = "blank" | "upload";
+
+/**
+ * A reconstructed résumé was downloaded as a PDF. There was no prior
+ * download-tracking event to extend (`useDownloadPdf.ts` didn't track at
+ * all) — this is a new event, distinguishing blank-authored from uploaded
+ * downloads via `source` per #313's requirement.
+ */
+export function trackDownloadCompleted(args: { source: DownloadSource }): void {
+  track("download_completed", { source: args.source });
+}

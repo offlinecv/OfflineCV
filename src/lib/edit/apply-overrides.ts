@@ -53,6 +53,13 @@ export interface ApplyOverridesResult {
   sections: SectionedResume;
 }
 
+/** A `{ rawText, sections }` pair — the two bullet-pool views that every
+ *  bullet-line mutation (replace/remove) must keep in lockstep. */
+interface BulletViews {
+  rawText: string;
+  sections: SectionedResume;
+}
+
 // ── Contact ────────────────────────────────────────────────────────────────
 
 /** The editable contact keys, all optional string-valued on the parsed object.
@@ -69,6 +76,207 @@ const CONTACT_KEYS: readonly (keyof ContactOverrides)[] = [
   "website_url",
 ];
 
+/** Leading bullet/numbered markers — mirrors group-bullets.ts LEADING_MARKER_RE. */
+const LEADING_MARKER_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)]) */;
+
+/**
+ * Fold `contact` overrides into `nextParsed` in place. Empty string clears a
+ * field (Completeness counts it as absent, mirroring ContactCard's display
+ * behaviour); a phone edit also drops the now-stale `phoneIsValid` flag so the
+ * scorer re-grades the edited number as validity-unknown rather than carrying
+ * the old false → permanent half credit (#70 review).
+ */
+function applyContactOverrides(
+  nextParsed: HeuristicParsedResume,
+  contact: ContactOverrides,
+): void {
+  for (const key of CONTACT_KEYS) {
+    const ov = contact[key];
+    if (ov === undefined) continue;
+    if (ov === "") {
+      delete nextParsed[key];
+    } else {
+      nextParsed[key] = ov;
+    }
+    if (key === "phone") delete nextParsed.phoneIsValid;
+  }
+}
+
+// ── Experience / education header fields ────────────────────────────────────
+
+/** Fold `experience` header overrides (title/company/location/dates) into the
+ *  cloned experience entries in place, keyed by array index. */
+function applyExperienceHeaderOverrides(
+  experience: HeuristicParsedResume["experience"],
+  overrides: Record<number, ExperienceFieldOverrides>,
+): void {
+  for (const [idxStr, fields] of Object.entries(overrides)) {
+    const idx = Number(idxStr);
+    const exp = experience[idx];
+    if (!exp) continue;
+    if (fields.title !== undefined) exp.title = fields.title;
+    if (fields.company !== undefined) exp.company = fields.company;
+    // `location` is optional; a clear ("") drops it so render/PDF treat it as
+    // absent rather than emitting an empty location segment.
+    if (fields.location !== undefined) exp.location = fields.location || undefined;
+    if (fields.start_date !== undefined) exp.start_date = fields.start_date;
+    if (fields.end_date !== undefined) exp.end_date = fields.end_date;
+  }
+}
+
+/** Fold `education` field overrides into the cloned education entries in
+ *  place, keyed by array index. Mirrors the experience-header fold: an empty
+ *  string clears the field (the UI renders "not detected" and the
+ *  scorer/PDF read the blank). `degree` and `institution` are required
+ *  string fields on ResumeEducation, so a clear writes "" rather than
+ *  deleting the key. */
+function applyEducationFieldOverrides(
+  education: HeuristicParsedResume["education"],
+  overrides: Record<number, EducationFieldOverrides>,
+): void {
+  for (const [idxStr, fields] of Object.entries(overrides)) {
+    const idx = Number(idxStr);
+    const edu = education[idx];
+    if (!edu) continue;
+    if (fields.degree !== undefined) edu.degree = fields.degree;
+    // `field` (major) is optional; a clear ("") drops it so render/PDF treat it
+    // as absent rather than emitting an empty subject after the degree comma.
+    if (fields.field !== undefined) edu.field = fields.field || undefined;
+    if (fields.institution !== undefined) edu.institution = fields.institution;
+    if (fields.start_date !== undefined) edu.start_date = fields.start_date;
+    if (fields.end_date !== undefined) edu.end_date = fields.end_date;
+  }
+}
+
+// ── Skills (add / remove) ───────────────────────────────────────────────────
+
+/**
+ * Rebuild `nextParsed.skills` in place from add/remove edits: final list =
+ * parsed skills minus `removed` (by lower-cased key), then `added` appended,
+ * de-duplicated case-insensitively against the survivors.
+ */
+function applySkillOverrides(
+  nextParsed: HeuristicParsedResume,
+  skills: SkillsOverride,
+): void {
+  if (skills.removed.length === 0 && skills.added.length === 0) return;
+  const removedSet = new Set(skills.removed.map((s) => s.toLowerCase()));
+  const kept = nextParsed.skills.filter(
+    (s) => !removedSet.has(s.toLowerCase()),
+  );
+  const present = new Set(kept.map((s) => s.toLowerCase()));
+  for (const add of skills.added) {
+    const key = add.toLowerCase();
+    if (present.has(key)) continue;
+    present.add(key);
+    kept.push(add);
+  }
+  nextParsed.skills = kept;
+}
+
+// ── Shared "find first matching line, then mutate" primitives ──────────────
+//
+// Every bullet edit (replace or remove) needs to locate the first line whose
+// normalised form equals the original bullet text, across one of three
+// different line containers (rawText, an accomplishment section, a role's
+// description) — then either swap or splice that one line. The three
+// `withMatched*` helpers below own the shared "find + clone + mutate" shape;
+// each pair of public replace/remove functions is a thin `mutate` callback
+// over one of them. This collapses what were six near-identical bodies
+// (previously duplicated clone groups flagged by fallow) into three shared
+// traversals.
+
+/** Index of the first line whose normalised form equals `target`, or -1. */
+function findMatchingLineIndex(
+  lines: readonly string[],
+  target: string,
+): number {
+  for (let i = 0; i < lines.length; i++) {
+    if (normalizeBulletText(lines[i]) === target) return i;
+  }
+  return -1;
+}
+
+/**
+ * Split `rawText` into lines, find the first line matching `originalText`,
+ * and let `mutate` rewrite the (mutable) lines array in place at that index
+ * (replace the entry, or splice it out). Returns the rejoined text, or the
+ * input unchanged when no line matches.
+ */
+function withMatchedRawTextLine(
+  rawText: string,
+  originalText: string,
+  mutate: (lines: string[], idx: number) => void,
+): string {
+  const target = normalizeBulletText(originalText);
+  if (!target) return rawText;
+  const lines = rawText.split(/\r?\n/);
+  const idx = findMatchingLineIndex(lines, target);
+  if (idx < 0) return rawText;
+  mutate(lines, idx);
+  return lines.join("\n");
+}
+
+/**
+ * Walk `sections.accomplishmentSections` in policy order, find the first
+ * section whose lines contain a line matching `originalText`, and let
+ * `mutate` rewrite a CLONED copy of that section's lines in place at the
+ * matched index. Returns a NEW {@link SectionedResume} with a cloned
+ * `byName` map (only the mutated section's array is cloned), or the input
+ * unchanged when no line matches anywhere.
+ */
+function withMatchedSectionLine(
+  sections: SectionedResume,
+  originalText: string,
+  mutate: (lines: string[], idx: number) => void,
+): SectionedResume {
+  const target = normalizeBulletText(originalText);
+  if (!target) return sections;
+
+  for (const name of sections.accomplishmentSections) {
+    const lines = sections.byName.get(name);
+    if (!lines) continue;
+    const idx = findMatchingLineIndex(lines, target);
+    if (idx < 0) continue;
+    const nextLines = lines.slice();
+    mutate(nextLines, idx);
+    const nextByName = new Map<SectionName | "profile", readonly string[]>(
+      sections.byName,
+    );
+    nextByName.set(name, nextLines);
+    return { ...sections, byName: nextByName };
+  }
+  return sections;
+}
+
+/**
+ * Walk `experience` in order, find the first role whose (newline-split)
+ * `description` contains a line matching `originalText`, and let `mutate`
+ * rewrite that role's description lines in place at the matched index —
+ * mirroring `groupBulletsByExperience`'s first-match tiebreak so the bullet
+ * lands in the same role the UI grouped it under. Mutates the role's
+ * `description` directly (the caller already cloned the experience entries);
+ * a no-op when no role matches.
+ */
+function withMatchedDescriptionLine(
+  experience: HeuristicParsedResume["experience"],
+  originalText: string,
+  mutate: (lines: string[], idx: number) => void,
+): void {
+  const target = normalizeBulletText(originalText);
+  if (!target) return;
+
+  for (const exp of experience) {
+    if (!exp.description) continue;
+    const descLines = exp.description.split("\n");
+    const idx = findMatchingLineIndex(descLines, target);
+    if (idx < 0) continue;
+    mutate(descLines, idx);
+    exp.description = descLines.join("\n");
+    return; // first-match tiebreak: only the first role claims this line
+  }
+}
+
 // ── Bullet line replacement ──────────────────────────────────────────────────
 
 /**
@@ -82,18 +290,10 @@ function replaceBulletInRawText(
   originalText: string,
   editedText: string,
 ): string {
-  const target = normalizeBulletText(originalText);
-  if (!target) return rawText;
-
-  const lines = rawText.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    if (normalizeBulletText(lines[i]) !== target) continue;
-    // Preserve the leading marker + whitespace; swap only the body text.
-    const marker = lines[i].match(LEADING_MARKER_RE)?.[0] ?? "";
-    lines[i] = marker + editedText;
-    return lines.join("\n");
-  }
-  return rawText;
+  return withMatchedRawTextLine(rawText, originalText, (lines, idx) => {
+    const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
+    lines[idx] = marker + editedText;
+  });
 }
 
 /**
@@ -112,27 +312,10 @@ function replaceBulletInSections(
   originalText: string,
   editedText: string,
 ): SectionedResume {
-  const target = normalizeBulletText(originalText);
-  if (!target) return sections;
-
-  for (const name of sections.accomplishmentSections) {
-    const lines = sections.byName.get(name);
-    if (!lines) continue;
-    for (let i = 0; i < lines.length; i++) {
-      if (normalizeBulletText(lines[i]) !== target) continue;
-      // First match wins — clone the map + this one section's array, swap the
-      // line body while preserving its leading marker, and return a new view.
-      const marker = lines[i].match(LEADING_MARKER_RE)?.[0] ?? "";
-      const nextLines = lines.slice();
-      nextLines[i] = marker + editedText;
-      const nextByName = new Map<SectionName | "profile", readonly string[]>(
-        sections.byName,
-      );
-      nextByName.set(name, nextLines);
-      return { ...sections, byName: nextByName };
-    }
-  }
-  return sections;
+  return withMatchedSectionLine(sections, originalText, (lines, idx) => {
+    const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
+    lines[idx] = marker + editedText;
+  });
 }
 
 /**
@@ -147,25 +330,9 @@ function replaceBulletInDescriptions(
   originalText: string,
   editedText: string,
 ): void {
-  const target = normalizeBulletText(originalText);
-  if (!target) return;
-
-  for (const exp of experience) {
-    if (!exp.description) continue;
-    const descLines = exp.description.split("\n");
-    let changed = false;
-    for (let i = 0; i < descLines.length; i++) {
-      if (normalizeBulletText(descLines[i]) === target) {
-        descLines[i] = editedText;
-        changed = true;
-        break;
-      }
-    }
-    if (changed) {
-      exp.description = descLines.join("\n");
-      return; // first-match tiebreak: only the first role claims this line
-    }
-  }
+  withMatchedDescriptionLine(experience, originalText, (lines, idx) => {
+    lines[idx] = editedText;
+  });
 }
 
 /**
@@ -178,15 +345,9 @@ function removeBulletFromRawText(
   rawText: string,
   originalText: string,
 ): string {
-  const target = normalizeBulletText(originalText);
-  if (!target) return rawText;
-  const lines = rawText.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    if (normalizeBulletText(lines[i]) !== target) continue;
-    lines.splice(i, 1);
-    return lines.join("\n");
-  }
-  return rawText;
+  return withMatchedRawTextLine(rawText, originalText, (lines, idx) => {
+    lines.splice(idx, 1);
+  });
 }
 
 /**
@@ -199,23 +360,9 @@ function removeBulletFromSections(
   sections: SectionedResume,
   originalText: string,
 ): SectionedResume {
-  const target = normalizeBulletText(originalText);
-  if (!target) return sections;
-  for (const name of sections.accomplishmentSections) {
-    const lines = sections.byName.get(name);
-    if (!lines) continue;
-    for (let i = 0; i < lines.length; i++) {
-      if (normalizeBulletText(lines[i]) !== target) continue;
-      const nextLines = lines.slice();
-      nextLines.splice(i, 1);
-      const nextByName = new Map<SectionName | "profile", readonly string[]>(
-        sections.byName,
-      );
-      nextByName.set(name, nextLines);
-      return { ...sections, byName: nextByName };
-    }
-  }
-  return sections;
+  return withMatchedSectionLine(sections, originalText, (lines, idx) => {
+    lines.splice(idx, 1);
+  });
 }
 
 /**
@@ -227,23 +374,214 @@ function removeBulletFromDescriptions(
   experience: HeuristicParsedResume["experience"],
   originalText: string,
 ): void {
-  const target = normalizeBulletText(originalText);
-  if (!target) return;
-  for (const exp of experience) {
-    if (!exp.description) continue;
-    const descLines = exp.description.split("\n");
-    for (let i = 0; i < descLines.length; i++) {
-      if (normalizeBulletText(descLines[i]) === target) {
-        descLines.splice(i, 1);
-        exp.description = descLines.join("\n");
-        return; // first-match tiebreak
-      }
-    }
-  }
+  withMatchedDescriptionLine(experience, originalText, (lines, idx) => {
+    lines.splice(idx, 1);
+  });
 }
 
-/** Leading bullet/numbered markers — mirrors group-bullets.ts LEADING_MARKER_RE. */
-const LEADING_MARKER_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)]) */;
+// ── Bullet override application ─────────────────────────────────────────────
+
+/**
+ * Fold `bullets` text edits into `views` (rawText + sections) and the
+ * matching role's description, in that priority order — first-match wins per
+ * container, same as the original inline loop. A no-op edit (equal to the
+ * original, or empty) is skipped: an empty edit doesn't drop a bullet (that
+ * would silently change the bullet count); clearing the field reverts to the
+ * parsed text instead.
+ */
+function applyBulletTextOverrides(
+  views: BulletViews,
+  experience: HeuristicParsedResume["experience"],
+  bullets: BulletOverrides,
+  byIndex: ReadonlyMap<number, BulletObservation>,
+): BulletViews {
+  let { rawText, sections } = views;
+  for (const [idxStr, editedRaw] of Object.entries(bullets)) {
+    const idx = Number(idxStr);
+    const obs = byIndex.get(idx);
+    if (!obs) continue;
+    const edited = editedRaw.trim();
+    if (edited === obs.text) continue;
+    if (edited === "") continue;
+    rawText = replaceBulletInRawText(rawText, obs.text, edited);
+    sections = replaceBulletInSections(sections, obs.text, edited);
+    replaceBulletInDescriptions(experience, obs.text, edited);
+  }
+  return { rawText, sections };
+}
+
+/**
+ * Fold `removedBullets` (accepted "this bullet was removed" decisions from
+ * the rewrite review, #211) into `views` and the matching role's
+ * description. Removal changes the bullet COUNT, so re-grading produces
+ * fresh BulletObservation indices; that's fine because removals are applied
+ * as a batch and the proposal is dismissed afterward (the override maps that
+ * key by index are reconciled on the next render against the new
+ * observations).
+ */
+function applyRemovedBulletOverrides(
+  views: BulletViews,
+  experience: HeuristicParsedResume["experience"],
+  removedBullets: ReadonlySet<number>,
+  byIndex: ReadonlyMap<number, BulletObservation>,
+): BulletViews {
+  let { rawText, sections } = views;
+  for (const idx of removedBullets) {
+    const obs = byIndex.get(idx);
+    if (!obs) continue;
+    rawText = removeBulletFromRawText(rawText, obs.text);
+    sections = removeBulletFromSections(sections, obs.text);
+    removeBulletFromDescriptions(experience, obs.text);
+  }
+  return { rawText, sections };
+}
+
+// ── Added entries + bullets ──────────────────────────────────────────────────
+
+/** Resolve a parsed-entry bullet key ("<section>:<index>") to the cloned
+ *  entry whose description carries the bullet. Added-entry keys
+ *  ("added:<n>") are handled by the caller and skipped here. Education
+ *  carries no bullets. */
+function resolveParsedDescriptionTarget(
+  nextParsed: HeuristicParsedResume,
+  key: string,
+): { description?: string } | undefined {
+  const colon = key.indexOf(":");
+  if (colon < 0) return undefined;
+  const section = key.slice(0, colon);
+  const index = Number(key.slice(colon + 1));
+  if (!Number.isInteger(index)) return undefined;
+  if (section === "experience") return nextParsed.experience[index];
+  if (section === "projects") return nextParsed.projects![index];
+  if (section === "achievements")
+    return nextParsed.heuristic_achievements![index];
+  return undefined;
+}
+
+/** Append a single user-added entry to its target section array, with its
+ *  description built from its own added bullets (keyed by the entry id).
+ *  Returns the "• "-prefixed pool lines for the added bullets so the caller
+ *  can fold them into the graded bullet pool. */
+function pushAddedEntry(
+  nextParsed: HeuristicParsedResume,
+  entry: AddedEntry,
+  addedBullets: AddedBullets,
+): string[] {
+  const entryBullets = addedBullets[entry.id] ?? [];
+  const description = entryBullets.join("\n") || undefined;
+  if (entry.section === "experience") {
+    nextParsed.experience.push({
+      title: entry.title,
+      company: entry.subtitle ?? "",
+      ...(entry.location ? { location: entry.location } : {}),
+      start_date: entry.start_date,
+      end_date: entry.end_date,
+      description,
+    });
+  } else if (entry.section === "education") {
+    nextParsed.education.push({
+      degree: entry.title,
+      institution: entry.subtitle ?? "",
+      start_date: entry.start_date,
+      end_date: entry.end_date,
+    });
+  } else if (entry.section === "projects") {
+    nextParsed.projects!.push({ name: entry.title, description });
+  } else {
+    nextParsed.heuristic_achievements!.push({
+      title: entry.title,
+      year: entry.year,
+      description,
+    });
+  }
+  return entryBullets.map((b) => `• ${b}`);
+}
+
+/** Append `poolLines` to the last accomplishment section (canonical order),
+ *  so appended bullets sort after every existing bullet and keep prior
+ *  `BulletObservation` indices (which bulletOverrides are keyed by) stable.
+ *  Falls back to "achievements" when there is no existing accomplishment
+ *  section. Returns a NEW {@link SectionedResume}; a no-op when there are no
+ *  pool lines to add. */
+function appendPoolLinesToSections(
+  sections: SectionedResume,
+  poolLines: readonly string[],
+): SectionedResume {
+  if (poolLines.length === 0) return sections;
+  const order = sections.accomplishmentSections;
+  const tail: SectionName =
+    order.length > 0 ? order[order.length - 1] : "achievements";
+  const nextByName = new Map<SectionName | "profile", readonly string[]>(
+    sections.byName,
+  );
+  const existing = nextByName.get(tail) ?? [];
+  nextByName.set(tail, [...existing, ...poolLines]);
+  const accomplishmentSections = order.includes(tail)
+    ? order
+    : [...order, tail];
+  return { ...sections, byName: nextByName, accomplishmentSections };
+}
+
+/**
+ * Fold `addedEntries` (whole new experience/education/projects/achievements
+ * rows) and `addedBullets` (bullet lines appended to a new or existing entry)
+ * into `nextParsed` (mutated in place — projects/heuristic_achievements are
+ * cloned here first since the entry point only pre-clones
+ * experience/education/skills) and `sections`. Added bullet lines land in
+ * BOTH the entry description (display / PDF / grouping / fallback grading)
+ * and the graded bullet pool (Specificity / Structure). A no-op when there
+ * are no additions.
+ */
+function applyAddedEntriesAndBullets(
+  nextParsed: HeuristicParsedResume,
+  sections: SectionedResume,
+  addedEntries: readonly AddedEntry[],
+  addedBullets: AddedBullets,
+): SectionedResume {
+  const hasAdds =
+    addedEntries.length > 0 || Object.keys(addedBullets).length > 0;
+  if (!hasAdds) return sections;
+
+  // projects + heuristic_achievements weren't cloned by the entry point (only
+  // experience / education / skills were). Clone them — and their entries —
+  // before we push or mutate descriptions, so the original parse is never
+  // touched.
+  nextParsed.projects = (nextParsed.projects ?? []).map((p) => ({ ...p }));
+  nextParsed.heuristic_achievements = (
+    nextParsed.heuristic_achievements ?? []
+  ).map((a) => ({ ...a }));
+
+  // "• "-prefixed copies of every added bullet, pooled for grading.
+  const poolLines: string[] = [];
+
+  for (const entry of addedEntries) {
+    poolLines.push(...pushAddedEntry(nextParsed, entry, addedBullets));
+  }
+
+  poolLines.push(...applyAddedBulletsToExistingEntries(nextParsed, addedBullets));
+
+  return appendPoolLinesToSections(sections, poolLines);
+}
+
+/** Fold `addedBullets` keyed to EXISTING parsed entries into those entries'
+ *  descriptions (cloned) and return the `"• "`-prefixed pool copies. Keys for
+ *  added entries (`"added:"` prefix) are handled by {@link pushAddedEntry} and
+ *  skipped here. */
+function applyAddedBulletsToExistingEntries(
+  nextParsed: HeuristicParsedResume,
+  addedBullets: AddedBullets,
+): string[] {
+  const poolLines: string[] = [];
+  for (const [key, lines] of Object.entries(addedBullets)) {
+    if (key.startsWith("added:") || lines.length === 0) continue;
+    const target = resolveParsedDescriptionTarget(nextParsed, key);
+    if (!target) continue;
+    const existing = target.description ? [target.description] : [];
+    target.description = [...existing, ...lines].join("\n");
+    for (const b of lines) poolLines.push(`• ${b}`);
+  }
+  return poolLines;
+}
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
@@ -299,216 +637,31 @@ export function applyOverrides(
     education: parsed.education.map((e) => ({ ...e })),
     skills: [...parsed.skills],
   };
-  let nextRawText = rawText;
-  let nextSections = sections;
 
-  // ── Contact fields ──────────────────────────────────────────────────────
-  for (const key of CONTACT_KEYS) {
-    const ov = contact[key];
-    if (ov === undefined) continue;
-    // Empty string = "user cleared it" → drop the field so Completeness counts
-    // it as absent (mirrors ContactCard's display behaviour).
-    if (ov === "") {
-      delete nextParsed[key];
-    } else {
-      nextParsed[key] = ov;
-    }
-    // The original `phoneIsValid` flag is now stale — it described the parsed
-    // phone, not the user-supplied one. Drop it so the scorer re-grades the
-    // edited number as validity-unknown (backward-compatible full credit)
-    // instead of carrying the old false → permanent half credit. (#70 review)
-    if (key === "phone") delete nextParsed.phoneIsValid;
-  }
+  applyContactOverrides(nextParsed, contact);
+  applyExperienceHeaderOverrides(nextParsed.experience, experience);
 
-  // ── Experience headers ──────────────────────────────────────────────────
-  for (const [idxStr, fields] of Object.entries(experience)) {
-    const idx = Number(idxStr);
-    const exp = nextParsed.experience[idx];
-    if (!exp) continue;
-    if (fields.title !== undefined) exp.title = fields.title;
-    if (fields.company !== undefined) exp.company = fields.company;
-    // `location` is optional; a clear ("") drops it so render/PDF treat it as
-    // absent rather than emitting an empty location segment.
-    if (fields.location !== undefined) exp.location = fields.location || undefined;
-    if (fields.start_date !== undefined) exp.start_date = fields.start_date;
-    if (fields.end_date !== undefined) exp.end_date = fields.end_date;
-  }
-
-  // ── Bullets — propagate to BOTH rawText and the matching description ──────
   const byIndex = new Map<number, BulletObservation>();
   for (const o of observations) byIndex.set(o.index, o);
 
-  for (const [idxStr, editedRaw] of Object.entries(bullets)) {
-    const idx = Number(idxStr);
-    const obs = byIndex.get(idx);
-    if (!obs) continue;
-    const edited = editedRaw.trim();
-    // No-op when the edit equals the original (nothing to re-grade).
-    if (edited === obs.text) continue;
-    // An empty edit is a no-op: we don't drop a bullet (that would silently
-    // change the bullet count); clearing the field reverts to the parsed text.
-    if (edited === "") continue;
-    nextRawText = replaceBulletInRawText(nextRawText, obs.text, edited);
-    nextSections = replaceBulletInSections(nextSections, obs.text, edited);
-    replaceBulletInDescriptions(nextParsed.experience, obs.text, edited);
-  }
+  let views: BulletViews = { rawText, sections };
+  views = applyBulletTextOverrides(views, nextParsed.experience, bullets, byIndex);
+  views = applyRemovedBulletOverrides(
+    views,
+    nextParsed.experience,
+    removedBullets,
+    byIndex,
+  );
 
-  // ── Removed bullets — drop the line from the pool, rawText, description ────
-  // Accepted "this bullet was removed" decisions from the rewrite review (#211).
-  // Removal changes the bullet COUNT, so re-grading produces fresh
-  // BulletObservation indices; that's fine because removals are applied as a
-  // batch and the proposal is dismissed afterward (the override maps that key
-  // by index are reconciled on the next render against the new observations).
-  for (const idx of removedBullets) {
-    const obs = byIndex.get(idx);
-    if (!obs) continue;
-    nextRawText = removeBulletFromRawText(nextRawText, obs.text);
-    nextSections = removeBulletFromSections(nextSections, obs.text);
-    removeBulletFromDescriptions(nextParsed.experience, obs.text);
-  }
+  applyEducationFieldOverrides(nextParsed.education, education);
+  applySkillOverrides(nextParsed, skills);
 
-  // ── Education fields ──────────────────────────────────────────────────────
-  // Mirror the experience-header fold: an empty string clears the field (the UI
-  // renders "not detected" and the scorer/PDF read the blank). degree and
-  // institution are required string fields on ResumeEducation, so a clear writes
-  // "" rather than deleting the key.
-  for (const [idxStr, fields] of Object.entries(education)) {
-    const idx = Number(idxStr);
-    const edu = nextParsed.education[idx];
-    if (!edu) continue;
-    if (fields.degree !== undefined) edu.degree = fields.degree;
-    // `field` (major) is optional; a clear ("") drops it so render/PDF treat it
-    // as absent rather than emitting an empty subject after the degree comma.
-    if (fields.field !== undefined) edu.field = fields.field || undefined;
-    if (fields.institution !== undefined) edu.institution = fields.institution;
-    if (fields.start_date !== undefined) edu.start_date = fields.start_date;
-    if (fields.end_date !== undefined) edu.end_date = fields.end_date;
-  }
+  const nextSections = applyAddedEntriesAndBullets(
+    nextParsed,
+    views.sections,
+    addedEntries,
+    addedBullets,
+  );
 
-  // ── Skills (add / remove) ─────────────────────────────────────────────────
-  // Final list = parsed skills minus `removed` (by lower-cased key), then
-  // `added` appended, de-duplicated case-insensitively against the survivors.
-  if (skills.removed.length > 0 || skills.added.length > 0) {
-    const removedSet = new Set(skills.removed.map((s) => s.toLowerCase()));
-    const kept = nextParsed.skills.filter(
-      (s) => !removedSet.has(s.toLowerCase()),
-    );
-    const present = new Set(kept.map((s) => s.toLowerCase()));
-    for (const add of skills.added) {
-      const key = add.toLowerCase();
-      if (present.has(key)) continue;
-      present.add(key);
-      kept.push(add);
-    }
-    nextParsed.skills = kept;
-  }
-
-  // ── Added entries + bullets ────────────────────────────────────────────────
-  // Append user-added entries to their section arrays and fold added bullet
-  // lines into BOTH the entry description (display / PDF / grouping / fallback
-  // grading) and the graded bullet pool (Specificity / Structure). Pool lines
-  // land in the LAST accomplishment section so they sort after every existing
-  // bullet — keeping prior BulletObservation indices (which bulletOverrides are
-  // keyed by) stable.
-  const hasAdds =
-    addedEntries.length > 0 || Object.keys(addedBullets).length > 0;
-  if (hasAdds) {
-    // projects + heuristic_achievements weren't cloned above (only experience /
-    // education / skills were). Clone them — and their entries — before we push
-    // or mutate descriptions, so the original parse is never touched.
-    nextParsed.projects = (nextParsed.projects ?? []).map((p) => ({ ...p }));
-    nextParsed.heuristic_achievements = (
-      nextParsed.heuristic_achievements ?? []
-    ).map((a) => ({ ...a }));
-
-    // "• "-prefixed copies of every added bullet, pooled for grading.
-    const poolLines: string[] = [];
-
-    // Added entries: build each from its header fields, with description from
-    // its own added bullets (keyed by the entry id).
-    for (const entry of addedEntries) {
-      const entryBullets = addedBullets[entry.id] ?? [];
-      const description = entryBullets.join("\n") || undefined;
-      if (entry.section === "experience") {
-        nextParsed.experience.push({
-          title: entry.title,
-          company: entry.subtitle ?? "",
-          ...(entry.location ? { location: entry.location } : {}),
-          start_date: entry.start_date,
-          end_date: entry.end_date,
-          description,
-        });
-      } else if (entry.section === "education") {
-        nextParsed.education.push({
-          degree: entry.title,
-          institution: entry.subtitle ?? "",
-          start_date: entry.start_date,
-          end_date: entry.end_date,
-        });
-      } else if (entry.section === "projects") {
-        nextParsed.projects.push({ name: entry.title, description });
-      } else {
-        nextParsed.heuristic_achievements.push({
-          title: entry.title,
-          year: entry.year,
-          description,
-        });
-      }
-      for (const b of entryBullets) poolLines.push(`• ${b}`);
-    }
-
-    // Resolve a parsed-entry bullet key ("<section>:<index>") to the cloned
-    // entry whose description carries the bullet. Added-entry keys ("added:<n>")
-    // are handled above and skipped here. Education carries no bullets.
-    const parsedDescTarget = (
-      key: string,
-    ): { description?: string } | undefined => {
-      const colon = key.indexOf(":");
-      if (colon < 0) return undefined;
-      const section = key.slice(0, colon);
-      const index = Number(key.slice(colon + 1));
-      if (!Number.isInteger(index)) return undefined;
-      if (section === "experience") return nextParsed.experience[index];
-      if (section === "projects") return nextParsed.projects![index];
-      if (section === "achievements")
-        return nextParsed.heuristic_achievements![index];
-      return undefined;
-    };
-
-    // Added bullets on EXISTING parsed entries: append to that entry's
-    // description (cloned) and to the pool.
-    for (const [key, lines] of Object.entries(addedBullets)) {
-      if (key.startsWith("added:")) continue; // added entries handled above
-      if (lines.length === 0) continue;
-      const target = parsedDescTarget(key);
-      if (!target) continue;
-      const existing = target.description ? [target.description] : [];
-      target.description = [...existing, ...lines].join("\n");
-      for (const b of lines) poolLines.push(`• ${b}`);
-    }
-
-    if (poolLines.length > 0) {
-      const order = nextSections.accomplishmentSections;
-      // Last accomplishment section in canonical order — its lines pool last, so
-      // appended bullets get the highest indices. Fall back to "achievements".
-      const tail: SectionName =
-        order.length > 0 ? order[order.length - 1] : "achievements";
-      const nextByName = new Map<
-        SectionName | "profile",
-        readonly string[]
-      >(nextSections.byName);
-      const existing = nextByName.get(tail) ?? [];
-      nextByName.set(tail, [...existing, ...poolLines]);
-      const accomplishmentSections = order.includes(tail)
-        ? order
-        : [...order, tail];
-      nextSections = {
-        ...nextSections,
-        byName: nextByName,
-        accomplishmentSections,
-      };
-    }
-  }
-
-  return { parsed: nextParsed, rawText: nextRawText, sections: nextSections };
+  return { parsed: nextParsed, rawText: views.rawText, sections: nextSections };
 }

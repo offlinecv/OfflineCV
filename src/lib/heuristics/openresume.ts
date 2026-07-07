@@ -44,6 +44,106 @@ import {
   extractAchievements,
 } from "./extract-fields.ts";
 import { tokenizeSkillLine } from "./extract/skills.ts";
+import { rejoinSplitLetters } from "./regex.ts";
+import type { ResumeExperience } from "../score/types.ts";
+
+/**
+ * Grouping key for an experience section's verbatim heading (#311). Normalizes
+ * the heading the same way `matchSectionHeader` does (trim, lowercase, strip
+ * trailing `:` / `·` / `•`, rejoin single split lead letters) so that a
+ * multi-page **continuation** header — `EXPERIENCE` on page 1 and its
+ * tracked/decorated `E XPERIENCE` twin on page 2 — collapses to ONE group
+ * (byte-identical single-"Experience" output preserved), while two genuinely
+ * distinct category headers (`Performance Experience` vs `Teaching Experience`)
+ * stay in separate groups. An absent heading keys to `""`.
+ */
+function experienceHeadingKey(rawHeading: string | undefined): string {
+  if (!rawHeading) return "";
+  const normalized = rawHeading.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
+  return rejoinSplitLetters(normalized);
+}
+
+/** One experience-category group: its verbatim heading + merged section lines,
+ *  in document order. */
+interface ExperienceGroup {
+  rawHeading?: string;
+  lines: PdfLine[];
+}
+
+/**
+ * Collect the `experience` PdfSections into ordered groups keyed by distinct
+ * verbatim heading (#311). Sections sharing a heading key (a continuation
+ * header) merge — mirroring `findSection`'s document-order line concatenation —
+ * so a single logical section stays one group. Distinct category headings
+ * ("Performance Experience", "Teaching Experience") become separate groups, in
+ * first-appearance order. Returns `[]` when there is no experience section.
+ */
+function groupExperienceSections(sections: PdfSection[]): ExperienceGroup[] {
+  const order: string[] = [];
+  const byKey = new Map<string, ExperienceGroup>();
+  for (const s of sections) {
+    if (s.name !== "experience") continue;
+    const key = experienceHeadingKey(s.rawHeading);
+    const existing = byKey.get(key);
+    if (existing) existing.lines.push(...s.lines);
+    else {
+      byKey.set(key, { rawHeading: s.rawHeading, lines: [...s.lines] });
+      order.push(key);
+    }
+  }
+  return order.map((k) => byKey.get(k)!);
+}
+
+/**
+ * Extract experience roles, preserving per-group section labels when the résumé
+ * carries more than one distinct experience-category section (#311).
+ *
+ * Single group (the common case — one "Experience"/"EXPERIENCE" section, or a
+ * multi-page continuation that keys the same) → delegates to `extractExperience`
+ * over the merged section EXACTLY as before, emitting NO `section_label`, so
+ * output is byte-identical to pre-#311 for the entire single-section corpus.
+ *
+ * Two or more distinct groups → runs the same extractor per group, tags every
+ * resulting role with `section_label = group.rawHeading` (the verbatim source
+ * heading, extending #285 from one heading to per-group), and concatenates the
+ * roles in document order. Scoring is unaffected — it reads the flat role list
+ * regardless of label. Section-level confidence is the count-weighted mean of
+ * the per-group confidences (an empty group contributes nothing), matching the
+ * averaging `extractExperience` does internally.
+ */
+function extractGroupedExperience(
+  groups: ExperienceGroup[],
+  mergedSection: PdfSection | undefined,
+): { value: ResumeExperience[]; confidence: number } {
+  if (groups.length <= 1) return extractExperience(mergedSection);
+
+  const value: ResumeExperience[] = [];
+  let weightedConfidence = 0;
+  let roleCount = 0;
+  for (const group of groups) {
+    const section: PdfSection = {
+      name: "experience",
+      rawHeading: group.rawHeading,
+      lines: group.lines,
+    };
+    const extracted = extractExperience(section);
+    for (const role of extracted.value) {
+      value.push(
+        group.rawHeading
+          ? { ...role, section_label: group.rawHeading }
+          : role,
+      );
+    }
+    if (extracted.value.length > 0) {
+      weightedConfidence += extracted.confidence * extracted.value.length;
+      roleCount += extracted.value.length;
+    }
+  }
+  return {
+    value,
+    confidence: roleCount > 0 ? weightedConfidence / roleCount : 0,
+  };
+}
 
 /**
  * PDF-side Tier 1 entry point.
@@ -76,7 +176,21 @@ export function parseHeuristic(
     }
   }
   if (!sections) sections = splitIntoSections(lines, boundaries);
-  return buildHeuristicResult(lines, sections, sectionSource, annotations);
+  // Multi-experience-section grouping (#311) is gated to single-column layouts:
+  // a two-column sidebar flatten fragments ONE experience section into several
+  // `experience` PdfSections (recovered sidebar labels like "Leadership"), which
+  // must stay merged — splitting them mints spurious roles. A genuine
+  // multi-category résumé (the #311 target: creative/academic/student) is
+  // single-column, and the reconstructed Download-PDF is always single-column,
+  // so the round-trip is unaffected.
+  const singleColumn = !boundaries || boundaries.size === 0;
+  return buildHeuristicResult(
+    lines,
+    sections,
+    sectionSource,
+    annotations,
+    singleColumn,
+  );
 }
 
 /**
@@ -92,8 +206,10 @@ export function parseHeuristicFromMarkdown(
   _rawText: string,
 ): HeuristicResult {
   const { lines, sections } = sectionizeMarkdown(markdown);
-  // DOCX / markdown-native path is always markdown-anchored by construction.
-  return buildHeuristicResult(lines, sections, "markdown");
+  // DOCX / markdown-native path is always markdown-anchored by construction and
+  // carries no column geometry, so it is treated as single-column for #311
+  // experience grouping.
+  return buildHeuristicResult(lines, sections, "markdown", [], true);
 }
 
 /**
@@ -200,6 +316,7 @@ function buildHeuristicResult(
   sections: PdfSection[],
   sectionSource: "markdown" | "regex",
   annotations: PdfLinkAnnotation[] = [],
+  singleColumn = true,
 ): HeuristicResult {
 
   const profile = findSection(sections, "profile") ?? {
@@ -235,9 +352,20 @@ function buildHeuristicResult(
   // above Awards must still read certs-first (see `sectionsInDocumentOrder`).
   const certificationsSection = findSection(ownedSections, "certifications");
 
+  // Experience: group distinct experience-category sections (#311) so a résumé
+  // with e.g. "Performance Experience" + "Teaching Experience" keeps its
+  // grouping. Single-group résumés fall through to the exact pre-#311 path
+  // (byte-identical output). Grouping runs on `ownedSections` so a contact line
+  // lifted out of an experience section is already stripped. Two-column layouts
+  // opt out (see `singleColumn` gate at the call site) — sidebar fragmentation
+  // there is not genuine multi-category structure.
+  const experienceGroups = singleColumn
+    ? groupExperienceSections(ownedSections)
+    : [];
+
   const summary = extractSummary(summarySection);
   const skills = extractSkills(skillsSection);
-  const experience = extractExperience(experienceSection);
+  const experience = extractGroupedExperience(experienceGroups, experienceSection);
   const education = extractEducation(educationSection);
   const projects = extractProjects(projectsSection);
   const achievements = extractAchievements(achievementsSection);

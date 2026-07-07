@@ -17,6 +17,8 @@ import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { buildAtsResumeModel } from "../lib/pdf/ats-resume-model.ts";
 import { renderAtsResumePdf } from "../lib/pdf/render-ats-pdf.ts";
 import type { EditableParse } from "./useEditableParse.ts";
+import { trackDownloadCompleted, type DownloadSource } from "../lib/analytics.ts";
+import { clearBlankDraft } from "./useResumeAnalysis.ts";
 
 export interface UseDownloadPdf {
   download: () => Promise<void>;
@@ -67,6 +69,18 @@ export function useDownloadPdf(
       const settledUrl = url;
       url = null;
       setTimeout(() => URL.revokeObjectURL(settledUrl), 60_000);
+
+      // Distinguish a from-scratch authored download from an uploaded one
+      // (#313). `tiers` is empty ONLY for `buildBlankResult()`'s output —
+      // every real cascade path (PDF or DOCX) always pushes at least one
+      // tier — so this is a reliable structural signal without threading an
+      // extra prop through `ReconstructedResume` (out of scope here).
+      const source: DownloadSource =
+        result.tiers.length === 0 ? "blank" : "upload";
+      trackDownloadCompleted({ source });
+      // A successful blank-authored export is one of the explicit
+      // draft-clearing triggers (#313) — the user has what they came for.
+      if (source === "blank") clearBlankDraft();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not generate PDF.");
     } finally {

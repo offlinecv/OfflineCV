@@ -198,6 +198,29 @@ export function criticalDownloadGate(
 }
 
 /**
+ * Score-reveal predicate (#313) — shared by the upload-path result view
+ * (`Result`/`AtsScoreReadout`) and the from-scratch authoring surface
+ * (`App`'s "authoring" branch): the score ring/verdict stays hidden until the
+ * résumé clears the same critical-field bar `criticalDownloadGate` already
+ * enforces before a PDF export (name present, email-or-phone present, at
+ * least one experience entry). The score itself keeps computing
+ * unconditionally elsewhere (feeding `AttentionStrip` + `useDownloadPdf`) —
+ * this predicate only gates the ring/verdict's PRESENTATION, and is meant to
+ * be re-evaluated on every render so it live-updates as the user edits.
+ */
+export function isScoreRevealed(
+  cascade: Pick<CascadeResult, "parsed" | "fieldConfidence">,
+  contactOverrides: ContactOverrides | undefined,
+): boolean {
+  const displayFields = applyContactOverrides(
+    buildContactFields(cascade),
+    contactOverrides,
+  );
+  const hasExperience = cascade.parsed.experience.length > 0;
+  return criticalDownloadGate(displayFields, hasExperience).length === 0;
+}
+
+/**
  * Shorten a link URL to a compact, human-readable slug for the card's links
  * line (#146). Strips the protocol, a leading `www.`, and any trailing slash,
  * leaving the host + path — e.g. `https://www.linkedin.com/in/jane-doe` →
