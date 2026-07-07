@@ -89,6 +89,9 @@ const SYNTHETIC_SKILLS = [
 describe("#301 — multi-word skill does not split at the line-wrap boundary", () => {
   let reparsedSkills: string[];
 
+  // Fixture-read + runCascade/render round-trip is slow under a
+  // coverage-instrumented full-suite `verify` run; scope a higher timeout to
+  // just this hook rather than bumping vitest's global default (#360).
   beforeAll(async () => {
     const original = await runCascade(new Uint8Array(readFileSync(FIXTURE)));
     const withSyntheticSkills: CascadeResult = {
@@ -102,7 +105,7 @@ describe("#301 — multi-word skill does not split at the line-wrap boundary", (
     const bytes = await renderAtsResumePdf(model);
     const reparsed = await runCascade(bytes);
     reparsedSkills = reparsed.parsed.skills ?? [];
-  });
+  }, 20000);
 
   it("round-trips the same skill count (AC)", () => {
     expect(reparsedSkills.length).toBe(SYNTHETIC_SKILLS.length);

@@ -79,7 +79,11 @@ const model = (text: string): AtsResumeModel => ({
   sections: [],
 });
 
-describe("Poppins font embed (#314)", () => {
+// Each case does a real fontkit Poppins-embed render (the failing glyph case
+// renders twice); slow under a coverage-instrumented full-suite `verify` run,
+// so scope a higher timeout to just this suite rather than bumping vitest's
+// global default (#360).
+describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.resetModules();

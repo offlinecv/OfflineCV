@@ -236,6 +236,9 @@ describe("multi-line bullet pool is fully merged and correctly attributed (#162)
   // Merging wrapped continuations upstream (`mergeWrappedContinuations` in
   // `toSectionedResume`) makes the pool carry each bullet's full text, so it
   // matches its role by construction.
+  // Fixture-read + runCascade round-trip is slow under a coverage-instrumented
+  // full-suite `verify` run; scope a higher timeout to just this test rather
+  // than bumping vitest's global default (#360).
   it("recovers full wrapped-bullet text and attributes it to its role, not Other", async () => {
     const bytes = await fsp.readFile(
       join(
@@ -299,7 +302,7 @@ describe("multi-line bullet pool is fully merged and correctly attributed (#162)
     for (const t of fullText.slice(0, 3)) {
       expect(otherText.has(t)).toBe(false);
     }
-  });
+  }, 20000);
 });
 
 // ── suppressTitleOwnedBullets (#224) ────────────────────────────────────────────

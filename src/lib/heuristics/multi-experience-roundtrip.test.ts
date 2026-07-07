@@ -39,7 +39,10 @@ function distinctLabels(exp: ReadonlyArray<{ section_label?: string }>): string[
   return out;
 }
 
-describe("#311 multiple experience sections — parse + round-trip", () => {
+// Fixture-read + runCascade/render round-trip is slow under a
+// coverage-instrumented full-suite `verify` run; scope a higher timeout to
+// just this suite rather than bumping vitest's global default (#360).
+describe("#311 multiple experience sections — parse + round-trip", { timeout: 20000 }, () => {
   it("parses two experience-category sections into labeled roles", async () => {
     const bytes = await fsp.readFile(FIXTURE);
     const cascade = await runCascade(new Uint8Array(bytes));

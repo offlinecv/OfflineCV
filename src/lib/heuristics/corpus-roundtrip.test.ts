@@ -271,7 +271,10 @@ const CATEGORIES: Category[] = [
   "render",
 ];
 
-describe("corpus round-trip invariants (#293)", () => {
+// Fixture-read + full runCascade→render→runCascade round-trip per fixture is
+// slow under a coverage-instrumented full-suite `verify` run; scope a higher
+// timeout to just this suite rather than bumping vitest's global default (#360).
+describe("corpus round-trip invariants (#293)", { timeout: 20000 }, () => {
   const fixtures = walkPdfs(FIXTURE_ROOT);
 
   it("finds fixtures to round-trip", () => {
