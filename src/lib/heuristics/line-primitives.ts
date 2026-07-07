@@ -34,18 +34,30 @@ export function stripBullet(text: string): string {
  *
  * Two signals, both required, plus a word floor:
  *   - a lowercase letter (a long ALL-CAPS company/title isn't prose), and
- *   - an INTERNAL sentence break ("…accomplishments. Where…") — a period
- *     between two letters followed by a capitalized word. This is what keeps a
- *     long-but-header line like "Acme Analytics (8 employee venture-backed
- *     startup) New York, NY" out: it has commas and parentheses but no
- *     sentence period, so it stays a header (and its company is preserved).
+ *   - an INTERNAL sentence break ("…accomplishments. Where the team…") — a
+ *     period between two letters, a capitalized word, then a RUNNING CLAUSE:
+ *     a later lowercase-initial word in that second sentence. This is what
+ *     keeps a long-but-header line like "Acme Analytics (8 employee
+ *     venture-backed startup) New York, NY" out: it has commas and parentheses
+ *     but no sentence period, so it stays a header (and its company is
+ *     preserved). The lowercase-continuation requirement is the other half:
+ *     a résumé's "Company. City, State" header delimiter ALSO looks like a
+ *     "word. Capital" break, but its tail is an all-Title-Case location with
+ *     no lowercase word — so it is NOT prose. Without that guard, a two-column
+ *     role header like "…Northwind Technology. San Jose, California" was misread
+ *     as a description, its block dropped, and the role demoted to loose bullets
+ *     under a neighbor (#341).
  * The 8-word floor sits just under the scorer's 8-30-word bullet window, so a
  * paragraph the scorer would grade as a bullet is captured as body here too.
  * Glyph-less descriptions WITHOUT a sentence period (e.g. indented one-line
  * bullets) are left to the bullet/indent path, unchanged by this predicate.
  */
 const PROSE_MIN_WORDS = 8;
-const SENTENCE_BREAK_RE = /[a-z]{2}\.\s+[A-Z]/;
+// `word. Capital…` (a sentence break) followed, before the next period, by a
+// space + lowercase letter (a real second clause). The trailing lowercase is
+// what separates a running sentence from a "Company. City, State" location tail
+// (all Title-Case, no lowercase word → not prose). See #341.
+const SENTENCE_BREAK_RE = /[a-z]{2}\.\s+[A-Z][^.]*\s[a-z]/;
 export function isProseLine(text: string): boolean {
   const trimmed = text.trim();
   if (!/[a-z]/.test(trimmed)) return false;
