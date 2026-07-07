@@ -1,6 +1,6 @@
 ---
-name: review-pr
-description: Review a resumelint pull request the way a maintainer does — pull the diff, run the generic /code-review correctness pass, then layer resumelint's own gates (fixture PII, design-system reuse, style tokens, fallow dead-code, command-level bugs in skill/script files), structure the findings Blocking / Secondary / Nits, and post a PR review whose verdict matches what was found. Use when the user says "review PR #N", "/review-pr", "review this PR", or hands you a PR to critique before merge.
+name: pr-review
+description: Review a resumelint pull request the way a maintainer does — pull the diff, run the generic /code-review correctness pass, then layer resumelint's own gates (fixture PII, design-system reuse, style tokens, fallow dead-code, command-level bugs in skill/script files), structure the findings Blocking / Secondary / Nits, and post a PR review whose verdict matches what was found. Use when the user says "review PR #N", "/pr-review", "review this PR", or hands you a PR to critique before merge.
 argument-hint: <#|#N> [--repo owner/repo] [--post|--local] [--effort low|medium|high]
 ---
 
