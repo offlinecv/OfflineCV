@@ -541,11 +541,38 @@ function disambiguateCompanyTitle(
       // one.
       team = splits.find((s) => s !== anchorSplit && s !== titleSplit)?.text;
     } else {
-      // No title-keyword signal and no stacked-shape anchor — assume top line is
-      // company (single-line header default).
-      company = splits[0]?.text;
-      title = splits[1]?.text;
-      team = splits[2]?.text;
+      // #346 — stacked "Title / Company / Dates+Location" where the company
+      // name itself carries a title keyword ("Globex Assistant"), so
+      // `looksLikeCompany` finds no employer and BOTH above lines read as
+      // titles. When ≥2 header lines sit ABOVE a pure date/location anchor and
+      // the topmost reads like a title, positional order wins: top = title, the
+      // next line = company (kept WHOLE so a comma descriptor stays with the
+      // company, not cleaved into the title), and the anchor's location routes
+      // via team-rescue below. Without this the default inverts them (top =
+      // company) and the comma-split orphans the location. `filtered[src]` is
+      // the original line, so the company keeps its "…, descriptor" tail.
+      const aboveSources =
+        anchorIdx !== undefined
+          ? [
+              ...new Set(
+                splits.filter((s) => s.source < anchorIdx).map((s) => s.source),
+              ),
+            ].sort((a, b) => a - b)
+          : [];
+      if (
+        aboveSources.length >= 2 &&
+        looksLikeTitle(filtered[aboveSources[0]])
+      ) {
+        title = filtered[aboveSources[0]];
+        company = filtered[aboveSources[1]];
+        team = splits.find((s) => s.source === anchorIdx)?.text;
+      } else {
+        // No title-keyword signal and no stacked-shape anchor — assume top line
+        // is company (single-line header default).
+        company = splits[0]?.text;
+        title = splits[1]?.text;
+        team = splits[2]?.text;
+      }
     }
   }
 
