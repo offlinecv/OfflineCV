@@ -74,7 +74,7 @@ REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org
 1. **Resolve the issue set.**
    - **Parent given** — list its native sub-issues:
      ```bash
-     gh api repos/$REPO/issues/<PARENT>/sub_issues --jq '.[].number'
+     gh api --paginate repos/$REPO/issues/<PARENT>/sub_issues --jq '.[].number'
      ```
      If the parent has no native sub-issues but lists child `#N`s in its body,
      parse those instead. If you can't resolve a child set, **stop and ask**.
@@ -82,7 +82,7 @@ REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org
 2. **Fetch each issue** (title, state, body) and its **dependencies**:
    ```bash
    gh issue view <N> --repo $REPO --json number,title,state,body
-   gh api repos/$REPO/issues/<N>/dependencies/blocked_by --jq '.[].number'
+   gh api --paginate repos/$REPO/issues/<N>/dependencies/blocked_by --jq '.[].number'
    ```
 3. **Topologically sort by `blocked_by`** — if A blocks B (B is `blocked_by` A),
    A runs before B. Preserve the given order among issues with no edge between
