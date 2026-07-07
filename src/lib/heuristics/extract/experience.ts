@@ -508,8 +508,25 @@ function disambiguateCompanyTitle(
   if (companyIdx !== -1) {
     company = splits[companyIdx].text;
     const others = splits.filter((_, i) => i !== companyIdx);
-    title = others[0]?.text;
-    team = others[1]?.text;
+    // #342 — "Company [— Dept] — Location  Dates \n Title": the company sits on
+    // the anchor (date) row and the TITLE is the line BELOW it. Prefer a
+    // below-anchor split that reads like a title as the role title. Without
+    // this, an anchor-row segment (the location, or a department) takes the
+    // title slot via `others[0]` and the real below-anchor title is demoted to
+    // `team` or dropped. Symmetric to the "title above" tiebreak (#298), for the
+    // inverse title-below-anchor layout. Additive: when no such split exists the
+    // `else` keeps the exact prior mapping, so only the broken case changes.
+    const belowTitle =
+      anchorIdx !== undefined
+        ? others.find((s) => s.source > anchorIdx && looksLikeTitle(s.text))
+        : undefined;
+    if (belowTitle) {
+      title = belowTitle.text;
+      team = others.find((s) => s !== belowTitle)?.text;
+    } else {
+      title = others[0]?.text;
+      team = others[1]?.text;
+    }
   } else {
     // No company suffix — tiebreak on title keywords. If only one of the
     // first two splits looks title-shaped, assign accordingly.
