@@ -864,6 +864,34 @@ describe("extractExperience", () => {
     expect(confidence).toBeGreaterThan(0.8);
   });
 
+  it("segments two roles whose 'Title, Company. City, State' header runs 8+ words (#341)", () => {
+    // Two-column résumés commonly stack a single-line "Title, Company. City,
+    // State" header over a bare date line. When that header reaches 8 words —
+    // e.g. a two-word city + full state name — the period between company and
+    // city ("Technology. San Jose") used to read as a prose sentence break, so
+    // isProseLine mis-classified the header, its block was dropped as a
+    // date-only phantom, and the role's bullets were demoted to a neighbor / the
+    // "Other" pool (only the ≤7-word role survived). Both must now segment.
+    const section = mkSection("experience", [
+      { text: "Platform Engineering Intern, Northwind Technology. San Jose, California" },
+      { text: "May 2023 - Aug 2023" },
+      { text: "• Debugged and resolved front-end issues." },
+      { text: "• Reviewed code and improved quality." },
+      { text: "Data Services Intern, Brightex. Dayton, Ohio" },
+      { text: "May 2020 - Aug 2020" },
+      { text: "• Reduced database loading steps by 20%." },
+      { text: "• Built a Python validation script." },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(2);
+    // Each role keeps its OWN bullets — nothing merged into a neighbor.
+    expect(value[0].description).toContain("front-end issues");
+    expect(value[0].description).not.toContain("loading steps");
+    expect(value[1].description).toContain("loading steps");
+    expect(value[0].start_date).toBe("May 2023");
+    expect(value[1].start_date).toBe("May 2020");
+  });
+
   it("marks an open-ended role is_current (Present)", () => {
     const section = mkSection("experience", [
       { text: "Globex" },
