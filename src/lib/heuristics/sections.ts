@@ -23,6 +23,10 @@ import {
   EMAIL_RE,
   PHONE_RE,
   LINKEDIN_RE,
+  DATE_RANGE_RE,
+  DEGREE_RE,
+  INSTITUTION_HINTS,
+  SECTION_KEYWORDS,
   type SectionName,
 } from "./regex.ts";
 
@@ -928,7 +932,36 @@ export function splitIntoSections(
   // keeps closed.
   let prevLineOpenedBoundary = false;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Single-column STACKED grid rail label (#355 gap 2): a section keyword
+    // split vertically across two consecutive rail rows ("Technical" over
+    // "Skills"). Checked before `classifyLine`, gated to single column and to
+    // past the leading name/contact block, and only when this row is not itself
+    // an already-recognized header — so an ordinary two-line profile pair can't
+    // mint a false section. Opens the section and routes both rows' grid
+    // remainders into it, consuming the second row.
+    if (
+      singleColumn &&
+      (openedRealSection || seenContactInProfile) &&
+      i + 1 < lines.length &&
+      !matchSectionHeaderDetailed(line.text)
+    ) {
+      const stacked = tryStackedRailLabel(line, lines[i + 1]);
+      if (stacked) {
+        sections.push({
+          name: stacked.section,
+          rawHeading: stacked.rawHeading,
+          lines: [...stacked.remainders],
+        });
+        openedRealSection = true;
+        prevLineOpenedBoundary = true;
+        i++; // consume the second stacked-label row
+        continue;
+      }
+    }
+
     // Per-line column split-x (undefined for single-column pages / docs).
     const columnSplitX = columnBoundaries?.get(line.page);
     const action = classifyLine(
@@ -943,11 +976,15 @@ export function splitIntoSections(
       singleColumn,
     );
     if (action.kind === "open") {
-      sections.push({
+      const opened: PdfSection = {
         name: action.name,
         rawHeading: action.rawHeading ?? line.text.trim(),
         lines: [],
-      });
+      };
+      // #355 gap 1: retain the inline header row's remainder as the section's
+      // first content line (the role/degree entry that shared the keyword's row).
+      if (action.retainLine) opened.lines.push(action.retainLine);
+      sections.push(opened);
       openedRealSection = true;
       prevLineOpenedBoundary = true;
       continue;
@@ -962,7 +999,19 @@ export function splitIntoSections(
 
 /** What `classifyLine` decided to do with one line. */
 type LineAction =
-  | { kind: "open"; name: SectionName; rawHeading?: string }
+  | {
+      kind: "open";
+      name: SectionName;
+      rawHeading?: string;
+      /**
+       * A content line to RETAIN in the newly-opened section (the #355
+       * single-column leading-token recovery: the row's non-header remainder,
+       * which carries the section's first entry — a role title + dates, a
+       * degree + institution). Absent for ordinary headers, whose line is a pure
+       * label consumed by the boundary.
+       */
+      retainLine?: PdfLine;
+    }
   | { kind: "append"; marksContactEnd: boolean };
 
 /**
@@ -1025,6 +1074,244 @@ function isInstitutionRepeat(
   // Experience: relax on a two-column flatten OR once a full entry block has
   // intervened (the 2nd category header is a new group, not an institution line).
   return !singleColumn || prevLineOpenedBoundary;
+}
+
+// ── Single-column label-rail header recovery (#355) ─────────────────────────
+//
+// A "section-label rail" résumé (single column — `detectColumnBoundaries` finds
+// no gutter) puts the section keyword in a left rail cell that pdfjs merges onto
+// the SAME line as the section's first entry. Two shapes slip past every
+// existing recognizer:
+//
+//   1. INLINE / leading-token header — the keyword LEADS a long merged content
+//      row ("Experience  Staff Engineer, Platform  Aug 2024 - Present").
+//      `matchSectionHeaderDetailed` bails (`normalized.length > 40`), the
+//      head-noun anchor fallback needs the head noun LAST, and the visual paths
+//      need a short header-shaped line — so the row never opens its section.
+//   2. STACKED grid rail label — the keyword is split VERTICALLY across two rows
+//      ("Technical" over "Skills"), each the lead cell of a skills grid, so
+//      neither single row's lead token equals the `technical skills` alias.
+//
+// Both recoveries are gated to SINGLE-COLUMN only (`columnSplitX === undefined`
+// / `singleColumn`): the unguarded trailing-anchor path (`matchSectionAnchorToken`)
+// is the two-column analogue, and loosening recognition on the labeled two-column
+// corpus regresses it. Neither path here calls that forbidden text-only-unsafe
+// lookup.
+
+/**
+ * Sections whose inline leading-token header we recover on the single-column
+ * text-only path — restricted to the two with a strong, closed-shape "first
+ * entry" tell (a date range for experience; a degree/institution for
+ * education). `skills`/`summary`/etc. have no comparably tight remainder shape,
+ * so admitting them here would reopen prose false positives — they stay out.
+ */
+const LEADING_TOKEN_SECTIONS: readonly SectionName[] = ["experience", "education"];
+
+// A strong date anchor that a bare `YYYY - YYYY` span lacks: a month-year, a
+// season-year, a numeric slash-date, an apostrophe-year, a `20XX` redaction
+// stub, or an open-ended "Present"-family token. Requiring one inside the
+// remainder is what separates a real role date tail ("Aug 2024 - Present",
+// "06/2021 - 09/2023") from a coincidental bare year span buried in prose
+// ("Marathon running club, 2018 - 2022").
+//
+// The month and season anchors REQUIRE an adjacent year: this rejects a bare
+// year span with no month/season token ("2018 - 2022") — the coincidental-prose
+// case above — and defuses the verb "may" and a stray "Marathon"/"March" NOT
+// followed by a year. It does NOT, on its own, reject a month word that happens
+// to be directly followed by a year ("Marathon 2018" still matches); that
+// residual is held out by the two guards this token is AND-ed with — a real
+// `DATE_RANGE_RE` span AND the leading alias being item[0]'s own text run — not
+// by this regex alone. Non-global, so `.test` is stateless.
+const STRONG_DATE_TOKEN_RE = new RegExp(
+  [
+    // month-year: "Aug 2024", "August 2024", "Aug. '24", "Sep 20XX"
+    "\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?\\s+(?:\\d{4}|'\\d{2}|20XX)",
+    // season-year: "Summer 2013"
+    "\\b(?:Spring|Summer|Fall|Autumn|Winter)\\s+\\d{4}",
+    // numeric slash date: "06/2021", "6-2021"
+    "\\d{1,2}[/-]\\d{4}",
+    // open-ended present-family token
+    "\\b(?:Present|Current|Ongoing|Now)\\b",
+    // apostrophe-year / redaction stub, standalone
+    "'\\d{2}\\b",
+    "\\b20XX\\b",
+  ].join("|"),
+  "i",
+);
+
+// Longest leading slice of an education remainder in which the degree/institution
+// tell must appear. A real first entry LEADS with the degree or the school name,
+// so a credential word buried deep in a sentence ("… a member of the Broad
+// Institute alumni network") is rejected — only a lead-anchored tell counts.
+const EDU_LEAD_WINDOW = 64;
+
+/**
+ * True when `remainder` (the row text after the leading section keyword) reads
+ * like that section's FIRST entry — the guard that separates a real inline rail
+ * header from a coincidental keyword-led PROSE line (#355 FP defense).
+ *
+ * Two prose rejections apply to BOTH sections, because a real rail first entry
+ * is a proper-noun / title-cased run (a job title, a degree, a school):
+ *   1. It must LEAD with an uppercase letter. A lowercase connective lead
+ *      ("spanning …", "focused …") or a numeric lead ("8 years …") is prose.
+ *   2. It must not END as a sentence (terminal `.`/`!`/`?`).
+ *
+ * Then the section-specific tell:
+ *   - experience: a STRONG date range — a real month/season/slash/Present-anchored
+ *     tail, NOT a bare `YYYY - YYYY` span (many prose lines carry a bare year
+ *     pair, so `DATE_RANGE_RE` alone over-admits).
+ *   - education: a degree credential OR institution name anchored in the LEADING
+ *     portion (the entry leads with it; a hint buried mid-sentence does not count).
+ * All regexes are non-global, so `.test` is stateless here.
+ */
+function remainderLooksLikeEntry(section: SectionName, remainder: string): boolean {
+  const trimmed = remainder.trim();
+  if (!trimmed) return false;
+  // Prose guards (both sections).
+  if (!/^[A-Z]/.test(trimmed)) return false; // lowercase / numeric lead → prose
+  if (/[.!?]\s*$/.test(trimmed)) return false; // terminal sentence mark → prose
+  if (section === "experience") {
+    // Strong, closed-shape tell: a real role date tail, not a bare year span.
+    return DATE_RANGE_RE.test(trimmed) && STRONG_DATE_TOKEN_RE.test(trimmed);
+  }
+  // education: degree/institution, anchored in the leading portion.
+  const lead = trimmed.slice(0, EDU_LEAD_WINDOW);
+  return DEGREE_RE.test(lead) || INSTITUTION_HINTS.test(lead);
+}
+
+/** Build a `PdfLine` from a contiguous subset of another line's items (the row
+ *  remainder after the leading rail label), inheriting the parent's `gapAbove`.
+ *  Mirrors `groupLinesSingle`'s line builder so the retained remainder is a
+ *  first-class content line downstream. */
+function buildLineFromItems(items: PdfTextItem[], parent: PdfLine): PdfLine {
+  const text = mergeItemText(items);
+  const ys = items.map((i) => i.y);
+  return {
+    page: items[0].page,
+    y: ys.reduce((a, b) => a + b, 0) / ys.length,
+    x: items[0].x,
+    items: [...items],
+    text,
+    maxFontSize: Math.max(...items.map((i) => i.fontSize)),
+    allCaps: text.replace(/[^A-Za-z]/g, "").length > 0 && text === text.toUpperCase(),
+    gapAbove: parent.gapAbove,
+  };
+}
+
+/**
+ * Recover an INLINE leading-token header (#355 gap 1). Matches the section alias
+ * against a whole-ITEM prefix of the line — NOT a sub-word split of the merged
+ * text. Requiring the alias to align to item boundaries is the load-bearing FP
+ * guard: a rail label is drawn as its own positioned text run (its own item),
+ * whereas a job title whose first word happens to be a keyword ("Experience
+ * Designer") is one continuous run, so its item[0] is the whole title and never
+ * equals a bare alias. The remainder items (past the alias) become the section's
+ * retained first content line. Returns null when no guarded match is found.
+ */
+function matchLeadingTokenHeader(
+  line: PdfLine,
+): { section: SectionName; alias: string; remainder: PdfLine } | null {
+  const items = line.items;
+  if (items.length < 2) return null; // need alias prefix + a non-empty remainder
+  // Aliases are ≤3 words; a rail label is ≤3 items. Try the shortest matching
+  // prefix first so a longer alias's own prefix ("work" of "work experience")
+  // is only consulted when the short form isn't itself an alias.
+  const maxPrefix = Math.min(3, items.length - 1);
+  for (let k = 1; k <= maxPrefix; k++) {
+    const aliasText = mergeItemText(items.slice(0, k));
+    const aliasTrim = aliasText.trim();
+    // Reject a trailing colon on the label run (#355 FP): "Experience:" leads an
+    // inline "label: value" prose/summary line ("Experience: 8 years …"), never a
+    // clean rail cell header. A rail label carries no colon — reject rather than
+    // normalize the colon away.
+    if (aliasTrim.endsWith(":")) continue;
+    const normalized = aliasTrim.toLowerCase().replace(/[·•]+$/, "").trim();
+    for (const section of LEADING_TOKEN_SECTIONS) {
+      if (!SECTION_KEYWORDS[section].includes(normalized)) continue;
+      const remItems = items.slice(k);
+      if (!remainderLooksLikeEntry(section, mergeItemText(remItems))) continue;
+      return {
+        section,
+        alias: aliasTrim,
+        remainder: buildLineFromItems(remItems, line),
+      };
+    }
+  }
+  return null;
+}
+
+/** x tolerance (pt) for treating two rail-label cells as sitting in the same
+ *  rail column (the stacked-label test). */
+const RAIL_X_TOL = 4;
+
+/** Max length (chars) of one horizontal grid value cell — a skill token
+ *  ("Python", "Kafka") is short; a prose clause is not. */
+const GRID_CELL_MAX = 24;
+
+/**
+ * True when a row PAST its lead cell reads like a horizontal grid of value
+ * tokens — ≥2 cells, each short and not a sentence — rather than prose (#355
+ * gap-2 finding #2 FP guard). A real stacked rail label ("Technical" over
+ * "Skills") sits atop a skills grid whose value cells are single short tokens;
+ * two consecutive prose lines whose leads coincidentally join to an alias
+ * ("Technical debt …" over "Skills matrix …") do not form such a grid.
+ */
+function isGridValueRow(row: PdfLine): boolean {
+  // pdfjs emits whitespace-only items between separately-drawn cells; drop them
+  // so they don't masquerade as (empty) value cells.
+  const values = row.items
+    .slice(1)
+    .map((it) => it.str.trim())
+    .filter((t) => t.length > 0);
+  if (values.length < 2) return false;
+  return values.every((t) => t.length <= GRID_CELL_MAX && !/[.!?]$/.test(t));
+}
+
+/**
+ * Recover a STACKED grid rail label (#355 gap 2): two consecutive single-column
+ * lines whose LEADING items, joined, form a section alias ("Technical" +
+ * "Skills" → `technical skills` → skills). The grid values (each row's remainder
+ * past its lead cell) become the section's content. Scoped tightly — both lead
+ * cells sit in the same rail column (same left x), and the joined lead tokens
+ * must EXACTLY equal a canonical alias — so ordinary two-line body content can't
+ * mint a false section. Returns null when the pair is not a stacked rail label.
+ */
+function tryStackedRailLabel(
+  a: PdfLine,
+  b: PdfLine,
+): { section: SectionName; rawHeading: string; remainders: PdfLine[] } | null {
+  if (a.items.length < 1 || b.items.length < 1) return null;
+  if (a.page !== b.page) return null;
+  const leadA = a.items[0];
+  const leadB = b.items[0];
+  // Same rail column: both lead cells share a left edge.
+  if (Math.abs(leadA.x - leadB.x) > RAIL_X_TOL) return null;
+  // Join the two lead cells with an explicit space — they are STACKED (same x,
+  // different y), so `mergeItemText` (which infers spacing from a same-line
+  // left-to-right gap) would compute a negative gap and weld them ("Technical"
+  // + "Skills" → "TechnicalSkills"). Collapse each cell's own letter-spacing
+  // first (a single-item `mergeItemText` does exactly that).
+  const joined = `${mergeItemText([leadA])} ${mergeItemText([leadB])}`.trim();
+  const normalized = joined.toLowerCase().replace(/[:·•]+$/, "").trim();
+  let matched: SectionName | null = null;
+  for (const [name, aliases] of Object.entries(SECTION_KEYWORDS) as Array<
+    [SectionName, readonly string[]]
+  >) {
+    if (aliases.includes(normalized)) {
+      matched = name;
+      break;
+    }
+  }
+  if (!matched) return null;
+  // Finding #2 FP guard: require each row to be a real grid (≥2 short value
+  // cells past its lead), so two prose lines whose leads happen to join to an
+  // alias can't mint a spurious section.
+  if (!isGridValueRow(a) || !isGridValueRow(b)) return null;
+  const remainders: PdfLine[] = [];
+  for (const row of [a, b]) {
+    if (row.items.length > 1) remainders.push(buildLineFromItems(row.items.slice(1), row));
+  }
+  return { section: matched, rawHeading: joined.trim(), remainders };
 }
 
 /**
@@ -1108,6 +1395,27 @@ function classifyLine(
         name: recovered,
         rawHeading: stripSidebarNoisePrefix(line.text),
       };
+  }
+
+  // Single-column INLINE leading-token header (#355 gap 1): the keyword leads a
+  // merged content row carrying the section's first entry. Gated to single
+  // column (`columnSplitX === undefined`) and to past the leading name/contact
+  // block (mirrors the visual-header suppression) so a keyword-led tagline in
+  // the header cluster can't open a section. The item-boundary + remainder-entry
+  // guards live in `matchLeadingTokenHeader`.
+  if (
+    columnSplitX === undefined &&
+    (openedRealSection || seenContactInProfile)
+  ) {
+    const inline = matchLeadingTokenHeader(line);
+    if (inline) {
+      return {
+        kind: "open",
+        name: inline.section,
+        rawHeading: inline.alias,
+        retainLine: inline.remainder,
+      };
+    }
   }
 
   return { kind: "append", marksContactEnd: !openedRealSection && contactShaped };

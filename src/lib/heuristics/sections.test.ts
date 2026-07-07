@@ -311,6 +311,132 @@ describe("splitIntoSections — visual-primary boundary path (#112)", () => {
   });
 });
 
+describe("splitIntoSections — single-column label-rail recovery FP gate (#355)", () => {
+  // The inline leading-token recognizer (`matchLeadingTokenHeader`) recovers a
+  // rail header whose keyword LEADS a merged content row ("Experience  Staff
+  // Engineer, Platform  Aug 2024 - Present"). Its FP defense — a whole-item alias
+  // prefix — is defeated when a bold inline label ("Experience:" / "Education")
+  // is its OWN styled run followed by a value run on the same line: the alias IS
+  // item[0], so it matches. `remainderLooksLikeEntry` is the guard that must
+  // reject those coincidental keyword-led PROSE lines. These pin both directions.
+  //
+  // Rows are modelled as MULTI-ITEM lines: cells sharing a `lineIndex` group into
+  // one `PdfLine` (ordered by x), so item[0] is the styled label run and the rest
+  // is the value remainder — the exact shape pdfjs produces for a rail row.
+
+  const RAIL_X = 54; // left rail margin
+  const CELL_GAP = 20; // inter-cell gap (pt) — < COLUMN_GAP_THRESHOLD (50) so a
+  // multi-cell row groups into ONE PdfLine (mkItem width = len * fontSize * 0.5).
+
+  /** Lay a run of cells left-to-right on one line (shared `lineIndex`), spacing
+   *  each by CELL_GAP from the prior cell's right edge — the drawRow analogue,
+   *  so the row groups into a single multi-item `PdfLine`. */
+  function railRow(
+    lineIndex: number,
+    cells: string[],
+    fontSize = 10,
+  ): Array<{ text: string; fontSize: number; x: number; lineIndex: number }> {
+    let x = RAIL_X;
+    return cells.map((text) => {
+      const spec = { text, fontSize, x, lineIndex };
+      x += text.length * fontSize * 0.5 + CELL_GAP;
+      return spec;
+    });
+  }
+
+  const PROFILE = [
+    { text: "Jane Smith", fontSize: 16, x: RAIL_X, lineIndex: 0 },
+    {
+      text: "jane.smith@example.com | (312) 555-0123 | San Francisco, CA",
+      fontSize: 10,
+      x: RAIL_X,
+      lineIndex: 1,
+    },
+  ];
+
+  it("does NOT open experience for `Experience:` ‖ prose summary with a bare year span", () => {
+    const sections = build([
+      ...PROFILE,
+      // Trailing colon marks an inline "label: value" summary lead, not a rail
+      // cell; the remainder is prose ("8 years …") with a bare year span.
+      ...railRow(2, ["Experience:", "8 years (2015 - 2023) in distributed systems"]),
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("does NOT open experience for `Experience` ‖ a lowercase-connective prose lead", () => {
+    const sections = build([
+      ...PROFILE,
+      // Remainder leads with a lowercase connective ("spanning …") — prose, even
+      // though it carries a "2015 - 2023" span.
+      ...railRow(2, ["Experience", "spanning 2015 - 2023 across fintech"]),
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("does NOT open education for `Education` ‖ a lowercase-lead sentence mentioning an institution", () => {
+    const sections = build([
+      ...PROFILE,
+      // Lowercase lead + terminal period + `Institute` buried mid-sentence.
+      ...railRow(2, ["Education", "focused, trained at the Broad Institute."]),
+    ]);
+    expect(names(sections)).not.toContain("education");
+  });
+
+  it("does NOT open experience for `Activities` ‖ a capitalized prose line with a BARE year span", () => {
+    const sections = build([
+      ...PROFILE,
+      // Capitalized lead, no terminal period — but the date is a bare `2018 -
+      // 2022` span, not a month/season/slash/Present-anchored role tail. (A month
+      // regex would also mis-fire on "Marathon" — this pins the year-adjacency.)
+      ...railRow(2, ["Activities", "Marathon running club, 2018 - 2022"]),
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("DOES open experience for the intended inline rail header (title lead + month-anchored date tail)", () => {
+    const sections = build([
+      ...PROFILE,
+      ...railRow(2, ["Experience", "Staff Engineer, Platform", "Aug 2024 - Present"]),
+    ]);
+    const exp = sectionContaining(sections, "Staff Engineer");
+    expect(exp).toBeDefined();
+    expect(exp!.name).toBe("experience");
+  });
+
+  it("DOES open education for the intended inline rail header (degree + institution lead)", () => {
+    const sections = build([
+      ...PROFILE,
+      ...railRow(2, ["Education", "B.S. Computer Science, State University", "2013 - 2017"]),
+    ]);
+    const edu = sectionContaining(sections, "B.S. Computer Science");
+    expect(edu).toBeDefined();
+    expect(edu!.name).toBe("education");
+  });
+
+  it("DOES open skills for the intended STACKED rail label atop a value grid (`Technical` / `Skills`)", () => {
+    const sections = build([
+      ...PROFILE,
+      // Lead cells "Technical" over "Skills" join to the `technical skills` alias;
+      // each row carries ≥2 short grid value cells.
+      ...railRow(2, ["Technical", "Java", "Python", "SQL", "Kafka"]),
+      ...railRow(3, ["Skills", "Spring", "Spark", "React", "AWS"]),
+    ]);
+    expect(names(sections)).toContain("skills");
+  });
+
+  it("does NOT open skills for two PROSE lines whose leads coincidentally join to `Technical Skills` (finding #2)", () => {
+    const sections = build([
+      ...PROFILE,
+      // Leads join to the alias, but each remainder is a single prose clause, not
+      // a grid of value cells — the grid-value guard must reject it.
+      ...railRow(2, ["Technical", "debt reduction was a major initiative"]),
+      ...railRow(3, ["Skills", "matrix mapped every role to a competency"]),
+    ]);
+    expect(names(sections)).not.toContain("skills");
+  });
+});
+
 describe("splitIntoSections — coursework header termination (#163)", () => {
   // A "Relevant Coursework" header (now an `education` keyword alias, #163
   // sub-problem 1) must OPEN an education section and thereby TERMINATE the
