@@ -1,14 +1,13 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.64,
     "triggers": [
       "two_column"
     ],
     "tiers": [
       "t0_layout",
-      "t1_openresume",
-      "t1_5_regex"
+      "t1_openresume"
     ],
     "suggestedEscalation": "ner",
     "fieldsPopulated": [
@@ -17,7 +16,10 @@
       "education",
       "email",
       "experience",
+      "family_name",
+      "full_name",
       "github_url",
+      "given_name",
       "heuristic_achievements",
       "linkedin_url",
       "phone",
@@ -37,8 +39,8 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 43,
-    "preLayoutOverall": 50,
+    "overall": 45,
+    "preLayoutOverall": 53,
     "specificity": {
       "score": 8,
       "max": 40,
@@ -54,12 +56,11 @@
       "totalBullets": 8
     },
     "completeness": {
-      "score": 21,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
         "location",
-        "name",
         "summary"
       ]
     },

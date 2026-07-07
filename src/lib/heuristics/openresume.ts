@@ -184,13 +184,38 @@ export function parseHeuristic(
   // single-column, and the reconstructed Download-PDF is always single-column,
   // so the round-trip is unaffected.
   const singleColumn = !boundaries || boundaries.size === 0;
+  // #349 name-recovery profile: on two-column layouts (Deedy), a centred name
+  // at the very top can straddle the column split so column-ordered flatten
+  // pushes it out of the profile region and into a body section. Rebuild the
+  // profile section WITHOUT column ordering to give `extractName` a second
+  // chance at the top-of-page header cluster. Skipped on single-column docs
+  // (the two views are identical). Read-only: never overrides section routing
+  // for anything but the name.
+  const nameFallbackProfile = singleColumn
+    ? undefined
+    : findNameFallbackProfile(items);
   return buildHeuristicResult(
     lines,
     sections,
     sectionSource,
     annotations,
     singleColumn,
+    nameFallbackProfile,
   );
+}
+
+/**
+ * Build a profile section from the raw items without column reordering, so a
+ * centred top-of-page name that straddles the column split (Deedy — #349)
+ * stays adjacent to the contact line where `extractName` looks for it. This
+ * mirrors the primary section-splitter path but omits the column boundaries;
+ * used only as a fallback for name extraction, so the primary column-ordered
+ * routing that every other extractor depends on is untouched.
+ */
+function findNameFallbackProfile(items: PdfTextItem[]): PdfSection | undefined {
+  const uncolumnedLines = groupIntoLines(items);
+  const uncolumnedSections = splitIntoSections(uncolumnedLines);
+  return findSection(uncolumnedSections, "profile");
 }
 
 /**
@@ -317,6 +342,7 @@ function buildHeuristicResult(
   sectionSource: "markdown" | "regex",
   annotations: PdfLinkAnnotation[] = [],
   singleColumn = true,
+  nameFallbackProfile?: PdfSection,
 ): HeuristicResult {
 
   const profile = findSection(sections, "profile") ?? {
@@ -329,7 +355,16 @@ function buildHeuristicResult(
   // it consumed (a footer "Links" line lifted into the contact card); those are
   // stripped from every section's candidate pool BEFORE the body extractors run
   // (#134), so the link never re-renders as a phantom project/achievement entry.
-  const name = extractName(profile);
+  let name = extractName(profile);
+  // #349 fallback: on two-column layouts the primary profile can miss a
+  // centred top-of-page name that the column reorder pushed into a body
+  // section (Deedy). Retry against the un-column-reordered profile only when
+  // the primary attempt produced no name — the primary path stays authoritative
+  // for every single-column and every two-column-with-name-in-profile case.
+  if (!name.value && nameFallbackProfile) {
+    const fallbackName = extractName(nameFallbackProfile);
+    if (fallbackName.value) name = fallbackName;
+  }
   const contact = extractContact(profile, lines, annotations);
 
   const ownedSections = stripConsumedLines(sections, contact.consumedLines);

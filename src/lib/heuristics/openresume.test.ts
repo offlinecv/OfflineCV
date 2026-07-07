@@ -82,6 +82,55 @@ describe("parseHeuristic — missing fields flag low confidence", () => {
   });
 });
 
+describe("parseHeuristic — two-column name-recovery fallback (issue #349)", () => {
+  // Deedy-style two-column layout: the centred top-of-page name straddles the
+  // column split, so column-ordered reading pushes it out of the profile band
+  // (contact line stays; name gets flattened into a body section on the right).
+  // The primary section-routed extractor misses it. The fallback re-scans the
+  // top-of-page cluster from the un-column-reordered items and recovers the
+  // name that the column reorder hid.
+  it("recovers a centred top-of-page name that column-ordered flatten pushed out of profile", () => {
+    // Left column at x=72 (Education), right column at x=320 (Experience). The
+    // NAME sits at x=200 (centred, straddling the split) at the very top.
+    const items = mkItems([
+      { text: "Jane Smith", lineIndex: 0, x: 200, fontSize: 22 },
+      { text: "jane.smith@example.com | (312) 555-0123", lineIndex: 1, x: 200, fontSize: 10 },
+      // Left column: education
+      { text: "EDUCATION", lineIndex: 2, x: 72, fontSize: 13 },
+      { text: "CORNELL UNIVERSITY", lineIndex: 3, x: 72, fontSize: 12 },
+      { text: "MEng in Computer Science", lineIndex: 4, x: 72, fontSize: 10 },
+      // Right column: experience (same y range as left column education)
+      { text: "EXPERIENCE", lineIndex: 2, x: 320, fontSize: 13 },
+      { text: "FACEBOOK | Software Engineer", lineIndex: 3, x: 320, fontSize: 12 },
+      { text: "Jan 2015 - Present", lineIndex: 4, x: 320, fontSize: 10 },
+    ]);
+    const boundaries = new Map<number, number>([[1, 250]]);
+    const result = parseHeuristic(
+      items,
+      mkDefaultPages(items),
+      undefined,
+      [],
+      boundaries,
+    );
+    expect(result.parsed.full_name).toBe("Jane Smith");
+    // Recovered from the alternate profile — same extractor, so confidence
+    // must clear the score's contact-confidence floor.
+    expect(result.fieldConfidence.full_name ?? 0).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it("does not override a name the primary path already found", () => {
+    // A single-column resume with a normal name-in-profile — the fallback is
+    // gated on `singleColumn` so it never runs here; even if it did, the
+    // primary result would win.
+    const items = mkItems([
+      { text: "Jane Q. Doe", fontSize: 18 },
+      { text: "jane.doe@example.com", fontSize: 10 },
+    ]);
+    const result = parseHeuristic(items, mkDefaultPages(items));
+    expect(result.parsed.full_name).toBe("Jane Q. Doe");
+  });
+});
+
 describe("parseHeuristic — markdown-anchored section splitting", () => {
   // Reusable clean resume items. The cascade emitter would promote 13pt
   // lines to `##` relative to the 10-11pt body.
