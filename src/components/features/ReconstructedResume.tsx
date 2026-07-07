@@ -325,6 +325,44 @@ const EXPERIENCE_FIELD_MAP: Record<
   end_date: "end_date",
 };
 
+/**
+ * Per-#311: split the flat role list into its source experience-category
+ * groups when roles carry distinct `section_label`s. The first real role's
+ * label heads the whole section (`topHeading`); each LATER group whose label
+ * differs from the prior one gets an inline sub-heading before its first role.
+ * With no labels — the common single-experience-section case — every entry is
+ * undefined, so `topHeading` is `heading ?? "Experience"` and `inlineHeadings`
+ * is all undefined: nothing extra renders and output is byte-identical.
+ */
+function computeExperienceHeadings(
+  groups: readonly BulletGroup[],
+  sectionLabels: readonly (string | undefined)[] | undefined,
+  heading: string | undefined,
+): { topHeading: string; inlineHeadings: (string | undefined)[] } {
+  const labelFor = (g: BulletGroup): string | undefined =>
+    g.experienceIndex === null ? undefined : sectionLabels?.[g.experienceIndex];
+  let firstLabel: string | undefined;
+  let prevLabel: string | undefined;
+  let seenReal = false;
+  const inlineHeadings: (string | undefined)[] = [];
+  for (const g of groups) {
+    if (g.experienceIndex === null) {
+      inlineHeadings.push(undefined);
+      continue;
+    }
+    const label = labelFor(g);
+    if (!seenReal) {
+      firstLabel = label;
+      inlineHeadings.push(undefined);
+    } else {
+      inlineHeadings.push(label && label !== prevLabel ? label : undefined);
+    }
+    if (label) prevLabel = label;
+    seenReal = true;
+  }
+  return { topHeading: firstLabel ?? heading ?? "Experience", inlineHeadings };
+}
+
 function ExperienceSection({
   heading,
   sectionLabels,
@@ -349,7 +387,7 @@ function ExperienceSection({
   /** Per-role verbatim experience-category labels (#311), indexed by
    *  `experienceIndex`. Present (with ≥2 distinct values) only when the résumé
    *  carried more than one experience section; otherwise every entry is
-   *  undefined and a single "Experience" heading renders exactly as before. */
+   *  undefined and a single "Experience" heading renders as it did before. */
   sectionLabels?: readonly (string | undefined)[];
   /** Pre-built experience groups + the shared "Other" group appended last. */
   groups: BulletGroup[];
@@ -380,37 +418,11 @@ function ExperienceSection({
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
 
-  // Per-#311: split the flat role list into its source experience-category
-  // groups when roles carry distinct `section_label`s. The first group's label
-  // heads the whole section (top `SectionHeading`); each LATER group gets an
-  // inline sub-heading before its first role. With no labels — the common
-  // single-experience-section case — every `labelFor` is undefined, so
-  // `topHeading` is `heading ?? "Experience"` and `inlineHeadings` is all
-  // undefined: nothing extra renders and the output is byte-identical to before.
-  const labelFor = (g: BulletGroup): string | undefined =>
-    g.experienceIndex === null ? undefined : sectionLabels?.[g.experienceIndex];
-  let firstLabel: string | undefined;
-  const inlineHeadings: (string | undefined)[] = [];
-  {
-    let prevLabel: string | undefined;
-    let seenReal = false;
-    for (const g of groups) {
-      if (g.experienceIndex === null) {
-        inlineHeadings.push(undefined);
-        continue;
-      }
-      const label = labelFor(g);
-      if (!seenReal) {
-        firstLabel = label;
-        inlineHeadings.push(undefined);
-      } else {
-        inlineHeadings.push(label && label !== prevLabel ? label : undefined);
-      }
-      if (label) prevLabel = label;
-      seenReal = true;
-    }
-  }
-  const topHeading = firstLabel ?? heading ?? "Experience";
+  const { topHeading, inlineHeadings } = computeExperienceHeadings(
+    groups,
+    sectionLabels,
+    heading,
+  );
   // Per-section write-back handlers for the whole-résumé review (#211 apply on
   // the whole-résumé path), keyed by the same `experience:<index>` id
   // `buildResumeSections` mints. `obsIndices` is parallel to each section's

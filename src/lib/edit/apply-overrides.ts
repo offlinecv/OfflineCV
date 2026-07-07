@@ -558,19 +558,29 @@ function applyAddedEntriesAndBullets(
     poolLines.push(...pushAddedEntry(nextParsed, entry, addedBullets));
   }
 
-  // Added bullets on EXISTING parsed entries: append to that entry's
-  // description (cloned) and to the pool.
+  poolLines.push(...applyAddedBulletsToExistingEntries(nextParsed, addedBullets));
+
+  return appendPoolLinesToSections(sections, poolLines);
+}
+
+/** Fold `addedBullets` keyed to EXISTING parsed entries into those entries'
+ *  descriptions (cloned) and return the `"• "`-prefixed pool copies. Keys for
+ *  added entries (`"added:"` prefix) are handled by {@link pushAddedEntry} and
+ *  skipped here. */
+function applyAddedBulletsToExistingEntries(
+  nextParsed: HeuristicParsedResume,
+  addedBullets: AddedBullets,
+): string[] {
+  const poolLines: string[] = [];
   for (const [key, lines] of Object.entries(addedBullets)) {
-    if (key.startsWith("added:")) continue; // added entries handled above
-    if (lines.length === 0) continue;
+    if (key.startsWith("added:") || lines.length === 0) continue;
     const target = resolveParsedDescriptionTarget(nextParsed, key);
     if (!target) continue;
     const existing = target.description ? [target.description] : [];
     target.description = [...existing, ...lines].join("\n");
     for (const b of lines) poolLines.push(`• ${b}`);
   }
-
-  return appendPoolLinesToSections(sections, poolLines);
+  return poolLines;
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
