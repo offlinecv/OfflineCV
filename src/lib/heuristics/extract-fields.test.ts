@@ -864,6 +864,28 @@ describe("extractExperience", () => {
     expect(confidence).toBeGreaterThan(0.8);
   });
 
+  it("does not invert title/company when the company line carries a comma descriptor + a title keyword (#346)", () => {
+    // Stacked "Title / Company / Dates+Location" where the company name itself
+    // contains a title keyword ("Assistant") and a comma descriptor. Pre-fix,
+    // looksLikeCompany found no employer, both above lines read as titles, and
+    // the "top = company" default INVERTED them (company="Sr. Engineering
+    // Manager", title="Globex Assistant") while the comma split orphaned the
+    // location. Roles whose company line has a real employer signal (Role 1's
+    // "Systems") were unaffected — this pins the comma-descriptor case.
+    const section = mkSection("experience", [
+      { text: "Sr. Engineering Manager" },
+      { text: "Globex Assistant, Assistant on Living-Room TV" },
+      { text: "06/2017 - 04/2021 Austin, TX" },
+      { text: "• Launched a reimagined assistant experience." },
+      { text: "• Improved yield by 44 percent." },
+    ]);
+    const { value } = extractExperience(section);
+    expect(value).toHaveLength(1);
+    expect(value[0].title).toBe("Sr. Engineering Manager");
+    expect(value[0].company).toBe("Globex Assistant, Assistant on Living-Room TV");
+    expect(value[0].location).toBe("Austin, TX");
+  });
+
   it("segments two roles whose 'Title, Company. City, State' header runs 8+ words (#341)", () => {
     // Two-column résumés commonly stack a single-line "Title, Company. City,
     // State" header over a bare date line. When that header reaches 8 words —
