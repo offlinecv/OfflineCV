@@ -94,14 +94,56 @@ points at which one:
 The `verify` block is the fast triage: a `PARSER-MISS` means the data is in the
 PDF and the bug is ours; `absent-in-pdf` means stop — nothing to fix.
 
-## Filing what you find
+## Filing what you find (gated auto-file)
 
-Localize the layer, then file a **public** `resumelint-org/resumelint` issue
-describing the corruption **by category, using a synthetic repro** — never the
-candidate's real values. Reproduce with a synthetic-persona PDF (fake name,
-`@example.com`, a `555-01xx` phone on a real area code) so the fixture is
-PII-free; the letter-spaced-name repro fixture under
-`tests/fixtures/pdfs/unknown/` is the template.
+Once you've localized the layer, you can turn the finding into a
+`resumelint-org/resumelint` issue **without leaving the probe** — via the in-repo
+[`create-gh-issue`](../create-gh-issue/SKILL.md) skill. Filing is **gated**: draft,
+show, confirm, then write. Never blast-file.
+
+**PII guardrail carries over unchanged.** The issue body must describe the
+corruption **by category with a synthetic repro** — never the candidate's real
+name / email / phone / location. The category is what you cite in the console
+("name dropped: letter-spaced heading"); the value stays in the gitignored scratch
+dir. If you can't restate the defect without a real value, you can't file it yet —
+build the synthetic repro first.
+
+### 1. Dedup first (required)
+
+Before drafting, search open issues for the same **layer + symptom** so you don't
+pile onto the existing open contact/parser bugs:
+
+```bash
+gh issue list --repo resumelint-org/resumelint --state open --limit 50 \
+  --search "contact <symptom keyword>"   # e.g. "contact letter-spaced name"
+```
+
+If a match already covers this layer+symptom, **stop** — link the existing issue
+instead of filing. Only file when nothing matches.
+
+### 2. Draft by category
+
+Build a self-contained finding from the probe's three blocks, values scrubbed to
+categories:
+
+- **Title** — the defect + localized layer, e.g. `Contact: letter-spaced name
+  heading dropped at the name field heuristic`.
+- **Body** — the region scanned (structure, not values), the fields produced
+  (`populated` / `empty`, not the values), the `verify` verdict
+  (`PARSER-MISS` vs `absent-in-pdf`), and the localized layer (line-assembly /
+  section-routing / field-heuristic) with the specific file + function.
+- **Synthetic repro** — a synthetic-persona PDF (fake name, `@example.com`, a
+  `555`-exchange phone on a real area code, subscriber `0100`–`0199`) that
+  reproduces the same category of corruption. The letter-spaced-name repro fixture
+  under `tests/fixtures/pdfs/unknown/` is the template.
+
+### 3. Show + confirm, then write
+
+Print the drafted title + body and the labels you'll use, and **wait for an
+explicit human confirm**. On confirm, write via the `create-gh-issue` skill (which
+owns the `scripts/create-gh-issue.sh` write path, label handling, and body-file
+escaping) — do **not** hand-roll a parallel `gh issue create` here. `bug` is the
+default type label; add `improvement` if it's a heuristic-tuning fix.
 
 ## Boundaries
 
