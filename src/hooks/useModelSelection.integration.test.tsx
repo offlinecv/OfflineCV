@@ -67,12 +67,8 @@ function Probe({
 }
 
 beforeEach(() => {
-  // Node 22+ ships a built-in global `localStorage` that shadows jsdom's
-  // `Storage` and exposes no `clear()` method, so a bare `localStorage.clear()`
-  // throws on newer runtimes (green on CI's Node 20, red on Node 25 locally).
-  // Optional-chain it to match the store's own defensive access; the per-key
-  // cleanup that actually matters is done by the reset helper below.
-  globalThis.localStorage?.clear?.();
+  // The fresh in-memory localStorage shim is installed globally per test
+  // (src/test-setup.ts, #398); just reset the hook's persisted state here.
   _resetPersistedModelSelectionForTesting();
 });
 

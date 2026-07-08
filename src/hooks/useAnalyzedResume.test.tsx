@@ -48,7 +48,6 @@ function unmount(): void {
 }
 
 beforeEach(() => {
-  localStorage.clear();
   mount();
 });
 

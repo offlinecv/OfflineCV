@@ -174,6 +174,9 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     globals: true,
+    // Install the in-memory localStorage shim before every test, workload-wide,
+    // so no suite has to remember to import it (#398). See src/test-setup.ts.
+    setupFiles: ["src/test-setup.ts"],
     coverage: {
       // v8 provider; emit lcov so `fallow audit --coverage` can compute
       // accurate CRAP scores in CI. Without coverage, CRAP collapses to a

@@ -85,6 +85,49 @@ interface EditableFieldProps {
    * unchanged in behavior.
    */
   multiline?: boolean;
+  /**
+   * Optional SHAPE validator (ADDITIVE, opt-in). Runs against the current
+   * committed `value` in read mode. Returns `null` when the value is a clean
+   * shape, or a short message when it is not (e.g. `banana` in a date field).
+   *
+   * NON-BLOCKING by design: a shape-fail never rejects the commit or traps the
+   * user in edit mode — the value still commits and a soft warning icon appears
+   * beside it in read mode, carrying the message on hover / for screen readers.
+   * Omitting this prop leaves callers byte-for-byte unchanged (no icon, no
+   * behavior change).
+   */
+  validate?: (value: string) => string | null;
+}
+
+/**
+ * Soft, non-blocking shape-warning glyph shown beside a read-mode value whose
+ * `validate` returned a message. A small stroke triangle in the semantic
+ * warning-icon token. The `<title>` gives a mouse-hover tooltip; the glyph is
+ * `aria-hidden` because it lives INSIDE the read-mode button's subtree, and an
+ * explicit `aria-label` on that button suppresses ALL descendant text from the
+ * accessible name (ARIA name-from-author precedence). So the message would be
+ * silently dropped for screen readers here — instead the button's own
+ * aria-label carries the warning (see the read-mode span), keeping the signal
+ * non-colour-only for assistive tech.
+ */
+function ShapeWarningGlyph({ message }: { message: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className="ml-1 inline-block h-3.5 w-3.5 shrink-0 align-text-bottom text-feedback-warning-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <title>{message}</title>
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" x2="12" y1="9" y2="13" />
+      <line x1="12" x2="12.01" y1="17" y2="17" />
+    </svg>
+  );
 }
 
 export function EditableField({
@@ -98,6 +141,7 @@ export function EditableField({
   textSize = "sm",
   display = "flex",
   multiline = false,
+  validate,
 }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -248,6 +292,10 @@ export function EditableField({
   // editability, which (unlike a hover-revealed pencil) also works on touch.
   const inlineFlow = display === "inline";
 
+  // Non-blocking shape check: run the optional validator against the committed
+  // value only when there is one to check. An absent field is never a typo.
+  const warning = validate && hasValue ? validate(value ?? "") : null;
+
   // Inline mode: plain `inline` so the value wraps as text and trailing siblings
   // flow after the last word. Flex mode: `inline-flex` atom. The negative margin
   // offsets the hover-tint padding so the tinted box doesn't shift the layout.
@@ -259,7 +307,10 @@ export function EditableField({
     <span
       role="button"
       tabIndex={0}
-      aria-label={`Edit ${label}`}
+      // Fold the shape warning into the accessible name: an explicit aria-label
+      // on this button suppresses the inner glyph's <title>, so screen readers
+      // would otherwise get zero warning signal (WCAG 1.4.1 — colour-only).
+      aria-label={warning ? `Edit ${label} — ${warning}` : `Edit ${label}`}
       onClick={startEdit}
       onKeyDown={(e: ReactKeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -281,6 +332,7 @@ export function EditableField({
         .join(" ")}
     >
       {hasValue ? (displayValue ?? value) : placeholder}
+      {warning && <ShapeWarningGlyph message={warning} />}
     </span>
   );
 }

@@ -29,6 +29,7 @@ import type {
 import { buildEducationDates } from "../../lib/score/entry-dates.ts";
 import { suggestSkills } from "../../lib/edit/skill-canonical.ts";
 import { Button, EditableField } from "@design-system";
+import { validateDate } from "../../lib/edit/field-validators.ts";
 import { AddPill, RemoveButton } from "./ReconstructedAdd.tsx";
 
 /** Map an EducationEntry field name to the flat AddedEntry field it edits.
@@ -182,6 +183,7 @@ function EducationEntry({
           placeholder="start"
           label="Education start date"
           textSize="xs"
+          validate={validateDate}
           onCommit={(v) => onFieldChange("start_date", v)}
         />
         <span aria-hidden="true">–</span>
@@ -190,6 +192,7 @@ function EducationEntry({
           placeholder="end"
           label="Education end date"
           textSize="xs"
+          validate={validateDate}
           onCommit={(v) => onFieldChange("end_date", v)}
         />
         {yearOnly && <span className="text-content-muted">{dates}</span>}

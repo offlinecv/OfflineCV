@@ -85,7 +85,6 @@ function mount(result: CascadeResult): void {
 
 beforeEach(() => {
   tracked.length = 0;
-  localStorage.clear();
 
   globalThis.URL.createObjectURL = vi.fn(
     () => "blob:mock",
