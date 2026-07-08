@@ -214,6 +214,38 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     expect(value[0].location).toBeUndefined();
   });
 
+  // #371 — a "Dean's List 2015–2017" honors annotation used to poison the
+  // parent entry's dates: parseDateRange's range-first preference picked up the
+  // annotation range and buried the real graduation year. Filter annotation
+  // lines out of the chunk before running parseEducationDates.
+  it("does not use a Dean's List annotation year range as the entry's attendance dates (#371)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Computer Science, 2017",
+        "GPA: 3.7 · Dean's List 2015–2017",
+      ]),
+    );
+    expect(value[0].institution).toBe("Springfield State University");
+    expect(value[0].degree).toBe("B.S.");
+    // Correct behavior: the sole date on the entry is the graduation year;
+    // start_date must NOT be populated from the annotation range.
+    expect(value[0].end_date).toBe("2017");
+    expect(value[0].start_date).toBeUndefined();
+  });
+
+  it("still uses attendance dates on the degree line when annotations carry no range", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Computer Science, 2015 - 2017",
+        "GPA: 3.7 · Cum Laude",
+      ]),
+    );
+    expect(value[0].start_date).toBe("2015");
+    expect(value[0].end_date).toBe("2017");
+  });
+
   it("leaves a course NAME that happens to contain 'Courses' mid-string untouched", () => {
     // Anchor-only strip: `COURSEWORK_LABEL_RE` binds at `^` so a course name
     // like "Advanced Courses in AI" is NOT accidentally stripped mid-string.

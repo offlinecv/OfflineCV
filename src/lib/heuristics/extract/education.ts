@@ -133,6 +133,28 @@ function educationDateFields(
   };
 }
 
+/** Honors / awards / activity keyword denylist for entry-level annotation lines
+ *  ("Dean's List 2015–2017", "Cum Laude", "Study Abroad, Florence 2021"). Used
+ *  by both {@link isInlineDatedProgram} — to reject an annotation-lead as a
+ *  phantom second entry — and by {@link filterAnnotationLinesForDates} — to
+ *  keep an annotation's dates from being picked up as attendance dates on the
+ *  parent entry (#371). Shared so the two consumers can never drift on which
+ *  phrases count as annotations. */
+const EDUCATION_ANNOTATION_RE =
+  /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project)\b/i;
+
+/** Strip lines that read as honors / awards / activity annotations from a
+ *  chunk before {@link parseEducationDates} runs on the joined text (#371).
+ *  Without this, a line like "GPA: 3.7 · Dean's List 2015–2017" contributes
+ *  its range to the entry and `parseDateRange`'s range-first preference makes
+ *  the annotation range (2015–2017) win over the real graduation year (2017)
+ *  on a sibling line. Line-level filter — an annotation phrase inline with a
+ *  real date on the SAME line is rare in practice; keeping the whole line
+ *  when it doesn't lead with an annotation is safer than mid-line surgery. */
+function filterAnnotationLinesForDates(lines: readonly string[]): string[] {
+  return lines.filter((l) => !EDUCATION_ANNOTATION_RE.test(l));
+}
+
 /** Source-side coursework label to peel off the bullet residue before the
  *  comma-split (#367). Covers the common LaTeX/résumé conventions:
  *  `Coursework:`, `Relevant Coursework:`, `Incoming Courses:`,
@@ -261,12 +283,7 @@ function isInlineDatedProgram(line: string): boolean {
   // sub-line — NOT bare anywhere, so a genuine credential title that merely contains
   // the word ("Project Management Certificate 2022", PMP) still splits into its own
   // program entry (#251 adversarial review).
-  if (
-    /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project)\b/i.test(
-      t,
-    ) ||
-    /\bproject\s*:/i.test(t)
-  )
+  if (EDUCATION_ANNOTATION_RE.test(t) || /\bproject\s*:/i.test(t))
     return false;
   // Drop a trailing "| City, Region" location segment before measuring the
   // program remainder — a date+location line ("… 2011 | Kolkata, India") must
@@ -668,8 +685,11 @@ function educationFromChunk(chunk: string[]): {
 
   // Shared date primitive (via the education wrapper) so a range like
   // "Sep 2024 - July 2025" keeps both halves and a lone graduation date lands in
-  // `end_date` (#97).
-  const dates = parseEducationDates(joined);
+  // `end_date` (#97). Filter honors/awards annotation lines first (#371) so a
+  // range on a "Dean's List 2015–2017" sub-line does not steal the primary date
+  // slot from the real graduation year on a sibling line.
+  const datesInput = filterAnnotationLinesForDates(chunk).join(" | ");
+  const dates = parseEducationDates(datesInput);
   const hasDate = !!(dates.start_date || dates.end_date);
 
   let score = 0;
