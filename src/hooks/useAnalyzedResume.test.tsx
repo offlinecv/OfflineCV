@@ -22,6 +22,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { useAnalyzedResume, type AnalyzedResume } from "./useAnalyzedResume.ts";
 import { isScoreRevealed } from "../lib/contact.ts";
 import { BLANK_DRAFT_STORAGE_KEY } from "./useResumeAnalysis.ts";
+import { installMemoryLocalStorage } from "./__test-utils__/memory-storage.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -48,7 +49,7 @@ function unmount(): void {
 }
 
 beforeEach(() => {
-  localStorage.clear();
+  installMemoryLocalStorage();
   mount();
 });
 

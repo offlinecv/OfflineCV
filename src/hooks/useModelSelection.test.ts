@@ -18,29 +18,13 @@ import {
   writePersistedModelId,
 } from "./useModelSelection.ts";
 import { DEFAULT_MODEL_ID, MODEL_REGISTRY } from "../lib/webllm/models.ts";
+import { installMemoryLocalStorage } from "./__test-utils__/memory-storage.ts";
 
 // Vitest defaults to Node env (per vite.config.ts), where `localStorage`
 // isn't defined. Provide a tiny in-memory shim so the hook's safeGet/safeSet
 // have something real to drive.
-class MemoryStorage {
-  private map = new Map<string, string>();
-  getItem(k: string): string | null {
-    return this.map.get(k) ?? null;
-  }
-  setItem(k: string, v: string): void {
-    this.map.set(k, v);
-  }
-  removeItem(k: string): void {
-    this.map.delete(k);
-  }
-  clear(): void {
-    this.map.clear();
-  }
-}
-
 beforeEach(() => {
-  (globalThis as { localStorage?: Storage }).localStorage =
-    new MemoryStorage() as unknown as Storage;
+  installMemoryLocalStorage();
   _resetPersistedModelSelectionForTesting();
 });
 

@@ -36,6 +36,7 @@ import {
 } from "./useModelSelection.ts";
 import { MODEL_REGISTRY } from "../lib/webllm/models.ts";
 import type { LicenseType } from "../lib/webllm/models.ts";
+import { installMemoryLocalStorage } from "./__test-utils__/memory-storage.ts";
 
 const restrictedModel = MODEL_REGISTRY.find(
   (m) => m.licenseType === "Restricted-Community",
@@ -68,11 +69,9 @@ function Probe({
 
 beforeEach(() => {
   // Node 22+ ships a built-in global `localStorage` that shadows jsdom's
-  // `Storage` and exposes no `clear()` method, so a bare `localStorage.clear()`
-  // throws on newer runtimes (green on CI's Node 20, red on Node 25 locally).
-  // Optional-chain it to match the store's own defensive access; the per-key
-  // cleanup that actually matters is done by the reset helper below.
-  globalThis.localStorage?.clear?.();
+  // `Storage` and exposes no working methods, so install a fresh in-memory
+  // shim per test rather than depending on the runtime's global (#398).
+  installMemoryLocalStorage();
   _resetPersistedModelSelectionForTesting();
 });
 
