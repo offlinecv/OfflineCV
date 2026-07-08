@@ -43,7 +43,7 @@ If `gh` isn't installed or authenticated, stop and tell the user to run
    code areas involved, and any analysis already done.
 
 2. **If context is thin, investigate the codebase.** Prefer codegraph tools
-   (`codegraph_search`, `codegraph_explore`, `codegraph_callers/callees/impact`)
+   (`codegraph_search`, `codegraph_context`, `codegraph_callers/callees/impact`)
    over raw grep for symbol lookups and call-graph traversal — `.codegraph/` is
    present in this repo. Read the actual source to confirm current behavior;
    don't describe the code from memory.

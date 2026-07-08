@@ -44,14 +44,24 @@ usage() {
     exit "${1:-0}"
 }
 
+# Abort with a friendly error if a value-taking flag is the last arg (no $2).
+# Runs in the current shell so `exit` aborts the script before `$2`/`shift 2`
+# trip `set -u` / a short `shift`.
+require_value() {
+    if [[ "$2" -lt 2 ]]; then
+        echo "[ERROR] $1 requires a value" >&2
+        exit 2
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --title)      TITLE="$2"; shift 2 ;;
-        --body-file)  BODY_FILE="$2"; shift 2 ;;
-        --labels)     LABELS="$2"; shift 2 ;;
-        --assignee)   ASSIGNEE="$2"; shift 2 ;;
-        --milestone)  MILESTONE="$2"; shift 2 ;;
-        --repo)       REPO="$2"; shift 2 ;;
+        --title)      require_value "$1" "$#"; TITLE="$2"; shift 2 ;;
+        --body-file)  require_value "$1" "$#"; BODY_FILE="$2"; shift 2 ;;
+        --labels)     require_value "$1" "$#"; LABELS="$2"; shift 2 ;;
+        --assignee)   require_value "$1" "$#"; ASSIGNEE="$2"; shift 2 ;;
+        --milestone)  require_value "$1" "$#"; MILESTONE="$2"; shift 2 ;;
+        --repo)       require_value "$1" "$#"; REPO="$2"; shift 2 ;;
         -h|--help)    usage 0 ;;
         *) echo "[ERROR] Unknown arg: $1" >&2; usage 2 ;;
     esac
@@ -74,7 +84,8 @@ fi
 LABEL_ARGS=()
 IFS=',' read -r -a LABEL_NAMES <<< "$LABELS"
 for label in "${LABEL_NAMES[@]}"; do
-    label_trimmed="$(echo "$label" | xargs)"
+    label_trimmed="${label#"${label%%[![:space:]]*}"}"   # strip leading whitespace
+    label_trimmed="${label_trimmed%"${label_trimmed##*[![:space:]]}"}"   # strip trailing
     [[ -z "$label_trimmed" ]] && continue
     LABEL_ARGS+=(--label "$label_trimmed")
 done
