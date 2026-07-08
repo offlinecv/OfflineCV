@@ -214,6 +214,22 @@ const LOCALITY_SUFFIX_RE =
  *  the single-source `MULTIWORD_US_CITY_ALT` const so the two can't drift. */
 const KNOWN_MULTIWORD_US_CITY_RE = new RegExp(MULTIWORD_US_CITY_ALT);
 
+/** Recover a location from an anchor-row cell of a "Company | Location Dates"
+ *  header line — the "New York, NY" cell of "Globex Financial | New York, NY
+ *  August 2024 - Present" (#373). `parseEntryBlocks` runs `stripDateRange` on the
+ *  anchor line before it reaches disambiguation, so the cell is a clean bare
+ *  "City, ST" / "City, Country" — but the location sits BEFORE the (removed)
+ *  dates, so `stripLocationSuffix`'s end-anchored passes never claimed it and it
+ *  was dropped. Return the cell when it is a whole-string bare location.
+ *
+ *  No date-range peel here: this only ever runs on the anchor line, which
+ *  `stripDateRange` has already cleared with the same `DATE_RANGE_RE`, so any
+ *  glued range is gone before this sees the cell (#409 review). */
+function locationFromAnchorCell(cell: string): string | undefined {
+  const c = cell.trim();
+  return isBareLocationString(c) ? c : undefined;
+}
+
 function stripLocationSuffix(s: string): {
   text: string;
   location: string | undefined;
@@ -730,6 +746,32 @@ function disambiguateCompanyTitle(
       //      (the #325 false-positive class reached via `team` instead of `title`).
       location = team;
       team = undefined;
+    }
+  }
+
+  // (3c) #373 — recover a per-entry location from an anchor-row cell that folds
+  //      "<City, ST> <dates>" with no separator ("Globex Financial | New York,
+  //      NY August 2024 - Present" — the second `|` cell). The date parse already
+  //      took the range into `block.dates`, but the location residue never
+  //      reached a field. Scan the anchor line's non-company segments; if one
+  //      yields a bare location once the date range is peeled, use it (and clear
+  //      the segment from `team` if it landed there).
+  if (!location && anchorIdx !== undefined) {
+    for (const s of splits) {
+      // Skip the company and the title cells: a location cell that landed in
+      // `title` is the empty-title "Company · City, ST" export shape, which
+      // step 5 rescues correctly (title → "", location set) — claiming it here
+      // would set `location` and block that rescue, orphaning the location in
+      // `title`. Only an unused/team location cell is claimed here.
+      if (s.source !== anchorIdx || s.text === company || s.text === title) {
+        continue;
+      }
+      const loc = locationFromAnchorCell(s.text);
+      if (loc) {
+        location = loc;
+        if (team === s.text) team = undefined;
+        break;
+      }
     }
   }
 
