@@ -1,16 +1,15 @@
 {
   "schemaVersion": 3,
   "cascade": {
-    "confidence": 0.9,
+    "confidence": 0.85,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "none",
+    "suggestedEscalation": "llm",
     "fieldsPopulated": [
       "current_company",
-      "current_title",
       "education",
       "email",
       "experience",
@@ -22,33 +21,33 @@
       "phoneIsValid",
       "skills"
     ],
-    "skillsCount": 13,
-    "experienceCount": 2,
+    "skillsCount": 8,
+    "experienceCount": 1,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 0,
-    "rawTextCharCount": 942,
+    "rawTextCharCount": 476,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 47,
-    "preLayoutOverall": 47,
+    "overall": 24,
+    "preLayoutOverall": 24,
     "specificity": {
       "score": 0,
       "max": 40,
-      "gradable": true,
-      "metricBullets": 0,
-      "totalBullets": 4
+      "gradable": false,
+      "metricBullets": 1,
+      "totalBullets": 2
     },
     "structure": {
-      "score": 23,
+      "score": 0,
       "max": 30,
-      "gradable": true,
-      "goodBullets": 3,
-      "totalBullets": 4
+      "gradable": false,
+      "goodBullets": 2,
+      "totalBullets": 2
     },
     "completeness": {
       "score": 24,
@@ -64,7 +63,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 4,
+    "bulletCount": 2,
     "algoVersion": "1.4"
   }
 }

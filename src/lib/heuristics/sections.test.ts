@@ -23,6 +23,7 @@ import {
   groupIntoLines,
   mergeItemText,
   splitIntoSections,
+  splitIntoSectionsWithMarkdown,
   toSectionedResume,
   type PdfSection,
 } from "./sections.ts";
@@ -1088,5 +1089,130 @@ describe("mergeItemText — letter-spaced heading recovery (#330)", () => {
       line("Engineer", 205, 60),
     ];
     expect(mergeItemText(items)).toBe("Jordan Reyes Engineer");
+  });
+});
+
+describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#374)", () => {
+  // Markdown that promotes ONLY Experience + Education to headings — the shape
+  // the PDF emitter produces when a wrapped "Technical Skills" header gets
+  // flattened into the two-column skills grid and never reaches `##`. The
+  // splitter runs (>=2 canonical sections) but, without the fold, strands the
+  // skills content in `profile`.
+  const MD = "## Experience\n\nrole\n\n## Education\n\ndegree";
+
+  /** Build PdfLines from line-by-line text (one item per line). */
+  function md(
+    specs: Array<Omit<Parameters<typeof mkItems>[0][number], "lineIndex">>,
+  ) {
+    return groupIntoLines(mkItems(specs));
+  }
+
+  it("folds `Technical` / `Skills` into a skills header and opens the section", () => {
+    const lines = md([
+      { text: "Jordan Reyes" },
+      { text: "jordan@example.com" },
+      { text: "Technical" },
+      { text: "Skills" },
+      { text: "Java" },
+      { text: "Spring" },
+      { text: "Experience" },
+      { text: "Software Engineer" },
+      { text: "Education" },
+      { text: "BS Computer Science" },
+    ]);
+    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    expect(sections).not.toBeNull();
+    expect(names(sections)).toContain("skills");
+    const skills = sections.find((s) => s.name === "skills")!;
+    expect(skills.lines.map((l) => l.text)).toEqual(["Java", "Spring"]);
+    // The first half must be pulled OUT of profile, not duplicated.
+    const profile = sections.find((s) => s.name === "profile")!;
+    expect(profile.lines.map((l) => l.text)).not.toContain("Technical");
+    expect(skills.rawHeading).toBe("Technical Skills");
+  });
+
+  it("generalizes to other wrapped compound aliases (`Core` / `Competencies`)", () => {
+    const lines = md([
+      { text: "Jordan Reyes" },
+      { text: "Core" },
+      { text: "Competencies" },
+      { text: "Leadership" },
+      { text: "Experience" },
+      { text: "role" },
+      { text: "Education" },
+      { text: "degree" },
+    ]);
+    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    expect(names(sections)).toContain("skills");
+    expect(
+      sections.find((s) => s.name === "skills")!.lines.map((l) => l.text),
+    ).toEqual(["Leadership"]);
+  });
+
+  it("does NOT fold two short lines whose join is not a known alias", () => {
+    const lines = md([
+      { text: "Project" },
+      { text: "Lead" },
+      { text: "at Globex" },
+      { text: "Experience" },
+      { text: "role" },
+      { text: "Education" },
+      { text: "degree" },
+    ]);
+    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    expect(names(sections)).not.toContain("skills");
+    expect(names(sections)).not.toContain("projects");
+    // Both lines stay as content in the profile.
+    const profile = sections.find((s) => s.name === "profile")!;
+    expect(profile.lines.map((l) => l.text)).toEqual(
+      expect.arrayContaining(["Project", "Lead"]),
+    );
+  });
+
+  it("does NOT fold lowercase prose halves even when they spell an alias", () => {
+    const lines = md([
+      { text: "highly" },
+      { text: "technical" },
+      { text: "skills" },
+      { text: "Experience" },
+      { text: "role" },
+      { text: "Education" },
+      { text: "degree" },
+    ]);
+    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    expect(names(sections)).not.toContain("skills");
+  });
+
+  it("does NOT fold when a half carries terminal sentence punctuation", () => {
+    const lines = md([
+      { text: "Technical." },
+      { text: "Skills" },
+      { text: "Experience" },
+      { text: "role" },
+      { text: "Education" },
+      { text: "degree" },
+    ]);
+    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    expect(names(sections)).not.toContain("skills");
+  });
+
+  it("does NOT fold across a section boundary (first half was a header)", () => {
+    // "Skills" immediately follows the Experience header line. The prior line
+    // opened a section, so there is no appended predecessor to fold with — the
+    // bare `Skills` must not silently steal the Experience section.
+    const lines = md([
+      { text: "Jordan Reyes" },
+      { text: "Experience" },
+      { text: "Skills" },
+      { text: "role" },
+      { text: "Education" },
+      { text: "degree" },
+    ]);
+    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    const expIdx = sections.findIndex((s) => s.name === "experience");
+    expect(expIdx).toBeGreaterThanOrEqual(0);
+    // The bare "Skills" line stays as content under Experience, not a new header.
+    expect(sections[expIdx].lines.map((l) => l.text)).toContain("Skills");
+    expect(names(sections)).not.toContain("skills");
   });
 });

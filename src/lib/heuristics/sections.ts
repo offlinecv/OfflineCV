@@ -1953,6 +1953,58 @@ const MARKDOWN_HEADING_RE = /^\s*#{1,3}\s+(.+?)\s*#*\s*$/;
  * Lines without a corresponding markdown-heading match fall into the
  * current section.
  */
+/**
+ * Header-shape gate for a two-line-wrap fold half (#374).
+ *
+ * A wrapped-header fragment is short, header-cased, and unpunctuated — the same
+ * shape that separates a heading from prose in `matchAnchorFallback` (Guard 7).
+ * Requiring it on BOTH halves keeps the fold from gluing two lowercase prose
+ * fragments together even when their concatenation happens to spell an alias:
+ *   - length ≤ 30 and 1–3 whitespace tokens (a header fragment, not a sentence),
+ *   - no terminal `.`/`!`/`?` (sentence punctuation marks prose),
+ *   - every alphabetic-leading word is Title Case or ALL CAPS (uppercase lead).
+ *     A non-alpha lead (e.g. the `&` in "Awards" / "& Honors") is exempt so a
+ *     legitimately wrapped `&`-joined header still qualifies.
+ */
+function isWrapHeaderShape(raw: string): boolean {
+  const t = raw.trim().replace(/[:·•]+$/, "").trim();
+  if (t.length === 0 || t.length > 30) return false;
+  if (/[.!?]$/.test(t)) return false;
+  const words = t.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0 || words.length > 3) return false;
+  for (const w of words) {
+    const first = w[0];
+    if (/[A-Za-z]/.test(first) && !/[A-Z]/.test(first)) return false;
+  }
+  return true;
+}
+
+/**
+ * Two-line-wrapped-header recovery for the markdown-anchored splitter (#374).
+ *
+ * Returns the section a `prev` + `cur` line pair reconstructs when — and only
+ * when — both halves are header-shaped (`isWrapHeaderShape`) AND their
+ * space-joined text resolves via `matchSectionHeader` — i.e. an exact multi-word
+ * alias ("technical skills", "core competencies", …) OR a guarded qualified
+ * header via the anchor-fallback tier ("relevant experience", "awards honors").
+ * Returns null otherwise.
+ *
+ * The join is what bounds the false-positive surface. A join of two lines is
+ * always ≥ 2 tokens, so it can never match a bare single-word section name; it
+ * resolves only to a multi-word alias or to a qualified header whose last token
+ * is a real section anchor (with matchSectionHeader's Guards 7/8/9 on the raw
+ * text). For a résumé, matching one of those is definitionally a wrapped header
+ * rather than coincidental adjacent prose. This is strictly tighter than the
+ * issue's Option 2 (admit a bare "Skills" after a "Core"/"Key"/… qualifier),
+ * which would also open on non-aliases like "Core Skills" and only ever covered
+ * the skills section.
+ */
+function matchWrappedHeader(prev: PdfLine, cur: PdfLine): SectionName | null {
+  if (!isWrapHeaderShape(prev.text) || !isWrapHeaderShape(cur.text)) return null;
+  const joined = `${prev.text.trim()} ${cur.text.trim()}`;
+  return matchSectionHeader(joined);
+}
+
 export function splitIntoSectionsWithMarkdown(
   lines: PdfLine[],
   markdown: string,
@@ -1961,6 +2013,10 @@ export function splitIntoSectionsWithMarkdown(
   if (headerTexts.size === 0) return null;
 
   const sections: PdfSection[] = [{ name: "profile", lines: [] }];
+  // Immediately-preceding line that was APPENDED to the current section (not a
+  // header). Reset to null whenever a section opens, so the two-line-wrap fold
+  // below only ever considers two consecutive body lines. See `matchWrappedHeader`.
+  let prevAppended: PdfLine | null = null;
   for (const line of lines) {
     const key = normalizeHeaderText(line.text);
     const section = headerTexts.get(key);
@@ -1970,9 +2026,37 @@ export function splitIntoSectionsWithMarkdown(
         rawHeading: line.text.trim(),
         lines: [],
       });
+      prevAppended = null;
       continue;
     }
+    // #374 two-line-wrapped-header recovery. A header that wraps across two
+    // visual lines ("Technical" / "Skills") is emitted by the markdown emitter
+    // as two body lines glued into the flattened content grid, so NEITHER half
+    // reaches `headerTexts` as a promoted heading — the map-gated branch above
+    // never fires and the whole section is stranded in the profile. When this
+    // line plus the line immediately appended before it reconstruct an EXACT
+    // known multi-word section alias, treat the pair as one header: drop the
+    // first half from the current section and open the reconstructed one. The
+    // exact-alias + header-shape gate (see `matchWrappedHeader`) is what keeps
+    // this from folding ordinary adjacent short lines into a false section.
+    if (prevAppended) {
+      const wrapped = matchWrappedHeader(prevAppended, line);
+      if (wrapped) {
+        // `prevAppended` is, by construction, the last line pushed to the
+        // current (last) section — pop it back off as the header's first half.
+        const current = sections[sections.length - 1];
+        current.lines.pop();
+        sections.push({
+          name: wrapped,
+          rawHeading: `${prevAppended.text.trim()} ${line.text.trim()}`,
+          lines: [],
+        });
+        prevAppended = null;
+        continue;
+      }
+    }
     sections[sections.length - 1].lines.push(line);
+    prevAppended = line;
   }
 
   // Count only non-profile sections — a markdown with zero canonical

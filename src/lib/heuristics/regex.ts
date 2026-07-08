@@ -261,6 +261,19 @@ export function rejoinSplitLetters(text: string): string {
 // a bullet is content, not a heading, so the anchor fallback must reject it.
 const LEADING_BULLET_RE = /^\s*[•‣▪●◦⁃*\-–—]/;
 
+// Leading decorative / icon-font glyph run on an already-normalized header
+// candidate. A mis-decoded icon-font glyph (e.g. U+00A5 `¥` glued directly to
+// `Skills`, #414) survives the trailing-`[:·•]` strip and blocks the exact-alias
+// keyword match. This strips such a run so the keyword tier can still fire.
+// Guarded by the lookahead: it removes the run ONLY when a LETTER immediately
+// follows, so a numeric-lead sidebar value ("20% Projects" — the `2` is `\p{N}`,
+// so the run matches nothing) or an all-symbol line is left untouched and cannot
+// be coerced into a section. Callers on the prose-exposed text-only path must
+// additionally exclude bullet lines (LEADING_BULLET_RE) — a leading bullet is
+// content, and stripping it would mint a false section from a bullet like
+// "• Skills".
+const LEADING_GLYPH_RE = /^[^\p{L}\p{N}]+(?=\p{L})/u;
+
 /**
  * Head-noun anchor fallback for qualified section headers (L2 / #111).
  *
@@ -393,7 +406,19 @@ function matchAnchorFallback(
  * #115 closed.
  */
 export function matchSectionAnchorToken(text: string): SectionName | null {
-  const normalized = text.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[:·•]+$/, "")
+    // Same leading-glyph strip as matchSectionHeaderDetailed (#414), applied
+    // UNGUARDED here: this path is column-gated (secondary-column header-shaped
+    // lines only) and already treats a leading bullet/box glyph as a sidebar
+    // artifact, not a prose marker — so a glyph glued onto a single-token header
+    // ("¥Projects") is recovered without the bullet-line exclusion the text-only
+    // path needs. Only single-token lines change outcome (the anchor is the LAST
+    // token; a multi-token line's leading glyph sits on the first token).
+    .replace(LEADING_GLYPH_RE, "")
+    .trim();
   const tokens = normalized.split(/\s+/).filter((t) => t.length > 0);
   if (tokens.length === 0) return null;
   const last = tokens[tokens.length - 1];
@@ -416,10 +441,25 @@ export function matchSectionAnchorToken(text: string): SectionName | null {
  * open of an already-open section — that repeat is an institution entry sitting
  * under its real header, not a new boundary (#258 Layer B).
  */
+// Tiered matcher (exact-alias → split-letter → anchor-fallback), each tier a
+// deliberate branch; the #414 leading-glyph guard adds one more. Splitting the
+// tiers into helpers would obscure their fixed order, which is the correctness
+// contract here — keep them linear and readable.
+// fallow-ignore-next-line complexity
 export function matchSectionHeaderDetailed(
   text: string,
 ): { section: SectionName; viaAnchorFallback: boolean } | null {
-  const normalized = text.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
+  let normalized = text.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
+  // Strip a leading decorative/icon-font glyph run (e.g. `¥Skills`, #414) so the
+  // exact-alias tier can still match. Guarded to NON-bullet lines: LEADING_GLYPH_RE
+  // itself fires only when a letter follows, but a leading bullet ("• Skills") is
+  // content — stripping it would mint a false section — so LEADING_BULLET_RE
+  // excludes it here. The anchor-fallback tier below stays safe independently:
+  // its Guard 7 casing check runs on the raw (unstripped) `text`, so a glyph-led
+  // line still fails there and gains no new false positive from this strip.
+  if (!LEADING_BULLET_RE.test(text)) {
+    normalized = normalized.replace(LEADING_GLYPH_RE, "");
+  }
   if (normalized.length === 0 || normalized.length > 40) return null;
   for (const [name, keywords] of Object.entries(SECTION_KEYWORDS) as Array<
     [SectionName, readonly string[]]

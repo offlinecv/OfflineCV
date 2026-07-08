@@ -286,6 +286,14 @@ describe("matchSectionAnchorToken — visual-path trailing anchor (#117)", () =>
   it("returns null when the last token is not an anchor", () => {
     expect(matchSectionAnchorToken("just some prose")).toBeNull();
   });
+
+  it("recovers a glyph glued onto a single-token header (#414)", () => {
+    // A mis-decoded icon-font glyph glued to a lone header token; the column
+    // gate at the call site licenses stripping it here (same as #117's noise
+    // prefix). skills stays excluded via anchorFallback:false.
+    expect(matchSectionAnchorToken("¥Projects")).toBe("projects");
+    expect(matchSectionAnchorToken("¥Skills")).toBeNull();
+  });
 });
 
 describe("stripDateRange — bracket/paren residue (#236)", () => {
@@ -367,5 +375,39 @@ describe("parseDateRange — season-comma dates (#250)", () => {
     expect(stripDateRange("Volunteer Swim Coach Summer 2013, 2014")).toBe(
       "Volunteer Swim Coach",
     );
+  });
+});
+
+describe("matchSectionHeader — leading decorative glyph (#414)", () => {
+  it("recognizes a skills header carrying a leading icon-font glyph", () => {
+    // The repro: a mis-decoded icon-font glyph U+00A5 `¥` glued to `Skills`
+    // (no space) survives the trailing-punct normalizer and blocks the exact
+    // keyword match. Strip the leading glyph run and the section is recovered.
+    expect(matchSectionHeader("¥Skills")).toBe("skills");
+  });
+
+  it("recognizes other leading-glyph variants and section words", () => {
+    expect(matchSectionHeader("§Experience")).toBe("experience");
+    expect(matchSectionHeader("★ Education")).toBe("education");
+    // Glyph + no space in front of a split-letter header still rejoins.
+    expect(matchSectionHeader("¥E XPERIENCE")).toBe("experience");
+  });
+
+  it("leaves an ordinary header untouched", () => {
+    expect(matchSectionHeader("Skills")).toBe("skills");
+    expect(matchSectionHeader("SKILLS")).toBe("skills");
+  });
+
+  it("does NOT coerce a symbol-led non-header line into a section", () => {
+    // A leading bullet is content, not a heading — stripping it must not mint a
+    // skills section from a bullet line.
+    expect(matchSectionHeader("• Skills you should learn")).toBeNull();
+    expect(matchSectionHeader("- Skills")).toBeNull();
+    // A numeric/currency-lead line is not a header: LEADING_GLYPH_RE stops at
+    // the first alphanumeric, so nothing is stripped and no keyword matches.
+    expect(matchSectionHeader("$100k skills budget")).toBeNull();
+    expect(matchSectionHeader("20% skills")).toBeNull();
+    // Glyph-led prose whose stripped remainder is not a bare keyword.
+    expect(matchSectionHeader("¥ proficient in typescript and go")).toBeNull();
   });
 });
