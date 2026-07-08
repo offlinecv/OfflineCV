@@ -21,6 +21,7 @@ import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { EditableField } from "@design-system";
+import { validateDate } from "../../lib/edit/field-validators.ts";
 import type {
   ExperienceFieldOverrides,
   BulletOverrides,
@@ -425,6 +426,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
             placeholder="start date"
             label="Start date"
             textSize="xs"
+            validate={validateDate}
             onCommit={(v) => onFieldChange("start_date", v)}
           />
           <span aria-hidden="true">–</span>
@@ -433,6 +435,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
             placeholder="end date"
             label="End date"
             textSize="xs"
+            validate={validateDate}
             onCommit={(v) => onFieldChange("end_date", v)}
           />
         </span>

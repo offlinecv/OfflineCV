@@ -5,7 +5,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import { computeAnonymousAtsScore, type AnonymousAtsScore } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
-import { Card, StatusBadge, Button } from "@design-system";
+import { Card, StatusBadge, Button, ErrorState } from "@design-system";
 import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
 import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
 import { isScoreRevealed } from "../lib/contact.ts";
@@ -20,6 +20,12 @@ import { ResultDetailTabs } from "./features/ResultDetailTabs.tsx";
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
   "Text is present in the source but uses custom font encodings that don't decode to characters. Common with Framer, Affinity, and some InDesign exports.";
+
+// Two-column layout warning (#356) — inline, non-blocking. Unlike
+// fonts_unmappable, two-column output is still usable, so this renders as a
+// warning banner alongside the score rather than replacing the whole card.
+const TWO_COLUMN_BLURB =
+  "This resume uses a two-column layout. Many ATS parsers read text column-by-column-merged or out of order, scrambling the result. The reconstructed text below shows what a generic parser actually extracted — for the most reliable ATS parsing, use a single-column layout.";
 
 type SourceKind = "pdf" | "docx";
 
@@ -143,6 +149,11 @@ function ParsedCard({
   const scoreRevealed =
     !isBlankAuthored || isScoreRevealed(activeResult, edit.contactOverrides);
 
+  // Two-column layout warning (#356) — detected but previously never
+  // surfaced to the user. Inline, not a full-page takeover: two-column
+  // output is still usable, unlike the fonts_unmappable case above.
+  const isTwoColumn = result.triggers.includes("two_column");
+
   return (
     // Two stacked surfaces: the score "summary" card on top, the tabbed detail
     // card below. The gap + each card's own border draws the separator the
@@ -166,6 +177,10 @@ function ParsedCard({
           onResetAll={edit.resetAll}
           onReset={onReset}
         />
+
+        {isTwoColumn && (
+          <ErrorState tone="warning">{TWO_COLUMN_BLURB}</ErrorState>
+        )}
 
         {scoreRevealed ? (
           <AtsScoreReadout score={activeScore} />

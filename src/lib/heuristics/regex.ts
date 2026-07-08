@@ -180,7 +180,13 @@ const MONTH_OR_PLACEHOLDER = `(?:${MONTH}|Month)`;
 // tail admits `20XX` (unambiguous) but NOT bare `XXXX`/`####` (too weak alone).
 // Season YYYY (e.g. "Summer 2013") is admitted so a season date participates in
 // branch (a) when an explicit separator (–/-/to) is present.
-const DATE_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})|${SEASON}\\s+\\d{4}|\\d{1,2}[\\/\\-]\\d{4}|20XX|\\d{4}`;
+// Exported (source fragment, not a compiled RegExp) so downstream shape
+// validators — e.g. the inline-edit date field guard (#357) — can reuse the
+// exact anchor grammar the parser recognizes rather than duplicating a fresh
+// regex. It carries top-level `|` alternations, so any consumer MUST wrap it in
+// a non-capturing group before anchoring (`^(?:${DATE_ANCHOR})$`), else the
+// `^`/`$` bind only to the first/last alternative.
+export const DATE_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})|${SEASON}\\s+\\d{4}|\\d{1,2}[\\/\\-]\\d{4}|20XX|\\d{4}`;
 
 // Strict month-year anchor (no bare-year / numeric-slash forms) for the
 // separator-less branch — bare years adjacent are too weak a signal.

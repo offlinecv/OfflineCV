@@ -20,6 +20,12 @@
 
 import { formatLinkDisplay, type ContactDisplayField } from "../../lib/contact.ts";
 import { EditableField } from "@design-system";
+import {
+  validateEmail,
+  validatePhone,
+  validateUrl,
+  type FieldValidator,
+} from "../../lib/edit/field-validators.ts";
 import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
 
 /** The inline-editable contact fields, mapped 1:1 to their `ContactOverrides`
@@ -38,6 +44,18 @@ const EDITABLE_KEYS: Record<string, keyof ContactOverrides> = {
 };
 
 type Commit = (key: keyof ContactOverrides, v: string) => void;
+
+/** Shape validator per editable contact field. Name/location are free-form
+ *  (a "parser audit, not a judge" — any string is a legitimate name), so they
+ *  map to no validator; email/phone/link fields each get a shape check. */
+const FIELD_VALIDATORS: Partial<Record<string, FieldValidator>> = {
+  email: validateEmail,
+  phone: validatePhone,
+  linkedin_url: validateUrl,
+  github_url: validateUrl,
+  portfolio_url: validateUrl,
+  website_url: validateUrl,
+};
 
 interface ContactDetailsProps {
   contactLine: ContactDisplayField[];
@@ -132,6 +150,7 @@ function EditableValue({
       placeholder={`${field.label} not detected`}
       label={field.label}
       textSize="sm"
+      validate={FIELD_VALIDATORS[field.key]}
       onCommit={(v) => commit(ovKey, v)}
     />
   );
