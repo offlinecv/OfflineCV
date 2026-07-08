@@ -534,8 +534,32 @@ function disambiguateCompanyTitle(
     const secondLooksTitle = splits[1] ? looksLikeTitle(splits[1].text) : false;
     if (firstLooksTitle && !secondLooksTitle) {
       title = splits[0]?.text;
-      company = splits[1]?.text;
-      team = splits[2]?.text;
+      // #372 — "Title, Team" over "Company | Location Dates": splits[0]/splits[1]
+      // are a role-comma split of ONE header line (same source), so the
+      // post-comma splits[1] is a team/sub-org suffix, not the company. When the
+      // anchor (date) line below was delimiter-split into "Company | Location
+      // Dates", its leading segment is the real company — take it and demote the
+      // post-comma segment to team. Additive: fires only for the comma-split +
+      // delimited-anchor shape; every other case keeps the "Title, Company"
+      // default below.
+      const isRoleCommaSplit =
+        splits[1] !== undefined && splits[0]?.source === splits[1].source;
+      const anchorSplits =
+        anchorIdx !== undefined
+          ? splits.filter((s) => s.source === anchorIdx)
+          : [];
+      const anchorCompany =
+        anchorSplits.length >= 2 &&
+        !looksLikeLocationTail(anchorSplits[0].text)
+          ? anchorSplits[0].text
+          : undefined;
+      if (isRoleCommaSplit && anchorCompany) {
+        company = anchorCompany;
+        team = splits[1]?.text;
+      } else {
+        company = splits[1]?.text;
+        team = splits[2]?.text;
+      }
     } else if (!firstLooksTitle && secondLooksTitle) {
       // Older convention ("Company / Title"): leave as default.
       company = splits[0]?.text;
