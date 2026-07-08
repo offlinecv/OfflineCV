@@ -191,6 +191,19 @@ function cityStartsWithCompanyText(city: string): boolean {
 const LOCALITY_SUFFIX_RE =
   /^(?:city|town|beach|springs?|heights|falls|hills|park|bay|harbou?r|grove|gardens?|valley|shores?)$/i;
 
+/** Known multi-word US cities, for the space-delimited "…Company New York, ST"
+ *  fold where the location is glued onto the company line with no comma before
+ *  the city. Pass B's single-token city rule truncates such a city to its last
+ *  word ("…New York, NY" → city "York", company "…New"), so a multi-word city is
+ *  admitted here ONLY from this closed vocabulary — an open greedy multi-word
+ *  match would eat company/role words ("Greenfield Studios New York" → city
+ *  "Studios New York"). Same closed-vocabulary discipline as Pass C/D's country
+ *  gazetteer. Longest-first so "New York City" wins over "New York" (regex
+ *  alternation is first-match). Mirrors the multi-word entries in
+ *  `BARE_LOCATION_RE`. */
+const KNOWN_MULTIWORD_US_CITY_RE =
+  /New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City/;
+
 function stripLocationSuffix(s: string): {
   text: string;
   location: string | undefined;
@@ -199,10 +212,21 @@ function stripLocationSuffix(s: string): {
   // multi-word (one+ capitalized words).
   const COMMA_LOCATION_RE =
     /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
+  // Pass B-multi — space-delimited "…Company <known multi-word city>, ST": no
+  // comma before the city, so a multi-word city is admitted only from the closed
+  // `KNOWN_MULTIWORD_US_CITY_RE` vocabulary (an open multi-word match would eat
+  // company/role words). Tried before single-token Pass B so "…New York, NY"
+  // captures "New York", not "York".
+  const SPACE_MULTIWORD_LOCATION_RE = new RegExp(
+    `\\s+(${KNOWN_MULTIWORD_US_CITY_RE.source}),\\s*([A-Z]{2})$`,
+  );
   // Pass B — space-delimited "Role … City, ST": single-token city only.
   const SPACE_LOCATION_RE = /\s+([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
 
-  const mUS = s.match(COMMA_LOCATION_RE) ?? s.match(SPACE_LOCATION_RE);
+  const mUS =
+    s.match(COMMA_LOCATION_RE) ??
+    s.match(SPACE_MULTIWORD_LOCATION_RE) ??
+    s.match(SPACE_LOCATION_RE);
   if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
     // Guard: stripping must leave a non-empty remainder.
     const before = stripDanglingSeparator(s.slice(0, mUS.index));
