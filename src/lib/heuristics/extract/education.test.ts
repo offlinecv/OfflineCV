@@ -88,13 +88,12 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     );
     expect(value).toHaveLength(2);
     expect(value[0].institution).toBe("Lakeside Institute of Technology");
-    expect(value[0].coursework).toEqual([
-      "Incoming Courses: Deep Learning, Machine Learning",
-    ]);
+    // #367 — leading `Incoming Courses:` / `Relevant Coursework:` label is
+    // peeled and the comma-separated list is split into individual courses so
+    // each entry is addressable in the reconstructed view.
+    expect(value[0].coursework).toEqual(["Deep Learning", "Machine Learning"]);
     expect(value[1].institution).toBe("Northgate State University");
-    expect(value[1].coursework).toEqual([
-      "Relevant Coursework: Data Structures, Algorithms",
-    ]);
+    expect(value[1].coursework).toEqual(["Data Structures", "Algorithms"]);
   });
 
   it("still merges a genuine wrapped coursework cell (regression guard)", () => {
@@ -113,6 +112,64 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     expect(value[0].coursework).toEqual([
       "Global Dimensions of Business",
       "Legal Environment of Business",
+    ]);
+  });
+
+  // #367 — coursework label + comma-split fixture cases.
+  it("peels a 'Coursework:' label and splits the comma-separated list (#367)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Coursework: Data Structures, Algorithms, Operating Systems",
+      ]),
+    );
+    expect(value[0].coursework).toEqual([
+      "Data Structures",
+      "Algorithms",
+      "Operating Systems",
+    ]);
+  });
+
+  it("keeps a single-course bullet as one entry (no comma → no split)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Relevant Coursework: Systems Programming",
+      ]),
+    );
+    expect(value[0].coursework).toEqual(["Systems Programming"]);
+  });
+
+  it("splits a bare comma-separated course list even without a leading label", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Machine Learning, Computer Vision, Natural Language Processing",
+      ]),
+    );
+    expect(value[0].coursework).toEqual([
+      "Machine Learning",
+      "Computer Vision",
+      "Natural Language Processing",
+    ]);
+  });
+
+  it("leaves a course NAME that happens to contain 'Courses' mid-string untouched", () => {
+    // Anchor-only strip: `COURSEWORK_LABEL_RE` binds at `^` so a course name
+    // like "Advanced Courses in AI" is NOT accidentally stripped mid-string.
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Advanced Courses in AI, Deep Learning",
+      ]),
+    );
+    expect(value[0].coursework).toEqual([
+      "Advanced Courses in AI",
+      "Deep Learning",
     ]);
   });
 });

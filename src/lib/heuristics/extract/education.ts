@@ -133,6 +133,15 @@ function educationDateFields(
   };
 }
 
+/** Source-side coursework label to peel off the bullet residue before the
+ *  comma-split (#367). Covers the common LaTeX/résumé conventions:
+ *  `Coursework:`, `Relevant Coursework:`, `Incoming Courses:`,
+ *  `Selected Courses:`, `Courses:`. Case-insensitive, anchored to the line
+ *  start so a course NAME that happens to contain "Courses" mid-string
+ *  ("Advanced Courses in AI") is not accidentally stripped. */
+const COURSEWORK_LABEL_RE =
+  /^(?:relevant\s+coursework|incoming\s+courses?|selected\s+courses?|coursework|courses?)\s*:\s*/i;
+
 /** Whether `line` reads as a *wrapped continuation* of the preceding coursework
  *  bullet (e.g. the `Business` half of `● Global Dimensions of` + `Business`)
  *  rather than a standalone field that merely follows the bullet. The recovery
@@ -681,8 +690,23 @@ export function extractEducation(
       j++;
     }
     item = item.trim();
-    if (/^[A-Z0-9]/.test(item)) {
-      coursework.push({ text: item, idx: i });
+    // Peel a leading source-side label ("Coursework:", "Relevant Coursework:",
+    // "Incoming Courses:", "Selected Courses:", "Courses:") so the residue is
+    // the course list itself and the reconstructed résumé doesn't render a
+    // redundant "Coursework: Relevant Coursework: …" double-label (#367).
+    item = item.replace(COURSEWORK_LABEL_RE, "").trim();
+    // Split a comma-separated course list into individual entries so each
+    // course is addressable in the reconstructed view (#367). A single-course
+    // bullet with no comma remains one entry. Filter empties (a trailing
+    // comma) and drop items that fail the Title-case guard so a lowercase
+    // prose bullet ("- including courses taught in Japanese") is still
+    // dropped as before.
+    const items = item.includes(",")
+      ? item.split(/\s*,\s*/).filter((t) => t.length > 0)
+      : [item];
+    const kept = items.filter((t) => /^[A-Z0-9]/.test(t));
+    if (kept.length > 0) {
+      for (const c of kept) coursework.push({ text: c, idx: i });
       for (const k of span) consumed.add(k);
     }
     i = j - 1;
