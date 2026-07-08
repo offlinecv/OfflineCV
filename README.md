@@ -140,6 +140,25 @@ scoped to your browser:
 | `rl_star_cta_seen` | one-time flag so the post-feedback GitHub-star prompt shows only once per browser |
 | `rl_gh_stars_cache` | caches the fetched star count (~1h TTL) to avoid re-hitting the GitHub API on every parse |
 
+#### IndexedDB (local-first storage)
+
+For structured/binary data the app uses an IndexedDB database named `resumelint`
+(via the ~1KB [`idb`](https://github.com/jakearchibald/idb) wrapper;
+`src/lib/storage/`), separate from the `rl_*` UI flags above. It has two object
+stores — `resumes` (raw PDF bytes as a `Blob` plus a cached parse so a reopened
+resume doesn't re-run the cascade) and `jobs` (tracked-job records) — versioned
+together under one `onupgradeneeded` migration path. This is **still first-party
+and local-only**: nothing here is sent anywhere, and it introduces **no network
+calls** — it is the same privacy posture as the `localStorage` keys, just for
+larger structured/binary data.
+
+On first write the app calls `navigator.storage.persist()` to ask the browser to
+exempt the database from automatic eviction; the grant is best-effort and
+queryable so the UI can be honest about it. Browsers can still clear site data
+under disk pressure, and Safari clears script-writable storage after 7 days
+without a visit — so the module ships a JSON **export/import** backup path (resume
+bytes base64-encoded in the export file) as the user's own recovery route.
+
 ### GitHub star count
 
 The footer shows the live repo star count via an unauthenticated call to

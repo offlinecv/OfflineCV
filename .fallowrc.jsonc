@@ -11,7 +11,15 @@
   "entry": [
     "jd-spike.html",
     "eval-rewrite.html",
-    "parse-eval.html"
+    "parse-eval.html",
+
+    // Local-first storage foundation (#321) is infrastructure shipped AHEAD of
+    // its UI — the resume-library and job-tracker follow-ups are its first
+    // in-repo consumers. Until they land, the public barrel has no importer, so
+    // register it as an intentional root; without this fallow flags the whole
+    // module (barrel + its export/import/persist surface) as unreachable dead
+    // code. Remove this line once a follow-up imports `@/lib/storage`.
+    "src/lib/storage/index.ts"
   ],
 
   // `@design-tokens` is a Vite CSS-import alias (vite.config.ts resolve.alias),
