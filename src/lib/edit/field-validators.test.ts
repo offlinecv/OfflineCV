@@ -59,6 +59,22 @@ describe("validateDate", () => {
     expect(validateDate("banana 2020")).not.toBeNull();
     expect(validateDate("hired 2020")).not.toBeNull();
   });
+
+  it("flags an unfilled Word/Office template placeholder", () => {
+    // The parser's DATE_ANCHOR recognizes `Month`/`Year` so it can drop these
+    // downstream; the edit surface must agree they aren't real dates (else the
+    // score says "missing dates" while the edit field shows no warning).
+    for (const v of [
+      "Month Year",
+      "Month YYYY",
+      "Mon Year",
+      "Mon YYYY",
+      "Month Year – Month Year",
+      "Month Year to Month Year",
+    ]) {
+      expect(validateDate(v), `expected flag: ${v}`).not.toBeNull();
+    }
+  });
 });
 
 describe("validateEmail", () => {
@@ -118,6 +134,13 @@ describe("validatePhone", () => {
 
   it("accepts a valid international number", () => {
     expect(validatePhone("+44 20 7946 0958")).toBeNull();
+  });
+
+  it("uses the parsed location's region so a local-form number isn't falsely flagged", () => {
+    // A UK local form (no +44) is invalid under the US default but valid once
+    // the résumé's UK location is threaded through (mirrors extractContact).
+    expect(validatePhone("020 7946 0958")).not.toBeNull();
+    expect(validatePhone("020 7946 0958", "London, United Kingdom")).toBeNull();
   });
 
   it("treats an empty field as clean", () => {

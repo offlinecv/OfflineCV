@@ -36,7 +36,6 @@ import {
 } from "./useModelSelection.ts";
 import { MODEL_REGISTRY } from "../lib/webllm/models.ts";
 import type { LicenseType } from "../lib/webllm/models.ts";
-import { installMemoryLocalStorage } from "./__test-utils__/memory-storage.ts";
 
 const restrictedModel = MODEL_REGISTRY.find(
   (m) => m.licenseType === "Restricted-Community",
@@ -68,10 +67,8 @@ function Probe({
 }
 
 beforeEach(() => {
-  // Node 22+ ships a built-in global `localStorage` that shadows jsdom's
-  // `Storage` and exposes no working methods, so install a fresh in-memory
-  // shim per test rather than depending on the runtime's global (#398).
-  installMemoryLocalStorage();
+  // The fresh in-memory localStorage shim is installed globally per test
+  // (src/test-setup.ts, #398); just reset the hook's persisted state here.
   _resetPersistedModelSelectionForTesting();
 });
 

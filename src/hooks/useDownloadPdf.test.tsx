@@ -22,7 +22,6 @@ import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import { computeAnonymousAtsScore } from "../lib/score/score.ts";
 import { BLANK_DRAFT_STORAGE_KEY } from "./useResumeAnalysis.ts";
-import { installMemoryLocalStorage } from "./__test-utils__/memory-storage.ts";
 
 const tracked: Array<{ source: string }> = [];
 vi.mock("../lib/analytics.ts", () => ({
@@ -86,7 +85,6 @@ function mount(result: CascadeResult): void {
 
 beforeEach(() => {
   tracked.length = 0;
-  installMemoryLocalStorage();
 
   globalThis.URL.createObjectURL = vi.fn(
     () => "blob:mock",

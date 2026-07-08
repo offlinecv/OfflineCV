@@ -102,14 +102,18 @@ interface EditableFieldProps {
 /**
  * Soft, non-blocking shape-warning glyph shown beside a read-mode value whose
  * `validate` returned a message. A small stroke triangle in the semantic
- * warning-icon token — the message rides on `title` (hover) and `aria-label`
- * (assistive tech), so the warning is never colour-only.
+ * warning-icon token. The `<title>` gives a mouse-hover tooltip; the glyph is
+ * `aria-hidden` because it lives INSIDE the read-mode button's subtree, and an
+ * explicit `aria-label` on that button suppresses ALL descendant text from the
+ * accessible name (ARIA name-from-author precedence). So the message would be
+ * silently dropped for screen readers here — instead the button's own
+ * aria-label carries the warning (see the read-mode span), keeping the signal
+ * non-colour-only for assistive tech.
  */
 function ShapeWarningGlyph({ message }: { message: string }) {
   return (
     <svg
-      role="img"
-      aria-label={message}
+      aria-hidden="true"
       className="ml-1 inline-block h-3.5 w-3.5 shrink-0 align-text-bottom text-feedback-warning-icon"
       viewBox="0 0 24 24"
       fill="none"
@@ -303,7 +307,10 @@ export function EditableField({
     <span
       role="button"
       tabIndex={0}
-      aria-label={`Edit ${label}`}
+      // Fold the shape warning into the accessible name: an explicit aria-label
+      // on this button suppresses the inner glyph's <title>, so screen readers
+      // would otherwise get zero warning signal (WCAG 1.4.1 — colour-only).
+      aria-label={warning ? `Edit ${label} — ${warning}` : `Edit ${label}`}
       onClick={startEdit}
       onKeyDown={(e: ReactKeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {

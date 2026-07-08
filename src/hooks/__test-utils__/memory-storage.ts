@@ -20,6 +20,12 @@
 
 class MemoryStorage {
   private map = new Map<string, string>();
+  get length(): number {
+    return this.map.size;
+  }
+  key(index: number): string | null {
+    return Array.from(this.map.keys())[index] ?? null;
+  }
   getItem(k: string): string | null {
     return this.map.get(k) ?? null;
   }

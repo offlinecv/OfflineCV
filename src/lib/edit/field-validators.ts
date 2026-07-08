@@ -29,7 +29,7 @@ import {
   DATE_RANGE_RE,
   EMAIL_RE,
 } from "../heuristics/regex.ts";
-import { normalizePhone } from "../heuristics/phone.ts";
+import { normalizePhone, regionFromLocation } from "../heuristics/phone.ts";
 
 /** A field validator: `null` when clean, else a short shape-fail message. */
 export type FieldValidator = (value: string) => string | null;
@@ -57,13 +57,31 @@ const DATE_FIELD_RE = new RegExp(
   "i",
 );
 
+// Unfilled Word/Office template placeholders. `DATE_ANCHOR`'s grammar
+// deliberately RECOGNIZES these (`MONTH_OR_PLACEHOLDER` accepts `Month`,
+// `YEAR_FORMS` accepts `Year`) so the parser can spot and drop them downstream —
+// which means `DATE_FIELD_RE` alone would treat `Month Year` as a clean shape.
+// The score's completeness signal flags such a role as "missing dates", so the
+// edit surface must agree: a value made ONLY of placeholder tokens (single or a
+// range of them) is rejected before the general shape check. Note `20XX` is NOT
+// a placeholder — it is a real redaction the user is authoritative over.
+const DATE_PLACEHOLDER_TOKEN = String.raw`(?:(?:Mon|Month)\s+)?(?:Year|YYYY)`;
+const DATE_PLACEHOLDER_RE = new RegExp(
+  `^\\s*${DATE_PLACEHOLDER_TOKEN}(?:\\s*(?:[–—-]|to)\\s*${DATE_PLACEHOLDER_TOKEN})?\\s*$`,
+  "i",
+);
+
 /**
  * Flag a start/end date field that is the wrong shape (e.g. `banana`), while
  * passing every résumé date form the parser recognizes. Never flags an empty
- * field or an odd-but-real date (future years, redacted `20XX`, etc.).
+ * field or an odd-but-real date (future years, redacted `20XX`, etc.). Unfilled
+ * template placeholders (`Month Year`, `Mon YYYY`) are flagged — they are not a
+ * real date, and the score already counts them as missing.
  */
 export const validateDate: FieldValidator = (value) => {
   if (value.trim() === "") return null;
+  if (DATE_PLACEHOLDER_RE.test(value))
+    return "Looks like an unfilled template placeholder — replace it with a real date";
   return DATE_FIELD_RE.test(value)
     ? null
     : "Doesn't look like a date (try “Jan 2020”, “2020”, or “Present”)";
@@ -113,14 +131,22 @@ export const validateUrl: FieldValidator = (value) => {
 
 /**
  * Flag a phone field libphonenumber can't read as a valid number. Reuses the
- * parser's `normalizePhone` (US default region) so the edit surface and the
- * extractor agree on validity. Synthetic reserved numbers — a real area code
- * with the `555-01xx` fictional range, e.g. `(312) 555-0123` — pass `isValid()`;
- * bare words and too-short digit runs are flagged.
+ * parser's `normalizePhone` so the edit surface and the extractor agree on
+ * validity. Synthetic reserved numbers — a real area code with the `555-01xx`
+ * fictional range, e.g. `(312) 555-0123` — pass `isValid()`; bare words and
+ * too-short digit runs are flagged.
+ *
+ * `location` threads the résumé's parsed location through to the region default,
+ * exactly as `extractContact` does — so a UK user typing a local-form number
+ * (`020 7946 0958`, no `+44`) isn't falsely flagged. Falls back to `"US"` when
+ * the location is absent or unmapped, matching `normalizePhone`'s own default.
  */
-export const validatePhone: FieldValidator = (value) => {
+export const validatePhone = (
+  value: string,
+  location?: string,
+): string | null => {
   if (value.trim() === "") return null;
-  const parsed = normalizePhone(value);
+  const parsed = normalizePhone(value, regionFromLocation(location) ?? "US");
   return parsed && parsed.isValid
     ? null
     : "Doesn't look like a valid phone number";

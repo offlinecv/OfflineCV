@@ -18,13 +18,11 @@ import {
   writePersistedModelId,
 } from "./useModelSelection.ts";
 import { DEFAULT_MODEL_ID, MODEL_REGISTRY } from "../lib/webllm/models.ts";
-import { installMemoryLocalStorage } from "./__test-utils__/memory-storage.ts";
 
-// Vitest defaults to Node env (per vite.config.ts), where `localStorage`
-// isn't defined. Provide a tiny in-memory shim so the hook's safeGet/safeSet
-// have something real to drive.
+// The in-memory localStorage shim is installed globally (src/test-setup.ts), so
+// the hook's safeGet/safeSet have something real to drive; just reset the hook's
+// persisted state per test.
 beforeEach(() => {
-  installMemoryLocalStorage();
   _resetPersistedModelSelectionForTesting();
 });
 

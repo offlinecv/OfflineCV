@@ -47,15 +47,27 @@ type Commit = (key: keyof ContactOverrides, v: string) => void;
 
 /** Shape validator per editable contact field. Name/location are free-form
  *  (a "parser audit, not a judge" — any string is a legitimate name), so they
- *  map to no validator; email/phone/link fields each get a shape check. */
+ *  map to no validator; email/link fields each get a shape check. Phone is
+ *  resolved separately (see `validatorFor`) because it needs the parsed
+ *  location threaded in for its region default. */
 const FIELD_VALIDATORS: Partial<Record<string, FieldValidator>> = {
   email: validateEmail,
-  phone: validatePhone,
   linkedin_url: validateUrl,
   github_url: validateUrl,
   portfolio_url: validateUrl,
   website_url: validateUrl,
 };
+
+/** Resolve the validator for a field. Phone binds the résumé's parsed location
+ *  so non-US local-form numbers aren't falsely flagged (mirrors the parser's
+ *  `extractContact`, which wires `regionFromLocation` for the same reason). */
+function validatorFor(
+  key: string,
+  location: string | undefined,
+): FieldValidator | undefined {
+  if (key === "phone") return (v) => validatePhone(v, location);
+  return FIELD_VALIDATORS[key];
+}
 
 interface ContactDetailsProps {
   contactLine: ContactDisplayField[];
@@ -70,6 +82,9 @@ export function ContactDetails({
   editable,
   commit,
 }: ContactDetailsProps) {
+  // The parsed location, threaded into the phone validator's region default so a
+  // non-US local-form number isn't falsely flagged (see `validatorFor`).
+  const location = contactLine.find((f) => f.key === "location")?.value;
   return (
     <>
       {/* Contact line: location / email / phone, pipe-joined, present-only. */}
@@ -78,7 +93,7 @@ export function ContactDetails({
           {contactLine.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">|</span>}
-              {renderContactValue(field, editable, commit)}
+              {renderContactValue(field, editable, commit, location)}
             </span>
           ))}
         </p>
@@ -134,11 +149,13 @@ function EditableValue({
   ovKey,
   commit,
   displayValue,
+  location,
 }: {
   field: ContactDisplayField;
   ovKey: keyof ContactOverrides;
   commit: Commit;
   displayValue?: string;
+  location?: string;
 }) {
   const absent = field.gated && field.reason === "absent";
   const lowConfidence = field.gated && field.reason === "low_confidence";
@@ -150,7 +167,7 @@ function EditableValue({
       placeholder={`${field.label} not detected`}
       label={field.label}
       textSize="sm"
-      validate={FIELD_VALIDATORS[field.key]}
+      validate={validatorFor(field.key, location)}
       onCommit={(v) => commit(ovKey, v)}
     />
   );
@@ -183,10 +200,13 @@ function renderContactValue(
   field: ContactDisplayField,
   editable: boolean,
   commit: Commit,
+  location: string | undefined,
 ) {
   const ovKey = EDITABLE_KEYS[field.key];
   if (editable && ovKey !== undefined) {
-    return <EditableValue field={field} ovKey={ovKey} commit={commit} />;
+    return (
+      <EditableValue field={field} ovKey={ovKey} commit={commit} location={location} />
+    );
   }
   return field.gated && field.reason === "absent" ? (
     <MissingToken label={field.label} />
