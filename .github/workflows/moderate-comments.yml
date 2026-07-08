@@ -27,25 +27,43 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = (context.payload.comment.body || '').toLowerCase();
+            // Minimum account age (days) for a non-contributor to comment.
+            // Younger accounts are auto-hidden regardless of content — the
+            // permanent "new accounts can't interact" gate. Tune freely.
+            const MIN_ACCOUNT_AGE_DAYS = 30;
 
-            // Tunable spam signals. Add/remove patterns as the spam evolves.
-            const patterns = [
-              /t\.me\//,                          // telegram invite links
-              /\b(whats?app|telegram)\b.*\+?\d/,  // "whatsapp +1..." contact bait
-              /\b(crypto|bitcoin|forex|binary option|airdrop|nft mint)\b/,
-              /\b(hack|recover(y)?)\b.*\b(wallet|funds|account|bitcoin)\b/,
-              /\b(cheap|buy).{0,20}(followers|likes|views)\b/,
-              /(https?:\/\/[^\s]+){4,}/,          // 4+ links in one comment
-              /\b(loan|investment).{0,20}(guaranteed|profit)\b/,
-            ];
+            let reason = null;
 
-            const hits = patterns.filter((re) => re.test(body)).map(String);
-            if (hits.length === 0) {
-              core.info('No spam signals. Leaving comment as-is.');
+            // 1. Account-age gate. Look up the commenter's creation date.
+            const login = context.payload.comment.user.login;
+            const { data: user } = await github.rest.users.getByUsername({ username: login });
+            const ageDays = (Date.now() - new Date(user.created_at).getTime()) / 86_400_000;
+            if (ageDays < MIN_ACCOUNT_AGE_DAYS) {
+              reason = `account age ${ageDays.toFixed(1)}d < ${MIN_ACCOUNT_AGE_DAYS}d`;
+            }
+
+            // 2. Content signals (catch older accounts posting obvious spam).
+            if (!reason) {
+              const body = (context.payload.comment.body || '').toLowerCase();
+              // Tunable spam signals. Add/remove patterns as the spam evolves.
+              const patterns = [
+                /t\.me\//,                          // telegram invite links
+                /\b(whats?app|telegram)\b.*\+?\d/,  // "whatsapp +1..." contact bait
+                /\b(crypto|bitcoin|forex|binary option|airdrop|nft mint)\b/,
+                /\b(hack|recover(y)?)\b.*\b(wallet|funds|account|bitcoin)\b/,
+                /\b(cheap|buy).{0,20}(followers|likes|views)\b/,
+                /(https?:\/\/[^\s]+){4,}/,          // 4+ links in one comment
+                /\b(loan|investment).{0,20}(guaranteed|profit)\b/,
+              ];
+              const hits = patterns.filter((re) => re.test(body)).map(String);
+              if (hits.length > 0) reason = `spam signals: ${hits.join(', ')}`;
+            }
+
+            if (!reason) {
+              core.info('No age or content signal. Leaving comment as-is.');
               return;
             }
-            core.info(`Spam signals matched: ${hits.join(', ')}`);
+            core.info(`Hiding comment from @${login} — ${reason}`);
 
             // Minimize (hide) the comment as spam via GraphQL.
             await github.graphql(
