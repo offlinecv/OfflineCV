@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The resumelint Authors
+#
+# Auto-hide obvious spam on issue / PR comments.
+# Hide-only: matched comments are minimized as "spam" (collapsed, reversible).
+# Only comments from non-members are ever touched, so maintainers can't trip it.
+name: Moderate comments
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  moderate:
+    runs-on: ubuntu-latest
+    # Skip anyone with a trusted relationship to the repo.
+    if: >
+      github.event.comment.author_association != 'OWNER' &&
+      github.event.comment.author_association != 'MEMBER' &&
+      github.event.comment.author_association != 'COLLABORATOR'
+    steps:
+      - name: Score and hide
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.comment.body || '').toLowerCase();
+
+            // Tunable spam signals. Add/remove patterns as the spam evolves.
+            const patterns = [
+              /t\.me\//,                          // telegram invite links
+              /\b(whats?app|telegram)\b.*\+?\d/,  // "whatsapp +1..." contact bait
+              /\b(crypto|bitcoin|forex|binary option|airdrop|nft mint)\b/,
+              /\b(hack|recover(y)?)\b.*\b(wallet|funds|account|bitcoin)\b/,
+              /\b(cheap|buy).{0,20}(followers|likes|views)\b/,
+              /(https?:\/\/[^\s]+){4,}/,          // 4+ links in one comment
+              /\b(loan|investment).{0,20}(guaranteed|profit)\b/,
+            ];
+
+            const hits = patterns.filter((re) => re.test(body)).map(String);
+            if (hits.length === 0) {
+              core.info('No spam signals. Leaving comment as-is.');
+              return;
+            }
+            core.info(`Spam signals matched: ${hits.join(', ')}`);
+
+            // Minimize (hide) the comment as spam via GraphQL.
+            await github.graphql(
+              `mutation ($id: ID!) {
+                 minimizeComment(input: { subjectId: $id, classifier: SPAM }) {
+                   minimizedComment { isMinimized }
+                 }
+               }`,
+              { id: context.payload.comment.node_id },
+            );
+            core.info('Comment minimized as spam.');
