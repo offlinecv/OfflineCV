@@ -179,7 +179,9 @@ LINKED=$(gh api "repos/$REPO/issues/$PARENT/sub_issues" --jq '.[].number' 2>/dev
 for N in "${CHILDREN[@]}"; do
   grep -qx "$N" <<<"$LINKED" && { echo "#$N already linked — skip"; continue; }
   CHILD_ID=$(gh api "repos/$REPO/issues/$N" --jq .id)
-  gh api -X POST "repos/$REPO/issues/$PARENT/sub_issues" -F sub_issue_id="$CHILD_ID"
+  [[ "$CHILD_ID" =~ ^[0-9]+$ ]] || { echo "✗ can't resolve id for #$N — skipping link"; continue; }
+  gh api -X POST "repos/$REPO/issues/$PARENT/sub_issues" -F sub_issue_id="$CHILD_ID" >/dev/null 2>&1 \
+    && echo "linked #$N"
 done
 ```
 **Verify by diffing the readback against the input set** — never assume the loop
@@ -217,19 +219,72 @@ done
 
 If `--order A,B,C` given (already validated in Step 2), wire `blocked_by` so B is
 blocked by A, C by B — each edge uses the **blocking** issue's internal id, typed `-F`.
-Mirror Step 4's idempotency: preflight the child's existing `blocked_by` set and skip
-an edge that's already there (a bare re-POST 422s on re-run), then verify the edge
-landed:
+
+Four failure modes bit real runs — the loop below defends against all four:
+
+1. **`${ARR[i]}` index math breaks under zsh (THE load-bearing one).** resumelint's
+   shell is **zsh, whose arrays are 1-indexed**; a `for ((i=1; i<${#ORDER[@]}; i++))`
+   loop written for **bash's 0-indexing** silently wires the *wrong* pairs — the first
+   edge gets an empty blocker and the last edge (which needs `i==len`) never runs.
+   **Never index the array.** Iterate values with a `PREV` cursor — identical in bash
+   and zsh — as below. (This is why an earlier version half-wired every chain.)
+2. **Unsuppressed POST output scrambles the log.** `gh api -X POST` prints the full
+   dependency JSON to stdout; interleaved with your `echo`s it becomes unreadable and
+   *looks* like edges wired to the wrong issue. Always `>/dev/null` the POST, stderr → tmpfile.
+3. **An unguarded blocker-id feeds garbage into the next POST.** If `gh api …/issues/$BLOCKER --jq .id`
+   errors, `$BLOCKER_ID` becomes an error-JSON blob and the POST 422s with
+   `not of type integer`. Numeric-guard the id before POSTing (same guard as `$PARENT`).
+4. **A half-wired chain reported as success.** GitHub does **not** materialize
+   transitive edges (`C blocked_by B` never adds `C blocked_by A`), so end with a
+   **full-chain audit** that prints each child's entire stored `blocked_by` set —
+   missing edges *and* stray extras both show.
+
+Each edge uses the **blocking** issue's internal id, typed `-F`. Mirror Step 4's
+idempotency (preflight the existing set; a bare re-POST 422s on re-run) and swallow
+only the benign "already been taken" dup error:
 ```bash
-for ((i=1; i<${#ORDER[@]}; i++)); do
-  BLOCKED="${ORDER[i]}"; BLOCKER="${ORDER[i-1]}"
-  EXISTING=$(gh api "repos/$REPO/issues/$BLOCKED/dependencies/blocked_by" --jq '.[].number' 2>/dev/null)
-  grep -qx "$BLOCKER" <<<"$EXISTING" && { echo "#$BLOCKED already blocked by #$BLOCKER — skip"; continue; }
-  BLOCKER_ID=$(gh api "repos/$REPO/issues/$BLOCKER" --jq .id)
-  gh api -X POST "repos/$REPO/issues/$BLOCKED/dependencies/blocked_by" -F issue_id="$BLOCKER_ID"
-  gh api "repos/$REPO/issues/$BLOCKED/dependencies/blocked_by" --jq '.[].number' | grep -qx "$BLOCKER" \
-    || echo "✗ #$BLOCKED → blocked_by #$BLOCKER did not land — check before reporting success"
-done
+wire_edge() {   # $1 = blocked issue, $2 = blocker issue
+  local BLOCKED="$1" BLOCKER="$2"
+  local EXISTING; EXISTING=$(gh api "repos/$REPO/issues/$BLOCKED/dependencies/blocked_by" --jq '.[].number' 2>/dev/null)
+  grep -qx "$BLOCKER" <<<"$EXISTING" && { echo "#$BLOCKED already blocked_by #$BLOCKER — skip"; return; }
+  local BID; BID=$(gh api "repos/$REPO/issues/$BLOCKER" --jq .id 2>/dev/null)
+  [[ "$BID" =~ ^[0-9]+$ ]] || { echo "✗ can't resolve id for #$BLOCKER — skipping edge #$BLOCKED←#$BLOCKER"; return; }
+  if ! gh api -X POST "repos/$REPO/issues/$BLOCKED/dependencies/blocked_by" \
+         -F issue_id="$BID" >/dev/null 2>/tmp/dep.err; then
+    grep -q "already been taken" /tmp/dep.err || { echo "✗ POST #$BLOCKED←#$BLOCKER failed:"; cat /tmp/dep.err; }
+  fi
+}
+
+if (( ${#ORDER[@]} > 1 )); then
+  # Value iteration with a PREV cursor — NO array indexing (zsh-safe).
+  PREV=""
+  for CUR in "${ORDER[@]}"; do
+    [[ -n $PREV ]] && wire_edge "$CUR" "$PREV"    # CUR blocked_by PREV
+    PREV="$CUR"
+  done
+  # Full-chain audit — stored set must equal exactly the consecutive pairs.
+  echo "── dependency audit (expected chain: ${ORDER[*]}) ──"
+  PREV=""
+  for CUR in "${ORDER[@]}"; do
+    if [[ -n $PREV ]]; then
+      HAVE=$(gh api "repos/$REPO/issues/$CUR/dependencies/blocked_by" --jq '[.[].number]|sort|join(",")' 2>/dev/null)
+      if grep -qx "$PREV" < <(printf '%s\n' "${HAVE//,/$'\n'}"); then
+        echo "✓ #$CUR blocked_by #$PREV   (stored: ${HAVE:-none})"
+      else
+        echo "✗ #$CUR MISSING blocked_by #$PREV   (stored: ${HAVE:-none}) — fix before reporting success"
+      fi
+      for h in ${HAVE//,/ }; do
+        [[ "$h" == "$PREV" ]] || echo "⚠ #$CUR also blocked_by #$h — not in the intended chain; remove if spurious"
+      done
+    fi
+    PREV="$CUR"
+  done
+fi
+```
+Remove a stray edge (id from the readback, not the issue number):
+```bash
+DEP_ID=$(gh api "repos/$REPO/issues/<BLOCKED>/dependencies/blocked_by" --jq '.[]|select(.number==<STRAY>)|.id')
+gh api -X DELETE "repos/$REPO/issues/<BLOCKED>/dependencies/blocked_by/$DEP_ID"
 ```
 
 ### Step 6 — Place the parent on the board
@@ -267,6 +322,19 @@ Implement it:  /implement-batch <PARENT>   ⚠ executor lands in #387 — not ru
   incoherent batch produces an unreviewable PR.
 - **Typed `-F` for every id.** Sub-issue and dependency links use the child's
   internal REST `id` with `-F` (integer), never the number, never `-f`.
+- **Never index a bash array — resumelint's shell is zsh (1-indexed).** A
+  `for ((i=1;…)); ${ORDER[i-1]}` loop written for bash's 0-indexing wires the wrong
+  dependency pairs under zsh (empty first blocker, last edge skipped). Iterate values
+  with a `PREV` cursor instead; it behaves identically in both shells.
+- **Numeric-guard every resolved id + suppress POST output.** Guard `CHILD_ID` /
+  `BLOCKER_ID` with `[[ … =~ ^[0-9]+$ ]]` before POSTing (a failed `--jq .id`
+  returns an error-JSON that 422s the POST), and `>/dev/null` every `gh api -X POST`
+  — its JSON response interleaves with your echoes and makes a run look like it
+  wired edges to the wrong issue.
+- **Audit the whole dependency chain, not each edge in isolation.** GitHub does not
+  add transitive edges, so end Step 5 by printing each child's full stored
+  `blocked_by` set — that catches a missing edge *and* a stray extra edge (both hit
+  real runs); remove strays with the `DELETE …/blocked_by/<dep_id>` call.
 - **Don't clobber good child metadata.** Add the batch label; set a child's
   milestone only when it has none (warn on conflict); add the assignee only when the
   child is unowned (warn if already assigned — `--add-assignee` co-assigns).
