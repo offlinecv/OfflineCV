@@ -25,7 +25,7 @@ const FONTS_UNMAPPABLE_BLURB =
 // fonts_unmappable, two-column output is still usable, so this renders as a
 // warning banner alongside the score rather than replacing the whole card.
 const TWO_COLUMN_BLURB =
-  "This resume uses a two-column layout. Many ATS parsers read text column-by-column-merged or out of order, scrambling the result. The reconstructed text below shows what a generic parser actually extracted — for the most reliable ATS parsing, use a single-column layout.";
+  "This resume uses a two-column layout. Text extractors often read the columns out of order — merging or interleaving them. The reconstructed text below is what a generic parser actually pulled out; if it looks scrambled, that's the ATS risk. A single-column layout parses most reliably.";
 
 type SourceKind = "pdf" | "docx";
 
