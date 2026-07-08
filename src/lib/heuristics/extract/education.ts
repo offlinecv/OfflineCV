@@ -614,7 +614,32 @@ function educationFromChunk(chunk: string[]): {
       chunk.find((l) => INSTITUTION_HINTS.test(l) && l !== degreeLine) ??
       chunk.find((l) => INSTITUTION_HINTS.test(l));
     if (instLine) {
-      institution = instLine.trim();
+      // #364 — when the ONLY institution-hint match is the same one-line
+      // "Degree — Institution" as the degree line, the raw line used to be
+      // stored verbatim ("B.S. in Computer Science — State University") AND
+      // parseDegreeAndField swallowed the institution into `field` ("Computer
+      // Science — State University"), producing a doubled render in the
+      // reconstructed view. Split at the em/en-dash separator so the trailing
+      // half is the institution and re-parse degree/field off the head.
+      if (instLine === degreeLine && degreeMatch) {
+        const parts = instLine.split(/\s+[–—-]\s+/);
+        if (parts.length >= 2) {
+          institution = parts[parts.length - 1].trim();
+          const head = parts.slice(0, -1).join(" — ");
+          ({ degree, field } = parseDegreeAndField(head));
+        } else {
+          // No separator — degree-strip and take whatever remains.
+          institution = instLine
+            .replace(degreeMatch[0], "")
+            .replace(/\s*\|\s*/g, " ")
+            .replace(/^\s*(?:in|of)\s+/i, "")
+            .replace(/^\s*[-–—,:]\s*/, "")
+            .replace(/[,|]+$/, "")
+            .trim();
+        }
+      } else {
+        institution = instLine.trim();
+      }
     } else {
       const cand = chunk.find((l) => !DEGREE_RE.test(l) && !isDateOnlyLine(l));
       if (cand) {

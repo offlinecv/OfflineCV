@@ -157,6 +157,33 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     ]);
   });
 
+  // #364 — a one-line "Degree — Institution" entry used to store the raw line
+  // verbatim as institution AND let parseDegreeAndField swallow the trailing
+  // institution into `field`, producing a doubled render.
+  it("splits one-line 'Degree in Field — Institution' into clean degree/field/institution (#364)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. in Computer Science — State University",
+        "2013",
+      ]),
+    );
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+    expect(value[0].institution).toBe("State University");
+    expect(value[0].institution).not.toMatch(/B\.S\.|Computer Science/);
+  });
+
+  it("handles em-dash / en-dash separator equivalently", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "M.Sc. in Data Science – Riverside College",
+        "2022",
+      ]),
+    );
+    expect(value[0].institution).toBe("Riverside College");
+    expect(value[0].field).toBe("Data Science");
+  });
+
   // #366 — LaTeX two-column line assembly joins institution and city with a
   // single space. The 1-space fallback splits when the surviving institution
   // prefix has ≥2 tokens; a single-token remainder ("Stanford CA") is
