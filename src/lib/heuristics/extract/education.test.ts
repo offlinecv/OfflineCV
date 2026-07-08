@@ -307,6 +307,33 @@ describe("extractEducation — trailing date peeled cleanly off one-line institu
     expect(value[0].institution).toBe("University of Example");
     expect(value[0].location).toBe("Seattle, WA");
   });
+
+  // #375 — one-line "Institution | Dates" (letter-spaced-name-heading fixture).
+  // Old `stripInstitutionDate` peeled only the date and left a trailing " |"
+  // glued onto the institution, then `stripInstitutionLocation` didn't clean
+  // bare punctuation either. The COL_SEP alternation now consumes the leading
+  // column separator alongside the trailing date.
+  it("peels a leading '| ' column separator alongside the trailing date (#375)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Bachelor of Science, Computer Science",
+        "State University | 2018 - 2022",
+      ]),
+    );
+    expect(value[0].institution).toBe("State University");
+    expect(value[0].institution).not.toMatch(/\|/);
+  });
+
+  it("peels a leading '· ' middot column separator with the trailing date", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science",
+        "Example College · 2015 – 2019",
+      ]),
+    );
+    expect(value[0].institution).toBe("Example College");
+    expect(value[0].institution).not.toMatch(/·/);
+  });
 });
 
 describe("splitDoubledCity — only collapse the concatenation artifact", () => {

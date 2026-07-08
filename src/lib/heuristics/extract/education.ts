@@ -528,8 +528,15 @@ function stripInstitutionDate(s: string): string {
   // second date — so "… 2015 – Current" peels whole, not nothing.
   const OPEN = `(?:present|current|ongoing|now)`;
   const SEP = `\\s*[–—-]\\s*`;
+  // Optional column separator immediately before the trailing date, so a
+  // one-line "Institution | 2018 – 2022" (#375) peels cleanly instead of
+  // leaving a bare " |" glued to the institution. The separator must be
+  // followed by whitespace, so a natural comma inside the institution name
+  // ("University of Washington, Seattle 2010 – 2015") that already has no
+  // preceding whitespace still cannot match this optional group.
+  const COL_SEP = `(?:[|·,]\\s+)?`;
   const TRAILING_DATE_RE = new RegExp(
-    `\\s+${DATE}(?:${SEP}(?:${DATE}|${OPEN}))?\\s*$`,
+    `\\s+${COL_SEP}${DATE}(?:${SEP}(?:${DATE}|${OPEN}))?\\s*$`,
     "i",
   );
   const stripped = s.replace(TRAILING_DATE_RE, "").trim();
