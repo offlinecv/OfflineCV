@@ -50,6 +50,11 @@ describe("'Title, Team' over 'Company | Location Dates' (#372)", () => {
     expect(role.team).toBe("Business Credit Journey");
     // The team must not be mislabeled as the company.
     expect(role.company).not.toContain("Business Credit Journey");
+    // Known gap: the anchor line's location ("New York, NY") is dropped on this
+    // shape — the location sits BEFORE the (stripped) date range, so no
+    // end-anchored pass claims it. Deferred to #373; pinned here so #373's fix
+    // flips a visible assertion rather than silently changing untested behavior.
+    expect(role.location).toBeUndefined();
   });
 
   it("still maps a genuine 'Title, Company' with a plain date line below (no regression)", () => {

@@ -110,12 +110,23 @@ function experienceFromBlock(block: EntryBlock): {
 const LEGAL_SUFFIX_RE =
   /^(inc\.?|llc|l\.l\.c\.?|ltd\.?|corp\.?|co\.?|gmbh|plc|lp|llp|pc|s\.a\.?|n\.a\.?|sa)$/i;
 
+/** Multi-word US cities recognized by BOTH the whole-string `BARE_LOCATION_RE`
+ *  (case-insensitive) and the embedded-fold `KNOWN_MULTIWORD_US_CITY_RE`
+ *  (case-sensitive Title-case). Single source of truth so the two can't drift
+ *  apart. Longest-first so "New York City" wins over "New York" in the embedded
+ *  alternation (regex first-match); order is irrelevant for the `^…$`-anchored
+ *  `BARE_LOCATION_RE`. */
+const MULTIWORD_US_CITY_ALT =
+  "New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City";
+
 /** Bare city/region names (no "City, ST" state tail, so `US_LOCATION_RE` misses
  *  them) that show up as a `"Title, Location"` header tail — must NOT be cleaved
  *  off as the company. Exact whole-string match keeps a real company that merely
  *  contains a city word ("New York Times", "Boston Consulting") splittable. */
-const BARE_LOCATION_RE =
-  /^(remote|hybrid|on-?site|san francisco|san diego|san jose|san antonio|los angeles|las vegas|new york|new york city|new orleans|salt lake city|washington|washington d\.?c\.?|boston|chicago|seattle|austin|denver|portland|atlanta|dallas|houston|phoenix|miami|detroit|philadelphia|pittsburgh|minneapolis|nashville|charlotte|columbus|indianapolis|baltimore|sacramento|raleigh|london|paris|berlin|munich|tokyo|singapore|bangalore|bengaluru|mumbai|delhi|hyderabad|toronto|vancouver|sydney|melbourne|dublin|amsterdam)$/i;
+const BARE_LOCATION_RE = new RegExp(
+  `^(remote|hybrid|on-?site|${MULTIWORD_US_CITY_ALT}|washington|washington d\\.?c\\.?|boston|chicago|seattle|austin|denver|portland|atlanta|dallas|houston|phoenix|miami|detroit|philadelphia|pittsburgh|minneapolis|nashville|charlotte|columbus|indianapolis|baltimore|sacramento|raleigh|london|paris|berlin|munich|tokyo|singapore|bangalore|bengaluru|mumbai|delhi|hyderabad|toronto|vancouver|sydney|melbourne|dublin|amsterdam)$`,
+  "i",
+);
 
 /** True when the comma tail reads like a location rather than an employer —
  *  either a "City, ST"/"City, Country" shape, a bare well-known city, or a
@@ -199,10 +210,9 @@ const LOCALITY_SUFFIX_RE =
  *  match would eat company/role words ("Greenfield Studios New York" → city
  *  "Studios New York"). Same closed-vocabulary discipline as Pass C/D's country
  *  gazetteer. Longest-first so "New York City" wins over "New York" (regex
- *  alternation is first-match). Mirrors the multi-word entries in
- *  `BARE_LOCATION_RE`. */
-const KNOWN_MULTIWORD_US_CITY_RE =
-  /New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City/;
+ *  alternation is first-match). Shares its city list with `BARE_LOCATION_RE` via
+ *  the single-source `MULTIWORD_US_CITY_ALT` const so the two can't drift. */
+const KNOWN_MULTIWORD_US_CITY_RE = new RegExp(MULTIWORD_US_CITY_ALT);
 
 function stripLocationSuffix(s: string): {
   text: string;
@@ -460,19 +470,31 @@ function disambiguateCompanyTitle(
   // Split any header that has an obvious "Title @ Company", "Title — Company",
   // "Title | Company", "Title · Company" (mid-dot, #217), or guarded
   // "Title, Company" pattern.
-  const splits: Array<{ text: string; source: number }> = [];
+  // `via` records HOW a split was cleaved so downstream guards can key on the
+  // actual shape, not just "same source line": "delim" = a `@`/`—`/`|`/`·`
+  // delimiter split, "comma" = a `splitRoleComma` (role-comma) split, "whole" =
+  // an unsplit header line.
+  const splits: Array<{
+    text: string;
+    source: number;
+    via: "delim" | "comma" | "whole";
+  }> = [];
   filtered.forEach((h, idx) => {
     const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s+|\s+·\s+/);
     if (atSplit.length > 1) {
-      atSplit.forEach((s) => splits.push({ text: s.trim(), source: idx }));
+      atSplit.forEach((s) =>
+        splits.push({ text: s.trim(), source: idx, via: "delim" }),
+      );
       return;
     }
     const roleComma = splitRoleComma(h);
     if (roleComma) {
-      roleComma.forEach((s) => splits.push({ text: s, source: idx }));
+      roleComma.forEach((s) =>
+        splits.push({ text: s, source: idx, via: "comma" }),
+      );
       return;
     }
-    splits.push({ text: h, source: idx });
+    splits.push({ text: h, source: idx, via: "whole" });
   });
 
   // Every split that reads like a company/institution (its index in `splits`).
@@ -559,15 +581,19 @@ function disambiguateCompanyTitle(
     if (firstLooksTitle && !secondLooksTitle) {
       title = splits[0]?.text;
       // #372 — "Title, Team" over "Company | Location Dates": splits[0]/splits[1]
-      // are a role-comma split of ONE header line (same source), so the
-      // post-comma splits[1] is a team/sub-org suffix, not the company. When the
-      // anchor (date) line below was delimiter-split into "Company | Location
-      // Dates", its leading segment is the real company — take it and demote the
-      // post-comma segment to team. Additive: fires only for the comma-split +
-      // delimited-anchor shape; every other case keeps the "Title, Company"
+      // are a role-comma split of ONE header line (same source, `via: "comma"`),
+      // so the post-comma splits[1] is a team/sub-org suffix, not the company.
+      // When the anchor (date) line below was delimiter-split into "Company |
+      // Location Dates", its leading segment is the real company — take it and
+      // demote the post-comma segment to team. Guarded on `via: "comma"` so a
+      // same-line `|`/`@`/`·`/`—` delimiter split (also same-source) can't
+      // misfire this comma-shape branch. Additive: fires only for the comma-split
+      // + delimited-anchor shape; every other case keeps the "Title, Company"
       // default below.
       const isRoleCommaSplit =
-        splits[1] !== undefined && splits[0]?.source === splits[1].source;
+        splits[1] !== undefined &&
+        splits[0]?.via === "comma" &&
+        splits[0]?.source === splits[1].source;
       const anchorSplits =
         anchorIdx !== undefined
           ? splits.filter((s) => s.source === anchorIdx)
