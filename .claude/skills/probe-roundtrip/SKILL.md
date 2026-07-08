@@ -78,13 +78,64 @@ Use an **absolute path** for `RL_RT_PDF`.
   Download-PDF path preserves what the parser read.
 - **A category regresses** (e.g. `education count 1 → 2`, a `role[i].company`
   value swap, a skills `added`/`removed` split) → that is a renderer or parser
-  bug. Localize it, then file a **public** `resumelint-org/resumelint` issue
-  describing the corruption **by category, using a synthetic repro** — never the
-  candidate's real values. The round-trip bugs this probe hunts are tracked at
+  bug. Localize it, then file it via **Filing what you find** below. The
+  round-trip bugs this probe hunts are tracked at
   resumelint-org/resumelint#295–#299.
 - **`renderError`** → `renderAtsResumePdf` crashed (e.g. a non-WinAnsi glyph the
   pdf-lib StandardFonts can't encode). Highest-severity find — the Download-PDF
   path throws for real users.
+
+## Filing what you find (gated auto-file)
+
+Once you've localized the corruption to a hop + layer, you can turn the finding
+into a `resumelint-org/resumelint` issue **without leaving the probe** — via the
+in-repo [`create-gh-issue`](../create-gh-issue/SKILL.md) skill. Filing is
+**gated**: draft, show, confirm, then write. Never blast-file.
+
+**PII guardrail carries over unchanged.** The issue body must describe the
+corruption **by category with a synthetic repro** — never the candidate's real
+field values. The category is what you cite in the console ("education count
+inflated 1→2", "a `role[i].company` value swap"); the values stay in the
+gitignored JSON report. If you can't restate the defect without a real value, you
+can't file it yet — build the synthetic repro first.
+
+### 1. Dedup first (required)
+
+Before drafting, search open issues for the same **symptom** so you don't pile
+onto the tracked round-trip bugs (#295–#299) or the open parser backlog:
+
+```bash
+gh issue list --repo resumelint-org/resumelint --state open --limit 50 \
+  --search "round-trip <symptom keyword>"   # e.g. "round-trip education count"
+```
+
+If a match already covers this symptom, **stop** — link the existing issue instead
+of filing. Only file when nothing matches.
+
+### 2. Draft by category
+
+Build a self-contained finding from the probe's per-hop diff, values scrubbed to
+categories:
+
+- **Title** — the defect + where it regresses, e.g. `Round-trip: education entry
+  count inflated on re-parse of the reconstructed PDF`.
+- **Body** — the hop at which the category first regresses (`renderError` is the
+  highest-severity variant), the category of drift (`count inflated`, `field
+  swap`, `skills added/removed`, `summary length drift`), and whether it is a
+  renderer defect (`renderAtsResumePdf` / `ats-resume-model.ts`) or a re-parse
+  defect — no raw candidate values.
+- **Synthetic repro** — a synthetic-persona PDF (fake name, `@example.com`, a
+  `555`-exchange phone on a real area code, subscriber `0100`–`0199`) that
+  reproduces the same category of round-trip corruption, so it can seed a
+  `corpus-roundtrip.test.ts` case. See `tests/fixtures/pdfs/README.md`.
+
+### 3. Show + confirm, then write
+
+Print the drafted title + body and the labels you'll use, and **wait for an
+explicit human confirm**. On confirm, write via the `create-gh-issue` skill (which
+owns the `scripts/create-gh-issue.sh` write path, label handling, and body-file
+escaping) — do **not** hand-roll a parallel `gh issue create` here. `bug` is the
+default type label; add `testing` when the fix seeds a corpus round-trip case.
 
 ## Boundaries
 
