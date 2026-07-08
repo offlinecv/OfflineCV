@@ -471,8 +471,27 @@ function stripInstitutionLocation(s: string): {
   // has already peeled any trailing dates by the time this runs.
   const MIDDOT_US_RE =
     /\s*·\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
-  const mUS =
+  // #366 — 1-space fallback for LaTeX two-column line assembly, which joins
+  // institution and city with only ONE space ("Lakeside Institute of Technology
+  // Seattle, WA"). Only fires when the surviving institution prefix has ≥2
+  // tokens: a single-token remainder ("Stanford CA", "MIT Cambridge, MA") is
+  // ambiguous with a real institution + state suffix, so we refuse to split
+  // there and keep the whole line as institution. Tried AFTER the 2+ space
+  // primary so "… University  City, ST" still matches the strict shape.
+  const SPACE1_US_RE = /\s([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
+  let mUS =
     s.match(COMMA_US_RE) ?? s.match(SPACE_US_RE) ?? s.match(MIDDOT_US_RE);
+  if (!mUS) {
+    const m1 = s.match(SPACE1_US_RE);
+    if (m1) {
+      const beforeTokens = s
+        .slice(0, m1.index)
+        .trim()
+        .split(/\s+/)
+        .filter((t) => t.length > 0);
+      if (beforeTokens.length >= 2) mUS = m1;
+    }
+  }
   if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
     const before = s
       .slice(0, mUS.index)

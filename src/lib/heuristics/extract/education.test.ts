@@ -157,6 +157,36 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     ]);
   });
 
+  // #366 — LaTeX two-column line assembly joins institution and city with a
+  // single space. The 1-space fallback splits when the surviving institution
+  // prefix has ≥2 tokens; a single-token remainder ("Stanford CA") is
+  // ambiguous with a state-suffixed institution and stays glued.
+  it("splits '… Institution City, ST' joined by a single space when institution ≥2 tokens (#366)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Lakeside Institute of Technology Seattle, WA",
+        "B.S. in Computer Science, 2020 - 2024",
+      ]),
+    );
+    expect(value[0].institution).toBe("Lakeside Institute of Technology");
+    expect(value[0].location).toBe("Seattle, WA");
+  });
+
+  it("refuses to split when the surviving institution reduces to one token (#366 guard)", () => {
+    // Ambiguous case: a single-word institution then a city, state (e.g.
+    // "Cornell Ithaca, NY"). Splitting would strip a legit institution token,
+    // so the 1-space fallback refuses. Chose 'NY' (unambiguous with degree
+    // patterns like BA/MA that DEGREE_RE would otherwise pick up).
+    const { value } = extractEducation(
+      mkEduSection([
+        "Cornell Ithaca, NY",
+        "B.S. in Computer Science, 2020 - 2024",
+      ]),
+    );
+    expect(value[0].institution).toBe("Cornell Ithaca, NY");
+    expect(value[0].location).toBeUndefined();
+  });
+
   it("leaves a course NAME that happens to contain 'Courses' mid-string untouched", () => {
     // Anchor-only strip: `COURSEWORK_LABEL_RE` binds at `^` so a course name
     // like "Advanced Courses in AI" is NOT accidentally stripped mid-string.
