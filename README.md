@@ -159,6 +159,10 @@ under disk pressure, and Safari clears script-writable storage after 7 days
 without a visit — so the module ships a JSON **export/import** backup path (resume
 bytes base64-encoded in the export file) as the user's own recovery route.
 
+The **resume library** (save a parsed resume, reload it later without re-uploading,
+rename/delete) is the first surface built on this store; it shows the persistence
+state and the eviction note inline, with the export backup reachable from there.
+
 ### GitHub star count
 
 The footer shows the live repo star count via an unauthenticated call to

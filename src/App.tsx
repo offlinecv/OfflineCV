@@ -8,7 +8,10 @@ import { ReconstructedResume } from "./components/features/ReconstructedResume.t
 import { AtsScoreReadout } from "./components/features/AtsScoreReadout.tsx";
 import { PageShell } from "./components/features/PageShell.tsx";
 import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
+import { ResumeLibrary } from "./components/features/ResumeLibrary.tsx";
+import { SaveResumeBar } from "./components/features/SaveResumeBar.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
+import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { writeJdFitHandoff } from "./lib/jd-fit-handoff.ts";
 import { isScoreRevealed } from "./lib/contact.ts";
@@ -26,7 +29,24 @@ export default function App() {
     startBlank,
     resumeDraft,
     startOverBlank,
+    loadSavedResume,
   } = useAnalyzedResume();
+
+  // Local-first resume library (#322) — save/reload parsed resumes without
+  // re-uploading. Loading hydrates the "done" state from the cached parse.
+  const library = useResumeLibrary();
+  const onLoadSavedResume = async (id: string) => {
+    const loaded = await library.load(id);
+    if (loaded === undefined) return;
+    loadSavedResume({
+      fileName: loaded.filename,
+      fileSize: loaded.fileSize,
+      bytes: loaded.bytes,
+      sourceKind: loaded.sourceKind,
+      result: loaded.result,
+      score: loaded.score,
+    });
+  };
 
   // Once a parse is done the inline DropZone is gone; this restores drag-and-
   // drop so a new resume can replace the current one (confirm-gated, since it
@@ -138,6 +158,13 @@ export default function App() {
           />
 
           {(state.phase === "idle" || state.phase === "error") && (
+            // Saved-resumes picker (#322) — self-hides when the library is
+            // empty. Sits directly beneath the drop zone; loading one restores
+            // the results view from its cached parse (no re-upload).
+            <ResumeLibrary library={library} onLoad={onLoadSavedResume} />
+          )}
+
+          {(state.phase === "idle" || state.phase === "error") && (
             // "Start from scratch" entry point (#313) — a clearly-secondary
             // CTA for a user with no resume yet (or who wants a clean start).
             // Reuses the existing editor/exporter surface (ReconstructedResume
@@ -196,6 +223,16 @@ export default function App() {
               sourceKind={state.sourceKind}
               onReset={reset}
               edit={edit}
+            />
+            {/* Save-to-library affordance (#322) — saves the edited parse +
+                source bytes so this resume can be reloaded without re-uploading. */}
+            <SaveResumeBar
+              library={library}
+              fileName={state.fileName}
+              bytes={state.bytes}
+              sourceKind={state.sourceKind}
+              result={displayResult}
+              score={edited.score}
             />
             {jdFitEnabled && (
               // Cross-sell sits *below* the result as a quiet follow-on, not a

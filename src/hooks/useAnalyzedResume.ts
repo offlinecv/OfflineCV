@@ -33,6 +33,7 @@ import {
   clearBlankDraft,
   type ParseState,
   type BlankDraftSnapshot,
+  type LoadedDoneState,
 } from "./useResumeAnalysis.ts";
 import {
   useEditableParse,
@@ -79,6 +80,8 @@ export interface AnalyzedResume {
   /** Discard a previously-detected draft and start a fresh blank resume.
    *  No-op outside an unresolved draft prompt. */
   startOverBlank: () => void;
+  /** Hydrate the results view from a saved resume (#322) — no re-parse. */
+  loadSavedResume: (saved: LoadedDoneState) => void;
 }
 
 export function useAnalyzedResume(): AnalyzedResume {
@@ -90,6 +93,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     startBlank,
     resolveDraftPrompt,
     startOverBlank,
+    loadSavedResume,
   } = useResumeAnalysis();
 
   // Lifted edit state (#82): overrides live ABOVE the scorer so a corrected
@@ -324,5 +328,6 @@ export function useAnalyzedResume(): AnalyzedResume {
     startBlank,
     resumeDraft,
     startOverBlank,
+    loadSavedResume,
   };
 }
