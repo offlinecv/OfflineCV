@@ -69,25 +69,20 @@ export function wrapWordsToLines(
   const lines: string[] = [];
   let current = "";
   for (const word of words) {
-    const candidate = current === "" ? word : `${current} ${word}`;
-    if (current === "" || font.widthOfTextAtSize(candidate, size) <= maxWidth) {
-      // Still room on the current line — but a first word that alone overflows
-      // must break here (when asked) rather than seed an overlong line.
-      if (
-        current === "" &&
-        breakLongWords &&
-        font.widthOfTextAtSize(word, size) > maxWidth
-      ) {
-        const chunks = breakLongWord(word, font, size, maxWidth);
-        lines.push(...chunks.slice(0, -1));
-        current = chunks[chunks.length - 1] ?? "";
-      } else {
+    // Extend the current line when the word still fits alongside it; otherwise
+    // flush it and fall through to seat `word` on a fresh (empty) line.
+    if (current !== "") {
+      const candidate = `${current} ${word}`;
+      if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
         current = candidate;
+        continue;
       }
-      continue;
+      lines.push(current);
+      current = "";
     }
-    // Word doesn't fit on the current line — flush and start it on a fresh line.
-    lines.push(current);
+    // `current` is empty here: seat `word` as the start of a new line. A word
+    // that alone overflows is broken across lines when asked, else emitted whole
+    // (the round-trip-safe overflow the résumé renderer relies on).
     if (breakLongWords && font.widthOfTextAtSize(word, size) > maxWidth) {
       const chunks = breakLongWord(word, font, size, maxWidth);
       lines.push(...chunks.slice(0, -1));
