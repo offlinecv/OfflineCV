@@ -28,7 +28,11 @@
  *   the achievements text still rides in the PDF's own text layer).
  */
 
-import type { AtsResumeModel, AtsEntryFields } from "./ats-resume-model.ts";
+import type {
+  AtsResumeModel,
+  AtsEntryFields,
+  AtsSectionKind,
+} from "./ats-resume-model.ts";
 import type { ProfileLink } from "../score/types.ts";
 import { APP_VERSION } from "../version.ts";
 
@@ -274,6 +278,44 @@ function toEducation(fields: AtsEntryFields): JsonResumeEducation {
 
 // ── Adapter ─────────────────────────────────────────────────────────────────────
 
+/** The four JSON Resume arrays accumulated while walking the model's sections. */
+interface ResumeBuckets {
+  work: JsonResumeWork[];
+  education: JsonResumeEducation[];
+  skills: JsonResumeSkill[];
+  projects: JsonResumeProject[];
+}
+
+/**
+ * Route one entry into its JSON Resume bucket by its section kind. An entry
+ * lacking structured `fields` carries nothing to map, so it is skipped (except
+ * `skills`, whose payload is the `fields.skills` list). "achievements" and any
+ * unmodeled section are intentionally not mapped.
+ */
+function appendEntry(
+  kind: AtsSectionKind | undefined,
+  entry: { fields?: AtsEntryFields; bullets: readonly string[] },
+  buckets: ResumeBuckets,
+): void {
+  const { fields } = entry;
+  switch (kind) {
+    case "experience":
+      if (fields) buckets.work.push(toWork(fields, entry.bullets));
+      break;
+    case "projects":
+      if (fields) buckets.projects.push(toProject(fields, entry.bullets));
+      break;
+    case "education":
+      if (fields) buckets.education.push(toEducation(fields));
+      break;
+    case "skills":
+      for (const name of fields?.skills ?? []) buckets.skills.push({ name });
+      break;
+    default:
+      break;
+  }
+}
+
 /**
  * Map an {@link AtsResumeModel} to a {@link JsonResume}. Pure — no I/O, no
  * pdf-lib. `work` / `education` / `skills` / `projects` are always present (as
@@ -282,41 +324,21 @@ function toEducation(fields: AtsEntryFields): JsonResumeEducation {
  * for that array (it carries nothing to map).
  */
 export function toJsonResume(model: AtsResumeModel): JsonResume {
-  const work: JsonResumeWork[] = [];
-  const education: JsonResumeEducation[] = [];
-  const skills: JsonResumeSkill[] = [];
-  const projects: JsonResumeProject[] = [];
+  const buckets: ResumeBuckets = { work: [], education: [], skills: [], projects: [] };
 
   for (const section of model.sections) {
     for (const entry of section.entries) {
-      const fields = entry.fields;
-      switch (section.kind) {
-        case "experience":
-          if (fields) work.push(toWork(fields, entry.bullets));
-          break;
-        case "projects":
-          if (fields) projects.push(toProject(fields, entry.bullets));
-          break;
-        case "education":
-          if (fields) education.push(toEducation(fields));
-          break;
-        case "skills":
-          for (const name of fields?.skills ?? []) skills.push({ name });
-          break;
-        // "achievements" (and any unmodeled section) is intentionally not mapped.
-        default:
-          break;
-      }
+      appendEntry(section.kind, entry, buckets);
     }
   }
 
   return {
     $schema: JSON_RESUME_SCHEMA,
     basics: toBasics(model),
-    work,
-    education,
-    skills,
-    projects,
+    work: buckets.work,
+    education: buckets.education,
+    skills: buckets.skills,
+    projects: buckets.projects,
     meta: { version: APP_VERSION },
   };
 }

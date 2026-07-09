@@ -6,6 +6,11 @@ import type { PdfLinkAnnotation } from "../types.ts";
 import type { ProfileLink } from "../../score/types.ts";
 import { profilesFromUrls } from "../../contact/profile-registry.ts";
 import {
+  LINKEDIN_NONPROFILE_RE,
+  normalizeUrl,
+  urlSlug,
+} from "../../contact/url-utils.ts";
+import {
   EMAIL_RE,
   LINKEDIN_RE,
   GITHUB_RE,
@@ -72,26 +77,12 @@ export interface ContactExtractionResult {
  *  ContactExtractionResult} (which adds `consumedLines`). */
 type ContactScanResult = Omit<ContactExtractionResult, "consumedLines" | "profiles">;
 
-/** LinkedIn paths that are NOT a personal profile — feed, company pages, job
- *  posts, articles, etc. Everything else under `linkedin.com/<handle>` (the
- *  `/in/<handle>` canonical form AND bare-vanity hosts) is treated as a
- *  profile, mirroring GitHub's "any `github.com/<user>`" rule. */
-export const LINKEDIN_NONPROFILE_RE =
-  /linkedin\.com\/(company|jobs|feed|school|learning|pulse|posts|groups|showcase|games|events|help|legal|search|signup|login|home)\b/i;
-
 /** True when `u` is a LinkedIn personal-profile URL. Accepts the canonical
  *  `linkedin.com/in/<handle>` and `linkedin.com/pub/...` as well as a vanity
  *  `linkedin.com/<handle>` that omits `/in/` — the latter is what makes a
  *  hyperlinked "LinkedIn" anchor resolve even when the target drops `/in/`. */
 function isLinkedinProfileUrl(u: string): boolean {
   return /linkedin\.com\/[A-Za-z0-9]/i.test(u) && !LINKEDIN_NONPROFILE_RE.test(u);
-}
-
-export function normalizeUrl(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  const trimmed = raw.replace(/[,;.)]$/, "").trim();
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
 }
 
 // ── Promoted-identity-link ownership (#134) ─────────────────────────────────
@@ -105,20 +96,6 @@ export function normalizeUrl(raw: string | undefined): string | undefined {
 // an optional introducing label — is reported on `consumedLines`, and the
 // caller drops those lines from the candidate pools before the body extractors
 // run. Ownership is recorded here, at the single point the link is promoted.
-
-/** Host+path of a URL, lowercased, with scheme / `www.` / trailing punctuation
- *  removed — the comparable identity of a link across "https://github.com/x",
- *  "github.com/x" and "github.com/x/". */
-export function urlSlug(u: string | undefined): string | undefined {
-  if (!u) return undefined;
-  const s = u
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/[/.,;:)\]]+$/, "")
-    .toLowerCase();
-  return s.length > 0 ? s : undefined;
-}
 
 /** Leading introducing label that a bare identity link sits behind ("LinkedIn:",
  *  "GitHub —", "Links", "Find me online") — stripped before testing whether a

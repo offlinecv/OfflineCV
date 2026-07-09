@@ -167,6 +167,50 @@ function dimensionValue(dim: { score: number; max: number; gradable: boolean }):
 }
 
 /**
+ * Identity header — PRIVACY GATE. Drawn ONLY when `includeIdentity` is true AND
+ * an `identity` block is present; a no-op otherwise, so the default artifact is
+ * anonymous. Extracted from the main render so its nested branches don't inflate
+ * the caller's complexity.
+ */
+function drawIdentityHeader(layout: ReportLayout, input: AuditReportInput, muted: RGB) {
+  if (!input.includeIdentity || !input.identity) return;
+  const id = input.identity;
+  if (id.name) layout.drawText(id.name, { bold: true, size: SIZE_BODY });
+  const parts = [
+    id.email,
+    id.phone,
+    id.location ? [id.location.city, id.location.region].filter(Boolean).join(", ") : undefined,
+    id.url,
+    ...(id.profiles ?? []).map((p) => p.url),
+  ].filter((p): p is string => Boolean(p));
+  if (parts.length > 0) {
+    layout.drawText(parts.join("  •  "), { size: SIZE_SMALL, color: muted });
+  }
+  layout.advance(8);
+}
+
+/** Layout-flags section: one bullet per fired trigger, or a reassuring line when
+ *  none fired. */
+function drawLayoutFlags(
+  layout: ReportLayout,
+  triggers: AuditReportInput["triggers"],
+  muted: RGB,
+) {
+  sectionHeading(layout, "Layout flags");
+  if (triggers.length === 0) {
+    layout.drawText("No layout flags — standard single-column, text-selectable PDF.", {
+      size: SIZE_BODY,
+      color: muted,
+    });
+    return;
+  }
+  for (const t of triggers) {
+    layout.drawText(`• ${LAYOUT_TRIGGER_BLURBS[t]}`, { size: SIZE_BODY, hangingIndent: 10 });
+    layout.advance(2);
+  }
+}
+
+/**
  * Render an audit report to PDF bytes (Uint8Array). Pure w.r.t. inputs — the
  * only side channel is the lazy pdf-lib import; no fetch, no upload.
  */
@@ -197,21 +241,7 @@ export async function renderAuditReportPdf(
   layout.advance(10);
 
   // ── Identity header (privacy gate — opt-in only) ──
-  if (input.includeIdentity && input.identity) {
-    const id = input.identity;
-    if (id.name) layout.drawText(id.name, { bold: true, size: SIZE_BODY });
-    const parts2 = [
-      id.email,
-      id.phone,
-      id.location ? [id.location.city, id.location.region].filter(Boolean).join(", ") : undefined,
-      id.url,
-      ...(id.profiles ?? []).map((p) => p.url),
-    ].filter((p): p is string => Boolean(p));
-    if (parts2.length > 0) {
-      layout.drawText(parts2.join("  •  "), { size: SIZE_SMALL, color: muted });
-    }
-    layout.advance(8);
-  }
+  drawIdentityHeader(layout, input, muted);
 
   // ── Verdict + overall score ──
   sectionHeading(layout, "Verdict");
@@ -239,21 +269,7 @@ export async function renderAuditReportPdf(
   }
 
   // ── Layout flags ──
-  sectionHeading(layout, "Layout flags");
-  if (input.triggers.length === 0) {
-    layout.drawText("No layout flags — standard single-column, text-selectable PDF.", {
-      size: SIZE_BODY,
-      color: muted,
-    });
-  } else {
-    for (const t of input.triggers) {
-      layout.drawText(`• ${LAYOUT_TRIGGER_BLURBS[t]}`, {
-        size: SIZE_BODY,
-        hangingIndent: 10,
-      });
-      layout.advance(2);
-    }
-  }
+  drawLayoutFlags(layout, input.triggers, muted);
 
   // ── Recommendation ──
   sectionHeading(layout, "Recommendation");

@@ -13,8 +13,9 @@
  *
  * URL normalization is intentionally NOT reimplemented here — `normalizeUrl` /
  * `urlSlug` and the `LINKEDIN_NONPROFILE_RE` exclusion are reused from the
- * parser's `extract/contact.ts` so classification stays byte-consistent with
- * extraction.
+ * shared `url-utils` leaf (the same helpers the parser's `extract/contact.ts`
+ * uses) so classification stays byte-consistent with extraction, without the
+ * two modules importing each other (#423).
  */
 
 import type { ProfileLink } from "../score/types.ts";
@@ -22,7 +23,7 @@ import {
   normalizeUrl,
   urlSlug,
   LINKEDIN_NONPROFILE_RE,
-} from "../heuristics/extract/contact.ts";
+} from "./url-utils.ts";
 
 interface HostRule {
   /** Tested against the URL's hostname (lowercased, `www.` stripped). */
