@@ -107,6 +107,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     skillsOverride,
     addedEntries,
     addedBullets,
+    addedProfiles,
     setContactField,
     setExperienceField,
     setBulletField,
@@ -150,6 +151,7 @@ export function useAnalyzedResume(): AnalyzedResume {
       addedEntries,
       addedBullets,
       removedBullets,
+      addedProfiles,
     );
     // The anonymous scorer pools its bullet set from `sections` (#133), so the
     // edited section view — not the original — must feed re-grading or a live
@@ -173,6 +175,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     addedEntries,
     addedBullets,
     removedBullets,
+    addedProfiles,
   ]);
 
   const displayResult = useMemo<CascadeResult | null>(() => {

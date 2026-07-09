@@ -526,3 +526,21 @@ export type DownloadSource = "blank" | "upload";
 export function trackDownloadCompleted(args: { source: DownloadSource }): void {
   track("download_completed", { source: args.source });
 }
+
+/** Which format the shareable audit report (#343) was exported in. */
+export type ReportFormat = "pdf" | "json";
+
+/**
+ * A shareable audit report was downloaded (#343). Carries only the chosen
+ * format and whether the user opted to include identity — no field values, no
+ * PII. Env-gated like every other tracker: no-op when VITE_POSTHOG_KEY is unset.
+ */
+export function trackReportDownloaded(args: {
+  format: ReportFormat;
+  includeIdentity: boolean;
+}): void {
+  track("report_downloaded", {
+    format: args.format,
+    include_identity: args.includeIdentity,
+  });
+}

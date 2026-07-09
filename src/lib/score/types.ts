@@ -56,6 +56,24 @@ export interface SkillInferred {
   confidence: number;
 }
 
+// ── Profile links (JSON Resume basics.profiles pattern, #335) ───────────────
+// A contributor-extensible replacement for the four hardcoded link slots
+// (`linkedin_url`, `github_url`, `portfolio_url`, `website_url`). Each detected
+// contact link becomes one `ProfileLink`, classified against the host registry
+// in `src/lib/contact/profile-registry.ts`. Phase 1 (#335) populates this
+// additively — the four legacy keys stay the source of truth for scoring and
+// corpus snapshots; #334's `toJsonResume()` maps this to `basics.profiles`.
+
+/** A single classified contact/identity link. */
+export interface ProfileLink {
+  /** Normalized canonical href (via the shared `normalizeUrl`). */
+  url: string;
+  /** Registry label ("GitHub") or the bare hostname when the host is unknown. */
+  network: string;
+  /** Coarse category used for grouping/UI. Unknown hosts fall to "other". */
+  kind: "code" | "social" | "portfolio" | "academic" | "writing" | "other";
+}
+
 // ── Resume data shapes ─────────────────────────────────────────────────────
 
 export type CareerTrajectory =
@@ -232,6 +250,10 @@ export interface ResumeData {
   portfolio_url?: string;
   github_url?: string;
   website_url?: string;
+  /** Contributor-extensible classified contact links (#335). Additive in
+   *  Phase 1 — mirrors the four legacy `*_url` keys above (which remain the
+   *  scoring/snapshot source of truth). #334 maps this to `basics.profiles`. */
+  profiles?: ProfileLink[];
   summary?: string;
   skills: string[];
   experience: ResumeExperience[];

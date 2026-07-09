@@ -26,7 +26,11 @@ import {
   validateUrl,
   type FieldValidator,
 } from "../../lib/edit/field-validators.ts";
-import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
+import type {
+  ContactOverrides,
+  AddedProfile,
+} from "../../hooks/useEditableParse.ts";
+import { ContactExtraLinks } from "./ContactExtraLinks.tsx";
 
 /** The inline-editable contact fields, mapped 1:1 to their `ContactOverrides`
  *  key. Includes the link fields — a detected GitHub/portfolio/website URL is
@@ -74,6 +78,13 @@ interface ContactDetailsProps {
   links: ContactDisplayField[];
   editable: boolean;
   commit: Commit;
+  /** Extra user-added links beyond the four legacy slots (#335). When
+   *  `onAddProfile` is provided (editable card), the variable-length add/edit/
+   *  delete affordance renders below the legacy links line. */
+  extraProfiles?: readonly AddedProfile[];
+  onAddProfile?: (url: string) => void;
+  onEditProfile?: (id: string, url: string) => void;
+  onRemoveProfile?: (id: string) => void;
 }
 
 export function ContactDetails({
@@ -81,6 +92,10 @@ export function ContactDetails({
   links,
   editable,
   commit,
+  extraProfiles,
+  onAddProfile,
+  onEditProfile,
+  onRemoveProfile,
 }: ContactDetailsProps) {
   // The parsed location, threaded into the phone validator's region default so a
   // non-US local-form number isn't falsely flagged (see `validatorFor`).
@@ -109,6 +124,19 @@ export function ContactDetails({
             </span>
           ))}
         </p>
+      )}
+
+      {/* Extra user-added links (#335) — add/edit/delete beyond the four legacy
+          slots. Edit-only: the affordance renders whenever an add handler is
+          wired (the editable card), even with zero extras so the first can be
+          added. */}
+      {editable && onAddProfile && onEditProfile && onRemoveProfile && (
+        <ContactExtraLinks
+          profiles={extraProfiles ?? []}
+          onAdd={onAddProfile}
+          onEdit={onEditProfile}
+          onRemove={onRemoveProfile}
+        />
       )}
     </>
   );

@@ -49,7 +49,12 @@ const CONTACT_ROWS: readonly {
   { key: "full_name", label: "Name", group: "identity" },
   { key: "email", label: "Email", group: "contact" },
   { key: "phone", label: "Phone", group: "contact" },
-  { key: "linkedin_url", label: "LinkedIn", group: "link" },
+  // Brand-neutral required row (#335): a "Professional profile" gap, satisfied
+  // by any social (LinkedIn) OR code (GitHub) link — see the github-satisfies
+  // check in `buildContactFields`. Keyed on `linkedin_url` so the existing
+  // fixed-key edit/override plumbing is unchanged this phase; Phase 2 flips the
+  // whole links block to read `profiles[]` directly.
+  { key: "linkedin_url", label: "Professional profile", group: "link" },
   { key: "github_url", label: "GitHub", group: "link", optional: true },
   { key: "portfolio_url", label: "Portfolio", group: "link", optional: true },
   { key: "website_url", label: "Website", group: "link", optional: true },
@@ -82,6 +87,15 @@ const FIELD_KEYS = {
 export function buildContactFields(
   cascade: Pick<CascadeResult, "parsed" | "fieldConfidence">,
 ): ContactDisplayField[] {
+  // A code profile (GitHub) satisfies the brand-neutral required "Professional
+  // profile" row (#335) — so a candidate who links GitHub but not LinkedIn sees
+  // no gap. The github value keeps rendering via its own optional row.
+  const githubConf =
+    cascade.fieldConfidence.github_url ?? 0;
+  const githubSatisfies =
+    Boolean(cascade.parsed.github_url) &&
+    githubConf >= CONTACT_DISPLAY_CONFIDENCE_FLOOR;
+
   const rows: ContactDisplayField[] = [];
   for (const { key, label, group, optional } of CONTACT_ROWS) {
     const raw = cascade.parsed[key as keyof typeof FIELD_KEYS];
@@ -91,6 +105,10 @@ export function buildContactFields(
 
     // An optional field is shown only when detected — its absence is not a gap.
     if (optional && !detected) continue;
+
+    // The required "Professional profile" row is not a gap when a code profile
+    // (GitHub) is present — social OR code satisfies it (#335).
+    if (key === "linkedin_url" && !detected && githubSatisfies) continue;
 
     if (!value) {
       rows.push({ key, label, group, value: "", gated: true, reason: "absent" });

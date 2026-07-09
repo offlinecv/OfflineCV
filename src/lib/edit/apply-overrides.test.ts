@@ -799,3 +799,152 @@ describe("applyOverrides — added entries + bullets", () => {
     expect(after.completeness.score).toBeGreaterThan(before.completeness.score);
   });
 });
+
+// ── Profile links: re-mirror + added extras (#335) ───────────────────────────
+
+/** baseParsed with the four legacy link slots populated (normalized form). */
+function parsedWithLinks(): HeuristicParsedResume {
+  return {
+    ...baseParsed(),
+    linkedin_url: "https://linkedin.com/in/jane",
+    github_url: "https://github.com/jane",
+  };
+}
+
+describe("applyOverrides — profiles[] (#335)", () => {
+  it("leaves profiles absent when no legacy link and no extras", () => {
+    const { parsed: out } = applyOverrides(
+      baseParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+    );
+    expect(out.profiles).toBeUndefined();
+  });
+
+  it("re-mirrors profiles from a legacy link edit (never desyncs)", () => {
+    const { parsed: out } = applyOverrides(
+      baseParsed(),
+      "raw",
+      makeSections(),
+      { linkedin_url: "https://linkedin.com/in/corrected" },
+      {},
+      {},
+      [],
+    );
+    expect(out.linkedin_url).toBe("https://linkedin.com/in/corrected");
+    expect(out.profiles).toEqual([
+      {
+        url: "https://linkedin.com/in/corrected",
+        network: "LinkedIn",
+        kind: "social",
+      },
+    ]);
+  });
+
+  it("clearing a legacy link drops it from the mirror", () => {
+    const { parsed: out } = applyOverrides(
+      parsedWithLinks(),
+      "raw",
+      makeSections(),
+      { linkedin_url: "" }, // clear LinkedIn; GitHub stays
+      {},
+      {},
+      [],
+    );
+    expect(out.linkedin_url).toBeUndefined();
+    expect(out.profiles).toEqual([
+      { url: "https://github.com/jane", network: "GitHub", kind: "code" },
+    ]);
+  });
+
+  it("appends added extras after the legacy slots, in order", () => {
+    const { parsed: out } = applyOverrides(
+      parsedWithLinks(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      { removed: [], added: [] },
+      [],
+      {},
+      new Set(),
+      [
+        { id: "profile:0", url: "https://gitlab.com/jane", network: "GitLab", kind: "code" },
+      ],
+    );
+    expect(out.profiles).toEqual([
+      { url: "https://linkedin.com/in/jane", network: "LinkedIn", kind: "social" },
+      { url: "https://github.com/jane", network: "GitHub", kind: "code" },
+      { url: "https://gitlab.com/jane", network: "GitLab", kind: "code" },
+    ]);
+  });
+
+  it("keeps an unknown-host extra with its hostname + other kind", () => {
+    const { parsed: out } = applyOverrides(
+      baseParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      { removed: [], added: [] },
+      [],
+      {},
+      new Set(),
+      [
+        { id: "profile:0", url: "https://example.dev/jane", network: "example.dev", kind: "other" },
+      ],
+    );
+    expect(out.profiles).toEqual([
+      { url: "https://example.dev/jane", network: "example.dev", kind: "other" },
+    ]);
+  });
+
+  it("de-dupes an extra that repeats a legacy link", () => {
+    const { parsed: out } = applyOverrides(
+      parsedWithLinks(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      { removed: [], added: [] },
+      [],
+      {},
+      new Set(),
+      [
+        { id: "profile:0", url: "https://github.com/jane", network: "GitHub", kind: "code" },
+      ],
+    );
+    expect(out.profiles).toEqual([
+      { url: "https://linkedin.com/in/jane", network: "LinkedIn", kind: "social" },
+      { url: "https://github.com/jane", network: "GitHub", kind: "code" },
+    ]);
+  });
+
+  it("does not mutate the input parsed object when re-mirroring", () => {
+    const parsed = parsedWithLinks();
+    const snapshot = JSON.parse(JSON.stringify(parsed));
+    applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      { linkedin_url: "https://linkedin.com/in/moved" },
+      {},
+      {},
+      [],
+    );
+    expect(parsed).toEqual(snapshot);
+  });
+});

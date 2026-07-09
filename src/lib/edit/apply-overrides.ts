@@ -33,6 +33,7 @@ import type { BulletObservation } from "../score/score.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
 import { normalizeBulletText } from "../score/group-bullets.ts";
+import { profilesFromUrls } from "../contact/profile-registry.ts";
 import type {
   ContactOverrides,
   ExperienceFieldOverrides,
@@ -40,6 +41,7 @@ import type {
   SkillsOverride,
   AddedEntry,
   AddedBullets,
+  AddedProfile,
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 
@@ -100,6 +102,37 @@ function applyContactOverrides(
     }
     if (key === "phone") delete nextParsed.phoneIsValid;
   }
+}
+
+// ── Profile links (#335) ────────────────────────────────────────────────────
+
+/**
+ * Re-derive `nextParsed.profiles` from the (already-override-applied) four
+ * legacy link keys in their fixed precedence order, then append the user-added
+ * extra profiles. This keeps the mirror in lockstep with the legacy keys — the
+ * scoring/snapshot source of truth — so a single-slot edit (e.g. correcting
+ * `linkedin_url`) never leaves `profiles[]` stale, and it is where #334's JSON
+ * export reads a user's added links from.
+ *
+ * `profilesFromUrls` classifies + de-dupes by normalized slug (a legacy link
+ * re-added as an extra collapses to one entry). Absent when nothing is left, so
+ * the parsed shape stays byte-identical to extraction's "present only when ≥1
+ * link" convention (openresume.ts) — and every corpus/roundtrip snapshot, which
+ * never routes through this module, is untouched.
+ */
+function applyProfileOverrides(
+  nextParsed: HeuristicParsedResume,
+  addedProfiles: readonly AddedProfile[],
+): void {
+  const profiles = profilesFromUrls([
+    nextParsed.linkedin_url,
+    nextParsed.github_url,
+    nextParsed.portfolio_url,
+    nextParsed.website_url,
+    ...addedProfiles.map((p) => p.url),
+  ]);
+  if (profiles.length > 0) nextParsed.profiles = profiles;
+  else delete nextParsed.profiles;
 }
 
 // ── Experience / education header fields ────────────────────────────────────
@@ -613,6 +646,12 @@ function applyAddedBulletsToExistingEntries(
  *                  entry's id. Folded into the entry description AND the graded
  *                  bullet pool so an addition moves Specificity / Structure.
  *                  Default `{}`.
+ * @param removedBullets accepted "this bullet was removed" indices (#211).
+ *                  Default empty set.
+ * @param addedProfiles user-added contact links beyond the four legacy slots
+ *                  (#335). `parsed.profiles` is re-derived from the edited
+ *                  legacy keys and these appended, so the mirror never desyncs
+ *                  from the scoring-source legacy keys. Default `[]`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -627,6 +666,7 @@ export function applyOverrides(
   addedEntries: readonly AddedEntry[] = [],
   addedBullets: AddedBullets = {},
   removedBullets: ReadonlySet<number> = new Set(),
+  addedProfiles: readonly AddedProfile[] = [],
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -639,6 +679,9 @@ export function applyOverrides(
   };
 
   applyContactOverrides(nextParsed, contact);
+  // Re-mirror profiles from the (now-edited) legacy keys + user-added extras, so
+  // the mirror never desyncs from the scoring-source legacy keys (#335).
+  applyProfileOverrides(nextParsed, addedProfiles);
   applyExperienceHeaderOverrides(nextParsed.experience, experience);
 
   const byIndex = new Map<number, BulletObservation>();

@@ -42,18 +42,19 @@ describe("buildContactFields", () => {
     ]);
   });
 
-  it("includes the GitHub row only when it is confidently detected", () => {
+  it("includes the GitHub row when confidently detected, and a code profile satisfies the brand-neutral 'Professional profile' row (#335)", () => {
     const fields = buildContactFields(
       makeCascade(
         { github_url: "https://github.com/jane" },
         { github_url: 0.95 },
       ),
     );
+    // A detected GitHub (code) profile satisfies the required "Professional
+    // profile" row, so the LinkedIn-keyed gap row does NOT render (#335).
     expect(fields.map((f) => f.key)).toEqual([
       "full_name",
       "email",
       "phone",
-      "linkedin_url",
       "github_url",
       "location",
     ]);

@@ -7,15 +7,7 @@
  */
 
 import type { LayoutTrigger } from "../../lib/heuristics/types.ts";
-
-const LAYOUT_TRIGGER_BLURBS: Record<LayoutTrigger, string> = {
-  two_column:
-    "Two-column layout — some text extractors read across columns and scramble the order.",
-  scanned:
-    "Image-only PDF — no selectable text, so a plain-text extractor returns nothing.",
-  fonts_unmappable:
-    "Text is present in the source but uses custom font encodings that don't decode to characters. Common with Framer, Affinity, and some InDesign exports.",
-};
+import { LAYOUT_TRIGGER_BLURBS } from "../../lib/heuristics/trigger-copy.ts";
 
 interface LayoutFlagsListProps {
   triggers: readonly LayoutTrigger[];
