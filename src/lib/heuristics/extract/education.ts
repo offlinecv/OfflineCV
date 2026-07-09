@@ -133,6 +133,44 @@ function educationDateFields(
   };
 }
 
+/** Honors / awards / activity keyword denylist for entry-level annotation lines
+ *  ("Dean's List 2015–2017", "Cum Laude", "Study Abroad, Florence 2021"). Used
+ *  by both {@link isInlineDatedProgram} — to reject an annotation-lead as a
+ *  phantom second entry — and by {@link filterAnnotationLinesForDates} — to
+ *  keep an annotation's dates from being picked up as attendance dates on the
+ *  parent entry (#371). Shared so the two consumers can never drift on which
+ *  phrases count as annotations. */
+const EDUCATION_ANNOTATION_RE =
+  /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project)\b/i;
+
+/** Strip lines that read as honors / awards / activity annotations from a
+ *  chunk before {@link parseEducationDates} runs on the joined text (#371).
+ *  Without this, a line like "GPA: 3.7 · Dean's List 2015–2017" contributes
+ *  its range to the entry and `parseDateRange`'s range-first preference makes
+ *  the annotation range (2015–2017) win over the real graduation year (2017)
+ *  on a sibling line. Line-level filter — an annotation phrase inline with a
+ *  real date on the SAME line is rare in practice; keeping the whole line
+ *  when it doesn't lead with an annotation is safer than mid-line surgery.
+ *
+ *  DEGREE-carve-out: a line that ALSO matches {@link DEGREE_RE} carries the
+ *  real attendance / graduation date and stays regardless of which annotation
+ *  keywords it contains. Commonwealth shapes like "Honours Bachelor of Science,
+ *  2015 - 2019" or "Thesis-based M.Sc. Data Science, 2018 - 2020" mention
+ *  `honours` / `thesis` on the SAME line as the degree + real dates; filtering
+ *  the whole line would drop both. */
+function filterAnnotationLinesForDates(lines: readonly string[]): string[] {
+  return lines.filter((l) => DEGREE_RE.test(l) || !EDUCATION_ANNOTATION_RE.test(l));
+}
+
+/** Source-side coursework label to peel off the bullet residue before the
+ *  comma-split (#367). Covers the common LaTeX/résumé conventions:
+ *  `Coursework:`, `Relevant Coursework:`, `Incoming Courses:`,
+ *  `Selected Courses:`, `Courses:`. Case-insensitive, anchored to the line
+ *  start so a course NAME that happens to contain "Courses" mid-string
+ *  ("Advanced Courses in AI") is not accidentally stripped. */
+const COURSEWORK_LABEL_RE =
+  /^(?:relevant\s+coursework|incoming\s+courses?|selected\s+courses?|coursework|courses?)\s*:\s*/i;
+
 /** Whether `line` reads as a *wrapped continuation* of the preceding coursework
  *  bullet (e.g. the `Business` half of `● Global Dimensions of` + `Business`)
  *  rather than a standalone field that merely follows the bullet. The recovery
@@ -252,12 +290,7 @@ function isInlineDatedProgram(line: string): boolean {
   // sub-line — NOT bare anywhere, so a genuine credential title that merely contains
   // the word ("Project Management Certificate 2022", PMP) still splits into its own
   // program entry (#251 adversarial review).
-  if (
-    /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project)\b/i.test(
-      t,
-    ) ||
-    /\bproject\s*:/i.test(t)
-  )
+  if (EDUCATION_ANNOTATION_RE.test(t) || /\bproject\s*:/i.test(t))
     return false;
   // Drop a trailing "| City, Region" location segment before measuring the
   // program remainder — a date+location line ("… 2011 | Kolkata, India") must
@@ -462,8 +495,37 @@ function stripInstitutionLocation(s: string): {
   // has already peeled any trailing dates by the time this runs.
   const MIDDOT_US_RE =
     /\s*·\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
-  const mUS =
+  // #366 — 1-space fallback for LaTeX two-column line assembly, which joins
+  // institution and city with only ONE space ("Lakeside Institute of Technology
+  // Seattle, WA"). Fires only when the surviving institution prefix has ≥2
+  // tokens AND its last token is not a preposition/article — a `\s+of\s+City,
+  // ST` construction ("University of Miami, FL", "University of Michigan, MI")
+  // is a state-suffixed institution NAME, not an institution + city + state,
+  // so a prefix ending in `of`/`the`/… is the tell that the split misfired.
+  // Single-word remainders ("Cornell Ithaca, NY", "MIT Cambridge, MA") are
+  // ambiguous with a state-suffixed institution and stay glued too. Tried
+  // AFTER the 2+ space primary so "… University  City, ST" still matches the
+  // strict shape.
+  const SPACE1_US_RE = /\s([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
+  // Lowercase words that must not sit at the tail of an institution prefix.
+  // Case-insensitive because a title-cased "Of"/"The" is the same tell.
+  const INST_PREFIX_STOP_TAIL = /^(?:of|the|a|an|and|for|in|on|at|to)$/i;
+  let mUS =
     s.match(COMMA_US_RE) ?? s.match(SPACE_US_RE) ?? s.match(MIDDOT_US_RE);
+  if (!mUS) {
+    const m1 = s.match(SPACE1_US_RE);
+    if (m1) {
+      const beforeTokens = s
+        .slice(0, m1.index)
+        .trim()
+        .split(/\s+/)
+        .filter((t) => t.length > 0);
+      const lastToken = beforeTokens[beforeTokens.length - 1] ?? "";
+      const guarded =
+        beforeTokens.length >= 2 && !INST_PREFIX_STOP_TAIL.test(lastToken);
+      if (guarded) mUS = m1;
+    }
+  }
   if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
     const before = s
       .slice(0, mUS.index)
@@ -528,8 +590,15 @@ function stripInstitutionDate(s: string): string {
   // second date — so "… 2015 – Current" peels whole, not nothing.
   const OPEN = `(?:present|current|ongoing|now)`;
   const SEP = `\\s*[–—-]\\s*`;
+  // Optional column separator immediately before the trailing date, so a
+  // one-line "Institution | 2018 – 2022" (#375) peels cleanly instead of
+  // leaving a bare " |" glued to the institution. The separator must be
+  // followed by whitespace, so a natural comma inside the institution name
+  // ("University of Washington, Seattle 2010 – 2015") that already has no
+  // preceding whitespace still cannot match this optional group.
+  const COL_SEP = `(?:[|·,]\\s+)?`;
   const TRAILING_DATE_RE = new RegExp(
-    `\\s+${DATE}(?:${SEP}(?:${DATE}|${OPEN}))?\\s*$`,
+    `\\s+${COL_SEP}${DATE}(?:${SEP}(?:${DATE}|${OPEN}))?\\s*$`,
     "i",
   );
   const stripped = s.replace(TRAILING_DATE_RE, "").trim();
@@ -579,7 +648,42 @@ function educationFromChunk(chunk: string[]): {
       chunk.find((l) => INSTITUTION_HINTS.test(l) && l !== degreeLine) ??
       chunk.find((l) => INSTITUTION_HINTS.test(l));
     if (instLine) {
-      institution = instLine.trim();
+      // #364 — when the ONLY institution-hint match is the same one-line
+      // "Degree — Institution" as the degree line, the raw line used to be
+      // stored verbatim ("B.S. in Computer Science — State University") AND
+      // parseDegreeAndField swallowed the institution into `field` ("Computer
+      // Science — State University"), producing a doubled render in the
+      // reconstructed view. Split at the em/en-dash separator so the trailing
+      // half is the institution and re-parse degree/field off the head.
+      if (instLine === degreeLine && degreeMatch) {
+        // En/em-dash only — a spaced ASCII `-` commonly separates degree from
+        // field ("B.S. - Computer Science, Stanford University"), not
+        // institution from the rest, so splitting on it here would strand the
+        // field on the wrong side of the boundary.
+        const parts = instLine.split(/\s+[–—]\s+/);
+        if (parts.length >= 2) {
+          // Pick the part carrying an institution hint ("University", "College",
+          // …) as the institution. If none carries a hint, fall back to the
+          // last part (the #364 primary shape "Degree in Field — Institution"
+          // where the hint might be missing on an acronym school). Re-parse
+          // degree/field from the remaining parts joined back with em-dash.
+          const hintIdx = parts.findIndex((p) => INSTITUTION_HINTS.test(p));
+          const instIdx = hintIdx >= 0 ? hintIdx : parts.length - 1;
+          institution = parts[instIdx].trim();
+          const head = parts.filter((_, i) => i !== instIdx).join(" — ");
+          ({ degree, field } = parseDegreeAndField(head));
+        } else {
+          // No em-dash separator to slice on — keep the raw line as the
+          // institution (behavior preserved from before #364; the strip-then-
+          // maybe-mangle path only pays off when the split cleanly isolates
+          // the institution). A comma-separated single-line entry like
+          // "Associate degree, H.R. Management, Bellows College" round-trips
+          // consistently that way.
+          institution = instLine.trim();
+        }
+      } else {
+        institution = instLine.trim();
+      }
     } else {
       const cand = chunk.find((l) => !DEGREE_RE.test(l) && !isDateOnlyLine(l));
       if (cand) {
@@ -608,8 +712,11 @@ function educationFromChunk(chunk: string[]): {
 
   // Shared date primitive (via the education wrapper) so a range like
   // "Sep 2024 - July 2025" keeps both halves and a lone graduation date lands in
-  // `end_date` (#97).
-  const dates = parseEducationDates(joined);
+  // `end_date` (#97). Filter honors/awards annotation lines first (#371) so a
+  // range on a "Dean's List 2015–2017" sub-line does not steal the primary date
+  // slot from the real graduation year on a sibling line.
+  const datesInput = filterAnnotationLinesForDates(chunk).join(" | ");
+  const dates = parseEducationDates(datesInput);
   const hasDate = !!(dates.start_date || dates.end_date);
 
   let score = 0;
@@ -674,8 +781,24 @@ export function extractEducation(
       j++;
     }
     item = item.trim();
-    if (/^[A-Z0-9]/.test(item)) {
-      coursework.push({ text: item, idx: i });
+    // Peel a leading source-side label ("Coursework:", "Relevant Coursework:",
+    // "Incoming Courses:", "Selected Courses:", "Courses:") so the residue is
+    // the course list itself and the reconstructed résumé doesn't render a
+    // redundant "Coursework: Relevant Coursework: …" double-label (#367).
+    item = item.replace(COURSEWORK_LABEL_RE, "").trim();
+    // Split a comma-separated course list into individual entries so each
+    // course is addressable in the reconstructed view (#367). A single-course
+    // bullet with no comma remains one entry. The Title-case guard runs on
+    // the FIRST item only (matching pre-split whole-bullet semantics): a
+    // lowercase prose bullet ("- including courses taught in Japanese") is
+    // dropped as before, but a mid-list lowercase course
+    // ("Coursework: Data Structures, algorithms, Operating Systems") is kept
+    // alongside its Title-case siblings rather than silently dropped.
+    const items = item.includes(",")
+      ? item.split(/\s*,\s*/).filter((t) => t.length > 0)
+      : [item];
+    if (items.length > 0 && /^[A-Z0-9]/.test(items[0])) {
+      for (const c of items) coursework.push({ text: c, idx: i });
       for (const k of span) consumed.add(k);
     }
     i = j - 1;

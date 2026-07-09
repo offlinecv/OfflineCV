@@ -88,13 +88,12 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     );
     expect(value).toHaveLength(2);
     expect(value[0].institution).toBe("Lakeside Institute of Technology");
-    expect(value[0].coursework).toEqual([
-      "Incoming Courses: Deep Learning, Machine Learning",
-    ]);
+    // #367 — leading `Incoming Courses:` / `Relevant Coursework:` label is
+    // peeled and the comma-separated list is split into individual courses so
+    // each entry is addressable in the reconstructed view.
+    expect(value[0].coursework).toEqual(["Deep Learning", "Machine Learning"]);
     expect(value[1].institution).toBe("Northgate State University");
-    expect(value[1].coursework).toEqual([
-      "Relevant Coursework: Data Structures, Algorithms",
-    ]);
+    expect(value[1].coursework).toEqual(["Data Structures", "Algorithms"]);
   });
 
   it("still merges a genuine wrapped coursework cell (regression guard)", () => {
@@ -113,6 +112,166 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     expect(value[0].coursework).toEqual([
       "Global Dimensions of Business",
       "Legal Environment of Business",
+    ]);
+  });
+
+  // #367 — coursework label + comma-split fixture cases.
+  it("peels a 'Coursework:' label and splits the comma-separated list (#367)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Coursework: Data Structures, Algorithms, Operating Systems",
+      ]),
+    );
+    expect(value[0].coursework).toEqual([
+      "Data Structures",
+      "Algorithms",
+      "Operating Systems",
+    ]);
+  });
+
+  it("keeps a single-course bullet as one entry (no comma → no split)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Relevant Coursework: Systems Programming",
+      ]),
+    );
+    expect(value[0].coursework).toEqual(["Systems Programming"]);
+  });
+
+  it("splits a bare comma-separated course list even without a leading label", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Machine Learning, Computer Vision, Natural Language Processing",
+      ]),
+    );
+    expect(value[0].coursework).toEqual([
+      "Machine Learning",
+      "Computer Vision",
+      "Natural Language Processing",
+    ]);
+  });
+
+  // #364 — a one-line "Degree — Institution" entry used to store the raw line
+  // verbatim as institution AND let parseDegreeAndField swallow the trailing
+  // institution into `field`, producing a doubled render.
+  it("splits one-line 'Degree in Field — Institution' into clean degree/field/institution (#364)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. in Computer Science — State University",
+        "2013",
+      ]),
+    );
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+    expect(value[0].institution).toBe("State University");
+    expect(value[0].institution).not.toMatch(/B\.S\.|Computer Science/);
+  });
+
+  it("handles em-dash / en-dash separator equivalently", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "M.Sc. in Data Science – Riverside College",
+        "2022",
+      ]),
+    );
+    expect(value[0].institution).toBe("Riverside College");
+    expect(value[0].field).toBe("Data Science");
+  });
+
+  it("picks the institution-hint part when the shape is 'Institution — Degree — Year' (multi-part)", () => {
+    // Reverse ordering of the #364 case: institution FIRST, then degree, then
+    // a trailing year. The fix must select the part carrying an INSTITUTION_HINTS
+    // token instead of blindly taking the last part.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Stanford University — B.S. Computer Science — 2019",
+      ]),
+    );
+    expect(value[0].institution).toContain("Stanford");
+    expect(value[0].degree).toMatch(/B\.S\./);
+  });
+
+  // #366 — LaTeX two-column line assembly joins institution and city with a
+  // single space. The 1-space fallback splits when the surviving institution
+  // prefix has ≥2 tokens; a single-token remainder ("Stanford CA") is
+  // ambiguous with a state-suffixed institution and stays glued.
+  it("splits '… Institution City, ST' joined by a single space when institution ≥2 tokens (#366)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Lakeside Institute of Technology Seattle, WA",
+        "B.S. in Computer Science, 2020 - 2024",
+      ]),
+    );
+    expect(value[0].institution).toBe("Lakeside Institute of Technology");
+    expect(value[0].location).toBe("Seattle, WA");
+  });
+
+  it("refuses to split when the surviving institution reduces to one token (#366 guard)", () => {
+    // Ambiguous case: a single-word institution then a city, state (e.g.
+    // "Cornell Ithaca, NY"). Splitting would strip a legit institution token,
+    // so the 1-space fallback refuses. Chose 'NY' (unambiguous with degree
+    // patterns like BA/MA that DEGREE_RE would otherwise pick up).
+    const { value } = extractEducation(
+      mkEduSection([
+        "Cornell Ithaca, NY",
+        "B.S. in Computer Science, 2020 - 2024",
+      ]),
+    );
+    expect(value[0].institution).toBe("Cornell Ithaca, NY");
+    expect(value[0].location).toBeUndefined();
+  });
+
+  // #371 — a "Dean's List 2015–2017" honors annotation used to poison the
+  // parent entry's dates: parseDateRange's range-first preference picked up the
+  // annotation range and buried the real graduation year. Filter annotation
+  // lines out of the chunk before running parseEducationDates.
+  it("does not use a Dean's List annotation year range as the entry's attendance dates (#371)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Computer Science, 2017",
+        "GPA: 3.7 · Dean's List 2015–2017",
+      ]),
+    );
+    expect(value[0].institution).toBe("Springfield State University");
+    expect(value[0].degree).toBe("B.S.");
+    // Correct behavior: the sole date on the entry is the graduation year;
+    // start_date must NOT be populated from the annotation range.
+    expect(value[0].end_date).toBe("2017");
+    expect(value[0].start_date).toBeUndefined();
+  });
+
+  it("still uses attendance dates on the degree line when annotations carry no range", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Computer Science, 2015 - 2017",
+        "GPA: 3.7 · Cum Laude",
+      ]),
+    );
+    expect(value[0].start_date).toBe("2015");
+    expect(value[0].end_date).toBe("2017");
+  });
+
+  it("leaves a course NAME that happens to contain 'Courses' mid-string untouched", () => {
+    // Anchor-only strip: `COURSEWORK_LABEL_RE` binds at `^` so a course name
+    // like "Advanced Courses in AI" is NOT accidentally stripped mid-string.
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Advanced Courses in AI, Deep Learning",
+      ]),
+    );
+    expect(value[0].coursework).toEqual([
+      "Advanced Courses in AI",
+      "Deep Learning",
     ]);
   });
 });
@@ -307,6 +466,33 @@ describe("extractEducation — trailing date peeled cleanly off one-line institu
     expect(value[0].institution).toBe("University of Example");
     expect(value[0].location).toBe("Seattle, WA");
   });
+
+  // #375 — one-line "Institution | Dates" (letter-spaced-name-heading fixture).
+  // Old `stripInstitutionDate` peeled only the date and left a trailing " |"
+  // glued onto the institution, then `stripInstitutionLocation` didn't clean
+  // bare punctuation either. The COL_SEP alternation now consumes the leading
+  // column separator alongside the trailing date.
+  it("peels a leading '| ' column separator alongside the trailing date (#375)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Bachelor of Science, Computer Science",
+        "State University | 2018 - 2022",
+      ]),
+    );
+    expect(value[0].institution).toBe("State University");
+    expect(value[0].institution).not.toMatch(/\|/);
+  });
+
+  it("peels a leading '· ' middot column separator with the trailing date", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science",
+        "Example College · 2015 – 2019",
+      ]),
+    );
+    expect(value[0].institution).toBe("Example College");
+    expect(value[0].institution).not.toMatch(/·/);
+  });
 });
 
 describe("splitDoubledCity — only collapse the concatenation artifact", () => {
@@ -431,5 +617,100 @@ describe("education — adjacent identical-degree headers, distinct schools (#29
       "University of Washington",
     ]);
     expect(value.map((e) => e.degree)).toEqual(["B.S.", "B.S."]);
+  });
+});
+
+// PR #417 review — targeted regressions surfaced during the reviewer's pass
+// on the batch fixes. Each `it` names the specific reviewer input so the
+// intent survives if the shape ever moves.
+describe("extractEducation — PR #417 review inputs", () => {
+  // #366: a `<Institution> of <City>, ST` construction ("University of Miami,
+  // FL") looks like a state-suffixed institution NAME, not institution + city
+  // + state — the 1-space fallback used to strand the institution as
+  // "University of" and treat the city as location. Reject when the surviving
+  // institution prefix ends in a preposition/article.
+  it("refuses to split 'University of Miami, FL' (prefix ends in a preposition)", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "University of Miami, FL",
+        "B.S. in Computer Science, 2018 - 2022",
+      ]),
+    );
+    expect(value[0].institution).toBe("University of Miami, FL");
+    expect(value[0].location).toBeUndefined();
+  });
+
+  it("refuses to split 'University of Michigan, MI'", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "University of Michigan, MI",
+        "B.S. in Computer Science, 2018 - 2022",
+      ]),
+    );
+    expect(value[0].institution).toBe("University of Michigan, MI");
+    expect(value[0].location).toBeUndefined();
+  });
+
+  // #371: legitimate Commonwealth degree shapes carry `Honours` / `Thesis` on
+  // the SAME line as the credential + real attendance dates. The annotation
+  // filter used to drop the whole line and lose the dates; the DEGREE_RE
+  // carve-out keeps any line that also matches a degree.
+  it("keeps attendance dates on an 'Honours Bachelor of Science, 2015 - 2019' line", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "University of Toronto",
+        "Honours Bachelor of Science, 2015 - 2019",
+      ]),
+    );
+    expect(value[0].start_date).toBe("2015");
+    expect(value[0].end_date).toBe("2019");
+  });
+
+  it("keeps attendance dates on a 'Thesis-based M.Sc. Data Science, 2018 - 2020' line", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "McGill University",
+        "Thesis-based M.Sc. Data Science, 2018 - 2020",
+      ]),
+    );
+    expect(value[0].start_date).toBe("2018");
+    expect(value[0].end_date).toBe("2020");
+  });
+
+  // #364: a spaced ASCII `-` commonly separates degree from field ("B.S. -
+  // Computer Science"), not institution from the rest, so the em-dash split
+  // must not fire on it — otherwise the field ends up glued to the institution.
+  it("does not split 'B.S. - Computer Science, Stanford University' at the ASCII hyphen", () => {
+    const { value } = extractEducation(
+      mkEduSection(["B.S. - Computer Science, Stanford University"]),
+    );
+    expect(value[0].degree).toBe("B.S.");
+    // Field is recovered (was `undefined` in the pre-fix regression, because
+    // the ASCII-hyphen split reassigned the credential's tail to institution
+    // and left field empty). Disambiguating a comma-separated
+    // "<field>, <institution>" is a separate split not in scope for #364; the
+    // guarantee here is that the credential's tail is no longer lost.
+    expect(value[0].field).toMatch(/Computer Science/);
+    // Institution still contains the trailing institution token; the raw
+    // whole-line fallback is unchanged for the no-em-dash shape.
+    expect(value[0].institution).toMatch(/Stanford/);
+  });
+
+  // #367: the per-item Title-case guard used to silently drop a mid-list
+  // lowercase course. Whole-bullet semantics restore that: check the FIRST
+  // item; if it clears the guard, keep all its comma-separated siblings.
+  it("keeps a mid-list lowercase course when the first item is Title-case", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University",
+        "B.S. Computer Science, 2020 - 2024",
+        "● Coursework: Data Structures, algorithms, Operating Systems",
+      ]),
+    );
+    expect(value[0].coursework).toEqual([
+      "Data Structures",
+      "algorithms",
+      "Operating Systems",
+    ]);
   });
 });
