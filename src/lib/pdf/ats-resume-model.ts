@@ -226,6 +226,10 @@ export function buildContact(
   };
 
   const name = valueFor("full_name") || result.parsed.full_name || "";
+  // Header headline (#425 follow-up): the standalone title tagline the parser
+  // lifted from the profile block ("Engineering Lead"), redrawn under the name.
+  // Not inline-editable (no ContactOverrides key), so read straight off parsed.
+  const headline = (result.parsed.headline ?? "").trim();
   const email = valueFor("email");
   const phone = valueFor("phone");
   const location = valueFor("location");
@@ -269,6 +273,7 @@ export function buildContact(
 
   return {
     name,
+    headline: headline || undefined,
     email: email || undefined,
     phone: phone || undefined,
     location: location || undefined,

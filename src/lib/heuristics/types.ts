@@ -133,6 +133,7 @@ export type HeuristicParsedResume = Partial<ParsedResume> & {
 export type FieldConfidence = Partial<
   Record<
     | "full_name"
+    | "headline"
     | "email"
     | "phone"
     | "location"

@@ -40,8 +40,11 @@ const UPDATE = process.env.UPDATE_FIXTURES === "1";
  *  - v3 (#96): added `cascade.achievementsCount`; the Achievements family
  *    (achievements/accomplishments/awards/activities) is promoted out of the
  *    `other` sink into a real extracted section, so `fieldsPopulated` may now
- *    include `heuristic_achievements`. */
-const SNAPSHOT_SCHEMA_VERSION = 3;
+ *    include `heuristic_achievements`.
+ *  - v4 (#425 follow-up): the parser now lifts a standalone header headline
+ *    ("Engineering Lead") from the profile block via `extractHeadline`, so
+ *    `fieldsPopulated` may include `headline` on résumés that carry one. */
+const SNAPSHOT_SCHEMA_VERSION = 4;
 
 function walkPdfs(dir: string): string[] {
   const out: string[] = [];

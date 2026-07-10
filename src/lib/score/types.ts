@@ -272,6 +272,12 @@ export interface ResumeData {
   email?: string;
   phone?: string;
   current_title?: string;
+  /** Professional headline as it appears standalone in the résumé's header
+   *  block — a job-title tagline the candidate placed under their name
+   *  ("Engineering Lead"), distinct from `current_title` (derived from the
+   *  most-recent experience role). Surfaced so the ATS export can redraw it
+   *  under the name instead of silently dropping it (#425 follow-up). */
+  headline?: string;
   location?: string;
   linkedin_url?: string;
   portfolio_url?: string;

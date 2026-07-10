@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "cascade": {
     "confidence": 0.64,
     "triggers": [
@@ -19,6 +19,7 @@
       "family_name",
       "full_name",
       "given_name",
+      "headline",
       "heuristic_achievements",
       "location",
       "phone",

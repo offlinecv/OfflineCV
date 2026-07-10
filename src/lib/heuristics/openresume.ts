@@ -35,6 +35,7 @@ import {
 import { sectionizeMarkdown } from "./markdown-lines.ts";
 import {
   extractName,
+  extractHeadline,
   extractContact,
   extractSummary,
   extractSkills,
@@ -365,6 +366,9 @@ function buildHeuristicResult(
     const fallbackName = extractName(nameFallbackProfile);
     if (fallbackName.value) name = fallbackName;
   }
+  // Professional headline standalone under the name (#425 follow-up) — the same
+  // title-tagline line `extractName` rejected, kept so the export can redraw it.
+  const headline = extractHeadline(profile, name.value);
   const contact = extractContact(profile, lines, annotations);
 
   const ownedSections = stripConsumedLines(sections, contact.consumedLines);
@@ -412,6 +416,7 @@ function buildHeuristicResult(
   const parsed: HeuristicParsedResume = {
     ...(name.value ? { full_name: name.value } : {}),
     ...splitGivenFamilyName(name.value),
+    ...(headline.value ? { headline: headline.value } : {}),
     ...(contact.email ? { email: contact.email } : {}),
     ...(contact.phone ? { phone: contact.phone } : {}),
     ...(contact.phone && contact.phoneIsValid !== undefined
@@ -444,6 +449,7 @@ function buildHeuristicResult(
 
   const fieldConfidence: FieldConfidence = {
     full_name: name.confidence,
+    ...(headline.value ? { headline: headline.confidence } : {}),
     email: contact.confidence.email,
     phone: contact.confidence.phone,
     location: contact.confidence.location,

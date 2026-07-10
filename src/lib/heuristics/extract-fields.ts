@@ -6,7 +6,7 @@
  * per-field modules live under `./extract/`. No logic lives here.
  */
 
-export { extractName } from "./extract/name.ts";
+export { extractName, extractHeadline } from "./extract/name.ts";
 export { extractContact } from "./extract/contact.ts";
 export { extractSummary } from "./extract/summary.ts";
 export { extractSkills } from "./extract/skills.ts";

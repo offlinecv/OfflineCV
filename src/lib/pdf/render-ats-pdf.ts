@@ -765,9 +765,10 @@ export async function renderAtsResumePdf(
   if (model.contact.name) {
     layout.drawText(model.contact.name, { bold: true, size: SIZE_NAME });
   }
-  // Professional headline (#425) — regular weight, under the name. Populated
-  // only when the model carries one; the field plumbing lands now, honest
-  // parser-side headline extraction is a follow-up (see `buildContact`).
+  // Professional headline (#425) — regular weight, muted, under the name.
+  // Populated when the parser lifted a standalone title tagline from the header
+  // block (`extractHeadline` → `parsed.headline` → `buildContact`); absent
+  // otherwise, so most résumés draw just name + contact line as before.
   if (model.contact.headline) {
     layout.drawText(model.contact.headline, {
       size: SIZE_HEADLINE,
