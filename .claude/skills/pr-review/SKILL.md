@@ -198,15 +198,31 @@ For each finding give: the file:line, the concrete failure (inputs → wrong res
 and a **fix** — a diff or exact command, not just a complaint. Cite the source
 (`/code-review` vs which gate) only if it helps the author.
 
-### Step 5 — Pick the verdict (must match the findings)
+### Step 5 — Compute the verdict (a pure function of the open-blocker set)
 
-- **≥1 Blocking → `REQUEST_CHANGES`.**
-- **0 Blocking → `APPROVE`**, even if Secondary/Nits remain. Do **not** soft-gate on
-  nits — list them as non-blocking and approve. Verdict-inconsistency (findings say
-  "looks good" but state is REQUEST_CHANGES, or vice-versa) is itself a review defect.
-- Genuinely can't decide (needs author context) → `COMMENT` with the open question.
+The verdict is **derived, not chosen** — the review event is whatever this rule
+produces, never a flag you pick. Compute the **open-blocker set** = every Blocking
+finding still reproducing on HEAD, across **all** reviews on the PR: this run's
+findings *plus* any other reviewer's standing `REQUEST_CHANGES` you have not
+personally cleared. Then map:
 
-State the verdict rule you applied in one line so it's auditable.
+- **≥1 open Blocking → `REQUEST_CHANGES`.** This includes another reviewer's open
+  block — a net-new pass that finds 0 *new* Blocking does **not** clear their standing
+  one. If you only re-checked new commits (not a full re-verify of every prior
+  blocker), you cannot reach 0 open blockers, so the verdict is `COMMENT` (a status
+  update on the open block), never `APPROVE`.
+- **0 open Blocking → `APPROVE`**, even if Secondary/Nits remain. Do **not** soft-gate
+  on nits — list them non-blocking and approve.
+- **Can't decide without author context → `COMMENT`** with the open question.
+
+Reaching `APPROVE` requires that **every** blocker across **every** review is resolved
+*and* you re-verified it yourself — not merely that your own pass added nothing. State
+the computed verdict + the open-blocker count in one line so it's auditable.
+
+> **GitHub mechanic:** your `APPROVE` does **not** dismiss another reviewer's
+> `REQUEST_CHANGES`. The PR stays blocked until that reviewer re-reviews or their
+> review is dismissed — surface this in the Step 7 report so an approve isn't mistaken
+> for "mergeable".
 
 ### Step 6 — Draft, confirm, post
 
@@ -214,15 +230,23 @@ Assemble the review body (Markdown: a one-line stance, then `## Blocking` /
 `## Secondary` / `## Nits`, findings most-severe first). **Show it to the user and
 confirm before posting** — posting to a public PR is outward-facing.
 
-Post as a single PR review with the matching event — **top-level body, not inline
-comments** (inline needs a diff-line that exists in the patch or it `422`s; the
-top-level body never does):
+Post as a single PR review whose event is **exactly the Step 5 verdict** — map it
+mechanically here, don't re-decide. Post to the **top-level body, not inline comments**
+(inline needs a diff-line that exists in the patch or it `422`s; the top-level body
+never does):
 
 ```bash
-# event flag: --request-changes | --approve | --comment
-gh pr review "$PR_NUM" --repo "$REPO" \
-  --request-changes \
-  --body-file /tmp/review.md
+# Event is derived from the Step 5 verdict via a fixed map — no discretion:
+#   REQUEST_CHANGES → --request-changes
+#   APPROVE         → --approve
+#   COMMENT         → --comment
+case "$VERDICT" in
+  REQUEST_CHANGES) EVENT=--request-changes ;;
+  APPROVE)         EVENT=--approve ;;
+  COMMENT)         EVENT=--comment ;;
+  *) echo "no verdict computed — rerun Step 5" >&2; exit 1 ;;
+esac
+gh pr review "$PR_NUM" --repo "$REPO" "$EVENT" --body-file /tmp/review.md
 ```
 
 If a finding genuinely needs to anchor to a line, verify the line is in the diff
@@ -234,7 +258,9 @@ with a `path:line` reference. In `--local` mode, print the review and stop.
 Print: the verdict + the rule that produced it, the finding counts
 (Blocking/Secondary/Nits), which gates ran vs were skipped, and the review URL (or
 "local only"). If any gate couldn't run (missing `pdftotext`, `fallow` not
-installed), say so — a skipped gate is not a passed gate.
+installed), say so — a skipped gate is not a passed gate. If the PR stays blocked by
+another reviewer's open `REQUEST_CHANGES` after your post (e.g. you approved but theirs
+still stands), say so explicitly — an `APPROVE` is not the same as "mergeable".
 
 ## Rules
 
@@ -243,8 +269,11 @@ installed), say so — a skipped gate is not a passed gate.
   `/code-review` already found — fold it in.
 - **Verify before flagging.** Read the file at each cited line; drop findings that
   don't reproduce. A wrong finding costs more trust than a missed nit.
-- **Verdict matches findings.** 0 Blocking → APPROVE; ≥1 Blocking → REQUEST_CHANGES.
-  Never soft-gate on nits. State the rule you applied.
+- **Verdict is derived, event follows.** Compute it from the open-blocker set across
+  *all* reviews (Step 5); the `gh` event is a fixed map of that verdict, never a
+  separate choice. 0 open Blocking → APPROVE; ≥1 (including another reviewer's standing
+  REQUEST_CHANGES you didn't clear yourself) → REQUEST_CHANGES/COMMENT. Never soft-gate
+  on nits. State the verdict + open-blocker count you computed.
 - **Blocking bar is specific:** correctness-on-normal-use, real fixture PII,
   hardcoded colors / wrong component tier, a command bug that breaks every
   invocation, a gate CI will fail. Everything softer is Secondary/Nit.
