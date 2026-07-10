@@ -364,6 +364,50 @@ export function parseBoldRuns(text: string): Array<{ text: string; bold: boolean
   return runs;
 }
 
+/** One drawable, pre-measured piece of a word carrying its own bold flag. */
+type WordChunk = { str: string; bold: boolean; width: number };
+
+/**
+ * Flatten bold runs into words (each a list of same-font chunks). Splitting on
+ * whitespace and re-inserting a single inter-word space reproduces the bullet's
+ * single-spaced text; a bold boundary with no surrounding space (e.g.
+ * "increase**40%**") keeps both chunks in one word, so no space is introduced
+ * between them. Widths are measured here so the draw loop is pure layout.
+ */
+function groupRunsIntoWords(
+  runs: Array<{ text: string; bold: boolean }>,
+  size: number,
+  fonts: { regular: PdfFont; bold: PdfFont },
+  sanitize: boolean,
+): WordChunk[][] {
+  const words: WordChunk[][] = [];
+  let current: WordChunk[] = [];
+  const flush = () => {
+    if (current.length) {
+      words.push(current);
+      current = [];
+    }
+  };
+  for (const run of runs) {
+    const value = sanitize ? toWinAnsi(run.text) : run.text;
+    const font = run.bold ? fonts.bold : fonts.regular;
+    for (const piece of value.split(/(\s+)/)) {
+      if (piece === "") continue;
+      if (/^\s+$/.test(piece)) {
+        flush();
+      } else {
+        current.push({
+          str: piece,
+          bold: run.bold,
+          width: font.widthOfTextAtSize(piece, size),
+        });
+      }
+    }
+  }
+  flush();
+  return words;
+}
+
 /**
  * Mutable cursor + page state threaded through the draw routines. We keep one
  * "current page" and append new pages as the cursor overflows.
@@ -540,36 +584,15 @@ class Layout {
     size: number,
     hangingIndent: number,
   ) {
-    type Chunk = { str: string; bold: boolean; width: number };
-    // Flatten runs into words (each a list of same-run chunks). Splitting on
-    // whitespace and re-inserting a single inter-word space reproduces the
-    // bullet's single-spaced text; a bold boundary with no surrounding space
-    // (e.g. "increase**40%**") keeps both chunks in one word so no space is
-    // introduced between them.
-    const words: Chunk[][] = [];
-    let current: Chunk[] = [];
-    for (const run of runs) {
-      const value = this.sanitize ? toWinAnsi(run.text) : run.text;
-      const font = run.bold ? this.fonts.bold : this.fonts.regular;
-      for (const piece of value.split(/(\s+)/)) {
-        if (piece === "") continue;
-        if (/^\s+$/.test(piece)) {
-          if (current.length) {
-            words.push(current);
-            current = [];
-          }
-        } else {
-          current.push({
-            str: piece,
-            bold: run.bold,
-            width: font.widthOfTextAtSize(piece, size),
-          });
-        }
-      }
-    }
-    if (current.length) words.push(current);
+    const words = groupRunsIntoWords(
+      runs,
+      size,
+      this.fonts,
+      this.sanitize,
+    );
 
-    const wordWidth = (w: Chunk[]) => w.reduce((sum, c) => sum + c.width, 0);
+    const wordWidth = (w: WordChunk[]) =>
+      w.reduce((sum, c) => sum + c.width, 0);
     const space = this.fonts.regular.widthOfTextAtSize(" ", size);
     const markerWidth = this.fonts.regular.widthOfTextAtSize(BULLET_MARKER, size);
     const rightEdge = PAGE_WIDTH - MARGIN;
