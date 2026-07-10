@@ -66,11 +66,19 @@ const WEIGHTS = {
  *   parsed-but-invalid phone (libphonenumber isValid===false) earns half
  *   completeness credit instead of full; valid phones unchanged, absent
  *   unchanged.
+ * - 1.5 (2026-07-10): the glyph-less-experience bullet fallback is now gated
+ *   per accomplishment section instead of on the whole bullet pool (#365) — a
+ *   résumé whose Experience section renders bullets as marker-less paragraphs
+ *   (Google-Docs/Skia export) but whose Achievements/Projects sections still
+ *   carry `•` glyphs previously lost Experience's bullets from Specificity /
+ *   Structure entirely, because the old gate only backfilled when NO section
+ *   had any glyph bullets. Only affects resumes with this mixed glyph/no-glyph
+ *   shape; unaffected resumes score unchanged.
  */
 // Internal-only: surfaced to the UI via the `algoVersion` score field, not
 // imported by name anywhere — so it stays unexported to satisfy the dead-code
 // gate (fallow flags exported symbols with no external consumer).
-const ATS_SCORE_ALGO_VERSION = "1.4";
+const ATS_SCORE_ALGO_VERSION = "1.5";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -691,11 +699,32 @@ function extractBulletsFromSections(sections: SectionedResume): string[] {
   return out;
 }
 
+/** Marker-bullet lines pooled from the `experience` section ALONE (#365) — the
+ *  subset of {@link extractBulletsFromSections} scoped to one accomplishment
+ *  section, so the caller can tell "experience carries no glyph bullets" apart
+ *  from "no accomplishment section carries glyph bullets". See
+ *  {@link poolExperienceDescriptions} for why that distinction matters. */
+function extractExperienceSectionBullets(sections: SectionedResume): string[] {
+  const lines = sections.byName.get("experience");
+  return lines && lines.length > 0 ? extractBulletsFromLines(lines) : [];
+}
+
 /**
  * Fallback bullet pool for marker-less prose templates: each parsed role's
  * `description` (one paragraph per line, the shape the entry-block parser folds
- * wrapped prose into) becomes one or more bullets via `splitBullets`. Only used
- * when the section pool is empty, so glyph resumes never double-count.
+ * wrapped prose into) becomes one or more bullets via `splitBullets`.
+ *
+ * Gated on the EXPERIENCE section's own marker-bullet pool being empty (#365),
+ * not the whole-résumé pool: a Google-Docs / Skia export can render Experience
+ * bullets as glyph-less paragraphs while Achievements/Projects in the SAME
+ * résumé keep their `•` glyphs, so the old "only when the whole pool is empty"
+ * gate never fired — Achievements' non-empty pool silently swallowed
+ * Experience's already-correctly-parsed bullets from both the score and the
+ * `groupBulletsByExperience` UI attribution (every role showed "No
+ * bullet-shaped lines detected"). Gating per-section instead means a glyph
+ * résumé (experience section pool non-empty) never double-counts, while a
+ * glyph-less experience section always gets backfilled regardless of what
+ * other sections carry.
  *
  * Scope note: pools experience descriptions only — not project (#95) or
  * achievement (#96) descriptions, which the authed scorer also pools. A
@@ -720,15 +749,19 @@ export function computeAnonymousAtsScore(
   // Same scoreBulletPool the authed scorer uses — guarantees the two
   // surfaces apply identical per-bullet rules.
   // Primary bullet source: marker-bearing lines pooled from the accomplishment
-  // sections. Fallback: glyph-less prose templates (Word / Office) write each
-  // role's description as a marker-less paragraph, so the section pool comes back
-  // empty — pool the parsed per-role descriptions instead (mirrors the authed
-  // scorer's per-role `splitBullets`). The description lines split exactly as
+  // sections. Fallback (#365): glyph-less prose templates (Word / Office,
+  // Google-Docs/Skia exports) write each role's description as a marker-less
+  // paragraph, so the EXPERIENCE section's own pool comes back empty — pool the
+  // parsed per-role descriptions instead (mirrors the authed scorer's per-role
+  // `splitBullets`). The description lines split exactly as
   // `groupBulletsByExperience` keys on them, so the UI attributes each pooled
-  // bullet to its role.
-  let bullets = extractBulletsFromSections(input.sections);
-  if (bullets.length === 0) {
-    bullets = poolExperienceDescriptions(input.parsed.experience);
+  // bullet to its role. Gated on the experience section alone, not the whole
+  // pool, so a résumé whose OTHER accomplishment sections (e.g. Achievements)
+  // still carry glyph bullets doesn't mask a glyph-less Experience section —
+  // see `poolExperienceDescriptions` for the full rationale.
+  const bullets = extractBulletsFromSections(input.sections);
+  if (extractExperienceSectionBullets(input.sections).length === 0) {
+    bullets.push(...poolExperienceDescriptions(input.parsed.experience));
   }
   const pool = scoreBulletPool(bullets);
   const observations = analyzeBullets(bullets);

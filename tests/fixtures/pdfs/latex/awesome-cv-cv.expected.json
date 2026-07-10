@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
   "cascade": {
-    "confidence": 0.89,
+    "confidence": 0.9,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -69,6 +69,6 @@
       "scanned": false
     },
     "bulletCount": 52,
-    "algoVersion": "1.4"
+    "algoVersion": "1.5"
   }
 }

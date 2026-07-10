@@ -967,6 +967,36 @@ describe("splitIntoSections — institution name ending in a section anchor (#25
     // Exactly ONE education section — the 2nd institution did NOT open a 2nd.
     expect(names(sections).filter((n) => n === "education").length).toBe(1);
   });
+
+  it("keeps a single-column EXPERIENCE whose 2nd entry's company ends in a section anchor as ONE section (#354)", () => {
+    // #354 residual #258 edge, now scoped to `experience`: #311 relaxed the #258
+    // suppression so a SECOND same-canonical anchor-fallback line, no longer the
+    // immediate first content line, opens a new group — legitimate for a genuine
+    // bare category header ("Teaching Experience"). But a later ROLE'S COMPANY
+    // name that merely ends in an anchor word ("...GLOBAL EXPERIENCE") also sits
+    // after an intervening entry block, and consuming it as a header would drop
+    // the company. `prevLineOpenedBoundary` alone can't tell them apart — the
+    // dated-entry tell does: a company/role line carries a date range on itself
+    // or the line immediately below, a bare category header is followed by a
+    // TITLE line. The company line must stay content, not open a 2nd section.
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 }, // name
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 }, // contact
+      { text: "EXPERIENCE", fontSize: 13 }, // real header (L1 exact alias)
+      { text: "ACME GLOBAL EXPERIENCE", fontSize: 11 }, // company 1 (first content line)
+      { text: "Senior Engineer  2018 - 2020", fontSize: 11 }, // title + date (intervening entry)
+      { text: "GLOBEX GLOBAL EXPERIENCE", fontSize: 11 }, // company 2 (NOT first content line — the #354 trap)
+      { text: "Staff Engineer  2012 - 2016", fontSize: 11 }, // title + date
+    ]);
+
+    // Both anchor-ending company lines are retained as content, not consumed as
+    // headers (which would drop the company name).
+    expect(sectionContaining(sections, "ACME GLOBAL EXPERIENCE")).toBeDefined();
+    expect(sectionContaining(sections, "GLOBEX GLOBAL EXPERIENCE")).toBeDefined();
+
+    // Exactly ONE experience section — the 2nd company did NOT open a 2nd.
+    expect(names(sections).filter((n) => n === "experience").length).toBe(1);
+  });
 });
 
 describe("PdfSection.rawHeading — verbatim source heading capture (#285)", () => {

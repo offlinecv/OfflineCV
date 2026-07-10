@@ -126,12 +126,12 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   //   - awesome-cv-cv: the #341 isProseLine fix RECOVERS a real role this CV was
   //     dropping (an "Undergraduate Research, … Lab(Prof. …)" header the old
   //     "Company. City" prose false-positive had swallowed). Net +1 real role
-  //     (16 → 17). That recovered role's header packs inline abbreviated dates
-  //     ("Researcher … Mar. 2016 Exp. Jun. 2017"), so its title/start_date don't
-  //     round-trip cleanly yet — a SEPARATE header-shape weakness tracked as
-  //     #383. Recovering the role beats dropping it, so the experience
-  //     round-trip is baselined here rather than blocking the #341 fix.
-  "latex/awesome-cv-cv.pdf": ["experience"],
+  //     (16 → 17). That recovered role's header packed inline abbreviated dates
+  //     with an "Expected" marker ("Researcher … Mar. 2016 Exp. Jun. 2017").
+  //     #383 taught DATE_RANGE_RE to absorb the optional "Expected"/"Exp." end-
+  //     date qualifier, so the role now splits its title from a clean
+  //     "Mar. 2016 – Jun. 2017" range and the experience round-trips; baseline
+  //     removed.
 
   // Experience SWAP cleared by #298 (removed from these lines). The skills-line
   // token split (#299/#E) is fixed by #301, so google-docs-skia-proxy-role-first-

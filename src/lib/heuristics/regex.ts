@@ -192,9 +192,24 @@ export const DATE_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})|${S
 // separator-less branch — bare years adjacent are too weak a signal.
 const MONTH_YEAR_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})`;
 
+// "Expected"/"Exp." end-date qualifier. Awesome-CV / LaTeX templates prefix an
+// in-progress end date with an "Expected" marker — e.g. "Mar. 2016 - Exp. Jun.
+// 2017" or, once pdfjs drops the dash glyph, "Mar. 2016 Exp. Jun. 2017". The
+// marker sits BETWEEN the range separator (or the bare gap) and the end anchor,
+// so without absorbing it the second anchor never matches and the whole header
+// leaks into the title (#383). Admitted ONLY as an optional prefix on the end
+// anchor (never bare, never on the start), inside a non-capturing group so the
+// numbered start/end capture groups are unchanged — and the marker itself is
+// dropped from the captured end date, so the range round-trips as a plain
+// "Mmm YYYY" end. `Expected` is listed before `Exp\.?` so the longer literal
+// wins (the engine still backtracks, but this keeps intent explicit) and the
+// trailing `\s+` guards against swallowing "Exp"/"Expected"-prefixed words like
+// "Experienced" that aren't a real marker.
+const EXPECTED_END_QUALIFIER = `(?:(?:Expected|Exp\\.?)\\s+)?`;
+
 /**
  * Date range between two anchors. Captures both halves. Tolerant of spacing,
- * dashes (—, –, -, to, through).
+ * dashes (—, –, -, to, through), and an "Expected"/"Exp." end-date qualifier.
  *
  * Three branches:
  *   (a) classic — any anchor, explicit separator (–/—/-/to/through), any anchor or Present.
@@ -205,12 +220,16 @@ const MONTH_YEAR_ANCHOR = `${MONTH_OR_PLACEHOLDER}\\.?\\s+(?:${YEAR_FORMS})`;
  *   (c) season-comma — "Season YYYY, YYYY" (e.g. "Summer 2013, 2014").
  *       Comma is the range separator; season + first year is start, second year is end.
  *       Groups: m[5] = start ("Summer 2013"), m[6] = end ("2014").
+ *
+ * Branches (a) and (b) admit an optional {@link EXPECTED_END_QUALIFIER} before
+ * the end anchor; it is consumed by the match (so `stripDateRange` removes it)
+ * but excluded from the end capture (so `parseDateRange` records a plain date).
  */
 export const DATE_RANGE_RE = new RegExp(
-  // (a) classic: any anchor, explicit separator, any anchor|Present
-  `(?:(${DATE_ANCHOR})\\s*(?:–|—|-|to|through)\\s*(${DATE_ANCHOR}|Present|Current|Now|Ongoing))` +
-    // (b) separator-less: month-year WS month-year (or Present)
-    `|(?:(${MONTH_YEAR_ANCHOR})\\s+(${MONTH_YEAR_ANCHOR}|Present|Current|Now|Ongoing))` +
+  // (a) classic: any anchor, explicit separator, [Expected] any anchor|Present
+  `(?:(${DATE_ANCHOR})\\s*(?:–|—|-|to|through)\\s*${EXPECTED_END_QUALIFIER}(${DATE_ANCHOR}|Present|Current|Now|Ongoing))` +
+    // (b) separator-less: month-year WS [Expected] month-year (or Present)
+    `|(?:(${MONTH_YEAR_ANCHOR})\\s+${EXPECTED_END_QUALIFIER}(${MONTH_YEAR_ANCHOR}|Present|Current|Now|Ongoing))` +
     // (c) season-comma: "Season YYYY, YYYY" (e.g. "Summer 2013, 2014")
     `|(?:(${SEASON}\\s+\\d{4}),\\s*(\\d{4}))`,
   "i",

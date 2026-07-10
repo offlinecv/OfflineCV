@@ -1022,6 +1022,7 @@ export function splitIntoSections(
       columnSplitX,
       sections[sections.length - 1].name,
       singleColumn,
+      lines[i + 1],
     );
     if (action.kind === "open") {
       const opened: PdfSection = {
@@ -1107,21 +1108,51 @@ function stripSidebarNoisePrefix(raw: string): string {
  * L1 exact-alias / split-letter headers (incl. multi-page "EXPERIENCE"
  * continuation headers) are not `viaAnchorFallback` and always open — they
  * short-circuit to `false` here.
+ *
+ * The single-column experience relaxation needs a signal STRONGER than
+ * `prevLineOpenedBoundary` (which only inspects the immediately-preceding line):
+ * a full entry block having intervened is necessary but NOT sufficient to open a
+ * new group. A later role's COMPANY name that happens to end in an anchor word
+ * ("Global Teaching Experience Inc.") also sits after an intervening block, yet
+ * must stay in the same section — consuming it as a heading would drop the
+ * company (#354, the residual #258-shape edge). `lineLooksLikeDatedEntry`
+ * separates the two: a genuine bare category header ("Teaching Experience", #311)
+ * is followed by its role's TITLE line, never a date, whereas an anchor-ending
+ * company/role line carries a date range on itself or the line immediately below
+ * it — so it reads as an entry and keeps the strict suppression.
  */
 function isInstitutionRepeat(
   header: { section: SectionName; viaAnchorFallback: boolean },
   currentSection: SectionName | "profile",
   singleColumn: boolean,
   prevLineOpenedBoundary: boolean,
+  lineLooksLikeDatedEntry: boolean,
 ): boolean {
   if (!header.viaAnchorFallback || header.section !== currentSection) {
     return false;
   }
   // Non-experience sections: strict #258 suppression, adjacency ignored.
   if (header.section !== "experience") return true;
-  // Experience: relax on a two-column flatten OR once a full entry block has
-  // intervened (the 2nd category header is a new group, not an institution line).
-  return !singleColumn || prevLineOpenedBoundary;
+  // Two-column flatten: strict #258 suppression (a sidebar flatten interleaves
+  // recovered anchors mid-column where a relaxed boundary mints spurious groups).
+  if (!singleColumn) return true;
+  // The institution/company line that is the immediate first content line under
+  // the header is always an entry, never a 2nd header — suppress.
+  if (prevLineOpenedBoundary) return true;
+  // A full entry block has intervened. Open a NEW experience group only for a
+  // genuine bare category header (#311); an anchor-ending company/role line that
+  // reads as a dated entry stays suppressed so its company is not lost (#354).
+  return lineLooksLikeDatedEntry;
+}
+
+/**
+ * True when a line carries a date range — the tell that separates a dated
+ * company/role ENTRY line from a bare section-category HEADER (#354). Uses the
+ * shared `DATE_RANGE_RE` (non-global, so `.test` is stateless). A `undefined`
+ * line (past the end of the document) carries no date.
+ */
+function hasDateRange(line: PdfLine | undefined): boolean {
+  return line !== undefined && DATE_RANGE_RE.test(line.text);
 }
 
 // ── Single-column label-rail header recovery (#355) ─────────────────────────
@@ -1836,6 +1867,7 @@ function classifyLine(
   columnSplitX: number | undefined,
   currentSection: SectionName | "profile",
   singleColumn: boolean,
+  nextLine: PdfLine | undefined,
 ): LineAction {
   const header = matchSectionHeaderDetailed(line.text);
   if (header) {
@@ -1843,8 +1875,21 @@ function classifyLine(
     // CURRENTLY-open section is an institution entry under its own real header,
     // not a second header — suppress the boundary and RETAIN it as content. The
     // full gate (current-section safety, the experience-only adjacency
-    // relaxation, and the two-column carve-out) lives in `isInstitutionRepeat`.
-    if (!isInstitutionRepeat(header, currentSection, singleColumn, prevLineOpenedBoundary)) {
+    // relaxation, the two-column carve-out, and the #354 dated-entry guard)
+    // lives in `isInstitutionRepeat`. A dated entry line is one carrying a date
+    // range on itself or the line immediately below it (a company whose role's
+    // date follows) — the tell of a company/role entry vs. a bare category header.
+    const lineLooksLikeDatedEntry =
+      hasDateRange(line) || hasDateRange(nextLine);
+    if (
+      !isInstitutionRepeat(
+        header,
+        currentSection,
+        singleColumn,
+        prevLineOpenedBoundary,
+        lineLooksLikeDatedEntry,
+      )
+    ) {
       return { kind: "open", name: header.section };
     }
     // Suppressed: retain the institution line as content. Return append
