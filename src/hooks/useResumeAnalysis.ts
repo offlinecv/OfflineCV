@@ -150,8 +150,6 @@ function isBlankDraftSnapshot(value: unknown): value is BlankDraftSnapshot {
   );
 }
 
-let migrationIdCounter = 0;
-
 /**
  * Upconvert a persisted draft to the current shape (#427). A draft saved before
  * #427 carried contact-link edits on `contactOverrides` under the four legacy
@@ -173,11 +171,16 @@ export function migrateBlankDraft(
     if (value === undefined) continue;
     delete contact[key];
     const classified = value.trim() === "" ? undefined : classifyProfile(value);
+    // `crypto.randomUUID()` (browser + Node ≥ 19) rather than a module-level
+    // counter: no cross-test contamination for tests importing this in the same
+    // vitest module, and no reset-to-0 collision when a page reload re-runs
+    // migration against a fresh counter. Each migrated override just needs a
+    // stable-per-call unique id; global uniqueness is overkill but free here.
     migrated.push(
       classified
-        ? { id: `profile:migrated:${migrationIdCounter++}`, ...classified, legacyKey: key }
+        ? { id: `profile:migrated:${crypto.randomUUID()}`, ...classified, legacyKey: key }
         : {
-            id: `profile:migrated:${migrationIdCounter++}`,
+            id: `profile:migrated:${crypto.randomUUID()}`,
             url: value,
             network: key,
             kind: "other",

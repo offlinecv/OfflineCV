@@ -210,7 +210,16 @@ export function applyProfileOverrides(
   // extraction's "present only when ≥1 link" convention.
   if (profiles.length > 0) nextParsed.profiles = profiles;
   else delete nextParsed.profiles;
-  return confEdits;
+
+  // A correction (step 1) and an extra back-fill (step 2) can target the SAME
+  // legacy slot — e.g. the user clears a detected LinkedIn (correction → conf 0)
+  // then adds one via + Add (extra → conf 1). Collapse to one entry per key,
+  // last-write-wins (which matches step order: the extra's confidence is what
+  // the slot actually ends up at), so a downstream `.find(e => e.key === …)`
+  // can't read the stale earlier confidence and treat a present link as absent.
+  const byKey = new Map<LegacyLinkKey, LegacyConfEdit>();
+  for (const edit of confEdits) byKey.set(edit.key, edit);
+  return [...byKey.values()];
 }
 
 // ── Experience / education header fields ────────────────────────────────────

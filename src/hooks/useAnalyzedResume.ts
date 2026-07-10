@@ -222,6 +222,18 @@ export function useAnalyzedResume(): AnalyzedResume {
   // doesn't back-fill an empty slot, …) recomputes `editedCore` for display
   // but leaves this memo — and the identical-numbers regrade it would
   // otherwise trigger — untouched (#428).
+  //
+  // INVARIANT (hand-maintained — a future add-a-channel PR must uphold both
+  // directions): every `editedCore` change that moves the score must ALSO
+  // change one of the `scoreAffectingProfileSlots.*` primitives below, and a
+  // change that does NOT move the score must leave them identical. Today this
+  // holds because those four primitives run the SAME `applyProfileOverrides`
+  // step `editedCore` does, over the same `[base, profileOverrides]` pair. If
+  // you widen `applyProfileOverrides` to touch a new confidence slot (e.g.
+  // `portfolio_url`), widen `scoreAffectingProfileSlots` in lockstep or the
+  // score silently returns a stale value for that channel. The object-identity
+  // tests pin both directions: a non-scoring profile edit keeps the score
+  // object-identical; a scoring correction produces a NEW score reference.
   const score = useMemo(() => {
     if (base === null || editedCore === null) return null;
     // The anonymous scorer pools its bullet set from `sections` (#133), so the
