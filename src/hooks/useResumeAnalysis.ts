@@ -106,6 +106,20 @@ export interface ResumeAnalysis {
   /** Start a genuinely fresh blank session (used by "start over"): clears
    *  `pendingDraft` AND bumps `generation` so the reset-edits effect fires. */
   startOverBlank: () => void;
+  /** Hydrate the "done" state directly from a saved resume (#322) — restores
+   *  the results view from a cached parse without re-running the cascade. */
+  loadSavedResume: (saved: LoadedDoneState) => void;
+}
+
+/** The pieces the resume library replays into the "done" state (#322). Mirrors
+ *  the `done` phase fields the parse pipeline produces. */
+export interface LoadedDoneState {
+  fileName: string;
+  fileSize: number;
+  bytes?: ArrayBuffer;
+  sourceKind: SourceKind;
+  result: CascadeResult;
+  score: AnonymousAtsScore;
 }
 
 // ── Draft persistence (#313) ─────────────────────────────────────────────────
@@ -256,6 +270,12 @@ export function useResumeAnalysis(): ResumeAnalysis {
     setState({ phase: "idle" });
   }, []);
 
+  const loadSavedResume = useCallback((saved: LoadedDoneState) => {
+    // Restore the results view straight from the cached parse (#322) — same
+    // shape `handleFile` would set after a live parse, minus the re-run.
+    setState({ phase: "done", ...saved });
+  }, []);
+
   // Monotonic source of "fresh authoring generation" ids. A ref (not state)
   // because minting one must not itself trigger a render — only the
   // `generation` value stored on `ParseState` does that. Never reset, even
@@ -313,5 +333,6 @@ export function useResumeAnalysis(): ResumeAnalysis {
     startBlank,
     resolveDraftPrompt,
     startOverBlank,
+    loadSavedResume,
   };
 }
