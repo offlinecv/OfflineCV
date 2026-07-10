@@ -232,4 +232,76 @@ describe("buildAtsResumeModel", () => {
     const model = buildAtsResumeModel(result, makeScore([]));
     expect(model.summaryHeading).toBe("Profile");
   });
+
+  // ── #425 ───────────────────────────────────────────────────────────────────
+
+  it("puts the role team/division on the org sub-line as the third middot segment (#425)", () => {
+    const result = makeResult({
+      experience: [
+        {
+          title: "Senior PM",
+          company: "Google",
+          location: "Mountain View, CA",
+          team: "Enterprise Platforms",
+          start_date: "2021",
+          end_date: "2024",
+          description: "Owned the platform roadmap",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const exp = model.sections.find((s) => s.heading === "Experience")!;
+    // Company · Location · Team, with the date glued after the whitespace gap
+    // (the date is intentionally NOT drawn flush-right — see the #425 deviation).
+    expect(exp.entries[0].subLine).toBe(
+      "Google · Mountain View, CA · Enterprise Platforms  2021 – 2024",
+    );
+  });
+
+  it("omits the team segment cleanly when a role has no team (#425)", () => {
+    const result = makeResult({
+      experience: [
+        {
+          title: "Senior PM",
+          company: "Google",
+          location: "Mountain View, CA",
+          start_date: "2021",
+          end_date: "2024",
+          description: "Owned the platform roadmap",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const exp = model.sections.find((s) => s.heading === "Experience")!;
+    expect(exp.entries[0].subLine).toBe(
+      "Google · Mountain View, CA  2021 – 2024",
+    );
+  });
+
+  it("strips the URL scheme from contact links but KEEPS a leading www (#425 round-trip)", () => {
+    const result = makeResult({
+      linkedin_url: "https://www.linkedin.com/in/janesmith",
+      github_url: "https://github.com/janesmith",
+      portfolio_url: "https://jane.dev/",
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    // Scheme + trailing slash gone; a leading `www.` is preserved so the parser
+    // re-adds `https://` on re-parse and the linkedin_url round-trips.
+    expect(model.contact.links).toContain("www.linkedin.com/in/janesmith");
+    expect(model.contact.links).toContain("github.com/janesmith");
+    expect(model.contact.links).toContain("jane.dev");
+    for (const link of model.contact.links)
+      expect(link).not.toMatch(/^https?:\/\//i);
+  });
+
+  it("marks the skills entry as regular-weight (headerBold=false); other entries stay bold (#425)", () => {
+    const result = makeResult();
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const skills = model.sections.find((s) => s.heading === "Skills")!;
+    expect(skills.entries[0].headerBold).toBe(false);
+    // Experience headers do not opt out — they render bold (headerBold undefined,
+    // which the renderer defaults to true).
+    const exp = model.sections.find((s) => s.heading === "Experience")!;
+    expect(exp.entries[0].headerBold).toBeUndefined();
+  });
 });

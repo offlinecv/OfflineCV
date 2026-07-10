@@ -26,6 +26,11 @@
 
 import { loadPdfLibOnce, type PdfLibParts } from "./load-pdf-lib.ts";
 import type { AtsResumeModel, AtsEntry } from "./ats-resume-model.ts";
+import {
+  autoBoldMetrics,
+  EMPHASIS_OPEN,
+  EMPHASIS_CLOSE,
+} from "./auto-bold-metrics.ts";
 import { toJsonResume } from "./to-json-resume.ts";
 import { wrapWordsToLines } from "./text-wrap.ts";
 import poppinsRegularUrl from "../../assets/fonts/Poppins-Regular.ttf?url";
@@ -56,6 +61,10 @@ const CONTENT_BOTTOM = MARGIN;
 // anchoring) and is intentionally out of scope here; if we later want
 // font-aware parsing, file it as its own follow-up.
 const SIZE_NAME = 18;
+// Professional headline under the name (#425) — regular weight, sized between
+// the name and the contact line so it reads as a subordinate title, not a
+// second name.
+const SIZE_HEADLINE = 11;
 const SIZE_CONTACT = 9;
 const SIZE_SECTION = 11;
 const SIZE_HEADER = 10.5;
@@ -332,6 +341,74 @@ export function wrapSegmentsToLines(
 }
 
 /**
+ * Parse a bullet string carrying sentinel emphasis markers (from
+ * `autoBoldMetrics` — the U+E000 / U+E001 Private-Use-Area pair, NOT literal
+ * `**`) into an ordered list of `{ text, bold }` runs. The sentinels are
+ * STRIPPED — no run's text contains them — so drawing the runs reproduces the
+ * original glyphs exactly, including any literal `**` in the source, which is
+ * inert here and drawn verbatim (round-trip-neutral, #284/#425). Text outside
+ * any marker is `bold: false`; text inside a sentinel span is `bold: true`.
+ * Exported for testing.
+ */
+export function parseBoldRuns(text: string): Array<{ text: string; bold: boolean }> {
+  const runs: Array<{ text: string; bold: boolean }> = [];
+  const re = new RegExp(`${EMPHASIS_OPEN}([^${EMPHASIS_CLOSE}]+?)${EMPHASIS_CLOSE}`, "g");
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) runs.push({ text: text.slice(last, m.index), bold: false });
+    runs.push({ text: m[1], bold: true });
+    last = re.lastIndex;
+  }
+  if (last < text.length) runs.push({ text: text.slice(last), bold: false });
+  return runs;
+}
+
+/** One drawable, pre-measured piece of a word carrying its own bold flag. */
+type WordChunk = { str: string; bold: boolean; width: number };
+
+/**
+ * Flatten bold runs into words (each a list of same-font chunks). Splitting on
+ * whitespace and re-inserting a single inter-word space reproduces the bullet's
+ * single-spaced text; a bold boundary with no surrounding space (e.g.
+ * "increase**40%**") keeps both chunks in one word, so no space is introduced
+ * between them. Widths are measured here so the draw loop is pure layout.
+ */
+function groupRunsIntoWords(
+  runs: Array<{ text: string; bold: boolean }>,
+  size: number,
+  fonts: { regular: PdfFont; bold: PdfFont },
+  sanitize: boolean,
+): WordChunk[][] {
+  const words: WordChunk[][] = [];
+  let current: WordChunk[] = [];
+  const flush = () => {
+    if (current.length) {
+      words.push(current);
+      current = [];
+    }
+  };
+  for (const run of runs) {
+    const value = sanitize ? toWinAnsi(run.text) : run.text;
+    const font = run.bold ? fonts.bold : fonts.regular;
+    for (const piece of value.split(/(\s+)/)) {
+      if (piece === "") continue;
+      if (/^\s+$/.test(piece)) {
+        flush();
+      } else {
+        current.push({
+          str: piece,
+          bold: run.bold,
+          width: font.widthOfTextAtSize(piece, size),
+        });
+      }
+    }
+  }
+  flush();
+  return words;
+}
+
+/**
  * Mutable cursor + page state threaded through the draw routines. We keep one
  * "current page" and append new pages as the cursor overflows.
  */
@@ -476,6 +553,87 @@ class Layout {
     }
   }
 
+  /**
+   * Draw one bullet. When `autoBoldMetrics` finds no quantifiable metric, this
+   * takes the legacy single-string path (byte-identical to the pre-#425
+   * renderer, so metric-free bullets are unchanged). When metrics are present,
+   * it draws per-word runs switching between the regular and bold fonts,
+   * preserving bold across wrapped lines. Either way the DRAWN text carries no
+   * sentinel markers, so the round-trip text is byte-identical to the source —
+   * including any literal `**` a user typed, which is drawn verbatim (#284/#425).
+   */
+  drawBullet(text: string, size: number, hangingIndent: number) {
+    const marked = autoBoldMetrics(text);
+    if (!marked.includes(EMPHASIS_OPEN)) {
+      this.drawText(`${BULLET_MARKER}${text}`, { size, hangingIndent });
+      return;
+    }
+    this.drawRuns(parseBoldRuns(marked), size, hangingIndent);
+  }
+
+  /**
+   * Draw a bullet as a sequence of `{ text, bold }` runs with word-level
+   * wrapping. A "word" is a run of non-whitespace that may span a bold→regular
+   * boundary (so mid-word emphasis draws correctly); words are separated by a
+   * single space. The bullet marker leads the first line; continuation lines
+   * use `hangingIndent`. Bold is preserved across wraps because it is tracked
+   * per chunk, not per line.
+   */
+  private drawRuns(
+    runs: Array<{ text: string; bold: boolean }>,
+    size: number,
+    hangingIndent: number,
+  ) {
+    const words = groupRunsIntoWords(
+      runs,
+      size,
+      this.fonts,
+      this.sanitize,
+    );
+
+    const wordWidth = (w: WordChunk[]) =>
+      w.reduce((sum, c) => sum + c.width, 0);
+    const space = this.fonts.regular.widthOfTextAtSize(" ", size);
+    const markerWidth = this.fonts.regular.widthOfTextAtSize(BULLET_MARKER, size);
+    const rightEdge = PAGE_WIDTH - MARGIN;
+    const lineHeight = size * LINE_GAP;
+
+    this.ensure(lineHeight);
+    this.page.drawText(BULLET_MARKER, {
+      x: MARGIN,
+      y: this.y - size,
+      size,
+      font: this.fonts.regular,
+      color: this.black,
+    });
+    let x = MARGIN + markerWidth;
+    let atLineStart = true;
+
+    for (const word of words) {
+      const ww = wordWidth(word);
+      // Wrap before a word (never the first on a line) that would overflow.
+      if (!atLineStart && x + space + ww > rightEdge) {
+        this.advance(lineHeight);
+        this.ensure(lineHeight);
+        x = MARGIN + hangingIndent;
+        atLineStart = true;
+      }
+      if (!atLineStart) x += space;
+      for (const chunk of word) {
+        this.page.drawText(chunk.str, {
+          x,
+          y: this.y - size,
+          size,
+          font: chunk.bold ? this.fonts.bold : this.fonts.regular,
+          color: this.black,
+        });
+        x += chunk.width;
+      }
+      atLineStart = false;
+    }
+    this.advance(lineHeight);
+  }
+
   drawRule() {
     this.ensure(2);
     this.page.drawLine({
@@ -508,9 +666,18 @@ export async function renderAtsResumePdf(
 
   const layout = new Layout(doc, { regular, bold }, black, gray, !isEmbedded);
 
-  // ── Header: name + contact line ──
+  // ── Header: name + (headline) + contact line ──
   if (model.contact.name) {
     layout.drawText(model.contact.name, { bold: true, size: SIZE_NAME });
+  }
+  // Professional headline (#425) — regular weight, under the name. Populated
+  // only when the model carries one; the field plumbing lands now, honest
+  // parser-side headline extraction is a follow-up (see `buildContact`).
+  if (model.contact.headline) {
+    layout.drawText(model.contact.headline, {
+      size: SIZE_HEADLINE,
+      color: muted,
+    });
   }
   const contactParts = [
     model.contact.email,
@@ -582,18 +749,20 @@ function drawSectionHeading(layout: Layout, heading: string) {
 function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
   if (entry.headerLine) {
     layout.drawText(entry.headerLine, {
-      bold: true,
+      // Every header is bold EXCEPT where the model opts out — the skills list,
+      // which reads as regular-weight body text (#425).
+      bold: entry.headerBold ?? true,
       size: SIZE_HEADER,
       atomicSegments: entry.atomicSegments,
     });
   }
   if (entry.subLine) {
     layout.advance(GAP_AFTER_HEADER);
-    // Sub-lines are the "Company · Location  Dates" / "Institution · Location
-    // Dates" org lines (see `ats-resume-model.ts`) — the middot here is a
-    // re-parse-critical boundary, NOT a display joiner: word-wrapping inside a
-    // multi-word location (e.g. "San Francisco Bay Area") re-parses it into
-    // fragmented location tokens (#301). Unlike the 3+ segment achievement
+    // Sub-lines are the "Company · Location · Team  Dates" / "Institution ·
+    // Location  Dates" org lines (see `ats-resume-model.ts`) — the middot here
+    // is a re-parse-critical boundary, NOT a display joiner: word-wrapping
+    // inside a multi-word location (e.g. "San Francisco Bay Area") re-parses it
+    // into fragmented location tokens (#301). Unlike the 3+ segment achievement
     // HEADER lines (#307), these must stay atomic, so opt in unconditionally.
     layout.drawText(entry.subLine, {
       size: SIZE_SUB,
@@ -602,9 +771,9 @@ function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
     });
   }
   for (const bullet of entry.bullets) {
-    layout.drawText(`${BULLET_MARKER}${bullet}`, {
-      size: SIZE_BODY,
-      hangingIndent: BULLET_INDENT,
-    });
+    // Auto-bold quantified metrics inside the bullet, then draw per-word runs
+    // (#425). Markers are stripped before drawing, so the round-trip text is
+    // unchanged; a metric-free bullet takes the legacy single-string path.
+    layout.drawBullet(bullet, SIZE_BODY, BULLET_INDENT);
   }
 }
