@@ -150,6 +150,65 @@ export function parseDateRange(text: string): {
   return {};
 }
 
+// A range whose START token is a bare SEASON ("Fall 2013 – Spring 2014",
+// "Summer 2013, 2014"). Deliberately EXCLUDED from `isLoneDateRange` (see below).
+const SEASON_LEAD_RE = /^(?:Spring|Summer|Fall|Autumn|Winter)\b/i;
+
+/**
+ * True when `text` is nothing but a month-year / year date range. The single
+ * discriminator shared by two #425 flush-right-date call sites so they can never
+ * drift: the section splitter's `flush()` exemption (which keeps a flush-right
+ * date merged into the org line's `PdfLine` instead of splitting it off at the
+ * wide same-y gap) and the ATS PDF model (which only routes a date to the
+ * flush-right slot when it is one of these, keeping everything else glued into
+ * the line's text). Reuses the shared `DATE_RANGE_RE` rather than a hand-rolled
+ * pattern, and requires it to cover the ENTIRE trimmed run: a lone
+ * `Jan 2024 – Present` / `2019 - 2021` qualifies, but a run carrying any other
+ * text (a course name, a skill, an org fragment) does not — so a genuine
+ * multi-column grid's trailing column still splits.
+ *
+ * Two shapes are deliberately NOT matched, so they stay glued rather than
+ * flush-right — both fully round-trip-safe (gluing is the #430 behavior), and
+ * both narrowing the blast radius of this core line-splitter change:
+ *   - a bare single date/year: `DATE_RANGE_RE` needs two anchors, so a lone
+ *     `2020` returns false; and
+ *   - a SEASON-led range (`Fall 2013 – Spring 2014`, `Summer 2013, 2014`): this
+ *     exclusion is load-bearing for an EXTERNAL fixture, not our own export.
+ *     `word/openresume-laverne-word-quartz.pdf` carries a flush-right honors
+ *     rail — "Dean's List  … Fall 2013 – Spring 2014" / "Summer 2013, 2014" —
+ *     and its committed corpus snapshot depends on those season rails staying
+ *     SPLIT off the "Dean's List" label (dropping the exclusion re-parses the
+ *     fixture and fails `corpus.test`, verified). Merging a season range onto its
+ *     honors label mis-segments the label as a dated entry.
+ *
+ *     Why seasons but NOT a plain year-range honors line ("Dean's List
+ *     2019 - 2021", which IS treated as a lone range and would merge): this is a
+ *     deliberately NARROW, fixture-anchored carve-out, not a claim that every
+ *     honors rail is excluded. Season ranges are near-exclusive to academic /
+ *     honors contexts, so excluding them is low-collateral; a bare YEAR range is
+ *     overwhelmingly a real employment/education date rail (the shape the
+ *     exporter actually right-aligns), so excluding it too would defeat the
+ *     flush-right round-trip it exists to protect. The #425 multi-row fix
+ *     (`columnGapCuts` in `sections.ts`) does NOT subsume this: it stops ≥2
+ *     adjacent date rails from being read as a column grid, but a single honors
+ *     rail still reaches `flush()`, where merging vs. splitting is exactly what
+ *     the season exclusion controls — so the carve-out is still required.
+ */
+export function isLoneDateRange(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0 || SEASON_LEAD_RE.test(t)) return false;
+  // `DATE_RANGE_RE`'s bare-year anchor is `\d{4}`, so a plain numeric range that
+  // is not a date ("5000 - 6000", a salary/score grid column) full-matches. Gate
+  // on a real date signal: a plausible 19xx/20xx year, or any month / season /
+  // slash / apostrophe / placeholder token (each of which carries a letter,
+  // slash, or apostrophe). A bare non-year numeric range has none, so it stays a
+  // normal splittable grid column instead of being merged as a flush-right rail.
+  if (!/(?:19|20)\d{2}|[A-Za-z'/]/.test(t)) return false;
+  const m = DATE_RANGE_RE.exec(t);
+  DATE_RANGE_RE.lastIndex = 0;
+  return m !== null && m.index === 0 && m[0].length === t.length;
+}
+
 export function stripDateRange(text: string): string {
   // Remove the paired match and leftover year tokens.
   let cleaned = text.replace(DATE_RANGE_RE, "").trim();

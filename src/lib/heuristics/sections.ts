@@ -16,6 +16,7 @@
 
 import type { PdfTextItem } from "./types.ts";
 import { mergeWrappedContinuations } from "./entry-blocks.ts";
+import { isLoneDateRange } from "./line-primitives.ts";
 import {
   matchSectionHeader,
   matchSectionHeaderDetailed,
@@ -243,17 +244,47 @@ export function orderItemsByColumn(
  */
 const MULTI_COLUMN_MIN_RUN_ROWS = 2;
 
-/** A row is "multi-column" when its x-sorted items carry a column-sized
- *  horizontal gap (the same `COLUMN_GAP_THRESHOLD` the line splitter uses). */
-function rowIsMultiColumn(row: PdfTextItem[]): boolean {
-  if (row.length < 2) return false;
-  const sorted = [...row].sort((a, b) => a.x - b.x);
+/**
+ * Column-sized horizontal-gap cut indices within an x-sorted, same-y run — the
+ * shared chokepoint for the line splitter (`flush`) and the embedded-column
+ * detector (`rowIsMultiColumn`). A cut at index `i` marks items `[i..]` as
+ * starting a new column past a `> COLUMN_GAP_THRESHOLD` gap.
+ *
+ * #425 flush-right-date exemption: when the FINAL segment (after the last cut)
+ * is nothing but a lone date range, that trailing cut is dropped, so a role /
+ * degree date the exporter draws flush-right stays merged into its org text
+ * rather than peeling into its own column/line. Applying the exemption HERE —
+ * not only in `flush` — is what neutralizes the ≥2-adjacent-row case: without it,
+ * two consecutive `Org …(wide gap) Date` rows read as a 2-row embedded grid and
+ * `reorderEmbeddedColumns` tears every date off its org into a trailing
+ * column-major band (the #298 title↔company / right-edge-date-band regression).
+ * A genuine coursework grid's trailing column is NOT a date range, so its cut
+ * survives and the grid still reorders column-major.
+ */
+function columnGapCuts(sorted: PdfTextItem[]): number[] {
+  const cuts: number[] = [];
   for (let i = 1; i < sorted.length; i++) {
     const prev = sorted[i - 1];
     const gap = sorted[i].x - (prev.x + prev.width);
-    if (gap > COLUMN_GAP_THRESHOLD) return true;
+    if (gap > COLUMN_GAP_THRESHOLD) cuts.push(i);
   }
-  return false;
+  if (
+    cuts.length > 0 &&
+    isLoneDateRange(mergeItemText(sorted.slice(cuts[cuts.length - 1])))
+  ) {
+    cuts.pop();
+  }
+  return cuts;
+}
+
+/** A row is "multi-column" when its x-sorted items carry a column-sized
+ *  horizontal gap (the same `COLUMN_GAP_THRESHOLD` the line splitter uses),
+ *  after the #425 flush-right-date exemption — so a lone flush-right date rail is
+ *  NOT counted as a grid column (see `columnGapCuts`). */
+function rowIsMultiColumn(row: PdfTextItem[]): boolean {
+  if (row.length < 2) return false;
+  const sorted = [...row].sort((a, b) => a.x - b.x);
+  return columnGapCuts(sorted).length > 0;
 }
 
 /**
@@ -455,17 +486,14 @@ function groupLinesSingle(bandItems: PdfTextItem[]): PdfLine[] {
     if (current.length === 0) return;
     current.sort((a, b) => a.x - b.x);
     // Split the same-y cluster at column-sized horizontal gaps so two-column
-    // layouts that share a baseline don't get merged into one PdfLine — see
-    // COLUMN_GAP_THRESHOLD and issue #9.
+    // layouts that share a baseline don't get merged into one PdfLine (#9), with
+    // the #425 flush-right-date exemption applied by `columnGapCuts` so an
+    // exporter-drawn flush-right date stays merged onto its org line.
+    const cuts = columnGapCuts(current);
     let runStart = 0;
-    for (let i = 1; i < current.length; i++) {
-      const prev = current[i - 1];
-      const cur = current[i];
-      const gap = cur.x - (prev.x + prev.width);
-      if (gap > COLUMN_GAP_THRESHOLD) {
-        lines.push(buildLine(current.slice(runStart, i)));
-        runStart = i;
-      }
+    for (const cut of cuts) {
+      lines.push(buildLine(current.slice(runStart, cut)));
+      runStart = cut;
     }
     lines.push(buildLine(current.slice(runStart)));
     current = [];

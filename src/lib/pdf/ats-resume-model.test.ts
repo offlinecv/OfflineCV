@@ -251,11 +251,12 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const exp = model.sections.find((s) => s.heading === "Experience")!;
-    // Company · Location · Team, with the date glued after the whitespace gap
-    // (the date is intentionally NOT drawn flush-right — see the #425 deviation).
+    // Company · Location · Team on the sub-line; the range date is carried
+    // separately in `subLineDate` and drawn flush-right (#425), not glued.
     expect(exp.entries[0].subLine).toBe(
-      "Google · Mountain View, CA · Enterprise Platforms  2021 – 2024",
+      "Google · Mountain View, CA · Enterprise Platforms",
     );
+    expect(exp.entries[0].subLineDate).toBe("2021 – 2024");
   });
 
   it("omits the team segment cleanly when a role has no team (#425)", () => {
@@ -273,21 +274,64 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const exp = model.sections.find((s) => s.heading === "Experience")!;
-    expect(exp.entries[0].subLine).toBe(
-      "Google · Mountain View, CA  2021 – 2024",
-    );
+    // Org on the sub-line; the range date is drawn flush-right via `subLineDate`.
+    expect(exp.entries[0].subLine).toBe("Google · Mountain View, CA");
+    expect(exp.entries[0].subLineDate).toBe("2021 – 2024");
   });
 
-  it("strips the URL scheme from contact links but KEEPS a leading www (#425 round-trip)", () => {
+  it("keeps the #298 org signature glued (no flush-right) for a location-less titled role (#425)", () => {
+    // A neutral, location-less company with a title needs the " · " org signature
+    // on the anchor line so the re-parser reads it as the company, not the title.
+    // A flush-right date draws no middot between them, so this case stays GLUED:
+    // the date is on `subLine` after " · ", and `subLineDate` is unset.
+    const result = makeResult({
+      experience: [
+        {
+          title: "Chair",
+          company: "Leadership Experience",
+          start_date: "2021",
+          end_date: "2024",
+          description: "Ran the committee",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const exp = model.sections.find((s) => s.heading === "Experience")!;
+    expect(exp.entries[0].subLine).toBe("Leadership Experience · 2021 – 2024");
+    expect(exp.entries[0].subLineDate).toBeUndefined();
+  });
+
+  it("keeps a single-token (non-range) date glued rather than flush-right (#425)", () => {
+    // Only a lone year is known — not a range — so it is NOT drawn flush-right
+    // (the flush() exemption only protects ranges); it stays glued on `subLine`.
+    const result = makeResult({
+      experience: [
+        {
+          title: "Analyst",
+          company: "Globex",
+          location: "Austin, TX",
+          start_date: "2022",
+          description: "Did analysis",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const exp = model.sections.find((s) => s.heading === "Experience")!;
+    expect(exp.entries[0].subLine).toBe("Globex · Austin, TX  2022");
+    expect(exp.entries[0].subLineDate).toBeUndefined();
+  });
+
+  it("fully display-formats contact links (scheme + www stripped) so the www round-trip holds (#425)", () => {
     const result = makeResult({
       linkedin_url: "https://www.linkedin.com/in/janesmith",
       github_url: "https://github.com/janesmith",
       portfolio_url: "https://jane.dev/",
     });
     const model = buildAtsResumeModel(result, makeScore([]));
-    // Scheme + trailing slash gone; a leading `www.` is preserved so the parser
-    // re-adds `https://` on re-parse and the linkedin_url round-trips.
-    expect(model.contact.links).toContain("www.linkedin.com/in/janesmith");
+    // Scheme, a leading `www.`, and any trailing slash are all dropped. Full
+    // www-stripping round-trips because the parser's `normalizeUrl` canonicalizes
+    // `www.` away on both the original parse and the re-parse of this display.
+    expect(model.contact.links).toContain("linkedin.com/in/janesmith");
     expect(model.contact.links).toContain("github.com/janesmith");
     expect(model.contact.links).toContain("jane.dev");
     for (const link of model.contact.links)

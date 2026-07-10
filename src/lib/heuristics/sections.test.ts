@@ -1216,3 +1216,118 @@ describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#3
     expect(names(sections)).not.toContain("skills");
   });
 });
+
+describe("groupIntoLines — flush() flush-right date-range exemption (#425)", () => {
+  // Same-baseline items with explicit x/width so we control the horizontal gap
+  // the column-split threshold (COLUMN_GAP_THRESHOLD = 50pt) measures.
+  const item = (x: number, str: string, width: number): PdfTextItem => ({
+    page: 1,
+    str,
+    x,
+    y: 100,
+    width,
+    height: 12,
+    fontSize: 10,
+    fontName: "f10",
+    hasEOL: true,
+  });
+
+  it("keeps a trailing lone date range merged onto the org line (not split off)", () => {
+    // "Company · Location" then a ~300pt gap then a right-aligned year range —
+    // the exporter's flush-right date shape. It must stay ONE PdfLine so the org
+    // keeps its date anchor on re-parse (#298/#425).
+    const lines = groupIntoLines([
+      item(54, "Company · Location", 100), // ends at 154
+      item(460, "2020 – 2023", 55), // gap 460-154 = 306 > 50
+    ]);
+    expect(lines.map((l) => l.text)).toEqual(["Company · Location 2020 – 2023"]);
+  });
+
+  it("still splits a genuine two-column grid whose trailing column is not a date", () => {
+    // Same wide gap, but the trailing run is a course name — NOT a lone date
+    // range — so the column-gap split stands and the row becomes two PdfLines.
+    const lines = groupIntoLines([
+      item(54, "Data Structures", 90),
+      item(460, "Algorithms", 60),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual(["Data Structures", "Algorithms"]);
+  });
+
+  it("still splits a trailing SEASON range (excluded from the exemption)", () => {
+    // A season-led range ("Fall 2013 – Spring 2014") is deliberately NOT exempt
+    // — it is common on honors/award rails, where merging would mis-segment it.
+    const lines = groupIntoLines([
+      item(54, "Dean's List", 60),
+      item(430, "Fall 2013 – Spring 2014", 110),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      "Dean's List",
+      "Fall 2013 – Spring 2014",
+    ]);
+  });
+});
+
+describe("groupIntoLines — ≥2 adjacent flush-right-date rows are NOT a column grid (#425)", () => {
+  // Same shape as above but two (or more) consecutive same-x `Org …(wide gap)
+  // Date` rows — what two title-less roles / degree-less programs export as. The
+  // embedded-column reconstruction (`reorderEmbeddedColumns`) MUST NOT read these
+  // as a coursework grid and reorder them column-major, which would tear every
+  // date off its org into a trailing date band (the #298 regression). Each row's
+  // sole column gap precedes a lone date range, so `columnGapCuts` neutralizes it
+  // and no grid run forms.
+  const row = (y: number, x: number, str: string, width: number): PdfTextItem => ({
+    page: 1,
+    str,
+    x,
+    y,
+    width,
+    height: 12,
+    fontSize: 10,
+    fontName: "f10",
+    hasEOL: true,
+  });
+
+  it("keeps each date attached to its own org across two title-less roles", () => {
+    // Reviewer's confirmed live repro: two `Org …(x≈460) Date` rows.
+    const lines = groupIntoLines([
+      row(100, 54, "Acme Corp", 70), // ends ~124
+      row(100, 460, "2018 - 2020", 55), // gap 336 > 50
+      row(116, 54, "Globex Inc", 75),
+      row(116, 460, "2020 - 2022", 55),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      "Acme Corp 2018 - 2020",
+      "Globex Inc 2020 - 2022",
+    ]);
+  });
+
+  it("keeps each date attached across two bare degree-less programs", () => {
+    const lines = groupIntoLines([
+      row(200, 54, "B.S. Computer Science", 130),
+      row(200, 470, "2015 - 2019", 55),
+      row(216, 54, "M.S. Data Science", 115),
+      row(216, 470, "2019 - 2021", 55),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      "B.S. Computer Science 2015 - 2019",
+      "M.S. Data Science 2019 - 2021",
+    ]);
+  });
+
+  it("STILL reorders a genuine ≥2-row coursework grid column-major", () => {
+    // Trailing column is a course name, not a date range — a real grid, so the
+    // exemption does not fire and the de-zig-zag column-major reorder stands.
+    const lines = groupIntoLines([
+      row(300, 54, "Data Structures", 90),
+      row(300, 300, "Machine Learning", 100), // gap 156 > 50
+      row(316, 54, "Databases", 60),
+      row(316, 300, "Compilers", 60),
+    ]);
+    expect(lines.map((l) => l.text)).toEqual([
+      "Data Structures",
+      "Databases",
+      "Machine Learning",
+      "Compilers",
+    ]);
+  });
+});

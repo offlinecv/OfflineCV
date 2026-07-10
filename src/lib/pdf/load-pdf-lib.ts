@@ -28,6 +28,11 @@ export interface PdfLibParts {
   PDFDocument: PdfLib["PDFDocument"];
   StandardFonts: PdfLib["StandardFonts"];
   rgb: PdfLib["rgb"];
+  /** Literal-string constructor — needed to build the `/URI` value of a Link
+   *  annotation's action (`context.obj` coerces a JS string to a `/Name`, not a
+   *  string, so the URI must be an explicit `PDFString`). See #425 (clickable
+   *  link annotations in render-ats-pdf.ts). */
+  PDFString: PdfLib["PDFString"];
   fontkit: unknown;
 }
 
@@ -39,10 +44,11 @@ export function loadPdfLibOnce(): Promise<PdfLibParts> {
     cached = Promise.all([
       import("pdf-lib"),
       import("@pdf-lib/fontkit"),
-    ]).then(([{ PDFDocument, StandardFonts, rgb }, fontkitModule]) => ({
+    ]).then(([{ PDFDocument, StandardFonts, rgb, PDFString }, fontkitModule]) => ({
       PDFDocument,
       StandardFonts,
       rgb,
+      PDFString,
       fontkit: fontkitModule.default,
     }));
   }

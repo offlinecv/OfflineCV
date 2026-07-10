@@ -211,12 +211,13 @@ describe("embedded multi-column reading order (#164)", () => {
       mkItem(72, 132, "● Shipped it on time"),
     ];
     const texts = groupIntoLines(dateRail).map((l) => l.text);
-    // The date stays grouped with its header row (split into its own line at the
-    // column gap, but in row order), and the bullets follow in order — the body
-    // is not pulled above the date.
-    expect(texts[0]).toBe("Senior Engineer, Acme Corp");
-    expect(texts[1]).toBe("2020 – 2023");
-    expect(texts.slice(2)).toEqual([
+    // The row is not reordered (the body is not pulled above the date). The
+    // trailing right-aligned date range now stays MERGED onto the header row via
+    // the #425 flush()-exemption — a lone trailing date range is kept on the org
+    // line rather than split off at the column gap, so the org keeps its date
+    // anchor on re-parse — and the bullets follow in order.
+    expect(texts[0]).toBe("Senior Engineer, Acme Corp 2020 – 2023");
+    expect(texts.slice(1)).toEqual([
       "● Built the thing that did the stuff",
       "● Shipped it on time",
     ]);

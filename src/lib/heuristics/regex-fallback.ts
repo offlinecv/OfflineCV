@@ -133,7 +133,14 @@ function firstMatch(re: RegExp, text: string): string | undefined {
 }
 
 function normalizeUrl(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, "");
+  // Strip a trailing slash and a leading `www.` (after any scheme), then ensure
+  // an `https://` scheme. The `www.` strip keeps this Tier-1.5 fallback's
+  // canonical form in lockstep with the Tier-1 `contact/url-utils.ts`
+  // `normalizeUrl`, so the ATS-export round-trip stays symmetric (#425).
+  const trimmed = url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/^(https?:\/\/)?www\./i, "$1");
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
 }

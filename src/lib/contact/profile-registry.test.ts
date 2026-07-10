@@ -21,8 +21,10 @@ describe("classifyProfile — known hosts", () => {
   });
 
   it("classifies LinkedIn profiles as social", () => {
+    // `normalizeUrl` canonicalizes a leading `www.` away (#425), so the stored
+    // profile url is www-less.
     expect(classifyProfile("https://www.linkedin.com/in/jane-doe")).toEqual({
-      url: "https://www.linkedin.com/in/jane-doe",
+      url: "https://linkedin.com/in/jane-doe",
       network: "LinkedIn",
       kind: "social",
     });

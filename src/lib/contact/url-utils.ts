@@ -19,11 +19,24 @@
 export const LINKEDIN_NONPROFILE_RE =
   /linkedin\.com\/(company|jobs|feed|school|learning|pulse|posts|groups|showcase|games|events|help|legal|search|signup|login|home)\b/i;
 
-/** Ensure a URL carries an `https://` scheme and drop a trailing sentence
- *  punctuation mark. Returns `undefined` for empty input. */
+/** Canonicalize a URL: ensure an `https://` scheme, drop a trailing sentence
+ *  punctuation mark, and strip a leading `www.` host prefix. Returns `undefined`
+ *  for empty input.
+ *
+ *  The `www.` strip (#425) makes the ATS-export round-trip symmetric: the
+ *  exporter shows link slugs `www.`-less (`formatLinkDisplay`), and the parser
+ *  can't recover a `www.` on re-parse — so canonicalizing it away HERE, on both
+ *  the original parse and the re-parse, means a `www.`-bearing source URL and
+ *  its `www.`-less exported display both normalize to the same value and the
+ *  `linkedin_url` round-trip holds. `www.` is a semantically inert host alias
+ *  (linkedin/github/etc. serve both), so dropping it loses nothing. Mirrors the
+ *  `www.` strip `urlSlug` already applies for identity comparison. */
 export function normalizeUrl(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
-  const trimmed = raw.replace(/[,;.)]$/, "").trim();
+  const trimmed = raw
+    .replace(/[,;.)]$/, "")
+    .trim()
+    .replace(/^(https?:\/\/)?www\./i, "$1");
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
 }

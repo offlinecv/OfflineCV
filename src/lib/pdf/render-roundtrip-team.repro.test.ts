@@ -88,13 +88,15 @@ describe("#425 — team on the org line round-trips through the parser", () => {
 
   it("renders the team as the third middot segment on the org sub-line", () => {
     const exp = model.sections.find((s) => s.heading === "Experience");
-    const subLines = exp?.entries.map((e) => e.subLine) ?? [];
-    expect(subLines[0]).toBe(
-      "Google · Mountain View, CA · Enterprise Platforms  2021 – 2024",
+    const entries = exp?.entries ?? [];
+    // Org (Company · Location · Team) on the sub-line; the range date is carried
+    // separately in `subLineDate` and drawn flush-right (#425), not glued.
+    expect(entries[0]?.subLine).toBe(
+      "Google · Mountain View, CA · Enterprise Platforms",
     );
-    expect(subLines[1]).toBe(
-      "Meta · Menlo Park, CA · Ads Platform  2018 – 2021",
-    );
+    expect(entries[0]?.subLineDate).toBe("2021 – 2024");
+    expect(entries[1]?.subLine).toBe("Meta · Menlo Park, CA · Ads Platform");
+    expect(entries[1]?.subLineDate).toBe("2018 – 2021");
   });
 
   it("re-parses each role's title / company / location / dates back into the right fields", () => {
