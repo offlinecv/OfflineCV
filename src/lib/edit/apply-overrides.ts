@@ -28,11 +28,15 @@
  * override is a no-op.
  */
 
-import type { HeuristicParsedResume } from "../heuristics/types.ts";
+import type {
+  HeuristicParsedResume,
+  FieldConfidence,
+} from "../heuristics/types.ts";
 import type { BulletObservation } from "../score/score.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
 import { normalizeBulletText } from "../score/group-bullets.ts";
+import { classifyProfile, profilesFromUrls } from "../contact/profile-registry.ts";
 import type {
   ContactOverrides,
   ExperienceFieldOverrides,
@@ -40,6 +44,7 @@ import type {
   SkillsOverride,
   AddedEntry,
   AddedBullets,
+  AddedProfile,
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 
@@ -51,6 +56,14 @@ export interface ApplyOverridesResult {
    *  bullet set from (#133), so a live edit must be reflected here to re-grade
    *  Specificity / Structure. */
   sections: SectionedResume;
+  /** The base `fieldConfidence` with every user-affirmed contact edit bumped to
+   *  1 (and an explicit clear dropped to 0). The scorer and the contact-gap
+   *  display both gate contact fields by confidence, but a user override lands
+   *  a value WITHOUT a matching new confidence — so a typed-in GitHub URL, or a
+   *  guided-picker LinkedIn add, would score as "still absent" against the
+   *  frozen base confidence. Threading this edited view keeps score + display in
+   *  step with the edits (#421 Blocking #1 / #3). */
+  fieldConfidence: FieldConfidence;
 }
 
 /** A `{ rawText, sections }` pair — the two bullet-pool views that every
@@ -100,6 +113,67 @@ function applyContactOverrides(
     }
     if (key === "phone") delete nextParsed.phoneIsValid;
   }
+}
+
+// ── Profile links (#335) ────────────────────────────────────────────────────
+
+/** The network label (`classifyProfile`) → legacy `_url` slot a back-fill
+ *  targets. Only the two links the scorer + contact-gap actually read
+ *  (`linkedin_url`, `github_url`) map — portfolio/website have no single
+ *  canonical network, and nothing downstream keys on them the way LinkedIn/
+ *  GitHub feed the "Professional profile" gap. */
+const NETWORK_TO_LEGACY_KEY: Readonly<Record<string, "linkedin_url" | "github_url">> = {
+  LinkedIn: "linkedin_url",
+  GitHub: "github_url",
+};
+
+/**
+ * Re-derive `nextParsed.profiles` from the (already-override-applied) four
+ * legacy link keys in their fixed precedence order, then append the user-added
+ * extra profiles. This keeps the mirror in lockstep with the legacy keys — the
+ * scoring/snapshot source of truth — so a single-slot edit (e.g. correcting
+ * `linkedin_url`) never leaves `profiles[]` stale, and it is where #334's JSON
+ * export reads a user's added links from.
+ *
+ * It ALSO back-fills the legacy `linkedin_url` / `github_url` slot from a
+ * matching user-added profile when that slot is empty (#421 Blocking #1): the
+ * anonymous scorer's completeness and the ContactCard's "Professional profile"
+ * gap both read the legacy slot, NOT `profiles[]`, so a LinkedIn URL added via
+ * the guided picker (which lands in `addedProfiles`) would otherwise never move
+ * the score or clear the gap. Returns the legacy keys it back-filled so the
+ * caller can mark them user-affirmed in the edited `fieldConfidence`.
+ *
+ * `profilesFromUrls` classifies + de-dupes by normalized slug (a legacy link
+ * re-added as an extra collapses to one entry).
+ */
+function applyProfileOverrides(
+  nextParsed: HeuristicParsedResume,
+  addedProfiles: readonly AddedProfile[],
+): ("linkedin_url" | "github_url")[] {
+  const backFilled: ("linkedin_url" | "github_url")[] = [];
+  for (const added of addedProfiles) {
+    const classified = classifyProfile(added.url);
+    if (!classified) continue;
+    const legacyKey = NETWORK_TO_LEGACY_KEY[classified.network];
+    if (legacyKey && !nextParsed[legacyKey]) {
+      nextParsed[legacyKey] = classified.url;
+      backFilled.push(legacyKey);
+    }
+  }
+
+  const profiles = profilesFromUrls([
+    nextParsed.linkedin_url,
+    nextParsed.github_url,
+    nextParsed.portfolio_url,
+    nextParsed.website_url,
+    ...addedProfiles.map((p) => p.url),
+  ]);
+  // Absent when nothing is left, so an empty-override call stays a true no-op
+  // (an `applyOverrides` invariant a test pins) and the parsed shape matches
+  // extraction's "present only when ≥1 link" convention.
+  if (profiles.length > 0) nextParsed.profiles = profiles;
+  else delete nextParsed.profiles;
+  return backFilled;
 }
 
 // ── Experience / education header fields ────────────────────────────────────
@@ -613,6 +687,17 @@ function applyAddedBulletsToExistingEntries(
  *                  entry's id. Folded into the entry description AND the graded
  *                  bullet pool so an addition moves Specificity / Structure.
  *                  Default `{}`.
+ * @param removedBullets accepted "this bullet was removed" indices (#211).
+ *                  Default empty set.
+ * @param addedProfiles user-added contact links beyond the four legacy slots
+ *                  (#335). `parsed.profiles` is re-derived from the edited
+ *                  legacy keys and these appended, so the mirror never desyncs
+ *                  from the scoring-source legacy keys. Default `[]`.
+ * @param fieldConfidence the base per-field confidence. Returned bumped to 1
+ *                  for every user-affirmed contact edit (and dropped to 0 for a
+ *                  clear), so a typed-in / picker-added contact link scores +
+ *                  displays as present rather than as low-confidence against the
+ *                  frozen base parse (#421 Blocking #1 / #3). Default `{}`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -627,6 +712,8 @@ export function applyOverrides(
   addedEntries: readonly AddedEntry[] = [],
   addedBullets: AddedBullets = {},
   removedBullets: ReadonlySet<number> = new Set(),
+  addedProfiles: readonly AddedProfile[] = [],
+  fieldConfidence: FieldConfidence = {},
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -639,6 +726,16 @@ export function applyOverrides(
   };
 
   applyContactOverrides(nextParsed, contact);
+  // Re-mirror profiles from the (now-edited) legacy keys + user-added extras, so
+  // the mirror never desyncs from the scoring-source legacy keys (#335), and
+  // back-fill the legacy linkedin/github slot from a matching added profile so
+  // the add moves the score + clears the gap (#421 Blocking #1).
+  const backFilledKeys = applyProfileOverrides(nextParsed, addedProfiles);
+  const nextConfidence = deriveEditedConfidence(
+    fieldConfidence,
+    contact,
+    backFilledKeys,
+  );
   applyExperienceHeaderOverrides(nextParsed.experience, experience);
 
   const byIndex = new Map<number, BulletObservation>();
@@ -663,5 +760,31 @@ export function applyOverrides(
     addedBullets,
   );
 
-  return { parsed: nextParsed, rawText: views.rawText, sections: nextSections };
+  return {
+    parsed: nextParsed,
+    rawText: views.rawText,
+    sections: nextSections,
+    fieldConfidence: nextConfidence,
+  };
+}
+
+/**
+ * Build the edited `fieldConfidence` from the base plus the user's contact
+ * edits: a non-empty override (or a back-filled linkedin/github slot) is
+ * user-affirmed → confidence 1; an explicit clear ("") → 0 (absent). Untouched
+ * fields keep their base confidence. See {@link ApplyOverridesResult.fieldConfidence}.
+ */
+function deriveEditedConfidence(
+  base: FieldConfidence,
+  contact: ContactOverrides,
+  backFilledKeys: readonly ("linkedin_url" | "github_url")[],
+): FieldConfidence {
+  const next: FieldConfidence = { ...base };
+  for (const key of CONTACT_KEYS) {
+    const ov = contact[key];
+    if (ov === undefined) continue;
+    next[key] = ov === "" ? 0 : 1;
+  }
+  for (const key of backFilledKeys) next[key] = 1;
+  return next;
 }

@@ -25,6 +25,7 @@ import type {
   ResumeEducation,
   HeuristicAchievement,
   ResumeExperience,
+  ProfileLink,
 } from "../score/types.ts";
 import {
   groupBulletsByExperience,
@@ -46,6 +47,52 @@ export interface AtsContact {
   location?: string;
   /** LinkedIn / GitHub / portfolio / website / other links, label-prefixed. */
   links: string[];
+  /**
+   * Classified contact/identity links (#335), the single source of truth for
+   * the JSON-Resume export's `basics.profiles` (#334). Read straight off
+   * `parsed.profiles`, which `applyOverrides` keeps in lockstep with the four
+   * legacy link keys and any user-added extras — so this already reflects edits.
+   * Distinct from `links` (the display-only, label-prefixed strings the PDF
+   * contact line draws); this carries the structured `{ url, network, kind }`.
+   * Optional so hand-built `AtsContact` literals (tests, non-edit callers) stay
+   * valid; `buildContact` always sets it, and the export treats absent as empty.
+   */
+  profiles?: ProfileLink[];
+}
+
+/**
+ * Structured source fields carried alongside an entry's render strings so the
+ * JSON-Resume export (`to-json-resume.ts`, #334) maps each entry losslessly
+ * WITHOUT re-parsing the glued `headerLine` / `subLine` display strings. The
+ * shape is a superset across section kinds; each kind fills only the fields it
+ * has (see the per-section builders below). Absent on synthesized/placeholder
+ * entries that carry no structured source. Display code ignores it entirely.
+ */
+export interface AtsEntryFields {
+  /** JSON Resume `work.name` (company) / `project.name` / `education.institution`. */
+  organization?: string;
+  /** JSON Resume `work.position` (role title). */
+  position?: string;
+  /** JSON Resume `education.studyType` (degree credential, e.g. "B.S."). */
+  studyType?: string;
+  /** JSON Resume `education.area` (field of study). */
+  area?: string;
+  /** Raw start-date string exactly as parsed (free-form; normalized at export). */
+  startDate?: string;
+  /** Raw end-date string. Omitted when `isCurrent` — JSON Resume treats an
+   *  absent `endDate` as ongoing, so an ongoing role emits no end date. */
+  endDate?: string;
+  /** True when the role/entry is ongoing (→ the export drops `endDate`). */
+  isCurrent?: boolean;
+  /** A URL on the entry header (project repo / demo, achievement link). */
+  url?: string;
+  /** JSON Resume `education.courses` — relevant-coursework items (#164). */
+  courses?: string[];
+  /** JSON Resume `skills` — the flat skill list, carried only on the single
+   *  skills entry (whose `headerLine` is the same list joined by " · "). */
+  skills?: string[];
+  /** JSON Resume `awards.title` — carried on achievement entries (#421). */
+  title?: string;
 }
 
 export interface AtsEntry {
@@ -64,11 +111,26 @@ export interface AtsEntry {
    * word-wrap normally, so this defaults to `false`/unset everywhere else.
    */
   atomicSegments?: boolean;
+  /** Structured source fields for the JSON-Resume export (#334). See
+   *  {@link AtsEntryFields}. Display/render code never reads this. */
+  fields?: AtsEntryFields;
 }
+
+/** Which JSON-Resume top-level array a section maps to (#334). Purely an export
+ *  hint — the renderer draws every section identically regardless of `kind`. */
+export type AtsSectionKind =
+  | "experience"
+  | "projects"
+  | "achievements"
+  | "education"
+  | "skills";
 
 export interface AtsSection {
   heading: string;
   entries: AtsEntry[];
+  /** JSON-Resume mapping hint (#334); absent on sections not modeled by the
+   *  export. Display code ignores it. */
+  kind?: AtsSectionKind;
 }
 
 export interface AtsResumeModel {
@@ -92,7 +154,7 @@ function resolveContactValue(
   return override; // "" clears, non-empty replaces
 }
 
-function buildContact(
+export function buildContact(
   result: CascadeResult,
   contactOverrides: ContactOverrides,
 ): AtsContact {
@@ -126,6 +188,10 @@ function buildContact(
     phone: phone || undefined,
     location: location || undefined,
     links,
+    // `parsed.profiles` is already override-applied (applyOverrides re-derives it
+    // from the edited legacy keys + user-added extras, #335), so read it straight
+    // — never re-derive from the four legacy keys here. Absent ⇒ no links.
+    profiles: result.parsed.profiles ?? [],
   };
 }
 
@@ -315,6 +381,16 @@ export function buildAtsResumeModel(
         bulletOverrides,
         exp.description,
       ),
+      // Structured JSON-Resume source (#334): name←company, position←title.
+      // `endDate` is dropped when the role is current (JSON Resume reads an
+      // absent endDate as ongoing).
+      fields: {
+        organization: exp.company || undefined,
+        position: title || undefined,
+        startDate: exp.start_date || undefined,
+        endDate: exp.is_current ? undefined : exp.end_date || undefined,
+        isCurrent: exp.is_current || undefined,
+      },
     };
   });
 
@@ -328,6 +404,15 @@ export function buildAtsResumeModel(
       bulletOverrides,
       proj.description,
     ),
+    // JSON-Resume `projects[]` source (#334): name←proj.name, plus optional
+    // header URL and dates.
+    fields: {
+      organization: proj.name || undefined,
+      startDate: proj.start_date || undefined,
+      endDate: proj.is_current ? undefined : proj.end_date || undefined,
+      isCurrent: proj.is_current || undefined,
+      url: proj.url || undefined,
+    },
   }));
 
   // ── Achievements ──
@@ -339,6 +424,12 @@ export function buildAtsResumeModel(
       bulletOverrides,
       ach.description,
     ),
+    // Structured source for the JSON Resume `awards[]` export (#421). Display
+    // code never reads `fields`; it renders `headerLine`/`bullets` above.
+    fields: {
+      ...(ach.title ? { title: ach.title } : {}),
+      ...(ach.year ? { startDate: ach.year } : {}),
+    },
   }));
 
   // ── Education ──
@@ -380,22 +471,51 @@ export function buildAtsResumeModel(
     // (entry LOSS, 2 → 1). Keep the date INLINE on the degree-less header instead,
     // so it reads as an `isInlineDatedProgram` lead, and drop the institution
     // alone to the sub-line.
+    // JSON-Resume `education[]` source (#334): institution←institution,
+    // studyType←degree, area←field. `endDate` carries the graduation date,
+    // falling back to the lead `year` when only a single date was parsed;
+    // `courses` carries the relevant-coursework list (#164). Shared across both
+    // header shapes below.
+    const eduFields: AtsEntryFields = {
+      organization: edu.institution || undefined,
+      studyType: edu.degree || undefined,
+      area: edu.field || undefined,
+      startDate: edu.start_date || undefined,
+      endDate: edu.end_date || edu.year || undefined,
+      courses:
+        edu.coursework && edu.coursework.length > 0 ? edu.coursework : undefined,
+    };
     if (!edu.degree && edu.field) {
       const headerLine = [edu.field, eduDates].filter(Boolean).join("  ");
-      return { headerLine, subLine: org || undefined, bullets };
+      return {
+        headerLine,
+        subLine: org || undefined,
+        bullets,
+        fields: eduFields,
+      };
     }
     const orgLine = [org, eduDates].filter(Boolean).join("  ");
     return {
       headerLine: degreeField || orgLine || "Education",
       subLine: degreeField ? orgLine || undefined : undefined,
       bullets,
+      fields: eduFields,
     };
   });
 
   // ── Skills (one entry, no header line — bullets carry the joined list) ──
   const skillsEntries: AtsEntry[] =
     skills.length > 0
-      ? [{ headerLine: skills.join(" · "), bullets: [], atomicSegments: true }]
+      ? [
+          {
+            headerLine: skills.join(" · "),
+            bullets: [],
+            atomicSegments: true,
+            // The flat skill list, carried structurally so the JSON export (#334)
+            // maps `skills[] ← { name }` without re-splitting the joined header.
+            fields: { skills: [...skills] },
+          },
+        ]
       : [];
 
   const achievementsAbove =
@@ -409,6 +529,7 @@ export function buildAtsResumeModel(
       ? {
           heading: headings?.get("achievements") ?? "Achievements",
           entries: achievementEntries,
+          kind: "achievements",
         }
       : null;
 
@@ -423,12 +544,13 @@ export function buildAtsResumeModel(
     experienceEntries,
     headings?.get("experience") ?? "Experience",
   )) {
-    sections.push(group);
+    sections.push({ ...group, kind: "experience" });
   }
   if (projectEntries.length > 0)
     sections.push({
       heading: headings?.get("projects") ?? "Projects",
       entries: projectEntries,
+      kind: "projects",
     });
   if (!achievementsAbove && achievementsSection)
     sections.push(achievementsSection);
@@ -436,11 +558,13 @@ export function buildAtsResumeModel(
     sections.push({
       heading: headings?.get("education") ?? "Education",
       entries: educationEntries,
+      kind: "education",
     });
   if (skillsEntries.length > 0)
     sections.push({
       heading: headings?.get("skills") ?? "Skills",
       entries: skillsEntries,
+      kind: "skills",
     });
 
   return {

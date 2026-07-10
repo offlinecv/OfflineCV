@@ -49,7 +49,12 @@ function render(
   result: CascadeResult,
   editProps?: Pick<
     Parameters<typeof ContactCard>[0],
-    "overrides" | "onFieldChange"
+    | "overrides"
+    | "onFieldChange"
+    | "addedProfiles"
+    | "onAddProfile"
+    | "onEditProfile"
+    | "onRemoveProfile"
   >,
 ): HTMLDivElement {
   container = document.createElement("div");
@@ -103,6 +108,48 @@ describe("ContactCard", () => {
     expect(dotted?.className).toContain("decoration-dotted");
   });
 
+  it("renders extra added-profile links with a slug + guided '+ Add a profile' affordance (issue 335)", () => {
+    const el = render(makeResult(), {
+      overrides: {},
+      onFieldChange: () => {},
+      addedProfiles: [
+        {
+          id: "profile:0",
+          url: "https://gitlab.com/jane",
+          network: "GitLab",
+          kind: "code",
+        },
+        {
+          id: "profile:1",
+          url: "https://example.dev/jane",
+          network: "example.dev",
+          kind: "other",
+        },
+      ],
+      onAddProfile: () => {},
+      onEditProfile: () => {},
+      onRemoveProfile: () => {},
+    });
+    const text = el.textContent ?? "";
+    // Known-host slug + unknown-host slug (hostname is the brand-neutral label).
+    expect(text).toContain("gitlab.com/jane");
+    expect(text).toContain("example.dev/jane");
+    // The "+ Add a profile" progressive-disclosure pill.
+    expect(el.querySelector('[aria-label="Add a profile"]')).not.toBeNull();
+    // Per-profile open-in-new-tab anchor + remove control.
+    expect(
+      el.querySelector('a[href="https://gitlab.com/jane"]'),
+    ).not.toBeNull();
+    expect(
+      el.querySelector('[aria-label="Remove GitLab link"]'),
+    ).not.toBeNull();
+  });
+
+  it("does not render the extra-links affordance on a display-only card (issue 335)", () => {
+    const el = render(makeResult({ email: "jane@example.com" }, { email: 0.9 }));
+    expect(el.querySelector('[aria-label="Add a profile"]')).toBeNull();
+  });
+
   it("renders a detected link as a clickable new-tab slug anchor", () => {
     const el = render(
       makeResult(
@@ -127,11 +174,14 @@ describe("ContactCard", () => {
       ),
       { overrides: {}, onFieldChange: () => {} },
     );
-    // Slug is the click-to-edit target (operates on the full URL)…
-    const edit = el.querySelector('[aria-label="Edit LinkedIn"]');
+    // Slug is the click-to-edit target (operates on the full URL). The required
+    // link row is the brand-neutral "Professional profile" row (#335).
+    const edit = el.querySelector('[aria-label="Edit Professional profile"]');
     expect(edit?.textContent).toBe("linkedin.com/in/jane-doe");
     // …and a separate ↗ anchor still opens the real URL in a new tab.
-    const open = el.querySelector('a[aria-label="Open LinkedIn in a new tab"]');
+    const open = el.querySelector(
+      'a[aria-label="Open Professional profile in a new tab"]',
+    );
     expect(open?.getAttribute("href")).toBe(
       "https://www.linkedin.com/in/jane-doe",
     );

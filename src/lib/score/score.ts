@@ -532,6 +532,11 @@ export interface AnonymousAtsScoreInput {
     phoneIsValid?: boolean;
     location?: string;
     linkedin_url?: string;
+    /** A code profile (GitHub) satisfies the brand-neutral "Professional
+     *  profile" completeness check just like LinkedIn does — mirrors the
+     *  ContactCard's github-satisfies rule so score + display agree (#421
+     *  Blocking #2). */
+    github_url?: string;
     summary?: string;
     skills?: string[];
     experience?: {
@@ -550,7 +555,7 @@ export interface AnonymousAtsScoreInput {
    *  credited — we don't want to reward a name we couldn't parse. */
   fieldConfidence: Partial<
     Record<
-      "full_name" | "email" | "phone" | "location" | "linkedin_url",
+      "full_name" | "email" | "phone" | "location" | "linkedin_url" | "github_url",
       number
     >
   >;
@@ -732,10 +737,19 @@ export function computeAnonymousAtsScore(
     label: string;
     credit?: number;
   }[] = [];
+  // A code profile (GitHub) satisfies the "Professional profile" requirement
+  // just like LinkedIn — same rule the ContactCard applies, so score + display
+  // agree that a GitHub-but-no-LinkedIn résumé has no professional-profile gap
+  // (#421 Blocking #2).
+  const githubSatisfies =
+    Boolean(input.parsed.github_url) &&
+    (input.fieldConfidence.github_url ?? 0) >= ANON_CONTACT_CONFIDENCE_FLOOR;
+
   for (const f of ANON_CONTACT_FIELDS) {
     const value = input.parsed[f.key];
     const conf = input.fieldConfidence[f.key] ?? 0;
-    const present = Boolean(value) && conf >= ANON_CONTACT_CONFIDENCE_FLOOR;
+    let present = Boolean(value) && conf >= ANON_CONTACT_CONFIDENCE_FLOOR;
+    if (f.key === "linkedin_url" && !present && githubSatisfies) present = true;
     if (f.key === "phone") {
       // Validity-aware phone credit (#70):
       //   present + valid (or validity unknown) → full credit (passed: true)

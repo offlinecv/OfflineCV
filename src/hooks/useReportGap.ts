@@ -23,6 +23,7 @@ import { useCallback, useState } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { ParseDisagreement } from "../lib/heuristics/disagreement.ts";
 import { buildReproArtifact } from "../lib/heuristics/repro-artifact.ts";
+import { triggerBlobDownload } from "../lib/download/blob-download.ts";
 import { trackGapReported } from "../lib/analytics.ts";
 
 export interface UseReportGap {
@@ -53,35 +54,20 @@ export function useReportGap(
 
   const report = useCallback(() => {
     setError(null);
-    let url: string | null = null;
     try {
       const artifact = buildReproArtifact(result, disagreements);
       const json = JSON.stringify(artifact, null, 2);
-      const blob = new Blob([json], { type: "application/json" });
-      url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = artifactFilename();
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      triggerBlobDownload(json, "application/json", artifactFilename());
       // Count-only, env-gated telemetry — never the artifact contents.
       trackGapReported({
         disagreementCount: disagreements.length,
         triggers: result.triggers,
       });
-      // Defer the revoke: a.click() only schedules the download; revoking
-      // synchronously can kill it on slower/remote contexts (see useDownloadPdf).
-      const settledUrl = url;
-      url = null;
-      setTimeout(() => URL.revokeObjectURL(settledUrl), 60_000);
       setReported(true);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Could not generate the report.",
       );
-    } finally {
-      if (url) URL.revokeObjectURL(url);
     }
   }, [result, disagreements]);
 

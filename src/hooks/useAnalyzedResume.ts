@@ -49,6 +49,7 @@ import {
 import type {
   CascadeResult,
   HeuristicParsedResume,
+  FieldConfidence,
 } from "../lib/heuristics/types.ts";
 import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
 
@@ -56,6 +57,11 @@ export interface EditedResume {
   parsed: HeuristicParsedResume;
   rawText: string;
   score: AnonymousAtsScore;
+  /** Edited per-field confidence (user-affirmed contact edits bumped to
+   *  present). Threaded onto `displayResult` so the ContactCard's
+   *  "GitHub satisfies Professional profile" gap reads the same edited
+   *  confidence the score did (#421 Blocking #3). */
+  fieldConfidence: FieldConfidence;
 }
 
 export interface AnalyzedResume {
@@ -107,6 +113,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     skillsOverride,
     addedEntries,
     addedBullets,
+    addedProfiles,
     setContactField,
     setExperienceField,
     setBulletField,
@@ -137,7 +144,7 @@ export function useAnalyzedResume(): AnalyzedResume {
   // Fold overrides back into a fresh { parsed, rawText } and re-grade live.
   const edited = useMemo<EditedResume | null>(() => {
     if (base === null) return null;
-    const { parsed, rawText, sections } = applyOverrides(
+    const { parsed, rawText, sections, fieldConfidence } = applyOverrides(
       base.parsed,
       base.rawText,
       base.sections,
@@ -150,18 +157,22 @@ export function useAnalyzedResume(): AnalyzedResume {
       addedEntries,
       addedBullets,
       removedBullets,
+      addedProfiles,
+      base.fieldConfidence,
     );
     // The anonymous scorer pools its bullet set from `sections` (#133), so the
     // edited section view — not the original — must feed re-grading or a live
-    // bullet edit would not move Specificity / Structure.
+    // bullet edit would not move Specificity / Structure. `fieldConfidence` is
+    // the edited view (contact edits + added linkedin/github bumped to present),
+    // so a user-added professional profile moves completeness (#421).
     const score = computeAnonymousAtsScore({
       parsed,
-      fieldConfidence: base.fieldConfidence,
+      fieldConfidence,
       triggers: base.triggers,
       rawText,
       sections,
     });
-    return { parsed, rawText, score };
+    return { parsed, rawText, score, fieldConfidence };
   }, [
     base,
     doneScoreBullets,
@@ -173,11 +184,16 @@ export function useAnalyzedResume(): AnalyzedResume {
     addedEntries,
     addedBullets,
     removedBullets,
+    addedProfiles,
   ]);
 
   const displayResult = useMemo<CascadeResult | null>(() => {
     if (base === null || edited === null) return null;
-    return { ...base, parsed: edited.parsed };
+    return {
+      ...base,
+      parsed: edited.parsed,
+      fieldConfidence: edited.fieldConfidence,
+    };
   }, [base, edited]);
 
   // Clear edits whenever a fresh parse lands (new file, reset) or a fresh

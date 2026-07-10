@@ -23,6 +23,8 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
+import { classifyProfile } from "../lib/contact/profile-registry.ts";
+import type { ProfileLink } from "../lib/score/types.ts";
 
 // ── Contact overrides ─────────────────────────────────────────────────────────
 
@@ -134,6 +136,29 @@ export function parsedEntryKey(section: AddableSection, index: number): string {
   return `${section}:${index}`;
 }
 
+// ── Added profile links (#335) ────────────────────────────────────────────────
+// The four legacy link slots (linkedin/github/portfolio/website) stay edited via
+// `ContactOverrides` above — they are the scoring/snapshot source of truth, and
+// `parsed.profiles[]` mirrors them. This channel holds ONLY the EXTRA
+// contact/identity links a user adds beyond those four slots (a second GitHub, a
+// GitLab, ORCID, Substack, an unknown host, …). applyOverrides re-derives
+// `parsed.profiles` from the (possibly-edited) legacy keys and appends these, so
+// the legacy keys never desync and the extras flow to #334's JSON export.
+
+/**
+ * One user-added contact/identity link. `id` is a stable per-session key
+ * (`"profile:<n>"`). `url`/`network`/`kind` are the classified {@link
+ * ProfileLink} — `network`/`kind` are re-derived via `classifyProfile` on every
+ * edit so the display label tracks the URL (an unknown host keeps its hostname
+ * as the label, brand-neutral by construction).
+ */
+export interface AddedProfile {
+  id: string;
+  url: string;
+  network: string;
+  kind: ProfileLink["kind"];
+}
+
 // ── Skills override ───────────────────────────────────────────────────────────
 
 /**
@@ -200,6 +225,17 @@ export interface EditableParse {
   /** Append a bullet line to an entry. No-op on blank text. An added entry's
    *  bullets are dropped wholesale when the entry is removed. */
   addBullet: (entryKey: string, text: string) => void;
+  /** Extra user-added contact links beyond the four legacy slots, in insertion
+   *  order (#335). The legacy slots keep editing through `contactOverrides`. */
+  addedProfiles: AddedProfile[];
+  /** Add a contact link from a raw URL. No-op on an empty/unparseable URL
+   *  (classifyProfile returns undefined). Returns the new entry's id, or
+   *  undefined when nothing was added. */
+  addProfile: (url: string) => string | undefined;
+  /** Re-classify and update one added profile's URL. An empty URL removes it. */
+  setProfileUrl: (id: string, url: string) => void;
+  /** Remove a previously-added profile by id. */
+  removeProfile: (id: string) => void;
   /** Add/remove edits against parsed.skills. */
   skillsOverride: SkillsOverride;
   /** Add a (canonicalized) skill. No-op for blank input or an exact dupe of an
@@ -234,6 +270,7 @@ export function useEditableParse(): EditableParse {
   );
   const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
   const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
+  const [addedProfiles, setAddedProfiles] = useState<AddedProfile[]>([]);
   // Monotonic source of stable added-entry ids. A ref (not state) because a new
   // id must not itself trigger a re-render, and the value need only be unique
   // within the session — never reset, even across resetAll.
@@ -379,6 +416,33 @@ export function useEditableParse(): EditableParse {
     }));
   }, []);
 
+  const addProfile = useCallback((url: string): string | undefined => {
+    const profile = classifyProfile(url);
+    if (!profile) return undefined;
+    const id = `profile:${idCounter.current++}`;
+    setAddedProfiles((prev) => [...prev, { id, ...profile }]);
+    return id;
+  }, []);
+
+  const setProfileUrl = useCallback((id: string, url: string) => {
+    // An emptied field removes the entry (mirrors the explicit remove control).
+    if (url.trim() === "") {
+      setAddedProfiles((prev) => prev.filter((p) => p.id !== id));
+      return;
+    }
+    // Re-derive network/kind from the edited URL; a now-unparseable URL keeps
+    // the prior classification rather than dropping the entry mid-edit.
+    const profile = classifyProfile(url);
+    if (!profile) return;
+    setAddedProfiles((prev) =>
+      prev.map((p) => (p.id === id ? { id, ...profile } : p)),
+    );
+  }, []);
+
+  const removeProfile = useCallback((id: string) => {
+    setAddedProfiles((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
   const resetAll = useCallback(() => {
     setContactOverrides({});
     setExperienceOverrides({});
@@ -388,6 +452,7 @@ export function useEditableParse(): EditableParse {
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
     setAddedEntries([]);
     setAddedBullets({});
+    setAddedProfiles([]);
   }, []);
 
   const hasEdits = useMemo(() => {
@@ -398,6 +463,7 @@ export function useEditableParse(): EditableParse {
       return true;
     if (addedEntries.length > 0) return true;
     if (Object.keys(addedBullets).length > 0) return true;
+    if (addedProfiles.length > 0) return true;
     if (
       Object.values(educationOverrides).some(
         (entry) => Object.keys(entry).length > 0,
@@ -416,6 +482,7 @@ export function useEditableParse(): EditableParse {
     skillsOverride,
     addedEntries,
     addedBullets,
+    addedProfiles,
   ]);
 
   return {
@@ -435,6 +502,10 @@ export function useEditableParse(): EditableParse {
     setEntryField,
     addedBullets,
     addBullet,
+    addedProfiles,
+    addProfile,
+    setProfileUrl,
+    removeProfile,
     skillsOverride,
     addSkill,
     removeSkill,
