@@ -401,6 +401,44 @@ describe("computeAnonymousAtsScore", () => {
     expect(result.completeness.missing).toContain("name");
   });
 
+  // #421 Blocking #2: a code profile (GitHub) satisfies the "Professional
+  // profile" completeness check, so a GitHub-but-no-LinkedIn résumé is NOT
+  // docked and does not list "LinkedIn" as missing — matching the ContactCard's
+  // github-satisfies display rule.
+  it("counts GitHub as satisfying the professional-profile requirement", () => {
+    const withGithub = computeAnonymousAtsScore(
+      makeAnonInput({
+        parsed: {
+          ...makeAnonInput().parsed,
+          linkedin_url: undefined,
+          github_url: "https://github.com/janedoe",
+        },
+        fieldConfidence: {
+          full_name: 0.9,
+          email: 0.95,
+          phone: 0.9,
+          location: 0.8,
+          github_url: 0.95,
+        },
+      }),
+    );
+    expect(withGithub.completeness.missing).not.toContain("LinkedIn");
+
+    // Sanity: with NEITHER link, the professional-profile gap is still flagged.
+    const withNeither = computeAnonymousAtsScore(
+      makeAnonInput({
+        parsed: { ...makeAnonInput().parsed, linkedin_url: undefined },
+        fieldConfidence: {
+          full_name: 0.9,
+          email: 0.95,
+          phone: 0.9,
+          location: 0.8,
+        },
+      }),
+    );
+    expect(withNeither.completeness.missing).toContain("LinkedIn");
+  });
+
   it("flags missing sections in completeness", () => {
     // With empty parsed.experience AND no experience section, the experience
     // completeness check fails (#133 — it now asks "is there a non-empty

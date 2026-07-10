@@ -83,6 +83,7 @@ import {
 import { Button, EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
+import { ReportDownloadControl } from "./DownloadReportDialog.tsx";
 
 // ── Attention strip ────────────────────────────────────────────────────────────
 
@@ -852,6 +853,10 @@ export function ReconstructedResume({
     addBullet,
     addSkill,
     removeSkill,
+    addedProfiles,
+    addProfile,
+    setProfileUrl,
+    removeProfile,
   } = edit;
 
   // Contact display fields — the same override-applied path the ContactCard
@@ -990,14 +995,17 @@ export function ReconstructedResume({
           <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
             Reconstructed resume
           </h2>
-          <Button
-            variant="primary"
-            onClick={handleDownloadClick}
-            disabled={isGenerating}
-            aria-label="Download the reconstructed resume as an ATS-friendly PDF"
-          >
-            {isGenerating ? "Generating…" : "Download PDF"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <ReportDownloadControl result={result} score={score} edit={edit} />
+            <Button
+              variant="primary"
+              onClick={handleDownloadClick}
+              disabled={isGenerating}
+              aria-label="Download the reconstructed resume as an ATS-friendly PDF"
+            >
+              {isGenerating ? "Generating…" : "Download PDF"}
+            </Button>
+          </div>
         </div>
         <p className="max-w-prose text-sm text-content-tertiary">
           What the parser recognized, in resume shape. Each bullet is checked
@@ -1023,6 +1031,10 @@ export function ReconstructedResume({
         result={result}
         overrides={contactOverrides}
         onFieldChange={(key, value) => setContactField(key, value)}
+        addedProfiles={addedProfiles}
+        onAddProfile={addProfile}
+        onEditProfile={setProfileUrl}
+        onRemoveProfile={removeProfile}
       />
       {achievementsAbove && achievementsSection}
       <ExperienceSection

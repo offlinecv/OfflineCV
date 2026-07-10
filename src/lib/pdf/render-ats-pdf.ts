@@ -31,6 +31,8 @@ import {
   EMPHASIS_OPEN,
   EMPHASIS_CLOSE,
 } from "./auto-bold-metrics.ts";
+import { toJsonResume } from "./to-json-resume.ts";
+import { wrapWordsToLines } from "./text-wrap.ts";
 import poppinsRegularUrl from "../../assets/fonts/Poppins-Regular.ttf?url";
 import poppinsBoldUrl from "../../assets/fonts/Poppins-Bold.ttf?url";
 
@@ -289,33 +291,6 @@ async function loadFonts(
   const regular = await doc.embedFont(parts.StandardFonts.Helvetica);
   const bold = await doc.embedFont(parts.StandardFonts.HelveticaBold);
   return { regular, bold, isEmbedded: false };
-}
-
-/**
- * Plain `\s+`-word wrap — never breaks a word apart, just packs words up to
- * `maxWidth`. A single word wider than `maxWidth` is emitted as its own line
- * (never split mid-word), so this always terminates.
- */
-function wrapWordsToLines(
-  words: string[],
-  font: PdfFont,
-  size: number,
-  maxWidth: number,
-): string[] {
-  if (words.length === 0) return [];
-  const lines: string[] = [];
-  let current = words[0];
-  for (let i = 1; i < words.length; i++) {
-    const candidate = `${current} ${words[i]}`;
-    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
-      current = candidate;
-    } else {
-      lines.push(current);
-      current = words[i];
-    }
-  }
-  lines.push(current);
-  return lines;
 }
 
 /**
@@ -711,6 +686,32 @@ export async function renderAtsResumePdf(
     }
     layout.advance(GAP_BETWEEN_ENTRIES);
   }
+
+  // ── Embedded machine-readable copy (#334, Europass pattern) ──
+  // Attach a JSON Resume (jsonresume.org) document as `resume.json` INSIDE the
+  // PDF. This lives in the PDF's EmbeddedFiles name tree — NOT the page content
+  // stream — so it never touches the text layer: `pdftotext`/pdfjs extraction is
+  // unaffected and the parse→export→re-parse round-trip stays byte-for-byte the
+  // same (verified by corpus-roundtrip.test.ts). Fully client-side; the bytes
+  // are built in-process from `model` (no fetch, no upload). `toJsonResume` is a
+  // pure adapter — no pdf-lib import — so it stays testable in isolation.
+  //
+  // creation/modification dates are deliberately omitted: pdf-lib writes no date
+  // when they're absent (FileEmbedder), keeping the output deterministic and
+  // leaking no wall-clock timestamp.
+  //
+  // Re-wrap the encoded bytes in a fresh `Uint8Array`: pdf-lib validates the
+  // attachment with `value instanceof Uint8Array`, and under jsdom the global
+  // `TextEncoder` returns a Uint8Array from a DIFFERENT realm that fails that
+  // check ("type NaN"). Copying into this module's Uint8Array normalizes the
+  // realm — a harmless one-time copy in the browser, and the fix in tests.
+  const resumeJsonBytes = new Uint8Array(
+    new TextEncoder().encode(JSON.stringify(toJsonResume(model), null, 2)),
+  );
+  await doc.attach(resumeJsonBytes, "resume.json", {
+    mimeType: "application/json",
+    description: "JSON Resume (jsonresume.org) — machine-readable copy",
+  });
 
   return doc.save();
 }

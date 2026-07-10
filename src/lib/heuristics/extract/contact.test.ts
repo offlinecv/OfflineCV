@@ -66,6 +66,47 @@ describe("extractContact — email domain is not a website", () => {
   });
 });
 
+describe("extractContact — additive profiles[] mirrors the legacy link keys (#335)", () => {
+  it("derives a profiles[] from the four legacy link values, in fixed order", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine(
+        "jane@uw.edu | linkedin.com/in/jane | github.com/jane | janedoe.dev",
+        10,
+      ),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    const result = extractContact(profile, lines);
+
+    // Legacy keys are unchanged (still the scoring/snapshot source of truth).
+    expect(result.linkedin_url).toBe("https://linkedin.com/in/jane");
+    expect(result.github_url).toBe("https://github.com/jane");
+
+    // profiles[] mirrors those legacy values, classified + order-preserving.
+    const byNetwork = result.profiles.map((p) => p.network);
+    expect(byNetwork).toContain("LinkedIn");
+    expect(byNetwork).toContain("GitHub");
+    const linkedin = result.profiles.find((p) => p.network === "LinkedIn");
+    const github = result.profiles.find((p) => p.network === "GitHub");
+    expect(linkedin?.url).toBe(result.linkedin_url);
+    expect(linkedin?.kind).toBe("social");
+    expect(github?.url).toBe(result.github_url);
+    expect(github?.kind).toBe("code");
+  });
+
+  it("emits an empty profiles[] when no link was detected", () => {
+    const lines: PdfLine[] = [
+      mkLine("Jane Doe", 0),
+      mkLine("Seattle, WA | jane@uw.edu | (312) 555-0123", 10),
+    ];
+    const profile: PdfSection = { name: "profile", lines };
+
+    const result = extractContact(profile, lines);
+    expect(result.profiles).toEqual([]);
+  });
+});
+
 describe("extractContact — mid-sentence domain is not promoted to website_url (#237)", () => {
   // Regression: a bare domain embedded in achievement/body prose (e.g. "sold
   // return2india.com to Satyam Infoway") was being picked up by the full-doc

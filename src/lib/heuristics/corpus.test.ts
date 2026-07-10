@@ -64,6 +64,11 @@ function fieldsPopulated(parsed: HeuristicParsedResume): string[] {
   for (const [k, v] of Object.entries(parsed)) {
     if (v === undefined || v === null || v === "") continue;
     if (Array.isArray(v) && v.length === 0) continue;
+    // `profiles` (#335) is an additive mirror of the four legacy `*_url` link
+    // keys — it carries no new field-presence signal, so it is excluded here to
+    // keep the Phase-1 migration snapshot-safe (no re-bake). Phase 2 flips the
+    // legacy keys to `profiles` and re-bakes the corpus deliberately.
+    if (k === "profiles") continue;
     keys.push(k);
   }
   return keys.sort();

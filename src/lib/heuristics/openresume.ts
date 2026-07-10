@@ -422,6 +422,9 @@ function buildHeuristicResult(
     ...(contact.github_url ? { github_url: contact.github_url } : {}),
     ...(contact.portfolio_url ? { portfolio_url: contact.portfolio_url } : {}),
     ...(contact.website_url ? { website_url: contact.website_url } : {}),
+    // Additive classified links (#335): mirrors the four legacy `*_url` keys
+    // above. Present only when at least one link was detected.
+    ...(contact.profiles.length > 0 ? { profiles: contact.profiles } : {}),
     ...(summary.value ? { summary: summary.value } : {}),
     skills: skills.value,
     skills_explicit: [],

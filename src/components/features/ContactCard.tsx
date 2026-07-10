@@ -31,7 +31,10 @@ import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { applyContactOverrides, buildContactFields } from "../../lib/contact.ts";
 import { Card, EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
-import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
+import type {
+  ContactOverrides,
+  AddedProfile,
+} from "../../hooks/useEditableParse.ts";
 import { ContactDetails } from "./ContactDetails.tsx";
 
 interface ContactCardProps {
@@ -41,12 +44,23 @@ interface ContactCardProps {
   overrides?: ContactOverrides;
   /** Called when the user commits an edit on a contact field. */
   onFieldChange?: (key: keyof ContactOverrides, newValue: string) => void;
+  /** Extra user-added contact links beyond the four legacy slots (#335). Wired
+   *  together with the add/edit/remove handlers to enable the variable-length
+   *  links affordance in the editable card. */
+  addedProfiles?: readonly AddedProfile[];
+  onAddProfile?: (url: string) => void;
+  onEditProfile?: (id: string, url: string) => void;
+  onRemoveProfile?: (id: string) => void;
 }
 
 export function ContactCard({
   result,
   overrides,
   onFieldChange,
+  addedProfiles,
+  onAddProfile,
+  onEditProfile,
+  onRemoveProfile,
 }: ContactCardProps) {
   const editable = overrides !== undefined && onFieldChange !== undefined;
 
@@ -91,6 +105,10 @@ export function ContactCard({
         links={links}
         editable={editable}
         commit={commit}
+        extraProfiles={addedProfiles}
+        onAddProfile={onAddProfile}
+        onEditProfile={onEditProfile}
+        onRemoveProfile={onRemoveProfile}
       />
     </Card>
   );

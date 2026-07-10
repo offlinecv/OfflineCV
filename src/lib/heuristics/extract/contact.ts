@@ -3,6 +3,13 @@
 
 import type { PdfLine, PdfSection } from "../sections.ts";
 import type { PdfLinkAnnotation } from "../types.ts";
+import type { ProfileLink } from "../../score/types.ts";
+import { profilesFromUrls } from "../../contact/profile-registry.ts";
+import {
+  LINKEDIN_NONPROFILE_RE,
+  normalizeUrl,
+  urlSlug,
+} from "../../contact/url-utils.ts";
 import {
   EMAIL_RE,
   LINKEDIN_RE,
@@ -28,6 +35,14 @@ export interface ContactExtractionResult {
   portfolio_url?: string;
   website_url?: string;
   location?: string;
+  /**
+   * Classified contact links (#335), additive. Built from the four legacy
+   * `*_url` values above in their fixed precedence order
+   * `[linkedin, github, portfolio, website]`, so this mirrors — never
+   * overrides — the legacy keys, keeping scoring and every corpus snapshot
+   * byte-for-byte unchanged this phase. Empty when no link was detected.
+   */
+  profiles: ProfileLink[];
   /** Per-field confidence for the cascade's field-confidence map. */
   confidence: {
     email: number;
@@ -60,14 +75,7 @@ export interface ContactExtractionResult {
  *  their confidences, before ownership is computed. `extractContact` combines a
  *  profile scan and a full-document scan into the public {@link
  *  ContactExtractionResult} (which adds `consumedLines`). */
-type ContactScanResult = Omit<ContactExtractionResult, "consumedLines">;
-
-/** LinkedIn paths that are NOT a personal profile — feed, company pages, job
- *  posts, articles, etc. Everything else under `linkedin.com/<handle>` (the
- *  `/in/<handle>` canonical form AND bare-vanity hosts) is treated as a
- *  profile, mirroring GitHub's "any `github.com/<user>`" rule. */
-const LINKEDIN_NONPROFILE_RE =
-  /linkedin\.com\/(company|jobs|feed|school|learning|pulse|posts|groups|showcase|games|events|help|legal|search|signup|login|home)\b/i;
+type ContactScanResult = Omit<ContactExtractionResult, "consumedLines" | "profiles">;
 
 /** True when `u` is a LinkedIn personal-profile URL. Accepts the canonical
  *  `linkedin.com/in/<handle>` and `linkedin.com/pub/...` as well as a vanity
@@ -75,13 +83,6 @@ const LINKEDIN_NONPROFILE_RE =
  *  hyperlinked "LinkedIn" anchor resolve even when the target drops `/in/`. */
 function isLinkedinProfileUrl(u: string): boolean {
   return /linkedin\.com\/[A-Za-z0-9]/i.test(u) && !LINKEDIN_NONPROFILE_RE.test(u);
-}
-
-function normalizeUrl(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  const trimmed = raw.replace(/[,;.)]$/, "").trim();
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `https://${trimmed}`;
 }
 
 // ── Promoted-identity-link ownership (#134) ─────────────────────────────────
@@ -95,20 +96,6 @@ function normalizeUrl(raw: string | undefined): string | undefined {
 // an optional introducing label — is reported on `consumedLines`, and the
 // caller drops those lines from the candidate pools before the body extractors
 // run. Ownership is recorded here, at the single point the link is promoted.
-
-/** Host+path of a URL, lowercased, with scheme / `www.` / trailing punctuation
- *  removed — the comparable identity of a link across "https://github.com/x",
- *  "github.com/x" and "github.com/x/". */
-function urlSlug(u: string | undefined): string | undefined {
-  if (!u) return undefined;
-  const s = u
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/^www\./i, "")
-    .replace(/[/.,;:)\]]+$/, "")
-    .toLowerCase();
-  return s.length > 0 ? s : undefined;
-}
 
 /** Leading introducing label that a bare identity link sits behind ("LinkedIn:",
  *  "GitHub —", "Links", "Find me online") — stripped before testing whether a
@@ -427,6 +414,18 @@ export function extractContact(
   ].filter((s): s is string => s !== undefined);
   const consumedLines = findConsumedLines(allLines, promotedSlugs);
 
+  // Additive `profiles[]` (#335): classify the four legacy link values in their
+  // fixed precedence order. The legacy keys below are UNCHANGED — `profiles`
+  // mirrors them, so scoring and every corpus snapshot stay byte-for-byte
+  // identical this phase. `normalizeUrl` is applied inside `classifyProfile`,
+  // matching the legacy keys' own `normalizeUrl(...)` wrapping.
+  const profiles = profilesFromUrls([
+    linkedin.value,
+    github.value,
+    portfolio.value,
+    website.value,
+  ]);
+
   return {
     email: primary.email ?? fallback.email,
     phone: primary.phone ?? fallback.phone,
@@ -435,6 +434,7 @@ export function extractContact(
     github_url: normalizeUrl(github.value),
     portfolio_url: normalizeUrl(portfolio.value),
     website_url: normalizeUrl(website.value),
+    profiles,
     // No fallback for location — see comment above.
     location: primary.location,
     confidence: {
