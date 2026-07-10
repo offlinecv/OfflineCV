@@ -41,7 +41,11 @@ import {
   type ExperienceFieldOverrides,
   type EducationFieldOverrides,
 } from "./useEditableParse.ts";
-import { applyOverrides } from "../lib/edit/apply-overrides.ts";
+import {
+  applyOverrides,
+  applyProfileOverrides,
+  type LegacyLinkFields,
+} from "../lib/edit/apply-overrides.ts";
 import {
   computeAnonymousAtsScore,
   type AnonymousAtsScore,
@@ -113,7 +117,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     skillsOverride,
     addedEntries,
     addedBullets,
-    addedProfiles,
+    profileOverrides,
     setContactField,
     setExperienceField,
     setBulletField,
@@ -124,6 +128,8 @@ export function useAnalyzedResume(): AnalyzedResume {
     addBullet,
     addSkill,
     removeSkill,
+    setLegacyLink,
+    addProfile,
   } = edit;
 
   // The base CascadeResult overrides fold onto: the original parse in "done",
@@ -138,13 +144,22 @@ export function useAnalyzedResume(): AnalyzedResume {
     return null;
   }, [state.phase, state.phase === "done" ? state.result : null, pendingDraft]);
 
-  const doneScoreBullets =
-    state.phase === "done" ? state.score.bullets ?? [] : [];
+  // Memoized (#428): an unmemoized `[]` fallback here would mint a fresh array
+  // reference on every render while authoring/idle, defeating the `score`
+  // memo split below on any unrelated re-render, not just a real edit.
+  const doneScoreBullets = useMemo(
+    () => (state.phase === "done" ? state.score.bullets ?? [] : []),
+    [state.phase === "done" ? state.score.bullets : null],
+  );
 
-  // Fold overrides back into a fresh { parsed, rawText } and re-grade live.
-  const edited = useMemo<EditedResume | null>(() => {
+  // Fold overrides back into a fresh { parsed, rawText, sections,
+  // fieldConfidence } — the display-facing view every consumer (ContactCard,
+  // displayResult, the eventual PDF/JSON export) reads. This always reruns on
+  // ANY override change, including a non-scoring profile add, so `profiles[]`
+  // and the other edited fields stay live.
+  const editedCore = useMemo(() => {
     if (base === null) return null;
-    const { parsed, rawText, sections, fieldConfidence } = applyOverrides(
+    return applyOverrides(
       base.parsed,
       base.rawText,
       base.sections,
@@ -157,22 +172,9 @@ export function useAnalyzedResume(): AnalyzedResume {
       addedEntries,
       addedBullets,
       removedBullets,
-      addedProfiles,
+      profileOverrides,
       base.fieldConfidence,
     );
-    // The anonymous scorer pools its bullet set from `sections` (#133), so the
-    // edited section view — not the original — must feed re-grading or a live
-    // bullet edit would not move Specificity / Structure. `fieldConfidence` is
-    // the edited view (contact edits + added linkedin/github bumped to present),
-    // so a user-added professional profile moves completeness (#421).
-    const score = computeAnonymousAtsScore({
-      parsed,
-      fieldConfidence,
-      triggers: base.triggers,
-      rawText,
-      sections,
-    });
-    return { parsed, rawText, score, fieldConfidence };
   }, [
     base,
     doneScoreBullets,
@@ -184,8 +186,90 @@ export function useAnalyzedResume(): AnalyzedResume {
     addedEntries,
     addedBullets,
     removedBullets,
-    addedProfiles,
+    profileOverrides,
   ]);
+
+  // The slice of `profileOverrides`' effect the scorer actually reads (#428):
+  // only the linkedin_url/github_url legacy slots + their confidence move
+  // completeness (see `contact-profiles.ts` — a code/social profile beyond
+  // those two, or an extra that doesn't back-fill an empty slot, never
+  // reaches the scorer). Probed against a cheap 4-field object — never the
+  // full parsed resume — via the SAME `applyProfileOverrides` step
+  // `editedCore` runs, so "did this move the score" can never drift from what
+  // the real override does.
+  const scoreAffectingProfileSlots = useMemo(() => {
+    if (base === null) return null;
+    const probe: LegacyLinkFields = {
+      linkedin_url: base.parsed.linkedin_url,
+      github_url: base.parsed.github_url,
+      portfolio_url: base.parsed.portfolio_url,
+      website_url: base.parsed.website_url,
+    };
+    const confEdits = applyProfileOverrides(probe, profileOverrides);
+    return {
+      linkedin_url: probe.linkedin_url,
+      github_url: probe.github_url,
+      linkedinConfidence: confEdits.find((e) => e.key === "linkedin_url")
+        ?.confidence,
+      githubConfidence: confEdits.find((e) => e.key === "github_url")
+        ?.confidence,
+    };
+  }, [base, profileOverrides]);
+
+  // Re-grade live. Deps deliberately mirror `editedCore`'s EXCEPT
+  // `profileOverrides` is replaced by `scoreAffectingProfileSlots` — so
+  // adding a non-scoring profile (Behance, GitLab, a second GitHub that
+  // doesn't back-fill an empty slot, …) recomputes `editedCore` for display
+  // but leaves this memo — and the identical-numbers regrade it would
+  // otherwise trigger — untouched (#428).
+  const score = useMemo(() => {
+    if (base === null || editedCore === null) return null;
+    // The anonymous scorer pools its bullet set from `sections` (#133), so the
+    // edited section view — not the original — must feed re-grading or a live
+    // bullet edit would not move Specificity / Structure. `fieldConfidence` is
+    // the edited view (contact edits + added linkedin/github bumped to present),
+    // so a user-added professional profile moves completeness (#421).
+    return computeAnonymousAtsScore({
+      parsed: editedCore.parsed,
+      fieldConfidence: editedCore.fieldConfidence,
+      triggers: base.triggers,
+      rawText: editedCore.rawText,
+      sections: editedCore.sections,
+    });
+    // `editedCore` is deliberately NOT a dep: this memo reads its latest
+    // value whenever it actually runs, but must not re-run on an
+    // `editedCore` change driven solely by a non-scoring profile edit —
+    // `scoreAffectingProfileSlots` stands in for `profileOverrides` for
+    // exactly that reason.
+  }, [
+    base,
+    doneScoreBullets,
+    contactOverrides,
+    experienceOverrides,
+    bulletOverrides,
+    educationOverrides,
+    skillsOverride,
+    addedEntries,
+    addedBullets,
+    removedBullets,
+    // Primitive fields, not the wrapper object — `scoreAffectingProfileSlots`
+    // is a fresh object literal every time `profileOverrides` changes, so
+    // depending on ITS reference would defeat the whole point (#428).
+    scoreAffectingProfileSlots?.linkedin_url,
+    scoreAffectingProfileSlots?.github_url,
+    scoreAffectingProfileSlots?.linkedinConfidence,
+    scoreAffectingProfileSlots?.githubConfidence,
+  ]);
+
+  const edited = useMemo<EditedResume | null>(() => {
+    if (editedCore === null || score === null) return null;
+    return {
+      parsed: editedCore.parsed,
+      rawText: editedCore.rawText,
+      score,
+      fieldConfidence: editedCore.fieldConfidence,
+    };
+  }, [editedCore, score]);
 
   const displayResult = useMemo<CascadeResult | null>(() => {
     if (base === null || edited === null) return null;
@@ -234,6 +318,7 @@ export function useAnalyzedResume(): AnalyzedResume {
       skillsOverride,
       addedEntries,
       addedBullets,
+      profileOverrides,
     };
     const timer = setTimeout(() => writeBlankDraft(snapshot), 500);
     return () => clearTimeout(timer);
@@ -249,6 +334,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     skillsOverride,
     addedEntries,
     addedBullets,
+    profileOverrides,
   ]);
 
   // Replay a saved draft snapshot through `useEditableParse`'s own public
@@ -308,6 +394,14 @@ export function useAnalyzedResume(): AnalyzedResume {
         const mappedKey = idMap.get(entryKey) ?? entryKey;
         bullets.forEach((text) => addBullet(mappedKey, text));
       }
+
+      // Contact-link overrides (#427): corrections (carrying a legacyKey) replay
+      // through `setLegacyLink`; extras replay through `addProfile`. Fresh ids
+      // are minted on replay — the old per-session ids are never reused.
+      for (const ov of snapshot.profileOverrides ?? []) {
+        if (ov.legacyKey !== undefined) setLegacyLink(ov.legacyKey, ov.url);
+        else addProfile(ov.url);
+      }
     },
     [
       setContactField,
@@ -320,6 +414,8 @@ export function useAnalyzedResume(): AnalyzedResume {
       addEntry,
       setEntryField,
       addBullet,
+      setLegacyLink,
+      addProfile,
     ],
   );
 

@@ -76,7 +76,7 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
       handoffEdit.addedEntries,
       handoffEdit.addedBullets,
       handoffEdit.removedBullets,
-      handoffEdit.addedProfiles,
+      handoffEdit.profileOverrides,
     );
     const score = computeAnonymousAtsScore({
       parsed,
@@ -96,7 +96,7 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
     handoffEdit.addedEntries,
     handoffEdit.addedBullets,
     handoffEdit.removedBullets,
-    handoffEdit.addedProfiles,
+    handoffEdit.profileOverrides,
   ]);
 
   // Handoff wins when present. Dropping it (reset) reveals the local DropZone.

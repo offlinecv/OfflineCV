@@ -34,7 +34,10 @@ import type {
   SkillsOverride,
   AddedEntry,
   AddedBullets,
+  ProfileOverride,
 } from "./useEditableParse.ts";
+import { classifyProfile } from "../lib/contact/profile-registry.ts";
+import { LEGACY_LINK_KEYS } from "../lib/contact/contact-profiles.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +59,17 @@ export interface BlankDraftSnapshot {
   skillsOverride: SkillsOverride;
   addedEntries: AddedEntry[];
   addedBullets: AddedBullets;
+  /** Consolidated contact-link overrides (#427). Optional in the persisted
+   *  shape for back-compat: a draft saved before #427 has no `profileOverrides`
+   *  key and instead carries link edits under `contactOverrides.{...}_url` —
+   *  `migrateBlankDraft` upconverts those on read. */
+  profileOverrides: ProfileOverride[];
 }
+
+/** A pre-#427 persisted draft: link edits lived on `contactOverrides` under the
+ *  four legacy `*_url` keys, and there was no `profileOverrides` list. */
+type LegacyContactOverrides = ContactOverrides &
+  Partial<Record<(typeof LEGACY_LINK_KEYS)[number], string>>;
 
 export type ParseState =
   | { phase: "idle" }
@@ -137,13 +150,59 @@ function isBlankDraftSnapshot(value: unknown): value is BlankDraftSnapshot {
   );
 }
 
+let migrationIdCounter = 0;
+
+/**
+ * Upconvert a persisted draft to the current shape (#427). A draft saved before
+ * #427 carried contact-link edits on `contactOverrides` under the four legacy
+ * `*_url` keys and had no `profileOverrides` list; this moves each such key into
+ * a `legacyKey`-tagged `ProfileOverride` (a correction), strips the key from
+ * `contactOverrides`, and leaves the non-link contact fields untouched. A draft
+ * already carrying `profileOverrides` passes through (its link edits are already
+ * consolidated). Idempotent: a current-shape draft has no legacy `*_url` keys to
+ * move. `addedProfiles` was never persisted pre-#427, so there is nothing to
+ * migrate from that channel.
+ */
+export function migrateBlankDraft(
+  snapshot: BlankDraftSnapshot,
+): BlankDraftSnapshot {
+  const contact = { ...snapshot.contactOverrides } as LegacyContactOverrides;
+  const migrated: ProfileOverride[] = [];
+  for (const key of LEGACY_LINK_KEYS) {
+    const value = contact[key];
+    if (value === undefined) continue;
+    delete contact[key];
+    const classified = value.trim() === "" ? undefined : classifyProfile(value);
+    migrated.push(
+      classified
+        ? { id: `profile:migrated:${migrationIdCounter++}`, ...classified, legacyKey: key }
+        : {
+            id: `profile:migrated:${migrationIdCounter++}`,
+            url: value,
+            network: key,
+            kind: "other",
+            legacyKey: key,
+          },
+    );
+  }
+  const existing = Array.isArray(snapshot.profileOverrides)
+    ? snapshot.profileOverrides
+    : [];
+  return {
+    ...snapshot,
+    contactOverrides: contact,
+    // Migrated legacy corrections lead, then any already-consolidated entries.
+    profileOverrides: [...migrated, ...existing],
+  };
+}
+
 /** Read the saved blank-authoring draft, or null if absent/unparseable. */
 function readBlankDraft(): BlankDraftSnapshot | null {
   try {
     const raw = localStorage.getItem(BLANK_DRAFT_STORAGE_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isBlankDraftSnapshot(parsed) ? parsed : null;
+    return isBlankDraftSnapshot(parsed) ? migrateBlankDraft(parsed) : null;
   } catch {
     return null;
   }

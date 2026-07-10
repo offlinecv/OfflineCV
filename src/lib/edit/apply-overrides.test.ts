@@ -825,15 +825,29 @@ describe("applyOverrides — profiles[] (#335)", () => {
     expect(out.profiles).toBeUndefined();
   });
 
-  it("re-mirrors profiles from a legacy link edit (never desyncs)", () => {
+  it("re-mirrors profiles from a legacy link correction (never desyncs)", () => {
     const { parsed: out } = applyOverrides(
       baseParsed(),
       "raw",
       makeSections(),
-      { linkedin_url: "https://linkedin.com/in/corrected" },
+      {},
       {},
       {},
       [],
+      {},
+      { removed: [], added: [] },
+      [],
+      {},
+      new Set(),
+      [
+        {
+          id: "profile:0",
+          url: "https://linkedin.com/in/corrected",
+          network: "LinkedIn",
+          kind: "social",
+          legacyKey: "linkedin_url",
+        },
+      ],
     );
     expect(out.linkedin_url).toBe("https://linkedin.com/in/corrected");
     expect(out.profiles).toEqual([
@@ -850,10 +864,25 @@ describe("applyOverrides — profiles[] (#335)", () => {
       parsedWithLinks(),
       "raw",
       makeSections(),
-      { linkedin_url: "" }, // clear LinkedIn; GitHub stays
+      {},
       {},
       {},
       [],
+      {},
+      { removed: [], added: [] },
+      [],
+      {},
+      new Set(),
+      [
+        // Clear LinkedIn (empty url correction); GitHub stays.
+        {
+          id: "profile:0",
+          url: "",
+          network: "linkedin_url",
+          kind: "other",
+          legacyKey: "linkedin_url",
+        },
+      ],
     );
     expect(out.linkedin_url).toBeUndefined();
     expect(out.profiles).toEqual([
@@ -940,10 +969,24 @@ describe("applyOverrides — profiles[] (#335)", () => {
       parsed,
       "raw",
       makeSections(),
-      { linkedin_url: "https://linkedin.com/in/moved" },
+      {},
       {},
       {},
       [],
+      {},
+      { removed: [], added: [] },
+      [],
+      {},
+      new Set(),
+      [
+        {
+          id: "profile:0",
+          url: "https://linkedin.com/in/moved",
+          network: "LinkedIn",
+          kind: "social",
+          legacyKey: "linkedin_url",
+        },
+      ],
     );
     expect(parsed).toEqual(snapshot);
   });
@@ -1012,7 +1055,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
       baseParsed(),
       "raw",
       makeSections(),
-      { github_url: "https://github.com/jane", email: "" },
+      { email: "" }, // clear email (non-link contact field)
       {},
       {},
       [],
@@ -1021,7 +1064,16 @@ describe("applyOverrides — profiles[] (#335)", () => {
       [],
       {},
       new Set(),
-      [],
+      [
+        // GitHub correction (a link edit) — affirmed → confidence 1.
+        {
+          id: "profile:0",
+          url: "https://github.com/jane",
+          network: "GitHub",
+          kind: "code",
+          legacyKey: "github_url",
+        },
+      ],
       { full_name: 0.9, email: 0.9 },
     );
     expect(fieldConfidence.github_url).toBe(1); // affirmed

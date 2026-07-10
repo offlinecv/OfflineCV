@@ -238,3 +238,45 @@ describe("useAnalyzedResume — draft persistence across reload (#313)", () => {
     expect(api.edit.contactOverrides).toEqual({});
   });
 });
+
+describe("useAnalyzedResume — score memo scoped to scoring inputs (#428)", () => {
+  function seedRevealedResume(): void {
+    act(() => api.startBlank());
+    act(() => {
+      api.edit.setContactField("full_name", "Jane Doe");
+      api.edit.setContactField("email", "jane@example.com");
+      const entryId = api.edit.addEntry("experience");
+      api.edit.setEntryField(entryId, "title", "Software Engineer");
+      api.edit.setEntryField(entryId, "subtitle", "Acme Corp");
+      api.edit.addBullet(entryId, "Shipped a feature that grew revenue 20%");
+    });
+  }
+
+  it("adding a non-scoring profile (Behance) leaves the score object untouched", () => {
+    seedRevealedResume();
+    const scoreBefore = api.edited?.score;
+    expect(scoreBefore).toBeDefined();
+
+    act(() => {
+      api.edit.addProfile("https://behance.net/janedoe");
+    });
+
+    // The extra shows up in edit state (ContactExtraLinks reads this
+    // directly), but it never reaches the scorer — no legacy slot moved.
+    expect(api.edit.profileOverrides).toHaveLength(1);
+    expect(api.edited?.score).toBe(scoreBefore);
+  });
+
+  it("a scoring correction (GitHub) DOES move and re-run the score", () => {
+    seedRevealedResume();
+    const scoreBefore = api.edited?.score;
+    expect(scoreBefore).toBeDefined();
+
+    act(() => {
+      api.edit.setLegacyLink("github_url", "https://github.com/janedoe");
+    });
+
+    expect(api.edited?.score).not.toBe(scoreBefore);
+    expect(api.edited?.parsed.github_url).toBe("https://github.com/janedoe");
+  });
+});

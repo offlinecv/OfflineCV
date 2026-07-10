@@ -13,8 +13,14 @@ import type {
   ScoreTier,
   ResumeExperience,
   ResumeData,
+  ProfileLink,
 } from "./types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
+import {
+  deriveContactProfiles,
+  isProfileConfident,
+  primaryProfileFor,
+} from "../contact/contact-profiles.ts";
 
 // Re-export types for convenience
 export type { AtsScore, ScoreTier };
@@ -531,12 +537,18 @@ export interface AnonymousAtsScoreInput {
      *  or undefined with a present phone, backward-compatible full credit. */
     phoneIsValid?: boolean;
     location?: string;
+    /** Legacy contact-link slots. Since #427 the scorer reads these through the
+     *  consolidated `deriveContactProfiles` list (which stamps each with its
+     *  `fieldConfidence`), not directly — a code profile (GitHub) still
+     *  satisfies the brand-neutral "Professional profile" check just like
+     *  LinkedIn (#421 Blocking #2), now expressed over the list. */
     linkedin_url?: string;
-    /** A code profile (GitHub) satisfies the brand-neutral "Professional
-     *  profile" completeness check just like LinkedIn does — mirrors the
-     *  ContactCard's github-satisfies rule so score + display agree (#421
-     *  Blocking #2). */
     github_url?: string;
+    portfolio_url?: string;
+    website_url?: string;
+    /** Consolidated contact-link list (#427). Extra links beyond the four legacy
+     *  slots ride here; the derivation folds the slots + these into one list. */
+    profiles?: ProfileLink[];
     summary?: string;
     skills?: string[];
     experience?: {
@@ -737,19 +749,38 @@ export function computeAnonymousAtsScore(
     label: string;
     credit?: number;
   }[] = [];
-  // A code profile (GitHub) satisfies the "Professional profile" requirement
-  // just like LinkedIn — same rule the ContactCard applies, so score + display
-  // agree that a GitHub-but-no-LinkedIn résumé has no professional-profile gap
-  // (#421 Blocking #2).
-  const githubSatisfies =
-    Boolean(input.parsed.github_url) &&
-    (input.fieldConfidence.github_url ?? 0) >= ANON_CONTACT_CONFIDENCE_FLOOR;
+  // Contact-link presence is read from the ONE consolidated profile list (#427)
+  // — `deriveContactProfiles` stamps each legacy slot with its `fieldConfidence`,
+  // so gating the list entry at the confidence floor is byte-identical to the
+  // pre-#427 `Boolean(slot) && fieldConfidence[slot] >= floor` read. A code
+  // profile (GitHub) satisfies the brand-neutral "Professional profile"
+  // requirement just like LinkedIn — same rule the ContactCard applies, so
+  // score + display agree that a GitHub-but-no-LinkedIn résumé has no
+  // professional-profile gap (#421 Blocking #2).
+  const contactProfiles = deriveContactProfiles(
+    input.parsed,
+    input.fieldConfidence,
+  );
+  const linkedinPrimary = primaryProfileFor(contactProfiles, "linkedin_url");
+  const githubPrimary = primaryProfileFor(contactProfiles, "github_url");
+  const githubSatisfies = githubPrimary
+    ? isProfileConfident(githubPrimary)
+    : false;
 
   for (const f of ANON_CONTACT_FIELDS) {
-    const value = input.parsed[f.key];
-    const conf = input.fieldConfidence[f.key] ?? 0;
-    let present = Boolean(value) && conf >= ANON_CONTACT_CONFIDENCE_FLOOR;
-    if (f.key === "linkedin_url" && !present && githubSatisfies) present = true;
+    let present: boolean;
+    if (f.key === "linkedin_url") {
+      // The brand-neutral "Professional profile" row: the confident primary
+      // LinkedIn entry, OR a confident code profile (GitHub) satisfying it.
+      const linkedinPresent = linkedinPrimary
+        ? isProfileConfident(linkedinPrimary)
+        : false;
+      present = linkedinPresent || githubSatisfies;
+    } else {
+      const value = input.parsed[f.key];
+      const conf = input.fieldConfidence[f.key] ?? 0;
+      present = Boolean(value) && conf >= ANON_CONTACT_CONFIDENCE_FLOOR;
+    }
     if (f.key === "phone") {
       // Validity-aware phone credit (#70):
       //   present + valid (or validity unknown) → full credit (passed: true)

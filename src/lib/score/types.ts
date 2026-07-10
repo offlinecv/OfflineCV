@@ -64,6 +64,15 @@ export interface SkillInferred {
 // additively — the four legacy keys stay the source of truth for scoring and
 // corpus snapshots; #334's `toJsonResume()` maps this to `basics.profiles`.
 
+/** The four legacy `*_url` contact slots a profile can be the primary entry
+ *  for (#427). A profile carrying one of these is the source of that legacy
+ *  getter's value; a secondary/extra link carries `undefined`. */
+export type LegacyLinkKey =
+  | "linkedin_url"
+  | "github_url"
+  | "portfolio_url"
+  | "website_url";
+
 /** A single classified contact/identity link. */
 export interface ProfileLink {
   /** Normalized canonical href (via the shared `normalizeUrl`). */
@@ -72,6 +81,24 @@ export interface ProfileLink {
   network: string;
   /** Coarse category used for grouping/UI. Unknown hosts fall to "other". */
   kind: "code" | "social" | "portfolio" | "academic" | "writing" | "other";
+  /**
+   * Per-entry confidence in [0, 1], mirrored from the source field's
+   * `fieldConfidence` at build time (#427). This is what lets the consolidated
+   * profile list be the SINGLE contact-link model without moving scores: the
+   * scorer + contact display gate a link at the 0.5 confidence floor by reading
+   * THIS, exactly as they gated the legacy `*_url` slot's `fieldConfidence`
+   * before consolidation. Absent ⇒ treat as trusted (1) — back-compat for
+   * profiles built before this field (e.g. persisted JSON-Resume exports).
+   */
+  confidence?: number;
+  /**
+   * Which legacy `*_url` slot this profile is the primary entry for (#427), or
+   * absent for a secondary/extra link (a second GitHub, a GitLab, ORCID, …).
+   * The primary entry per legacy key derives that key's back-compat getter and
+   * is what the scorer's contact-completeness check reads, so the consolidated
+   * list reproduces the pre-consolidation slot semantics byte-for-byte.
+   */
+  legacyKey?: LegacyLinkKey;
 }
 
 // ── Resume data shapes ─────────────────────────────────────────────────────

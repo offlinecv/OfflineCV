@@ -51,7 +51,8 @@ function render(
     Parameters<typeof ContactCard>[0],
     | "overrides"
     | "onFieldChange"
-    | "addedProfiles"
+    | "onLegacyLinkChange"
+    | "extraProfiles"
     | "onAddProfile"
     | "onEditProfile"
     | "onRemoveProfile"
@@ -112,7 +113,8 @@ describe("ContactCard", () => {
     const el = render(makeResult(), {
       overrides: {},
       onFieldChange: () => {},
-      addedProfiles: [
+      onLegacyLinkChange: () => {},
+      extraProfiles: [
         {
           id: "profile:0",
           url: "https://gitlab.com/jane",
@@ -172,7 +174,7 @@ describe("ContactCard", () => {
         { linkedin_url: "https://www.linkedin.com/in/jane-doe" },
         { linkedin_url: 0.9 },
       ),
-      { overrides: {}, onFieldChange: () => {} },
+      { overrides: {}, onFieldChange: () => {}, onLegacyLinkChange: () => {} },
     );
     // Slug is the click-to-edit target (operates on the full URL). The required
     // link row is the brand-neutral "Professional profile" row (#335).
@@ -194,7 +196,7 @@ describe("ContactCard", () => {
         { github_url: "https://github.com/janedoe" },
         { github_url: 0.9 },
       ),
-      { overrides: {}, onFieldChange: () => {} },
+      { overrides: {}, onFieldChange: () => {}, onLegacyLinkChange: () => {} },
     );
     expect(el.querySelector('[aria-label="Edit GitHub"]')?.textContent).toBe(
       "github.com/janedoe",

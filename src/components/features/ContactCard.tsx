@@ -33,8 +33,9 @@ import { Card, EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import type {
   ContactOverrides,
-  AddedProfile,
+  ProfileOverride,
 } from "../../hooks/useEditableParse.ts";
+import type { LegacyLinkKey } from "../../lib/score/types.ts";
 import { ContactDetails } from "./ContactDetails.tsx";
 
 interface ContactCardProps {
@@ -42,12 +43,16 @@ interface ContactCardProps {
   /** In-memory overrides for the editable contact fields. When provided
    *  together with `onFieldChange`, the card becomes inline-editable (#147). */
   overrides?: ContactOverrides;
-  /** Called when the user commits an edit on a contact field. */
+  /** Called when the user commits an edit on a non-link contact field
+   *  (name/email/phone/location). */
   onFieldChange?: (key: keyof ContactOverrides, newValue: string) => void;
-  /** Extra user-added contact links beyond the four legacy slots (#335). Wired
+  /** Called when the user edits/clears one of the four detected legacy link
+   *  slots (#427) — routed to the consolidated `profileOverrides` channel. */
+  onLegacyLinkChange?: (key: LegacyLinkKey, url: string | undefined) => void;
+  /** Extra user-added contact links beyond the four legacy slots (#427). Wired
    *  together with the add/edit/remove handlers to enable the variable-length
    *  links affordance in the editable card. */
-  addedProfiles?: readonly AddedProfile[];
+  extraProfiles?: readonly ProfileOverride[];
   onAddProfile?: (url: string) => void;
   onEditProfile?: (id: string, url: string) => void;
   onRemoveProfile?: (id: string) => void;
@@ -57,7 +62,8 @@ export function ContactCard({
   result,
   overrides,
   onFieldChange,
-  addedProfiles,
+  onLegacyLinkChange,
+  extraProfiles,
   onAddProfile,
   onEditProfile,
   onRemoveProfile,
@@ -105,7 +111,8 @@ export function ContactCard({
         links={links}
         editable={editable}
         commit={commit}
-        extraProfiles={addedProfiles}
+        onLegacyLinkChange={onLegacyLinkChange}
+        extraProfiles={extraProfiles}
         onAddProfile={onAddProfile}
         onEditProfile={onEditProfile}
         onRemoveProfile={onRemoveProfile}

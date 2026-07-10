@@ -35,6 +35,11 @@ import type {
 } from "./ats-resume-model.ts";
 import type { ProfileLink } from "../score/types.ts";
 import { APP_VERSION } from "../version.ts";
+import {
+  countryCodeForToken,
+  countryDisplayName,
+  isUsStateToken,
+} from "./country-registry.ts";
 
 // ── JSON Resume shape (subset we populate) ─────────────────────────────────────
 // Only the fields this exporter fills are typed; JSON Resume has more (all
@@ -188,21 +193,67 @@ export function normalizeJsonResumeDate(
 // ── basics helpers ─────────────────────────────────────────────────────────────
 
 /**
- * Structure a free-form location string ("San Francisco, CA") into JSON Resume's
- * `{ city, region }` by splitting the LAST comma — so `city + ", " + region`
- * rejoins to the exact source string (lossless). No comma ⇒ the whole string is
- * the city. We deliberately do NOT invent postalCode / countryCode.
+ * Structure a free-form location string into JSON Resume's `{ city, region?,
+ * countryCode? }` (#429). Split on commas, then:
+ *   1. If the LAST token is a recognized country name/alias (and NOT a US state)
+ *      → it becomes `countryCode` (alpha-2) and is peeled off.
+ *   2. Of what remains, the last token (if any) is `region`, the rest is `city`.
+ *
+ * Examples:
+ *   "San Francisco, CA"       → { city: "San Francisco", region: "CA" }
+ *   "San Francisco, CA, USA"  → { city: "San Francisco", region: "CA", countryCode: "US" }
+ *   "London, UK"              → { city: "London", countryCode: "GB" }
+ *   "Paris, France"           → { city: "Paris", countryCode: "FR" }
+ *   "Toronto, ON, Canada"     → { city: "Toronto", region: "ON", countryCode: "CA" }
+ *   "Remote"                  → { city: "Remote" }
+ *
+ * Precedence for the country vs. region ambiguity: a trailing token that is a US
+ * state (2-letter code or full name) is ALWAYS `region`, never a country — so
+ * "…, CA" stays California and never resolves to Canada (see country-registry).
+ * When no country is recognized the shape is byte-identical to the old
+ * split-on-last-comma behavior, so `region`-only strings round-trip unchanged.
+ * We still never invent postalCode. Reverse: {@link formatJsonResumeLocation}.
  */
 export function toJsonResumeLocation(
   raw: string | undefined,
 ): JsonResumeLocation | undefined {
   const s = raw?.trim();
   if (!s) return undefined;
-  const lastComma = s.lastIndexOf(",");
-  if (lastComma < 0) return { city: s };
-  const city = s.slice(0, lastComma).trim();
-  const region = s.slice(lastComma + 1).trim();
-  return region ? { city, region } : { city };
+  const tokens = s
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  if (tokens.length === 0) return undefined;
+  if (tokens.length === 1) return { city: tokens[0] };
+
+  const last = tokens[tokens.length - 1];
+  const countryCode = isUsStateToken(last) ? undefined : countryCodeForToken(last);
+  const rest = countryCode ? tokens.slice(0, -1) : tokens;
+
+  // `rest` holds city (+ optional region as its final token).
+  if (rest.length === 1) {
+    return { city: rest[0], ...(countryCode ? { countryCode } : {}) };
+  }
+  const region = rest[rest.length - 1];
+  const city = rest.slice(0, -1).join(", ");
+  return { city, region, ...(countryCode ? { countryCode } : {}) };
+}
+
+/**
+ * Reverse of {@link toJsonResumeLocation}: reconstruct a display string from a
+ * structured location. Appends the country's canonical display name for its
+ * `countryCode` (falling back to the raw code if unrecognized). Because the
+ * registry's canonical names are the résumé-common forms ("USA", "UK"), the
+ * canonical spellings round-trip byte-identically. `undefined` in ⇒ `undefined`.
+ */
+export function formatJsonResumeLocation(
+  loc: JsonResumeLocation | undefined,
+): string | undefined {
+  if (!loc) return undefined;
+  const parts = [loc.city, loc.region];
+  if (loc.countryCode) parts.push(countryDisplayName(loc.countryCode) ?? loc.countryCode);
+  const joined = parts.filter((p): p is string => Boolean(p)).join(", ");
+  return joined || undefined;
 }
 
 /** Last non-empty path segment of a URL, case-preserved — the JSON Resume

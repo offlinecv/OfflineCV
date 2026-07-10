@@ -37,6 +37,7 @@ import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
 import { normalizeBulletText } from "../score/group-bullets.ts";
 import { classifyProfile, profilesFromUrls } from "../contact/profile-registry.ts";
+import type { LegacyLinkKey, ProfileLink } from "../score/types.ts";
 import type {
   ContactOverrides,
   ExperienceFieldOverrides,
@@ -44,7 +45,7 @@ import type {
   SkillsOverride,
   AddedEntry,
   AddedBullets,
-  AddedProfile,
+  ProfileOverride,
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 
@@ -75,18 +76,14 @@ interface BulletViews {
 
 // ── Contact ────────────────────────────────────────────────────────────────
 
-/** The editable contact keys, all optional string-valued on the parsed object.
- *  Link fields (github/portfolio/website) join the original five so a corrected
- *  URL re-grades Completeness + JD coverage like any other field. */
+/** The editable non-link contact keys, all optional string-valued on the parsed
+ *  object. Link fields moved to the consolidated `profileOverrides` channel
+ *  (#427), applied by `applyProfileOverrides`. */
 const CONTACT_KEYS: readonly (keyof ContactOverrides)[] = [
   "full_name",
   "email",
   "phone",
-  "linkedin_url",
   "location",
-  "github_url",
-  "portfolio_url",
-  "website_url",
 ];
 
 /** Leading bullet/numbered markers — mirrors group-bullets.ts LEADING_MARKER_RE. */
@@ -127,53 +124,93 @@ const NETWORK_TO_LEGACY_KEY: Readonly<Record<string, "linkedin_url" | "github_ur
   GitHub: "github_url",
 };
 
+/** The confidence a user-affirmed contact link earns; a cleared slot earns 0. */
+export type LegacyConfEdit = { key: LegacyLinkKey; confidence: 0 | 1 };
+
 /**
- * Re-derive `nextParsed.profiles` from the (already-override-applied) four
- * legacy link keys in their fixed precedence order, then append the user-added
- * extra profiles. This keeps the mirror in lockstep with the legacy keys — the
- * scoring/snapshot source of truth — so a single-slot edit (e.g. correcting
- * `linkedin_url`) never leaves `profiles[]` stale, and it is where #334's JSON
- * export reads a user's added links from.
- *
- * It ALSO back-fills the legacy `linkedin_url` / `github_url` slot from a
- * matching user-added profile when that slot is empty (#421 Blocking #1): the
- * anonymous scorer's completeness and the ContactCard's "Professional profile"
- * gap both read the legacy slot, NOT `profiles[]`, so a LinkedIn URL added via
- * the guided picker (which lands in `addedProfiles`) would otherwise never move
- * the score or clear the gap. Returns the legacy keys it back-filled so the
- * caller can mark them user-affirmed in the edited `fieldConfidence`.
- *
- * `profilesFromUrls` classifies + de-dupes by normalized slug (a legacy link
- * re-added as an extra collapses to one entry).
+ * The legacy-link slice of a parsed resume that {@link applyProfileOverrides}
+ * actually reads/writes — the four legacy `*_url` slots plus the `profiles[]`
+ * mirror. Narrowed rather than the full `HeuristicParsedResume` so a caller can
+ * probe "would this `profileOverrides` change move a legacy slot" against a
+ * cheap 4-field object instead of paying for a full parsed-resume clone (#428
+ * — the score memo split in `useAnalyzedResume`).
  */
-function applyProfileOverrides(
-  nextParsed: HeuristicParsedResume,
-  addedProfiles: readonly AddedProfile[],
-): ("linkedin_url" | "github_url")[] {
-  const backFilled: ("linkedin_url" | "github_url")[] = [];
-  for (const added of addedProfiles) {
-    const classified = classifyProfile(added.url);
+export type LegacyLinkFields = Pick<
+  HeuristicParsedResume,
+  "linkedin_url" | "github_url" | "portfolio_url" | "website_url"
+> & { profiles?: ProfileLink[] };
+
+/**
+ * Fold the ONE consolidated `profileOverrides` list (#427) back into
+ * `nextParsed`: the four legacy `*_url` slots (the back-compat readers — scorer,
+ * PDF render, JSON export) AND `nextParsed.profiles[]`.
+ *
+ * Two override kinds, per the #427 ruling:
+ *   - CORRECTION (`legacyKey` set) — replaces that detected slot outright; an
+ *     empty url clears it. This is a user-affirmed edit, so it forces the slot's
+ *     confidence to 1 (or 0 on clear). Mirrors the old per-slot
+ *     `contactOverrides.{...}_url` behavior.
+ *   - EXTRA (`legacyKey` absent) — an added link with no legacy home. It
+ *     back-fills an EMPTY linkedin/github slot (only when empty), matching the
+ *     old `addedProfiles` behavior, and otherwise rides only in `profiles[]`.
+ *
+ * `profiles[]` is then re-derived from the (now-edited) four legacy slots in
+ * precedence order plus the extras, classified + de-duped by slug — the mirror
+ * every downstream reader consumes. Returns the per-slot confidence edits so the
+ * caller can thread them into the edited `fieldConfidence`.
+ *
+ * Exported (#428) so a caller can run just this cheap step against a 4-field
+ * {@link LegacyLinkFields} probe to answer "did this move a legacy slot"
+ * without the full `applyOverrides` clone + regrade — the ONE place this logic
+ * lives, so that answer never drifts from what a real override actually does.
+ */
+export function applyProfileOverrides(
+  nextParsed: LegacyLinkFields,
+  profileOverrides: readonly ProfileOverride[],
+): LegacyConfEdit[] {
+  const confEdits: LegacyConfEdit[] = [];
+
+  // 1. Corrections — replace/clear the targeted legacy slot, confidence → 1/0.
+  for (const ov of profileOverrides) {
+    if (ov.legacyKey === undefined) continue;
+    if (ov.url.trim() === "") {
+      delete nextParsed[ov.legacyKey];
+      confEdits.push({ key: ov.legacyKey, confidence: 0 });
+    } else {
+      // Store the classified (normalized) URL when parseable, else the raw edit
+      // — mirrors the old per-slot override storing the user's value.
+      nextParsed[ov.legacyKey] = classifyProfile(ov.url)?.url ?? ov.url;
+      confEdits.push({ key: ov.legacyKey, confidence: 1 });
+    }
+  }
+
+  // 2. Extras — back-fill an EMPTY linkedin/github slot from a matching added
+  //    link (only when empty), so the add moves the score + clears the gap.
+  const extras = profileOverrides.filter((p) => p.legacyKey === undefined);
+  for (const extra of extras) {
+    const classified = classifyProfile(extra.url);
     if (!classified) continue;
     const legacyKey = NETWORK_TO_LEGACY_KEY[classified.network];
     if (legacyKey && !nextParsed[legacyKey]) {
       nextParsed[legacyKey] = classified.url;
-      backFilled.push(legacyKey);
+      confEdits.push({ key: legacyKey, confidence: 1 });
     }
   }
 
+  // 3. Re-derive the profiles mirror from the edited legacy slots + extras.
   const profiles = profilesFromUrls([
     nextParsed.linkedin_url,
     nextParsed.github_url,
     nextParsed.portfolio_url,
     nextParsed.website_url,
-    ...addedProfiles.map((p) => p.url),
+    ...extras.map((p) => p.url),
   ]);
   // Absent when nothing is left, so an empty-override call stays a true no-op
   // (an `applyOverrides` invariant a test pins) and the parsed shape matches
   // extraction's "present only when ≥1 link" convention.
   if (profiles.length > 0) nextParsed.profiles = profiles;
   else delete nextParsed.profiles;
-  return backFilled;
+  return confEdits;
 }
 
 // ── Experience / education header fields ────────────────────────────────────
@@ -689,10 +726,11 @@ function applyAddedBulletsToExistingEntries(
  *                  Default `{}`.
  * @param removedBullets accepted "this bullet was removed" indices (#211).
  *                  Default empty set.
- * @param addedProfiles user-added contact links beyond the four legacy slots
- *                  (#335). `parsed.profiles` is re-derived from the edited
- *                  legacy keys and these appended, so the mirror never desyncs
- *                  from the scoring-source legacy keys. Default `[]`.
+ * @param profileOverrides the ONE consolidated contact-link edit list (#427):
+ *                  corrections to the four legacy slots (entries with a
+ *                  `legacyKey`) AND user-added extras (untagged). Folded into the
+ *                  legacy slots + `parsed.profiles`, and the per-slot confidence
+ *                  edits are threaded into `fieldConfidence`. Default `[]`.
  * @param fieldConfidence the base per-field confidence. Returned bumped to 1
  *                  for every user-affirmed contact edit (and dropped to 0 for a
  *                  clear), so a typed-in / picker-added contact link scores +
@@ -712,7 +750,7 @@ export function applyOverrides(
   addedEntries: readonly AddedEntry[] = [],
   addedBullets: AddedBullets = {},
   removedBullets: ReadonlySet<number> = new Set(),
-  addedProfiles: readonly AddedProfile[] = [],
+  profileOverrides: readonly ProfileOverride[] = [],
   fieldConfidence: FieldConfidence = {},
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
@@ -726,15 +764,14 @@ export function applyOverrides(
   };
 
   applyContactOverrides(nextParsed, contact);
-  // Re-mirror profiles from the (now-edited) legacy keys + user-added extras, so
-  // the mirror never desyncs from the scoring-source legacy keys (#335), and
-  // back-fill the legacy linkedin/github slot from a matching added profile so
-  // the add moves the score + clears the gap (#421 Blocking #1).
-  const backFilledKeys = applyProfileOverrides(nextParsed, addedProfiles);
+  // Fold the consolidated contact-link list (#427) into the legacy slots +
+  // profiles mirror, returning the per-slot confidence edits (corrections → 1,
+  // clears → 0, extra back-fills → 1) so the score + ContactCard read the edit.
+  const linkConfEdits = applyProfileOverrides(nextParsed, profileOverrides);
   const nextConfidence = deriveEditedConfidence(
     fieldConfidence,
     contact,
-    backFilledKeys,
+    linkConfEdits,
   );
   applyExperienceHeaderOverrides(nextParsed.experience, experience);
 
@@ -770,14 +807,16 @@ export function applyOverrides(
 
 /**
  * Build the edited `fieldConfidence` from the base plus the user's contact
- * edits: a non-empty override (or a back-filled linkedin/github slot) is
- * user-affirmed → confidence 1; an explicit clear ("") → 0 (absent). Untouched
- * fields keep their base confidence. See {@link ApplyOverridesResult.fieldConfidence}.
+ * edits: a non-empty non-link contact override is user-affirmed → confidence 1;
+ * an explicit clear ("") → 0 (absent). Contact-link confidence edits arrive
+ * pre-resolved from `applyProfileOverrides` (correction → 1, clear → 0, extra
+ * back-fill → 1). Untouched fields keep their base confidence. See {@link
+ * ApplyOverridesResult.fieldConfidence}.
  */
 function deriveEditedConfidence(
   base: FieldConfidence,
   contact: ContactOverrides,
-  backFilledKeys: readonly ("linkedin_url" | "github_url")[],
+  linkConfEdits: readonly LegacyConfEdit[],
 ): FieldConfidence {
   const next: FieldConfidence = { ...base };
   for (const key of CONTACT_KEYS) {
@@ -785,6 +824,8 @@ function deriveEditedConfidence(
     if (ov === undefined) continue;
     next[key] = ov === "" ? 0 : 1;
   }
-  for (const key of backFilledKeys) next[key] = 1;
+  // Apply link edits in order so a later extra back-fill can't undo a correction
+  // clear on the same slot (corrections are processed first in the list).
+  for (const { key, confidence } of linkConfEdits) next[key] = confidence;
   return next;
 }

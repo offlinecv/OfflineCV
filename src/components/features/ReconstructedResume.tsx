@@ -853,11 +853,18 @@ export function ReconstructedResume({
     addBullet,
     addSkill,
     removeSkill,
-    addedProfiles,
+    profileOverrides,
+    setLegacyLink,
     addProfile,
     setProfileUrl,
     removeProfile,
   } = edit;
+
+  // The extra (non-legacy) contact links — the consolidated list minus the four
+  // legacy-slot corrections, which render inline on the ContactCard links line.
+  const extraProfiles = profileOverrides.filter(
+    (p) => p.legacyKey === undefined,
+  );
 
   // Contact display fields — the same override-applied path the ContactCard
   // renders from, so every consumer (AttentionStrip's per-row gaps, the
@@ -1031,7 +1038,8 @@ export function ReconstructedResume({
         result={result}
         overrides={contactOverrides}
         onFieldChange={(key, value) => setContactField(key, value)}
-        addedProfiles={addedProfiles}
+        onLegacyLinkChange={setLegacyLink}
+        extraProfiles={extraProfiles}
         onAddProfile={addProfile}
         onEditProfile={setProfileUrl}
         onRemoveProfile={removeProfile}

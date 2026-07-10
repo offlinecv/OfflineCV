@@ -172,10 +172,15 @@ export function buildContact(
   const phone = valueFor("phone");
   const location = valueFor("location");
 
-  // Links: LinkedIn comes from the editable/contact path; the remaining link
-  // fields are read straight off the parsed resume (they're not edited inline).
+  // Links: since #427 every link edit (including LinkedIn corrections) folds
+  // into the parsed slots via `profileOverrides`, so `result.parsed` already
+  // carries the edited values. LinkedIn keeps its confidence gating via the
+  // display field (unchanged behavior); the remaining link fields are read
+  // straight off the parsed resume.
   const links: string[] = [];
-  const linkedin = valueFor("linkedin_url");
+  const linkedinField = byKey.get("linkedin_url");
+  const linkedin =
+    linkedinField && !linkedinField.gated ? linkedinField.value.trim() : "";
   if (linkedin) links.push(linkedin);
   const parsed = result.parsed;
   if (parsed.github_url) links.push(parsed.github_url);

@@ -3,13 +3,13 @@
 
 /**
  * ContactExtraLinks — the variable-length "extra links" affordance on the
- * reconstructed-resume contact card (#335).
+ * reconstructed-resume contact card (#335, #427).
  *
  * The four legacy link slots (LinkedIn / GitHub / portfolio / website) keep
- * rendering + editing through `ContactDetails`' `links` row — they are the
- * scoring/snapshot source of truth. THIS surface owns only the EXTRA links a
- * user adds beyond those four (a second GitHub, a GitLab, ORCID, an unknown
- * host, …), held in `useEditableParse`'s `addedProfiles` channel:
+ * rendering + editing through `ContactDetails`' `links` row. THIS surface owns
+ * only the EXTRA links a user adds beyond those four (a second GitHub, a GitLab,
+ * ORCID, an unknown host, …) — the untagged (`legacyKey`-less) entries of the
+ * consolidated `profileOverrides` channel (#427):
  *
  *   in/slug · gh/slug          ← ContactDetails links line (legacy slots)
  *   gitlab.com/x ✕ · orcid… ✕  ← THIS row (user-added extras) + "+ Add link"
@@ -24,12 +24,12 @@
 
 import { EditableField } from "@design-system";
 import { formatLinkDisplay } from "../../lib/contact.ts";
-import type { AddedProfile } from "../../hooks/useEditableParse.ts";
+import type { ProfileOverride } from "../../hooks/useEditableParse.ts";
 import { RemoveButton } from "./ReconstructedAdd.tsx";
 import { ProfileLinkAdd } from "./ProfileLinkAdd.tsx";
 
 interface ContactExtraLinksProps {
-  profiles: readonly AddedProfile[];
+  profiles: readonly ProfileOverride[];
   onAdd: (url: string) => void;
   onEdit: (id: string, url: string) => void;
   onRemove: (id: string) => void;

@@ -28,24 +28,21 @@ import {
 } from "../../lib/edit/field-validators.ts";
 import type {
   ContactOverrides,
-  AddedProfile,
+  ProfileOverride,
 } from "../../hooks/useEditableParse.ts";
+import type { LegacyLinkKey } from "../../lib/score/types.ts";
 import { ContactExtraLinks } from "./ContactExtraLinks.tsx";
 import { ProfileLinkAdd } from "./ProfileLinkAdd.tsx";
 
-/** The inline-editable contact fields, mapped 1:1 to their `ContactOverrides`
- *  key. Includes the link fields — a detected GitHub/portfolio/website URL is
- *  editable too (only optional links that the parser actually found render, so
- *  there is nothing to edit when absent). */
+/** The inline-editable non-link contact fields, mapped 1:1 to their
+ *  `ContactOverrides` key. Link fields (linkedin/github/portfolio/website) are
+ *  edited through the consolidated `profileOverrides` channel (#427), not this
+ *  map — see `onLegacyLinkChange`. */
 const EDITABLE_KEYS: Record<string, keyof ContactOverrides> = {
   full_name: "full_name",
   email: "email",
   phone: "phone",
-  linkedin_url: "linkedin_url",
   location: "location",
-  github_url: "github_url",
-  portfolio_url: "portfolio_url",
-  website_url: "website_url",
 };
 
 type Commit = (key: keyof ContactOverrides, v: string) => void;
@@ -79,10 +76,13 @@ interface ContactDetailsProps {
   links: ContactDisplayField[];
   editable: boolean;
   commit: Commit;
-  /** Extra user-added links beyond the four legacy slots (#335). When
+  /** Edit/clear one of the four detected legacy link slots (#427) — routed to
+   *  the consolidated `profileOverrides` channel. */
+  onLegacyLinkChange?: (key: LegacyLinkKey, url: string | undefined) => void;
+  /** Extra user-added links beyond the four legacy slots (#427). When
    *  `onAddProfile` is provided (editable card), the variable-length add/edit/
    *  delete affordance renders below the legacy links line. */
-  extraProfiles?: readonly AddedProfile[];
+  extraProfiles?: readonly ProfileOverride[];
   onAddProfile?: (url: string) => void;
   onEditProfile?: (id: string, url: string) => void;
   onRemoveProfile?: (id: string) => void;
@@ -93,6 +93,7 @@ export function ContactDetails({
   links,
   editable,
   commit,
+  onLegacyLinkChange,
   extraProfiles,
   onAddProfile,
   onEditProfile,
@@ -121,7 +122,7 @@ export function ContactDetails({
           {links.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">·</span>}
-              {renderLink(field, editable, commit)}
+              {renderLink(field, editable, onLegacyLinkChange)}
             </span>
           ))}
         </p>
@@ -175,14 +176,12 @@ function MissingToken({ label }: { label: string }) {
  *  keeps its dotted treatment — both still editable. */
 function EditableValue({
   field,
-  ovKey,
-  commit,
+  onCommitValue,
   displayValue,
   location,
 }: {
   field: ContactDisplayField;
-  ovKey: keyof ContactOverrides;
-  commit: Commit;
+  onCommitValue: (v: string) => void;
   displayValue?: string;
   location?: string;
 }) {
@@ -197,7 +196,7 @@ function EditableValue({
       label={field.label}
       textSize="sm"
       validate={validatorFor(field.key, location)}
-      onCommit={(v) => commit(ovKey, v)}
+      onCommit={onCommitValue}
     />
   );
 
@@ -234,7 +233,11 @@ function renderContactValue(
   const ovKey = EDITABLE_KEYS[field.key];
   if (editable && ovKey !== undefined) {
     return (
-      <EditableValue field={field} ovKey={ovKey} commit={commit} location={location} />
+      <EditableValue
+        field={field}
+        onCommitValue={(v) => commit(ovKey, v)}
+        location={location}
+      />
     );
   }
   return field.gated && field.reason === "absent" ? (
@@ -252,17 +255,20 @@ function renderContactValue(
 function renderLink(
   field: ContactDisplayField,
   editable: boolean,
-  commit: Commit,
+  onLegacyLinkChange: ((key: LegacyLinkKey, url: string | undefined) => void) | undefined,
 ) {
-  const ovKey = EDITABLE_KEYS[field.key];
-  if (editable && ovKey !== undefined) {
+  // Every link row's key is one of the four legacy slots (the display rows are
+  // built from those keys), so it is a `LegacyLinkKey` routed to the
+  // consolidated `profileOverrides` channel (#427).
+  const legacyKey = field.key as LegacyLinkKey;
+  if (editable && onLegacyLinkChange !== undefined) {
+    const commitLink = (v: string) => onLegacyLinkChange(legacyKey, v);
     if (!field.gated) {
       return (
         <span className="inline-flex items-center gap-1">
           <EditableValue
             field={field}
-            ovKey={ovKey}
-            commit={commit}
+            onCommitValue={commitLink}
             displayValue={formatLinkDisplay(field.value)}
           />
           <a
@@ -285,12 +291,12 @@ function renderLink(
       return (
         <ProfileLinkAdd
           label={`Add a ${field.label.toLowerCase()}`}
-          onAdd={(url) => commit(ovKey, url)}
+          onAdd={commitLink}
         />
       );
     }
     // Low-confidence: keep the editable value so the user can confirm/correct it.
-    return <EditableValue field={field} ovKey={ovKey} commit={commit} />;
+    return <EditableValue field={field} onCommitValue={commitLink} />;
   }
   if (field.gated) {
     return field.reason === "low_confidence" ? (

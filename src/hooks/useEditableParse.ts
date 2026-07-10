@@ -24,22 +24,19 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
 import { classifyProfile } from "../lib/contact/profile-registry.ts";
-import type { ProfileLink } from "../lib/score/types.ts";
+import type { LegacyLinkKey, ProfileLink } from "../lib/score/types.ts";
 
 // ── Contact overrides ─────────────────────────────────────────────────────────
+// Contact LINKS moved out of this map into the consolidated `profileOverrides`
+// list (#427) — a LinkedIn/GitHub/portfolio/website correction is now one entry
+// in that single channel, alongside user-added extra links, so the two no longer
+// drift. This map keeps only the non-link contact fields.
 
 export interface ContactOverrides {
   full_name?: string;
   email?: string;
   phone?: string;
-  linkedin_url?: string;
   location?: string;
-  /** Link fields are editable too: a detected GitHub/portfolio/personal-site URL
-   *  can be corrected in place. They only surface for editing when the parser
-   *  detected them (optional rows render only when present). */
-  github_url?: string;
-  portfolio_url?: string;
-  website_url?: string;
 }
 
 // ── Experience overrides ──────────────────────────────────────────────────────
@@ -136,27 +133,40 @@ export function parsedEntryKey(section: AddableSection, index: number): string {
   return `${section}:${index}`;
 }
 
-// ── Added profile links (#335) ────────────────────────────────────────────────
-// The four legacy link slots (linkedin/github/portfolio/website) stay edited via
-// `ContactOverrides` above — they are the scoring/snapshot source of truth, and
-// `parsed.profiles[]` mirrors them. This channel holds ONLY the EXTRA
-// contact/identity links a user adds beyond those four slots (a second GitHub, a
-// GitLab, ORCID, Substack, an unknown host, …). applyOverrides re-derives
-// `parsed.profiles` from the (possibly-edited) legacy keys and appends these, so
-// the legacy keys never desync and the extras flow to #334's JSON export.
+// ── Profile-link overrides (#427, consolidates #335) ──────────────────────────
+// ONE channel for every contact-link edit — corrections to the four detected
+// legacy slots AND user-added extra links (a second GitHub, a GitLab, ORCID,
+// Substack, an unknown host, …). Before #427 these were two parallel channels
+// (`contactOverrides.{...}_url` + `addedProfiles`) that drifted: a network with
+// no legacy slot had no correction target. Now every link is one
+// `ProfileOverride` in this list.
+//
+// Correction-vs-addition (issue #427 ruling): an override that carries a
+// `legacyKey` CORRECTS that detected slot — it replaces the parsed value and
+// forces confidence→1 (an empty url clears it to absent), matching the old
+// per-slot `contactOverrides` behavior. An override WITHOUT a `legacyKey` is an
+// EXTRA link — appended, and back-filling an empty linkedin/github slot only
+// when that slot is empty, matching the old `addedProfiles` behavior. The UI
+// decides which by affordance: editing a detected legacy link row tags the
+// override with its `legacyKey`; the "+ Add link" affordance mints an untagged
+// extra. `applyOverrides` folds the whole list back into the legacy slots +
+// `parsed.profiles[]`, so every downstream reader (scorer, ContactCard, JSON
+// export) sees one consistent list.
 
 /**
- * One user-added contact/identity link. `id` is a stable per-session key
+ * One contact/identity link edit. `id` is a stable per-session key
  * (`"profile:<n>"`). `url`/`network`/`kind` are the classified {@link
  * ProfileLink} — `network`/`kind` are re-derived via `classifyProfile` on every
  * edit so the display label tracks the URL (an unknown host keeps its hostname
- * as the label, brand-neutral by construction).
+ * as the label, brand-neutral by construction). `legacyKey` is set when this
+ * override corrects one of the four detected legacy slots; absent for an extra.
  */
-export interface AddedProfile {
+export interface ProfileOverride {
   id: string;
   url: string;
   network: string;
   kind: ProfileLink["kind"];
+  legacyKey?: LegacyLinkKey;
 }
 
 // ── Skills override ───────────────────────────────────────────────────────────
@@ -225,16 +235,26 @@ export interface EditableParse {
   /** Append a bullet line to an entry. No-op on blank text. An added entry's
    *  bullets are dropped wholesale when the entry is removed. */
   addBullet: (entryKey: string, text: string) => void;
-  /** Extra user-added contact links beyond the four legacy slots, in insertion
-   *  order (#335). The legacy slots keep editing through `contactOverrides`. */
-  addedProfiles: AddedProfile[];
-  /** Add a contact link from a raw URL. No-op on an empty/unparseable URL
-   *  (classifyProfile returns undefined). Returns the new entry's id, or
-   *  undefined when nothing was added. */
+  /** The ONE consolidated contact-link edit channel (#427): corrections to the
+   *  four detected legacy slots (entries carrying a `legacyKey`) AND user-added
+   *  extra links (untagged), in insertion order. */
+  profileOverrides: ProfileOverride[];
+  /** Correct one detected legacy link slot (linkedin/github/portfolio/website).
+   *  A non-empty URL replaces the detected value (confidence→1); an empty URL
+   *  clears it to absent (confidence→0); `undefined` drops the correction,
+   *  reverting to the parsed value. Re-classifies the URL so the label tracks
+   *  the network. */
+  setLegacyLink: (key: LegacyLinkKey, url: string | undefined) => void;
+  /** Add an EXTRA contact link (beyond the four legacy slots) from a raw URL.
+   *  No-op on an empty/unparseable URL (classifyProfile returns undefined).
+   *  Returns the new entry's id, or undefined when nothing was added. */
   addProfile: (url: string) => string | undefined;
-  /** Re-classify and update one added profile's URL. An empty URL removes it. */
+  /** Re-classify and update one override's URL by id. An empty URL removes an
+   *  extra; for a legacy-slot correction, an empty URL clears the slot (keeps
+   *  the entry so the clear is authoritative). */
   setProfileUrl: (id: string, url: string) => void;
-  /** Remove a previously-added profile by id. */
+  /** Remove a previously-added profile override by id (extras only; a legacy
+   *  correction is dropped via `setLegacyLink(key, undefined)`). */
   removeProfile: (id: string) => void;
   /** Add/remove edits against parsed.skills. */
   skillsOverride: SkillsOverride;
@@ -270,7 +290,9 @@ export function useEditableParse(): EditableParse {
   );
   const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
   const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
-  const [addedProfiles, setAddedProfiles] = useState<AddedProfile[]>([]);
+  const [profileOverrides, setProfileOverrides] = useState<ProfileOverride[]>(
+    [],
+  );
   // Monotonic source of stable added-entry ids. A ref (not state) because a new
   // id must not itself trigger a re-render, and the value need only be unique
   // within the session — never reset, even across resetAll.
@@ -416,31 +438,62 @@ export function useEditableParse(): EditableParse {
     }));
   }, []);
 
+  const setLegacyLink = useCallback(
+    (key: LegacyLinkKey, url: string | undefined) => {
+      setProfileOverrides((prev) => {
+        // Corrections are keyed by their legacyKey (one per slot). `undefined`
+        // drops the correction (revert to parsed); "" is an authoritative clear
+        // (kept as an entry so applyOverrides zeroes the slot).
+        const rest = prev.filter((p) => p.legacyKey !== key);
+        if (url === undefined) return rest;
+        const classified = url.trim() === "" ? undefined : classifyProfile(url);
+        const id = `profile:${idCounter.current++}`;
+        const entry: ProfileOverride = classified
+          ? { id, ...classified, legacyKey: key }
+          : // Empty clear, or an unparseable URL: keep the raw value + slot's
+            // default network label so the correction still lands.
+            { id, url, network: key, kind: "other", legacyKey: key };
+        return [...rest, entry];
+      });
+    },
+    [],
+  );
+
   const addProfile = useCallback((url: string): string | undefined => {
     const profile = classifyProfile(url);
     if (!profile) return undefined;
     const id = `profile:${idCounter.current++}`;
-    setAddedProfiles((prev) => [...prev, { id, ...profile }]);
+    setProfileOverrides((prev) => [...prev, { id, ...profile }]);
     return id;
   }, []);
 
   const setProfileUrl = useCallback((id: string, url: string) => {
-    // An emptied field removes the entry (mirrors the explicit remove control).
-    if (url.trim() === "") {
-      setAddedProfiles((prev) => prev.filter((p) => p.id !== id));
-      return;
-    }
-    // Re-derive network/kind from the edited URL; a now-unparseable URL keeps
-    // the prior classification rather than dropping the entry mid-edit.
-    const profile = classifyProfile(url);
-    if (!profile) return;
-    setAddedProfiles((prev) =>
-      prev.map((p) => (p.id === id ? { id, ...profile } : p)),
-    );
+    setProfileOverrides((prev) => {
+      const target = prev.find((p) => p.id === id);
+      if (!target) return prev;
+      // An emptied EXTRA is removed (mirrors the explicit remove control); an
+      // emptied legacy CORRECTION is kept as an authoritative clear (url: "").
+      if (url.trim() === "") {
+        return target.legacyKey === undefined
+          ? prev.filter((p) => p.id !== id)
+          : prev.map((p) =>
+              p.id === id
+                ? { ...p, url: "", network: p.legacyKey!, kind: "other" }
+                : p,
+            );
+      }
+      // Re-derive network/kind from the edited URL; a now-unparseable URL keeps
+      // the prior classification rather than dropping the entry mid-edit.
+      const profile = classifyProfile(url);
+      if (!profile) return prev;
+      return prev.map((p) =>
+        p.id === id ? { ...p, ...profile } : p,
+      );
+    });
   }, []);
 
   const removeProfile = useCallback((id: string) => {
-    setAddedProfiles((prev) => prev.filter((p) => p.id !== id));
+    setProfileOverrides((prev) => prev.filter((p) => p.id !== id));
   }, []);
 
   const resetAll = useCallback(() => {
@@ -452,7 +505,7 @@ export function useEditableParse(): EditableParse {
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
     setAddedEntries([]);
     setAddedBullets({});
-    setAddedProfiles([]);
+    setProfileOverrides([]);
   }, []);
 
   const hasEdits = useMemo(() => {
@@ -463,7 +516,7 @@ export function useEditableParse(): EditableParse {
       return true;
     if (addedEntries.length > 0) return true;
     if (Object.keys(addedBullets).length > 0) return true;
-    if (addedProfiles.length > 0) return true;
+    if (profileOverrides.length > 0) return true;
     if (
       Object.values(educationOverrides).some(
         (entry) => Object.keys(entry).length > 0,
@@ -482,7 +535,7 @@ export function useEditableParse(): EditableParse {
     skillsOverride,
     addedEntries,
     addedBullets,
-    addedProfiles,
+    profileOverrides,
   ]);
 
   return {
@@ -502,7 +555,8 @@ export function useEditableParse(): EditableParse {
     setEntryField,
     addedBullets,
     addBullet,
-    addedProfiles,
+    profileOverrides,
+    setLegacyLink,
     addProfile,
     setProfileUrl,
     removeProfile,

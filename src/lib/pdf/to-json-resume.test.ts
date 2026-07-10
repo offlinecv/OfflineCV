@@ -17,6 +17,7 @@ import {
   toJsonResume,
   normalizeJsonResumeDate,
   toJsonResumeLocation,
+  formatJsonResumeLocation,
   JSON_RESUME_SCHEMA,
 } from "./to-json-resume.ts";
 import type { AtsResumeModel } from "./ats-resume-model.ts";
@@ -294,14 +295,50 @@ describe("normalizeJsonResumeDate", () => {
 });
 
 describe("toJsonResumeLocation", () => {
-  it("splits the last comma so city + region rejoin losslessly", () => {
+  it("splits US 'City, ST' into city + region (no country)", () => {
     expect(toJsonResumeLocation("San Francisco, CA")).toEqual({
       city: "San Francisco",
       region: "CA",
     });
+  });
+
+  it("splits US 'City, ST, USA' into city + region + countryCode (#429)", () => {
     expect(toJsonResumeLocation("San Francisco, CA, USA")).toEqual({
-      city: "San Francisco, CA",
-      region: "USA",
+      city: "San Francisco",
+      region: "CA",
+      countryCode: "US",
+    });
+  });
+
+  it("maps a 'City, Country' trailing country to countryCode (#429)", () => {
+    expect(toJsonResumeLocation("London, UK")).toEqual({
+      city: "London",
+      countryCode: "GB",
+    });
+    expect(toJsonResumeLocation("Paris, France")).toEqual({
+      city: "Paris",
+      countryCode: "FR",
+    });
+  });
+
+  it("splits 'City, Region, Country' with a non-US region (#429)", () => {
+    expect(toJsonResumeLocation("Toronto, ON, Canada")).toEqual({
+      city: "Toronto",
+      region: "ON",
+      countryCode: "CA",
+    });
+  });
+
+  it("keeps a bare 2-letter US state as region, never a country (CA = California)", () => {
+    // "CA" (California) must not resolve to Canada; a spelled-out country does.
+    expect(toJsonResumeLocation("Sacramento, CA")).toEqual({
+      city: "Sacramento",
+      region: "CA",
+    });
+    // A full US state name is also kept as region, not the same-named country.
+    expect(toJsonResumeLocation("Atlanta, Georgia")).toEqual({
+      city: "Atlanta",
+      region: "Georgia",
     });
   });
 
@@ -309,9 +346,40 @@ describe("toJsonResumeLocation", () => {
     expect(toJsonResumeLocation("Remote")).toEqual({ city: "Remote" });
   });
 
+  it("is case- and space-insensitive on the country token", () => {
+    expect(toJsonResumeLocation("berlin , germany")).toEqual({
+      city: "berlin",
+      countryCode: "DE",
+    });
+  });
+
   it("returns undefined for empty/absent", () => {
     expect(toJsonResumeLocation(undefined)).toBeUndefined();
     expect(toJsonResumeLocation("")).toBeUndefined();
+  });
+});
+
+describe("formatJsonResumeLocation (round-trip)", () => {
+  const cases = [
+    "San Francisco, CA",
+    "San Francisco, CA, USA",
+    "London, UK",
+    "Paris, France",
+    "Toronto, ON, Canada",
+    "Remote",
+  ];
+  it.each(cases)("round-trips %s losslessly", (loc) => {
+    expect(formatJsonResumeLocation(toJsonResumeLocation(loc))).toBe(loc);
+  });
+
+  it("returns undefined for an absent location", () => {
+    expect(formatJsonResumeLocation(undefined)).toBeUndefined();
+  });
+
+  it("falls back to the raw code for an unrecognized countryCode", () => {
+    expect(
+      formatJsonResumeLocation({ city: "Somewhere", countryCode: "ZZ" }),
+    ).toBe("Somewhere, ZZ");
   });
 });
 

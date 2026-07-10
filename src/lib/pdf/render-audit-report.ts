@@ -32,6 +32,7 @@ import { getScoreLabel, getScoreTier } from "../score/score.ts";
 import { LAYOUT_TRIGGER_BLURBS } from "../heuristics/trigger-copy.ts";
 import type { AuditReportInput } from "../report/serialize.ts";
 import { REPORT_VERSION } from "../report/serialize.ts";
+import { formatJsonResumeLocation } from "./to-json-resume.ts";
 import { APP_VERSION } from "../version.ts";
 
 /** Where the artifact points readers back to (branded footer). */
@@ -172,7 +173,7 @@ function drawIdentityHeader(layout: ReportLayout, input: AuditReportInput, muted
   const parts = [
     id.email,
     id.phone,
-    id.location ? [id.location.city, id.location.region].filter(Boolean).join(", ") : undefined,
+    formatJsonResumeLocation(id.location),
     id.url,
     ...(id.profiles ?? []).map((p) => p.url),
   ].filter((p): p is string => Boolean(p));
