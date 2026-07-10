@@ -249,6 +249,16 @@ function isSoftWrapContinuation(pending: string, nextText: string): boolean {
   // Always skip if the next line starts a new sub-list (label or bullet).
   if (SKILLS_NEW_ENTRY_RE.test(nextText)) return false;
 
+  // Condition A′ (symmetric to A): the NEXT line LEADS with a bare connector
+  // glyph — a soft-wrap that broke a skill/list immediately BEFORE the connector
+  // ("…API Design" ⏎ "& Development", "…CI" ⏎ "+ CD"). Condition A only catches
+  // the break AFTER the glyph ("Hiring &" ⏎ "Talent Acquisition"); when the
+  // wrap lands before it and the tail carries no comma, Condition B can't fire
+  // either, so the fragment would wrongly become its own skill (`& Development`).
+  // Only `&`/`+` — never the list-bullet glyphs `-`/`–`/`•`/`*`, which
+  // SKILLS_NEW_ENTRY_RE already routed to `return false` above — trigger this.
+  if (/^[&+]\s/.test(nextText)) return true;
+
   // Condition A: pending ends with an explicit continuation glyph — the glyph
   // must be its OWN whitespace-separated token ("Hiring &", "Data -"), not the
   // tail of a compact skill name like "C++" or "PHP7+" (#301: our own

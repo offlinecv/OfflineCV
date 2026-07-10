@@ -299,6 +299,33 @@ describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
     expect(result.parsed.skills).not.toContain("JavaScript Databases");
   });
 
+  it("rejoins a skill list that wrapped right before a leading connector glyph", () => {
+    // pdfjs broke the last skill "API Design & Development" so the connector `&`
+    // leads the final line: "…, API Design" ⏎ "& Development". The tail carries
+    // no comma, so Condition B can't fire and the pre-fix code emitted a bogus
+    // "& Development" skill while stranding "API Design" alone. Condition A′
+    // (next line leads with a bare `&`/`+`) rejoins them.
+    // Synthetic persona: Morgan Diaz, morgan.diaz@example.com, (312) 555-0155
+    const items = mkItems([
+      { text: "Morgan Diaz", fontSize: 18 },
+      { text: "morgan.diaz@example.com  (312) 555-0155  Austin, TX", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      { text: "SKILLS", fontSize: 13 },
+      { text: "Performance Optimization, API Design", fontSize: 10 },
+      { text: "& Development", fontSize: 10 },
+    ]);
+    const pages = mkDefaultPages(items);
+    const result = parseHeuristic(items, pages);
+
+    // The wrapped skill is rejoined whole
+    expect(result.parsed.skills).toContain("API Design & Development");
+    // Neither orphan half survives
+    expect(result.parsed.skills).not.toContain("API Design");
+    expect(result.parsed.skills).not.toContain("& Development");
+    // A skill before the wrap is untouched
+    expect(result.parsed.skills).toContain("Performance Optimization");
+  });
+
   it("does not merge a comma-less standalone skill into a following comma-list", () => {
     // A single-skill line with no comma ("Machine Learning") followed by an
     // independent comma-list ("Data Analysis, Python, SQL") must NOT be treated
