@@ -42,10 +42,17 @@ import type {
 
 export interface AtsContact {
   name: string;
+  /** Professional headline shown regular-weight under the name (#425). Absent
+   *  until the parser surfaces a genuine headline distinct from the most-recent
+   *  role title — see the follow-up note in `buildContact`. When present, the
+   *  renderer draws it between the name and the contact line. */
+  headline?: string;
   email?: string;
   phone?: string;
   location?: string;
-  /** LinkedIn / GitHub / portfolio / website / other links, label-prefixed. */
+  /** LinkedIn / GitHub / portfolio / website / other links, scheme-stripped
+   *  for display (`https://www.linkedin.com/in/jane` → `linkedin.com/in/jane`,
+   *  #425). */
   links: string[];
   /**
    * Classified contact/identity links (#335), the single source of truth for
@@ -98,8 +105,16 @@ export interface AtsEntryFields {
 export interface AtsEntry {
   /** Primary header line, e.g. "Senior PM · Google". */
   headerLine: string;
-  /** Secondary line under the header, e.g. a date range. */
+  /** Secondary line under the header, e.g. "Company · Location · Team  Dates".
+   *  The date range is glued onto this line (not drawn flush-right) so a wide
+   *  same-`y` gap can't trip the parser's column detector (#425 deviation). */
   subLine?: string;
+  /**
+   * Whether `headerLine` is drawn bold. Defaults to `true` (every role /
+   * degree / achievement header is bold); set `false` on the skills entry so
+   * the skills list renders as regular-weight body text (#425).
+   */
+  headerBold?: boolean;
   /** Bullet body lines (already stripped of leading markers, non-empty). */
   bullets: string[];
   /**
@@ -145,6 +160,19 @@ export interface AtsResumeModel {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Strip a URL's `https?://` scheme and any trailing slash for display, KEEPING
+ * a leading `www.` (#425). Round-trip-safe counterpart to the contact-card's
+ * `formatLinkDisplay`, which also drops `www.` — see the note in `buildContact`
+ * for why the exported PDF must preserve it. Idempotent.
+ */
+function stripLinkScheme(url: string): string {
+  return url
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+}
+
 /** Apply ContactCard's override semantics: "" clears, undefined keeps parsed. */
 function resolveContactValue(
   parsedValue: string,
@@ -174,13 +202,24 @@ export function buildContact(
 
   // Links: LinkedIn comes from the editable/contact path; the remaining link
   // fields are read straight off the parsed resume (they're not edited inline).
+  // Each is scheme-stripped for display via `stripLinkScheme` (#425) —
+  // `https://www.linkedin.com/in/jane` → `www.linkedin.com/in/jane`.
+  //
+  // NOTE: unlike the contact-card's `formatLinkDisplay`, this KEEPS a leading
+  // `www.`. Stripping `www.` breaks the round-trip: the parser re-adds a
+  // `https://` scheme on re-parse but never re-adds `www.`, so a www-stripped
+  // `linkedin.com/in/jane` re-parses to `https://linkedin.com/in/jane` —
+  // dropping the `www.` the original carried (corpus-roundtrip `linkedin_url`
+  // regression). Full www-stripping is deferred to a parser-canonicalization
+  // follow-up. The helper is idempotent, so an already-stripped value passes
+  // through unchanged.
   const links: string[] = [];
   const linkedin = valueFor("linkedin_url");
-  if (linkedin) links.push(linkedin);
+  if (linkedin) links.push(stripLinkScheme(linkedin));
   const parsed = result.parsed;
-  if (parsed.github_url) links.push(parsed.github_url);
-  if (parsed.portfolio_url) links.push(parsed.portfolio_url);
-  if (parsed.website_url) links.push(parsed.website_url);
+  if (parsed.github_url) links.push(stripLinkScheme(parsed.github_url));
+  if (parsed.portfolio_url) links.push(stripLinkScheme(parsed.portfolio_url));
+  if (parsed.website_url) links.push(stripLinkScheme(parsed.website_url));
 
   return {
     name,
@@ -346,11 +385,11 @@ export function buildAtsResumeModel(
   // body and dropped the role — and a bulletless role had no anchor at all.
   const experienceEntries: AtsEntry[] = experiences.map((exp, i) => {
     const title = (exp.title ?? "").trim();
-    // Company · Location joined with the dot; the date range is appended after a
-    // whitespace gap (the natural right-aligned-date shape) rather than another
-    // " · ", so stripping the date anchor leaves a clean "Company · Location"
-    // with no dangling separator leaking into the parsed company field.
-    const org = joinHeader([exp.company, exp.location], " · ");
+    // Company · Location · Team joined with the dot (#425 — the team/division
+    // was previously dropped at model-build time even though the parser
+    // populates `exp.team`). The date range is glued onto the same line below
+    // (the flush-right treatment was dropped — see the deviation note there).
+    const org = joinHeader([exp.company, exp.location, exp.team], " · ");
     // Re-parse company/title tiebreak signature (#298 round-trip). When this role
     // has a TITLE, the org+date line becomes the parser's date-anchor sub-line, and
     // the re-parser only treats a bare, neutral anchor as the company (rather than
@@ -366,14 +405,23 @@ export function buildAtsResumeModel(
     // Location-less-with-title: put the date after a " · " so the re-parse anchor
     // carries the org signature (reads "Company · Dates"). Otherwise keep the date
     // after the whitespace gap so a "Company · Location" org stays clean on strip.
+    //
+    // The date is deliberately GLUED onto the org line rather than drawn
+    // flush-right (#425 flush-right dropped — see the deviation note): a
+    // flush-right date opens a >50pt same-`y` gap that the parser's embedded
+    // multi-column reconstruction reads as a column boundary
+    // (`COLUMN_GAP_THRESHOLD`, `sections.ts`), which on dense/consecutive-role
+    // layouts forms a right-edge date band and swaps title/company on re-parse
+    // (corpus-roundtrip regression on the two-column fixtures). The team segment
+    // below IS round-trip-safe and stays.
     const subLine = needsOrgSignature
       ? [org, dateRange].filter(Boolean).join(" · ") || undefined
       : [org, dateRange].filter(Boolean).join("  ") || undefined;
+    // Title-less role: the org/date line leads on the (bold) header itself, with
+    // the date glued after a whitespace gap so it still carries the date anchor
+    // (a title-less header is not disambiguated, so it needs no signature).
     const headerOrgLine = [org, dateRange].filter(Boolean).join("  ") || undefined;
     return {
-      // Title alone leads (bold); when a role has no title, the org/date line
-      // leads so it still carries the date anchor on the header line itself (and
-      // needs no signature — a title-less header is not disambiguated).
       headerLine: title || headerOrgLine || "Experience",
       subLine: title ? subLine : undefined,
       bullets: resolveBullets(
@@ -511,6 +559,8 @@ export function buildAtsResumeModel(
             headerLine: skills.join(" · "),
             bullets: [],
             atomicSegments: true,
+            // Skills read as regular-weight body text, not a bold header (#425).
+            headerBold: false,
             // The flat skill list, carried structurally so the JSON export (#334)
             // maps `skills[] ← { name }` without re-splitting the joined header.
             fields: { skills: [...skills] },

@@ -2,9 +2,16 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, expect, it } from "vitest";
-import { renderAtsResumePdf, toWinAnsi } from "./render-ats-pdf.ts";
+import { renderAtsResumePdf, toWinAnsi, parseBoldRuns } from "./render-ats-pdf.ts";
+import {
+  EMPHASIS_OPEN,
+  EMPHASIS_CLOSE,
+} from "./auto-bold-metrics.ts";
 import { extractPdfText } from "./render-ats-pdf.test-utils.ts";
 import type { AtsResumeModel } from "./ats-resume-model.ts";
+
+/** Wrap `s` in the sentinel emphasis delimiters `parseBoldRuns` consumes. */
+const emph = (s: string) => `${EMPHASIS_OPEN}${s}${EMPHASIS_CLOSE}`;
 
 const MODEL: AtsResumeModel = {
   contact: {
@@ -310,5 +317,100 @@ describe("renderAtsResumePdf", () => {
       expect(toWinAnsi("")).toBe("");
       expect(toWinAnsi("   ")).toBe("   ");
     });
+  });
+});
+
+describe("parseBoldRuns (#425)", () => {
+  it("returns a single regular run for text with no markers", () => {
+    expect(parseBoldRuns("plain bullet text")).toEqual([
+      { text: "plain bullet text", bold: false },
+    ]);
+  });
+
+  it("splits a mid-string metric into regular / bold / regular runs", () => {
+    expect(
+      parseBoldRuns(`Grew revenue ${emph("40%")} year over year`),
+    ).toEqual([
+      { text: "Grew revenue ", bold: false },
+      { text: "40%", bold: true },
+      { text: " year over year", bold: false },
+    ]);
+  });
+
+  it("handles multiple bold spans and a leading bold run", () => {
+    expect(
+      parseBoldRuns(`${emph("$2M")} raised and ${emph("18 engineers")} hired`),
+    ).toEqual([
+      { text: "$2M", bold: true },
+      { text: " raised and ", bold: false },
+      { text: "18 engineers", bold: true },
+      { text: " hired", bold: false },
+    ]);
+  });
+
+  it("strips the sentinels — the joined run text is byte-identical to the clean bullet", () => {
+    const runs = parseBoldRuns(
+      `Cut latency ${emph("10%")} and grew ${emph("1.5x")}`,
+    );
+    for (const run of runs) {
+      expect(run.text).not.toContain(EMPHASIS_OPEN);
+      expect(run.text).not.toContain(EMPHASIS_CLOSE);
+    }
+    expect(runs.map((r) => r.text).join("")).toBe(
+      "Cut latency 10% and grew 1.5x",
+    );
+  });
+
+  it("treats literal `**` as inert text — draws it verbatim (#284)", () => {
+    // Literal asterisks are NOT the marker, so they survive as ordinary glyphs.
+    const runs = parseBoldRuns("Wrote **important** design docs");
+    expect(runs).toEqual([
+      { text: "Wrote **important** design docs", bold: false },
+    ]);
+    expect(runs.map((r) => r.text).join("")).toBe(
+      "Wrote **important** design docs",
+    );
+  });
+});
+
+describe("#425 render — headline + metric bold", () => {
+  it("renders a professional headline (regular weight) under the name", async () => {
+    const model: AtsResumeModel = {
+      contact: {
+        name: "Jane Candidate",
+        headline: "Engineering Lead",
+        links: [],
+      },
+      sections: [],
+    };
+    const text = await extractPdfText(await renderAtsResumePdf(model));
+    expect(text).toContain("Jane Candidate");
+    expect(text).toContain("Engineering Lead");
+  });
+
+  it("draws a metric bullet with NO '**' markers leaking into the text", async () => {
+    const model: AtsResumeModel = {
+      contact: { name: "Jane Candidate", links: [] },
+      sections: [
+        {
+          heading: "Experience",
+          entries: [
+            {
+              headerLine: "Senior PM · Acme",
+              subLine: "2020 – 2024",
+              bullets: ["Drove 40% revenue growth and onboarded 50K users"],
+            },
+          ],
+        },
+      ],
+    };
+    const text = await extractPdfText(await renderAtsResumePdf(model));
+    // The emphasis markers are stripped before drawing, so no `*` reaches the
+    // page — the visible text is the un-emphasized bullet (round-trip guard).
+    // `extractPdfText` emits each drawn run as a separate token, so assert the
+    // metric words are all present (whitespace between them is util-normalized).
+    expect(text).not.toContain("*");
+    for (const token of ["Drove", "40%", "revenue", "50K", "users"])
+      expect(text).toContain(token);
   });
 });
