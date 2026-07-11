@@ -12,9 +12,11 @@
  * Design contract:
  *   - NO `pdf-lib` import, NO I/O — a plain `(model) => JsonResume` function,
  *     unit-testable in isolation.
- *   - It reads the STRUCTURED source the model carries (`AtsEntry.fields`,
- *     `AtsSection.kind`, `AtsContact.profiles`), never re-parsing the glued
- *     `headerLine` / `subLine` display strings — so the mapping is lossless.
+ *   - It reads the STRUCTURED source via the {@link AtsExportProjection}
+ *     (`projectAtsExport`, #442) — the export-semantic view of the model
+ *     (`entry.kind`, `entry.fields`, `contact.profiles`) — never the render
+ *     model's layout fields and never re-parsing the glued `headerLine` /
+ *     `subLine` display strings, so the mapping is lossless.
  *   - **Never fabricates a date.** A free-form date string is best-effort
  *     normalized to `YYYY-MM` / `YYYY`; when it can't be parsed confidently, the
  *     RAW string is emitted (JSON Resume tolerates partial/free-form dates).
@@ -31,8 +33,9 @@ import type {
   AtsResumeModel,
   AtsContact,
   AtsEntryFields,
-  AtsSectionKind,
 } from "./ats-resume-model.ts";
+import { projectAtsExport } from "./ats-export-projection.ts";
+import type { AtsExportEntry } from "./ats-export-projection.ts";
 import type { ProfileLink } from "../score/types.ts";
 import { APP_VERSION } from "../version.ts";
 import {
@@ -299,10 +302,6 @@ export function basicsFromContact(c: AtsContact): JsonResumeBasics {
   };
 }
 
-function toBasics(model: AtsResumeModel): JsonResumeBasics {
-  return basicsFromContact(model.contact);
-}
-
 // ── section → array mappers ────────────────────────────────────────────────────
 
 /** Bullet body → JSON Resume `highlights`, or `undefined` when empty. */
@@ -367,18 +366,14 @@ interface ResumeBuckets {
 }
 
 /**
- * Route one entry into its JSON Resume bucket by its section kind. An entry
- * lacking structured `fields` carries nothing to map, so it is skipped (except
- * `skills`, whose payload is the `fields.skills` list). "achievements" and any
- * unmodeled section are intentionally not mapped.
+ * Route one projected entry into its JSON Resume bucket by its section kind. An
+ * entry lacking structured `fields` carries nothing to map, so it is skipped
+ * (except `skills`, whose payload is the `fields.skills` list). Any unmodeled
+ * section kind is intentionally not mapped.
  */
-function appendEntry(
-  kind: AtsSectionKind | undefined,
-  entry: { fields?: AtsEntryFields; bullets: readonly string[] },
-  buckets: ResumeBuckets,
-): void {
+function appendEntry(entry: AtsExportEntry, buckets: ResumeBuckets): void {
   const { fields } = entry;
-  switch (kind) {
+  switch (entry.kind) {
     case "experience":
       if (fields) buckets.work.push(toWork(fields, entry.bullets));
       break;
@@ -401,12 +396,16 @@ function appendEntry(
 
 /**
  * Map an {@link AtsResumeModel} to a {@link JsonResume}. Pure — no I/O, no
- * pdf-lib. `work` / `education` / `skills` / `projects` are always present (as
- * possibly-empty arrays, matching the JSON Resume convention). Section ORDER is
- * the model's (document order); an entry lacking structured `fields` is skipped
- * for that array (it carries nothing to map).
+ * pdf-lib. Drives entirely off the export-semantic {@link AtsExportProjection}
+ * (`projectAtsExport`, #442): `basics` from the projected contact, the section
+ * arrays from the projected entries — so the mapping never reads the render
+ * model's layout fields. `work` / `education` / `skills` / `projects` are always
+ * present (as possibly-empty arrays, matching the JSON Resume convention).
+ * Section ORDER is the model's (document order); an entry lacking structured
+ * `fields` is skipped for that array (it carries nothing to map).
  */
 export function toJsonResume(model: AtsResumeModel): JsonResume {
+  const projection = projectAtsExport(model);
   const buckets: ResumeBuckets = {
     work: [],
     education: [],
@@ -415,15 +414,13 @@ export function toJsonResume(model: AtsResumeModel): JsonResume {
     awards: [],
   };
 
-  for (const section of model.sections) {
-    for (const entry of section.entries) {
-      appendEntry(section.kind, entry, buckets);
-    }
+  for (const entry of projection.entries) {
+    appendEntry(entry, buckets);
   }
 
   return {
     $schema: JSON_RESUME_SCHEMA,
-    basics: toBasics(model),
+    basics: basicsFromContact(projection.contact),
     work: buckets.work,
     education: buckets.education,
     skills: buckets.skills,
