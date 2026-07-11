@@ -349,6 +349,31 @@ export function extractName(
  * parse → export → re-parse round-trip stable: the redrawn headline re-parses
  * back to the same value.
  */
+/** True when `text` IS the candidate's name (so it is not the headline). Compares
+ *  case-insensitively AND treats a line the name CONTAINS as the name, so a
+ *  normalized/merged name (a stacked-name second line, an occupational-word
+ *  surname) can't leak through a byte-exact `===` and be returned as the headline
+ *  (full_name "John Engineer" → headline "Engineer") (Samhit review, PR #434). */
+function isNameLine(text: string, name: string | undefined): boolean {
+  if (!name) return false;
+  const nName = name.trim().toLowerCase();
+  const nText = text.toLowerCase();
+  return nName === nText || nName.includes(nText);
+}
+
+/** True when `text` begins the contact cluster (email / phone / linkedin / any
+ *  URL) — the header block is over, so nothing at or below it is the headline.
+ *  Resets `lastIndex` defensively: these constants may carry a `g` flag whose
+ *  test() mutates state (mirrors `findContactClusterY`). */
+function startsContactCluster(text: string): boolean {
+  const hit =
+    EMAIL_RE.test(text) || PHONE_RE.test(text) || LINKEDIN_RE.test(text);
+  EMAIL_RE.lastIndex = 0;
+  PHONE_RE.lastIndex = 0;
+  LINKEDIN_RE.lastIndex = 0;
+  return hit || text.includes("@") || /https?:\/\//i.test(text);
+}
+
 export function extractHeadline(
   profile: PdfSection,
   name: string | undefined,
@@ -357,18 +382,9 @@ export function extractHeadline(
   for (let i = 0; i < scan; i++) {
     const text = profile.lines[i].text.trim();
     if (!text) continue;
-    if (name && text === name) continue; // the name is not its own headline
+    if (isNameLine(text, name)) continue; // the name is not its own headline
     if (matchSectionHeader(text)) break; // reached a section — header block over
-    // The contact cluster begins — anything at or below it is not the headline.
-    // Reset lastIndex defensively: these constants may carry a `g` flag whose
-    // test() mutates state (mirrors `findContactClusterY`).
-    if (EMAIL_RE.test(text) || PHONE_RE.test(text) || LINKEDIN_RE.test(text)) {
-      EMAIL_RE.lastIndex = 0;
-      PHONE_RE.lastIndex = 0;
-      LINKEDIN_RE.lastIndex = 0;
-      break;
-    }
-    if (text.includes("@") || /https?:\/\//i.test(text)) break;
+    if (startsContactCluster(text)) break; // contact cluster — header block over
     if (text.length > 60) continue;
     if (!looksLikeTitle(text)) continue;
     return { value: text, confidence: 0.7 };

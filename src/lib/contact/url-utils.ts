@@ -37,7 +37,12 @@ export function normalizeUrl(raw: string | undefined): string | undefined {
     .replace(/[,;.)]$/, "")
     .trim()
     .replace(/^(https?:\/\/)?www\./i, "$1");
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // Preserve any explicit scheme unchanged — only default a bare host to https.
+  // Matching just `https?://` here would (a) not exist as a bug for http (it
+  // already round-trips) but (b) turn `ftp://foo` into `https://ftp://foo`.
+  // Guarding on the general scheme grammar keeps the module's round-trip promise
+  // for non-http(s) inputs too (Samhit review, PR #434).
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
 }
 
