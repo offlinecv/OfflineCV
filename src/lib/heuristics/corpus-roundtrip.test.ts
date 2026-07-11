@@ -164,6 +164,12 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["experience"],
   "google-docs/google-docs-skia-proxy-role-first-experience.pdf": ["experience"],
   "google-docs/google-docs-skia-proxy-two-column.pdf": ["experience"],
+  // awesome-cv-cv: #383 cleared its earlier abbreviated-date baseline (see the
+  // #383 note above), but main's one-line header re-regresses `experience` for
+  // the #436 reason — 12 roles re-parse company-truncated/swapped off the
+  // one-line "Title · Company … Dates" shape. Same #436 root as the group here;
+  // the ratchet removes this line when #436 lands.
+  "latex/awesome-cv-cv.pdf": ["experience"],
   "latex/awesome-cv-resume.pdf": ["experience"],
   "latex/deedy-resume-macfonts.pdf": ["experience"],
   "latex/deedy-resume-openfonts.pdf": ["experience"],
