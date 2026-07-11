@@ -57,6 +57,8 @@ import type {
   FieldConfidence,
 } from "../lib/heuristics/types.ts";
 import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
+import { toCanonicalResume } from "../lib/heuristics/canonical.ts";
+import { projectScoreSections } from "../lib/heuristics/projections.ts";
 
 export interface EditedResume {
   parsed: HeuristicParsedResume;
@@ -250,7 +252,10 @@ export function useAnalyzedResume(): AnalyzedResume {
       fieldConfidence: editedCore.fieldConfidence,
       triggers: base.triggers,
       rawText: editedCore.rawText,
-      sections: editedCore.sections,
+      // Score projection (#443, Stage B) off the edited canonical cores.
+      sections: projectScoreSections(
+        toCanonicalResume(editedCore.parsed, editedCore.sections),
+      ),
     });
     // `editedCore` is deliberately NOT a dep: this memo reads its latest
     // value whenever it actually runs, but must not re-run on an

@@ -1,0 +1,158 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 The resumelint Authors
+
+/**
+ * Faithfulness gate for the Stage B canonical projections (#443).
+ *
+ * `runCascade` now builds a `CanonicalResume` and hands its cores back out as
+ * the `CascadeResult` façade; the scorer and `ReconstructedResume` read section
+ * pools / display fields through `projectScoreSections` / `projectDisplay`
+ * instead of off the cascade result directly. This is behaviour-preserving ONLY
+ * if the projections reproduce exactly what the direct reads returned. Two
+ * proofs here:
+ *
+ *   1. **Unit** — the projections and the canonical constructor carry their
+ *      cores by reference (identity-holder, Stage B), so display/score reads are
+ *      the same objects the façade held.
+ *   2. **Corpus (re-derivation tripwire)** — over the WHOLE fixture corpus,
+ *      build a canonical model from DEEP-CLONED cores (so reference identity
+ *      can't mask a content bug) and assert the score projection deep-equals the
+ *      cascade's `sections` and reproduces the same score. With Stage B's
+ *      identity-holder bodies this is near-trivially true; its job is to FIRE
+ *      when a later stage swaps a body to re-derivation and the re-derived pools
+ *      drift. The byte-identical Stage-B behaviour proof proper is the unchanged
+ *      corpus goldens in `heuristics/corpus.test.ts`, not this file.
+ *
+ * Fixtures are synthetic personas only — see tests/fixtures/pdfs/README.md.
+ */
+
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { describe, it, expect } from "vitest";
+import {
+  toCanonicalResume,
+  canonicalFromCascade,
+  type CanonicalResume,
+} from "./canonical.ts";
+import { projectScoreSections, projectDisplay } from "./projections.ts";
+import { runCascade } from "./cascade.ts";
+import { computeAnonymousAtsScore } from "../score/score.ts";
+import type { SectionedResume } from "./sections.ts";
+import type { HeuristicParsedResume } from "./types.ts";
+
+describe("canonical projections — identity-holder semantics (#443, Stage B)", () => {
+  const fields = {
+    full_name: "Jane Candidate",
+    skills: ["TypeScript"],
+    experience: [],
+    education: [],
+  } satisfies HeuristicParsedResume;
+  const sections: SectionedResume = {
+    byName: new Map([["skills", ["TypeScript · React"]]]),
+    accomplishmentSections: ["experience", "projects", "achievements"],
+    sectionHeadings: new Map([["skills", "Technical Skills"]]),
+    source: "markdown",
+  };
+  const canonical: CanonicalResume = toCanonicalResume(fields, sections);
+
+  it("composes the two cores by reference", () => {
+    expect(canonical.fields).toBe(fields);
+    expect(canonical.sections).toBe(sections);
+  });
+
+  it("projectScoreSections returns the section core by reference", () => {
+    expect(projectScoreSections(canonical)).toBe(sections);
+  });
+
+  it("projectDisplay returns the field core + headings by reference", () => {
+    const display = projectDisplay(canonical);
+    expect(display.parsed).toBe(fields);
+    expect(display.sectionHeadings).toBe(sections.sectionHeadings);
+  });
+
+  it("canonicalFromCascade lifts a façade's parsed/sections back into canonical", () => {
+    const faux = { parsed: fields, sections } as unknown as Parameters<
+      typeof canonicalFromCascade
+    >[0];
+    const back = canonicalFromCascade(faux);
+    expect(back.fields).toBe(fields);
+    expect(back.sections).toBe(sections);
+  });
+
+  it("canonicalFromCascade substitutes an inert (frozen, empty) core when a loose façade omits sections", () => {
+    const faux = { parsed: fields } as unknown as Parameters<
+      typeof canonicalFromCascade
+    >[0];
+    const back = canonicalFromCascade(faux);
+    // Inert: no pools, no headings — the `result.sections?.…` fall-through the
+    // old read sites gave, never a throw.
+    expect(back.sections.byName.get("skills")).toBeUndefined();
+    expect(back.sections.sectionHeadings).toBeUndefined();
+    expect(Object.isFrozen(back.sections)).toBe(true);
+  });
+});
+
+// ── Corpus proof: projections are content-faithful across every fixture ───────
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
+
+function walkPdfs(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkPdfs(p));
+    else if (e.isFile() && e.name.toLowerCase().endsWith(".pdf")) out.push(p);
+  }
+  return out.sort();
+}
+
+describe("canonical projections — corpus parity (synthetic personas)", { timeout: 20000 }, () => {
+  const fixtures = walkPdfs(FIXTURE_ROOT);
+
+  it("finds fixtures to project", () => {
+    expect(fixtures.length).toBeGreaterThan(0);
+  });
+
+  for (const fixture of fixtures) {
+    const name = fixture.slice(FIXTURE_ROOT.length + 1);
+    it(`projects score sections faithfully: ${name}`, async () => {
+      const cascade = await runCascade(new Uint8Array(readFileSync(fixture)));
+
+      // Deep-clone the cores so the projection can't pass on reference identity
+      // alone — a content bug in re-derivation would surface here.
+      const canonical = toCanonicalResume(
+        structuredClone(cascade.parsed),
+        structuredClone(cascade.sections),
+      );
+
+      // Score projection reproduces the cascade's section pools byte-for-byte.
+      expect(projectScoreSections(canonical)).toEqual(cascade.sections);
+
+      // And the anonymous score is identical whether the scorer reads the
+      // projection or `cascade.sections` directly — the app-path invariant.
+      const baseInput = {
+        parsed: cascade.parsed,
+        fieldConfidence: cascade.fieldConfidence,
+        triggers: cascade.triggers,
+        rawText: cascade.rawText,
+      };
+      const viaProjection = computeAnonymousAtsScore({
+        ...baseInput,
+        sections: projectScoreSections(canonical),
+      });
+      const viaDirect = computeAnonymousAtsScore({
+        ...baseInput,
+        sections: cascade.sections,
+      });
+      expect(viaProjection).toEqual(viaDirect);
+
+      // Display projection reproduces the parsed core + headings.
+      const display = projectDisplay(canonical);
+      expect(display.parsed).toEqual(cascade.parsed);
+      expect(display.sectionHeadings).toEqual(cascade.sections.sectionHeadings);
+    });
+  }
+});

@@ -31,6 +31,7 @@ import type {
 } from "./types.ts";
 import { CASCADE_VERSION } from "./types.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
+import { toCanonicalResume } from "./canonical.ts";
 import { computeConfidence } from "./confidence.ts";
 
 export interface RunCascadeOptions {
@@ -188,8 +189,13 @@ export async function runCascade(
   const tiers: CascadeResult["tiers"] = ["t0_layout", "t1_openresume"];
   if (ranT15) tiers.push("t1_5_regex");
 
+  // Canonical model is the source of record (#443, Stage B); the CascadeResult
+  // below is its byte-identical compatibility façade — `parsed`/`sections` come
+  // straight off the canonical cores.
+  const canonical = toCanonicalResume(parsed, heuristic.sections);
+
   const result: CascadeResult = {
-    parsed,
+    parsed: canonical.fields,
     confidence,
     fieldConfidence,
     triggers: layout.triggers,
@@ -197,7 +203,7 @@ export async function runCascade(
     tiers,
     rawText: extract.text,
     markdown,
-    sections: heuristic.sections,
+    sections: canonical.sections,
     linkAnnotations: extract.linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,
@@ -405,8 +411,12 @@ export async function runCascadeFromMarkdown(
   const tiers: CascadeResult["tiers"] = ["t0_layout", "t1_openresume"];
   if (ranT15) tiers.push("t1_5_regex");
 
+  // Canonical model is the source of record (#443, Stage B); façade below reads
+  // its cores.
+  const canonical = toCanonicalResume(parsed, heuristic.sections);
+
   const result: CascadeResult = {
-    parsed,
+    parsed: canonical.fields,
     confidence,
     fieldConfidence,
     triggers: [],
@@ -414,7 +424,7 @@ export async function runCascadeFromMarkdown(
     tiers,
     rawText,
     markdown,
-    sections: heuristic.sections,
+    sections: canonical.sections,
     // DOCX cascade has no PDF annotations.
     linkAnnotations: [],
     diagnostics: {
@@ -460,28 +470,33 @@ function buildScannedResult(
   start: number,
   t0Duration: number,
 ): CascadeResult {
-  return {
-    parsed: {
+  // Scanned-abandon path: no Tier 1 ran, so there are no detected sections.
+  // An empty view yields `byName.get("skills") === undefined`, exactly the
+  // inert behaviour the absent `skillsSectionText` gave here before (#132).
+  // Built through the canonical model so this path matches the others (#443).
+  const canonical = toCanonicalResume(
+    {
       skills: [],
       skills_explicit: [],
       skills_inferred: [],
       experience: [],
       education: [],
     },
+    {
+      byName: new Map(),
+      accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+      source: "regex",
+    },
+  );
+  return {
+    parsed: canonical.fields,
     confidence: 0,
     fieldConfidence: {},
     triggers: layout.triggers,
     suggestedEscalation: "ocr",
     tiers: ["t0_layout"],
     rawText: extract.text,
-    // Scanned-abandon path: no Tier 1 ran, so there are no detected sections.
-    // An empty view yields `byName.get("skills") === undefined`, exactly the
-    // inert behaviour the absent `skillsSectionText` gave here before (#132).
-    sections: {
-      byName: new Map(),
-      accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
-      source: "regex",
-    },
+    sections: canonical.sections,
     linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,

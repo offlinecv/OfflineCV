@@ -3,6 +3,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
+import { canonicalFromCascade } from "../lib/heuristics/canonical.ts";
+import { projectScoreSections } from "../lib/heuristics/projections.ts";
 import { computeAnonymousAtsScore, type AnonymousAtsScore } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, ErrorState } from "@design-system";
@@ -130,7 +132,9 @@ function ParsedCard({
       fieldConfidence: activeResult.fieldConfidence,
       triggers: activeResult.triggers,
       rawText: activeResult.rawText,
-      sections: activeResult.sections,
+      // Score projection (#443, Stage B) — section pools read off the canonical
+      // model, not straight off the cascade result.
+      sections: projectScoreSections(canonicalFromCascade(activeResult)),
     });
   }, [activeResult, llmOverride, score]);
 
