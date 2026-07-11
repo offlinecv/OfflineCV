@@ -33,6 +33,8 @@ import {
 } from "../score/group-bullets.ts";
 import { buildProjectDates } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
+import { canonicalFromCascade } from "../heuristics/canonical.ts";
+import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import { buildContactFields, formatLinkDisplay } from "../contact.ts";
 import type {
@@ -332,6 +334,35 @@ function joinHeader(parts: Array<string | undefined>, sep: string): string {
   return parts.filter((p) => p && p.trim()).join(sep);
 }
 
+/**
+ * §7 header-vs-entry predicate (#444, `docs/canonical-resume-model.md` §7): an
+ * experience / education entry that carries any structured date **is** a dated
+ * entry by construction. The header-vs-entry classification the parser makes
+ * today from adjacent raw-line signals (`isLoneDateRange` on the trailing
+ * segment) has a structured answer already present on the canonical entry —
+ * `start_date` / `end_date` — so this reads that instead.
+ *
+ * DERIVED, not stored (locked via `/clarify`, 2026-07-11): `CanonicalResume`
+ * carries the dates on `fields.experience[]` / `fields.education[]`; adding an
+ * `isDatedEntry` field would be a second source of truth to keep in lockstep —
+ * the exact parallel-shape cost the epic (#441) removes. So it is a pure
+ * predicate over the dates the entry already holds.
+ *
+ * NOTE — this is NOT the flush-right routing discriminator. Whether a date draws
+ * flush-right (`headerLineDate` / `subLineDate`) still turns on
+ * {@link isLoneDateRange} over the *formatted* range, because that decision is a
+ * render-shape / re-parse concern (a lone `2020` or a season range stays glued;
+ * only a two-anchor range right-aligns), and Stage C keeps the rendered bytes
+ * byte-identical. `isDatedEntry` answers the coarser "is this a dated entry at
+ * all" question §7 names.
+ */
+export function isDatedEntry(entry: {
+  start_date?: string;
+  end_date?: string;
+}): boolean {
+  return Boolean(entry.start_date || entry.end_date);
+}
+
 /** Longest a leading achievement segment can be and still read as a "type"
  *  label ("Patent", "Publication", "Exit", "Best Paper Award") rather than a
  *  full sentence — guards against bolding an entire prose title that merely
@@ -417,7 +448,23 @@ function groupExperienceEntriesByLabel(
 // ── Builder ───────────────────────────────────────────────────────────────────
 
 /**
- * Build the flat ATS render model from the surface's own props.
+ * Build the flat ATS render model as a projection off the canonical résumé
+ * (#444, Stage C; `docs/canonical-resume-model.md` §4). `buildAtsResumeModel` is
+ * now `canonical → AtsResumeModel`: it lifts the `CascadeResult` façade into the
+ * {@link CanonicalResume} and reads its **field core** and **section headings**
+ * through {@link projectDisplay}, the same seam Stage B (#443) established and
+ * left tagged for this stage — so the render model no longer reaches straight
+ * into `result.parsed` / `result.sections.sectionHeadings`.
+ *
+ * Stage C is **additive** (§4): the output type is unchanged and `render-ats-pdf`
+ * is not re-pointed, so the rendered bytes stay byte-identical (the corpus +
+ * render round-trip goldens are the gate). The renderer's source flips and the
+ * type retires at Stage E.
+ *
+ * Stage-D remainder: the contact confidence gating still reads
+ * `result.fieldConfidence` (via {@link buildContact}), which `CanonicalResume`
+ * does not yet carry — `fieldConfidence` migrates to the canonical model at
+ * Stage D (§2.3). Field/heading reads route through the projection here.
  *
  * `edit` is optional — when omitted, no in-memory overrides are applied and the
  * model reflects the raw parse (used by tests / non-edit callers).
@@ -427,7 +474,8 @@ export function buildAtsResumeModel(
   score: AnonymousAtsScore,
   edit?: Pick<EditableParse, "contactOverrides" | "bulletOverrides">,
 ): AtsResumeModel {
-  const parsed = result.parsed;
+  const display = projectDisplay(canonicalFromCascade(result));
+  const parsed = display.parsed;
   const contactOverrides = edit?.contactOverrides ?? {};
   const bulletOverrides = edit?.bulletOverrides ?? {};
 
@@ -696,8 +744,10 @@ export function buildAtsResumeModel(
     parsed.achievements_placement === "above_experience";
   // Verbatim source headings (#285) — display-only; scoring stays canonical-
   // keyed. Falls back to the canonical word when a section wasn't opened by a
-  // recognized/other header (e.g. synthesized or profile-only content).
-  const headings = result.sections?.sectionHeadings;
+  // recognized/other header (e.g. synthesized or profile-only content). Routed
+  // through the display projection (#444, Stage C) — the read Stage B (#443) left
+  // tagged for this stage in `projections.ts`.
+  const headings = display.sectionHeadings;
   const achievementsSection: AtsSection | null =
     achievementEntries.length > 0
       ? {

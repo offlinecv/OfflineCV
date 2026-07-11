@@ -23,11 +23,15 @@
  * recomputed from the canonical model, headings derived, etc.) without editing a
  * single call site.
  *
+ * Routed through {@link projectDisplay} as of Stage C (#444):
+ *   - `pdf/ats-resume-model.ts` — `buildAtsResumeModel` reads the field core and
+ *     `sectionHeadings` for the exported PDF through {@link projectDisplay} (the
+ *     render+export projection), not straight off `result.parsed` /
+ *     `result.sections`.
+ *
  * NOT yet routed through these projections (byte-identical today, but will drift
- * from the editor/scorer once Stage C+ makes a body re-derive — route them when
+ * from the editor/scorer once Stage D+ makes a body re-derive — route them when
  * that stage lands):
- *   - `pdf/ats-resume-model.ts` reads `result.sections?.sectionHeadings` for
- *     exported-PDF headings → fold into the render+export projection (Stage C).
  *   - `hooks/useResumeAnalysisLlm.ts` reads `result.sections.byName` for
  *     disagreement gating → fold into the llm-diff projection (Stage D).
  */

@@ -171,7 +171,11 @@ if (cuts.length > 0 &&
 
 The *problem class* named in #438 is real — "is this line a category header or a dated entry?" is decided from **adjacent raw-line signals** (`isLoneDateRange` on the trailing segment) rather than from a structured field on a canonical model. The cited symbol is just wrong.
 
-**Acceptance test the canonical model must pass:** a one-line `Title  Dates` role under a section header routes as a **dated entry**, not a sub-section boundary, with the header-vs-entry call keyed off a structured `isDatedEntry` property on `CanonicalResume` — not off `isLoneDateRange`/`hasDateRange` re-scanning neighboring raw lines. Capture it as a fixture + assertion at Stage C (where the render+export projection takes over) and carry it green through Stage E.
+**Acceptance test the canonical model must pass:** a one-line `Title  Dates` role under a section header routes as a **dated entry**, not a sub-section boundary, with the header-vs-entry call keyed off a **derived** `isDatedEntry` predicate over the entry's structured dates — not off `isLoneDateRange`/`hasDateRange` re-scanning neighboring raw lines.
+
+> **§7 correction (folded in at Stage C, #444).** Earlier this read "keyed off a structured `isDatedEntry` **property** on `CanonicalResume`." That over-specified: the structure (`start_date` / `end_date` + precision) is **already** on the entry (`fields.experience[]` / `fields.education[]`). A stored `isDatedEntry` field would be a second entries representation parallel to the field core — exactly the parallel-shape lockstep cost this epic removes (considered and **rejected** via `/clarify`, 2026-07-11). So `isDatedEntry` is a **derived predicate** — `Boolean(start_date || end_date)` — over the dates the entry already holds (`isDatedEntry` in `pdf/ats-resume-model.ts`), never a new core or field. It answers §7's coarse "is this a dated entry at all"; the finer flush-right routing (`headerLineDate` / `subLineDate`) stays on `isLoneDateRange` over the *formatted* range, a render-shape concern Stage C keeps byte-identical.
+
+Capture it as a fixture + assertion at Stage C (where the render+export projection takes over) and carry it green through Stage E.
 
 ---
 
