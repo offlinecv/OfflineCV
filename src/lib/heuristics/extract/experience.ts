@@ -151,8 +151,13 @@ function propagateSharedEmployer(
     }
     if (banner && isBannerContinuation(entry)) {
       // A bare "Title, Team" continuation: inherit the shared employer, keeping
-      // the per-block `title` / `team` intact. The prior `company` was a title
-      // duplicate (already truthy), so the entry's confidence score is unchanged.
+      // the per-block `title` / `team` intact. Only the empty-company branch
+      // gains a real `company` here, so it earns the +0.25 company weight
+      // `experienceFromBlock` withheld; the other branches were already truthy,
+      // so their score is unchanged.
+      if (entry.company === "") {
+        built[i].score = Math.min(built[i].score + 0.25, 1);
+      }
       built[i].entry = { ...entry, company: banner };
       continue;
     }
