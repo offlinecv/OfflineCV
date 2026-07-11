@@ -147,6 +147,32 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   // whole cascade (contact, experience, and education all dropped). Removing the
   // spurious item-count arm from `probeScanned` (character sparsity is the
   // reliable scanned signal) restores the full round-trip; no line remains.
+
+  // ── One-line experience header (#436) ──
+  // The Download-PDF exporter now emits a ONE-LINE experience header
+  // ("Title · Company, Location · Team", date flush-right) instead of the older
+  // stacked two-line shape (#284/#298). The text-only parser has no font signal,
+  // so it used the two-line STRUCTURE to tell title from company; on one line
+  // that signal is gone, and fixtures with neutral / parenthetical / two-column
+  // company names re-parse title↔company-swapped or company-truncated. This is a
+  // deliberate look-over-fidelity tradeoff (`ats-resume-model.ts`); teaching the
+  // parser to round-trip the one-line shape is tracked as #436. Delete each line
+  // below as #436 lands (the ratchet forces it — a fixed fixture trips the
+  // stale-entry check).
+  "google-docs/google-docs-skia-proxy-achievements-oneline.pdf": ["experience"],
+  "google-docs/google-docs-skia-proxy-certifications.pdf": ["experience"],
+  "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["experience"],
+  "google-docs/google-docs-skia-proxy-role-first-experience.pdf": ["experience"],
+  "google-docs/google-docs-skia-proxy-two-column.pdf": ["experience"],
+  "latex/awesome-cv-resume.pdf": ["experience"],
+  "latex/deedy-resume-macfonts.pdf": ["experience"],
+  "latex/deedy-resume-openfonts.pdf": ["experience"],
+  "unknown/chromium-asymmetric-sidebar.pdf": ["experience"],
+  "unknown/chromium-two-column-sidebar.pdf": ["experience"],
+  "unknown/single-column-year-only-roundtrip.pdf": ["experience"],
+  "unknown/synthetic-two-experience-sections.pdf": ["experience"],
+  "unknown/two-column-achievements-sidebar.pdf": ["experience"],
+  "unknown/weasyprint-cairo-two-column.pdf": ["experience"],
 };
 
 function walkPdfs(dir: string): string[] {

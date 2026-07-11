@@ -4,20 +4,21 @@
 /**
  * Round-trip guard for the #425 team-on-the-org-line change.
  *
- * `buildAtsResumeModel` now joins `exp.team` onto the experience sub-line
- * ("Company · Location · Team  Dates"). The team/division was previously dropped
- * at model-build time even though the parser populates it. The RISK is that
- * adding a third `· team` segment to the parser's date-anchor org line perturbs
- * re-segmentation (the #298 company/title-swap signature). This test proves it
- * does not: a two-role résumé carrying company + location + team renders and
- * RE-parses back to the same title / company / location / dates per role.
+ * `buildAtsResumeModel` joins `exp.team` onto the experience header as the
+ * trailing segment ("Title · Company, Location · Team", date flush-right — the
+ * one-line shape, #436). The team/division was previously dropped at model-build
+ * time even though the parser populates it. The RISK is that adding a `· team`
+ * segment perturbs re-segmentation (the #298 company/title-swap signature). This
+ * test proves it does not for a clean two-role résumé: it renders and RE-parses
+ * back to the same title / company / location / dates per role.
  *
  * The `team` field itself is not asserted on re-parse — the reconstructed
- * single-column shape shows the team on the org line, but the parser folds the
- * third middot segment into the role header without re-extracting a distinct
- * `team` field. That is acceptable: the export's job is to DISPLAY the team, and
- * the round-trip invariants the corpus gate protects (title/company/dates) stay
- * intact. The sub-line assertion below confirms the team is actually rendered.
+ * single-column shape shows the team on the header line, but the parser folds
+ * the trailing middot segment into the role header without re-extracting a
+ * distinct `team` field. That is acceptable: the export's job is to DISPLAY the
+ * team, and the round-trip invariants the corpus gate protects
+ * (title/company/dates) stay intact. The header assertion below confirms the
+ * team is actually rendered.
  *
  * PII-free: synthetic persona, all fields fabricated.
  */
@@ -86,17 +87,22 @@ describe("#425 — team on the org line round-trips through the parser", () => {
     reparsed = await runCascade(await renderAtsResumePdf(model));
   });
 
-  it("renders the team as the third middot segment on the org sub-line", () => {
+  it("renders the team as the trailing middot segment on the one-line header", () => {
     const exp = model.sections.find((s) => s.heading === "Experience");
     const entries = exp?.entries ?? [];
-    // Org (Company · Location · Team) on the sub-line; the range date is carried
-    // separately in `subLineDate` and drawn flush-right (#425), not glued.
-    expect(entries[0]?.subLine).toBe(
-      "Google · Mountain View, CA · Enterprise Platforms",
+    // One-line header (#436): "Title · Company, Location · Team"; the range date
+    // is carried separately in `headerLineDate` and drawn flush-right (#425),
+    // not glued. The team is still displayed — now the trailing segment of the
+    // header rather than a sub-line.
+    expect(entries[0]?.headerLine).toBe(
+      "Senior Product Manager · Google, Mountain View, CA · Enterprise Platforms",
     );
-    expect(entries[0]?.subLineDate).toBe("2021 – 2024");
-    expect(entries[1]?.subLine).toBe("Meta · Menlo Park, CA · Ads Platform");
-    expect(entries[1]?.subLineDate).toBe("2018 – 2021");
+    expect(entries[0]?.headerLineDate).toBe("2021 – 2024");
+    expect(entries[0]?.subLine).toBeUndefined();
+    expect(entries[1]?.headerLine).toBe(
+      "Product Manager · Meta, Menlo Park, CA · Ads Platform",
+    );
+    expect(entries[1]?.headerLineDate).toBe("2018 – 2021");
   });
 
   it("re-parses each role's title / company / location / dates back into the right fields", () => {

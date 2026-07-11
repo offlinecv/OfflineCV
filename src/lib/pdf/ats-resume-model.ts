@@ -461,53 +461,33 @@ export function buildAtsResumeModel(
   const sections: AtsSection[] = [];
 
   // ── Experience ──
-  // Round-trip layout (#284): emit the STACKED shape the text-only parser is
-  // tuned to re-segment — the role TITLE on the bold header line, and
-  // "Company · Location" followed by the dates after a whitespace gap (not a
-  // third " · " — see the join below) on the sub-line. The date lives there
-  // so that line becomes the parser's `date_range` anchor (one anchor per role),
-  // with the title one line above it (within the 2-line header lookback). The
-  // old single combined "Title · Company · Location" header line (with the date
-  // on a separate bare line below) did NOT round-trip: a "Company Inc. Location"
-  // header trips the description-prose detector (an "Inc. Seoul"-style internal
-  // sentence break), so the parser folded the header into the previous role's
-  // body and dropped the role — and a bulletless role had no anchor at all.
+  // One-line header shape: "Title · Company, Location · Team" with the date
+  // drawn FLUSH-RIGHT on that same header line — the compact canonical résumé
+  // shape. Company and Location join with a COMMA ("116 Ideas Inc., Santa
+  // Clara, CA"); the title and any team/division segment attach with " · ".
+  //
+  // ⚠️ Round-trip tradeoff (supersedes the #284/#298 stacked two-line shape):
+  // collapsing title + company onto one line removes the structural signal the
+  // text-only parser used to tell title from company (it has no font signal —
+  // `groupIntoLines` drops per-glyph weight). Some fixtures with neutral or
+  // parenthetical company names therefore re-parse title↔company-swapped or
+  // truncated, so the corpus round-trip gate baselines `experience` on the
+  // affected fixtures (see KNOWN_FAILURES in `corpus-roundtrip.test.ts`) and
+  // the #284/#358 repro assertions are relaxed. Teaching the parser to
+  // round-trip this one-line shape (disambiguateCompanyTitle + entry-block
+  // anchoring) is tracked as a follow-up (#436) — until then this is a
+  // deliberate look-over-fidelity choice for the reconstructed PDF.
   const experienceEntries: AtsEntry[] = experiences.map((exp, i) => {
     const title = (exp.title ?? "").trim();
-    // Company · Location · Team joined with the dot (#425 — the team/division
-    // was previously dropped at model-build time even though the parser
-    // populates `exp.team`).
-    const org = joinHeader([exp.company, exp.location, exp.team], " · ");
+    // Company + Location join with a comma; the team/division (#425) attaches
+    // after a middot: "Company, Location · Team".
+    const companyLocation = [exp.company, exp.location]
+      .filter((p) => p && p.trim())
+      .join(", ");
+    const org = joinHeader([companyLocation, exp.team], " · ");
     const dateRange = experienceDateRange(exp);
-    // Re-parse company/title tiebreak signature (#298 round-trip). When this role
-    // has a TITLE, the org line becomes the parser's date-anchor sub-line, and the
-    // re-parser only treats a bare, neutral anchor as the company (rather than the
-    // title) when the line carries a positive org signal. A `Company · Location`
-    // org already carries the " · " tell; a location-less `Company` does NOT, so a
-    // neutral company ("Leadership Experience", "Books for Life") would re-parse
-    // inverted (company↔title swap).
-    const needsOrgSignature =
-      Boolean(title) && Boolean(org) && Boolean(dateRange) && !org.includes(" · ");
-    // The date range is now drawn FLUSH-RIGHT on the same visual line as the org
-    // text (#425), carried in `subLineDate`/`headerLineDate` instead of glued
-    // into the line's text. This lands where #430 had to defer it: the `flush()`
-    // date-range exemption (`sections.ts`) now keeps the wide flush-right same-`y`
-    // gap from splitting the date onto its own `PdfLine`, so the org line keeps
-    // its date anchor on re-parse. Two guards keep the anchor semantics intact:
-    //   1. Only a genuine range (`isLoneDateRange`) is right-aligned — a
-    //      single-token date stays glued, since the exemption only protects
-    //      ranges `DATE_RANGE_RE` matches.
-    //   2. The location-less-with-title case (`needsOrgSignature`) still GLUES
-    //      the date after a " · " ("Company · Dates"): a flush-right date draws
-    //      no middot between org and date, so right-aligning it would strip the
-    //      #298 org signature and re-parse the neutral company as a title. That
-    //      one case keeps the #430 glued shape.
-    // Flush-right only when there is org text to anchor the date against: an
-    // org-less role (title only) has no sub-line to right-align onto, so its
-    // date stays glued (as #430) — routing it to `subLineDate` with no `subLine`
-    // would drop it at draw time.
-    const rightAlignDate =
-      isLoneDateRange(dateRange) && !needsOrgSignature && Boolean(org);
+    // Full one-line header: "Title · Company, Location · Team".
+    const headerText = joinHeader([title, org], " · ");
     const bullets = resolveBullets(
       bulletsByIndex.get(expOffset + i),
       bulletOverrides,
@@ -523,33 +503,14 @@ export function buildAtsResumeModel(
       endDate: exp.is_current ? undefined : exp.end_date || undefined,
       isCurrent: exp.is_current || undefined,
     };
-    if (title) {
-      // Titled role: title leads the bold header, org sits on the sub-line.
-      let subLine: string | undefined;
-      let subLineDate: string | undefined;
-      if (needsOrgSignature) {
-        // Location-less-with-title: keep the date GLUED after a " · " so the
-        // re-parse anchor carries the org signature (#298); never flush-right.
-        subLine = [org, dateRange].filter(Boolean).join(" · ") || undefined;
-      } else if (rightAlignDate) {
-        // Range date: org on the sub-line, date drawn flush-right on it.
-        subLine = org || undefined;
-        subLineDate = dateRange;
-      } else {
-        // Single-token date (or none): glue after a whitespace gap, as #430.
-        subLine = [org, dateRange].filter(Boolean).join("  ") || undefined;
-      }
-      return { headerLine: title, subLine, subLineDate, bullets, fields };
-    }
-    // Title-less role: org leads the bold header line; the date draws flush-right
-    // on the header's own baseline. A title-less header is not disambiguated, so
-    // it needs no " · " signature. When there is no org text to anchor against
-    // (or the date is a single token) fall back to gluing the date inline.
-    if (org && rightAlignDate) {
-      return { headerLine: org, headerLineDate: dateRange, bullets, fields };
+    // A genuine range draws flush-right on the header (the `flush()` date-range
+    // exemption keeps it merged into the header `PdfLine` on re-parse); a
+    // single-token date (or none) glues after a whitespace gap.
+    if (headerText && isLoneDateRange(dateRange)) {
+      return { headerLine: headerText, headerLineDate: dateRange, bullets, fields };
     }
     return {
-      headerLine: [org, dateRange].filter(Boolean).join("  ") || "Experience",
+      headerLine: [headerText, dateRange].filter(Boolean).join("  ") || "Experience",
       bullets,
       fields,
     };

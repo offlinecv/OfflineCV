@@ -97,14 +97,12 @@ describe("buildAtsResumeModel", () => {
     expect(headings).toEqual(["Experience", "Education", "Skills"]);
 
     const exp = model.sections[0].entries[0];
-    // Stacked round-trip shape (#284): title leads the bold header, the
-    // "Company · Location  Dates" line (carrying the parser's date anchor) sits
-    // on the sub-line so the emitted role re-segments back to one entry. With no
-    // location the company is bare, so the date is joined with a " · " org-signature
-    // marker (#298 review) — "Company · Dates" — so the re-parse anchor is
-    // recognizably the company, not the title.
-    expect(exp.headerLine).toBe("Senior PM");
-    expect(exp.subLine).toBe("Acme · 2020 – 2024");
+    // One-line header (#436): "Title · Company, Location" on a single header
+    // line, the range date drawn flush-right via `headerLineDate` (no sub-line).
+    // With no location the company is bare, so the header is "Senior PM · Acme".
+    expect(exp.headerLine).toBe("Senior PM · Acme");
+    expect(exp.headerLineDate).toBe("2020 – 2024");
+    expect(exp.subLine).toBeUndefined();
     expect(exp.bullets).toEqual([
       "Led migration of legacy auth system to OAuth",
       "Drove 30% revenue growth across the platform",
@@ -285,7 +283,7 @@ describe("buildAtsResumeModel", () => {
 
   // ── #425 ───────────────────────────────────────────────────────────────────
 
-  it("puts the role team/division on the org sub-line as the third middot segment (#425)", () => {
+  it("puts the role team/division on the one-line header as the trailing segment (#436)", () => {
     const result = makeResult({
       experience: [
         {
@@ -301,15 +299,16 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const exp = model.sections.find((s) => s.heading === "Experience")!;
-    // Company · Location · Team on the sub-line; the range date is carried
-    // separately in `subLineDate` and drawn flush-right (#425), not glued.
-    expect(exp.entries[0].subLine).toBe(
-      "Google · Mountain View, CA · Enterprise Platforms",
+    // One-line header: "Title · Company, Location · Team"; the range date is
+    // carried separately in `headerLineDate` and drawn flush-right, not glued.
+    expect(exp.entries[0].headerLine).toBe(
+      "Senior PM · Google, Mountain View, CA · Enterprise Platforms",
     );
-    expect(exp.entries[0].subLineDate).toBe("2021 – 2024");
+    expect(exp.entries[0].headerLineDate).toBe("2021 – 2024");
+    expect(exp.entries[0].subLine).toBeUndefined();
   });
 
-  it("omits the team segment cleanly when a role has no team (#425)", () => {
+  it("omits the team segment cleanly when a role has no team (#436)", () => {
     const result = makeResult({
       experience: [
         {
@@ -324,16 +323,19 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const exp = model.sections.find((s) => s.heading === "Experience")!;
-    // Org on the sub-line; the range date is drawn flush-right via `subLineDate`.
-    expect(exp.entries[0].subLine).toBe("Google · Mountain View, CA");
-    expect(exp.entries[0].subLineDate).toBe("2021 – 2024");
+    // No team → header is "Title · Company, Location"; date flush-right.
+    expect(exp.entries[0].headerLine).toBe(
+      "Senior PM · Google, Mountain View, CA",
+    );
+    expect(exp.entries[0].headerLineDate).toBe("2021 – 2024");
+    expect(exp.entries[0].subLine).toBeUndefined();
   });
 
-  it("keeps the #298 org signature glued (no flush-right) for a location-less titled role (#425)", () => {
-    // A neutral, location-less company with a title needs the " · " org signature
-    // on the anchor line so the re-parser reads it as the company, not the title.
-    // A flush-right date draws no middot between them, so this case stays GLUED:
-    // the date is on `subLine` after " · ", and `subLineDate` is unset.
+  it("renders a location-less titled role on one line, date flush-right (#436)", () => {
+    // The old two-line shape needed a " · " org signature on a separate anchor
+    // line so the re-parser read the neutral company as the company, not the
+    // title (#298). The one-line header drops that mechanism; the re-parse
+    // title/company disambiguation for this shape is deferred to #436.
     const result = makeResult({
       experience: [
         {
@@ -347,13 +349,15 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const exp = model.sections.find((s) => s.heading === "Experience")!;
-    expect(exp.entries[0].subLine).toBe("Leadership Experience · 2021 – 2024");
-    expect(exp.entries[0].subLineDate).toBeUndefined();
+    expect(exp.entries[0].headerLine).toBe("Chair · Leadership Experience");
+    expect(exp.entries[0].headerLineDate).toBe("2021 – 2024");
+    expect(exp.entries[0].subLine).toBeUndefined();
   });
 
-  it("keeps a single-token (non-range) date glued rather than flush-right (#425)", () => {
+  it("keeps a single-token (non-range) date glued rather than flush-right (#436)", () => {
     // Only a lone year is known — not a range — so it is NOT drawn flush-right
-    // (the flush() exemption only protects ranges); it stays glued on `subLine`.
+    // (the flush() exemption only protects ranges); it stays glued after a
+    // whitespace gap on the one-line header.
     const result = makeResult({
       experience: [
         {
@@ -367,8 +371,9 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const exp = model.sections.find((s) => s.heading === "Experience")!;
-    expect(exp.entries[0].subLine).toBe("Globex · Austin, TX  2022");
-    expect(exp.entries[0].subLineDate).toBeUndefined();
+    expect(exp.entries[0].headerLine).toBe("Analyst · Globex, Austin, TX  2022");
+    expect(exp.entries[0].headerLineDate).toBeUndefined();
+    expect(exp.entries[0].subLine).toBeUndefined();
   });
 
   it("fully display-formats contact links (scheme + www stripped) so the www round-trip holds (#425)", () => {
