@@ -660,18 +660,32 @@ class Layout {
   }
 
   /**
-   * Draw a bullet as a sequence of `{ text, bold }` runs with word-level
-   * wrapping. A "word" is a run of non-whitespace that may span a bold→regular
-   * boundary (so mid-word emphasis draws correctly); words are separated by a
-   * single space. The bullet marker leads the first line; continuation lines
-   * use `hangingIndent`. Bold is preserved across wraps because it is tracked
-   * per chunk, not per line.
+   * Draw a header line as bold/regular runs (#425 — achievement "type" labels).
+   * A leading substring wrapped in the sentinel emphasis markers draws bold, the
+   * rest regular; the sentinels are stripped, so the round-trip text is
+   * unchanged. Same word-wrapping engine as `drawBullet`, but with no bullet
+   * marker and drawn at the header color/size.
+   */
+  drawHeaderRuns(text: string, size: number) {
+    this.drawRuns(parseBoldRuns(text), size, 0, { marker: "", color: this.black });
+  }
+
+  /**
+   * Draw a sequence of `{ text, bold }` runs with word-level wrapping. A "word"
+   * is a run of non-whitespace that may span a bold→regular boundary (so mid-
+   * word emphasis draws correctly); words are separated by a single space. A
+   * leading `marker` (the bullet "• " by default, "" for a header) leads the
+   * first line; continuation lines use `hangingIndent`. Bold is preserved across
+   * wraps because it is tracked per chunk, not per line.
    */
   private drawRuns(
     runs: Array<{ text: string; bold: boolean }>,
     size: number,
     hangingIndent: number,
+    opts: { marker?: string; color?: RGB } = {},
   ) {
+    const marker = opts.marker ?? BULLET_MARKER;
+    const color = opts.color ?? this.black;
     const words = groupRunsIntoWords(
       runs,
       size,
@@ -682,18 +696,22 @@ class Layout {
     const wordWidth = (w: WordChunk[]) =>
       w.reduce((sum, c) => sum + c.width, 0);
     const space = this.fonts.regular.widthOfTextAtSize(" ", size);
-    const markerWidth = this.fonts.regular.widthOfTextAtSize(BULLET_MARKER, size);
+    const markerWidth = marker
+      ? this.fonts.regular.widthOfTextAtSize(marker, size)
+      : 0;
     const rightEdge = PAGE_WIDTH - MARGIN;
     const lineHeight = size * LINE_GAP;
 
     this.ensure(lineHeight);
-    this.page.drawText(BULLET_MARKER, {
-      x: MARGIN,
-      y: this.y - size,
-      size,
-      font: this.fonts.regular,
-      color: this.black,
-    });
+    if (marker) {
+      this.page.drawText(marker, {
+        x: MARGIN,
+        y: this.y - size,
+        size,
+        font: this.fonts.regular,
+        color,
+      });
+    }
     let x = MARGIN + markerWidth;
     let atLineStart = true;
 
@@ -713,7 +731,7 @@ class Layout {
           y: this.y - size,
           size,
           font: chunk.bold ? this.fonts.bold : this.fonts.regular,
-          color: this.black,
+          color,
         });
         x += chunk.width;
       }
@@ -868,18 +886,25 @@ function drawSectionHeading(layout: Layout, heading: string) {
 
 function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
   if (entry.headerLine) {
-    layout.drawText(entry.headerLine, {
-      // Every header is bold EXCEPT where the model opts out — the skills list,
-      // which reads as regular-weight body text (#425).
-      bold: entry.headerBold ?? true,
-      size: SIZE_HEADER,
-      atomicSegments: entry.atomicSegments,
-      // Flush-right date on the header line (#425) — set for a title-less role /
-      // degree-less program, where the org/date anchor lives on the header.
-      rightText: entry.headerLineDate,
-      rightColor: mutedColor,
-      rightSize: SIZE_SUB,
-    });
+    if (entry.headerLine.includes(EMPHASIS_OPEN)) {
+      // Mixed-weight header (#425 — an achievement "type" label bolded, the rest
+      // regular). Routed to the run-aware draw; these headers carry no flush-right
+      // date, so the marker-less run path covers them.
+      layout.drawHeaderRuns(entry.headerLine, SIZE_HEADER);
+    } else {
+      layout.drawText(entry.headerLine, {
+        // Every header is bold EXCEPT where the model opts out — the skills list,
+        // which reads as regular-weight body text (#425).
+        bold: entry.headerBold ?? true,
+        size: SIZE_HEADER,
+        atomicSegments: entry.atomicSegments,
+        // Flush-right date on the header line (#425) — set for a title-less role /
+        // degree-less program, where the org/date anchor lives on the header.
+        rightText: entry.headerLineDate,
+        rightColor: mutedColor,
+        rightSize: SIZE_SUB,
+      });
+    }
   }
   if (entry.subLine) {
     layout.advance(GAP_AFTER_HEADER);

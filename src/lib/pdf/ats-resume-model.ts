@@ -33,6 +33,7 @@ import {
 } from "../score/group-bullets.ts";
 import { buildProjectDates } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
+import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import { buildContactFields, formatLinkDisplay } from "../contact.ts";
 import type {
   ContactOverrides,
@@ -331,6 +332,42 @@ function joinHeader(parts: Array<string | undefined>, sep: string): string {
   return parts.filter((p) => p && p.trim()).join(sep);
 }
 
+/** Longest a leading achievement segment can be and still read as a "type"
+ *  label ("Patent", "Publication", "Exit", "Best Paper Award") rather than a
+ *  full sentence — guards against bolding an entire prose title that merely
+ *  happens to carry a " · ". */
+const ACHIEVEMENT_TYPE_MAX_LEN = 28;
+
+/**
+ * Build an achievement's header string, emphasizing ONLY the leading "type"
+ * label (e.g. "Patent", "Publication") when the title carries the canonical
+ * "Type · description" shape — the rest of the header stays regular weight.
+ *
+ * The type is the first `" · "`-delimited segment of `title`, kept only when it
+ * is short enough to read as a label (see `ACHIEVEMENT_TYPE_MAX_LEN`). It is
+ * wrapped in the renderer's PUA emphasis sentinels (`EMPHASIS_OPEN`/`CLOSE`) so
+ * `drawEntry` draws just that run bold; the sentinels are stripped before
+ * drawing, so the round-trip text is unchanged (display-only weight, #284/#425).
+ * When there is no such type segment the header is returned plain (no
+ * sentinels) and the caller keeps the whole line bold as before.
+ */
+function buildAchievementHeader(
+  title: string,
+  year: string | undefined,
+): { headerLine: string; emphasized: boolean } {
+  const idx = title.indexOf(" · ");
+  const type = idx >= 0 ? title.slice(0, idx).trim() : "";
+  if (idx >= 0 && type && type.length <= ACHIEVEMENT_TYPE_MAX_LEN) {
+    const rest = title.slice(idx + 3);
+    const emphasizedTitle = `${EMPHASIS_OPEN}${type}${EMPHASIS_CLOSE} · ${rest}`;
+    return {
+      headerLine: joinHeader([emphasizedTitle, year], " · "),
+      emphasized: true,
+    };
+  }
+  return { headerLine: joinHeader([title, year], " · "), emphasized: false };
+}
+
 /**
  * Group experience entries into one {@link AtsSection} per distinct
  * experience-category section (#311), preserving document order. `experiences`
@@ -540,21 +577,33 @@ export function buildAtsResumeModel(
   }));
 
   // ── Achievements ──
-  const achievementEntries: AtsEntry[] = achievements.map((ach, i) => ({
-    headerLine: joinHeader([ach.title, ach.year], " · ") || "Achievement",
-    subLine: undefined,
-    bullets: resolveBullets(
-      bulletsByIndex.get(achOffset + i),
-      bulletOverrides,
-      ach.description,
-    ),
-    // Structured source for the JSON Resume `awards[]` export (#421). Display
-    // code never reads `fields`; it renders `headerLine`/`bullets` above.
-    fields: {
-      ...(ach.title ? { title: ach.title } : {}),
-      ...(ach.year ? { startDate: ach.year } : {}),
-    },
-  }));
+  const achievementEntries: AtsEntry[] = achievements.map((ach, i) => {
+    // Bold only the leading "type" label ("Patent", "Publication") when the
+    // title carries the canonical "Type · description" shape; the rest of the
+    // header stays regular. A type-less title keeps the whole header bold.
+    const { headerLine, emphasized } = buildAchievementHeader(
+      ach.title,
+      ach.year,
+    );
+    return {
+      headerLine: headerLine || "Achievement",
+      // The emphasized header carries its own per-run weight (via the sentinels),
+      // so the base line is drawn regular; a plain header stays fully bold.
+      headerBold: emphasized ? false : true,
+      subLine: undefined,
+      bullets: resolveBullets(
+        bulletsByIndex.get(achOffset + i),
+        bulletOverrides,
+        ach.description,
+      ),
+      // Structured source for the JSON Resume `awards[]` export (#421). Display
+      // code never reads `fields`; it renders `headerLine`/`bullets` above.
+      fields: {
+        ...(ach.title ? { title: ach.title } : {}),
+        ...(ach.year ? { startDate: ach.year } : {}),
+      },
+    };
+  });
 
   // ── Education ──
   const educationEntries: AtsEntry[] = education.map((edu) => {

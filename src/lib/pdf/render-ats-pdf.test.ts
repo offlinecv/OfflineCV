@@ -413,4 +413,31 @@ describe("#425 render — headline + metric bold", () => {
     for (const token of ["Drove", "40%", "revenue", "50K", "users"])
       expect(text).toContain(token);
   });
+
+  it("draws an emphasized achievement header (type bold) with no sentinel leakage", async () => {
+    // A header carrying the PUA emphasis sentinels routes to the run-aware
+    // draw (`drawHeaderRuns`); the sentinels are stripped, so the visible text
+    // is the plain "Patent · … · 2019" header (no PUA glyphs reach the page).
+    const model: AtsResumeModel = {
+      contact: { name: "Jane Candidate", links: [] },
+      sections: [
+        {
+          heading: "Achievements",
+          kind: "achievements",
+          entries: [
+            {
+              headerLine: `${emph("Patent")} · Issued US10275736B1; bulk catalog editor · 2019`,
+              headerBold: false,
+              bullets: [],
+            },
+          ],
+        },
+      ],
+    };
+    const text = await extractPdfText(await renderAtsResumePdf(model));
+    expect(text).not.toContain(EMPHASIS_OPEN);
+    expect(text).not.toContain(EMPHASIS_CLOSE);
+    for (const token of ["Patent", "US10275736B1", "editor", "2019"])
+      expect(text).toContain(token);
+  });
 });

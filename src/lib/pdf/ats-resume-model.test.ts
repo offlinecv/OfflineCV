@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { buildAtsResumeModel } from "./ats-resume-model.ts";
+import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import type { CascadeResult } from "../heuristics/types.ts";
 import type { AnonymousAtsScore, BulletObservation } from "../score/score.ts";
 
@@ -199,6 +200,55 @@ describe("buildAtsResumeModel", () => {
     expect(headings.indexOf("Achievements")).toBeLessThan(
       headings.indexOf("Experience"),
     );
+  });
+
+  it("bolds only the leading type label of a 'Type · description' achievement", () => {
+    const result = makeResult({
+      heuristic_achievements: [
+        {
+          title: "Patent · Issued US10275736B1; bulk catalog editor",
+          year: "2019",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const ach = model.sections.find((s) => s.kind === "achievements");
+    const entry = ach!.entries[0];
+    // The type ("Patent") is wrapped in the PUA emphasis sentinels; the rest of
+    // the header — description and year — stays outside them (regular weight).
+    expect(entry.headerLine).toBe(
+      `${EMPHASIS_OPEN}Patent${EMPHASIS_CLOSE} · ` +
+        "Issued US10275736B1; bulk catalog editor · 2019",
+    );
+    // Base line drawn regular; the sentinels carry the per-run bold.
+    expect(entry.headerBold).toBe(false);
+  });
+
+  it("keeps a type-less achievement header fully bold (no emphasis sentinels)", () => {
+    const result = makeResult({
+      heuristic_achievements: [{ title: "Best Paper Award", year: "2021" }],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const entry = model.sections.find((s) => s.kind === "achievements")!
+      .entries[0];
+    expect(entry.headerLine).toBe("Best Paper Award · 2021");
+    expect(entry.headerLine).not.toContain(EMPHASIS_OPEN);
+    expect(entry.headerBold).toBe(true);
+  });
+
+  it("does not treat a long prose first segment as a type label", () => {
+    // A " · " inside a full sentence must not bold the whole clause — the
+    // leading segment exceeds the type-label length guard.
+    const longFirst =
+      "Recognized across the org for sustained impact over many years · runner-up";
+    const result = makeResult({
+      heuristic_achievements: [{ title: longFirst, year: "2020" }],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const entry = model.sections.find((s) => s.kind === "achievements")!
+      .entries[0];
+    expect(entry.headerLine).not.toContain(EMPHASIS_OPEN);
+    expect(entry.headerBold).toBe(true);
   });
 
   it("omits empty sections", () => {
