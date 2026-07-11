@@ -27,6 +27,8 @@ import {
   type AnonymousAtsScore,
 } from "../lib/score/score.ts";
 import type { CascadeResult, HeuristicParsedResume } from "../lib/heuristics/types.ts";
+import { toCanonicalResume } from "../lib/heuristics/canonical.ts";
+import { projectScoreSections } from "../lib/heuristics/projections.ts";
 import {
   consumeJdFitHandoff,
   type JdFitHandoff,
@@ -83,7 +85,8 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
       fieldConfidence: base.fieldConfidence,
       triggers: base.triggers,
       rawText,
-      sections,
+      // Score projection (#443, Stage B) off the handoff-edited canonical cores.
+      sections: projectScoreSections(toCanonicalResume(parsed, sections)),
     });
     return { result: { ...base, parsed }, score, parsed };
   }, [

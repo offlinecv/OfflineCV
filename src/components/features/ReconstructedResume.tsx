@@ -28,6 +28,8 @@
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
+import { canonicalFromCascade } from "../../lib/heuristics/canonical.ts";
+import { projectDisplay } from "../../lib/heuristics/projections.ts";
 import type {
   AnonymousAtsScore,
   BulletObservation,
@@ -828,7 +830,10 @@ export function ReconstructedResume({
   /** Optional JD-driven rewrite steering (#226). Set only on `/jd-fit`. */
   jdContext?: string;
 }) {
-  const parsed = result.parsed;
+  // Display projection (#443, Stage B) — parsed field core + the user's own
+  // section headings, read off the canonical model rather than `result` directly.
+  const display = projectDisplay(canonicalFromCascade(result));
+  const parsed = display.parsed;
   const bullets = score.bullets ?? [];
   const projects = parsed.projects ?? [];
   const achievements = parsed.heuristic_achievements ?? [];
@@ -979,7 +984,7 @@ export function ReconstructedResume({
   // Skills, which also render an add affordance unconditionally.
   const achievementsSection = (
     <AchievementsSection
-      heading={result.sections?.sectionHeadings?.get("achievements")}
+      heading={display.sectionHeadings?.get("achievements")}
       achievements={achievements}
       groups={achievementGroups}
       bulletOverrides={bulletOverrides}
@@ -1046,7 +1051,7 @@ export function ReconstructedResume({
       />
       {achievementsAbove && achievementsSection}
       <ExperienceSection
-        heading={result.sections?.sectionHeadings?.get("experience")}
+        heading={display.sectionHeadings?.get("experience")}
         sectionLabels={parsed.experience.map((e) => e.section_label)}
         groups={experienceRenderGroups}
         resumeSections={resumeSections}
@@ -1067,7 +1072,7 @@ export function ReconstructedResume({
         onAddBullet={addBullet}
       />
       <ProjectsSection
-        heading={result.sections?.sectionHeadings?.get("projects")}
+        heading={display.sectionHeadings?.get("projects")}
         projects={projects}
         groups={projectGroups}
         bulletOverrides={bulletOverrides}
@@ -1080,7 +1085,7 @@ export function ReconstructedResume({
       />
       {!achievementsAbove && achievementsSection}
       <EducationSection
-        heading={result.sections?.sectionHeadings?.get("education")}
+        heading={display.sectionHeadings?.get("education")}
         education={parsed.education}
         educationOverrides={educationOverrides}
         onEducationFieldChange={(index, field, value) =>
@@ -1093,7 +1098,7 @@ export function ReconstructedResume({
         onEntryField={setEntryField}
       />
       <SkillsSection
-        heading={result.sections?.sectionHeadings?.get("skills")}
+        heading={display.sectionHeadings?.get("skills")}
         skills={parsed.skills}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}
