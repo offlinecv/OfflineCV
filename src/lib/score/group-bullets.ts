@@ -57,6 +57,10 @@ export interface BulletExperience {
   title?: string;
   company?: string;
   location?: string;
+  /** Team / department / sub-org — the trailing "· Team" header segment. Carried
+   *  for display + edit in the reconstructed résumé (renders in the Download PDF
+   *  header via ats-resume-model, #425). Absent on projects/achievements. */
+  team?: string;
   start_date?: string;
   end_date?: string;
   is_current?: boolean;

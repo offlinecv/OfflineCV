@@ -249,8 +249,8 @@ function dedupeConfEdits(confEdits: readonly LegacyConfEdit[]): LegacyConfEdit[]
 
 // ── Experience / education header fields ────────────────────────────────────
 
-/** Fold `experience` header overrides (title/company/location/dates) into the
- *  cloned experience entries in place, keyed by array index. */
+/** Fold `experience` header overrides (title/company/location/team/dates) into
+ *  the cloned experience entries in place, keyed by array index. */
 function applyExperienceHeaderOverrides(
   experience: HeuristicParsedResume["experience"],
   overrides: Record<number, ExperienceFieldOverrides>,
@@ -264,6 +264,9 @@ function applyExperienceHeaderOverrides(
     // `location` is optional; a clear ("") drops it so render/PDF treat it as
     // absent rather than emitting an empty location segment.
     if (fields.location !== undefined) exp.location = fields.location || undefined;
+    // `team` is optional too; mirror `location` — a clear ("") drops it so the
+    // render/PDF header emits no trailing " · Team" segment.
+    if (fields.team !== undefined) exp.team = fields.team || undefined;
     if (fields.start_date !== undefined) exp.start_date = fields.start_date;
     if (fields.end_date !== undefined) exp.end_date = fields.end_date;
   }
@@ -619,6 +622,7 @@ function pushAddedEntry(
       title: entry.title,
       company: entry.subtitle ?? "",
       ...(entry.location ? { location: entry.location } : {}),
+      ...(entry.team ? { team: entry.team } : {}),
       start_date: entry.start_date,
       end_date: entry.end_date,
       description,

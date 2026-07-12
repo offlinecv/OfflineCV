@@ -172,6 +172,35 @@ describe("applyOverrides", () => {
     expect(parsed.experience[0].location).toBe("Springfield, IL");
   });
 
+  it("applies an experience team override and clears it on empty string", () => {
+    const parsed = baseParsed();
+    parsed.experience[0].team = "Enterprise Platforms";
+    const { fields: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { team: "Cloud Infrastructure" } },
+      {},
+      [],
+    );
+    expect(out.experience[0].team).toBe("Cloud Infrastructure");
+
+    const { fields: cleared } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { team: "" } },
+      {},
+      [],
+    );
+    // A cleared team drops off entirely so the render/PDF emits no "· Team".
+    expect(cleared.experience[0].team).toBeUndefined();
+    // Original untouched.
+    expect(parsed.experience[0].team).toBe("Enterprise Platforms");
+  });
+
   it("propagates a bullet edit to rawText, sections, and the matching description", () => {
     const parsed = baseParsed();
     const rawText = "• Built a thing\n• Shipped another thing";
