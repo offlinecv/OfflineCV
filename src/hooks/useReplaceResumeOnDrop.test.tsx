@@ -36,13 +36,14 @@ function pdf(name = "resume.pdf"): File {
  */
 function fireDrag(
   type: "dragenter" | "dragover" | "dragleave" | "drop",
-  opts: { hasFiles?: boolean; files?: File[] } = {},
+  opts: { hasFiles?: boolean; files?: File[]; types?: string[] } = {},
 ): { preventDefault: ReturnType<typeof vi.fn> } {
   const { hasFiles = true, files = [] } = opts;
+  const types = opts.types ?? (hasFiles ? ["Files"] : ["text/plain"]);
   const preventDefault = vi.fn();
   const event = new Event(type, { bubbles: true });
   Object.defineProperty(event, "dataTransfer", {
-    value: { types: hasFiles ? ["Files"] : ["text/plain"], files },
+    value: { types, files },
     configurable: true,
   });
   Object.defineProperty(event, "preventDefault", {
@@ -157,6 +158,25 @@ describe("useReplaceResumeOnDrop", () => {
     mount();
     fireDrag("dragenter", { hasFiles: false });
     expect(api.isDragging).toBe(false);
+  });
+
+  // Linux (GNOME/GTK file managers) surfaces a dragged file as "text/uri-list",
+  // not the macOS/Windows "Files" token — the overlay must still arm and
+  // dragover must still preventDefault, or the browser opens the dropped PDF.
+  it("arms on a Linux 'text/uri-list' file drag and preventDefaults dragover", () => {
+    mount();
+    fireDrag("dragenter", { types: ["text/uri-list"] });
+    expect(api.isDragging).toBe(true);
+    expect(
+      fireDrag("dragover", { types: ["text/uri-list"] }).preventDefault,
+    ).toHaveBeenCalled();
+  });
+
+  // Firefox exposes "application/x-moz-file" during a file drag.
+  it("arms on a Firefox 'application/x-moz-file' drag", () => {
+    mount();
+    fireDrag("dragenter", { types: ["application/x-moz-file"] });
+    expect(api.isDragging).toBe(true);
   });
 
   it("is inert while disabled", () => {

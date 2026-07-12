@@ -42,8 +42,24 @@ export interface ReplaceResumeOnDrop {
 
 function hasFiles(e: DragEvent): boolean {
   // `types` is populated during drag (the file list itself isn't readable until
-  // drop for security reasons), so it's the reliable "is this a file drag" gate.
-  return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  // drop for security reasons), so it's the "is this a file drag" gate.
+  //
+  // The token varies by platform, so we can't match "Files" alone: Chrome and
+  // Safari on macOS/Windows expose the literal "Files", but Linux (GNOME/GTK
+  // file managers) surfaces a dragged file only as "text/uri-list" on
+  // dragenter/dragover — and Firefox adds "application/x-moz-file". The real
+  // File objects still arrive in `dataTransfer.files` at drop on every platform
+  // (the inline DropZone proves this), so matching any of these arms the overlay
+  // and lets `onDragOver` preventDefault cross-platform. A non-file drop (e.g. a
+  // dragged link, which also carries "text/uri-list") is still filtered out by
+  // `isAcceptedResumeFile` at drop, so the worst case is a spurious overlay flash
+  // with no replace.
+  return Array.from(e.dataTransfer?.types ?? []).some(
+    (t) =>
+      t === "Files" ||
+      t === "application/x-moz-file" ||
+      t === "text/uri-list",
+  );
 }
 
 export function useReplaceResumeOnDrop({
