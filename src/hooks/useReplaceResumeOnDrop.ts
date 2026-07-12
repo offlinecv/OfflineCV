@@ -20,7 +20,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { isAcceptedResumeFile } from "../lib/file-accept.ts";
+import {
+  isAcceptedResumeFile,
+  dragHasFiles,
+  extractDroppedFile,
+} from "../lib/file-accept.ts";
 
 interface UseReplaceResumeOnDropArgs {
   /** Only listen while true (e.g. a parse is `done`). */
@@ -40,75 +44,61 @@ export interface ReplaceResumeOnDrop {
   cancelReplace: () => void;
 }
 
-function hasFiles(e: DragEvent): boolean {
-  // `types` is populated during drag (the file list itself isn't readable until
-  // drop for security reasons), so it's the "is this a file drag" gate.
-  //
-  // The token varies by platform, so we can't match "Files" alone: Chrome and
-  // Safari on macOS/Windows expose the literal "Files", but Linux (GNOME/GTK
-  // file managers) surfaces a dragged file only as "text/uri-list" on
-  // dragenter/dragover — and Firefox adds "application/x-moz-file". The real
-  // File objects still arrive in `dataTransfer.files` at drop on every platform
-  // (the inline DropZone proves this), so matching any of these arms the overlay
-  // and lets `onDragOver` preventDefault cross-platform. A non-file drop (e.g. a
-  // dragged link, which also carries "text/uri-list") is still filtered out by
-  // `isAcceptedResumeFile` at drop, so the worst case is a spurious overlay flash
-  // with no replace.
-  return Array.from(e.dataTransfer?.types ?? []).some(
-    (t) =>
-      t === "Files" ||
-      t === "application/x-moz-file" ||
-      t === "text/uri-list",
-  );
-}
-
 export function useReplaceResumeOnDrop({
   enabled,
   onFile,
 }: UseReplaceResumeOnDropArgs): ReplaceResumeOnDrop {
   const [isDragging, setIsDragging] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  // dragenter/dragleave fire per child element as the cursor crosses the DOM;
-  // a depth counter keeps the overlay from flickering mid-drag.
-  const dragDepth = useRef(0);
+  // `dragover` fires continuously (~every few hundred ms) while a drag is over
+  // the window, so we drive the overlay off a self-refreshing timeout instead of
+  // a dragenter/dragleave depth counter. The counter approach is fragile here:
+  // the overlay is `pointer-events-none`, so drag events keep hitting the
+  // elements *under* it, firing unbalanced enter/leave pairs that desync the
+  // count and leave the overlay stuck or dead on the next drag. A timeout has no
+  // such state to corrupt — when dragover stops firing (cursor left the window
+  // or the drag ended), the overlay clears itself.
+  const dragEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
 
-    const onDragEnter = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
-      dragDepth.current += 1;
-      setIsDragging(true);
+    const stopDragging = () => {
+      if (dragEndTimer.current !== null) {
+        clearTimeout(dragEndTimer.current);
+        dragEndTimer.current = null;
+      }
+      setIsDragging(false);
     };
+
     const onDragOver = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
+      if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault(); // allow the drop + suppress the browser's file-open
+      setIsDragging(true);
+      if (dragEndTimer.current !== null) clearTimeout(dragEndTimer.current);
+      dragEndTimer.current = setTimeout(stopDragging, 150);
     };
+    // Leaving the window entirely reports a null relatedTarget — clear at once
+    // for snappy feedback; the dragover timeout is the backstop for the rest.
     const onDragLeave = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
-      dragDepth.current = Math.max(0, dragDepth.current - 1);
-      if (dragDepth.current === 0) setIsDragging(false);
+      if (e.relatedTarget === null) stopDragging();
     };
     const onDrop = (e: DragEvent) => {
-      if (!hasFiles(e)) return;
+      if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
-      dragDepth.current = 0;
-      setIsDragging(false);
-      const file = e.dataTransfer?.files?.[0];
+      stopDragging();
+      const file = extractDroppedFile(e.dataTransfer);
       if (file && isAcceptedResumeFile(file)) setPendingFile(file);
     };
 
-    window.addEventListener("dragenter", onDragEnter);
     window.addEventListener("dragover", onDragOver);
     window.addEventListener("dragleave", onDragLeave);
     window.addEventListener("drop", onDrop);
     return () => {
-      window.removeEventListener("dragenter", onDragEnter);
       window.removeEventListener("dragover", onDragOver);
       window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
-      dragDepth.current = 0;
-      setIsDragging(false);
+      stopDragging();
     };
   }, [enabled]);
 
