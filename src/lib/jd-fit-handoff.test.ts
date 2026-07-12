@@ -34,10 +34,24 @@ beforeEach(() => {
 });
 
 // Minimal handoff payload — only the fields the shape-guard checks need to be
-// present; the rest round-trips opaquely through JSON.
+// present; the rest round-trips opaquely through JSON. `canonical.sections`
+// carries the `byName` / `sectionHeadings` Maps the scorer reads, so the sample
+// exercises the Map-preserving serialization (#450), not just field passthrough.
 const samplePayload = {
   result: {
-    canonical: { fields: { full_name: "Synthetic Persona" } },
+    canonical: {
+      fields: { full_name: "Synthetic Persona" },
+      sections: {
+        byName: new Map<string, readonly string[]>([
+          ["experience", ["Did a thing at Acme"]],
+          ["skills", ["TypeScript", "React"]],
+        ]),
+        accomplishmentSections: ["experience"],
+        source: "regex",
+        sectionHeadings: new Map<string, string>([["skills", "SKILLS"]]),
+      },
+      fieldConfidence: { full_name: 0.9 },
+    },
     rawText: "x",
   },
   score: { overall: 72 },
@@ -48,6 +62,35 @@ describe("jd-fit handoff round-trip (#226)", () => {
     writeJdFitHandoff(samplePayload);
     const got = consumeJdFitHandoff();
     expect(got).toEqual(samplePayload);
+  });
+
+  it("revives sections.byName / sectionHeadings as real Maps (#450)", () => {
+    // Regression: `JSON.stringify` drops Map entries to `{}`, so the scorer's
+    // `sections.byName.get(...)` used to throw on /jd-fit. The revived payload
+    // must carry live Maps, not plain objects.
+    writeJdFitHandoff(samplePayload);
+    const got = consumeJdFitHandoff();
+    const sections = got?.result.canonical.sections as unknown as {
+      byName: Map<string, readonly string[]>;
+      sectionHeadings: Map<string, string>;
+    };
+    expect(sections.byName).toBeInstanceOf(Map);
+    expect(sections.byName.get("skills")).toEqual(["TypeScript", "React"]);
+    expect(sections.sectionHeadings).toBeInstanceOf(Map);
+    expect(sections.sectionHeadings.get("skills")).toBe("SKILLS");
+  });
+
+  it("rejects a payload whose byName did not round-trip as a Map (#450)", () => {
+    // A naively-stringified payload (no Map sentinel) revives byName as a plain
+    // object → guard rejects so the scorer never hits `.get is not a function`.
+    globalThis.sessionStorage.setItem(
+      JDFIT_HANDOFF_KEY,
+      JSON.stringify({
+        result: { canonical: { sections: { byName: {} } } },
+        score: { overall: 50 },
+      }),
+    );
+    expect(consumeJdFitHandoff()).toBeNull();
   });
 
   it("is one-shot — a second consume returns null", () => {

@@ -26,6 +26,33 @@ import type { AnonymousAtsScore } from "./score/score.ts";
 /** sessionStorage key for the parser-audit → JD-fit handoff payload (#226). */
 export const JDFIT_HANDOFF_KEY = "rl_jdfit_handoff";
 
+/**
+ * Sentinel wrapper for a `Map` in the JSON payload (#450). `JSON.stringify`
+ * turns a `Map` into `{}` (its own enumerable props, of which a Map has none),
+ * silently dropping every entry — so `result.canonical.sections.byName` and
+ * `.sectionHeadings` would revive as empty `{}` and the scorer's
+ * `sections.byName.get(...)` would throw on `/jd-fit`. We tag Maps on write and
+ * rebuild them on read. Structural (not path-based) so it survives further
+ * canonical-shape churn (#441): any `Map` anywhere in the payload round-trips.
+ */
+interface SerializedMap {
+  readonly __rlMap: readonly [unknown, unknown][];
+}
+
+function replaceMaps(_key: string, value: unknown): unknown {
+  return value instanceof Map
+    ? ({ __rlMap: [...value.entries()] } satisfies SerializedMap)
+    : value;
+}
+
+function reviveMaps(_key: string, value: unknown): unknown {
+  return value !== null &&
+    typeof value === "object" &&
+    Array.isArray((value as SerializedMap).__rlMap)
+    ? new Map((value as SerializedMap).__rlMap)
+    : value;
+}
+
 export interface JdFitHandoff {
   /** The edited CascadeResult `<Result>` receives ({ ...result, parsed }). */
   result: CascadeResult;
@@ -36,7 +63,10 @@ export interface JdFitHandoff {
 /** Write the one-shot handoff payload before navigating to /jd-fit. */
 export function writeJdFitHandoff(payload: JdFitHandoff): void {
   try {
-    sessionStorage.setItem(JDFIT_HANDOFF_KEY, JSON.stringify(payload));
+    sessionStorage.setItem(
+      JDFIT_HANDOFF_KEY,
+      JSON.stringify(payload, replaceMaps),
+    );
   } catch {
     // Quota / private-mode / disabled storage — navigation still proceeds and
     // /jd-fit falls back to its own DropZone.
@@ -57,10 +87,13 @@ export function consumeJdFitHandoff(): JdFitHandoff | null {
   }
   if (raw === null) return null;
   try {
-    const parsed = JSON.parse(raw) as JdFitHandoff;
+    const parsed = JSON.parse(raw, reviveMaps) as JdFitHandoff;
     // Minimal shape guard: a malformed/partial payload falls back to DropZone.
     if (!parsed || typeof parsed !== "object") return null;
     if (!parsed.result || !parsed.result.canonical || !parsed.score) return null;
+    // The scorer/section reads require a revived `byName` Map, not a plain
+    // object (#450). Reject a payload where it failed to round-trip as a Map.
+    if (!(parsed.result.canonical.sections?.byName instanceof Map)) return null;
     return parsed;
   } catch {
     return null;
