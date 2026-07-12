@@ -178,6 +178,27 @@ export async function loadResumeFromLibrary(
     if (bytes === undefined) return undefined;
     const result = await runCascade(bytes);
     const score = scoreForResult(result);
+    // Re-stamp the record at the current shape version so this migration is a
+    // one-time cost (#452 review). Without re-saving, every subsequent load of a
+    // stale record re-parses from the Blob again. Preserve the stored blob and id;
+    // only the snapshot advances. Best-effort — a failed re-save just means the
+    // next load re-parses, so hydration never blocks on it.
+    const migrated: SavedResumeSnapshot = {
+      result,
+      score,
+      sourceKind: snap.sourceKind,
+      shapeVersion: CACHE_SHAPE_VERSION,
+    };
+    try {
+      await saveResume({
+        id: record.id,
+        filename: record.filename,
+        blob: record.blob,
+        parse: migrated,
+      });
+    } catch {
+      // non-fatal: leave the record stale; it re-parses on the next load.
+    }
     return {
       id: record.id,
       filename: record.filename,

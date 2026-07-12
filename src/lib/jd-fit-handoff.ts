@@ -34,6 +34,11 @@ export const JDFIT_HANDOFF_KEY = "rl_jdfit_handoff";
  * `sections.byName.get(...)` would throw on `/jd-fit`. We tag Maps on write and
  * rebuild them on read. Structural (not path-based) so it survives further
  * canonical-shape churn (#441): any `Map` anywhere in the payload round-trips.
+ *
+ * `__rlMap` is a RESERVED key in this handoff payload (#452 review): `reviveMaps`
+ * rebuilds any object with an array-valued `__rlMap` prop into a `Map`, so no
+ * résumé field may carry a literal `__rlMap` array of its own — it would be
+ * silently coerced to a `Map` on read. No canonical field has that shape today.
  */
 interface SerializedMap {
   readonly __rlMap: readonly [unknown, unknown][];
