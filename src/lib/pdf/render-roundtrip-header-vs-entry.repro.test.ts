@@ -57,19 +57,22 @@ const ROLES = [
 
 function makeResult(): CascadeResult {
   return {
-    parsed: {
-      full_name: "Alex Candidate",
-      email: "alex@example.com",
-      phone: "(312) 555-0123",
-      location: "Chicago, IL",
-      summary: "Backend engineer with a decade building high-scale services.",
-      skills: ["Go", "Distributed Systems", "PostgreSQL"],
-      experience: ROLES,
-      education: [],
-      projects: [],
-      heuristic_achievements: [],
+    canonical: {
+      fields: {
+        full_name: "Alex Candidate",
+        email: "alex@example.com",
+        phone: "(312) 555-0123",
+        location: "Chicago, IL",
+        summary: "Backend engineer with a decade building high-scale services.",
+        skills: ["Go", "Distributed Systems", "PostgreSQL"],
+        experience: ROLES,
+        education: [],
+        projects: [],
+        heuristic_achievements: [],
+      },
+      sections: { byName: new Map(), accomplishmentSections: ["experience", "projects", "achievements"], source: "regex" },
+      fieldConfidence: {},
     },
-    fieldConfidence: {},
     confidence: 1,
     triggers: [],
     linkAnnotations: [],
@@ -110,7 +113,7 @@ describe("§7 header-vs-entry — a one-line `Title  Dates` role routes as a dat
   });
 
   it("re-parses both one-line roles back as dated experience entries, not a folded boundary", () => {
-    const reExp = reparsed.parsed.experience ?? [];
+    const reExp = reparsed.canonical.fields.experience ?? [];
     // Both roles survive as distinct dated entries — neither collapsed into the
     // other nor dropped into prose.
     expect(reExp.length).toBe(ROLES.length);

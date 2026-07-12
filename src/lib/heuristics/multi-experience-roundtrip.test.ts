@@ -25,8 +25,21 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { runCascade } from "./cascade.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
+import { projectScoreSections } from "./projections.ts";
+import type { CascadeResult } from "./types.ts";
 import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
 import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
+
+/** Grade a cascade result the same way production does (#445): read the parse
+ *  core off the canonical model rather than the retired top-level façade. */
+const scoreOf = (r: CascadeResult) =>
+  computeAnonymousAtsScore({
+    parsed: r.canonical.fields,
+    fieldConfidence: r.canonical.fieldConfidence,
+    triggers: r.triggers,
+    rawText: r.rawText,
+    sections: projectScoreSections(r.canonical),
+  });
 
 const FIXTURE = path.resolve(
   __dirname,
@@ -49,7 +62,7 @@ describe("#311 multiple experience sections — parse + round-trip", { timeout: 
   it("parses two experience-category sections into labeled roles", async () => {
     const bytes = await fsp.readFile(FIXTURE);
     const cascade = await runCascade(new Uint8Array(bytes));
-    const experience = cascade.parsed.experience ?? [];
+    const experience = cascade.canonical.fields.experience ?? [];
 
     // Every role retains its originating group label, in document order.
     expect(distinctLabels(experience)).toEqual([
@@ -70,7 +83,7 @@ describe("#311 multiple experience sections — parse + round-trip", { timeout: 
   it("renders one ATS-model section per group, in document order, with verbatim headings", async () => {
     const bytes = await fsp.readFile(FIXTURE);
     const cascade = await runCascade(new Uint8Array(bytes));
-    const model = buildAtsResumeModel(cascade, computeAnonymousAtsScore(cascade));
+    const model = buildAtsResumeModel(cascade, scoreOf(cascade));
     const headings = model.sections.map((s) => s.heading);
     // Both experience headings appear, in order, ahead of Education.
     expect(headings).toContain("Performance Experience");
@@ -83,15 +96,15 @@ describe("#311 multiple experience sections — parse + round-trip", { timeout: 
   it("round-trips the grouping through Download-PDF export (2 sections → 2)", async () => {
     const bytes = await fsp.readFile(FIXTURE);
     const parse1 = await runCascade(new Uint8Array(bytes));
-    const model = buildAtsResumeModel(parse1, computeAnonymousAtsScore(parse1));
+    const model = buildAtsResumeModel(parse1, scoreOf(parse1));
     const exportedBytes = await renderAtsResumePdf(model);
     const parse3 = await runCascade(new Uint8Array(exportedBytes));
 
     // Two distinct experience-category groups on the way IN. (The export
     // uppercases section headings, so compare on group COUNT, not exact text.)
-    expect(distinctLabels(parse1.parsed.experience ?? []).length).toBe(2);
+    expect(distinctLabels(parse1.canonical.fields.experience ?? []).length).toBe(2);
     // No roles lost across the round-trip — every role survives export + re-parse.
-    expect(parse3.parsed.experience?.length).toBe(parse1.parsed.experience?.length);
+    expect(parse3.canonical.fields.experience?.length).toBe(parse1.canonical.fields.experience?.length);
     // #436 known gap: on the way BACK OUT the grouping currently flattens to a
     // single unlabeled experience section — 0 distinct category labels survive.
     // Main's one-line experience header (#434) renders each role as a single
@@ -102,6 +115,6 @@ describe("#311 multiple experience sections — parse + round-trip", { timeout: 
     // section_label. Restoring the 2 → 2 round-trip needs the one-line-header
     // title/company disambiguation tracked in #436; this assertion tightens back
     // to `.toBe(2)` when #436 lands.
-    expect(distinctLabels(parse3.parsed.experience ?? []).length).toBe(0);
+    expect(distinctLabels(parse3.canonical.fields.experience ?? []).length).toBe(0);
   });
 });

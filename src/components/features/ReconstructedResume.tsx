@@ -28,7 +28,6 @@
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
-import { canonicalFromCascade } from "../../lib/heuristics/canonical.ts";
 import { projectDisplay } from "../../lib/heuristics/projections.ts";
 import type {
   AnonymousAtsScore,
@@ -832,7 +831,7 @@ export function ReconstructedResume({
 }) {
   // Display projection (#443, Stage B) — parsed field core + the user's own
   // section headings, read off the canonical model rather than `result` directly.
-  const display = projectDisplay(canonicalFromCascade(result));
+  const display = projectDisplay(result.canonical);
   const parsed = display.parsed;
   const bullets = score.bullets ?? [];
   const projects = parsed.projects ?? [];
@@ -875,7 +874,7 @@ export function ReconstructedResume({
   // renders from, so every consumer (AttentionStrip's per-row gaps, the
   // pre-download critical-field gate) agrees with what the card shows.
   const contactDisplayFields = applyContactOverrides(
-    buildContactFields(result),
+    buildContactFields(result.canonical),
     contactOverrides,
   );
   const contactMissing = contactCompleteness(contactDisplayFields).missing;

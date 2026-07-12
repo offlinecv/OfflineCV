@@ -115,14 +115,14 @@ describe.runIf(process.env.RL_EDUCATION_PDF)(
         join(HERE, "../../..", "internal/education");
 
       const cascade = await runCascade(new Uint8Array(readFileSync(path)));
-      const p = cascade.parsed;
+      const p = cascade.canonical.fields;
 
       const score = computeAnonymousAtsScore({
         parsed: { ...p },
-        fieldConfidence: cascade.fieldConfidence,
+        fieldConfidence: cascade.canonical.fieldConfidence,
         triggers: cascade.triggers,
         rawText: cascade.rawText,
-        sections: cascade.sections,
+        sections: cascade.canonical.sections,
       });
 
       // OUTPUT: the parsed education entries.
@@ -139,12 +139,12 @@ describe.runIf(process.env.RL_EDUCATION_PDF)(
 
       // INPUT (routed): the education region the chunker scanned, if any.
       const educationRegion = [
-        ...(cascade.sections.byName.get("education") ?? []),
+        ...(cascade.canonical.sections.byName.get("education") ?? []),
       ];
       const regionPresent = educationRegion.length > 0;
 
       // Section-detection overview (all regions, line counts only).
-      const sectionOverview = [...cascade.sections.byName.entries()].map(
+      const sectionOverview = [...cascade.canonical.sections.byName.entries()].map(
         ([name, lines]) => `${name}(${lines.length})`,
       );
 

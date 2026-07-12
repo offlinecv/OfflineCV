@@ -16,6 +16,7 @@ import type {
   ResumeEducation,
 } from "../score/types.ts";
 import type { SectionedResume } from "./sections.ts";
+import type { CanonicalResume } from "./canonical.ts";
 
 // ── PDF primitives ──────────────────────────────────────────────────────────
 
@@ -170,12 +171,24 @@ export interface HeuristicResult {
 
 export type EscalationSuggestion = "none" | "ner" | "ocr" | "llm";
 
-/** Shape emitted by `runCascade`. */
+/**
+ * Shape emitted by `runCascade`. As of the Stage D+E cutover (#445) the parse
+ * core is the single `canonical` member (`CanonicalResume` — field core,
+ * section-membership core, and per-field confidence); the pre-cutover
+ * compatibility façade (top-level `parsed` / `sections` / `fieldConfidence`
+ * duplicating the canonical cores) is gone. Everything else on this shape is
+ * genuinely-additional cascade metadata the canonical model does not own
+ * (extraction text, layout triggers, link annotations, diagnostics, timings).
+ */
 export interface CascadeResult {
-  parsed: HeuristicParsedResume;
+  /** The canonical parse model — the single source of truth for parsed fields,
+   *  section membership, and per-field confidence. Reads that used to hit
+   *  `result.parsed` / `result.sections` / `result.fieldConfidence` now go
+   *  through `result.canonical.{fields,sections,fieldConfidence}` or a
+   *  projection over `result.canonical`. */
+  canonical: CanonicalResume;
   /** Overall 0..1 score. Dashboard compares against a threshold. */
   confidence: number;
-  fieldConfidence: FieldConfidence;
   triggers: LayoutTrigger[];
   suggestedEscalation: EscalationSuggestion;
   /** Which tiers actually executed (for debugging / telemetry). */
@@ -191,11 +204,6 @@ export interface CascadeResult {
    *  scanned PDFs or when the emitter could not produce useful structure.
    *  Section splitters prefer this over `rawText` when present. */
   markdown?: string;
-  /** Typed view of the detected section structure (#132). The scorer reads
-   *  `sections.byName.get("skills")` to keep bulleted skills out of the
-   *  experience-bullet pool (#30); replaces the retired `skillsSectionText`
-   *  side-channel. Always present (built from the `PdfSection[]` Tier 1 holds). */
-  sections: SectionedResume;
   /** Link annotations Tier 0 lifted off the PDF. Surfaces URLs hyperlinked
    *  behind visible words; also the only credible recovered signal on
    *  `fonts_unmappable` PDFs where the text path came back empty. Empty

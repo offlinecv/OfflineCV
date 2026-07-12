@@ -32,6 +32,8 @@ import type {
   HeuristicParsedResume,
   FieldConfidence,
 } from "../heuristics/types.ts";
+import type { CanonicalResume } from "../heuristics/canonical.ts";
+import { toCanonicalResume } from "../heuristics/canonical.ts";
 import type { BulletObservation } from "../score/score.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
@@ -49,23 +51,19 @@ import type {
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 
-export interface ApplyOverridesResult {
-  parsed: HeuristicParsedResume;
-  rawText: string;
-  /** The section view with any live bullet edits folded into the matching
-   *  accomplishment-section line. This is what the anonymous scorer pools its
-   *  bullet set from (#133), so a live edit must be reflected here to re-grade
-   *  Specificity / Structure. */
-  sections: SectionedResume;
-  /** The base `fieldConfidence` with every user-affirmed contact edit bumped to
-   *  1 (and an explicit clear dropped to 0). The scorer and the contact-gap
-   *  display both gate contact fields by confidence, but a user override lands
-   *  a value WITHOUT a matching new confidence — so a typed-in GitHub URL, or a
-   *  guided-picker LinkedIn add, would score as "still absent" against the
-   *  frozen base confidence. Threading this edited view keeps score + display in
-   *  step with the edits (#421 Blocking #1 / #3). */
-  fieldConfidence: FieldConfidence;
-}
+/**
+ * The edit result (#445, Stage D+E): the mutated {@link CanonicalResume} plus
+ * the edited `rawText`. The pre-cutover four-field lockstep quadruple collapses
+ * — `fields` / `sections` / `fieldConfidence` are simply the canonical model's
+ * members (the same three that AC1 unified), so they can no longer drift out of
+ * step. `rawText` is NOT a canonical member (it is cascade metadata); it rides
+ * alongside because the scorer's redacted-date scan re-reads the edited text
+ * (#133), and the section view still carries live bullet edits so the anonymous
+ * scorer re-grades Specificity / Structure from the pooled bullets. The edited
+ * `fieldConfidence` keeps score + contact-gap display in step with user-affirmed
+ * contact edits (#421 Blocking #1 / #3).
+ */
+export type ApplyOverridesResult = CanonicalResume & { rawText: string };
 
 /** A `{ rawText, sections }` pair — the two bullet-pool views that every
  *  bullet-line mutation (replace/remove) must keep in lockstep. */
@@ -834,10 +832,8 @@ export function applyOverrides(
   );
 
   return {
-    parsed: nextParsed,
+    ...toCanonicalResume(nextParsed, nextSections, nextConfidence),
     rawText: views.rawText,
-    sections: nextSections,
-    fieldConfidence: nextConfidence,
   };
 }
 

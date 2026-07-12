@@ -4,7 +4,11 @@
 import { describe, expect, it } from "vitest";
 import { buildAtsResumeModel } from "./ats-resume-model.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
-import type { CascadeResult } from "../heuristics/types.ts";
+import type {
+  CascadeResult,
+  HeuristicParsedResume,
+} from "../heuristics/types.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "../heuristics/sections.ts";
 import type { AnonymousAtsScore, BulletObservation } from "../score/score.ts";
 
 function bullet(text: string, index: number): BulletObservation {
@@ -19,14 +23,20 @@ function bullet(text: string, index: number): BulletObservation {
 }
 
 function makeResult(
-  parsed: Partial<CascadeResult["parsed"]> = {},
+  parsed: Partial<HeuristicParsedResume> = {},
   sectionHeadings?: Partial<Record<string, string>>,
 ): CascadeResult {
   return {
-    ...(sectionHeadings
-      ? { sections: { sectionHeadings: new Map(Object.entries(sectionHeadings)) } }
-      : {}),
-    parsed: {
+    canonical: {
+    sections: {
+      byName: new Map(),
+      accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+      source: "regex",
+      ...(sectionHeadings
+        ? { sectionHeadings: new Map(Object.entries(sectionHeadings)) }
+        : {}),
+    },
+    fields: {
       full_name: "Jane Candidate",
       email: "jane@example.com",
       phone: "(312) 555-0123",
@@ -63,6 +73,7 @@ function makeResult(
       location: 1,
       linkedin_url: 1,
       github_url: 1,
+    },
     },
     confidence: 1,
     triggers: [],

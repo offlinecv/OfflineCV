@@ -61,14 +61,14 @@ describe.runIf(process.env.RL_EXPERIENCE_PDF)(
         join(HERE, "../../..", "internal/experience");
 
       const cascade = await runCascade(new Uint8Array(readFileSync(path)));
-      const p = cascade.parsed;
+      const p = cascade.canonical.fields;
 
       const score = computeAnonymousAtsScore({
         parsed: { ...p },
-        fieldConfidence: cascade.fieldConfidence,
+        fieldConfidence: cascade.canonical.fieldConfidence,
         triggers: cascade.triggers,
         rawText: cascade.rawText,
-        sections: cascade.sections,
+        sections: cascade.canonical.sections,
       });
 
       // OUTPUT: the parsed role entries.
@@ -85,11 +85,11 @@ describe.runIf(process.env.RL_EXPERIENCE_PDF)(
 
       // INPUT: the experience region the entry segmenter scanned.
       const regionLines = [
-        ...(cascade.sections.byName.get("experience") ?? []),
+        ...(cascade.canonical.sections.byName.get("experience") ?? []),
       ];
 
       // Section-detection overview (all regions, line counts only).
-      const sectionOverview = [...cascade.sections.byName.entries()].map(
+      const sectionOverview = [...cascade.canonical.sections.byName.entries()].map(
         ([name, lines]) => `${name}(${lines.length})`,
       );
 

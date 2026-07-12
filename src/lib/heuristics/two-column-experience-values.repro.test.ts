@@ -45,7 +45,7 @@ describe("#369/#370 — two-column sidebar must not corrupt experience fields", 
   beforeAll(async () => {
     const bytes = readFileSync(FIXTURE);
     const c = await runCascade(new Uint8Array(bytes));
-    parsed = c.parsed;
+    parsed = c.canonical.fields;
   });
 
   it("segments all three roles in source order (sidebar not merged in)", () => {

@@ -51,7 +51,7 @@
 
 import type { LayoutTrigger, HeuristicParsedResume } from "./types.ts";
 import type { SectionName } from "./sections.config.ts";
-import type { LlmParsedResume } from "../webllm/parse-resume.ts";
+import type { CanonicalResume } from "./canonical.ts";
 
 /**
  * One detected gap between the heuristic and LLM parse.
@@ -178,23 +178,37 @@ function sectionDropCredible(
  *
  * Pure and deterministic — the same inputs always yield the same array.
  *
- * `presentSections` is the set of section headers the heuristic sectioner
- * detected (`CascadeResult.sections.byName` keys). It gates whole-section drops
- * so an LLM that synthesizes a section absent from the page does not surface a
- * phantom `dropped_section` — see {@link sectionDropCredible}.
+ * Both sides are {@link CanonicalResume} shapes (#445): `heuristic` is the real
+ * cascade canonical; `llm` is the on-device parse coerced through
+ * `projectLlmDiff`. The whole-section-drop gate is derived from the *heuristic*
+ * canonical's section headers (`heuristic.sections.byName` keys — the sectioner
+ * is the ground truth on headers), so an LLM that synthesizes a section absent
+ * from the page does not surface a phantom `dropped_section` — see
+ * {@link sectionDropCredible}. This fold retires the caller-computed
+ * `presentSections` argument that used to read `result.sections.byName` in
+ * `useResumeAnalysisLlm`.
  */
 export function diffParses(
-  heuristic: HeuristicParsedResume,
-  llm: LlmParsedResume,
+  heuristic: CanonicalResume,
+  llm: CanonicalResume,
   triggers: LayoutTrigger[],
-  presentSections: ReadonlySet<SectionName>,
 ): ParseDisagreement[] {
   const out: ParseDisagreement[] = [];
 
+  const heuristicFields = heuristic.fields;
+  const llmFields = llm.fields;
+  // The section headers the heuristic sectioner actually detected. "profile" is
+  // not a `SectionName`, so it is filtered out (mirrors the old call-site set).
+  const presentSections = new Set<SectionName>(
+    [...heuristic.sections.byName.keys()].filter(
+      (n): n is SectionName => n !== "profile",
+    ),
+  );
+
   // ── Scalar contact + summary fields ──
   for (const field of SCALAR_FIELDS) {
-    const h = presentScalar(heuristicScalar(heuristic, field));
-    const l = presentScalar(llm[field]);
+    const h = presentScalar(heuristicScalar(heuristicFields, field));
+    const l = presentScalar(llmFields[field]);
     // Gap only in the LLM-recovered direction: heuristic blank, LLM present.
     if (h === null && l !== null) {
       out.push(
@@ -212,8 +226,8 @@ export function diffParses(
   }
 
   // ── Experience: dropped_section | merged_roles | dropped_role ──
-  const hExp = heuristic.experience.length;
-  const lExp = llm.experience.length;
+  const hExp = heuristicFields.experience.length;
+  const lExp = llmFields.experience.length;
   if (hExp === 0 && lExp > 0 && sectionDropCredible(presentSections, "experience", triggers)) {
     // The whole section vanished from the heuristic parse.
     out.push(
@@ -248,8 +262,8 @@ export function diffParses(
 
   // ── Education: whole-section drop only ──
   if (
-    heuristic.education.length === 0 &&
-    llm.education.length > 0 &&
+    heuristicFields.education.length === 0 &&
+    llmFields.education.length > 0 &&
     sectionDropCredible(presentSections, "education", triggers)
   ) {
     out.push(
@@ -258,7 +272,7 @@ export function diffParses(
           kind: "dropped_section",
           field: "education",
           heuristicValue: null,
-          llmValue: String(llm.education.length),
+          llmValue: String(llmFields.education.length),
         },
         pickCause(triggers, /* preferTwoColumn */ false),
       ),
@@ -267,8 +281,8 @@ export function diffParses(
 
   // ── Skills: whole-section drop only ──
   if (
-    heuristic.skills.length === 0 &&
-    llm.skills.length > 0 &&
+    heuristicFields.skills.length === 0 &&
+    llmFields.skills.length > 0 &&
     sectionDropCredible(presentSections, "skills", triggers)
   ) {
     out.push(
@@ -277,7 +291,7 @@ export function diffParses(
           kind: "dropped_section",
           field: "skills",
           heuristicValue: null,
-          llmValue: String(llm.skills.length),
+          llmValue: String(llmFields.skills.length),
         },
         pickCause(triggers, /* preferTwoColumn */ false),
       ),

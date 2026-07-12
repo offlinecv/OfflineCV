@@ -58,11 +58,11 @@ function walkPdfs(dir: string): string[] {
 
 function scoreFor(cascade: CascadeResult) {
   return computeAnonymousAtsScore({
-    parsed: { ...cascade.parsed },
-    fieldConfidence: cascade.fieldConfidence,
+    parsed: { ...cascade.canonical.fields },
+    fieldConfidence: cascade.canonical.fieldConfidence,
     triggers: cascade.triggers,
     rawText: cascade.rawText,
-    sections: cascade.sections,
+    sections: cascade.canonical.sections,
   });
 }
 

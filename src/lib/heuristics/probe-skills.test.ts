@@ -92,25 +92,25 @@ describe.runIf(process.env.RL_SKILLS_PDF)(
         process.env.RL_SKILLS_OUT ?? join(HERE, "../../..", "internal/skills");
 
       const cascade = await runCascade(new Uint8Array(readFileSync(path)));
-      const p = cascade.parsed;
+      const p = cascade.canonical.fields;
 
       const score = computeAnonymousAtsScore({
         parsed: { ...p },
-        fieldConfidence: cascade.fieldConfidence,
+        fieldConfidence: cascade.canonical.fieldConfidence,
         triggers: cascade.triggers,
         rawText: cascade.rawText,
-        sections: cascade.sections,
+        sections: cascade.canonical.sections,
       });
 
       // OUTPUT: the parsed skills list.
       const skills = [...(p.skills ?? [])];
 
       // INPUT (routed): the skills region the extractor scanned, if any.
-      const skillsRegion = [...(cascade.sections.byName.get("skills") ?? [])];
+      const skillsRegion = [...(cascade.canonical.sections.byName.get("skills") ?? [])];
       const skillsRegionPresent = skillsRegion.length > 0;
 
       // Section-detection overview (all regions, line counts only).
-      const sectionOverview = [...cascade.sections.byName.entries()].map(
+      const sectionOverview = [...cascade.canonical.sections.byName.entries()].map(
         ([name, lines]) => `${name}(${lines.length})`,
       );
 

@@ -32,14 +32,17 @@ const EMPTY_CRITIQUE: ResumeCritique = { bulletFindings: [], missingSections: []
 
 function result(summary?: string, title?: string): CascadeResult {
   return {
-    parsed: {
-      skills: [],
-      experience: title ? [{ title }] : [],
-      education: [],
-      ...(summary ? { summary } : {}),
+    canonical: {
+      fields: {
+        skills: [],
+        experience: title ? [{ title }] : [],
+        education: [],
+        ...(summary ? { summary } : {}),
+      },
+      sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
+      fieldConfidence: {},
     },
     confidence: 0.6,
-    fieldConfidence: {},
     triggers: ["two_column"],
     suggestedEscalation: "none",
     tiers: ["t0_layout", "t1_openresume"],

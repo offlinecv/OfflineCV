@@ -25,9 +25,12 @@ import type { CascadeResult } from "../../lib/heuristics/types.ts";
 
 function result(): CascadeResult {
   return {
-    parsed: { skills: [], experience: [], education: [] },
+    canonical: {
+      fields: { skills: [], experience: [], education: [] },
+      sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
+      fieldConfidence: {},
+    },
     confidence: 0.6,
-    fieldConfidence: {},
     triggers: ["two_column", "fonts_unmappable"],
     suggestedEscalation: "none",
     tiers: ["t0_layout", "t1_openresume"],

@@ -10,8 +10,8 @@
 
 import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
-import { beforeEach, describe, expect, it } from "vitest";
-import { DB_NAME, closeDB } from "./storage/index.ts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DB_NAME, closeDB, saveResume } from "./storage/index.ts";
 import {
   saveResumeToLibrary,
   listLibrary,
@@ -19,10 +19,19 @@ import {
   renameLibraryResume,
   removeLibraryResume,
 } from "./resume-library.ts";
+import { runCascade } from "./heuristics/index.ts";
+import { toCanonicalResume } from "./heuristics/canonical.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./heuristics/sections.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
 import type { AnonymousAtsScore } from "./score/score.ts";
 
+// The stale-shape guard re-parses from the stored blob via `runCascade`; mock it
+// so the test doesn't need a real parseable PDF, and so we can assert the loaded
+// result came from the re-parse rather than a stale-shape deserialize (#445 AC7).
+vi.mock("./heuristics/index.ts", () => ({ runCascade: vi.fn() }));
+
 beforeEach(async () => {
+  vi.mocked(runCascade).mockReset();
   await closeDB();
   await deleteDB(DB_NAME);
 });
@@ -97,6 +106,75 @@ describe("resume-library: rename + delete", () => {
     const id = await save("cv.pdf");
     await removeLibraryResume(id);
     expect(await listLibrary()).toHaveLength(0);
+  });
+});
+
+describe("resume-library: cache-version mismatch (#445 / #321)", () => {
+  it("re-parses from the stored blob instead of deserializing a stale-shape record", async () => {
+    // A re-parsed canonical result the mocked cascade returns, tagged so we can
+    // prove the loaded result came from the re-parse, not the stale snapshot.
+    const reparsed = {
+      canonical: toCanonicalResume(
+        { full_name: "Reparsed Persona", skills: [], experience: [], education: [] },
+        {
+          byName: new Map(),
+          accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+          source: "regex",
+        },
+        {},
+      ),
+      confidence: 0,
+      triggers: [],
+      suggestedEscalation: "none",
+      tiers: ["t0_layout", "t1_openresume"],
+      rawText: "",
+      linkAnnotations: [],
+      diagnostics: { rawCharCount: 0, extractedCharCount: 0, pages: 1, elapsedMs: 0 },
+      timings: { t0_layout_ms: 0, t1_openresume_ms: 0 },
+    } as unknown as CascadeResult;
+    vi.mocked(runCascade).mockResolvedValue(reparsed);
+
+    // Write a pre-cutover record DIRECTLY through the storage layer: a stale
+    // snapshot with NO `shapeVersion` and the old top-level-`parsed` façade shape,
+    // plus a real source blob to re-parse from.
+    const staleSnapshot = {
+      result: { parsed: { full_name: "Stale Persona" }, sections: { byName: new Map() } },
+      score: score(41),
+      sourceKind: "pdf",
+      // shapeVersion intentionally absent — a pre-#445 record.
+    };
+    const rec = await saveResume({
+      filename: "old.pdf",
+      blob: new Blob([bytes().buffer], { type: "application/pdf" }),
+      parse: staleSnapshot,
+    });
+
+    const loaded = await loadResumeFromLibrary(rec.id);
+
+    // The stale record was NOT deserialized — the cascade re-ran on the blob and
+    // its canonical result is what came back, re-graded fresh.
+    expect(runCascade).toHaveBeenCalledTimes(1);
+    expect(loaded).toBeDefined();
+    expect(loaded!.result).toBe(reparsed);
+    expect(loaded!.result.canonical.fields.full_name).toBe("Reparsed Persona");
+    expect(loaded!.score).toBeDefined();
+    // The bytes are still handed back for the preview pane.
+    expect([...new Uint8Array(loaded!.bytes!)]).toEqual([...bytes()]);
+  });
+
+  it("drops a stale-shape record that has no blob to re-parse from", async () => {
+    // A DOCX-style record: stale shape, empty blob → can't re-parse → undefined.
+    const rec = await saveResume({
+      filename: "old.docx",
+      blob: new Blob([], { type: "application/octet-stream" }),
+      parse: {
+        result: { parsed: {}, sections: { byName: new Map() } },
+        score: score(30),
+        sourceKind: "docx",
+      },
+    });
+    expect(await loadResumeFromLibrary(rec.id)).toBeUndefined();
+    expect(runCascade).not.toHaveBeenCalled();
   });
 });
 

@@ -13,7 +13,6 @@
 import { useState, useCallback, useRef } from "react";
 import { runCascade, runCascadeFromMarkdown } from "../lib/heuristics";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
-import { canonicalFromCascade } from "../lib/heuristics/canonical.ts";
 import { projectScoreSections } from "../lib/heuristics/projections.ts";
 import { parseDocx } from "../lib/ingest/docx.ts";
 import {
@@ -287,12 +286,12 @@ export function useResumeAnalysis(): ResumeAnalysis {
       }
 
       const score = computeAnonymousAtsScore({
-        parsed: result.parsed,
-        fieldConfidence: result.fieldConfidence,
+        parsed: result.canonical.fields,
+        fieldConfidence: result.canonical.fieldConfidence,
         triggers: result.triggers,
         rawText: result.rawText,
-        // Score projection (#443, Stage B) off the canonical model.
-        sections: projectScoreSections(canonicalFromCascade(result)),
+        // Score projection off the canonical model (the sole parse shape, #445).
+        sections: projectScoreSections(result.canonical),
       });
 
       trackParseCompleted({

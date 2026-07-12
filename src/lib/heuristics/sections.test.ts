@@ -876,9 +876,9 @@ describe("splitIntoSections — corpus section-count regression (#112)", () => {
     it(`${c.file}: experience=${c.experience}, education=${c.education}`, async () => {
       const bytes = await fsp.readFile(join(FIXTURE_ROOT, c.file));
       const cascade = await runCascade(new Uint8Array(bytes));
-      expect(cascade.parsed.experience?.length ?? 0).toBe(c.experience);
-      expect(cascade.parsed.education?.length ?? 0).toBe(c.education);
-      expect(!!cascade.parsed.location).toBe(c.hasLocation);
+      expect(cascade.canonical.fields.experience?.length ?? 0).toBe(c.experience);
+      expect(cascade.canonical.fields.education?.length ?? 0).toBe(c.education);
+      expect(!!cascade.canonical.fields.location).toBe(c.hasLocation);
     }, 15_000);
   }
 });

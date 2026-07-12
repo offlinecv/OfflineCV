@@ -84,7 +84,7 @@ describe.runIf(process.env.RL_CONTACT_PDF)(
         process.env.RL_CONTACT_OUT ?? join(HERE, "../../..", "internal/contact");
 
       const cascade = await runCascade(new Uint8Array(readFileSync(path)));
-      const p = cascade.parsed;
+      const p = cascade.canonical.fields;
 
       // OUTPUT: the structured contact fields + their per-field confidence.
       const extracted = Object.fromEntries(
@@ -92,7 +92,7 @@ describe.runIf(process.env.RL_CONTACT_PDF)(
           k,
           {
             value: (p as Record<string, unknown>)[k] ?? null,
-            confidence: cascade.fieldConfidence[k] ?? 0,
+            confidence: cascade.canonical.fieldConfidence[k] ?? 0,
           },
         ]),
       );
@@ -100,7 +100,7 @@ describe.runIf(process.env.RL_CONTACT_PDF)(
       // INPUT: the profile region the contact extractor scanned. If the contact
       // line never landed here, that alone explains a dropped location (location
       // has NO full-doc fallback).
-      const profileLines = cascade.sections.byName.get("profile") ?? [];
+      const profileLines = cascade.canonical.sections.byName.get("profile") ?? [];
 
       // VERIFY: independent rawText re-scan for the drop-prone fields.
       const candidates = rawTextCandidates(cascade.rawText);

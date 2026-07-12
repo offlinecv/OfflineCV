@@ -36,7 +36,10 @@ beforeEach(() => {
 // Minimal handoff payload — only the fields the shape-guard checks need to be
 // present; the rest round-trips opaquely through JSON.
 const samplePayload = {
-  result: { parsed: { full_name: "Synthetic Persona" }, rawText: "x" },
+  result: {
+    canonical: { fields: { full_name: "Synthetic Persona" } },
+    rawText: "x",
+  },
   score: { overall: 72 },
 } as unknown as JdFitHandoff;
 

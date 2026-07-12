@@ -34,24 +34,27 @@ import type { CascadeResult } from "../lib/heuristics/types.ts";
 // the old shared `isScoreRevealed` gate would have hidden the ring here.
 function uploadResultMissingContact(): CascadeResult {
   return {
-    parsed: {
-      full_name: "",
-      email: "",
-      phone: "",
-      skills: ["TypeScript", "React"],
-      experience: [
-        {
-          title: "Senior Engineer",
-          company: "Acme",
-          start_date: "2020",
-          end_date: "2022",
-          description: "Shipped 3 products increasing revenue by 40%.",
-        },
-      ],
-      education: [],
+    canonical: {
+      fields: {
+        full_name: "",
+        email: "",
+        phone: "",
+        skills: ["TypeScript", "React"],
+        experience: [
+          {
+            title: "Senior Engineer",
+            company: "Acme",
+            start_date: "2020",
+            end_date: "2022",
+            description: "Shipped 3 products increasing revenue by 40%.",
+          },
+        ],
+        education: [],
+      },
+      sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
+      fieldConfidence: {},
     },
     confidence: 0.6,
-    fieldConfidence: {},
     triggers: [],
     suggestedEscalation: "none",
     tiers: ["t0_layout", "t1_openresume"],
@@ -69,8 +72,8 @@ let root: Root;
 function Host({ result }: { result: CascadeResult }) {
   const edit = useEditableParse();
   const score = computeAnonymousAtsScore({
-    parsed: result.parsed,
-    fieldConfidence: result.fieldConfidence,
+    parsed: result.canonical.fields,
+    fieldConfidence: result.canonical.fieldConfidence,
     triggers: result.triggers,
     rawText: result.rawText,
     // Minimal SectionedResume — the accomplishment pool is empty so the scorer

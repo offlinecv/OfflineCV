@@ -20,7 +20,6 @@ import type {
   HeuristicResult,
   LayoutProbes,
   EscalationSuggestion,
-  CascadeResult,
   FieldConfidence,
 } from "./types.ts";
 import type { ResumeExperience } from "../score/types.ts";
@@ -48,9 +47,11 @@ export interface ScoreInputs {
   extractedCharCount: number;
 }
 
-export function computeConfidence(
-  inputs: ScoreInputs,
-): Pick<CascadeResult, "confidence" | "suggestedEscalation" | "fieldConfidence"> {
+export function computeConfidence(inputs: ScoreInputs): {
+  confidence: number;
+  suggestedEscalation: EscalationSuggestion;
+  fieldConfidence: FieldConfidence;
+} {
   const { heuristic, layout, rawCharCount, extractedCharCount } = inputs;
   const fc = heuristic.fieldConfidence;
   const parsed = heuristic.parsed;

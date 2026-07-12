@@ -53,7 +53,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
-import type { CascadeResult } from "./types.ts";
+import type { CascadeResult, HeuristicParsedResume } from "./types.ts";
 import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
 import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
 
@@ -193,11 +193,11 @@ function walkPdfs(dir: string): string[] {
 
 function scoreFor(cascade: CascadeResult) {
   return computeAnonymousAtsScore({
-    parsed: { ...cascade.parsed },
-    fieldConfidence: cascade.fieldConfidence,
+    parsed: { ...cascade.canonical.fields },
+    fieldConfidence: cascade.canonical.fieldConfidence,
     triggers: cascade.triggers,
     rawText: cascade.rawText,
-    sections: cascade.sections,
+    sections: cascade.canonical.sections,
   });
 }
 
@@ -206,8 +206,8 @@ const same = (a: unknown, b: unknown) =>
 
 /** Contact scalar-field diffs (name/email/phone/location/linkedin). */
 function contactFails(
-  c1: CascadeResult["parsed"],
-  c3: CascadeResult["parsed"],
+  c1: HeuristicParsedResume,
+  c3: HeuristicParsedResume,
 ): string[] {
   const out: string[] = [];
   for (const k of [
@@ -271,8 +271,8 @@ function invariantFailures(
   p1: CascadeResult,
   p3: CascadeResult,
 ): Record<Exclude<Category, "render">, string[]> {
-  const c1 = p1.parsed;
-  const c3 = p3.parsed;
+  const c1 = p1.canonical.fields;
+  const c3 = p3.canonical.fields;
   const sk1 = (c1.skills ?? []).length;
   const sk3 = (c3.skills ?? []).length;
   return {
@@ -431,8 +431,8 @@ function harnessDiff(
   before: CascadeResult,
   after: CascadeResult,
 ): Record<Exclude<Category, "render">, string[]> {
-  const c1 = before.parsed;
-  const c3 = after.parsed;
+  const c1 = before.canonical.fields;
+  const c3 = after.canonical.fields;
   return {
     contact: contactFails(c1, c3),
     experience: entryValueFails(

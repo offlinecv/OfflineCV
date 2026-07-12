@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { mergeLlmParse } from "./merge-override.ts";
 import type { LlmParsedResume } from "./parse-resume.ts";
 import type { CascadeResult } from "../heuristics/types.ts";
+import { toCanonicalResume } from "../heuristics/canonical.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
 
@@ -26,7 +27,8 @@ function sectioned(): SectionedResume {
 
 function baseResult(): CascadeResult {
   return {
-    parsed: {
+    canonical: toCanonicalResume(
+      {
       full_name: "Orig Name",
       email: "orig@example.com",
       phone: "(312) 555-0123",
@@ -42,15 +44,16 @@ function baseResult(): CascadeResult {
         },
       ],
       education: [{ institution: "Orig U", degree: "BS" }],
-    },
+      },
+      sectioned(),
+      {},
+    ),
     confidence: 0.4,
-    fieldConfidence: {},
     triggers: ["two_column"],
     suggestedEscalation: "llm",
     tiers: ["t0_layout", "t1_openresume"],
     rawText: "ORIG RAW",
     markdown: "ORIG MD",
-    sections: sectioned(),
     linkAnnotations: [],
     diagnostics: {
       rawCharCount: 100,
@@ -82,18 +85,18 @@ describe("mergeLlmParse", () => {
       baseResult(),
       llm({ full_name: "LLM Name", email: "llm@example.com" }),
     );
-    expect(merged.parsed.full_name).toBe("LLM Name");
-    expect(merged.parsed.email).toBe("llm@example.com");
+    expect(merged.canonical.fields.full_name).toBe("LLM Name");
+    expect(merged.canonical.fields.email).toBe("llm@example.com");
     // Untouched scalar falls back to original.
-    expect(merged.parsed.location).toBe("Orig City");
+    expect(merged.canonical.fields.location).toBe("Orig City");
   });
 
   it("keeps original list fields when the LLM returns none", () => {
     const merged = mergeLlmParse(baseResult(), llm());
-    expect(merged.parsed.skills).toEqual(["orig-skill"]);
-    expect(merged.parsed.experience).toHaveLength(1);
-    expect(merged.parsed.experience[0]!.company).toBe("Orig Co");
-    expect(merged.parsed.education[0]!.institution).toBe("Orig U");
+    expect(merged.canonical.fields.skills).toEqual(["orig-skill"]);
+    expect(merged.canonical.fields.experience).toHaveLength(1);
+    expect(merged.canonical.fields.experience[0]!.company).toBe("Orig Co");
+    expect(merged.canonical.fields.education[0]!.institution).toBe("Orig U");
   });
 
   it("replaces list fields when the LLM returns entries, normalizing shape", () => {
@@ -107,14 +110,14 @@ describe("mergeLlmParse", () => {
         education: [{ institution: "LLM U", degree: "MS" }],
       }),
     );
-    expect(merged.parsed.skills).toEqual(["llm-skill"]);
-    expect(merged.parsed.experience[0]).toEqual({
+    expect(merged.canonical.fields.skills).toEqual(["llm-skill"]);
+    expect(merged.canonical.fields.experience[0]).toEqual({
       company: "LLM Co",
       title: "LLM Title",
       description: "llm desc",
       is_current: false,
     });
-    expect(merged.parsed.education[0]).toEqual({
+    expect(merged.canonical.fields.education[0]).toEqual({
       institution: "LLM U",
       degree: "MS",
     });

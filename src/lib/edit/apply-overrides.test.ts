@@ -55,7 +55,7 @@ function baseParsed(): HeuristicParsedResume {
 describe("applyOverrides", () => {
   it("replaces contact fields on a clone", () => {
     const parsed = baseParsed();
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -72,7 +72,7 @@ describe("applyOverrides", () => {
   });
 
   it("treats an empty contact override as cleared (absent)", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       baseParsed(),
       "raw",
       makeSections(),
@@ -92,7 +92,7 @@ describe("applyOverrides", () => {
     };
     // User fixes the number → the old `false` must not survive, else the
     // scorer keeps awarding half credit on the corrected phone.
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -113,7 +113,7 @@ describe("applyOverrides", () => {
       phone: "555-invalid",
       phoneIsValid: false,
     };
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -128,7 +128,7 @@ describe("applyOverrides", () => {
 
   it("replaces experience header fields by index", () => {
     const parsed = baseParsed();
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -147,7 +147,7 @@ describe("applyOverrides", () => {
   it("applies an experience location override and clears it on empty string", () => {
     const parsed = baseParsed();
     parsed.experience[0].location = "Springfield, IL";
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -158,7 +158,7 @@ describe("applyOverrides", () => {
     );
     expect(out.experience[0].location).toBe("Santa Clara, CA");
 
-    const { parsed: cleared } = applyOverrides(
+    const { fields: cleared } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -177,7 +177,7 @@ describe("applyOverrides", () => {
     const rawText = "• Built a thing\n• Shipped another thing";
     const sections = makeSections(["• Built a thing", "• Shipped another thing"]);
     const {
-      parsed: out,
+      fields: out,
       rawText: outRaw,
       sections: outSections,
     } = applyOverrides(
@@ -217,7 +217,7 @@ describe("applyOverrides", () => {
   it("matches bullets regardless of leading marker differences", () => {
     // rawText uses a dash marker, description has no marker (stripBullet output).
     const rawText = "- Led the migration effort";
-    const { parsed: out, rawText: outRaw } = applyOverrides(
+    const { fields: out, rawText: outRaw } = applyOverrides(
       {
         ...baseParsed(),
         experience: [
@@ -244,7 +244,7 @@ describe("applyOverrides", () => {
   it("removes a bullet from rawText, sections, and the role description", () => {
     const rawText = "• Built a thing\n• Shipped another thing";
     const {
-      parsed: out,
+      fields: out,
       rawText: outRaw,
       sections: outSections,
     } = applyOverrides(
@@ -290,7 +290,7 @@ describe("applyOverrides", () => {
   it("is a no-op when overrides are empty", () => {
     const parsed = baseParsed();
     const rawText = "• Built a thing";
-    const { parsed: out, rawText: outRaw } = applyOverrides(
+    const { fields: out, rawText: outRaw } = applyOverrides(
       parsed,
       rawText,
       makeSections(),
@@ -320,7 +320,7 @@ describe("applyOverrides", () => {
   it("is a no-op for an empty bullet edit (does not drop the bullet)", () => {
     const rawText = "• Built a thing";
     const parsed = baseParsed();
-    const { rawText: outRaw, parsed: out } = applyOverrides(
+    const { rawText: outRaw, fields: out } = applyOverrides(
       parsed,
       rawText,
       makeSections(["• Built a thing"]),
@@ -369,7 +369,7 @@ function eduParsed(): HeuristicParsedResume {
 describe("applyOverrides — education", () => {
   it("replaces an education field by index on a clone", () => {
     const parsed = eduParsed();
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -388,7 +388,7 @@ describe("applyOverrides — education", () => {
   });
 
   it("writes education dates so buildEducationDates reflects them", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       eduParsed(),
       "raw",
       makeSections(),
@@ -403,7 +403,7 @@ describe("applyOverrides — education", () => {
   });
 
   it("treats an empty education field override as cleared ('not detected')", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       eduParsed(),
       "raw",
       makeSections(),
@@ -417,7 +417,7 @@ describe("applyOverrides — education", () => {
   });
 
   it("writes the major (field) override, and a clear drops it to undefined", () => {
-    const { parsed: set } = applyOverrides(
+    const { fields: set } = applyOverrides(
       eduParsed(),
       "raw",
       makeSections(),
@@ -429,7 +429,7 @@ describe("applyOverrides — education", () => {
     );
     expect(set.education[0].field).toBe("Computer Science & Engineering");
 
-    const { parsed: cleared } = applyOverrides(
+    const { fields: cleared } = applyOverrides(
       eduParsed(),
       "raw",
       makeSections(),
@@ -444,7 +444,7 @@ describe("applyOverrides — education", () => {
 
   it("ignores an education override for an out-of-range index", () => {
     const parsed = eduParsed();
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -462,7 +462,7 @@ describe("applyOverrides — education", () => {
 describe("applyOverrides — skills", () => {
   it("removes a parsed skill by lower-cased key", () => {
     const parsed = eduParsed();
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -479,7 +479,7 @@ describe("applyOverrides — skills", () => {
   });
 
   it("appends an added skill, de-duplicated case-insensitively", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       eduParsed(),
       "raw",
       makeSections(),
@@ -494,7 +494,7 @@ describe("applyOverrides — skills", () => {
   });
 
   it("applies removal then addition together", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       eduParsed(),
       "raw",
       makeSections(),
@@ -510,7 +510,7 @@ describe("applyOverrides — skills", () => {
 
   it("is a no-op when the skills override is empty", () => {
     const parsed = eduParsed();
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -604,7 +604,7 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
 
     // Sanity: BOTH rawText and the role's description picked up the edit.
     expect(result.rawText).toContain("$50K");
-    expect(result.parsed.experience[0].description).toContain("$50K");
+    expect(result.fields.experience[0].description).toContain("$50K");
 
     // Now simulate the post-edit re-grouping. The bullets carry the edited
     // text (as they would after re-grading); the descriptions ALSO carry the
@@ -618,7 +618,7 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
     ];
     const groups = groupBulletsByExperience(
       postEditBullets,
-      result.parsed.experience,
+      result.fields.experience,
     );
 
     const globexGroup = groups.find((g) => g.experienceIndex === 0);
@@ -676,7 +676,7 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
 describe("applyOverrides — added entries + bullets", () => {
   it("appends an added experience entry with its bullets in the description", () => {
     const parsed = baseParsed();
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsed,
       "raw",
       makeSections(),
@@ -709,7 +709,7 @@ describe("applyOverrides — added entries + bullets", () => {
   });
 
   it("appends added education / project / achievement entries to their arrays", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       baseParsed(),
       "raw",
       makeSections(),
@@ -739,7 +739,7 @@ describe("applyOverrides — added entries + bullets", () => {
 
   it("folds an added bullet on an existing role into description AND the pool", () => {
     const parsed = baseParsed();
-    const { parsed: out, sections } = applyOverrides(
+    const { fields: out, sections } = applyOverrides(
       parsed,
       "raw",
       makeSections(["• Built a thing"]),
@@ -775,7 +775,7 @@ describe("applyOverrides — added entries + bullets", () => {
       rawText: "raw",
       sections,
     });
-    const { parsed: out, sections: outSections } = applyOverrides(
+    const { fields: out, sections: outSections } = applyOverrides(
       base,
       "raw",
       sections,
@@ -814,7 +814,7 @@ function parsedWithLinks(): HeuristicParsedResume {
 
 describe("applyOverrides — profiles[] (#335)", () => {
   it("leaves profiles absent when no legacy link and no extras", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       baseParsed(),
       "raw",
       makeSections(),
@@ -827,7 +827,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
   });
 
   it("re-mirrors profiles from a legacy link correction (never desyncs)", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       baseParsed(),
       "raw",
       makeSections(),
@@ -861,7 +861,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
   });
 
   it("clearing a legacy link drops it from the mirror", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsedWithLinks(),
       "raw",
       makeSections(),
@@ -892,7 +892,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
   });
 
   it("appends added extras after the legacy slots, in order", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsedWithLinks(),
       "raw",
       makeSections(),
@@ -917,7 +917,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
   });
 
   it("keeps an unknown-host extra with its hostname + other kind", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       baseParsed(),
       "raw",
       makeSections(),
@@ -940,7 +940,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
   });
 
   it("de-dupes an extra that repeats a legacy link", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsedWithLinks(),
       "raw",
       makeSections(),
@@ -997,7 +997,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
   // slot — so the add must back-fill that slot (when empty) and mark it
   // user-affirmed in the edited fieldConfidence, or the score never moves.
   it("back-fills the empty linkedin_url slot from an added LinkedIn profile", () => {
-    const { parsed: out, fieldConfidence } = applyOverrides(
+    const { fields: out, fieldConfidence } = applyOverrides(
       baseParsed(), // no legacy linkedin_url
       "raw",
       makeSections(),
@@ -1024,7 +1024,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
   });
 
   it("does NOT overwrite an existing legacy slot when back-filling", () => {
-    const { parsed: out } = applyOverrides(
+    const { fields: out } = applyOverrides(
       parsedWithLinks(), // linkedin_url already set to .../in/jane
       "raw",
       makeSections(),

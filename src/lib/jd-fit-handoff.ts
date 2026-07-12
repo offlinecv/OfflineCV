@@ -60,7 +60,7 @@ export function consumeJdFitHandoff(): JdFitHandoff | null {
     const parsed = JSON.parse(raw) as JdFitHandoff;
     // Minimal shape guard: a malformed/partial payload falls back to DropZone.
     if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.result || !parsed.result.parsed || !parsed.score) return null;
+    if (!parsed.result || !parsed.result.canonical || !parsed.score) return null;
     return parsed;
   } catch {
     return null;

@@ -24,31 +24,34 @@ import { renderAtsResumePdf } from "./render-ats-pdf.ts";
 
 function makeResult(): CascadeResult {
   return {
-    parsed: {
-      full_name: "Jane Candidate",
-      email: "jane@example.com",
-      phone: "(312) 555-0123",
-      location: "Chicago, IL",
-      // Source URL canonicalizes `www.` away at parse time; the model reads this
-      // already-canonical value (so it is www-less here, as a real parse yields).
-      linkedin_url: "https://linkedin.com/in/janesmith",
-      summary: "Product leader with a decade of B2B SaaS experience building.",
-      skills: ["TypeScript", "SQL"],
-      experience: [
-        {
-          title: "Senior Product Manager",
-          company: "Google",
-          location: "Mountain View, CA",
-          start_date: "2021",
-          end_date: "2024",
-          description: "Drove 30% revenue growth across the platform lineup",
-        },
-      ],
-      education: [],
-      projects: [],
-      heuristic_achievements: [],
+    canonical: {
+      fields: {
+        full_name: "Jane Candidate",
+        email: "jane@example.com",
+        phone: "(312) 555-0123",
+        location: "Chicago, IL",
+        // Source URL canonicalizes `www.` away at parse time; the model reads this
+        // already-canonical value (so it is www-less here, as a real parse yields).
+        linkedin_url: "https://linkedin.com/in/janesmith",
+        summary: "Product leader with a decade of B2B SaaS experience building.",
+        skills: ["TypeScript", "SQL"],
+        experience: [
+          {
+            title: "Senior Product Manager",
+            company: "Google",
+            location: "Mountain View, CA",
+            start_date: "2021",
+            end_date: "2024",
+            description: "Drove 30% revenue growth across the platform lineup",
+          },
+        ],
+        education: [],
+        projects: [],
+        heuristic_achievements: [],
+      },
+      sections: { byName: new Map(), accomplishmentSections: ["experience", "projects", "achievements"], source: "regex" },
+      fieldConfidence: { linkedin_url: 0.95 },
     },
-    fieldConfidence: { linkedin_url: 0.95 },
     confidence: 1,
     triggers: [],
     linkAnnotations: [],
@@ -70,7 +73,7 @@ describe("#425 — full www-strip contact link round-trips", { timeout: 20000 },
 
     const p3 = await runCascade(await renderAtsResumePdf(model));
     // The www-less display re-parses to the same canonical linkedin_url.
-    expect(p3.parsed.linkedin_url).toBe(p1.parsed.linkedin_url);
-    expect(p3.parsed.linkedin_url).toBe("https://linkedin.com/in/janesmith");
+    expect(p3.canonical.fields.linkedin_url).toBe(p1.canonical.fields.linkedin_url);
+    expect(p3.canonical.fields.linkedin_url).toBe("https://linkedin.com/in/janesmith");
   });
 });

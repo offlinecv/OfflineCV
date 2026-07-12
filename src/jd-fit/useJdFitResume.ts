@@ -27,7 +27,6 @@ import {
   type AnonymousAtsScore,
 } from "../lib/score/score.ts";
 import type { CascadeResult, HeuristicParsedResume } from "../lib/heuristics/types.ts";
-import { toCanonicalResume } from "../lib/heuristics/canonical.ts";
 import { projectScoreSections } from "../lib/heuristics/projections.ts";
 import {
   consumeJdFitHandoff,
@@ -65,10 +64,10 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
     if (!handoff) return null;
     const base = handoff.result;
     const observations = handoff.score.bullets ?? [];
-    const { parsed, rawText, sections } = applyOverrides(
-      base.parsed,
+    const applied = applyOverrides(
+      base.canonical.fields,
       base.rawText,
-      base.sections,
+      base.canonical.sections,
       handoffEdit.contactOverrides,
       handoffEdit.experienceOverrides,
       handoffEdit.bulletOverrides,
@@ -80,15 +79,20 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
       handoffEdit.removedBullets,
       handoffEdit.profileOverrides,
     );
+    const parsed = applied.fields;
     const score = computeAnonymousAtsScore({
       parsed,
-      fieldConfidence: base.fieldConfidence,
+      fieldConfidence: base.canonical.fieldConfidence,
       triggers: base.triggers,
-      rawText,
-      // Score projection (#443, Stage B) off the handoff-edited canonical cores.
-      sections: projectScoreSections(toCanonicalResume(parsed, sections)),
+      rawText: applied.rawText,
+      // Score projection off the handoff-edited canonical model (#445).
+      sections: projectScoreSections(applied),
     });
-    return { result: { ...base, parsed }, score, parsed };
+    return {
+      result: { ...base, canonical: { ...base.canonical, fields: parsed } },
+      score,
+      parsed,
+    };
   }, [
     handoff,
     handoffEdit.contactOverrides,
@@ -122,7 +126,10 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
   const { state, edited, edit, reset } = analyzed;
   if (state.phase === "done" && edited) {
     return {
-      result: { ...state.result, parsed: edited.parsed },
+      result: {
+        ...state.result,
+        canonical: { ...state.result.canonical, fields: edited.parsed },
+      },
       score: edited.score,
       parsed: edited.parsed,
       bytes: state.bytes,

@@ -22,6 +22,7 @@ import {
   REPRO_ARTIFACT_VERSION,
 } from "./repro-artifact.ts";
 import type { CascadeResult } from "./types.ts";
+import { toCanonicalResume } from "./canonical.ts";
 import type { SectionedResume } from "./sections.ts";
 import type { SectionName } from "./regex.ts";
 import type { ParseDisagreement } from "./disagreement.ts";
@@ -64,7 +65,8 @@ function sectioned(): SectionedResume {
 /** A CascadeResult salted with PII in every value-bearing field. */
 function pollutedResult(): CascadeResult {
   return {
-    parsed: {
+    canonical: toCanonicalResume(
+      {
       full_name: PII.fullName,
       email: PII.email,
       phone: PII.phone,
@@ -80,15 +82,16 @@ function pollutedResult(): CascadeResult {
         },
       ],
       education: [{ institution: PII.institution, degree: PII.degree }],
-    },
+      },
+      sectioned(),
+      {},
+    ),
     confidence: 0.7,
-    fieldConfidence: {},
     triggers: ["two_column"],
     suggestedEscalation: "none",
     tiers: ["t0_layout", "t1_openresume"],
     rawText: PII.rawText,
     markdown: PII.markdown,
-    sections: sectioned(),
     linkAnnotations: [
       { page: 1, url: PII.linkUrl, rect: [0, 0, 1, 1], yTop: 0 },
     ],
@@ -183,8 +186,8 @@ describe("buildReproArtifact — structure-only shape", () => {
 
   it("reports presence=false for empty scalar fields", () => {
     const r = pollutedResult();
-    r.parsed.email = undefined;
-    r.parsed.location = "   ";
+    r.canonical.fields.email = undefined;
+    r.canonical.fields.location = "   ";
     const a = buildReproArtifact(r);
     expect(a.parsedCounts.hasEmail).toBe(false);
     expect(a.parsedCounts.hasLocation).toBe(false);

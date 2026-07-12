@@ -57,7 +57,6 @@ import type {
   FieldConfidence,
 } from "../lib/heuristics/types.ts";
 import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
-import { toCanonicalResume } from "../lib/heuristics/canonical.ts";
 import { projectScoreSections } from "../lib/heuristics/projections.ts";
 
 export interface EditedResume {
@@ -166,9 +165,9 @@ export function useAnalyzedResume(): AnalyzedResume {
   const editedCore = useMemo(() => {
     if (base === null) return null;
     return applyOverrides(
-      base.parsed,
+      base.canonical.fields,
       base.rawText,
-      base.sections,
+      base.canonical.sections,
       contactOverrides,
       experienceOverrides,
       bulletOverrides,
@@ -179,7 +178,7 @@ export function useAnalyzedResume(): AnalyzedResume {
       addedBullets,
       removedBullets,
       profileOverrides,
-      base.fieldConfidence,
+      base.canonical.fieldConfidence,
     );
   }, [
     base,
@@ -206,10 +205,10 @@ export function useAnalyzedResume(): AnalyzedResume {
   const scoreAffectingProfileSlots = useMemo(() => {
     if (base === null) return null;
     const probe: LegacyLinkFields = {
-      linkedin_url: base.parsed.linkedin_url,
-      github_url: base.parsed.github_url,
-      portfolio_url: base.parsed.portfolio_url,
-      website_url: base.parsed.website_url,
+      linkedin_url: base.canonical.fields.linkedin_url,
+      github_url: base.canonical.fields.github_url,
+      portfolio_url: base.canonical.fields.portfolio_url,
+      website_url: base.canonical.fields.website_url,
     };
     const confEdits = applyProfileOverrides(probe, profileOverrides);
     return {
@@ -248,14 +247,13 @@ export function useAnalyzedResume(): AnalyzedResume {
     // the edited view (contact edits + added linkedin/github bumped to present),
     // so a user-added professional profile moves completeness (#421).
     return computeAnonymousAtsScore({
-      parsed: editedCore.parsed,
+      parsed: editedCore.fields,
       fieldConfidence: editedCore.fieldConfidence,
       triggers: base.triggers,
       rawText: editedCore.rawText,
-      // Score projection (#443, Stage B) off the edited canonical cores.
-      sections: projectScoreSections(
-        toCanonicalResume(editedCore.parsed, editedCore.sections),
-      ),
+      // Score projection off the edited canonical model (`editedCore` IS the
+      // mutated CanonicalResume as of #445).
+      sections: projectScoreSections(editedCore),
     });
     // `editedCore` is deliberately NOT a dep: this memo reads its latest
     // value whenever it actually runs, but must not re-run on an
@@ -285,7 +283,7 @@ export function useAnalyzedResume(): AnalyzedResume {
   const edited = useMemo<EditedResume | null>(() => {
     if (editedCore === null || score === null) return null;
     return {
-      parsed: editedCore.parsed,
+      parsed: editedCore.fields,
       rawText: editedCore.rawText,
       score,
       fieldConfidence: editedCore.fieldConfidence,
@@ -294,10 +292,16 @@ export function useAnalyzedResume(): AnalyzedResume {
 
   const displayResult = useMemo<CascadeResult | null>(() => {
     if (base === null || edited === null) return null;
+    // Fold the edited fields + confidence back onto the base result's canonical
+    // model. `sections` (and `rawText`) stay the base's — display never showed
+    // the edited section pool or rawText, only the edited parsed fields (#445).
     return {
       ...base,
-      parsed: edited.parsed,
-      fieldConfidence: edited.fieldConfidence,
+      canonical: {
+        ...base.canonical,
+        fields: edited.parsed,
+        fieldConfidence: edited.fieldConfidence,
+      },
     };
   }, [base, edited]);
 

@@ -7,7 +7,7 @@ import { buildBlankResult } from "./empty-result.ts";
 describe("buildBlankResult", () => {
   it("returns empty parsed sections and no triggers", () => {
     const result = buildBlankResult();
-    expect(result.parsed).toEqual({
+    expect(result.canonical.fields).toEqual({
       skills: [],
       skills_explicit: [],
       skills_inferred: [],
@@ -32,21 +32,21 @@ describe("buildBlankResult", () => {
 
   it("carries an empty (but well-typed) section view", () => {
     const result = buildBlankResult();
-    expect(result.sections.byName.size).toBe(0);
-    expect(result.sections.accomplishmentSections).toEqual([
+    expect(result.canonical.sections.byName.size).toBe(0);
+    expect(result.canonical.sections.accomplishmentSections).toEqual([
       "experience",
       "projects",
       "achievements",
     ]);
-    expect(result.sections.source).toBe("regex");
+    expect(result.canonical.sections.source).toBe("regex");
   });
 
   it("returns a fresh object each call (no shared mutable state)", () => {
     const a = buildBlankResult();
     const b = buildBlankResult();
     expect(a).not.toBe(b);
-    expect(a.parsed).not.toBe(b.parsed);
-    a.parsed.skills.push("mutated");
-    expect(b.parsed.skills).toEqual([]);
+    expect(a.canonical.fields).not.toBe(b.canonical.fields);
+    a.canonical.fields.skills.push("mutated");
+    expect(b.canonical.fields.skills).toEqual([]);
   });
 });
