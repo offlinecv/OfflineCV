@@ -29,12 +29,7 @@ import {
 import { formatBytes } from "../lib/format-bytes.ts";
 import type {
   ContactOverrides,
-  ExperienceFieldOverrides,
-  EducationFieldOverrides,
-  BulletOverrides,
-  SkillsOverride,
-  AddedEntry,
-  AddedBullets,
+  EditSnapshot,
   ProfileOverride,
 } from "./useEditableParse.ts";
 import { classifyProfile } from "../lib/contact/profile-registry.ts";
@@ -45,27 +40,14 @@ import { LEGACY_LINK_KEYS } from "../lib/contact/contact-profiles.ts";
 type SourceKind = "pdf" | "docx";
 
 /**
- * A serializable snapshot of the from-scratch draft's edit-override state
- * (#313) — the SAME shape `useEditableParse` exposes, persisted verbatim so
- * a restore can replay it through the hook's own public setters (in
- * `useAnalyzedResume.ts`) rather than reaching into its internals.
- * `removedBullets` is serialized as an array — a `Set` isn't JSON-safe.
+ * The persisted from-scratch draft (#313) is exactly `useEditableParse`'s own
+ * {@link EditSnapshot} — the hook produces it (`edit.snapshot`) and replays it
+ * (`edit.replay`) through its public setters. This alias names the persistence
+ * ROLE; the shape is defined once, at the hook, so a new override map cannot be
+ * added without joining the snapshot (which is how `team` and `achievementType`
+ * were once silently dropped on restore).
  */
-export interface BlankDraftSnapshot {
-  contactOverrides: ContactOverrides;
-  experienceOverrides: Record<number, ExperienceFieldOverrides>;
-  bulletOverrides: BulletOverrides;
-  removedBullets: number[];
-  educationOverrides: Record<number, EducationFieldOverrides>;
-  skillsOverride: SkillsOverride;
-  addedEntries: AddedEntry[];
-  addedBullets: AddedBullets;
-  /** Consolidated contact-link overrides (#427). Optional in the persisted
-   *  shape for back-compat: a draft saved before #427 has no `profileOverrides`
-   *  key and instead carries link edits under `contactOverrides.{...}_url` —
-   *  `migrateBlankDraft` upconverts those on read. */
-  profileOverrides: ProfileOverride[];
-}
+export type BlankDraftSnapshot = EditSnapshot;
 
 /** A pre-#427 persisted draft: link edits lived on `contactOverrides` under the
  *  four legacy `*_url` keys, and there was no `profileOverrides` list. */

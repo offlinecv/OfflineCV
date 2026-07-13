@@ -108,3 +108,25 @@ describe("splitAchievementType", () => {
     expect(splitAchievementType(" · orphan description")).toBeNull();
   });
 });
+
+describe("splitAchievementType — parse-time only (#456)", () => {
+  // The split runs exactly once, in `extractAchievements`, and its result is
+  // STORED as `HeuristicAchievement.type`. These cases are the reason nothing
+  // downstream may re-derive the label from a composed string: re-splitting
+  // "Type · Title" does not always return the pair it was built from.
+  it("does not round-trip a label over the length cap", () => {
+    const type = "x".repeat(ACHIEVEMENT_TYPE_MAX_LEN + 1);
+    // Composing is lossless as a STRING, but the label no longer reads back —
+    // a consumer that re-split would emphasize the whole line instead.
+    expect(splitAchievementType(`${type} · runner-up`)).toBeNull();
+  });
+
+  it("does not round-trip a title that carries its own separator", () => {
+    // Built from ("", "KubeCon · Amsterdam") — no type at all. Re-splitting the
+    // composed string promotes the title's first segment to the type.
+    expect(splitAchievementType("KubeCon · Amsterdam")).toEqual({
+      type: "KubeCon",
+      rest: "Amsterdam",
+    });
+  });
+});

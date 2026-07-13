@@ -215,7 +215,8 @@ describe("buildAtsResumeModel", () => {
     const result = makeResult({
       heuristic_achievements: [
         {
-          title: "Patent · Issued US10275736B1; bulk catalog editor",
+          type: "Patent",
+          title: "Issued US10275736B1; bulk catalog editor",
           year: "2019",
         },
       ],
@@ -223,8 +224,8 @@ describe("buildAtsResumeModel", () => {
     const model = buildAtsResumeModel(result, makeScore([]));
     const ach = model.sections.find((s) => s.kind === "achievements");
     const entry = ach!.entries[0];
-    // The type ("Patent") is wrapped in the PUA emphasis sentinels; the rest of
-    // the header — description and year — stays outside them (regular weight).
+    // The `type` field ("Patent") is wrapped in the PUA emphasis sentinels; the
+    // rest of the header — title and year — stays outside them (regular weight).
     expect(entry.headerLine).toBe(
       `${EMPHASIS_OPEN}Patent${EMPHASIS_CLOSE} · ` +
         "Issued US10275736B1; bulk catalog editor · 2019",

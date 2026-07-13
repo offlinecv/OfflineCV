@@ -43,14 +43,19 @@ export function buildEducationDates(edu: ResumeEducation): string {
 export const ACHIEVEMENT_TYPE_MAX_LEN = 28;
 
 /**
- * Split an achievement title into its leading "type" label + the rest, when the
- * title carries the canonical "Type · description" shape and the type is short
+ * Split a raw achievement header into its leading "type" label + the rest, when
+ * the header carries the canonical "Type · title" shape and the label is short
  * enough to read as a label (see {@link ACHIEVEMENT_TYPE_MAX_LEN}). Returns null
- * when there is no qualifying type segment (the whole title is prose).
+ * when there is no qualifying type segment (the whole header is prose).
  *
- * Shared by the PDF header builder (which bolds just the type run via emphasis
- * sentinels) and the reconstructed-résumé view, so both emphasize the identical
- * run — the on-screen header must match the Download PDF (#452).
+ * PARSE-TIME ONLY. This runs exactly once, in `extractAchievements`, and its
+ * result is stored as `HeuristicAchievement.type` (#456). Nothing downstream may
+ * re-derive the label by re-splitting a composed string: the split is lossy in
+ * the direction that matters (a label over the length cap, or a title carrying
+ * its own `" · "`, re-splits into a DIFFERENT pair), so a consumer that re-split
+ * emphasized the wrong run in the PDF and showed the wrong halves on `/jd-fit`.
+ * The edit surface, the export projection, and the canonical model all read the
+ * stored field.
  */
 export function splitAchievementType(
   title: string,

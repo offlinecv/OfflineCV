@@ -5,12 +5,19 @@
  * One-shot resume handoff from `/` (parser audit) to `/jd-fit` (issue #226).
  *
  * When a user parses a résumé on `/` and clicks "Check fit against a job", the
- * already-parsed + edited result is stashed here so `/jd-fit` can rehydrate it
- * without re-parsing the PDF. We hand off the PARSED JSON (the edited
- * CascadeResult shape `<Result>` receives, plus its re-graded score), not the
- * PDF bytes — JD-fit doesn't show the source-PDF pane, and JSON survives the
- * navigation cheaply. PDF bytes are intentionally dropped (they don't serialize
- * to JSON and the source-PDF pane isn't shown on /jd-fit).
+ * parse is stashed here so `/jd-fit` can rehydrate it without re-parsing the
+ * PDF. We hand off the PARSED JSON, not the PDF bytes — JD-fit doesn't show the
+ * source-PDF pane, and JSON survives the navigation cheaply.
+ *
+ * What crosses is the PRISTINE parse + score and the user's EDIT STATE as a
+ * separate `edit` snapshot (#456) — never the override-APPLIED result. `/jd-fit`
+ * runs its own edit layer, so it must receive the same two inputs `/` had and
+ * re-apply them itself. Handing over an applied result instead made the edits
+ * unrecoverable on the far side: they had already been baked into the fields, so
+ * `/jd-fit` could not tell a user-ADDED entry from a parsed one (it lost its
+ * Remove button) and its fresh, empty edit layer re-derived achievement fields
+ * from the applied ones. Re-seeding the far side from an applied payload is NOT
+ * a fix — the entries would be appended a second time.
  *
  * Stored under sessionStorage (not localStorage) because this is a
  * within-session, within-tab handoff — it must not leak a parsed résumé into a
@@ -22,6 +29,7 @@
 
 import type { CascadeResult } from "./heuristics/types.ts";
 import type { AnonymousAtsScore } from "./score/score.ts";
+import type { EditSnapshot } from "../hooks/useEditableParse.ts";
 
 /** sessionStorage key for the parser-audit → JD-fit handoff payload (#226). */
 export const JDFIT_HANDOFF_KEY = "rl_jdfit_handoff";
@@ -59,10 +67,17 @@ function reviveMaps(_key: string, value: unknown): unknown {
 }
 
 export interface JdFitHandoff {
-  /** The edited CascadeResult `<Result>` receives ({ ...result, parsed }). */
+  /** The PRISTINE CascadeResult — the parse as it came off the cascade, with NO
+   *  overrides applied. `/jd-fit` folds `edit` onto this itself. */
   result: CascadeResult;
-  /** The re-graded anonymous ATS score for that edited result. */
+  /** The PRISTINE anonymous ATS score for that parse. Its `bullets` pool is the
+   *  one `edit.bulletOverrides` / `removedBullets` are keyed against, so it must
+   *  be the un-edited pool, not a re-graded one. */
   score: AnonymousAtsScore;
+  /** The user's edit state from `/`, replayed into `/jd-fit`'s own edit layer so
+   *  their corrections carry over AND stay editable (an added entry is still an
+   *  added entry). Absent/empty when they made no edits. */
+  edit: EditSnapshot;
 }
 
 /** Write the one-shot handoff payload before navigating to /jd-fit. */
@@ -96,6 +111,7 @@ export function consumeJdFitHandoff(): JdFitHandoff | null {
     // Minimal shape guard: a malformed/partial payload falls back to DropZone.
     if (!parsed || typeof parsed !== "object") return null;
     if (!parsed.result || !parsed.result.canonical || !parsed.score) return null;
+    if (!parsed.edit) return null;
     // The scorer/section reads require a revived `byName` Map, not a plain
     // object (#450). Reject a payload where it failed to round-trip as a Map.
     if (!(parsed.result.canonical.sections?.byName instanceof Map)) return null;

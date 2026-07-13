@@ -31,7 +31,7 @@ import {
   groupBulletsByExperience,
   toBulletExperience,
 } from "../score/group-bullets.ts";
-import { buildProjectDates, splitAchievementType } from "../score/entry-dates.ts";
+import { buildProjectDates } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
 import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
@@ -363,31 +363,44 @@ export function isDatedEntry(entry: {
 }
 
 /**
- * Build an achievement's header string, emphasizing ONLY the leading "type"
- * label (e.g. "Patent", "Publication") when the title carries the canonical
- * "Type · description" shape — the rest of the header stays regular weight.
+ * Build an achievement's header string, emphasizing ONLY its `type` label (e.g.
+ * "Patent", "Publication") — the rest of the header stays regular weight.
  *
- * The type run (see {@link splitAchievementType}) is wrapped in the renderer's
- * PUA emphasis sentinels (`EMPHASIS_OPEN`/`CLOSE`) so `drawEntry` draws just that
- * run bold; the sentinels are stripped before drawing, so the round-trip text is
- * unchanged (display-only weight, #284/#425). When there is no such type segment
- * the header is returned plain (no sentinels) and the caller keeps the whole line
- * bold. The reconstructed-résumé view shares `splitAchievementType` so its header
- * emphasizes the identical run (#452).
+ * The label is read from the stored `type` field, never re-derived by splitting
+ * the title (#456): the emphasized run is exactly the label the parser lifted or
+ * the user typed, whatever its length or punctuation. The run is wrapped in the
+ * renderer's PUA emphasis sentinels (`EMPHASIS_OPEN`/`CLOSE`) so `drawEntry`
+ * draws just it bold; the sentinels are stripped before drawing, so the
+ * round-trip TEXT is unchanged (display-only weight, #284/#425). With no label
+ * (or no title to set it off against) the header is returned plain and the
+ * caller keeps the whole line bold. `ReconstructedResume` reads the same field,
+ * so the on-screen header and the Download PDF emphasize the identical run
+ * (#452).
+ *
+ * Round-trip caveat: the exported text is `"Type · Title"`, and re-parsing it
+ * recovers `type` only when the label still passes `splitAchievementType` — a
+ * label over `ACHIEVEMENT_TYPE_MAX_LEN`, or a title carrying its own `" · "`,
+ * re-parses into a different split. The bold run is the PDF's only other
+ * encoding of the label and the parser does not read font weight, so this is
+ * inherent to the format, not to the model.
  */
 function buildAchievementHeader(
+  type: string | undefined,
   title: string,
   year: string | undefined,
 ): { headerLine: string; emphasized: boolean } {
-  const split = splitAchievementType(title);
-  if (split) {
-    const emphasizedTitle = `${EMPHASIS_OPEN}${split.type}${EMPHASIS_CLOSE} · ${split.rest}`;
+  const label = type?.trim();
+  if (label && title) {
+    const emphasizedTitle = `${EMPHASIS_OPEN}${label}${EMPHASIS_CLOSE} · ${title}`;
     return {
       headerLine: joinHeader([emphasizedTitle, year], " · "),
       emphasized: true,
     };
   }
-  return { headerLine: joinHeader([title, year], " · "), emphasized: false };
+  return {
+    headerLine: joinHeader([label || title, year], " · "),
+    emphasized: false,
+  };
 }
 
 /**
@@ -575,13 +588,14 @@ export function buildAtsResumeModel(
 
   // ── Achievements ──
   const achievementEntries: AtsEntry[] = achievements.map((ach, i) => {
-    // Bold only the leading "type" label ("Patent", "Publication") when the
-    // title carries the canonical "Type · description" shape; the rest of the
-    // header stays regular. A type-less title keeps the whole header bold.
+    // Bold only the `type` label ("Patent", "Publication"); the rest of the
+    // header stays regular. A type-less achievement keeps the whole header bold.
     const { headerLine, emphasized } = buildAchievementHeader(
+      ach.type,
       ach.title,
       ach.year,
     );
+    const awardTitle = [ach.type?.trim(), ach.title].filter(Boolean).join(" · ");
     return {
       headerLine: headerLine || "Achievement",
       // The emphasized header carries its own per-run weight (via the sentinels),
@@ -595,8 +609,12 @@ export function buildAtsResumeModel(
       ),
       // Structured source for the JSON Resume `awards[]` export (#421). Display
       // code never reads `fields`; it renders `headerLine`/`bullets` above.
+      //
+      // JSON Resume has no slot for a type label, so `title` carries the FULL
+      // "Patent · Foo" line (#456) — dropping the label to match the narrowed
+      // `HeuristicAchievement.title` would silently lose it from the export.
       fields: {
-        ...(ach.title ? { title: ach.title } : {}),
+        ...(awardTitle ? { title: awardTitle } : {}),
         ...(ach.year ? { startDate: ach.year } : {}),
       },
     };

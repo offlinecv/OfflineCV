@@ -7,10 +7,11 @@
  * Two sources collapse to ONE `{ result, score, edit, parsed, ... }` shape that
  * `<Result>` and the JD coverage memo consume identically:
  *
- *  1. Handoff from `/` — the parser-audit surface stashed an already-parsed +
- *     edited résumé in sessionStorage (read once on mount). JD-fit re-grades it
- *     live through its OWN edit layer so inline edits here move the score + JD
- *     coverage, exactly as on `/`.
+ *  1. Handoff from `/` — the parser-audit surface stashed the PRISTINE parse
+ *     plus the user's edit snapshot in sessionStorage (read once on mount).
+ *     JD-fit replays those edits into its OWN edit layer and applies them here,
+ *     so inline edits move the score + JD coverage exactly as on `/` and the
+ *     edits stay editable (#456).
  *  2. Local DropZone parse — when there's no handoff, the user drops a PDF here
  *     and `useAnalyzedResume` drives the parse → edit → re-grade pipeline.
  *
@@ -18,7 +19,7 @@
  * /jd-fit falls back to the DropZone rather than re-showing a stale résumé.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AnalyzedResume } from "../hooks/useAnalyzedResume.ts";
 import { useEditableParse, type EditableParse } from "../hooks/useEditableParse.ts";
 import { applyOverrides } from "../lib/edit/apply-overrides.ts";
@@ -50,9 +51,18 @@ export interface JdFitResume {
 }
 
 export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
-  // Read the one-shot handoff exactly once, on mount.
+  // Read the one-shot handoff exactly once, on mount. The guard is a REF, not
+  // state: `consumeJdFitHandoff` reads AND clears sessionStorage, so it is not
+  // idempotent, and StrictMode (dev) runs an effect setup→cleanup→setup within
+  // one commit with no re-render between. A state guard cannot short-circuit
+  // the second setup — it captures the same pre-update closure — so the second
+  // read would find the key already cleared and `setHandoff(null)` would win,
+  // dropping the whole handoff. A ref flips synchronously and survives it.
+  const consumedRef = useRef(false);
   const [handoff, setHandoff] = useState<JdFitHandoff | null>(null);
   useEffect(() => {
+    if (consumedRef.current) return;
+    consumedRef.current = true;
     setHandoff(consumeJdFitHandoff());
   }, []);
 
@@ -60,6 +70,21 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
   // mirroring useAnalyzedResume's `edited` memo but seeded from the rehydrated
   // result rather than a fresh parse.
   const handoffEdit = useEditableParse();
+
+  // Replay the edits the user made on `/` into THIS layer, once, when the
+  // handoff lands (#456). The payload carries the PRISTINE parse, so replaying
+  // is what reproduces their edited résumé here — and it stays edit STATE, so an
+  // added entry is still an added entry (it keeps its Remove button) instead of
+  // arriving baked into the parsed arrays. Replay is additive — `addEntry` mints
+  // a fresh id per call — so running it twice would append every added entry a
+  // second time. Ref guard for the same reason as the consume above.
+  const { replay } = handoffEdit;
+  const replayedRef = useRef(false);
+  useEffect(() => {
+    if (!handoff || replayedRef.current) return;
+    replayedRef.current = true;
+    replay(handoff.edit);
+  }, [handoff, replay]);
   const handoffEdited = useMemo(() => {
     if (!handoff) return null;
     const base = handoff.result;
@@ -78,6 +103,8 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
       handoffEdit.addedBullets,
       handoffEdit.removedBullets,
       handoffEdit.profileOverrides,
+      base.canonical.fieldConfidence,
+      handoffEdit.achievementOverrides,
     );
     const parsed = applied.fields;
     const score = computeAnonymousAtsScore({
@@ -99,6 +126,7 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
     handoffEdit.experienceOverrides,
     handoffEdit.bulletOverrides,
     handoffEdit.educationOverrides,
+    handoffEdit.achievementOverrides,
     handoffEdit.skillsOverride,
     handoffEdit.addedEntries,
     handoffEdit.addedBullets,

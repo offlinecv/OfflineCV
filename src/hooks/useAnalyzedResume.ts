@@ -32,16 +32,9 @@ import {
   writeBlankDraft,
   clearBlankDraft,
   type ParseState,
-  type BlankDraftSnapshot,
   type LoadedDoneState,
 } from "./useResumeAnalysis.ts";
-import {
-  useEditableParse,
-  type EditableParse,
-  type ContactOverrides,
-  type ExperienceFieldOverrides,
-  type EducationFieldOverrides,
-} from "./useEditableParse.ts";
+import { useEditableParse, type EditableParse } from "./useEditableParse.ts";
 import {
   applyOverrides,
   applyProfileOverrides,
@@ -119,22 +112,11 @@ export function useAnalyzedResume(): AnalyzedResume {
     bulletOverrides,
     removedBullets,
     educationOverrides,
+    achievementOverrides,
     skillsOverride,
     addedEntries,
     addedBullets,
     profileOverrides,
-    setContactField,
-    setExperienceField,
-    setBulletField,
-    removeBullet,
-    setEducationField,
-    addEntry,
-    setEntryField,
-    addBullet,
-    addSkill,
-    removeSkill,
-    setLegacyLink,
-    addProfile,
   } = edit;
 
   // The base CascadeResult overrides fold onto: the original parse in "done",
@@ -179,6 +161,7 @@ export function useAnalyzedResume(): AnalyzedResume {
       removedBullets,
       profileOverrides,
       base.canonical.fieldConfidence,
+      achievementOverrides,
     );
   }, [
     base,
@@ -187,6 +170,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     experienceOverrides,
     bulletOverrides,
     educationOverrides,
+    achievementOverrides,
     skillsOverride,
     addedEntries,
     addedBullets,
@@ -267,6 +251,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     experienceOverrides,
     bulletOverrides,
     educationOverrides,
+    achievementOverrides,
     skillsOverride,
     addedEntries,
     addedBullets,
@@ -334,121 +319,22 @@ export function useAnalyzedResume(): AnalyzedResume {
       clearBlankDraft();
       return;
     }
-    const snapshot: BlankDraftSnapshot = {
-      contactOverrides,
-      experienceOverrides,
-      bulletOverrides,
-      removedBullets: [...removedBullets],
-      educationOverrides,
-      skillsOverride,
-      addedEntries,
-      addedBullets,
-      profileOverrides,
-    };
-    const timer = setTimeout(() => writeBlankDraft(snapshot), 500);
+    const timer = setTimeout(() => writeBlankDraft(edit.snapshot), 500);
     return () => clearTimeout(timer);
+    // `edit.snapshot` is memoized on every override map, so it is the one dep
+    // that stands for all of them — it changes exactly when the draft does.
   }, [
     state.phase,
     state.phase === "authoring" ? state.pendingDraft : null,
     edit.hasEdits,
-    contactOverrides,
-    experienceOverrides,
-    bulletOverrides,
-    removedBullets,
-    educationOverrides,
-    skillsOverride,
-    addedEntries,
-    addedBullets,
-    profileOverrides,
+    edit.snapshot,
   ]);
-
-  // Replay a saved draft snapshot through `useEditableParse`'s own public
-  // setters, rather than reaching into its internals. `addEntry` mints a
-  // fresh id per call, so added entries (and any bullets keyed by their id)
-  // are remapped old-id → new-id as they're replayed.
-  const replayDraft = useCallback(
-    (snapshot: BlankDraftSnapshot) => {
-      (
-        Object.entries(snapshot.contactOverrides) as [
-          keyof ContactOverrides,
-          string,
-        ][]
-      ).forEach(([key, value]) => setContactField(key, value));
-
-      Object.entries(snapshot.experienceOverrides).forEach(
-        ([index, fields]) => {
-          (
-            Object.entries(fields) as [keyof ExperienceFieldOverrides, string][]
-          ).forEach(([field, value]) =>
-            setExperienceField(Number(index), field, value),
-          );
-        },
-      );
-
-      Object.entries(snapshot.bulletOverrides).forEach(([index, value]) =>
-        setBulletField(Number(index), value),
-      );
-
-      snapshot.removedBullets.forEach((index) => removeBullet(index));
-
-      Object.entries(snapshot.educationOverrides).forEach(
-        ([index, fields]) => {
-          (
-            Object.entries(fields) as [keyof EducationFieldOverrides, string][]
-          ).forEach(([field, value]) =>
-            setEducationField(Number(index), field, value),
-          );
-        },
-      );
-
-      snapshot.skillsOverride.added.forEach((skill) => addSkill(skill));
-      snapshot.skillsOverride.removed.forEach((skill) => removeSkill(skill));
-
-      const idMap = new Map<string, string>();
-      for (const entry of snapshot.addedEntries) {
-        const newId = addEntry(entry.section);
-        idMap.set(entry.id, newId);
-        (
-          ["title", "subtitle", "location", "start_date", "end_date", "year"] as const
-        ).forEach((field) => {
-          const value = entry[field];
-          if (value !== undefined) setEntryField(newId, field, value);
-        });
-      }
-      for (const [entryKey, bullets] of Object.entries(snapshot.addedBullets)) {
-        const mappedKey = idMap.get(entryKey) ?? entryKey;
-        bullets.forEach((text) => addBullet(mappedKey, text));
-      }
-
-      // Contact-link overrides (#427): corrections (carrying a legacyKey) replay
-      // through `setLegacyLink`; extras replay through `addProfile`. Fresh ids
-      // are minted on replay — the old per-session ids are never reused.
-      for (const ov of snapshot.profileOverrides ?? []) {
-        if (ov.legacyKey !== undefined) setLegacyLink(ov.legacyKey, ov.url);
-        else addProfile(ov.url);
-      }
-    },
-    [
-      setContactField,
-      setExperienceField,
-      setBulletField,
-      removeBullet,
-      setEducationField,
-      addSkill,
-      removeSkill,
-      addEntry,
-      setEntryField,
-      addBullet,
-      setLegacyLink,
-      addProfile,
-    ],
-  );
 
   const resumeDraft = useCallback(() => {
     if (state.phase !== "authoring" || !state.pendingDraft) return;
-    replayDraft(state.pendingDraft);
+    edit.replay(state.pendingDraft);
     resolveDraftPrompt();
-  }, [state, replayDraft, resolveDraftPrompt]);
+  }, [state, edit, resolveDraftPrompt]);
 
   return {
     state,

@@ -77,6 +77,66 @@ export interface EducationFieldOverrides {
   end_date?: string;
 }
 
+// ── Achievement overrides (#454) ──────────────────────────────────────────────
+
+/**
+ * Editable fields on a PARSED achievement. Every key names a REAL field on
+ * `HeuristicAchievement` (#456) — `applyOverrides` copies it straight across, so
+ * each field is independent and an edit round-trips verbatim.
+ *
+ * This was briefly two halves of a composed `title` (#454, design model (a)),
+ * which forced the edit surface to pin both halves on the first edit just to
+ * avoid re-decomposing a title it had itself recomposed. Storing `type` on the
+ * model deletes that whole mechanism, and with it the two surfaces (the PDF's
+ * bold run, `/jd-fit`'s field halves) that re-split the title and got it wrong.
+ *
+ * An empty string clears the field (clearing `type` leaves the bare title;
+ * clearing `year` drops it, mirroring `location`/`team` on experience).
+ * `undefined` means "no override" — the parsed value shows through.
+ */
+export interface AchievementFieldOverrides {
+  /** Leading type label ("Patent", "Best Paper Award") — the run rendered bold. */
+  type?: string;
+  /** Item title, without the type label. */
+  title?: string;
+  /** Lead year (achievements carry a single year, not a range). */
+  year?: string;
+}
+
+// ── Edit snapshot (serializable edit state) ──────────────────────────────────
+
+/**
+ * The hook's complete override state as a plain, JSON-safe value — every map,
+ * nothing derived. Two consumers need edit state to cross a boundary, and both
+ * go through this ONE shape:
+ *
+ *   - the from-scratch draft (#313), persisted to localStorage and replayed on
+ *     reload (`BlankDraftSnapshot` is this type);
+ *   - the `/` → `/jd-fit` handoff (#456), which hands over the PRISTINE parse
+ *     plus this snapshot, so `/jd-fit` re-applies the edits itself rather than
+ *     inheriting an already-applied result it can no longer take apart.
+ *
+ * `removedBullets` is an array, not a `Set` — a `Set` isn't JSON-safe.
+ *
+ * Every override map must appear here. A silently-absent one is exactly how
+ * `team` (#425) and `achievementType` (#455) got dropped on restore.
+ */
+export interface EditSnapshot {
+  contactOverrides: ContactOverrides;
+  experienceOverrides: Record<number, ExperienceFieldOverrides>;
+  bulletOverrides: BulletOverrides;
+  removedBullets: number[];
+  educationOverrides: Record<number, EducationFieldOverrides>;
+  /** Optional: drafts persisted before #454 carry no such key. */
+  achievementOverrides?: Record<number, AchievementFieldOverrides>;
+  skillsOverride: SkillsOverride;
+  addedEntries: AddedEntry[];
+  addedBullets: AddedBullets;
+  /** Optional: drafts persisted before #427 carry link edits on
+   *  `contactOverrides.{...}_url` instead — `migrateBlankDraft` upconverts. */
+  profileOverrides?: ProfileOverride[];
+}
+
 // ── Added entries + bullets ─────────────────────────────────────────────────
 // Edit overrides above CORRECT what the parser found; these ADD what it missed
 // entirely — a whole role/degree/project/achievement, or a bullet under any
@@ -98,7 +158,9 @@ export type AddableSection =
  *   - experience:   title, subtitle (company), start_date, end_date
  *   - education:    title (degree), subtitle (institution), start_date, end_date
  *   - projects:     title (name)
- *   - achievements: title, year
+ *   - achievements: achievementType, title, year — mapped straight onto the
+ *                   achievement's real `type` / `title` / `year` fields, matching
+ *                   the parsed-achievement edit model (#455, #456)
  * `id` is a stable per-session key (`"added:<n>"`) so the entry's bullets (in
  * `addedBullets`) and inline header edits track it without relying on array
  * position.
@@ -106,7 +168,8 @@ export type AddableSection =
 export interface AddedEntry {
   id: string;
   section: AddableSection;
-  /** Primary header: job title / degree / project name / achievement title. */
+  /** Primary header: job title / degree / project name / achievement title. For
+   *  achievements this excludes the type label — see {@link achievementType}. */
   title: string;
   /** Secondary header: company / institution. Unused for projects/achievements. */
   subtitle?: string;
@@ -119,17 +182,34 @@ export interface AddedEntry {
   end_date?: string;
   /** Achievement year (achievements carry a single year, not a range). */
   year?: string;
+  /** Achievement type label ("Patent", "Best Paper Award") — the bold run, and
+   *  the pushed achievement's `type` field (#456). Achievements only; ignored by
+   *  other sections. */
+  achievementType?: string;
 }
 
+/**
+ * Editable header fields on an added entry, as a value — {@link EditableParse.replay}
+ * iterates this to rehydrate a snapshot, so the list must stay exhaustive or a
+ * field persists into the snapshot and is silently dropped on replay (`team`
+ * (#425) and `achievementType` (#455) were both lost that way). Deriving
+ * {@link AddedEntryField} FROM the tuple is what keeps the two in lockstep: a
+ * new field can only join the union by joining the replay. Not exported — replay
+ * lives in this module now, so nothing outside it needs the tuple.
+ */
+const ADDED_ENTRY_FIELDS = [
+  "title",
+  "subtitle",
+  "location",
+  "team",
+  "start_date",
+  "end_date",
+  "year",
+  "achievementType",
+] as const;
+
 /** Editable header fields on an added entry. */
-export type AddedEntryField =
-  | "title"
-  | "subtitle"
-  | "location"
-  | "team"
-  | "start_date"
-  | "end_date"
-  | "year";
+export type AddedEntryField = (typeof ADDED_ENTRY_FIELDS)[number];
 
 /**
  * Bullet lines a user appended to an entry, keyed by entry key. A PARSED entry's
@@ -231,6 +311,18 @@ export interface EditableParse {
     field: keyof EducationFieldOverrides,
     value: string | undefined,
   ) => void;
+  /** Override map for parsed achievements, keyed by `heuristic_achievements`
+   *  array index. */
+  achievementOverrides: Record<number, AchievementFieldOverrides>;
+  /** Update one field on a specific parsed achievement by its array index.
+   *  Every field maps 1:1 onto `HeuristicAchievement` (#456), so this is a plain
+   *  per-field setter — no pairing, no recomposition. Pass undefined to clear
+   *  that single field's override. */
+  setAchievementField: (
+    index: number,
+    field: keyof AchievementFieldOverrides,
+    value: string | undefined,
+  ) => void;
   /** User-added entries across all sections, in insertion order. */
   addedEntries: AddedEntry[];
   /** Append a new (empty-header) entry to a section. Returns its stable id. */
@@ -275,6 +367,15 @@ export interface EditableParse {
    *  parse (records its key in `removed`) or from a prior add (drops it from
    *  `added`). */
   removeSkill: (skill: string) => void;
+  /** The complete override state as a JSON-safe value (#456) — the one shape
+   *  every consumer that must carry edits across a boundary uses (draft
+   *  persistence, the `/` → `/jd-fit` handoff). */
+  snapshot: EditSnapshot;
+  /** Replay a snapshot through this hook's own public setters, rather than
+   *  reaching into its internals. `addEntry` mints a fresh id per call, so added
+   *  entries (and any bullets keyed by their id) are remapped old-id → new-id.
+   *  Additive: replaying onto a non-empty state merges rather than replaces. */
+  replay: (snapshot: EditSnapshot) => void;
   /** True when any contact, experience, bullet, education, or skills override is set. */
   hasEdits: boolean;
   /** Clear every override, reverting to the original parse. */
@@ -294,6 +395,9 @@ export function useEditableParse(): EditableParse {
   );
   const [educationOverrides, setEducationOverrides] = useState<
     Record<number, EducationFieldOverrides>
+  >({});
+  const [achievementOverrides, setAchievementOverrides] = useState<
+    Record<number, AchievementFieldOverrides>
   >({});
   const [skillsOverride, setSkillsOverride] = useState<SkillsOverride>(
     EMPTY_SKILLS_OVERRIDE,
@@ -379,6 +483,22 @@ export function useEditableParse(): EditableParse {
         } else {
           entry[field] = value;
         }
+        return { ...prev, [index]: entry };
+      });
+    },
+    [],
+  );
+
+  const setAchievementField = useCallback(
+    (
+      index: number,
+      field: keyof AchievementFieldOverrides,
+      value: string | undefined,
+    ) => {
+      setAchievementOverrides((prev) => {
+        const entry = { ...prev[index] };
+        if (value === undefined) delete entry[field];
+        else entry[field] = value;
         return { ...prev, [index]: entry };
       });
     },
@@ -512,11 +632,131 @@ export function useEditableParse(): EditableParse {
     setBulletOverrides({});
     setRemovedBullets(new Set());
     setEducationOverrides({});
+    setAchievementOverrides({});
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
     setAddedEntries([]);
     setAddedBullets({});
     setProfileOverrides([]);
   }, []);
+
+  const snapshot = useMemo<EditSnapshot>(
+    () => ({
+      contactOverrides,
+      experienceOverrides,
+      bulletOverrides,
+      removedBullets: [...removedBullets],
+      educationOverrides,
+      achievementOverrides,
+      skillsOverride,
+      addedEntries,
+      addedBullets,
+      profileOverrides,
+    }),
+    [
+      contactOverrides,
+      experienceOverrides,
+      bulletOverrides,
+      removedBullets,
+      educationOverrides,
+      achievementOverrides,
+      skillsOverride,
+      addedEntries,
+      addedBullets,
+      profileOverrides,
+    ],
+  );
+
+  const replay = useCallback(
+    (snap: EditSnapshot) => {
+      (
+        Object.entries(snap.contactOverrides) as [
+          keyof ContactOverrides,
+          string,
+        ][]
+      ).forEach(([key, value]) => setContactField(key, value));
+
+      Object.entries(snap.experienceOverrides).forEach(([index, fields]) => {
+        (
+          Object.entries(fields) as [keyof ExperienceFieldOverrides, string][]
+        ).forEach(([field, value]) =>
+          setExperienceField(Number(index), field, value),
+        );
+      });
+
+      Object.entries(snap.bulletOverrides).forEach(([index, value]) =>
+        setBulletField(Number(index), value),
+      );
+
+      snap.removedBullets.forEach((index) => removeBullet(index));
+
+      Object.entries(snap.educationOverrides).forEach(([index, fields]) => {
+        (
+          Object.entries(fields) as [keyof EducationFieldOverrides, string][]
+        ).forEach(([field, value]) =>
+          setEducationField(Number(index), field, value),
+        );
+      });
+
+      // Each achievement override key is a real field (#456), so replaying them
+      // one by one rebuilds the map exactly.
+      Object.entries(snap.achievementOverrides ?? {}).forEach(
+        ([index, fields]) => {
+          (
+            Object.entries(fields) as [
+              keyof AchievementFieldOverrides,
+              string,
+            ][]
+          ).forEach(([field, value]) =>
+            setAchievementField(Number(index), field, value),
+          );
+        },
+      );
+
+      snap.skillsOverride.added.forEach((skill) => addSkill(skill));
+      snap.skillsOverride.removed.forEach((skill) => removeSkill(skill));
+
+      const idMap = new Map<string, string>();
+      for (const entry of snap.addedEntries) {
+        const newId = addEntry(entry.section);
+        idMap.set(entry.id, newId);
+        // Iterates the field tuple AddedEntryField is derived from, so a new
+        // editable field cannot be added to the union without also being
+        // replayed here — `team` (#425) and `achievementType` (#455) were both
+        // silently dropped on restore by a hand-synced list.
+        ADDED_ENTRY_FIELDS.forEach((field) => {
+          const value = entry[field];
+          if (value !== undefined) setEntryField(newId, field, value);
+        });
+      }
+      for (const [entryKey, bullets] of Object.entries(snap.addedBullets)) {
+        const mappedKey = idMap.get(entryKey) ?? entryKey;
+        bullets.forEach((text) => addBullet(mappedKey, text));
+      }
+
+      // Contact-link overrides (#427): corrections (carrying a legacyKey) replay
+      // through `setLegacyLink`; extras replay through `addProfile`. Fresh ids
+      // are minted on replay — the old per-session ids are never reused.
+      for (const ov of snap.profileOverrides ?? []) {
+        if (ov.legacyKey !== undefined) setLegacyLink(ov.legacyKey, ov.url);
+        else addProfile(ov.url);
+      }
+    },
+    [
+      setContactField,
+      setExperienceField,
+      setBulletField,
+      removeBullet,
+      setEducationField,
+      setAchievementField,
+      addSkill,
+      removeSkill,
+      addEntry,
+      setEntryField,
+      addBullet,
+      setLegacyLink,
+      addProfile,
+    ],
+  );
 
   const hasEdits = useMemo(() => {
     if (Object.keys(contactOverrides).length > 0) return true;
@@ -533,6 +773,12 @@ export function useEditableParse(): EditableParse {
       )
     )
       return true;
+    if (
+      Object.values(achievementOverrides).some(
+        (entry) => Object.keys(entry).length > 0,
+      )
+    )
+      return true;
     return Object.values(experienceOverrides).some(
       (entry) => Object.keys(entry).length > 0,
     );
@@ -542,6 +788,7 @@ export function useEditableParse(): EditableParse {
     bulletOverrides,
     removedBullets,
     educationOverrides,
+    achievementOverrides,
     skillsOverride,
     addedEntries,
     addedBullets,
@@ -559,6 +806,8 @@ export function useEditableParse(): EditableParse {
     removeBullet,
     educationOverrides,
     setEducationField,
+    achievementOverrides,
+    setAchievementField,
     addedEntries,
     addEntry,
     removeEntry,
@@ -573,6 +822,8 @@ export function useEditableParse(): EditableParse {
     skillsOverride,
     addSkill,
     removeSkill,
+    snapshot,
+    replay,
     hasEdits,
     resetAll,
   };

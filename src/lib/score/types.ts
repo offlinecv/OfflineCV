@@ -240,17 +240,28 @@ export interface Achievement {
 export type AchievementsPlacement = "default" | "above_experience";
 
 // ── Heuristic achievements ──────────────────────────────────────────────────
-// The deterministic parser cannot classify an achievement's TYPE (patent vs.
-// award vs. talk) — that requires the LLM path, which populates the structured
-// `Achievement[]` above. Rather than fabricate a `type` (and the
-// `custom_emoji`/`custom_label` that `type: "custom"` mandates), the heuristic
-// path emits this honest, structure-free shape: a name-led item with optional
-// year/url and a bullet body, mirroring `ResumeProject`. A name-led item is the
-// most a regex parser can truthfully assert about an Achievements / Activities
-// / Awards block. Issue #96, design option (a).
+// The deterministic parser cannot CLASSIFY an achievement into the closed
+// `AchievementType` enum (patent vs. award vs. talk) — that requires the LLM
+// path, which populates the structured `Achievement[]` above. Rather than
+// fabricate a classification (and the `custom_emoji`/`custom_label` that
+// `type: "custom"` mandates), the heuristic path emits this honest,
+// structure-free shape: a title-led item with an optional VERBATIM type label,
+// year, url, and a bullet body, mirroring `ResumeProject`. Issue #96.
 
 export interface HeuristicAchievement {
-  /** Item title — the header line that leads the entry. Empty string only when
+  /** The verbatim leading label the header carried before its first `" · "`
+   *  ("Patent", "Best Paper Award"), when short enough to read as a label
+   *  rather than prose — see `splitAchievementType`. NOT the classified
+   *  `AchievementType` enum: free text, exactly as written.
+   *
+   *  A real field, not a run of `title` (#456). It was briefly modelled as the
+   *  leading `" · "` segment of a composed `title` (#454, design model (a)),
+   *  but `decompose ∘ join` is not the identity — every consumer holding only
+   *  the composed title re-split it differently from what the user typed (the
+   *  PDF bolded the wrong run; `/jd-fit` showed the wrong halves). Storing the
+   *  label makes the split happen exactly once, at parse. */
+  type?: string;
+  /** Item title, WITHOUT the leading {@link type} label. Empty string only when
    *  the block carried no usable header line. */
   title: string;
   /** Lead year when the header carried a date (achievements show a single year,
