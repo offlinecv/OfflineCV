@@ -35,6 +35,7 @@ import type {
 import type { CanonicalResume } from "../heuristics/canonical.ts";
 import { toCanonicalResume } from "../heuristics/canonical.ts";
 import type { BulletObservation } from "../score/score.ts";
+import type { HeuristicAchievement } from "../score/types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
 import { normalizeBulletText } from "../score/group-bullets.ts";
@@ -44,6 +45,7 @@ import type {
   ContactOverrides,
   ExperienceFieldOverrides,
   EducationFieldOverrides,
+  AchievementFieldOverrides,
   SkillsOverride,
   AddedEntry,
   AddedBullets,
@@ -294,6 +296,53 @@ function applyEducationFieldOverrides(
     if (fields.start_date !== undefined) edu.start_date = fields.start_date;
     if (fields.end_date !== undefined) edu.end_date = fields.end_date;
   }
+}
+
+// ── Achievements (#454) ─────────────────────────────────────────────────────
+
+/**
+ * Fold `achievements` field overrides into the parsed achievements, keyed by
+ * array index. Each override key names a REAL field on `HeuristicAchievement`
+ * (`type`, `title`, `year`) and is copied straight onto it (#456) — there is no
+ * compose/decompose step, so an edit to one field can never perturb another.
+ *
+ * An empty `type` or `year` drops the key (mirroring the optional
+ * `location`/`team` clears on experience); an empty `title` is kept verbatim,
+ * since `title` is required and its empty string is the parser's own
+ * no-usable-header value.
+ *
+ * `heuristic_achievements` is cloned here (the entry point pre-clones only
+ * experience / education / skills). A later re-clone by
+ * {@link applyAddedEntriesAndBullets} preserves these edits.
+ *
+ * Achievement overrides are keyed against the PARSED array, and added entries
+ * are appended AFTER this runs, so the two index spaces never collide.
+ */
+function applyAchievementOverrides(
+  nextParsed: HeuristicParsedResume,
+  overrides: Record<number, AchievementFieldOverrides>,
+): void {
+  if (Object.keys(overrides).length === 0) return;
+  const parsedAchievements = nextParsed.heuristic_achievements;
+  if (!parsedAchievements || parsedAchievements.length === 0) return;
+
+  const achievements = parsedAchievements.map((a) => ({ ...a }));
+  for (const [idxStr, fields] of Object.entries(overrides)) {
+    const ach = achievements[Number(idxStr)];
+    if (!ach) continue;
+    mergeAchievementFields(ach, fields);
+  }
+  nextParsed.heuristic_achievements = achievements;
+}
+
+/** Fold one achievement's field overrides into the (already cloned) entry. */
+function mergeAchievementFields(
+  ach: HeuristicAchievement,
+  fields: AchievementFieldOverrides,
+): void {
+  if (fields.type !== undefined) ach.type = fields.type || undefined;
+  if (fields.title !== undefined) ach.title = fields.title;
+  if (fields.year !== undefined) ach.year = fields.year || undefined;
 }
 
 // ── Skills (add / remove) ───────────────────────────────────────────────────
@@ -637,7 +686,12 @@ function pushAddedEntry(
   } else if (entry.section === "projects") {
     nextParsed.projects!.push({ name: entry.title, description });
   } else {
+    // The added entry's flat header fields map straight onto the achievement's
+    // real fields (#456) — `achievementType` is the bold label, `title` the rest
+    // — so an added achievement is indistinguishable from a parsed-then-edited
+    // one (#455) without any recomposition.
     nextParsed.heuristic_achievements!.push({
+      type: entry.achievementType || undefined,
       title: entry.title,
       year: entry.year,
       description,
@@ -774,6 +828,11 @@ function applyAddedBulletsToExistingEntries(
  *                  clear), so a typed-in / picker-added contact link scores +
  *                  displays as present rather than as low-confidence against the
  *                  frozen base parse (#421 Blocking #1 / #3). Default `{}`.
+ * @param achievements achievement-field overrides keyed by
+ *                  `heuristic_achievements` array index (#454). `type`, `title`
+ *                  and `year` are copied straight onto the entry — `type` is a
+ *                  stored field, not a run of `title`, so nothing is recomposed
+ *                  (#456). An empty `type` or `year` clears it. Default `{}`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -790,6 +849,7 @@ export function applyOverrides(
   removedBullets: ReadonlySet<number> = new Set(),
   profileOverrides: readonly ProfileOverride[] = [],
   fieldConfidence: FieldConfidence = {},
+  achievements: Record<number, AchievementFieldOverrides> = {},
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -826,6 +886,9 @@ export function applyOverrides(
   );
 
   applyEducationFieldOverrides(nextParsed.education, education);
+  // Before the added-entry append below, so the override keys stay aligned with
+  // the PARSED achievement indices they were captured against.
+  applyAchievementOverrides(nextParsed, achievements);
   applySkillOverrides(nextParsed, skills);
 
   const nextSections = applyAddedEntriesAndBullets(

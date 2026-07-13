@@ -766,6 +766,60 @@ describe("applyOverrides — added entries + bullets", () => {
     });
   });
 
+  it("maps an added achievement's type + title onto the real fields (#455, #456)", () => {
+    const { fields: out } = applyOverrides(
+      baseParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      undefined,
+      [
+        {
+          id: "added:0",
+          section: "achievements",
+          achievementType: "Patent",
+          title: "Issued US10275736B1; bulk catalog editor",
+          year: "2021",
+        },
+      ],
+      {},
+    );
+    expect(out.heuristic_achievements?.[0]).toMatchObject({
+      type: "Patent",
+      title: "Issued US10275736B1; bulk catalog editor",
+      year: "2021",
+    });
+  });
+
+  it("adds an achievement with no type as a bare description (#455)", () => {
+    const { fields: out } = applyOverrides(
+      baseParsed(),
+      "raw",
+      makeSections(),
+      {},
+      {},
+      {},
+      [],
+      {},
+      undefined,
+      [
+        {
+          id: "added:0",
+          section: "achievements",
+          title: "Ran the local 10k for charity",
+        },
+      ],
+      {},
+    );
+    expect(out.heuristic_achievements?.[0].title).toBe(
+      "Ran the local 10k for charity",
+    );
+  });
+
   it("folds an added bullet on an existing role into description AND the pool", () => {
     const parsed = baseParsed();
     const { fields: out, sections } = applyOverrides(
@@ -1129,5 +1183,182 @@ describe("applyOverrides — profiles[] (#335)", () => {
     expect(linkedinEdits).toHaveLength(1);
     expect(linkedinEdits[0].confidence).toBe(1); // present, not the stale clear
     expect(probe.linkedin_url).toBe("https://linkedin.com/in/new");
+  });
+});
+
+// ── Achievements (#454) ─────────────────────────────────────────────────────
+//
+// `title` is the canonical field: the UI edits its two halves (the leading type
+// label and the description) as separate fields and applyOverrides recomposes
+// them, so these tests pin the decompose → edit → recompose loop, including the
+// degenerate shapes (no type segment, a cleared type, an over-long type).
+
+/** A parse carrying two parsed achievements — one typed, one prose-only. */
+function achParsed(): HeuristicParsedResume {
+  return {
+    ...baseParsed(),
+    heuristic_achievements: [
+      {
+        type: "Patent",
+        title: "Issued US10275736B1; bulk catalog editor",
+        year: "2019",
+        description: "Cut editor latency 40%",
+      },
+      { title: "Best Paper Award", year: "2021" },
+    ],
+  };
+}
+
+/** applyOverrides with only the achievement overrides (+ optional added entries)
+ *  set — the rest defaulted, so the calls below stay readable. */
+function applyAch(
+  parsed: HeuristicParsedResume,
+  achievements: Parameters<typeof applyOverrides>[14],
+  addedEntries: Parameters<typeof applyOverrides>[9] = [],
+) {
+  return applyOverrides(
+    parsed,
+    "raw",
+    makeSections(),
+    {},
+    {},
+    {},
+    [],
+    {},
+    undefined,
+    addedEntries,
+    {},
+    undefined,
+    undefined,
+    undefined,
+    achievements,
+  );
+}
+
+describe("applyOverrides — achievements", () => {
+  it("writes the title override onto the title field, leaving the type alone", () => {
+    const parsed = achParsed();
+    const { fields: out } = applyAch(parsed, {
+      0: { title: "Issued US10275736B1; bulk catalog editor v2" },
+    });
+    expect(out.heuristic_achievements?.[0]).toMatchObject({
+      type: "Patent",
+      title: "Issued US10275736B1; bulk catalog editor v2",
+    });
+    // The original parse is not mutated.
+    expect(parsed.heuristic_achievements?.[0].title).toBe(
+      "Issued US10275736B1; bulk catalog editor",
+    );
+  });
+
+  it("writes the type override onto the type field (the bold run tracks it)", () => {
+    const { fields: out } = applyAch(achParsed(), { 0: { type: "Publication" } });
+    expect(out.heuristic_achievements?.[0]).toMatchObject({
+      type: "Publication",
+      title: "Issued US10275736B1; bulk catalog editor",
+    });
+  });
+
+  it("clearing the type drops the field, keeping the title intact", () => {
+    const { fields: out } = applyAch(achParsed(), { 0: { type: "" } });
+    expect(out.heuristic_achievements?.[0].type).toBeUndefined();
+    expect(out.heuristic_achievements?.[0].title).toBe(
+      "Issued US10275736B1; bulk catalog editor",
+    );
+  });
+
+  it("adds a type to a previously type-less achievement", () => {
+    const { fields: out } = applyAch(achParsed(), { 1: { type: "Award" } });
+    expect(out.heuristic_achievements?.[1]).toMatchObject({
+      type: "Award",
+      title: "Best Paper Award",
+    });
+  });
+
+  it("edits the title of a type-less achievement without inventing a type", () => {
+    const { fields: out } = applyAch(achParsed(), {
+      1: { title: "Best Paper Award, ACL" },
+    });
+    expect(out.heuristic_achievements?.[1].type).toBeUndefined();
+    expect(out.heuristic_achievements?.[1].title).toBe("Best Paper Award, ACL");
+  });
+
+  it("sets the year, and an empty year clears it", () => {
+    const { fields: set } = applyAch(achParsed(), { 1: { year: "2022" } });
+    expect(set.heuristic_achievements?.[1].year).toBe("2022");
+
+    const { fields: cleared } = applyAch(achParsed(), { 1: { year: "" } });
+    expect(cleared.heuristic_achievements?.[1].year).toBeUndefined();
+  });
+
+  it("clearing both fields empties the header without cross-contamination", () => {
+    const { fields: out } = applyAch(achParsed(), { 0: { type: "", title: "" } });
+    expect(out.heuristic_achievements?.[0].type).toBeUndefined();
+    expect(out.heuristic_achievements?.[0].title).toBe("");
+  });
+
+  it("keeps the achievement's bullets (description body) across a header edit", () => {
+    const { fields: out } = applyAch(achParsed(), { 0: { type: "Publication" } });
+    expect(out.heuristic_achievements?.[0].description).toBe(
+      "Cut editor latency 40%",
+    );
+  });
+
+  // ── The two shapes the old composed-title model (#454) got wrong ────────────
+  // Both used to survive as a `title` STRING but re-split into a different pair,
+  // so the PDF bolded the wrong run and /jd-fit showed the wrong fields. With
+  // `type` a real field there is nothing to re-split (#456).
+
+  it("keeps an over-long type as the type — it is not folded into the title", () => {
+    const longType = "Recognized across the org for sustained impact";
+    const { fields: out } = applyAch(achParsed(), { 1: { type: longType } });
+    expect(out.heuristic_achievements?.[1]).toMatchObject({
+      type: longType,
+      title: "Best Paper Award",
+    });
+  });
+
+  it("keeps a title carrying its own separator out of the type", () => {
+    const { fields: out } = applyAch(achParsed(), {
+      1: { type: "Talk", title: "KubeCon · Amsterdam" },
+    });
+    expect(out.heuristic_achievements?.[1]).toMatchObject({
+      type: "Talk",
+      title: "KubeCon · Amsterdam",
+    });
+  });
+
+  it("ignores an achievement override for an out-of-range index", () => {
+    const { fields: out } = applyAch(achParsed(), { 5: { type: "Patent" } });
+    expect(out.heuristic_achievements).toHaveLength(2);
+    expect(out.heuristic_achievements?.[0].type).toBe("Patent");
+  });
+
+  it("is a no-op when there are no achievement overrides", () => {
+    const { fields: out } = applyAch(achParsed(), {});
+    expect(out.heuristic_achievements).toEqual(achParsed().heuristic_achievements);
+  });
+
+  it("survives an override against a parse with no achievements at all", () => {
+    const { fields: out } = applyAch(baseParsed(), { 0: { type: "Patent" } });
+    expect(out.heuristic_achievements).toBeUndefined();
+  });
+
+  it("keys overrides against the PARSED indices — an added achievement never collides", () => {
+    const { fields: out } = applyAch(
+      achParsed(),
+      { 0: { type: "Publication" } },
+      [{ id: "added:0", section: "achievements", title: "Talk", year: "2024" }],
+    );
+    expect(out.heuristic_achievements).toHaveLength(3);
+    expect(out.heuristic_achievements?.[0]).toMatchObject({
+      type: "Publication",
+      title: "Issued US10275736B1; bulk catalog editor",
+    });
+    // The appended entry sits past the parsed ones, untouched by the override.
+    expect(out.heuristic_achievements?.[2]).toMatchObject({
+      title: "Talk",
+      year: "2024",
+    });
   });
 });

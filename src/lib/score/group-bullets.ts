@@ -13,6 +13,7 @@
  */
 
 import type { BulletObservation } from "./score.ts";
+import { splitAchievementType } from "./entry-dates.ts";
 
 // ── Normalization ─────────────────────────────────────────────────────────────
 
@@ -72,6 +73,15 @@ export interface BulletExperience {
  * the `BulletExperience` shape: `name` falls back to `title`, and the date /
  * currency fields pass through verbatim. Shared by the reconstruction surface
  * and the ATS render-model builder so both derive the entry shape identically.
+ *
+ * An achievement's `type` label is deliberately NOT folded into the title here.
+ * The title must stay the entry's CANONICAL text — the one thing a `type` edit
+ * cannot change — because it is the ownership key {@link suppressTitleOwnedBullets}
+ * matches against. Composing `type · title` instead would rebuild the key out of
+ * a user-editable field, so retyping a "Patent" as a "Book" would move the key
+ * off the raw PDF line it has to match and strand that line in "Other bullets"
+ * (#456). The label tolerance lives on the bullet side instead, where the text is
+ * immutable.
  */
 export function toBulletExperience(
   entries: ReadonlyArray<{
@@ -198,6 +208,27 @@ function normalizeTitleKey(s: string): string {
 }
 
 /**
+ * The bullet key with a leading achievement-type run removed, or null when it
+ * carries none.
+ *
+ * A pooled bullet is raw PDF text, so an achievement's line arrives COMPOSED
+ * (`"Patent · Issued US10275736B1"`) while the parsed entry holds the two halves
+ * apart — `type: "Patent"`, `title: "Issued US10275736B1"`. Ownership therefore
+ * has to compare the bullet's post-label remainder against the bare title.
+ *
+ * This reuses the parser's own {@link splitAchievementType} rather than
+ * re-deriving the split: it IS the inverse of the parse-time cut, so the two stay
+ * in lockstep on the separator and the type-length bound. Rolling a second regex
+ * here would let the two drift, which is exactly how the label run stopped
+ * matching in the first place.
+ */
+function stripAchievementLabel(key: string): string | null {
+  const split = splitAchievementType(key);
+  const rest = split?.rest.trim();
+  return rest ? rest : null;
+}
+
+/**
  * Drop from a bullet list every bullet whose content is already OWNED by a
  * title-only entry — i.e. a `• Label … [year]` achievement/project that renders
  * its whole line as a header and carries no `description` for the grouper to
@@ -205,6 +236,12 @@ function normalizeTitleKey(s: string): string {
  * the same content twice. We suppress it from "Other" rather than re-attributing
  * it to the entry: the entry's own title already IS that content, so rendering it
  * again as the entry's bullet would just move the duplicate, not remove it.
+ *
+ * A bullet matches on EITHER its whole key or its key minus a leading achievement
+ * type run (#456) — the composed-vs-split reconciliation described on
+ * {@link stripAchievementLabel}. The second candidate is additive: it only ever
+ * suppresses more, and it is keyed on the entry's canonical `title`, so editing an
+ * achievement's `type` cannot move the key off the raw line it has to match.
  *
  * Ownership is exact on the residue-tolerant {@link normalizeTitleKey} — a tight
  * key, not substring containment — so a genuinely-unmatched bullet that merely
@@ -223,7 +260,12 @@ export function suppressTitleOwnedBullets(
     if (key) ownedKeys.add(key);
   }
   if (ownedKeys.size === 0) return [...bullets];
-  return bullets.filter((b) => !ownedKeys.has(normalizeTitleKey(b.text)));
+  return bullets.filter((b) => {
+    const key = normalizeTitleKey(b.text);
+    if (ownedKeys.has(key)) return false;
+    const unlabelled = stripAchievementLabel(key);
+    return !(unlabelled && ownedKeys.has(unlabelled));
+  });
 }
 
 // ── Header formatting ─────────────────────────────────────────────────────────

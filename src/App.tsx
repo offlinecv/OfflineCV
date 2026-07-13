@@ -66,13 +66,15 @@ export default function App() {
   // re-parsing, then navigate to the base-aware /jd-fit URL — works under both
   // the custom-domain "/" base and the "/resumelint/" Pages-fallback base.
   const goToJdFit = () => {
-    if (state.phase === "done" && edited) {
+    if (state.phase === "done") {
+      // The PRISTINE parse + score and the edit state as SEPARATE payloads —
+      // /jd-fit re-applies the overrides through its own edit layer (#456).
+      // Handing it `edited.parsed` instead baked the edits in irreversibly:
+      // added entries arrived indistinguishable from parsed ones.
       writeJdFitHandoff({
-        result: {
-          ...state.result,
-          canonical: { ...state.result.canonical, fields: edited.parsed },
-        },
-        score: edited.score,
+        result: state.result,
+        score: state.score,
+        edit: edit.snapshot,
       });
     }
     window.location.href = `${import.meta.env.BASE_URL}jd-fit/`;

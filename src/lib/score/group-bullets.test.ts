@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   groupBulletsByExperience,
   suppressTitleOwnedBullets,
+  toBulletExperience,
   formatExperienceHeader,
   normalizeBulletText,
   type BulletExperience,
@@ -303,6 +304,51 @@ describe("multi-line bullet pool is fully merged and correctly attributed (#162)
       expect(otherText.has(t)).toBe(false);
     }
   }, 20000);
+});
+
+// ── Achievement-label-tolerant ownership (issue 456) ──────────────────────────
+
+describe("suppressTitleOwnedBullets — achievement type labels (issue 456)", () => {
+  // The pooled bullet is raw PDF text, so the achievement's header arrives as ONE
+  // composed line, while the parsed entry holds the halves apart (type + title).
+  const RAW_LINE = "Patent · Ranking e-commerce catalogs. [2019]";
+  const PARSED = { type: "Patent", title: "Ranking e-commerce catalogs. []" };
+
+  it("suppresses a title-only achievement's own composed source line", () => {
+    const kept = suppressTitleOwnedBullets(
+      [makeBullet(RAW_LINE, 0)],
+      toBulletExperience([PARSED]),
+    );
+    expect(kept).toEqual([]);
+  });
+
+  it("REGRESSION: retyping the achievement does not resurrect the duplicate", () => {
+    // `type` is user-editable; the raw PDF line is not. Keying ownership on a
+    // recomposed `type · title` rebuilt the key out of the editable half, so
+    // retyping "Patent" as "Book" moved the key off the line it had to match and
+    // stranded that line in "Other bullets". Ownership keys on the canonical
+    // title, so the retype is inert.
+    const retyped = { ...PARSED, type: "Book" };
+    const entries = toBulletExperience([retyped]);
+    expect(entries[0].title).toBe(PARSED.title); // no label folded in
+    const kept = suppressTitleOwnedBullets([makeBullet(RAW_LINE, 0)], entries);
+    expect(kept).toEqual([]);
+  });
+
+  it("leaves an unrelated bullet that merely carries a ' · ' run alone", () => {
+    const bullet = makeBullet("Led team · shipped an unrelated thing", 0);
+    const kept = suppressTitleOwnedBullets([bullet], toBulletExperience([PARSED]));
+    expect(kept).toEqual([bullet]);
+  });
+
+  it("coerces entries without folding any label into the title", () => {
+    const [exp, proj] = toBulletExperience([
+      { title: "Senior PM", description: "• Shipped it" },
+      { name: "Revenue Forecasting" },
+    ]);
+    expect(exp.title).toBe("Senior PM");
+    expect(proj.title).toBe("Revenue Forecasting");
+  });
 });
 
 // ── suppressTitleOwnedBullets (#224) ────────────────────────────────────────────

@@ -73,13 +73,13 @@ import type {
   BulletOverrides,
   AddedEntry,
   AddedEntryField,
+  AchievementFieldOverrides,
 } from "../../hooks/useEditableParse.ts";
 import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
 import { AddPill, RemoveButton, InlineBulletAdd } from "./ReconstructedAdd.tsx";
-import {
-  buildProjectDates,
-  splitAchievementType,
-} from "../../lib/score/entry-dates.ts";
+import { AchievementTypePicker } from "./AchievementTypePicker.tsx";
+import { buildProjectDates } from "../../lib/score/entry-dates.ts";
+import { validateDate } from "../../lib/edit/field-validators.ts";
 import {
   EducationSection,
   SkillsSection,
@@ -643,44 +643,79 @@ function ProjectsSection({
 }
 
 /**
- * Read-only achievement header. Emphasizes ONLY the leading "type" label (e.g.
- * "Patent", "Publication") when the title carries the canonical "Type ·
- * description" shape, matching the Download PDF, which bolds just that run
- * (#452). The rest of the header — description + year — renders regular weight.
- * When there is no qualifying type segment the whole header stays bold, as the
- * PDF keeps the whole line bold in that case.
+ * An achievement's header, inline-editable (#454) — used for BOTH a parsed
+ * achievement and a user-ADDED one, which render identically and differ only in
+ * which override map the commit lands in (the caller supplies `onFieldChange`).
+ *
+ * `type` and `title` are REAL fields on the achievement (#456), and the props
+ * here are the OVERRIDE-APPLIED values — so the header just renders them. It
+ * used to derive the two from a composed `title`, which is not a round-trip and
+ * needed a pinning layer to stay honest; storing the label deletes both.
+ *
+ * `type` is a PICKER, not a free text field: it is a small, mostly-closed
+ * vocabulary ("Patent", "Talk", "Award"), so typing it out invites the typo the
+ * exporter would then bold. The picker still commits free text for the labels a
+ * real résumé used that no preset covers — see `AchievementTypePicker`.
  */
 function AchievementHeader({
+  type,
   title,
   year,
-  fallback,
+  onFieldChange,
 }: {
+  type?: string;
   title?: string;
   year?: string;
-  fallback: string;
+  onFieldChange: (field: keyof AchievementFieldOverrides, value: string) => void;
 }) {
-  const split = title ? splitAchievementType(title) : null;
-  if (!split) {
-    return (
-      <h3 className="text-sm font-semibold text-content-primary">{fallback}</h3>
-    );
-  }
-  const tail = [split.rest, year].filter(Boolean).join(" · ");
   return (
-    <h3 className="text-sm font-normal text-content-primary">
-      <span className="font-semibold">{split.type}</span>
-      {` · ${tail}`}
-    </h3>
+    <div className="flex min-w-0 grow flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+      <AchievementTypePicker
+        value={type || undefined}
+        onSelect={(v) => onFieldChange("type", v)}
+      />
+      <span className="text-content-muted" aria-hidden="true">
+        ·
+      </span>
+      <EditableField
+        value={title || undefined}
+        placeholder="achievement not detected"
+        label="Achievement description"
+        textSize="sm"
+        // With no type label there is no run to single out, so the exporter
+        // bolds the whole header (`ats-resume-model.ts`, headerBold). Match it
+        // here, or the view and the PDF disagree on emphasis for the common
+        // type-less "Best Paper Award" shape.
+        textWeight={type ? undefined : "semibold"}
+        multiline
+        onCommit={(v) => onFieldChange("title", v)}
+      />
+      <span className="text-content-muted" aria-hidden="true">
+        ·
+      </span>
+      <EditableField
+        value={year || undefined}
+        placeholder="year"
+        label="Year"
+        textSize="xs"
+        validate={validateDate}
+        onCommit={(v) => onFieldChange("year", v)}
+      />
+    </div>
   );
 }
 
 /**
  * Achievements render as their OWN section (#96), mirroring ProjectsSection: a
  * title-led header + the same graded `ResumeBulletRow`s used everywhere else, so
- * achievement bullets are checked and flagged identically. Read-only — the edit
- * affordances target experience/contact, not achievements. Achievements carry a
+ * achievement bullets are checked and flagged identically. Achievements carry a
  * single `year`, not a date range, so the header equivalent of
  * `buildProjectDates` is just the year string.
+ *
+ * Both branches are editable: a PARSED achievement's type / title / year through
+ * `AchievementHeader` (#454, overrides keyed by parsed index and already folded
+ * into `achievements` by `applyOverrides`), a user-ADDED one through the flat
+ * `AddedEntry` fields (#455).
  */
 function AchievementsSection({
   heading,
@@ -692,6 +727,7 @@ function AchievementsSection({
   onAddEntry,
   onRemoveEntry,
   onEntryField,
+  onAchievementField,
   onAddBullet,
 }: {
   /** Verbatim source heading (#285); falls back to "Achievements" when absent. */
@@ -705,6 +741,11 @@ function AchievementsSection({
   onAddEntry: () => void;
   onRemoveEntry: (id: string) => void;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  onAchievementField: (
+    index: number,
+    field: keyof AchievementFieldOverrides,
+    value: string,
+  ) => void;
   onAddBullet: (entryKey: string, text: string) => void;
 }) {
   return (
@@ -717,37 +758,33 @@ function AchievementsSection({
             i >= originalCount
               ? addedAchievements[i - originalCount]
               : undefined;
-          const header = [achievement.title, achievement.year]
-            .filter(Boolean)
-            .join(" · ");
           return (
             <div key={added ? added.id : i} className="flex flex-col gap-1.5">
               <div className="flex items-start justify-between gap-2">
                 {added ? (
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                    <EditableField
-                      value={achievement.title || undefined}
-                      placeholder="achievement title"
-                      label="Achievement title"
-                      textWeight="semibold"
-                      textSize="sm"
-                      multiline
-                      onCommit={(v) => onEntryField(added.id, "title", v)}
-                    />
-                    <span className="text-content-muted">·</span>
-                    <EditableField
-                      value={achievement.year || undefined}
-                      placeholder="year"
-                      label="Year"
-                      textSize="xs"
-                      onCommit={(v) => onEntryField(added.id, "year", v)}
-                    />
-                  </div>
+                  // Same header as a parsed achievement — an added entry stores
+                  // its label under `achievementType` on the flat AddedEntry, so
+                  // only the commit target differs.
+                  <AchievementHeader
+                    type={added.achievementType}
+                    title={added.title}
+                    year={added.year}
+                    onFieldChange={(field, value) =>
+                      onEntryField(
+                        added.id,
+                        field === "type" ? "achievementType" : field,
+                        value,
+                      )
+                    }
+                  />
                 ) : (
                   <AchievementHeader
+                    type={achievement.type}
                     title={achievement.title}
                     year={achievement.year}
-                    fallback={header || "Untitled achievement"}
+                    onFieldChange={(field, value) =>
+                      onAchievementField(i, field, value)
+                    }
                   />
                 )}
                 {added && (
@@ -889,6 +926,7 @@ export function ReconstructedResume({
     removeBullet,
     educationOverrides,
     setEducationField,
+    setAchievementField,
     addEntry,
     removeEntry,
     setEntryField,
@@ -1030,6 +1068,7 @@ export function ReconstructedResume({
       onAddEntry={() => addEntry("achievements")}
       onRemoveEntry={removeEntry}
       onEntryField={setEntryField}
+      onAchievementField={setAchievementField}
       onAddBullet={addBullet}
     />
   );

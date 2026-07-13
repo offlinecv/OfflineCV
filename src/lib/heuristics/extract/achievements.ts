@@ -6,6 +6,7 @@ import type { PdfLine, PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { YEAR_RE } from "../regex.ts";
+import { splitAchievementType } from "../../score/entry-dates.ts";
 import {
   isBulletLine,
   isPageFurniture,
@@ -47,10 +48,11 @@ import { liftHeaderLabel } from "./projects.ts";
  * continuation page carries) is stripped first, so it never becomes a title or
  * leaks into an award's description.
  *
- * Honest-by-construction (#96, option (a)): we emit only what a regex parser can
- * truthfully assert — a title, an optional year/url, and a bullet body. We do
- * NOT guess an `AchievementType`; the structured `Achievement[]` is the LLM
- * path's job.
+ * Honest-by-construction (#96): we emit only what a regex parser can truthfully
+ * assert — a title, an optional verbatim type label, year/url, and a bullet
+ * body. The label is lifted off the header, never invented, and stays free text:
+ * we do NOT guess the closed `AchievementType` enum; the structured
+ * `Achievement[]` is the LLM path's job.
  */
 export function extractAchievements(
   achievements: PdfSection | undefined,
@@ -147,7 +149,15 @@ function achievementFromBlock(block: EntryBlock): {
   const cleanedHeader = block.dates.start_date
     ? block.headerLines
     : [stripDateRange(headerText), ...block.headerLines.slice(1)];
-  const { label: title, url } = liftHeaderLabel(cleanedHeader);
+  const { label, url } = liftHeaderLabel(cleanedHeader);
+
+  // Lift the leading "Patent · …" type label off the header into its own field
+  // — the ONE place that split happens (#456). Storing it here is what lets the
+  // edit surface and the PDF exporter agree on the emphasized run without
+  // re-splitting a composed string (which is not a round-trip).
+  const split = splitAchievementType(label);
+  const type = split?.type;
+  const title = split ? split.rest : label;
 
   // Reduce any date range the header carried to a single lead year.
   const year = dates.start_date
@@ -164,6 +174,7 @@ function achievementFromBlock(block: EntryBlock): {
 
   return {
     entry: {
+      ...(type ? { type } : {}),
       title,
       ...(year ? { year } : {}),
       ...(url ? { url } : {}),

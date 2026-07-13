@@ -215,6 +215,42 @@ describe("useAnalyzedResume — draft persistence across reload (#313)", () => {
     ).toBe(true);
   });
 
+  it("restore keeps every added-entry field — including team (#425) and achievementType (#455)", () => {
+    vi.useFakeTimers();
+    act(() => api.startBlank());
+    let roleId = "";
+    let achId = "";
+    act(() => {
+      api.edit.setContactField("full_name", "Jane Doe");
+      roleId = api.edit.addEntry("experience");
+      api.edit.setEntryField(roleId, "title", "Engineer");
+      api.edit.setEntryField(roleId, "subtitle", "Acme");
+      api.edit.setEntryField(roleId, "team", "Platform Infrastructure");
+      achId = api.edit.addEntry("achievements");
+      api.edit.setEntryField(achId, "achievementType", "Patent");
+      api.edit.setEntryField(achId, "title", "US 11,123,456");
+      api.edit.setEntryField(achId, "year", "2023");
+    });
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    unmount();
+    vi.useRealTimers();
+    mount();
+    act(() => api.startBlank());
+    act(() => api.resumeDraft());
+
+    // Before the fix, the replay tuple omitted both fields: the snapshot carried
+    // them and the restore threw them away.
+    expect(api.edited?.parsed.experience[0].team).toBe("Platform Infrastructure");
+    const achievements = api.edited?.parsed.heuristic_achievements ?? [];
+    expect(achievements).toHaveLength(1);
+    expect(achievements[0].type).toBe("Patent");
+    expect(achievements[0].title).toBe("US 11,123,456");
+    expect(achievements[0].year).toBe("2023");
+  });
+
   it("startOverBlank() discards the saved draft and starts fresh (blank, empty)", () => {
     vi.useFakeTimers();
     act(() => api.startBlank());

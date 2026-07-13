@@ -8,6 +8,7 @@ import {
   consumeJdFitHandoff,
   type JdFitHandoff,
 } from "./jd-fit-handoff.ts";
+import type { EditSnapshot } from "../hooks/useEditableParse.ts";
 
 // Vitest defaults to Node env (per vite.config.ts), where `sessionStorage`
 // isn't defined. Provide a tiny in-memory shim so the handoff read/write/clear
@@ -33,6 +34,20 @@ beforeEach(() => {
     new MemoryStorage() as unknown as Storage;
 });
 
+/** An untouched edit layer — what crosses when the user edited nothing. */
+const EMPTY_EDIT: EditSnapshot = {
+  contactOverrides: {},
+  experienceOverrides: {},
+  bulletOverrides: {},
+  removedBullets: [],
+  educationOverrides: {},
+  achievementOverrides: {},
+  skillsOverride: { removed: [], added: [] },
+  addedEntries: [],
+  addedBullets: {},
+  profileOverrides: [],
+};
+
 // Minimal handoff payload — only the fields the shape-guard checks need to be
 // present; the rest round-trips opaquely through JSON. `canonical.sections`
 // carries the `byName` / `sectionHeadings` Maps the scorer reads, so the sample
@@ -55,6 +70,7 @@ const samplePayload = {
     rawText: "x",
   },
   score: { overall: 72 },
+  edit: EMPTY_EDIT,
 } as unknown as JdFitHandoff;
 
 describe("jd-fit handoff round-trip (#226)", () => {
@@ -87,6 +103,50 @@ describe("jd-fit handoff round-trip (#226)", () => {
       JDFIT_HANDOFF_KEY,
       JSON.stringify({
         result: { canonical: { sections: { byName: {} } } },
+        score: { overall: 50 },
+      }),
+    );
+    expect(consumeJdFitHandoff()).toBeNull();
+  });
+
+  it("carries the user's edit STATE, not an override-applied résumé (#456)", () => {
+    // The payload must hand over the pristine parse + the edits separately, so
+    // /jd-fit can re-apply them through its own edit layer. An added entry has
+    // to survive as an ADDED entry — baked into `result.canonical.fields` it
+    // would arrive indistinguishable from a parsed one (and lose its Remove
+    // button), and re-seeding from an applied payload would append it twice.
+    const edited: JdFitHandoff = {
+      ...samplePayload,
+      edit: {
+        ...EMPTY_EDIT,
+        contactOverrides: { full_name: "Corrected Persona" },
+        achievementOverrides: { 0: { type: "Patent", title: "Catalog editor" } },
+        addedEntries: [
+          { id: "added:0", section: "achievements", title: "Talk", year: "2024" },
+        ],
+      },
+    };
+    writeJdFitHandoff(edited);
+    const got = consumeJdFitHandoff();
+
+    expect(got?.edit.contactOverrides.full_name).toBe("Corrected Persona");
+    expect(got?.edit.achievementOverrides?.[0]).toEqual({
+      type: "Patent",
+      title: "Catalog editor",
+    });
+    expect(got?.edit.addedEntries).toHaveLength(1);
+    // The parse itself crosses UNTOUCHED — the correction is not folded in.
+    expect(got?.result.canonical.fields.full_name).toBe("Synthetic Persona");
+  });
+
+  it("rejects a payload with no edit snapshot (#456)", () => {
+    // A pre-#456 payload carried an override-APPLIED result and no `edit` key.
+    // Consuming it would silently show an un-edited résumé, so the guard rejects
+    // and /jd-fit falls back to its DropZone.
+    globalThis.sessionStorage.setItem(
+      JDFIT_HANDOFF_KEY,
+      JSON.stringify({
+        result: { canonical: { sections: { byName: { __rlMap: [] } } } },
         score: { overall: 50 },
       }),
     );

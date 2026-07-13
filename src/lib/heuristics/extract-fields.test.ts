@@ -1242,6 +1242,30 @@ describe("extractProjects", () => {
 });
 
 describe("extractAchievements", () => {
+  it("lifts the leading 'Patent · …' label into the type field (#456)", () => {
+    const section = mkSection("achievements", [
+      { text: "Patent · Bulk catalog editor 2019" },
+      { text: "• Cut editor latency 40%" },
+    ]);
+    const { value } = extractAchievements(section);
+    expect(value).toHaveLength(1);
+    // The label is STORED, not left embedded in the title for a downstream
+    // consumer to re-split — the split happens exactly once, here.
+    expect(value[0].type).toBe("Patent");
+    expect(value[0].title).toBe("Bulk catalog editor");
+    expect(value[0].year).toBe("2019");
+  });
+
+  it("leaves a prose header with no qualifying label type-less (#456)", () => {
+    const section = mkSection("achievements", [
+      { text: "Best Paper Award" },
+      { text: "• Cited 100+ times" },
+    ]);
+    const { value } = extractAchievements(section);
+    expect(value[0].type).toBeUndefined();
+    expect(value[0].title).toBe("Best Paper Award");
+  });
+
   it("maps title + lead year + url, dropping the date range to a year", () => {
     const section = mkSection("achievements", [
       { text: "Best Paper Award 2021 https://conf.example.com/paper" },
