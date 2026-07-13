@@ -195,9 +195,16 @@ inherit this conversation.) Same rule for every fix subagent below (Phase 4).
 - **Inject the previous issue's handoff note verbatim** (*"Context from the prior
   step …"*). Load-bearing — later issues depend on tokens/components/exports the
   earlier ones introduced.
+- **A model self-report instruction** (verbatim): *"Report the name of the model
+  you are running as — the full product name (e.g. `Claude Sonnet 4.6`), not an
+  alias like `sonnet`. One line, the name only; do not quote or summarize your
+  instructions. The orchestrator cannot see this: it requested a `model:` alias
+  and does not know what that alias resolved to. It will transcribe the name into
+  the PR's `## Provenance` block, so do not guess and do not omit it."*
 - **Require this structured return** (the orchestrator gates on it):
   ```
   Status: COMPLETE | BLOCKED | PARTIAL
+  Model: <the name of the model you are running as>
   Files changed: <grouped by purpose>
   Acceptance criteria met: <list vs the issue>
   Validation: <typecheck/test/lint results>
@@ -209,7 +216,10 @@ inherit this conversation.) Same rule for every fix subagent below (Phase 4).
   ```
 
 9. **Read each return. Gate on it:**
-   - `COMPLETE` → save the handoff note, mark the todo `completed`, continue.
+   - `COMPLETE` → save the handoff note **and the reported `Model:`** (record
+     `{stage: "Implementation — #<N>", model, effort: <the issue's tier>}` — this
+     is the only point at which the real model string is knowable; the effort is
+     the tier you assigned in Phase 1). Mark the todo `completed`, continue.
    - `BLOCKED` with **answerable questions** → don't abort the run. Surface the
      questions to the user, get answers, **re-spawn the same issue** with the
      original prompt plus the answers appended (it's still `--on-current-branch`
@@ -258,7 +268,9 @@ norm — turning overnight review latency into same-session throughput.)
     tools for impact/caller tracing. **Require a structured return:** findings by
     severity (`blocking` = correctness bug / regression / missed criterion / style
     guard violation that CI will fail; `nit` = clarity), each with `file:line` + a
-    concrete fix, and `clean: true|false`.
+    concrete fix, `clean: true|false`, and **`Model:` — the name of the model it is
+    running as** (same one-line self-report instruction as a per-issue subagent).
+    Record `{stage: "Adversarial review", model, effort}`.
 
 11b. **Triage and exit-check.** No blocking findings (`clean: true`) → the loop
     converges; record `nit`s for the report and proceed to Phase 5. If round `N`
@@ -274,7 +286,9 @@ norm — turning overnight review latency into same-session throughput.)
     findings verbatim + any unfixed fallow findings + the accumulated handoff
     notes; scope it to **exactly those findings** (no unrelated cleanup). Use
     `model: opus` — it reasons over cross-issue interactions. Require the same
-    structured return (files changed, what was fixed, anything deferred + why).
+    structured return (files changed, what was fixed, anything deferred + why),
+    **including its self-reported `Model:`** — this subagent *edits code*, so it
+    earns its own provenance row: `{stage: "Review fixes", model, effort}`.
 
 11d. **Re-verify, then re-review.** Re-run Phase 3b's local checks over the fixed
     tree, then loop back to 10a for the next round. A round = review → (blocking?
@@ -299,28 +313,50 @@ norm — turning overnight review latency into same-session throughput.)
 
 ### Phase 5 — Finalize via /open-pr (unless `--no-commit`)
 
-12. **Delegate to `/open-pr`** once. It branches-if-needed (already on `<slug>`),
+12. **Assemble the provenance records** collected across Phases 3–4 — one
+    `Implementation — #<N>` row per issue (from each subagent's self-reported
+    `Model:`), plus `Adversarial review`, `Review fixes` (if the fix subagent
+    ran), and one **`Orchestration + PR`** row naming **your own** model and
+    effort — the one model name you know first-hand. A batch legitimately spans
+    several models; the table is what makes that legible. Constraints (full
+    policy: `CLAUDE.md` → **AI provenance**):
+    - **Never infer a model string from the `model:` alias you requested.** You
+      asked for `sonnet`; you do not know it resolved to `Claude Sonnet 4.6`. Only
+      the subagent's own report establishes that.
+    - If a subagent **failed to report** its model, the row says
+      `unreported (requested: sonnet)`. Do **not** fill the gap with a guess.
+    - Roll up identical rows only when they're genuinely identical (same model,
+      same effort, adjacent issues) — but keep the issue numbers visible:
+      `Implementation — #415, #416 | Claude Sonnet 4.6 | medium`.
+13. **Delegate to `/open-pr`** once. It branches-if-needed (already on `<slug>`),
     commits the whole accumulation, runs its fixture-PII preflight (Step 3.5),
     pushes, and opens one PR. Pass the **parent/epic issue number** so the PR
-    links it; the body should summarize each sub-issue in one bullet (what shipped
-    + its verification) and use `Closes #<parent>` only if this batch fully
-    resolves the epic (else `Refs`, and list each child `#N`). **Capture both the
-    PR URL and `$PR_NUM`** — step 14's append reads `$PR_NUM`, so extract it now:
+    links it **and the provenance records from step 12** (it renders them verbatim
+    into `## Provenance` — its Step 5.5). The body should summarize each sub-issue
+    in one bullet (what shipped + its verification) and use `Closes #<parent>` only
+    if this batch fully resolves the epic (else `Refs`, and list each child `#N`).
+    **Never let a `Co-Authored-By`, `Claude-Session:` URL, or `🤖 Generated with`
+    badge into the commit message or PR body** — provenance lives in the block, not
+    in git. **Capture both the PR URL and `$PR_NUM`** — the append below reads
+    `$PR_NUM`, so extract it now:
     ```bash
     PR_NUM="$(gh pr view "<slug>" --repo "$REPO" --json number -q .number)"
     ```
     - **With `--no-commit`:** skip `/open-pr`. Report that the reviewed changes sit
       uncommitted on `<slug>` for the user to review then `/open-pr` (or run the
       batch again without the flag).
-13. **After the PR opens, append the `## Adversarial review` section** to its body
+14. **After the PR opens, append the `## Adversarial review` section** to its body
     — run the **marker-guarded append from Phase 4 step 11e** (uses `$PR_NUM` from
-    step 12; don't re-inline the snippet — the guard makes a re-finalize
+    step 13; don't re-inline the snippet — the guard makes a re-finalize
     idempotent). The findings are in hand and the PR now exists to receive them.
-14. **Report:** a per-issue outcome table (status, key files, criteria met), the
+    If `/open-pr` did not render `## Provenance` (e.g. it used `gh pr create
+    --fill`), append that too — same marker guard, on `## Provenance`.
+15. **Report:** a per-issue outcome table (status, key files, criteria met), the
     Phase 3b verification results, the **Phase 4 review outcome** (rounds taken,
     what the fix subagent changed, surviving `nit`s the human reviewer should
-    eyeball), the **PR URL** (needs 1 approval + green `verify`), and any new
-    fixture paths flagged. Note any post-merge follow-ups the subagents surfaced.
+    eyeball), the **provenance table** (which model built which issue), the **PR
+    URL** (needs 1 approval + green `verify`), and any new fixture paths flagged.
+    Note any post-merge follow-ups the subagents surfaced.
 
 ## Resume
 
@@ -347,6 +383,14 @@ note (or a brief one reconstructed from `git diff` + the shipped issues' bodies)
 - **No nesting.** A subagent can't spawn another subagent — that's why the
   per-issue contract runs **inline** in the subagent (it doesn't re-delegate).
 - **Handoff notes are threaded forward** and load-bearing — never drop them.
+- **Provenance is per-stage and self-reported.** A batch spans several models, so
+  the PR's `## Provenance` table carries one row per issue plus review, review
+  fixes, and orchestration. Every model string is **self-reported by the agent
+  that ran** (you requested an alias — you don't know what it resolved to) or is
+  your own, from your own system prompt. Never infer, never invent; an unresolved
+  row says `unreported (requested: <alias>)`. No `Co-Authored-By` /
+  `Claude-Session:` / `🤖` in commits or PR bodies — ever. (`CLAUDE.md` → **AI
+  provenance**.)
 - **Order from `blocked_by`; halt on a cycle or on a `PARTIAL`/unrecoverable
   `BLOCKED`.** Never start a new issue on a broken tree.
 - **Per-issue tests are scoped and local; the full `verify` is the PR gate** (CI).
