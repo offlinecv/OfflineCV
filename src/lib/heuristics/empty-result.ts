@@ -20,25 +20,29 @@
 
 import { emptyParsed } from "./cascade.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
+import { toCanonicalResume } from "./canonical.ts";
 import type { CascadeResult } from "./types.ts";
 
 export function buildBlankResult(): CascadeResult {
   return {
-    parsed: emptyParsed(),
+    // Canonical model with no parsed content: empty field core, empty section
+    // view (same inert shape the scanned-abandon path uses, #132), no
+    // confidence.
+    canonical: toCanonicalResume(
+      emptyParsed(),
+      {
+        byName: new Map(),
+        accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+        source: "regex",
+      },
+      {},
+    ),
     confidence: 0,
-    fieldConfidence: {},
     triggers: [],
     // Authored, not parsed — nothing to escalate.
     suggestedEscalation: "none",
     tiers: [],
     rawText: "",
-    // Empty view, same shape the scanned-abandon path uses (#132): no
-    // detected sections since nothing was ever parsed.
-    sections: {
-      byName: new Map(),
-      accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
-      source: "regex",
-    },
     linkAnnotations: [],
     diagnostics: {
       rawCharCount: 0,

@@ -49,20 +49,20 @@ const FIXTURE = join(
 function scoreFor(cascade: CascadeResult) {
   return computeAnonymousAtsScore({
     parsed: {
-      full_name: cascade.parsed.full_name,
-      email: cascade.parsed.email,
-      phone: cascade.parsed.phone,
-      location: cascade.parsed.location,
-      linkedin_url: cascade.parsed.linkedin_url,
-      summary: cascade.parsed.summary,
-      skills: cascade.parsed.skills,
-      experience: cascade.parsed.experience,
-      education: cascade.parsed.education,
+      full_name: cascade.canonical.fields.full_name,
+      email: cascade.canonical.fields.email,
+      phone: cascade.canonical.fields.phone,
+      location: cascade.canonical.fields.location,
+      linkedin_url: cascade.canonical.fields.linkedin_url,
+      summary: cascade.canonical.fields.summary,
+      skills: cascade.canonical.fields.skills,
+      experience: cascade.canonical.fields.experience,
+      education: cascade.canonical.fields.education,
     },
-    fieldConfidence: cascade.fieldConfidence,
+    fieldConfidence: cascade.canonical.fieldConfidence,
     triggers: cascade.triggers,
     rawText: cascade.rawText,
-    sections: cascade.sections,
+    sections: cascade.canonical.sections,
   });
 }
 
@@ -78,8 +78,8 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
   });
 
   it("preserves the work-experience role count end to end (AC#1)", () => {
-    const origExp = original.parsed.experience ?? [];
-    const reExp = reparsed.parsed.experience ?? [];
+    const origExp = original.canonical.fields.experience ?? [];
+    const reExp = reparsed.canonical.fields.experience ?? [];
     // Baseline sanity: the fixture parses to 8 roles.
     expect(origExp.length).toBe(8);
     expect(reExp.length).toBe(origExp.length);
@@ -93,8 +93,8 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
   // education round-trip (#291) below are unaffected and still enforced. Un-skip
   // when #436 lands the one-line title/company disambiguation.
   it.skip("re-parses each role's title / company back into the right fields (AC#3)", () => {
-    const origExp = original.parsed.experience ?? [];
-    const reExp = reparsed.parsed.experience ?? [];
+    const origExp = original.canonical.fields.experience ?? [];
+    const reExp = reparsed.canonical.fields.experience ?? [];
     origExp.forEach((orig, i) => {
       expect(reExp[i]?.title).toBe(orig.title);
       expect(reExp[i]?.company).toBe(orig.company);
@@ -104,8 +104,8 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
   });
 
   it("re-parses education degree / field / institution back into the right fields (#291)", () => {
-    const origEdu = original.parsed.education ?? [];
-    const reEdu = reparsed.parsed.education ?? [];
+    const origEdu = original.canonical.fields.education ?? [];
+    const reEdu = reparsed.canonical.fields.education ?? [];
     // Baseline: the fixture parses to at least one education entry.
     expect(origEdu.length).toBeGreaterThan(0);
     expect(reEdu.length).toBe(origEdu.length);
@@ -122,8 +122,8 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
   });
 
   it("preserves the summary text end to end (#292)", () => {
-    const s1 = original.parsed.summary ?? "";
-    const s3 = reparsed.parsed.summary ?? "";
+    const s1 = original.canonical.fields.summary ?? "";
+    const s3 = reparsed.canonical.fields.summary ?? "";
     expect(s1.length).toBeGreaterThan(0);
     // The reconstructed-résumé renderer re-wraps prose, which can push a
     // sentence-level en/em dash to the start of a line; the summary extractor
@@ -134,7 +134,7 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
   });
 
   it("leaves no role description ending with the NEXT role's header (AC#2)", () => {
-    const reExp = reparsed.parsed.experience ?? [];
+    const reExp = reparsed.canonical.fields.experience ?? [];
     // A swallowed next-role header manifests as a trailing description line that
     // reads "Title · Company …". Assert no role's description tail matches any
     // other role's rendered header signature (title token + the "·" join).

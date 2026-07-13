@@ -45,7 +45,7 @@ describe("#283 — page footer bleeds into experience roles across page breaks",
   beforeAll(async () => {
     const bytes = readFileSync(FIXTURE);
     const c = await runCascade(new Uint8Array(bytes));
-    parsed = c.parsed;
+    parsed = c.canonical.fields;
   });
 
   it("parses the first page-2 role (Kasa) with its real title, footer stripped", () => {

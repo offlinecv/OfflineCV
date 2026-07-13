@@ -47,6 +47,12 @@ export interface ExperienceFieldOverrides {
   /** Role location ("City, ST" / "City, Country") peeled off the header by the
    *  parser. Editable like the other header fields; empty string clears it. */
   location?: string;
+  /** Team / department / sub-org — the trailing header segment in
+   *  "Title · Company, Location · Team" (or a post-comma "Title, Team"). The
+   *  parser captures it and the Download PDF renders it (#425), but it was never
+   *  surfaced for display/edit here — this makes it editable; empty string clears
+   *  it. */
+  team?: string;
   start_date?: string;
   end_date?: string;
 }
@@ -106,6 +112,9 @@ export interface AddedEntry {
   subtitle?: string;
   /** Role location ("City, ST"). Experience only; ignored by other sections. */
   location?: string;
+  /** Team / department / sub-org (the trailing "· Team" header segment).
+   *  Experience only; ignored by other sections. */
+  team?: string;
   start_date?: string;
   end_date?: string;
   /** Achievement year (achievements carry a single year, not a range). */
@@ -117,6 +126,7 @@ export type AddedEntryField =
   | "title"
   | "subtitle"
   | "location"
+  | "team"
   | "start_date"
   | "end_date"
   | "year";

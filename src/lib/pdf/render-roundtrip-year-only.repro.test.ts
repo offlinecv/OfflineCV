@@ -33,23 +33,26 @@ const STUB_SCORE = { bullets: [] } as unknown as AnonymousAtsScore;
 
 function makeResult(): CascadeResult {
   return {
-    parsed: {
-      full_name: "Jane Candidate",
-      email: "jane@example.com",
-      phone: "(312) 555-0123",
-      location: "Chicago, IL",
-      skills: ["TypeScript", "SQL"],
-      experience: [
-        // Year-only + location: the canonical #358 swap+drop shape.
-        { title: "Composer", company: "Northwind Ensemble", location: "Boston, MA", start_date: "2022", description: "• Scored the winter program." },
-        // Year-only, no location (org-signature form).
-        { title: "Lecturer", company: "Fabrikam Institute", start_date: "2019", description: "• Taught the seminar." },
-      ],
-      education: [],
-      projects: [],
-      heuristic_achievements: [],
+    canonical: {
+      fields: {
+        full_name: "Jane Candidate",
+        email: "jane@example.com",
+        phone: "(312) 555-0123",
+        location: "Chicago, IL",
+        skills: ["TypeScript", "SQL"],
+        experience: [
+          // Year-only + location: the canonical #358 swap+drop shape.
+          { title: "Composer", company: "Northwind Ensemble", location: "Boston, MA", start_date: "2022", description: "• Scored the winter program." },
+          // Year-only, no location (org-signature form).
+          { title: "Lecturer", company: "Fabrikam Institute", start_date: "2019", description: "• Taught the seminar." },
+        ],
+        education: [],
+        projects: [],
+        heuristic_achievements: [],
+      },
+      sections: { byName: new Map(), accomplishmentSections: ["experience", "projects", "achievements"], source: "regex" },
+      fieldConfidence: { full_name: 1, email: 1, phone: 1, location: 1, linkedin_url: 1, github_url: 1 },
     },
-    fieldConfidence: { full_name: 1, email: 1, phone: 1, location: 1, linkedin_url: 1, github_url: 1 },
     confidence: 1,
     triggers: [],
     linkAnnotations: [],
@@ -72,7 +75,7 @@ describe("#358 — year-only experience role round-trips (no title/company swap,
   // title↔company-swapped. Un-skip when #436 teaches the parser to disambiguate
   // title/company on a single header line.
   it.skip("keeps title/company (no swap) and re-attaches the bare-year start_date", () => {
-    const exp = reparsed.parsed.experience ?? [];
+    const exp = reparsed.canonical.fields.experience ?? [];
     const composer = exp.find(
       (e) => e.title === "Composer" || e.company === "Composer",
     );
@@ -85,7 +88,7 @@ describe("#358 — year-only experience role round-trips (no title/company swap,
   });
 
   it("re-attaches a year-only date on the location-less (org-signature) form too", () => {
-    const exp = reparsed.parsed.experience ?? [];
+    const exp = reparsed.canonical.fields.experience ?? [];
     const lecturer = exp.find((e) => e.title === "Lecturer");
     expect(lecturer).toBeDefined();
     expect(lecturer!.company).toBe("Fabrikam Institute");

@@ -27,14 +27,16 @@ import type { CascadeResult } from "../../lib/heuristics/types.ts";
 // Minimal CascadeResult stub — only needs to be a valid reference for render;
 // buildReproArtifact is only called on button click (not tested here).
 const stubResult = {
-  parsed: { skills: [], experience: [], education: [] },
+  canonical: {
+    fields: { skills: [], experience: [], education: [] },
+    sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
+    fieldConfidence: {},
+  },
   confidence: 0,
-  fieldConfidence: {},
   triggers: [],
   suggestedEscalation: "none",
   tiers: [],
   rawText: "",
-  sections: { byName: new Map(), all: [] },
   linkAnnotations: [],
   diagnostics: { pages: 1, elapsedMs: 0 },
 } as unknown as CascadeResult;

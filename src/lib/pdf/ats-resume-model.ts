@@ -31,9 +31,8 @@ import {
   groupBulletsByExperience,
   toBulletExperience,
 } from "../score/group-bullets.ts";
-import { buildProjectDates } from "../score/entry-dates.ts";
+import { buildProjectDates, splitAchievementType } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
-import { canonicalFromCascade } from "../heuristics/canonical.ts";
 import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import { buildContactFields, formatLinkDisplay } from "../contact.ts";
@@ -219,7 +218,7 @@ export function buildContact(
   result: CascadeResult,
   contactOverrides: ContactOverrides,
 ): AtsContact {
-  const fields = buildContactFields(result);
+  const fields = buildContactFields(result.canonical);
   const byKey = new Map(fields.map((f) => [f.key, f]));
 
   const valueFor = (key: keyof ContactOverrides): string => {
@@ -228,11 +227,11 @@ export function buildContact(
     return resolveContactValue(parsed, contactOverrides[key]).trim();
   };
 
-  const name = valueFor("full_name") || result.parsed.full_name || "";
+  const name = valueFor("full_name") || result.canonical.fields.full_name || "";
   // Header headline (#425 follow-up): the standalone title tagline the parser
   // lifted from the profile block ("Engineering Lead"), redrawn under the name.
   // Not inline-editable (no ContactOverrides key), so read straight off parsed.
-  const headline = (result.parsed.headline ?? "").trim();
+  const headline = (result.canonical.fields.headline ?? "").trim();
   const email = valueFor("email");
   const phone = valueFor("phone");
   const location = valueFor("location");
@@ -269,7 +268,7 @@ export function buildContact(
   const linkedin =
     linkedinField && !linkedinField.gated ? linkedinField.value.trim() : "";
   if (linkedin) addLink(linkedin);
-  const parsed = result.parsed;
+  const parsed = result.canonical.fields;
   if (parsed.github_url) addLink(parsed.github_url);
   if (parsed.portfolio_url) addLink(parsed.portfolio_url);
   if (parsed.website_url) addLink(parsed.website_url);
@@ -285,7 +284,7 @@ export function buildContact(
     // `parsed.profiles` is already override-applied (applyOverrides re-derives it
     // from the edited legacy keys + user-added extras, #335), so read it straight
     // — never re-derive from the four legacy keys here. Absent ⇒ no links.
-    profiles: result.parsed.profiles ?? [],
+    profiles: result.canonical.fields.profiles ?? [],
   };
 }
 
@@ -363,34 +362,26 @@ export function isDatedEntry(entry: {
   return Boolean(entry.start_date || entry.end_date);
 }
 
-/** Longest a leading achievement segment can be and still read as a "type"
- *  label ("Patent", "Publication", "Exit", "Best Paper Award") rather than a
- *  full sentence — guards against bolding an entire prose title that merely
- *  happens to carry a " · ". */
-const ACHIEVEMENT_TYPE_MAX_LEN = 28;
-
 /**
  * Build an achievement's header string, emphasizing ONLY the leading "type"
  * label (e.g. "Patent", "Publication") when the title carries the canonical
  * "Type · description" shape — the rest of the header stays regular weight.
  *
- * The type is the first `" · "`-delimited segment of `title`, kept only when it
- * is short enough to read as a label (see `ACHIEVEMENT_TYPE_MAX_LEN`). It is
- * wrapped in the renderer's PUA emphasis sentinels (`EMPHASIS_OPEN`/`CLOSE`) so
- * `drawEntry` draws just that run bold; the sentinels are stripped before
- * drawing, so the round-trip text is unchanged (display-only weight, #284/#425).
- * When there is no such type segment the header is returned plain (no
- * sentinels) and the caller keeps the whole line bold as before.
+ * The type run (see {@link splitAchievementType}) is wrapped in the renderer's
+ * PUA emphasis sentinels (`EMPHASIS_OPEN`/`CLOSE`) so `drawEntry` draws just that
+ * run bold; the sentinels are stripped before drawing, so the round-trip text is
+ * unchanged (display-only weight, #284/#425). When there is no such type segment
+ * the header is returned plain (no sentinels) and the caller keeps the whole line
+ * bold. The reconstructed-résumé view shares `splitAchievementType` so its header
+ * emphasizes the identical run (#452).
  */
 function buildAchievementHeader(
   title: string,
   year: string | undefined,
 ): { headerLine: string; emphasized: boolean } {
-  const idx = title.indexOf(" · ");
-  const type = idx >= 0 ? title.slice(0, idx).trim() : "";
-  if (idx >= 0 && type && type.length <= ACHIEVEMENT_TYPE_MAX_LEN) {
-    const rest = title.slice(idx + 3);
-    const emphasizedTitle = `${EMPHASIS_OPEN}${type}${EMPHASIS_CLOSE} · ${rest}`;
+  const split = splitAchievementType(title);
+  if (split) {
+    const emphasizedTitle = `${EMPHASIS_OPEN}${split.type}${EMPHASIS_CLOSE} · ${split.rest}`;
     return {
       headerLine: joinHeader([emphasizedTitle, year], " · "),
       emphasized: true,
@@ -456,15 +447,12 @@ function groupExperienceEntriesByLabel(
  * left tagged for this stage — so the render model no longer reaches straight
  * into `result.parsed` / `result.sections.sectionHeadings`.
  *
- * Stage C is **additive** (§4): the output type is unchanged and `render-ats-pdf`
- * is not re-pointed, so the rendered bytes stay byte-identical (the corpus +
- * render round-trip goldens are the gate). The renderer's source flips and the
- * type retires at Stage E.
- *
- * Stage-D remainder: the contact confidence gating still reads
- * `result.fieldConfidence` (via {@link buildContact}), which `CanonicalResume`
- * does not yet carry — `fieldConfidence` migrates to the canonical model at
- * Stage D (§2.3). Field/heading reads route through the projection here.
+ * As of the Stage D+E cutover (#445) the `CascadeResult` façade's duplicated
+ * parse core is gone: `result.canonical` is the sole source of the field core,
+ * section membership, and per-field confidence, and the contact confidence
+ * gating reads `result.canonical.fieldConfidence` (via {@link buildContact}).
+ * Field/heading reads route through the projection here. The rendered bytes
+ * stay byte-identical — the corpus + render round-trip goldens are the gate.
  *
  * `edit` is optional — when omitted, no in-memory overrides are applied and the
  * model reflects the raw parse (used by tests / non-edit callers).
@@ -474,7 +462,7 @@ export function buildAtsResumeModel(
   score: AnonymousAtsScore,
   edit?: Pick<EditableParse, "contactOverrides" | "bulletOverrides">,
 ): AtsResumeModel {
-  const display = projectDisplay(canonicalFromCascade(result));
+  const display = projectDisplay(result.canonical);
   const parsed = display.parsed;
   const contactOverrides = edit?.contactOverrides ?? {};
   const bulletOverrides = edit?.bulletOverrides ?? {};

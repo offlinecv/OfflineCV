@@ -11,15 +11,16 @@ import {
   isScoreRevealed,
   CONTACT_DISPLAY_CONFIDENCE_FLOOR,
 } from "./contact.ts";
-import type { CascadeResult } from "./heuristics/types.ts";
+import type { HeuristicParsedResume, FieldConfidence } from "./heuristics/types.ts";
+import type { CanonicalResume } from "./heuristics/canonical.ts";
 
-// Minimal CascadeResult stub — only the fields buildContactFields reads.
+// Minimal canonical stub — only the members buildContactFields reads (#445).
 function makeCascade(
-  parsedOverrides: Partial<CascadeResult["parsed"]> = {},
-  confidenceOverrides: Partial<CascadeResult["fieldConfidence"]> = {},
-): Pick<CascadeResult, "parsed" | "fieldConfidence"> {
+  parsedOverrides: Partial<HeuristicParsedResume> = {},
+  confidenceOverrides: FieldConfidence = {},
+): Pick<CanonicalResume, "fields" | "fieldConfidence"> {
   return {
-    parsed: {
+    fields: {
       skills: [],
       experience: [],
       education: [],

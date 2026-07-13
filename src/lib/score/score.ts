@@ -75,10 +75,11 @@ const WEIGHTS = {
  *   had any glyph bullets. Only affects resumes with this mixed glyph/no-glyph
  *   shape; unaffected resumes score unchanged.
  */
-// Internal-only: surfaced to the UI via the `algoVersion` score field, not
-// imported by name anywhere — so it stays unexported to satisfy the dead-code
-// gate (fallow flags exported symbols with no external consumer).
-const ATS_SCORE_ALGO_VERSION = "1.5";
+// Surfaced to the UI via the `algoVersion` score field, and consumed by the
+// #321 resume-library cache to version persisted parse+score records (a bump
+// here invalidates stale cached snapshots, which then re-parse from the stored
+// PDF blob — see `resume-library.ts`).
+export const ATS_SCORE_ALGO_VERSION = "1.5";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //

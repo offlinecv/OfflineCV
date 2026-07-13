@@ -82,8 +82,11 @@ function renderContactCard(): HTMLDivElement {
   document.body.appendChild(container);
   root = createRoot(container);
   const result = {
-    parsed: { skills: [], experience: [], education: [] },
-    fieldConfidence: {},
+    canonical: {
+      fields: { skills: [], experience: [], education: [] },
+      sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
+      fieldConfidence: {},
+    },
   } as unknown as CascadeResult;
   act(() => {
     root!.render(createElement(ContactCard, { result }));

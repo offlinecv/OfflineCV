@@ -29,17 +29,20 @@
  *     render+export projection), not straight off `result.parsed` /
  *     `result.sections`.
  *
- * NOT yet routed through these projections (byte-identical today, but will drift
- * from the editor/scorer once Stage D+ makes a body re-derive — route them when
- * that stage lands):
- *   - `hooks/useResumeAnalysisLlm.ts` reads `result.sections.byName` for
- *     disagreement gating → fold into the llm-diff projection (Stage D).
+ * Stage D+E (#445) adds {@link projectLlmDiff} — the llm-diff projection that
+ * coerces on-device `LlmParsedResume` output into a `CanonicalResume`-shaped
+ * value so `diffParses` reads two canonical shapes. The disagreement-gating
+ * `result.sections.byName` read that used to live in `useResumeAnalysisLlm`
+ * is now derived inside `diffParses` off the heuristic canonical's sections.
  */
 
 import type { CanonicalResume } from "./canonical.ts";
+import { toCanonicalResume } from "./canonical.ts";
 import type { HeuristicParsedResume } from "./types.ts";
 import type { SectionedResume } from "./sections.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
 import type { SectionName } from "./sections.config.ts";
+import type { LlmParsedResume } from "../webllm/parse-resume.ts";
 
 /**
  * Score projection: the section pools the anonymous scorer grades from. Feeds
@@ -76,4 +79,45 @@ export function projectDisplay(canonical: CanonicalResume): DisplayProjection {
     parsed: canonical.fields,
     sectionHeadings: canonical.sections.sectionHeadings,
   };
+}
+
+/**
+ * llm-diff projection: coerce an on-device {@link LlmParsedResume} into a
+ * {@link CanonicalResume}-shaped value so the disagreement detector can diff two
+ * canonical shapes (`diffParses`) instead of hand-syncing a parallel
+ * `LlmParsedResume` type against `HeuristicParsedResume` (the retired
+ * `parse-resume.ts` "Keep field names in sync" note, #445).
+ *
+ * This is a field-name-mapping adapter only — no re-parsing, no section
+ * splitting (the LLM output has no section pools). The section-membership core
+ * and `fieldConfidence` are intentionally EMPTY/best-effort: `diffParses`
+ * derives its whole-section-drop gate from the *heuristic* canonical's sections
+ * (the sectioner is the ground truth on headers), never from the LLM side, and
+ * reads no confidence off the LLM parse. `null` scalars map to `undefined`
+ * (both read as "absent" by the diff's `presentScalar`).
+ */
+export function projectLlmDiff(llm: LlmParsedResume): CanonicalResume {
+  const fields: HeuristicParsedResume = {
+    full_name: llm.full_name ?? undefined,
+    email: llm.email ?? undefined,
+    phone: llm.phone ?? undefined,
+    location: llm.location ?? undefined,
+    summary: llm.summary ?? undefined,
+    skills: llm.skills,
+    experience: llm.experience.map((e) => ({
+      title: e.title,
+      company: e.company,
+      description: e.description,
+    })),
+    education: llm.education.map((e) => ({
+      degree: e.degree,
+      institution: e.institution,
+    })),
+  };
+  const sections: SectionedResume = {
+    byName: new Map(),
+    accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+    source: "regex",
+  };
+  return toCanonicalResume(fields, sections, {});
 }

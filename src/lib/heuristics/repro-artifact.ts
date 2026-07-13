@@ -141,7 +141,7 @@ export function buildReproArtifact(
     artifactVersion: REPRO_ARTIFACT_VERSION,
     cascadeVersion: CASCADE_VERSION,
     triggers: [...result.triggers],
-    sectionSource: result.sections.source,
+    sectionSource: result.canonical.sections.source,
     pageCount: result.diagnostics.pages,
     rawCharCount: result.diagnostics.rawCharCount,
     extractedCharCount: result.diagnostics.extractedCharCount,
@@ -160,7 +160,7 @@ export function buildReproArtifact(
  *  the `byName` map's KEYS (enum names) and array LENGTHS — never the lines. */
 function buildSections(result: CascadeResult): ReproSection[] {
   const out: ReproSection[] = [];
-  for (const [name, lines] of result.sections.byName) {
+  for (const [name, lines] of result.canonical.sections.byName) {
     out.push({ name, lineCount: lines.length });
   }
   return out;
@@ -169,7 +169,7 @@ function buildSections(result: CascadeResult): ReproSection[] {
 /** Presence flags + counts off the structured parse. `present` returns a
  *  BOOLEAN — the scalar VALUE never enters the artifact. */
 function buildParsedCounts(result: CascadeResult): ReproParsedCounts {
-  const p = result.parsed;
+  const p = result.canonical.fields;
   const present = (v: string | null | undefined): boolean =>
     v != null && v.trim().length > 0;
   return {

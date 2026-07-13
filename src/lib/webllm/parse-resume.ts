@@ -49,9 +49,11 @@ import { tryParseJsonObject } from "./json-repair.ts";
 /**
  * Structured resume extracted by the LLM provider.
  *
- * Shape is intentionally mirrored against the heuristic parser's output
- * (`HeuristicParsedResume`) for field-by-field diffing by the disagreement
- * detector (#242). Keep field names in sync with that interface.
+ * This is the raw on-device parse. It is no longer a hand-synced peer of
+ * `HeuristicParsedResume`: the disagreement detector diffs two
+ * `CanonicalResume` shapes, and this output is coerced into one via
+ * `projectLlmDiff` (`heuristics/projections.ts`, #445) — a single field-name
+ * adapter that owns the mapping, so there is nothing to keep in sync by hand.
  */
 export interface LlmParsedResume {
   full_name: string | null;

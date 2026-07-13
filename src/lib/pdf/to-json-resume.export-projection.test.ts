@@ -288,11 +288,11 @@ describe("projectAtsExport — corpus parity (synthetic personas)", { timeout: 2
     it(`projects faithfully: ${name}`, async () => {
       const cascade = await runCascade(new Uint8Array(readFileSync(fixture)));
       const score = computeAnonymousAtsScore({
-        parsed: { ...cascade.parsed },
-        fieldConfidence: cascade.fieldConfidence,
+        parsed: { ...cascade.canonical.fields },
+        fieldConfidence: cascade.canonical.fieldConfidence,
         triggers: cascade.triggers,
         rawText: cascade.rawText,
-        sections: cascade.sections,
+        sections: cascade.canonical.sections,
       });
       const model = buildAtsResumeModel(cascade, score);
 

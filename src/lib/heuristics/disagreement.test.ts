@@ -17,10 +17,17 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { diffParses as rawDiffParses, type ParseDisagreement } from "./disagreement.ts";
+import {
+  diffParses as canonicalDiffParses,
+  type ParseDisagreement,
+} from "./disagreement.ts";
 import type { HeuristicParsedResume, LayoutTrigger } from "./types.ts";
 import type { SectionName } from "./sections.config.ts";
 import type { LlmParsedResume } from "../webllm/parse-resume.ts";
+import { toCanonicalResume } from "./canonical.ts";
+import { projectLlmDiff } from "./projections.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
+import type { SectionedResume } from "./sections.ts";
 
 // All gateable sections present by default — most cases below exercise drop
 // *detection*, not the section-presence guard (that has its own describe block).
@@ -30,6 +37,36 @@ const ALL_SECTIONS: ReadonlySet<SectionName> = new Set([
   "education",
   "skills",
 ]);
+
+// Post-#445 `diffParses` takes two `CanonicalResume` shapes and derives the
+// section-presence guard from the HEURISTIC canonical's `sections.byName` keys.
+// This adapter reproduces the old 4-arg call surface so the cases below stay
+// unchanged: it builds a heuristic canonical whose `byName` carries exactly the
+// requested present-section headers, and coerces the LLM parse via the real
+// `projectLlmDiff` projection (the same path production uses).
+function sectionsWithHeaders(present: ReadonlySet<SectionName>): SectionedResume {
+  const byName = new Map<SectionName | "profile", readonly string[]>();
+  for (const name of present) byName.set(name, []);
+  return {
+    byName,
+    accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+    source: "regex",
+  };
+}
+
+function rawDiffParses(
+  heuristic: HeuristicParsedResume,
+  llm: LlmParsedResume,
+  triggers: LayoutTrigger[],
+  presentSections: ReadonlySet<SectionName>,
+): ParseDisagreement[] {
+  const heuristicCanonical = toCanonicalResume(
+    heuristic,
+    sectionsWithHeaders(presentSections),
+    {},
+  );
+  return canonicalDiffParses(heuristicCanonical, projectLlmDiff(llm), triggers);
+}
 
 function diffParses(
   heuristic: HeuristicParsedResume,

@@ -21,6 +21,7 @@
 import type {
   CascadeResult,
   HeuristicResult,
+  HeuristicParsedResume,
   LayoutProbes,
   LayoutTrigger,
   PdfLinkAnnotation,
@@ -189,21 +190,18 @@ export async function runCascade(
   const tiers: CascadeResult["tiers"] = ["t0_layout", "t1_openresume"];
   if (ranT15) tiers.push("t1_5_regex");
 
-  // Canonical model is the source of record (#443, Stage B); the CascadeResult
-  // below is its byte-identical compatibility façade — `parsed`/`sections` come
-  // straight off the canonical cores.
-  const canonical = toCanonicalResume(parsed, heuristic.sections);
+  // Canonical model is the sole parse shape (#445, Stage D+E cutover); the
+  // CascadeResult carries it as `canonical` alongside cascade-only metadata.
+  const canonical = toCanonicalResume(parsed, heuristic.sections, fieldConfidence);
 
   const result: CascadeResult = {
-    parsed: canonical.fields,
+    canonical,
     confidence,
-    fieldConfidence,
     triggers: layout.triggers,
     suggestedEscalation,
     tiers,
     rawText: extract.text,
     markdown,
-    sections: canonical.sections,
     linkAnnotations: extract.linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,
@@ -284,7 +282,7 @@ function bucketFileSize(kb: number): FileSizeBucket {
   return "1000kb+";
 }
 
-function shouldRunRegexFallback(parsed: CascadeResult["parsed"]): boolean {
+function shouldRunRegexFallback(parsed: HeuristicParsedResume): boolean {
   return !parsed.full_name || !parsed.email || !parsed.phone;
 }
 
@@ -411,20 +409,17 @@ export async function runCascadeFromMarkdown(
   const tiers: CascadeResult["tiers"] = ["t0_layout", "t1_openresume"];
   if (ranT15) tiers.push("t1_5_regex");
 
-  // Canonical model is the source of record (#443, Stage B); façade below reads
-  // its cores.
-  const canonical = toCanonicalResume(parsed, heuristic.sections);
+  // Canonical model is the sole parse shape (#445, Stage D+E cutover).
+  const canonical = toCanonicalResume(parsed, heuristic.sections, fieldConfidence);
 
   const result: CascadeResult = {
-    parsed: canonical.fields,
+    canonical,
     confidence,
-    fieldConfidence,
     triggers: [],
     suggestedEscalation,
     tiers,
     rawText,
     markdown,
-    sections: canonical.sections,
     // DOCX cascade has no PDF annotations.
     linkAnnotations: [],
     diagnostics: {
@@ -453,7 +448,7 @@ export async function runCascadeFromMarkdown(
 /** Exported for reuse by `empty-result.ts`'s `buildBlankResult()` (#313) — the
  *  single source of truth for "empty parsed" so the blank-authoring factory
  *  never re-inlines this literal. */
-export function emptyParsed(): CascadeResult["parsed"] {
+export function emptyParsed(): HeuristicParsedResume {
   return {
     skills: [],
     skills_explicit: [],
@@ -473,7 +468,7 @@ function buildScannedResult(
   // Scanned-abandon path: no Tier 1 ran, so there are no detected sections.
   // An empty view yields `byName.get("skills") === undefined`, exactly the
   // inert behaviour the absent `skillsSectionText` gave here before (#132).
-  // Built through the canonical model so this path matches the others (#443).
+  // Built through the canonical model so this path matches the others (#445).
   const canonical = toCanonicalResume(
     {
       skills: [],
@@ -487,16 +482,15 @@ function buildScannedResult(
       accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
       source: "regex",
     },
+    {},
   );
   return {
-    parsed: canonical.fields,
+    canonical,
     confidence: 0,
-    fieldConfidence: {},
     triggers: layout.triggers,
     suggestedEscalation: "ocr",
     tiers: ["t0_layout"],
     rawText: extract.text,
-    sections: canonical.sections,
     linkAnnotations,
     diagnostics: {
       rawCharCount: extract.rawCharCount,
@@ -529,7 +523,7 @@ const TYPED_FIELD_SECTIONS = new Set<string>([
 const fieldLen = (s: string | null | undefined): number => (s ?? "").length;
 
 /** Chars from the typed scalar contact + summary fields. */
-function scalarFieldChars(parsed: CascadeResult["parsed"]): number {
+function scalarFieldChars(parsed: HeuristicParsedResume): number {
   return (
     fieldLen(parsed.full_name) +
     fieldLen(parsed.email) +
@@ -540,7 +534,7 @@ function scalarFieldChars(parsed: CascadeResult["parsed"]): number {
 }
 
 /** Chars from the typed list fields (skills, experience, education). */
-function listFieldChars(parsed: CascadeResult["parsed"]): number {
+function listFieldChars(parsed: HeuristicParsedResume): number {
   let n = 0;
   for (const s of parsed.skills ?? []) n += s.length;
   for (const e of parsed.experience ?? []) {
@@ -570,7 +564,7 @@ function untypedSectionChars(sections: HeuristicResult["sections"]): number {
 
 /** Sum visible character counts across the heuristic parse output. */
 function countExtractedChars(
-  parsed: CascadeResult["parsed"],
+  parsed: HeuristicParsedResume,
   sections: HeuristicResult["sections"],
 ): number {
   return (

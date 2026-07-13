@@ -50,11 +50,11 @@ const FIXTURE = join(
 
 function scoreFor(cascade: CascadeResult) {
   return computeAnonymousAtsScore({
-    parsed: { ...cascade.parsed },
-    fieldConfidence: cascade.fieldConfidence,
+    parsed: { ...cascade.canonical.fields },
+    fieldConfidence: cascade.canonical.fieldConfidence,
     triggers: cascade.triggers,
     rawText: cascade.rawText,
-    sections: cascade.sections,
+    sections: cascade.canonical.sections,
   });
 }
 
@@ -96,7 +96,10 @@ describe("#301 — multi-word skill does not split at the line-wrap boundary", (
     const original = await runCascade(new Uint8Array(readFileSync(FIXTURE)));
     const withSyntheticSkills: CascadeResult = {
       ...original,
-      parsed: { ...original.parsed, skills: SYNTHETIC_SKILLS },
+      canonical: {
+        ...original.canonical,
+        fields: { ...original.canonical.fields, skills: SYNTHETIC_SKILLS },
+      },
     };
     const model = buildAtsResumeModel(
       withSyntheticSkills,
@@ -104,7 +107,7 @@ describe("#301 — multi-word skill does not split at the line-wrap boundary", (
     );
     const bytes = await renderAtsResumePdf(model);
     const reparsed = await runCascade(bytes);
-    reparsedSkills = reparsed.parsed.skills ?? [];
+    reparsedSkills = reparsed.canonical.fields.skills ?? [];
   }, 20000);
 
   it("round-trips the same skill count (AC)", () => {

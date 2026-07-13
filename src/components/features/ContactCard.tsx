@@ -73,7 +73,7 @@ export function ContactCard({
   // Resolve overrides against the parsed fields via the shared helper — the same
   // path the AttentionStrip uses to count gaps, so card and strip never disagree.
   const displayFields = applyContactOverrides(
-    buildContactFields(result),
+    buildContactFields(result.canonical),
     editable ? overrides : undefined,
   );
 

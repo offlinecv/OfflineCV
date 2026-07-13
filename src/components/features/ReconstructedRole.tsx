@@ -10,7 +10,8 @@
  *
  * Edit mode (#58): when `experienceIndex` + `overrides` + `onFieldChange` are
  * provided, `RoleHeader` exposes inline EditableField affordances for title,
- * company, start_date, and end_date. Overrides are in-memory only.
+ * company, location, team/department, start_date, and end_date. Overrides are
+ * in-memory only.
  *
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
  */
@@ -297,7 +298,7 @@ interface RoleHeaderProps {
  *
  * Edit mode: when `overrides` + `onFieldChange` are provided the header renders
  * inline EditableField affordances — title (multiline), company (multiline),
- * start date, end date — each committed individually. Every field uses the same
+ * location, team/department, start date, end date — each committed individually. Every field uses the same
  * paradigm as the rest of the reconstructed résumé: the value itself is the
  * click/keyboard/tap target (quiet inline affordance). Cleared fields show
  * "not detected".
@@ -327,6 +328,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
     const title = exp.title || undefined;
     const company = exp.company || undefined;
     const location = exp.location || undefined;
+    const team = exp.team || undefined;
 
     // Build date segment.
     let dates: string | undefined;
@@ -338,17 +340,23 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
     else if (start) dates = start;
     else if (end) dates = end;
 
-    // Location rides inline with the company, comma-joined ("Company, City, ST").
+    // Location rides inline with the company, comma-joined ("Company, City, ST");
+    // the team/department (when present) trails after a "·", mirroring the
+    // Download PDF's "Company, Location · Team" header (#425).
     const companyLoc =
       company && location
         ? `${company}, ${location}`
         : company || location || undefined;
+    const org =
+      companyLoc && team
+        ? `${companyLoc} · ${team}`
+        : companyLoc || team || undefined;
 
     // Build composite label.
     let label = "";
-    if (title && companyLoc) label = `${title} — ${companyLoc}`;
+    if (title && org) label = `${title} — ${org}`;
     else if (title) label = title;
-    else if (companyLoc) label = companyLoc;
+    else if (org) label = org;
     if (dates) label = label ? `${label} · ${dates}` : dates;
 
     return (
@@ -370,6 +378,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
   const location = toDisplay(
     ov.location !== undefined ? ov.location : exp.location,
   );
+  const team = toDisplay(ov.team !== undefined ? ov.team : exp.team);
   const startDate = toDisplay(
     ov.start_date !== undefined ? ov.start_date : exp.start_date,
   );
@@ -417,6 +426,19 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
             label="Location"
             textSize="sm"
             onCommit={(v) => onFieldChange("location", v)}
+          />
+          {/* Team / department — trails after a "·", mirroring the Download PDF's
+              "Company, Location · Team" header (#425). Always rendered (like
+              Location) so an absent team can be ADDED, not just corrected. */}
+          <span className="text-content-muted" aria-hidden="true">
+            ·
+          </span>
+          <EditableField
+            value={team}
+            placeholder="team not detected"
+            label="Team or department"
+            textSize="sm"
+            onCommit={(v) => onFieldChange("team", v)}
           />
         </div>
         {/* Date range, flush-right and in the tertiary metadata colour. */}

@@ -53,7 +53,8 @@ const ROLES = [
 
 function makeResult(): CascadeResult {
   return {
-    parsed: {
+    canonical: {
+      fields: {
       full_name: "Jane Candidate",
       email: "jane@example.com",
       phone: "(312) 555-0123",
@@ -65,8 +66,10 @@ function makeResult(): CascadeResult {
       education: [],
       projects: [],
       heuristic_achievements: [],
+      },
+      sections: { byName: new Map(), accomplishmentSections: [], source: "regex" },
+      fieldConfidence: {},
     },
-    fieldConfidence: {},
     confidence: 1,
     triggers: [],
     linkAnnotations: [],
@@ -85,7 +88,7 @@ describe("#284/#425 — literal `**` in a bullet round-trips byte-identically", 
   });
 
   it("re-parses each role's description with its literal `**` intact", () => {
-    const reExp = reparsed.parsed.experience ?? [];
+    const reExp = reparsed.canonical.fields.experience ?? [];
     expect(reExp.length).toBe(ROLES.length);
     ROLES.forEach((orig, i) => {
       const desc = reExp[i]?.description ?? "";
@@ -95,7 +98,7 @@ describe("#284/#425 — literal `**` in a bullet round-trips byte-identically", 
   });
 
   it("did not strip the `**` (would have, pre-fix)", () => {
-    const reExp = reparsed.parsed.experience ?? [];
+    const reExp = reparsed.canonical.fields.experience ?? [];
     expect(reExp[0]?.description).toContain("**important**");
     // The pre-fix corruption signature — must NOT appear.
     expect(reExp[0]?.description).not.toBe(

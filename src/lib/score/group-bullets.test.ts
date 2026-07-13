@@ -248,11 +248,11 @@ describe("multi-line bullet pool is fully merged and correctly attributed (#162)
     );
     const cascade = await runCascade(new Uint8Array(bytes));
     const score = computeAnonymousAtsScore({
-      parsed: cascade.parsed,
-      fieldConfidence: cascade.fieldConfidence,
+      parsed: cascade.canonical.fields,
+      fieldConfidence: cascade.canonical.fieldConfidence,
       triggers: cascade.triggers,
       rawText: cascade.rawText,
-      sections: cascade.sections,
+      sections: cascade.canonical.sections,
     });
     const pool = score.bullets ?? [];
 
@@ -290,8 +290,8 @@ describe("multi-line bullet pool is fully merged and correctly attributed (#162)
         is_current: e.is_current,
       }));
     const combined = [
-      ...toBE(cascade.parsed.experience ?? []),
-      ...toBE(cascade.parsed.projects ?? []),
+      ...toBE(cascade.canonical.fields.experience ?? []),
+      ...toBE(cascade.canonical.fields.projects ?? []),
     ];
     const groups = groupBulletsByExperience(pool, combined);
 

@@ -33,27 +33,29 @@ vi.mock("../lib/analytics.ts", () => ({
 
 function uploadedResult(): CascadeResult {
   return {
-    parsed: {
-      full_name: "Jane Doe",
-      email: "jane@example.com",
-      skills: [],
-      experience: [
-        { company: "Acme", title: "Engineer", description: "Did work" },
-      ],
-      education: [],
+    canonical: {
+      fields: {
+        full_name: "Jane Doe",
+        email: "jane@example.com",
+        skills: [],
+        experience: [
+          { company: "Acme", title: "Engineer", description: "Did work" },
+        ],
+        education: [],
+      },
+      sections: {
+        byName: new Map(),
+        accomplishmentSections: ["experience"],
+        source: "regex",
+      },
+      fieldConfidence: {},
     },
     confidence: 0.8,
-    fieldConfidence: {},
     triggers: [],
     suggestedEscalation: "none",
     // Non-empty tiers — a real (uploaded) parse always has at least these.
     tiers: ["t0_layout", "t1_openresume"],
     rawText: "Jane Doe\njane@example.com\nEngineer at Acme\nDid work",
-    sections: {
-      byName: new Map(),
-      accomplishmentSections: ["experience"],
-      source: "regex",
-    },
     linkAnnotations: [],
     diagnostics: { rawCharCount: 10, extractedCharCount: 10, pages: 1, elapsedMs: 1 },
     timings: { t0_layout_ms: 1, t1_openresume_ms: 1 },
@@ -66,11 +68,11 @@ let api: UseDownloadPdf;
 
 function Probe({ result }: { result: CascadeResult }) {
   const score = computeAnonymousAtsScore({
-    parsed: result.parsed,
-    fieldConfidence: result.fieldConfidence,
+    parsed: result.canonical.fields,
+    fieldConfidence: result.canonical.fieldConfidence,
     triggers: result.triggers,
     rawText: result.rawText,
-    sections: result.sections,
+    sections: result.canonical.sections,
   });
   api = useDownloadPdf(result, score);
   return null;

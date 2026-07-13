@@ -35,3 +35,29 @@ export function buildEducationDates(edu: ResumeEducation): string {
   if (start_date) return start_date;
   return edu.year ?? "";
 }
+
+/** Longest a leading achievement segment can be and still read as a "type"
+ *  label ("Patent", "Publication", "Exit", "Best Paper Award") rather than a
+ *  full sentence — guards against emphasizing an entire prose title that merely
+ *  happens to carry a " · ". */
+export const ACHIEVEMENT_TYPE_MAX_LEN = 28;
+
+/**
+ * Split an achievement title into its leading "type" label + the rest, when the
+ * title carries the canonical "Type · description" shape and the type is short
+ * enough to read as a label (see {@link ACHIEVEMENT_TYPE_MAX_LEN}). Returns null
+ * when there is no qualifying type segment (the whole title is prose).
+ *
+ * Shared by the PDF header builder (which bolds just the type run via emphasis
+ * sentinels) and the reconstructed-résumé view, so both emphasize the identical
+ * run — the on-screen header must match the Download PDF (#452).
+ */
+export function splitAchievementType(
+  title: string,
+): { type: string; rest: string } | null {
+  const idx = title.indexOf(" · ");
+  if (idx < 0) return null;
+  const type = title.slice(0, idx).trim();
+  if (!type || type.length > ACHIEVEMENT_TYPE_MAX_LEN) return null;
+  return { type, rest: title.slice(idx + 3) };
+}

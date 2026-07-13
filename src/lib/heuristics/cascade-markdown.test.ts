@@ -61,9 +61,9 @@ describe("runCascadeFromMarkdown — clean DOCX resume", () => {
     expect(result.tiers).toContain("t1_openresume");
     expect(typeof result.timings.t1_openresume_ms).toBe("number");
 
-    expect(result.parsed.full_name).toBe("Jane Q. Doe");
-    expect(result.parsed.email).toBe("jane.doe@example.com");
-    expect(result.parsed.experience.length).toBeGreaterThanOrEqual(2);
+    expect(result.canonical.fields.full_name).toBe("Jane Q. Doe");
+    expect(result.canonical.fields.email).toBe("jane.doe@example.com");
+    expect(result.canonical.fields.experience.length).toBeGreaterThanOrEqual(2);
 
     // markdown-native cascade always reports markdown-anchored
     // section splitting. Lets telemetry split the funnel cleanly from the
@@ -140,9 +140,9 @@ describe("runCascadeFromMarkdown — real-world DOCX fixtures", () => {
       TURNDOWN_ESCAPED_EMAIL_DOCX.replace(/\\_/g, "_"),
       TURNDOWN_ESCAPED_EMAIL_DOCX,
     );
-    expect(result.parsed.email).toBe("Jordan_Lee@outlook.com");
-    expect(result.parsed.experience.length).toBeGreaterThanOrEqual(2);
-    expect(result.parsed.experience[0].is_current).toBe(true);
+    expect(result.canonical.fields.email).toBe("Jordan_Lee@outlook.com");
+    expect(result.canonical.fields.experience.length).toBeGreaterThanOrEqual(2);
+    expect(result.canonical.fields.experience[0].is_current).toBe(true);
     expect(result.confidence).toBeGreaterThanOrEqual(
       CANONICAL_CONFIDENCE_THRESHOLD,
     );
@@ -211,12 +211,12 @@ describe("runCascadeFromMarkdown — real-world DOCX fixtures", () => {
       SPLIT_LETTER_HEADER_DOCX,
       SPLIT_LETTER_HEADER_DOCX,
     );
-    expect(result.parsed.full_name).toBe("Jordan Lee");
-    expect(result.parsed.email).toBe("jordan.lee@example.com");
+    expect(result.canonical.fields.full_name).toBe("Jordan Lee");
+    expect(result.canonical.fields.email).toBe("jordan.lee@example.com");
     // libphonenumber-js reformats US numbers to national form: (NXX) NXX-XXXX
-    expect(result.parsed.phone).toMatch(/\(415\) 555-0123/);
+    expect(result.canonical.fields.phone).toMatch(/\(415\) 555-0123/);
     // Hard-fail `zero_experience_non_student` must no longer fire.
-    expect(result.parsed.experience.length).toBeGreaterThanOrEqual(1);
+    expect(result.canonical.fields.experience.length).toBeGreaterThanOrEqual(1);
     expect(result.confidence).toBeGreaterThan(0);
   });
 });
@@ -335,11 +335,11 @@ describe("runCascadeFromMarkdown — two-column DOCX with sidebar bleedthrough",
       TWO_COLUMN_SIDEBAR_DOCX,
       TWO_COLUMN_SIDEBAR_DOCX,
     );
-    expect(result.parsed.experience.length).toBeGreaterThanOrEqual(6);
+    expect(result.canonical.fields.experience.length).toBeGreaterThanOrEqual(6);
     // First entry is current
-    expect(result.parsed.experience[0].is_current).toBe(true);
+    expect(result.canonical.fields.experience[0].is_current).toBe(true);
     // Education still parses from the trailing `# E DUCATION` section
-    expect(result.parsed.education.length).toBeGreaterThanOrEqual(1);
+    expect(result.canonical.fields.education.length).toBeGreaterThanOrEqual(1);
   });
 
   it("assigns title/company correctly when H2=title, H3=company (modern convention)", async () => {
@@ -347,13 +347,13 @@ describe("runCascadeFromMarkdown — two-column DOCX with sidebar bleedthrough",
       TWO_COLUMN_SIDEBAR_DOCX,
       TWO_COLUMN_SIDEBAR_DOCX,
     );
-    const first = result.parsed.experience[0];
+    const first = result.canonical.fields.experience[0];
     expect(first.title).toMatch(/Sr\.\s*Engineering Manager/);
     expect(first.company).toMatch(/Globex.*CloudWave/);
 
     // Verify a few others too — the whole point of this regression test is
     // that title/company aren't swapped across entries.
-    const ms = result.parsed.experience.find((e) =>
+    const ms = result.canonical.fields.experience.find((e) =>
       /Soylent/i.test(e.company ?? ""),
     );
     expect(ms).toBeDefined();
@@ -368,7 +368,7 @@ describe("runCascadeFromMarkdown — two-column DOCX with sidebar bleedthrough",
       TWO_COLUMN_SIDEBAR_DOCX,
       TWO_COLUMN_SIDEBAR_DOCX,
     );
-    expect(result.parsed.experience.length).toBeGreaterThan(1);
+    expect(result.canonical.fields.experience.length).toBeGreaterThan(1);
   });
 });
 

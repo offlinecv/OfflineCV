@@ -68,7 +68,10 @@ export default function App() {
   const goToJdFit = () => {
     if (state.phase === "done" && edited) {
       writeJdFitHandoff({
-        result: { ...state.result, parsed: edited.parsed },
+        result: {
+          ...state.result,
+          canonical: { ...state.result.canonical, fields: edited.parsed },
+        },
         score: edited.score,
       });
     }
@@ -284,7 +287,7 @@ export default function App() {
                   ← Back
                 </Button>
               </div>
-              {isScoreRevealed(displayResult, edit.contactOverrides) && (
+              {isScoreRevealed(displayResult.canonical, edit.contactOverrides) && (
                 <AtsScoreReadout score={edited.score} />
               )}
               <ReconstructedResume

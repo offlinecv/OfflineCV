@@ -40,6 +40,7 @@ import {
   diffParses,
   type ParseDisagreement,
 } from "../lib/heuristics/disagreement.ts";
+import { projectLlmDiff } from "../lib/heuristics/projections.ts";
 import {
   trackCritiqueRan,
   trackDisagreementsFound,
@@ -51,7 +52,6 @@ import type {
   CascadeResult,
   LayoutTrigger,
 } from "../lib/heuristics/types.ts";
-import type { SectionName } from "../lib/heuristics/sections.config.ts";
 
 // ── Status discriminator ──────────────────────────────────────────────────────
 
@@ -194,21 +194,15 @@ export function useResumeAnalysisLlm(
       trackLlmParseRan({ model: modelId });
 
       // ── Diff the LLM parse against the heuristic parse. ──
+      // Both sides are canonical shapes: the cascade canonical and the LLM
+      // parse coerced through `projectLlmDiff`. `diffParses` derives its
+      // whole-section-drop gate from the heuristic canonical's own section
+      // headers, so the call site no longer computes `presentSections` (#445).
       const triggers = result.triggers as LayoutTrigger[];
-      // The section headers the heuristic sectioner actually detected. Gates
-      // whole-section drops so an LLM that synthesizes a section absent from
-      // the page (e.g. mining skills out of experience bullets) doesn't
-      // surface a phantom dropped_section. "profile" is not a SectionName.
-      const presentSections = new Set(
-        [...result.sections.byName.keys()].filter(
-          (n): n is SectionName => n !== "profile",
-        ),
-      );
       const disagreements = diffParses(
-        result.parsed,
-        combined.parse,
+        result.canonical,
+        projectLlmDiff(combined.parse),
         triggers,
-        presentSections,
       );
       const tally = tallyKinds(disagreements);
       trackDisagreementsFound({

@@ -55,20 +55,23 @@ const ROLES = [
 
 function makeResult(): CascadeResult {
   return {
-    parsed: {
-      full_name: "Jane Candidate",
-      email: "jane@example.com",
-      phone: "(312) 555-0123",
-      location: "Chicago, IL",
-      summary:
-        "Product leader with a decade of B2B SaaS experience building teams.",
-      skills: ["TypeScript", "Product Strategy", "SQL"],
-      experience: ROLES,
-      education: [],
-      projects: [],
-      heuristic_achievements: [],
+    canonical: {
+      fields: {
+        full_name: "Jane Candidate",
+        email: "jane@example.com",
+        phone: "(312) 555-0123",
+        location: "Chicago, IL",
+        summary:
+          "Product leader with a decade of B2B SaaS experience building teams.",
+        skills: ["TypeScript", "Product Strategy", "SQL"],
+        experience: ROLES,
+        education: [],
+        projects: [],
+        heuristic_achievements: [],
+      },
+      sections: { byName: new Map(), accomplishmentSections: ["experience", "projects", "achievements"], source: "regex" },
+      fieldConfidence: {},
     },
-    fieldConfidence: {},
     confidence: 1,
     triggers: [],
     linkAnnotations: [],
@@ -106,7 +109,7 @@ describe("#425 — team on the org line round-trips through the parser", () => {
   });
 
   it("re-parses each role's title / company / location / dates back into the right fields", () => {
-    const reExp = reparsed.parsed.experience ?? [];
+    const reExp = reparsed.canonical.fields.experience ?? [];
     expect(reExp.length).toBe(ROLES.length);
     ROLES.forEach((orig, i) => {
       expect(reExp[i]?.title).toBe(orig.title);

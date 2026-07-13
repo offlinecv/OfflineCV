@@ -21,8 +21,15 @@ import {
   getAllResumes,
   deleteResume,
 } from "./storage/index.ts";
+import { runCascade } from "./heuristics/index.ts";
+import { CANONICAL_SHAPE_VERSION } from "./heuristics/canonical.ts";
+import { projectScoreSections } from "./heuristics/projections.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
-import type { AnonymousAtsScore } from "./score/score.ts";
+import {
+  computeAnonymousAtsScore,
+  ATS_SCORE_ALGO_VERSION,
+  type AnonymousAtsScore,
+} from "./score/score.ts";
 
 type SourceKind = "pdf" | "docx";
 
@@ -31,6 +38,16 @@ const MIME: Record<SourceKind, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
 
+/**
+ * Cache-key for the persisted parse+score record (#321 / #445). It composes the
+ * score-algorithm version with the canonical parser-shape version, so a bump to
+ * EITHER auto-invalidates a stored snapshot on read. A mismatch never silently
+ * deserializes a stale record (e.g. a pre-cutover `CascadeResult` façade with no
+ * `canonical` member) into the current shape — it re-parses from the stored PDF
+ * blob instead. See {@link loadResumeFromLibrary}.
+ */
+const CACHE_SHAPE_VERSION = `${ATS_SCORE_ALGO_VERSION}:${CANONICAL_SHAPE_VERSION}`;
+
 /** What we stash in the record's opaque `parse` slot: enough to restore the
  *  results view without re-parsing. Internal to this module — callers go through
  *  the save/load functions, not the raw snapshot. */
@@ -38,6 +55,10 @@ interface SavedResumeSnapshot {
   result: CascadeResult;
   score: AnonymousAtsScore;
   sourceKind: SourceKind;
+  /** Shape version the record was written at ({@link CACHE_SHAPE_VERSION}).
+   *  Absent on pre-#445 records — those read as `undefined`, which never matches
+   *  the current version, so they re-parse rather than deserialize. */
+  shapeVersion?: string;
 }
 
 /** A row in the library list — the light metadata the picker renders. */
@@ -70,7 +91,21 @@ function readSnapshot(parse: unknown): SavedResumeSnapshot | null {
     result: snap.result,
     score: snap.score,
     sourceKind: snap.sourceKind ?? "pdf",
+    shapeVersion: snap.shapeVersion,
   };
+}
+
+/** Re-grade a (re-parsed) canonical result — mirrors the parse-time score
+ *  computation in `useResumeAnalysis` exactly so a re-parsed record scores
+ *  identically to a fresh upload. */
+function scoreForResult(result: CascadeResult): AnonymousAtsScore {
+  return computeAnonymousAtsScore({
+    parsed: result.canonical.fields,
+    fieldConfidence: result.canonical.fieldConfidence,
+    triggers: result.triggers,
+    rawText: result.rawText,
+    sections: projectScoreSections(result.canonical),
+  });
 }
 
 /** Save (or overwrite, when `id` is given) a resume. Bytes are stored as a Blob
@@ -91,6 +126,7 @@ export async function saveResumeToLibrary(input: {
     result: input.result,
     score: input.score,
     sourceKind: input.sourceKind,
+    shapeVersion: CACHE_SHAPE_VERSION,
   };
   const record = await saveResume({
     id: input.id,
@@ -130,6 +166,50 @@ export async function loadResumeFromLibrary(
   if (snap === null) return undefined;
   const bytes =
     record.blob.size > 0 ? await record.blob.arrayBuffer() : undefined;
+
+  // Stale-shape guard (#445 / #321). A record written at a different parser-shape
+  // or score-algo version must NOT be deserialized as the current canonical
+  // shape (a pre-cutover record has a `parsed`/`sections` façade and no
+  // `canonical` member — reading it as canonical would crash downstream). Re-parse
+  // from the stored PDF blob instead. If there is no blob to re-parse from (e.g. a
+  // DOCX record, whose source bytes are not kept at rest), the record can't be
+  // safely restored — drop it rather than hand back a stale shape.
+  if (snap.shapeVersion !== CACHE_SHAPE_VERSION) {
+    if (bytes === undefined) return undefined;
+    const result = await runCascade(bytes);
+    const score = scoreForResult(result);
+    // Re-stamp the record at the current shape version so this migration is a
+    // one-time cost (#452 review). Without re-saving, every subsequent load of a
+    // stale record re-parses from the Blob again. Preserve the stored blob and id;
+    // only the snapshot advances. Best-effort — a failed re-save just means the
+    // next load re-parses, so hydration never blocks on it.
+    const migrated: SavedResumeSnapshot = {
+      result,
+      score,
+      sourceKind: snap.sourceKind,
+      shapeVersion: CACHE_SHAPE_VERSION,
+    };
+    try {
+      await saveResume({
+        id: record.id,
+        filename: record.filename,
+        blob: record.blob,
+        parse: migrated,
+      });
+    } catch {
+      // non-fatal: leave the record stale; it re-parses on the next load.
+    }
+    return {
+      id: record.id,
+      filename: record.filename,
+      fileSize: record.blob.size,
+      bytes,
+      sourceKind: snap.sourceKind,
+      result,
+      score,
+    };
+  }
+
   return {
     id: record.id,
     filename: record.filename,

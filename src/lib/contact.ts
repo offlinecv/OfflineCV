@@ -9,7 +9,7 @@
  * confidence is treated as absent.
  */
 
-import type { CascadeResult } from "./heuristics/types.ts";
+import type { CanonicalResume } from "./heuristics/canonical.ts";
 import type { ContactOverrides } from "../hooks/useEditableParse.ts";
 
 export const CONTACT_DISPLAY_CONFIDENCE_FLOOR = 0.5;
@@ -85,22 +85,22 @@ const FIELD_KEYS = {
  * (#146) can partition them into its name heading, contact line, and links line.
  */
 export function buildContactFields(
-  cascade: Pick<CascadeResult, "parsed" | "fieldConfidence">,
+  canonical: Pick<CanonicalResume, "fields" | "fieldConfidence">,
 ): ContactDisplayField[] {
   // A code profile (GitHub) satisfies the brand-neutral required "Professional
   // profile" row (#335) — so a candidate who links GitHub but not LinkedIn sees
   // no gap. The github value keeps rendering via its own optional row.
   const githubConf =
-    cascade.fieldConfidence.github_url ?? 0;
+    canonical.fieldConfidence.github_url ?? 0;
   const githubSatisfies =
-    Boolean(cascade.parsed.github_url) &&
+    Boolean(canonical.fields.github_url) &&
     githubConf >= CONTACT_DISPLAY_CONFIDENCE_FLOOR;
 
   const rows: ContactDisplayField[] = [];
   for (const { key, label, group, optional } of CONTACT_ROWS) {
-    const raw = cascade.parsed[key as keyof typeof FIELD_KEYS];
+    const raw = canonical.fields[key as keyof typeof FIELD_KEYS];
     const value = typeof raw === "string" ? raw : "";
-    const conf = cascade.fieldConfidence[key as keyof typeof FIELD_KEYS] ?? 0;
+    const conf = canonical.fieldConfidence[key as keyof typeof FIELD_KEYS] ?? 0;
     const detected = Boolean(value) && conf >= CONTACT_DISPLAY_CONFIDENCE_FLOOR;
 
     // An optional field is shown only when detected — its absence is not a gap.
@@ -227,14 +227,14 @@ export function criticalDownloadGate(
  * be re-evaluated on every render so it live-updates as the user edits.
  */
 export function isScoreRevealed(
-  cascade: Pick<CascadeResult, "parsed" | "fieldConfidence">,
+  canonical: Pick<CanonicalResume, "fields" | "fieldConfidence">,
   contactOverrides: ContactOverrides | undefined,
 ): boolean {
   const displayFields = applyContactOverrides(
-    buildContactFields(cascade),
+    buildContactFields(canonical),
     contactOverrides,
   );
-  const hasExperience = cascade.parsed.experience.length > 0;
+  const hasExperience = canonical.fields.experience.length > 0;
   return criticalDownloadGate(displayFields, hasExperience).length === 0;
 }
 

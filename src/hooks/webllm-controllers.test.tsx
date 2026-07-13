@@ -110,23 +110,25 @@ function sectioned(): SectionedResume {
 
 function result(): CascadeResult {
   return {
-    parsed: {
-      full_name: "Orig",
-      email: "orig@example.com",
-      skills: ["s"],
-      experience: [
-        { company: "Co", title: "T", description: "did a thing", is_current: false },
-      ],
-      education: [],
+    canonical: {
+      fields: {
+        full_name: "Orig",
+        email: "orig@example.com",
+        skills: ["s"],
+        experience: [
+          { company: "Co", title: "T", description: "did a thing", is_current: false },
+        ],
+        education: [],
+      },
+      sections: sectioned(),
+      fieldConfidence: {},
     },
     confidence: 0.4,
-    fieldConfidence: {},
     triggers: ["two_column"],
     suggestedEscalation: "llm",
     tiers: ["t0_layout", "t1_openresume"],
     rawText: "some extractable text",
     markdown: "some extractable text",
-    sections: sectioned(),
     linkAnnotations: [],
     diagnostics: { rawCharCount: 100, extractedCharCount: 20, pages: 1, elapsedMs: 5 },
     timings: { t0_layout_ms: 1, t1_openresume_ms: 1 },

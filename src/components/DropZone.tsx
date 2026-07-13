@@ -4,6 +4,7 @@
 import { useCallback, useId, useRef, useState } from "react";
 import {
   isAcceptedResumeFile,
+  extractDroppedFile,
   RESUME_ACCEPT_ATTR,
   RESUME_REJECT_HINT,
 } from "../lib/file-accept.ts";
@@ -21,11 +22,10 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleFiles = useCallback(
-    (files: FileList | null) => {
+  const acceptFile = useCallback(
+    (f: File | null) => {
       setError(null);
-      if (!files || files.length === 0) return;
-      const f = files[0];
+      if (!f) return;
       if (!isAcceptedResumeFile(f)) {
         setError(RESUME_REJECT_HINT);
         return;
@@ -47,7 +47,11 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
         e.preventDefault();
         setDragOver(false);
         if (disabled) return;
-        handleFiles(e.dataTransfer.files);
+        // `extractDroppedFile` reads `dataTransfer.files` first and falls back to
+        // `items[].getAsFile()` — some Linux/Chrome drags leave `.files` empty
+        // and only expose the File through `items`, which looked like an accepted
+        // drop that silently dropped the file.
+        acceptFile(extractDroppedFile(e.dataTransfer));
       }}
       className={[
         "flex cursor-pointer flex-col items-center justify-center gap-2",
@@ -68,7 +72,7 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
         accept={RESUME_ACCEPT_ATTR}
         className="sr-only"
         disabled={disabled}
-        onChange={(e) => handleFiles(e.target.files)}
+        onChange={(e) => acceptFile(e.target.files?.[0] ?? null)}
       />
       <p className="text-sm font-medium">
         Drop a resume PDF or DOCX here, or click to pick one

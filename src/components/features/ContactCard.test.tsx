@@ -25,21 +25,33 @@ import { act } from "react";
   true;
 
 import { ContactCard } from "./ContactCard.tsx";
-import type { CascadeResult } from "../../lib/heuristics/types.ts";
+import type {
+  CascadeResult,
+  HeuristicParsedResume,
+  FieldConfidence,
+} from "../../lib/heuristics/types.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "../../lib/heuristics/sections.ts";
 
 function makeResult(
-  parsedOverrides: Partial<CascadeResult["parsed"]> = {},
-  confidenceOverrides: Partial<CascadeResult["fieldConfidence"]> = {},
+  parsedOverrides: Partial<HeuristicParsedResume> = {},
+  confidenceOverrides: FieldConfidence = {},
 ): CascadeResult {
   return {
-    parsed: {
-      skills: [],
-      experience: [],
-      education: [],
-      ...parsedOverrides,
+    canonical: {
+      fields: {
+        skills: [],
+        experience: [],
+        education: [],
+        ...parsedOverrides,
+      },
+      sections: {
+        byName: new Map(),
+        accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+        source: "regex",
+      },
+      fieldConfidence: confidenceOverrides,
     },
-    fieldConfidence: confidenceOverrides,
-  } as CascadeResult;
+  } as unknown as CascadeResult;
 }
 
 let container: HTMLDivElement | undefined;

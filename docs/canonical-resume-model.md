@@ -112,7 +112,7 @@ The parser-side exemption that today backstops flush-right dates — `columnGapC
 
 ## 4. Staged migration plan
 
-Ordered stages. **Each stage keeps `corpus-roundtrip.test.ts`, `render-roundtrip.repro.test.ts`, and the golden snapshots green** — no half-baked intermediate state. Stages are **additive**: the present `AtsResumeModel` shape stays live until the final cutover, so in-flight fidelity PRs (#435 and successors) keep landing and migrate only at cutover.
+Ordered stages, shipped as **A / B / C / (D+E)** — the final two were combined into one cutover at implementation time (#445; see the Stage D+E entry below). **Each stage keeps `corpus-roundtrip.test.ts`, `render-roundtrip.repro.test.ts`, and the golden snapshots green** — no half-baked intermediate state. Stages A–C were **additive** (the `AtsResumeModel` shape stayed live so in-flight fidelity PRs kept landing); the combined **D+E** is the one-time cutover that removes the `CascadeResult` façade and versions the persisted cache.
 
 ### Stage A — Split export-semantics from layout inside `AtsEntry`
 Extract `AtsEntryFields` (`ats-resume-model.ts:87`) into a standalone export-semantic projection so `toJsonResume` (`to-json-resume.ts:409`) reads **semantic** fields, not the render model's layout hints (`headerLineDate`/`subLineDate`/`atomicSegments`/`headerBold`). After this, a layout tweak cannot ripple into export mapping.
@@ -129,15 +129,17 @@ Make the render+export projection derive from `CanonicalResume` and be round-tri
 - **Round-trip story:** this is the delicate stage — land it behind the projection with the corpus + render round-trip tests as the gate, and only flip the renderer's source once the projection reproduces every current golden. The `columnGapCuts`/`isLoneDateRange` exemption (`sections.ts:264-277`) becomes a canonical-model assertion.
 - **Blast radius:** `ats-resume-model.ts`, `render-ats-pdf.ts`, projection module, goldens. Medium-large, but **one-time** — it buys down every future fidelity PR.
 
-### Stage D — Collapse the remaining peer shapes + retire hand-sync
-Retire `LlmParsedResume` as a peer type: coerce LLM output into `CanonicalResume`, make `diffParses` (`disagreement.ts:186`) read the llm-diff projection. Delete the `parse-resume.ts:52-54` hand-sync note. Collapse `ApplyOverridesResult` (`apply-overrides.ts:52`) to `CanonicalResume`; `parsed`/`rawText`/`sections`/`fieldConfidence` become projections (§2.3).
-- **Round-trip story:** disagreement output and edit re-grade behavior unchanged (projections reproduce the mirrored fields); assert against current `diffParses` + `applyOverrides` results.
-- **Blast radius:** `parse-resume.ts`, `disagreement.ts`, `apply-overrides.ts`, callers. Medium.
+### Stage D+E — Collapse the remaining peer shapes + cutover + cache migration (shipped as one, #445)
+Stages D and E were combined into a single verifiable cutover (see #445's rationale: an "additive Stage D" would leave the `CascadeResult` façade alive as a crutch, so the projection collapse could never be *proven* complete until the façade itself was gone — one cutover, one round-trip gate, one manual-test cycle). What landed:
+- `fieldConfidence` became a **third member of `CanonicalResume`** (`{ fields, sections, fieldConfidence }`) — orthogonal parse-provenance metadata, not a duplicate values shape (see §2.3 note below).
+- `LlmParsedResume` stopped being a peer type: on-device LLM output is coerced into a `CanonicalResume` via the **`projectLlmDiff`** projection (`projections.ts`), and `diffParses` (`disagreement.ts`) now takes two `CanonicalResume` shapes and derives its section-presence guard from the heuristic canonical's own `sections.byName` — retiring the caller-computed `presentSections` read in `useResumeAnalysisLlm`. The `parse-resume.ts` hand-sync note is deleted.
+- `ApplyOverridesResult` collapsed to `CanonicalResume & { rawText }`: `fields`/`sections`/`fieldConfidence` are the canonical model's own members (no longer a hand-assembled lockstep quadruple); `rawText` rides alongside because it is cascade metadata the scorer's redacted-date scan still reads, not a canonical member.
+- The **`CascadeResult` façade is removed**: the type no longer carries a top-level `parsed`/`sections`/`fieldConfidence` triple duplicating the canonical cores. It now holds a single `canonical: CanonicalResume` member alongside the genuinely-additional cascade metadata (`rawText`, `markdown`, `triggers`, `linkAnnotations`, `confidence`, `diagnostics`, `timings`, …) that the canonical model does not own. Every ex-`result.parsed` / `result.sections` / `result.fieldConfidence` read migrated to `result.canonical.{fields,sections,fieldConfidence}` or a projection over `result.canonical`.
+- **#321 cache versioning** shipped: the `resumes` IndexedDB snapshot is keyed by `ATS_SCORE_ALGO_VERSION` + a new `CANONICAL_SHAPE_VERSION` (`canonical.ts`). A stale-shape read re-parses from the stored PDF `Blob` rather than deserializing a pre-cutover record into the canonical shape (`resume-library.ts`); a DOCX record with no stored bytes is dropped rather than mis-restored.
+- **Round-trip story:** disagreement output, edit re-grade (#133), and `fieldConfidence` (#421) behavior are unchanged — the migration is reference-identical (`result.canonical.fields === the old result.parsed`), so score-algo output and the corpus/render goldens stay byte-identical; the golden *structure* is unaffected because the persisted change is the cache key, not the golden shape. A cache-version-mismatch test asserts old-snapshot-in → re-parse-out.
+- **Blast radius:** wide but overwhelmingly mechanical (compiler-enumerated, reference-identical read-site migration across `src/`), plus `parse-resume.ts`, `disagreement.ts`, `projections.ts`, `apply-overrides.ts`, `canonical.ts`, `types.ts`, `resume-library.ts`. This is the one-time cutover.
 
-### Stage E — Cutover + cache migration
-Remove the `CascadeResult` compatibility façade; canonical model is the only shape. Ship the #321 cache versioning (§6). This is the only stage that touches persisted state.
-
-Per-stage implementation issues are minted from **this** list once it's fixed — not before (§9).
+Per-stage implementation issues were minted from **this** list once it was fixed (§9). D and E were merged at implementation time (#445, superseding #446).
 
 ---
 
@@ -175,7 +177,7 @@ The *problem class* named in #438 is real — "is this line a category header or
 
 > **§7 correction (folded in at Stage C, #444).** Earlier this read "keyed off a structured `isDatedEntry` **property** on `CanonicalResume`." That over-specified: the structure (`start_date` / `end_date` + precision) is **already** on the entry (`fields.experience[]` / `fields.education[]`). A stored `isDatedEntry` field would be a second entries representation parallel to the field core — exactly the parallel-shape lockstep cost this epic removes (considered and **rejected** via `/clarify`, 2026-07-11). So `isDatedEntry` is a **derived predicate** — `Boolean(start_date || end_date)` — over the dates the entry already holds (`isDatedEntry` in `pdf/ats-resume-model.ts`), never a new core or field. It answers §7's coarse "is this a dated entry at all"; the finer flush-right routing (`headerLineDate` / `subLineDate`) stays on `isLoneDateRange` over the *formatted* range, a render-shape concern Stage C keeps byte-identical.
 
-Capture it as a fixture + assertion at Stage C (where the render+export projection takes over) and carry it green through Stage E.
+Capture it as a fixture + assertion at Stage C (where the render+export projection takes over) and carry it green through the combined D+E cutover (#445).
 
 ---
 
@@ -183,7 +185,7 @@ Capture it as a fixture + assertion at Stage C (where the render+export projecti
 
 - No parser-heuristic **accuracy** rewrite — this is representation/coupling only (#438).
 - No code migration **in #439** — this issue produces the diagram + plan; implementation is the per-stage follow-ups.
-- Stages A–D are additive; **in-flight fidelity work (#435 and successors) is not blocked** and migrates only at the Stage E cutover.
+- Stages A–C were additive; **in-flight fidelity work (#435 and successors) was not blocked** and migrated at the combined **D+E** cutover (#445), which is the single stage that removes the façade and touches persisted state.
 
 ---
 
@@ -194,7 +196,6 @@ Minted **after** this plan is accepted, one per stage, each with its round-trip-
 1. **Stage A** — extract `AtsEntryFields` export-semantic projection out of `AtsEntry` layout hints. *(smallest; good first cut / intern-sized.)*
 2. **Stage B** — introduce `CanonicalResume`; cascade writes it; display + score projections; `CascadeResult` as façade.
 3. **Stage C** — move the round-trip invariant onto the canonical model; renderer draws from the projection. *(carries the §7 header-vs-entry acceptance test.)*
-4. **Stage D** — collapse `LlmParsedResume` + `ApplyOverridesResult` into projections; delete the hand-sync note.
-5. **Stage E** — cutover + #321 cache versioning/invalidation (§6).
+4. **Stage D+E** (shipped combined, #445 — supersedes the separate #446) — collapse `LlmParsedResume` + `ApplyOverridesResult` into projections and delete the hand-sync note, **and** cut over: remove the `CascadeResult` façade + ship #321 cache versioning/invalidation (§6). Combined so the façade removal is provable in one round-trip gate rather than two.
 
 Refs [#438](https://github.com/resumelint-org/resumelint/issues/438), [#321](https://github.com/resumelint-org/resumelint/issues/321), [#401](https://github.com/resumelint-org/resumelint/issues/401), [#425](https://github.com/resumelint-org/resumelint/issues/425), [#434](https://github.com/resumelint-org/resumelint/issues/434), [#435](https://github.com/resumelint-org/resumelint/issues/435).

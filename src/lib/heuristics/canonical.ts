@@ -22,63 +22,51 @@
  * the call sites established here.
  */
 
-import type { HeuristicParsedResume, CascadeResult } from "./types.ts";
+import type { HeuristicParsedResume, FieldConfidence } from "./types.ts";
 import type { SectionedResume } from "./sections.ts";
-import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
-
-/** Inert section core for a façade that carries none — e.g. a hand-built test
- *  fixture predating the `sections` field, or a pre-#132 cached record. Yields
- *  `byName.get(...) === undefined` and no headings, exactly the fall-through the
- *  old `result.sections?.…` reads gave. Production cascade always sets a real
- *  section core, so this only backstops the loose-fixture boundary.
- *
- *  Frozen so a shared singleton can't be mutated into cross-contamination.
- *  `Object.freeze` does NOT lock the inner `Map` — but nothing writes to a
- *  section core in place (`apply-overrides` clones `byName` before editing), so
- *  the empty map stays empty; a future in-place writer must clone first. */
-const EMPTY_SECTION_CORE: SectionedResume = Object.freeze({
-  byName: new Map(),
-  accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
-  source: "regex",
-});
 
 /**
- * The canonical internal résumé: a field core + a section-membership core,
- * held by reference. The single source of truth the projections read from.
+ * Persisted parser-shape version — bumped whenever the shape of a cached parse
+ * record (the `CanonicalResume`/`CascadeResult` structure the #321 resume-library
+ * writes to IndexedDB) changes in a way that a straight structured-clone
+ * deserialize would misread. `"2"` marks the Stage D+E cutover (#445): the
+ * pre-cutover records carried a top-level `parsed`/`sections`/`fieldConfidence`
+ * façade with no `canonical` member, so they must NOT be deserialized as a
+ * canonical record — a version mismatch forces a re-parse from the stored PDF
+ * blob. Paired with `ATS_SCORE_ALGO_VERSION` in the cache key (`resume-library.ts`).
+ */
+export const CANONICAL_SHAPE_VERSION = "2" as const;
+
+/**
+ * The canonical internal résumé: a field core + a section-membership core +
+ * per-field confidence, held by reference. The single source of truth the
+ * projections read from — and, as of the Stage D+E cutover (#445), the sole
+ * parse shape (the `CascadeResult` compatibility façade that used to duplicate
+ * these members is gone; `CascadeResult.canonical` now holds this model).
  */
 export interface CanonicalResume {
   /** Parsed field core — contact, summary, skills, experience, education. */
   readonly fields: HeuristicParsedResume;
   /** Section-membership core — `byName` pools, headings, splitter provenance. */
   readonly sections: SectionedResume;
+  /** Per-field parse confidence (0..1). Orthogonal parse-provenance metadata the
+   *  cascade genuinely emits (confidence-per-field, not a second copy of the
+   *  field *values*), so it is a member of the canonical model rather than a
+   *  projection argument threaded at every call site (#445, Stage D+E). The
+   *  scorer and contact-gap display both gate contact fields by this. */
+  readonly fieldConfidence: FieldConfidence;
 }
 
 /**
- * Compose a {@link CanonicalResume} from its two cores. PURE and allocation-
- * light: both members are carried by reference (they are read-only downstream),
+ * Compose a {@link CanonicalResume} from its three cores. PURE and allocation-
+ * light: every member is carried by reference (they are read-only downstream),
  * so this is a zero-cost view, not a copy. `runCascade` calls this as it
  * assembles each result.
  */
 export function toCanonicalResume(
   fields: HeuristicParsedResume,
   sections: SectionedResume,
+  fieldConfidence: FieldConfidence,
 ): CanonicalResume {
-  return { fields, sections };
-}
-
-/**
- * Adapter for read-site consumers that still receive the {@link CascadeResult}
- * compatibility façade: lift its `parsed` + `sections` back into the canonical
- * view so display / score projections read one shape. The inverse of how
- * `runCascade` derives the façade from the canonical model. PURE.
- *
- * `sections` is required on a production `CascadeResult`, but hand-built test
- * fixtures (and pre-#132 records) can omit it — the old read sites guarded with
- * `result.sections?.…`, so we mirror that here by substituting an inert section
- * core rather than propagating `undefined` into the non-null canonical model.
- */
-export function canonicalFromCascade(
-  result: Omit<CascadeResult, "sections"> & { sections?: SectionedResume },
-): CanonicalResume {
-  return { fields: result.parsed, sections: result.sections ?? EMPTY_SECTION_CORE };
+  return { fields, sections, fieldConfidence };
 }

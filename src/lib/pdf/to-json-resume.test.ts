@@ -396,11 +396,11 @@ describe("toJsonResume — fixture round-trip (synthetic persona)", () => {
   it("produces a well-formed JSON Resume from a parsed fixture", async () => {
     const cascade = await runCascade(new Uint8Array(readFileSync(FIXTURE)));
     const score = computeAnonymousAtsScore({
-      parsed: { ...cascade.parsed },
-      fieldConfidence: cascade.fieldConfidence,
+      parsed: { ...cascade.canonical.fields },
+      fieldConfidence: cascade.canonical.fieldConfidence,
       triggers: cascade.triggers,
       rawText: cascade.rawText,
-      sections: cascade.sections,
+      sections: cascade.canonical.sections,
     });
     const doc = toJsonResume(buildAtsResumeModel(cascade, score));
 

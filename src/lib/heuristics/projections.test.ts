@@ -31,12 +31,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
+import { toCanonicalResume, type CanonicalResume } from "./canonical.ts";
 import {
-  toCanonicalResume,
-  canonicalFromCascade,
-  type CanonicalResume,
-} from "./canonical.ts";
-import { projectScoreSections, projectDisplay } from "./projections.ts";
+  projectScoreSections,
+  projectDisplay,
+  projectLlmDiff,
+} from "./projections.ts";
+import type { LlmParsedResume } from "../webllm/parse-resume.ts";
 import { runCascade } from "./cascade.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
 import type { SectionedResume } from "./sections.ts";
@@ -55,11 +56,17 @@ describe("canonical projections — identity-holder semantics (#443, Stage B)", 
     sectionHeadings: new Map([["skills", "Technical Skills"]]),
     source: "markdown",
   };
-  const canonical: CanonicalResume = toCanonicalResume(fields, sections);
+  const fieldConfidence = { full_name: 1, skills: 0.8 };
+  const canonical: CanonicalResume = toCanonicalResume(
+    fields,
+    sections,
+    fieldConfidence,
+  );
 
-  it("composes the two cores by reference", () => {
+  it("composes the three cores by reference", () => {
     expect(canonical.fields).toBe(fields);
     expect(canonical.sections).toBe(sections);
+    expect(canonical.fieldConfidence).toBe(fieldConfidence);
   });
 
   it("projectScoreSections returns the section core by reference", () => {
@@ -72,25 +79,36 @@ describe("canonical projections — identity-holder semantics (#443, Stage B)", 
     expect(display.sectionHeadings).toBe(sections.sectionHeadings);
   });
 
-  it("canonicalFromCascade lifts a façade's parsed/sections back into canonical", () => {
-    const faux = { parsed: fields, sections } as unknown as Parameters<
-      typeof canonicalFromCascade
-    >[0];
-    const back = canonicalFromCascade(faux);
-    expect(back.fields).toBe(fields);
-    expect(back.sections).toBe(sections);
-  });
-
-  it("canonicalFromCascade substitutes an inert (frozen, empty) core when a loose façade omits sections", () => {
-    const faux = { parsed: fields } as unknown as Parameters<
-      typeof canonicalFromCascade
-    >[0];
-    const back = canonicalFromCascade(faux);
-    // Inert: no pools, no headings — the `result.sections?.…` fall-through the
-    // old read sites gave, never a throw.
-    expect(back.sections.byName.get("skills")).toBeUndefined();
-    expect(back.sections.sectionHeadings).toBeUndefined();
-    expect(Object.isFrozen(back.sections)).toBe(true);
+  it("projectLlmDiff coerces LLM output into a canonical shape (field-name map, empty sections/confidence)", () => {
+    const llm: LlmParsedResume = {
+      full_name: "Jane Candidate",
+      email: null,
+      phone: null,
+      location: null,
+      summary: "Summary text",
+      skills: ["TypeScript", "React"],
+      experience: [
+        { company: "Acme", title: "Engineer", description: "Built things" },
+      ],
+      education: [{ institution: "State U", degree: "BS" }],
+    };
+    const back = projectLlmDiff(llm);
+    // Field-name mapping: scalars carried, null → undefined; arrays mapped 1:1.
+    expect(back.fields.full_name).toBe("Jane Candidate");
+    expect(back.fields.email).toBeUndefined();
+    expect(back.fields.summary).toBe("Summary text");
+    expect(back.fields.skills).toEqual(["TypeScript", "React"]);
+    expect(back.fields.experience).toHaveLength(1);
+    expect(back.fields.experience[0]).toMatchObject({
+      company: "Acme",
+      title: "Engineer",
+      description: "Built things",
+    });
+    expect(back.fields.education).toHaveLength(1);
+    // Best-effort/empty: no section pools, no confidence (the diff derives its
+    // section gate from the heuristic canonical, never the LLM side).
+    expect(back.sections.byName.size).toBe(0);
+    expect(back.fieldConfidence).toEqual({});
   });
 });
 
@@ -124,18 +142,19 @@ describe("canonical projections — corpus parity (synthetic personas)", { timeo
       // Deep-clone the cores so the projection can't pass on reference identity
       // alone — a content bug in re-derivation would surface here.
       const canonical = toCanonicalResume(
-        structuredClone(cascade.parsed),
-        structuredClone(cascade.sections),
+        structuredClone(cascade.canonical.fields),
+        structuredClone(cascade.canonical.sections),
+        structuredClone(cascade.canonical.fieldConfidence),
       );
 
       // Score projection reproduces the cascade's section pools byte-for-byte.
-      expect(projectScoreSections(canonical)).toEqual(cascade.sections);
+      expect(projectScoreSections(canonical)).toEqual(cascade.canonical.sections);
 
       // And the anonymous score is identical whether the scorer reads the
-      // projection or `cascade.sections` directly — the app-path invariant.
+      // projection or `cascade.canonical.sections` directly — the app-path invariant.
       const baseInput = {
-        parsed: cascade.parsed,
-        fieldConfidence: cascade.fieldConfidence,
+        parsed: cascade.canonical.fields,
+        fieldConfidence: cascade.canonical.fieldConfidence,
         triggers: cascade.triggers,
         rawText: cascade.rawText,
       };
@@ -145,14 +164,16 @@ describe("canonical projections — corpus parity (synthetic personas)", { timeo
       });
       const viaDirect = computeAnonymousAtsScore({
         ...baseInput,
-        sections: cascade.sections,
+        sections: cascade.canonical.sections,
       });
       expect(viaProjection).toEqual(viaDirect);
 
       // Display projection reproduces the parsed core + headings.
       const display = projectDisplay(canonical);
-      expect(display.parsed).toEqual(cascade.parsed);
-      expect(display.sectionHeadings).toEqual(cascade.sections.sectionHeadings);
+      expect(display.parsed).toEqual(cascade.canonical.fields);
+      expect(display.sectionHeadings).toEqual(
+        cascade.canonical.sections.sectionHeadings,
+      );
     });
   }
 });

@@ -53,23 +53,25 @@ function result(): CascadeResult {
     source: "regex",
   };
   return {
-    parsed: {
-      full_name: PII_SENTINEL,
-      email: PII_SENTINEL,
-      skills: [PII_SENTINEL],
-      experience: [
-        { company: PII_SENTINEL, title: PII_SENTINEL, description: PII_SENTINEL },
-      ],
-      education: [],
+    canonical: {
+      fields: {
+        full_name: PII_SENTINEL,
+        email: PII_SENTINEL,
+        skills: [PII_SENTINEL],
+        experience: [
+          { company: PII_SENTINEL, title: PII_SENTINEL, description: PII_SENTINEL },
+        ],
+        education: [],
+      },
+      sections,
+      fieldConfidence: {},
     },
     confidence: 0.6,
-    fieldConfidence: {},
     triggers: ["two_column"],
     suggestedEscalation: "none",
     tiers: ["t0_layout", "t1_openresume"],
     rawText: PII_SENTINEL,
     markdown: PII_SENTINEL,
-    sections,
     linkAnnotations: [],
     diagnostics: {
       rawCharCount: 100,

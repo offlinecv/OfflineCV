@@ -74,7 +74,7 @@ describe("useAnalyzedResume — from-scratch authoring (#313)", () => {
     expect(api.edited?.parsed.skills).toEqual([]);
     expect(api.displayResult).not.toBeNull();
     expect(
-      isScoreRevealed(api.displayResult!, api.edit.contactOverrides),
+      isScoreRevealed(api.displayResult!.canonical, api.edit.contactOverrides),
     ).toBe(false);
   });
 
@@ -87,7 +87,7 @@ describe("useAnalyzedResume — from-scratch authoring (#313)", () => {
     });
     // Contact alone isn't enough — no experience yet.
     expect(
-      isScoreRevealed(api.displayResult!, api.edit.contactOverrides),
+      isScoreRevealed(api.displayResult!.canonical, api.edit.contactOverrides),
     ).toBe(false);
 
     let entryId = "";
@@ -99,7 +99,7 @@ describe("useAnalyzedResume — from-scratch authoring (#313)", () => {
     });
 
     expect(
-      isScoreRevealed(api.displayResult!, api.edit.contactOverrides),
+      isScoreRevealed(api.displayResult!.canonical, api.edit.contactOverrides),
     ).toBe(true);
     expect(api.edited?.parsed.experience).toHaveLength(1);
     expect(api.edited?.parsed.experience[0].title).toBe("Software Engineer");
@@ -110,7 +110,7 @@ describe("useAnalyzedResume — from-scratch authoring (#313)", () => {
     // A sparse/failed parse — missing contact — should not reveal the ring
     // even though it came from an upload, not from-scratch authoring.
     const bareCascade = {
-      parsed: { skills: [], experience: [], education: [] },
+      fields: { skills: [], experience: [], education: [] },
       fieldConfidence: {},
     };
     expect(isScoreRevealed(bareCascade, undefined)).toBe(false);
@@ -211,7 +211,7 @@ describe("useAnalyzedResume — draft persistence across reload (#313)", () => {
     expect(api.edited?.parsed.experience).toHaveLength(1);
     expect(api.edited?.parsed.experience[0].title).toBe("Engineer");
     expect(
-      isScoreRevealed(api.displayResult!, api.edit.contactOverrides),
+      isScoreRevealed(api.displayResult!.canonical, api.edit.contactOverrides),
     ).toBe(true);
   });
 

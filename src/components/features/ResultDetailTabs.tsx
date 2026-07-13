@@ -100,7 +100,7 @@ export function ResultDetailTabs({
                 questions (PR #337 review). */}
             <FindJobsPanel
               key={activeResult === result ? "heuristic" : "recovered"}
-              parsed={activeResult.parsed}
+              parsed={activeResult.canonical.fields}
             />
           </TabPanel>
           {showQualityTab && (
