@@ -214,6 +214,19 @@ Assemble the review body (Markdown: a one-line stance, then `## Blocking` /
 `## Secondary` / `## Nits`, findings most-severe first). **Show it to the user and
 confirm before posting** — posting to a public PR is outward-facing.
 
+**Sign the review with your model.** End the body with one line naming the model
+and effort that produced it:
+
+```markdown
+---
+Reviewed by: Claude Opus 4.8 (high)
+```
+
+Name **your own** model (you know it first-hand) — never a guess, and never an
+alias like `opus`. This is what makes a cross-model review legible: the value of a
+second model's read is lost if the PR doesn't say which model read it. No
+`Co-Authored-By`, no session URL, no `🤖` badge (`CLAUDE.md` → **AI provenance**).
+
 Post as a single PR review with the matching event — **top-level body, not inline
 comments** (inline needs a diff-line that exists in the patch or it `422`s; the
 top-level body never does):

@@ -18,6 +18,10 @@ branch name (`feat/...-issue-5`, `gh-5`) or a `Closes #N` / `Refs #N` trailer in
 an existing commit. If still unknown, open the PR without an issue link and note
 that in the output — don't block on it.
 
+A calling skill may also hand over **provenance records** (`{stage, model,
+effort}`, e.g. from `/implement-batch`). If present, render them verbatim into
+the `## Provenance` block (Step 5.5) rather than re-deriving them.
+
 ## Why this skill exists
 
 `main` is protected: every change merges through a PR that needs **1 approving
@@ -68,6 +72,11 @@ Use a `COMMIT_EDITMSG` file if one is already prepared (`git commit -F COMMIT_ED
 If the tree is already clean and there are commits ahead of `origin/$BASE`, skip
 to push.
 
+**No AI trailers in the commit message.** No `Co-Authored-By: Claude …`, no
+`Claude-Session:` URL, no `🤖 Generated with …` badge — the Bash tool's default
+template suggests them; ignore it. Model provenance belongs in the PR body
+(Step 5.5), not in git history. See `CLAUDE.md` → **AI provenance**.
+
 ### Step 3: Confirm there's something to propose
 
 ```bash
@@ -103,11 +112,64 @@ pdftotext "tests/fixtures/pdfs/<category>/<file>.pdf" - | head -40
 - A "PII-free" claim already written in a commit/PR body does not satisfy this —
   verify the binary itself.
 
+### Step 3.6: Collapse the branch to a single commit
+
+`main` merges through a **merge queue**, and the queue's enqueue API carries **no
+commit-message fields** (`EnqueuePullRequestInput` is `pullRequestId` / `jump` /
+`expectedHeadOid` — nothing else). So the squash message can't be supplied at
+merge time; GitHub *derives* it from repo settings when the queue merges.
+
+Those settings are `squash_merge_commit_title: COMMIT_OR_PR_TITLE` and
+`squash_merge_commit_message: COMMIT_MESSAGES`. The lever that gives is:
+
+> **A PR with exactly one commit merges with that commit's subject and body
+> verbatim** — PR title/body ignored, no `* `-bulleted commit soup, no
+> `## Provenance` block leaking into `git log`.
+
+So the branch must arrive at the queue holding **one commit whose message is the
+message you want in `main`**. Doing it here — before the PR exists — costs
+nothing (there's no approval to dismiss yet).
+
+```bash
+git log --oneline "origin/$BASE..HEAD" | wc -l    # >1 → collapse
+```
+
+If more than one commit, write the combined message and collapse:
+
+```bash
+git reset --soft "$(git merge-base HEAD "origin/$BASE")"
+git commit -F .git/COMMIT_EDITMSG      # the combined message you authored
+```
+
+The combined message is **written, not concatenated** — it describes the change
+as a whole, not the sequence of steps that produced it. Branch commits are
+scratch; this message is the artifact:
+
+```
+feat(score): weight specificity by bullet density (#453)
+
+Bullets with quantified outcomes now dominate the specificity dimension
+instead of raw keyword count, which over-rewarded skill-stuffed resumes.
+
+- add BulletDensity probe in score/specificity.ts
+- bump ATS_SCORE_ALGO_VERSION to 4
+- regenerate corpus goldens
+
+Closes #453
+```
+
+Drop the `wip` / `fix lint` / `address review` commits — they are process, not
+change. Keep the same no-AI-trailer rule as Step 2 (this message lands in `main`,
+so it matters more, not less).
+
 ### Step 4: Push the branch
 
 ```bash
 git push -u origin "$BRANCH"
 ```
+
+If the branch already existed on `origin` and Step 3.6 rewrote its history, this
+needs `git push --force-with-lease -u origin "$BRANCH"` (never bare `--force`).
 
 ### Step 5: Create the PR
 
@@ -130,6 +192,11 @@ Closes #<N>   <!-- omit if not fully resolving an issue; use "Refs #<N>" if part
 - [ ] `npm run typecheck` clean
 - [ ] `npm run test` green
 - [ ] Manually verified in `npm run dev` / `npm run preview`
+
+## Provenance
+
+Code implementation via: <Model> (<effort>)
+Verification: `npm run verify` — green in CI
 BODY
 )"
 ```
@@ -137,7 +204,54 @@ BODY
 If the PR adds fixtures, add a line to the Test plan:
 `- [ ] Fixture personas verified synthetic — no real PII (Step 3.5)`.
 
-`gh pr create --fill` derives title/body from the commits — fine for small PRs.
+`gh pr create --fill` derives title/body from the commits — fine for small PRs,
+but it won't produce a `## Provenance` block — append one (Step 5.5) if you use it.
+
+### Step 5.5: The `## Provenance` block
+
+Declare **which model did which stage, at what effort**. This is method
+disclosure, not authorship — it makes cross-model review legible and lets a
+reader calibrate the diff. Full policy: `CLAUDE.md` → **AI provenance**.
+
+A caller may hand this skill a set of provenance records (`/implement-batch`
+does — one per issue, plus review/orchestration). **If records were passed,
+render them verbatim; do not re-derive them.** For a multi-issue batch, use the
+table form, one `Implementation — #<N>` row per issue:
+
+```markdown
+## Provenance
+
+| Stage | Model | Effort |
+|---|---|---|
+| Implementation — #415 | Claude Sonnet 4.6 | medium |
+| Implementation — #417 | Claude Opus 4.8 | high |
+| Adversarial review | Gemini 3.1 Pro | high |
+| Review fixes | Claude Opus 4.8 | medium |
+| Orchestration + PR | Claude Opus 4.8 | medium |
+| Verification | `npm run verify` — green in CI | — |
+```
+
+For a single-issue PR you implemented yourself, the prose form in the Step 5
+template is enough — name **your own** model and effort, which you know
+first-hand.
+
+**Never guess a model name.** You know your own; you do **not** know what a
+subagent's `model: opus` alias resolved to — only that subagent does, and the
+only thing it reports back is the one-line name. If a stage's model can't be
+resolved (an externally-run reviewer, a hand-edit), state what's true
+(`Gemini 3.1 Pro (high) — run manually`) or omit the row. A missing row is
+honest; a fabricated one is worse than none.
+
+If the body already contains a `## Provenance` marker (a re-run, a resumed
+batch), **update it in place — never append a second block**:
+
+```bash
+body="$(gh pr view "$PR_NUM" --repo "$REPO" --json body -q .body)"
+if ! grep -qF '## Provenance' <<<"$body"; then
+  printf '%s\n\n%s\n' "$body" "$PROVENANCE_MD" \
+    | gh pr edit "$PR_NUM" --repo "$REPO" --body-file -
+fi
+```
 
 ### Step 6: Report
 
@@ -151,6 +265,21 @@ merge their own PR via admin bypass.)
 - **Never commit or push to `main`** — always a feature branch + PR. (The local
   hook enforces the no-commit-on-`main` half; server-side protection enforces
   the rest.)
+- **No AI trailers in git; a `## Provenance` block in the PR body instead.** No
+  `Co-Authored-By: Claude …` (authorship — the human is the author), no
+  `Claude-Session:` URL or `🤖 Generated with …` badge anywhere (this repo is
+  public; a session URL is an account-scoped identifier with no reader value).
+  Declare the models in the PR body, per `CLAUDE.md` → **AI provenance**.
+- **Every provenance row is self-reported or first-hand.** Name your own model
+  from your system prompt; take a subagent's from what it reported. Never infer a
+  version string from a `model:` alias, and never invent a row — omit it instead.
+- **One commit per PR, message hand-written (Step 3.6).** `main`'s merge queue
+  can't be handed a squash message — it derives one, and with
+  `COMMIT_OR_PR_TITLE` a single-commit PR merges with that commit's message
+  verbatim. So the branch's one commit *is* the message that lands in `main`.
+  Branch commits are scratch; the merge message is the artifact. Collapse before
+  the PR exists (no approval to lose) and never bypass the queue with `--admin`
+  just to hand-write a message.
 - **One PR per issue/topic.** Keep the diff focused so a single reviewer can
   approve it quickly.
 - Use a closing keyword (`Closes #N`) only when the PR fully resolves the issue;

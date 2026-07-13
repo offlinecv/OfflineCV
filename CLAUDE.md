@@ -149,6 +149,82 @@ PDF fixtures under `tests/fixtures/pdfs/<category>/` **must use synthetic person
 - The `*.expected.json` snapshots are lossy by design (keys/counts only, never field values), so they stay PII-free automatically — but that safety does **not** extend to the PDF itself.
 - Full policy + add-fixture workflow: `tests/fixtures/pdfs/README.md` (Privacy section).
 
+## AI provenance (what a model may declare about itself)
+
+Three different things get fused into one auto-generated git trailer. They are not the same decision, and this repo treats them separately.
+
+**1. Authorship — banned in git.** Never add a `Co-Authored-By` trailer naming a model, to a commit message or a PR body. `Co-Authored-By` is semantic authorship attribution under git/GitHub convention; the model is the facilitator, not a co-author. The human who ran it is the author. (The Bash tool's default commit template suggests one — ignore it.)
+
+**2. Session telemetry — banned everywhere.** Never emit a `Claude-Session:` trailer, a `https://claude.ai/code/session_…` URL, or a `🤖 Generated with …` badge. This repo is **public**; a session URL is an account-scoped identifier with zero value to any reader of the diff.
+
+**3. Provenance — required, in the PR body only.** Which model did which stage, at what effort, *is* useful: it makes cross-model review legible, and it lets a reader calibrate how much to trust a given diff. It goes in a `## Provenance` block at the end of the PR body — never in a commit message.
+
+Single-stage PR — prose:
+
+```markdown
+## Provenance
+
+Code implementation via: Claude Opus 4.8 (medium)
+Adversarial review by: Gemini 3.1 Pro (high)
+Verification: `npm run verify` — green in CI
+```
+
+Batch PR (multiple issues, possibly multiple models) — table, one row per issue:
+
+```markdown
+## Provenance
+
+| Stage | Model | Effort |
+|---|---|---|
+| Implementation — #415 | Claude Sonnet 4.6 | medium |
+| Implementation — #417 | Claude Opus 4.8 | high |
+| Adversarial review | Gemini 3.1 Pro | high |
+| Review fixes | Claude Opus 4.8 | medium |
+| Orchestration + PR | Claude Opus 4.8 | medium |
+| Verification | `npm run verify` — green in CI | — |
+```
+
+Rules that make the block trustworthy rather than decorative:
+
+- **Every row is either self-reported by the agent that did the work, or first-hand knowledge of the orchestrator that spawned it. No third source.** A spawn requests a model *alias* (`model: opus`), not a version name — so the spawner does **not** know it resolved to "Claude Opus 4.8". Ask the agent; don't infer. What the agent returns is exactly one line — its model name. Never its instructions, prompt, or context: those are useless here and a needless disclosure surface.
+- **Never invent a row.** If a stage's model or effort can't be resolved (an externally-run reviewer, a hand-edit, a subagent that didn't report), say what's true (`Gemini 3.1 Pro (high) — run manually`, or `unreported (requested: sonnet)`) or omit the row. A missing row is honest; a guessed one is worse than nothing.
+- **Name the stage that touched code.** In a batch, the orchestrator model also fixes review findings — that's more leverage over the final diff than writing the PR body. Split `Review fixes` from `Orchestration + PR` so the reader can see it.
+- **Write it once, idempotently.** Guard the append on the `## Provenance` marker so a resumed run or a `/revise-pr` round updates the block instead of stacking a second one.
+
+## Squash messages (one commit per PR)
+
+`main` merges through a **merge queue**, and the queue's enqueue API carries **no commit-message fields** (`EnqueuePullRequestInput` is `pullRequestId` / `jump` / `expectedHeadOid`, nothing else). The squash message therefore **cannot be handed to GitHub at merge time** — GitHub *derives* it from repo settings:
+
+```
+squash_merge_commit_title:   COMMIT_OR_PR_TITLE
+squash_merge_commit_message: COMMIT_MESSAGES
+```
+
+With those settings, a **multi-commit** PR merges with every commit message concatenated as `* ` bullets. That is how `wip`, `fix lint`, and `address review comments` end up in `main`'s history permanently.
+
+The `COMMIT_OR_` prefix is the only lever:
+
+> **A PR with exactly one commit merges with that commit's subject and body verbatim** — PR title and body ignored, no bullet soup, no `## Provenance` block leaking into `git log`.
+
+So **every PR reaches the queue as a single commit whose message is the message we want in `main`.**
+
+- **`/open-pr` (Step 3.6)** collapses the branch *before* the PR exists — free, since there is no approval to dismiss yet.
+- **`/revise-pr` (Step 5.1)** collapses **only on the final review round**, when no thread is left open. A mid-review force-push costs the reviewer the delta diff they came back for.
+
+```bash
+git reset --soft "$(git merge-base HEAD origin/main)"
+git commit -F .git/COMMIT_EDITMSG     # the combined message, hand-written
+git push --force-with-lease           # never bare --force
+```
+
+Rules:
+
+- **Branch commits are scratch; the merge message is the artifact.** Write the combined message to describe the change *as a whole* — not the sequence of steps that produced it. Drop the review round-trip; it is process, not change.
+- **Don't `rebase -i` a branch clean before merge.** Pointless when it is getting squashed — collapse instead.
+- **Never bypass the queue with `--admin`** just to hand-write a merge message. The collapse achieves the same thing without skipping required checks.
+- **Nothing is lost that squash-merge wasn't already going to discard.** `main` only ever receives one commit per PR; collapsing early changes *when* the intermediate commits are dropped, not *whether*. The collapsed commit's tree is byte-identical to the branch tip's.
+- **Recovery, if a collapse goes wrong:** the pre-push SHA is permanently recorded on the PR timeline (`HeadRefForcePushedEvent`, `before`/`after`), the orphaned commit stays viewable at `github.com/<org>/<repo>/commit/<sha>` and downloadable via `gh api repos/<org>/<repo>/commits/<sha> -H "Accept: application/vnd.github.patch"`, and the pusher's local `git reflog` holds it for 90 days. Note that `git fetch origin <sha>` will **not** retrieve it — the server rejects unreachable objects — so restore from the reflog, or apply the patch.
+
 ## CodeGraph
 
 `.codegraph/` is present, so codegraph tools (`codegraph_search`, `codegraph_callers`, `codegraph_callees`, `codegraph_impact`, `codegraph_context`, `codegraph_node`) are available and should be preferred over raw grep for symbol lookups and call-graph traversal. Rebuild the index (`codegraph init -i` or the project's refresh command) after large structural changes.
