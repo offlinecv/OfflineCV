@@ -18,11 +18,6 @@ encoding doesn't decode to characters. For that last case the parser falls
 back to the PDF's embedded link annotations as recovered signal, so a
 candidate can still see what survived.
 
-resumelint is the open-source spinoff of `recruidea.app/ats-resume-check` —
-the standalone PDF-parser-audit lane of the [Recruidea](https://recruidea.com)
-sponsor-assisted job-search product. The audit lives here so it can grow
-in the open; the sponsor workflow stays with Recruidea.
-
 New contributors: see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for setup,
 branch + commit conventions, and the PR checklist.
 
@@ -106,12 +101,13 @@ when `VITE_POSTHOG_KEY` is set at build time. In an OSS build (no env vars),
 the PostHog branch is dead-code-eliminated by Vite/Rollup and the dep does
 not appear in the output bundle.
 
-The hosted build at recruidea.com sets `VITE_POSTHOG_KEY` and emits events
-such as `file_accepted`, `parse_completed`, and `parse_failed`. The payloads
-are listed in `src/lib/analytics.ts` and contain only file size, page count,
-parse duration, score breakdown, layout triggers, and error name — never
-PDF bytes, never extracted text, never names or URLs. Session recording and
-autocapture are disabled; the distinct ID is in-memory and reset on tab close.
+A build with `VITE_POSTHOG_KEY` set — such as the hosted preview at
+resumelint.org — emits events such as `file_accepted`, `parse_completed`, and
+`parse_failed`. The payloads are listed in `src/lib/analytics.ts` and contain
+only file size, page count, parse duration, score breakdown, layout triggers,
+and error name — never PDF bytes, never extracted text, never names or URLs.
+Session recording and autocapture are disabled; the distinct ID is in-memory
+and reset on tab close.
 
 The one exception is the optional feedback panel (`feedback_submitted`): it
 carries a 1–5 `rating` plus, **only when the user chooses to fill them**, a

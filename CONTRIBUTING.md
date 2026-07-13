@@ -1,8 +1,7 @@
 # Contributing to resumelint
 
-Thanks for picking up a piece of this. resumelint is the OSS dev surface
-for a browser-side PDF parser audit — the same one that runs at
-`recruidea.app/ats-resume-check`. Code lives under `src/`, license is
+Thanks for picking up a piece of this. resumelint is a browser-side PDF
+parser audit and job-search workbench. Code lives under `src/`, license is
 [Apache-2.0](./LICENSE) (patent grant included; see `NOTICE`). See
 [`README.md`](./README.md) for what resumelint is and what it surfaces;
 see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout.

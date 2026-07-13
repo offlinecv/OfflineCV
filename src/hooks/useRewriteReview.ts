@@ -3,15 +3,14 @@
 
 /**
  * useRewriteReview — in-memory per-bullet accept/reject/edit decision model for
- * a rewrite proposal (issue #211). The hook half of Recruidea's
- * `useArtifactReview` (its Supabase persistence half is intentionally dropped —
- * cloud versioning of accepted edits is the paid-tier lane, out of scope here).
+ * a rewrite proposal (issue #211). Decisions are deliberately in-memory only:
+ * persisting accepted edits would mean a cloud round-trip, which the
+ * client-side-only constraint rules out.
  *
  * It is told the aligned pairs (from `alignBullets`) up front and owns two maps,
  * both keyed by `AlignedPair.id`:
  *   - `decisions`  — accepted | rejected (absent = undecided).
- *   - `edits`      — per-bullet edited text (an edit auto-accepts its pair, the
- *     same affordance as `editSuggestionValue` in the source).
+ *   - `edits`      — per-bullet edited text (an edit auto-accepts its pair).
  *
  * Section/batch actions operate over an explicit id list the caller passes (a
  * section's pair ids, or "all"), so the hook never needs to know the section

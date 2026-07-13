@@ -5,9 +5,6 @@
  * Minimal in-browser text diff using `fast-diff` (MIT). Produces a flat list
  * of segments — equal, added, or removed — that the InlineDiff component
  * renders as struck-through red / highlighted green / plain text.
- *
- * Ported from Recruidea `dashboard/lib/text-diff.ts` (same algo, web Tailwind
- * presentation swapped in at the component layer).
  */
 
 import diff from "fast-diff";

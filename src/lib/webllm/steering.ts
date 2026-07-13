@@ -11,8 +11,7 @@
  * number-preservation / no-fabrication guardrails. Interleaving user text into
  * those rules risks the small instruct model dropping a guardrail. Appending
  * the steering AFTER the rules keeps them intact and just layers intent on top
- * — the same shape Recruidea uses for `custom_instructions` (a system-message
- * suffix), see issue #210 references.
+ * (see issue #210).
  *
  * Both halves are independent and optional:
  *   - `userInstructions` → appended verbatim ("The user has these additional

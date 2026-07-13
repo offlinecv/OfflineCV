@@ -5,14 +5,13 @@
  * skill-canonical — a small, self-contained skills-name normalizer + suggester
  * for the "Add skill" affordance on the reconstructed resume (#176).
  *
- * SCOPE / PROVENANCE: this is a minimal in-repo placeholder, NOT the full
- * Recruidea skills taxonomy. It does case/whitespace normalization, folds a
- * small hand-curated alias map to a canonical display form (e.g. "JS" →
- * "JavaScript", "reactjs" → "React"), and offers cheap prefix/substring
- * suggestions over the union of (a) that canonical vocabulary and (b) the
- * skills already parsed off the current resume. The maintainer can swap `CANONICAL`
- * + `ALIASES` for the real taxonomy port without touching the call sites — the
- * exported function surface is the contract.
+ * SCOPE: a deliberately small hand-curated vocabulary, not an exhaustive skills
+ * taxonomy. It does case/whitespace normalization, folds an alias map to a
+ * canonical display form (e.g. "JS" → "JavaScript", "reactjs" → "React"), and
+ * offers cheap prefix/substring suggestions over the union of (a) that canonical
+ * vocabulary and (b) the skills already parsed off the current resume.
+ * `CANONICAL` + `ALIASES` can be swapped for a fuller taxonomy without touching
+ * the call sites — the exported function surface is the contract.
  *
  * Pure and dependency-free so it unit-tests directly and ships no PII/IP.
  */

@@ -2,8 +2,7 @@
 // Copyright 2026 The resumelint Authors
 
 /**
- * Compact relative-time formatting. Ported from Recruidea's dashboard
- * (lib/date-utils.ts). Pure, zero-dependency.
+ * Compact relative-time formatting. Pure, zero-dependency.
  *
  * - Under 1 minute: "now"
  * - Under 1 hour:   "5m ago"

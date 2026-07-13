@@ -225,8 +225,8 @@ export interface BulletObservation {
 /**
  * Per-bullet view of the same three checks scoreBulletPool aggregates. Kept
  * parallel to scoreBulletPool (not folded into its return shape) so the
- * authed scorer in ~/recruidea that consumes the math signature stays stable
- * and only the anonymous surface pays the per-bullet cost.
+ * aggregate math signature stays stable for downstream consumers and only
+ * callers that need the per-bullet detail pay for it.
  */
 function analyzeBullets(bullets: string[]): BulletObservation[] {
   return bullets.map((text, index) => {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-resumelint started as a browser-side PDF parser stress test for resumes and is growing into a **private, no-login job-search workbench**: drop a PDF in, see what a generic text extractor reads back, get an anonymous heuristic score, fix the resume in place (inline edit + on-device LLM rewrite), download a clean ATS-safe PDF, match it against a job description, and discover relevant job postings. It is the open-source spinoff of `recruidea.app/ats-resume-check`. The non-negotiable product constraint: **everything runs client-side — no PDF bytes, resume text, or job-search queries leave the browser** (the only cloud path is the opt-in BYOK provider, keyed and initiated by the user).
+resumelint started as a browser-side PDF parser stress test for resumes and is growing into a **private, no-login job-search workbench**: drop a PDF in, see what a generic text extractor reads back, get an anonymous heuristic score, fix the resume in place (inline edit + on-device LLM rewrite), download a clean ATS-safe PDF, match it against a job description, and discover relevant job postings. The non-negotiable product constraint: **everything runs client-side — no PDF bytes, resume text, or job-search queries leave the browser** (the only cloud path is the opt-in BYOK provider, keyed and initiated by the user).
 
 ### Product lanes and entry points
 
@@ -67,8 +67,7 @@ CascadeResult
        → AnonymousAtsScore with per-dimension breakdown and ATS_SCORE_ALGO_VERSION
 
 Verdict bands: overall ≥ 80 → "Strong", ≥ 60 → "Getting There", < 60 → "Needs Work"
-(thresholds match Recruidea `ats-check-vm` buckets at 80/60; labels are a simpler
-3-label set vs. the authed scorer's tier names).
+(thresholds at 80/60).
 ```
 
 Each tier in `src/lib/heuristics/` is dynamic-imported from `cascade.ts` so the entry chunk stays small and unused tiers don't ship. The same lazy-load discipline applies to the heavier lanes: WebLLM model weights, `pdf-lib` (via `src/lib/pdf/load-pdf-lib.ts`), and jd-match/job-search modules load on demand.
