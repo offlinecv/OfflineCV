@@ -19,4 +19,5 @@ the PR description:
 
 The `*.expected.json` snapshots are lossy by design (keys + counts only, never
 field values), so they stay PII-safe automatically — but the **PDF binary** is
-the real exposure surface. Full policy: ../../../CLAUDE.md · ./README.md
+the real exposure surface. Full policy: ../../../docs/CONTRIBUTING-PROCESS.md ·
+./README.md — and the binding one-liner in ../../../CLAUDE.md ("Hard rules").

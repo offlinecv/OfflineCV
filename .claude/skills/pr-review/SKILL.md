@@ -225,7 +225,8 @@ Reviewed by: Claude Opus 4.8 (high)
 Name **your own** model (you know it first-hand) — never a guess, and never an
 alias like `opus`. This is what makes a cross-model review legible: the value of a
 second model's read is lost if the PR doesn't say which model read it. No
-`Co-Authored-By`, no session URL, no `🤖` badge (`CLAUDE.md` → **AI provenance**).
+`Co-Authored-By`, no session URL, no `🤖` badge — none of those belong in git or a
+PR body on a public repo (`CLAUDE.md` → **Hard rules**).
 
 Post as a single PR review with the matching event — **top-level body, not inline
 comments** (inline needs a diff-line that exists in the patch or it `422`s; the
@@ -264,7 +265,9 @@ installed), say so — a skipped gate is not a passed gate.
 - **Skill/script files are code.** Review `gh`/bash blocks for the Step 3e class —
   don't wave them through as documentation.
 - **Fixtures: verify the binary, not the prose.** Any added/changed fixture runs 3a;
-  synthetic personas only; a real persona is Blocking (see `CLAUDE.md`).
+  synthetic personas only; a real persona is Blocking. Gate 3a above is the whole
+  check — a real area code + `555` exchange, and an OSS template's demo PDF is no
+  exception.
 - **Post to the top-level body, never a phantom inline line** (avoids `422`). Confirm
   before posting to a public PR.
 - **Tune stance to the author** — historically complex/untested contributions get an

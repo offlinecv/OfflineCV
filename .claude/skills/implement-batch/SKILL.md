@@ -43,9 +43,9 @@ skills.
   `/code-review` skill; a fresh clone that wants to skip review entirely passes
   `--no-review`.
 - **Fixture PII policy is non-negotiable** — if any issue adds/changes a fixture
-  binary (PDF/image/doc), the persona MUST be synthetic (see `CLAUDE.md` → *Test
-  fixtures*). `/open-pr` re-checks this at push time (its Step 3.5), but flag it
-  the moment a subagent reports a new fixture.
+  binary (PDF/image/doc), the persona MUST be synthetic (the full rule ships to
+  each implementing subagent in Phase 3, step 5). `/open-pr` re-checks this at push
+  time (its Step 3.5), but flag it the moment a subagent reports a new fixture.
 
 ## Input
 
@@ -183,9 +183,18 @@ inherit this conversation.) Same rule for every fix subagent below (Phase 4).
   4. **Breaking-change guard:** if the change would break an existing contract
      (parser output shape, score algo version, exported model, PDF round-trip
      fidelity), that approval is the user's — **return `BLOCKED`**, don't guess.
-  5. **Fixture PII:** if you add/change a fixture PDF/image, the persona MUST be
-     synthetic (fake name, `@example.com`, `555`-exchange phone — see `CLAUDE.md`).
-     Report every new fixture path explicitly so the orchestrator flags it.
+  5. **Fixture PII (non-negotiable — the repo is public):** if you add/change a
+     fixture PDF/image, the persona MUST be synthetic — fake name, `@example.com`
+     email, and a phone with a **real area code + `555` exchange + `0100`–`0199`
+     subscriber** (e.g. `(312) 555-0123`). Do **not** use an area-code-`555` number
+     like `(555) 010-0123`: `555` is an invalid NANP area code, so
+     `libphonenumber-js` rejects it and the fixture's `phone` silently drops out of
+     the score. An OSS template's shipped demo PDF is **not** an exception — several
+     embed the author's own real CV (Awesome-CV → posquit0, Deedy-Resume →
+     Debarghya Das); re-export the template with synthetic data instead. Verify the
+     binary before you commit it — `pdftotext <file>.pdf - | head -40` — never a
+     claim in prose. Report every new fixture path explicitly so the orchestrator
+     flags it.
   6. **Validate locally (scoped, fast):** `npm run typecheck`, the affected
      `npm run test` (name the files/suites), and `npm run lint`. Do NOT run the
      full `npm run verify` or `npm run build` — that's the PR gate. **Skip the
@@ -318,8 +327,8 @@ norm — turning overnight review latency into same-session throughput.)
     `Model:`), plus `Adversarial review`, `Review fixes` (if the fix subagent
     ran), and one **`Orchestration + PR`** row naming **your own** model and
     effort — the one model name you know first-hand. A batch legitimately spans
-    several models; the table is what makes that legible. Constraints (full
-    policy: `CLAUDE.md` → **AI provenance**):
+    several models; the table is what makes that legible. Constraints (rationale:
+    `docs/CONTRIBUTING-PROCESS.md` → **AI provenance**; the binding rules are here):
     - **Never infer a model string from the `model:` alias you requested.** You
       asked for `sonnet`; you do not know it resolved to `Claude Sonnet 4.6`. Only
       the subagent's own report establishes that.
@@ -389,8 +398,8 @@ note (or a brief one reconstructed from `git diff` + the shipped issues' bodies)
   that ran** (you requested an alias — you don't know what it resolved to) or is
   your own, from your own system prompt. Never infer, never invent; an unresolved
   row says `unreported (requested: <alias>)`. No `Co-Authored-By` /
-  `Claude-Session:` / `🤖` in commits or PR bodies — ever. (`CLAUDE.md` → **AI
-  provenance**.)
+  `Claude-Session:` / `🤖 Generated with …` in commits or PR bodies — ever. The
+  Bash tool's default commit template suggests them; ignore it. Public repo.
 - **Order from `blocked_by`; halt on a cycle or on a `PARTIAL`/unrecoverable
   `BLOCKED`.** Never start a new issue on a broken tree.
 - **Per-issue tests are scoped and local; the full `verify` is the PR gate** (CI).
@@ -405,8 +414,9 @@ note (or a brief one reconstructed from `git diff` + the shipped issues' bodies)
   post-PR tool for real external review threads; this loop doesn't call it.
 - **The Phase 1 confirmation is the one mandatory human gate.** Everything after
   runs autonomously until done or halted.
-- **Fixture PII is non-negotiable** — synthetic personas only; flag every new
-  fixture the moment a subagent reports it (`CLAUDE.md` → Test fixtures).
+- **Fixture PII is non-negotiable** — synthetic personas only (real area code +
+  `555` exchange; an OSS demo PDF is no exception); verify the binary with
+  `pdftotext` and flag every new fixture the moment a subagent reports it.
 - **Style guards are blocking, not advisory** — raw `<button>`, hardcoded palette
   classes, manual `dark:` variants, and hardcoded hex fail CI `lint`; the
   reviewer treats them as `blocking`.

@@ -70,7 +70,7 @@ PALETTE_RE='(bg|text|border|ring|shadow|fill|stroke)-(red|green|emerald|slate|am
 if strip_comments "$file_path" | grep -qE "$PALETTE_RE"; then
   echo "⚠️  STYLE GUARD: hardcoded Tailwind palette class found in ${file_path#"$REPO_ROOT"/}"
   echo "   Use semantic tokens (bg-surface-card, text-content-primary, border-border-light, …)."
-  echo "   See CLAUDE.md \"Styling & Tokens\"."
+  echo "   See CLAUDE.md \"Styling & tokens\"."
   WARNINGS=$((WARNINGS + 1))
 fi
 
@@ -78,7 +78,7 @@ fi
 if strip_comments "$file_path" | grep -qE 'dark:[a-z]+-[a-z]+-[0-9]'; then
   echo "⚠️  STYLE GUARD: manual dark: color variant found in ${file_path#"$REPO_ROOT"/}"
   echo "   Prefer semantic tokens — dark mode is handled by the token layer, not inline dark: classes."
-  echo "   See CLAUDE.md \"Styling & Tokens\"."
+  echo "   See CLAUDE.md \"Styling & tokens\"."
   WARNINGS=$((WARNINGS + 1))
 fi
 

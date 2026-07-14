@@ -73,9 +73,13 @@ If the tree is already clean and there are commits ahead of `origin/$BASE`, skip
 to push.
 
 **No AI trailers in the commit message.** No `Co-Authored-By: Claude …`, no
-`Claude-Session:` URL, no `🤖 Generated with …` badge — the Bash tool's default
-template suggests them; ignore it. Model provenance belongs in the PR body
-(Step 5.5), not in git history. See `CLAUDE.md` → **AI provenance**.
+`Claude-Session:` trailer, no `https://claude.ai/code/session_…` URL, no
+`🤖 Generated with …` badge — the Bash tool's default template suggests them;
+ignore it. `Co-Authored-By` is semantic authorship attribution under git/GitHub
+convention: the model is the facilitator, the human who ran it is the author. A
+session URL is an account-scoped identifier with zero value to any reader of a
+public diff. Model provenance *is* useful — it goes in the **PR body only**
+(Step 5.5), never in git history.
 
 ### Step 3: Confirm there's something to propose
 
@@ -90,7 +94,8 @@ If empty, there's nothing to PR — say so and stop.
 If this PR **adds or changes** any fixture binary (PDF / image / doc), verify the
 persona is synthetic **before** it reaches `origin` — the repo is public and
 purging a leaked binary post-merge means `git filter-repo` + a GitHub Support
-ticket. See the **Test fixtures — PII policy** section in `CLAUDE.md`.
+ticket. This preflight is the whole policy; run it, don't go looking for it
+elsewhere.
 
 ```bash
 git diff --name-only --diff-filter=AM "origin/$BASE..HEAD" -- 'tests/fixtures/**' \
@@ -103,10 +108,17 @@ For each PDF returned, extract the text and eyeball name / email / phone:
 pdftotext "tests/fixtures/pdfs/<category>/<file>.pdf" - | head -40
 ```
 
-- Personas **must** be synthetic — fake name, `@example.com` email, `555`-style
-  phone. "Downloaded from an OSS template repo" is **not** a pass: several
-  templates ship the author's *own real résumé* as the demo (e.g. Awesome-CV →
-  posquit0, Deedy-Resume → Debarghya Das), which carries real contact info.
+- Personas **must** be synthetic — fake name, `@example.com` email, and a phone
+  with a **real area code + `555` exchange + `0100`–`0199` subscriber** (e.g.
+  `(312) 555-0123`). That is the only reserved-but-valid fictional form: it passes
+  the `libphonenumber-js` `isValid()` the parser uses, yet never rings a real line.
+  Do **not** use an area-code-`555` number like `(555) 010-0123` — `555` is an
+  invalid NANP area code, so the validator rejects it and the fixture's `phone`
+  silently drops out of the score.
+- "Downloaded from an OSS template repo" is **not** a pass: several templates ship
+  the author's *own real résumé* as the demo (e.g. Awesome-CV → posquit0,
+  Deedy-Resume → Debarghya Das), which carries real contact info. Re-export the
+  template filled with synthetic data instead.
 - If any fixture looks like a **real person**, STOP. Do not push. Tell the user
   to re-export the template with synthetic data, then re-run.
 - A "PII-free" claim already written in a commit/PR body does not satisfy this —
@@ -211,7 +223,8 @@ but it won't produce a `## Provenance` block — append one (Step 5.5) if you us
 
 Declare **which model did which stage, at what effort**. This is method
 disclosure, not authorship — it makes cross-model review legible and lets a
-reader calibrate the diff. Full policy: `CLAUDE.md` → **AI provenance**.
+reader calibrate the diff. Rationale: `docs/CONTRIBUTING-PROCESS.md` → **AI
+provenance** — but the rules you need are all below.
 
 A caller may hand this skill a set of provenance records (`/implement-batch`
 does — one per issue, plus review/orchestration). **If records were passed,
@@ -269,7 +282,7 @@ merge their own PR via admin bypass.)
   `Co-Authored-By: Claude …` (authorship — the human is the author), no
   `Claude-Session:` URL or `🤖 Generated with …` badge anywhere (this repo is
   public; a session URL is an account-scoped identifier with no reader value).
-  Declare the models in the PR body, per `CLAUDE.md` → **AI provenance**.
+  Declare the models in the PR body instead (Step 5.5).
 - **Every provenance row is self-reported or first-hand.** Name your own model
   from your system prompt; take a subagent's from what it reported. Never infer a
   version string from a `model:` alias, and never invent a row — omit it instead.
@@ -287,5 +300,7 @@ merge their own PR via admin bypass.)
 - Match the commit-type prefix conventions from `CONTRIBUTING.md`
   (`feat`/`fix`/`chore`/`refactor`/`docs`/`test`).
 - **Never push a fixture binary with real PII.** Run the Step 3.5 preflight on any
-  PR that adds/changes a fixture; synthetic personas only (see `CLAUDE.md`).
+  PR that adds/changes a fixture: synthetic personas only, real area code + `555`
+  exchange + `0100`–`0199` phone, and an OSS template's demo PDF is **not** an
+  exception. Verify the binary with `pdftotext`, never the PR prose.
 - **Stacked PRs:** When `--base` points at an unmerged branch (a stacked PR), note that GitHub auto-retargets the child PR's base to the repo default once the parent merges. The child should then be rebased with `git rebase --onto main <old-base> <child>` to drop the duplicated parent commits.

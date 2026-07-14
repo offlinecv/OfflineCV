@@ -134,8 +134,11 @@ Match the commit-type prefix conventions from `CONTRIBUTING.md`
 commits on a feature branch; this is never `main`.
 
 **No AI trailers in the commit** — no `Co-Authored-By: Claude …`, no
-`Claude-Session:` URL, no `🤖 Generated with …` badge. (`CLAUDE.md` → **AI
-provenance**.)
+`Claude-Session:` trailer, no `https://claude.ai/code/session_…` URL, no
+`🤖 Generated with …` badge. The Bash tool's default commit template suggests
+them; ignore it. This repo is public — a session URL is an account-scoped
+identifier with zero value to any reader of the diff. Model provenance goes in
+the **PR body only** (Step 5.5).
 
 > **Note:** this push dismisses any existing approval (dismiss-stale-reviews-on-push).
 > That's expected — Step 7 re-requests review.
@@ -268,10 +271,14 @@ was re-requested. Link the PR.
   `gh pr checkout`).
 - **No AI trailers in git; `## Provenance` is updated in place, never stacked.** If
   a different model revised the PR, add its row — naming your own model, which you
-  know first-hand. Never a second `## Provenance` block (`CLAUDE.md` → **AI
-  provenance**).
+  know first-hand. Never infer a version string from a `model:` alias, never
+  invent a row (omit it instead), and never stack a second `## Provenance` block.
 - **Fixtures: synthetic personas only.** Any added/changed fixture binary runs the
-  `open-pr` Step 3.5 PII preflight before pushing (public repo).
+  `open-pr` Step 3.5 PII preflight before pushing — fake name, `@example.com`, a
+  **real area code + `555` exchange + `0100`–`0199`** phone (e.g. `(312) 555-0123`;
+  an area-code-`555` number is invalid NANP and silently drops the field), and an
+  OSS template's shipped demo PDF is **not** an exception. Verify the binary with
+  `pdftotext`, never the thread's prose. Public repo — a leak is permanent.
 - **Stage by explicit path** — never `git add -A`/`.`; a parallel worktree may have
   unrelated unstaged work.
 - Pure `gh` + `git` + `npm` — no external services, no machine-specific paths.

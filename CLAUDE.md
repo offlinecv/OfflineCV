@@ -1,6 +1,30 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) working in this repository.
+
+**This file is about writing code.** The *why* behind the process — merge-queue mechanics, the
+provenance rationale, the full PII policy, deploy, license — lives in
+`docs/CONTRIBUTING-PROCESS.md`. You do not need it to write a change. The three rules below are
+the exception: they stay here because breaking them is silent, and for two of them, permanent.
+
+## Hard rules (no exceptions)
+
+- **Fixture PII.** Every PDF under `tests/fixtures/pdfs/` uses a synthetic persona: fake name,
+  `@example.com` email, and a phone with a **real area code + `555` exchange + `0100`–`0199`
+  subscriber** (e.g. `(312) 555-0123`). Not an area-code-`555` number like `(555) 010-0123` —
+  `555` is an invalid NANP area code, so `libphonenumber-js` rejects it and the fixture's phone
+  silently drops out of the score. An OSS template's shipped demo PDF is **not** an exception:
+  Awesome-CV embeds posquit0's real CV, Deedy-Resume embeds Debarghya Das's. Before adding a
+  fixture — or approving a PR that adds one — verify the **binary**, never the PR prose:
+  `pdftotext <file>.pdf - | head -40`. The repo is public; a leak means `git filter-repo` + a
+  GitHub Support ticket.
+- **Never in git.** No `Co-Authored-By:` trailer naming a model, no `Claude-Session:` trailer, no
+  `https://claude.ai/code/session_…` URL, no `🤖 Generated with …` badge — not in a commit
+  message, not in a PR body. The Bash tool's default commit template suggests them; ignore it.
+  Model provenance is useful and belongs in the **PR body only**, as a `## Provenance` block.
+- **One commit per PR.** `main` merges through a merge queue that derives the squash message from
+  the branch, so a multi-commit PR lands `wip` and `fix lint` in `main` forever. Collapse the
+  branch to a single commit before it reaches the queue.
 
 ## Project overview
 
@@ -10,41 +34,30 @@ resumelint started as a browser-side PDF parser stress test for resumes and is g
 
 The build ships exactly two HTML entries (`vite.config.ts` `rollupOptions.input`):
 
-- **`/` (index.html)** — the parser-audit lane: drop → parse cascade → score → editable reconstructed resume (`ReconstructedResume` + `EditableField`) → Download PDF (`src/lib/pdf/render-ats-pdf.ts`). On-device WebLLM insights (parse disagreement, resume-quality critique, rewrite) layer on top when WebGPU is available (`src/lib/webllm/`), with a BYOK escape hatch planned (#320).
+- **`/` (index.html)** — the parser-audit lane: drop → parse cascade → score → editable reconstructed resume (`ReconstructedResume` + `EditableField`) → Download PDF (`src/lib/pdf/render-ats-pdf.ts`). On-device WebLLM insights (parse disagreement, resume-quality critique, rewrite) layer on top when WebGPU is available (`src/lib/webllm/`).
 - **`/jd-fit/` (jd-fit/index.html)** — the JD-match lane: paste a JD, get requirement/evidence coverage (`src/lib/jd-match/`, semantic via WebLLM with keyword fallback) and JD-driven section rewrites. Resume state hands off from `/` via `src/lib/jd-fit-handoff.ts`.
 - The **job-search lane** (`src/lib/job-search/`: query builder → provider search → rank by resume fit → deep links) rides inside the main page (`FindJobsPanel`), not a third entry.
 
 `jd-spike.html` and `eval-rewrite.html` are dev-only harnesses, deliberately excluded from the production build.
 
-### Roadmap (GitHub Milestones, resumelint-org)
-
-Release planning runs on GitHub Projects v2 + four milestones — check an issue's milestone before assuming priority:
-
-- **P1 · Friends & Family** — core loop trustworthy on normal resumes (drop → correct parse + score → safe download).
-- **P2 · Design Partner** — differentiators live (semantic JD-match, AI rewrite), reliability across diverse PDFs, score transparency.
-- **P3 · Public Launch** — polish + standards (JSON Resume export #334, profiles[] model #335, JD-match eval/telemetry/docs).
-- **P4 · Post-Public** — job-search lane maturation, local-first IndexedDB storage (#321), resume library (#322), job tracker (#323), blank-resume authoring (#313).
+Release planning runs on GitHub Milestones (P1 Friends & Family → P4 Post-Public) + a Projects v2 board — check an issue's milestone before assuming priority.
 
 ## Stack and commands
 
-- Vite 7 + React 19 + TypeScript 5.8 + Tailwind 3.4. Vitest runs against `vite.config.ts` (Node env, globals on).
-- pdfjs-dist 4.x; the worker is configured once at app boot in `src/main.tsx` via Vite's `?url` import.
-- No router (single-page app), no SSR/prerender. Analytics are env-gated (`VITE_POSTHOG_KEY`) and dead-code-eliminated when unset — see `src/lib/analytics.ts` and the README's Telemetry section, which also documents the functional `localStorage` keys (`rl_*`) and the unauthenticated `api.github.com` star-count call (discloses the user's IP to GitHub on load). `.env` and `.env.example` are gitignored so the repo ships zero env-file PostHog surface.
+Vite 7 + React 19 + TypeScript 5.8 + Tailwind 3.4. Vitest runs against `vite.config.ts` (Node env, globals on). pdfjs-dist 4.x; the worker is configured once at app boot in `src/main.tsx` via Vite's `?url` import. No router (single-page app), no SSR/prerender. Analytics are env-gated (`VITE_POSTHOG_KEY`) and dead-code-eliminated when unset — see `src/lib/analytics.ts`.
 
 ```bash
-npm install
 npm run dev        # vite dev server (http://localhost:5173)
 npm run build      # tsc -b && vite build → dist/
-npm run preview    # serve the built bundle
 npm run test       # vitest run
 npm run typecheck  # tsc -b --noEmit
 npm run lint       # eslint .
 npm run verify     # full local CI mirror: typecheck → lint → coverage → build → fallow
 ```
 
-`npm run verify` is the canonical local pre-push gate — the exact CI sequence (`fallow` report-only, mirroring `ci.yml`). `npm install` wires a git `pre-push` hook via the package's `prepare` script (`scripts/install-git-hooks.mjs`) that runs `npm run verify` before every push; the same gate also backs the Claude Stop hook (`scripts/hooks/lint_and_test.sh`). Bypass either with `RESUMELINT_SKIP_HOOKS=1`. The hook installer is idempotent and no-ops when `.git/` is absent (tarball / CI `npm ci`), so `prepare` never fails an install.
+`npm run verify` is the canonical pre-push gate — the exact CI sequence. A git `pre-push` hook runs it automatically (installed by `npm install`); bypass with `RESUMELINT_SKIP_HOOKS=1`.
 
-The `npm` scripts above are the portable, supported entry point and work on any checkout. A maintainer convenience wrapper (`scripts/run_resumelint.sh`, an interactive menu) and a GCS deploy script (`scripts/deploy_resumelint.sh`) exist locally but are **not tracked** — they `source` shared bash helpers symlinked from `~/tools/scripts/` (`common.sh`, `deploy_web_utils.sh`, `load_env.sh`) that only exist on the maintainer's machine, so they're gitignored rather than shipped broken. Don't reintroduce them to the repo; build/deploy guidance for contributors lives in the README's Deploy section.
+**While iterating, prefer the narrow gate** — `npx vitest run <path>` on the files you touched, plus `npm run typecheck`. Save the full `verify` for when you think you're done. It runs coverage + build + fallow and is slow enough to cost you iterations.
 
 ## Pipeline shape
 
@@ -67,164 +80,72 @@ CascadeResult
        → AnonymousAtsScore with per-dimension breakdown and ATS_SCORE_ALGO_VERSION
 
 Verdict bands: overall ≥ 80 → "Strong", ≥ 60 → "Getting There", < 60 → "Needs Work"
-(thresholds at 80/60).
 ```
 
-Each tier in `src/lib/heuristics/` is dynamic-imported from `cascade.ts` so the entry chunk stays small and unused tiers don't ship. The same lazy-load discipline applies to the heavier lanes: WebLLM model weights, `pdf-lib` (via `src/lib/pdf/load-pdf-lib.ts`), and jd-match/job-search modules load on demand.
+Each tier in `src/lib/heuristics/` is dynamic-imported from `cascade.ts` so the entry chunk stays small. The same lazy-load discipline applies to the heavier lanes: WebLLM model weights, `pdf-lib` (via `src/lib/pdf/load-pdf-lib.ts`), and jd-match/job-search modules load on demand.
 
 Downstream of the cascade:
 
 - **Edit + export** — user overrides apply through `src/lib/edit/apply-overrides.ts`; `src/lib/pdf/ats-resume-model.ts` + `render-ats-pdf.ts` render the Download PDF. Round-trip fidelity (parse → export → re-parse) is a tested invariant (`corpus-roundtrip.test.ts`, `render-roundtrip.repro.test.ts`) — the exported PDF must re-parse to the same fields.
-- **WebLLM lane** (`src/lib/webllm/`) — on-device parse (`parse-resume.ts`), critique, and rewrite; capability/platform gating in `capability.ts`/`platform.ts`; heuristic-vs-LLM parse disagreement computed in `src/lib/heuristics/disagreement.ts`.
+- **WebLLM lane** (`src/lib/webllm/`) — on-device parse, critique, rewrite; capability/platform gating in `capability.ts`/`platform.ts`; heuristic-vs-LLM disagreement in `src/lib/heuristics/disagreement.ts`.
 - **JD-match** (`src/lib/jd-match/`) and **job-search** (`src/lib/job-search/`) consume the parsed resume, never the raw PDF.
 
-UI shell is `src/App.tsx` + `src/components/{DropZone,PdfPreview,Result}.tsx`; the real surface lives in `src/components/features/` (~30 components: `ReconstructedResume`, `AtsScoreReadout`, `ResultDetailTabs`, `JdMatch`, `FindJobsPanel`, `FeedbackPanel`, …). The `/jd-fit/` page has its own shell in `src/jd-fit/JdFitApp.tsx`.
+The canonical résumé model is documented in `docs/canonical-resume-model.md`.
 
-## Component Architecture & Reuse
+## Exemplars — read one before you write
 
-We use a strict 3-tier component architecture to prevent UI drift and enforce reuse. Primitives + shared-composed components live in the in-tree design-system home (`src/design-system/`) behind the `@design-system` seam; feature code consumes them via `import { ... } from "@design-system"`, never deep paths.
-
-1. **Primitives** (`src/design-system/primitives/*`): The raw building blocks (Buttons, Dialogs, Inputs). These own their tokens and styling. There should be exactly **one** primitive per concern (e.g., one `<Button>`). 
-2. **Shared Composed** (`src/design-system/shared/*`): Domain-agnostic compositions of primitives (e.g., `StatusBadge`, `Card`, `ErrorState`).
-3. **Feature** (`src/components/features/*`): Components wired to domain data (e.g., `PdfPreview`, `LimitedParsingCard`). Split these if they exceed ~200 LOC.
-
-> **The Golden Rule:** Before you write a `<button>`, a modal, a drop zone, or a warning banner—find the existing primitive or shared component and reuse it. Never hand-roll a parallel copy or an inline one-off. If a shared piece is missing a variant, add the variant to the shared piece.
-
-## Workflow-surface Reuse (The Reuse Gate)
-
-Before adding a new workflow surface or UI component, you must search the codebase for an existing surface that already owns that capability and **extend it** rather than building a parallel one. 
-
-**The Rule (Soft Gate):** 
-A new parallel surface is allowed, but only with a written justification (a "Reuse analysis"). Extending the owning surface is the default; "build new" must justify *why* (e.g., a genuinely different interaction model or isolation requirement).
-
-We enforce this with a Claude hook (`scripts/hooks/reuse_surface_reminder.sh`) that will warn you when creating new files under `src/components/`.
-
-## Styling & Tokens
-
-- **Semantic Tokens are Canonical:** Style with semantic Tailwind classes (e.g., `bg-surface-card`, `text-content-primary`, `border-border-light`, `text-brand-amber`). 
-- **No Hardcoded Colors:** Never hardcode hex values (`#ef4444`) or raw Tailwind palette colors (`bg-red-500`, `text-slate-400`) in feature code. 
-- **Typography:** Rely on global typography settings. If custom typography components are introduced (e.g., a `<Text>` wrapper), they must be imported from the shared UI directory, never hand-styled inline.
-
-## Data & Hooks
-
-- **Domain Logic Segregation:** Keep business logic in `src/lib/` (e.g., `heuristics/`, `score/`), strictly separated from UI components. Components should import typed async functions or hooks from `lib/`.
-- **UI Hooks:** Extract cross-cutting interaction state (like `useDisclosure` for modals, or `useFileDropZone` for drag-and-drop validation) into `src/hooks/`. Do not leave `useState`/`useEffect` boilerplate cluttering feature components.
-- **Rules of Hooks:** Keep data logic separate from UI interaction hooks. Single-use render-only logic should stay inline, but any reusable state interaction must be extracted.
-
-## What NOT to do
-
-- ❌ **Raw interactive HTML elements in features:** Do not use raw `<button className="...">` in feature code. Always use the `<Button>` primitive (`import { Button } from "@design-system"`).
-- ❌ **Hardcoded colors:** Do not use raw hex colors or secondary styling vocabularies in feature code.
-- ❌ **Duplicated interactions:** Do not build a new modal or dropzone if one already exists.
-- ❌ **Bloated components:** Do not leave a feature component past ~200 LOC without decomposing it.
-- ❌ **Silent style drift:** The same three checks (raw `<button`, hardcoded palette classes, manual `dark:` colour variants, hardcoded hex) are now **blocked by ESLint in CI** (`npm run lint`) — violations fail the `verify` check on every PR. The `scripts/hooks/style_guard.sh` PostToolUse hook remains wired in as a fast advisory nudge inside Claude Code (non-blocking, same checks, fires before commit). Two layers — don't suppress either.
-
-## Deploy
-
-`npm run build` emits a self-contained static `dist/` that hosts on any static-file host — the portable, contributor-facing deploy path documented in the README's Deploy section.
-
-The hosted preview is published to GitHub Pages via `.github/workflows/deploy-pages.yml` (the canonical, in-repo deploy example).
-
-The maintainer also keeps an **untracked, local-only** `scripts/deploy_resumelint.sh` that uploads `dist/` to a GCS bucket (config from a gitignored `.env.deploy`; sources the `~/tools/scripts/` symlinked helpers). It's gitignored alongside `run_resumelint.sh` because it depends on machine-local tooling — don't recommend it to contributors or recreate it as a tracked file.
-
-## License
-
-Apache-2.0. The patent grant is deliberate — the parser audit should be safely reusable in commercial LLM-adjacent products. See `LICENSE` and `NOTICE` at repo root. Every `.ts`/`.tsx` file under `src/` carries the 3-line SPDX header:
+**Match the neighbours.** This repo has a strong, consistent house style; the fastest way to write
+code that fits is to open the closest exemplar and mirror its shape. Every file under `src/` opens
+with the 3-line SPDX header, then a docblock that explains **why the module exists and what
+constraint it guards** — not what the code does line by line.
 
 ```ts
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The resumelint Authors
 ```
 
-## Test fixtures — PII policy (non-negotiable)
-
-PDF fixtures under `tests/fixtures/pdfs/<category>/` **must use synthetic personas only** — fake name, email (`@example.com`), and a phone using a **real area code with the `555` exchange and a `0100`–`0199` subscriber** (e.g. `(312) 555-0123`). That is the only reserved-but-valid fictional form: it passes `libphonenumber-js` `isValid()` (which the parser uses) yet never rings a real line. Do **not** use an area-code-`555` number like `(555) 010-0123` — `555` is an invalid NANP area code, so the validator rejects it and the fixture's `phone` silently drops out of the score. The repo is **public**; the committed PDF *binary* is the exposure surface, and purging a leaked fixture after merge means `git filter-repo` + a GitHub Support ticket. Catch it before merge.
-
-- **"Self-published upstream" is not an exception.** Several OSS résumé templates ship the author's *own real résumé* as the demo PDF — e.g. Awesome-CV embeds posquit0's CV (real email + phone), Deedy-Resume embeds Debarghya Das's. Downloading those verbatim re-hosts a real person's contact info here. Re-export the template filled with synthetic data instead.
-- **Before adding a fixture — or approving a PR that adds one — extract the text and eyeball the persona:**
-  ```bash
-  pdftotext tests/fixtures/pdfs/<category>/<file>.pdf - | head -40
-  ```
-  Confirm the name, email, and phone are fake. A "PII-free" claim in a PR description is not a substitute for this check — verify the binary, not the prose.
-- The `*.expected.json` snapshots are lossy by design (keys/counts only, never field values), so they stay PII-free automatically — but that safety does **not** extend to the PDF itself.
-- Full policy + add-fixture workflow: `tests/fixtures/pdfs/README.md` (Privacy section).
-
-## AI provenance (what a model may declare about itself)
-
-Three different things get fused into one auto-generated git trailer. They are not the same decision, and this repo treats them separately.
-
-**1. Authorship — banned in git.** Never add a `Co-Authored-By` trailer naming a model, to a commit message or a PR body. `Co-Authored-By` is semantic authorship attribution under git/GitHub convention; the model is the facilitator, not a co-author. The human who ran it is the author. (The Bash tool's default commit template suggests one — ignore it.)
-
-**2. Session telemetry — banned everywhere.** Never emit a `Claude-Session:` trailer, a `https://claude.ai/code/session_…` URL, or a `🤖 Generated with …` badge. This repo is **public**; a session URL is an account-scoped identifier with zero value to any reader of the diff.
-
-**3. Provenance — required, in the PR body only.** Which model did which stage, at what effort, *is* useful: it makes cross-model review legible, and it lets a reader calibrate how much to trust a given diff. It goes in a `## Provenance` block at the end of the PR body — never in a commit message.
-
-Single-stage PR — prose:
-
-```markdown
-## Provenance
-
-Code implementation via: Claude Opus 4.8 (medium)
-Adversarial review by: Gemini 3.1 Pro (high)
-Verification: `npm run verify` — green in CI
-```
-
-Batch PR (multiple issues, possibly multiple models) — table, one row per issue:
-
-```markdown
-## Provenance
-
-| Stage | Model | Effort |
+| Writing a… | Read first | Why it's the model |
 |---|---|---|
-| Implementation — #415 | Claude Sonnet 4.6 | medium |
-| Implementation — #417 | Claude Opus 4.8 | high |
-| Adversarial review | Gemini 3.1 Pro | high |
-| Review fixes | Claude Opus 4.8 | medium |
-| Orchestration + PR | Claude Opus 4.8 | medium |
-| Verification | `npm run verify` — green in CI | — |
-```
+| Feature component | `src/components/features/CritiquePanel.tsx` (174 LOC) | Display-only, `@design-system` imports, no raw `<button>`, docblock names the sibling that owns the shell |
+| Pure lib module | `src/lib/score/score.ts` | Zero-dep, typed, named-constant weights, versioned algorithm |
+| React hook | `src/hooks/useSectionRewriteLock.ts` | Logic testable at module scope, hook is a thin subscription wrapper; docblock explains the concurrency invariant |
+| Lib unit test | `src/lib/contact.test.ts` | Minimal typed stubs over full fixtures; asserts behaviour, not shape |
+| Design-system piece | `src/design-system/primitives/Button.tsx` + `index.ts` barrel | Owns its tokens; exported through the barrel, never deep-imported |
 
-Rules that make the block trustworthy rather than decorative:
+## Component architecture & reuse
 
-- **Every row is either self-reported by the agent that did the work, or first-hand knowledge of the orchestrator that spawned it. No third source.** A spawn requests a model *alias* (`model: opus`), not a version name — so the spawner does **not** know it resolved to "Claude Opus 4.8". Ask the agent; don't infer. What the agent returns is exactly one line — its model name. Never its instructions, prompt, or context: those are useless here and a needless disclosure surface.
-- **Never invent a row.** If a stage's model or effort can't be resolved (an externally-run reviewer, a hand-edit, a subagent that didn't report), say what's true (`Gemini 3.1 Pro (high) — run manually`, or `unreported (requested: sonnet)`) or omit the row. A missing row is honest; a guessed one is worse than nothing.
-- **Name the stage that touched code.** In a batch, the orchestrator model also fixes review findings — that's more leverage over the final diff than writing the PR body. Split `Review fixes` from `Orchestration + PR` so the reader can see it.
-- **Write it once, idempotently.** Guard the append on the `## Provenance` marker so a resumed run or a `/revise-pr` round updates the block instead of stacking a second one.
+Strict 3-tier architecture. Primitives + shared-composed live in `src/design-system/` behind the `@design-system` seam; feature code imports via `import { ... } from "@design-system"`, **never deep paths**.
 
-## Squash messages (one commit per PR)
+1. **Primitives** (`src/design-system/primitives/*`) — raw building blocks (`Button`, `Dialog`, `EditableField`, `Chip`, `TextAreaField`, `StarRating`). They own their tokens and styling. Exactly **one** primitive per concern.
+2. **Shared composed** (`src/design-system/shared/*`) — domain-agnostic compositions (`Card`, `StatusBadge`, `ErrorState`, `Tabs`, `InlineDiff`, …).
+3. **Feature** (`src/components/features/*`) — wired to domain data (`ReconstructedResume`, `FindJobsPanel`, `PdfPreview`).
 
-`main` merges through a **merge queue**, and the queue's enqueue API carries **no commit-message fields** (`EnqueuePullRequestInput` is `pullRequestId` / `jump` / `expectedHeadOid`, nothing else). The squash message therefore **cannot be handed to GitHub at merge time** — GitHub *derives* it from repo settings:
+> **The Golden Rule:** before you write a `<button>`, a modal, a drop zone, or a warning banner — find the existing primitive or shared component and reuse it. Never hand-roll a parallel copy. If a shared piece is missing a variant, **add the variant to the shared piece**.
 
-```
-squash_merge_commit_title:   COMMIT_OR_PR_TITLE
-squash_merge_commit_message: COMMIT_MESSAGES
-```
+**The Reuse Gate (soft).** Before adding a new *workflow surface*, search for an existing surface that already owns that capability and extend it. A parallel surface is allowed only with a written "Reuse analysis" justifying why (genuinely different interaction model, or isolation requirement). A hook (`scripts/hooks/reuse_surface_reminder.sh`) warns on new files under `src/components/`.
 
-With those settings, a **multi-commit** PR merges with every commit message concatenated as `* ` bullets. That is how `wip`, `fix lint`, and `address review comments` end up in `main`'s history permanently.
+**Size.** Keep feature components under ~200 LOC; decompose past that. ⚠️ **Known debt — do not imitate:** `ReconstructedResume.tsx` (1184), `ReconstructedRole.tsx` (588), `ModelSelector.tsx` (556), `SectionRewrite.tsx` (501) all violate this. If you are editing one, prefer extracting your change into a new sibling over growing the file further.
 
-The `COMMIT_OR_` prefix is the only lever:
+## Styling & tokens
 
-> **A PR with exactly one commit merges with that commit's subject and body verbatim** — PR title and body ignored, no bullet soup, no `## Provenance` block leaking into `git log`.
+- **Semantic tokens are canonical.** Style with semantic Tailwind classes: `bg-surface-card`, `text-content-primary`, `border-border-light`, `text-brand-amber`. Vocabulary lives in `src/design-system/styles/theme.css`; values in `tokens.css`.
+- **No hardcoded colors.** Never a hex (`#ef4444`), never a raw palette class (`bg-red-500`, `text-slate-400`), never a manual `dark:` colour variant, in feature code.
+- **Typography** rides global settings — never hand-styled inline.
 
-So **every PR reaches the queue as a single commit whose message is the message we want in `main`.**
+## Data & hooks
 
-- **`/open-pr` (Step 3.6)** collapses the branch *before* the PR exists — free, since there is no approval to dismiss yet.
-- **`/revise-pr` (Step 5.1)** collapses **only on the final review round**, when no thread is left open. A mid-review force-push costs the reviewer the delta diff they came back for.
+- **Domain logic stays in `src/lib/`** (`heuristics/`, `score/`, `pdf/`, …), strictly separated from UI. Components import typed async functions or hooks from `lib/`.
+- **Cross-cutting interaction state** (modals, drop zones, locks) belongs in `src/hooks/`, not inline `useState`/`useEffect` boilerplate in feature components. Single-use render-only logic can stay inline.
 
-```bash
-git reset --soft "$(git merge-base HEAD origin/main)"
-git commit -F .git/COMMIT_EDITMSG     # the combined message, hand-written
-git push --force-with-lease           # never bare --force
-```
+## What NOT to do
 
-Rules:
+- ❌ Raw `<button className="...">` in feature code — use the `<Button>` primitive.
+- ❌ Hardcoded hex or raw Tailwind palette classes in feature code.
+- ❌ A second modal / dropzone / banner when one already exists.
+- ❌ A feature component past ~200 LOC with no decomposition.
 
-- **Branch commits are scratch; the merge message is the artifact.** Write the combined message to describe the change *as a whole* — not the sequence of steps that produced it. Drop the review round-trip; it is process, not change.
-- **Don't `rebase -i` a branch clean before merge.** Pointless when it is getting squashed — collapse instead.
-- **Never bypass the queue with `--admin`** just to hand-write a merge message. The collapse achieves the same thing without skipping required checks.
-- **Nothing is lost that squash-merge wasn't already going to discard.** `main` only ever receives one commit per PR; collapsing early changes *when* the intermediate commits are dropped, not *whether*. The collapsed commit's tree is byte-identical to the branch tip's.
-- **Recovery, if a collapse goes wrong:** the pre-push SHA is permanently recorded on the PR timeline (`HeadRefForcePushedEvent`, `before`/`after`), the orphaned commit stays viewable at `github.com/<org>/<repo>/commit/<sha>` and downloadable via `gh api repos/<org>/<repo>/commits/<sha> -H "Accept: application/vnd.github.patch"`, and the pusher's local `git reflog` holds it for 90 days. Note that `git fetch origin <sha>` will **not** retrieve it — the server rejects unreachable objects — so restore from the reflog, or apply the patch.
+The first three are **blocked by ESLint in CI** (`npm run lint` → fails `verify` on every PR). `scripts/hooks/style_guard.sh` is a fast advisory nudge inside Claude Code that fires earlier. Two layers — don't suppress either.
 
 ## CodeGraph
 
-`.codegraph/` is present, so codegraph tools (`codegraph_search`, `codegraph_callers`, `codegraph_callees`, `codegraph_impact`, `codegraph_context`, `codegraph_node`) are available and should be preferred over raw grep for symbol lookups and call-graph traversal. Rebuild the index (`codegraph init -i` or the project's refresh command) after large structural changes.
+`.codegraph/` is present, so codegraph tools (`codegraph_explore`, `codegraph_search`, `codegraph_callers`, `codegraph_callees`, `codegraph_impact`) are available and should be **preferred over raw grep** for symbol lookups and call-graph traversal. Rebuild the index (`codegraph init -i`) after large structural changes.

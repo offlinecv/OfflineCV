@@ -8,7 +8,7 @@ with a clear message) when the change introduces a known anti-pattern.
 
 Checks:
 1. SPDX header — every ``src/**/*.{ts,tsx}`` file carries the 3-line
-   Apache-2.0 SPDX block (CLAUDE.md "License").
+   Apache-2.0 SPDX block (CLAUDE.md "Exemplars").
 2. Copy discipline — forbid ``exactly`` / ``precisely`` in user-facing
    files (``src/App.tsx`` and ``src/components/``). Our parser doesn't
    see what an ATS sees; promising precision misrepresents the tool.
@@ -87,7 +87,8 @@ def main() -> None:
             PREFIX,
             f"`src/{rel_str}` is missing the SPDX header. Prepend:\n"
             f"{SPDX_HEADER}"
-            f"See CLAUDE.md \"License\".",
+            f"See CLAUDE.md \"Exemplars\"; license rationale in "
+            f"docs/CONTRIBUTING-PROCESS.md.",
         )
 
     # 2: copy discipline — no "exactly" / "precisely" in user-facing files.

@@ -67,7 +67,7 @@ If `gh` isn't installed or authenticated, stop and tell the user to run
    invariant that must still hold (`corpus.test.ts`, `corpus-roundtrip.test.ts`).
 
 5b. **Reuse analysis — required when the issue adds a UI/workflow surface.**
-   resumelint enforces a Reuse Gate (see `CLAUDE.md` → "Workflow-surface Reuse").
+   resumelint enforces a Reuse Gate (`CLAUDE.md` → "Component architecture & reuse").
    Before finalizing a body that proposes a **new component, panel, dialog, or
    page**, search for an existing surface that already owns that capability:
    - Check the design-system (`src/design-system/`) for an existing primitive or
