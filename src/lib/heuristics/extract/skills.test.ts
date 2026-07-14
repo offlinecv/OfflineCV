@@ -2,7 +2,9 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, it, expect } from "vitest";
-import { tokenizeSkillLine } from "./skills.ts";
+import { extractSkills, tokenizeSkillLine } from "./skills.ts";
+import type { PdfLine, PdfSection } from "../sections.ts";
+import type { PdfTextItem } from "../types.ts";
 import { parseHeuristic } from "../openresume.ts";
 import { mkItems, mkDefaultPages } from "../__test-utils__/mkItem.ts";
 
@@ -469,5 +471,270 @@ describe('parseHeuristic — "Programs, Skills, Software" section, all sub-lines
     expect(result.parsed.skills).not.toContain("Writing & Editing");
     // Real section path (≥5 tokens) → 0.85, not the recovery constant 0.65.
     expect(result.fieldConfidence.skills).toBe(0.85);
+  });
+});
+
+// ── Bulleted labelled single-column rows (#465) ──────────────────────────────
+
+/**
+ * Build a Skills section from item-level geometry.
+ *
+ * The bullet geometry is load-bearing and mirrors what pdfjs emits for a real
+ * Word/LaTeX bulleted list: the marker is its own text run at the margin, and
+ * the hanging indent behind it arrives as a synthesized blank item wider than
+ * the column-spacer floor (`> max(fontSize, 10)`).
+ */
+function skillsLines(
+  rows: Array<Array<{ x: number; str: string; w: number }>>,
+): PdfSection {
+  const lines: PdfLine[] = rows.map((runs, i) => {
+    const y = 300 + i * 13;
+    const items: PdfTextItem[] = runs.map((r) => ({
+      page: 1,
+      str: r.str,
+      x: r.x,
+      y,
+      width: r.w,
+      height: 10,
+      fontSize: 10,
+      fontName: "font-10",
+      hasEOL: true,
+    }));
+    return {
+      page: 1,
+      y,
+      x: runs[0].x,
+      items,
+      text: runs
+        .map((r) => r.str)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim(),
+      maxFontSize: 10,
+      allCaps: false,
+      gapAbove: 0,
+    };
+  });
+  return { name: "skills", lines };
+}
+
+/** The bullet marker (`w: 3.5`) plus its hanging-indent blank (`w: 10.5`, wider
+ *  than the 10pt spacer floor — this is what used to read as a column gutter). */
+const BULLET_RUNS = [
+  { x: 60, str: "•", w: 3.5 },
+  { x: 64, str: " ", w: 10.5 },
+];
+
+describe("extractSkills — bulleted labelled single-column rows (#465)", () => {
+  it("rejoins a skill name the wrap broke, despite the bullet's hanging indent", () => {
+    // "… Tailwind" ⏎ "CSS, React Query" — before the fix the bullet's indent
+    // blank made the row look multi-column, which bypassed the soft-wrap
+    // rejoin and shredded "Tailwind CSS" into two tokens.
+    const section = skillsLines([
+      [
+        ...BULLET_RUNS,
+        { x: 74, str: "Frontend:", w: 46.7 },
+        { x: 121, str: " ", w: 2.6 },
+        { x: 123, str: "React, TypeScript, Tailwind", w: 130 },
+      ],
+      [{ x: 74, str: "CSS, React Query", w: 78 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toContain("Tailwind CSS");
+    expect(value).toContain("React Query");
+    expect(value).not.toContain("Tailwind");
+    expect(value).not.toContain("CSS");
+    // The category label is not a skill.
+    expect(value).not.toContain("Frontend");
+  });
+
+  it("keeps a parenthesised clarifier whole when the wrap lands inside it", () => {
+    // "… AWS (EC2," ⏎ "S3, RDS)" — the pending line ends on a comma, so the
+    // comma-list rule alone declines to rejoin; the unclosed paren is what
+    // proves the break is mid-token.
+    const section = skillsLines([
+      [
+        ...BULLET_RUNS,
+        { x: 74, str: "Cloud & Infra:", w: 66.1 },
+        { x: 140, str: " ", w: 2.8 },
+        { x: 143, str: "Docker, Terraform, AWS (EC2,", w: 135 },
+      ],
+      [{ x: 74, str: "S3, RDS)", w: 38 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toContain("AWS (EC2, S3, RDS)");
+    expect(value).toEqual(expect.arrayContaining(["Docker", "Terraform"]));
+    expect(value).not.toContain("AWS (EC2");
+    expect(value).not.toContain("S3");
+    expect(value).not.toContain("RDS)");
+    expect(value).not.toContain("Cloud");
+  });
+
+  it("does not swallow the section behind a STRAY open paren", () => {
+    // Regression guard for the bounded half of Condition C. An open paren that
+    // the next line never closes is an OCR artifact, not a wrap. Joining on the
+    // open paren alone never re-satisfies its own predicate, so every following
+    // line would keep joining and the whole section would collapse into one
+    // garbage token — starving the unbalanced-paren fallback in
+    // `splitRespectingParens` that recovers the items after the stray "(".
+    const section = skillsLines([
+      [{ x: 74, str: "Cloud (AWS", w: 50 }],
+      [{ x: 74, str: "Docker", w: 30 }],
+      [{ x: 74, str: "Kubernetes", w: 50 }],
+      [{ x: 74, str: "Terraform", w: 45 }],
+    ]);
+
+    expect(extractSkills(section).value).toEqual([
+      "Cloud (AWS",
+      "Docker",
+      "Kubernetes",
+      "Terraform",
+    ]);
+  });
+
+  it("rejoins a tab-aligned label torn off its body, and rejoins its wrap", () => {
+    // A Word/Google-Docs tab stop sets the body far enough after the bold
+    // `Label:` that the blank clears the spacer floor — so the row splits into
+    // `Label:` + body and takes the multi-column branch, which cannot
+    // soft-wrap-rejoin. `dropLeadingBullet` alone does NOT rescue this (the gap
+    // is not the bullet's hanging indent); the bare-label rejoin does.
+    const section = skillsLines([
+      [
+        ...BULLET_RUNS,
+        { x: 74, str: "Frontend:", w: 46.7 },
+        { x: 121, str: " ", w: 24 }, // tab stop — above the 10pt spacer floor
+        { x: 145, str: "React, TypeScript, Tailwind", w: 130 },
+      ],
+      [{ x: 74, str: "CSS, React Query", w: 78 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toContain("Tailwind CSS");
+    expect(value).not.toContain("Tailwind");
+    expect(value).not.toContain("CSS");
+    expect(value).not.toContain("Frontend");
+  });
+
+  it("keeps a tab-aligned MULTI-column labelled grid as separate columns", () => {
+    // The bare-label rejoin must re-attach each label to its OWN body only —
+    // collapsing the whole row instead would strip just the first label and
+    // leave a garbage "Vue Backend: Java" token.
+    const section = skillsLines([
+      [
+        { x: 74, str: "Frontend:", w: 46.7 },
+        { x: 121, str: " ", w: 24 },
+        { x: 145, str: "React, Vue", w: 50 },
+        { x: 195, str: " ", w: 60 },
+        { x: 255, str: "Backend:", w: 44 },
+        { x: 299, str: " ", w: 24 },
+        { x: 323, str: "Java, Go", w: 40 },
+      ],
+    ]);
+
+    expect(extractSkills(section).value).toEqual([
+      "React",
+      "Vue",
+      "Java",
+      "Go",
+    ]);
+  });
+
+  it("drops a bare label that another bare label would otherwise absorb", () => {
+    // Two consecutive label-only cells ("Frontend:" ⇥ "Backend:" ⇥ "Java, Go").
+    // The rejoin must not let the FIRST label swallow the SECOND: the merged
+    // "Frontend: Backend:" is no longer bare, so the real body would attach to
+    // the wrong label and `Backend:` would survive as a skill token (the
+    // trailing-punctuation strip in `tokenizeCell` excludes `:`). A label with
+    // no body of its own is neither a column nor a skill — it is dropped.
+    const section = skillsLines([
+      [
+        { x: 74, str: "Frontend:", w: 46.7 },
+        { x: 121, str: " ", w: 24 },
+        { x: 145, str: "Backend:", w: 44 },
+        { x: 190, str: " ", w: 24 },
+        { x: 214, str: "Java, Go", w: 40 },
+      ],
+    ]);
+
+    expect(extractSkills(section).value).toEqual(["Java", "Go"]);
+  });
+
+  it("does not marry a stray open paren to an unrelated stray close paren", () => {
+    // "Tools: Vim (advanced" ⏎ "Emacs, VS Code)". Both parens are strays, on
+    // unrelated lines. Condition C keys on paren balance, so without its
+    // "pending ends on a comma" conjunct it would join them into one garbage
+    // token and LOSE `Emacs` and `VS Code`. The break here is not mid-list
+    // inside a clarifier — pending does not end on a comma — so C declines.
+    const section = skillsLines([
+      [{ x: 74, str: "Tools: Vim (advanced", w: 95 }],
+      [{ x: 74, str: "Emacs, VS Code)", w: 70 }],
+    ]);
+
+    expect(extractSkills(section).value).toEqual([
+      "Vim (advanced",
+      "Emacs",
+      "VS Code)",
+    ]);
+    expect(extractSkills(section).value).not.toContain(
+      "Vim (advanced Emacs, VS Code)",
+    );
+  });
+
+  it("KNOWN LIMIT: a clarifier wrapping across THREE lines is still shredded", () => {
+    // Pins current behavior, not an aspiration. Condition C joins only when the
+    // NEXT line closes the clarifier; "Cloud: AWS (EC2," ⏎ "S3," ⏎ "RDS)" leaves
+    // it open after the second line, so no join fires and the clarifier shreds.
+    // Same as main — deferred, not regressed by #465.
+    const section = skillsLines([
+      [{ x: 74, str: "Cloud: AWS (EC2,", w: 80 }],
+      [{ x: 74, str: "S3,", w: 20 }],
+      [{ x: 74, str: "RDS)", w: 25 }],
+    ]);
+
+    expect(extractSkills(section).value).toEqual(["AWS (EC2", "S3", "RDS)"]);
+  });
+
+  it("KNOWN BEHAVIOR: a line that closes one clarifier and opens another recovers the second", () => {
+    // "Cloud: AWS (EC2," ⏎ "S3), Azure (VMs," ⏎ "Blobs)". The middle line closes
+    // the first clarifier and opens a second, so the first join is declined (the
+    // join would not resolve the imbalance) and the first clarifier shreds — but
+    // the SECOND is rejoined whole. Better than main, which shreds both
+    // ("Azure (VMs" / "Blobs)"). Pinned so the recovery cannot silently vanish.
+    const section = skillsLines([
+      [{ x: 74, str: "Cloud: AWS (EC2,", w: 80 }],
+      [{ x: 74, str: "S3), Azure (VMs,", w: 80 }],
+      [{ x: 74, str: "Blobs)", w: 35 }],
+    ]);
+
+    expect(extractSkills(section).value).toEqual([
+      "AWS (EC2",
+      "S3)",
+      "Azure (VMs, Blobs)",
+    ]);
+  });
+
+  it("still splits a genuine multi-column row whose columns each carry a bullet", () => {
+    // Regression guard: dropping the LEADING bullet must not collapse a real
+    // multi-column skills grid. The wide inter-column blanks remain gutters.
+    const section = skillsLines([
+      [
+        ...BULLET_RUNS,
+        { x: 74, str: "Project management", w: 85 },
+        { x: 207, str: " ", w: 59 },
+        { x: 266, str: "•", w: 3.5 },
+        { x: 271, str: "Data analysis", w: 53 },
+        { x: 324, str: " ", w: 99 },
+        { x: 423, str: "•", w: 3.5 },
+        { x: 428, str: "Communication", w: 64 },
+      ],
+    ]);
+
+    expect(extractSkills(section).value).toEqual([
+      "Project management",
+      "Data analysis",
+      "Communication",
+    ]);
   });
 });

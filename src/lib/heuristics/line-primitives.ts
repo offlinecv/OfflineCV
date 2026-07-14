@@ -15,14 +15,30 @@
 import type { PdfLine } from "./sections.ts";
 import { DATE_RANGE_RE, YEAR_RE } from "./regex.ts";
 
+/** Glyphs a template may use as a list bullet. One source of truth for the
+ *  line-level tests below and the item-level `isBulletGlyph` — they must agree
+ *  on what counts as a bullet, or a glyph stripped from a line's text could
+ *  still survive as a standalone pdfjs item. */
+const BULLET_CLASS = "[•‣▪●◦⁃*\\-–—]";
+const BULLET_LEAD_RE = new RegExp(`^\\s*${BULLET_CLASS}`);
+const BULLET_PREFIX_RE = new RegExp(`^\\s*${BULLET_CLASS}\\s*`);
+const BULLET_GLYPH_RE = new RegExp(`^${BULLET_CLASS}$`);
+
 /** True if the line looks like a bullet point (starts with •, ‣, -, *, ◦, or is indented prose). */
 export function isBulletLine(line: PdfLine): boolean {
-  return /^\s*[•‣▪●◦⁃*\-–—]/.test(line.text);
+  return BULLET_LEAD_RE.test(line.text);
 }
 
 /** Strip leading bullet glyphs + whitespace. */
 export function stripBullet(text: string): string {
-  return text.replace(/^\s*[•‣▪●◦⁃*\-–—]\s*/, "").trim();
+  return text.replace(BULLET_PREFIX_RE, "").trim();
+}
+
+/** True when a pdfjs item is *nothing but* a bullet glyph — i.e. the template
+ *  drew the marker as its own text run, so the glyph is line decoration rather
+ *  than content. */
+export function isBulletGlyph(str: string): boolean {
+  return BULLET_GLYPH_RE.test(str.trim());
 }
 
 /**
