@@ -111,6 +111,21 @@ the full plan back for line-by-line approval.
    the path collided — pick another suffix. Use the exact same path in the next
    step.
 
+9b. **Do NOT hard-wrap the body.** Write each paragraph, list item, and table row
+   as ONE physical line, however long, and let GitHub soft-wrap it to the reader's
+   viewport. Nothing in this skill or in `create-gh-issue.sh` reflows text — a
+   manual ~80-column wrap survives verbatim into the issue and into every later
+   `gh issue edit` / `/clarify` round, where it turns a one-word change into a
+   whole-paragraph reflow diff. It is also self-inconsistent: tables and fenced
+   code blocks can't be wrapped, so a hard-wrapped body wraps some content and not
+   the rest.
+
+   Hard line breaks are meaningful in exactly three places — keep them there:
+   - **inside fenced code blocks** (` ``` `), where they are the content;
+   - **between** block elements (the blank line separating paragraphs, list items,
+     headings);
+   - a deliberate **two-space** or `\` line break, if you actually want a `<br>`.
+
 10. **Run the writer** (from the repo root):
 
     ```bash
