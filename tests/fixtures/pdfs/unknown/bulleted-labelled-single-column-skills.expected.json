@@ -1,7 +1,7 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0.88,
+    "confidence": 0.9,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -22,33 +22,33 @@
       "phoneIsValid",
       "skills"
     ],
-    "skillsCount": 14,
-    "experienceCount": 3,
+    "skillsCount": 37,
+    "experienceCount": 2,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 0,
-    "rawTextCharCount": 2259,
+    "rawTextCharCount": 1000,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 65,
-    "preLayoutOverall": 65,
+    "overall": 89,
+    "preLayoutOverall": 89,
     "specificity": {
-      "score": 24,
+      "score": 40,
       "max": 40,
       "gradable": true,
-      "metricBullets": 4,
-      "totalBullets": 11
+      "metricBullets": 3,
+      "totalBullets": 3
     },
     "structure": {
-      "score": 17,
+      "score": 25,
       "max": 30,
       "gradable": true,
-      "goodBullets": 6,
-      "totalBullets": 11
+      "goodBullets": 3,
+      "totalBullets": 3
     },
     "completeness": {
       "score": 24,
@@ -64,7 +64,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 11,
+    "bulletCount": 3,
     "algoVersion": "1.5"
   },
   "reproArtifact": {
@@ -73,24 +73,24 @@
     "triggers": [],
     "sectionSource": "regex",
     "pageCount": 1,
-    "rawCharCount": 2223,
-    "extractedCharCount": 1843,
+    "rawCharCount": 980,
+    "extractedCharCount": 707,
     "sections": [
       {
         "name": "profile",
         "lineCount": 2
       },
       {
-        "name": "education",
-        "lineCount": 2
+        "name": "skills",
+        "lineCount": 7
       },
       {
         "name": "experience",
-        "lineCount": 24
+        "lineCount": 5
       },
       {
-        "name": "skills",
-        "lineCount": 6
+        "name": "education",
+        "lineCount": 1
       }
     ],
     "parsedCounts": {
@@ -99,9 +99,9 @@
       "hasPhone": true,
       "hasLocation": true,
       "hasSummary": false,
-      "experienceCount": 3,
+      "experienceCount": 2,
       "educationCount": 1,
-      "skillsCount": 14
+      "skillsCount": 37
     },
     "linkAnnotationCount": 0,
     "disagreements": []

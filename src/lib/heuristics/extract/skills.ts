@@ -4,7 +4,7 @@
 import type { PdfSection } from "../sections.ts";
 import type { PdfTextItem } from "../types.ts";
 import { mergeItemText } from "../sections.ts";
-import { stripBullet } from "../line-primitives.ts";
+import { isBulletGlyph, stripBullet } from "../line-primitives.ts";
 
 // ── Skills ──────────────────────────────────────────────────────────────────
 
@@ -23,20 +23,22 @@ import { stripBullet } from "../line-primitives.ts";
 const SKILL_SPLIT_RE = /[;·•|]+|\s{2,}|(?<!\w)\/+(?!\w)/;
 
 /**
- * Split `text` on skill delimiters while ignoring commas that appear inside
- * balanced parentheses, e.g. `Cloud Infrastructure (GCP, Hybrid Cloud)` →
- * one token, not two.
+ * Single paren depth-walk over `text` — the one source of truth for what
+ * "balanced" means in this module.
  *
- * Algorithm: scan the string one character at a time, tracking paren depth.
- * When depth === 0, a comma terminates the current segment. The remaining
- * delimiters (semicolon, bullet chars, wide whitespace, standalone slash) are
- * applied to each segment afterwards via `SKILL_SPLIT_RE`.
+ * Returns the offsets of the commas that sit OUTSIDE any parenthesis (the only
+ * commas that are list delimiters) and the depth still open at end of string
+ * (`0` = balanced, `> 0` = a paren the text never closes). A `)` with no
+ * matching `(` is ignored — depth never goes negative.
+ *
+ * Both `splitRespectingParens` and `hasUnclosedParen` walk through here rather
+ * than each keeping their own loop: an unbalanced pending line is exactly what
+ * trips the shredding fallback below, so the two MUST agree on balance, and
+ * sharing the walk makes that structural instead of a promise in a comment.
  */
-function splitRespectingParens(text: string): string[] {
-  // Step 1: split on commas that are outside balanced parens.
-  const commaParts: string[] = [];
+function scanParens(text: string): { outsideCommas: number[]; depth: number } {
+  const outsideCommas: number[] = [];
   let depth = 0;
-  let start = 0;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (ch === "(") {
@@ -44,9 +46,30 @@ function splitRespectingParens(text: string): string[] {
     } else if (ch === ")") {
       if (depth > 0) depth--;
     } else if (ch === "," && depth === 0) {
-      commaParts.push(text.slice(start, i));
-      start = i + 1;
+      outsideCommas.push(i);
     }
+  }
+  return { outsideCommas, depth };
+}
+
+/**
+ * Split `text` on skill delimiters while ignoring commas that appear inside
+ * balanced parentheses, e.g. `Cloud Infrastructure (GCP, Hybrid Cloud)` →
+ * one token, not two.
+ *
+ * Algorithm: walk the string tracking paren depth (`scanParens`); a comma at
+ * depth 0 terminates the current segment. The remaining delimiters (semicolon,
+ * bullet chars, wide whitespace, standalone slash) are applied to each segment
+ * afterwards via `SKILL_SPLIT_RE`.
+ */
+function splitRespectingParens(text: string): string[] {
+  // Step 1: split on commas that are outside balanced parens.
+  const { outsideCommas, depth } = scanParens(text);
+  const commaParts: string[] = [];
+  let start = 0;
+  for (const i of outsideCommas) {
+    commaParts.push(text.slice(start, i));
+    start = i + 1;
   }
   commaParts.push(text.slice(start));
 
@@ -124,6 +147,30 @@ function isSkillToken(tok: string): boolean {
 }
 
 /**
+ * Drop a leading list-bullet item and the blank pdfjs synthesizes for the
+ * hanging indent behind it.
+ *
+ * A bullet is drawn at the margin with its text set at an indent, so pdfjs
+ * emits a blank item as wide as that indent — routinely wider than the spacer
+ * floor `splitColumnCells` uses (a 10pt hanging indent at a 10pt font already
+ * clears it). Left in place, that indent reads as a column gutter, so EVERY
+ * bulleted row would look multi-column and take the branch in
+ * `collectSkillCells` that cannot soft-wrap-rejoin — shredding any skill that
+ * straddles the wrap (`… Tailwind` ⏎ `CSS …` → `Tailwind` + `CSS`) and
+ * exploding a parenthesised clarifier whose parens land on opposite sides of it
+ * (#465).
+ *
+ * The invariant: a leading bullet is decoration and its hanging indent is not a
+ * gutter. Column cells are the runs that remain once it is removed.
+ */
+function dropLeadingBullet(items: PdfTextItem[]): PdfTextItem[] {
+  if (items.length === 0 || !isBulletGlyph(items[0].str)) return items;
+  let i = 1;
+  while (i < items.length && items[i].str.trim() === "") i++;
+  return items.slice(i);
+}
+
+/**
  * Word/LaTeX résumés often lay skills out in a borderless multi-column table.
  * pdfjs renders each inter-column gap as a wide blank "spacer" item rather than
  * a large x-gap between glyph runs, so `groupIntoLines` (which splits only on
@@ -140,7 +187,7 @@ function isSkillToken(tok: string): boolean {
 function splitColumnCells(line: { text: string; items: PdfTextItem[] }): string[] {
   const cells: PdfTextItem[][] = [];
   let cur: PdfTextItem[] = [];
-  for (const item of line.items) {
+  for (const item of dropLeadingBullet(line.items)) {
     const isSpacer =
       item.str.trim() === "" && item.width > Math.max(item.fontSize, 10);
     if (isSpacer) {
@@ -154,9 +201,66 @@ function splitColumnCells(line: { text: string; items: PdfTextItem[] }): string[
   if (cells.length <= 1) return [line.text];
   // Collapse any whitespace a narrow (non-splitting) spacer item left inside a
   // cell — e.g. a " \n" run between "REST" and "API" → "REST API".
-  return cells
+  const texts = cells
     .map((c) => mergeItemText(c).replace(/\s+/g, " ").trim())
     .filter((t) => t.length > 0);
+
+  const { cells: bodied, dropped } = rejoinBareLabels(texts);
+  if (bodied.length === 0) return [line.text];
+  // One surviving cell: hand it back as a single-column line so it can still
+  // soft-wrap-rejoin with the next line. Return `line.text` only when nothing
+  // was dropped — otherwise the dropped label would ride back in on the raw text.
+  if (bodied.length === 1) return dropped ? bodied : [line.text];
+  return bodied;
+}
+
+/**
+ * Re-attach a bare `Label:` cell to the cell that follows it, and drop any label
+ * left without a body.
+ *
+ * A Word / Google-Docs export tab-aligns a category body after its bold label,
+ * so pdfjs emits the tab as a blank far wider than the spacer floor —
+ * indistinguishable, by width alone, from a column gutter. The split then lands
+ * between the label and its own items, and the row takes the multi-column branch
+ * of `collectSkillCells`, which cannot soft-wrap-rejoin (#465).
+ * `dropLeadingBullet` only rescues this when the gap happens to be narrower than
+ * the floor — which is exactly why the original fixture, whose body sits one
+ * space-width after the label, sidestepped the failing branch.
+ *
+ * The tell is not the gap width but the CELL CONTENT: a genuine column cell
+ * always carries its items; a cell consisting solely of `Label:` never does — it
+ * is a label the tab stop tore off its body. Rejoining forward is therefore
+ * strictly narrower than collapsing the whole row, and it keeps a tab-aligned
+ * MULTI-column labelled grid ("Frontend: …⇥ Backend: …") intact as two labelled
+ * cells rather than mashing both lists into one.
+ *
+ * A label only ever absorbs a cell that HAS a body: rejoining one bare label into
+ * another ("Frontend:" + "Backend:") produces a cell that is no longer bare, so
+ * the real body then attaches to the WRONG label and the absorbed one survives as
+ * a skill token (`tokenizeCell`'s trailing-punctuation strip excludes `:`).
+ *
+ * Invariant: a cell that is nothing but a label is not a column.
+ *
+ * `dropped` reports whether any bodyless label was discarded — the caller needs
+ * it to know that `line.text` no longer faithfully represents the cells.
+ */
+function rejoinBareLabels(texts: string[]): {
+  cells: string[];
+  dropped: boolean;
+} {
+  const joined: string[] = [];
+  for (const t of texts) {
+    const prev = joined.length - 1;
+    if (
+      prev >= 0 &&
+      BARE_SUBLABEL_RE.test(joined[prev]) &&
+      !BARE_SUBLABEL_RE.test(t)
+    )
+      joined[prev] += ` ${t}`;
+    else joined.push(t);
+  }
+  const cells = joined.filter((t) => !BARE_SUBLABEL_RE.test(t));
+  return { cells, dropped: cells.length !== joined.length };
 }
 
 /** A Skills-section sub-label whose contents are NOT professional skills — a
@@ -180,6 +284,11 @@ const SUBLABEL_BODY = "[A-Z][A-Za-z &/]+";
 /** Leading `Label:` prefix of a skills cell — captures the label phrase so it
  *  can be checked against the non-skill denylist before being stripped. */
 const SUBLABEL_PREFIX_RE = new RegExp(`^(${SUBLABEL_BODY}):\\s*`);
+
+/** A column cell that is ONLY a `Label:` — nothing after the colon. Such a cell
+ *  is never a real column (a column carries its items); it is a label a tab stop
+ *  tore off its body. See the rejoin in `splitColumnCells`. */
+const BARE_SUBLABEL_RE = new RegExp(`^${SUBLABEL_BODY}:$`);
 
 /**
  * Tokenizes a single column cell into valid skill tokens and adds them to
@@ -227,6 +336,14 @@ export function tokenizeSkillLine(raw: string): string[] {
  *  continuation of the previous one or a fresh entry. */
 const SKILLS_NEW_ENTRY_RE = new RegExp(`^(?:[•\\-–*]\\s|${SUBLABEL_BODY}:\\s)`);
 
+/** True when `text` leaves a parenthesis open. Shares `scanParens` with
+ *  `splitRespectingParens` so the two cannot drift on what "balanced" means —
+ *  an unbalanced pending line is exactly what trips that function's shredding
+ *  fallback. */
+function hasUnclosedParen(text: string): boolean {
+  return scanParens(text).depth > 0;
+}
+
 /**
  * True when the pending accumulated text and `nextText` together indicate a
  * soft-wrap: the line break happened mid-skill-name or mid-list, not between
@@ -271,6 +388,43 @@ function isSoftWrapContinuation(pending: string, nextText: string): boolean {
     if (lead[1] === "&") return true;
     if (!/\s/.test(lead[2].trim())) return true;
   }
+
+  // Condition C: the pending line broke MID-LIST INSIDE a parenthesised
+  // clarifier, and the next line closes that clarifier ("… AWS (EC2," ⏎
+  // "S3, RDS)"). Such a break is unambiguously mid-token, and it is the one case
+  // Condition B structurally cannot reach: pending ends on a comma, so B reads
+  // it as a completed entry and declines to join — leaving
+  // splitRespectingParens' unbalanced-paren fallback to shred the clarifier into
+  // "AWS (EC2" / "S3" / "RDS)" (#465).
+  //
+  // Three conjuncts, each load-bearing:
+  //
+  //  1. `hasUnclosedParen(pending)` — the break landed inside a clarifier.
+  //  2. `/,\s*$/.test(pending)` — it landed at a COMMA, i.e. between two items
+  //     of the clarifier's own list, so the list is unterminated and cannot be
+  //     what the entry ends on. Without this, C keys on paren balance alone and
+  //     will marry a STRAY "(" to an unrelated STRAY ")" on some later line
+  //     ("Tools: Vim (advanced" ⏎ "Emacs, VS Code)" → one garbage token, losing
+  //     Emacs and VS Code). It is also exactly what makes C the COMPLEMENT of
+  //     Condition B rather than a superset of it: B handles every wrapped list
+  //     that does NOT end on a comma, C handles only the comma-terminated ones B
+  //     refuses. Every real clarifier wrap breaks after a comma.
+  //  3. `!hasUnclosedParen(joined)` — the join RESOLVES the imbalance. An open
+  //     paren the next line does NOT close is a stray paren (the OCR artifact
+  //     "C++ (advanced, Node"), not a wrap. Joining on the open paren alone
+  //     never re-satisfies its own predicate, so every subsequent line would keep
+  //     joining and the whole rest of the section would collapse into one garbage
+  //     token — starving the unbalanced-paren fallback in `splitRespectingParens`
+  //     that exists precisely to recover the items after a stray "(".
+  //
+  // Invariant: join only when the break is mid-list INSIDE an open clarifier and
+  // the join CLOSES that clarifier.
+  if (
+    hasUnclosedParen(pending) &&
+    /,\s*$/.test(pending) &&
+    !hasUnclosedParen(`${pending} ${nextText}`)
+  )
+    return true;
 
   // Condition A: pending ends with an explicit continuation glyph — the glyph
   // must be its OWN whitespace-separated token ("Hiring &", "Data -"), not the
