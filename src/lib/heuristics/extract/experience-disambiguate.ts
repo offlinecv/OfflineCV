@@ -152,6 +152,20 @@ function locationFromAnchorCell(cell: string): string | undefined {
   return isBareLocationString(c) ? c : undefined;
 }
 
+/** Front-anchored `City, ST` at the START of a cell, guarded by a valid USPS code
+ *  (`US_STATE_CODE_RE`) — the same closed-vocabulary discipline `stripLocationSuffix`
+ *  applies at the END. This catches an employer-line cell that leads with the
+ *  location and carries a trailing dept/sub-org after it ("Chicago, IL  Consumer
+ *  Banking" → "Chicago, IL"), where neither `isBareLocationString` (not a
+ *  whole-string location) nor `stripLocationSuffix` (location is not the trailing
+ *  suffix) can claim it (#466). Multi-word city allowed via the comma boundary. */
+function leadingLocation(cell: string): string | undefined {
+  const m = cell
+    .trim()
+    .match(/^([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})(?:\s|$)/);
+  return m && US_STATE_CODE_RE.test(m[2]) ? `${m[1]}, ${m[2]}` : undefined;
+}
+
 function stripLocationSuffix(s: string): {
   text: string;
   location: string | undefined;
@@ -516,31 +530,66 @@ function mapWithCompanyMatch(
 
 /**
  * Phase 2b-i — the first split reads like a title and the second does not:
- * "Title, Team" over "Company | Location Dates" (#372).
+ * "Title, Team" over a separate employer line (#372, #466).
  *
  * splits[0]/splits[1] are a role-comma split of ONE header line (same source,
  * `via: "comma"`), so the post-comma splits[1] is a team/sub-org suffix, not the
- * company. When the anchor (date) line below was delimiter-split into "Company |
- * Location Dates", its leading segment is the real company — take it and demote
- * the post-comma segment to team. Guarded on `via: "comma"` so a same-line
- * `|`/`@`/`·`/`—` delimiter split (also same-source) can't misfire this
- * comma-shape branch. Additive: fires only for the comma-split + delimited-anchor
- * shape; every other case keeps the "Title, Company" default.
+ * company. The employer therefore lives on a DIFFERENT header line, and which one
+ * is the anchor (date) line depends on the layout:
+ *
+ *   - #372 — the title line has NO date; the employer line below is the anchor and
+ *     was delimiter-split into "Company | Location Dates". Its leading segment is
+ *     the company (`anchorCompany`). Guarded on `anchorIdx !== titleSource` so this
+ *     only fires when the anchor really is a separate line.
+ *   - #466 — the DATE sits on the "Title, Team" line, so that line is the anchor.
+ *     `anchorSplits[0]` would then be the TITLE, not a company — reading it as the
+ *     company mirrored the title into `company` and never consulted the real
+ *     employer on the line below. Instead take the company off the first segment
+ *     whose `source` differs from the title line's; never mirror the title.
+ *   - No separate employer line at all — a genuine single-line "Title, Company"
+ *     ("Office manager, Nod Publishing") — the post-comma segment IS the company.
+ *
+ * Guarded on `via: "comma"` so a same-line `|`/`@`/`·`/`—` delimiter split (also
+ * same-source) can't misfire this comma-shape branch.
  */
 function mapTitleFirst(splits: Split[], anchorIdx: number | undefined): Fields {
   const title = splits[0]?.text;
+  const titleSource = splits[0]?.source;
   const isRoleCommaSplit =
     splits[1] !== undefined &&
     splits[0]?.via === "comma" &&
     splits[0]?.source === splits[1].source;
+  // The anchor supplies the company only when it is a DIFFERENT line than the
+  // title's comma line (#372). When the date is on the title line itself (#466),
+  // `anchorIdx === titleSource`, so its segments are the title — not a company.
   const anchorSplits =
     anchorIdx !== undefined ? splits.filter((s) => s.source === anchorIdx) : [];
   const anchorCompany =
-    anchorSplits.length >= 2 && !looksLikeLocationTail(anchorSplits[0].text)
+    anchorIdx !== titleSource &&
+    anchorSplits.length >= 2 &&
+    !looksLikeLocationTail(anchorSplits[0].text)
       ? anchorSplits[0].text
       : undefined;
-  if (isRoleCommaSplit && anchorCompany) {
-    return { company: anchorCompany, title, team: splits[1]?.text };
+  if (isRoleCommaSplit) {
+    // #372 — company on the separate anchor (employer) line below.
+    if (anchorCompany) return { company: anchorCompany, title, team: splits[1].text };
+    // #466 — employer on a different line than the title's comma line. Take that
+    // line's leading segment as company; never mirror the title into `company`.
+    const employer = splits.find((s) => s.source !== titleSource);
+    if (employer) return { company: employer.text, title, team: splits[1].text };
+    // No separate employer line. The date's position disambiguates the post-comma:
+    if (anchorIdx === titleSource) {
+      // Date is ON the "Title, X" line — the #382 shared-employer shape: X is a
+      // team/sub-org, and the employer is a banner above (or genuinely absent).
+      // Leave `company` EMPTY (a miss, not a title mirror) with the team set, so
+      // `isBannerContinuation` can inherit the banner employer; if none rescues it,
+      // it honestly reads as absent rather than as the title (#466).
+      return { title, team: splits[1].text };
+    }
+    // A separate date line below with no employer segments → a genuine single-line
+    // "Title, Company" ("Office manager, Nod Publishing"): the post-comma is the
+    // company (#372 no-regression).
+    return { company: splits[1].text, title };
   }
   return { company: splits[1]?.text, title, team: splits[2]?.text };
 }
@@ -723,25 +772,76 @@ function recoverLocation(
   //      yields a bare location once the date range is peeled, use it (and clear
   //      the segment from `team` if it landed there).
   if (!location && anchorIdx !== undefined) {
-    for (const s of splits) {
-      // Skip the company and the title cells: a location cell that landed in
-      // `title` is the empty-title "Company · City, ST" export shape, which
-      // step 5 rescues correctly (title → "", location set) — claiming it here
-      // would set `location` and block that rescue, orphaning the location in
-      // `title`. Only an unused/team location cell is claimed here.
-      if (s.source !== anchorIdx || s.text === company || s.text === title) {
-        continue;
-      }
-      const loc = locationFromAnchorCell(s.text);
-      if (loc) {
-        location = loc;
-        if (team === s.text) team = undefined;
-        break;
-      }
-    }
+    const r = anchorCellLocation(splits, anchorIdx, company, title, team);
+    location = r.location;
+    team = r.team;
+  }
+
+  // (3d) #466 — recover a `City, ST` that LEADS an employer-line cell ("Chicago, IL
+  //      Consumer Banking"). See {@link employerLineLocation}.
+  if (!location) {
+    const r = employerLineLocation(splits, company, title, team);
+    location = r.location;
+    team = r.team;
   }
 
   return { company, title, team, location };
+}
+
+/**
+ * Step 3c (#373) — recover a per-entry location from an ANCHOR-row cell that folds
+ * "<City, ST> <dates>" with no separator ("Globex Financial | New York, NY August
+ * 2024 - Present" — the second `|` cell). The date parse already took the range into
+ * `block.dates`, but the location residue never reached a field. Scans the anchor
+ * line's non-company / non-title segments for a whole-string bare location; when one
+ * led the `team` cell, clears the team. Skipping the title cell keeps the empty-title
+ * "Company · City, ST" export shape for step 5 to rescue (setting it here would orphan
+ * the location in `title`).
+ */
+function anchorCellLocation(
+  splits: Split[],
+  anchorIdx: number,
+  company: string | undefined,
+  title: string | undefined,
+  team: string | undefined,
+): { location?: string; team?: string } {
+  for (const s of splits) {
+    if (s.source !== anchorIdx || s.text === company || s.text === title) continue;
+    const loc = locationFromAnchorCell(s.text);
+    if (loc) return { location: loc, team: team === s.text ? undefined : team };
+  }
+  return { team };
+}
+
+/**
+ * Step 3d (#466) — recover a `City, ST` that LEADS an employer-line cell ("Chicago,
+ * IL  Consumer Banking" — a pipe cell carrying the location plus a trailing
+ * dept/sub-org). Unlike step 3c this is NOT restricted to the anchor line: for the
+ * "Title, Team <dates>" / "Company | City, ST Dept" shape the employer and its
+ * location sit on a NON-anchor line, and the location is neither a whole-string bare
+ * location (3c) nor a trailing suffix (`stripLocationSuffix`), so a front-anchored
+ * match claims it. The closed-vocabulary USPS guard inside `leadingLocation` keeps a
+ * "Word, XX" title/company from false-matching; company/title cells are skipped so
+ * only an unclaimed (or team-carried) cell is read. When the location led the `team`
+ * cell, the residual text after it (a trailing dept) is returned as the new team.
+ */
+function employerLineLocation(
+  splits: Split[],
+  company: string | undefined,
+  title: string | undefined,
+  team: string | undefined,
+): { location?: string; team?: string } {
+  for (const s of splits) {
+    if (s.text === company || s.text === title) continue;
+    const loc = leadingLocation(s.text);
+    if (!loc) continue;
+    if (team === s.text) {
+      const rest = s.text.slice(loc.length).replace(/^[\s,·|–—-]+/, "").trim();
+      return { location: loc, team: rest || undefined };
+    }
+    return { location: loc, team };
+  }
+  return { team };
 }
 
 /**
@@ -873,5 +973,13 @@ export function disambiguateCompanyTitle(
   const mapped = mapSegmentsToFields(splits, strip.filtered, strip.anchorIdx);
   const located = recoverLocation(mapped, splits, strip.anchorIdx);
   const cleaned = cleanFieldArtifacts(located);
-  return applyTrailingCompanyGuard(cleaned, strip.leadsFreshEntry);
+  const guarded = applyTrailingCompanyGuard(cleaned, strip.leadsFreshEntry);
+  // Backstop (#466): a `company` byte-identical to its own `title` is never a real
+  // employer — it is a mirror left by a mapping that could not find one. Prefer a
+  // miss over bad data: drop it so the gap reads as a gap (and no downstream reader
+  // scores or renders the title as the company).
+  if (guarded.company !== undefined && guarded.company === guarded.title) {
+    return { ...guarded, company: undefined };
+  }
+  return guarded;
 }

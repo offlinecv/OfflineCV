@@ -1,15 +1,14 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0.9,
+    "confidence": 0.83,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "none",
+    "suggestedEscalation": "llm",
     "fieldsPopulated": [
-      "current_company",
       "current_title",
       "education",
       "email",
@@ -74,7 +73,7 @@
     "sectionSource": "regex",
     "pageCount": 1,
     "rawCharCount": 499,
-    "extractedCharCount": 421,
+    "extractedCharCount": 392,
     "sections": [
       {
         "name": "profile",
@@ -122,7 +121,7 @@
     "phoneChangedAcrossRoundtrip": false,
     "locationChangedAcrossRoundtrip": false,
     "linkedinUrlChangedAcrossRoundtrip": false,
-    "experienceChangedAcrossRoundtrip": false,
+    "experienceChangedAcrossRoundtrip": true,
     "educationChangedAcrossRoundtrip": false,
     "skillsChangedAcrossRoundtrip": false,
     "summaryChangedAcrossRoundtrip": false,

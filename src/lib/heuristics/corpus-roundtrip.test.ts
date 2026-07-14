@@ -173,6 +173,14 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   "unknown/synthetic-two-experience-sections.pdf": ["experience"],
   "unknown/two-column-achievements-sidebar.pdf": ["experience"],
   "unknown/weasyprint-cairo-two-column.pdf": ["experience"],
+  // label-rail grids: the employer is glued into the header with no delimiter
+  // ("Staff Engineer, Platform Northwind Systems"), so the parser cannot read a
+  // company. On main it MIRRORED the title into `company` (bad data that happened
+  // to round-trip mirror==mirror); #466 replaced that with an honest empty
+  // company. The now-empty company re-parses non-empty off the one-line export
+  // header — the same #436 root as the group above. Delete when #436 lands.
+  "unknown/label-rail-grid-fragmented.pdf": ["experience"],
+  "unknown/label-rail-inline-headers.pdf": ["experience"],
 };
 
 function walkPdfs(dir: string): string[] {

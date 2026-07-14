@@ -72,3 +72,75 @@ describe("'Title, Team' over 'Company | Location Dates' (#372)", () => {
     expect(role.company).toBe("Nod Publishing");
   });
 });
+
+/**
+ * Regression for #466 — the INVERSE anchor placement of #372: the DATE sits on the
+ * "Title, Team" line itself, with the employer on the NEXT line:
+ *
+ *   Product Designer, Growth      Jan 2020 - Dec 2021
+ *   Acme | Chicago, IL  Design
+ *
+ * Because the date-bearing anchor is the title line, `mapTitleFirst` read that
+ * line's own comma segments as the company and mirrored the title into `company`
+ * (a suffix-less employer like "Acme" never triggers `looksLikeCompany`, so it
+ * fell to this branch); `location`, sitting on the employer line, was dropped by
+ * both the company-correct path AND the mirror path. The fix reads the company off
+ * the separate employer line, recovers a leading `City, ST` from that line, and
+ * backstops `company === title` to an honest miss.
+ */
+describe("'Title, Team <dates>' over a next-line employer (#466)", () => {
+  it("reads the company + location off the next line for a suffix-less employer (no mirror)", () => {
+    const roles = roleFromSection([
+      { text: "Experience", fontSize: 13 },
+      { text: "Product Designer, Growth  Jan 2020 - Dec 2021", fontSize: 11 },
+      { text: "Acme | Chicago, IL  Design", fontSize: 11 },
+      { text: "• Shipped the onboarding redesign.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.title).toBe("Product Designer");
+    expect(role.company).toBe("Acme");
+    expect(role.team).toBe("Growth");
+    expect(role.location).toBe("Chicago, IL");
+    // The title is never mirrored into the company.
+    expect(role.company).not.toBe(role.title);
+  });
+
+  it("recovers the employer-line location even when the company already resolved (suffixed)", () => {
+    // "Northwind Systems" carries a company suffix, so `company` was already
+    // correct — but `location` on the employer line (before a trailing dept) was
+    // still dropped. This pins the location half of the fix independently.
+    const roles = roleFromSection([
+      { text: "Experience", fontSize: 13 },
+      { text: "Software Engineer II, Payments Platform  Aug 2024 - Present", fontSize: 11 },
+      { text: "Northwind Systems | Chicago, IL  Consumer Banking", fontSize: 11 },
+      { text: "• Led the platform reliability program.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.title).toBe("Software Engineer II");
+    expect(role.company).toBe("Northwind Systems");
+    expect(role.team).toBe("Payments Platform");
+    expect(role.location).toBe("Chicago, IL");
+    expect(role.company).not.toBe(role.title);
+  });
+
+  it("prefers an absent company over a mirrored title when no employer line exists", () => {
+    // A standalone "Title, Team <dates>" with no employer line and no shared-
+    // employer banner: the company genuinely cannot be read, so it must be a miss
+    // (empty), never the title mirrored back.
+    const roles = roleFromSection([
+      { text: "Experience", fontSize: 13 },
+      { text: "Data Analyst, Growth Squad  Feb 2021 - Dec 2022", fontSize: 11 },
+      { text: "• Built the retention dashboard.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.title).toBe("Data Analyst");
+    expect(role.company).not.toBe(role.title);
+    expect(role.company).toBe("");
+  });
+});
