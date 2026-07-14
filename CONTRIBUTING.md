@@ -4,7 +4,10 @@ Thanks for picking up a piece of this. resumelint is a browser-side PDF
 parser audit and job-search workbench. Code lives under `src/`, license is
 [Apache-2.0](./LICENSE) (patent grant included; see `NOTICE`). See
 [`README.md`](./README.md) for what resumelint is and what it surfaces;
-see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout.
+see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout; and see
+[`docs/CONTRIBUTING-PROCESS.md`](./docs/CONTRIBUTING-PROCESS.md) for the shipping
+process this file summarizes — the **test-fixture PII policy** (mandatory before
+you add any PDF), AI provenance, squash messages, and deploy.
 
 ## Setup
 
@@ -89,7 +92,7 @@ with `npm run bake-fixtures`. Full workflow + sourcing guidance in
 
 Every new `.ts` / `.tsx` file under `src/` carries the 3-line SPDX
 header — see the canonical form in [`CLAUDE.md`](./CLAUDE.md) under
-"License":
+"Exemplars":
 
 ```ts
 // SPDX-License-Identifier: Apache-2.0
