@@ -1,13 +1,14 @@
 ---
 name: probe-achievements
-description: Extract + verify the ACHIEVEMENTS section (patents, awards, publications, talks — type label, description, year, bullets) of any résumé PDF, including a real PII-bearing one, via the real parser, and localize a dropped/merged/mis-split achievement to the exact layer (line-assembly vs section-routing vs entry segmentation vs the type/description split). Prints the achievements region the segmenter scanned next to the entries it produced, with each title decomposed into the bold "type" run and the description. One of the `probe-*` parser probes (see also `probe-experience`, `probe-contact`, `probe-roundtrip`). Use when the user says "probe achievements", "/probe-achievements", "an award/patent is missing", "the achievement type is wrong", or hands you a résumé whose achievements extract wrong.
+description: Extract + verify the ACHIEVEMENTS section (patents, awards, publications, talks — type label, description, year, bullets) of any résumé PDF, including a real PII-bearing one, via the real parser, and localize a dropped/merged/mis-split achievement to the exact layer (line-assembly vs section-routing vs entry segmentation vs the type/description split). Prints the achievements region the segmenter scanned next to the entries it produced, with each title decomposed into the bold "type" run and the description. One of the `probe-*` parser probes (see also `probe-experience`, `probe-contact`, `probe-roundtrip`, `probe-resume` — the whole-résumé sweep + corpus-coverage orchestrator over all six section probes). Use when the user says "probe achievements", "/probe-achievements", "an award/patent is missing", "the achievement type is wrong", or hands you a résumé whose achievements extract wrong.
 ---
 
 # Probe: Achievements
 
 > One of the `probe-*` parser-probe family (siblings: `probe-experience`,
-> `probe-contact`, `probe-skills`, `probe-education`, `probe-roundtrip`). Type
-> `probe-` to list them all.
+> `probe-contact`, `probe-skills`, `probe-education`, `probe-roundtrip`; see
+> also `probe-resume`, the whole-résumé sweep + corpus-coverage orchestrator
+> over all six section probes). Type `probe-` to list them all.
 
 Drop in **any** résumé PDF and see exactly what the parser reads for the
 achievements section — each entry's **type** label, **description**, **year**, and

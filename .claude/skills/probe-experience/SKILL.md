@@ -1,12 +1,14 @@
 ---
 name: probe-experience
-description: Extract + verify the EXPERIENCE section (roles — title, company, location, dates, bullets) of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped/merged role to the exact layer (line-assembly vs section-routing vs entry segmentation). Prints the experience region the segmenter scanned next to the role entries it produced, plus an independent date-range re-scan that separates "dateless-in-pdf" from "parser-miss". One of the `probe-*` parser probes (see also `probe-contact`, `probe-roundtrip`). Use when the user says "probe experience", "/probe-experience", "why is a role missing/merged", "employment history isn't parsing", or hands you a résumé whose roles extract wrong.
+description: Extract + verify the EXPERIENCE section (roles — title, company, location, dates, bullets) of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped/merged role to the exact layer (line-assembly vs section-routing vs entry segmentation). Prints the experience region the segmenter scanned next to the role entries it produced, plus an independent date-range re-scan that separates "dateless-in-pdf" from "parser-miss". One of the `probe-*` parser probes (see also `probe-contact`, `probe-roundtrip`, `probe-resume` — the whole-résumé sweep + corpus-coverage orchestrator over all six section probes). Use when the user says "probe experience", "/probe-experience", "why is a role missing/merged", "employment history isn't parsing", or hands you a résumé whose roles extract wrong.
 ---
 
 # Probe: Experience
 
 > One of the `probe-*` parser-probe family (siblings: `probe-contact`,
-> `probe-roundtrip`). Type `probe-` to list them all.
+> `probe-roundtrip`; see also `probe-resume`, the whole-résumé sweep +
+> corpus-coverage orchestrator over all six section probes). Type `probe-` to
+> list them all.
 
 Drop in **any** résumé PDF and see exactly what the parser reads for the
 experience section — every role's title, company, location, date range, and

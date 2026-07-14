@@ -57,49 +57,10 @@ import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
-import { matchSectionHeader, SECTION_KEYWORDS, DEGREE_RE } from "./regex.ts";
-import { SECTION_ANCHORS } from "./sections.config.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
+import { localizeEducation } from "./localize/education.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-const EDUCATION_ALIASES: readonly string[] = SECTION_KEYWORDS.education ?? [];
-const EDUCATION_ANCHORS: ReadonlySet<string> =
-  SECTION_ANCHORS.education ?? new Set<string>();
-
-/**
- * Loose education-header oracle. Mirrors the strict normalizer in
- * `matchSectionHeaderDetailed` (trim + lowercase + trailing-punct strip) but
- * ALSO strips a leading run of non-letter / non-number glyphs — the exact gap
- * the routing miss classes (leading decorative glyph, out-of-alias wording)
- * exploit. Returns the reason a strict match would have failed, or null if
- * the line doesn't read as education at all.
- */
-function looseEducationReason(raw: string): string | null {
-  const trimmedLower = raw.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
-  const glyphStripped = trimmedLower.replace(/^[^\p{L}\p{N}]+/u, "").trim();
-  if (glyphStripped.length === 0 || glyphStripped.length > 40) return null;
-  if (EDUCATION_ALIASES.includes(glyphStripped)) {
-    return glyphStripped === trimmedLower
-      ? "alias match (would route — not a miss)"
-      : `leading-glyph prefix (${JSON.stringify(trimmedLower)} → ${JSON.stringify(glyphStripped)})`;
-  }
-  const tokens = glyphStripped.split(/\s+/).filter(Boolean);
-  if (tokens.some((t) => EDUCATION_ANCHORS.has(t)))
-    return `contains education anchor token but wording not in aliases (${JSON.stringify(glyphStripped)})`;
-  return null;
-}
-
-/** Count `DEGREE_RE` matches in `text` via a fresh global clone. `DEGREE_RE`
- *  is non-global to keep `lastIndex` state out of the field heuristics, so
- *  cloning here is the safe way to count without mutating the shared
- *  instance. */
-function countDegrees(text: string): number {
-  const flags = DEGREE_RE.flags.includes("g")
-    ? DEGREE_RE.flags
-    : `${DEGREE_RE.flags}g`;
-  return (text.match(new RegExp(DEGREE_RE.source, flags)) ?? []).length;
-}
 
 describe.runIf(process.env.RL_EDUCATION_PDF)(
   "education dev probe (RL_EDUCATION_PDF)",
@@ -125,100 +86,17 @@ describe.runIf(process.env.RL_EDUCATION_PDF)(
         sections: cascade.canonical.sections,
       });
 
-      // OUTPUT: the parsed education entries.
-      const entries = (p.education ?? []).map((e) => ({
-        institution: e.institution || null,
-        degree: e.degree || null,
-        field: e.field ?? null,
-        location: e.location ?? null,
-        start_date: e.start_date ?? null,
-        end_date: e.end_date ?? null,
-        year: e.year ?? null,
-        coursework: e.coursework?.length ?? 0,
-      }));
-
-      // INPUT (routed): the education region the chunker scanned, if any.
-      const educationRegion = [
-        ...(cascade.canonical.sections.byName.get("education") ?? []),
-      ];
-      const regionPresent = educationRegion.length > 0;
-
-      // Section-detection overview (all regions, line counts only).
-      const sectionOverview = [...cascade.canonical.sections.byName.entries()].map(
-        ([name, lines]) => `${name}(${lines.length})`,
-      );
-
-      // Header candidates from the ordered markdown (`#`/`##`/`###` lines).
-      // The markdown header heuristic is looser than the router, so a rejected
-      // education header still shows up here — that is exactly what localizes
-      // a routing miss.
-      const md = cascade.markdown ?? "";
-      const mdLines = md.split("\n");
-      const headerCandidates = mdLines
-        .map((l, i) => ({
-          text: l.replace(/^#{1,3}\s+/, "").trim(),
-          i,
-          isHeader: /^#{1,3}\s+/.test(l),
-        }))
-        .filter((h) => h.isHeader && h.text.length > 0);
-
-      // An education-like header the strict router did NOT map to education.
-      const missedEducationHeaders = headerCandidates
-        .map((h) => ({
-          ...h,
-          strict: matchSectionHeader(h.text),
-          reason: looseEducationReason(h.text),
-        }))
-        .filter(
-          (h) =>
-            h.strict !== "education" &&
-            h.reason !== null &&
-            !h.reason.startsWith("alias match"),
-        );
-
-      // The markdown block under the first missed header (its dropped
-      // content), up to the next markdown header. Scrubbed to a line count in
-      // the console; full text only in the gitignored JSON.
-      const orphanBlock: string[] = [];
-      if (missedEducationHeaders.length > 0) {
-        const start = missedEducationHeaders[0].i + 1;
-        for (let i = start; i < mdLines.length; i++) {
-          if (/^#{1,3}\s+/.test(mdLines[i])) break;
-          if (mdLines[i].trim()) orphanBlock.push(mdLines[i].trim());
-        }
-      }
-
-      // Count `DEGREE_RE` tokens inside the routed region — a LOWER-BOUND
-      // oracle for entry count. `entries < regionDegrees` flags UNDER-CHUNKED
-      // (two degrees collapsed into one). `entries > regionDegrees` is NOT
-      // flagged — a degree-less program (#238) legitimately produces an entry
-      // with no `DEGREE_RE` match.
-      const regionDegrees = countDegrees(educationRegion.join("\n"));
-
-      // Per-entry field-presence sanity check. Not a wrong-value oracle (no
-      // ground truth for a real résumé) — just a presence gate that catches
-      // silent per-entry drops even when the count is right.
-      const perEntry = entries.map((e, i) => {
-        const missing: string[] = [];
-        if (!e.institution) missing.push("institution");
-        if (!e.degree) missing.push("degree");
-        if (!e.start_date && !e.end_date) missing.push("date");
-        return { i, missing };
-      });
-
-      let verdict: string;
-      if (entries.length === 0 && regionPresent) {
-        verdict = `EXTRACTION-MISS (education region routed with ${educationRegion.length} lines but 0 entries)`;
-      } else if (entries.length === 0 && missedEducationHeaders.length > 0) {
-        verdict = `HEADER-UNRECOGNIZED (education-like header rejected by the strict router → ${missedEducationHeaders[0].reason})`;
-      } else if (entries.length === 0) {
-        verdict =
-          "NO-EDUCATION-SECTION (no routed region and no education-like header candidate)";
-      } else if (regionDegrees > entries.length) {
-        verdict = `UNDER-CHUNKED (${entries.length} entries < ${regionDegrees} DEGREE_RE tokens in region — a degree line likely merged with a neighbour)`;
-      } else {
-        verdict = `ok (${entries.length} education entries parsed)`;
-      }
+      const {
+        entries,
+        perEntry,
+        educationRegion,
+        regionDegrees,
+        sectionOverview,
+        headerCandidates,
+        missedEducationHeaders,
+        orphanBlock,
+        verdict,
+      } = localizeEducation(cascade);
 
       const report = {
         path,
@@ -233,14 +111,8 @@ describe.runIf(process.env.RL_EDUCATION_PDF)(
         perEntry,
         educationRegion,
         regionDegrees,
-        headerCandidates: headerCandidates.map((h) => ({
-          text: h.text,
-          strict: matchSectionHeader(h.text),
-        })),
-        missedEducationHeaders: missedEducationHeaders.map((h) => ({
-          text: h.text,
-          reason: h.reason,
-        })),
+        headerCandidates,
+        missedEducationHeaders,
         orphanBlock,
         verdict,
         triggers: [...cascade.triggers],

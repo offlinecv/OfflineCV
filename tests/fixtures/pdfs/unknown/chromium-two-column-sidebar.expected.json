@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "cascade": {
     "confidence": 0.64,
     "triggers": [
@@ -73,5 +73,87 @@
     },
     "bulletCount": 27,
     "algoVersion": "1.5"
+  },
+  "reproArtifact": {
+    "artifactVersion": "v1",
+    "cascadeVersion": "v1",
+    "triggers": [
+      "two_column"
+    ],
+    "sectionSource": "regex",
+    "pageCount": 2,
+    "rawCharCount": 3797,
+    "extractedCharCount": 3242,
+    "sections": [
+      {
+        "name": "profile",
+        "lineCount": 3
+      },
+      {
+        "name": "summary",
+        "lineCount": 3
+      },
+      {
+        "name": "experience",
+        "lineCount": 53
+      },
+      {
+        "name": "other",
+        "lineCount": 10
+      },
+      {
+        "name": "skills",
+        "lineCount": 8
+      },
+      {
+        "name": "achievements",
+        "lineCount": 6
+      },
+      {
+        "name": "projects",
+        "lineCount": 10
+      },
+      {
+        "name": "education",
+        "lineCount": 3
+      }
+    ],
+    "parsedCounts": {
+      "hasFullName": true,
+      "hasEmail": true,
+      "hasPhone": true,
+      "hasLocation": true,
+      "hasSummary": true,
+      "experienceCount": 5,
+      "educationCount": 1,
+      "skillsCount": 17
+    },
+    "linkAnnotationCount": 0,
+    "disagreements": []
+  },
+  "derived": {
+    "emailInRawTextButNotParsed": false,
+    "phoneInRawTextButNotParsed": false,
+    "locationInRawTextButNotParsed": false,
+    "skillsHeaderCandidateRejected": false,
+    "educationHeaderCandidateRejected": false,
+    "educationEntriesFewerThanDegreeTokens": false,
+    "experienceRegionHasDateRangeLines": true,
+    "experienceEntriesFewerThanDateRangeLines": false,
+    "achievementsParsedEmpty": false,
+    "achievementsEntriesFewerThanHeaderLines": true,
+    "fullNameChangedAcrossRoundtrip": false,
+    "emailChangedAcrossRoundtrip": false,
+    "phoneChangedAcrossRoundtrip": false,
+    "locationChangedAcrossRoundtrip": false,
+    "linkedinUrlChangedAcrossRoundtrip": false,
+    "experienceChangedAcrossRoundtrip": true,
+    "educationChangedAcrossRoundtrip": false,
+    "skillsChangedAcrossRoundtrip": false,
+    "summaryChangedAcrossRoundtrip": false,
+    "renderThrewOnRoundtrip": false,
+    "textOracleUnavailable": false,
+    "headerOracleUnavailable": false,
+    "roundtripOracleUnavailable": false
   }
 }

@@ -52,10 +52,10 @@ import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
-import { computeAnonymousAtsScore } from "../score/score.ts";
-import type { CascadeResult, HeuristicParsedResume } from "./types.ts";
-import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
-import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
+import type { CascadeResult } from "./types.ts";
+import { runRoundtripHop } from "./roundtrip-hop.ts";
+import type { RoundtripCategory } from "./localize/roundtrip.ts";
+import { invariantFailures, harnessDiff } from "./localize/roundtrip.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
@@ -68,16 +68,10 @@ function relKey(fixture: string): string {
   return relative(FIXTURE_ROOT, fixture).split(sep).join("/");
 }
 
-type Category =
-  | "contact"
-  | "experience"
-  | "education"
-  | "skills"
-  | "summary"
-  // `render` = renderAtsResumePdf threw before any re-parse could run. A crash in
-  // the Download-PDF path is more severe than a field swap; it's baselined the
-  // same way so the gate stays green while the fix is tracked separately.
-  | "render";
+/** Re-exported for readability at this file's original name; the type itself
+ *  now lives at `./localize/roundtrip.ts` (issue #469 step 4) so the shared
+ *  detector logic and its category type travel together. */
+type Category = RoundtripCategory;
 
 /**
  * Per-fixture invariant categories currently allowed to fail. Keyed by the
@@ -191,109 +185,6 @@ function walkPdfs(dir: string): string[] {
   return out.sort();
 }
 
-function scoreFor(cascade: CascadeResult) {
-  return computeAnonymousAtsScore({
-    parsed: { ...cascade.canonical.fields },
-    fieldConfidence: cascade.canonical.fieldConfidence,
-    triggers: cascade.triggers,
-    rawText: cascade.rawText,
-    sections: cascade.canonical.sections,
-  });
-}
-
-const same = (a: unknown, b: unknown) =>
-  JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-
-/** Contact scalar-field diffs (name/email/phone/location/linkedin). */
-function contactFails(
-  c1: HeuristicParsedResume,
-  c3: HeuristicParsedResume,
-): string[] {
-  const out: string[] = [];
-  for (const k of [
-    "full_name",
-    "email",
-    "phone",
-    "location",
-    "linkedin_url",
-  ] as const) {
-    if (!same(c1[k], c3[k]))
-      out.push(`${k}: ${JSON.stringify(c1[k])} → ${JSON.stringify(c3[k])}`);
-  }
-  return out;
-}
-
-/** Ordered-entry-list diff skeleton: a count mismatch short-circuits, else each
- *  index/key inequality is rendered by `formatMismatch`. The two callers below
- *  differ ONLY in that formatter — the PII-free corpus gate prints field names,
- *  the harness prints before → after values. */
-function entryListDiff<T>(
-  a1: readonly T[],
-  a3: readonly T[],
-  keys: readonly (keyof T)[],
-  label: string,
-  formatMismatch: (i: number, k: keyof T, v1: T[keyof T], v3: T[keyof T] | undefined) => string,
-): string[] {
-  if (a1.length !== a3.length)
-    return [`${label} count ${a1.length} → ${a3.length}`];
-  const out: string[] = [];
-  a1.forEach((r, i) => {
-    for (const k of keys)
-      if (!same(r[k], a3[i]?.[k])) out.push(formatMismatch(i, k, r[k], a3[i]?.[k]));
-  });
-  return out;
-}
-
-/** Ordered-entry-list diff (shared by experience and education): a count
- *  mismatch, else per-field inequality at each index. Prints field NAMES only,
- *  so it stays PII-free (used by the corpus gate). */
-function entryListFails<T>(
-  a1: readonly T[],
-  a3: readonly T[],
-  keys: readonly (keyof T)[],
-  label: string,
-): string[] {
-  return entryListDiff(a1, a3, keys, label, (i, k) => `${label}[${i}].${String(k)}`);
-}
-
-/** Summary length drift ≥ 5% (the round-trip truncation signal, #292). */
-function summaryFails(s1: string, s3: string): string[] {
-  if (s1.length === 0) return [];
-  const deltaPct = (100 * Math.abs(s1.length - s3.length)) / s1.length;
-  return deltaPct >= 5
-    ? [`|Δ| ${deltaPct.toFixed(1)}% (${s1.length} → ${s3.length})`]
-    : [];
-}
-
-/** Collect per-category failure messages for one round-trip. Empty array for a
- *  category ⇒ that invariant holds. */
-function invariantFailures(
-  p1: CascadeResult,
-  p3: CascadeResult,
-): Record<Exclude<Category, "render">, string[]> {
-  const c1 = p1.canonical.fields;
-  const c3 = p3.canonical.fields;
-  const sk1 = (c1.skills ?? []).length;
-  const sk3 = (c3.skills ?? []).length;
-  return {
-    contact: contactFails(c1, c3),
-    experience: entryListFails(
-      c1.experience ?? [],
-      c3.experience ?? [],
-      ["title", "company", "start_date", "end_date"] as const,
-      "role",
-    ),
-    education: entryListFails(
-      c1.education ?? [],
-      c3.education ?? [],
-      ["degree", "field", "institution"] as const,
-      "entry",
-    ),
-    skills: sk1 !== sk3 ? [`count ${sk1} → ${sk3}`] : [],
-    summary: summaryFails(c1.summary ?? "", c3.summary ?? ""),
-  };
-}
-
 const CATEGORIES: Category[] = [
   "contact",
   "experience",
@@ -323,25 +214,24 @@ describe("corpus round-trip invariants (#293)", { timeout: 20000 }, () => {
     const rel = relKey(fixture);
     it(`round-trips: ${rel}`, async () => {
       const p1 = await runCascade(new Uint8Array(readFileSync(fixture)));
-      const model = buildAtsResumeModel(p1, scoreFor(p1));
+      // The one shared render → re-parse hop (`./roundtrip-hop.ts`), also used
+      // by the corpus bake's `derived` block (#469 step 5).
+      const { after: p3, renderError } = await runRoundtripHop(p1);
 
-      let fails: Record<Category, string[]>;
-      try {
-        const p3 = await runCascade(await renderAtsResumePdf(model));
-        fails = { ...invariantFailures(p1, p3), render: [] };
-      } catch (err) {
-        // A render crash pre-empts every field invariant; record it as the
-        // single `render` failure so the baseline/ratchet logic below handles it
-        // uniformly.
-        fails = {
-          contact: [],
-          experience: [],
-          education: [],
-          skills: [],
-          summary: [],
-          render: [`renderAtsResumePdf threw: ${(err as Error).message}`],
-        };
-      }
+      // A render crash pre-empts every field invariant; record it as the single
+      // `render` failure so the baseline/ratchet logic below handles it
+      // uniformly.
+      const fails: Record<Category, string[]> =
+        p3 && !renderError
+          ? { ...invariantFailures(p1, p3), render: [] }
+          : {
+              contact: [],
+              experience: [],
+              education: [],
+              skills: [],
+              summary: [],
+              render: [renderError ?? "renderAtsResumePdf produced no parse"],
+            };
       const baseline = new Set(KNOWN_FAILURES[rel] ?? []);
 
       for (const cat of CATEGORIES) {
@@ -393,64 +283,10 @@ describe("corpus round-trip invariants (#293)", { timeout: 20000 }, () => {
  * ⚠️ Both the input PDF and this JSON carry PII — NEVER commit either.
  */
 
-/** Ordered-entry value diff (experience/education): a count mismatch, else the
- *  changed field VALUES `before → after` at each index. Unlike `entryListFails`
- *  above (mapping-only, prints field names) this prints values, so it is
- *  harness-only — never used by the PII-free corpus gate. */
-function entryValueFails<T>(
-  a1: readonly T[],
-  a3: readonly T[],
-  keys: readonly (keyof T)[],
-  label: string,
-): string[] {
-  return entryListDiff(
-    a1,
-    a3,
-    keys,
-    label,
-    (i, k, v1, v3) =>
-      `${label}[${i}].${String(k)}: ${JSON.stringify(v1)} → ${JSON.stringify(v3)}`,
-  );
-}
-
-/** Skills value diff: the count delta plus the added/removed tokens. */
-function skillsValueFails(s1: readonly string[], s3: readonly string[]): string[] {
-  const set1 = new Set(s1);
-  const set3 = new Set(s3);
-  const removed = s1.filter((s) => !set3.has(s));
-  const added = s3.filter((s) => !set1.has(s));
-  if (removed.length === 0 && added.length === 0) return [];
-  const out = [`count ${s1.length} → ${s3.length}`];
-  if (removed.length) out.push(`removed: ${JSON.stringify(removed)}`);
-  if (added.length) out.push(`added: ${JSON.stringify(added)}`);
-  return out;
-}
-
-/** Per-category before → after VALUE diff for one hop. */
-function harnessDiff(
-  before: CascadeResult,
-  after: CascadeResult,
-): Record<Exclude<Category, "render">, string[]> {
-  const c1 = before.canonical.fields;
-  const c3 = after.canonical.fields;
-  return {
-    contact: contactFails(c1, c3),
-    experience: entryValueFails(
-      c1.experience ?? [],
-      c3.experience ?? [],
-      ["title", "company", "start_date", "end_date"] as const,
-      "role",
-    ),
-    education: entryValueFails(
-      c1.education ?? [],
-      c3.education ?? [],
-      ["degree", "field", "institution"] as const,
-      "entry",
-    ),
-    skills: skillsValueFails(c1.skills ?? [], c3.skills ?? []),
-    summary: summaryFails(c1.summary ?? "", c3.summary ?? ""),
-  };
-}
+// `entryValueFails` / `skillsValueFails` / `harnessDiff` are imported from
+// `./localize/roundtrip.ts` (issue #469 step 4) — see that module's header
+// for why the value-level diffs live there alongside the mapping-only ones
+// the corpus gate above uses.
 
 describe.runIf(process.env.RL_RT_PDF)("round-trip dev harness (RL_RT_PDF)", () => {
   it("dumps per-hop field-value diffs for RL_RT_PDF", async () => {
@@ -467,13 +303,15 @@ describe.runIf(process.env.RL_RT_PDF)("round-trip dev harness (RL_RT_PDF)", () =
     let renderError: string | undefined;
     for (let hop = 1; hop <= rounds; hop++) {
       const prev = parses[parses.length - 1];
-      const model = buildAtsResumeModel(prev, scoreFor(prev));
-      try {
-        parses.push(await runCascade(await renderAtsResumePdf(model)));
-      } catch (err) {
-        renderError = `renderAtsResumePdf threw on hop ${hop}: ${(err as Error).message}`;
+      const res = await runRoundtripHop(prev);
+      if (!res.after || res.renderError) {
+        renderError = (res.renderError ?? "renderAtsResumePdf produced no parse").replace(
+          /^renderAtsResumePdf threw:/,
+          `renderAtsResumePdf threw on hop ${hop}:`,
+        );
         break;
       }
+      parses.push(res.after);
     }
 
     type HopReport = {

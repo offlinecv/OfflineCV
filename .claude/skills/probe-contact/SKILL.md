@@ -1,12 +1,14 @@
 ---
 name: probe-contact
-description: Extract + verify the CONTACT section (name, email, phone, location, links) of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped/wrong field to the exact layer (line-assembly vs section-routing vs the field heuristic). Prints the profile region the extractor scanned next to the fields it produced, plus an independent rawText re-scan that separates "absent-in-pdf" from "parser-miss". One of the `probe-*` parser probes (see also `probe-roundtrip`). Use when the user says "probe contact", "/probe-contact", "why is the name/email/phone wrong", "contact isn't parsing", or hands you a résumé whose header fields extract wrong.
+description: Extract + verify the CONTACT section (name, email, phone, location, links) of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped/wrong field to the exact layer (line-assembly vs section-routing vs the field heuristic). Prints the profile region the extractor scanned next to the fields it produced, plus an independent rawText re-scan that separates "absent-in-pdf" from "parser-miss". One of the `probe-*` parser probes (see also `probe-roundtrip`, `probe-resume` — the whole-résumé sweep + corpus-coverage orchestrator over all six section probes). Use when the user says "probe contact", "/probe-contact", "why is the name/email/phone wrong", "contact isn't parsing", or hands you a résumé whose header fields extract wrong.
 ---
 
 # Probe: Contact
 
 > One of the `probe-*` parser-probe family (sibling: `probe-roundtrip`, which
-> audits the parse→export→parse cycle). Type `probe-` to list them all.
+> audits the parse→export→parse cycle; see also `probe-resume`, the
+> whole-résumé sweep + corpus-coverage orchestrator over all six section
+> probes). Type `probe-` to list them all.
 
 Drop in **any** résumé PDF and see exactly what the parser reads for the contact
 block — name, email, phone, location, LinkedIn/GitHub/portfolio/website — and,
