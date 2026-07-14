@@ -31,7 +31,10 @@ import {
   groupBulletsByExperience,
   toBulletExperience,
 } from "../score/group-bullets.ts";
-import { buildProjectDates } from "../score/entry-dates.ts";
+import {
+  achievementYearJoiner,
+  buildProjectDates,
+} from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
 import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
@@ -388,17 +391,22 @@ function buildAchievementHeader(
   type: string | undefined,
   title: string,
   year: string | undefined,
+  yearSeparator?: string,
 ): { headerLine: string; emphasized: boolean } {
   const label = type?.trim();
+  // The year is set off by the source's own punctuation when it had any (#380),
+  // so the exported PDF re-parses to the same `year_separator` it came from —
+  // and reads as the résumé's own line, not one we re-punctuated.
+  const yearSep = achievementYearJoiner(yearSeparator);
   if (label && title) {
     const emphasizedTitle = `${EMPHASIS_OPEN}${label}${EMPHASIS_CLOSE} · ${title}`;
     return {
-      headerLine: joinHeader([emphasizedTitle, year], " · "),
+      headerLine: joinHeader([emphasizedTitle, year], yearSep),
       emphasized: true,
     };
   }
   return {
-    headerLine: joinHeader([label || title, year], " · "),
+    headerLine: joinHeader([label || title, year], yearSep),
     emphasized: false,
   };
 }
@@ -624,6 +632,7 @@ export function buildAtsResumeModel(
       ach.type,
       ach.title,
       ach.year,
+      ach.year_separator,
     );
     const awardTitle = [ach.type?.trim(), ach.title].filter(Boolean).join(" · ");
     return {

@@ -35,6 +35,7 @@ export function ResumeLibraryEntry({
         <EditableField
           value={entry.filename}
           placeholder="Untitled resume"
+          emptyAffordance="plain"
           label="Resume name"
           onCommit={(next) => {
             const trimmed = next.trim();

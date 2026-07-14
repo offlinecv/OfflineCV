@@ -10,7 +10,7 @@
  * was uncorrectable. They now expose inline edit affordances wired to the lifted
  * override model (useEditableParse):
  *   - Education: degree / institution / dates editable via the shared
- *     EditableField. A cleared field shows "not detected".
+ *     EditableField. A cleared field shows an "+ <noun>" add-affordance.
  *   - Skills: each skill is a removable chip; a "+ Add skill" pill expands
  *     inline into an input (canonical-name normalization + suggestions),
  *     collapsing back on Escape or empty blur.
@@ -147,7 +147,7 @@ function EducationEntry({
           {!majorInPrimary && (
             <EditableField
               value={degree}
-              placeholder="degree not detected"
+              placeholder="degree"
               label="Degree"
               textWeight="semibold"
               onCommit={(v) => onFieldChange("degree", v)}
@@ -168,7 +168,7 @@ function EducationEntry({
           <span className="text-content-muted">—</span>
           <EditableField
             value={institution}
-            placeholder="institution not detected"
+            placeholder="institution"
             label="Institution"
             onCommit={(v) => onFieldChange("institution", v)}
           />

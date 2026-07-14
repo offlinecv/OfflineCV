@@ -91,7 +91,7 @@ export function ContactCard({
         {editable ? (
           <EditableField
             value={name && !name.gated ? name.value : undefined}
-            placeholder="Name not detected"
+            placeholder="name"
             label="Name"
             textSize="lg"
             textWeight="semibold"

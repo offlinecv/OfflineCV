@@ -50,7 +50,6 @@ export function ContactExtraLinks({
             <EditableField
               value={profile.url}
               displayValue={formatLinkDisplay(profile.url)}
-              placeholder="Link URL"
               label={profile.network}
               textSize="sm"
               onCommit={(v) => onEdit(profile.id, v)}

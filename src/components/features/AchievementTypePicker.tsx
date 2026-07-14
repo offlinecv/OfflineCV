@@ -121,7 +121,6 @@ export function AchievementTypePicker({
                 PDF actually said. */}
             <EditableField
               value={label || undefined}
-              placeholder="Custom label"
               label="Custom achievement type"
               textSize="xs"
               onCommit={(v) => pick(v)}

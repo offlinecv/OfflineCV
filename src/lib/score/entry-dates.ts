@@ -36,6 +36,29 @@ export function buildEducationDates(edu: ResumeEducation): string {
   return edu.year ?? "";
 }
 
+/** The separator an achievement header falls back to between its title and its
+ *  year when the source used none of its own (whitespace only). */
+export const DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR = "·";
+
+/** True when a separator glyph binds TIGHT to the word before it — a comma, a
+ *  semicolon, a colon take no space in front ("Award, 2021"), where a dash or a
+ *  pipe takes one on both sides ("Award – 2021"). The one place that rule is
+ *  written down: the edit surface renders the separator as its own flex child
+ *  and the exporter joins it into a string, and the two must not disagree about
+ *  the spacing of the same résumé (#380). */
+export function isTightYearSeparator(separator: string): boolean {
+  return /^[,;:]$/.test(separator);
+}
+
+/** The exact string that joins an achievement's header text to its trailing year
+ *  — the source's own separator ({@link isTightYearSeparator} decides its
+ *  spacing), or the middot fallback. Used by the PDF exporter; the edit surface
+ *  renders the same glyph with the same spacing. */
+export function achievementYearJoiner(separator?: string): string {
+  if (!separator) return ` ${DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR} `;
+  return isTightYearSeparator(separator) ? `${separator} ` : ` ${separator} `;
+}
+
 /** Longest a leading achievement segment can be and still read as a "type"
  *  label ("Patent", "Publication", "Exit", "Best Paper Award") rather than a
  *  full sentence — guards against emphasizing an entire prose title that merely

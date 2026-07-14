@@ -37,6 +37,25 @@ function CloseIcon() {
 }
 
 /**
+ * The one-line prompt an EMPTY section shows above its {@link AddPill} (#380).
+ *
+ * A section that renders with no entries is ambiguous in a way that matters
+ * here: it reads as "the parser found your achievements and dropped them" when
+ * what it means is "this section is empty — you can fill it." The pattern that
+ * resolves it is the standard guided empty state (a helpful message plus the
+ * action, never bare blank space), with one constraint the copy must honour: it
+ * describes what BELONGS in the section, and makes no claim about what the
+ * parser did or did not find. We cannot tell "the résumé had none" apart from
+ * "we missed them", so any finding-shaped wording ("no achievements detected")
+ * would either be a guess or reinforce the very reading we are fixing. The
+ * `AddPill` below it stays the reachable input path, untouched — the block-level
+ * "add a whole entry" affordance it already is.
+ */
+export function SectionEmptyHint({ children }: { children: React.ReactNode }) {
+  return <p className="text-sm text-content-tertiary">{children}</p>;
+}
+
+/**
  * The collapsed progressive-disclosure trigger — a chip-shaped "+ <label>" pill
  * that sits inline with the content it adds to. Quiet by default; warms to the
  * brand accent on hover.

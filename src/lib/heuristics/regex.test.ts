@@ -2,8 +2,17 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, it, expect } from "vitest";
-import { matchSectionHeader, matchSectionAnchorToken, DATE_RANGE_RE } from "./regex.ts";
-import { parseDateRange, stripDateRange } from "./line-primitives.ts";
+import {
+  matchSectionHeader,
+  matchSectionAnchorToken,
+  DATE_RANGE_RE,
+  STRICT_MONTH_YEAR_RE,
+} from "./regex.ts";
+import {
+  dateSeparator,
+  parseDateRange,
+  stripDateRange,
+} from "./line-primitives.ts";
 
 describe("matchSectionHeader — split-letter headers (#56)", () => {
   it("matches a clean header unchanged", () => {
@@ -468,5 +477,183 @@ describe("matchSectionHeader — compound X & Y headers (#462)", () => {
     expect(matchSectionHeader("• Committee member and volunteer")).toBeNull();
     expect(matchSectionHeader("• Dean's List and Honors")).toBeNull();
     expect(matchSectionHeader("• Mentored juniors and interests")).toBeNull();
+  });
+});
+
+describe("parseDateRange — lone (un-paired) dates (#380)", () => {
+  // A project/award dated with a single "Mon. YYYY" and no end date never
+  // matches the PAIRED DATE_RANGE_RE, so it falls to the loose fallback. That
+  // fallback used to keep only the bare year, which left the month word stuck in
+  // the entry title ("tinylm | Link Jan." · "2026"). Start and strip must move
+  // together: whatever the date captures, the title must lose.
+  it("captures a lone 'Mon. YYYY' whole — month AND year", () => {
+    expect(parseDateRange("tinylm | Link Jan. 2026")).toEqual({
+      start_date: "Jan. 2026",
+    });
+  });
+
+  it("strips the month with the year, leaving a clean title", () => {
+    expect(stripDateRange("tinylm | Link Jan. 2026")).toBe("tinylm | Link");
+  });
+
+  it("captures a lone month spelled in full, and without a period", () => {
+    expect(parseDateRange("Portfolio site January 2026").start_date).toBe(
+      "January 2026",
+    );
+    expect(parseDateRange("Portfolio site May 2023").start_date).toBe("May 2023");
+    expect(stripDateRange("Portfolio site May 2023")).toBe("Portfolio site");
+  });
+
+  it("still parses a lone BARE year exactly as before (no month to absorb)", () => {
+    expect(parseDateRange("Best Paper Award 2021")).toEqual({
+      start_date: "2021",
+    });
+    expect(stripDateRange("Best Paper Award 2021")).toBe("Best Paper Award");
+  });
+
+  it("keeps the EARLIEST date token when a bare year precedes a month-year", () => {
+    // The fallback has always taken the FIRST date token in the line; absorbing
+    // the month must not reorder that. Here the bare year comes first, so it
+    // still wins.
+    expect(parseDateRange("2019 cohort, revisited Jan. 2026").start_date).toBe(
+      "2019",
+    );
+  });
+
+  it("leaves PAIRED ranges untouched (the fallback never runs)", () => {
+    expect(parseDateRange("Jan. 2020 – Mar. 2021")).toEqual({
+      start_date: "Jan. 2020",
+      end_date: "Mar. 2021",
+    });
+    expect(parseDateRange("2019 - 2021")).toEqual({
+      start_date: "2019",
+      end_date: "2021",
+    });
+    expect(parseDateRange("Jan 2020 - Present")).toEqual({
+      start_date: "Jan 2020",
+      is_current: true,
+    });
+    expect(parseDateRange("Sep. 2023 Mar. 2024")).toEqual({
+      start_date: "Sep. 2023",
+      end_date: "Mar. 2024",
+    });
+    expect(stripDateRange("Acme Corp Jan. 2020 – Mar. 2021")).toBe("Acme Corp");
+  });
+
+  it("records no date for an unfilled 'Month Year' template placeholder", () => {
+    // The word placeholders live only in the PAIRED anchors, so the lone
+    // fallback must not resurrect them as a real date.
+    expect(parseDateRange("Production Intern Month Year")).toEqual({});
+  });
+
+  it("reports no date when the line carries none", () => {
+    expect(parseDateRange("Outstanding Performer Award")).toEqual({});
+  });
+});
+
+describe("dateSeparator — the punctuation a date was set off by (#380)", () => {
+  it("returns the comma a flat award list used", () => {
+    expect(dateSeparator("Globex Engineering Excellence, 2021")).toBe(",");
+  });
+
+  it("returns undefined when whitespace alone set the date off", () => {
+    expect(dateSeparator("Best Paper Award 2021")).toBeUndefined();
+  });
+
+  it("returns undefined when the date LEADS the line (nothing to set off)", () => {
+    expect(dateSeparator("2021 2nd Place, AWS GameDay")).toBeUndefined();
+  });
+
+  it("returns undefined when the line carries no date", () => {
+    expect(dateSeparator("Dean's List")).toBeUndefined();
+  });
+
+  it("reads the separator in front of a month-year date too", () => {
+    expect(dateSeparator("tinylm – Jan. 2026")).toBe("–");
+  });
+});
+
+describe("month regexes — loose for POSITION, strict for VALUE", () => {
+  it("STRICT_MONTH_YEAR_RE does not match a word that merely starts with a month", () => {
+    for (const word of ["Marketing", "Marathon", "Mayor", "Junior", "Decathlon", "Sepsis"]) {
+      STRICT_MONTH_YEAR_RE.lastIndex = 0;
+      expect(STRICT_MONTH_YEAR_RE.test(`${word} 2020`)).toBe(false);
+      STRICT_MONTH_YEAR_RE.lastIndex = 0;
+    }
+  });
+
+  it("STRICT_MONTH_YEAR_RE matches every real month spelling it must", () => {
+    for (const m of [
+      "Jan", "January", "Feb", "February", "Mar", "March", "Apr", "April",
+      "May", "Jun", "June", "Jul", "July", "Aug", "August", "Sep", "Sept",
+      "September", "Oct", "October", "Nov", "November", "Dec", "December",
+    ]) {
+      STRICT_MONTH_YEAR_RE.lastIndex = 0;
+      expect(STRICT_MONTH_YEAR_RE.test(`${m} 2020`), m).toBe(true);
+      STRICT_MONTH_YEAR_RE.lastIndex = 0;
+      expect(STRICT_MONTH_YEAR_RE.test(`${m}. '20`), `${m}. '20`).toBe(true);
+      STRICT_MONTH_YEAR_RE.lastIndex = 0;
+    }
+  });
+
+  it("parseDateRange does not read a false month as the date", () => {
+    // Loose MONTH_YEAR_RE reads "Marketing 2020" as a month-year, so the lone-date
+    // fallback recorded start_date "Marketing 2020" and stripDateRange ate the word.
+    expect(parseDateRange("Head of Marketing 2020")).toEqual({ start_date: "2020" });
+    expect(parseDateRange("Boston Marathon 2021")).toEqual({ start_date: "2021" });
+    expect(parseDateRange("Deputy Mayor 2021")).toEqual({ start_date: "2021" });
+  });
+
+  it("parseDateRange still captures a real lone month-year whole", () => {
+    expect(parseDateRange("tinylm | Link Jan. 2026")).toEqual({
+      start_date: "Jan. 2026",
+    });
+  });
+
+  it("stripDateRange leaves a false month in the title", () => {
+    expect(stripDateRange("Head of Marketing 2020")).toBe("Head of Marketing");
+    expect(stripDateRange("Sepsis 2020")).toBe("Sepsis");
+  });
+
+  it("leaves a remainder for a header that is ONLY a false month + year", () => {
+    // `startsNewAnchor` (entry-blocks.ts) decides "is this line a NEW entry?" by
+    // asking whether anything SURVIVES stripDateRange. Over-stripping reduced
+    // "Marketing 2021 - 2022" to "" — so the header stopped being an anchor and
+    // was silently merged into the previous entry. The remainder is the contract.
+    expect(stripDateRange("Marketing 2021 - 2022")).toBe("Marketing");
+    expect(stripDateRange("Marathon 2019 - 2020")).toBe("Marathon");
+    // A genuine bare date tail still strips to nothing — that is what lets a
+    // wrapped "… Jan 2022 -" / "Present" reassemble instead of opening a role.
+    expect(stripDateRange("Jan 2020 - Present")).toBe("");
+  });
+});
+
+describe("stripDateRange — trailing separator trim", () => {
+  // Every glyph `dateSeparator` reports EXCEPT `·`. A glyph that is reported but
+  // not trimmed is kept twice — once on the title, once re-emitted by the
+  // consumer that was told about it — and the doubling grows on every
+  // parse→export→re-parse cycle ("Tech Lead: 2020" → "Tech Lead:: 2020" → …).
+  // `;` and `:` were exactly that case (#380).
+  it.each([",", ";", ":", "|", "–", "—", "-"])(
+    "removes %s along with the date it held",
+    (sep) => {
+      expect(stripDateRange(`Tech Lead${sep} 2020`)).toBe("Tech Lead");
+    },
+  );
+
+  // `·` is the deliberate exception, and it must STAY one. The middot is the
+  // org-signature marker the anchor-position tiebreak keys on: a location-less
+  // reconstructed role emits "Company · Dates", and the gate has to SEE that
+  // marker to know the anchor line is the company rather than the title — it
+  // strips the marker itself, after firing. Trimming the middot here destroys the
+  // evidence before the gate can read it, and the role's title and company swap
+  // (extract/experience.anchor-tiebreak.test.ts, #298).
+  //
+  // It cannot double the way `;`/`:` did, because `splitAchievementType` consumes
+  // the " · " boundary before a middot can ever end up trailing a title.
+  it("preserves · — it is the org-signature marker, not date punctuation", () => {
+    expect(stripDateRange("Northern Trust · Jan 2019 - Mar 2021")).toBe(
+      "Northern Trust ·",
+    );
   });
 });

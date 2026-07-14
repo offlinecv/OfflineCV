@@ -153,7 +153,7 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
           <span className="text-xs text-content-tertiary">Title</span>
           <EditableField
             value={query.title}
-            placeholder="title not detected"
+            placeholder="job title"
             label="Job title"
             textWeight="semibold"
             onCommit={(v) => setQuery((q) => ({ ...q, title: v }))}
@@ -163,7 +163,7 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
           <span className="text-xs text-content-tertiary">Seniority</span>
           <EditableField
             value={query.seniority}
-            placeholder="not detected"
+            placeholder="seniority"
             label="Seniority"
             onCommit={(v) =>
               setQuery((q) => ({ ...q, seniority: v || undefined }))
