@@ -312,8 +312,29 @@ function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
       // the 2nd line of a multi-line header ("Title" / "Company"), not a new
       // entry. (A header that follows a wrapped bullet or a bullet still opens
       // one, so real headers after a wrap aren't lost.)
+      //
+      // #464 EXCEPTION — this line opens a NEW entry when ALL THREE hold:
+      //   1. prev reads as a BODY PARAGRAPH (a description sentence, not a
+      //      subtitle / tech-stack CSV / label), AND
+      //   2. this line LOOKS like an entry header (capital-led, not prose,
+      //      not a sub-label note) — {@link isEntryHeaderShape}, AND
+      //   3. this line is NOT itself body-paragraph shaped (a verb-led wrapped
+      //      continuation, a long sentence).
+      // All three gates together are required — a lowercase-led wrapped
+      // continuation ("hackathon") fails (2); a verb-led sentence tail
+      // ("Awarded First Prize in …") fails (3). Without them, the section
+      // over-splits into one anchor per body sentence. Without ANY of them,
+      // a prose-body project section — two projects separated only by a blank
+      // line and prose paragraphs (no `•` bullets) — collapses into ONE anchor
+      // and the second project vanishes into the first's window (#464 primary).
       const prev = lines[i - 1];
-      if (!isBulletLine(prev) && prev.x <= markerX) continue;
+      if (!isBulletLine(prev) && prev.x <= markerX) {
+        const opensNewEntryAfterBody =
+          looksLikeBodyParagraph(prev.text) &&
+          isEntryHeaderShape(lines[i].text) &&
+          !looksLikeBodyParagraph(lines[i].text);
+        if (!opensNewEntryAfterBody) continue;
+      }
     }
     anchors.push(i);
   }
@@ -454,6 +475,52 @@ function collectDatelessAnchors(lines: PdfLine[], dateAnchors: number[]): number
     if (introducesBulletBody(lines, i, isDate)) out.push(i);
   }
   return out;
+}
+
+/**
+ * True when a non-bullet line under a `first_line` anchor reads as a BODY
+ * PARAGRAPH — a description sentence — rather than a header continuation (a
+ * subtitle, a tech-stack CSV, a location, a date). Used by
+ * {@link collectAnchors} (`first_line` branch) so a prose-body project (#464)
+ * whose description lines are NOT bulleted still breaks the header run: without
+ * this, every non-bullet line collapses into one header via the multi-line
+ * header rule and the section becomes ONE mega-project that absorbs the second
+ * project's name, tech stack, and description.
+ *
+ * A line qualifies as body prose when ANY of:
+ *   - it ends in sentence-terminating punctuation (`.`/`!`/`?`) — the clearest
+ *     signal a line reads as a complete sentence rather than a label, or
+ *   - it exceeds a length threshold (60+ characters) — a long line is a
+ *     wrapped paragraph, not a compact subtitle / tech-stack list, or
+ *   - it opens with a body-verb indicator (`Built`, `Designed`, `Implemented`,
+ *     `Developed`, `Led`, `Architected`, `Optimised/Optimized`, `Refactored`,
+ *     `Deployed`, `Prototyped`, `Migrated`, `Automated`, `Delivered`) AND
+ *     carries no CSV comma — a verb-led sentence, not a comma-delimited
+ *     `Framework, Framework, Framework` tech-stack list.
+ *
+ * All three signals are content-only (no geometry), so this works on any layout
+ * — glyph-less markdown/DOCX, PDF-column, or Chromium print. Deliberately
+ * limited to `first_line` so the `date_range` (experience) and `institution`
+ * (education) anchor paths are unaffected — those don't need this predicate
+ * (they anchor on structured signals) and applying it there would risk
+ * regressing existing multi-line header shapes.
+ */
+function looksLikeBodyParagraph(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/[.!?]$/.test(t)) return true;
+  // Length branch (PR #483 review): same `!t.includes(",")` CSV exemption as
+  // the verb-led branch below. A realistic tech-stack subtitle like
+  // "React, TypeScript, Tailwind CSS, Node.js, PostgreSQL, Redis, Docker"
+  // is 67 chars but obviously a header continuation, not body prose — the
+  // CSV pattern is the tell.
+  if (t.length > 60 && !t.includes(",")) return true;
+  const verbLed =
+    /^(?:Built|Designed|Implemented|Developed|Led|Architected|Optimi[sz]ed|Refactored|Deployed|Prototyped|Migrated|Automated|Delivered|Created|Engineered|Shipped|Wrote|Authored|Reduced|Improved|Increased|Launched|Ran)\b/i.test(
+      t,
+    );
+  if (verbLed && !t.includes(",")) return true;
+  return false;
 }
 
 /** True when the whole trimmed line is JUST a "City, ST" location — a pure city
@@ -1120,7 +1187,16 @@ function buildEntryBlock(
       isBulletLine(lines[i]) ||
       isProseLine(lines[i].text) ||
       startsBodyByGap(lines, i, baseline) ||
-      isGlyphlessBody(lines[i], bodyMarginX)
+      isGlyphlessBody(lines[i], bodyMarginX) ||
+      // #464 — for `first_line` (projects, achievements) sections whose bodies
+      // are prose paragraphs rather than `•` bullets, `isProseLine` misses
+      // single-sentence bodies (it requires an internal `word. Capital ...
+      // word` sentence break) so the paragraph gets absorbed into headerLines
+      // and never surfaces as `description`. `looksLikeBodyParagraph` catches
+      // the wrapped-paragraph shape by content (period-terminated, long, or
+      // verb-led without a CSV comma), scoped to `first_line` so
+      // `date_range`'s existing header/body split is unaffected.
+      (cfg.anchor === "first_line" && looksLikeBodyParagraph(lines[i].text))
     ) {
       bodyStart = i;
       break;

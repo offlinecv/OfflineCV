@@ -411,3 +411,62 @@ describe("matchSectionHeader — leading decorative glyph (#414)", () => {
     expect(matchSectionHeader("¥ proficient in typescript and go")).toBeNull();
   });
 });
+
+describe("matchSectionHeader — compound X & Y headers (#462)", () => {
+  it("routes 'Certifications & Activities' to certifications (left-side wins)", () => {
+    expect(matchSectionHeader("Certifications & Activities")).toBe(
+      "certifications",
+    );
+    expect(matchSectionHeader("CERTIFICATIONS & ACTIVITIES")).toBe(
+      "certifications",
+    );
+  });
+
+  it("routes 'X and Y' word-form to the left side's section", () => {
+    expect(matchSectionHeader("Certifications and Activities")).toBe(
+      "certifications",
+    );
+  });
+
+  it("falls through to the right side when the left side is not an alias", () => {
+    // "Personal" is not an alias; "achievements" is — the compound router
+    // splits on ` and ` and takes the RIGHT side once the left fails. The
+    // literal ` and ` (or ` & `) connective IS required — a bare
+    // "Personal Achievements" would hit the pre-existing head-noun anchor-
+    // fallback tier instead, so the compound router itself must be tested
+    // through a real connective to cover its right-side path.
+    expect(matchSectionHeader("Personal and Achievements")).toBe(
+      "achievements",
+    );
+    expect(matchSectionHeader("Personal & Achievements")).toBe(
+      "achievements",
+    );
+  });
+
+  it("keeps existing 'awards & honors' behavior (achievements, either tier)", () => {
+    // Was pre-#462 covered by explicit compound aliases in sections.config.json;
+    // now the compound router alone would also route it. Behavior unchanged.
+    expect(matchSectionHeader("Awards & Honors")).toBe("achievements");
+    expect(matchSectionHeader("Honors & Awards")).toBe("achievements");
+  });
+
+  it("routes 'Skills & Interests' to skills (left side wins over 'other')", () => {
+    expect(matchSectionHeader("Skills & Interests")).toBe("skills");
+  });
+
+  it("does not mint a section when neither side is an alias", () => {
+    expect(matchSectionHeader("Head Coach & Assistant")).toBeNull();
+  });
+
+  it("rejects a leading-bullet compound line (PR #483 review)", () => {
+    // A `•`-led bullet like "• Public speaking and leadership" splits on ` and `
+    // to `• Public speaking` / `leadership`. `leadership` is a single-word
+    // `experience` alias — without the LEADING_BULLET_RE guard the compound
+    // tier would open an `experience` section mid-body from an ordinary bullet
+    // (verified on the reviewer's four repro strings).
+    expect(matchSectionHeader("• Public speaking and leadership")).toBeNull();
+    expect(matchSectionHeader("• Committee member and volunteer")).toBeNull();
+    expect(matchSectionHeader("• Dean's List and Honors")).toBeNull();
+    expect(matchSectionHeader("• Mentored juniors and interests")).toBeNull();
+  });
+});

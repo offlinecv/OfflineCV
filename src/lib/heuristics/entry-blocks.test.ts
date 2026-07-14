@@ -233,10 +233,13 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
   }
 
   it("opens one entry per header run, not one per header line", () => {
+    // A short, label-shaped subtitle (no period, no verb-lead, < 60 chars)
+    // joins the header run under the first_line anchor; a bulleted body opens
+    // per-project, not per-line.
     const blocks = parseEntryBlocks(
       section([
         { text: "Resume Linter" },
-        { text: "A browser-side PDF parser audit." },
+        { text: "React, TypeScript, Vite" },
         { text: "• Built the heuristic cascade." },
         { text: "Trip Planner" },
         { text: "• Added the itinerary view." },
@@ -245,12 +248,61 @@ describe("parseEntryBlocks — first_line anchor (projects / date-optional secti
     );
     expect(blocks).toHaveLength(2);
     expect(blocks[0].headerLines).toContain("Resume Linter");
-    // The non-bullet line right after the first header joins that header run,
-    // it does not open a second entry.
-    expect(blocks[0].headerLines).toContain("A browser-side PDF parser audit.");
+    // The tech-stack subtitle (a label-shaped CSV, not a body paragraph)
+    // joins the header run — one entry, not two.
+    expect(blocks[0].headerLines).toContain("React, TypeScript, Vite");
     expect(blocks[0].body).toContain("heuristic cascade");
     expect(blocks[1].headerLines).toContain("Trip Planner");
     expect(blocks[1].body).toContain("itinerary view");
+  });
+
+  it("#464: a period-terminated prose line closes the header run and routes to body", () => {
+    // A body-paragraph shape (ends in `.`, or long, or verb-led without a
+    // CSV comma) is a description sentence, not a subtitle — it goes to
+    // `body`, not `headerLines`. Without this, single-sentence prose bodies
+    // get absorbed into headerLines and never surface as `description`.
+    const blocks = parseEntryBlocks(
+      section([
+        { text: "Resume Linter" },
+        { text: "A browser-side PDF parser audit." },
+        { text: "• Built the heuristic cascade." },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].headerLines).toContain("Resume Linter");
+    expect(blocks[0].headerLines).not.toContain(
+      "A browser-side PDF parser audit.",
+    );
+    expect(blocks[0].body).toContain("A browser-side PDF parser audit.");
+    expect(blocks[0].body).toContain("heuristic cascade");
+  });
+
+  it("#464: no `•` bullets, two prose-body projects — each becomes its own entry with its description surfaced", () => {
+    const blocks = parseEntryBlocks(
+      section([
+        { text: "Ridgemont Resume Studio" },
+        { text: "React, TypeScript, Tailwind" },
+        {
+          text: "Built a client-side resume review platform with real-time feedback.",
+        },
+        { text: "Optimized rendering with responsive interfaces." },
+        { text: "Ledger Ingest Toolkit" },
+        { text: "Java, Spring Boot, Kafka" },
+        { text: "Designed a distributed-systems teaching harness." },
+        { text: "Documented Redis-backed caching patterns." },
+      ]),
+      { anchor: "first_line", collectBody: true },
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].headerLines).toContain("Ridgemont Resume Studio");
+    expect(blocks[0].headerLines).toContain("React, TypeScript, Tailwind");
+    expect(blocks[0].body).toContain("resume review platform");
+    expect(blocks[0].body).toContain("responsive interfaces");
+    expect(blocks[1].headerLines).toContain("Ledger Ingest Toolkit");
+    expect(blocks[1].headerLines).toContain("Java, Spring Boot, Kafka");
+    expect(blocks[1].body).toContain("distributed-systems teaching harness");
+    expect(blocks[1].body).toContain("Redis-backed caching patterns");
   });
 
   it("parses an optional date off a project header when present", () => {

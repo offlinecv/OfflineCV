@@ -623,6 +623,15 @@ function ProjectsSection({
                     />
                   ))}
                 </ul>
+              ) : !added && project.description ? (
+                // #464 — a prose-body project (no `•` bullets, description is
+                // one or more paragraph sentences) surfaces the description
+                // as a paragraph. Without this, the fallback below reads "No
+                // bullet-shaped lines detected" even though the parser DID
+                // extract the description via looksLikeBodyParagraph.
+                <p className="text-sm text-content-primary whitespace-pre-wrap">
+                  {project.description}
+                </p>
               ) : (
                 !added && (
                   <p className="text-sm text-content-tertiary">

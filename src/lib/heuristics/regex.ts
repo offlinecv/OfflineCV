@@ -497,6 +497,40 @@ export function matchSectionHeaderDetailed(
         return { section: name, viaAnchorFallback: false };
     }
   }
+  // Compound "X & Y" / "X and Y" headers (#462). Real résumés fold two related
+  // categories into one heading — `CERTIFICATIONS & ACTIVITIES`, `HONORS &
+  // LEADERSHIP`, `AWARDS AND HONORS`. Enumerating every pairing in
+  // `sections.config.json` doesn't scale (`achievements` already carries four
+  // `awards & honors` variants, and any new pairing needs a manual add); split
+  // on the connective and try each side against the exact-alias table. Route to
+  // whichever side hits, preferring the LEFT (the header's primary category —
+  // `CERTIFICATIONS & ACTIVITIES` is a certifications section that also carries
+  // activities). Runs BEFORE the anchor-fallback tier so a compound header is
+  // recognized as an L1 exact-alias match rather than a softer L2 anchor match
+  // — the tier flag matters for the `isInstitutionRepeat` suppression logic in
+  // sections.ts.
+  //
+  // Bullet guard (post-review): trailing `[:·•]` normalization strips only the
+  // TAIL, so a LEADING `•` survives into `normalized`. The left side then
+  // carries the bullet and fails the alias table, but the right side hits any
+  // single-word alias (`leadership`, `volunteer`, `activities`, `honors`,
+  // `interests`, `projects`) — so a plain bullet line like
+  // "• Public speaking and leadership" would open an `experience` section
+  // mid-body. Mirror the exact same `!LEADING_BULLET_RE.test(text)` guard the
+  // adjacent tiers use.
+  if (!LEADING_BULLET_RE.test(text)) {
+    const compound = /^(.+?)\s+(?:&|and)\s+(.+)$/.exec(normalized);
+    if (compound) {
+      for (const side of [compound[1].trim(), compound[2].trim()]) {
+        for (const [name, keywords] of Object.entries(SECTION_KEYWORDS) as Array<
+          [SectionName, readonly string[]]
+        >) {
+          if (keywords.includes(side))
+            return { section: name, viaAnchorFallback: false };
+        }
+      }
+    }
+  }
   // Head-noun anchor fallback for qualified headers ("Relevant Experience").
   // Guard 5 (not a bullet line) runs on the raw text here, before the
   // bullet glyph is normalized away. See matchAnchorFallback for the rest.

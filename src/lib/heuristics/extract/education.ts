@@ -171,6 +171,56 @@ function filterAnnotationLinesForDates(lines: readonly string[]): string[] {
 const COURSEWORK_LABEL_RE =
   /^(?:relevant\s+coursework|incoming\s+courses?|selected\s+courses?|coursework|courses?)\s*:\s*/i;
 
+/**
+ * Whether a DEGREE_RE / INSTITUTION_HINTS hit on `line` reads as a body-prose
+ * match rather than a genuine EDUCATION ENTRY HEADER — the guard that stops
+ * the education chunker from anchoring a phantom entry on a sentence like
+ * `Graduated B.E. with Distinction` pooled from a mis-routed compound-header
+ * block (#462), or on a sub-labelled prose line that happens to contain a
+ * substring hit like `inter-college hackathons` (which matches
+ * `INSTITUTION_HINTS`'s `\bcollege\b`).
+ *
+ * Rejects (returns `false` — "not a real education entry header") when the
+ * line either:
+ *   1. begins with a sub-label prefix (`Achievements:`, `Certifications:`,
+ *      `Leadership:`, `Awards:`, `Activities:`, `Projects:`) — the substring
+ *      hit downstream of the colon is body content of that annotation, or
+ *   2. begins with a body-prose past-tense verb (`Graduated`, `Received`,
+ *      `Earned`, `Awarded`, `Completed`, `Achieved`) with an optional
+ *      intervening word before the credential — the hit is describing an
+ *      event, not opening a new entry.
+ *
+ * Otherwise returns `true`: a genuine header like `B.E. in Computer Science —
+ * <College>` or `Bachelor of Music, Music Composition` (both begin with the
+ * credential itself, not a prose lead) is admitted unchanged. Closed-vocabulary
+ * + prefix-only, so no real entry header is rejected. Shared by BOTH the
+ * `isDeg` and `isInst` chunker gates so a sub-labelled line whose body carries
+ * an incidental degree token AND an incidental institution word — e.g.
+ * `Leadership: Led CSR initiatives at inter-college hackathons` — anchors
+ * nothing.
+ */
+function isRealEntryHeader(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  // Sub-label prefix — the content past the colon is an annotation body.
+  if (
+    /^(?:Achievements?|Certifications?|Awards?|Honou?rs?|Leadership|Activities|Projects?|Involvement|Coursework|Relevant\s+Coursework)\s*:/i.test(
+      t,
+    )
+  )
+    return false;
+  // Past-tense event-narration prefix — a "…Graduated B.E. with Distinction"
+  // sentence. Allow up to one intervening word ("Graduated with B.E.") before
+  // the credential.
+  if (
+    /^(?:Graduated|Received|Earned|Awarded|Completed|Achieved|Attained|Obtained)\b(?:\s+\w+)?\s+/i.test(
+      t,
+    )
+  )
+    return false;
+  return true;
+}
+
 /** Whether `line` reads as a *wrapped continuation* of the preceding coursework
  *  bullet (e.g. the `Business` half of `● Global Dimensions of` + `Business`)
  *  rather than a standalone field that merely follows the bullet. The recovery
@@ -614,7 +664,14 @@ function educationFromChunk(chunk: string[]): {
   const joined = chunk.join(" | ");
   // Parse degree + field off the specific degree-bearing line (cleaner than the
   // joined chunk, whose " | " separators would confuse the field tail).
-  const degreeLine = chunk.find((l) => DEGREE_RE.test(l));
+  // #462/#467 — apply the same `isRealEntryHeader` guard that gates chunking:
+  // a chunk that happens to contain a sub-labelled body-prose line ("Achievements:
+  // Graduated B.E. with Distinction") pooled from a mis-routed compound header
+  // must NOT let that line's incidental DEGREE_RE/INSTITUTION_HINTS substring
+  // become the entry's degree or institution field.
+  const degreeLine = chunk.find(
+    (l) => DEGREE_RE.test(l) && isRealEntryHeader(l),
+  );
   const degreeMatch = DEGREE_RE.exec(joined);
   let { degree, field } = degreeLine
     ? parseDegreeAndField(degreeLine)
@@ -645,8 +702,15 @@ function educationFromChunk(chunk: string[]): {
     // there, not the degree header. Falls back to the header's own hint for a
     // single-line "Degree, University" entry.
     const instLine =
-      chunk.find((l) => INSTITUTION_HINTS.test(l) && l !== degreeLine) ??
-      chunk.find((l) => INSTITUTION_HINTS.test(l));
+      chunk.find(
+        (l) =>
+          INSTITUTION_HINTS.test(l) &&
+          l !== degreeLine &&
+          isRealEntryHeader(l),
+      ) ??
+      chunk.find(
+        (l) => INSTITUTION_HINTS.test(l) && isRealEntryHeader(l),
+      );
     if (instLine) {
       // #364 — when the ONLY institution-hint match is the same one-line
       // "Degree — Institution" as the degree line, the raw line used to be
@@ -878,8 +942,20 @@ export function extractEducation(
   };
   for (let li = 0; li < lines.length; li++) {
     const text = lines[li].text;
-    const isDeg = DEGREE_RE.test(text);
-    const isInst = INSTITUTION_HINTS.test(text);
+    // #462/#467 — a DEGREE_RE or INSTITUTION_HINTS hit on a sub-labelled line
+    // ("Achievements: Graduated B.E. with Distinction"), an event-narration
+    // sentence ("Graduated B.E. …"), or a body sentence that contains an
+    // incidental institution-word substring (e.g. `\bcollege\b` inside
+    // "inter-college hackathons") is body prose that bled in from a mis-routed
+    // compound header ("CERTIFICATIONS & ACTIVITIES") or an unrouted qualified
+    // header ("RELEVANT COURSEWORK"), not a new education entry. Gate BOTH
+    // isDeg and isInst on `isRealEntryHeader` so such lines never open a
+    // phantom entry — the raw DEGREE_RE hit still shows up in
+    // `startsHintlessEntry`'s next-line lookahead below (which uses raw
+    // DEGREE_RE.test), so genuine follow-on degrees are unaffected.
+    const isDeg = DEGREE_RE.test(text) && isRealEntryHeader(text);
+    const isInst =
+      INSTITUTION_HINTS.test(text) && isRealEntryHeader(text);
     const isProgramLead = isProgramLeadAt(lines, li);
     // A bare line (no degree/institution-hint, not a date) that arrives once the
     // current chunk already holds BOTH a degree and an institution, AND is
@@ -896,7 +972,11 @@ export function extractEducation(
       hasDegree &&
       hasInstitution &&
       !isDateOnlyLine(text) &&
-      ((next !== undefined && DEGREE_RE.test(next)) ||
+      // Same `isRealEntryHeader` gate as `isDeg` above (#462/#467): a phantom
+      // DEGREE_RE hit on a body-prose "Graduated B.E. with Distinction" sentence
+      // must not persuade the chunker that this hint-less line leads a new
+      // acronym-school entry.
+      ((next !== undefined && DEGREE_RE.test(next) && isRealEntryHeader(next)) ||
         // …or the boundary line is itself a hint-less, degree-less PROGRAM NAME
         // carrying its own graduation year inline ("MIT Applied Data Science
         // (2023)", #219). The inline year is what the old code would bleed onto

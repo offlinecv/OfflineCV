@@ -380,5 +380,46 @@ describe("role location extraction (#218)", () => {
       expect(role.company).toContain("Mexico City");
       expect(role.location).not.toBe("City, Mexico");
     });
+
+    describe("#461 — Pass D guards prevent stealing the last word of a multi-word company", () => {
+      it("defers a common corporate-tail 'Bank' ('Northwind Bank, India')", () => {
+        // Pre-#461: Pass D peeled " Bank, India" as location → company
+        // "Northwind" + location "Bank, India". Post-#461, COMPANY_TAIL_TOKENS_RE
+        // rejects the strip and Pass E peels only the trailing country.
+        const role = roleFromTwoLine("Northwind Bank, India");
+        expect(role.company).toContain("Bank");
+        expect(role.location).not.toBe("Bank, India");
+      });
+
+      it("defers 'Solutions' / 'Group' / 'Consulting' corporate-tail words", () => {
+        expect(
+          roleFromTwoLine("Contoso Solutions, India").company,
+        ).toContain("Solutions");
+        expect(
+          roleFromTwoLine("Bluefin Consulting Group, India").company,
+        ).toContain("Group");
+        expect(
+          roleFromTwoLine("Ridgemont Technologies, Germany").company,
+        ).toContain("Technologies");
+      });
+
+      it("defers a legal-suffix 'Ltd.' / 'Inc.' tail (Pass C's cityStartsWithCompanyText now applies to Pass D too)", () => {
+        // Pre-#461: Pass D peeled " Ltd., India" as location. Post-#461,
+        // cityStartsWithCompanyText rejects the strip.
+        const roleLtd = roleFromTwoLine("Fabrikam Consulting Ltd., India");
+        expect(roleLtd.company).toContain("Ltd");
+        if (roleLtd.location) expect(roleLtd.location).not.toContain("Ltd");
+        const roleInc = roleFromTwoLine("Litware Ideas, Inc., USA");
+        expect(roleInc.company).toContain("Inc");
+      });
+
+      it("still strips a genuine 'City, Country' single-token fold ('Kasa Seoul, S.Korea') — no regression", () => {
+        // "Seoul" is neither a corporate tail nor a legal suffix, so Pass D
+        // still fires; the #287 baseline holds.
+        const role = roleFromTwoLine("Kasa Seoul, S.Korea");
+        expect(role.company).toBe("Kasa");
+        expect(role.location).toBe("Seoul, S.Korea");
+      });
+    });
   });
 });

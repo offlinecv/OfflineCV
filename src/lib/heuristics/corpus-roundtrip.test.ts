@@ -173,6 +173,14 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   "unknown/synthetic-two-experience-sections.pdf": ["experience"],
   "unknown/two-column-achievements-sidebar.pdf": ["experience"],
   "unknown/weasyprint-cairo-two-column.pdf": ["experience"],
+  // #467's fixture exhibits the #436 one-line-header title/company swap on the
+  // two involvement roles ("Founding Member" / "Student Composers Association"
+  // and "Music Educator" / "Campus Outreach Program"): neither segment has a
+  // company-suffix or a title keyword, so the exporter's one-line
+  // "Title · Company" shape re-parses with splits[0] taken as company by the
+  // no-signal fall-through. Same #436 root as the group above; un-baseline
+  // when #436 lands.
+  "unknown/qualified-experience-relevant-coursework.pdf": ["experience"],
 };
 
 function walkPdfs(dir: string): string[] {

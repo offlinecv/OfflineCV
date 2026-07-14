@@ -714,3 +714,58 @@ describe("extractEducation — PR #417 review inputs", () => {
     ]);
   });
 });
+
+describe("extractEducation — entry-boundary guard against phantom entries (#462/#467)", () => {
+  it("does NOT anchor a phantom entry on a 'Graduated B.E. with Distinction' body sentence", () => {
+    // When a compound header ("CERTIFICATIONS & ACTIVITIES") is unrouted and
+    // its body pools into education, a body-prose "Achievements: Graduated
+    // B.E. with Distinction; mentored 3 interns" line hits DEGREE_RE and
+    // pre-#462/#467 anchored a phantom second degree entry off the fragment.
+    // The `isRealDegreeHeader` guard rejects such lines.
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.E. in Computer Science — Ridgemont College",
+        "Aug 2017 - Jun 2021",
+        "Achievements: Graduated B.E. with Distinction; mentored 3 interns",
+        "Leadership: Led CSR initiatives; competed in inter-college hackathons",
+      ]),
+    );
+    // Exactly ONE education entry — no phantom on the sub-labelled prose.
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toContain("B.E.");
+    expect(value[0].institution).toContain("Ridgemont College");
+  });
+
+  it("does NOT anchor on a 'Achievements: …' sub-labelled prefix line", () => {
+    // A sub-label prefix ("Achievements:", "Certifications:", "Leadership:")
+    // is followed by annotation body — never a real entry header. Even if the
+    // body contains a degree token, the entry-boundary guard rejects.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Bachelor of Music, Music Composition",
+        "Ridgemont University",
+        "2025",
+        "Certifications: Music Theory (Ph.D. level)",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toContain("Bachelor of Music");
+  });
+
+  it("still anchors a genuine second degree header (no regression)", () => {
+    // A real degree header ("B.S. in Computer Science — State University") is
+    // not preceded by a body-prose verb or a sub-label prefix, so
+    // `isRealDegreeHeader` admits it and the chunker opens a new entry.
+    const { value } = extractEducation(
+      mkEduSection([
+        "M.Sc. in Computer Science — Wingtip University",
+        "Jul 2024 - Dec 2025",
+        "B.E. in Computer Science — Ridgemont College",
+        "Aug 2017 - Jun 2021",
+      ]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value[0].degree).toContain("M.Sc.");
+    expect(value[1].degree).toContain("B.E.");
+  });
+});

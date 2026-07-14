@@ -1,15 +1,14 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0.91,
+    "confidence": 0.84,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "none",
+    "suggestedEscalation": "llm",
     "fieldsPopulated": [
-      "current_company",
       "current_title",
       "education",
       "email",
@@ -17,45 +16,46 @@
       "family_name",
       "full_name",
       "given_name",
-      "linkedin_url",
+      "heuristic_achievements",
+      "location",
       "phone",
-      "phoneIsValid",
-      "skills"
+      "phoneIsValid"
     ],
-    "skillsCount": 11,
-    "experienceCount": 2,
-    "educationCount": 1,
+    "skillsCount": 0,
+    "experienceCount": 1,
+    "educationCount": 2,
     "projectsCount": 0,
-    "achievementsCount": 0,
-    "rawTextCharCount": 1455,
+    "achievementsCount": 3,
+    "rawTextCharCount": 629,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
-    "sectionSource": "regex"
+    "sectionSource": "markdown"
   },
   "score": {
-    "overall": 48,
-    "preLayoutOverall": 48,
+    "overall": 21,
+    "preLayoutOverall": 21,
     "specificity": {
       "score": 0,
       "max": 40,
-      "gradable": true,
-      "metricBullets": 0,
-      "totalBullets": 8
+      "gradable": false,
+      "metricBullets": 2,
+      "totalBullets": 2
     },
     "structure": {
-      "score": 24,
+      "score": 0,
       "max": 30,
-      "gradable": true,
-      "goodBullets": 7,
-      "totalBullets": 8
+      "gradable": false,
+      "goodBullets": 1,
+      "totalBullets": 2
     },
     "completeness": {
-      "score": 24,
+      "score": 21,
       "max": 30,
       "gradable": true,
       "missing": [
-        "location",
+        "LinkedIn",
+        "skills",
         "summary"
       ]
     },
@@ -64,44 +64,44 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 8,
+    "bulletCount": 2,
     "algoVersion": "1.5"
   },
   "reproArtifact": {
     "artifactVersion": "v1",
     "cascadeVersion": "v1",
     "triggers": [],
-    "sectionSource": "regex",
+    "sectionSource": "markdown",
     "pageCount": 1,
-    "rawCharCount": 1428,
-    "extractedCharCount": 1149,
+    "rawCharCount": 617,
+    "extractedCharCount": 455,
     "sections": [
       {
         "name": "profile",
         "lineCount": 2
       },
       {
-        "name": "education",
-        "lineCount": 3
-      },
-      {
-        "name": "skills",
-        "lineCount": 3
-      },
-      {
         "name": "experience",
-        "lineCount": 16
+        "lineCount": 3
+      },
+      {
+        "name": "education",
+        "lineCount": 2
+      },
+      {
+        "name": "certifications",
+        "lineCount": 3
       }
     ],
     "parsedCounts": {
       "hasFullName": true,
       "hasEmail": true,
       "hasPhone": true,
-      "hasLocation": false,
+      "hasLocation": true,
       "hasSummary": false,
-      "experienceCount": 2,
-      "educationCount": 1,
-      "skillsCount": 11
+      "experienceCount": 1,
+      "educationCount": 2,
+      "skillsCount": 0
     },
     "linkAnnotationCount": 0,
     "disagreements": []
@@ -109,20 +109,20 @@
   "derived": {
     "emailInRawTextButNotParsed": false,
     "phoneInRawTextButNotParsed": false,
-    "locationInRawTextButNotParsed": true,
+    "locationInRawTextButNotParsed": false,
     "skillsHeaderCandidateRejected": false,
     "educationHeaderCandidateRejected": false,
     "educationEntriesFewerThanDegreeTokens": false,
     "experienceRegionHasDateRangeLines": true,
     "experienceEntriesFewerThanDateRangeLines": false,
-    "achievementsParsedEmpty": true,
+    "achievementsParsedEmpty": false,
     "achievementsEntriesFewerThanHeaderLines": false,
     "fullNameChangedAcrossRoundtrip": false,
     "emailChangedAcrossRoundtrip": false,
     "phoneChangedAcrossRoundtrip": false,
     "locationChangedAcrossRoundtrip": false,
     "linkedinUrlChangedAcrossRoundtrip": false,
-    "experienceChangedAcrossRoundtrip": true,
+    "experienceChangedAcrossRoundtrip": false,
     "educationChangedAcrossRoundtrip": false,
     "skillsChangedAcrossRoundtrip": false,
     "summaryChangedAcrossRoundtrip": false,
