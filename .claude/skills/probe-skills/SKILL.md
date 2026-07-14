@@ -1,12 +1,14 @@
 ---
 name: probe-skills
-description: Extract + verify the SKILLS section of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped skills section to the exact layer (header routing vs extraction). Prints the header candidates the router saw and the skills region it scanned next to the parsed skills list, plus an independent header-recognition oracle that flags a skills-like header the strict router rejected (leading-glyph #414, out-of-alias wording, two-line wrap #374). One of the `probe-*` parser probes (see also `probe-contact`, `probe-experience`, `probe-roundtrip`). Use when the user says "probe skills", "/probe-skills", "why are skills missing/empty", "skills section not detected", or hands you a résumé whose skills extract wrong.
+description: Extract + verify the SKILLS section of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped skills section to the exact layer (header routing vs extraction). Prints the header candidates the router saw and the skills region it scanned next to the parsed skills list, plus an independent header-recognition oracle that flags a skills-like header the strict router rejected (leading-glyph #414, out-of-alias wording, two-line wrap #374). One of the `probe-*` parser probes (see also `probe-contact`, `probe-experience`, `probe-roundtrip`, `probe-resume` — the whole-résumé sweep + corpus-coverage orchestrator over all six section probes). Use when the user says "probe skills", "/probe-skills", "why are skills missing/empty", "skills section not detected", or hands you a résumé whose skills extract wrong.
 ---
 
 # Probe: Skills
 
 > One of the `probe-*` parser-probe family (siblings: `probe-contact`,
-> `probe-experience`, `probe-roundtrip`). Type `probe-` to list them all.
+> `probe-experience`, `probe-roundtrip`; see also `probe-resume`, the
+> whole-résumé sweep + corpus-coverage orchestrator over all six section
+> probes). Type `probe-` to list them all.
 
 Drop in **any** résumé PDF and see exactly what the parser reads for the skills
 section — the parsed skill list, the skills region the extractor scanned, and

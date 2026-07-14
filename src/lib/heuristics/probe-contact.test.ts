@@ -41,39 +41,9 @@ import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
-import { EMAIL_RE, US_LOCATION_RE, INTL_LOCATION_RE } from "./regex.ts";
-import { findFirstPhone } from "./phone.ts";
+import { CONTACT_FIELDS, localizeContact } from "./localize/contact.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-/** The contact scalar/URL fields the extractor produces. */
-const CONTACT_FIELDS = [
-  "full_name",
-  "email",
-  "phone",
-  "location",
-  "linkedin_url",
-  "github_url",
-  "portfolio_url",
-  "website_url",
-] as const;
-
-/** Independent re-scan of rawText for the fields that most often drop when a
- *  region filter mis-fires. Returns the first candidate for each, or undefined.
- *  Deliberately loose — this is the "is it anywhere in the doc?" oracle, not the
- *  precise extractor. */
-function rawTextCandidates(rawText: string): {
-  email?: string;
-  phone?: string;
-  location?: string;
-} {
-  EMAIL_RE.lastIndex = 0;
-  const email = EMAIL_RE.exec(rawText)?.[0];
-  const phone = findFirstPhone(rawText, "US")?.formatted;
-  const us = US_LOCATION_RE.exec(rawText)?.[0];
-  const intl = INTL_LOCATION_RE.exec(rawText)?.[0];
-  return { email, phone, location: us ?? intl };
-}
 
 describe.runIf(process.env.RL_CONTACT_PDF)(
   "contact dev probe (RL_CONTACT_PDF)",
@@ -84,37 +54,7 @@ describe.runIf(process.env.RL_CONTACT_PDF)(
         process.env.RL_CONTACT_OUT ?? join(HERE, "../../..", "internal/contact");
 
       const cascade = await runCascade(new Uint8Array(readFileSync(path)));
-      const p = cascade.canonical.fields;
-
-      // OUTPUT: the structured contact fields + their per-field confidence.
-      const extracted = Object.fromEntries(
-        CONTACT_FIELDS.map((k) => [
-          k,
-          {
-            value: (p as Record<string, unknown>)[k] ?? null,
-            confidence: cascade.canonical.fieldConfidence[k] ?? 0,
-          },
-        ]),
-      );
-
-      // INPUT: the profile region the contact extractor scanned. If the contact
-      // line never landed here, that alone explains a dropped location (location
-      // has NO full-doc fallback).
-      const profileLines = cascade.canonical.sections.byName.get("profile") ?? [];
-
-      // VERIFY: independent rawText re-scan for the drop-prone fields.
-      const candidates = rawTextCandidates(cascade.rawText);
-      const verify = (
-        ["email", "phone", "location"] as const
-      ).map((k) => {
-        const got = (p as Record<string, unknown>)[k] ?? null;
-        const cand = candidates[k] ?? null;
-        let verdict: string;
-        if (got) verdict = "ok";
-        else if (cand) verdict = "PARSER-MISS (in rawText, not in field)";
-        else verdict = "absent-in-pdf";
-        return { field: k, field_value: got, rawText_candidate: cand, verdict };
-      });
+      const { extracted, profileLines, verify } = localizeContact(cascade);
 
       const report = {
         path,

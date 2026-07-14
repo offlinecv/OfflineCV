@@ -56,12 +56,9 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
+import { localizeAchievements } from "./localize/achievements.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-/** Bullet/numbered lead markers — a line carrying one is a BODY line, not a
- *  candidate entry header (mirrors group-bullets' LEADING_MARKER_RE). */
-const BULLET_LINE_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·]|\d+[.)])\s/;
 
 describe.runIf(process.env.RL_ACHIEVEMENTS_PDF)(
   "achievements dev probe (RL_ACHIEVEMENTS_PDF)",
@@ -83,50 +80,8 @@ describe.runIf(process.env.RL_ACHIEVEMENTS_PDF)(
         sections: cascade.canonical.sections,
       });
 
-      // OUTPUT: the parsed achievement entries. `type` and `title` are the two
-      // stored halves the view/PDF/editor all read — no re-splitting here, the
-      // split happened once at parse (#456).
-      const entries = (p.heuristic_achievements ?? []).map((a) => {
-        const type = a.type ?? null;
-        return {
-          type,
-          description: a.title,
-          // Whether the header carried a LABEL — i.e. whether the export bolds
-          // just the type (true) or the whole header line (false).
-          typeIsLabel: type !== null,
-          year: a.year ?? null,
-          url: a.url ?? null,
-          bullets: a.description
-            ? a.description.split("\n").filter((l) => l.trim()).length
-            : 0,
-        };
-      });
-
-      // INPUT: the achievements region the entry segmenter scanned.
-      const regionLines = [
-        ...(cascade.canonical.sections.byName.get("achievements") ?? []),
-      ];
-
-      // Section-detection overview (all regions, line counts only). A missing
-      // `achievements` region means the failure is upstream of entry
-      // segmentation — the block was never routed here (heading unrecognized,
-      // or swallowed by a neighbor section).
-      const sectionOverview = [
-        ...cascade.canonical.sections.byName.entries(),
-      ].map(([name, lines]) => `${name}(${lines.length})`);
-
-      // VERIFY: non-bullet lines in the region are candidate entry headers —
-      // a lower-bound oracle for the entry count.
-      const headerLines = regionLines.filter((l) => !BULLET_LINE_RE.test(l));
-      let verdict: string;
-      if (entries.length === 0 && regionLines.length > 0)
-        verdict = `PARSER-MISS (0 entries; the achievements region has ${regionLines.length} lines)`;
-      else if (entries.length < headerLines.length)
-        verdict = `UNDER-SEGMENTED (${entries.length} entries < ${headerLines.length} header-shaped lines — an achievement likely merged into a neighbor)`;
-      else if (entries.length === 0 && regionLines.length === 0)
-        verdict =
-          "no achievements region segmented (the résumé may carry none — check `Sections detected` for a mis-routed block)";
-      else verdict = "ok";
+      const { entries, regionLines, sectionOverview, headerLines, verdict } =
+        localizeAchievements(cascade);
 
       const report = {
         path,

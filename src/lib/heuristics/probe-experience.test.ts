@@ -46,8 +46,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
-import { DATE_RANGE_RE } from "./regex.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
+import { localizeExperience } from "./localize/experience.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -71,37 +71,8 @@ describe.runIf(process.env.RL_EXPERIENCE_PDF)(
         sections: cascade.canonical.sections,
       });
 
-      // OUTPUT: the parsed role entries.
-      const entries = (p.experience ?? []).map((e) => ({
-        title: e.title || null,
-        company: e.company || null,
-        location: e.location ?? null,
-        start_date: e.start_date ?? null,
-        end_date: e.end_date ?? (e.is_current ? "Present" : null),
-        bullets: e.description
-          ? e.description.split("\n").filter((l) => l.trim()).length
-          : 0,
-      }));
-
-      // INPUT: the experience region the entry segmenter scanned.
-      const regionLines = [
-        ...(cascade.canonical.sections.byName.get("experience") ?? []),
-      ];
-
-      // Section-detection overview (all regions, line counts only).
-      const sectionOverview = [...cascade.canonical.sections.byName.entries()].map(
-        ([name, lines]) => `${name}(${lines.length})`,
-      );
-
-      // VERIFY: date-range lines inside the region are a lower-bound oracle
-      // for the role count. DATE_RANGE_RE is non-global; test per line.
-      const dateRangeLines = regionLines.filter((l) => DATE_RANGE_RE.test(l));
-      let verdict: string;
-      if (entries.length === 0 && dateRangeLines.length > 0)
-        verdict = `PARSER-MISS (0 entries; region has ${dateRangeLines.length} date-range lines)`;
-      else if (entries.length < dateRangeLines.length)
-        verdict = `UNDER-SEGMENTED (${entries.length} entries < ${dateRangeLines.length} date-range lines — a role likely merged into a neighbor)`;
-      else verdict = "ok";
+      const { entries, regionLines, sectionOverview, dateRangeLines, verdict } =
+        localizeExperience(cascade);
 
       const report = {
         path,

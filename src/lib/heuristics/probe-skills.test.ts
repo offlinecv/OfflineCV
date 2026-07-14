@@ -49,35 +49,10 @@ import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
-import { matchSectionHeader, SECTION_KEYWORDS } from "./regex.ts";
-import { SECTION_ANCHORS } from "./sections.config.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
+import { localizeSkills } from "./localize/skills.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-const SKILLS_ALIASES = SECTION_KEYWORDS.skills ?? [];
-const SKILLS_ANCHORS: ReadonlySet<string> = SECTION_ANCHORS.skills ?? new Set();
-
-/**
- * Loose skills-header oracle. Mirrors the strict normalizer in
- * `matchSectionHeaderDetailed` but ALSO strips a leading run of non-letter /
- * non-number glyphs — the exact gap #414 identified. Returns the reason a
- * strict match would have failed, or null if the line doesn't read as skills.
- */
-function looseSkillsReason(raw: string): string | null {
-  const trimmedLower = raw.trim().toLowerCase().replace(/[:·•]+$/, "").trim();
-  const glyphStripped = trimmedLower.replace(/^[^\p{L}\p{N}]+/u, "").trim();
-  if (glyphStripped.length === 0 || glyphStripped.length > 40) return null;
-  if (SKILLS_ALIASES.includes(glyphStripped)) {
-    return glyphStripped === trimmedLower
-      ? "alias match (would route — not a miss)"
-      : `leading-glyph prefix (${JSON.stringify(trimmedLower)} → ${JSON.stringify(glyphStripped)})`;
-  }
-  const tokens = glyphStripped.split(/\s+/).filter(Boolean);
-  if (tokens.some((t) => SKILLS_ANCHORS.has(t)))
-    return `contains skills anchor token but wording not in aliases (${JSON.stringify(glyphStripped)})`;
-  return null;
-}
 
 describe.runIf(process.env.RL_SKILLS_PDF)(
   "skills dev probe (RL_SKILLS_PDF)",
@@ -102,61 +77,15 @@ describe.runIf(process.env.RL_SKILLS_PDF)(
         sections: cascade.canonical.sections,
       });
 
-      // OUTPUT: the parsed skills list.
-      const skills = [...(p.skills ?? [])];
-
-      // INPUT (routed): the skills region the extractor scanned, if any.
-      const skillsRegion = [...(cascade.canonical.sections.byName.get("skills") ?? [])];
-      const skillsRegionPresent = skillsRegion.length > 0;
-
-      // Section-detection overview (all regions, line counts only).
-      const sectionOverview = [...cascade.canonical.sections.byName.entries()].map(
-        ([name, lines]) => `${name}(${lines.length})`,
-      );
-
-      // Header candidates from the ordered markdown (`#`/`##`/`###` lines). The
-      // markdown header heuristic is looser than the router, so a rejected
-      // skills header still shows up here — that is exactly what localizes a
-      // routing miss.
-      const md = cascade.markdown ?? "";
-      const mdLines = md.split("\n");
-      const headerCandidates = mdLines
-        .map((l, i) => ({ text: l.replace(/^#{1,3}\s+/, "").trim(), i, isHeader: /^#{1,3}\s+/.test(l) }))
-        .filter((h) => h.isHeader && h.text.length > 0);
-
-      // A skills-like header the strict router did NOT map to skills.
-      const missedSkillsHeaders = headerCandidates
-        .map((h) => ({ ...h, strict: matchSectionHeader(h.text), reason: looseSkillsReason(h.text) }))
-        .filter(
-          (h) =>
-            h.strict !== "skills" &&
-            h.reason !== null &&
-            !h.reason.startsWith("alias match"),
-        );
-
-      // The markdown block under the first missed header (its dropped content),
-      // up to the next markdown header — the skills content that should have
-      // been routed. Scrubbed to a line count in the console; full text only in
-      // the gitignored JSON.
-      let orphanBlock: string[] = [];
-      if (missedSkillsHeaders.length > 0) {
-        const start = missedSkillsHeaders[0].i + 1;
-        for (let i = start; i < mdLines.length; i++) {
-          if (/^#{1,3}\s+/.test(mdLines[i])) break;
-          if (mdLines[i].trim()) orphanBlock.push(mdLines[i].trim());
-        }
-      }
-
-      let verdict: string;
-      if (skills.length > 0) {
-        verdict = `ok (${skills.length} skill entries parsed)`;
-      } else if (skillsRegionPresent) {
-        verdict = `EXTRACTION-MISS (skills region routed with ${skillsRegion.length} lines but 0 skills parsed)`;
-      } else if (missedSkillsHeaders.length > 0) {
-        verdict = `HEADER-UNRECOGNIZED (skills-like header rejected by the strict router → ${missedSkillsHeaders[0].reason})`;
-      } else {
-        verdict = "NO-SKILLS-SECTION (no routed region and no skills-like header candidate)";
-      }
+      const {
+        skills,
+        skillsRegion,
+        sectionOverview,
+        headerCandidates,
+        missedSkillsHeaders,
+        orphanBlock,
+        verdict,
+      } = localizeSkills(cascade);
 
       const report = {
         path,
@@ -169,14 +98,8 @@ describe.runIf(process.env.RL_SKILLS_PDF)(
         sectionOverview,
         skills,
         skillsRegion,
-        headerCandidates: headerCandidates.map((h) => ({
-          text: h.text,
-          strict: matchSectionHeader(h.text),
-        })),
-        missedSkillsHeaders: missedSkillsHeaders.map((h) => ({
-          text: h.text,
-          reason: h.reason,
-        })),
+        headerCandidates,
+        missedSkillsHeaders,
         orphanBlock,
         verdict,
         triggers: [...cascade.triggers],

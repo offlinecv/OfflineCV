@@ -26,7 +26,12 @@ import { fileURLToPath } from "node:url";
 
 import { runCascade } from "./cascade.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
-import type { HeuristicParsedResume } from "./types.ts";
+import type { CascadeResult, HeuristicParsedResume } from "./types.ts";
+import { buildReproArtifact } from "./repro-artifact.ts";
+import type { DerivedSignals } from "./defect-classes.ts";
+import { sweepParse } from "./sweep.ts";
+import { runRoundtripHop } from "./roundtrip-hop.ts";
+import { CORPUS_SNAPSHOT_SCHEMA_VERSION } from "./__test-utils__/corpus-snapshots.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "../../..");
@@ -43,8 +48,37 @@ const UPDATE = process.env.UPDATE_FIXTURES === "1";
  *    include `heuristic_achievements`.
  *  - v4 (#425 follow-up): the parser now lifts a standalone header headline
  *    ("Engineering Lead") from the profile block via `extractHeadline`, so
- *    `fieldsPopulated` may include `headline` on résumés that carry one. */
-const SNAPSHOT_SCHEMA_VERSION = 4;
+ *    `fieldsPopulated` may include `headline` on résumés that carry one.
+ *  - v5 (#469): added the `reproArtifact` block (`buildReproArtifact`, the
+ *    structure-only parse fingerprint) and the `derived` block (the flat,
+ *    boolean-only `DerivedSignals` — the value-level signals the artifact is
+ *    structurally blind to, including the export → re-parse round-trip hop).
+ *    Together they make each fixture a `CorpusEntry` the `/probe-resume` sweep
+ *    (`fixture-match.ts`) can match a real résumé's defects against WITHOUT
+ *    re-parsing 45 PDFs. Both blocks are PII-free BY TYPE — numbers, booleans,
+ *    fixed enums, no free-form string slot — so the snapshots stay "lossy by
+ *    design, never field values". */
+const SNAPSHOT_SCHEMA_VERSION = CORPUS_SNAPSHOT_SCHEMA_VERSION;
+
+/**
+ * The full `DerivedSignals` bag for one fixture — every key in
+ * `DERIVED_SIGNAL_KEYS`, no more and no fewer (`loadCorpus()` rejects a snapshot
+ * missing any of them, so the count is pinned mechanically and this comment
+ * cannot rot into a wrong number).
+ *
+ * Computed by `sweepParse()` — the SAME function `/probe-resume` runs over the
+ * real résumé. That identity is not tidiness: it is what puts the résumé and the
+ * fixtures on the same axes, without which every coverage answer the sweep prints
+ * would be comparing two different things.
+ *
+ * A localizer never renders or re-parses — the caller performs the hop
+ * (`runRoundtripHop`), which NEVER throws: a crash in any of its four layers is
+ * DATA (`renderThrewOnRoundtrip: true` + `roundtripOracleUnavailable: true`),
+ * never a bake failure.
+ */
+async function bakeDerived(cascade: CascadeResult): Promise<DerivedSignals> {
+  return sweepParse(cascade, await runRoundtripHop(cascade)).derived;
+}
 
 function walkPdfs(dir: string): string[] {
   const out: string[] = [];
@@ -167,6 +201,10 @@ describe("corpus snapshots", () => {
               bulletCount: score.bullets?.length ?? 0,
               algoVersion: score.algoVersion ?? null,
             },
+            // #469: the fixture's `CorpusEntry` payload — the structure-only
+            // parse fingerprint plus the boolean-only value-level signals.
+            reproArtifact: buildReproArtifact(cascade),
+            derived: await bakeDerived(cascade),
           };
 
           if (UPDATE) {
@@ -188,12 +226,36 @@ describe("corpus snapshots", () => {
                 `and commit it alongside the PDF.`,
             );
           }
+          // ── The self-verifying bake. `derived` is RECOMPUTED here, per run,
+          // and diffed against the committed golden — deliberately: a bake that
+          // only ever writes and never checks would let a silently-changed
+          // signal ship. Know what that couples the goldens to:
+          //
+          //   The nine `*ChangedAcrossRoundtrip` bits come from the export →
+          //   re-parse hop, so they pin EXACT BITS of `pdf-lib`'s render output
+          //   AND of the font-fallback path (the current goldens were baked with
+          //   "Poppins font embed failed, falling back to Helvetica"). A pdf-lib
+          //   bump, a font-loading fix, or a change to `render-ats-pdf.ts` can
+          //   therefore turn corpus tests red WITHOUT any parser change.
+          //
+          // That is a FEATURE — the round-trip is a product invariant and a
+          // silent change to it should be visible — but it is a different
+          // contract from `corpus-roundtrip.test.ts`, which asserts round-trip
+          // INVARIANTS (nothing may be lost) rather than exact bits.
+          //
+          // When such a red is expected and understood: re-run
+          // `npm run bake-fixtures`, then diff the goldens and confirm the ONLY
+          // moved keys are the round-trip ones. A moved parse/score/artifact key
+          // in that diff is a real regression, not a re-bake artifact.
           const expected = JSON.parse(expectedRaw);
           expect(snapshot).toEqual(expected);
         },
         // PDF parse + score is fast for normal-sized resumes, but generous
         // ceiling so a slow CI runner doesn't false-fail on a 2MB LaTeX export.
-        15_000,
+        // Raised from 15s for #469: the snapshot's `derived` block needs the
+        // export → re-parse hop, so each fixture now costs parse + render +
+        // re-parse (the same budget `corpus-roundtrip.test.ts` runs on).
+        25_000,
       );
     });
   }

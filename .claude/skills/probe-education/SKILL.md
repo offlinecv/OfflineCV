@@ -1,13 +1,14 @@
 ---
 name: probe-education
-description: Extract + verify the EDUCATION section (entries, degree, field, institution, location, dates, coursework) of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped/merged/under-chunked entry to the exact layer (header routing vs chunker vs field heuristic). Prints the header candidates the router saw and the education region it scanned next to the parsed entries, plus an independent header-recognition oracle that flags an education-like header the strict router rejected (leading-glyph, out-of-alias wording, two-line wrap) and a DEGREE_RE token count over the routed region as a lower-bound oracle for chunker under-segmentation. One of the `probe-*` parser probes (see also `probe-contact`, `probe-experience`, `probe-roundtrip`, `probe-skills`). Use when the user says "probe education", "/probe-education", "why is the degree/institution/coursework wrong", "education section isn't parsing", "why are two degrees showing as one entry", or hands you a résumé whose education entries parse wrong.
+description: Extract + verify the EDUCATION section (entries, degree, field, institution, location, dates, coursework) of any résumé PDF — including a real, PII-bearing one — via the real parser, and localize a dropped/merged/under-chunked entry to the exact layer (header routing vs chunker vs field heuristic). Prints the header candidates the router saw and the education region it scanned next to the parsed entries, plus an independent header-recognition oracle that flags an education-like header the strict router rejected (leading-glyph, out-of-alias wording, two-line wrap) and a DEGREE_RE token count over the routed region as a lower-bound oracle for chunker under-segmentation. One of the `probe-*` parser probes (see also `probe-contact`, `probe-experience`, `probe-roundtrip`, `probe-skills`, `probe-resume` — the whole-résumé sweep + corpus-coverage orchestrator over all six section probes). Use when the user says "probe education", "/probe-education", "why is the degree/institution/coursework wrong", "education section isn't parsing", "why are two degrees showing as one entry", or hands you a résumé whose education entries parse wrong.
 ---
 
 # Probe: Education
 
 > One of the `probe-*` parser-probe family (siblings: `probe-contact`,
-> `probe-experience`, `probe-roundtrip`, `probe-skills`). Type `probe-` to list
-> them all.
+> `probe-experience`, `probe-roundtrip`, `probe-skills`; see also
+> `probe-resume`, the whole-résumé sweep + corpus-coverage orchestrator over
+> all six section probes). Type `probe-` to list them all.
 
 Drop in **any** résumé PDF and see exactly what the parser reads for the
 education section — the parsed entries (degree, field, institution, location,

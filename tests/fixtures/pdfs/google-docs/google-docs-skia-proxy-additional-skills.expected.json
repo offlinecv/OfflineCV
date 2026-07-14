@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "cascade": {
     "confidence": 0.78,
     "triggers": [],
@@ -67,5 +67,73 @@
     },
     "bulletCount": 7,
     "algoVersion": "1.5"
+  },
+  "reproArtifact": {
+    "artifactVersion": "v1",
+    "cascadeVersion": "v1",
+    "triggers": [],
+    "sectionSource": "regex",
+    "pageCount": 1,
+    "rawCharCount": 1987,
+    "extractedCharCount": 1713,
+    "sections": [
+      {
+        "name": "profile",
+        "lineCount": 2
+      },
+      {
+        "name": "education",
+        "lineCount": 5
+      },
+      {
+        "name": "experience",
+        "lineCount": 14
+      },
+      {
+        "name": "projects",
+        "lineCount": 7
+      },
+      {
+        "name": "other",
+        "lineCount": 2
+      }
+    ],
+    "parsedCounts": {
+      "hasFullName": true,
+      "hasEmail": true,
+      "hasPhone": true,
+      "hasLocation": true,
+      "hasSummary": false,
+      "experienceCount": 3,
+      "educationCount": 2,
+      "skillsCount": 6
+    },
+    "linkAnnotationCount": 0,
+    "disagreements": []
+  },
+  "derived": {
+    "emailInRawTextButNotParsed": false,
+    "phoneInRawTextButNotParsed": false,
+    "locationInRawTextButNotParsed": false,
+    "skillsHeaderCandidateRejected": false,
+    "educationHeaderCandidateRejected": false,
+    "educationEntriesFewerThanDegreeTokens": false,
+    "experienceRegionHasDateRangeLines": true,
+    "experienceEntriesFewerThanDateRangeLines": false,
+    "achievementsParsedEmpty": true,
+    "achievementsEntriesFewerThanHeaderLines": false,
+    "fullNameChangedAcrossRoundtrip": false,
+    "emailChangedAcrossRoundtrip": false,
+    "phoneChangedAcrossRoundtrip": false,
+    "locationChangedAcrossRoundtrip": false,
+    "linkedinUrlChangedAcrossRoundtrip": false,
+    "experienceChangedAcrossRoundtrip": false,
+    "educationChangedAcrossRoundtrip": false,
+    "skillsChangedAcrossRoundtrip": false,
+    "summaryChangedAcrossRoundtrip": false,
+    "renderThrewOnRoundtrip": false,
+    "textOracleUnavailable": false,
+    "headerOracleUnavailable": false,
+    "roundtripOracleUnavailable": false
   }
 }
