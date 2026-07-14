@@ -172,7 +172,15 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // `scripts/**` carries the build-time gates (e.g. the fixture-PII check,
+    // #478). They are plain Node ESM — deliberately not part of the app's TS
+    // build, so a CI gate can never be broken by the app's compile — but their
+    // rules still need unit tests, so the suite has to reach them here.
+    include: [
+      "src/**/*.test.ts",
+      "src/**/*.test.tsx",
+      "scripts/**/*.test.mjs",
+    ],
     globals: true,
     // Install the in-memory localStorage shim before every test, workload-wide,
     // so no suite has to remember to import it (#398). See src/test-setup.ts.
@@ -186,7 +194,19 @@ export default defineConfig({
       // `fallow audit --coverage` consumes for accurate per-function CRAP.
       reporter: ["text-summary", "json"],
       reportsDirectory: "coverage",
-      include: ["src/**/*.{ts,tsx}"],
+      // The tested build-time gates under `scripts/` are listed individually, not
+      // globbed. They must be here at all because fallow scores every changed
+      // file it sees, and a file the coverage report never mentions is scored as
+      // 0% covered — which multiplies its CRAP by the full cyclomatic penalty, so
+      // a tested gate left out of `include` reads as untested rather than as
+      // out-of-scope. But a `scripts/**/*.mjs` glob also sweeps in the one-shot
+      // scripts no test ever loads (the fixture generators, the hook installer),
+      // and v8 emits bogus source-map columns for those — the same negative
+      // `end.column` that the `main.tsx` exclude below exists to dodge, which
+      // crashes `fallow audit`'s u32 coverage parser and silently zeroes the
+      // whole report. Enumerating inverts that failure mode: forget to add a new
+      // tested gate here and fallow merely scores it 0% and complains, loudly.
+      include: ["src/**/*.{ts,tsx}", "scripts/check-fixture-pii.mjs"],
       exclude: [
         "src/**/*.test.ts",
         "src/**/__test-utils__/**",

@@ -96,11 +96,30 @@ the repo is public and a leaked binary means `git filter-repo` + a Support ticke
 A "PII-free" claim in the PR body is **not** a pass; verify the binary.
 
 ```bash
+npm run check:fixtures   # the gate: every PDF's text + annotations + metadata
 git diff --name-only --diff-filter=AM "origin/$BASE...HEAD" -- 'tests/fixtures/**' \
   | grep -iE '\.(pdf|png|jpe?g|docx?)$'
-# for each PDF:
+# for each PDF (the other surface — read the NAME yourself; see below):
 pdftotext "tests/fixtures/pdfs/<category>/<file>.pdf" - | head -40
 ```
+
+`npm run check:fixtures` failing is **Blocking**, no exceptions. It also runs in CI,
+so a red `verify` job on a fixture-touching PR is likely this.
+
+**Know what the gate does NOT cover — a green check is not an approval.** It scans
+every **PDF** (text, `tel:`/`mailto:` link annotations, and metadata) for four
+things: the email domain, the phone shape, a denylist of real people from OSS
+templates, and a metadata author. It does **not** scan the non-PDF fixtures
+(png/jpeg/docx), and it **cannot** judge whether a *name* is synthetic. So for any
+added fixture you still look at the binary yourself, and a real-looking **name** is
+Blocking even when the gate is green.
+
+Note `pdftotext` sees only the drawn page: it cannot see a `tel:`/`mailto:` link
+annotation or the Info dict, both of which the gate scans and both of which have
+leaked here. So a clean `pdftotext` does not overrule the gate — they cover
+different surfaces. A **new entry in the exception table** in
+`scripts/check-fixture-pii.mjs` is Blocking unless the PR justifies why the fixture
+cannot be re-exported.
 
 - Personas must be synthetic — fake name, `@example.com`, a **real area code + `555`
   exchange + `0100`–`0199`** phone (e.g. `(312) 555-0123`). A `555` *area code*

@@ -14,10 +14,18 @@ the exception: they stay here because breaking them is silent, and for two of th
   subscriber** (e.g. `(312) 555-0123`). Not an area-code-`555` number like `(555) 010-0123` —
   `555` is an invalid NANP area code, so `libphonenumber-js` rejects it and the fixture's phone
   silently drops out of the score. An OSS template's shipped demo PDF is **not** an exception:
-  Awesome-CV embeds posquit0's real CV, Deedy-Resume embeds Debarghya Das's. Before adding a
-  fixture — or approving a PR that adds one — verify the **binary**, never the PR prose:
-  `pdftotext <file>.pdf - | head -40`. The repo is public; a leak means `git filter-repo` + a
-  GitHub Support ticket.
+  Awesome-CV embeds posquit0's real CV, Deedy-Resume embeds Debarghya Das's. The repo is public;
+  a leak means `git filter-repo` + a GitHub Support ticket.
+  **`npm run check:fixtures` enforces part of this** (`scripts/check-fixture-pii.mjs`, wired into
+  `verify` and CI). It checks every **PDF** under `tests/fixtures/pdfs/` — its text, its link
+  annotations (`tel:`/`mailto:` hrefs) and its metadata — for four things: the email domain, the
+  phone shape, a denylist of real people from OSS templates, and a metadata author. It exits
+  non-zero naming the offending value. It does **not** check the other fixture types (png/jpeg/
+  docx), and it **cannot** tell whether a *name* is synthetic — no check can. **That judgement is
+  still yours.** Run it before adding a fixture or approving a PR that adds one, and also read
+  `pdftotext <file>.pdf - | head -40` — the two cover different surfaces. `pdftotext` prints only
+  the drawn page, so it cannot see a `tel:`/`mailto:` **link annotation** or the Info dict, and
+  both have leaked here. Never trust the PR prose over the binary.
 - **Never in git.** No `Co-Authored-By:` trailer naming a model, no `Claude-Session:` trailer, no
   `https://claude.ai/code/session_…` URL, no `🤖 Generated with …` badge — not in a commit
   message, not in a PR body. The Bash tool's default commit template suggests them; ignore it.

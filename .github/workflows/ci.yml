@@ -34,6 +34,12 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      # Fixture-PII gate (#478). The repo is public and the committed PDF binary
+      # is the exposure surface, so this is the one check whose failure mode is
+      # unrecoverable — it runs before the test suite so a leak fails fast. Reads
+      # text + metadata via pdfjs-dist (already a dependency), so no poppler-utils
+      # or any other system binary is needed on the runner.
+      - run: npm run check:fixtures
       # Run the suite with coverage so the fallow step below can compute
       # accurate per-function CRAP scores (coverage/coverage-final.json).
       - run: npm run test:coverage

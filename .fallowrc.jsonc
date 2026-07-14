@@ -8,10 +8,17 @@
   // fallow follows them and stops reporting their browser `.ts` modules
   // (jd-spike-browser.ts, run-eval-browser.ts, parse-eval-browser.ts and their
   // spike/eval helpers) as unreachable dead code.
+  //
+  // `scripts/**/*.test.mjs` (the fixture-PII gate's suite, #478) is registered
+  // for a different reason: fallow's vitest plugin discovers `src/**/*.test.ts`
+  // on its own but does not pick up the `.mjs` tests, so the suite reads as a
+  // file "not reachable from any entry point" — dead code. It is a test, and a
+  // test is an entry point.
   "entry": [
     "jd-spike.html",
     "eval-rewrite.html",
-    "parse-eval.html"
+    "parse-eval.html",
+    "scripts/**/*.test.mjs"
   ],
 
   // `@design-tokens` is a Vite CSS-import alias (vite.config.ts resolve.alias),

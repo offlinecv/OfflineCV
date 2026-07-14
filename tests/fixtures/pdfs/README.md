@@ -29,9 +29,10 @@ Empty subfolders are fine and tracked via `.gitkeep` — they signal a category 
 ## Adding a new PDF
 
 1. Drop the PDF into the right `<category>/` subfolder. Use a descriptive, persona-free filename — e.g. `awesome-cv-resume.pdf`, `google-docs-skia-m146.pdf`. Avoid real names in the filename.
-2. Run `npm run bake-fixtures`. The harness writes a fresh `<name>.expected.json` next to the PDF.
-3. **Eyeball the snapshot before committing.** Open the JSON, sanity-check the counts (`skillsCount`, `experienceCount`, `bulletCount`, score numbers). Anything that looks obviously wrong is a parser bug — file an issue with the PDF and the snapshot as the reproducer, **don't** commit the snapshot until the bug is filed.
-4. `git add` both the PDF and the `.expected.json`. Commit message: `test(corpus): add <generator> sample (<one-line characterization>)`.
+2. **Run `npm run check:fixtures`** and read the `pdftotext` dump (see [Privacy](#privacy)). Do this *first* — a PII leak here is unrecoverable, and the check is a blocking gate in `verify` and CI, so a fixture that fails it cannot merge anyway.
+3. Run `npm run bake-fixtures`. The harness writes a fresh `<name>.expected.json` next to the PDF.
+4. **Eyeball the snapshot before committing.** Open the JSON, sanity-check the counts (`skillsCount`, `experienceCount`, `bulletCount`, score numbers). Anything that looks obviously wrong is a parser bug — file an issue with the PDF and the snapshot as the reproducer, **don't** commit the snapshot until the bug is filed.
+5. `git add` both the PDF and the `.expected.json`. Commit message: `test(corpus): add <generator> sample (<one-line characterization>)`.
 
 ## Updating an existing snapshot
 
@@ -81,10 +82,30 @@ Before adding a PDF — or approving a PR that does — verify the binary,
 not the PR description:
 
 ```bash
+npm run check:fixtures                                    # the mechanical gate
 pdftotext tests/fixtures/pdfs/<category>/<file>.pdf - | head -40
 ```
 
-Confirm the name, email, and phone are fake.
+**Run both — they cover different surfaces, and neither subsumes the other.**
+
+`npm run check:fixtures` ([`scripts/check-fixture-pii.mjs`](../../../scripts/check-fixture-pii.mjs))
+walks every PDF in this tree with `pdfjs` and fails the build on a
+non-`@example.com` email, an out-of-policy phone, a denylisted real person
+(posquit0, Debarghya Das, …), or an `Author`/`dc:creator` naming the exporter.
+Crucially it scans surfaces `pdftotext` cannot reach: **link annotations**
+(`tel:`/`mailto:` hrefs — two fixtures here drew a compliant phone while their
+href still leaked a forbidden area-code-`555` number) and the **Info dict**,
+including the non-standard keys where Word parks `/Company` and `/Manager`. It
+runs in `verify` and in CI, so what it catches cannot merge.
+
+What it **cannot** do is judge whether a *name* is synthetic — no script can.
+That is what the `pdftotext` dump is for: read it and confirm the name, email,
+and phone are fake yourself. A green gate does not mean the fixture is clean.
+
+The gate's `EXCEPTIONS` table is its only hole. Each entry pins **one value in
+one file** and must state a reason; two exist today (both upstream OpenResume
+demo personas whose renderers cannot be reproduced here). Prefer re-exporting the
+fixture over adding an entry — a new one is a review-Blocking change.
 
 ## What the snapshot captures (and doesn't)
 

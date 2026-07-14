@@ -102,11 +102,30 @@ git diff --name-only --diff-filter=AM "origin/$BASE..HEAD" -- 'tests/fixtures/**
   | grep -iE '\.(pdf|png|jpe?g|docx?)$'
 ```
 
-For each PDF returned, extract the text and eyeball name / email / phone:
+**Run the check — for what it covers, it is stricter than your eyes:**
+
+```bash
+npm run check:fixtures   # every PDF's text + link annotations + metadata
+```
+
+It must exit 0. But **exit 0 is not a clean bill of health.** The gate checks every
+**PDF** for four things — the email domain, the phone shape, a denylist of real
+people from OSS templates, and a metadata author. It does **not** scan the non-PDF
+fixtures (png/jpeg/docx), and it **cannot** decide whether a *name* is synthetic.
+
+So for each PDF returned above, still eyeball name / email / phone yourself — the
+name especially, because nothing else will:
 
 ```bash
 pdftotext "tests/fixtures/pdfs/<category>/<file>.pdf" - | head -40
 ```
+
+The two cover different surfaces, so run both. `pdftotext` prints only the drawn
+page — it cannot see a `tel:`/`mailto:` **link annotation** at all, and two
+fixtures drew a compliant phone while their href still leaked a forbidden
+area-code-`555` one. The gate scans annotations and metadata as well as text. What
+`pdftotext` does print, though, it prints faithfully: read it, and judge the
+**name** yourself — that is the one thing no check can do.
 
 - Personas **must** be synthetic — fake name, `@example.com` email, and a phone
   with a **real area code + `555` exchange + `0100`–`0199` subscriber** (e.g.
