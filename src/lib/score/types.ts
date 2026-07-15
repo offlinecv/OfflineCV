@@ -267,6 +267,17 @@ export interface HeuristicAchievement {
   /** Lead year when the header carried a date (achievements show a single year,
    *  not a range — we keep the first year of any range the header carried). */
   year?: string;
+  /** The punctuation the source put between {@link title} and {@link year}
+   *  ("Globex Engineering Excellence, 2021" → `","`), when it used any.
+   *
+   *  The header is stored decomposed (type / title / year) and RE-COMPOSED by
+   *  every consumer that shows it — the edit surface and the PDF exporter — so
+   *  each of them has to emit some separator. Without the source's own, they
+   *  hardcoded a middot and rewrote the résumé's comma into "Globex Engineering
+   *  Excellence · 2021" (#380). Absent (whitespace-separated in the source) is
+   *  NOT the same as "no separator": consumers fall back to the middot, which is
+   *  the only thing that keeps the year legible as a distinct field. */
+  year_separator?: string;
   /** A URL on the header line (e.g. a publication / patent link), when found. */
   url?: string;
   /** Bullet body joined with "\n", mirroring `ResumeProject.description`, so the

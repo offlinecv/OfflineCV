@@ -5,14 +5,33 @@
  * EditableField — the ONE shared inline-edit primitive.
  *
  * Renders in one of two modes:
- *   • read  — shows the current value (or a "not detected" placeholder when
- *             value is absent). The value itself is the edit affordance: a text
+ *   • read  — shows the current value (or, when absent, the placeholder noun).
+ *             The value itself is the edit affordance: a text
  *             cursor + a subtle hover tint signal editability; clicking/tapping
  *             it (or focusing it and pressing Enter/Space) enters edit mode.
  *             No pencil icon — one icon per field reads as clutter on a
  *             document-shaped surface, and a hover-only pencil is invisible on
  *             touch. The quiet hover affordance works with mouse, keyboard, and
  *             touch alike (Notion/Linear/Docs pattern).
+ *             An EMPTY field renders as an add-affordance: a "+ " glyph in
+ *             front of a bare NOUN naming the thing you would add (e.g.
+ *             "+ location"), so it stays legible as an invitation rather than a
+ *             literal value when a caller joins it into a compound line with a
+ *             fixed separator (#376) — "Acme Corp, + location" vs. "Acme Corp,
+ *             location not detected". Muted italic alone already differentiates
+ *             it in isolation; the "+ " is what survives being read in situ next
+ *             to real content.
+ *
+ *             Three things that used to be one string are now separate:
+ *               – the GLYPH is its own `aria-hidden` span, so "+" is never read
+ *                 out as punctuation;
+ *               – the PLACEHOLDER is a bare noun, defaulting to the label
+ *                 lowercased — which makes "+ not detected" unrepresentable;
+ *               – the ACCESSIBLE NAME says "Add <label>" for an empty add-field
+ *                 and "Edit <label>" otherwise, so the announced name contains
+ *                 the visible one (WCAG 2.5.3 Label in Name).
+ *             `emptyAffordance="plain"` opts a field out of the glyph and the
+ *             "Add" verb — for fields whose empty state is a STATE, not a gap.
  *   • edit  — inline <input> (default) or auto-growing <textarea> (multiline)
  *             pre-filled with the current value.
  *             Single-line: blurring or pressing Enter/Escape commits/cancels.
@@ -28,7 +47,8 @@
  *
  * Props:
  *   value       — current display value (may be empty/undefined when absent).
- *   placeholder — shown when value is empty, e.g. "not detected".
+ *   placeholder — the NOUN shown when value is empty, e.g. "location". Defaults
+ *                 to the label, lowercased.
  *   label       — accessible label for the input (aria-label).
  *   onCommit    — called with the trimmed new string (or "" on clear).
  *   className   — extra classes on the root wrapper (layout stays with caller).
@@ -43,7 +63,20 @@ import { Button } from "./Button.tsx";
 
 interface EditableFieldProps {
   value: string | undefined;
+  /**
+   * What an EMPTY field shows. A bare NOUN naming the thing you would add
+   * ("location", "degree"), NOT a status sentence — the "+ " glyph in front of
+   * it is what makes it read as English. Defaults to the label, lowercased.
+   */
   placeholder?: string;
+  /**
+   * What an EMPTY field offers. "add" (default) renders the "+ " affordance
+   * glyph and announces itself as an add action; "plain" renders the bare
+   * placeholder — for fields whose empty state is a STATE, not a gap the user is
+   * invited to fill (an "Untitled resume" name fallback, an "empty bullet"
+   * description, an "edit this bullet" instruction).
+   */
+  emptyAffordance?: "add" | "plain";
   label: string;
   onCommit: (newValue: string) => void;
   /**
@@ -132,7 +165,12 @@ function ShapeWarningGlyph({ message }: { message: string }) {
 
 export function EditableField({
   value,
-  placeholder = "not detected",
+  // Derived from the label, not a fixed string: the placeholder is a NOUN naming
+  // the thing you add, and the label already is that noun. Deriving it is what
+  // makes "+ not detected" unrepresentable — the defect class cannot regrow at
+  // the next call site that forgets to pass a placeholder.
+  placeholder,
+  emptyAffordance = "add",
   label,
   onCommit,
   displayValue,
@@ -178,6 +216,9 @@ export function EditableField({
   }, [value]);
 
   const hasValue = Boolean(value);
+  const emptyText = placeholder ?? label.toLowerCase();
+  // The "+ " glyph is offered only where the empty state is a gap to fill.
+  const offersAdd = !hasValue && emptyAffordance === "add";
 
   const weightCls =
     textWeight === "semibold" ? "font-semibold" : "font-normal";
@@ -303,6 +344,8 @@ export function EditableField({
     ? "inline"
     : "inline-flex min-w-0 items-center";
 
+  const addOrEdit = offersAdd ? "Add" : "Edit";
+
   return (
     <span
       role="button"
@@ -310,7 +353,17 @@ export function EditableField({
       // Fold the shape warning into the accessible name: an explicit aria-label
       // on this button suppresses the inner glyph's <title>, so screen readers
       // would otherwise get zero warning signal (WCAG 1.4.1 — colour-only).
-      aria-label={warning ? `Edit ${label} — ${warning}` : `Edit ${label}`}
+      //
+      // The VERB has to match what the field visibly offers. An explicit
+      // aria-label overrides the element's text content, so an empty field
+      // reading "+ location" was announced "Edit Location" — a name that does
+      // not contain the visible label (WCAG 2.5.3 Label in Name), and one a
+      // voice-control user cannot speak. "Add" for an empty add-field, "Edit"
+      // otherwise; the "+" itself is aria-hidden, so it is never read as
+      // punctuation.
+      aria-label={
+        warning ? `${addOrEdit} ${label} — ${warning}` : `${addOrEdit} ${label}`
+      }
       onClick={startEdit}
       onKeyDown={(e: ReactKeyboardEvent) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -331,7 +384,16 @@ export function EditableField({
         .filter(Boolean)
         .join(" ")}
     >
-      {hasValue ? (displayValue ?? value) : placeholder}
+      {hasValue ? (
+        (displayValue ?? value)
+      ) : offersAdd ? (
+        <>
+          <span aria-hidden="true">+ </span>
+          {emptyText}
+        </>
+      ) : (
+        emptyText
+      )}
       {warning && <ShapeWarningGlyph message={warning} />}
     </span>
   );

@@ -2,9 +2,12 @@
 // Copyright 2026 The resumelint Authors
 
 import { describe, it, expect } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   resolveEduValue,
   resolveEducationDisplay,
+  EducationSection,
 } from "./ReconstructedEducationSkills.tsx";
 import type { ResumeEducation } from "../../lib/score/types.ts";
 
@@ -105,5 +108,73 @@ describe("resolveEducationDisplay", () => {
     expect(resolveEducationDisplay(noCoursework, undefined).coursework).toEqual(
       [],
     );
+  });
+});
+
+describe("EducationSection date-row symmetry (issue 376)", () => {
+  // The `–` separator between start/end EditableFields must render identically
+  // regardless of which side is empty; only the empty side switches to the
+  // strengthened "+ " placeholder treatment. Static (read-mode) render, so
+  // renderToStaticMarkup is sufficient — matches the EditableField primitive's
+  // own test harness.
+  function renderSection(edu: ResumeEducation): string {
+    return renderToStaticMarkup(
+      createElement(EducationSection, {
+        education: [edu],
+        educationOverrides: {},
+        onEducationFieldChange: () => {},
+        addedEducation: [],
+        originalCount: 1,
+        onAddEntry: () => {},
+        onRemoveEntry: () => {},
+        onEntryField: () => {},
+      }),
+    );
+  }
+
+  it("renders the dash with both sides populated, neither prefixed", () => {
+    const html = renderSection({
+      degree: "BSc",
+      institution: "U",
+      start_date: "2018",
+      end_date: "2022",
+    });
+    expect(html).toContain(">2018<");
+    expect(html).toContain(">2022<");
+    expect(html).toContain("–");
+    expect(html).not.toContain("+ 2018");
+    expect(html).not.toContain("+ 2022");
+  });
+
+  it("prefixes only the empty start side; the dash and the populated end side are unchanged", () => {
+    const html = renderSection({
+      degree: "BSc",
+      institution: "U",
+      end_date: "2022",
+    });
+    expect(html).toContain(`<span aria-hidden="true">+ </span>start`);
+    expect(html).toContain(">2022<");
+    expect(html).toContain("–");
+  });
+
+  it("prefixes only the empty end side; the dash and the populated start side are unchanged", () => {
+    const html = renderSection({
+      degree: "BSc",
+      institution: "U",
+      start_date: "2009",
+    });
+    expect(html).toContain(">2009<");
+    expect(html).toContain(`<span aria-hidden="true">+ </span>end`);
+    expect(html).toContain("–");
+  });
+
+  it("prefixes both sides when both start and end are absent", () => {
+    const html = renderSection({
+      degree: "BSc",
+      institution: "U",
+    });
+    expect(html).toContain(`<span aria-hidden="true">+ </span>start`);
+    expect(html).toContain(`<span aria-hidden="true">+ </span>end`);
+    expect(html).toContain("–");
   });
 });

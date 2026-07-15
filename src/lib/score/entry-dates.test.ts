@@ -7,6 +7,8 @@ import {
   buildEducationDates,
   splitAchievementType,
   ACHIEVEMENT_TYPE_MAX_LEN,
+  achievementYearJoiner,
+  isTightYearSeparator,
 } from "./entry-dates.ts";
 
 describe("buildProjectDates", () => {
@@ -128,5 +130,23 @@ describe("splitAchievementType — parse-time only (#456)", () => {
       type: "KubeCon",
       rest: "Amsterdam",
     });
+  });
+});
+
+describe("achievementYearJoiner — the source's own title↔year separator (#380)", () => {
+  it("falls back to the middot when the source used none", () => {
+    expect(achievementYearJoiner(undefined)).toBe(" · ");
+  });
+
+  it("binds a comma tight to the title, with one space after", () => {
+    // "Globex Engineering Excellence, 2021" — not " , 2021".
+    expect(achievementYearJoiner(",")).toBe(", ");
+    expect(isTightYearSeparator(",")).toBe(true);
+  });
+
+  it("gives a dash or a pipe air on both sides", () => {
+    expect(achievementYearJoiner("–")).toBe(" – ");
+    expect(achievementYearJoiner("|")).toBe(" | ");
+    expect(isTightYearSeparator("–")).toBe(false);
   });
 });

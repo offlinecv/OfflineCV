@@ -167,6 +167,7 @@ export function BulletReviewRow({
           <EditableField
             value={newSideText(pair, review)}
             placeholder="edit this bullet"
+            emptyAffordance="plain"
             label="Edit proposed bullet"
             textSize="sm"
             display="inline"

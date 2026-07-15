@@ -192,7 +192,7 @@ function EditableValue({
     <EditableField
       value={field.value || undefined}
       displayValue={displayValue}
-      placeholder={`${field.label} not detected`}
+      placeholder={field.label.toLowerCase()}
       label={field.label}
       textSize="sm"
       validate={validatorFor(field.key, location)}

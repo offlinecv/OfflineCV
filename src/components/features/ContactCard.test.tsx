@@ -223,8 +223,14 @@ describe("ContactCard", () => {
       makeResult({ email: "jane@example.com" }, { email: 0.95 }),
       { overrides: {}, onFieldChange: () => {} },
     );
-    expect(el.textContent).toContain("Phone not detected");
-    expect(el.querySelector('[aria-label="Edit Phone"]')).not.toBeNull();
+    // An absent required field reads as a gap to FILL — "+ phone", announced
+    // "Add Phone" — not as a status sentence. It is still discernible, and still
+    // the only input path (role=button, focusable, opens an empty input).
+    expect(el.textContent).toContain("+ phone");
+    const field = el.querySelector('[aria-label="Add Phone"]');
+    expect(field).not.toBeNull();
+    expect(field?.getAttribute("role")).toBe("button");
+    expect(field?.getAttribute("tabindex")).toBe("0");
   });
 
   it("no longer renders the detected/total completeness footer (moved to the AttentionStrip)", () => {

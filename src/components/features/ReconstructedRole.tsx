@@ -253,6 +253,7 @@ export function ResumeBulletRow({
             <EditableField
               value={displayText || undefined}
               placeholder="empty bullet"
+              emptyAffordance="plain"
               label="Bullet text"
               textSize="sm"
               display="inline"
@@ -396,7 +397,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
           <EditableField
             value={title}
-            placeholder="title not detected"
+            placeholder="title"
             label="Job title"
             textWeight="semibold"
             textSize="sm"
@@ -410,7 +411,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
           <span className="inline-flex items-baseline">
             <EditableField
               value={company}
-              placeholder="company not detected"
+              placeholder="company"
               label="Company"
               textSize="sm"
               multiline
@@ -422,7 +423,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
           </span>
           <EditableField
             value={location}
-            placeholder="location not detected"
+            placeholder="location"
             label="Location"
             textSize="sm"
             onCommit={(v) => onFieldChange("location", v)}
@@ -435,7 +436,7 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
           </span>
           <EditableField
             value={team}
-            placeholder="team not detected"
+            placeholder="team"
             label="Team or department"
             textSize="sm"
             onCommit={(v) => onFieldChange("team", v)}

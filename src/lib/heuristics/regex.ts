@@ -139,6 +139,37 @@ export const MONTH_YEAR_RE = new RegExp(
   "gi",
 );
 
+// Month names spelled out in full, longest-first. NO `[a-z]*` tail — see
+// STRICT_MONTH_YEAR_RE.
+const STRICT_MONTH =
+  "January|Jan|February|Feb|March|Mar|April|Apr|May|June|Jun|July|Jul|" +
+  "August|Aug|September|Sept|Sep|October|Oct|November|Nov|December|Dec";
+
+/**
+ * The same "Mmm YYYY" shape as {@link MONTH_YEAR_RE}, but with the month
+ * ENUMERATED rather than prefix-matched. A strict variant exists alongside the
+ * loose one because the two are used for different jobs, and only one of them
+ * can afford to be wrong.
+ *
+ * `MONTH_YEAR_RE`'s `[a-z]*` tail also matches ordinary words that merely BEGIN
+ * with a month prefix — Marketing, Marathon, Mayor, Junior, Decathlon, Sepsis.
+ * That is harmless for a POSITION probe like `dateRegionStart`, which only needs
+ * to know roughly where the right-hand date column starts. It is NOT harmless
+ * the moment the same regex is used to extract a date VALUE or to DELETE text:
+ * a false month then eats a word out of the entry title and lands in the date
+ * ("Head of Marketing 2020" → title "Head of", start_date "Marketing 2020").
+ *
+ * So the two value-level call sites — `parseDateRange`'s lone-date fallback and
+ * `stripDateRange`'s month strip — use THIS regex, and they must keep using the
+ * SAME one as each other: the token the date captures has to be exactly the
+ * token the title loses, or the month re-leaks into the title (#380). Do not
+ * "simplify" the two regexes back into one.
+ */
+export const STRICT_MONTH_YEAR_RE = new RegExp(
+  `\\b(?:${STRICT_MONTH})\\.?\\s+(?:\\d{4}|'\\d{2})\\b`,
+  "gi",
+);
+
 /** "01/2020", "1/2020", "01-2020". */
 export const NUMERIC_MONTH_YEAR_RE = /\b(0?[1-9]|1[0-2])[\/\-]\d{4}\b/g;
 
@@ -172,7 +203,16 @@ const YEAR_FORMS = `\\d{4}|'\\d{2}|20XX|XXXX|####|Year`;
 // placeholder (see YEAR_FORMS note). Scoped to the anchors only — the shared
 // `MONTH` const and `MONTH_YEAR_RE` are left untouched so education/date-region
 // detection keep requiring a real month name.
-const MONTH_OR_PLACEHOLDER = `(?:${MONTH}|Month)`;
+//
+// STRICT_MONTH, not the loose MONTH: a date ANCHOR is a value, so the same
+// `[a-z]*` false-month problem bites here. With the loose month, "Marketing
+// 2021" is a legal anchor — so "Marketing 2021 - 2022" full-matched
+// DATE_RANGE_RE, `stripDateRange` deleted the ENTIRE header, and
+// `startsNewAnchor` (which asks whether anything survives the strip) stopped
+// seeing it as a new entry and merged it into the one above. The bare-year
+// alternative below still anchors the real "2021 - 2022" range, so the date is
+// parsed and only the false month stays where it belongs — in the title.
+const MONTH_OR_PLACEHOLDER = `(?:${STRICT_MONTH}|Month)`;
 
 // Shared fragment for one date anchor (Mmm YYYY | 'YY, mm/yyyy, YYYY, Season YYYY).
 // Reused by DATE_RANGE_RE's start and end groups. Apostrophe-year keeps

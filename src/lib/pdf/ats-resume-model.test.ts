@@ -211,6 +211,36 @@ describe("buildAtsResumeModel", () => {
     );
   });
 
+  it("exports an achievement's year behind the source's own separator (#380)", () => {
+    // Ground truth on the fixture is "Globex Engineering Excellence, 2021". The
+    // exporter re-composes the header from the stored parts, so without the
+    // parsed `year_separator` it re-punctuated the résumé's comma into a middot
+    // — and the on-screen header and the PDF have to agree, so both read it.
+    const result = makeResult({
+      heuristic_achievements: [
+        {
+          title: "Globex Engineering Excellence",
+          year: "2021",
+          year_separator: ",",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const ach = model.sections.find((s) => s.kind === "achievements");
+    expect(ach!.entries[0].headerLine).toBe(
+      "Globex Engineering Excellence, 2021",
+    );
+  });
+
+  it("falls back to the middot when the source set the year off with a space", () => {
+    const result = makeResult({
+      heuristic_achievements: [{ title: "Best Paper Award", year: "2021" }],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const ach = model.sections.find((s) => s.kind === "achievements");
+    expect(ach!.entries[0].headerLine).toBe("Best Paper Award · 2021");
+  });
+
   it("bolds only the leading type label of a 'Type · description' achievement", () => {
     const result = makeResult({
       heuristic_achievements: [

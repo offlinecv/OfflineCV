@@ -31,12 +31,11 @@ import {
   DATE_RANGE_RE,
   PRESENT_RE,
   INSTITUTION_HINTS,
-  MONTH_YEAR_RE,
-  NUMERIC_MONTH_YEAR_RE,
-  YEAR_RE,
   PROGRAM_NOTE_RE,
 } from "./regex.ts";
 import {
+  dateRegionStart,
+  dateSeparator,
   parseDateRange,
   stripDateRange,
   isBulletLine,
@@ -225,6 +224,15 @@ export interface EntryBlock {
   anchorHeaderIndex?: number;
   /** Parsed start/end/is_current off the anchor line (empty object if none). */
   dates: ReturnType<typeof parseDateRange>;
+  /**
+   * The punctuation the anchor line used to set its date off from the text
+   * before it (`","` in "Best Paper Award, 2021"), or undefined when whitespace
+   * alone did. Stripping the date deletes this, so it is captured HERE, at the
+   * one place that still sees the raw anchor line — a consumer that re-composes
+   * the header from its parts (the achievements editor, #380) would otherwise
+   * have to invent a separator and would silently rewrite the résumé's own.
+   */
+  dateSeparator?: string;
   /**
    * Bullet body collected for this entry, joined with "\n", or undefined when
    * there were no bullets or `collectBody` was false.
@@ -635,21 +643,9 @@ function startsNewAnchor(text: string): boolean {
   return stripDateRange(text).replace(PRESENT_RE, "").trim().length > 0;
 }
 
-/** Index of the earliest date-region token (month-year, numeric month/year, or
- *  a bare year) in `text`, or -1 if none. Marks where the right-hand date column
- *  begins so a wrapped header's left (org) and right (date) continuations fold
- *  back onto the correct side. The three source regexes are global; reset
- *  `lastIndex` before each scan so repeated calls are idempotent. */
-function dateRegionStart(text: string): number {
-  let idx = -1;
-  for (const re of [MONTH_YEAR_RE, NUMERIC_MONTH_YEAR_RE, YEAR_RE]) {
-    re.lastIndex = 0;
-    const m = re.exec(text);
-    re.lastIndex = 0;
-    if (m && (idx === -1 || m.index < idx)) idx = m.index;
-  }
-  return idx;
-}
+// `dateRegionStart` moved to `line-primitives.ts` (#380) — the achievements
+// extractor needs the same "where does the date column begin" scan to recover
+// the separator that preceded the date, and two copies would drift.
 
 /** A continuation fragment belongs to the right-hand date column when it sits
  *  past the bullet-marker margin (geometry) OR reads as a bare date tail — just
@@ -1021,6 +1017,7 @@ function buildBulletEntry(
   return {
     headerLines: title ? [title] : [],
     dates,
+    dateSeparator: dateSeparator(combined),
     body,
     bulletCount: cfg.collectBody ? bodyLines.length : 0,
   };
@@ -1297,5 +1294,12 @@ function buildEntryBlock(
   }
   const body = cfg.collectBody ? bodyUnits.join("\n").trim() || undefined : undefined;
 
-  return { headerLines, anchorHeaderIndex, dates, body, bulletCount: bodyUnits.length };
+  return {
+    headerLines,
+    anchorHeaderIndex,
+    dates,
+    dateSeparator: dateSeparator(anchorLine.text),
+    body,
+    bulletCount: bodyUnits.length,
+  };
 }

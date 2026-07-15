@@ -46,8 +46,8 @@
  * Net effect: the baseline can only shrink. Fix a bug → delete its line.
  */
 
-import { readFileSync, readdirSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, basename, sep } from "node:path";
+import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, it, expect } from "vitest";
@@ -56,17 +56,15 @@ import type { CascadeResult } from "./types.ts";
 import { runRoundtripHop } from "./roundtrip-hop.ts";
 import type { RoundtripCategory } from "./localize/roundtrip.ts";
 import { invariantFailures, harnessDiff } from "./localize/roundtrip.ts";
+import {
+  FIXTURE_ROOT,
+  walkPdfs,
+  relKey,
+  assertNoStaleKeys,
+  assertRatchet,
+} from "./corpus-gate.test-utils.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
-
-/** Fixture path relative to `FIXTURE_ROOT`, posix-separated on every platform.
- *  `KNOWN_FAILURES` is keyed with `/`; Windows `relative()` yields `\`, which
- *  both failed the stale-key check and silently voided every known-failure
- *  exemption there (the three documented fixtures reported as regressions). */
-function relKey(fixture: string): string {
-  return relative(FIXTURE_ROOT, fixture).split(sep).join("/");
-}
 
 /** Re-exported for readability at this file's original name; the type itself
  *  now lives at `./localize/roundtrip.ts` (issue #469 step 4) so the shared
@@ -183,16 +181,6 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   "unknown/qualified-experience-relevant-coursework.pdf": ["experience"],
 };
 
-function walkPdfs(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkPdfs(p));
-    else if (e.isFile() && e.name.toLowerCase().endsWith(".pdf")) out.push(p);
-  }
-  return out.sort();
-}
-
 const CATEGORIES: Category[] = [
   "contact",
   "experience",
@@ -213,9 +201,7 @@ describe("corpus round-trip invariants (#293)", { timeout: 20000 }, () => {
   });
 
   it("every KNOWN_FAILURES key names a real fixture", () => {
-    const rel = new Set(fixtures.map(relKey));
-    for (const key of Object.keys(KNOWN_FAILURES))
-      expect(rel.has(key), `stale KNOWN_FAILURES key: ${key}`).toBe(true);
+    assertNoStaleKeys(KNOWN_FAILURES, fixtures);
   });
 
   for (const fixture of fixtures) {
@@ -240,26 +226,9 @@ describe("corpus round-trip invariants (#293)", { timeout: 20000 }, () => {
               summary: [],
               render: [renderError ?? "renderAtsResumePdf produced no parse"],
             };
-      const baseline = new Set(KNOWN_FAILURES[rel] ?? []);
-
-      for (const cat of CATEGORIES) {
-        const failing = fails[cat].length > 0;
-        if (baseline.has(cat)) {
-          // Ratchet: a baselined category that now passes means the underlying
-          // bug was fixed — delete its line from KNOWN_FAILURES to tighten the
-          // gate. (This intentionally fails until the stale entry is removed.)
-          expect(
-            failing,
-            `${rel}: '${cat}' now round-trips — remove it from KNOWN_FAILURES`,
-          ).toBe(true);
-        } else {
-          // The teeth: any non-baselined category must round-trip cleanly.
-          expect(
-            fails[cat],
-            `${rel}: '${cat}' regressed:\n  ${fails[cat].join("\n  ")}`,
-          ).toEqual([]);
-        }
-      }
+      // Shared ratchet (#459): non-baselined category must pass; a baselined
+      // category that now passes fails with "remove it from KNOWN_FAILURES".
+      assertRatchet(rel, CATEGORIES, fails, new Set(KNOWN_FAILURES[rel] ?? []));
     });
   }
 });

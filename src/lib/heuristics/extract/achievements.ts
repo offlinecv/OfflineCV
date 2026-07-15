@@ -8,6 +8,7 @@ import type { EntryBlock } from "../entry-blocks.ts";
 import { YEAR_RE } from "../regex.ts";
 import { splitAchievementType } from "../../score/entry-dates.ts";
 import {
+  dateSeparator,
   isBulletLine,
   isPageFurniture,
   parseDateRange,
@@ -149,6 +150,12 @@ function achievementFromBlock(block: EntryBlock): {
   const cleanedHeader = block.dates.start_date
     ? block.headerLines
     : [stripDateRange(headerText), ...block.headerLines.slice(1)];
+  // Same fork as the dates: the entry-block path already stripped the date (and
+  // with it the punctuation that set it off), so it carries the separator on the
+  // block; the flat-list path still has the raw header, so read it off that.
+  const separator = block.dates.start_date
+    ? block.dateSeparator
+    : dateSeparator(headerText);
   const { label, url } = liftHeaderLabel(cleanedHeader);
 
   // Lift the leading "Patent · …" type label off the header into its own field
@@ -177,6 +184,7 @@ function achievementFromBlock(block: EntryBlock): {
       ...(type ? { type } : {}),
       title,
       ...(year ? { year } : {}),
+      ...(year && separator ? { year_separator: separator } : {}),
       ...(url ? { url } : {}),
       ...(description ? { description } : {}),
     },

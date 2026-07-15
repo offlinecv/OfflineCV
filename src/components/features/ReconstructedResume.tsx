@@ -76,9 +76,18 @@ import type {
   AchievementFieldOverrides,
 } from "../../hooks/useEditableParse.ts";
 import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
-import { AddPill, RemoveButton, InlineBulletAdd } from "./ReconstructedAdd.tsx";
+import {
+  AddPill,
+  RemoveButton,
+  InlineBulletAdd,
+  SectionEmptyHint,
+} from "./ReconstructedAdd.tsx";
 import { AchievementTypePicker } from "./AchievementTypePicker.tsx";
-import { buildProjectDates } from "../../lib/score/entry-dates.ts";
+import {
+  buildProjectDates,
+  isTightYearSeparator,
+  DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR,
+} from "../../lib/score/entry-dates.ts";
 import { validateDate } from "../../lib/edit/field-validators.ts";
 import {
   EducationSection,
@@ -670,11 +679,14 @@ function AchievementHeader({
   type,
   title,
   year,
+  yearSeparator,
   onFieldChange,
 }: {
   type?: string;
   title?: string;
   year?: string;
+  /** The source's own title↔year punctuation (#380); middot when it had none. */
+  yearSeparator?: string;
   onFieldChange: (field: keyof AchievementFieldOverrides, value: string) => void;
 }) {
   return (
@@ -688,7 +700,7 @@ function AchievementHeader({
       </span>
       <EditableField
         value={title || undefined}
-        placeholder="achievement not detected"
+        placeholder="achievement"
         label="Achievement description"
         textSize="sm"
         // With no type label there is no run to single out, so the exporter
@@ -699,8 +711,17 @@ function AchievementHeader({
         multiline
         onCommit={(v) => onFieldChange("title", v)}
       />
-      <span className="text-content-muted" aria-hidden="true">
-        ·
+      {/* The source's own separator, not a hardcoded middot: a résumé that wrote
+          "Globex Engineering Excellence, 2021" keeps its comma (#380). Tight
+          punctuation cancels the flex row's gap so it hugs the title, matching
+          how the exported PDF spaces it (`achievementYearJoiner`). */}
+      <span
+        className={`text-content-muted ${
+          yearSeparator && isTightYearSeparator(yearSeparator) ? "-ml-1.5" : ""
+        }`}
+        aria-hidden="true"
+      >
+        {yearSeparator ?? DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR}
       </span>
       <EditableField
         value={year || undefined}
@@ -791,6 +812,7 @@ function AchievementsSection({
                     type={achievement.type}
                     title={achievement.title}
                     year={achievement.year}
+                    yearSeparator={achievement.year_separator}
                     onFieldChange={(field, value) =>
                       onAchievementField(i, field, value)
                     }
@@ -821,6 +843,11 @@ function AchievementsSection({
           );
         })}
       </div>
+      {achievements.length === 0 && (
+        <SectionEmptyHint>
+          Awards, patents, publications, and honors go here.
+        </SectionEmptyHint>
+      )}
       <AddPill label="Add achievement" onClick={onAddEntry} />
     </section>
   );

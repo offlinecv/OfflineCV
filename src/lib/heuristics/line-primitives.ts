@@ -13,7 +13,13 @@
  */
 
 import type { PdfLine } from "./sections.ts";
-import { DATE_RANGE_RE, YEAR_RE } from "./regex.ts";
+import {
+  DATE_RANGE_RE,
+  MONTH_YEAR_RE,
+  NUMERIC_MONTH_YEAR_RE,
+  STRICT_MONTH_YEAR_RE,
+  YEAR_RE,
+} from "./regex.ts";
 
 /** Glyphs a template may use as a list bullet. One source of truth for the
  *  line-level tests below and the item-level `isBulletGlyph` — they must agree
@@ -159,11 +165,100 @@ export function parseDateRange(text: string): {
       ? { start_date: start }
       : { start_date: start, end_date: end };
   }
-  // Fall back to loose detection: first year.
+  // Fall back to loose detection: the EARLIEST lone date token in the line.
+  //
+  // A lone (un-paired) date — a project or award dated "Jan. 2026" with no end
+  // date — never matches `DATE_RANGE_RE`, which needs two anchors. It used to
+  // decay here to the bare year, which had two consequences, not one: the date
+  // lost its month, AND the month word survived in the entry title, because
+  // `stripDateRange` only removes what a date regex matched ("tinylm | Link
+  // Jan." · "2026", #380). So the month-anchored form is tried alongside the
+  // bare year and the earlier of the two wins — preserving the long-standing
+  // "first date token in the line" semantics for every line that has only a
+  // bare year, while a `Mon. YYYY` is now captured whole. `stripDateRange`
+  // removes exactly the same token, so the two stay in lockstep by
+  // construction; anything else would re-leak the month into the title.
+  //
+  // STRICT_MONTH_YEAR_RE, not the loose MONTH_YEAR_RE: this is a date VALUE, and
+  // the loose form's `[a-z]*` tail reads "Marketing 2020" as a month-year, so
+  // "Head of Marketing 2020" would record start_date "Marketing 2020" and lose
+  // the word from the title.
+  const lone = STRICT_MONTH_YEAR_RE.exec(text);
+  STRICT_MONTH_YEAR_RE.lastIndex = 0;
   const year = YEAR_RE.exec(text);
   YEAR_RE.lastIndex = 0;
+  if (lone && (!year || lone.index <= year.index)) {
+    return { start_date: normalizeDate(lone[0]) };
+  }
   if (year) return { start_date: year[0] };
   return {};
+}
+
+/** Index of the earliest date-region token (month-year, numeric month/year, or
+ *  a bare year) in `text`, or -1 if none. Marks where the right-hand date column
+ *  begins so a wrapped header's left (org) and right (date) continuations fold
+ *  back onto the correct side, and where {@link dateSeparator} looks for the
+ *  punctuation that set the date off. The three source regexes are global; reset
+ *  `lastIndex` before each scan so repeated calls are idempotent. */
+export function dateRegionStart(text: string): number {
+  let idx = -1;
+  for (const re of [MONTH_YEAR_RE, NUMERIC_MONTH_YEAR_RE, YEAR_RE]) {
+    re.lastIndex = 0;
+    const m = re.exec(text);
+    re.lastIndex = 0;
+    if (m && (idx === -1 || m.index < idx)) idx = m.index;
+  }
+  return idx;
+}
+
+// Punctuation a résumé uses to set a trailing date off from the text before it.
+// Two sets that have to be reasoned about TOGETHER:
+//   - DATE_SEPARATOR_CHARS — what `dateSeparator` REPORTS, so a consumer (the
+//     achievements header, the PDF exporter) can re-emit the source's own glyph.
+//   - TRIMMED_SEPARATOR_CHARS — what `stripDateRange` REMOVES from the title
+//     once the date is gone.
+// A glyph the first set reports and the second leaves behind is kept TWICE —
+// once on the title, once re-emitted by the consumer — and the doubling GROWS on
+// every parse→export→re-parse cycle ("Tech Lead: 2020" → "Tech Lead:: 2020" →
+// "Tech Lead::: 2020"). `;` and `:` were exactly that: reported, never trimmed.
+// They are added to the trim here — no résumé title legitimately ends in a
+// semicolon or a colon, so removing them is safe.
+//
+// The middot is the ONE deliberate asymmetry: it is reported (a source that
+// wrote "Award · 2021" must get its middot back) but NOT trimmed, because a
+// TRAILING " ·" is the org-signature marker the experience anchor-position
+// tiebreak keys on (#298) and stripping it there mis-anchors the role. It does
+// not double on the achievements path — `liftHeaderLabel` clears the dangling
+// glyph before the title is stored — which the two-cycle round-trip test over
+// every separator pins. Do not "fix" the asymmetry by adding `·` to the trim.
+// `-` sits last in each class so it is a literal, never a range.
+const DATE_SEPARATOR_CHARS = ",;:|·–—-";
+const TRIMMED_SEPARATOR_CHARS = ",;:|–—-";
+const DATE_SEPARATOR_RE = new RegExp(`([${DATE_SEPARATOR_CHARS}])\\s*$`);
+const SEPARATOR_TRIM_RE = new RegExp(
+  `^[\\s${TRIMMED_SEPARATOR_CHARS}]+|[\\s${TRIMMED_SEPARATOR_CHARS}]+$`,
+  "g",
+);
+
+/**
+ * The punctuation the source used between an entry's header text and its
+ * trailing date — "Globex Engineering Excellence, 2021" → `","` — or undefined
+ * when the date was set off by whitespace alone (or by nothing at all).
+ *
+ * `stripDateRange` deletes the date AND the separator that held it, so the
+ * separator is source information that would otherwise be lost at parse. The
+ * achievements header renders type/title/year as three separately editable
+ * fields and therefore must re-emit SOME separator between them; without this it
+ * hardcoded a middot and silently rewrote the résumé's comma (#380). Callers
+ * fall back to the middot when this returns undefined — with no source
+ * punctuation to honour there is nothing to preserve, and the fields still need
+ * to be told apart.
+ */
+export function dateSeparator(text: string): string | undefined {
+  const idx = dateRegionStart(text);
+  if (idx <= 0) return undefined;
+  const m = DATE_SEPARATOR_RE.exec(text.slice(0, idx));
+  return m ? m[1] : undefined;
 }
 
 // A range whose START token is a bare SEASON ("Fall 2013 – Spring 2014",
@@ -230,11 +325,21 @@ export function stripDateRange(text: string): string {
   let cleaned = text.replace(DATE_RANGE_RE, "").trim();
   DATE_RANGE_RE.lastIndex = 0;
   cleaned = cleaned.replace(/\b(Present|Current|Now|Ongoing)\b/gi, "").trim();
+  // Lone month-year tokens BEFORE bare years: a `Mon. YYYY` that no range
+  // matched is one token, and removing its year first would strand the month in
+  // the title ("… Link Jan.", #380). This is the exact token `parseDateRange`'s
+  // lone-date fallback captures — the SAME strict regex, deliberately — so the
+  // date the parser records and the text the title loses are the same run, and a
+  // word that merely starts with a month prefix ("Marketing") is not eaten.
+  cleaned = cleaned.replace(STRICT_MONTH_YEAR_RE, "").trim();
+  STRICT_MONTH_YEAR_RE.lastIndex = 0;
   cleaned = cleaned.replace(YEAR_RE, "").trim();
   YEAR_RE.lastIndex = 0;
   // After year removal, bracket/paren pairs that held only the year are now
   // empty (e.g. "[2019]" → "[]", "(2019)" → "()"). Strip them.
   cleaned = cleaned.replace(/\[\s*\]|\(\s*\)/g, "").trim();
-  cleaned = cleaned.replace(/^[-–—,|\s]+|[-–—,|\s]+$/g, "");
+  // Trim the separator that held the date (and any leading counterpart).
+  cleaned = cleaned.replace(SEPARATOR_TRIM_RE, "");
+  SEPARATOR_TRIM_RE.lastIndex = 0;
   return cleaned;
 }
