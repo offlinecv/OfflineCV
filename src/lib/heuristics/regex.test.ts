@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   matchSectionHeader,
+  matchSectionHeaderDetailed,
   matchSectionAnchorToken,
   DATE_RANGE_RE,
   STRICT_MONTH_YEAR_RE,
@@ -64,6 +65,45 @@ describe("matchSectionHeader — head-noun anchor fallback (#108 / #111)", () =>
     // Exact aliases still resolve via the keyword path, not the fallback.
     expect(matchSectionHeader("Experience")).toBe("experience");
     expect(matchSectionHeader("Work Experience")).toBe("experience");
+  });
+
+  describe("closed-vocabulary qualifier fold promotes to the EXACT tier (#467)", () => {
+    // A closed set of qualifier words ("Relevant / Additional / Performance /
+    // Involvement / …" + Experience) folds to the bare "experience" anchor so it
+    // matches the EXACT-alias tier (viaAnchorFallback:false), NOT the softer L2
+    // anchor-fallback tier the splitter suppresses on a repeat open (#258 Layer B).
+    // Without this a SECOND qualified experience header is swallowed as a content
+    // line and the roles beneath it lose their entry boundary.
+    it.each([
+      "Relevant Experience",
+      "Additional Experience",
+      "Performance Experience",
+      "Involvement Experience",
+      "Leadership Experience",
+    ])("routes %s via the exact tier (not anchor-fallback)", (header) => {
+      expect(matchSectionHeaderDetailed(header)).toEqual({
+        section: "experience",
+        viaAnchorFallback: false,
+      });
+    });
+
+    it("leaves an OPEN-ended qualifier on the soft anchor-fallback tier", () => {
+      // "Customer Service Experience" is a genuine heading but its qualifier is not
+      // in the closed set, so it stays a soft L2 match — unchanged by #467.
+      expect(matchSectionHeaderDetailed("Customer Service Experience")).toEqual({
+        section: "experience",
+        viaAnchorFallback: true,
+      });
+    });
+
+    it("does not fold prose or a non-experience anchor", () => {
+      // The fold only fires on "<closed-qualifier…> experience"; a lowercase prose
+      // fragment or a different trailing anchor is untouched.
+      expect(matchSectionHeader("i have relevant experience")).toBeNull();
+      expect(matchSectionHeaderDetailed("Relevant Coursework")?.viaAnchorFallback).toBe(
+        false, // exact education alias, not the experience fold
+      );
+    });
   });
 
   it("rejects prose: long-form sentence with an incidental head noun", () => {

@@ -363,6 +363,43 @@ const LEADING_GLYPH_RE = /^[^\p{L}\p{N}]+(?=\p{L})/u;
  * already-trimmed/lowercased/colon-stripped text from the caller. Returns the
  * matched section, or null when no guardrail-passing anchor is found.
  */
+/**
+ * Closed set of header QUALIFIER words that modify the EXPERIENCE anchor without
+ * changing which section it names — "Relevant / Additional / Performance /
+ * Involvement / Other … Experience" are all the experience section (#467). Closed
+ * vocabulary (not any Title-case word) so a prose line ending in "experience"
+ * cannot be folded into a heading; the anchor-fallback tier's casing/word-count
+ * guards still gate anything outside this list.
+ */
+const EXPERIENCE_QUALIFIERS = new Set<string>([
+  "relevant",
+  "additional",
+  "performance",
+  "involvement",
+  "other",
+  "related",
+  "leadership",
+  "extracurricular",
+  "selected",
+  "further",
+]);
+
+/**
+ * Fold `"<qualifier…> experience"` to the bare `"experience"` anchor when every
+ * word before the trailing anchor is a known {@link EXPERIENCE_QUALIFIERS} word;
+ * otherwise return the input unchanged. Lets a qualified experience header route
+ * via the EXACT-alias tier rather than the splitter-suppressed L2 tier (#467).
+ */
+function stripExperienceQualifier(normalized: string): string {
+  const tokens = normalized.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length < 2 || tokens[tokens.length - 1] !== "experience") {
+    return normalized;
+  }
+  return tokens.slice(0, -1).every((t) => EXPERIENCE_QUALIFIERS.has(t))
+    ? "experience"
+    : normalized;
+}
+
 function matchAnchorFallback(
   raw: string,
   normalized: string,
@@ -520,10 +557,21 @@ export function matchSectionHeaderDetailed(
     normalized = normalized.replace(LEADING_GLYPH_RE, "");
   }
   if (normalized.length === 0 || normalized.length > 40) return null;
+  // #467 — fold a qualifier-prefixed EXPERIENCE header ("Relevant Experience",
+  // "Involvement Experience", "Additional Experience") to the bare "experience"
+  // anchor so it matches the EXACT-alias tier below (viaAnchorFallback:false).
+  // The anchor-fallback tier would also route it, but as a SOFT (L2) match the
+  // splitter suppresses a REPEAT open of an already-open section (#258 Layer B) —
+  // swallowing a second qualified experience header as a content line and
+  // stranding the roles beneath it. A closed qualifier vocabulary keeps this from
+  // minting a section out of prose; enumerating every "<qualifier> experience"
+  // permutation as its own alias is exactly the gap this replaces.
+  const dequalified = stripExperienceQualifier(normalized);
   for (const [name, keywords] of Object.entries(SECTION_KEYWORDS) as Array<
     [SectionName, readonly string[]]
   >) {
-    if (keywords.includes(normalized)) return { section: name, viaAnchorFallback: false };
+    if (keywords.includes(normalized) || keywords.includes(dequalified))
+      return { section: name, viaAnchorFallback: false };
   }
   // Split-letter headers: pdfjs reads a tracked/decorated `EXPERIENCE` as
   // `E XPERIENCE`. Rejoin single split letters and retry, gated to the

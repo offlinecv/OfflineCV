@@ -1361,3 +1361,35 @@ describe("groupIntoLines — ≥2 adjacent flush-right-date rows are NOT a colum
     ]);
   });
 });
+
+describe("qualified experience headers each open a boundary (#467)", () => {
+  it("a SECOND <qualifier> EXPERIENCE header is a boundary, not a content line", () => {
+    // Both headers fold to the exact "experience" alias (#467), so neither is a
+    // soft L2 match — the splitter no longer suppresses the second one as a repeat
+    // open (#258 Layer B). Before the fold, "INVOLVEMENT EXPERIENCE" was swallowed
+    // as a content line inside the first experience region, stranding the roles
+    // beneath it without an entry boundary.
+    const sections = build([
+      { text: "RELEVANT EXPERIENCE", fontSize: 13 },
+      { text: "Lakeside Opera  Springfield, IL", fontSize: 11 },
+      { text: "Production Intern  June 2023 - Present", fontSize: 11 },
+      { text: "• Supported departmental assignments", fontSize: 11 },
+      { text: "INVOLVEMENT EXPERIENCE", fontSize: 13 },
+      { text: "Student Composers Association  August 2022 - Present", fontSize: 11 },
+      { text: "• Created work ranging from symphonic to electronic music", fontSize: 11 },
+    ]);
+
+    // Two distinct experience sections, one per header.
+    expect(names(sections).filter((n) => n === "experience")).toHaveLength(2);
+    // The header text never survives as a content line inside a region.
+    for (const s of sections) {
+      expect(s.lines.some((l) => l.text.includes("INVOLVEMENT EXPERIENCE"))).toBe(
+        false,
+      );
+    }
+    // The role under the second header rides in the second experience section.
+    expect(
+      sectionContaining(sections, "Student Composers Association")?.name,
+    ).toBe("experience");
+  });
+});
