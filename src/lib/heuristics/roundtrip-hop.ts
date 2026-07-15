@@ -26,8 +26,10 @@ import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
 import { runCascade } from "./cascade.ts";
 import type { CascadeResult } from "./types.ts";
 
-/** The score the reconstructed-PDF model is built against. */
-function scoreForCascade(cascade: CascadeResult) {
+/** The score the reconstructed-PDF model is built against. Exported so the edit-
+ *  leg gate (#459) scores its override-applied `displayResult` through the exact
+ *  same recipe the render hop uses, rather than re-deriving it. */
+export function scoreForCascade(cascade: CascadeResult) {
   return computeAnonymousAtsScore({
     parsed: { ...cascade.canonical.fields },
     fieldConfidence: cascade.canonical.fieldConfidence,
