@@ -145,4 +145,36 @@ describe("mid-dot (·) single-line experience headers (#217)", () => {
     expect(roles[0].title).not.toContain("·");
     expect(roles[0].company).toContain("Computer Science Society");
   });
+
+  it("neutral two-segment header keeps 'Title · Company' order (no swap, #436)", () => {
+    // Neither segment carries a company-suffix or a title-keyword, so the
+    // company/title tiebreaks can't decide. A single-line MIDDOT header follows
+    // the "Title · Company" convention (the exporter's one-line shape, #217), so
+    // the first segment must be the TITLE — otherwise the reconstructed header
+    // re-parses title↔company swapped (the #436 round-trip failure).
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Composer · Northwind Ensemble", fontSize: 11 },
+      { text: "2019 - 2021", fontSize: 11 },
+      { text: "• Premiered twelve original chamber works.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Composer");
+    expect(roles[0].company).toBe("Northwind Ensemble");
+  });
+
+  it("a PIPE header keeps the company-first default (middot flip is middot-only)", () => {
+    // The #436 title-first flip is gated to the MIDDOT delimiter. A "Company |
+    // Location"-style pipe header must keep the company-first default so the flip
+    // can't invert a different single-line convention.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Harborlight Chorale | Ensemble Member", fontSize: 11 },
+      { text: "2020 - 2022", fontSize: 11 },
+      { text: "• Sang in the touring ensemble.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].company).toBe("Harborlight Chorale");
+    expect(roles[0].title).toBe("Ensemble Member");
+  });
 });

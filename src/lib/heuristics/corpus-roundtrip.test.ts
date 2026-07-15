@@ -141,16 +141,25 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   // reliable scanned signal) restores the full round-trip; no line remains.
 
   // ── One-line experience header (#436) ──
-  // The Download-PDF exporter now emits a ONE-LINE experience header
+  // The Download-PDF exporter emits a ONE-LINE experience header
   // ("Title · Company, Location · Team", date flush-right) instead of the older
   // stacked two-line shape (#284/#298). The text-only parser has no font signal,
   // so it used the two-line STRUCTURE to tell title from company; on one line
-  // that signal is gone, and fixtures with neutral / parenthetical / two-column
-  // company names re-parse title↔company-swapped or company-truncated. This is a
-  // deliberate look-over-fidelity tradeoff (`ats-resume-model.ts`); teaching the
-  // parser to round-trip the one-line shape is tracked as #436. Delete each line
-  // below as #436 lands (the ratchet forces it — a fixed fixture trips the
-  // stale-entry check).
+  // that signal is gone. #436 has TWO roots:
+  //
+  //   1. SWAP — a neutral two-segment middot header ("Composer · Northwind
+  //      Ensemble", no company-suffix / title-keyword either side) re-parsed
+  //      title↔company-swapped because the no-signal default read the first
+  //      segment as the company. FIXED: the `middot` title-first default in
+  //      `mapWithoutCompanyMatch` reads "Title · Company" per the export/#217
+  //      convention. Seven fixtures cleared their baseline via the ratchet.
+  //   2. TRUNCATION — a PARENTHETICAL / multi-word company on the one-line shape
+  //      ("Danggeun Pay Inc. (KarrotPay)" → "(KarrotPay)") still re-parses
+  //      truncated. STILL OPEN — the remaining lines below are this root (plus
+  //      two-column re-segmentation), a distinct follow-up from the swap.
+  //
+  // Delete each line below as its root lands (the ratchet forces it — a fixed
+  // fixture trips the stale-entry check).
   "google-docs/google-docs-skia-proxy-achievements-oneline.pdf": ["experience"],
   "google-docs/google-docs-skia-proxy-certifications.pdf": ["experience"],
   "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["experience"],
@@ -163,22 +172,8 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   // the ratchet removes this line when #436 lands.
   "latex/awesome-cv-cv.pdf": ["experience"],
   "latex/awesome-cv-resume.pdf": ["experience"],
-  "latex/deedy-resume-macfonts.pdf": ["experience"],
-  "latex/deedy-resume-openfonts.pdf": ["experience"],
   "unknown/chromium-asymmetric-sidebar.pdf": ["experience"],
-  "unknown/chromium-two-column-sidebar.pdf": ["experience"],
-  "unknown/single-column-year-only-roundtrip.pdf": ["experience"],
-  "unknown/synthetic-two-experience-sections.pdf": ["experience"],
-  "unknown/two-column-achievements-sidebar.pdf": ["experience"],
   "unknown/weasyprint-cairo-two-column.pdf": ["experience"],
-  // #467's fixture exhibits the #436 one-line-header title/company swap on the
-  // two involvement roles ("Founding Member" / "Student Composers Association"
-  // and "Music Educator" / "Campus Outreach Program"): neither segment has a
-  // company-suffix or a title keyword, so the exporter's one-line
-  // "Title · Company" shape re-parses with splits[0] taken as company by the
-  // no-signal fall-through. Same #436 root as the group above; un-baseline
-  // when #436 lands.
-  "unknown/qualified-experience-relevant-coursework.pdf": ["experience"],
 };
 
 const CATEGORIES: Category[] = [
