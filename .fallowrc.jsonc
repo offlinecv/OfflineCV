@@ -37,7 +37,16 @@
     "ignore": [
       "src/lib/webllm/spike/**",
       "src/lib/webllm/eval/**",
-      "src/lib/webllm/parse-eval/**"
+      "src/lib/webllm/parse-eval/**",
+
+      // `scripts/**` is dev/CI tooling (fidelity, fixture-derive, fixture-audit)
+      // deliberately outside the production rollup (`input` in vite.config.ts) —
+      // it never ships to dist/. Like the WebLLM harnesses above, these CLIs
+      // score high CRAP purely from carrying no test coverage (they need Node 22
+      // + real PDFs + pdfjs, so they're maintainer-run, not unit-tested), not
+      // from genuine complexity debt. Hold the shipped bundle to the CRAP bar,
+      // not the tooling.
+      "scripts/**"
     ]
   },
 

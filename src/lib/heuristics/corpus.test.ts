@@ -32,6 +32,11 @@ import type { DerivedSignals } from "./defect-classes.ts";
 import { sweepParse } from "./sweep.ts";
 import { runRoundtripHop } from "./roundtrip-hop.ts";
 import { CORPUS_SNAPSHOT_SCHEMA_VERSION } from "./__test-utils__/corpus-snapshots.ts";
+import {
+  readOriginJson,
+  reproTestsReferencingIssue,
+  type OriginJson,
+} from "./__test-utils__/origin-links.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "../../..");
@@ -257,6 +262,50 @@ describe("corpus snapshots", () => {
         // re-parse (the same budget `corpus-roundtrip.test.ts` runs on).
         25_000,
       );
+    });
+  }
+});
+
+/**
+ * `.origin.json` breadcrumb enforcement (issue #39).
+ *
+ * A fixture DERIVED from a real résumé carries a sibling `<name>.origin.json`
+ * naming the issue(s) it reproduces (see `__test-utils__/origin-links.ts`). The
+ * `*.expected.json` golden is lossy by design and cannot catch a value-level
+ * regression sneaking back, so the derived fixture's guard is its `*.repro.test.ts`.
+ * This asserts that guard EXISTS: every issue a breadcrumb claims to reproduce
+ * still has a live `src/lib/heuristics/*.repro.test.ts` referencing `#<issue>`.
+ * A derived fixture that stops pinning its bug becomes a test failure here rather
+ * than a silent hole.
+ */
+describe(".origin.json breadcrumbs pin a live repro test", () => {
+  const withOrigin = pdfs
+    .map((pdf) => ({ pdf, origin: readOriginJson(pdf) }))
+    .filter(
+      (x): x is { pdf: string; origin: OriginJson } =>
+        x.origin !== null && x.origin.reproduces.length > 0,
+    );
+
+  if (withOrigin.length === 0) {
+    // No derived fixtures carry a breadcrumb yet — the convention ships as
+    // infrastructure ahead of the first `.origin.json`. Vacuously green.
+    it.skip("no fixture carries a .origin.json with reproduces[] yet", () => {});
+    return;
+  }
+
+  for (const { pdf, origin } of withOrigin) {
+    const rel = relative(REPO_ROOT, pdf);
+    it(`${rel}: each reproduced issue has a *.repro.test.ts`, () => {
+      for (const issue of origin.reproduces) {
+        const tests = reproTestsReferencingIssue(issue);
+        expect(
+          tests.length,
+          `${rel} (ledger ${origin.ledgerId}) declares it reproduces #${issue}, ` +
+            `but no src/lib/heuristics/*.repro.test.ts references #${issue}. ` +
+            `A derived fixture that stops pinning its bug must fail here — either ` +
+            `restore the repro test or update the .origin.json.`,
+        ).toBeGreaterThan(0);
+      }
     });
   }
 });
