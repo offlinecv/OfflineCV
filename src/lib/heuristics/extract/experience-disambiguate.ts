@@ -27,6 +27,12 @@ type Split = {
   text: string;
   source: number;
   via: "delim" | "comma" | "whole";
+  /** True when the delim split was cleaved by a `" · "` MIDDOT and no other
+   *  delimiter was present on the line — the exporter's one-line
+   *  `Title · Company, Location · Team` shape and the #217 "Title · Company"
+   *  convention. Lets the no-signal default read the first segment as the TITLE
+   *  (not the company), which is what that convention means (#436). */
+  middot?: boolean;
 };
 
 const LEGAL_SUFFIX_RE =
@@ -455,8 +461,12 @@ function splitHeaderSegments(filtered: string[]): Split[] {
   filtered.forEach((h, idx) => {
     const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s+|\s+·\s+/);
     if (atSplit.length > 1) {
+      // A PURE-middot line ("Title · Company · Team") — the exporter's one-line
+      // shape (#436). Excludes a line that also carries `@`/`—`/`|`, which follow
+      // other ordering conventions.
+      const middot = /\s+·\s+/.test(h) && !/\s+[@—|]\s+/.test(h);
       atSplit.forEach((s) =>
-        splits.push({ text: s.trim(), source: idx, via: "delim" }),
+        splits.push({ text: s.trim(), source: idx, via: "delim", middot }),
       );
       return;
     }
@@ -752,8 +762,28 @@ function mapWithoutCompanyMatch(
       team: splits.find((s) => s.source === anchorIdx)?.text,
     };
   }
-  // No title-keyword signal and no stacked-shape anchor — assume top line
-  // is company (single-line header default).
+  // No title-keyword signal and no stacked-shape anchor. Default: the top line is
+  // the company (the stacked "Company \n Title" convention the parser inherited).
+  //
+  // EXCEPTION (#436) — a single-line MIDDOT header follows the OPPOSITE ordering:
+  // "Title · Company" ("Composer · Northwind Ensemble"). That is the exporter's
+  // one-line shape AND the dominant single-line résumé convention (#217), so a
+  // neutral two-segment middot split (no company/title keyword either side) must
+  // read the FIRST segment as the title — otherwise the exported header re-parses
+  // title↔company swapped and no round-trip holds. Guarded to a pure-middot split
+  // whose two segments share one source, so pipe/em-dash/@/stacked shapes keep the
+  // company-first default.
+  if (
+    splits[0]?.middot &&
+    splits[1] !== undefined &&
+    splits[0].source === splits[1].source
+  ) {
+    return {
+      title: splits[0].text,
+      company: splits[1].text,
+      team: splits[2]?.text,
+    };
+  }
   return {
     company: splits[0]?.text,
     title: splits[1]?.text,

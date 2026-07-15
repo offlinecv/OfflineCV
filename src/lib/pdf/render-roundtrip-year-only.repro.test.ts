@@ -74,7 +74,7 @@ describe("#358 — year-only experience role round-trips (no title/company swap,
   // relied on, so the year-only titled+located role now re-parses
   // title↔company-swapped. Un-skip when #436 teaches the parser to disambiguate
   // title/company on a single header line.
-  it.skip("keeps title/company (no swap) and re-attaches the bare-year start_date", () => {
+  it("keeps title/company (no swap) and re-attaches the bare-year start_date", () => {
     const exp = reparsed.canonical.fields.experience ?? [];
     const composer = exp.find(
       (e) => e.title === "Composer" || e.company === "Composer",
