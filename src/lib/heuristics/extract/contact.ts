@@ -85,6 +85,66 @@ function isLinkedinProfileUrl(u: string): boolean {
   return /linkedin\.com\/[A-Za-z0-9]/i.test(u) && !LINKEDIN_NONPROFILE_RE.test(u);
 }
 
+/** Anchored `lnkd.in` shortlink test: a boundary before the host (string start,
+ *  `//`, or a subdomain dot) and a path slash after. The anchors keep it precise
+ *  — a plain `u.includes("lnkd.in")` would also match `blnkd.info` and a
+ *  slash-less `lnkd.in`. Shared by {@link isLinkedinShapedUrl} and the
+ *  website/portfolio exclusion, where it is the only LinkedIn signal the literal
+ *  `linkedin.com` check there does not already cover. */
+function isLnkdInShortlink(u: string): boolean {
+  return /(?:^|\/\/|\.)lnkd\.in\//i.test(u);
+}
+
+/** True when `u` is a LinkedIn identity link on a KNOWN LinkedIn host — the
+ *  canonical `linkedin.com` profile OR the `lnkd.in/...` shortlink domain. Both
+ *  are host-anchored, so this is safe to run over doc-wide visible text without
+ *  false positives. (The looser, host-agnostic `/in/<handle>` redirect shape is
+ *  handled separately by {@link isLinkedinRedirectUrl}, which is restricted to
+ *  authored link annotations — see #378.) */
+function isLinkedinShapedUrl(u: string): boolean {
+  return isLinkedinProfileUrl(u) || isLnkdInShortlink(u);
+}
+
+/** True when `u` is a LinkedIn-*shaped* profile redirect on a NON-`linkedin.com`
+ *  host: `<host>/in/<handle>` as the sole path segment — a personal-domain
+ *  redirect (`jane.dev/in/jane`) or (in our public, PII-safe fixtures) the
+ *  synthetic `example.com/in/<handle>` convention that mirrors LinkedIn's real
+ *  path shape. Résumés hyperlink a visible "LinkedIn" label to such a URL; since
+ *  the annotation carries no anchor text (`PdfLinkAnnotation` has only the URL),
+ *  the `/in/<handle>` shape is the only signal we get.
+ *
+ *  This is deliberately NOT part of {@link isLinkedinShapedUrl}: a bare `/in/`
+ *  path is host-unbounded and matches non-LinkedIn URLs — India-locale paths
+ *  (`nike.com/in/en`), catalog paths (`samsung.com/in/smartphones`), and
+ *  mid-path `/in/` segments (`janedoe.com/portfolio/in/2023`). Applied over
+ *  doc-wide *visible text* it would hijack `linkedin_url`. So it is used ONLY as
+ *  an ANNOTATION predicate (an authored hyperlink is high-intent and rarely
+ *  points at a locale/catalog page), and constrained to `/in/<handle>` as the
+ *  first *and only* path segment with a ≥3-char handle — which rejects the
+ *  mid-path and 2-letter-locale (`/in/en`, `/in/us`) cases outright (#378).
+ *
+ *  ACCEPTED TRADEOFF: the handle is not name-shape-checked, so a sole-segment
+ *  non-LinkedIn `/in/<≥3>` link — a personal portfolio at
+ *  `janedoe.com/in/design-portfolio`, or `acme.com/in/careers` — is claimed as
+ *  LinkedIn when it sits in the contact block. No regex cleanly separates
+ *  `/in/jane-doe` from `/in/design-portfolio` (both are hyphenated), so the
+ *  profile-band restriction (the caller only applies this predicate to
+ *  contact-block annotations) IS the mitigation: an authored `/in/`-shaped link
+ *  in the header is far more likely a "LinkedIn" label than a catalog page.
+ *  Pinned by test rather than narrowed further. */
+function isLinkedinRedirectUrl(u: string): boolean {
+  if (isLinkedinShapedUrl(u)) return true;
+  // The host must carry a dot (`acme.com`, not a dotless `foo`/`localhost`) —
+  // a real personal-domain redirect is an absolute host, and requiring the dot
+  // drops `foo/in/jane` / `localhost/in/team` false positives. The terminator
+  // allows an optional query/fragment (`?utm_source=cv`, `#about`) — tracking
+  // params on a résumé link are common — while the locale/mid-path cases are
+  // still rejected on handle length and segment position, not the terminator.
+  return /^(?:https?:\/\/)?(?:www\.)?[^/\s]+\.[^/\s]+\/in\/[A-Za-z0-9][A-Za-z0-9._-]{2,}\/?(?:[?#]\S*)?$/i.test(
+    u,
+  );
+}
+
 // ── Promoted-identity-link ownership (#134) ─────────────────────────────────
 // LinkedIn/GitHub identity links are matched document-wide (see `anywhereOnDoc`
 // below), so an identity link sitting in a "Links"/footer block that segmented
@@ -219,7 +279,18 @@ function extractOtherUrls(joined: string): {
   const withoutEmails = joined.replace(EMAIL_RE, " ");
   const others = allMatches(URL_RE, withoutEmails).filter((u) => {
     const lower = u.toLowerCase();
-    if (lower.includes("linkedin.com") || lower.includes("github.com")) {
+    // Exclude any linkedin.com URL (profile OR non-profile company/jobs/feed
+    // pages — the literal-host guard keeps those out of website_url), the
+    // `lnkd.in` shortlink host, and github.com. The literal `linkedin.com`
+    // check is load-bearing: it also catches non-profile `linkedin.com/company/…`
+    // pages, which the shortlink test does not (#378). The three terms are
+    // uniform host checks — `lnkd.in` is the one LinkedIn signal `linkedin.com`
+    // doesn't already cover.
+    if (
+      lower.includes("linkedin.com") ||
+      isLnkdInShortlink(u) ||
+      lower.includes("github.com")
+    ) {
       return false;
     }
     // Reject `token.token` false positives (skills like `Node.js`, `etc.`).
@@ -253,7 +324,7 @@ function scan(lines: PdfLine[], joined: string): ContactScanResult {
   // so a hyperlinked "LinkedIn" anchor resolves regardless of the path shape.
   const linkedin =
     firstMatch(LINKEDIN_RE, joined) ??
-    allMatches(URL_RE, joined).find(isLinkedinProfileUrl);
+    allMatches(URL_RE, joined).find(isLinkedinShapedUrl);
   const github = firstMatch(GITHUB_RE, joined);
 
   // Other URLs that aren't linkedin/github → portfolio/website bucket.
@@ -312,9 +383,11 @@ export function extractContact(
   const fallback = scan(allLines, fullText);
 
   // Annotation fallback: URLs hyperlinked behind a visible word
-  // ("LinkedIn", "GitHub") only show up here. LinkedIn/GitHub are matched
-  // document-wide (see `anywhereOnDoc` below); only the looser-but-still-bounded
-  // portfolio/website lookup keeps a section-based region filter.
+  // ("LinkedIn", "GitHub") only show up here. GitHub, and LinkedIn on a KNOWN
+  // host (linkedin.com / lnkd.in), are matched document-wide (see `anywhereOnDoc`
+  // below) — the host anchors them. The host-agnostic LinkedIn `/in/<handle>`
+  // redirect has no host anchor, so its lookup is section-banded like
+  // portfolio/website (see the two-tier `linkedin` resolver below).
   // Portfolio/website use the profile-section boundary — the profile section
   // covers everything above the first recognized header, which is exactly
   // the contact/links block. Annotations whose top edge falls within (or just
@@ -353,7 +426,11 @@ export function extractContact(
     return undefined;
   };
 
-  const isLinkedinUrl = isLinkedinProfileUrl;
+  // `isLinkedinUrl` classifies a URL as LinkedIn for the portfolio/website
+  // EXCLUSIONS below (a `/in/` redirect must never also read as a website). The
+  // annotation LOOKUP for the linkedin slot is split by host anchor — see the
+  // two-tier resolver on `linkedin` below.
+  const isLinkedinUrl = isLinkedinRedirectUrl;
   const isGithubUrl = (u: string) =>
     /github\.com\//i.test(u) && !/github\.com\/(orgs|topics|search)/i.test(u);
   const isPortfolioUrl = (u: string) =>
@@ -361,44 +438,91 @@ export function extractContact(
       u,
     );
 
+  // `reject` runs against EVERY tier's candidate — the text-scan primary/
+  // fallback values as well as the annotation — so a URL already claimed by a
+  // higher-priority field can't re-enter through the text scan. Without it a
+  // `/in/` redirect printed as its own label (LaTeX `\href{url}{url}`) fills
+  // `linkedin_url` from the annotation AND `website_url` from the text scan —
+  // the exact double-render this PR removes (#378).
   const pickUrl = <K extends "linkedin_url" | "github_url" | "portfolio_url" | "website_url">(
     key: K,
-    annotationPredicate: (url: string) => boolean,
-    band: (ann: PdfLinkAnnotation) => boolean,
+    resolveAnnotation: () => string | undefined,
+    reject?: (url: string) => boolean,
   ): { value: string | undefined; confidence: number } => {
-    if (primary[key])
+    if (primary[key] && !reject?.(primary[key]!))
       return { value: primary[key], confidence: primary.confidence[key] };
-    if (fallback[key])
+    if (fallback[key] && !reject?.(fallback[key]!))
       return {
         value: fallback[key],
         confidence: fallback.confidence[key] * 0.9,
       };
-    const annUrl = findAnnotationUrl(annotationPredicate, band);
-    if (annUrl) return { value: annUrl, confidence: 0.95 };
+    const annUrl = resolveAnnotation();
+    if (annUrl && !reject?.(annUrl))
+      return { value: annUrl, confidence: 0.95 };
     return { value: undefined, confidence: 0 };
   };
 
-  const linkedin = pickUrl("linkedin_url", isLinkedinUrl, anywhereOnDoc);
-  const github = pickUrl("github_url", isGithubUrl, anywhereOnDoc);
+  // A hyperlinked "LinkedIn" label often points at a non-linkedin.com redirect
+  // whose path is still the `/in/<handle>` profile shape. Two-tier lookup, split
+  // by whether the host anchors the match:
+  //   1. Known LinkedIn hosts (`linkedin.com` / `lnkd.in`) — the host anchors
+  //      the match, so it is safe ANYWHERE on the doc (a footer/icon link).
+  //   2. Host-agnostic `/in/<handle>` redirect — no host anchor, so confine it
+  //      to the profile band, where an authored "LinkedIn" label actually lives.
+  //      Otherwise a body link like `acme.com/in/analytics` (sole segment, ≥3
+  //      chars) would win the linkedin_url slot ahead of github/portfolio/
+  //      website (#378 follow-up).
+  const linkedin = pickUrl(
+    "linkedin_url",
+    () =>
+      findAnnotationUrl(isLinkedinShapedUrl, anywhereOnDoc) ??
+      findAnnotationUrl(
+        (u) => isLinkedinRedirectUrl(u) && !isLinkedinShapedUrl(u),
+        inProfileSection,
+      ),
+  );
+  const github = pickUrl("github_url", () =>
+    findAnnotationUrl(isGithubUrl, anywhereOnDoc),
+  );
+  // A URL is "the same claim" across tiers regardless of scheme/`www.`/trailing
+  // punctuation, so compare on the normalized form — the text scan normalizes
+  // its values, an annotation carries the raw href.
+  const claimKey = (u: string): string => normalizeUrl(u) ?? u;
+  const claimedByIdentity = new Set(
+    [linkedin.value, github.value]
+      .filter((u): u is string => Boolean(u))
+      .map(claimKey),
+  );
   const portfolio = pickUrl(
     "portfolio_url",
-    (u) => isPortfolioUrl(u) && !isLinkedinUrl(u) && !isGithubUrl(u),
-    inProfileSection,
+    () =>
+      findAnnotationUrl(
+        (u) => isPortfolioUrl(u) && !isLinkedinUrl(u) && !isGithubUrl(u),
+        inProfileSection,
+      ),
+    (u) => claimedByIdentity.has(claimKey(u)),
   );
-  // Website is the catch-all: any remaining annotation URL not already
-  // claimed by linkedin/github/portfolio.
+  // Website is the catch-all: any remaining URL not already claimed by
+  // linkedin/github/portfolio — on ANY tier (text scan or annotation), so a
+  // `/in/` redirect that is both visible text and a hyperlink can't fill both
+  // linkedin_url and website_url (#378).
   const claimedUrls = new Set(
-    [linkedin.value, github.value, portfolio.value].filter(Boolean) as string[],
+    [linkedin.value, github.value, portfolio.value]
+      .filter((u): u is string => Boolean(u))
+      .map(claimKey),
   );
   const website = pickUrl(
     "website_url",
-    (u) =>
-      !claimedUrls.has(u) &&
-      !isLinkedinUrl(u) &&
-      !isGithubUrl(u) &&
-      !u.startsWith("mailto:") &&
-      !u.startsWith("tel:"),
-    inProfileSection,
+    () =>
+      findAnnotationUrl(
+        (u) =>
+          !isLinkedinUrl(u) &&
+          !isGithubUrl(u) &&
+          !u.startsWith("mailto:") &&
+          !u.startsWith("tel:"),
+        inProfileSection,
+      ),
+    (u) => claimedUrls.has(claimKey(u)),
   );
 
   // Ownership (#134): claim the document-wide body lines that are nothing but a

@@ -17,6 +17,7 @@
       "family_name",
       "full_name",
       "given_name",
+      "linkedin_url",
       "phone",
       "phoneIsValid",
       "projects",
@@ -35,8 +36,8 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 86,
-    "preLayoutOverall": 86,
+    "overall": 89,
+    "preLayoutOverall": 89,
     "specificity": {
       "score": 40,
       "max": 40,
@@ -52,11 +53,10 @@
       "totalBullets": 16
     },
     "completeness": {
-      "score": 21,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
-        "LinkedIn",
         "location",
         "summary"
       ]
