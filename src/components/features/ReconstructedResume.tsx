@@ -71,6 +71,7 @@ import type {
   EditableParse,
   ExperienceFieldOverrides,
   BulletOverrides,
+  DescriptionOverrides,
   AddedEntry,
   AddedEntryField,
   AchievementFieldOverrides,
@@ -566,11 +567,13 @@ function ProjectsSection({
   projects,
   groups,
   bulletOverrides,
+  descriptionOverrides,
   addedProjects,
   originalCount,
   onAddEntry,
   onRemoveEntry,
   onEntryField,
+  onDescriptionField,
   onAddBullet,
 }: {
   /** Verbatim source heading (#285); falls back to "Projects" when absent. */
@@ -579,11 +582,16 @@ function ProjectsSection({
   /** Pre-built project groups, index-aligned with `projects`. */
   groups: BulletGroup[];
   bulletOverrides: BulletOverrides;
+  /** Prose-description edits keyed by parsedEntryKey (#489) — read only to keep
+   *  a CLEARED prose field mounted (so the clear is reversible in-session). */
+  descriptionOverrides: DescriptionOverrides;
   addedProjects: AddedEntry[];
   originalCount: number;
   onAddEntry: () => void;
   onRemoveEntry: (id: string) => void;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  /** Commit an edit to a parsed project's prose description (#489). */
+  onDescriptionField: (key: string, value: string | undefined) => void;
   onAddBullet: (entryKey: string, text: string) => void;
 }) {
   return (
@@ -594,6 +602,12 @@ function ProjectsSection({
           const group = groups[i];
           const added =
             i >= originalCount ? addedProjects[i - originalCount] : undefined;
+          const descKey = parsedEntryKey("projects", i);
+          // Keep the prose field mounted once the user has touched it, even after
+          // an authoritative clear ("" override) drops `project.description` — so
+          // the clear stays reversible in-session instead of collapsing to the
+          // read-only "no bullets" hint with no way back (#489 review).
+          const hasDescriptionEdit = descriptionOverrides[descKey] !== undefined;
           const header = [project.name, buildProjectDates(project)]
             .filter(Boolean)
             .join(" · ");
@@ -632,15 +646,26 @@ function ProjectsSection({
                     />
                   ))}
                 </ul>
-              ) : !added && project.description ? (
+              ) : !added && (project.description || hasDescriptionEdit) ? (
                 // #464 — a prose-body project (no `•` bullets, description is
-                // one or more paragraph sentences) surfaces the description
-                // as a paragraph. Without this, the fallback below reads "No
-                // bullet-shaped lines detected" even though the parser DID
-                // extract the description via looksLikeBodyParagraph.
-                <p className="text-sm text-content-primary whitespace-pre-wrap">
-                  {project.description}
-                </p>
+                // one or more paragraph sentences) surfaces the description as a
+                // paragraph. #489 makes that paragraph editable in place: an
+                // EditableField (multiline) keyed by the project's parsedEntryKey
+                // commits back through `descriptionOverrides`, keeping the same
+                // paragraph render style (NOT a bulleted list — the parser
+                // produced prose). The read-only `<p>` (#483) had no input path
+                // while a `•`-bulleted project was fully editable.
+                <EditableField
+                  value={project.description}
+                  emptyAffordance="plain"
+                  placeholder="description"
+                  label="Project description"
+                  textSize="sm"
+                  display="inline"
+                  multiline
+                  className="whitespace-pre-wrap"
+                  onCommit={(v) => onDescriptionField(descKey, v)}
+                />
               ) : (
                 !added && (
                   <p className="text-sm text-content-tertiary">
@@ -959,6 +984,8 @@ export function ReconstructedResume({
     setExperienceField,
     bulletOverrides,
     setBulletField,
+    descriptionOverrides,
+    setDescriptionField,
     removeBullet,
     educationOverrides,
     setEducationField,
@@ -1188,11 +1215,13 @@ export function ReconstructedResume({
         projects={projects}
         groups={projectGroups}
         bulletOverrides={bulletOverrides}
+        descriptionOverrides={descriptionOverrides}
         addedProjects={addedProjects}
         originalCount={originalProjCount}
         onAddEntry={() => addEntry("projects")}
         onRemoveEntry={removeEntry}
         onEntryField={setEntryField}
+        onDescriptionField={setDescriptionField}
         onAddBullet={addBullet}
       />
       {!achievementsAbove && achievementsSection}

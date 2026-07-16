@@ -51,6 +51,7 @@ import type {
   AddedBullets,
   ProfileOverride,
   BulletOverrides,
+  DescriptionOverrides,
 } from "../../hooks/useEditableParse.ts";
 
 /**
@@ -343,6 +344,46 @@ function mergeAchievementFields(
   if (fields.type !== undefined) ach.type = fields.type || undefined;
   if (fields.title !== undefined) ach.title = fields.title;
   if (fields.year !== undefined) ach.year = fields.year || undefined;
+}
+
+// ── Prose descriptions (#489) ───────────────────────────────────────────────
+
+/**
+ * Fold `descriptionOverrides` onto the matching parsed entries' prose
+ * `description`, keyed by {@link parsedEntryKey} (`"<section>:<index>"`) and
+ * resolved through the same {@link resolveParsedDescriptionTarget} the
+ * added-bullet fold uses. This is the edit path for a prose-body entry (a
+ * project whose blurb the parser stored as a paragraph, with no `•` bullets) —
+ * the read-only branch #483 rendered now commits back here (#489).
+ *
+ * An empty string clears the description (treated as absent); a non-empty value
+ * replaces it verbatim.
+ *
+ * `projects` / `heuristic_achievements` are NOT pre-cloned by the entry point
+ * (it clones only experience / education / skills), so clone the arrays + their
+ * entries here before mutating a description — mirroring
+ * {@link applyAchievementOverrides}. `experience` entries are already cloned by
+ * the entry point, so mutating one in place is safe. A later re-clone by
+ * {@link applyAddedEntriesAndBullets} preserves these edits.
+ */
+function applyDescriptionOverrides(
+  nextParsed: HeuristicParsedResume,
+  overrides: DescriptionOverrides,
+): void {
+  if (Object.keys(overrides).length === 0) return;
+  if (nextParsed.projects) {
+    nextParsed.projects = nextParsed.projects.map((p) => ({ ...p }));
+  }
+  if (nextParsed.heuristic_achievements) {
+    nextParsed.heuristic_achievements = nextParsed.heuristic_achievements.map(
+      (a) => ({ ...a }),
+    );
+  }
+  for (const [key, value] of Object.entries(overrides)) {
+    const target = resolveParsedDescriptionTarget(nextParsed, key);
+    if (!target) continue;
+    target.description = value || undefined;
+  }
 }
 
 // ── Skills (add / remove) ───────────────────────────────────────────────────
@@ -649,9 +690,13 @@ function resolveParsedDescriptionTarget(
   const index = Number(key.slice(colon + 1));
   if (!Number.isInteger(index)) return undefined;
   if (section === "experience") return nextParsed.experience[index];
-  if (section === "projects") return nextParsed.projects![index];
+  // `?.` (not `!`): a description/added-bullet override can outlive the section
+  // array it was keyed against (a stale draft or handoff whose re-parse produced
+  // no projects/achievements). Resolve to undefined so the caller's `if
+  // (!target) continue` no-ops, rather than throwing on an absent array.
+  if (section === "projects") return nextParsed.projects?.[index];
   if (section === "achievements")
-    return nextParsed.heuristic_achievements![index];
+    return nextParsed.heuristic_achievements?.[index];
   return undefined;
 }
 
@@ -833,6 +878,12 @@ function applyAddedBulletsToExistingEntries(
  *                  and `year` are copied straight onto the entry — `type` is a
  *                  stored field, not a run of `title`, so nothing is recomposed
  *                  (#456). An empty `type` or `year` clears it. Default `{}`.
+ * @param descriptionOverrides prose-description overrides keyed by
+ *                  {@link parsedEntryKey} (`"<section>:<index>"`, #489). Applied
+ *                  straight onto the matching parsed entry's `description` — the
+ *                  edit path for a prose-body project (no `•` bullets). An empty
+ *                  string clears the description; a non-empty value replaces it.
+ *                  Default `{}`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -850,6 +901,7 @@ export function applyOverrides(
   profileOverrides: readonly ProfileOverride[] = [],
   fieldConfidence: FieldConfidence = {},
   achievements: Record<number, AchievementFieldOverrides> = {},
+  descriptionOverrides: DescriptionOverrides = {},
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -889,6 +941,11 @@ export function applyOverrides(
   // Before the added-entry append below, so the override keys stay aligned with
   // the PARSED achievement indices they were captured against.
   applyAchievementOverrides(nextParsed, achievements);
+  // Prose-body descriptions (#489). Runs before the added-entry append so its
+  // clone-and-set stays aligned with the PARSED entry indices the override keys
+  // were captured against; the later re-clone in applyAddedEntriesAndBullets
+  // preserves these edits.
+  applyDescriptionOverrides(nextParsed, descriptionOverrides);
   applySkillOverrides(nextParsed, skills);
 
   const nextSections = applyAddedEntriesAndBullets(

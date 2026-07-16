@@ -110,6 +110,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     contactOverrides,
     experienceOverrides,
     bulletOverrides,
+    descriptionOverrides,
     removedBullets,
     educationOverrides,
     achievementOverrides,
@@ -162,6 +163,7 @@ export function useAnalyzedResume(): AnalyzedResume {
       profileOverrides,
       base.canonical.fieldConfidence,
       achievementOverrides,
+      descriptionOverrides,
     );
   }, [
     base,
@@ -169,6 +171,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     contactOverrides,
     experienceOverrides,
     bulletOverrides,
+    descriptionOverrides,
     educationOverrides,
     achievementOverrides,
     skillsOverride,

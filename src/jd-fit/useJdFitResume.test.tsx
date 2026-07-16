@@ -77,6 +77,9 @@ function pristineResult(): CascadeResult {
         heuristic_achievements: [
           { type: "Pantent", title: "Bulk catalog editor" },
         ],
+        projects: [
+          { name: "Ledger", description: "Old prose blurb." },
+        ],
       },
       sections: {
         byName: new Map<string, readonly string[]>(),
@@ -162,6 +165,19 @@ describe("useJdFitResume — the handoff carries edit STATE (#456)", () => {
       type: "Patent",
       title: "Bulk catalog editor",
     });
+  });
+
+  it("replays a prose-description edit onto the pristine parse (#489)", () => {
+    // A prose-body project blurb the user rewrote on `/` must apply to the
+    // displayed/exported résumé here, not silently drop back to the original —
+    // the 16th `applyOverrides` arg the handoff caller had missed.
+    seedHandoff({
+      ...EMPTY_EDIT,
+      descriptionOverrides: { "projects:0": "New rewritten blurb." },
+    });
+    mount();
+
+    expect(api?.parsed.projects?.[0].description).toBe("New rewritten blurb.");
   });
 
   it("keeps a user-ADDED entry editable here — it does not arrive baked in", () => {

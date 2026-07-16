@@ -62,6 +62,24 @@ export interface ExperienceFieldOverrides {
 /** Bullet-text overrides, keyed by BulletObservation.index (stable rawText order). */
 export type BulletOverrides = Record<number, string>;
 
+// ── Description overrides (#489) ──────────────────────────────────────────────
+
+/**
+ * Prose-body description overrides, keyed by {@link parsedEntryKey}
+ * (`"<section>:<index>"`) — the SAME key space as {@link AddedBullets}. This is
+ * the edit channel for a parsed entry whose body is a prose paragraph rather
+ * than `•` bullets: a project like "Ridgemont Resume Studio" whose two-sentence
+ * blurb the parser stores on `project.description` with zero graded bullets.
+ * bulletOverrides can't key it — that map is keyed by the resume-wide graded
+ * bullet-pool index, and a prose paragraph produces no such observation — so
+ * this parallel map carries the edit instead (#489). `applyOverrides` folds an
+ * entry straight onto the matching parsed entry's `description`; an empty string
+ * clears it (treated as absent), a non-empty value replaces it verbatim.
+ * Projects are the only surface wired today, but the key space generalizes to
+ * any prose-body entry `resolveParsedDescriptionTarget` resolves.
+ */
+export type DescriptionOverrides = Record<string, string>;
+
 // ── Education overrides ───────────────────────────────────────────────────────
 
 /** Editable education fields (degree, field/major, institution, dates). Mirrors
@@ -125,6 +143,8 @@ export interface EditSnapshot {
   contactOverrides: ContactOverrides;
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
   bulletOverrides: BulletOverrides;
+  /** Optional: drafts persisted before #489 carry no such key. */
+  descriptionOverrides?: DescriptionOverrides;
   removedBullets: number[];
   educationOverrides: Record<number, EducationFieldOverrides>;
   /** Optional: drafts persisted before #454 carry no such key. */
@@ -296,6 +316,13 @@ export interface EditableParse {
   bulletOverrides: BulletOverrides;
   /** Set the override text for one bullet. Pass undefined to clear it. */
   setBulletField: (index: number, value: string | undefined) => void;
+  /** Override map for a parsed entry's prose description, keyed by
+   *  {@link parsedEntryKey} (`"<section>:<index>"`). */
+  descriptionOverrides: DescriptionOverrides;
+  /** Set the override text for one entry's prose description. Pass undefined to
+   *  clear the override (revert to the parsed prose); an empty string is an
+   *  authoritative clear of the description itself. */
+  setDescriptionField: (key: string, value: string | undefined) => void;
   /** Indices of parsed bullets the user dropped (rewrite-review removals, #211),
    *  keyed by BulletObservation.index — folded by applyOverrides to drop the
    *  line from the graded pool, rawText, and the role description. */
@@ -390,6 +417,8 @@ export function useEditableParse(): EditableParse {
     Record<number, ExperienceFieldOverrides>
   >({});
   const [bulletOverrides, setBulletOverrides] = useState<BulletOverrides>({});
+  const [descriptionOverrides, setDescriptionOverrides] =
+    useState<DescriptionOverrides>({});
   const [removedBullets, setRemovedBullets] = useState<ReadonlySet<number>>(
     () => new Set(),
   );
@@ -454,6 +483,21 @@ export function useEditableParse(): EditableParse {
           delete next[index];
         } else {
           next[index] = value;
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const setDescriptionField = useCallback(
+    (key: string, value: string | undefined) => {
+      setDescriptionOverrides((prev) => {
+        const next = { ...prev };
+        if (value === undefined) {
+          delete next[key];
+        } else {
+          next[key] = value;
         }
         return next;
       });
@@ -630,6 +674,7 @@ export function useEditableParse(): EditableParse {
     setContactOverrides({});
     setExperienceOverrides({});
     setBulletOverrides({});
+    setDescriptionOverrides({});
     setRemovedBullets(new Set());
     setEducationOverrides({});
     setAchievementOverrides({});
@@ -644,6 +689,7 @@ export function useEditableParse(): EditableParse {
       contactOverrides,
       experienceOverrides,
       bulletOverrides,
+      descriptionOverrides,
       removedBullets: [...removedBullets],
       educationOverrides,
       achievementOverrides,
@@ -656,6 +702,7 @@ export function useEditableParse(): EditableParse {
       contactOverrides,
       experienceOverrides,
       bulletOverrides,
+      descriptionOverrides,
       removedBullets,
       educationOverrides,
       achievementOverrides,
@@ -685,6 +732,10 @@ export function useEditableParse(): EditableParse {
 
       Object.entries(snap.bulletOverrides).forEach(([index, value]) =>
         setBulletField(Number(index), value),
+      );
+
+      Object.entries(snap.descriptionOverrides ?? {}).forEach(([key, value]) =>
+        setDescriptionField(key, value),
       );
 
       snap.removedBullets.forEach((index) => removeBullet(index));
@@ -745,6 +796,7 @@ export function useEditableParse(): EditableParse {
       setContactField,
       setExperienceField,
       setBulletField,
+      setDescriptionField,
       removeBullet,
       setEducationField,
       setAchievementField,
@@ -761,6 +813,7 @@ export function useEditableParse(): EditableParse {
   const hasEdits = useMemo(() => {
     if (Object.keys(contactOverrides).length > 0) return true;
     if (Object.keys(bulletOverrides).length > 0) return true;
+    if (Object.keys(descriptionOverrides).length > 0) return true;
     if (removedBullets.size > 0) return true;
     if (skillsOverride.removed.length > 0 || skillsOverride.added.length > 0)
       return true;
@@ -786,6 +839,7 @@ export function useEditableParse(): EditableParse {
     contactOverrides,
     experienceOverrides,
     bulletOverrides,
+    descriptionOverrides,
     removedBullets,
     educationOverrides,
     achievementOverrides,
@@ -802,6 +856,8 @@ export function useEditableParse(): EditableParse {
     setExperienceField,
     bulletOverrides,
     setBulletField,
+    descriptionOverrides,
+    setDescriptionField,
     removedBullets,
     removeBullet,
     educationOverrides,
