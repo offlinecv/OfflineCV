@@ -128,6 +128,7 @@ describe("EducationSection date-row symmetry (issue 376)", () => {
         onAddEntry: () => {},
         onRemoveEntry: () => {},
         onEntryField: () => {},
+        onPruneEmpty: () => {},
       }),
     );
   }

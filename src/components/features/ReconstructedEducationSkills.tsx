@@ -30,7 +30,7 @@ import { buildEducationDates } from "../../lib/score/entry-dates.ts";
 import { suggestSkills } from "../../lib/edit/skill-canonical.ts";
 import { Button, EditableField } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
-import { AddPill, RemoveButton } from "./ReconstructedAdd.tsx";
+import { AddPill, RemoveButton, sectionExitBlur } from "./ReconstructedAdd.tsx";
 
 /** Map an EducationEntry field name to the flat AddedEntry field it edits.
  *  `field` (major) is intentionally omitted — added entries carry no major slot,
@@ -216,6 +216,7 @@ export function EducationSection({
   onAddEntry,
   onRemoveEntry,
   onEntryField,
+  onPruneEmpty,
 }: {
   /** Verbatim source heading (#285); falls back to "Education" when absent. */
   heading?: string;
@@ -233,9 +234,14 @@ export function EducationSection({
   onAddEntry: () => void;
   onRemoveEntry: (id: string) => void;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
+  /** Drop a blank added entry when focus leaves the section (#379). */
+  onPruneEmpty: () => void;
 }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section
+      className="flex flex-col gap-2"
+      onBlur={sectionExitBlur(onPruneEmpty)}
+    >
       <SectionHeading>{heading ?? "Education"}</SectionHeading>
       {education.length === 0 ? (
         <NotDetected what="education" />

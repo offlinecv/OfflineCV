@@ -16,7 +16,31 @@
  */
 
 import { useState } from "react";
+import type { FocusEvent } from "react";
 import { Button } from "@design-system";
+
+/**
+ * Build an `onBlur` handler for a section container that fires `onExit` when
+ * focus leaves the section's DOM subtree (the standard
+ * `currentTarget.contains(relatedTarget)` idiom, shared with
+ * {@link InlineBulletAdd}). Used to prune a blank "ghost" entry the user opened
+ * with "+ Add …" and abandoned without typing (#379): the "+ Add" pill lives
+ * inside the section and holds focus after the click, so a focus-exit fires
+ * reliably even though the click-to-edit fields never autofocus.
+ *
+ * The prune is deferred one tick because a field commit fires on the SAME blur
+ * event that leaves the section; running `onExit` synchronously would test the
+ * entry's emptiness against pre-commit state and wrongly drop an entry the user
+ * just typed into. The macrotask lets React flush the commit first.
+ */
+export function sectionExitBlur(
+  onExit: () => void,
+): (e: FocusEvent<HTMLElement>) => void {
+  return (e) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setTimeout(onExit, 0);
+  };
+}
 
 /** A small X glyph, matching the SkillChip remove control. */
 function CloseIcon() {

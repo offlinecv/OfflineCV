@@ -232,6 +232,24 @@ const ADDED_ENTRY_FIELDS = [
 export type AddedEntryField = (typeof ADDED_ENTRY_FIELDS)[number];
 
 /**
+ * True when a user-added entry carries no content at all: every header field is
+ * blank/whitespace AND it has no appended bullets. This is the "ghost entry"
+ * left behind when the user clicks "+ Add …" and navigates away without typing
+ * anything (#379) — such an entry must not persist in the list, the score, or
+ * the exported PDF. Iterates {@link ADDED_ENTRY_FIELDS} so a newly-added header
+ * field is covered automatically, in lockstep with the replay/snapshot tuple.
+ */
+export function isAddedEntryEmpty(
+  entry: AddedEntry,
+  addedBullets: AddedBullets,
+): boolean {
+  const headerEmpty = ADDED_ENTRY_FIELDS.every(
+    (f) => (entry[f] ?? "").trim().length === 0,
+  );
+  return headerEmpty && (addedBullets[entry.id] ?? []).length === 0;
+}
+
+/**
  * Bullet lines a user appended to an entry, keyed by entry key. A PARSED entry's
  * key is `"<section>:<index>"` (see {@link parsedEntryKey}); an ADDED entry's key
  * is its `id`. The two namespaces never collide (added ids are `"added:<n>"`).
@@ -356,6 +374,11 @@ export interface EditableParse {
   addEntry: (section: AddableSection) => string;
   /** Remove a previously-added entry by id (also drops its added bullets). */
   removeEntry: (id: string) => void;
+  /** Drop every EMPTY user-added entry in a section — one the user opened with
+   *  "+ Add …" and left with no populated field and no bullets (#379). Called
+   *  when focus leaves the section, so a blank ghost entry never persists in the
+   *  list, the score, or the exported PDF. No-op when nothing is empty. */
+  pruneEmptyAddedEntries: (section: AddableSection) => void;
   /** Edit one header field on an added entry. */
   setEntryField: (id: string, field: AddedEntryField, value: string) => void;
   /** Bullet lines appended to entries, keyed by entry key (parsedEntryKey or
@@ -433,6 +456,11 @@ export function useEditableParse(): EditableParse {
   );
   const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
   const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
+  // Latest bullets, readable synchronously inside `pruneEmptyAddedEntries` —
+  // which is called deferred (a tick after a blur), by which point an in-flight
+  // add-bullet may have landed. A render-time closure would read a stale map.
+  const addedBulletsRef = useRef(addedBullets);
+  addedBulletsRef.current = addedBullets;
   const [profileOverrides, setProfileOverrides] = useState<ProfileOverride[]>(
     [],
   );
@@ -591,6 +619,19 @@ export function useEditableParse(): EditableParse {
       const next = { ...prev };
       delete next[id];
       return next;
+    });
+  }, []);
+
+  const pruneEmptyAddedEntries = useCallback((section: AddableSection) => {
+    const bullets = addedBulletsRef.current;
+    setAddedEntries((prev) => {
+      const kept = prev.filter(
+        (e) => e.section !== section || !isAddedEntryEmpty(e, bullets),
+      );
+      // An empty entry has no bullets by definition, so `addedBullets` needs no
+      // cleanup here (unlike `removeEntry`). Preserve identity when nothing
+      // changed so an idle blur doesn't churn a re-render.
+      return kept.length === prev.length ? prev : kept;
     });
   }, []);
 
@@ -867,6 +908,7 @@ export function useEditableParse(): EditableParse {
     addedEntries,
     addEntry,
     removeEntry,
+    pruneEmptyAddedEntries,
     setEntryField,
     addedBullets,
     addBullet,
