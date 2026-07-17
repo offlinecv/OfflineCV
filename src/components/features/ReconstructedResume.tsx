@@ -82,6 +82,7 @@ import {
   RemoveButton,
   InlineBulletAdd,
   SectionEmptyHint,
+  sectionExitBlur,
 } from "./ReconstructedAdd.tsx";
 import { AchievementTypePicker } from "./AchievementTypePicker.tsx";
 import {
@@ -397,6 +398,7 @@ function ExperienceSection({
   onRemoveEntry,
   onEntryField,
   onAddBullet,
+  onPruneEmpty,
 }: {
   /** Verbatim source heading (#285); falls back to "Experience" when absent. */
   heading?: string;
@@ -430,6 +432,8 @@ function ExperienceSection({
   onRemoveEntry: (id: string) => void;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
   onAddBullet: (entryKey: string, text: string) => void;
+  /** Drop a blank added entry when focus leaves the section (#379). */
+  onPruneEmpty: () => void;
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
@@ -471,7 +475,10 @@ function ExperienceSection({
     panel: resumeRewritePanel,
   } = useResumeRewriteUi(resumeSections, rewriteApplyBySection, jdContext);
   return (
-    <section className="flex flex-col gap-3">
+    <section
+      className="flex flex-col gap-3"
+      onBlur={sectionExitBlur(onPruneEmpty)}
+    >
       {/* Heading row: the flag legend sits beside the Experience title (next to
           where the inline glyphs actually appear), not at the top of the
           section where it reads as detached. */}
@@ -575,6 +582,7 @@ function ProjectsSection({
   onEntryField,
   onDescriptionField,
   onAddBullet,
+  onPruneEmpty,
 }: {
   /** Verbatim source heading (#285); falls back to "Projects" when absent. */
   heading?: string;
@@ -593,9 +601,14 @@ function ProjectsSection({
   /** Commit an edit to a parsed project's prose description (#489). */
   onDescriptionField: (key: string, value: string | undefined) => void;
   onAddBullet: (entryKey: string, text: string) => void;
+  /** Drop a blank added entry when focus leaves the section (#379). */
+  onPruneEmpty: () => void;
 }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section
+      className="flex flex-col gap-3"
+      onBlur={sectionExitBlur(onPruneEmpty)}
+    >
       <SectionHeading>{heading ?? "Projects"}</SectionHeading>
       <div className="flex flex-col gap-4">
         {projects.map((project, i) => {
@@ -784,6 +797,7 @@ function AchievementsSection({
   onEntryField,
   onAchievementField,
   onAddBullet,
+  onPruneEmpty,
 }: {
   /** Verbatim source heading (#285); falls back to "Achievements" when absent. */
   heading?: string;
@@ -802,9 +816,14 @@ function AchievementsSection({
     value: string,
   ) => void;
   onAddBullet: (entryKey: string, text: string) => void;
+  /** Drop a blank added entry when focus leaves the section (#379). */
+  onPruneEmpty: () => void;
 }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section
+      className="flex flex-col gap-3"
+      onBlur={sectionExitBlur(onPruneEmpty)}
+    >
       <SectionHeading>{heading ?? "Achievements"}</SectionHeading>
       <div className="flex flex-col gap-4">
         {achievements.map((achievement, i) => {
@@ -992,6 +1011,7 @@ export function ReconstructedResume({
     setAchievementField,
     addEntry,
     removeEntry,
+    pruneEmptyAddedEntries,
     setEntryField,
     addBullet,
     addSkill,
@@ -1129,6 +1149,7 @@ export function ReconstructedResume({
       addedAchievements={addedAchievements}
       originalCount={originalAchCount}
       onAddEntry={() => addEntry("achievements")}
+      onPruneEmpty={() => pruneEmptyAddedEntries("achievements")}
       onRemoveEntry={removeEntry}
       onEntryField={setEntryField}
       onAchievementField={setAchievementField}
@@ -1206,6 +1227,7 @@ export function ReconstructedResume({
         addedExperience={addedExperience}
         originalCount={originalExpCount}
         onAddEntry={() => addEntry("experience")}
+        onPruneEmpty={() => pruneEmptyAddedEntries("experience")}
         onRemoveEntry={removeEntry}
         onEntryField={setEntryField}
         onAddBullet={addBullet}
@@ -1219,6 +1241,7 @@ export function ReconstructedResume({
         addedProjects={addedProjects}
         originalCount={originalProjCount}
         onAddEntry={() => addEntry("projects")}
+        onPruneEmpty={() => pruneEmptyAddedEntries("projects")}
         onRemoveEntry={removeEntry}
         onEntryField={setEntryField}
         onDescriptionField={setDescriptionField}
@@ -1235,6 +1258,7 @@ export function ReconstructedResume({
         addedEducation={addedEducation}
         originalCount={originalEduCount}
         onAddEntry={() => addEntry("education")}
+        onPruneEmpty={() => pruneEmptyAddedEntries("education")}
         onRemoveEntry={removeEntry}
         onEntryField={setEntryField}
       />
