@@ -54,8 +54,6 @@ __pycache__/
 # above (which only exist on the maintainer's machine), so they're broken for
 # anyone else — kept on disk for local use, not shipped. Contributors use the
 # npm scripts; build/deploy guidance lives in README.md.
-/scripts/run_resumelint.sh
-/scripts/deploy_resumelint.sh
 /scripts/run_offlinecv.sh
 /scripts/deploy_offlinecv.sh
 
