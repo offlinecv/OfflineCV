@@ -300,6 +300,26 @@ function stripLocationSuffix(s: string): {
     }
   }
 
+  // Pass F — comma-delimited trailing BARE-LOCATION keyword (#436). The one-line
+  // experience exporter joins "Company, Location" into a single middot cell, and
+  // when the model's `location` is a work-mode keyword ("Remote", "Hybrid",
+  // "On-site") or a bare well-known city with no state/country tail ("London",
+  // "Seattle") — the forms `BARE_LOCATION_RE` recognizes but Passes A–E (which
+  // all require a "City, ST" / "City, Country" shape) do not — the location bled
+  // into `company` on round-trip ("Globex Corporation, Remote"). Peel the tail
+  // when it whole-matches the closed `BARE_LOCATION_RE` vocabulary; a real
+  // company never ends in a bare ", Remote" / ", London" tail, so the closed set
+  // keeps this from stealing company text. Tried LAST so the richer city+state
+  // and city+country shapes above still win when they apply.
+  const commaF = s.lastIndexOf(",");
+  if (commaF > 0) {
+    const tail = s.slice(commaF + 1).trim();
+    if (BARE_LOCATION_RE.test(tail)) {
+      const before = stripDanglingSeparator(s.slice(0, commaF));
+      if (before) return { text: before, location: tail };
+    }
+  }
+
   return { text: s, location: undefined };
 }
 
@@ -540,6 +560,40 @@ function mapSegmentsToFields(
         (i) => splits[i].source === anchorIdx,
       );
       if (anchorMatch !== undefined) return anchorMatch;
+    }
+    // #436 (truncation root) — a single-line MIDDOT header "Title · Company"
+    // (no line above) where BOTH segments read like a company: the title carries
+    // a SOFT company word ("Solutions Engineer" → `Solutions`) and the real
+    // company carries a HARD legal-entity marker ("Acme Cloud, Inc." → `Inc.`).
+    // Without `hasAbove` the anchor tiebreak can't fire, so the topmost
+    // `companyMatchIdxs[0]` (the title) would be mis-labelled the company,
+    // swapping title↔company — the #495 middot title-first default never runs
+    // because `companyIdx !== -1` routes to `mapWithCompanyMatch`. Prefer the
+    // hard-legal segment: it is a strictly stronger company signal than a soft
+    // keyword. `COMPANY_LEGAL_TAIL_RE` is the same strict promotion vocab
+    // `mapTitleFirst` case 3a uses; a soft-only tie keeps the topmost default.
+    //
+    // GATED to the exact export shape — every company-match on ONE source line
+    // that split as `middot` — so a stacked two-line header (matches on
+    // different sources) and a non-middot single line are untouched. When the
+    // topmost match is itself the hard-legal one, `find` returns it and the
+    // result equals the default, so no extra guard is needed. Without this gate
+    // the preference
+    // fired on genuine two-column/stacked layouts and stole the company (#436
+    // review).
+    const allMatchesShareMiddotLine =
+      companyMatchIdxs.every(
+        (i) =>
+          splits[i].source === splits[companyMatchIdxs[0]].source &&
+          splits[i].middot,
+      );
+    if (allMatchesShareMiddotLine) {
+      const hardLegalIdx = companyMatchIdxs.find((i) =>
+        COMPANY_LEGAL_TAIL_RE.test(
+          splits[i].text.trim().split(/[\s,]+/).pop() ?? "",
+        ),
+      );
+      if (hardLegalIdx !== undefined) return hardLegalIdx;
     }
     return companyMatchIdxs[0];
   };

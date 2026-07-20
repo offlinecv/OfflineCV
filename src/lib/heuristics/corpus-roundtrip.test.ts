@@ -150,30 +150,32 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   //   1. SWAP — a neutral two-segment middot header ("Composer · Northwind
   //      Ensemble", no company-suffix / title-keyword either side) re-parsed
   //      title↔company-swapped because the no-signal default read the first
-  //      segment as the company. FIXED: the `middot` title-first default in
-  //      `mapWithoutCompanyMatch` reads "Title · Company" per the export/#217
-  //      convention. Seven fixtures cleared their baseline via the ratchet.
+  //      segment as the company. FIXED (#495): the `middot` title-first default
+  //      in `mapWithoutCompanyMatch`. A related swap where BOTH segments look
+  //      like a company on one middot line — a soft title keyword vs a hard legal
+  //      tail ("Solutions Engineer · Acme Cloud, Inc.") — is now also fixed by
+  //      the `chooseCompanyIdx` hard-legal preference (certifications cleared).
+  //      A bare-location tail the exporter joins into the company cell
+  //      ("…, Remote") is peeled by `stripLocationSuffix` Pass F (achievements-
+  //      oneline, two-column, chromium-asymmetric, weasyprint-two-column cleared).
   //   2. TRUNCATION — a PARENTHETICAL / multi-word company on the one-line shape
   //      ("Danggeun Pay Inc. (KarrotPay)" → "(KarrotPay)") still re-parses
-  //      truncated. STILL OPEN — the remaining lines below are this root (plus
-  //      two-column re-segmentation), a distinct follow-up from the swap.
+  //      truncated. STILL OPEN — the four lines below are this root (plus
+  //      two-column re-segmentation). The fix needs a wrapped-header rejoin AND a
+  //      render-side date-column reserve, which perturb two-column round-trips
+  //      and so warrant their own follow-up, kept separate from the swap fix.
   //
   // Delete each line below as its root lands (the ratchet forces it — a fixed
   // fixture trips the stale-entry check).
-  "google-docs/google-docs-skia-proxy-achievements-oneline.pdf": ["experience"],
-  "google-docs/google-docs-skia-proxy-certifications.pdf": ["experience"],
   "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["experience"],
   "google-docs/google-docs-skia-proxy-role-first-experience.pdf": ["experience"],
-  "google-docs/google-docs-skia-proxy-two-column.pdf": ["experience"],
   // awesome-cv-cv: #383 cleared its earlier abbreviated-date baseline (see the
   // #383 note above), but main's one-line header re-regresses `experience` for
-  // the #436 reason — 12 roles re-parse company-truncated/swapped off the
-  // one-line "Title · Company … Dates" shape. Same #436 root as the group here;
-  // the ratchet removes this line when #436 lands.
+  // the #436 TRUNCATION reason — 12 roles re-parse company-truncated/swapped off
+  // the one-line "Title · Company … Dates" shape. Removed when the truncation
+  // root lands.
   "latex/awesome-cv-cv.pdf": ["experience"],
   "latex/awesome-cv-resume.pdf": ["experience"],
-  "unknown/chromium-asymmetric-sidebar.pdf": ["experience"],
-  "unknown/weasyprint-cairo-two-column.pdf": ["experience"],
 };
 
 const CATEGORIES: Category[] = [

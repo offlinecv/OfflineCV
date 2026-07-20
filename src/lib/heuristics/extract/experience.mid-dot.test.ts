@@ -177,4 +177,76 @@ describe("mid-dot (·) single-line experience headers (#217)", () => {
     expect(roles[0].company).toBe("Harborlight Chorale");
     expect(roles[0].title).toBe("Ensemble Member");
   });
+
+  it("a soft-keyword title does not steal the company from a hard legal tail (#436)", () => {
+    // "Solutions Engineer" carries a SOFT company word ("Solutions"), so BOTH
+    // middot segments read like a company; the #495 title-first default never
+    // runs because a company match routes to `mapWithCompanyMatch`. The hard
+    // legal tail ("Inc.") must win so title↔company don't swap on this single
+    // line (no line above to run the anchor tiebreak).
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Solutions Engineer · Acme Cloud, Inc.", fontSize: 11 },
+      { text: "01/2020 - Present", fontSize: 11 },
+      { text: "• Rolled out zero-downtime deploys across 12 services.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Solutions Engineer");
+    expect(roles[0].company).toContain("Acme Cloud");
+  });
+
+  it("peels a bare-location tail ('Remote') off the company (#436, Pass F)", () => {
+    // The exporter joins "Company, Location" in one middot cell; a work-mode
+    // location keyword has no "City, ST" shape, so Pass F must peel it rather
+    // than let it bleed into `company` on round-trip.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Staff Engineer · Globex Corporation, Remote", fontSize: 11 },
+      { text: "06/2021 - Present", fontSize: 11 },
+      { text: "• Owned the billing platform end to end.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title.toLowerCase()).toContain("engineer");
+    expect(roles[0].company).toBe("Globex Corporation");
+    expect(roles[0].company).not.toContain("Remote");
+  });
+
+  it("locks the accepted tie-break: a hard-legal TITLE tail commits to title-first (#436, #505 review)", () => {
+    // Documented convention tradeoff (PR #505 Secondary). The hard-legal
+    // promotion is one convention: it can't distinguish "soft-company title +
+    // hard-legal company" (the shape it fixes) from the signal-identical
+    // "soft-company company + hard-legal title". So a header whose *title* ends
+    // in a literal legal token ("Director, Holdings") commits to title-first —
+    // an undecidable edge that never occurs in the export domain (a title never
+    // ends in "Inc."/"Holdings") and is vanishingly rare in real résumés. This
+    // test pins the intended behavior so a future change to the tie-break is a
+    // visible diff, not a silent regression.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Acme Solutions · Director, Holdings", fontSize: 11 },
+      { text: "01/2020 - Present", fontSize: 11 },
+      { text: "• Led a team of 12.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Acme Solutions");
+    expect(roles[0].company).toContain("Director, Holdings");
+  });
+
+  it("locks the Pass F boundary: a company ending in a listed city splits at the last comma (#436, #505 review)", () => {
+    // Pass F peels any last-comma tail that whole-matches the closed
+    // `BARE_LOCATION_RE` city vocab, so a real employer whose name ends in a
+    // listed city ("Lloyd's, London") splits company/location. The extracted
+    // location stays semantically correct and the split is gated to the last
+    // comma + a closed vocab, so this is a low-risk, documented boundary — pinned
+    // here so the intended behavior is a visible diff if the vocab changes.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Underwriter · Lloyd's, London", fontSize: 11 },
+      { text: "06/2021 - Present", fontSize: 11 },
+      { text: "• Priced specialty risk.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].company).toBe("Lloyd's");
+    expect(roles[0].location).toBe("London");
+  });
 });
