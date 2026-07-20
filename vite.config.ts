@@ -9,6 +9,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 // Token-values swap seam. `src/styles.css` imports the raw `--color-*` values
 // via the bare `@design-tokens` specifier; this alias points it at the in-tree
 // default (`src/design-system/styles/tokens.css`), so the standalone build is
@@ -141,6 +143,7 @@ export default defineConfig({
     react(),
     emitVersionJson(APP_VERSION),
     jdFitTrailingSlash(),
+    cloudflare()
   ],
   build: {
     // Two HTML entries (#226): `/` (parser audit, index.html) and `/jd-fit/`
