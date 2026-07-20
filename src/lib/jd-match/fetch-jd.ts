@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 // ATS public JSON API clients — fetch a job description as plaintext.
 // These APIs are free, unauthenticated, and legally safe.

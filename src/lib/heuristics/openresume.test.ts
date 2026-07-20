@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { parseHeuristic } from "./openresume.ts";
 import { mkItems, mkDefaultPages } from "./__test-utils__/mkItem.ts";

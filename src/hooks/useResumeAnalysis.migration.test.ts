@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Persistence back-compat for the #427 contact-link consolidation.

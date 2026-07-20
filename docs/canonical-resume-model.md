@@ -1,10 +1,10 @@
 # Canonical résumé model — target representation + staged migration plan (#439)
 
-Design for [#439](https://github.com/resumelint-org/resumelint/issues/439), the follow-up to the architecture decision in [#438](https://github.com/resumelint-org/resumelint/issues/438) ("one canonical representation, staged").
+Design for [#439](https://github.com/offlinecv/OfflineCV/issues/439), the follow-up to the architecture decision in [#438](https://github.com/offlinecv/OfflineCV/issues/438) ("one canonical representation, staged").
 
 **Status:** design only — no production code changed by this issue (acceptance criterion). Implementation lands as the sequenced, per-stage follow-up issues at the end of this doc. Each stage is separately reviewable and keeps the round-trip invariant green; **nothing here is a big-bang PR.**
 
-**Baseline the design is written against:** `main` as of the mapping in this doc. All `file:line` citations are against that baseline. `ATS_SCORE_ALGO_VERSION` is `"1.4"` (`src/lib/score/score.ts:73`); [#435](https://github.com/resumelint-org/resumelint/issues/435) bumps it to `1.5` in flight — the cache-version hook in §6 keys off whatever value is current at each stage's cutover, not a pinned literal.
+**Baseline the design is written against:** `main` as of the mapping in this doc. All `file:line` citations are against that baseline. `ATS_SCORE_ALGO_VERSION` is `"1.4"` (`src/lib/score/score.ts:73`); [#435](https://github.com/offlinecv/OfflineCV/issues/435) bumps it to `1.5` in flight — the cache-version hook in §6 keys off whatever value is current at each stage's cutover, not a pinned literal.
 
 ---
 
@@ -24,7 +24,7 @@ The decision (#438) is to collapse these toward **one canonical internal model**
 
 Two structural costs the canonical model must dissolve, not just relocate:
 
-- **Cost 1 — N peer shapes, N hand-sync adapters.** `apply-overrides.ts` is the sharpest tell: `ApplyOverridesResult` (`edit/apply-overrides.ts:52`) must return `parsed` **and** `rawText` **and** `sections` **and** `fieldConfidence` **together**, because one un-mirrored user edit re-grades or re-parses wrong (comments cite [#133](https://github.com/resumelint-org/resumelint/issues/133), [#421](https://github.com/resumelint-org/resumelint/issues/421) Blocking #1/#3). The `LlmParsedResume` hand-sync note (`parse-resume.ts:52-54`: *"Keep field names in sync with that interface"*) is the same cost in a second place.
+- **Cost 1 — N peer shapes, N hand-sync adapters.** `apply-overrides.ts` is the sharpest tell: `ApplyOverridesResult` (`edit/apply-overrides.ts:52`) must return `parsed` **and** `rawText` **and** `sections` **and** `fieldConfidence` **together**, because one un-mirrored user edit re-grades or re-parses wrong (comments cite [#133](https://github.com/offlinecv/OfflineCV/issues/133), [#421](https://github.com/offlinecv/OfflineCV/issues/421) Blocking #1/#3). The `LlmParsedResume` hand-sync note (`parse-resume.ts:52-54`: *"Keep field names in sync with that interface"*) is the same cost in a second place.
 - **Cost 2 — the render model encodes re-parse invariants.** `AtsEntry` is doing triple duty (display, PDF layout, **and** export hint via `AtsEntryFields`). Its layout fields exist to satisfy the parse→export→parse identity: `headerLineDate` (#425/#302 entry-boundary date cue), `subLineDate` (#425, avoids the #298 title↔company re-parse swap), `atomicSegments` (#301 skills-middot atomicity), `headerBold` (#425) — each documented in terms of how the exported PDF must re-parse (`ats-resume-model.ts:118-158`). So the renderer knows parser internals, and a fidelity fix touches model + renderer + the parser exemption it leans on + regenerated corpus goldens — four surfaces **by construction**. That is why #425/#434/#435 each landed at 40–54 files.
 
 ---
@@ -33,13 +33,13 @@ Two structural costs the canonical model must dissolve, not just relocate:
 
 ### 1 · `HeuristicParsedResume` + `CascadeResult`
 - `HeuristicParsedResume = Partial<ParsedResume> & { skills; experience; education; phoneIsValid? }` — `heuristics/types.ts:121`. `phoneIsValid?` (`:126-129`) precomputes libphonenumber `isValid()` so the scorer skips importing `libphonenumber-js` (entry-chunk budget).
-- `CascadeResult` — `heuristics/types.ts:174`: `parsed`, `rawText` (`:185`), `markdown?` (`:188`), **`sections: SectionedResume`** (`:194`, cites [#132](https://github.com/resumelint-org/resumelint/issues/132) — replaces the retired `skillsSectionText` side-channel), `linkAnnotations`, `diagnostics.sectionSource`, `timings`.
+- `CascadeResult` — `heuristics/types.ts:174`: `parsed`, `rawText` (`:185`), `markdown?` (`:188`), **`sections: SectionedResume`** (`:194`, cites [#132](https://github.com/offlinecv/OfflineCV/issues/132) — replaces the retired `skillsSectionText` side-channel), `linkAnnotations`, `diagnostics.sectionSource`, `timings`.
 
 ### 2 · `SectionedResume`
 - `heuristics/sections.ts:85` (cites #127 §2.1, #132). `byName: ReadonlyMap<SectionName|"profile", readonly string[]>` (`:89`), `accomplishmentSections` (`:90`, *not yet consumed by pool sourcing*), `sectionHeadings?` (`:94`, #285), `source: "markdown"|"regex"` (`:101`). Built by `toSectionedResume` (`sections.ts:122`) over `PdfSection` (`:62`).
 
 ### 3 · `LlmParsedResume`
-- `webllm/parse-resume.ts:56`. Fields mirror the heuristic parser **by hand** (`:52-54`) so the disagreement detector can diff field-by-field ([#242](https://github.com/resumelint-org/resumelint/issues/242)). No converter exists between #1 and #3 — the "adapter" is the intentional structural mirror; `diffParses(heuristic, llm)` at `heuristics/disagreement.ts:186` consumes both.
+- `webllm/parse-resume.ts:56`. Fields mirror the heuristic parser **by hand** (`:52-54`) so the disagreement detector can diff field-by-field ([#242](https://github.com/offlinecv/OfflineCV/issues/242)). No converter exists between #1 and #3 — the "adapter" is the intentional structural mirror; `diffParses(heuristic, llm)` at `heuristics/disagreement.ts:186` consumes both.
 
 ### 4 · `AtsResumeModel`
 - `pdf/ats-resume-model.ts:181` (`sections: AtsSection[]` `:188`). `AtsSection` `:173`; `AtsEntry` `:114` with the four round-trip-encoding layout fields above; `AtsEntryFields` `:87` (machine-readable mirror; *"Display/render code never reads this"* `:160`). Built by `buildAtsResumeModel(result, score, edit?)` — `ats-resume-model.ts:425`; date-slot routing to `headerLineDate`/`subLineDate` at `:597-613` cites #425/#302. Round-trip-tradeoff note at `:469`.
@@ -155,7 +155,7 @@ Per-stage implementation issues were minted from **this** list once it was fixed
 
 The `resumes` IndexedDB store caches a **pre-canonical `CascadeResult`**: `SavedResumeSnapshot { result: CascadeResult; score; sourceKind }` (`resume-library.ts:37`), written in `saveResumeToLibrary` (`:90-99`), read via `readSnapshot` (`:66`); it round-trips through IndexedDB structured clone, which preserves the `sections` `Map` (`:6-13`, #321).
 
-Any stage that changes the **persisted** shape (Stage E, and Stage B if the façade is persisted) MUST invalidate or migrate that cache — not only the in-memory model + corpus goldens. **Cheapest hook:** version the cached record by `ATS_SCORE_ALGO_VERSION` (`score.ts:73`, currently `"1.4"`, →`1.5` via #435) **plus a new parser-shape version constant**, so a representation change auto-invalidates on read and re-parses from the stored PDF `Blob` (#321 keeps the blob). A stale-shape read must **re-parse**, never silently deserialize an old shape into the canonical model. Refs [#321](https://github.com/resumelint-org/resumelint/issues/321), [#401](https://github.com/resumelint-org/resumelint/issues/401).
+Any stage that changes the **persisted** shape (Stage E, and Stage B if the façade is persisted) MUST invalidate or migrate that cache — not only the in-memory model + corpus goldens. **Cheapest hook:** version the cached record by `ATS_SCORE_ALGO_VERSION` (`score.ts:73`, currently `"1.4"`, →`1.5` via #435) **plus a new parser-shape version constant**, so a representation change auto-invalidates on read and re-parses from the stored PDF `Blob` (#321 keeps the blob). A stale-shape read must **re-parse**, never silently deserialize an old shape into the canonical model. Refs [#321](https://github.com/offlinecv/OfflineCV/issues/321), [#401](https://github.com/offlinecv/OfflineCV/issues/401).
 
 ---
 
@@ -198,4 +198,4 @@ Minted **after** this plan is accepted, one per stage, each with its round-trip-
 3. **Stage C** — move the round-trip invariant onto the canonical model; renderer draws from the projection. *(carries the §7 header-vs-entry acceptance test.)*
 4. **Stage D+E** (shipped combined, #445 — supersedes the separate #446) — collapse `LlmParsedResume` + `ApplyOverridesResult` into projections and delete the hand-sync note, **and** cut over: remove the `CascadeResult` façade + ship #321 cache versioning/invalidation (§6). Combined so the façade removal is provable in one round-trip gate rather than two.
 
-Refs [#438](https://github.com/resumelint-org/resumelint/issues/438), [#321](https://github.com/resumelint-org/resumelint/issues/321), [#401](https://github.com/resumelint-org/resumelint/issues/401), [#425](https://github.com/resumelint-org/resumelint/issues/425), [#434](https://github.com/resumelint-org/resumelint/issues/434), [#435](https://github.com/resumelint-org/resumelint/issues/435).
+Refs [#438](https://github.com/offlinecv/OfflineCV/issues/438), [#321](https://github.com/offlinecv/OfflineCV/issues/321), [#401](https://github.com/offlinecv/OfflineCV/issues/401), [#425](https://github.com/offlinecv/OfflineCV/issues/425), [#434](https://github.com/offlinecv/OfflineCV/issues/434), [#435](https://github.com/offlinecv/OfflineCV/issues/435).

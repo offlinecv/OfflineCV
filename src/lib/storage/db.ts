@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * IndexedDB handle for the local-first storage foundation (#321).
@@ -18,23 +18,27 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { ResumeRecord, JobRecord } from "./types.ts";
 
+// Kept as "resumelint" through the OfflineCV rename: this is the IndexedDB
+// database name, not a brand string. Renaming it would orphan every existing
+// user's locally stored resumes/jobs (no migration path). It is invisible to
+// users, so it stays for data continuity.
 export const DB_NAME = "resumelint";
 /** Bump when adding/altering a store or index; add a matching `oldVersion < N`
  *  branch in `upgrade()`. */
 export const DB_VERSION = 1;
 
-interface ResumeLintDB extends DBSchema {
+interface OfflineCvDB extends DBSchema {
   resumes: { key: string; value: ResumeRecord };
   jobs: { key: string; value: JobRecord };
 }
 
-let dbPromise: Promise<IDBPDatabase<ResumeLintDB>> | null = null;
+let dbPromise: Promise<IDBPDatabase<OfflineCvDB>> | null = null;
 
 /** Open (once) and return the shared DB handle. Cached so concurrent callers
  *  share one connection. */
-export function getDB(): Promise<IDBPDatabase<ResumeLintDB>> {
+export function getDB(): Promise<IDBPDatabase<OfflineCvDB>> {
   if (dbPromise === null) {
-    dbPromise = openDB<ResumeLintDB>(DB_NAME, DB_VERSION, {
+    dbPromise = openDB<OfflineCvDB>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion) {
         // v0 → v1: both stores keyed on `id`. Keep future migrations as
         // additional `if (oldVersion < N)` blocks below — never edit an

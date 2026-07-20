@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Repro artifact builder — a structure-only, PII-redacted-BY-CONSTRUCTION
@@ -8,7 +8,7 @@
  * ┌─────────────────────────────────────────────────────────────────────────┐
  * │ WHY THIS FILE NEVER CARRIES RÉSUMÉ TEXT — read before editing.            │
  * │                                                                           │
- * │ resumelint is a PUBLIC repo. A user reporting a parser gap is, by         │
+ * │ offlinecv is a PUBLIC repo. A user reporting a parser gap is, by         │
  * │ definition, sitting on top of their OWN résumé — real name, real email,   │
  * │ real phone, real bullet text. If any of that literal text rode along in   │
  * │ the downloadable repro artifact, the user would unknowingly publish their │

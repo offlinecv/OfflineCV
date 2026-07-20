@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The resumelint Authors
+# Copyright 2026 The offlinecv Authors
 #
 # PostToolUse(Edit|Write) hook: drop a per-session sentinel when a .ts
 # or .tsx file under src/ is touched, so lint_and_test.sh knows to run
@@ -11,11 +11,11 @@
 # config. When that lands, add the per-file format call here (single
 # file, ~300ms budget).
 #
-# Override: RESUMELINT_SKIP_HOOKS=1.
+# Override: OFFLINECV_SKIP_HOOKS=1.
 
 set -euo pipefail
 
-[[ "${RESUMELINT_SKIP_HOOKS:-0}" == "1" ]] && exit 0
+[[ "${OFFLINECV_SKIP_HOOKS:-0}" == "1" ]] && exit 0
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=_lib.sh
@@ -40,7 +40,7 @@ esac
 
 # Per-session sentinel for the Stop hook.
 if [[ -n "$session_id" ]]; then
-  : >"/tmp/resumelint_ts_edited.$session_id"
+  : >"/tmp/offlinecv_ts_edited.$session_id"
 fi
 
 exit 0

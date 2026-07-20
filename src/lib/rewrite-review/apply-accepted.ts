@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * apply-accepted.ts — fold per-bullet accept/reject/edit decisions over an

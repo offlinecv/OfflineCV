@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Copyright 2026 The resumelint Authors */
+/* Copyright 2026 The offlinecv Authors */
 
 /*
  * Default token VALUES — the SWAPPABLE layer.
@@ -12,7 +12,7 @@
  * semantic vocabulary in styles/theme.css. They are the override seam: a
  * downstream productionizer supplies their own brand without forking, either
  * by (1) redefining these same properties in a stylesheet imported after
- * resumelint's (cascade wins), or (2) pointing the Vite `@design-tokens`
+ * offlinecv's (cascade wins), or (2) pointing the Vite `@design-tokens`
  * alias at their own complete copy of this file. See the README "Theming"
  * section. The semantic Tailwind classes are generated from these names and
  * do not change — only the values here are meant to be replaced.

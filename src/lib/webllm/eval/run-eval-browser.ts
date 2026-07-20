@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Browser entry for the rewrite-quality eval harness.
  *
  * Reached via `npm run eval:rewrite` → opens
- * `/resumelint/eval-rewrite.html` in the dev server. Loads the model
+ * `/offlinecv/eval-rewrite.html` in the dev server. Loads the model
  * the user picked, runs every prompt variant against every fixture,
  * scores with the deterministic rubric, and renders a downloadable
  * JSON + Markdown report.

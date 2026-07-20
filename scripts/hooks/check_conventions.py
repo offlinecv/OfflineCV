@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The resumelint Authors
-"""PostToolUse(Edit|Write) convention check for resumelint.
+# Copyright 2026 The offlinecv Authors
+"""PostToolUse(Edit|Write) convention check for offlinecv.
 
 Fires after a .ts / .tsx file under ``src/`` is edited. Fails (exit 2
 with a clear message) when the change introduces a known anti-pattern.
@@ -24,7 +24,7 @@ Checks:
 5. No raw ``console.log`` in ``src/lib/``. Easy to slip in during
    debugging, would ship in the OSS bundle.
 
-Override for one tool call: ``RESUMELINT_SKIP_HOOKS=1``.
+Override for one tool call: ``OFFLINECV_SKIP_HOOKS=1``.
 """
 
 from __future__ import annotations
@@ -39,11 +39,11 @@ from _hooklib import fail, load_payload, maybe_skip, tool_file_path  # noqa: E40
 
 REPO_ROOT = HOOK_DIR.parent.parent
 SRC = REPO_ROOT / "src"
-PREFIX = "resumelint convention check"
+PREFIX = "offlinecv convention check"
 
 SPDX_HEADER = (
     "// SPDX-License-Identifier: Apache-2.0\n"
-    "// Copyright 2026 The resumelint Authors\n"
+    "// Copyright 2026 The offlinecv Authors\n"
 )
 USER_FACING_TOP = {"App.tsx", "components"}
 TIER_MODULES = ("pdf-extract", "openresume", "regex-fallback")

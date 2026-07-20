@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * render-audit-report — the human-readable half of the shareable audit report
@@ -36,7 +36,7 @@ import { formatJsonResumeLocation } from "./to-json-resume.ts";
 import { APP_VERSION } from "../version.ts";
 
 /** Where the artifact points readers back to (branded footer). */
-const APP_URL = "github.com/resumelint-org/resumelint";
+const APP_URL = "github.com/offlinecv/OfflineCV";
 
 // ── Page geometry (points) ────────────────────────────────────────────────────
 

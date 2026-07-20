@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * useResumeLibrary — UI-facing state over the resume-library domain layer
@@ -114,7 +114,7 @@ export function useResumeLibrary(): ResumeLibrary {
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = "resumelint-backup.json";
+    a.download = "offlinecv-backup.json";
     a.click();
     URL.revokeObjectURL(url);
   }, []);

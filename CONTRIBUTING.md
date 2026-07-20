@@ -1,9 +1,9 @@
-# Contributing to resumelint
+# Contributing to offlinecv
 
-Thanks for picking up a piece of this. resumelint is a browser-side PDF
+Thanks for picking up a piece of this. offlinecv is a browser-side PDF
 parser audit and job-search workbench. Code lives under `src/`, license is
 [Apache-2.0](./LICENSE) (patent grant included; see `NOTICE`). See
-[`README.md`](./README.md) for what resumelint is and what it surfaces;
+[`README.md`](./README.md) for what offlinecv is and what it surfaces;
 see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout; and see
 [`docs/CONTRIBUTING-PROCESS.md`](./docs/CONTRIBUTING-PROCESS.md) for the shipping
 process this file summarizes — the **test-fixture PII policy** (mandatory before
@@ -48,8 +48,8 @@ available, do the equivalent by hand:
    `scripts/hooks/check_conventions.py` for the exact prefixes the
    project enforces.
 3. To skip the Claude Code commit-block hook for the session, export
-   `RESUMELINT_SKIP_HOOKS=1` in the shell **before** launching `claude`.
-   Inline prefixing (`RESUMELINT_SKIP_HOOKS=1 git commit ...`) does
+   `OFFLINECV_SKIP_HOOKS=1` in the shell **before** launching `claude`.
+   Inline prefixing (`OFFLINECV_SKIP_HOOKS=1 git commit ...`) does
    **not** work — the env assignment is part of the command string the
    hook never executes. The constraint is documented at the top of
    `scripts/hooks/block_commit.sh`.
@@ -96,7 +96,7 @@ header — see the canonical form in [`CLAUDE.md`](./CLAUDE.md) under
 
 ```ts
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 ```
 
 TypeScript strict mode is on. Default to writing no comments — add one
@@ -106,7 +106,7 @@ explain **what** the code does; the names already do that.
 
 ## UI primitives & tokens
 
-resumelint enforces a strict component hierarchy. Before writing any
+offlinecv enforces a strict component hierarchy. Before writing any
 interactive element or styled surface, check whether a shared primitive
 already exists:
 
@@ -134,7 +134,7 @@ These architecture rules are enforced at two layers:
    (`scripts/hooks/style_guard.sh`) fires immediately after a file edit
    inside Claude Code, giving you instant feedback before commit.
    Warnings are non-blocking; bypass for one session with
-   `export RESUMELINT_SKIP_HOOKS=1`.
+   `export OFFLINECV_SKIP_HOOKS=1`.
 
 ## Filing issues
 
@@ -146,8 +146,8 @@ are the most common and the hardest to repro without a sample.
 
 ## Project board
 
-Issues are tracked on the **ResumeLint v1** board
-([`resumelint-org/projects/1`](https://github.com/orgs/resumelint-org/projects/1)),
+Issues are tracked on the **OfflineCV v1** board
+([`offlinecv/projects/1`](https://github.com/orgs/offlinecv/projects/1)),
 grouped by **Phase** — the milestone each issue belongs to (`M1 Parser
 Hardening`, `M2 UI Parity`, `M3 JD Matching`, `M4 AI Rewrite`, `v1.1
 Post-Launch`). v1.0 ships when M1–M4 land; v1.1 holds post-launch work.
@@ -157,7 +157,7 @@ After filing an issue, place it on the roadmap. With Claude Code, run
 board, and sets its Phase. By hand:
 
 ```bash
-gh issue edit <number> --repo resumelint-org/resumelint --milestone "<milestone title>"
+gh issue edit <number> --repo offlinecv/OfflineCV --milestone "<milestone title>"
 ```
 
 Adding an issue to the board (the Phase column) needs the `project`

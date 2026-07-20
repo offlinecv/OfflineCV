@@ -25,7 +25,7 @@ PR descriptions.
 ## Workflow
 
 ```sh
-npm run eval:rewrite        # opens /resumelint/eval-rewrite.html with WebGPU
+npm run eval:rewrite        # opens /offlinecv/eval-rewrite.html with WebGPU
 # in the browser: click "Run eval", wait, download both report files
 mv ~/Downloads/eval-rewrite-*.json tests/fixtures/rewrite/reports/
 mv ~/Downloads/eval-rewrite-*.md   tests/fixtures/rewrite/reports/

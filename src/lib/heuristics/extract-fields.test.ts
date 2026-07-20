@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect } from "vitest";
 import {
@@ -1217,13 +1217,13 @@ describe("extractExperience", () => {
 describe("extractProjects", () => {
   it("lifts a URL out of the header and keeps the clean name", () => {
     const section = mkSection("projects", [
-      { text: "Resume Linter https://github.com/acme/resumelint" },
+      { text: "Resume Linter https://github.com/acme/offlinecv" },
       { text: "• Parses PDFs in the browser" },
     ]);
     const { value, confidence } = extractProjects(section);
     expect(value).toHaveLength(1);
     expect(value[0].name).toBe("Resume Linter");
-    expect(value[0].url).toBe("https://github.com/acme/resumelint");
+    expect(value[0].url).toBe("https://github.com/acme/offlinecv");
     expect(value[0].description).toContain("Parses PDFs");
     expect(confidence).toBeGreaterThan(0);
   });

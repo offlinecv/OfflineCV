@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * ReportGapSection — "Report a parsing gap" affordance (#245).
@@ -93,12 +93,12 @@ export function ReportGapSection({
           <p className="text-sm text-content-tertiary">
             Attach it to a new issue at{" "}
             <a
-              href="https://github.com/resumelint-org/resumelint/issues/new"
+              href="https://github.com/offlinecv/OfflineCV/issues/new"
               target="_blank"
               rel="noreferrer noopener"
               className="underline decoration-dotted hover:decoration-solid"
             >
-              github.com/resumelint-org/resumelint
+              github.com/offlinecv/OfflineCV
             </a>{" "}
             describing what the parser got wrong.
           </p>

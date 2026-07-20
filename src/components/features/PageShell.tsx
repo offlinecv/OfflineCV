@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * PageShell — the chrome both root surfaces share (issue #226).
@@ -62,11 +62,11 @@ export function PageShell({
             <a
               href={import.meta.env.BASE_URL}
               className="inline-grid h-8 w-8 place-items-center rounded-md bg-brand-amber text-base font-bold text-content-inverse"
-              aria-label="resumelint home"
+              aria-label="offlinecv home"
             >
               R
             </a>
-            <h1 className="text-2xl font-semibold tracking-tight">resumelint</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">offlinecv</h1>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
               {badge}
             </span>
@@ -88,7 +88,7 @@ export function PageShell({
         <p>Your PDF stays in this browser tab by default and is never used to train AI. AI analysis is optional.</p>
         <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
           <a
-            href="https://github.com/resumelint-org/resumelint/blob/main/LICENSE"
+            href="https://github.com/offlinecv/OfflineCV/blob/main/LICENSE"
             target="_blank"
             rel="noreferrer noopener"
             className="hover:underline"
@@ -104,7 +104,7 @@ export function PageShell({
             Further reading: HBS Hidden Workers
           </a>
           <a
-            href="https://github.com/resumelint-org/resumelint/blob/main/README.md#telemetry"
+            href="https://github.com/offlinecv/OfflineCV/blob/main/README.md#telemetry"
             target="_blank"
             rel="noreferrer noopener"
             className="hover:underline"

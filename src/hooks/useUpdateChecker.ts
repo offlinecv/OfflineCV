@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APP_VERSION, fetchDeployedVersion } from "../lib/version.ts";

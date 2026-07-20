@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /// <reference types="vitest" />
 import { execSync } from "node:child_process";
@@ -51,7 +51,7 @@ const APP_VERSION = resolveAppVersion();
 
 // Base path. The custom domain (resumelint.org) and the GCS bucket root both
 // serve at "/"; the bare github.io project-Pages fallback
-// (resumelint-org.github.io/resumelint/) needs "/resumelint/". Env-driven so
+// (offlinecv.github.io/OfflineCV/) needs "/OfflineCV/". Env-driven so
 // each deploy target builds with its own prefix without a code edit — set
 // VITE_BASE_PATH to override. Default "/" is the custom-domain production
 // target and local dev.
@@ -62,7 +62,7 @@ const BASE_PATH = process.env.VITE_BASE_PATH ?? "/";
 // short-lived Cache-Control, so the client cache-busts the fetch anyway.
 function emitVersionJson(version: string): Plugin {
   return {
-    name: "resumelint:emit-version-json",
+    name: "offlinecv:emit-version-json",
     apply: "build",
     generateBundle() {
       this.emitFile({
@@ -99,7 +99,7 @@ function jdFitTrailingSlash(): Plugin {
     next();
   };
   return {
-    name: "resumelint:jd-fit-trailing-slash",
+    name: "offlinecv:jd-fit-trailing-slash",
     configureServer(server) {
       server.middlewares.use(redirect);
     },
@@ -113,7 +113,7 @@ export default defineConfig({
   base: BASE_PATH,
   // Multi-page app, not SPA. The default 'spa' appType silently falls back to
   // serving the root index.html (the parser) for ANY unmatched path — so
-  // `/resumelint`, or `/jd-fit` without its trailing slash, would render the
+  // `/offlinecv`, or `/jd-fit` without its trailing slash, would render the
   // parser instead of 404ing. 'mpa' disables that catch-all: `/` → parser,
   // `/jd-fit/` → JD fit, and anything else 404s honestly. The two products are
   // real, separate HTML entries — there is no client-side router to fall back

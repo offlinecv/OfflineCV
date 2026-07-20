@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Curated WebLLM model registry — what the user can pick from.
@@ -10,7 +10,7 @@
  *
  * Three constraints shape this list:
  *
- *   1. License — resumelint is Apache-2.0. The default MUST be Apache-2.0
+ *   1. License — offlinecv is Apache-2.0. The default MUST be Apache-2.0
  *      (Qwen2.5-1.5B) so every install works without surfacing a
  *      Restricted-Community consent modal up front. Gemma + Llama ship as
  *      opt-in extras gated by the consent modal (see #64 Step 5).

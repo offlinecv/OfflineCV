@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Tests for the pure I/O surface of `useModelSelection`. The React hook
@@ -43,7 +43,7 @@ describe("readPersistedModelId", () => {
     // Simulate a registry entry that existed in a previous version and was
     // removed since (e.g. a model deprecated by MLC).
     globalThis.localStorage.setItem(
-      "resumelint:webllm:modelId",
+      "offlinecv:webllm:modelId",
       "deprecated-old-model-id",
     );
     expect(readPersistedModelId()).toBe(DEFAULT_MODEL_ID);

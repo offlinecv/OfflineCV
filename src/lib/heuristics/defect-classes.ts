@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Defect-class taxonomy + the load-bearing-axis table (issue #469).
@@ -17,7 +17,7 @@
  * │ This file exists to answer "does any fixture already reproduce the defect │
  * │ this REAL résumé exposes?" — so it sits, by construction, one function    │
  * │ call away from a real name, a real email, a real phone, real bullet text. │
- * │ resumelint is a PUBLIC repo. Anything this layer can carry is one         │
+ * │ offlinecv is a PUBLIC repo. Anything this layer can carry is one         │
  * │ copy-paste from a public issue, and the `*.expected.json` corpus          │
  * │ snapshots (which will bake a `DerivedSignals` per fixture, #469 step 5)   │
  * │ are COMMITTED. A single free-form `string` slot here would turn both into │
@@ -216,7 +216,7 @@ export const DERIVED_SIGNAL_KEYS = [
   // `scanned`, so the cascade short-circuits before Tier 1; or `rawText` is
   // empty). EVERY key above except the round-trip ones is derived from the
   // extracted text or from the sections cut out of it, so on such a parse they
-  // are all false because there was nothing to read. This is resumelint's single
+  // are all false because there was nothing to read. This is offlinecv's single
   // most severe failure mode (zero characters extracted) and it must never be
   // reported as "no defect class is exhibited by this parse".
   "textOracleUnavailable",

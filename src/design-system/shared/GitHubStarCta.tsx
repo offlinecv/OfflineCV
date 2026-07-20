@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * GitHubStarCta — quiet, policy-compliant GitHub star CTA.
@@ -26,7 +26,7 @@
 
 import { Card } from "./Card.tsx";
 
-const REPO_URL = "https://github.com/resumelint-org/resumelint";
+const REPO_URL = "https://github.com/offlinecv/OfflineCV";
 
 /**
  * Minimum star count before we surface the number as social proof. Below this,
@@ -80,8 +80,8 @@ function StarLink({ count }: { count?: number }) {
       className="inline-flex items-center gap-1.5 text-xs text-content-secondary transition-colors hover:text-content-primary"
       aria-label={
         showCount
-          ? `Star resumelint on GitHub — ${formatCount(count)} stars`
-          : "Star resumelint on GitHub"
+          ? `Star offlinecv on GitHub — ${formatCount(count)} stars`
+          : "Star offlinecv on GitHub"
       }
     >
       <GitHubIcon />
@@ -106,7 +106,7 @@ export function GitHubStarCta({ variant, count }: GitHubStarCtaProps) {
           Glad it's working! ⭐
         </p>
         <p className="text-sm text-content-secondary">
-          Star us on GitHub so others can find ResumeLint.
+          Star us on GitHub so others can find OfflineCV.
         </p>
         <StarLink count={count} />
       </Card>

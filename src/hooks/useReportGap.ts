@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * useReportGap — drives the "Report a parsing gap" download (issue #245).
@@ -42,7 +42,7 @@ function artifactFilename(): string {
   const stamp =
     `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
     `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  return `resumelint-repro-${stamp}.json`;
+  return `offlinecv-repro-${stamp}.json`;
 }
 
 export function useReportGap(

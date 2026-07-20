@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { computeConfidence, CANONICAL_CONFIDENCE_THRESHOLD } from "./confidence.ts";
 import type { HeuristicResult, LayoutProbes } from "./types.ts";

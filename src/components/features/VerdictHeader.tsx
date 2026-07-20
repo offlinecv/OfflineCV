@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { getScoreLabel, getScoreTier } from "../../lib/score/score.ts";
 import { scoreBandTextClass } from "./scoreBand.ts";

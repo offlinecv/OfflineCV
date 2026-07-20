@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import weak from "../../../../tests/fixtures/rewrite/weak.json" with { type: "json" };
 import strong from "../../../../tests/fixtures/rewrite/strong.json" with { type: "json" };

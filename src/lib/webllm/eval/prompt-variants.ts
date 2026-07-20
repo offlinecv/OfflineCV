@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { SECTION_REWRITE_SYSTEM_PROMPT } from "../rewrite-section.ts";
 import type { PromptVariant } from "./types.ts";

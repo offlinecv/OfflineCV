@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# create-gh-issue.sh — Create a resumelint GitHub issue via `gh issue create`,
+# create-gh-issue.sh — Create a offlinecv GitHub issue via `gh issue create`,
 # passing the body as a FILE so backticks, tables, and fenced code blocks survive
 # shell escaping intact.
 #

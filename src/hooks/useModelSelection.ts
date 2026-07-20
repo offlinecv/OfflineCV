@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * `useModelSelection` — drives the user's persisted WebLLM model choice and
@@ -22,8 +22,8 @@
  * with Qwen2.5 (Apache-2.0) regardless.
  *
  * Storage layout:
- *   - `resumelint:webllm:modelId` → exact `model_id` from MODEL_REGISTRY
- *   - `resumelint:webllm:consent:<LicenseType>` → "accepted" (presence
+ *   - `offlinecv:webllm:modelId` → exact `model_id` from MODEL_REGISTRY
+ *   - `offlinecv:webllm:consent:<LicenseType>` → "accepted" (presence
  *     only; absence means "no consent recorded")
  *
  * The pure I/O functions (`readPersistedModelId`, `writePersistedModelId`,
@@ -45,8 +45,8 @@ const LICENSE_TYPES: readonly LicenseType[] = Array.from(
   new Set(MODEL_REGISTRY.map((m) => m.licenseType)),
 );
 
-const MODEL_ID_KEY = "resumelint:webllm:modelId";
-const CONSENT_KEY_PREFIX = "resumelint:webllm:consent:";
+const MODEL_ID_KEY = "offlinecv:webllm:modelId";
+const CONSENT_KEY_PREFIX = "offlinecv:webllm:consent:";
 const CONSENT_VALUE = "accepted";
 
 function safeGet(key: string): string | null {

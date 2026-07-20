@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * StarRating — the ONE 1–N star rating primitive.
@@ -27,7 +27,7 @@ interface StarRatingProps {
   /** Number of stars. Defaults to 5. */
   max?: number;
   disabled?: boolean;
-  /** Accessible name for the group (e.g. "Rate ResumeLint from 1 to 5 stars"). */
+  /** Accessible name for the group (e.g. "Rate OfflineCV from 1 to 5 stars"). */
   ariaLabel?: string;
   /** Id of an external element (e.g. a validation error) describing the group. */
   ariaDescribedBy?: string;

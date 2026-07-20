@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import type { ResumeExperience } from "../../score/types.ts";
 import type { PdfSection } from "../sections.ts";

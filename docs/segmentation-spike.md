@@ -1,10 +1,10 @@
 # Segmentation-as-source-of-truth — design spike (#127)
 
-Spike for [#127](https://github.com/resumelint-org/resumelint/issues/127), under the section-recognizer epic [#109](https://github.com/resumelint-org/resumelint/issues/109).
+Spike for [#127](https://github.com/offlinecv/OfflineCV/issues/127), under the section-recognizer epic [#109](https://github.com/offlinecv/OfflineCV/issues/109).
 
 **Status:** design only — no production code changed by this issue (acceptance criterion). Implementation lands as the sequenced follow-up issues at the end of this doc.
 
-**Note on the moving target:** issue [#126](https://github.com/resumelint-org/resumelint/issues/126) is concurrently splitting `src/lib/heuristics/extract-fields.ts` into `src/lib/heuristics/extract/*.ts`. All `extract-fields.ts:NNN` citations below are against the current main baseline (what is in this worktree). Follow-ups should target the **post-split** module paths once #126 merges; the per-symbol names (`extractSkills`, `looksLikeContactLink`, `disambiguateCompanyTitle`, …) are stable across the split and are the durable anchors.
+**Note on the moving target:** issue [#126](https://github.com/offlinecv/OfflineCV/issues/126) is concurrently splitting `src/lib/heuristics/extract-fields.ts` into `src/lib/heuristics/extract/*.ts`. All `extract-fields.ts:NNN` citations below are against the current main baseline (what is in this worktree). Follow-ups should target the **post-split** module paths once #126 merges; the per-symbol names (`extractSkills`, `looksLikeContactLink`, `disambiguateCompanyTitle`, …) are stable across the split and are the durable anchors.
 
 ---
 
@@ -259,13 +259,13 @@ Gate each on the corpus suite. Sequence after #126 lands (or rebase onto it) so 
 
 ## 6. Follow-up issues filed
 
-Filed on `resumelint-org/resumelint`, each referencing #127 and #109, in dependency order:
+Filed on `offlinecv/OfflineCV`, each referencing #127 and #109, in dependency order:
 
 | Seq | Issue | Title | Bucket | Risk |
 |---|---|---|---|---|
-| A (PR 1) | [#132](https://github.com/resumelint-org/resumelint/issues/132) | Emit typed `SectionedResume` from cascade + retire `skillsSectionText` (proof PR) | (S) | ~zero (behavior-preserving; goldens unchanged) |
-| B (PR 2) | [#133](https://github.com/resumelint-org/resumelint/issues/133) | Pool anon scorer bullets from accomplishment sections (retire rawText walk + `buildSkillsExclusion`) | (S) | medium (deliberate score change; algo bump) |
-| C (PR 3) | [#134](https://github.com/resumelint-org/resumelint/issues/134) | Replace `stripPromotedUrls` scrub with a section-ownership/provenance model | (B) | medium |
-| D (PR 4) | [#135](https://github.com/resumelint-org/resumelint/issues/135) | Replace `extractContact` y-band header proxy with a real contact/links section boundary | (B) | medium |
+| A (PR 1) | [#132](https://github.com/offlinecv/OfflineCV/issues/132) | Emit typed `SectionedResume` from cascade + retire `skillsSectionText` (proof PR) | (S) | ~zero (behavior-preserving; goldens unchanged) |
+| B (PR 2) | [#133](https://github.com/offlinecv/OfflineCV/issues/133) | Pool anon scorer bullets from accomplishment sections (retire rawText walk + `buildSkillsExclusion`) | (S) | medium (deliberate score change; algo bump) |
+| C (PR 3) | [#134](https://github.com/offlinecv/OfflineCV/issues/134) | Replace `stripPromotedUrls` scrub with a section-ownership/provenance model | (B) | medium |
+| D (PR 4) | [#135](https://github.com/offlinecv/OfflineCV/issues/135) | Replace `extractContact` y-band header proxy with a real contact/links section boundary | (B) | medium |
 
 A is the gating dependency for B/C/D and is the provably-inert first step. Sequence the whole set after #126 (the `extract/*.ts` split) lands, or rebase onto it.

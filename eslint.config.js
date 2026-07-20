@@ -1,5 +1,5 @@
 // eslint.config.js — flat config (ESLint 9+, ESM)
-// Architecture/token guard for resumelint. Minimal ruleset: no style
+// Architecture/token guard for offlinecv. Minimal ruleset: no style
 // bikeshedding, just the structural rules that style_guard.sh checked.
 // These same checks run (blocking) in CI via `npm run lint`.
 

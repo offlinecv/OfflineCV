@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * render-ats-pdf — the single-column, text-only ATS PDF draw engine (#171).
@@ -230,7 +230,7 @@ type PdfFont = Awaited<ReturnType<Doc["embedFont"]>>;
 // The Poppins TTF bytes are bundled as Vite assets (imported via `?url` above
 // — the same mechanism `src/main.tsx` uses for the pdfjs worker) and fetched
 // from the app's own bundled-asset origin at download time. That `fetch()`
-// never leaves the browser's own origin, so it does NOT violate resumelint's
+// never leaves the browser's own origin, so it does NOT violate offlinecv's
 // zero-egress guarantee — this is loading a local asset, not calling a font
 // CDN (e.g. `fonts.gstatic.com`), which is explicitly forbidden here.
 // Cached module-scoped so repeat downloads reuse the same fetched bytes.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The resumelint Authors
+# Copyright 2026 The offlinecv Authors
 #
-# Shared helper for resumelint Claude Code hooks. Sourced by every *.sh
+# Shared helper for offlinecv Claude Code hooks. Sourced by every *.sh
 # hook in this directory. No shebang — this file is sourced, not executed.
 #
 # Each hook receives a JSON payload on stdin describing the tool call
@@ -28,13 +28,13 @@
 hook_input_field() {
   local payload="$1"
   local path="$2"
-  printf '%s' "$payload" | RESUMELINT_HOOK_FIELD="$path" python3 -c '
+  printf '%s' "$payload" | OFFLINECV_HOOK_FIELD="$path" python3 -c '
 import json, os, sys
 try:
     d = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
-for part in os.environ["RESUMELINT_HOOK_FIELD"].split("."):
+for part in os.environ["OFFLINECV_HOOK_FIELD"].split("."):
     if not isinstance(d, dict):
         sys.exit(0)
     d = d.get(part)

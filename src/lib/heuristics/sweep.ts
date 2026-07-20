@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * The whole-parse sweep (issue #469) — the ONE place a `DerivedSignals` bag and
@@ -65,7 +65,7 @@ import { localizeRoundtripHop } from "./localize/roundtrip.ts";
  * text — or out of the sections cut from it — so on such a parse they are all
  * `false` because there was nothing to read.
  *
- * This is resumelint's single most severe failure mode. It must never be
+ * This is offlinecv's single most severe failure mode. It must never be
  * reported as "no defect class is exhibited by this parse".
  */
 export function isTextOracleUnavailable(cascade: CascadeResult): boolean {

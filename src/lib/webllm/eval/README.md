@@ -37,7 +37,7 @@ Real models run only in a browser. The entry point is the dev-only
 
 ```sh
 npm run eval:rewrite
-# opens http://localhost:5173/resumelint/eval-rewrite.html
+# opens http://localhost:5173/offlinecv/eval-rewrite.html
 ```
 
 **One model per tab.** The page asks you to pick a model from the

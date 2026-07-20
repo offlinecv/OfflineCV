@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { analyzeLayout, detectColumnBoundaries } from "./pdf-layout.ts";
 import type { PdfPageInfo, PdfTextItem } from "./types.ts";

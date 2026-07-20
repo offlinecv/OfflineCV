@@ -1,9 +1,9 @@
 # Parse-resume eval harness
 
 Dev-only eval harness for the LLM structured-parse provider
-([issue #241](https://github.com/resumelint-org/resumelint/issues/241)) and
+([issue #241](https://github.com/offlinecv/OfflineCV/issues/241)) and
 the combined parse+critique pass
-([issue #262](https://github.com/resumelint-org/resumelint/issues/262)).
+([issue #262](https://github.com/offlinecv/OfflineCV/issues/262)).
 
 ## What it measures
 

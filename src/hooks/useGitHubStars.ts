@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
- * useGitHubStars — fetches the resumelint-org/resumelint star count from the
+ * useGitHubStars — fetches the offlinecv/OfflineCV star count from the
  * GitHub REST API, caches the result in localStorage (~1 h TTL), and returns
  * it fail-silently: any network error, rate-limit, or localStorage unavailability
  * resolves to `{ count: undefined }` without throwing or rendering an error UI.
@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 const LS_KEY = "rl_gh_stars_cache";
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const API_URL =
-  "https://api.github.com/repos/resumelint-org/resumelint";
+  "https://api.github.com/repos/offlinecv/OfflineCV";
 
 interface StarCache {
   count: number;

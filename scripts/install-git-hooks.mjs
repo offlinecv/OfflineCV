@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 //
 // Installs a git `pre-push` hook that runs `npm run verify` (the local
 // CI mirror) before every push. Wired into package.json's `prepare`
@@ -12,17 +12,17 @@
 //   - Graceful no-op when `.git/` is absent (tarball install, or a CI
 //     `npm ci` checkout that ran `prepare` outside a work tree). `prepare`
 //     must never fail the install, so every path exits 0.
-//   - Honors the `RESUMELINT_SKIP_HOOKS=1` escape hatch at hook runtime.
+//   - Honors the `OFFLINECV_SKIP_HOOKS=1` escape hatch at hook runtime.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const MARKER_BEGIN = "# >>> resumelint managed pre-push (npm run verify) >>>";
-const MARKER_END = "# <<< resumelint managed pre-push <<<";
+const MARKER_BEGIN = "# >>> offlinecv managed pre-push (npm run verify) >>>";
+const MARKER_END = "# <<< offlinecv managed pre-push <<<";
 
 const MANAGED_BLOCK = `${MARKER_BEGIN}
-# Mirror CI locally before push. Bypass with RESUMELINT_SKIP_HOOKS=1.
-if [ "\${RESUMELINT_SKIP_HOOKS:-0}" = "1" ]; then
+# Mirror CI locally before push. Bypass with OFFLINECV_SKIP_HOOKS=1.
+if [ "\${OFFLINECV_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0
 fi
 npm run verify

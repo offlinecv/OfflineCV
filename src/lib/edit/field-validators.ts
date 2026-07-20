@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Shape validators for the inline-edit fields on the reconstructed résumé (#357).
  *
- * These are **shape** checks, not judgments. ResumeLint is a "parser audit, not
+ * These are **shape** checks, not judgments. OfflineCV is a "parser audit, not
  * a judge": the user is authoritative over their own résumé, so future dates,
  * unusual company names, redacted placeholders, and other odd-but-real values
  * must NOT be flagged. A validator returns a message ONLY when the value is the

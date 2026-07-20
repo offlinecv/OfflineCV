@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * The fixture-derivation tool (`npm run fixture-derive`, issue #39).
@@ -463,7 +463,7 @@ function reproTestScaffold(
 ): string {
   const stem = basename(fixtureRel, ".pdf");
   return `// SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Repro regression for #${issue} — ${cls} (${probe}).

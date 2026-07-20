@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The resumelint Authors
+# Copyright 2026 The offlinecv Authors
 #
 # PostToolUse(Edit|Write) hook: warn when a component or App.tsx edit
 # introduces UI-primitive / token anti-patterns memorialized in CLAUDE.md:
@@ -13,11 +13,11 @@
 # Scope: src/components/**, src/design-system/**, and src/App.tsx (all .ts/.tsx).
 #
 # NON-blocking — emits warnings but always exits 0 so the edit proceeds.
-# Override: RESUMELINT_SKIP_HOOKS=1.
+# Override: OFFLINECV_SKIP_HOOKS=1.
 
 set -euo pipefail
 
-[[ "${RESUMELINT_SKIP_HOOKS:-0}" == "1" ]] && exit 0
+[[ "${OFFLINECV_SKIP_HOOKS:-0}" == "1" ]] && exit 0
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=_lib.sh
@@ -85,7 +85,7 @@ fi
 if [[ $WARNINGS -gt 0 ]]; then
   echo ""
   echo "   $WARNINGS warning(s) above are non-blocking. To suppress for this session:"
-  echo "   export RESUMELINT_SKIP_HOOKS=1 (before launching claude)."
+  echo "   export OFFLINECV_SKIP_HOOKS=1 (before launching claude)."
 fi
 
 exit 0

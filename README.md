@@ -1,4 +1,4 @@
-# resumelint
+# offlinecv
 
 **Try it:** [resumelint.org](https://resumelint.org) — stable, promoted daily once
 CI is green · [dev.resumelint.org](https://dev.resumelint.org) — bleeding edge,
@@ -10,7 +10,7 @@ reports what its own parser sees, so you can spot the failure modes that
 quietly drop a candidate's text on the floor before any downstream system
 ever looks at it.
 
-The core failure modes resumelint surfaces are common but rarely visible:
+The core failure modes offlinecv surfaces are common but rarely visible:
 two-column layouts that text extractors read across, image-only PDFs that
 return zero selectable text, and "fonts-unmappable" PDFs (Framer, Affinity,
 and some InDesign exports) where the source carries real text but the font
@@ -47,7 +47,7 @@ locally instead of on the PR.
   its findings are printed but never fail the push. Typecheck, lint, test,
   and build failures **do** block the push.
 - Bypass the hook for a single push with
-  `RESUMELINT_SKIP_HOOKS=1 git push`.
+  `OFFLINECV_SKIP_HOOKS=1 git push`.
 - The hook install is a no-op on tarball installs and CI `npm ci` (no
   `.git/` work tree), so it never breaks a non-developer install.
 
@@ -95,7 +95,7 @@ filing an issue; pair the finding with a synthetic, PII-free fixture under
 
 ## Telemetry
 
-resumelint ships with no analytics by default. `package.json` declares
+offlinecv ships with no analytics by default. `package.json` declares
 `posthog-js` as a dependency, but the import is dynamic and only resolved
 when `VITE_POSTHOG_KEY` is set at build time. In an OSS build (no env vars),
 the PostHog branch is dead-code-eliminated by Vite/Rollup and the dep does
@@ -138,7 +138,7 @@ scoped to your browser:
 
 #### IndexedDB (local-first storage)
 
-For structured/binary data the app uses an IndexedDB database named `resumelint`
+For structured/binary data the app uses an IndexedDB database named `offlinecv`
 (via the ~1KB [`idb`](https://github.com/jakearchibald/idb) wrapper;
 `src/lib/storage/`), separate from the `rl_*` UI flags above. It has two object
 stores — `resumes` (raw PDF bytes as a `Blob` plus a cached parse so a reopened
@@ -162,7 +162,7 @@ state and the eviction note inline, with the export backup reachable from there.
 ### GitHub star count
 
 The footer shows the live repo star count via an unauthenticated call to
-`https://api.github.com/repos/resumelint-org/resumelint` (`src/hooks/useGitHubStars.ts`).
+`https://api.github.com/repos/offlinecv/OfflineCV` (`src/hooks/useGitHubStars.ts`).
 It runs from your browser on app load whenever the ~1h cache
 (`rl_gh_stars_cache`) is stale, and is **fail-silent** — on network error or
 rate-limit (GitHub allows 60 req/hr/IP unauthenticated) the count is hidden
@@ -208,16 +208,16 @@ Colors are plain CSS custom properties split into two layers:
   (slate neutrals + a blue accent)**, not a specific product brand. This is the
   **swappable layer**.
 
-You can reskin resumelint to your own brand **without forking this repo**, two
+You can reskin offlinecv to your own brand **without forking this repo**, two
 ways:
 
 ### 1. Cascade override (no build config)
 
-Import your own stylesheet *after* resumelint's and redefine the same
+Import your own stylesheet *after* offlinecv's and redefine the same
 `--color-*` properties. The last definition wins in the cascade:
 
 ```css
-/* your-brand.css — imported after resumelint's styles */
+/* your-brand.css — imported after offlinecv's styles */
 :root {
   --color-brand-amber: #ff6b35;
   --color-bg-card: #fffaf5;
@@ -327,8 +327,8 @@ The hosted preview at the top of this README is published from `dist/`
 to GitHub Pages by `.github/workflows/deploy-pages.yml` — read that
 workflow for a working end-to-end example. The canonical production URL
 is the custom domain **<https://resumelint.org>**; the project-Pages URL
-<https://resumelint-org.github.io/resumelint/> remains as a fallback (built
-with `VITE_BASE_PATH=/resumelint/`).
+<https://offlinecv.github.io/OfflineCV/> remains as a fallback (built
+with `VITE_BASE_PATH=/OfflineCV/`).
 
 The build emits two root pages — `/` (the parser audit) and `/jd-fit`
 (JD-match + JD-driven rewrite) — as a multi-entry Vite build, so both ship

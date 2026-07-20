@@ -113,9 +113,9 @@ Rules:
 
 The hosted preview is published to GitHub Pages via `.github/workflows/deploy-pages.yml` (the canonical, in-repo deploy example).
 
-The maintainer also keeps an **untracked, local-only** `scripts/deploy_resumelint.sh` that uploads `dist/` to a GCS bucket (config from a gitignored `.env.deploy`; sources the `~/tools/scripts/` symlinked helpers). It's gitignored alongside `run_resumelint.sh` because it depends on machine-local tooling — don't recommend it to contributors or recreate it as a tracked file.
+The maintainer also keeps an **untracked, local-only** `scripts/deploy_offlinecv.sh` that uploads `dist/` to a GCS bucket (config from a gitignored `.env.deploy`; sources the `~/tools/scripts/` symlinked helpers). It's gitignored alongside `run_offlinecv.sh` because it depends on machine-local tooling — don't recommend it to contributors or recreate it as a tracked file.
 
-Likewise, a maintainer convenience wrapper (`scripts/run_resumelint.sh`, an interactive menu) exists locally but is **not tracked** — it `source`s shared bash helpers symlinked from `~/tools/scripts/` (`common.sh`, `deploy_web_utils.sh`, `load_env.sh`) that only exist on the maintainer's machine. Don't reintroduce either to the repo; build/deploy guidance for contributors lives in the README's Deploy section.
+Likewise, a maintainer convenience wrapper (`scripts/run_offlinecv.sh`, an interactive menu) exists locally but is **not tracked** — it `source`s shared bash helpers symlinked from `~/tools/scripts/` (`common.sh`, `deploy_web_utils.sh`, `load_env.sh`) that only exist on the maintainer's machine. Don't reintroduce either to the repo; build/deploy guidance for contributors lives in the README's Deploy section.
 
 ## License
 

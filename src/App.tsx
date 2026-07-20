@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 import { Card, Chip, ErrorState, ErrorBoundary, Button } from "@design-system";
 import { DropZone } from "./components/DropZone";
@@ -64,7 +64,7 @@ export default function App() {
   // Cross-link to /jd-fit (#226). On click we stash the edited parse in
   // sessionStorage (one-shot handoff) so JD-fit rehydrates it without
   // re-parsing, then navigate to the base-aware /jd-fit URL — works under both
-  // the custom-domain "/" base and the "/resumelint/" Pages-fallback base.
+  // the custom-domain "/" base and the "/OfflineCV/" Pages-fallback base.
   const goToJdFit = () => {
     if (state.phase === "done") {
       // The PRISTINE parse + score and the edit state as SEPARATE payloads —
@@ -111,7 +111,7 @@ export default function App() {
           {(state.phase === "idle" || state.phase === "error") && (
             // One consolidated hero message (internal #265): a single,
             // non-hyperbolic headline — no "they don't read your PDF" claim and
-            // no "parser" jargon — that says what resumelint does in one angle.
+            // no "parser" jargon — that says what OfflineCV does in one angle.
             // The trust stat is the one supporting line; everything else (the
             // recruiter-agent context) moves to the quiet block below the drop
             // zone so the hero isn't three competing messages.
@@ -134,7 +134,7 @@ export default function App() {
                   </a>
                 </h2>
                 <p className="text-pretty text-base font-medium text-content-primary sm:text-lg">
-                  resumelint shows you what a recruiter or screener reads back
+                  OfflineCV shows you what a recruiter or screener reads back
                   from your resume — free, private, and open-source.
                 </p>
                 <p className="text-xs text-content-muted">
@@ -195,7 +195,7 @@ export default function App() {
                 <span className="font-medium text-content-primary">
                   Recruiters are starting to run AI agents over resumes.
                 </span>{" "}
-                Several products score candidates for recruiters. resumelint is
+                Several products score candidates for recruiters. OfflineCV is
                 the candidate-side
                 mirror: it shows you what survives the parse — before you hit
                 submit. The score isn&apos;t a verdict on you as a candidate —

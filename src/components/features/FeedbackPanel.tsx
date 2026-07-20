@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * FeedbackPanel — inline, PostHog-backed feedback panel (#51, #193).
@@ -178,7 +178,7 @@ function FeedbackRatingForm() {
               Thanks for your feedback!
             </p>
             <p className="text-sm text-content-tertiary">
-              It helps us improve ResumeLint.
+              It helps us improve OfflineCV.
             </p>
           </div>
         </Card>
@@ -227,7 +227,7 @@ function FeedbackRatingForm() {
       // side is empty) — turns two stacked footnote rows into one, killing the
       // empty band below the score. Right-aligned, so the lift can't misalign.
       <div className="flex items-center justify-end gap-2 -mt-8">
-        <span className="text-xs text-content-muted">Rate ResumeLint</span>
+        <span className="text-xs text-content-muted">Rate OfflineCV</span>
         <StarRating
           value={rating}
           onChange={(v) => {
@@ -235,7 +235,7 @@ function FeedbackRatingForm() {
             setRatingError(false);
             setCompactExpanded(true);
           }}
-          ariaLabel="Rate ResumeLint from 1 to 5 stars"
+          ariaLabel="Rate OfflineCV from 1 to 5 stars"
         />
       </div>
     );
@@ -252,7 +252,7 @@ function FeedbackRatingForm() {
               id={headingId}
               className="text-sm font-semibold text-content-primary"
             >
-              How's ResumeLint working for you?
+              How's OfflineCV working for you?
             </h2>
             <StarRating
               value={rating}
@@ -261,7 +261,7 @@ function FeedbackRatingForm() {
                 setRatingError(false);
               }}
               disabled={submitting}
-              ariaLabel="Rate ResumeLint from 1 to 5 stars"
+              ariaLabel="Rate OfflineCV from 1 to 5 stars"
               ariaDescribedBy={ratingError ? errorId : undefined}
             />
           </div>

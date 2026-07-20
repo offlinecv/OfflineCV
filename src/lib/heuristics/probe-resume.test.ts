@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * Whole-résumé sweep probe (#469) — inert in CI, runs ONLY when
@@ -155,7 +155,7 @@ const ORACLE_BANNER: Readonly<Record<Oracle, string[]>> = {
     "   (the layout probe called the PDF `scanned`, or rawText came back empty).",
     "   EVERY defect signal below the round-trip is read out of that text, so none",
     "   of them could be computed. This is NOT a clean résumé — it is a résumé this",
-    "   parser could not read, which is resumelint's single most severe failure mode.",
+    "   parser could not read, which is offlinecv's single most severe failure mode.",
   ],
   header: [
     "⚠️  HEADER ORACLE UNAVAILABLE — this parse produced NO markdown",
@@ -284,7 +284,7 @@ describe.runIf(process.env.RL_RESUME_PDF)(
       // readable text at all; `extractedCharCount === 0` ⇒ it read text but
       // produced NOTHING from it. Either way every oracle below was blind, and an
       // affirmative "no defect class is exhibited by this parse" would be a false
-      // claim about a dead parse — resumelint's most severe failure mode reported
+      // claim about a dead parse — offlinecv's most severe failure mode reported
       // as clean. The harness REFUSES: no DEFECTS FOUND block, no COVERAGE
       // number, no corpus match. The only honest output is "we could not read
       // this". ────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 
 /**
  * UpdateBanner — non-blocking notice that a newer build is deployed.
@@ -27,7 +27,7 @@ export function UpdateBanner({ onReload, onDismiss }: UpdateBannerProps) {
       className="flex items-center justify-between gap-3 rounded-md border border-feedback-info-border bg-feedback-info-bg px-4 py-2.5 text-sm text-feedback-info-text"
     >
       <span>
-        A new version of resumelint is available. Reload to get the latest.
+        A new version of offlinecv is available. Reload to get the latest.
       </span>
       <div className="flex shrink-0 items-center gap-1">
         <Button variant="primary" size="sm" onClick={onReload}>

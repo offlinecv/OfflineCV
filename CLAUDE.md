@@ -36,7 +36,7 @@ the exception: they stay here because breaking them is silent, and for two of th
 
 ## Project overview
 
-resumelint started as a browser-side PDF parser stress test for resumes and is growing into a **private, no-login job-search workbench**: drop a PDF in, see what a generic text extractor reads back, get an anonymous heuristic score, fix the resume in place (inline edit + on-device LLM rewrite), download a clean ATS-safe PDF, match it against a job description, and discover relevant job postings. The non-negotiable product constraint: **everything runs client-side — no PDF bytes, resume text, or job-search queries leave the browser** (the only cloud path is the opt-in BYOK provider, keyed and initiated by the user).
+offlinecv started as a browser-side PDF parser stress test for resumes and is growing into a **private, no-login job-search workbench**: drop a PDF in, see what a generic text extractor reads back, get an anonymous heuristic score, fix the resume in place (inline edit + on-device LLM rewrite), download a clean ATS-safe PDF, match it against a job description, and discover relevant job postings. The non-negotiable product constraint: **everything runs client-side — no PDF bytes, resume text, or job-search queries leave the browser** (the only cloud path is the opt-in BYOK provider, keyed and initiated by the user).
 
 ### Product lanes and entry points
 
@@ -63,7 +63,7 @@ npm run lint       # eslint .
 npm run verify     # full local CI mirror: typecheck → lint → coverage → build → fallow
 ```
 
-`npm run verify` is the canonical pre-push gate — the exact CI sequence. A git `pre-push` hook runs it automatically (installed by `npm install`); bypass with `RESUMELINT_SKIP_HOOKS=1`.
+`npm run verify` is the canonical pre-push gate — the exact CI sequence. A git `pre-push` hook runs it automatically (installed by `npm install`); bypass with `OFFLINECV_SKIP_HOOKS=1`.
 
 **While iterating, prefer the narrow gate** — `npx vitest run <path>` on the files you touched, plus `npm run typecheck`. Save the full `verify` for when you think you're done. It runs coverage + build + fallow and is slow enough to cost you iterations.
 
@@ -109,7 +109,7 @@ constraint it guards** — not what the code does line by line.
 
 ```ts
 // SPDX-License-Identifier: Apache-2.0
-// Copyright 2026 The resumelint Authors
+// Copyright 2026 The offlinecv Authors
 ```
 
 | Writing a… | Read first | Why it's the model |

@@ -1,6 +1,6 @@
 # JD Spike Harness
 
-Dev-only spike for issue [#198](https://github.com/resumelint-org/resumelint/issues/198).
+Dev-only spike for issue [#198](https://github.com/offlinecv/OfflineCV/issues/198).
 Validates Qwen2.5-1.5B (the default WebLLM model) for two tasks before any production
 design commitment:
 
@@ -16,12 +16,12 @@ design commitment:
 ## How to run
 
 1. Start the dev server: `npm run dev`
-2. Open: `http://localhost:5173/resumelint/jd-spike.html`
+2. Open: `http://localhost:5173/offlinecv/jd-spike.html`
 3. Select **Qwen 2.5 (1.5B)** (default) in the model picker.
 4. Set **Repeats** (default 3 — higher values give better failure-rate estimates).
 5. Click **Run spike** — the model downloads on first run (~1.6 GB); subsequent runs use the cached IndexedDB copy.
 6. When done, click **Download Markdown report**.
-7. Paste the Markdown into issue [#156](https://github.com/resumelint-org/resumelint/issues/156) as the spike findings.
+7. Paste the Markdown into issue [#156](https://github.com/offlinecv/OfflineCV/issues/156) as the spike findings.
 
 ## Not bundled / no prod code
 
