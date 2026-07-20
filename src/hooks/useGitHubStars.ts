@@ -7,13 +7,13 @@
  * it fail-silently: any network error, rate-limit, or localStorage unavailability
  * resolves to `{ count: undefined }` without throwing or rendering an error UI.
  *
- * Cache key : "rl_gh_stars_cache"
+ * Cache key : "ocv_gh_stars_cache"
  * Cache format: JSON `{ count: number; fetchedAt: number }` (fetchedAt = ms epoch)
  */
 
 import { useEffect, useState } from "react";
 
-const LS_KEY = "rl_gh_stars_cache";
+const LS_KEY = "ocv_gh_stars_cache";
 const TTL_MS = 60 * 60 * 1000; // 1 hour
 const API_URL =
   "https://api.github.com/repos/offlinecv/OfflineCV";

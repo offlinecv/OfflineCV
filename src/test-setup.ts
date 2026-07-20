@@ -5,7 +5,7 @@
  * Project-wide vitest setup (wired as `test.setupFiles` in `vite.config.ts`).
  *
  * Installs a fresh in-memory `localStorage` shim before EVERY test, globally.
- * The `rl_*` functional keys touch a `localStorage` that neither the Node env
+ * The `ocv_*` functional keys touch a `localStorage` that neither the Node env
  * (default) provisions nor Node 22+'s built-in global exposes as a working
  * `Storage` (#398). Doing this once at the workload level — instead of an
  * `import + beforeEach` per file — closes the "new test forgot to install the

@@ -54,8 +54,8 @@ import { usePersistentFlag } from "./usePersistentFlag.ts";
 import { useSectionRewriteLock } from "./useSectionRewriteLock.ts";
 
 /** localStorage keys for the last-used steering (issue #210). */
-const INSTRUCTIONS_KEY = "rl_rewrite_instructions";
-const PAGE_TARGET_KEY = "rl_rewrite_page_target";
+const INSTRUCTIONS_KEY = "ocv_rewrite_instructions";
+const PAGE_TARGET_KEY = "ocv_rewrite_page_target";
 
 function parsePageTarget(stored: string): PageTarget | null {
   return stored === "1" || stored === "2" || stored === "3"

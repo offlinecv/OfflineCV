@@ -11,18 +11,19 @@
  * for the range `(oldVersion, DB_VERSION]`, so guarding each step with
  * `oldVersion < N` makes the migrations cumulative and idempotent.
  *
- * localStorage stays the home for the `rl_*` UI flags (see README) — this module
+ * localStorage stays the home for the `ocv_*` UI flags (see README) — this module
  * is for structured/binary data only.
  */
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { ResumeRecord, JobRecord } from "./types.ts";
 
-// Kept as "resumelint" through the OfflineCV rename: this is the IndexedDB
-// database name, not a brand string. Renaming it would orphan every existing
-// user's locally stored resumes/jobs (no migration path). It is invisible to
-// users, so it stays for data continuity.
-export const DB_NAME = "resumelint";
+// Renamed from "resumelint" during the OfflineCV rename (#498). Safe to change
+// outright: the store had no external users at cutover, so there was no data to
+// strand. Treat it as frozen from here — a later rename WOULD orphan real users'
+// resumes/jobs, because a different database name is a different database, not a
+// `DB_VERSION` migration.
+export const DB_NAME = "offlinecv";
 /** Bump when adding/altering a store or index; add a matching `oldVersion < N`
  *  branch in `upgrade()`. */
 export const DB_VERSION = 1;

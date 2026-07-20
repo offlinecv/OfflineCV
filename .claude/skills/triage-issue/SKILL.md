@@ -1,6 +1,6 @@
 ---
 name: triage-issue
-description: Place a GitHub issue onto the offlinecv roadmap — assign it to the right milestone, add it to the "ResumeLint v1" project board, and set its Phase. Use when the user says "triage this issue", "/triage-issue", "add this to the roadmap/board", or files/finds an issue with no milestone.
+description: Place a GitHub issue onto the offlinecv roadmap — assign it to the right milestone, add it to the "OfflineCV v1" project board, and set its Phase. Use when the user says "triage this issue", "/triage-issue", "add this to the roadmap/board", or files/finds an issue with no milestone.
 ---
 
 # Triage Issue
@@ -75,9 +75,9 @@ gh issue edit <N> --milestone "<exact milestone title>"
 
 ```bash
 PROJ_NUM="$(gh project list --owner "$OWNER" --format json \
-  --jq '.projects[] | select(.title=="ResumeLint v1") | .number')"
+  --jq '.projects[] | select(.title=="OfflineCV v1") | .number')"
 PROJ_ID="$(gh project list --owner "$OWNER" --format json \
-  --jq '.projects[] | select(.title=="ResumeLint v1") | .id')"
+  --jq '.projects[] | select(.title=="OfflineCV v1") | .id')"
 ```
 
 If `PROJ_NUM` is empty, the board doesn't exist yet — see **First-time setup**
@@ -152,7 +152,7 @@ gh api "repos/$REPO/milestones" -f title="<title>" -f description="<role in the 
 Create the board + the Phase field, with one option per milestone:
 
 ```bash
-gh project create --owner "$OWNER" --title "ResumeLint v1"
+gh project create --owner "$OWNER" --title "OfflineCV v1"
 # Phase options should mirror the CURRENT milestone titles so triage can set a
 # matching Phase (Step 4). Read them live first, don't paste a stale list:
 #   gh api "repos/$REPO/milestones?state=open" --jq '[.[].title]|join(",")'

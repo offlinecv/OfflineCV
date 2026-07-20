@@ -28,8 +28,8 @@
  * | "compact"| not submitted AND seen count >= 2  | quiet inline star strip        |
  *
  * localStorage keys:
- *   rl_feedback_seen      — integer, incremented once per real mount
- *   rl_feedback_submitted — "1" once handleSubmit succeeds
+ *   ocv_feedback_seen      — integer, incremented once per real mount
+ *   ocv_feedback_submitted — "1" once handleSubmit succeeds
  *
  * Design rules (CLAUDE.md): `Card` + `Button` + `StarRating` from
  * `@design-system`; semantic tokens only; explicit labels on every field.
@@ -70,10 +70,10 @@ const CATEGORIES = ["Parsing", "Scoring", "UI", "Other"] as const;
 type Category = (typeof CATEGORIES)[number];
 
 // localStorage key constants (internal — only used within this module).
-const LS_KEY_SEEN = "rl_feedback_seen";
-const LS_KEY_SUBMITTED = "rl_feedback_submitted";
+const LS_KEY_SEEN = "ocv_feedback_seen";
+const LS_KEY_SUBMITTED = "ocv_feedback_submitted";
 // One-time star CTA seen flag (set when shown after a 4–5★ submission).
-const LS_KEY_STAR_CTA_SEEN = "rl_star_cta_seen";
+const LS_KEY_STAR_CTA_SEEN = "ocv_star_cta_seen";
 
 /**
  * FeedbackPanel — the one owning star-rating feedback surface (#51, #193).
@@ -167,7 +167,7 @@ function FeedbackRatingForm() {
   // ── Done state ────────────────────────────────────────────────────────────
   if (submitted) {
     // Sentiment gate: only show star CTA after a 4–5 star rating, and only
-    // once per browser (rl_star_cta_seen flag). Mark seen on first render.
+    // once per browser (ocv_star_cta_seen flag). Mark seen on first render.
     const showStarCta = rating >= 4 && starCtaSeen !== "1";
 
     return (
