@@ -1,0 +1,14 @@
+// Cloudflare Workers static-assets config — required in-repo for Workers git
+// builds (build: `npm run build`, deploy: `npx wrangler deploy`). Assets-only:
+// no worker script, no build-time Cloudflare dependency — the OSS build stays
+// host-agnostic (vite build → dist/), matching the repo's client-side-only
+// constraint. SPA not-found handling mirrors the old Pages behavior.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "offlinecv",
+  "compatibility_date": "2026-07-20",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
