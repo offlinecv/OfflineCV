@@ -1,18 +1,18 @@
 ---
 name: create-gh-issue
-description: File a thorough, self-contained GitHub issue against resumelint-org/resumelint — full analysis, implementation plan, acceptance criteria — using the scripts/create-gh-issue.sh writer so backticks/tables/code blocks survive intact. Use when the user says "create an issue", "file an issue", "/create-gh-issue", or wants a well-scoped issue written from the current conversation.
+description: File a thorough, self-contained GitHub issue against offlinecv/OfflineCV — full analysis, implementation plan, acceptance criteria — using the scripts/create-gh-issue.sh writer so backticks/tables/code blocks survive intact. Use when the user says "create an issue", "file an issue", "/create-gh-issue", or wants a well-scoped issue written from the current conversation.
 ---
 
-# Create GitHub Issue (resumelint)
+# Create GitHub Issue (offlinecv)
 
-File a comprehensive, **self-contained** issue against `resumelint-org/resumelint`.
+File a comprehensive, **self-contained** issue against `offlinecv/OfflineCV`.
 The issue must carry enough detail that someone with **no prior context** (a
 contributor after `/clear`, or another intern) can implement it start to finish.
 
 This skill is the intern-facing, in-repo version of the maintainer's private
 issue tooling. It depends on nothing outside this checkout: only `gh`
 (authenticated) and `scripts/create-gh-issue.sh`. No `~/tools`, no Linear,
-no machine-local `.env`. GitHub-only — resumelint has no Linear backend.
+no machine-local `.env`. GitHub-only — offlinecv has no Linear backend.
 
 ## Input
 
@@ -29,7 +29,7 @@ anywhere (branch names, commits, cross-links) until the script reports the real
 First, confirm the backend is reachable (one line, non-blocking):
 
 ```bash
-gh repo view --json nameWithOwner -q .nameWithOwner   # → resumelint-org/resumelint
+gh repo view --json nameWithOwner -q .nameWithOwner   # → offlinecv/OfflineCV
 ```
 
 If `gh` isn't installed or authenticated, stop and tell the user to run
@@ -67,7 +67,7 @@ If `gh` isn't installed or authenticated, stop and tell the user to run
    invariant that must still hold (`corpus.test.ts`, `corpus-roundtrip.test.ts`).
 
 5b. **Reuse analysis — required when the issue adds a UI/workflow surface.**
-   resumelint enforces a Reuse Gate (`CLAUDE.md` → "Component architecture & reuse").
+   offlinecv enforces a Reuse Gate (`CLAUDE.md` → "Component architecture & reuse").
    Before finalizing a body that proposes a **new component, panel, dialog, or
    page**, search for an existing surface that already owns that capability:
    - Check the design-system (`src/design-system/`) for an existing primitive or
@@ -155,7 +155,7 @@ the full plan back for line-by-line approval.
 **Error handling:**
 - Exit 2 = arg/env error (missing required arg, `gh` not on PATH, or no GitHub
   remote detected). For the last, run from the repo root or pass `--repo
-  resumelint-org/resumelint`.
+  offlinecv/OfflineCV`.
 - Exit 1 = `gh issue create` failed. Most common cause: a `--labels` value that
   doesn't exist. Check `gh label list`; drop or correct the label and retry. If a
   genuinely new label is needed, ask the user before `gh label create`.
@@ -164,7 +164,7 @@ the full plan back for line-by-line approval.
 
 Every issue needs at least one **type** label; add the domain labels that fit
 (most issues carry 2–3). These are the labels that exist in
-`resumelint-org/resumelint` today — check `gh label list` if unsure:
+`offlinecv/OfflineCV` today — check `gh label list` if unsure:
 
 ### Type (pick at least one)
 | Label | When |
@@ -189,8 +189,8 @@ existing one or ask the user before creating a new label — don't invent taxono
 
 ## Milestones (the roadmap)
 
-resumelint plans on four milestones (read live with
-`gh api repos/resumelint-org/resumelint/milestones --jq '.[] | "\(.number)\t\(.title)"'`).
+offlinecv plans on four milestones (read live with
+`gh api repos/offlinecv/OfflineCV/milestones --jq '.[] | "\(.number)\t\(.title)"'`).
 Pass `--milestone` by title or number when the issue's home is clear:
 
 | # | Title | Role |

@@ -82,7 +82,7 @@ Use an **absolute path** for `RL_RT_PDF`.
   value swap, a skills `added`/`removed` split) → that is a renderer or parser
   bug. Localize it, then file it via **Filing what you find** below. The
   round-trip bugs this probe hunts are tracked at
-  resumelint-org/resumelint#295–#299.
+  offlinecv/OfflineCV#295–#299.
 - **`renderError`** → `renderAtsResumePdf` crashed (e.g. a non-WinAnsi glyph the
   pdf-lib StandardFonts can't encode). Highest-severity find — the Download-PDF
   path throws for real users.
@@ -90,7 +90,7 @@ Use an **absolute path** for `RL_RT_PDF`.
 ## Filing what you find (gated auto-file)
 
 Once you've localized the corruption to a hop + layer, you can turn the finding
-into a `resumelint-org/resumelint` issue **without leaving the probe** — via the
+into an `offlinecv/OfflineCV` issue **without leaving the probe** — via the
 in-repo [`create-gh-issue`](../create-gh-issue/SKILL.md) skill. Filing is
 **gated**: draft, show, confirm, then write. Never blast-file.
 
@@ -107,7 +107,7 @@ Before drafting, search open issues for the same **symptom** so you don't pile
 onto the tracked round-trip bugs (#295–#299) or the open parser backlog:
 
 ```bash
-gh issue list --repo resumelint-org/resumelint --state open --limit 50 \
+gh issue list --repo offlinecv/OfflineCV --state open --limit 50 \
   --search "round-trip <symptom keyword>"   # e.g. "round-trip education count"
 ```
 

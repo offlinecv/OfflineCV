@@ -156,7 +156,7 @@ export interface RunRecord {
 export interface EvalReport {
   /** ISO-8601 timestamp the run started. */
   startedAt: string;
-  /** Resumelint commit SHA the eval ran against, if resolvable. */
+  /** OfflineCV commit SHA the eval ran against, if resolvable. */
   appVersion: string | null;
   /** Models compared in this run. */
   modelIds: readonly string[];

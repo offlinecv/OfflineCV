@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Copyright 2026 The resumelint Authors
+# Copyright 2026 The offlinecv Authors
 #
 # Stop hook: run `fallow audit` over the TS/JS files changed vs the base
 # branch and drop a JSON report under .fallow/. Informational only — this

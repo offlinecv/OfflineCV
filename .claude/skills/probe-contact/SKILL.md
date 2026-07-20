@@ -99,7 +99,7 @@ PDF and the bug is ours; `absent-in-pdf` means stop — nothing to fix.
 ## Filing what you find (gated auto-file)
 
 Once you've localized the layer, you can turn the finding into a
-`resumelint-org/resumelint` issue **without leaving the probe** — via the in-repo
+`offlinecv/OfflineCV` issue **without leaving the probe** — via the in-repo
 [`create-gh-issue`](../create-gh-issue/SKILL.md) skill. Filing is **gated**: draft,
 show, confirm, then write. Never blast-file.
 
@@ -116,7 +116,7 @@ Before drafting, search open issues for the same **layer + symptom** so you don'
 pile onto the existing open contact/parser bugs:
 
 ```bash
-gh issue list --repo resumelint-org/resumelint --state open --limit 50 \
+gh issue list --repo offlinecv/OfflineCV --state open --limit 50 \
   --search "contact <symptom keyword>"   # e.g. "contact letter-spaced name"
 ```
 

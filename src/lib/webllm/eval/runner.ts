@@ -59,7 +59,7 @@ export interface RunEvalInput {
    */
   judgeEnabled?: boolean;
   /**
-   * Resumelint commit SHA the eval ran against, surfaced in the report.
+   * OfflineCV commit SHA the eval ran against, surfaced in the report.
    * The browser entry passes `__APP_VERSION__`; tests pass `null`.
    */
   appVersion?: string | null;

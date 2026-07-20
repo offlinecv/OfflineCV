@@ -108,7 +108,7 @@ split points at which one:
 ## Filing what you find (gated auto-file)
 
 Once you've localized the layer, you can turn the finding into a
-`resumelint-org/resumelint` issue **without leaving the probe** — via the in-repo
+`offlinecv/OfflineCV` issue **without leaving the probe** — via the in-repo
 [`create-gh-issue`](../create-gh-issue/SKILL.md) skill. Filing is **gated**: draft,
 show, confirm, then write. Never blast-file.
 
@@ -126,7 +126,7 @@ pile onto the existing open skills/parser bugs (e.g. #374 two-line wrap, #414
 leading glyph):
 
 ```bash
-gh issue list --repo resumelint-org/resumelint --state open --limit 50 \
+gh issue list --repo offlinecv/OfflineCV --state open --limit 50 \
   --search "skills <symptom keyword>"   # e.g. "skills header glyph"
 ```
 

@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Open a pull request against resumelint from your current work — branch if needed, commit, push, and create the PR with a filled body that links the issue. Use when the user says "open a PR", "send a PR", "/open-pr", or has finished a change and wants it reviewed.
+description: Open a pull request against offlinecv from your current work — branch if needed, commit, push, and create the PR with a filled body that links the issue. Use when the user says "open a PR", "send a PR", "/open-pr", or has finished a change and wants it reviewed.
 ---
 
 # Open PR
@@ -35,7 +35,7 @@ branch, never on `main`.
 ### Step 0: Detect repo + base
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"          # resumelint-org/resumelint
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"          # offlinecv/OfflineCV
 BASE="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"  # main
 # If --base <ref> was provided, override BASE here: BASE="<ref>"
 ```

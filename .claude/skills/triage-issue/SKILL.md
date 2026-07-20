@@ -1,6 +1,6 @@
 ---
 name: triage-issue
-description: Place a GitHub issue onto the resumelint roadmap — assign it to the right milestone, add it to the "ResumeLint v1" project board, and set its Phase. Use when the user says "triage this issue", "/triage-issue", "add this to the roadmap/board", or files/finds an issue with no milestone.
+description: Place a GitHub issue onto the offlinecv roadmap — assign it to the right milestone, add it to the "ResumeLint v1" project board, and set its Phase. Use when the user says "triage this issue", "/triage-issue", "add this to the roadmap/board", or files/finds an issue with no milestone.
 ---
 
 # Triage Issue
@@ -29,8 +29,8 @@ gh issue list --state open --json number,title,milestone \
 ### Step 0: Detect repo + read the live roadmap
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org/resumelint
-OWNER="${REPO%%/*}"                                             # resumelint-org
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
+OWNER="${REPO%%/*}"                                             # offlinecv
 
 # Open milestones (the canonical roadmap buckets)
 gh api "repos/$REPO/milestones?state=open" \

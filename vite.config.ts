@@ -49,7 +49,7 @@ function resolveAppVersion(): string {
 
 const APP_VERSION = resolveAppVersion();
 
-// Base path. The custom domain (resumelint.org) and the GCS bucket root both
+// Base path. The custom domain (offlinecv.org) and the GCS bucket root both
 // serve at "/"; the bare github.io project-Pages fallback
 // (offlinecv.github.io/OfflineCV/) needs "/OfflineCV/". Env-driven so
 // each deploy target builds with its own prefix without a code edit — set

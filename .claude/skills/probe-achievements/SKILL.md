@@ -109,7 +109,7 @@ which one:
 ## Filing what you find (gated auto-file)
 
 Once you've localized the layer, you can turn the finding into a
-`resumelint-org/resumelint` issue **without leaving the probe** — via the in-repo
+`offlinecv/OfflineCV` issue **without leaving the probe** — via the in-repo
 [`create-gh-issue`](../create-gh-issue/SKILL.md) skill. Filing is **gated**: draft,
 show, confirm, then write. Never blast-file.
 
@@ -121,7 +121,7 @@ can't file it yet — build the synthetic repro first.
 ### 1. Dedup first (required)
 
 ```bash
-gh issue list --repo resumelint-org/resumelint --state open --limit 50 \
+gh issue list --repo offlinecv/OfflineCV --state open --limit 50 \
   --search "achievements <symptom keyword>"   # e.g. "achievements award merged"
 ```
 

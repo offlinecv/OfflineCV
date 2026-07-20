@@ -1,7 +1,7 @@
 # offlinecv
 
-**Try it:** [resumelint.org](https://resumelint.org) — stable, promoted daily once
-CI is green · [dev.resumelint.org](https://dev.resumelint.org) — bleeding edge,
+**Try it:** [offlinecv.org](https://offlinecv.org) — stable, promoted daily once
+CI is green · [dev.offlinecv.org](https://dev.offlinecv.org) — bleeding edge,
 updated on every push
 
 A PDF parser stress test for resumes. Drop a PDF in; see what a generic
@@ -102,7 +102,7 @@ the PostHog branch is dead-code-eliminated by Vite/Rollup and the dep does
 not appear in the output bundle.
 
 A build with `VITE_POSTHOG_KEY` set — such as the hosted preview at
-resumelint.org — emits events such as `file_accepted`, `parse_completed`, and
+offlinecv.org — emits events such as `file_accepted`, `parse_completed`, and
 `parse_failed`. The payloads are listed in `src/lib/analytics.ts` and contain
 only file size, page count, parse duration, score breakdown, layout triggers,
 and error name — never PDF bytes, never extracted text, never names or URLs.
@@ -326,7 +326,7 @@ aws s3 sync dist s3://your-bucket     # S3
 The hosted preview at the top of this README is published from `dist/`
 to GitHub Pages by `.github/workflows/deploy-pages.yml` — read that
 workflow for a working end-to-end example. The canonical production URL
-is the custom domain **<https://resumelint.org>**; the project-Pages URL
+is the custom domain **<https://offlinecv.org>**; the project-Pages URL
 <https://offlinecv.github.io/OfflineCV/> remains as a fallback (built
 with `VITE_BASE_PATH=/OfflineCV/`).
 

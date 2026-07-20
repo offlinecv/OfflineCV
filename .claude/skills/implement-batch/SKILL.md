@@ -14,7 +14,7 @@ and opening **one PR** via `/open-pr`.
 This is the GitHub-only, self-contained sibling of the global `/implement-epic`.
 It has **no Linear code** and **no dependency on `/implement-issue`** — the
 per-issue implementation contract is embedded here, in the subagent spawn
-prompt, so this skill works for anyone who clones `resumelint-org/resumelint`
+prompt, so this skill works for anyone who clones `offlinecv/OfflineCV`
 (interns included), not just a maintainer whose `~/tools/skills/` has the global
 skills.
 
@@ -24,9 +24,9 @@ skills.
 > explore/edit context stays down there; only a tight structured summary returns.
 > The orchestrator stays lean across the whole sequence.
 
-## Repo facts (resumelint)
+## Repo facts (offlinecv)
 
-- **Repo:** `resumelint-org/resumelint`. `main` is protected — every change
+- **Repo:** `offlinecv/OfflineCV`. `main` is protected — every change
   merges through a PR that needs **1 approving review** + a green **`verify`**
   check. Direct commits/pushes to `main` are blocked (server-side protection +
   the local `block_commit` hook). So this skill **never commits on `main`** — it
@@ -57,7 +57,7 @@ Parse `$ARGUMENTS` for **either**:
 
 Resolve `<owner>/<repo>` once:
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org/resumelint
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
 ```
 
 **Flags** (strip before parsing the identifier):

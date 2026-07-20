@@ -1,14 +1,14 @@
 ---
 name: pr-review
-description: Review a resumelint pull request the way a maintainer does — pull the diff, run the generic /code-review correctness pass, then layer resumelint's own gates (fixture PII, design-system reuse, style tokens, fallow dead-code, command-level bugs in skill/script files), structure the findings Blocking / Secondary / Nits, and post a PR review whose verdict matches what was found. Use when the user says "review PR #N", "/pr-review", "review this PR", or hands you a PR to critique before merge.
+description: Review an offlinecv pull request the way a maintainer does — pull the diff, run the generic /code-review correctness pass, then layer offlinecv's own gates (fixture PII, design-system reuse, style tokens, fallow dead-code, command-level bugs in skill/script files), structure the findings Blocking / Secondary / Nits, and post a PR review whose verdict matches what was found. Use when the user says "review PR #N", "/pr-review", "review this PR", or hands you a PR to critique before merge.
 argument-hint: <#|#N> [--repo owner/repo] [--post|--local] [--effort low|medium|high]
 ---
 
 # Review PR
 
-Take a resumelint PR from "someone opened it" to "a maintainer-grade review is on
+Take an offlinecv PR from "someone opened it" to "a maintainer-grade review is on
 the thread": check out the diff → run the built-in `/code-review` for the generic
-correctness pass → **layer the resumelint-specific gates** → structure findings
+correctness pass → **layer the offlinecv-specific gates** → structure findings
 **Blocking / Secondary / Nits** → draft the review → confirm → post a `gh` PR
 review whose **verdict matches the findings**.
 
@@ -18,7 +18,7 @@ the PR, `revise-pr` addresses the review — this skill *is* the review in betwe
 ## Why this skill exists
 
 `/code-review` is a strong **generic** diff pass (correctness, reuse, simplify,
-efficiency) but it doesn't know resumelint's house rules: the public-repo fixture
+efficiency) but it doesn't know offlinecv's house rules: the public-repo fixture
 PII policy, the 3-tier design-system + reuse gate, the semantic-token style rules,
 the `fallow` dead-code gate, or that a **skill/script file is code too** — the kind
 of `gh`/bash command-level bug that sank PR #390 (a `--json` flag that doesn't
@@ -29,7 +29,7 @@ are blocking) and the posting path (**inline anchors where the finding lives**, 
 for the rest, one `422`-safe fallback).
 
 **Don't reimplement bug-finding** — delegate the generic pass to `/code-review` and
-spend the skill's effort on the resumelint-specific gates and the workflow.
+spend the skill's effort on the offlinecv-specific gates and the workflow.
 
 ## Input
 
@@ -49,7 +49,7 @@ guess. `--effort` is passed straight through to `/code-review` (default `high`).
 ### Step 0 — Detect repo + PR
 
 ```bash
-REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"   # resumelint-org/resumelint
+REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"   # offlinecv/OfflineCV
 gh pr view "$PR_NUM" --repo "$REPO" \
   --json number,title,state,headRefName,baseRefName,author,files \
   -q '{n:.number,t:.title,s:.state,h:.headRefName,b:.baseRefName,a:.author.login}'
@@ -85,7 +85,7 @@ simplify + efficiency. This is the bug-finding engine — don't duplicate it:
 `/code-review` is **diff-scoped and repo-agnostic**. Everything below is what it
 *won't* catch.
 
-### Step 3 — Layer the resumelint gates
+### Step 3 — Layer the offlinecv gates
 
 Run each gate against the **changed files** (`git diff --name-only "origin/$BASE...HEAD"`).
 A gate that doesn't apply to this diff is skipped — say so, don't invent findings.
@@ -329,7 +329,7 @@ were lost to a mid-review push, not to laziness.
 ## Rules
 
 - **Wrap, don't duplicate.** `/code-review` owns the generic correctness pass; this
-  skill owns the resumelint gates + workflow + posting. Don't re-litigate what
+  skill owns the offlinecv gates + workflow + posting. Don't re-litigate what
   `/code-review` already found — fold it in.
 - **Verify before flagging.** Read the file at each cited line; drop findings that
   don't reproduce. A wrong finding costs more trust than a missed nit.

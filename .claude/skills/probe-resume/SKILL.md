@@ -155,7 +155,7 @@ Printed to the console (full JSON mirrored to the gitignored out dir):
   extracted **0 characters**), the harness **refuses to print `DEFECTS FOUND` or
   `COVERAGE` at all**, and runs no corpus match. There is no honest defect report
   over a document the parser never read, and an affirmative "no defect class is
-  exhibited by this parse" there would report resumelint's **single most severe
+  exhibited by this parse" there would report offlinecv's **single most severe
   failure mode as clean**. What you get instead is the char counts, the layout
   triggers, the withheld list, and a pointer at the real problem: this is a
   **Tier-0 extraction failure** (scanned/OCR, unmappable fonts), not a

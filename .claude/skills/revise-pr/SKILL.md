@@ -39,7 +39,7 @@ every thread gets a visible reply (the PR-author signal norm: don't push silent)
 ### Step 0: Detect repo + PR
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org/resumelint
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
 OWNER="${REPO%%/*}"; NAME="${REPO##*/}"
 # PR_NUM from the argument, or inferred from the current branch (see Input).
 gh pr view "$PR_NUM" --repo "$REPO" \

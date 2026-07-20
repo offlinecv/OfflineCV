@@ -18,9 +18,9 @@ off a ready invocation.
 > an explicit list: `/implement-batch 341,346,349`. `/implement-batch` already
 > accepts a raw list — this skill earns its keep only by making the group real.
 
-## Repo facts (resumelint)
+## Repo facts (offlinecv)
 
-- **Repo:** `resumelint-org/resumelint`, GitHub-only (no Linear). All grouping is
+- **Repo:** `offlinecv/OfflineCV`, GitHub-only (no Linear). All grouping is
   native GitHub: sub-issues via `gh api .../sub_issues`, dependency order via
   `.../dependencies/blocked_by`, board via `gh project`.
 - **This skill only creates/links issues** — no branch, no commit, no PR. The
@@ -62,7 +62,7 @@ CHILDREN=($(printf '%s' "$RAW_LIST" | tr ',' ' ' | tr -s ' ' | sed 's/#//g'))
 
 Resolve the repo once:
 ```bash
-REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # resumelint-org/resumelint
+REPO="$(gh repo view --json nameWithOwner -q .nameWithOwner)"   # offlinecv/OfflineCV
 OWNER="${REPO%%/*}"
 ```
 
@@ -225,7 +225,7 @@ blocked by A, C by B — each edge uses the **blocking** issue's internal id, ty
 
 Four failure modes bit real runs — the loop below defends against all four:
 
-1. **`${ARR[i]}` index math breaks under zsh (THE load-bearing one).** resumelint's
+1. **`${ARR[i]}` index math breaks under zsh (THE load-bearing one).** offlinecv's
    shell is **zsh, whose arrays are 1-indexed**; a `for ((i=1; i<${#ORDER[@]}; i++))`
    loop written for **bash's 0-indexing** silently wires the *wrong* pairs — the first
    edge gets an empty blocker and the last edge (which needs `i==len`) never runs.
@@ -329,7 +329,7 @@ Implement it:  /implement-batch <PARENT>   ⚠ executor lands in #387 — not ru
   incoherent batch produces an unreviewable PR.
 - **Typed `-F` for every id.** Sub-issue and dependency links use the child's
   internal REST `id` with `-F` (integer), never the number, never `-f`.
-- **Never index a bash array — resumelint's shell is zsh (1-indexed).** A
+- **Never index a bash array — offlinecv's shell is zsh (1-indexed).** A
   `for ((i=1;…)); ${ORDER[i-1]}` loop written for bash's 0-indexing wires the wrong
   dependency pairs under zsh (empty first blocker, last edge skipped). Iterate values
   with a `PREV` cursor instead; it behaves identically in both shells.

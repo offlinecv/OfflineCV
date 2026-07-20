@@ -1,10 +1,10 @@
 name: Promote main → release (prod gate)
 
 # Advances the `release` branch (Cloudflare Pages production source, served at
-# resumelint.org) to the latest `main` SHA — but only when the full local CI
+# offlinecv.org) to the latest `main` SHA — but only when the full local CI
 # gate (`npm run verify`) passes on that commit. Runs once a day, and on manual
 # dispatch. If verify fails, `release` stays on the last good commit, so prod
-# holds a known-good build while `main` (dev.resumelint.org, via GitHub Pages)
+# holds a known-good build while `main` (dev.offlinecv.org, via GitHub Pages)
 # keeps taking every push.
 #
 # No secrets: pushes to `release` with the built-in GITHUB_TOKEN. Cloudflare

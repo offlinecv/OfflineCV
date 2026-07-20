@@ -56,6 +56,8 @@ __pycache__/
 # npm scripts; build/deploy guidance lives in README.md.
 /scripts/run_resumelint.sh
 /scripts/deploy_resumelint.sh
+/scripts/run_offlinecv.sh
+/scripts/deploy_offlinecv.sh
 
 # Local-only internal working directory — never ship in the OSS repo
 internal/
