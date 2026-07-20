@@ -61,3 +61,8 @@ __pycache__/
 
 # Local-only internal working directory — never ship in the OSS repo
 internal/
+
+# wrangler local state
+.wrangler/
+.dev.vars*
+!.dev.vars.example
