@@ -24,7 +24,7 @@
  * later, unrelated session. Consumed once: `/jd-fit` reads then clears the key
  * on mount, so a manual reload falls back to its own DropZone.
  *
- * Key follows the repo's `rl_*` storage convention.
+ * Key follows the repo's `ocv_*` storage convention.
  */
 
 import type { CascadeResult } from "./heuristics/types.ts";
@@ -32,7 +32,7 @@ import type { AnonymousAtsScore } from "./score/score.ts";
 import type { EditSnapshot } from "../hooks/useEditableParse.ts";
 
 /** sessionStorage key for the parser-audit → JD-fit handoff payload (#226). */
-export const JDFIT_HANDOFF_KEY = "rl_jdfit_handoff";
+export const JDFIT_HANDOFF_KEY = "ocv_jdfit_handoff";
 
 /**
  * Sentinel wrapper for a `Map` in the JSON payload (#450). `JSON.stringify`

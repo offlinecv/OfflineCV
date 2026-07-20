@@ -131,16 +131,16 @@ scoped to your browser:
 
 | Key | Purpose |
 |---|---|
-| `rl_feedback_seen` | counts how many times the feedback ask has rendered; after 2 the panel switches from the full card to a quiet compact star strip |
-| `rl_feedback_submitted` | set after a successful feedback submit so the panel never re-asks in that browser |
-| `rl_star_cta_seen` | one-time flag so the post-feedback GitHub-star prompt shows only once per browser |
-| `rl_gh_stars_cache` | caches the fetched star count (~1h TTL) to avoid re-hitting the GitHub API on every parse |
+| `ocv_feedback_seen` | counts how many times the feedback ask has rendered; after 2 the panel switches from the full card to a quiet compact star strip |
+| `ocv_feedback_submitted` | set after a successful feedback submit so the panel never re-asks in that browser |
+| `ocv_star_cta_seen` | one-time flag so the post-feedback GitHub-star prompt shows only once per browser |
+| `ocv_gh_stars_cache` | caches the fetched star count (~1h TTL) to avoid re-hitting the GitHub API on every parse |
 
 #### IndexedDB (local-first storage)
 
 For structured/binary data the app uses an IndexedDB database named `offlinecv`
 (via the ~1KB [`idb`](https://github.com/jakearchibald/idb) wrapper;
-`src/lib/storage/`), separate from the `rl_*` UI flags above. It has two object
+`src/lib/storage/`), separate from the `ocv_*` UI flags above. It has two object
 stores — `resumes` (raw PDF bytes as a `Blob` plus a cached parse so a reopened
 resume doesn't re-run the cascade) and `jobs` (tracked-job records) — versioned
 together under one `onupgradeneeded` migration path. This is **still first-party
@@ -164,7 +164,7 @@ state and the eviction note inline, with the export backup reachable from there.
 The footer shows the live repo star count via an unauthenticated call to
 `https://api.github.com/repos/offlinecv/OfflineCV` (`src/hooks/useGitHubStars.ts`).
 It runs from your browser on app load whenever the ~1h cache
-(`rl_gh_stars_cache`) is stale, and is **fail-silent** — on network error or
+(`ocv_gh_stars_cache`) is stale, and is **fail-silent** — on network error or
 rate-limit (GitHub allows 60 req/hr/IP unauthenticated) the count is hidden
 and the rest of the UI is unaffected. Because the request originates in your
 browser, **your IP address is seen by GitHub** (a US third party) as a result

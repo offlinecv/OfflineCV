@@ -4,7 +4,7 @@
 /**
  * Persistence back-compat for the #427 contact-link consolidation.
  *
- * Before #427 a saved blank-authoring draft (`rl_blank_draft`) carried contact
+ * Before #427 a saved blank-authoring draft (`ocv_blank_draft`) carried contact
  * LINK edits on `contactOverrides` under the four legacy `*_url` keys and had no
  * `profileOverrides` list. `migrateBlankDraft` upconverts such a draft on read
  * into the consolidated shape without losing edits, and leaves a current-shape

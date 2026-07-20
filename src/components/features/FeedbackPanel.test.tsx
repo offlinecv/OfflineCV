@@ -53,8 +53,8 @@ async function mountPanel(opts: {
   return container;
 }
 
-// FeedbackPanel persists render-state to localStorage (rl_feedback_seen /
-// rl_feedback_submitted / rl_star_cta_seen / rl_gh_stars_cache, #193/#194).
+// FeedbackPanel persists render-state to localStorage (ocv_feedback_seen /
+// ocv_feedback_submitted / ocv_star_cta_seen / ocv_gh_stars_cache, #193/#194).
 // Without a clean store, the submit test flips later mounts into "done"
 // (renders null) and the seen counter accumulates into "compact" mode — both
 // hide the form. The global setup (src/test-setup.ts, #398) installs a fresh

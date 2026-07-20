@@ -121,10 +121,10 @@ export interface LoadedDoneState {
 // ── Draft persistence (#313) ─────────────────────────────────────────────────
 
 /** localStorage key for the in-progress from-scratch draft, following the
- *  `rl_*` functional-key convention (README's Telemetry section). Exported so
+ *  `ocv_*` functional-key convention (README's Telemetry section). Exported so
  *  `useDownloadPdf` can clear it on a successful blank-authored export
  *  without sharing any React state with this hook. */
-export const BLANK_DRAFT_STORAGE_KEY = "rl_blank_draft";
+export const BLANK_DRAFT_STORAGE_KEY = "ocv_blank_draft";
 
 function isBlankDraftSnapshot(value: unknown): value is BlankDraftSnapshot {
   if (typeof value !== "object" || value === null) return false;

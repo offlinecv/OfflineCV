@@ -299,7 +299,7 @@ gh api -X DELETE "repos/$REPO/issues/<BLOCKED>/dependencies/blocked_by/$DEP_ID"
 Don't re-implement project logic — **delegate to the repo's `/triage-issue`**, which
 owns board placement **and the parent's milestone/Phase**:
 
-> Run `/triage-issue <PARENT>` to put the epic on the "ResumeLint v1" board and
+> Run `/triage-issue <PARENT>` to put the epic on the "OfflineCV v1" board and
 > set its Phase/milestone.
 
 Invoke it (or tell the user to) so the batch shows up on the roadmap as one row.
