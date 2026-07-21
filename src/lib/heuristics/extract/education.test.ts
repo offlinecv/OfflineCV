@@ -769,3 +769,91 @@ describe("extractEducation — entry-boundary guard against phantom entries (#46
     expect(value[1].degree).toContain("B.E.");
   });
 });
+
+describe("extractEducation — one-line 'Degree Field, Institution' + en-dash date + plain coursework (#506)", () => {
+  it("keeps the degree/field when the only en-dash is inside a trailing date RANGE", () => {
+    // The #506 repro: degree + field + institution on ONE line, with a trailing
+    // "Mon YYYY – Mon YYYY" range. The date's en-dash used to be mistaken for the
+    // degree↔institution separator, burying the credential in `institution` and
+    // re-parsing degree from the bare end-date ("May 2023") → empty.
+    const { value } = extractEducation(
+      mkEduSection([
+        "M.S. Data Science, Example State University Aug 2021 – May 2023",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("M.S.");
+    expect(value[0].field).toBe("Data Science");
+    expect(value[0].institution).toBe("Example State University");
+    expect(value[0].institution).not.toMatch(/M\.S\.|Data Science|2021|2023/);
+    expect(value[0].start_date).toBe("Aug 2021");
+    expect(value[0].end_date).toBe("May 2023");
+  });
+
+  it("recovers coursework written as a plain (glyph-less) 'Coursework:' line", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "M.S. Data Science, Example State University Aug 2021 – May 2023",
+        "Coursework: Databases, Machine Learning, Statistics",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].coursework).toEqual([
+      "Databases",
+      "Machine Learning",
+      "Statistics",
+    ]);
+  });
+
+  it("attributes plain coursework to the correct entry across two one-line degrees", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "M.S. Data Science, Example State University Aug 2021 – May 2023",
+        "Coursework: Databases, Machine Learning, Statistics",
+        "B.Tech. Electronics Engineering, Sample Institute of Technology Jun 2016 – May 2020",
+        "Coursework: Data Structures, RDBMS, Software Engineering",
+      ]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value[0]).toMatchObject({
+      degree: "M.S.",
+      field: "Data Science",
+      institution: "Example State University",
+      coursework: ["Databases", "Machine Learning", "Statistics"],
+    });
+    expect(value[1]).toMatchObject({
+      degree: "B.Tech.",
+      field: "Electronics Engineering",
+      institution: "Sample Institute of Technology",
+      coursework: ["Data Structures", "RDBMS", "Software Engineering"],
+    });
+  });
+
+  it("preserves a comma inside the institution name (no trailing date)", () => {
+    // The comma-split must not cut "University of California, Berkeley" in half:
+    // the institution run starts at the first hint-bearing part and keeps the
+    // rest, so the campus comma survives.
+    const { value } = extractEducation(
+      mkEduSection([
+        "B.S. Computer Science, University of California, Berkeley",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+    expect(value[0].institution).toBe("University of California, Berkeley");
+  });
+
+  it("does NOT comma-split an institution-first line with no degree prefix", () => {
+    // The hint sits in the FIRST comma-part ("State University Boston, MA") — the
+    // line leads with the institution, there is no "<Degree Field>," head to peel.
+    // The comma-split must NOT fire (an empty head would nuke degree/field); the
+    // whole line stays the institution and the location peels normally.
+    const { value } = extractEducation(
+      mkEduSection(["State University Boston, MA"]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("State University");
+    expect(value[0].location).toBe("Boston, MA");
+  });
+});
