@@ -20,11 +20,11 @@ import { isBulletGlyph, stripBullet } from "../line-primitives.ts";
  * balanced parentheses (e.g. `Cloud Infrastructure (GCP, Hybrid Cloud)`) must
  * not split the token. Only commas OUTSIDE parens are delimiters.
  */
-// Bullet-glyph separators mirror the canonical leading-bullet set
-// (`regex.ts` LEADING_BULLET_RE, `sections.ts` VISUAL_BULLET_RE): `·` (U+00B7),
-// `•` (U+2022), `‣` (U+2023), `▪` (U+25AA), `●` (U+25CF), `◦` (U+25E6),
-// `⁃` (U+2043) — every round/square bullet Word / Google-Docs emit inline
-// between skills. The dash glyphs (`-`/`–`/`—`) and `*` in that set are
+// Bullet-glyph separators cover `·` (U+00B7) plus the round/square bullets from
+// the canonical leading-bullet set (`regex.ts` LEADING_BULLET_RE, `sections.ts`
+// VISUAL_BULLET_RE): `•` (U+2022), `‣` (U+2023), `▪` (U+25AA), `●` (U+25CF),
+// `◦` (U+25E6), `⁃` (U+2043) — every round/square bullet Word / Google-Docs
+// emit inline between skills. The dash glyphs (`-`/`–`/`—`) and `*` in that set are
 // DELIBERATELY excluded: they occur inside real skill names (`CI-CD`,
 // `front-end`, `C*`), so splitting on them would fragment a legitimate token.
 const SKILL_SPLIT_RE = /[;·•‣▪●◦⁃|]+|\s{2,}|(?<!\w)\/+(?!\w)/;
