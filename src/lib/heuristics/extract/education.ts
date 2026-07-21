@@ -720,11 +720,19 @@ function educationFromChunk(chunk: string[]): {
       // reconstructed view. Split at the em/en-dash separator so the trailing
       // half is the institution and re-parse degree/field off the head.
       if (instLine === degreeLine && degreeMatch) {
+        // Peel any trailing date range off the one-line entry FIRST, so an
+        // en/em-dash INSIDE the date range ("… University Aug 2021 – May 2025",
+        // #506) is never mistaken for the degree↔institution separator. Without
+        // this the split below cut the entry on the date's en-dash, burying the
+        // credential in `institution` and re-parsing degree/field from the bare
+        // end-date ("May 2025") — degree came back empty. `stripInstitutionDate`
+        // runs again downstream (line ~768); it is idempotent.
+        const instNoDate = stripInstitutionDate(instLine);
         // En/em-dash only — a spaced ASCII `-` commonly separates degree from
         // field ("B.S. - Computer Science, Stanford University"), not
         // institution from the rest, so splitting on it here would strand the
         // field on the wrong side of the boundary.
-        const parts = instLine.split(/\s+[–—]\s+/);
+        const parts = instNoDate.split(/\s+[–—]\s+/);
         if (parts.length >= 2) {
           // Pick the part carrying an institution hint ("University", "College",
           // …) as the institution. If none carries a hint, fall back to the
@@ -737,13 +745,31 @@ function educationFromChunk(chunk: string[]): {
           const head = parts.filter((_, i) => i !== instIdx).join(" — ");
           ({ degree, field } = parseDegreeAndField(head));
         } else {
-          // No em-dash separator to slice on — keep the raw line as the
-          // institution (behavior preserved from before #364; the strip-then-
-          // maybe-mangle path only pays off when the split cleanly isolates
-          // the institution). A comma-separated single-line entry like
-          // "Associate degree, H.R. Management, Bellows College" round-trips
-          // consistently that way.
-          institution = instLine.trim();
+          // No em/en-dash separator. Try a COMMA separator
+          // "<Degree Field>, <Institution>" (#506) — the shape "M.S. Data
+          // Science, Example State University". Split on commas and take the run
+          // from the FIRST hint-bearing part onward as the institution, so a
+          // comma INSIDE the institution name ("University of California,
+          // Berkeley") is preserved, re-parsing degree/field off the head.
+          // Gated on a hint part existing AT INDEX ≥ 1, so there is a non-empty
+          // "<Degree Field>" head before it to re-parse. `cHintIdx === 0` means
+          // the line LEADS with the institution ("State University Boston, MA",
+          // no degree prefix) — there is nothing to split off, so it falls to the
+          // raw-line fallback unchanged rather than nuke degree/field to empty.
+          // An acronym-school single-line entry ("B.S. Computer Science, MIT")
+          // carries no hint and likewise falls through untouched.
+          const commaParts = instNoDate.split(/\s*,\s*/);
+          const cHintIdx = commaParts.findIndex((p) => INSTITUTION_HINTS.test(p));
+          if (cHintIdx >= 1) {
+            institution = commaParts.slice(cHintIdx).join(", ").trim();
+            const head = commaParts.slice(0, cHintIdx).join(", ");
+            ({ degree, field } = parseDegreeAndField(head));
+          } else {
+            // Keep the (date-stripped) raw line as the institution (behavior
+            // preserved from before #364; the strip-then-maybe-mangle path only
+            // pays off when the split cleanly isolates the institution).
+            institution = instNoDate.trim();
+          }
         }
       } else {
         institution = instLine.trim();
@@ -826,7 +852,12 @@ export function extractEducation(
   const coursework: { text: string; idx: number }[] = [];
   const consumed = new Set<number>();
   for (let i = 0; i < ls.length; i++) {
-    if (!isBulletLine(ls[i])) continue;
+    // Coursework is usually a bullet list, but some résumés write it as a plain
+    // (glyph-less) label line — "Coursework: Databases, Machine Learning" (#506).
+    // Admit such a line too, or it never reaches the label-strip + comma-split
+    // below and is silently dropped. `stripBullet` is a no-op on a glyph-less
+    // line, so the bullet path is unaffected.
+    if (!isBulletLine(ls[i]) && !COURSEWORK_LABEL_RE.test(ls[i].text)) continue;
     let item = stripBullet(ls[i].text);
     const span = [i];
     let j = i + 1;
