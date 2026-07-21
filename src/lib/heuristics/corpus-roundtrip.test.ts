@@ -168,7 +168,6 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   // Delete each line below as its root lands (the ratchet forces it — a fixed
   // fixture trips the stale-entry check).
   "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["experience"],
-  "google-docs/google-docs-skia-proxy-role-first-experience.pdf": ["experience"],
   // awesome-cv-cv: #383 cleared its earlier abbreviated-date baseline (see the
   // #383 note above), but main's one-line header re-regresses `experience` for
   // the #436 TRUNCATION reason — 12 roles re-parse company-truncated/swapped off

@@ -153,6 +153,7 @@ const KNOWN_FAILURES: Record<string, EditCategory[]> = {
   "unknown/mid-dot-header.pdf": ["bullets"],
   "unknown/name-set-apart-tagline.pdf": ["bullets"],
   "unknown/pdflib-leading-glyph-skills-header.pdf": ["bullets"],
+  "unknown/single-column-endash-title-company.pdf": ["bullets"],
   "unknown/single-column-intl-role-headers.pdf": ["bullets"],
   "unknown/single-column-title-below-anchor.pdf": ["bullets"],
   "unknown/single-column-year-only-roundtrip.pdf": ["bullets"],

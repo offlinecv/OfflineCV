@@ -345,6 +345,36 @@ function splitRoleComma(h: string): [string, string] | null {
 }
 
 /**
+ * Split a single "Title – Company" header line on a spaced EN-DASH (–, U+2013)
+ * into [title, company]. Word / Google-Docs single-column exports join the role
+ * title to the employer with an en-dash, exactly like the em-dash (—, U+2014)
+ * the Phase-1 delimiter split already recognizes — the en-dash was simply
+ * missing from that alternation, so the whole header collapsed into one segment
+ * (title dropped to null, or the company lost to the title).
+ *
+ * Guarded to leave the line UNSPLIT (returns null) when the tail reads like a
+ * bare location: the role-first "Company – City, ST" header (#215/#436) uses the
+ * same spaced en-dash to join a company to its trailing city, and that shape is
+ * owned by the location-recovery path in {@link recoverLocation}, not by a
+ * segment split — cleaving it would strand the city as a phantom company.
+ * Requires exactly one en-dash boundary (two segments) so a multi-dash line
+ * falls through to the existing paths untouched.
+ *
+ * Date ranges also use an en-dash, but `parseEntryBlocks` runs `stripDateRange`
+ * on every header line before it reaches here, so a spaced en-dash surviving on
+ * a header line is a field separator, never a date range.
+ */
+function splitEnDashTitleCompany(h: string): [string, string] | null {
+  const parts = h.split(/\s+–\s+/);
+  if (parts.length !== 2) return null;
+  const before = parts[0].trim();
+  const after = parts[1].trim();
+  if (!before || !after) return null;
+  if (isBareLocationString(after)) return null;
+  return [before, after];
+}
+
+/**
  * True when a date-anchor line carries the reconstructed-export org signature —
  * used to gate the anchor-is-company positional tiebreak in
  * {@link disambiguateCompanyTitle} so it fires ONLY on our own reconstructed
@@ -472,7 +502,8 @@ function stripLeadingSectionHeaders(
 /**
  * Phase 1 — split each header line into segments.
  *
- * Split any header that has an obvious "Title @ Company", "Title — Company",
+ * Split any header that has an obvious "Title @ Company", "Title — Company"
+ * (em-dash), "Title – Company" (en-dash, via {@link splitEnDashTitleCompany}),
  * "Title | Company", "Title · Company" (mid-dot, #217), or guarded
  * "Title, Company" pattern.
  */
@@ -487,6 +518,13 @@ function splitHeaderSegments(filtered: string[]): Split[] {
       const middot = /\s+·\s+/.test(h) && !/\s+[@—|]\s+/.test(h);
       atSplit.forEach((s) =>
         splits.push({ text: s.trim(), source: idx, via: "delim", middot }),
+      );
+      return;
+    }
+    const enDash = splitEnDashTitleCompany(h);
+    if (enDash) {
+      enDash.forEach((s) =>
+        splits.push({ text: s, source: idx, via: "delim", middot: false }),
       );
       return;
     }
