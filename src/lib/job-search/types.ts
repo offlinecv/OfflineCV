@@ -36,6 +36,10 @@ export interface JobPosting {
   /** Provider display name, shown on the card to reinforce the honest-sample
    *  framing ("Remotive"). */
   source: string;
+  /** Department/team names, when the provider's feed carries them (e.g. a
+   *  Greenhouse board's `departments[].name`). Optional — most keyless feeds
+   *  don't have this axis. Consumed by the #534 title/board-size filter. */
+  departments?: string[];
 }
 
 /** One keyless job feed, adapted to the normalized shape. */
