@@ -80,7 +80,7 @@ function BulletFindingRow({
           variant="link"
           size="sm"
           onClick={onGoToRewrite}
-          className="self-start text-[11px] font-medium text-brand-amber"
+          className="self-start text-[11px] font-medium text-accent-primary"
           aria-label="Go to Reconstructed resume tab to rewrite this bullet"
         >
           Rewrite this section →

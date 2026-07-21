@@ -26,12 +26,12 @@ function restrictedSyntaxRules() {
     {
       selector: `Literal[value=/${PALETTE_RE}/]`,
       message:
-        "Use semantic tokens (bg-surface-card, text-content-primary, border-border-light, text-brand-amber, …) instead of raw Tailwind palette classes.",
+        "Use semantic tokens (bg-surface-card, text-content-primary, border-border-light, text-accent-primary, …) instead of raw Tailwind palette classes.",
     },
     {
       selector: `TemplateElement[value.raw=/${PALETTE_RE}/]`,
       message:
-        "Use semantic tokens (bg-surface-card, text-content-primary, border-border-light, text-brand-amber, …) instead of raw Tailwind palette classes.",
+        "Use semantic tokens (bg-surface-card, text-content-primary, border-border-light, text-accent-primary, …) instead of raw Tailwind palette classes.",
     },
     // Manual dark: colour variants
     {

@@ -438,7 +438,7 @@ export function ModelRow({
         aria-pressed={selected}
         className={`flex w-full flex-col items-stretch gap-1 rounded-md border px-3 py-2 text-left ${
           selected
-            ? "border-brand-amber bg-feedback-success-bg"
+            ? "border-accent-primary bg-feedback-success-bg"
             : "border-border-light bg-surface-card hover:border-border hover:bg-surface-hover"
         }`}
       >

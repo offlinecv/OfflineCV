@@ -136,7 +136,7 @@ Strict 3-tier architecture. Primitives + shared-composed live in `src/design-sys
 
 ## Styling & tokens
 
-- **Semantic tokens are canonical.** Style with semantic Tailwind classes: `bg-surface-card`, `text-content-primary`, `border-border-light`, `text-brand-amber`. Vocabulary lives in `src/design-system/styles/theme.css`; values in `tokens.css`.
+- **Semantic tokens are canonical.** Style with semantic Tailwind classes: `bg-surface-card`, `text-content-primary`, `border-border-light`, `text-accent-primary`. Vocabulary lives in `src/design-system/styles/theme.css`; values in `tokens.css`.
 - **No hardcoded colors.** Never a hex (`#ef4444`), never a raw palette class (`bg-red-500`, `text-slate-400`), never a manual `dark:` colour variant, in feature code.
 - **Typography** rides global settings — never hand-styled inline.
 

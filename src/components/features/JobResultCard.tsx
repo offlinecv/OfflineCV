@@ -72,7 +72,7 @@ export function JobResultCard({ job }: { job: RankedJob }) {
           href={posting.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs font-medium text-content-secondary transition-colors hover:text-content-primary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-amber"
+          className="text-xs font-medium text-content-secondary transition-colors hover:text-content-primary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
         >
           Open posting <span aria-hidden="true">↗</span>
         </a>

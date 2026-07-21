@@ -119,7 +119,7 @@ already exists:
 
 **No hardcoded colours.** Style with semantic Tailwind tokens
 (`bg-surface-card`, `text-content-primary`, `border-border-light`,
-`text-brand-amber`, …). Raw palette classes (`bg-red-500`,
+`text-accent-primary`, …). Raw palette classes (`bg-red-500`,
 `text-slate-400`) and manual `dark:` variants are anti-patterns —
 dark mode is handled by the token layer, not inline overrides.
 

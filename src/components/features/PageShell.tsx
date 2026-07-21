@@ -25,7 +25,7 @@ export interface PageShellProps {
   subtitle: string;
   /** Small uppercase badge after the wordmark (e.g. "alpha", "JD Fit"). */
   badge: string;
-  /** Optional chip row under the header. */
+  /** Optional block rendered under the header (e.g. the capability strip). */
   chips?: ReactNode;
   /** Optional header-right slot rendered before the GitHub CTA. */
   headerExtra?: ReactNode;
@@ -61,10 +61,10 @@ export function PageShell({
           <div className="flex items-center gap-2">
             <a
               href={import.meta.env.BASE_URL}
-              className="inline-grid h-8 w-8 place-items-center rounded-md bg-brand-amber text-base font-bold text-content-inverse"
+              className="inline-grid h-8 w-8 place-items-center rounded-md bg-accent-primary text-base font-bold text-content-inverse"
               aria-label="offlinecv home"
             >
-              R
+              O
             </a>
             <h1 className="text-2xl font-semibold tracking-tight">offlinecv</h1>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
@@ -79,7 +79,7 @@ export function PageShell({
             <GitHubStarCta variant="inline" count={starCount} />
           </div>
         </div>
-        {chips && <div className="flex flex-wrap gap-2">{chips}</div>}
+        {chips && <div className="w-full">{chips}</div>}
       </header>
 
       {children}

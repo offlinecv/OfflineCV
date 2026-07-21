@@ -347,7 +347,7 @@ function AddSkillInput({
         size="sm"
         onClick={() => setExpanded(true)}
         aria-label="Add skill"
-        className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-brand-amber"
+        className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-accent-primary"
       >
         + Add skill
       </Button>
@@ -387,7 +387,7 @@ function AddSkillInput({
               setExpanded(false);
             }
           }}
-          className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-brand-amber"
+          className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
         />
         <Button
           variant="primary"
@@ -408,7 +408,7 @@ function AddSkillInput({
               size="sm"
               onClick={() => commit(s)}
               aria-label={`Add ${s}`}
-              className="rounded-full bg-surface-subtle px-2.5 py-0.5 text-xs text-content-tertiary hover:text-brand-amber"
+              className="rounded-full bg-surface-subtle px-2.5 py-0.5 text-xs text-content-tertiary hover:text-accent-primary"
             >
               + {s}
             </Button>

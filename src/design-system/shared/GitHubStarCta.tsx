@@ -101,7 +101,7 @@ function StarLink({ count }: { count?: number }) {
 export function GitHubStarCta({ variant, count }: GitHubStarCtaProps) {
   if (variant === "card") {
     return (
-      <Card className="flex flex-col gap-2 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
+      <Card className="flex flex-col gap-2 border-l-4 border-l-accent-primary bg-accent-forward-bg shadow-sm">
         <p className="text-sm font-semibold text-content-primary">
           Glad it's working! ⭐
         </p>

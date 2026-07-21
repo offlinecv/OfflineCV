@@ -97,7 +97,7 @@ export function AddPill({
       size="sm"
       onClick={onClick}
       aria-label={label}
-      className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-brand-amber"
+      className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-accent-primary"
     >
       + {label}
     </Button>
@@ -182,7 +182,7 @@ export function InlineBulletAdd({
             setExpanded(false);
           }
         }}
-        className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-brand-amber"
+        className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
       />
       <Button
         variant="primary"

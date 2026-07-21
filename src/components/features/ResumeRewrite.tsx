@@ -306,7 +306,7 @@ export function StepIndicator({
         className="h-1.5 w-full overflow-hidden rounded-full bg-surface-base"
       >
         <div
-          className="h-full bg-brand-amber transition-all"
+          className="h-full bg-accent-primary transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>

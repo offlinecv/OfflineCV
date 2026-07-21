@@ -62,7 +62,7 @@ export function ConsentDialog({
               href={model.licenseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-brand-amber underline underline-offset-2 hover:text-brand-amber-light"
+              className="text-accent-primary underline underline-offset-2 hover:text-accent-primary-hover"
             >
               vendor's terms of use
             </a>

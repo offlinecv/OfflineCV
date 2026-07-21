@@ -275,7 +275,7 @@ function renderLink(
             href={field.value}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-brand-amber hover:underline"
+            className="text-accent-primary hover:underline"
             aria-label={`Open ${field.label} in a new tab`}
           >
             ↗
@@ -310,7 +310,7 @@ function renderLink(
       href={field.value}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-brand-amber hover:underline"
+      className="text-accent-primary hover:underline"
     >
       {formatLinkDisplay(field.value)}
     </a>

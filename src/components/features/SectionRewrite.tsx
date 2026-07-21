@@ -332,7 +332,7 @@ export function useSectionRewrite(
       disabled={isLocked}
       aria-label={`${triggerTitle} — rewrites every bullet in this role`}
       title={triggerTitle}
-      className="h-7 w-7 shrink-0 rounded-md text-content-muted hover:text-brand-amber disabled:opacity-50"
+      className="h-7 w-7 shrink-0 rounded-md text-content-muted hover:text-accent-primary disabled:opacity-50"
     >
       {myBusy ? <SpinnerIcon /> : <WandIcon />}
     </Button>

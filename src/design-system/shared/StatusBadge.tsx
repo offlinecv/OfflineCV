@@ -35,7 +35,7 @@ const TONE_CLS: Record<StatusBadgeTone, string> = {
 export function StatusBadge({ tone, children }: StatusBadgeProps) {
   return (
     <span
-      className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${TONE_CLS[tone]}`}
+      className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${TONE_CLS[tone]}`}
     >
       {children}
     </span>

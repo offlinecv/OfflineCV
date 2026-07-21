@@ -18,8 +18,15 @@
  *
  * Design rules (CLAUDE.md):
  *   – Semantic tokens only; no hardcoded hex or raw palette classes.
- *   – Triggers use the <Button> primitive — no raw <button> in feature/primitive code.
+ *   – Triggers use the <Button> primitive (variant="tab") — no raw <button> in
+ *     feature/primitive code.
  *   – Inactive panels stay mounted (hidden attr) so child UI state survives a switch.
+ *
+ * Selection affordance (#516): TabList is a recessed track (bg-surface-subtle);
+ * the active Tab sits on bg-surface-card + shadow-xs + font-semibold — a real
+ * surface step, not a 2px underline competing with the track's own border (the
+ * pre-#516 bug). Never colour alone: the weight/surface step still resolves in
+ * a greyscale render.
  */
 
 import {
@@ -110,7 +117,7 @@ export function TabList({ "aria-label": ariaLabel, children }: TabListProps) {
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={onKeyDown}
-      className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border-light"
+      className="flex gap-1 overflow-x-auto overflow-y-hidden rounded-md border border-border-light bg-surface-subtle p-1"
     >
       {children}
     </div>
@@ -134,13 +141,32 @@ interface TabProps {
 export function Tab({ id, children, count, warn }: TabProps) {
   const { value, onValueChange, baseId } = useTabsContext("Tab");
   const isActive = value === id;
+  // Selection carries a real surface (bg-surface-card, matching the panel
+  // beneath it) plus a font-weight step — never colour alone, so the row
+  // still resolves in a greyscale render (#516). The inactive track is
+  // bg-surface-subtle (set on TabList), so the active tab visibly "pops"
+  // off it rather than relying on a 2px underline sitting on the TabList's
+  // own border (the pre-#516 illegibility bug).
+  //
+  // Hover on an INACTIVE tab must not borrow the selected tab's surface:
+  // `hover:bg-surface-card` made a merely-pointed-at tab look selected, with
+  // only font-weight left to tell them apart. It hovers to an outline instead
+  // of a fill — `bg-surface-hover` alone cannot carry it, because
+  // `--color-bg-hover` and `--color-bg-subtle` (the track) are the SAME value
+  // in dark (#334155 → 1.00:1). The inset `ring-border-strong` reads at
+  // 2.34:1 light / 2.18:1 dark against the track — enough to be perceptible
+  // for a hover-only affordance (not an enumerated 1.4.11 state), but BELOW
+  // that criterion's 3:1, so do not reuse this token for a persistent
+  // boundary (see `CountBadge.tsx`, which needs `content-muted` for exactly
+  // that reason). It stays visually distinct from selection, which is a
+  // filled surface with no ring.
   const activeCls = isActive
-    ? "border-brand-amber text-content-primary font-semibold"
-    : "border-transparent text-content-secondary font-medium hover:text-content-primary";
+    ? "bg-surface-card text-content-primary font-semibold shadow-xs"
+    : "bg-transparent text-content-secondary font-medium hover:bg-surface-hover hover:text-content-primary hover:ring-1 hover:ring-inset hover:ring-border-strong";
 
   return (
     <Button
-      variant="ghost"
+      variant="tab"
       role="tab"
       id={tabId(baseId, id)}
       data-tab-id={id}
@@ -148,7 +174,7 @@ export function Tab({ id, children, count, warn }: TabProps) {
       aria-controls={panelId(baseId, id)}
       tabIndex={isActive ? 0 : -1}
       onClick={() => onValueChange(id)}
-      className={`-mb-px rounded-none border-b-2 px-3 py-2 text-base hover:bg-transparent ${activeCls}`}
+      className={activeCls}
     >
       {children}
       <CountBadge count={count} />

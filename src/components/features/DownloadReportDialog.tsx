@@ -102,7 +102,7 @@ export function ReportDownloadControl({
                   checked={format === value}
                   disabled={isGenerating}
                   onChange={() => setFormat(value)}
-                  className="h-4 w-4 accent-brand-amber"
+                  className="h-4 w-4 accent-accent-primary"
                 />
                 {label}
               </label>
@@ -119,7 +119,7 @@ export function ReportDownloadControl({
               checked={includeIdentity}
               disabled={isGenerating}
               onChange={(e) => setIncludeIdentity(e.target.checked)}
-              className="h-4 w-4 accent-brand-amber"
+              className="h-4 w-4 accent-accent-primary"
             />
             Include my name and contact details
           </label>

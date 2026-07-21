@@ -74,7 +74,7 @@ export function TextAreaField({
         "w-full resize-none overflow-hidden rounded border border-border",
         "bg-surface-card px-2 py-1.5 text-sm leading-snug",
         "text-content-primary placeholder:text-content-muted",
-        "outline-hidden focus:ring-1 focus:ring-brand-amber",
+        "outline-hidden focus:ring-1 focus:ring-accent-primary",
         "disabled:opacity-60",
         className ?? "",
       ]

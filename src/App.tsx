@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { Card, Chip, ErrorState, ErrorBoundary, Button } from "@design-system";
+import {
+  Card,
+  CapabilityStrip,
+  ErrorState,
+  ErrorBoundary,
+  Button,
+} from "@design-system";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
 import { ReconstructedResume } from "./components/features/ReconstructedResume.tsx";
@@ -90,14 +96,7 @@ export default function App() {
     <PageShell
       subtitle="A parser audit for your resume — not a judge"
       badge="alpha"
-      chips={
-        <>
-          <Chip icon="⚡">A few seconds</Chip>
-          <Chip icon="🔒">Your file never leaves your device</Chip>
-          <Chip icon="✓">No account, no email</Chip>
-          <Chip icon="🔁">Same PDF, same score</Chip>
-        </>
-      }
+      chips={<CapabilityStrip />}
     >
       {(state.phase === "idle" ||
         state.phase === "parsing" ||
@@ -115,30 +114,32 @@ export default function App() {
             // The trust stat is the one supporting line; everything else (the
             // recruiter-agent context) moves to the quiet block below the drop
             // zone so the hero isn't three competing messages.
+            //
+            // The headline's "by default" is NOT hedging for its own sake and
+            // must not be dropped: the job-search lane egresses keywords on an
+            // explicit click (see FindJobsPanel), a build with
+            // VITE_POSTHOG_KEY set (the hosted one) ships analytics, and the
+            // BYOK provider path (#320, not in the tree yet — see
+            // CapabilityStrip) will be real cloud egress once it lands. The
+            // first two are true today and already load-bearing on their own.
+            // An unqualified "on your device"
+            // would be the only absolute privacy claim in the app — every
+            // other surface is already scoped the same way (PageShell's
+            // footer, CapabilityStrip's rail).
             <Card className="flex flex-col items-center gap-5 bg-surface-card-warm">
               <div className="flex max-w-2xl flex-col gap-4 text-center">
-                <h2 className="text-balance text-2xl font-normal leading-snug tracking-tight text-content-secondary sm:text-3xl">
-                  <span className="font-semibold text-content-primary">
-                    AI is now part of most hiring pipelines —
-                  </span>{" "}
-                  and nearly half of job seekers say they&apos;ve lost trust in
-                  a process they can&apos;t see into.
-                  <a
-                    href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
-                    target="_blank"
-                    rel="nofollow noopener noreferrer"
-                    aria-label="Source: Greenhouse, 2025 AI in Hiring Report"
-                    className="align-super text-xs text-brand-amber hover:underline"
-                  >
-                    1
-                  </a>
+                <h2 className="text-balance text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
+                  Your whole job search — on your device by default.
                 </h2>
-                <p className="text-pretty text-base font-medium text-content-primary sm:text-lg">
-                  OfflineCV shows you what a recruiter or screener reads back
-                  from your resume — free, private, and open-source.
+                <p className="text-pretty text-base font-medium text-content-secondary sm:text-lg">
+                  OfflineCV is a free, open-source job-search workbench —
+                  read your resume, fix it, and match it against real
+                  postings, all in your browser. Nothing to install, no
+                  account to create.
                 </p>
                 <p className="text-xs text-content-muted">
-                  Source:{" "}
+                  Built in response to a hiring process job seekers say they
+                  can&apos;t see into — source:{" "}
                   <a
                     href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
                     target="_blank"
@@ -190,6 +191,11 @@ export default function App() {
             // file-scoped, determinism is score-scoped. Per the public-copy
             // policy (internal #24) we never name other products here — the
             // trend is described generically, no links to specific tools.
+            //
+            // #517: this block also now carries the three claims displaced
+            // from the old trust-chip row (speed, no-signup, determinism) —
+            // real differentiators that moved here rather than vanishing when
+            // the chip row became the capability strip above.
             <div className="rounded-lg border border-border-light bg-surface-subtle px-4 py-3">
               <p className="mx-auto max-w-3xl text-pretty text-sm text-content-secondary">
                 <span className="font-medium text-content-primary">
@@ -199,7 +205,9 @@ export default function App() {
                 the candidate-side
                 mirror: it shows you what survives the parse — before you hit
                 submit. The score isn&apos;t a verdict on you as a candidate —
-                it measures how well a machine can read your resume.
+                it measures how well a machine can read your resume. It takes
+                a few seconds, needs no account or email, and the same PDF
+                always gets the same score.
               </p>
             </div>
           )}

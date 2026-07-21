@@ -199,7 +199,7 @@ labeled in-app as a remote/tech-heavy **sample, not every job**.
 Colors are plain CSS custom properties split into two layers:
 
 - **`src/design-system/styles/theme.css`** — the semantic vocabulary
-  (`--color-surface-card`, `--color-content-primary`, `--color-brand-amber`, …).
+  (`--color-surface-card`, `--color-content-primary`, `--color-accent-primary`, …).
   This is the **stable contract**: it generates the Tailwind classes
   (`bg-surface-card`, `text-content-primary`, …) that the components use. Names
   here don't change.
@@ -207,6 +207,22 @@ Colors are plain CSS custom properties split into two layers:
   vocabulary, light and dark. The default is a **generic, accessible palette
   (slate neutrals + a blue accent)**, not a specific product brand. This is the
   **swappable layer**.
+
+> **Deprecated names (removed 2026-07, #513):** `--color-brand-amber` was an
+> exact duplicate of `--color-accent-primary` (same blue in both themes).
+> `--color-brand-amber-light` was a *near*-duplicate of
+> `--color-accent-primary-hover`: identical in dark (`#93c5fd`), but in light
+> it held `#3b82f6` against the hover token's `#1d4ed8`. Folding them
+> deliberately corrects the light-mode hover on `Button variant="primary"` and
+> the ConsentDialog licence link from a lighter blue to a darker one. Every
+> consumer now points at the `accent-primary` pair, which is canonical.
+> `--color-brand-navy`, `--color-brand-navy-dark`, and
+> `--color-brand-cream` are gone — they had zero consumers in either theme.
+> `--color-accent-forward` (the foreground/text variant) is also gone — only
+> its background wash, `--color-accent-forward-bg`, had consumers; wiring a
+> foreground use of the forward accent is tracked separately. If your
+> override layer still defines any of these names, drop them — they no
+> longer resolve to anything.
 
 You can reskin offlinecv to your own brand **without forking this repo**, two
 ways:
@@ -219,12 +235,12 @@ Import your own stylesheet *after* offlinecv's and redefine the same
 ```css
 /* your-brand.css — imported after offlinecv's styles */
 :root {
-  --color-brand-amber: #ff6b35;
+  --color-accent-primary: #ff6b35;
   --color-bg-card: #fffaf5;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-brand-amber: #ffa07a;
+    --color-accent-primary: #ffa07a;
     --color-bg-card: #1c1410;
   }
 }

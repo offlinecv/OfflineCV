@@ -172,7 +172,7 @@ function FeedbackRatingForm() {
 
     return (
       <div className="flex flex-col gap-3">
-        <Card className="flex flex-col gap-1 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
+        <Card className="flex flex-col gap-1 border-l-4 border-l-accent-primary bg-accent-forward-bg shadow-sm">
           <div ref={thanksRef} tabIndex={-1} className="outline-hidden">
             <p className="text-sm font-semibold text-content-primary">
               Thanks for your feedback!
@@ -243,7 +243,7 @@ function FeedbackRatingForm() {
 
   // ── Full panel (mode === "full", or compact strip expanded by star click) ──
   return (
-    <Card className="flex flex-col gap-4 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
+    <Card className="flex flex-col gap-4 border-l-4 border-l-accent-primary bg-accent-forward-bg shadow-sm">
       <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
         {/* Collapsed line: heading + inline rating on one row. */}
         <div className="flex flex-col gap-1">
@@ -319,7 +319,7 @@ function FeedbackRatingForm() {
                 disabled={submitting}
                 rows={3}
                 placeholder="Tell us what worked, what didn't, or what you'd change…"
-                className="w-full resize-y rounded border border-border-light bg-surface-card px-2 py-1.5 text-sm text-content-primary placeholder:text-content-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-amber"
+                className="w-full resize-y rounded border border-border-light bg-surface-card px-2 py-1.5 text-sm text-content-primary placeholder:text-content-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
               />
             </div>
 
@@ -335,7 +335,7 @@ function FeedbackRatingForm() {
                   checked={wantsContact}
                   disabled={submitting}
                   onChange={(e) => setWantsContact(e.target.checked)}
-                  className="h-4 w-4 accent-brand-amber"
+                  className="h-4 w-4 accent-accent-primary"
                 />
                 I'd like the team to follow up with me
               </label>
@@ -355,7 +355,7 @@ function FeedbackRatingForm() {
                     onChange={(e) => setEmail(e.target.value)}
                     disabled={submitting}
                     placeholder="you@example.com"
-                    className="w-full rounded border border-border-light bg-surface-card px-2 py-1.5 text-sm text-content-primary placeholder:text-content-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-amber"
+                    className="w-full rounded border border-border-light bg-surface-card px-2 py-1.5 text-sm text-content-primary placeholder:text-content-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
                   />
                 </div>
               )}

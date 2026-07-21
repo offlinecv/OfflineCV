@@ -69,7 +69,7 @@ export function StarRating({
             />
             <span
               aria-hidden="true"
-              className={filled ? "text-brand-amber" : "text-content-muted"}
+              className={filled ? "text-accent-primary" : "text-content-muted"}
             >
               {filled ? "★" : "☆"}
             </span>

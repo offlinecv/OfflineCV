@@ -64,7 +64,7 @@ export function ReportGapSection({
   }
 
   return (
-    <Card className="flex flex-col gap-3 border-l-4 border-l-brand-amber bg-accent-forward-bg shadow-sm">
+    <Card className="flex flex-col gap-3 border-l-4 border-l-accent-primary bg-accent-forward-bg shadow-sm">
       <div className="flex flex-col gap-1">
         <Heading
           id={headingId}

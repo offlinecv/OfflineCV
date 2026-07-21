@@ -116,7 +116,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
                       href={link.href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-brand-amber hover:underline underline-offset-2"
+                      className="text-xs text-accent-primary hover:underline underline-offset-2"
                     >
                       {link.label} ↗
                     </a>
@@ -202,7 +202,7 @@ function CopyablePath({ path }: { path: CopyPath }) {
           size="sm"
           onClick={onCopy}
           aria-label={`Copy ${path.value}`}
-          className="shrink-0 text-[11px] text-brand-amber"
+          className="shrink-0 text-[11px] text-accent-primary"
         >
           {copied ? "Copied ✓" : "Copy"}
         </Button>

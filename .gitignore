@@ -60,6 +60,13 @@ __pycache__/
 # Local-only internal working directory — never ship in the OSS repo
 internal/
 
+# Maintainer-only skill whose source of truth lives in the private
+# offlinecv-internal repo (internal/.claude/skills/oss-translate). It is
+# surfaced here as a symlink so Claude Code discovers it as /oss-translate,
+# but it must never ship in the public repo — it translates private internal
+# issues into public ones and knows partner/PII sanitization specifics.
+/.claude/skills/oss-translate
+
 # wrangler local state
 .wrangler/
 .dev.vars*

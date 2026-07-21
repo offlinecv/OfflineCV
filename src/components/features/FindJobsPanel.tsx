@@ -196,7 +196,7 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
                   addSkill();
                 }
               }}
-              className="min-w-0 max-w-56 flex-1 rounded border border-border-light bg-surface-card px-2 py-1 text-xs text-content-primary outline-hidden focus:ring-1 focus:ring-brand-amber"
+              className="min-w-0 max-w-56 flex-1 rounded border border-border-light bg-surface-card px-2 py-1 text-xs text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
             />
             <Button
               variant="ghost"
@@ -227,7 +227,7 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
               href={link.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-content-secondary transition-colors hover:bg-surface-subtle focus:outline-hidden focus-visible:ring-2 focus-visible:ring-brand-amber"
+              className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-content-secondary transition-colors hover:bg-surface-subtle focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
             >
               {link.label}
               <span aria-hidden="true">↗</span>

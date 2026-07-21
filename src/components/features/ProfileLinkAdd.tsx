@@ -101,7 +101,7 @@ export function ProfileLinkAdd({
             size="sm"
             onClick={() => pick(p.prefix)}
             aria-label={`Add ${p.label}`}
-            className="rounded-full bg-surface-card px-2.5 py-1 text-xs text-content-secondary hover:text-brand-amber"
+            className="rounded-full bg-surface-card px-2.5 py-1 text-xs text-content-secondary hover:text-accent-primary"
           >
             {p.label}
           </Button>
@@ -128,7 +128,7 @@ export function ProfileLinkAdd({
               setExpanded(false);
             }
           }}
-          className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-brand-amber"
+          className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
         />
         <Button
           variant="primary"

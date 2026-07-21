@@ -9,7 +9,7 @@ export function scoreBandTextClass(tier: ScoreTier): string {
     case "high":
       return "text-feedback-success-icon";
     case "medium":
-      return "text-brand-amber";
+      return "text-accent-primary";
     case "low":
       return "text-feedback-warning-icon";
     default:
@@ -23,7 +23,7 @@ export function scoreBandBgClass(tier: ScoreTier): string {
     case "high":
       return "bg-feedback-success-icon";
     case "medium":
-      return "bg-brand-amber";
+      return "bg-accent-primary";
     case "low":
       return "bg-feedback-warning-icon";
     default:

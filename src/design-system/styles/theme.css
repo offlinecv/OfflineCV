@@ -20,14 +20,6 @@
     Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Brand colors — actual values live in CSS custom properties in tokens.css;
-     @theme references them so Tailwind generates e.g. text-brand-navy */
-  --color-brand-navy: var(--color-brand-navy);
-  --color-brand-navy-dark: var(--color-brand-navy-dark);
-  --color-brand-amber: var(--color-brand-amber);
-  --color-brand-amber-light: var(--color-brand-amber-light);
-  --color-brand-cream: var(--color-brand-cream);
-
   /* Surface colors */
   --color-surface-base: var(--color-bg-base);
   --color-surface-card: var(--color-bg-card);
@@ -50,7 +42,6 @@
   /* Accent colors */
   --color-accent-primary: var(--color-accent-primary);
   --color-accent-primary-hover: var(--color-accent-primary-hover);
-  --color-accent-forward: var(--color-accent-forward);
   --color-accent-forward-bg: var(--color-accent-forward-bg);
 
   /* Feedback — error */

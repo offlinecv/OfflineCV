@@ -58,7 +58,7 @@ export function ContactExtraLinks({
               href={profile.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-brand-amber hover:underline"
+              className="text-accent-primary hover:underline"
               aria-label={`Open ${profile.network} in a new tab`}
             >
               ↗

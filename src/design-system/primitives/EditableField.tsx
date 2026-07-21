@@ -267,7 +267,7 @@ export function EditableField({
             sizeCls,
             weightCls,
             "text-content-primary leading-snug",
-            "outline-hidden focus:ring-1 focus:ring-brand-amber",
+            "outline-hidden focus:ring-1 focus:ring-accent-primary",
           ].join(" ")}
         />
         {/* Save / Cancel action row */}
@@ -319,7 +319,7 @@ export function EditableField({
             sizeCls,
             weightCls,
             "text-content-primary",
-            "outline-hidden focus:ring-1 focus:ring-brand-amber",
+            "outline-hidden focus:ring-1 focus:ring-accent-primary",
           ].join(" ")}
         />
       </span>
@@ -375,7 +375,7 @@ export function EditableField({
         rootBox,
         "cursor-text rounded px-1 -mx-1 transition-colors",
         "hover:bg-surface-subtle",
-        "outline-hidden focus-visible:ring-1 focus-visible:ring-brand-amber",
+        "outline-hidden focus-visible:ring-1 focus-visible:ring-accent-primary",
         sizeCls,
         weightCls,
         hasValue ? "text-content-primary" : "text-content-muted italic",

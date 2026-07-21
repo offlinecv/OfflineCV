@@ -20,11 +20,6 @@
 :root {
   color-scheme: light dark;
 
-  --color-brand-navy: #1e293b;
-  --color-brand-navy-dark: #0f172a;
-  --color-brand-amber: #2563eb;
-  --color-brand-amber-light: #3b82f6;
-  --color-brand-cream: #f8fafc;
   --color-bg-base: #f8fafc;
   --color-bg-card: #ffffff;
   --color-bg-card-warm: #f1f5f9;
@@ -40,7 +35,6 @@
   --color-border-strong: #94a3b8;
   --color-accent-primary: #2563eb;
   --color-accent-primary-hover: #1d4ed8;
-  --color-accent-forward: #4f46e5;
   --color-accent-forward-bg: #EEF2FF;
   --color-feedback-error-bg: #fef2f2;
   --color-feedback-error-border: #fecaca;
@@ -62,11 +56,6 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-brand-navy: #94a3b8;
-    --color-brand-navy-dark: #cbd5e1;
-    --color-brand-amber: #60a5fa;
-    --color-brand-amber-light: #93c5fd;
-    --color-brand-cream: #0f172a;
     --color-bg-base: #0f172a;
     --color-bg-card: #1e293b;
     --color-bg-card-warm: #1e293b;
@@ -82,7 +71,6 @@
     --color-border-strong: #64748b;
     --color-accent-primary: #60a5fa;
     --color-accent-primary-hover: #93c5fd;
-    --color-accent-forward: #818cf8;
     --color-accent-forward-bg: #1e1b4b;
     --color-feedback-error-bg: #2d1215;
     --color-feedback-error-border: #5c1d24;
