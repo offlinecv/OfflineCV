@@ -358,6 +358,26 @@ describe("extractContact — LinkedIn-shaped URL on a non-linkedin.com host (#37
     expect(result.website_url).toBeUndefined();
   });
 
+  it("dedups across tiers when the href has a trailing slash the text label lacks", () => {
+    // The `\href{url}{url}` double-render, but the annotation carries a
+    // canonical trailing slash (`.../jane/`) while the visible text is bare
+    // (`.../jane`). The cross-tier claim key must treat them as the SAME link —
+    // `normalizeUrl` keeps the trailing slash and would let both slots fill.
+    const contactLine = mkLine(
+      "Jane Doe | jane@example.com | jane.dev/in/jane | LinkedIn",
+      0,
+    );
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const result = extractContact(profile, [contactLine], [
+      mkAnnotation("https://jane.dev/in/jane/"),
+    ]);
+
+    expect(result.linkedin_url).toBe("https://jane.dev/in/jane/");
+    // Same target as linkedin_url → must not also render as portfolio/website.
+    expect(result.portfolio_url).toBeUndefined();
+    expect(result.website_url).toBeUndefined();
+  });
+
   it("claims a profile-band sole-segment /in/ link as linkedin_url (accepted tradeoff)", () => {
     // A non-LinkedIn `/in/<≥3>` link in the contact block — a personal portfolio
     // at `janedoe.com/in/design-portfolio` — is claimed as LinkedIn. No regex

@@ -484,10 +484,12 @@ export function extractContact(
   const github = pickUrl("github_url", () =>
     findAnnotationUrl(isGithubUrl, anywhereOnDoc),
   );
-  // A URL is "the same claim" across tiers regardless of scheme/`www.`/trailing
-  // punctuation, so compare on the normalized form — the text scan normalizes
-  // its values, an annotation carries the raw href.
-  const claimKey = (u: string): string => normalizeUrl(u) ?? u;
+  // A URL is "the same claim" across tiers regardless of scheme/`www.`/case/
+  // trailing slash or punctuation, so compare on `urlSlug` — the identity form
+  // (`normalizeUrl` keeps a trailing `/` and case, so `.../jane/` and `.../jane`
+  // would read as different claims and the cross-tier dedup would silently
+  // no-op). Same helper the ownership dedup below uses.
+  const claimKey = (u: string): string => urlSlug(u) ?? u;
   const claimedByIdentity = new Set(
     [linkedin.value, github.value]
       .filter((u): u is string => Boolean(u))
