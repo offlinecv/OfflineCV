@@ -63,8 +63,9 @@ describe("extractContact — annotation fallback for hyperlinked URLs", () => {
     ];
 
     const contact = extractContact(profile, lines, annotations);
-    // `normalizeUrl` canonicalizes a leading `www.` away (#425).
-    expect(contact.linkedin_url).toBe("https://linkedin.com/in/mohin-patel/");
+    // `normalizeUrl` canonicalizes a leading `www.` (#425) and a trailing
+    // slash away — LinkedIn's own `/in/<slug>/` canonical form ends in a slash.
+    expect(contact.linkedin_url).toBe("https://linkedin.com/in/mohin-patel");
     expect(contact.github_url).toBe("https://github.com/mohinpatell");
     expect(contact.confidence.linkedin_url).toBeCloseTo(0.95, 5);
     expect(contact.confidence.github_url).toBeCloseTo(0.95, 5);
@@ -97,7 +98,7 @@ describe("extractContact — annotation fallback for hyperlinked URLs", () => {
         },
       ],
     );
-    expect(result.linkedin_url).toBe("https://linkedin.com/in/jane-doe/");
+    expect(result.linkedin_url).toBe("https://linkedin.com/in/jane-doe");
     expect(result.confidence.linkedin_url).toBeGreaterThan(0);
   });
 
