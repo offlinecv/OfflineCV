@@ -115,27 +115,41 @@ export default function App() {
             // recruiter-agent context) moves to the quiet block below the drop
             // zone so the hero isn't three competing messages.
             //
-            // The headline's "by default" is NOT hedging for its own sake and
-            // must not be dropped: the job-search lane egresses keywords on an
-            // explicit click (see FindJobsPanel), a build with
+            // The headline claims custody, NOT runtime — the distinction is
+            // load-bearing and must survive edits. "in your browser" scopes the
+            // claim to a place; it is NOT an absolute "runs on your device"
+            // claim, which would be false: the job-search lane egresses
+            // keywords on an explicit click (see FindJobsPanel), a build with
             // VITE_POSTHOG_KEY set (the hosted one) ships analytics, and the
             // BYOK provider path (#320, not in the tree yet — see
-            // CapabilityStrip) will be real cloud egress once it lands. The
-            // first two are true today and already load-bearing on their own.
-            // An unqualified "on your device"
-            // would be the only absolute privacy claim in the app — every
-            // other surface is already scoped the same way (PageShell's
-            // footer, CapabilityStrip's rail).
+            // CapabilityStrip) will be real cloud egress once it lands.
+            //
+            // "Browser" is also the noun the sibling surfaces use, and the
+            // three are read together on the idle screen: CapabilityStrip's
+            // rail ("Your resume stays in your browser") renders as PageShell's
+            // `chips` a few inches below, and PageShell's footer states its own
+            // narrower, hedged claim about a different object ("your PDF stays
+            // in this browser tab by default"). Same noun, three different
+            // sentences — if you change the noun in one, change it in all.
+            //
+            // What is absolute is the subhead's promise — the *resume* never
+            // leaves the browser — guaranteed by keywords.ts (only a derived
+            // keyword string egresses, never the resume/PDF/queries). That is
+            // absolute only while keywords.ts is the sole resume-derived
+            // egress: if #320's BYOK path lands, it sends resume text to a
+            // cloud provider and this subhead becomes false, so it must be
+            // rescoped in the same PR that ships it. Keep the headline about
+            // place and the subhead about the resume; do not merge them into a
+            // blanket "everything stays on your device."
             <Card className="flex flex-col items-center gap-5 bg-surface-card-warm">
               <div className="flex max-w-2xl flex-col gap-4 text-center">
                 <h2 className="text-balance text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
-                  Your whole job search — on your device by default.
+                  Your whole job search — in your browser.
                 </h2>
                 <p className="text-pretty text-base font-medium text-content-secondary sm:text-lg">
-                  OfflineCV is a free, open-source job-search workbench —
-                  read your resume, fix it, and match it against real
-                  postings, all in your browser. Nothing to install, no
-                  account to create.
+                  OfflineCV is a free, open-source job-search workbench. Drop a
+                  PDF, score it, fix it, match a JD, and find jobs — all without
+                  your resume leaving your browser.
                 </p>
                 <p className="text-xs text-content-muted">
                   Built in response to a hiring process job seekers say they

@@ -20,7 +20,7 @@
  * carries the rail statement, matching how the old chip row phrased itself.
  *
  * Privacy scope (binding, epic #511): the rail claims custody of the RESUME —
- * "Your resume stays on your device" — deliberately not "nothing leaves" or
+ * "Your resume stays in your browser" — deliberately not "nothing leaves" or
  * "runs entirely on your device". Those would be false: the job-search lane
  * this same card advertises does `fetch()` three third-party feeds, and a
  * build with VITE_POSTHOG_KEY set ships analytics the user never opted into.
@@ -30,9 +30,16 @@
  * or if a cloud LLM path lands (none exists today — there is no BYOK provider
  * in the tree despite older docs implying one), this line becomes a lie and
  * must change with it. Per-feature exceptions stay stated where the user
- * meets them (`FindJobsPanel`), not restated here. `PageShell`'s footer makes
- * the equivalent scoped claim in its own words ("your PDF stays in this
- * browser tab by default").
+ * meets them (`FindJobsPanel`), not restated here.
+ *
+ * The noun is "browser", not "device", and that is deliberate (#537): this
+ * rail renders a few inches below `App`'s hero, which says "in your browser"
+ * in the headline and "leaving your browser" in the subhead, so a visitor
+ * reads all three at once. "Device" also understates the guarantee — another
+ * app on the same device cannot read the resume either. If you change the
+ * noun here, change it in `App.tsx`'s hero in the same commit. `PageShell`'s
+ * footer states a narrower, hedged claim about a different object ("your PDF
+ * stays in this browser tab by default") — same noun, not the same sentence.
  */
 
 import { Chip } from "../primitives/Chip.tsx";
@@ -81,7 +88,7 @@ export function CapabilityStrip() {
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-2 border-t border-border-light pt-3">
-        <Chip icon={<LockIcon />}>Your resume stays on your device</Chip>
+        <Chip icon={<LockIcon />}>Your resume stays in your browser</Chip>
       </div>
     </Card>
   );
