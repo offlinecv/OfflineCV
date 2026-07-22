@@ -10,7 +10,7 @@
  * `../lib/storage` (the barrel), not the internal files.
  */
 
-export { DB_NAME, DB_VERSION, closeDB } from "./db.ts";
+export { DB_NAME, closeDB } from "./db.ts";
 export {
   saveResume,
   getResume,

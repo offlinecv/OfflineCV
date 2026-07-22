@@ -16,7 +16,7 @@
  */
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { ResumeRecord, JobRecord } from "./types.ts";
+import type { ResumeRecord, JobRecord, BoardCacheRecord } from "./types.ts";
 
 // Renamed from "resumelint" during the OfflineCV rename (#498). Safe to change
 // outright: the store had no external users at cutover, so there was no data to
@@ -25,12 +25,13 @@ import type { ResumeRecord, JobRecord } from "./types.ts";
 // `DB_VERSION` migration.
 export const DB_NAME = "offlinecv";
 /** Bump when adding/altering a store or index; add a matching `oldVersion < N`
- *  branch in `upgrade()`. */
-export const DB_VERSION = 1;
+ *  branch in `upgrade()`. Internal — only `getDB()` below reads it. */
+const DB_VERSION = 2;
 
 interface OfflineCvDB extends DBSchema {
   resumes: { key: string; value: ResumeRecord };
   jobs: { key: string; value: JobRecord };
+  boards: { key: string; value: BoardCacheRecord };
 }
 
 let dbPromise: Promise<IDBPDatabase<OfflineCvDB>> | null = null;
@@ -47,6 +48,12 @@ export function getDB(): Promise<IDBPDatabase<OfflineCvDB>> {
         if (oldVersion < 1) {
           db.createObjectStore("resumes", { keyPath: "id" });
           db.createObjectStore("jobs", { keyPath: "id" });
+        }
+        // v1 → v2 (#533): the company-ATS-board cache. Purely additive — an
+        // existing user's resumes/jobs are untouched, and the new store simply
+        // starts empty (a cache miss, which the caller already handles).
+        if (oldVersion < 2) {
+          db.createObjectStore("boards", { keyPath: "id" });
         }
       },
     });

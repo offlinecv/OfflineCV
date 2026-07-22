@@ -1,7 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
+import { Button } from "./Button.tsx";
+
 export type ChipTone = "neutral" | "success" | "warning";
+
+/** The chip's own remove (×) glyph — kept inline so the primitive stays
+ *  self-contained (no feature-layer icon import). Matches the SkillChip X. */
+function ChipRemoveIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="10"
+      height="10"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+    >
+      <path d="M3 3l10 10M13 3L3 13" />
+    </svg>
+  );
+}
 
 interface ChipProps {
   /**
@@ -14,18 +35,35 @@ interface ChipProps {
   icon?: React.ReactNode;
   children: React.ReactNode;
   tone?: ChipTone;
+  /**
+   * When set, the chip renders a trailing remove (×) control that calls this
+   * on click — the removable-chip variant, so a labelled list (Titles, Skills)
+   * reuses the one chip implementation instead of hand-rolling its own. Pass
+   * `removeLabel` for the control's accessible name.
+   */
+  onRemove?: () => void;
+  /** Accessible name for the remove control; required when `onRemove` is set. */
+  removeLabel?: string;
 }
 
-export function Chip({ icon, children, tone = "neutral" }: ChipProps) {
+export function Chip({
+  icon,
+  children,
+  tone = "neutral",
+  onRemove,
+  removeLabel,
+}: ChipProps) {
   const toneCls =
     tone === "success"
       ? "bg-feedback-success-bg text-feedback-success-text"
       : tone === "warning"
         ? "bg-feedback-warning-bg text-feedback-warning-text"
         : "bg-surface-subtle text-content-secondary";
+  // Tighten the trailing padding when a remove control sits in that slot.
+  const padCls = onRemove ? "py-1 pl-2.5 pr-1" : "px-2.5 py-1";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${toneCls}`}
+      className={`inline-flex items-center gap-1 rounded-full text-xs ${padCls} ${toneCls}`}
     >
       {icon && (
         <span
@@ -36,6 +74,16 @@ export function Chip({ icon, children, tone = "neutral" }: ChipProps) {
         </span>
       )}
       {children}
+      {onRemove && (
+        <Button
+          variant="icon"
+          aria-label={removeLabel ?? "Remove"}
+          onClick={onRemove}
+          className="shrink-0 text-content-muted hover:text-content-secondary"
+        >
+          <ChipRemoveIcon />
+        </Button>
+      )}
     </span>
   );
 }

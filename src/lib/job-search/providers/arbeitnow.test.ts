@@ -5,7 +5,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { arbeitnowProvider } from "./arbeitnow.ts";
 import type { JobQuery } from "../query-builder.ts";
 
-const query: JobQuery = { title: "Frontend Engineer", skills: ["React"] };
+const query: JobQuery = { titles: ["Frontend Engineer"], skills: ["React"] };
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({

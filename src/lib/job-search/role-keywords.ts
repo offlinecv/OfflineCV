@@ -235,8 +235,13 @@ const MAX_FAMILIES = 2;
  */
 const RUNNER_UP_SHARE = 2;
 
-/** A sensible default per-company cap for callers (#533) that don't specify. */
-export const DEFAULT_PER_COMPANY_CAP = 15;
+/**
+ * A sensible default per-company cap for callers (#533) that don't specify.
+ * Lowered from 15 to 8 alongside the #542 `COMPANY_LIMIT` raise (8 → 14) so
+ * the pre-rank posting ceiling stays sane: 14 * 8 = 112, versus the previous
+ * 8 * 15 = 120 — the pairing changed shape but not its order of magnitude.
+ */
+export const DEFAULT_PER_COMPANY_CAP = 8;
 
 /** Declaration-order index of a family, for the deterministic tie-break. */
 const FAMILY_ORDER: ReadonlyMap<RoleFamily, number> = new Map(
