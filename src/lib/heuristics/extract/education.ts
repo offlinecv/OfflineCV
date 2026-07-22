@@ -800,6 +800,22 @@ function educationFromChunk(chunk: string[]): {
     stripInstitutionLocation(institution);
   institution = instClean;
 
+  // Strip a trailing run of pipe-delimited date / empty segments glued onto the
+  // institution by a one-line "Institution (…) | <dates> |" header — the dates
+  // are parsed into their own fields below, so a "| 2019-2021" or bare "|" tail
+  // is residue, not part of the school name. Each group is a `|` followed by an
+  // OPTIONAL year-range, so a genuine "| City" tail (a location, owned by
+  // `stripInstitutionLocation`) does NOT match and is left intact. A real
+  // institution never ends in a bare separator, so the final dangling-separator
+  // trim only ever removes the artifact.
+  institution = institution
+    .replace(
+      /(\s*\|\s*(?:(?:19|20)\d{2}(?:\s*[-–—]\s*(?:(?:19|20)\d{2}|present))?)?)+\s*$/i,
+      "",
+    )
+    .replace(/[\s|,·–—-]+$/, "")
+    .trim();
+
   // Shared date primitive (via the education wrapper) so a range like
   // "Sep 2024 - July 2025" keeps both halves and a lone graduation date lands in
   // `end_date` (#97). Filter honors/awards annotation lines first (#371) so a

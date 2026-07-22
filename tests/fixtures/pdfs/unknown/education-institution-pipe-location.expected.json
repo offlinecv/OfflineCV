@@ -1,7 +1,7 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0.87,
+    "confidence": 0.89,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -17,46 +17,46 @@
       "family_name",
       "full_name",
       "given_name",
-      "linkedin_url",
       "location",
       "phone",
-      "phoneIsValid",
-      "summary"
+      "phoneIsValid"
     ],
     "skillsCount": 0,
-    "experienceCount": 2,
-    "educationCount": 1,
+    "experienceCount": 1,
+    "educationCount": 2,
     "projectsCount": 0,
     "achievementsCount": 0,
-    "rawTextCharCount": 762,
+    "rawTextCharCount": 386,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
-    "sectionSource": "regex"
+    "sectionSource": "markdown"
   },
   "score": {
-    "overall": 78,
-    "preLayoutOverall": 78,
+    "overall": 21,
+    "preLayoutOverall": 21,
     "specificity": {
-      "score": 27,
+      "score": 0,
       "max": 40,
-      "gradable": true,
-      "metricBullets": 2,
-      "totalBullets": 5
+      "gradable": false,
+      "metricBullets": 1,
+      "totalBullets": 1
     },
     "structure": {
-      "score": 24,
+      "score": 0,
       "max": 30,
-      "gradable": true,
-      "goodBullets": 4,
-      "totalBullets": 5
+      "gradable": false,
+      "goodBullets": 1,
+      "totalBullets": 1
     },
     "completeness": {
-      "score": 27,
+      "score": 21,
       "max": 30,
       "gradable": true,
       "missing": [
-        "skills"
+        "LinkedIn",
+        "skills",
+        "summary"
       ]
     },
     "layout": {
@@ -64,33 +64,29 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 5,
+    "bulletCount": 1,
     "algoVersion": "1.5"
   },
   "reproArtifact": {
     "artifactVersion": "v1",
     "cascadeVersion": "v1",
     "triggers": [],
-    "sectionSource": "regex",
+    "sectionSource": "markdown",
     "pageCount": 1,
-    "rawCharCount": 744,
-    "extractedCharCount": 578,
+    "rawCharCount": 376,
+    "extractedCharCount": 261,
     "sections": [
       {
         "name": "profile",
-        "lineCount": 4
-      },
-      {
-        "name": "summary",
         "lineCount": 2
       },
       {
         "name": "experience",
-        "lineCount": 9
+        "lineCount": 3
       },
       {
         "name": "education",
-        "lineCount": 1
+        "lineCount": 4
       }
     ],
     "parsedCounts": {
@@ -98,9 +94,9 @@
       "hasEmail": true,
       "hasPhone": true,
       "hasLocation": true,
-      "hasSummary": true,
-      "experienceCount": 2,
-      "educationCount": 1,
+      "hasSummary": false,
+      "experienceCount": 1,
+      "educationCount": 2,
       "skillsCount": 0
     },
     "linkAnnotationCount": 0,
