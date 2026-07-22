@@ -28,7 +28,7 @@
  * absence, matching `RewriteButton` / `SectionRewrite`).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { detectWebGpu } from "../lib/webllm/capability.ts";
 import {
   acquireInference,
@@ -73,6 +73,23 @@ export type ResumeRewriteStatus =
       /** Snapshot of the section list the model actually saw — see useEffect below. */
       snapshot: readonly SectionInput[];
     }
+  | {
+      /** Apply just committed its writes (#508) — held in place for a few
+       *  seconds instead of dismissing the panel silently. */
+      kind: "applied";
+      count: number;
+      sections: readonly string[];
+      /** Reverses the whole applied batch (issue 510). Absent when the batch
+       *  couldn't be snapshotted in full — then no Undo is offered. */
+      undo?: () => void;
+    }
+  | {
+      /** Undo just ran (issue 510) — acknowledged in the same strip rather
+       *  than reverting silently. One-shot: there is no re-apply. */
+      kind: "undone";
+      count: number;
+      sections: readonly string[];
+    }
   | { kind: "error"; message: string };
 
 export interface ResumeRewriteController {
@@ -95,8 +112,19 @@ export interface ResumeRewriteController {
   isLockedByOther: boolean;
   /** Start the whole-résumé run. No-op if the lock is already held. */
   start: () => Promise<void>;
-  /** Drop a proposed/error state back to idle. */
+  /** Drop a proposed/error/applied state back to idle. */
   dismiss: () => void;
+  /** Move from "proposed" to "applied" (#508) — Apply just committed its
+   *  writes; hold the confirmation instead of dismissing synchronously.
+   *  `undo` reverses the whole batch (issue 510). */
+  confirmApplied: (
+    count: number,
+    sections: readonly string[],
+    undo?: () => void,
+  ) => void;
+  /** Run the applied batch's undo and move to "undone" (issue 510). One-shot:
+   *  a no-op unless the current status is "applied" WITH an undo. */
+  undoApplied: () => void;
   /** Freeform "what I want from this rewrite" text (#210). Persisted. */
   userInstructions: string;
   /** Update the freeform instructions (persists to localStorage). */
@@ -277,6 +305,29 @@ export function useResumeRewrite(
     setStatus({ kind: "idle" });
   }, []);
 
+  const confirmApplied = useCallback(
+    (count: number, sections: readonly string[], undo?: () => void) => {
+      setStatus({ kind: "applied", count, sections, undo });
+    },
+    [],
+  );
+
+  // Read the live status through a ref rather than a `setStatus` updater: the
+  // undo thunk is a side effect, and an updater is re-invoked under StrictMode.
+  // (The restore is idempotent, but a state updater is the wrong place for it.)
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const undoApplied = useCallback(() => {
+    const current = statusRef.current;
+    if (current.kind !== "applied" || !current.undo) return;
+    current.undo();
+    setStatus({
+      kind: "undone",
+      count: current.count,
+      sections: current.sections,
+    });
+  }, []);
+
   const isAvailable =
     capability === "available" && rewriteableSections.length > 0;
 
@@ -291,6 +342,8 @@ export function useResumeRewrite(
     isLockedByOther,
     start,
     dismiss,
+    confirmApplied,
+    undoApplied,
     userInstructions,
     setUserInstructions: setUserInstructionsRaw,
     pageTarget,

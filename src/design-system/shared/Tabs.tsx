@@ -136,9 +136,28 @@ interface TabProps {
    * isn't conveyed by colour alone.
    */
   warn?: boolean;
+  /**
+   * Optional one-line subtitle rendered under the label (issue #519), so a
+   * tab's purpose is legible without clicking it. Omitting this prop
+   * reproduces today's single-line rendering exactly — Tabs is a shared
+   * primitive and a future consumer must not be forced into two-line tabs.
+   *
+   * Accessibility: the subtitle is plain visible text nested inside the tab
+   * `<button>`, so it becomes part of the tab's accessible NAME via the
+   * standard accessible-name-from-content algorithm — the same mechanism
+   * `warn`'s `sr-only` addendum already uses to extend the name. No separate
+   * `aria-describedby` wiring, so there's nothing to keep in sync if the
+   * label or subtitle changes.
+   *
+   * Responsive: hidden below the `sm` breakpoint so a narrow viewport (375px)
+   * degrades to today's single-line tab row instead of widening it — the
+   * existing `overflow-x-auto` track only has to absorb one line at that
+   * width, same as before this prop existed.
+   */
+  description?: string;
 }
 
-export function Tab({ id, children, count, warn }: TabProps) {
+export function Tab({ id, children, count, warn, description }: TabProps) {
   const { value, onValueChange, baseId } = useTabsContext("Tab");
   const isActive = value === id;
   // Selection carries a real surface (bg-surface-card, matching the panel
@@ -176,18 +195,44 @@ export function Tab({ id, children, count, warn }: TabProps) {
       onClick={() => onValueChange(id)}
       className={activeCls}
     >
-      {children}
-      <CountBadge count={count} />
-      {warn && (
+      {description == null ? (
         <>
-          {/* U+26A0 + U+FE0E (VS-15) forces TEXT presentation so the glyph
-              renders monochrome (tinted by the warning token), not as a colour
-              emoji — the codebase's no-emoji-as-icon rule. */}
-          <span aria-hidden="true" className="ml-1.5 text-feedback-warning-text">
-            {"⚠︎"}
-          </span>
-          <span className="sr-only"> (setup needed)</span>
+          {children}
+          <CountBadge count={count} />
+          {warn && (
+            <>
+              {/* U+26A0 + U+FE0E (VS-15) forces TEXT presentation so the
+                  glyph renders monochrome (tinted by the warning token), not
+                  as a colour emoji — the codebase's no-emoji-as-icon rule. */}
+              <span aria-hidden="true" className="ml-1.5 text-feedback-warning-text">
+                {"⚠︎"}
+              </span>
+              <span className="sr-only"> (setup needed)</span>
+            </>
+          )}
         </>
+      ) : (
+        // Two-line layout only when a description is supplied. The label row
+        // reuses the exact same inline sequence (label, CountBadge, warn dot)
+        // as the single-line case above, just wrapped so the subtitle can sit
+        // underneath without displacing either.
+        <span className="flex flex-col items-start gap-0.5 text-left">
+          <span className="flex items-center gap-1">
+            {children}
+            <CountBadge count={count} />
+            {warn && (
+              <>
+                <span aria-hidden="true" className="text-feedback-warning-text">
+                  {"⚠︎"}
+                </span>
+                <span className="sr-only"> (setup needed)</span>
+              </>
+            )}
+          </span>
+          <span className="hidden text-xs font-normal text-content-secondary sm:block">
+            {description}
+          </span>
+        </span>
       )}
     </Button>
   );

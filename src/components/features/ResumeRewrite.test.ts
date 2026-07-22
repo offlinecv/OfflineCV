@@ -205,14 +205,24 @@ describe("StepIndicator", () => {
 describe("ResumeRewritePanel", () => {
   it("renders nothing for the idle status", () => {
     const html = renderToStaticMarkup(
-      createElement(ResumeRewritePanel, { status: idle, onDismiss: () => {} }),
+      createElement(ResumeRewritePanel, {
+        status: idle,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
     );
     expect(html).toBe("");
   });
 
   it("renders the model-load progress bar in the loading status", () => {
     const html = renderToStaticMarkup(
-      createElement(ResumeRewritePanel, { status: loading, onDismiss: () => {} }),
+      createElement(ResumeRewritePanel, {
+        status: loading,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
     );
     expect(html).toContain("Loading the rewrite model");
     expect(html).toContain('role="progressbar"');
@@ -220,7 +230,12 @@ describe("ResumeRewritePanel", () => {
 
   it("renders the error message in the error status", () => {
     const html = renderToStaticMarkup(
-      createElement(ResumeRewritePanel, { status: errored, onDismiss: () => {} }),
+      createElement(ResumeRewritePanel, {
+        status: errored,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
     );
     expect(html).toContain("Engine failed to load");
     expect(html).toContain('role="alert"');
@@ -231,6 +246,8 @@ describe("ResumeRewritePanel", () => {
       createElement(ResumeRewritePanel, {
         status: running,
         onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
       }),
     );
     expect(html).toContain("Rewriting 2 of 3");
@@ -254,6 +271,8 @@ describe("ResumeRewritePanel", () => {
       createElement(ResumeRewritePanel, {
         status: finishing,
         onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
       }),
     );
     expect(html).toContain("Finishing…");
@@ -272,7 +291,12 @@ describe("ResumeRewritePanel", () => {
       snapshot: [],
     };
     const html = renderToStaticMarkup(
-      createElement(ResumeRewritePanel, { status, onDismiss: () => {} }),
+      createElement(ResumeRewritePanel, {
+        status,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
     );
     // Section labels (h4 headings) are unaffected by the diff swap.
     expect(html).toContain("Summary");
@@ -294,7 +318,12 @@ describe("ResumeRewritePanel", () => {
       snapshot: [],
     };
     const html = renderToStaticMarkup(
-      createElement(ResumeRewritePanel, { status, onDismiss: () => {} }),
+      createElement(ResumeRewritePanel, {
+        status,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
     );
     expect(html).toContain("AI altered a metric");
     expect(html).toContain("$5K");

@@ -338,7 +338,7 @@ export function ModelSelector() {
                 onClick={onDownloadAhead}
                 className="text-xs"
               >
-                Download now · ~{(selectedModel.downloadSizeMb / 1024).toFixed(1)}{" "}
+                Download model · ~{(selectedModel.downloadSizeMb / 1024).toFixed(1)}{" "}
                 GB
               </Button>
             )}

@@ -23,6 +23,10 @@
  * "Show changes" disclosure underneath. Accept / Reject are icon-only toggles
  * (✓ / ✗) so a long list of rows reads as content, not a wall of buttons —
  * each keeps its descriptive `aria-label` + a hover `title`.
+ *
+ * The apply-confirmation state (#508) lives in the sibling
+ * `ApplyConfirmation.tsx` rather than here — this file was already past the
+ * ~200 LOC soft cap from CLAUDE.md.
  */
 
 import { Button, EditableField, InlineDiff } from "@design-system";

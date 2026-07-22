@@ -31,7 +31,7 @@
  */
 
 import { useState } from "react";
-import { Button, Dialog, ModelLoadProgress, TextAreaField } from "@design-system";
+import { Button, Dialog, InlineResult, ModelLoadProgress, TextAreaField } from "@design-system";
 import {
   labelForResumeRewrite,
   useResumeRewrite,
@@ -40,6 +40,11 @@ import {
 } from "../../hooks/useResumeRewrite.ts";
 import type { SectionInput, SectionOutcome } from "../../lib/webllm/rewrite-resume.ts";
 import type { PageTarget } from "../../lib/webllm/steering.ts";
+import {
+  ApplyConfirmation,
+  UndoBatchButton,
+  UNDO_HOLD_MS,
+} from "./ApplyConfirmation.tsx";
 import {
   ProposedPanel,
   type ResumeRewriteApply,
@@ -89,6 +94,8 @@ export function useResumeRewriteUi(
       <ResumeRewritePanel
         status={controller.status}
         onDismiss={controller.dismiss}
+        onApplied={controller.confirmApplied}
+        onUndo={controller.undoApplied}
         applyBySection={applyBySection}
       />
     );
@@ -228,10 +235,19 @@ function RewriteSteeringBox({
 export function ResumeRewritePanel({
   status,
   onDismiss,
+  onApplied,
+  onUndo,
   applyBySection,
 }: {
   status: ResumeRewriteStatus;
   onDismiss: () => void;
+  onApplied: (
+    count: number,
+    sections: readonly string[],
+    undo?: () => void,
+  ) => void;
+  /** Reverse the applied batch (issue 510). */
+  onUndo: () => void;
   applyBySection?: ResumeRewriteApply;
 }) {
   if (status.kind === "idle") return null;
@@ -269,10 +285,38 @@ export function ResumeRewritePanel({
       </div>
     );
   }
+  if (status.kind === "applied") {
+    return (
+      <InlineResult tone="success">
+        <ApplyConfirmation
+          count={status.count}
+          sections={status.sections}
+          onCollapse={onDismiss}
+          // Only a confirmation that actually hosts an Undo gets the longer
+          // hold — with no undo this stays on #508's 3s.
+          holdMs={status.undo ? UNDO_HOLD_MS : undefined}
+          action={status.undo && <UndoBatchButton onUndo={onUndo} />}
+        />
+      </InlineResult>
+    );
+  }
+  if (status.kind === "undone") {
+    return (
+      <InlineResult tone="success">
+        <ApplyConfirmation
+          verb="Reverted"
+          count={status.count}
+          sections={status.sections}
+          onCollapse={onDismiss}
+        />
+      </InlineResult>
+    );
+  }
   return (
     <ProposedPanel
       result={status.result}
       onDismiss={onDismiss}
+      onApplied={onApplied}
       applyBySection={applyBySection}
     />
   );

@@ -99,6 +99,7 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
       createElement(ProposedPanel, {
         result: RESULT,
         onDismiss: vi.fn(),
+        onApplied: vi.fn(),
         applyBySection: map,
       }),
     );
@@ -116,13 +117,14 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     expect(apply.disabled).toBe(true);
   });
 
-  it("Accept all + global Apply writes back through mapped obsIndices, then dismisses", () => {
+  it("Accept all + global Apply writes back through mapped obsIndices, then reports what was applied", () => {
     const { map, handlers } = makeApply();
-    const onDismiss = vi.fn();
+    const onApplied = vi.fn();
     const el = render(
       createElement(ProposedPanel, {
         result: RESULT,
-        onDismiss,
+        onDismiss: vi.fn(),
+        onApplied,
         applyBySection: map,
       }),
     );
@@ -144,12 +146,102 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     expect(handlers.onReplace).toHaveBeenCalledWith(10, "Led a team of 5 engineers");
     expect(handlers.onRemove).toHaveBeenCalledWith(11);
     expect(handlers.onAdd).toHaveBeenCalledWith("Mentored two interns");
-    expect(onDismiss).toHaveBeenCalledTimes(1);
+    // Apply no longer dismisses synchronously — it reports the count and the
+    // touched section labels so the caller can confirm in place (#508).
+    // Third arg is the batch undo (issue 510) — undefined here because these
+    // handlers carry no `captureUndo`, so no Undo is offered.
+    expect(onApplied).toHaveBeenCalledWith(
+      3,
+      ["Senior Engineer — Acme"],
+      undefined,
+    );
+  });
+
+  it("hands back one undo thunk that reverses the whole batch (issue 510)", () => {
+    const { handlers } = makeApply();
+    const reverse = vi.fn();
+    const captureUndo =
+      vi.fn<NonNullable<SectionRewriteApply["captureUndo"]>>(() => reverse);
+    const withUndo: SectionRewriteApply = { ...handlers, captureUndo };
+    const onApplied = vi.fn();
+    const el = render(
+      createElement(ProposedPanel, {
+        result: RESULT,
+        onDismiss: vi.fn(),
+        onApplied,
+        applyBySection: new Map([["experience:0", withUndo]]),
+      }),
+    );
+
+    click(
+      [...el.querySelectorAll("button")].find(
+        (b) => b.textContent === "Accept all",
+      ) as HTMLButtonElement,
+    );
+    click(
+      el.querySelector(
+        'button[aria-label="Apply accepted changes to the resume"]',
+      ) as HTMLButtonElement,
+    );
+
+    // The snapshot saw every write the loop was about to issue, and was taken
+    // BEFORE any of them landed — otherwise it captures post-apply values.
+    expect(captureUndo).toHaveBeenCalledTimes(1);
+    expect(captureUndo.mock.calls[0]![0]).toEqual([
+      { kind: "replace", obsIndex: 10, text: "Led a team of 5 engineers" },
+      { kind: "add", text: "Mentored two interns" },
+      { kind: "remove", obsIndex: 11 },
+    ]);
+    expect(captureUndo.mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(withUndo.onReplace).mock.invocationCallOrder[0]!,
+    );
+
+    const undo = onApplied.mock.calls[0]![2] as () => void;
+    expect(undo).toBeTypeOf("function");
+    expect(reverse).not.toHaveBeenCalled();
+    undo();
+    expect(reverse).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no undo when any written section can't be snapshotted", () => {
+    // A written section with no `captureUndo` makes the batch unreversible.
+    // A partial revert would leave the résumé in a state the user never
+    // authored, so the control is withheld for the whole batch.
+    const bare: SectionRewriteApply = {
+      obsIndices: [10, 11],
+      onReplace: vi.fn(),
+      onRemove: vi.fn(),
+      onAdd: vi.fn(),
+    };
+    const onApplied = vi.fn();
+    const el = render(
+      createElement(ProposedPanel, {
+        result: RESULT,
+        onDismiss: vi.fn(),
+        onApplied,
+        applyBySection: new Map([["experience:0", bare]]),
+      }),
+    );
+    click(
+      [...el.querySelectorAll("button")].find(
+        (b) => b.textContent === "Accept all",
+      ) as HTMLButtonElement,
+    );
+    click(
+      el.querySelector(
+        'button[aria-label="Apply accepted changes to the resume"]',
+      ) as HTMLButtonElement,
+    );
+    expect(onApplied.mock.calls[0]![2]).toBeUndefined();
   });
 
   it("falls back to read-only (no review controls) when no apply wiring is given", () => {
     const el = render(
-      createElement(ProposedPanel, { result: RESULT, onDismiss: vi.fn() }),
+      createElement(ProposedPanel, {
+        result: RESULT,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+      }),
     );
     // No per-bullet Accept controls without an apply map; the diff still renders.
     const acceptButtons = [...el.querySelectorAll("button")].filter((b) =>

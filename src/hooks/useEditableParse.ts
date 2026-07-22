@@ -22,6 +22,11 @@
  */
 
 import { useState, useCallback, useMemo, useRef } from "react";
+import {
+  captureBulletUndoSnapshot,
+  restoreBulletUndoSnapshot,
+  type BulletUndoTargets,
+} from "../lib/rewrite-review/undo-batch.ts";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
 import { classifyProfile } from "../lib/contact/profile-registry.ts";
 import type { LegacyLinkKey, ProfileLink } from "../lib/score/types.ts";
@@ -387,6 +392,13 @@ export interface EditableParse {
   /** Append a bullet line to an entry. No-op on blank text. An added entry's
    *  bullets are dropped wholesale when the entry is removed. */
   addBullet: (entryKey: string, text: string) => void;
+  /**
+   * Snapshot the pre-apply state of exactly the bullet slots a rewrite batch is
+   * about to write, and return the thunk that restores them (issue 510). Call
+   * BEFORE the write loop; the returned thunk is single-level, one-shot and
+   * idempotent. Stable identity — safe as a memo dep of the rewrite wiring.
+   */
+  captureBulletUndo: (targets: BulletUndoTargets) => () => void;
   /** The ONE consolidated contact-link edit channel (#427): corrections to the
    *  four detected legacy slots (entries carrying a `legacyKey`) AND user-added
    *  extra links (untagged), in insertion order. */
@@ -653,6 +665,63 @@ export function useEditableParse(): EditableParse {
     }));
   }, []);
 
+  // ── Rewrite-batch undo primitives (issue 510) ─────────────────────────────
+  // The inverses of removeBullet / addBullet. Deliberately NOT on the public
+  // `EditableParse` surface: the only supported way to reach them is
+  // `captureBulletUndo`, which pairs each inverse with a pre-apply snapshot.
+  // A bare "un-remove" or "overwrite this entry's bullets" control would be a
+  // second, un-snapshotted mutation path into the same state.
+
+  const restoreBullet = useCallback((index: number) => {
+    setRemovedBullets((prev) => {
+      if (!prev.has(index)) return prev;
+      const next = new Set(prev);
+      next.delete(index);
+      return next;
+    });
+  }, []);
+
+  const replaceAddedBullets = useCallback(
+    (entryKey: string, bullets: readonly string[]) => {
+      setAddedBullets((prev) => {
+        const next = { ...prev };
+        // An empty list must DELETE the bucket, not leave `{key: []}` behind —
+        // `hasEdits` keys off `Object.keys(addedBullets).length`, so a stray
+        // empty bucket would leave the résumé permanently "dirty" after undo.
+        if (bullets.length === 0) delete next[entryKey];
+        else next[entryKey] = [...bullets];
+        return next;
+      });
+    },
+    [],
+  );
+
+  // Live edit state readable synchronously at capture time. Refs, not the
+  // render closure, so `captureBulletUndo` keeps a STABLE identity — it is
+  // memo-dep of the rewrite-apply wiring, and a churning identity there resets
+  // the in-flight proposal's accept/reject decisions.
+  const bulletOverridesRef = useRef(bulletOverrides);
+  bulletOverridesRef.current = bulletOverrides;
+  const removedBulletsRef = useRef(removedBullets);
+  removedBulletsRef.current = removedBullets;
+
+  const captureBulletUndo = useCallback(
+    (targets: BulletUndoTargets) => {
+      const snap = captureBulletUndoSnapshot(targets, {
+        bulletOverrides: bulletOverridesRef.current,
+        removedBullets: removedBulletsRef.current,
+        addedBullets: addedBulletsRef.current,
+      });
+      return () =>
+        restoreBulletUndoSnapshot(snap, {
+          setBulletField,
+          restoreBullet,
+          setAddedBullets: replaceAddedBullets,
+        });
+    },
+    [setBulletField, restoreBullet, replaceAddedBullets],
+  );
+
   const setLegacyLink = useCallback(
     (key: LegacyLinkKey, url: string | undefined) => {
       setProfileOverrides((prev) => {
@@ -912,6 +981,7 @@ export function useEditableParse(): EditableParse {
     setEntryField,
     addedBullets,
     addBullet,
+    captureBulletUndo,
     profileOverrides,
     setLegacyLink,
     addProfile,

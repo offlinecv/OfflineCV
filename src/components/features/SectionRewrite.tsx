@@ -54,8 +54,16 @@ import {
   alignBullets,
   type AlignedPair,
 } from "../../lib/rewrite-review/align-bullets.ts";
-import { resolveBulletActions } from "../../lib/rewrite-review/apply-accepted.ts";
+import {
+  resolveSectionWrites,
+  type ResolvedWrite,
+} from "../../lib/rewrite-review/apply-accepted.ts";
 import { useRewriteReview } from "../../hooks/useRewriteReview.ts";
+import {
+  ApplyConfirmation,
+  UndoBatchButton,
+  UNDO_HOLD_MS,
+} from "./ApplyConfirmation.tsx";
 import { RewriteReviewList } from "./RewriteReviewList.tsx";
 
 /**
@@ -74,6 +82,14 @@ export interface SectionRewriteApply {
   onRemove: (obsIndex: number) => void;
   /** Append a new bullet to this role (→ addBullet on the role's entry key). */
   onAdd: (text: string) => void;
+  /**
+   * Snapshot the pre-apply state of the slots `writes` will touch and return
+   * the thunk that restores them (issue 510). Called BEFORE the write loop.
+   * Absent → this surface offers no Undo at all: a partial undo that restores
+   * some sections and not others is worse than none, so both apply paths only
+   * surface the control when EVERY section they write has this wired.
+   */
+  captureUndo?: (writes: readonly ResolvedWrite[]) => () => void;
 }
 
 /** Stable empty alignment so the review hook doesn't reset on every idle render. */
@@ -147,6 +163,23 @@ export type Status =
        *  bullet underneath a previous rewrite. */
       snapshot: readonly string[];
     }
+  | {
+      /** Apply just committed its writes (#508) — shown in place of the
+       *  review surface for a few seconds instead of dismissing silently. */
+      kind: "applied";
+      count: number;
+      sections: readonly string[];
+      /** Reverses the whole batch (issue 510). Absent when the edit model
+       *  didn't hand back a capture — then no Undo is offered. */
+      undo?: () => void;
+    }
+  | {
+      /** Undo just ran (issue 510) — acknowledged in the same strip rather
+       *  than reverting silently. One-shot: there is no re-apply. */
+      kind: "undone";
+      count: number;
+      sections: readonly string[];
+    }
   | { kind: "error"; message: string };
 
 function bulletsEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -167,6 +200,10 @@ function bulletsEqual(a: readonly string[], b: readonly string[]): boolean {
 export function useSectionRewrite(
   bullets: readonly string[],
   apply?: SectionRewriteApply,
+  /** Display label for the "Applied N changes — <label>" confirmation
+   *  (#508) — the role's `roleLabel(group.experience)`. Falls back to a
+   *  generic name when the caller has none to give. */
+  sectionLabel = "This section",
 ): SectionRewriteParts {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -286,26 +323,60 @@ export function useSectionRewrite(
     setCopied(false);
   }, []);
 
+  // `ApplyConfirmation` re-arms its EXIT_MS collapse timer whenever `onCollapse`
+  // changes identity, so both confirmation states hand it this stable callback
+  // rather than a fresh inline arrow per render — symmetric with the
+  // whole-résumé surface, which already passes a stable `onDismiss`.
+  const backToIdle = useCallback(() => {
+    setStatus({ kind: "idle" });
+  }, []);
+
   // Apply accepted decisions back into the reconstructed résumé via the edit
   // model, then dismiss the proposal. Each action's `originalIndex` is a
   // position in the trimmed snapshot, mapped to its BulletObservation.index
   // through `keptObsIndices`.
   const onApply = useCallback(() => {
     if (!apply) return;
-    const actions = resolveBulletActions(pairs, review.decisions, review.edits);
-    for (const action of actions) {
-      if (action.kind === "add") {
-        apply.onAdd(action.text);
-        continue;
-      }
-      const obsIndex = keptObsIndices[action.originalIndex];
-      if (obsIndex === undefined || obsIndex < 0) continue;
-      if (action.kind === "replace") apply.onReplace(obsIndex, action.text);
-      else apply.onRemove(obsIndex);
+    const writes = resolveSectionWrites(
+      pairs,
+      keptObsIndices,
+      review.decisions,
+      review.edits,
+    );
+    // An all-verbatim batch resolves to zero writes (resolveSectionWrites
+    // drops no-op accepts). Confirming it would announce changes that never
+    // landed AND offer an Undo over an empty snapshot — a control that
+    // reverses nothing. Bail to idle instead, mirroring the whole-résumé
+    // path's zero-write dismiss.
+    if (writes.length === 0) {
+      setStatus({ kind: "idle" });
+      setCopied(false);
+      return;
     }
-    setStatus({ kind: "idle" });
+    // Snapshot BEFORE the loop — once a write lands the prior value is gone
+    // (issue 510).
+    const undo = apply.captureUndo?.(writes);
+    for (const write of writes) {
+      if (write.kind === "add") apply.onAdd(write.text);
+      else if (write.kind === "replace") apply.onReplace(write.obsIndex, write.text);
+      else apply.onRemove(write.obsIndex);
+    }
+    setStatus({
+      kind: "applied",
+      // Writes committed, not pairs accepted — see the zero-write bail above.
+      count: writes.length,
+      sections: [sectionLabel],
+      undo,
+    });
     setCopied(false);
-  }, [apply, pairs, review.decisions, review.edits, keptObsIndices]);
+  }, [
+    apply,
+    pairs,
+    review.decisions,
+    review.edits,
+    keptObsIndices,
+    sectionLabel,
+  ]);
 
   const onCopyAll = useCallback(async () => {
     if (status.kind !== "proposed") return;
@@ -385,6 +456,44 @@ export function useSectionRewrite(
               onReject={onReject}
             />
           ))}
+
+        {status.kind === "applied" && (
+          <InlineResult tone="success">
+            <ApplyConfirmation
+              count={status.count}
+              sections={status.sections}
+              onCollapse={backToIdle}
+              // Only a confirmation that actually hosts an Undo gets the longer
+              // hold — with no undo this stays on #508's 3s.
+              holdMs={status.undo ? UNDO_HOLD_MS : undefined}
+              action={
+                status.undo && (
+                  <UndoBatchButton
+                    onUndo={() => {
+                      status.undo?.();
+                      setStatus({
+                        kind: "undone",
+                        count: status.count,
+                        sections: status.sections,
+                      });
+                    }}
+                  />
+                )
+              }
+            />
+          </InlineResult>
+        )}
+
+        {status.kind === "undone" && (
+          <InlineResult tone="success">
+            <ApplyConfirmation
+              verb="Reverted"
+              count={status.count}
+              sections={status.sections}
+              onCollapse={backToIdle}
+            />
+          </InlineResult>
+        )}
 
         {status.kind === "error" && (
           <p role="alert" className="text-[11px] text-feedback-error-text">

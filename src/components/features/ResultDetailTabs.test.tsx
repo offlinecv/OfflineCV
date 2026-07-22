@@ -113,7 +113,7 @@ describe("ResultDetailTabs", () => {
     expect(el.textContent).toContain("Reconstructed resume");
     expect(el.textContent).toContain("Find jobs");
     expect(el.textContent).toContain("Source & diagnostics");
-    expect(el.textContent).not.toContain("Resume Quality");
+    expect(el.textContent).not.toContain("Resume quality");
   });
 
   it("mounts the single Resume Quality tab (2nd position) when analysis is available", () => {
@@ -129,7 +129,7 @@ describe("ResultDetailTabs", () => {
     expect(labels).toHaveLength(4);
     expect(labels[0]).toContain("Reconstructed resume");
     expect(labels[1]).toContain("Find jobs");
-    expect(labels[2]).toContain("Resume Quality");
+    expect(labels[2]).toContain("Resume quality");
     expect(labels[3]).toContain("Source & diagnostics");
   });
 
@@ -178,7 +178,7 @@ describe("ResultDetailTabs", () => {
       "Senior engineer with a track record of shipping.",
     );
     const qualityTab = Array.from(el.querySelectorAll('[role="tab"]')).find((t) =>
-      (t.textContent ?? "").includes("Resume Quality"),
+      (t.textContent ?? "").includes("Resume quality"),
     );
     expect(qualityTab).toBeDefined();
     // Warn marker is announced, not colour-only.

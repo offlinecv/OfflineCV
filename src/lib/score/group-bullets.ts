@@ -111,6 +111,22 @@ export interface BulletGroup {
   bullets: BulletObservation[];
 }
 
+/**
+ * Short "Title — Company" display label for a role, falling back to whichever
+ * of the two is present, or "Untitled role" / "Other bullets" when neither is.
+ * Shared by `ReconstructedResume` (role headings, whole-résumé rewrite section
+ * labels) and the per-role `SectionRewrite` apply-confirmation copy (#508) —
+ * one label format across every surface that names a role.
+ */
+export function roleLabel(exp: BulletGroup["experience"]): string {
+  if (exp === null) return "Other bullets";
+  const { title, company } = exp;
+  if (title && company) return `${title} — ${company}`;
+  if (title) return title;
+  if (company) return company;
+  return "Untitled role";
+}
+
 // ── Core logic ────────────────────────────────────────────────────────────────
 
 /**

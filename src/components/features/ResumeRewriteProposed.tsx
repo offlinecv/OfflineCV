@@ -59,10 +59,26 @@ interface ReviewSection {
 export function ProposedPanel({
   result,
   onDismiss,
+  onApplied,
   applyBySection,
 }: {
   result: ResumeRewriteResult;
+  /** Discard CTA only — Apply no longer calls this (#508; it calls
+   *  `onApplied` instead so the confirmation shows in place). */
   onDismiss: () => void;
+  /** Apply just committed its writes: the count of writes that actually
+   *  landed — NOT `acceptedCount`, which includes accepted-but-verbatim pairs
+   *  that resolve to no write — and the section labels that got one (#508).
+   *  Never called with a count of 0; a zero-write batch dismisses instead. The caller shows the
+   *  confirmation and holds the panel instead of dismissing synchronously.
+   *  `undo` reverses the whole batch (issue 510) — undefined when any written
+   *  section couldn't be snapshotted, so the control is never offered for a
+   *  partial revert. */
+  onApplied: (
+    count: number,
+    sections: readonly string[],
+    undo?: () => void,
+  ) => void;
   /** Per-section write-back handlers (#211 apply for the whole-résumé path).
    *  Absent → every section renders read-only (graceful fallback). */
   applyBySection?: ResumeRewriteApply;
@@ -102,6 +118,22 @@ export function ProposedPanel({
   );
 
   const onApply = useCallback(() => {
+    // Track which sections actually got a write — an accepted-but-unedited
+    // pair resolves to zero writes (resolveSectionWrites drops no-ops), so
+    // "touched" is the writes list, not the section's accepted-pair count.
+    const touchedSections: string[] = [];
+    // Undo is all-or-nothing across the batch (issue 510): a per-section
+    // snapshot is taken before that section's writes land, and the control is
+    // offered only if EVERY written section handed one back. Reversing four
+    // sections out of five would silently leave the résumé in a state the user
+    // never authored — worse than offering no undo at all.
+    const undos: (() => void)[] = [];
+    let reversible = true;
+    // The confirmation must report WRITES, not accepted pairs: accepting a
+    // bullet whose rewrite equals the original is a legitimate accept the
+    // Apply button counts, but it commits nothing. Announcing the accepted
+    // count would claim changes that never landed.
+    let writtenCount = 0;
     for (const sec of reviewSections) {
       const writes = resolveSectionWrites(
         sec.pairs,
@@ -109,14 +141,36 @@ export function ProposedPanel({
         review.decisions,
         review.edits,
       );
+      if (writes.length === 0) continue;
+      writtenCount += writes.length;
+      touchedSections.push(sec.label);
+      const undo = sec.apply.captureUndo?.(writes);
+      if (undo) undos.push(undo);
+      else reversible = false;
       for (const w of writes) {
         if (w.kind === "add") sec.apply.onAdd(w.text);
         else if (w.kind === "replace") sec.apply.onReplace(w.obsIndex, w.text);
         else sec.apply.onRemove(w.obsIndex);
       }
     }
-    onDismiss();
-  }, [reviewSections, review.decisions, review.edits, onDismiss]);
+    // An all-verbatim batch commits nothing — no confirmation at all, or the
+    // strip would announce "Applied N changes — " with an empty section list
+    // and (on the per-role path) a live Undo over an empty snapshot. Fall back
+    // to the pre-#508 behaviour: just drop the proposal.
+    if (writtenCount === 0) {
+      onDismiss();
+      return;
+    }
+    onApplied(
+      writtenCount,
+      touchedSections,
+      reversible && undos.length > 0
+        ? () => {
+            for (const undo of undos) undo();
+          }
+        : undefined,
+    );
+  }, [reviewSections, review.decisions, review.edits, onApplied, onDismiss]);
 
   const accepted = review.acceptedCount;
 

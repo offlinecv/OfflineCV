@@ -70,14 +70,36 @@ export function ResultDetailTabs({
             is promoted to this parent tab so the warning count stays visible
             without opening it. */}
         <TabList aria-label="Parsed result views">
-          <Tab id="reconstructed">Reconstructed resume</Tab>
-          <Tab id="find-jobs">Find jobs</Tab>
+          <Tab
+            id="reconstructed"
+            description="what a parser pulled out — edit it here"
+          >
+            Reconstructed resume
+          </Tab>
+          <Tab
+            id="find-jobs"
+            description="search job boards, ranked by fit to this résumé"
+          >
+            Find jobs
+          </Tab>
           {showQualityTab && (
-            <Tab id="quality" warn={!analysis.isAvailable}>
-              Resume Quality
+            <Tab
+              id="quality"
+              warn={!analysis.isAvailable}
+              description={
+                analysis.isAvailable
+                  ? "on-device critique and rewrites"
+                  : "on-device critique — needs browser support"
+              }
+            >
+              Resume quality
             </Tab>
           )}
-          <Tab id="diagnostics" count={triggerCount}>
+          <Tab
+            id="diagnostics"
+            count={triggerCount}
+            description="raw text, layout flags, what went wrong"
+          >
             Source &amp; diagnostics
           </Tab>
         </TabList>

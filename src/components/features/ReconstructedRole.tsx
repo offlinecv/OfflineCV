@@ -19,7 +19,7 @@
 import { useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
-import { needsAttention } from "../../lib/score/group-bullets.ts";
+import { needsAttention, roleLabel } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { EditableField } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
@@ -492,6 +492,9 @@ interface RoleEntryProps {
    *  alongside onBulletChange + onAddBullet — to wire the section-rewrite
    *  per-bullet Apply (accept/reject/edit writes back here). */
   onRemoveBullet?: (index: number) => void;
+  /** Snapshot the slots a rewrite batch will write, so the whole batch can be
+   *  reversed in one action (issue 510). Omitted → no Undo is offered. */
+  captureUndo?: SectionRewriteApply["captureUndo"];
   /** Remove this role (only set for user-ADDED roles). Renders an X control in
    *  the header row when provided. */
   onRemove?: () => void;
@@ -510,6 +513,7 @@ export function RoleEntry({
   onBulletChange,
   onAddBullet,
   onRemoveBullet,
+  captureUndo,
   onRemove,
 }: RoleEntryProps) {
   // Bullet display text honors #82 overrides — section rewrite must see the
@@ -530,14 +534,16 @@ export function RoleEntry({
       onReplace: (index, text) => onBulletChange(index, text),
       onRemove: (index) => onRemoveBullet(index),
       onAdd: (text) => onAddBullet(text),
+      captureUndo,
     };
     // obsIndices identity churns each render; key on its stable string form.
-  }, [obsIndicesKey, onBulletChange, onAddBullet, onRemoveBullet]);
+  }, [obsIndicesKey, onBulletChange, onAddBullet, onRemoveBullet, captureUndo]);
   // The "Rewrite section" trigger sits on the header row (right of the title);
   // its result panel renders full-width below the bullet list.
   const { trigger: rewriteTrigger, panel: rewritePanel } = useSectionRewrite(
     sectionBullets,
     rewriteApply,
+    roleLabel(group.experience),
   );
   return (
     <div className="flex flex-col gap-1.5">

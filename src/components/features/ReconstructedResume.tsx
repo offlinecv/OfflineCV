@@ -40,6 +40,7 @@ import type {
 import {
   groupBulletsByExperience,
   needsAttention,
+  roleLabel,
   suppressTitleOwnedBullets,
   toBulletExperience,
 } from "../../lib/score/group-bullets.ts";
@@ -77,6 +78,10 @@ import type {
   AchievementFieldOverrides,
 } from "../../hooks/useEditableParse.ts";
 import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
+import {
+  batchUndoTargets,
+  type BulletUndoTargets,
+} from "../../lib/rewrite-review/undo-batch.ts";
 import {
   AddPill,
   RemoveButton,
@@ -398,6 +403,7 @@ function ExperienceSection({
   onRemoveEntry,
   onEntryField,
   onAddBullet,
+  captureBulletUndo,
   onPruneEmpty,
 }: {
   /** Verbatim source heading (#285); falls back to "Experience" when absent. */
@@ -432,6 +438,9 @@ function ExperienceSection({
   onRemoveEntry: (id: string) => void;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
   onAddBullet: (entryKey: string, text: string) => void;
+  /** Snapshot the slots a rewrite batch will write, for a one-action undo of
+   *  the whole batch (issue 510). */
+  captureBulletUndo: (targets: BulletUndoTargets) => () => void;
   /** Drop a blank added entry when focus leaves the section (#379). */
   onPruneEmpty: () => void;
 }) {
@@ -462,10 +471,22 @@ function ExperienceSection({
         onReplace: (obsIndex, text) => onBulletChange(obsIndex, text),
         onRemove: (obsIndex) => onRemoveBullet(obsIndex),
         onAdd: (text) => onAddBullet(entryKey, text),
+        // Adds land in THIS role's bucket, so the entry key the snapshot
+        // records is the same one `onAdd` writes to (issue 510).
+        captureUndo: (writes) =>
+          captureBulletUndo(batchUndoTargets(writes, entryKey)),
       });
     }
     return map;
-  }, [groups, originalCount, addedExperience, onBulletChange, onRemoveBullet, onAddBullet]);
+  }, [
+    groups,
+    originalCount,
+    addedExperience,
+    onBulletChange,
+    onRemoveBullet,
+    onAddBullet,
+    captureBulletUndo,
+  ]);
   // The whole-résumé rewrite CTA (#67) lives at the top of Experience next to
   // the picker. Trigger + panel render only when WebGPU is available AND
   // there's at least one rewriteable section — same silent-absence rule as
@@ -541,6 +562,14 @@ function ExperienceSection({
                   onAddBullet(
                     added ? added.id : parsedEntryKey("experience", idx),
                     text,
+                  )
+                }
+                captureUndo={(writes) =>
+                  captureBulletUndo(
+                    batchUndoTargets(
+                      writes,
+                      added ? added.id : parsedEntryKey("experience", idx),
+                    ),
                   )
                 }
                 onRemove={added ? () => onRemoveEntry(added.id) : undefined}
@@ -950,14 +979,11 @@ export function buildResumeSections(
   return out;
 }
 
-export function roleLabel(exp: BulletGroup["experience"]): string {
-  if (exp === null) return "Other bullets";
-  const { title, company } = exp;
-  if (title && company) return `${title} — ${company}`;
-  if (title) return title;
-  if (company) return company;
-  return "Untitled role";
-}
+// `roleLabel` now lives in group-bullets.ts (#508 — the per-role
+// SectionRewrite apply-confirmation copy needed the same label without a
+// circular import back into this file). Re-exported so the existing public
+// surface (and ReconstructedResume.test.ts's import) is unchanged.
+export { roleLabel };
 
 // ── Container ─────────────────────────────────────────────────────────────────
 
@@ -1014,6 +1040,7 @@ export function ReconstructedResume({
     pruneEmptyAddedEntries,
     setEntryField,
     addBullet,
+    captureBulletUndo,
     addSkill,
     removeSkill,
     profileOverrides,
@@ -1175,7 +1202,7 @@ export function ReconstructedResume({
               disabled={isGenerating}
               aria-label="Download the reconstructed resume as an ATS-friendly PDF"
             >
-              {isGenerating ? "Generating…" : "Download PDF"}
+              {isGenerating ? "Generating…" : "Download resume"}
             </Button>
           </div>
         </div>
@@ -1231,6 +1258,7 @@ export function ReconstructedResume({
         onRemoveEntry={removeEntry}
         onEntryField={setEntryField}
         onAddBullet={addBullet}
+        captureBulletUndo={captureBulletUndo}
       />
       <ProjectsSection
         heading={display.sectionHeadings?.get("projects")}
