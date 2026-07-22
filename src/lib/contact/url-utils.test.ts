@@ -42,6 +42,46 @@ describe("normalizeUrl", () => {
     const exportedDisplay = "linkedin.com/in/jane"; // formatLinkDisplay output
     expect(normalizeUrl(source)).toBe(normalizeUrl(exportedDisplay));
   });
+
+  it("strips a trailing slash — LinkedIn's own /in/<slug>/ canonical form", () => {
+    expect(normalizeUrl("https://linkedin.com/in/jane/")).toBe(
+      "https://linkedin.com/in/jane",
+    );
+    expect(normalizeUrl("github.com/jane/")).toBe("https://github.com/jane");
+  });
+
+  it("is symmetric: a trailing-slash source and its slash-less display converge", () => {
+    // `formatLinkDisplay` drops the trailing slash on export; the parser must
+    // drop it too on both parses, or a `/in/<slug>/` source re-parses to a
+    // slash-less value and the linkedin_url round-trip breaks.
+    const source = "https://linkedin.com/in/jane/";
+    const exportedDisplay = "linkedin.com/in/jane"; // formatLinkDisplay output
+    expect(normalizeUrl(source)).toBe(normalizeUrl(exportedDisplay));
+  });
+
+  it("strips punctuation behind a trailing slash, not just in front of it", () => {
+    // Two sequential strips (punctuation, then slashes) would leave the `.`
+    // stranded: it is not the last character when the punctuation pass runs,
+    // and the slash pass does not go back for it. One shared class does.
+    expect(normalizeUrl("linkedin.com/in/jane./")).toBe(
+      "https://linkedin.com/in/jane",
+    );
+    expect(normalizeUrl("linkedin.com/in/jane/.")).toBe(
+      "https://linkedin.com/in/jane",
+    );
+  });
+
+  it("returns undefined when nothing but a bare scheme survives the strip", () => {
+    // `https://` strips to `https:`, which is not a URL — prefixing it back to
+    // `https://https:` would manufacture one. Same contract as `urlSlug`.
+    expect(normalizeUrl("https://")).toBeUndefined();
+    expect(normalizeUrl("/")).toBeUndefined();
+    expect(normalizeUrl("   ")).toBeUndefined();
+    // A real scheme-bearing URL is still returned untouched.
+    expect(normalizeUrl("ftp://files.example.com/x")).toBe(
+      "ftp://files.example.com/x",
+    );
+  });
 });
 
 describe("urlSlug", () => {

@@ -362,7 +362,8 @@ describe("extractContact — LinkedIn-shaped URL on a non-linkedin.com host (#37
     // The `\href{url}{url}` double-render, but the annotation carries a
     // canonical trailing slash (`.../jane/`) while the visible text is bare
     // (`.../jane`). The cross-tier claim key must treat them as the SAME link —
-    // `normalizeUrl` keeps the trailing slash and would let both slots fill.
+    // `normalizeUrl` strips the trailing slash so both tiers resolve to the
+    // same slash-less form and only one slot fills.
     const contactLine = mkLine(
       "Jane Doe | jane@example.com | jane.dev/in/jane | LinkedIn",
       0,
@@ -372,7 +373,7 @@ describe("extractContact — LinkedIn-shaped URL on a non-linkedin.com host (#37
       mkAnnotation("https://jane.dev/in/jane/"),
     ]);
 
-    expect(result.linkedin_url).toBe("https://jane.dev/in/jane/");
+    expect(result.linkedin_url).toBe("https://jane.dev/in/jane");
     // Same target as linkedin_url → must not also render as portfolio/website.
     expect(result.portfolio_url).toBeUndefined();
     expect(result.website_url).toBeUndefined();

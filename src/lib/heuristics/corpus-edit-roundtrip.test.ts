@@ -146,6 +146,7 @@ const KNOWN_FAILURES: Record<string, EditCategory[]> = {
   "latex/awesome-cv-resume.pdf": ["bullets"],
   "latex/header-as-name-functional-resume.pdf": ["bullets"],
   "latex/multi-degree-coursework.pdf": ["bullets"],
+  "unknown/bare-linkedin-url-roundtrip.pdf": ["bullets"],
   "unknown/bulleted-labelled-single-column-skills.pdf": ["bullets"],
   "unknown/chromium-asymmetric-sidebar.pdf": ["bullets"],
   "unknown/compound-certifications-activities-tail.pdf": ["bullets"],

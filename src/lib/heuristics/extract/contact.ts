@@ -486,9 +486,9 @@ export function extractContact(
   );
   // A URL is "the same claim" across tiers regardless of scheme/`www.`/case/
   // trailing slash or punctuation, so compare on `urlSlug` — the identity form
-  // (`normalizeUrl` keeps a trailing `/` and case, so `.../jane/` and `.../jane`
-  // would read as different claims and the cross-tier dedup would silently
-  // no-op). Same helper the ownership dedup below uses.
+  // (`normalizeUrl` strips the trailing slash but preserves case, so `.../Jane`
+  // and `.../jane` would read as different claims and the cross-tier dedup would
+  // silently no-op). Same helper the ownership dedup below uses.
   const claimKey = (u: string): string => urlSlug(u) ?? u;
   const claimedByIdentity = new Set(
     [linkedin.value, github.value]
