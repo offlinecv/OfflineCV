@@ -36,7 +36,12 @@ the exception: they stay here because breaking them is silent, and for two of th
 
 ## Project overview
 
-offlinecv started as a browser-side PDF parser stress test for resumes and is growing into a **private, no-login job-search workbench**: drop a PDF in, see what a generic text extractor reads back, get an anonymous heuristic score, fix the resume in place (inline edit + on-device LLM rewrite), download a clean ATS-safe PDF, match it against a job description, and discover relevant job postings. The non-negotiable product constraint: **everything runs client-side — no PDF bytes, resume text, or job-search queries leave the browser** (the only cloud path is the opt-in BYOK provider, keyed and initiated by the user).
+offlinecv started as a browser-side PDF parser stress test for resumes and is growing into a **private, no-login job-search workbench**: drop a PDF in, see what a generic text extractor reads back, get an anonymous heuristic score, fix the resume in place (inline edit + on-device LLM rewrite), download a clean ATS-safe PDF, match it against a job description, and discover relevant job postings. The non-negotiable product constraint: **the PDF bytes and the resume text never leave the browser.** Scope the claim to *data custody*, not runtime — "runs on your device" is falsifiable and two egress paths ship today:
+
+- **Job search** hits third-party feeds. What egresses is a short **keyword string** built from the user-editable query title + skills, never the resume text — `src/lib/job-search/providers/keywords.ts` is the sole resume-derived egress helper and the invariant the copy depends on. Company adapters egress only the **public company slug**.
+- **Analytics** is env-gated PostHog (`src/lib/analytics.ts`, `VITE_POSTHOG_KEY`) — dead-code-eliminated when unset, but a hosted build ships it, so it is not the user's choice.
+
+There is **no BYOK LLM provider in the tree** — `#320` is future; App.tsx / CapabilityStrip docblocks that mention BYOK are describing an unbuilt path. Don't cite BYOK as a current cloud path, and don't write a privacy line without grepping the actual `fetch(`/analytics/provider egress first.
 
 ### Product lanes and entry points
 
@@ -64,6 +69,8 @@ npm run verify     # full local CI mirror: typecheck → lint → coverage → b
 ```
 
 `npm run verify` is the canonical pre-push gate — the exact CI sequence. A git `pre-push` hook runs it automatically (installed by `npm install`); bypass with `OFFLINECV_SKIP_HOOKS=1`.
+
+**fallow is report-only inside `verify`.** The step ends `|| echo '…report-only, ignored'`, so a `fallow audit` exit 1 (complexity / CRAP / duplication) does **not** fail `verify` — branch protection requires only the `verify` job. A fallow complexity/CRAP finding on a PR is a **Nit / Secondary**, never Blocking on its own.
 
 **While iterating, prefer the narrow gate** — `npx vitest run <path>` on the files you touched, plus `npm run typecheck`. Save the full `verify` for when you think you're done. It runs coverage + build + fallow and is slow enough to cost you iterations.
 
@@ -144,6 +151,7 @@ Strict 3-tier architecture. Primitives + shared-composed live in `src/design-sys
 
 - **Domain logic stays in `src/lib/`** (`heuristics/`, `score/`, `pdf/`, …), strictly separated from UI. Components import typed async functions or hooks from `lib/`.
 - **Cross-cutting interaction state** (modals, drop zones, locks) belongs in `src/hooks/`, not inline `useState`/`useEffect` boilerplate in feature components. Single-use render-only logic can stay inline.
+- **`exhaustive-deps` is NOT enforced.** `eslint.config.js` registers no `react-hooks` plugin — a clean `npx eslint src` is zero evidence about a hook dep list; a stale closure lints green. Hand-audit any `useCallback`/`useEffect`/`useMemo` dep array you touch, both directions (missing dep → stale closure; extra dep → needless re-fire).
 
 ## What NOT to do
 
