@@ -2,10 +2,10 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { makeLeverProvider } from "./lever.ts";
+import { makeLeverProvider, hydrateLever } from "./lever.ts";
 import type { JobQuery } from "../query-builder.ts";
 
-const query: JobQuery = { title: "Backend Engineer", skills: ["Go", "Python"] };
+const query: JobQuery = { titles: ["Backend Engineer"], skills: ["Go", "Python"] };
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
@@ -120,5 +120,41 @@ describe("makeLeverProvider", () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url as string).toContain("?mode=json&limit=");
     expect((init as RequestInit).signal).toBe(signal);
+  });
+});
+
+describe("hydrateLever", () => {
+  it("maps a 200 to descriptionPlain", async () => {
+    mockFetch({ id: "1", descriptionPlain: "Full plaintext body" });
+    expect(await hydrateLever("acme", "1", new AbortController().signal)).toBe(
+      "Full plaintext body",
+    );
+  });
+
+  it("falls back to HTML-stripping description when descriptionPlain is absent", async () => {
+    mockFetch({ id: "1", description: "<p>Build &amp; ship <strong>APIs</strong></p>" });
+    expect(await hydrateLever("acme", "1")).toBe("Build & ship APIs");
+  });
+
+  it("returns '' on a non-ok response without throwing", async () => {
+    mockFetch({}, false, 404);
+    await expect(hydrateLever("acme", "1")).resolves.toBe("");
+  });
+
+  it("returns '' when the fetch itself throws (network / abort)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    await expect(hydrateLever("acme", "1")).resolves.toBe("");
+  });
+
+  it("hits the keyless per-job endpoint with ?mode=json", async () => {
+    const fetchMock = mockFetch({ descriptionPlain: "x" });
+    await hydrateLever("acme", "job-1");
+    const [url] = fetchMock.mock.calls[0];
+    expect(url as string).toBe("https://api.lever.co/v0/postings/acme/job-1?mode=json");
   });
 });

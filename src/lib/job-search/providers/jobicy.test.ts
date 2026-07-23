@@ -5,7 +5,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { jobicyProvider } from "./jobicy.ts";
 import type { JobQuery } from "../query-builder.ts";
 
-const query: JobQuery = { title: "Senior Software Engineer", skills: ["Kubernetes", "Go"] };
+const query: JobQuery = { titles: ["Senior Software Engineer"], skills: ["Kubernetes", "Go"] };
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
@@ -55,7 +55,7 @@ describe("jobicyProvider", () => {
   it("falls back to the title when there are no skills", async () => {
     const fetchMock = mockFetch({ jobs: [] });
     await jobicyProvider.search(
-      { title: "Data Analyst", skills: [] },
+      { titles: ["Data Analyst"], skills: [] },
       new AbortController().signal,
     );
     expect(fetchMock.mock.calls[0][0]).toContain("tag=Data%20Analyst");

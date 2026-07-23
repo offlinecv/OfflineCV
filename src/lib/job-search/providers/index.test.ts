@@ -12,7 +12,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { KEYLESS_PROVIDERS, getProviders } from "./index.ts";
+import { KEYLESS_PROVIDERS, getProviders, makeCompanyProvider } from "./index.ts";
+import type { CompanyEntry } from "../company-registry.ts";
+import type { JobProvider } from "../types.ts";
 
 describe("keyless provider registry", () => {
   it("ships the three CORS-verified feeds in display order", () => {
@@ -33,7 +35,55 @@ describe("keyless provider registry", () => {
     }
   });
 
-  it("getProviders resolves the keyless set today (the #320 seam)", () => {
+  it("getProviders with no companies resolves exactly the keyless set", () => {
     expect(getProviders()).toEqual(KEYLESS_PROVIDERS);
+  });
+});
+
+describe("makeCompanyProvider (#533)", () => {
+  function entry(ats: CompanyEntry["ats"]): CompanyEntry {
+    return { name: "Acme Corp", ats, slug: "acme", sectors: ["fintech"] };
+  }
+
+  it.each([
+    ["greenhouse", "greenhouse:acme"],
+    ["lever", "lever:acme"],
+    ["ashby", "ashby:acme"],
+  ] as const)("dispatches %s to the matching adapter factory", (ats, id) => {
+    expect(makeCompanyProvider(entry(ats)).id).toBe(id);
+  });
+
+  it("threads the display name through as the label, not the ATS vendor", () => {
+    for (const ats of ["greenhouse", "lever", "ashby"] as const) {
+      // The card must read "Acme Corp", never "Greenhouse · acme".
+      expect(makeCompanyProvider(entry(ats)).label).toBe("Acme Corp");
+    }
+  });
+});
+
+describe("getProviders composition (#533)", () => {
+  const company: JobProvider = {
+    id: "greenhouse:acme",
+    label: "Acme Corp",
+    search: async () => [],
+  };
+
+  it("appends company providers after the always-on keyless feeds", () => {
+    const resolved = getProviders([company]);
+    expect(resolved.map((p) => p.id)).toEqual([
+      "remotive",
+      "arbeitnow",
+      "jobicy",
+      "greenhouse:acme",
+    ]);
+  });
+
+  it("never drops a keyless feed, whatever the company selection", () => {
+    for (const selection of [[], [company], [company, company]]) {
+      const ids = getProviders(selection).map((p) => p.id);
+      for (const keyless of KEYLESS_PROVIDERS) {
+        expect(ids).toContain(keyless.id);
+      }
+    }
   });
 });

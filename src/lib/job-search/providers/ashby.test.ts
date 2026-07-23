@@ -5,7 +5,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { makeAshbyProvider } from "./ashby.ts";
 import type { JobQuery } from "../query-builder.ts";
 
-const query: JobQuery = { title: "Backend Engineer", skills: ["Go", "Python"] };
+const query: JobQuery = { titles: ["Backend Engineer"], skills: ["Go", "Python"] };
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({

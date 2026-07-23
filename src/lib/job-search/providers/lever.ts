@@ -8,12 +8,15 @@
  * `JobProvider` scoped to that company's public board. Lever has no
  * server-side free-text search either, but it does support server-side
  * paging: `?limit=` caps the fetch instead of pulling an unbounded board.
- * Unlike Greenhouse, Lever already returns a plaintext description
- * (`descriptionPlain`) in the same response, so there is no separate hydrate
- * step — prefer `descriptionPlain`, falling back to HTML-stripping
- * `description` only when plaintext is absent.
+ * Lever's light response already returns a plaintext description
+ * (`descriptionPlain`) inline — prefer it, falling back to HTML-stripping
+ * `description` only when plaintext is absent. That inline description is used
+ * as-is on a fresh fetch; it is stripped when the board is cached (the cache is
+ * light-index only), so a cache hit re-hydrates each survivor via the keyless
+ * per-job endpoint below (`hydrateLever`), mirroring Greenhouse.
  *
- *   GET https://api.lever.co/v0/postings/{slug}?mode=json&limit=100
+ *   Light index:  GET https://api.lever.co/v0/postings/{slug}?mode=json&limit=100
+ *   Hydrate one:  GET https://api.lever.co/v0/postings/{slug}/{id}?mode=json
  *
  * Response is a **top-level array** (not wrapped in an object), unlike
  * Greenhouse's `{ jobs: [] }` and Ashby's `{ jobs: [] }`.
@@ -65,7 +68,12 @@ function mapJob(slug: string, label: string, job: LeverJob): JobPosting {
     location: (job.categories?.location ?? "").trim(),
     url: job.hostedUrl ?? "",
     description: job.descriptionPlain ?? htmlToPlaintext(job.description ?? ""),
-    postedAt: typeof job.createdAt === "number" ? new Date(job.createdAt).toISOString() : undefined,
+    // `Number.isFinite` (not just `typeof number`) guards `toISOString`, which
+    // throws `RangeError` on ±Infinity / |v| > 8.64e15 — cheap insurance so one
+    // malformed board row can't abort the whole `.map` in `search()`.
+    postedAt: Number.isFinite(job.createdAt)
+      ? new Date(job.createdAt as number).toISOString()
+      : undefined,
     source: label,
     departments,
   };
@@ -93,4 +101,30 @@ export function makeLeverProvider(slug: string, companyName = slug): JobProvider
       return jobs.map((j) => mapJob(slug, LABEL, j)).filter((p) => p.title && p.url);
     },
   };
+}
+
+/**
+ * Lazy per-job hydrate: fetches one Lever posting and returns its plaintext
+ * description. Called only for survivors whose cached light-index row had its
+ * description stripped — never for the whole board.
+ *
+ * Unlike `hydrateGreenhouse`, this NEVER throws: a hydrate failure (non-ok
+ * response, network error, aborted fetch) resolves to `""`. A missing
+ * description must cost that one posting its text, never sink the surrounding
+ * `mapWithConcurrency` slot — an undescribed posting still ranks and links.
+ */
+export async function hydrateLever(
+  slug: string,
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  try {
+    const url = `${BASE}/${encodeURIComponent(slug)}/${encodeURIComponent(jobId)}?mode=json`;
+    const res = await fetch(url, { signal });
+    if (!res.ok) return "";
+    const data = (await res.json()) as LeverJob;
+    return data.descriptionPlain ?? htmlToPlaintext(data.description ?? "");
+  } catch {
+    return "";
+  }
 }

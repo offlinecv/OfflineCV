@@ -14,19 +14,26 @@ import type { JobQuery } from "../query-builder.ts";
 
 /**
  * Full-text search phrase for feeds with a `search=` param (Remotive,
- * Arbeitnow). Prefers the title; falls back to the top few skills when the
- * résumé had no derivable title.
+ * Arbeitnow). Prefers the PRIMARY (most-recent) title; falls back to the top
+ * few skills when the résumé had no derivable title.
+ *
+ * Deliberately sends only the primary title, not the full multi-title set
+ * (#539): a `search=` param is a single-intent full-text query, so stacking
+ * distinct titles ("Executive Staff Engineer") would over-constrain the feed,
+ * and it would widen the audited egress for no gain. The multi-title broadening
+ * happens client-side in `search.ts`'s `matchesQuery`, which ORs across every
+ * title's tokens against the (unfiltered) feed response.
  */
 export function searchPhrase(query: JobQuery): string {
-  const title = query.title.trim();
-  const parts = title ? [title] : query.skills.slice(0, 3);
+  const primary = query.titles[0]?.trim();
+  const parts = primary ? [primary] : query.skills.slice(0, 3);
   return parts.join(" ").trim();
 }
 
 /**
  * A single keyword for tag-style feeds (Jobicy's `tag=`). Prefers the first
- * skill (feed tags are skill/tech-shaped), falls back to the title.
+ * skill (feed tags are skill/tech-shaped), falls back to the primary title.
  */
 export function primaryKeyword(query: JobQuery): string {
-  return (query.skills[0] ?? query.title).trim();
+  return (query.skills[0] ?? query.titles[0] ?? "").trim();
 }

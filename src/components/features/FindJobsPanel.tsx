@@ -27,78 +27,43 @@ import {
   JobSearchResults,
   type SearchPhase,
 } from "./JobSearchResults.tsx";
+import { ChipListEditor } from "./ChipListEditor.tsx";
+import { CompanyTargets } from "./CompanyTargets.tsx";
+import { useCompanyTargets } from "../../hooks/useCompanyTargets.ts";
+import { AddPill } from "./ReconstructedAdd.tsx";
 
 interface FindJobsPanelProps {
-  /** The live cascade's parsed résumé. `buildJobQuery` reads only title/skills;
+  /** The live cascade's parsed résumé. `buildJobQuery` reads only titles/skills;
    *  the fit-ranking (via `searchJobs`) needs the fuller shape (summary,
    *  education) for accurate coverage, so we take the whole `HeuristicParsedResume`
    *  rather than the narrow query-only Pick. */
   parsed: HeuristicParsedResume;
 }
 
-function RemoveIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      width="10"
-      height="10"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    >
-      <path d="M3 3l10 10M13 3L3 13" />
-    </svg>
-  );
-}
-
-function RemovableSkillChip({
-  skill,
-  onRemove,
-}: {
-  skill: string;
-  onRemove: () => void;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-surface-subtle py-1 pl-2.5 pr-1 text-xs text-content-secondary">
-      {skill}
-      <Button
-        variant="icon"
-        aria-label={`Remove ${skill}`}
-        onClick={onRemove}
-        className="shrink-0 text-content-muted hover:text-content-secondary"
-      >
-        <RemoveIcon />
-      </Button>
-    </span>
-  );
-}
-
 export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   // Seed local query state from the parse once (lazy initializer — runs only
   // on mount); the user edits it from here.
   const [query, setQuery] = useState<JobQuery>(() => buildJobQuery(parsed));
-  const [skillDraft, setSkillDraft] = useState("");
+  // Progressive disclosure for Seniority (#540): a résumé whose titles carry
+  // no recognized seniority keyword renders no inert placeholder field — the
+  // row appears only once a seniority was derived, or the user opts in via
+  // the "+ Seniority" pill.
+  const [seniorityExpanded, setSeniorityExpanded] = useState(false);
 
   const links = useMemo(() => buildDeepLinks(query), [query]);
-  const isDegenerate = !query.title.trim() && query.skills.length === 0;
+  const isDegenerate = query.titles.length === 0 && query.skills.length === 0;
 
-  const addSkill = () => {
-    const trimmed = skillDraft.trim();
-    if (!trimmed) return;
-    const alreadyPresent = query.skills.some(
-      (s) => s.toLowerCase() === trimmed.toLowerCase(),
-    );
-    if (!alreadyPresent) {
-      setQuery((q) => ({ ...q, skills: [...q.skills, trimmed] }));
-    }
-    setSkillDraft("");
-  };
+  // ChipListEditor already trims + case-insensitively dedups before calling
+  // onAdd, so these handlers just append / filter the controlled list.
+  const addTitle = (title: string) =>
+    setQuery((q) => ({ ...q, titles: [...q.titles, title] }));
+  const removeTitle = (title: string) =>
+    setQuery((q) => ({ ...q, titles: q.titles.filter((t) => t !== title) }));
 
-  const removeSkill = (skill: string) => {
+  const addSkill = (skill: string) =>
+    setQuery((q) => ({ ...q, skills: [...q.skills, skill] }));
+  const removeSkill = (skill: string) =>
     setQuery((q) => ({ ...q, skills: q.skills.filter((s) => s !== skill) }));
-  };
 
   // In-app search state. The fetch fires ONLY from runSearch (the Search
   // click) — never on drop, tab open, or query edit. searchJobs dynamic-imports
@@ -106,6 +71,12 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   const [phase, setPhase] = useState<SearchPhase>({ kind: "idle" });
   const abortRef = useRef<AbortController | null>(null);
   const isLoading = phase.kind === "loading";
+
+  // Sector-suggested companies whose ATS boards join the fan-out. Selecting
+  // none is a supported state: the search falls back to the keyless feeds
+  // alone, exactly as it behaved before #533.
+  const companyTargets = useCompanyTargets(parsed);
+  const selectedCompanies = companyTargets.selected;
 
   // Abort any in-flight search on unmount so a late response can't try to
   // update state on an unmounted component.
@@ -120,7 +91,12 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
     void (async () => {
       try {
         const { searchJobs } = await import("../../lib/job-search/search.ts");
-        const result = await searchJobs(query, parsed, ctrl.signal);
+        const result = await searchJobs(
+          query,
+          parsed,
+          ctrl.signal,
+          selectedCompanies,
+        );
         if (ctrl.signal.aborted) return;
         setPhase({ kind: "loaded", result });
       } catch {
@@ -149,65 +125,53 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
       </header>
 
       <div className="flex flex-col gap-3">
+        <ChipListEditor
+          label="Titles"
+          items={query.titles}
+          onAdd={addTitle}
+          onRemove={removeTitle}
+          placeholder="Add a title…"
+          addAriaLabel="Add title"
+        />
+        {/* Location (#545): always shown, unlike Seniority's AddPill-gated
+         *  disclosure — location is a primary axis of every job-board search
+         *  form (not an auxiliary facet the way seniority is), and a résumé
+         *  with no parsed location still needs a visible place to type one to
+         *  get any location-aware ranking or deep-link behavior at all. */}
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span className="text-xs text-content-tertiary">Title</span>
+          <span className="text-xs text-content-tertiary">Location</span>
           <EditableField
-            value={query.title}
-            placeholder="job title"
-            label="Job title"
-            textWeight="semibold"
-            onCommit={(v) => setQuery((q) => ({ ...q, title: v }))}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span className="text-xs text-content-tertiary">Seniority</span>
-          <EditableField
-            value={query.seniority}
-            placeholder="seniority"
-            label="Seniority"
+            value={query.location}
+            placeholder="location"
+            label="Location"
             onCommit={(v) =>
-              setQuery((q) => ({ ...q, seniority: v || undefined }))
+              setQuery((q) => ({ ...q, location: v || undefined }))
             }
           />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-content-tertiary">Skills</span>
-          {query.skills.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {query.skills.map((skill) => (
-                <RemovableSkillChip
-                  key={skill}
-                  skill={skill}
-                  onRemove={() => removeSkill(skill)}
-                />
-              ))}
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={skillDraft}
-              aria-label="Add skill"
-              placeholder="Add a skill…"
-              onChange={(e) => setSkillDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addSkill();
-                }
-              }}
-              className="min-w-0 max-w-56 flex-1 rounded border border-border-light bg-surface-card px-2 py-1 text-xs text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
+        {query.seniority || seniorityExpanded ? (
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span className="text-xs text-content-tertiary">Seniority</span>
+            <EditableField
+              value={query.seniority}
+              placeholder="seniority"
+              label="Seniority"
+              onCommit={(v) =>
+                setQuery((q) => ({ ...q, seniority: v || undefined }))
+              }
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={addSkill}
-              disabled={skillDraft.trim().length === 0}
-            >
-              Add
-            </Button>
           </div>
-        </div>
+        ) : (
+          <AddPill label="Seniority" onClick={() => setSeniorityExpanded(true)} />
+        )}
+        <ChipListEditor
+          label="Skills"
+          items={query.skills}
+          onAdd={addSkill}
+          onRemove={removeSkill}
+          placeholder="Add a skill…"
+          addAriaLabel="Add skill"
+        />
         {isDegenerate && (
           <p className="text-xs text-content-tertiary">
             We couldn&apos;t derive a search from this resume — add a title or
@@ -239,6 +203,8 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
           above.
         </p>
       </div>
+
+      <CompanyTargets targets={companyTargets} />
 
       <div className="flex flex-col gap-2">
         <div>

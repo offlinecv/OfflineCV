@@ -41,8 +41,18 @@ export interface JobRecord extends StoredRecord {
   [field: string]: unknown;
 }
 
+/** A cached company ATS board: the light-index postings one board returned,
+ *  keyed `${ats}:${slug}` (#533). A pure CACHE — deliberately absent from the
+ *  backup document, because re-fetching a board is cheap and a stale export
+ *  would resurrect boards the registry has since dropped. `postings` is opaque
+ *  here for the same reason `ResumeRecord.parse` is: this module never imports
+ *  the job-search graph. */
+export interface BoardCacheRecord extends StoredRecord {
+  postings: unknown[];
+}
+
 /** Object-store names. Adding a store is a schema-version bump (see db.ts). */
-export type StoreName = "resumes" | "jobs";
+export type StoreName = "resumes" | "jobs" | "boards";
 
 /** A resume as it appears in an export file: blob replaced by base64 + MIME so
  *  the whole backup is a single JSON document. */
