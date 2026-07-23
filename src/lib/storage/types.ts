@@ -34,12 +34,55 @@ export interface ResumeRecord extends StoredRecord {
   parse?: unknown;
 }
 
-/** A tracked job. Shape is owned by the job-tracker follow-up; the store exists
- *  here so both stores version together under one migration path. Kept open
- *  beyond the common keys until that issue pins the fields. */
+/**
+ * Application status of a tracked job. A simple linear lifecycle
+ * (`interested → applied → interviewing → offer / rejected / archived`) — a
+ * status picker, not a workflow engine (#323).
+ */
+export type JobStatus =
+  | "interested"
+  | "applied"
+  | "interviewing"
+  | "offer"
+  | "rejected"
+  | "archived";
+
+/** A tracked job (#323). Field shape pinned here now that the tracker UI exists;
+ *  the store has lived in the foundation (#321) so both stores version together
+ *  under one migration path. Every field is JSON-safe so the whole record
+ *  survives the export/import round-trip (see backup.ts). */
 export interface JobRecord extends StoredRecord {
-  [field: string]: unknown;
+  /** Posting title, e.g. "Senior Frontend Engineer". */
+  title: string;
+  /** Hiring company. May be empty when the user hasn't filled it in yet. */
+  company: string;
+  /** Posting URL. Optional — the user pastes/types details; we never scrape. */
+  url?: string;
+  /** Free-text notes. */
+  notes?: string;
+  /** Where this job sits in the application lifecycle. */
+  status: JobStatus;
+  /** Optional link to a saved resume (`ResumeRecord.id`) — the version used for
+   *  this job. Cleared (not orphaned) if that resume is later deleted. */
+  resumeId?: string;
+  /** Optional pasted job description, when the job came from / ran a JD match. */
+  jdText?: string;
+  /** Optional JD-match result carried over from the JD-fit flow. Opaque +
+   *  JSON-safe by contract so it survives export/import. */
+  matchResult?: unknown;
 }
+
+/** The lifecycle order for display grouping and the "advance status" affordance
+ *  (#323). Terminal branches (`offer` / `rejected` / `archived`) all sit at the
+ *  end; there is no forced single path between them. */
+export const JOB_STATUS_ORDER: readonly JobStatus[] = [
+  "interested",
+  "applied",
+  "interviewing",
+  "offer",
+  "rejected",
+  "archived",
+];
 
 /** A cached company ATS board: the light-index postings one board returned,
  *  keyed `${ats}:${slug}` (#533). A pure CACHE — deliberately absent from the

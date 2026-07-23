@@ -29,6 +29,7 @@ export {
   exportToJson,
   importAll,
   importFromJson,
+  downloadStorageBackup,
 } from "./backup.ts";
 export type {
   StoredRecord,

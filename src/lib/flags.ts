@@ -31,6 +31,12 @@ const envOn = (v: unknown): boolean => v === "true" || v === "1";
  *   cross-sell to the `/jd-fit/` surface. Off by default: `/jd-fit/` is alpha
  *   and not ready to promote from the parser result.
  *
+ * - `job-tracker` (`VITE_ENABLE_JOB_TRACKER`) — the local job tracker (#323)
+ *   on `/` and its "save this job" affordance on `/jd-fit/`. Off by default:
+ *   #323 is P4 (Post-Public), so the surface ships dark and is promoted from
+ *   PostHog rather than by a rebuild. The data layer is inert while off — the
+ *   hook only runs where the flag renders it.
+ *
  * - `llm` (`VITE_ENABLE_LLM`) — two-layer gate for all WebLLM-backed
  *   features: the disagreement detector (#242), escape hatch (#243), and
  *   gap-report (#245).
@@ -54,6 +60,7 @@ const envOn = (v: unknown): boolean => v === "true" || v === "1";
 // dead public export (fallow dead-code gate).
 const FLAG_DEFAULTS = {
   "jd-fit-banner": envOn(import.meta.env.VITE_ENABLE_JD_FIT),
+  "job-tracker": envOn(import.meta.env.VITE_ENABLE_JOB_TRACKER),
   "llm": envOn(import.meta.env.VITE_ENABLE_LLM),
 } as const;
 

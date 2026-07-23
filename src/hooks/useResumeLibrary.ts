@@ -23,8 +23,9 @@ import {
 import {
   requestStoragePersistence,
   isStoragePersisted,
-  exportToJson,
+  downloadStorageBackup,
 } from "../lib/storage/index.ts";
+import { clearResumeLink } from "../lib/job-tracker.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 
@@ -102,22 +103,24 @@ export function useResumeLibrary(): ResumeLibrary {
   const remove = useCallback(
     async (id: string) => {
       await removeLibraryResume(id);
+      try {
+        // Graceful degrade (#323 AC): a tracked job that pointed at this resume
+        // keeps its record and loses only the dangling link. Runs after the
+        // delete so a failure here can never leave the resume undeleted — and
+        // is caught so it can't skip the refresh below either, which would
+        // leave the just-deleted resume on screen until something re-lists.
+        // `reconcileResumeLinks` is the backstop for a link missed here.
+        await clearResumeLink(id);
+      } catch {
+        // Swallowed deliberately: the resume IS gone, and a stale link is a
+        // cosmetic "Not linked" degrade, not a failure worth blocking the UI.
+      }
       await refresh();
     },
     [refresh],
   );
 
-  const exportBackup = useCallback(async () => {
-    const json = await exportToJson();
-    const url = URL.createObjectURL(
-      new Blob([json], { type: "application/json" }),
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "offlinecv-backup.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, []);
+  const exportBackup = useCallback(() => downloadStorageBackup(), []);
 
   return {
     entries,

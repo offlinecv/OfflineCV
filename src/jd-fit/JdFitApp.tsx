@@ -21,8 +21,10 @@ import { Result } from "../components/Result.tsx";
 import { PageShell } from "../components/features/PageShell.tsx";
 import { JdInput } from "../components/features/JdInput.tsx";
 import { JdMatch } from "../components/features/JdMatch.tsx";
+import { SaveJobFromMatchSection } from "../components/features/SaveJobFromMatch.tsx";
 import { useAnalyzedResume } from "../hooks/useAnalyzedResume.ts";
 import { useJdFitResume } from "./useJdFitResume.ts";
+import { useFlag } from "../lib/flags.ts";
 import { extractJdTerms, computeCoverage, type JdMatchResult } from "../lib/jd-match";
 import { buildJdRewriteContext } from "../lib/jd-match/rewrite-context.ts";
 
@@ -34,6 +36,11 @@ export default function JdFitApp() {
   // collapse to the SAME { result, score, edit, source } shape `<Result>` and
   // JD coverage consume.
   const resume = useJdFitResume(analyzed);
+
+  // "Save this job" (#323) — same flag as the tracker on `/`, since a saved
+  // job with nowhere to manage it is a dead end. The section child owns the
+  // hook, so a flag-off visit never opens IndexedDB.
+  const jobTrackerEnabled = useFlag("job-tracker");
 
   // JD coverage memo — moved verbatim from App (#226). Runs only when there's
   // both JD text and a parsed résumé.
@@ -113,6 +120,13 @@ export default function JdFitApp() {
       )}
 
       {jdMatch && <JdMatch result={jdMatch} />}
+
+      {jdMatch && jobTrackerEnabled && (
+        <SaveJobFromMatchSection
+          jdText={jdText}
+          matchResult={jdMatch}
+        />
+      )}
 
       <ErrorBoundary onReset={resume?.reset ?? analyzed.reset}>
         {resume && (

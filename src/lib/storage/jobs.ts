@@ -17,14 +17,22 @@ import type { JobRecord } from "./types.ts";
 
 /** Save a job record. Generates a UUID when `id` is absent; timestamps managed
  *  by `putRecord`. Extra fields pass through (open shape until the tracker
- *  issue pins them). */
+ *  issue pins them). `touch: false` preserves `updatedAt` for a housekeeping
+ *  write the user did not make — see `putRecord`. */
 export async function saveJob(
   input: Partial<JobRecord> & { id?: string },
+  options: { touch?: boolean } = {},
 ): Promise<JobRecord> {
+  // The store is intentionally permissive — it writes whatever fields the caller
+  // supplies (the domain layer in `job-tracker.ts` owns completeness). Reads are
+  // typed as a full `JobRecord` because every production write goes through the
+  // domain layer with the required fields set; the cast bridges the permissive
+  // write shape to `putRecord`'s complete-record parameter.
   return putRecord<JobRecord>("jobs", {
     ...input,
     id: input.id ?? crypto.randomUUID(),
-  });
+  } as Omit<JobRecord, "createdAt" | "updatedAt"> &
+    Partial<Pick<JobRecord, "createdAt" | "updatedAt">>, options);
 }
 
 export function getJob(id: string): Promise<JobRecord | undefined> {

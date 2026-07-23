@@ -96,3 +96,31 @@ export async function importFromJson(
 ): Promise<{ resumes: number; jobs: number }> {
   return importAll(JSON.parse(json) as StorageExport, mode);
 }
+
+/** Filename every backup download uses. Module-private: both surfaces reach it
+ *  through {@link downloadStorageBackup}, so there is nothing to export. */
+const BACKUP_FILENAME = "offlinecv-backup.json";
+
+/**
+ * Export everything and hand the user a JSON file.
+ *
+ * Shared by both local-first surfaces (`useResumeLibrary`, `useJobTracker`) —
+ * the export is origin-wide, not per-lane, so the two "Export backup" buttons
+ * produce the same document and there is no per-lane variant to justify two
+ * copies of the object-URL dance.
+ *
+ * Browser-only (touches `URL` and `document`); callers are hooks, never lib.
+ */
+export async function downloadStorageBackup(): Promise<void> {
+  const json = await exportToJson();
+  const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = BACKUP_FILENAME;
+    a.click();
+  } finally {
+    // In a `finally` so a click that throws can't leak the object URL.
+    URL.revokeObjectURL(url);
+  }
+}

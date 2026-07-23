@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
+import { useCallback } from "react";
 import {
   Card,
   CapabilityStrip,
@@ -15,6 +16,7 @@ import { AtsScoreReadout } from "./components/features/AtsScoreReadout.tsx";
 import { PageShell } from "./components/features/PageShell.tsx";
 import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
 import { ResumeLibrary } from "./components/features/ResumeLibrary.tsx";
+import { JobTrackerSection } from "./components/features/JobTracker.tsx";
 import { SaveResumeBar } from "./components/features/SaveResumeBar.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
@@ -66,6 +68,19 @@ export default function App() {
   // Cross-sell to the `/jd-fit/` surface is gated (default off) — `/jd-fit/` is
   // alpha and not ready to promote from the parser result. See lib/flags.ts.
   const jdFitEnabled = useFlag("jd-fit-banner");
+
+  // Local job tracker (#323) — flag-gated (default off) while #323 sits at P4.
+  // `JobTrackerSection` owns `useJobTracker`, so with the flag off nothing here
+  // touches IndexedDB at all.
+  const jobTrackerEnabled = useFlag("job-tracker");
+  // Resolve a job's linked resume id to a display name, and offer the same
+  // library entries to the row's link picker. Both come from the library the
+  // page already loads, so the tracker never re-reads the resume store.
+  const resumeName = useCallback(
+    (resumeId: string) =>
+      library.entries.find((entry) => entry.id === resumeId)?.filename,
+    [library.entries],
+  );
 
   // Cross-link to /jd-fit (#226). On click we stash the edited parse in
   // sessionStorage (one-shot handoff) so JD-fit rehydrates it without
@@ -182,6 +197,17 @@ export default function App() {
             // empty. Sits directly beneath the drop zone; loading one restores
             // the results view from its cached parse (no re-upload).
             <ResumeLibrary library={library} onLoad={onLoadSavedResume} />
+          )}
+
+          {jobTrackerEnabled && (state.phase === "idle" || state.phase === "error") && (
+            // Tracked jobs (#323) — sits under the saved-resumes picker, the
+            // other local-first surface, so both persistence affordances live
+            // in one place. Unlike the library it does NOT self-hide when
+            // empty: its empty state carries the only "Add a job" entry point.
+            <JobTrackerSection
+              resumeName={resumeName}
+              resumeOptions={library.entries}
+            />
           )}
 
           {(state.phase === "idle" || state.phase === "error") && (

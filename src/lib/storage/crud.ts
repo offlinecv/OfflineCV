@@ -25,13 +25,20 @@ async function looseDB(): Promise<IDBPDatabase> {
 
 /** Upsert a record, stamping timestamps from a single `now`: `createdAt` comes
  *  from the existing row (update), else the record's own value (import restore),
- *  else `now`; `updatedAt` is always `now`. A brand-new record therefore has
- *  `createdAt === updatedAt`. Domain helpers omit the timestamps and let this own
- *  them; import passes them through to preserve `createdAt`. */
+ *  else `now`; `updatedAt` is `now` unless the write opts out. A brand-new record
+ *  therefore has `createdAt === updatedAt`. Domain helpers omit the timestamps and
+ *  let this own them; import passes them through to preserve `createdAt`.
+ *
+ *  `touch: false` keeps the existing `updatedAt` — for a write the USER did not
+ *  make. Clearing a job's dangling resume link when that resume is deleted (#323)
+ *  is the motivating case: stamping it would reshuffle a tracker sorted
+ *  most-recently-updated-first, so deleting one resume makes every job that
+ *  merely referenced it jump to the top. Never use it for a user edit. */
 export async function putRecord<T extends StoredRecord>(
   store: StoreName,
   record: Omit<T, "createdAt" | "updatedAt"> &
     Partial<Pick<T, "createdAt" | "updatedAt">>,
+  options: { touch?: boolean } = {},
 ): Promise<T> {
   const db = await looseDB();
   const now = Date.now();
@@ -39,7 +46,10 @@ export async function putRecord<T extends StoredRecord>(
   const written = {
     ...record,
     createdAt: existing?.createdAt ?? record.createdAt ?? now,
-    updatedAt: now,
+    updatedAt:
+      options.touch === false
+        ? (existing?.updatedAt ?? record.updatedAt ?? now)
+        : now,
   } as T;
   await db.put(store, written);
   return written;
