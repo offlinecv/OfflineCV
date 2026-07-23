@@ -28,6 +28,16 @@ import {
   type BulletUndoTargets,
 } from "../lib/rewrite-review/undo-batch.ts";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
+import {
+  addCategory as addSkillCategoryTx,
+  addSkillToCategory as addSkillToCategoryTx,
+  deleteCategory as deleteSkillCategoryTx,
+  isEmptySkillsOverride,
+  moveSkillBetweenCategories,
+  removeSkillFromCategories,
+  renameCategory as renameSkillCategoryTx,
+} from "../lib/edit/skills-categories.ts";
+import type { SkillCategory } from "../lib/heuristics/types.ts";
 import { classifyProfile } from "../lib/contact/profile-registry.ts";
 import type { LegacyLinkKey, ProfileLink } from "../lib/score/types.ts";
 
@@ -305,14 +315,27 @@ export interface ProfileOverride {
 // ── Skills override ───────────────────────────────────────────────────────────
 
 /**
- * Add/remove edits against `parsed.skills`. `removed` holds the lower-cased keys
- * of parsed skills the user dropped; `added` holds user-typed (canonicalized)
- * skills in insertion order. applyOverrides folds these into the final skills
- * list: parsed skills minus `removed`, then `added` appended (de-duplicated).
+ * Edits against `parsed.skills` AND its `skillCategories` grouping (#476).
+ *
+ * The flat pair is unchanged from before #476 and drives UNCATEGORISED résumés:
+ *   - `removed` — lower-cased keys of skills the user dropped (delete-single-skill);
+ *   - `added` — user-typed (canonicalized) skills appended to the flat list.
+ *
+ * `categories` is a SNAPSHOT of the edited grouping — present once the user makes
+ * any category edit on a categorised résumé, and it IS what the editor renders.
+ * Every grouping op (rename / delete category / add category / move / delete a
+ * single categorised skill) is a pure array→array transform in
+ * `skills-categories.ts` producing the next snapshot, so a rename is not a
+ * delete-plus-add and a move is not a remove-plus-add. When present it is
+ * authoritative: `applyOverrides` flattens it to the flat `skills`, so the #473
+ * invariant holds by construction and the flat `removed`/`added` are unused.
+ * Absent means the categorised grouping is untouched (or the résumé is
+ * uncategorised). Reset clears it back to `undefined` in one step.
  */
 export interface SkillsOverride {
   removed: string[];
   added: string[];
+  categories?: SkillCategory[];
 }
 
 const EMPTY_SKILLS_OVERRIDE: SkillsOverride = { removed: [], added: [] };
@@ -425,10 +448,45 @@ export interface EditableParse {
   /** Add a (canonicalized) skill. No-op for blank input or an exact dupe of an
    *  already-present skill. Re-adding a previously-removed skill un-removes it. */
   addSkill: (skill: string) => void;
-  /** Remove a skill by its display text — drops it whether it came from the
-   *  parse (records its key in `removed`) or from a prior add (drops it from
-   *  `added`). */
+  /** Remove a skill by its display text — the UNCATEGORISED delete-single-skill
+   *  path (drops it whether it came from the parse or a prior flat add). For a
+   *  categorised résumé the editor uses {@link removeCategorySkill} instead so
+   *  the grouping snapshot stays authoritative. */
   removeSkill: (skill: string) => void;
+  /** The current edited Skills grouping — the {@link SkillsOverride.categories}
+   *  snapshot when a category edit has been made, else `undefined`. */
+  skillCategoriesOverride: SkillCategory[] | undefined;
+  /** Rename the category at `index` in `cats` (the current rendered grouping) —
+   *  label-only, members untouched (#476). */
+  renameSkillCategory: (
+    cats: readonly SkillCategory[],
+    index: number,
+    label: string,
+  ) => void;
+  /** Delete the whole category at `index` (label AND members), atomically —
+   *  behind the caller's confirmation dialog. */
+  deleteSkillCategory: (cats: readonly SkillCategory[], index: number) => void;
+  /** Append a new empty category with `label`; populate via
+   *  {@link addSkillToCategory}. */
+  addSkillCategory: (cats: readonly SkillCategory[], label: string) => void;
+  /** Add a (canonicalized) skill into the category at `index`. No-op for blank
+   *  input or a dupe of any already-present skill. */
+  addSkillToCategory: (
+    cats: readonly SkillCategory[],
+    index: number,
+    skill: string,
+  ) => void;
+  /** Move a skill (by display text) into the category at `destIndex` — one
+   *  atomic op. The DnD drop and the keyboard "Move to" control both call this. */
+  moveSkillToCategory: (
+    cats: readonly SkillCategory[],
+    skill: string,
+    destIndex: number,
+  ) => void;
+  /** Remove a single skill from the categorised grouping — the categorised
+   *  delete-single-skill path (the source category stays present even if now
+   *  empty). */
+  removeCategorySkill: (cats: readonly SkillCategory[], skill: string) => void;
   /** The complete override state as a JSON-safe value (#456) — the one shape
    *  every consumer that must carry edits across a boundary uses (draft
    *  persistence, the `/` → `/jd-fit` handoff). */
@@ -599,7 +657,11 @@ export function useEditableParse(): EditableParse {
       // Don't duplicate an already-added skill (case-insensitive).
       const alreadyAdded = prev.added.some((a) => a.toLowerCase() === key);
       const added = alreadyAdded ? prev.added : [...prev.added, canonical];
-      return { removed, added };
+      // Preserve `categories` (align with removeSkill): an all-deleted snapshot
+      // leaves `categories: []`, degrading the section to the flat AddSkillInput.
+      // Dropping the `[]` here would let computeEditedSkills fall back to the
+      // pristine flat branch and resurrect every deleted skill (#415).
+      return { ...prev, removed, added };
     });
   }, []);
 
@@ -614,9 +676,61 @@ export function useEditableParse(): EditableParse {
       const removed = prev.removed.includes(key)
         ? prev.removed
         : [...prev.removed, key];
-      return { removed, added };
+      return { ...prev, removed, added };
     });
   }, []);
+
+  // ── Categorised Skills edits (#476) ───────────────────────────────────────
+  // Each takes the CURRENT rendered grouping, runs a pure array→array transform
+  // (skills-categories.ts), and stores the result as the authoritative snapshot.
+  // Because the snapshot IS what the editor renders, `cats` is always the live
+  // grouping and the transforms compose without any pristine-vs-edited mapping.
+
+  const setSkillCategories = useCallback((next: SkillCategory[]) => {
+    setSkillsOverride((prev) => ({ ...prev, categories: next }));
+  }, []);
+
+  const renameSkillCategory = useCallback(
+    (cats: readonly SkillCategory[], index: number, label: string) => {
+      setSkillCategories(renameSkillCategoryTx(cats, index, label));
+    },
+    [setSkillCategories],
+  );
+
+  const deleteSkillCategory = useCallback(
+    (cats: readonly SkillCategory[], index: number) => {
+      setSkillCategories(deleteSkillCategoryTx(cats, index));
+    },
+    [setSkillCategories],
+  );
+
+  const addSkillCategory = useCallback(
+    (cats: readonly SkillCategory[], label: string) => {
+      setSkillCategories(addSkillCategoryTx(cats, label));
+    },
+    [setSkillCategories],
+  );
+
+  const addSkillToCategory = useCallback(
+    (cats: readonly SkillCategory[], index: number, skill: string) => {
+      setSkillCategories(addSkillToCategoryTx(cats, index, skill));
+    },
+    [setSkillCategories],
+  );
+
+  const moveSkillToCategory = useCallback(
+    (cats: readonly SkillCategory[], skill: string, destIndex: number) => {
+      setSkillCategories(moveSkillBetweenCategories(cats, skill, destIndex));
+    },
+    [setSkillCategories],
+  );
+
+  const removeCategorySkill = useCallback(
+    (cats: readonly SkillCategory[], skill: string) => {
+      setSkillCategories(removeSkillFromCategories(cats, skill));
+    },
+    [setSkillCategories],
+  );
 
   const addEntry = useCallback((section: AddableSection) => {
     const id = `added:${idCounter.current++}`;
@@ -873,8 +987,13 @@ export function useEditableParse(): EditableParse {
         },
       );
 
-      snap.skillsOverride.added.forEach((skill) => addSkill(skill));
-      snap.skillsOverride.removed.forEach((skill) => removeSkill(skill));
+      // Skills. The edited grouping is a whole snapshot (#476), so replay just
+      // restores it — no per-op id remapping (the snapshot carries no ids). The
+      // flat add/remove replay as before, for uncategorised résumés.
+      const so = snap.skillsOverride;
+      if (so.categories) setSkillCategories(so.categories);
+      so.added.forEach((skill) => addSkill(skill));
+      so.removed.forEach((skill) => removeSkill(skill));
 
       const idMap = new Map<string, string>();
       for (const entry of snap.addedEntries) {
@@ -912,6 +1031,7 @@ export function useEditableParse(): EditableParse {
       setAchievementField,
       addSkill,
       removeSkill,
+      setSkillCategories,
       addEntry,
       setEntryField,
       addBullet,
@@ -925,8 +1045,7 @@ export function useEditableParse(): EditableParse {
     if (Object.keys(bulletOverrides).length > 0) return true;
     if (Object.keys(descriptionOverrides).length > 0) return true;
     if (removedBullets.size > 0) return true;
-    if (skillsOverride.removed.length > 0 || skillsOverride.added.length > 0)
-      return true;
+    if (!isEmptySkillsOverride(skillsOverride)) return true;
     if (addedEntries.length > 0) return true;
     if (Object.keys(addedBullets).length > 0) return true;
     if (profileOverrides.length > 0) return true;
@@ -990,6 +1109,13 @@ export function useEditableParse(): EditableParse {
     skillsOverride,
     addSkill,
     removeSkill,
+    skillCategoriesOverride: skillsOverride.categories,
+    renameSkillCategory,
+    deleteSkillCategory,
+    addSkillCategory,
+    addSkillToCategory,
+    moveSkillToCategory,
+    removeCategorySkill,
     snapshot,
     replay,
     hasEdits,

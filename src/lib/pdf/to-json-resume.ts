@@ -90,7 +90,13 @@ export interface JsonResumeEducation {
 }
 
 export interface JsonResumeSkill {
+  /** JSON Resume `skills[].name`. Flat export: the skill itself. Categorised
+   *  export (#473): the CATEGORY label, with the members under `keywords`. */
   name: string;
+  /** JSON Resume `skills[].keywords` — the category's member skills. Present
+   *  only on a categorised entry; absent keeps the flat one-object-per-skill
+   *  shape byte-identical to the pre-#473 export. */
+  keywords?: string[];
 }
 
 export interface JsonResumeProject {
@@ -384,7 +390,18 @@ function appendEntry(entry: AtsExportEntry, buckets: ResumeBuckets): void {
       if (fields) buckets.education.push(toEducation(fields));
       break;
     case "skills":
-      for (const name of fields?.skills ?? []) buckets.skills.push({ name });
+      // Categorised entry (#473): one skill object per category, `name` =
+      // category label + `keywords` = its members — the shape the JSON Resume
+      // spec actually defines (`{ name, level, keywords[] }`). A flat entry
+      // (no `skillCategory`) stays one `{ name }` per skill, byte-identical.
+      if (fields?.skillCategory) {
+        buckets.skills.push({
+          name: fields.skillCategory,
+          keywords: [...(fields.skills ?? [])],
+        });
+      } else {
+        for (const name of fields?.skills ?? []) buckets.skills.push({ name });
+      }
       break;
     case "achievements":
       if (fields) buckets.awards.push(toAward(fields));

@@ -709,26 +709,64 @@ describe("extractSkills — bulleted labelled single-column rows (#465)", () => 
     );
   });
 
-  it("KNOWN LIMIT: a clarifier wrapping across THREE lines is still shredded", () => {
-    // Pins current behavior, not an aspiration. Condition C joins only when the
-    // NEXT line closes the clarifier; "Cloud: AWS (EC2," ⏎ "S3," ⏎ "RDS)" leaves
-    // it open after the second line, so no join fires and the clarifier shreds.
-    // Same as main — deferred, not regressed by #465.
+  it("keeps a clarifier whole when it wraps across THREE lines (#475)", () => {
+    // The complement of the two-line case above: closure now arrives on the
+    // THIRD line. Condition C's bounded n-line look-ahead sees that
+    // "Cloud & Infra: AWS (EC2," ⏎ "S3," ⏎ "RDS), Docker, Kubernetes" closes the
+    // clarifier within the window, so the wrapped lines rejoin and
+    // splitRespectingParens re-splits on the outside commas. Previously this was
+    // a KNOWN LIMIT (shredded into "AWS (EC2" / "S3" / "RDS)").
+    const section = skillsLines([
+      [{ x: 74, str: "Cloud & Infra: AWS (EC2,", w: 118 }],
+      [{ x: 74, str: "S3,", w: 20 }],
+      [{ x: 74, str: "RDS), Docker, Kubernetes", w: 118 }],
+    ]);
+    const value = extractSkills(section).value;
+
+    expect(value).toEqual(["AWS (EC2, S3, RDS)", "Docker", "Kubernetes"]);
+    expect(value).not.toContain("AWS (EC2");
+    expect(value).not.toContain("S3");
+    expect(value).not.toContain("RDS)");
+  });
+
+  it("degrades to shredded-but-bounded when a clarifier wraps past the window", () => {
+    // The look-ahead is CLARIFIER_WRAP_LOOKAHEAD lines deep, on purpose: a paren
+    // whose close never arrives inside the window is treated as a stray "(" and
+    // the join is refused — never swallowing the section into one cell. Here the
+    // clarifier's items are spread one-per-line so closure sits well beyond the
+    // window; the fallback shreds it, but every item survives as its own token
+    // (nothing is lost, nothing is merged into a garbage super-token).
     const section = skillsLines([
       [{ x: 74, str: "Cloud: AWS (EC2,", w: 80 }],
       [{ x: 74, str: "S3,", w: 20 }],
-      [{ x: 74, str: "RDS)", w: 25 }],
+      [{ x: 74, str: "RDS,", w: 25 }],
+      [{ x: 74, str: "Lambda,", w: 40 }],
+      [{ x: 74, str: "DynamoDB,", w: 55 }],
+      [{ x: 74, str: "ECS,", w: 30 }],
+      [{ x: 74, str: "EKS,", w: 30 }],
+      [{ x: 74, str: "CloudFront)", w: 60 }],
     ]);
+    const value = extractSkills(section).value;
 
-    expect(extractSkills(section).value).toEqual(["AWS (EC2", "S3", "RDS)"]);
+    // Bounded: the stray-looking "(" is not swallowed; the trailing items are
+    // recovered individually rather than collapsed into one cell.
+    expect(value).toContain("AWS (EC2");
+    expect(value).toContain("DynamoDB");
+    expect(value).toContain("CloudFront)");
+    expect(value).not.toContain(
+      "AWS (EC2, S3, RDS, Lambda, DynamoDB, ECS, EKS, CloudFront)",
+    );
   });
 
-  it("KNOWN BEHAVIOR: a line that closes one clarifier and opens another recovers the second", () => {
+  it("recovers BOTH clarifiers when one closes and another opens across the wrap (#475)", () => {
     // "Cloud: AWS (EC2," ⏎ "S3), Azure (VMs," ⏎ "Blobs)". The middle line closes
-    // the first clarifier and opens a second, so the first join is declined (the
-    // join would not resolve the imbalance) and the first clarifier shreds — but
-    // the SECOND is rejoined whole. Better than main, which shreds both
-    // ("Azure (VMs" / "Blobs)"). Pinned so the recovery cannot silently vanish.
+    // the first clarifier and opens a second. Under #465's single-line look-ahead
+    // the first join was declined (the one-line join `…(EC2, S3), Azure (VMs,`
+    // does not balance) and the first clarifier shredded to "AWS (EC2" / "S3)".
+    // With #475's bounded n-line look-ahead the scan sees the whole run balance
+    // by the third line, so it rejoins; splitRespectingParens then re-splits on
+    // the outside comma and BOTH clarifiers come back whole — strictly better
+    // than the old shred-the-first behaviour.
     const section = skillsLines([
       [{ x: 74, str: "Cloud: AWS (EC2,", w: 80 }],
       [{ x: 74, str: "S3), Azure (VMs,", w: 80 }],
@@ -736,8 +774,7 @@ describe("extractSkills — bulleted labelled single-column rows (#465)", () => 
     ]);
 
     expect(extractSkills(section).value).toEqual([
-      "AWS (EC2",
-      "S3)",
+      "AWS (EC2, S3)",
       "Azure (VMs, Blobs)",
     ]);
   });
@@ -763,5 +800,80 @@ describe("extractSkills — bulleted labelled single-column rows (#465)", () => 
       "Data analysis",
       "Communication",
     ]);
+  });
+});
+
+describe("extractSkills — category capture (#473)", () => {
+  it("captures each label as a category and keeps `skills` the flat union", () => {
+    const section = skillsLines([
+      [...BULLET_RUNS, { x: 74, str: "Frontend: React, TypeScript", w: 140 }],
+      [...BULLET_RUNS, { x: 74, str: "Backend: Java, Python", w: 120 }],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(value).toEqual(["React", "TypeScript", "Java", "Python"]);
+    expect(categories).toEqual([
+      { label: "Frontend", skills: ["React", "TypeScript"] },
+      { label: "Backend", skills: ["Java", "Python"] },
+    ]);
+  });
+
+  it("INVARIANT 1: `skills` deep-equals `categories.flatMap((c) => c.skills)`", () => {
+    // A wrapped Frontend list whose continuation flushed as its own bare cell
+    // ("… HTML5," ⏎ "CSS3, JavaScript") must fold back into Frontend, not become
+    // an uncategorised tail that suppresses the whole structured view.
+    const section = skillsLines([
+      [
+        ...BULLET_RUNS,
+        { x: 74, str: "Frontend: React, TypeScript, HTML5,", w: 180 },
+      ],
+      [{ x: 74, str: "CSS3, JavaScript", w: 78 }],
+      [...BULLET_RUNS, { x: 74, str: "Backend: Java, Go", w: 110 }],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(categories).toBeDefined();
+    expect(value).toEqual(categories!.flatMap((c) => c.skills));
+    // The wrap continuation belongs to Frontend, not to a bare bucket.
+    expect(categories![0]).toEqual({
+      label: "Frontend",
+      skills: ["React", "TypeScript", "HTML5", "CSS3", "JavaScript"],
+    });
+  });
+
+  it("INVARIANT 2: an uncategorised comma list yields `categories === undefined`", () => {
+    const section = skillsLines([
+      [{ x: 74, str: "React, TypeScript, Java, Python", w: 180 }],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(value).toEqual(["React", "TypeScript", "Java", "Python"]);
+    expect(categories).toBeUndefined(); // not [], not a synthetic empty bucket
+  });
+
+  it("suppresses categories when a bare head precedes the first label", () => {
+    // A partly-categorised section cannot satisfy invariant (1) without inventing
+    // a bucket for the leading bare skills, so the structured view is dropped and
+    // the flat list is preserved intact.
+    const section = skillsLines([
+      [{ x: 74, str: "React, TypeScript", w: 110 }],
+      [...BULLET_RUNS, { x: 74, str: "Backend: Java, Go", w: 110 }],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(value).toEqual(["React", "TypeScript", "Java", "Go"]);
+    expect(categories).toBeUndefined();
+  });
+
+  it("does not treat a hobbies/interests sub-label as a category", () => {
+    // A non-skill sub-label contributes no tokens and must not become a category.
+    const section = skillsLines([
+      [...BULLET_RUNS, { x: 74, str: "Backend: Java, Go", w: 110 }],
+      [...BULLET_RUNS, { x: 74, str: "Interests: Tennis, Gardening", w: 150 }],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(value).toEqual(["Java", "Go"]);
+    expect(categories).toEqual([{ label: "Backend", skills: ["Java", "Go"] }]);
   });
 });

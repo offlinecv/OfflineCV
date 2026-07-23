@@ -21,6 +21,8 @@ import {
   type EditableParse,
   type AddedEntry,
 } from "./useEditableParse.ts";
+import type { SkillCategory } from "../lib/heuristics/types.ts";
+import { computeEditedSkills } from "../lib/edit/skills-categories.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -127,5 +129,92 @@ describe("useEditableParse — pruneEmptyAddedEntries (#379)", () => {
 
     act(() => api.pruneEmptyAddedEntries("projects"));
     expect(api.addedEntries).toBe(before);
+  });
+});
+
+describe("useEditableParse — Skills category edits (#476)", () => {
+  const cats: SkillCategory[] = [
+    { label: "Frontend", skills: ["React", "TypeScript"] },
+    { label: "Backend", skills: ["Java"] },
+  ];
+
+  it("takes a grouping snapshot on the first category edit and marks hasEdits", () => {
+    expect(api.skillsOverride.categories).toBeUndefined();
+    expect(api.hasEdits).toBe(false);
+
+    act(() => api.renameSkillCategory(cats, 0, "UI"));
+    expect(api.skillsOverride.categories?.[0].label).toBe("UI");
+    // Rename is label-only — members untouched.
+    expect(api.skillsOverride.categories?.[0].skills).toEqual(["React", "TypeScript"]);
+    expect(api.hasEdits).toBe(true);
+  });
+
+  it("moves a skill through the same path the DnD drop uses", () => {
+    act(() => api.moveSkillToCategory(cats, "React", 1));
+    const snap = api.skillsOverride.categories!;
+    expect(snap[0].skills).toEqual(["TypeScript"]);
+    expect(snap[1].skills).toContain("React");
+  });
+
+  it("resetAll clears the category snapshot back to pristine", () => {
+    act(() => api.addSkillCategory(cats, "Data"));
+    expect(api.skillsOverride.categories).toBeDefined();
+    act(() => api.resetAll());
+    expect(api.skillsOverride.categories).toBeUndefined();
+    expect(api.hasEdits).toBe(false);
+  });
+
+  it("round-trips the snapshot through snapshot → replay", () => {
+    act(() => api.renameSkillCategory(cats, 0, "UI"));
+    // Second op composes on the flushed snapshot (mirrors the component reading
+    // the applied `parsed.skillCategories` between edits).
+    act(() => api.deleteSkillCategory(api.skillsOverride.categories!, 1));
+    const saved = api.snapshot;
+    act(() => api.resetAll());
+    expect(api.skillsOverride.categories).toBeUndefined();
+    act(() => api.replay(saved));
+    expect(api.skillsOverride.categories?.map((c) => c.label)).toEqual(["UI"]);
+  });
+
+  it("delete-all-categories then flat addSkill does NOT resurrect deleted skills (#415)", () => {
+    // The pristine parse `applyOverrides` always re-folds against.
+    const parsed = { skills: cats.flatMap((c) => c.skills), skillCategories: cats };
+
+    // Delete every category. Each op composes on the current applied snapshot,
+    // mirroring the component reading `parsed.skillCategories` between edits.
+    act(() => api.deleteSkillCategory(cats, 0));
+    act(() => api.deleteSkillCategory(api.skillsOverride.categories!, 0));
+    // Degraded: an empty-but-present snapshot (`[]`), NOT absent — this is what
+    // keeps computeEditedSkills out of the pristine flat branch.
+    expect(api.skillsOverride.categories).toEqual([]);
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([]);
+
+    // The flat AddSkillInput is now live; the user adds one skill.
+    act(() => api.addSkill("Rust"));
+    // addSkill must PRESERVE the `[]` snapshot (align with removeSkill), else the
+    // override falls back to the pristine flat branch and every deleted skill
+    // reappears — the #415 bug.
+    expect(api.skillsOverride.categories).toEqual([]);
+    expect(api.skillsOverride.added).toEqual(["Rust"]);
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([
+      "Rust",
+    ]);
+
+    // …then removes it → back to empty (not resurrected).
+    act(() => api.removeSkill("Rust"));
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([]);
+  });
+
+  it("delete-all then add twice keeps both adds, no pristine skills (#415)", () => {
+    const parsed = { skills: cats.flatMap((c) => c.skills), skillCategories: cats };
+    act(() => api.deleteSkillCategory(cats, 0));
+    act(() => api.deleteSkillCategory(api.skillsOverride.categories!, 0));
+    act(() => api.addSkill("Rust"));
+    act(() => api.addSkill("Go"));
+    expect(api.skillsOverride.categories).toEqual([]);
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([
+      "Rust",
+      "Go",
+    ]);
   });
 });

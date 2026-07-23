@@ -445,4 +445,34 @@ describe("buildAtsResumeModel", () => {
     const exp = model.sections.find((s) => s.heading === "Experience")!;
     expect(exp.entries[0].headerBold).toBeUndefined();
   });
+
+  it("exports one entry per category under its (edited) label (#473/#476)", () => {
+    const result = makeResult({
+      skills: ["PostgreSQL", "Redis", "Java"],
+      skillCategories: [
+        { label: "Data Stores", skills: ["PostgreSQL", "Redis"] },
+        { label: "Backend", skills: ["Java"] },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const skills = model.sections.find((s) => s.heading === "Skills")!;
+    expect(skills.entries.map((e) => e.fields?.skillCategory)).toEqual([
+      "Data Stores",
+      "Backend",
+    ]);
+    expect(skills.entries[0].headerLine).toBe("Data Stores: PostgreSQL · Redis");
+  });
+
+  it("drops an empty category so the PDF renders no dangling 'Label:' (#476)", () => {
+    const result = makeResult({
+      skills: ["Java"],
+      skillCategories: [
+        { label: "Data Stores", skills: [] }, // emptied in the editor
+        { label: "Backend", skills: ["Java"] },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const skills = model.sections.find((s) => s.heading === "Skills")!;
+    expect(skills.entries.map((e) => e.fields?.skillCategory)).toEqual(["Backend"]);
+  });
 });

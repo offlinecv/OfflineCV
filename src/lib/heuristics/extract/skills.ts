@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import type { PdfSection } from "../sections.ts";
-import type { PdfTextItem } from "../types.ts";
+import type { PdfTextItem, SkillCategory } from "../types.ts";
 import { mergeItemText } from "../sections.ts";
 import { isBulletGlyph, stripBullet } from "../line-primitives.ts";
 
@@ -352,6 +352,24 @@ function hasUnclosedParen(text: string): boolean {
 }
 
 /**
+ * How many subsequent physical lines Condition C will scan for the paren that
+ * closes a clarifier which soft-wrapped mid-list.
+ *
+ * A clarifier only wraps when its own comma-list is wider than the résumé
+ * column, and a column that narrow fits, at most, a handful of items per line —
+ * so a realistic wrap is two or three lines (`AWS (EC2,` / `S3,` / `RDS)`),
+ * never a dozen. A window of 4 covers every real case with margin while keeping
+ * the scan a bounded O(N) peek. The bound is the whole point of the check: an
+ * open `(` whose close never arrives within the window is a STRAY paren (an OCR
+ * artifact like `Vim (advanced`, not a wrap). Refusing the join there degrades
+ * to today's shredded-but-bounded output and hands the trailing items to
+ * `splitRespectingParens`' unbalanced-paren fallback — it must NEVER swallow the
+ * rest of the section into one cell, which is exactly what an unbounded scan
+ * (or the pre-#465 code) did.
+ */
+const CLARIFIER_WRAP_LOOKAHEAD = 4;
+
+/**
  * True when the pending accumulated text and `nextText` together indicate a
  * soft-wrap: the line break happened mid-skill-name or mid-list, not between
  * two independent items.
@@ -367,7 +385,11 @@ function hasUnclosedParen(text: string): boolean {
  * Both guards also reject standalone profile/contact links and new-sub-list
  * patterns unconditionally.
  */
-function isSoftWrapContinuation(pending: string, nextText: string): boolean {
+function isSoftWrapContinuation(
+  pending: string,
+  nextText: string,
+  upcoming: string[],
+): boolean {
   // Always skip standalone profile/contact links — they are their own items.
   if (looksLikeContactLink(nextText)) return false;
   // Always skip if the next line starts a new sub-list (label or bullet).
@@ -397,12 +419,13 @@ function isSoftWrapContinuation(pending: string, nextText: string): boolean {
   }
 
   // Condition C: the pending line broke MID-LIST INSIDE a parenthesised
-  // clarifier, and the next line closes that clarifier ("… AWS (EC2," ⏎
-  // "S3, RDS)"). Such a break is unambiguously mid-token, and it is the one case
-  // Condition B structurally cannot reach: pending ends on a comma, so B reads
-  // it as a completed entry and declines to join — leaving
-  // splitRespectingParens' unbalanced-paren fallback to shred the clarifier into
-  // "AWS (EC2" / "S3" / "RDS)" (#465).
+  // clarifier, and the clarifier closes within a bounded look-ahead ("… AWS
+  // (EC2," ⏎ "S3, RDS)", or the 3+-line form "… AWS (EC2," ⏎ "S3," ⏎ "RDS)").
+  // Such a break is unambiguously mid-token, and it is the one case Condition B
+  // structurally cannot reach: pending ends on a comma, so B reads it as a
+  // completed entry and declines to join — leaving splitRespectingParens'
+  // unbalanced-paren fallback to shred the clarifier into "AWS (EC2" / "S3" /
+  // "RDS)" (#465).
   //
   // Three conjuncts, each load-bearing:
   //
@@ -416,22 +439,34 @@ function isSoftWrapContinuation(pending: string, nextText: string): boolean {
   //     Condition B rather than a superset of it: B handles every wrapped list
   //     that does NOT end on a comma, C handles only the comma-terminated ones B
   //     refuses. Every real clarifier wrap breaks after a comma.
-  //  3. `!hasUnclosedParen(joined)` — the join RESOLVES the imbalance. An open
-  //     paren the next line does NOT close is a stray paren (the OCR artifact
-  //     "C++ (advanced, Node"), not a wrap. Joining on the open paren alone
-  //     never re-satisfies its own predicate, so every subsequent line would keep
-  //     joining and the whole rest of the section would collapse into one garbage
-  //     token — starving the unbalanced-paren fallback in `splitRespectingParens`
-  //     that exists precisely to recover the items after a stray "(".
+  //  3. Some prefix of `[nextText, ...upcoming]`, appended to `pending`, RESOLVES
+  //     the imbalance — the clarifier closes within `CLARIFIER_WRAP_LOOKAHEAD`
+  //     lines. This is #465's `!hasUnclosedParen(pending + nextText)` widened
+  //     from a single-line check to a bounded n-line scan, so closure can arrive
+  //     two or three lines out (a clarifier that wraps 3+ times) instead of
+  //     exactly one. The BOUND is what keeps the safety property #465's single
+  //     line bought: an open paren that NO prefix within the window closes is a
+  //     stray paren (the OCR artifact "C++ (advanced, Node"), not a wrap, so the
+  //     join is refused and `splitRespectingParens`' fallback recovers the items
+  //     after it — the section is never swallowed into one garbage token. The
+  //     scan only tests whether closure is reachable; the actual joining still
+  //     happens one hop at a time back in `collectSkillCells`, each hop
+  //     re-checking all three conjuncts, so a continuation line that does not end
+  //     on a comma flushes and bounds the accumulation further.
   //
   // Invariant: join only when the break is mid-list INSIDE an open clarifier and
-  // the join CLOSES that clarifier.
-  if (
-    hasUnclosedParen(pending) &&
-    /,\s*$/.test(pending) &&
-    !hasUnclosedParen(`${pending} ${nextText}`)
-  )
-    return true;
+  // that clarifier demonstrably CLOSES within the look-ahead window.
+  if (hasUnclosedParen(pending) && /,\s*$/.test(pending)) {
+    let joined = `${pending} ${nextText}`;
+    if (!hasUnclosedParen(joined)) return true;
+    for (const following of upcoming.slice(0, CLARIFIER_WRAP_LOOKAHEAD)) {
+      joined += ` ${following}`;
+      if (!hasUnclosedParen(joined)) return true;
+    }
+    // No closing prefix within the window: fall through. Conjunct 2 guarantees
+    // pending ends on a comma, so Conditions A and B below are both structurally
+    // false too — the join is refused, leaving the clarifier shredded-but-bounded.
+  }
 
   // Condition A: pending ends with an explicit continuation glyph — the glyph
   // must be its OWN whitespace-separated token ("Hiring &", "Data -"), not the
@@ -495,8 +530,16 @@ function collectSkillCells(lines: PdfSection["lines"]): string[] {
     }
   };
 
-  for (const line of lines) {
-    const cells = splitColumnCells(line);
+  // Split every line's columns once up front. Condition C's n-line look-ahead
+  // (see `isSoftWrapContinuation`) needs to peek at the single-column line texts
+  // that FOLLOW the current one to decide whether an open clarifier ever closes;
+  // computing the splits here keeps that peek O(1) per hop and keeps the
+  // predicate pure — it receives the upcoming texts as data rather than reaching
+  // back into the loop.
+  const lineCells = lines.map(splitColumnCells);
+
+  for (let i = 0; i < lineCells.length; i++) {
+    const cells = lineCells[i];
     if (cells.length > 1) {
       // Multi-column row: flush any pending single-col accumulation, then add
       // each column cell individually (they are separate logical groups).
@@ -506,7 +549,10 @@ function collectSkillCells(lines: PdfSection["lines"]): string[] {
       // Single-column line — may be a soft-wrap continuation of the previous.
       const text = (cells[0] ?? "").trim();
       if (!text) continue;
-      if (pending && isSoftWrapContinuation(pending, text)) {
+      if (
+        pending &&
+        isSoftWrapContinuation(pending, text, upcomingContinuationTexts(lineCells, i + 1))
+      ) {
         // Looks like a continuation — join with a space.
         pending += " " + text;
       } else {
@@ -519,16 +565,107 @@ function collectSkillCells(lines: PdfSection["lines"]): string[] {
   return result;
 }
 
+/**
+ * The subsequent single-column line texts that COULD extend a soft-wrap, in
+ * document order, for Condition C's bounded clarifier-close look-ahead.
+ *
+ * Gathers up to `CLARIFIER_WRAP_LOOKAHEAD` following texts, stopping at the
+ * first line that breaks a continuation so the scan can never count a paren that
+ * lives past a boundary as "closing" the clarifier:
+ *   - a MULTI-COLUMN row (`cells.length !== 1`) flushes pending in the loop;
+ *   - a NEW-ENTRY line (bullet/label) or a CONTACT link is where
+ *     `isSoftWrapContinuation` itself would refuse to join.
+ * A blank single-column line is skipped without counting — it neither breaks nor
+ * extends the wrap (the loop `continue`s past it too), so it must not consume the
+ * window budget or terminate the scan.
+ */
+function upcomingContinuationTexts(lineCells: string[][], from: number): string[] {
+  const out: string[] = [];
+  for (
+    let j = from;
+    j < lineCells.length && out.length < CLARIFIER_WRAP_LOOKAHEAD;
+    j++
+  ) {
+    const cells = lineCells[j];
+    if (cells.length !== 1) break; // multi-column row: continuation boundary
+    const t = (cells[0] ?? "").trim();
+    if (t === "") continue; // blank: skipped by the loop too, not a boundary
+    if (SKILLS_NEW_ENTRY_RE.test(t) || looksLikeContactLink(t)) break;
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * The category label a skills cell opens with, minus its trailing colon — or
+ * `undefined` when the cell carries no leading `Label:` (#473). Mirrors the
+ * label recognition `tokenizeCell` already performs (`stripBullet` then
+ * `SUBLABEL_PREFIX_RE`), so a cell captured as a category is exactly one whose
+ * label `tokenizeCell` would otherwise strip and drop.
+ *
+ * A non-skill sub-label (Interests/Hobbies) is not a category: `tokenizeCell`
+ * drops such a cell whole, so it never contributes tokens and never reaches the
+ * caller's category branch — but the guard here keeps the two decisions aligned.
+ */
+function matchCellLabel(cell: string): string | undefined {
+  const m = stripBullet(cell).match(SUBLABEL_PREFIX_RE);
+  if (!m || NON_SKILL_SUBLABEL_RE.test(m[1])) return undefined;
+  return m[1].trim();
+}
+
 export function extractSkills(
   skills: PdfSection | undefined,
-): { value: string[]; confidence: number } {
+): { value: string[]; categories?: SkillCategory[]; confidence: number } {
   if (!skills || skills.lines.length === 0) return { value: [], confidence: 0 };
 
-  const tokens = new Set<string>();
+  // One walk builds BOTH views off the same cell stream, sharing a single dedup
+  // set so the flat list is byte-identical to the pre-#473 global-Set behavior
+  // (per-cell dedup via `tokenizeSkillLine`, then a global dedup here) and the
+  // categories' members are exactly the flat list re-partitioned by label —
+  // guaranteeing `skills === skillCategories.flatMap((c) => c.skills)`.
+  const seen = new Set<string>();
+  const value: string[] = [];
+  const categories: SkillCategory[] = [];
+  // A skill that surfaced BEFORE any category label is a bare, uncategorised
+  // head of the section. It cannot belong to a category, so its presence means
+  // the section is only PARTLY categorised — we then drop the structured view
+  // entirely rather than invent a bucket, keeping invariant (1) exact.
+  let hasUncategorisedHead = false;
+
   for (const cell of collectSkillCells(skills.lines)) {
-    tokenizeCell(cell, tokens);
+    const cellTokens: string[] = [];
+    for (const tok of tokenizeSkillLine(cell)) {
+      if (seen.has(tok)) continue;
+      seen.add(tok);
+      value.push(tok);
+      cellTokens.push(tok);
+    }
+    // A cell that produced nothing (dropped link/hobbies label, or all-duplicate)
+    // is neither a category nor a bare contribution — skip it on both axes.
+    if (cellTokens.length === 0) continue;
+
+    const label = matchCellLabel(cell);
+    if (label !== undefined) {
+      categories.push({ label, skills: cellTokens });
+    } else if (categories.length > 0) {
+      // A bare cell that follows a category is a soft-wrap continuation of it —
+      // the wrap flushed as its own cell (e.g. the pending line ended on a comma,
+      // which declines the comma-list rejoin) — so its tokens extend the last
+      // category. `collectSkillCells` preserves document order, so a
+      // continuation always trails its own category and precedes the next label.
+      categories[categories.length - 1].skills.push(...cellTokens);
+    } else {
+      hasUncategorisedHead = true;
+    }
   }
-  const value = [...tokens];
+
   const confidence = value.length >= 5 ? 0.85 : value.length >= 2 ? 0.6 : 0.2;
-  return { value, confidence };
+  return {
+    value,
+    // Emit the structured view ONLY when the section is fully categorised: at
+    // least one label AND no bare head. Otherwise the field is absent (never
+    // `[]`), which reads as "uncategorised" per invariant (2).
+    ...(categories.length > 0 && !hasUncategorisedHead ? { categories } : {}),
+    confidence,
+  };
 }

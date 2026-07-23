@@ -111,6 +111,11 @@ function fieldsPopulated(parsed: HeuristicParsedResume): string[] {
     // keep the Phase-1 migration snapshot-safe (no re-bake). Phase 2 flips the
     // legacy keys to `profiles` and re-bakes the corpus deliberately.
     if (k === "profiles") continue;
+    // `skillCategories` (#473) is an additive STRUCTURED view over `skills` — it
+    // carries no new field-presence signal (its presence implies `skills`), so
+    // it is excluded here to keep the snapshot migration-safe: a categorised
+    // fixture's `fieldsPopulated` does not move, no re-bake needed.
+    if (k === "skillCategories") continue;
     keys.push(k);
   }
   return keys.sort();

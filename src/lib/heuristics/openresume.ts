@@ -432,6 +432,11 @@ function buildHeuristicResult(
     ...(contact.profiles.length > 0 ? { profiles: contact.profiles } : {}),
     ...(summary.value ? { summary: summary.value } : {}),
     skills: skills.value,
+    // Structured category view (#473) — additive over the flat `skills`, present
+    // only when the Skills section was actually categorised. The inline-label
+    // recovery below never sets it (it fires only when `skills.value` is empty,
+    // which leaves `skills.categories` absent), so flat-only stays flat-only.
+    ...(skills.categories ? { skillCategories: skills.categories } : {}),
     skills_explicit: [],
     skills_inferred: [],
     experience: experience.value,

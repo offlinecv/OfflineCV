@@ -108,9 +108,14 @@ export interface AtsEntryFields {
   url?: string;
   /** JSON Resume `education.courses` — relevant-coursework items (#164). */
   courses?: string[];
-  /** JSON Resume `skills` — the flat skill list, carried only on the single
-   *  skills entry (whose `headerLine` is the same list joined by " · "). */
+  /** JSON Resume `skills` — the flat skill list, carried on the skills entry
+   *  (whose `headerLine` is the same list joined by " · "). On a CATEGORISED
+   *  skills entry (#473) this holds that ONE category's members. */
   skills?: string[];
+  /** The category label of a categorised skills entry (#473) — its `headerLine`
+   *  is `"<label>: a · b · c"` and the JSON export maps it to
+   *  `{ name: label, keywords: members }`. Absent on a flat skills entry. */
+  skillCategory?: string;
   /** JSON Resume `awards.title` — carried on achievement entries (#421). */
   title?: string;
 }
@@ -768,22 +773,41 @@ export function buildAtsResumeModel(
     };
   });
 
-  // ── Skills (one entry, no header line — bullets carry the joined list) ──
+  // ── Skills ──────────────────────────────────────────────────────────────
+  // Categorised (#473): one entry PER category, each `"<label>: a · b · c"`, so
+  // the exported PDF reproduces the input's grouping and re-parses back to the
+  // same categories. Uncategorised: the single flat " · "-joined entry, exactly
+  // as before (byte-identical). Both read as regular-weight body text (#425) and
+  // keep segments atomic so a multi-word skill never wraps mid-name (#301).
+  // Drop empty categories (an editor "empty-but-present" state, #476) so the PDF
+  // never renders a dangling "Label:" with nothing after it; the flat list is
+  // already the flatten of the non-empty ones, so this stays invariant-safe.
+  const skillCategories = parsed.skillCategories?.filter(
+    (c) => c.skills.length > 0,
+  );
   const skillsEntries: AtsEntry[] =
-    skills.length > 0
-      ? [
-          {
-            headerLine: skills.join(" · "),
-            bullets: [],
-            atomicSegments: true,
-            // Skills read as regular-weight body text, not a bold header (#425).
-            headerBold: false,
-            // The flat skill list, carried structurally so the JSON export (#334)
-            // maps `skills[] ← { name }` without re-splitting the joined header.
-            fields: { skills: [...skills] },
-          },
-        ]
-      : [];
+    skillCategories && skillCategories.length > 0
+      ? skillCategories.map((c) => ({
+          headerLine: `${c.label}: ${c.skills.join(" · ")}`,
+          bullets: [],
+          atomicSegments: true,
+          headerBold: false,
+          fields: { skills: [...c.skills], skillCategory: c.label },
+        }))
+      : skills.length > 0
+        ? [
+            {
+              headerLine: skills.join(" · "),
+              bullets: [],
+              atomicSegments: true,
+              // Skills read as regular-weight body text, not a bold header (#425).
+              headerBold: false,
+              // The flat skill list, carried structurally so the JSON export
+              // (#334) maps `skills[] ← { name }` without re-splitting the header.
+              fields: { skills: [...skills] },
+            },
+          ]
+        : [];
 
   const achievementsAbove =
     parsed.achievements_placement === "above_experience";
