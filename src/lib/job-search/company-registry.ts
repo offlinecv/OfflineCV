@@ -15,7 +15,15 @@
  * Sourcing: hand-curated from each ATS vendor's public board directory and
  * general familiarity with well-known companies' public careers pages, one
  * company per entry, tagged with 1-2 sectors from `./sector.ts`. Curated
- * 2026-07-21; EXISTENCE-AUDITED 2026-07-22 (#533).
+ * 2026-07-21; EXISTENCE-AUDITED 2026-07-22 (#533). Registry GROWTH batch
+ * 2026-07-22 (#542/#546): ~68 entries added for the sectors that bottomed out
+ * near the #542 fan-out cap (gaming, hardware-iot, logistics-mobility,
+ * government-defense, ecommerce, media-adtech, crypto-web3, security, edtech),
+ * plus a GPU/AI-infra "neocloud" cluster in data-ml. Every one existence-
+ * audited the same way, and each generic-slug board identity-checked against
+ * its live posting titles to reject lookalikes (e.g. `gh:ritual` is an AI/crypto
+ * protocol, not the DTC vitamins brand; `ashby:primer` is a microschool, not the
+ * defense-AI Primer — both rejected).
  *
  * EXISTENCE-audited, NOT CORS-verified — two different claims, do not
  * conflate them:
@@ -32,8 +40,12 @@
  *    it is not Circle Internet Financial.
  *  - What the audit does NOT prove: browser CORS. The audit ran over `curl`,
  *    which ignores CORS entirely, so a 200 here says the board EXISTS — not
- *    that a page on offlinecv.org may read it. Browser-origin CORS
- *    verification per vendor remains an open task (a human/dev step).
+ *    that a page on offlinecv.org may read it. Browser CORS is settled at the
+ *    VENDOR level, not per entry: #535 verified from a real page origin
+ *    (example.com) that all three vendors — Greenhouse, Lever, Ashby — return
+ *    a permissive `Access-Control-Allow-Origin` header across public API routes.
+ *    A new entry on these vendors is therefore expected to be browser-reachable
+ *    without requiring a per-entry CORS check, assuming vendor CORS policies hold.
  *
  * Boards churn: a company can move ATS or close its board at any time, so a
  * stale entry is expected drift, not a bug. The wiring in `company-boards.ts`
@@ -111,6 +123,16 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Cohere", ats: "ashby", slug: "cohere", sectors: ["data-ml"] },
   { name: "Pinecone", ats: "ashby", slug: "pinecone", sectors: ["data-ml"] },
   { name: "Modal", ats: "ashby", slug: "modal", sectors: ["data-ml"] },
+  // GPU/AI-infra "neoclouds" — compute + inference platforms for the ML lane.
+  { name: "CoreWeave", ats: "greenhouse", slug: "coreweave", sectors: ["data-ml"] },
+  { name: "Nebius", ats: "greenhouse", slug: "nebius", sectors: ["data-ml"] },
+  { name: "Crusoe", ats: "ashby", slug: "crusoe", sectors: ["data-ml"] },
+  { name: "Cerebras", ats: "ashby", slug: "cerebras", sectors: ["data-ml", "hardware-iot"] },
+  { name: "Together AI", ats: "greenhouse", slug: "togetherai", sectors: ["data-ml"] },
+  { name: "Baseten", ats: "ashby", slug: "baseten", sectors: ["data-ml"] },
+  { name: "Lambda", ats: "ashby", slug: "lambda", sectors: ["data-ml"] },
+  { name: "RunPod", ats: "ashby", slug: "runpod", sectors: ["data-ml"] },
+  { name: "Vast.ai", ats: "ashby", slug: "vastai", sectors: ["data-ml"] },
 
   // -- healthtech -------------------------------------------------------------
   { name: "Oscar Health", ats: "greenhouse", slug: "oscar", sectors: ["healthtech"] },
@@ -130,6 +152,12 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Glossier", ats: "greenhouse", slug: "glossier", sectors: ["ecommerce"] },
   { name: "Stitch Fix", ats: "greenhouse", slug: "stitchfix", sectors: ["ecommerce"] },
   { name: "Poshmark", ats: "ashby", slug: "poshmark", sectors: ["ecommerce"] },
+  { name: "StockX", ats: "greenhouse", slug: "stockx", sectors: ["ecommerce"] },
+  { name: "Rent the Runway", ats: "greenhouse", slug: "renttherunway", sectors: ["ecommerce"] },
+  { name: "Misfits Market", ats: "greenhouse", slug: "misfitsmarket", sectors: ["ecommerce"] },
+  { name: "Thrive Market", ats: "greenhouse", slug: "thrivemarket", sectors: ["ecommerce"] },
+  { name: "Back Market", ats: "ashby", slug: "backmarket", sectors: ["ecommerce"] },
+  { name: "Harry's", ats: "greenhouse", slug: "harrys", sectors: ["ecommerce"] },
 
   // -- gaming ---------------------------------------------------------------
   { name: "Discord", ats: "greenhouse", slug: "discord", sectors: ["gaming", "consumer-social"] },
@@ -138,6 +166,12 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Twitch", ats: "greenhouse", slug: "twitch", sectors: ["gaming", "media-adtech"] },
   { name: "Epic Games", ats: "greenhouse", slug: "epicgames", sectors: ["gaming"] },
   { name: "Scopely", ats: "greenhouse", slug: "scopely", sectors: ["gaming"] },
+  { name: "Voodoo", ats: "ashby", slug: "voodoo", sectors: ["gaming"] },
+  { name: "Supercell", ats: "ashby", slug: "supercell", sectors: ["gaming"] },
+  { name: "Dream Games", ats: "lever", slug: "dreamgames", sectors: ["gaming"] },
+  { name: "Jam City", ats: "lever", slug: "jamcity", sectors: ["gaming"] },
+  { name: "Kabam", ats: "lever", slug: "kabam", sectors: ["gaming"] },
+  { name: "Improbable", ats: "ashby", slug: "improbable", sectors: ["gaming"] },
 
   // -- security ---------------------------------------------------------------
   { name: "Okta", ats: "greenhouse", slug: "okta", sectors: ["security"] },
@@ -147,6 +181,12 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Tailscale", ats: "greenhouse", slug: "tailscale", sectors: ["security", "devtools"] },
   { name: "Netskope", ats: "greenhouse", slug: "netskope", sectors: ["security"] },
   { name: "Datadog", ats: "greenhouse", slug: "datadog", sectors: ["security", "devtools"] },
+  { name: "Abnormal Security", ats: "greenhouse", slug: "abnormalsecurity", sectors: ["security"] },
+  { name: "Chainguard", ats: "greenhouse", slug: "chainguard", sectors: ["security", "devtools"] },
+  { name: "Huntress", ats: "greenhouse", slug: "huntress", sectors: ["security"] },
+  { name: "Semgrep", ats: "ashby", slug: "semgrep", sectors: ["security", "devtools"] },
+  { name: "HackerOne", ats: "ashby", slug: "hackerone", sectors: ["security"] },
+  { name: "Shift5", ats: "greenhouse", slug: "shift5", sectors: ["security", "government-defense"] },
 
   // -- enterprise-saas --------------------------------------------------------
   { name: "Asana", ats: "greenhouse", slug: "asana", sectors: ["enterprise-saas"] },
@@ -176,6 +216,14 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Verkada", ats: "greenhouse", slug: "verkada", sectors: ["hardware-iot", "security"] },
   { name: "Bird", ats: "greenhouse", slug: "bird", sectors: ["hardware-iot", "logistics-mobility"] },
   { name: "Astranis", ats: "greenhouse", slug: "astranis", sectors: ["hardware-iot"] },
+  { name: "Formlabs", ats: "greenhouse", slug: "formlabs", sectors: ["hardware-iot"] },
+  { name: "Peloton", ats: "greenhouse", slug: "peloton", sectors: ["hardware-iot"] },
+  { name: "Oura", ats: "greenhouse", slug: "oura", sectors: ["hardware-iot"] },
+  { name: "Whoop", ats: "ashby", slug: "whoop", sectors: ["hardware-iot"] },
+  { name: "Eight Sleep", ats: "ashby", slug: "eightsleep", sectors: ["hardware-iot"] },
+  { name: "Tonal", ats: "ashby", slug: "tonal", sectors: ["hardware-iot"] },
+  { name: "Nuro", ats: "greenhouse", slug: "nuro", sectors: ["hardware-iot", "logistics-mobility"] },
+  { name: "Wing", ats: "greenhouse", slug: "wing", sectors: ["hardware-iot", "logistics-mobility"] },
 
   // -- crypto-web3 --------------------------------------------------------------
   { name: "Uniswap Labs", ats: "ashby", slug: "uniswap", sectors: ["crypto-web3"] },
@@ -185,6 +233,12 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Anchorage Digital", ats: "lever", slug: "anchorage", sectors: ["crypto-web3"] },
   { name: "Ripple", ats: "greenhouse", slug: "ripple", sectors: ["crypto-web3", "fintech"] },
   { name: "Gemini", ats: "greenhouse", slug: "gemini", sectors: ["crypto-web3"] },
+  { name: "Fireblocks", ats: "greenhouse", slug: "fireblocks", sectors: ["crypto-web3"] },
+  { name: "Blockchain.com", ats: "greenhouse", slug: "blockchain", sectors: ["crypto-web3"] },
+  { name: "Bitso", ats: "greenhouse", slug: "bitso", sectors: ["crypto-web3"] },
+  { name: "Aptos Labs", ats: "greenhouse", slug: "aptoslabs", sectors: ["crypto-web3"] },
+  { name: "Paxos", ats: "ashby", slug: "paxos", sectors: ["crypto-web3"] },
+  { name: "Ledger", ats: "ashby", slug: "ledger", sectors: ["crypto-web3"] },
 
   // -- edtech -----------------------------------------------------------------
   { name: "Coursera", ats: "greenhouse", slug: "coursera", sectors: ["edtech"] },
@@ -194,6 +248,12 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Guild Education", ats: "greenhouse", slug: "guild", sectors: ["edtech"] },
   { name: "Handshake", ats: "ashby", slug: "handshake", sectors: ["edtech"] },
   { name: "ClassDojo", ats: "ashby", slug: "classdojo", sectors: ["edtech"] },
+  { name: "Instructure", ats: "ashby", slug: "instructure", sectors: ["edtech"] },
+  { name: "DataCamp", ats: "greenhouse", slug: "datacamp", sectors: ["edtech"] },
+  { name: "Nerdy", ats: "greenhouse", slug: "nerdy", sectors: ["edtech"] },
+  { name: "Newsela", ats: "greenhouse", slug: "newsela", sectors: ["edtech"] },
+  { name: "Multiverse", ats: "ashby", slug: "multiverse", sectors: ["edtech"] },
+  { name: "Brilliant", ats: "lever", slug: "brilliant", sectors: ["edtech"] },
 
   // -- logistics-mobility -------------------------------------------------
   { name: "Flexport", ats: "greenhouse", slug: "flexport", sectors: ["logistics-mobility"] },
@@ -201,6 +261,12 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Route", ats: "greenhouse", slug: "route", sectors: ["logistics-mobility", "ecommerce"] },
   { name: "Loadsmart", ats: "lever", slug: "loadsmart", sectors: ["logistics-mobility"] },
   { name: "Fleetio", ats: "greenhouse", slug: "fleetio", sectors: ["logistics-mobility"] },
+  { name: "Via", ats: "greenhouse", slug: "via", sectors: ["logistics-mobility"] },
+  { name: "Lyft", ats: "greenhouse", slug: "lyft", sectors: ["logistics-mobility"] },
+  { name: "Kodiak Robotics", ats: "greenhouse", slug: "kodiak", sectors: ["logistics-mobility"] },
+  { name: "project44", ats: "greenhouse", slug: "project44", sectors: ["logistics-mobility"] },
+  { name: "Motive", ats: "greenhouse", slug: "motive", sectors: ["logistics-mobility"] },
+  { name: "FourKites", ats: "greenhouse", slug: "fourkites", sectors: ["logistics-mobility"] },
 
   // -- media-adtech -------------------------------------------------------------
   { name: "Spotify", ats: "lever", slug: "spotify", sectors: ["media-adtech", "consumer-social"] },
@@ -209,6 +275,13 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "Buzzfeed", ats: "greenhouse", slug: "buzzfeed", sectors: ["media-adtech"] },
   { name: "Taboola", ats: "greenhouse", slug: "taboola", sectors: ["media-adtech"] },
   { name: "Chartbeat", ats: "greenhouse", slug: "chartbeatinc", sectors: ["media-adtech"] },
+  { name: "Braze", ats: "greenhouse", slug: "braze", sectors: ["media-adtech"] },
+  { name: "PubMatic", ats: "greenhouse", slug: "pubmatic", sectors: ["media-adtech"] },
+  { name: "DoubleVerify", ats: "greenhouse", slug: "doubleverify", sectors: ["media-adtech"] },
+  { name: "AppLovin", ats: "greenhouse", slug: "applovin", sectors: ["media-adtech"] },
+  { name: "Attentive", ats: "greenhouse", slug: "attentive", sectors: ["media-adtech"] },
+  { name: "Iterable", ats: "greenhouse", slug: "iterable", sectors: ["media-adtech"] },
+  { name: "Liftoff", ats: "greenhouse", slug: "liftoff", sectors: ["media-adtech"] },
 
   // -- government-defense -------------------------------------------------
   { name: "Palantir", ats: "lever", slug: "palantir", sectors: ["government-defense", "data-ml"] },
@@ -217,6 +290,14 @@ export const COMPANY_REGISTRY: readonly CompanyEntry[] = [
   { name: "HawkEye 360", ats: "greenhouse", slug: "hawkeye360", sectors: ["government-defense"] },
   { name: "Second Front Systems", ats: "ashby", slug: "second-front-systems", sectors: ["government-defense"] },
   { name: "Vannevar Labs", ats: "greenhouse", slug: "vannevarlabs", sectors: ["government-defense"] },
+  { name: "Chaos Industries", ats: "greenhouse", slug: "chaosindustries", sectors: ["government-defense"] },
+  { name: "Helsing", ats: "greenhouse", slug: "helsing", sectors: ["government-defense"] },
+  { name: "Saronic", ats: "ashby", slug: "saronic", sectors: ["government-defense"] },
+  { name: "Epirus", ats: "greenhouse", slug: "epirus", sectors: ["government-defense"] },
+  { name: "Ursa Major", ats: "greenhouse", slug: "ursamajor", sectors: ["government-defense", "hardware-iot"] },
+  { name: "Regent", ats: "ashby", slug: "regent", sectors: ["government-defense", "logistics-mobility"] },
+  { name: "Allen Control Systems", ats: "greenhouse", slug: "allencontrolsystems", sectors: ["government-defense"] },
+  { name: "Picogrid", ats: "ashby", slug: "picogrid", sectors: ["government-defense"] },
 ];
 
 /**
