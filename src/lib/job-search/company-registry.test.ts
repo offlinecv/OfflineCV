@@ -58,6 +58,9 @@ describe("COMPANY_REGISTRY", () => {
    * actually matters after a prune: `companiesForSector` must never hand the
    * #533 fan-out an empty set for a sector the classifier can return. A bare
    * ">= 1" would pass with a single company — too thin to be a useful search.
+   *
+   * The floor is kept at 5 (softer than the fan-out target of 10) so expected
+   * board churn/drift does not turn routine board-death into a red test.
    */
   it("leaves every non-'other' sector with enough companies to search", () => {
     const MIN_PER_SECTOR = 5;
