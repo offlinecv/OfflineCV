@@ -96,10 +96,8 @@ import {
   DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR,
 } from "../../lib/score/entry-dates.ts";
 import { validateDate } from "../../lib/edit/field-validators.ts";
-import {
-  EducationSection,
-  SkillsSection,
-} from "./ReconstructedEducationSkills.tsx";
+import { EducationSection } from "./ReconstructedEducationSkills.tsx";
+import { SkillsSection } from "./ReconstructedSkills.tsx";
 import { Button, EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
@@ -1043,6 +1041,12 @@ export function ReconstructedResume({
     captureBulletUndo,
     addSkill,
     removeSkill,
+    renameSkillCategory,
+    deleteSkillCategory,
+    addSkillCategory,
+    addSkillToCategory,
+    moveSkillToCategory,
+    removeCategorySkill,
     profileOverrides,
     setLegacyLink,
     addProfile,
@@ -1293,8 +1297,30 @@ export function ReconstructedResume({
       <SkillsSection
         heading={display.sectionHeadings?.get("skills")}
         skills={parsed.skills}
+        skillCategories={parsed.skillCategories}
         onAddSkill={addSkill}
         onRemoveSkill={removeSkill}
+        // Categorised edits (#476) — bound to the CURRENT edited grouping, which
+        // the override snapshot keeps in lockstep with the flat list. Each
+        // dispatches the same grouping-snapshot transform.
+        onRenameCategory={(i, label) =>
+          renameSkillCategory(parsed.skillCategories ?? [], i, label)
+        }
+        onDeleteCategory={(i) =>
+          deleteSkillCategory(parsed.skillCategories ?? [], i)
+        }
+        onAddCategory={(label) =>
+          addSkillCategory(parsed.skillCategories ?? [], label)
+        }
+        onAddSkillToCategory={(i, skill) =>
+          addSkillToCategory(parsed.skillCategories ?? [], i, skill)
+        }
+        onMoveSkill={(skill, destIndex) =>
+          moveSkillToCategory(parsed.skillCategories ?? [], skill, destIndex)
+        }
+        onRemoveCategorySkill={(skill) =>
+          removeCategorySkill(parsed.skillCategories ?? [], skill)
+        }
       />
     </section>
   );

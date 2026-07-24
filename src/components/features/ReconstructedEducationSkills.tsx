@@ -2,24 +2,20 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * ReconstructedEducationSkills — the editable Education and Skills sections of
- * the reconstructed resume (#176). Split out of ReconstructedResume.tsx to keep
- * that container under ~200 LOC.
+ * ReconstructedEducationSkills — the editable Education section of the
+ * reconstructed resume (#176). Split out of ReconstructedResume.tsx to keep that
+ * container under ~200 LOC; the Skills section moved to its sibling
+ * `ReconstructedSkills.tsx` when category editing (#476) grew it past that limit.
  *
- * Both sections were read-only; since the surface exports to PDF, a parser miss
- * was uncorrectable. They now expose inline edit affordances wired to the lifted
- * override model (useEditableParse):
- *   - Education: degree / institution / dates editable via the shared
- *     EditableField. A cleared field shows an "+ <noun>" add-affordance.
- *   - Skills: each skill is a removable chip; a "+ Add skill" pill expands
- *     inline into an input (canonical-name normalization + suggestions),
- *     collapsing back on Escape or empty blur.
+ * Education was read-only; since the surface exports to PDF, a parser miss was
+ * uncorrectable. It now exposes inline edit affordances wired to the lifted
+ * override model (useEditableParse): degree / institution / dates editable via
+ * the shared EditableField, a cleared field shows an "+ <noun>" add-affordance.
  *
  * The override maps live in App and feed applyOverrides → re-grade → PDF, so an
  * edit here moves the ATS score AND the downloaded PDF, not just the display.
  */
 
-import { useMemo, useState } from "react";
 import type { ResumeEducation } from "../../lib/score/types.ts";
 import type {
   EducationFieldOverrides,
@@ -27,8 +23,7 @@ import type {
   AddedEntryField,
 } from "../../hooks/useEditableParse.ts";
 import { buildEducationDates } from "../../lib/score/entry-dates.ts";
-import { suggestSkills } from "../../lib/edit/skill-canonical.ts";
-import { Button, EditableField } from "@design-system";
+import { EditableField } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
 import { AddPill, RemoveButton, sectionExitBlur } from "./ReconstructedAdd.tsx";
 
@@ -276,181 +271,6 @@ export function EducationSection({
         </ul>
       )}
       <AddPill label="Add education" onClick={onAddEntry} />
-    </section>
-  );
-}
-
-// ── Skills ─────────────────────────────────────────────────────────────────────
-
-function SkillChip({
-  skill,
-  onRemove,
-}: {
-  skill: string;
-  onRemove: () => void;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-secondary">
-      {skill}
-      <Button
-        variant="icon"
-        aria-label={`Remove ${skill}`}
-        onClick={onRemove}
-        className="shrink-0 text-content-muted hover:text-content-secondary"
-      >
-        <svg
-          aria-hidden="true"
-          width="10"
-          height="10"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        >
-          <path d="M3 3l10 10M13 3L3 13" />
-        </svg>
-      </Button>
-    </span>
-  );
-}
-
-function AddSkillInput({
-  skills,
-  onAdd,
-}: {
-  skills: string[];
-  onAdd: (skill: string) => void;
-}) {
-  const [draft, setDraft] = useState("");
-  const suggestions = useMemo(
-    () => suggestSkills(draft, skills),
-    [draft, skills],
-  );
-
-  const [expanded, setExpanded] = useState(false);
-
-  const commit = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    onAdd(trimmed);
-    setDraft("");
-  };
-
-  // Collapsed: a chip-shaped "+ Add skill" pill that sits inline with the
-  // skill chips. Progressive disclosure — the input only exists while adding,
-  // so it doesn't sit heavy under the lightweight chip cluster (#180-followup).
-  if (!expanded) {
-    return (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setExpanded(true)}
-        aria-label="Add skill"
-        className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-accent-primary"
-      >
-        + Add skill
-      </Button>
-    );
-  }
-
-  return (
-    <div
-      className="flex flex-col gap-1.5"
-      onBlur={(e) => {
-        // Collapse back to the pill when focus leaves the editor entirely and
-        // nothing is typed. relatedTarget within the container (suggestion or
-        // Add button click) keeps it open.
-        if (
-          !e.currentTarget.contains(e.relatedTarget as Node | null) &&
-          draft.trim().length === 0
-        ) {
-          setExpanded(false);
-        }
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={draft}
-          autoFocus
-          aria-label="Add skill"
-          placeholder="Add a skill…"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commit(draft);
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              setDraft("");
-              setExpanded(false);
-            }
-          }}
-          className="min-w-0 flex-1 rounded border border-border bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
-        />
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => commit(draft)}
-          disabled={draft.trim().length === 0}
-          aria-label="Add skill"
-        >
-          Add
-        </Button>
-      </div>
-      {suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {suggestions.map((s) => (
-            <Button
-              key={s}
-              variant="ghost"
-              size="sm"
-              onClick={() => commit(s)}
-              aria-label={`Add ${s}`}
-              className="rounded-full bg-surface-subtle px-2.5 py-0.5 text-xs text-content-tertiary hover:text-accent-primary"
-            >
-              + {s}
-            </Button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function SkillsSection({
-  heading,
-  skills,
-  onAddSkill,
-  onRemoveSkill,
-}: {
-  /** Verbatim source heading (#285); falls back to "Skills" when absent. */
-  heading?: string;
-  /** The edited skills list (parsed minus removed, plus added) — what renders.
-   *  App already folds skillsOverride into this via applyOverrides, so the
-   *  section renders the resolved list directly. */
-  skills: string[];
-  onAddSkill: (skill: string) => void;
-  onRemoveSkill: (skill: string) => void;
-}) {
-  return (
-    <section className="flex flex-col gap-2">
-      <SectionHeading>{heading ?? "Skills"}</SectionHeading>
-      {skills.length === 0 ? (
-        <NotDetected what="skills" />
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {skills.map((skill, i) => (
-            <SkillChip
-              key={`${skill}-${i}`}
-              skill={skill}
-              onRemove={() => onRemoveSkill(skill)}
-            />
-          ))}
-        </div>
-      )}
-      <AddSkillInput skills={skills} onAdd={onAddSkill} />
     </section>
   );
 }

@@ -118,10 +118,34 @@ export interface LayoutProbes {
 
 // ── Tier 1 heuristic output ─────────────────────────────────────────────────
 
+/**
+ * One labelled group inside the Skills section — the category label as written
+ * and its member skills. This is the STRUCTURED view over the flat `skills`
+ * union: a labelled row `Frontend: React, TypeScript` is one category
+ * (`Frontend`) holding two skills, rather than the label being dropped (#473).
+ */
+export interface SkillCategory {
+  /** The category label as written, minus the trailing colon: "Cloud & Infra". */
+  label: string;
+  /** Members, in document order. Each also appears in the flat `skills` array. */
+  skills: string[];
+}
+
 /** Subset of ParsedResume that the heuristic path can reliably produce. */
 export type HeuristicParsedResume = Partial<ParsedResume> & {
   /** Always present (empty array if none found). */
   skills: string[];
+  /**
+   * Structured view of a CATEGORISED Skills section (#473) — additive over the
+   * flat `skills`. Two invariants hold whenever this is present:
+   *   1. `skills` deep-equals `skillCategories.flatMap((c) => c.skills)` — the
+   *      flat list is the union of the categories' members, in document order.
+   *   2. Present ONLY when the section was actually categorised. A plain comma
+   *      list has no categories: the field is ABSENT (undefined), never `[]`,
+   *      never a synthetic `{ label: "", skills: [...] }` bucket. Absent means
+   *      "the résumé did not say", not "there are no categories".
+   */
+  skillCategories?: SkillCategory[];
   experience: ResumeExperience[];
   education: ResumeEducation[];
   /** libphonenumber isValid() result for the extracted phone — plumbed from

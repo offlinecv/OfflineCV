@@ -39,6 +39,10 @@ import type { HeuristicAchievement } from "../score/types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
 import { normalizeBulletText } from "../score/group-bullets.ts";
+import {
+  computeEditedSkills,
+  isEmptySkillsOverride,
+} from "./skills-categories.ts";
 import { classifyProfile, profilesFromUrls } from "../contact/profile-registry.ts";
 import type { LegacyLinkKey, ProfileLink } from "../score/types.ts";
 import type {
@@ -389,27 +393,30 @@ function applyDescriptionOverrides(
 // ── Skills (add / remove) ───────────────────────────────────────────────────
 
 /**
- * Rebuild `nextParsed.skills` in place from add/remove edits: final list =
- * parsed skills minus `removed` (by lower-cased key), then `added` appended,
- * de-duplicated case-insensitively against the survivors.
+ * Rebuild `nextParsed.skills` — and, for a categorised résumé, its
+ * `skillCategories` grouping — in place from the {@link SkillsOverride} edits,
+ * delegating to {@link computeEditedSkills} (the single mutation path, #476).
+ *
+ * The #473 stopgap this replaces DROPPED `skillCategories` on any flat edit,
+ * treating the edited résumé as uncategorised. The reducer instead reduces the
+ * parsed categories through the rename / delete-category / add-category / move /
+ * delete-skill edits and DERIVES the flat list by flattening, so the
+ * `skills === skillCategories.flatMap((c) => c.skills)` invariant holds after
+ * every op. `skillCategories` is deleted only when the reducer returns none
+ * (every category was deleted) or the résumé was never categorised.
  */
 function applySkillOverrides(
   nextParsed: HeuristicParsedResume,
   skills: SkillsOverride,
 ): void {
-  if (skills.removed.length === 0 && skills.added.length === 0) return;
-  const removedSet = new Set(skills.removed.map((s) => s.toLowerCase()));
-  const kept = nextParsed.skills.filter(
-    (s) => !removedSet.has(s.toLowerCase()),
+  if (isEmptySkillsOverride(skills)) return;
+  const result = computeEditedSkills(
+    { skills: nextParsed.skills, skillCategories: nextParsed.skillCategories },
+    skills,
   );
-  const present = new Set(kept.map((s) => s.toLowerCase()));
-  for (const add of skills.added) {
-    const key = add.toLowerCase();
-    if (present.has(key)) continue;
-    present.add(key);
-    kept.push(add);
-  }
-  nextParsed.skills = kept;
+  nextParsed.skills = result.skills;
+  if (result.skillCategories) nextParsed.skillCategories = result.skillCategories;
+  else delete nextParsed.skillCategories;
 }
 
 // ── Shared "find first matching line, then mutate" primitives ──────────────

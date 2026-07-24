@@ -230,6 +230,51 @@ describe("corpus round-trip invariants (#293)", { timeout: 20000 }, () => {
 });
 
 /**
+ * Skills category round-trip (#473). The whole-corpus ratchet above pins the
+ * FLAT invariants only; the structured category view is new, so this asserts
+ * directly that a categorised résumé's `skillCategories` survives the
+ * parse → export → re-parse hop intact — the exported PDF renders one
+ * `Label: a · b · c` row per category, and re-parsing recovers the same
+ * labels and members (not just the same flat skills).
+ *
+ * PII-free: the fixture is a synthetic persona; labels/counts are asserted, no
+ * value snapshot is dumped.
+ */
+describe("skills categories round-trip (#473)", () => {
+  const CATEGORISED_FIXTURE = join(
+    FIXTURE_ROOT,
+    "unknown",
+    "bulleted-labelled-single-column-skills.pdf",
+  );
+
+  it("re-parses the categorised fixture to the same categories", async () => {
+    const before = await runCascade(
+      new Uint8Array(readFileSync(CATEGORISED_FIXTURE)),
+    );
+    const cats = before.canonical.fields.skillCategories;
+
+    // The categories the parser captured, and their coherence invariant.
+    expect(cats?.map((c) => c.label)).toEqual([
+      "Frontend",
+      "Frontend Testing",
+      "Backend",
+      "Cloud & Infra",
+      "Databases & Caching",
+      "Product & Collaboration",
+      "Data & Analytics",
+    ]);
+    expect(before.canonical.fields.skills).toEqual(
+      cats!.flatMap((c) => c.skills),
+    );
+
+    // parse → export → re-parse recovers the SAME category structure.
+    const { after, renderError } = await runRoundtripHop(before);
+    expect(renderError).toBeUndefined();
+    expect(after?.canonical.fields.skillCategories).toEqual(cats);
+  });
+});
+
+/**
  * Dev triage harness — inert in CI, runs ONLY when `RL_RT_PDF=<path>` is set:
  *
  *   RL_RT_PDF=/path/to/real-resume.pdf [RL_RT_ROUNDS=2] npx vitest run \
