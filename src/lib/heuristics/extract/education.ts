@@ -7,6 +7,7 @@ import {
   DEGREE_RE,
   INSTITUTION_HINTS,
   MONTH_YEAR_RE,
+  STRICT_MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
   US_STATE_CODE_RE,
   COUNTRY_GAZETTEER,
@@ -143,23 +144,57 @@ function educationDateFields(
 const EDUCATION_ANNOTATION_RE =
   /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project)\b/i;
 
+/** A month-year attendance/graduation date range sitting at the very END of a
+ *  line — "… Data Mining. Aug 2023 – May 2025" — captured in the `date` group.
+ *  The leading `[.,;\s]+` swallows the separator (a period, comma, or space)
+ *  between the prose and the date so the whole tail can be stripped in one
+ *  replace. The range START must be a month-year (`STRICT_MONTH_YEAR_RE` /
+ *  numeric), never a bare year — a coursework item that merely ends in a 4-digit
+ *  token ("… since 2020") must not be mistaken for an attendance date; only the
+ *  range END may be a bare year ("Aug 2023 – 2025") or an open marker
+ *  ("Aug 2023 – Present"). Uses the STRICT month regex, not the loose
+ *  `MONTH_YEAR_RE`, because this value is both EXTRACTED and DELETED — the loose
+ *  `[a-z]*` tail would false-match a word like "Marketing" and eat it (#380). */
+const END = `(?:${STRICT_MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source}|\\b\\d{4}\\b|present|current|ongoing|now)`;
+const TRAILING_ATTENDANCE_DATE_RE = new RegExp(
+  `[.,;\\s]+(?<date>(?:${STRICT_MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source})(?:\\s*[–—-]\\s*${END})?)\\s*$`,
+  "i",
+);
+
+/** Peel a trailing attendance-date range off an annotation line and return just
+ *  the date, or `undefined` when the line carries none. Lets a real attendance
+ *  date that rides at the tail of a coursework line survive
+ *  {@link filterAnnotationLinesForDates}'s line drop (#555). */
+function trailingAttendanceDate(line: string): string | undefined {
+  return TRAILING_ATTENDANCE_DATE_RE.exec(line)?.groups?.date?.trim();
+}
+
 /** Strip lines that read as honors / awards / activity annotations from a
  *  chunk before {@link parseEducationDates} runs on the joined text (#371).
  *  Without this, a line like "GPA: 3.7 · Dean's List 2015–2017" contributes
  *  its range to the entry and `parseDateRange`'s range-first preference makes
  *  the annotation range (2015–2017) win over the real graduation year (2017)
- *  on a sibling line. Line-level filter — an annotation phrase inline with a
- *  real date on the SAME line is rare in practice; keeping the whole line
- *  when it doesn't lead with an annotation is safer than mid-line surgery.
+ *  on a sibling line.
  *
  *  DEGREE-carve-out: a line that ALSO matches {@link DEGREE_RE} carries the
  *  real attendance / graduation date and stays regardless of which annotation
  *  keywords it contains. Commonwealth shapes like "Honours Bachelor of Science,
  *  2015 - 2019" or "Thesis-based M.Sc. Data Science, 2018 - 2020" mention
  *  `honours` / `thesis` on the SAME line as the degree + real dates; filtering
- *  the whole line would drop both. */
+ *  the whole line would drop both.
+ *
+ *  TAIL-DATE carve-out (#555): a non-degree annotation line whose real
+ *  attendance date rides at its END — "Coursework: Databases, Data Mining.
+ *  Aug 2023 – May 2025" — keeps just that trailing date (the annotation prose
+ *  is still dropped) so the date reaches `parseEducationDates` instead of being
+ *  discarded with the line. An annotation line with no trailing date is dropped
+ *  as before, so the #371 over-capture guard is unchanged for that shape. */
 function filterAnnotationLinesForDates(lines: readonly string[]): string[] {
-  return lines.filter((l) => DEGREE_RE.test(l) || !EDUCATION_ANNOTATION_RE.test(l));
+  return lines.flatMap((l) => {
+    if (DEGREE_RE.test(l) || !EDUCATION_ANNOTATION_RE.test(l)) return [l];
+    const tail = trailingAttendanceDate(l);
+    return tail ? [tail] : [];
+  });
 }
 
 /** Source-side coursework label to peel off the bullet residue before the
@@ -421,6 +456,15 @@ function cleanField(raw: string): string | undefined {
   return f.length > 0 ? f : undefined;
 }
 
+/** The degree-TYPE word that follows "of" in a spelled-out credential
+ *  ("Bachelor **of Technology**", "Master **of Science**"). Anchored to the
+ *  start of the post-"of" run, longest-first so "Business Administration" and
+ *  "Fine Arts" win over their prefixes. Used by {@link parseDegreeAndField} to
+ *  find where the credential ends and the subject field begins in a
+ *  connective-less "of <Type> <Field>" header (#557). */
+const DEGREE_TYPE_RE =
+  /^(?:Business Administration|Fine Arts|Computer Applications|Science|Arts|Technology|Engineering|Philosophy|Education|Commerce|Laws|Law|Medicine|Architecture|Design|Nursing|Pharmacy|Business|Management)\b/i;
+
 /** Parse a degree-bearing line into a bare credential + its subject field.
  *
  * `DEGREE_RE` either matches just the credential ("B.S.") or — via its optional
@@ -432,7 +476,16 @@ function cleanField(raw: string): string | undefined {
  * whatever text follows the credential, with dates/notes stripped by
  * `cleanField`. Connective-less shapes ("M.S. Computer Science", "B.S. Business
  * Administration — May 2027") are handled too: the field is the post-credential
- * remainder. */
+ * remainder.
+ *
+ * CONNECTIVE-LESS "of" shapes (#557): a spelled-out "<Bachelor|Master|…> of
+ * <Type> <Field>" with no " in " ("Master of Science Information Technology",
+ * "Bachelor of Technology Electronics & Communication Eng.") is common in
+ * Indian résumés. `DEGREE_RE`'s greedy `of [A-Za-z ]{2,40}` swallows the field
+ * INTO the credential, so the split below would leave `field` empty (or, when an
+ * "&" halts the greedy run, split it mid-phrase). {@link DEGREE_TYPE_RE} cuts
+ * the credential at the end of the degree-TYPE word so the remainder is the
+ * field. */
 function parseDegreeAndField(line: string): {
   degree: string;
   field?: string;
@@ -452,6 +505,21 @@ function parseDegreeAndField(line: string): {
   } else {
     degree = matched.trim();
     fieldStart = dm.index + matched.length;
+    // Connective-less "<prefix> of <Type> <Field>" (#557): if the match ran
+    // "of <Type>" straight into a field, cut the credential at the end of the
+    // degree-TYPE word so <Field> is not buried in the degree. Only fires when
+    // real field text follows the type word — "Master of Business
+    // Administration" (type IS the whole credential) is left whole.
+    const ofm = /\bof\s+/i.exec(matched);
+    if (ofm) {
+      const afterOf = matched.slice(ofm.index + ofm[0].length);
+      const typeM = DEGREE_TYPE_RE.exec(afterOf);
+      if (typeM && afterOf.slice(typeM[0].length).trim().length > 0) {
+        const degreeEnd = ofm.index + ofm[0].length + typeM[0].length;
+        degree = matched.slice(0, degreeEnd).trim();
+        fieldStart = dm.index + degreeEnd;
+      }
+    }
   }
   const fieldRaw = line
     .slice(fieldStart)
@@ -655,6 +723,23 @@ function stripInstitutionDate(s: string): string {
   return stripped || s;
 }
 
+/** A trailing GPA / CGPA note glued onto the institution string with no comma
+ *  boundary — "State University GPA 3.8" (#556). Covers "GPA 3.8", "GPA: 3.8",
+ *  "CGPA 8.7", a "/N" scale ("GPA 3.8/4.0", "CGPA 8.7/10") and a percentage
+ *  ("GPA 85%"), with an optional leading separator, `$`-anchored. Requires the
+ *  `gpa`/`cgpa` keyword, so a school name that merely ends in a digit is never
+ *  cut. */
+const INSTITUTION_GRADE_RE =
+  /[\s,;·|-]*\bc?gpa\b[:\s]*\d(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)?%?\s*$/i;
+
+/** Peel a trailing GPA/CGPA note off an institution string, leaving the bare
+ *  school name. Never consumes the whole string (a GPA-only value keeps the
+ *  original). Mirrors {@link stripInstitutionDate}'s trailing-strip contract. */
+function stripInstitutionGrade(s: string): string {
+  const stripped = s.replace(INSTITUTION_GRADE_RE, "").trim();
+  return stripped || s;
+}
+
 /** Map one education chunk (the degree + institution + date lines of a single
  *  qualification) to a `ResumeEducation` and its confidence. */
 function educationFromChunk(chunk: string[]): {
@@ -793,6 +878,12 @@ function educationFromChunk(chunk: string[]): {
   // otherwise the date blocks the $-anchored location strip below.
   institution = stripInstitutionDate(institution);
 
+  // Peel a trailing GPA/CGPA note glued on with no comma boundary
+  // ("… State University GPA 3.8", #556) — otherwise it rides into the school
+  // name (the comma-delimited GPA cut in `cleanField` only touches the degree
+  // field, not the institution).
+  institution = stripInstitutionGrade(institution);
+
   // Peel a trailing "City, ST" / "City, Country" off the institution so it isn't
   // glued on ("University of Example, …   Seattle, WA" → institution without the
   // location, location surfaced separately).
@@ -866,6 +957,10 @@ export function extractEducation(
   // to the nearest preceding degree below.
   const ls = education.lines;
   const coursework: { text: string; idx: number }[] = [];
+  // A real attendance-date range peeled off the END of a coursework line (#555),
+  // tagged with the source-line `idx` so it can be attributed to the same entry
+  // the courses on that line belong to.
+  const courseworkDates: { date: string; idx: number }[] = [];
   const consumed = new Set<number>();
   for (let i = 0; i < ls.length; i++) {
     // Coursework is usually a bullet list, but some résumés write it as a plain
@@ -897,6 +992,13 @@ export function extractEducation(
     // the course list itself and the reconstructed résumé doesn't render a
     // redundant "Coursework: Relevant Coursework: …" double-label (#367).
     item = item.replace(COURSEWORK_LABEL_RE, "").trim();
+    // Peel a trailing attendance-date range that rode at the END of the
+    // coursework line ("… Data Mining. Aug 2023 – May 2025", #555) so the date
+    // is not surfaced as a phantom last course, and remember it to attribute to
+    // this entry below (the coursework line is `consumed`, so it never reaches
+    // the chunk's own date parse).
+    const tailDate = trailingAttendanceDate(item);
+    item = item.replace(TRAILING_ATTENDANCE_DATE_RE, "").trim();
     // Split a comma-separated course list into individual entries so each
     // course is addressable in the reconstructed view (#367). A single-course
     // bullet with no comma remains one entry. The Title-case guard runs on
@@ -910,6 +1012,7 @@ export function extractEducation(
       : [item];
     if (items.length > 0 && /^[A-Z0-9]/.test(items[0])) {
       for (const c of items) coursework.push({ text: c, idx: i });
+      if (tailDate) courseworkDates.push({ date: tailDate, idx: i });
       for (const k of span) consumed.add(k);
     }
     i = j - 1;
@@ -1095,6 +1198,21 @@ export function extractEducation(
       else break;
     }
     (value[target].coursework ??= []).push(course.text);
+  }
+
+  // Attribute a date recovered from a coursework-line tail (#555) to the nearest
+  // preceding entry, but only when that entry parsed NO date of its own — a real
+  // date on the degree/institution line always wins over a coursework-tail date.
+  for (const cd of courseworkDates) {
+    let target = 0;
+    for (let e = 0; e < built.length; e++) {
+      if (built[e].startIdx <= cd.idx) target = e;
+      else break;
+    }
+    const entry = value[target];
+    if (!entry.start_date && !entry.end_date && !entry.year) {
+      Object.assign(entry, educationDateFields(parseEducationDates(cd.date)));
+    }
   }
 
   // Deduplicate coursework on each entry (#223). When a standalone "Relevant
