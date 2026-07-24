@@ -79,7 +79,7 @@ describe("SourceDiagnosticsPanel", () => {
     expect(segment("PDF").getAttribute("aria-pressed")).toBe("true");
     expect(segment("Extracted text").getAttribute("aria-pressed")).toBe("false");
     // The docx no-preview fallback (PDF panel) is the visible body.
-    expect(container.textContent).toContain("No source preview available for DOCX");
+    expect(container.textContent).toContain("No source preview available for this file type");
   });
 
   it("shows the trigger count badge on the Layout flags segment", () => {
@@ -104,7 +104,7 @@ describe("SourceDiagnosticsPanel", () => {
   it("keeps all three panels mounted (hidden, not unmounted) across switches", () => {
     render();
     // PDF body present at first.
-    const pdfText = "No source preview available for DOCX";
+    const pdfText = "No source preview available for this file type";
     expect(container.textContent).toContain(pdfText);
     act(() => {
       segment("Layout flags").click();

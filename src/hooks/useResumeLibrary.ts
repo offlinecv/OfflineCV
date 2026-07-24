@@ -33,7 +33,7 @@ export interface SaveResumeParams {
   id?: string;
   filename: string;
   bytes?: ArrayBuffer;
-  sourceKind: "pdf" | "docx";
+  sourceKind: "pdf" | "docx" | "markdown";
   result: CascadeResult;
   score: AnonymousAtsScore;
 }

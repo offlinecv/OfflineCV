@@ -14,7 +14,7 @@
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { PdfPreview } from "../PdfPreview.tsx";
 
-type SourceKind = "pdf" | "docx";
+type SourceKind = "pdf" | "docx" | "markdown";
 
 interface SourcePdfPanelProps {
   bytes?: ArrayBuffer;
@@ -31,7 +31,7 @@ export function SourcePdfPanel({ bytes, sourceKind }: SourcePdfPanelProps) {
   }
   return (
     <p className="text-sm text-content-muted">
-      No source preview available for DOCX — see the Extracted text view.
+      No source preview available for this file type — see the Extracted text view.
     </p>
   );
 }

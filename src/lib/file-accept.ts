@@ -15,11 +15,11 @@ const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /** Value for a file input's `accept` attribute. */
-export const RESUME_ACCEPT_ATTR = `application/pdf,.pdf,${DOCX_MIME},.docx`;
+export const RESUME_ACCEPT_ATTR = `application/pdf,.pdf,${DOCX_MIME},.docx,text/markdown,.md,.markdown`;
 
 /** User-facing hint shown when a rejected file is dropped. */
 export const RESUME_REJECT_HINT =
-  "That doesn't look like a PDF or DOCX. Please drop a .pdf or .docx file.";
+  "That doesn't look like a PDF, DOCX, or markdown file. Please drop a .pdf, .docx, or .md file.";
 
 function isPdf(f: File): boolean {
   return f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
@@ -29,8 +29,16 @@ function isDocx(f: File): boolean {
   return f.type === DOCX_MIME || f.name.toLowerCase().endsWith(".docx");
 }
 
+/** `.md`/`.markdown` (#552) — the import side of the `cv.md` round-trip. */
+function isMarkdown(f: File): boolean {
+  return (
+    f.type === "text/markdown" ||
+    /\.(md|markdown)$/i.test(f.name)
+  );
+}
+
 export function isAcceptedResumeFile(f: File): boolean {
-  return isPdf(f) || isDocx(f);
+  return isPdf(f) || isDocx(f) || isMarkdown(f);
 }
 
 /**

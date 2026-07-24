@@ -13,7 +13,7 @@ import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
 
-type SourceKind = "pdf" | "docx";
+type SourceKind = "pdf" | "docx" | "markdown";
 
 interface ResultDetailTabsProps {
   activeResult: CascadeResult;

@@ -62,7 +62,7 @@ export function useDownloadPdf(
       // extra prop through `ReconstructedResume` (out of scope here).
       const source: DownloadSource =
         result.tiers.length === 0 ? "blank" : "upload";
-      trackDownloadCompleted({ source });
+      trackDownloadCompleted({ source, format: "pdf" });
       // A successful blank-authored export is one of the explicit
       // draft-clearing triggers (#313) — the user has what they came for.
       if (source === "blank") clearBlankDraft();

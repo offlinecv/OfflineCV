@@ -43,7 +43,7 @@ export interface JdFitResume {
   parsed: HeuristicParsedResume;
   /** PDF bytes for the source pane — only the local path has them. */
   bytes?: ArrayBuffer;
-  sourceKind: "pdf" | "docx";
+  sourceKind: "pdf" | "docx" | "markdown";
   /** Live inline-edit state threaded into `<Result>`. */
   edit: EditableParse;
   /** Clear the résumé (handoff: back to DropZone; local: reset parse). */

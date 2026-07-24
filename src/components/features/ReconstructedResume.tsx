@@ -101,6 +101,7 @@ import { SkillsSection } from "./ReconstructedSkills.tsx";
 import { Button, EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
+import { useDownloadMarkdown } from "../../hooks/useDownloadMarkdown.ts";
 import { ReportDownloadControl } from "./DownloadReportDialog.tsx";
 
 // ── Attention strip ────────────────────────────────────────────────────────────
@@ -1105,6 +1106,11 @@ export function ReconstructedResume({
   // so no PDF bytes ever leave the browser (#171).
   const { download, isGenerating } = useDownloadPdf(result, score, edit);
 
+  // Download the same reconstructed résumé as a career-ops-shaped `cv.md`
+  // (#552) — a plain-text sibling artifact, not a competing "primary" export.
+  const { download: downloadMarkdown, isGenerating: isGeneratingMarkdown } =
+    useDownloadMarkdown(result, score, edit);
+
   // Pre-download checklist popover (#312) — a soft guardrail, not a hard
   // block. Download click re-derives the gate from the CURRENT (override-
   // applied) fields every time, so an edit made via "Fix now" clears the item
@@ -1200,6 +1206,18 @@ export function ReconstructedResume({
           </h2>
           <div className="flex flex-wrap items-center gap-2">
             <ReportDownloadControl result={result} score={score} edit={edit} />
+            {/* No pre-download checklist gate here (unlike the PDF button):
+                cv.md is a plain-text interchange file, not an ATS-submitted
+                artifact, so the "missing name/contact/experience" nudge that
+                protects the PDF doesn't apply. */}
+            <Button
+              variant="ghost"
+              onClick={() => void downloadMarkdown()}
+              disabled={isGeneratingMarkdown}
+              aria-label="Download the reconstructed resume as a markdown file"
+            >
+              {isGeneratingMarkdown ? "Generating…" : "Download as Markdown"}
+            </Button>
             <Button
               variant="primary"
               onClick={handleDownloadClick}

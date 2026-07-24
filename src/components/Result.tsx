@@ -28,7 +28,7 @@ const FONTS_UNMAPPABLE_BLURB =
 const TWO_COLUMN_BLURB =
   "This resume uses a two-column layout. Text extractors often read the columns out of order — merging or interleaving them. The reconstructed text below is what a generic parser actually pulled out; if it looks scrambled, that's the ATS risk. A single-column layout parses most reliably.";
 
-type SourceKind = "pdf" | "docx";
+type SourceKind = "pdf" | "docx" | "markdown";
 
 interface ResultProps {
   result: CascadeResult;

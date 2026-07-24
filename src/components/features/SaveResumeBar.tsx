@@ -19,7 +19,7 @@ interface SaveResumeBarProps {
   library: ResumeLibrary;
   fileName: string;
   bytes?: ArrayBuffer;
-  sourceKind: "pdf" | "docx";
+  sourceKind: "pdf" | "docx" | "markdown";
   result: CascadeResult;
   score: AnonymousAtsScore;
 }
