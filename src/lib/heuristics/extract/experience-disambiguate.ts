@@ -510,7 +510,13 @@ function stripLeadingSectionHeaders(
 function splitHeaderSegments(filtered: string[]): Split[] {
   const splits: Split[] = [];
   filtered.forEach((h, idx) => {
-    const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s+|\s+·\s+/);
+    // The pipe accepts whitespace on AT LEAST ONE side (`\s+\|\s*` or
+    // `\s*\|\s+`), not both — a tight-right header "Company, Location |Title"
+    // (space before the pipe, none after) must still cleave the title off
+    // (#554). A zero-width `A|B` with no surrounding whitespace stays unsplit
+    // so a URL / table residue is never split. `@`/`—`/`·` keep the stricter
+    // both-sides rule (an email `a@b` must not split).
+    const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s*|\s*\|\s+|\s+·\s+/);
     if (atSplit.length > 1) {
       // A PURE-middot line ("Title · Company · Team") — the exporter's one-line
       // shape (#436). Excludes a line that also carries `@`/`—`/`|`, which follow
