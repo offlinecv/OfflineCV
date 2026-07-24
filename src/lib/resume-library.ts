@@ -31,11 +31,12 @@ import {
   type AnonymousAtsScore,
 } from "./score/score.ts";
 
-type SourceKind = "pdf" | "docx";
+type SourceKind = "pdf" | "docx" | "markdown";
 
 const MIME: Record<SourceKind, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  markdown: "text/markdown",
 };
 
 /**

@@ -27,7 +27,7 @@ import { Button, CountBadge } from "@design-system";
 import { LayoutFlagsList } from "./LayoutFlagsList.tsx";
 import { SourcePdfPanel, ExtractedTextPanel } from "./EvidencePanel.tsx";
 
-type SourceKind = "pdf" | "docx";
+type SourceKind = "pdf" | "docx" | "markdown";
 type Segment = "pdf" | "extracted" | "flags";
 
 interface SourceDiagnosticsPanelProps {

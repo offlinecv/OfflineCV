@@ -23,9 +23,10 @@ import type { CascadeResult } from "../lib/heuristics/types.ts";
 import { computeAnonymousAtsScore } from "../lib/score/score.ts";
 import { BLANK_DRAFT_STORAGE_KEY } from "./useResumeAnalysis.ts";
 
-const tracked: Array<{ source: string }> = [];
+const tracked: Array<{ source: string; format?: string }> = [];
 vi.mock("../lib/analytics.ts", () => ({
-  trackDownloadCompleted: (args: { source: string }) => tracked.push(args),
+  trackDownloadCompleted: (args: { source: string; format?: string }) =>
+    tracked.push(args),
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -112,7 +113,7 @@ describe("useDownloadPdf — download-source tagging (#313)", () => {
       await api.download();
     });
 
-    expect(tracked).toEqual([{ source: "upload" }]);
+    expect(tracked).toEqual([{ source: "upload", format: "pdf" }]);
   });
 
   it("tags a blank/authored result's download as source: 'blank'", async () => {
@@ -121,7 +122,7 @@ describe("useDownloadPdf — download-source tagging (#313)", () => {
       await api.download();
     });
 
-    expect(tracked).toEqual([{ source: "blank" }]);
+    expect(tracked).toEqual([{ source: "blank", format: "pdf" }]);
   });
 
   it("clears the persisted blank draft on a successful blank-authored download", async () => {

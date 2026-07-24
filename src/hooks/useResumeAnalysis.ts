@@ -37,7 +37,7 @@ import { LEGACY_LINK_KEYS } from "../lib/contact/contact-profiles.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type SourceKind = "pdf" | "docx";
+type SourceKind = "pdf" | "docx" | "markdown";
 
 /**
  * The persisted from-scratch draft (#313) is exactly `useEditableParse`'s own
@@ -242,14 +242,30 @@ export function useResumeAnalysis(): ResumeAnalysis {
       file.type ===
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
       file.name.toLowerCase().endsWith(".docx");
+    // The import side of the `cv.md` round-trip (#552) — a dropped .md/.markdown
+    // file. Mirrors the DOCX branch below: no bytes stored, cascade runs
+    // straight off markdown (it already parses markdown natively).
+    const isMarkdownFile =
+      file.type === "text/markdown" || /\.(md|markdown)$/i.test(file.name);
 
     try {
-      const bytes = await file.arrayBuffer();
       let result: CascadeResult;
       let pdfBytes: ArrayBuffer | undefined;
 
-      if (isDocxFile) {
+      if (isMarkdownFile) {
+        // Markdown path — the file already IS markdown; no extraction step.
+        const text = await file.text();
+        const { parseMarkdownFile } = await import("../lib/ingest/markdown.ts");
+        const { rawText, markdown } = parseMarkdownFile(text);
+        result = await runCascadeFromMarkdown(rawText, markdown, {
+          userType: "anon",
+          onEvent: trackCascadeEvent,
+        });
+        // No source bytes to store — PdfPreview won't be shown (docx-shaped).
+        pdfBytes = undefined;
+      } else if (isDocxFile) {
         // DOCX path — extract markdown via mammoth+turndown, then cascade on it.
+        const bytes = await file.arrayBuffer();
         const { rawText, markdown } = await parseDocx(bytes);
         result = await runCascadeFromMarkdown(rawText, markdown, {
           userType: "anon",
@@ -260,6 +276,7 @@ export function useResumeAnalysis(): ResumeAnalysis {
       } else {
         // PDF path — pdfjs mutates the buffer it parses; hand it a copy so we
         // can re-render the source PDF in the side-by-side preview afterward.
+        const bytes = await file.arrayBuffer();
         result = await runCascade(bytes.slice(0), {
           userType: "anon",
           onEvent: trackCascadeEvent,
@@ -293,7 +310,7 @@ export function useResumeAnalysis(): ResumeAnalysis {
         fileName: file.name,
         fileSize: file.size,
         bytes: pdfBytes,
-        sourceKind: isDocxFile ? "docx" : "pdf",
+        sourceKind: isMarkdownFile ? "markdown" : isDocxFile ? "docx" : "pdf",
         result,
         score,
       });

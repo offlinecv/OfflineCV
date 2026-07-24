@@ -521,10 +521,16 @@ export type DownloadSource = "blank" | "upload";
  * A reconstructed résumé was downloaded as a PDF. There was no prior
  * download-tracking event to extend (`useDownloadPdf.ts` didn't track at
  * all) — this is a new event, distinguishing blank-authored from uploaded
- * downloads via `source` per #313's requirement.
+ * downloads via `source` per #313's requirement. `format` (#552) distinguishes
+ * the ATS PDF from the plain-text `cv.md` markdown export sharing this event;
+ * it defaults to `"pdf"` so every existing call site (and every already-fired
+ * event) stays unchanged.
  */
-export function trackDownloadCompleted(args: { source: DownloadSource }): void {
-  track("download_completed", { source: args.source });
+export function trackDownloadCompleted(args: {
+  source: DownloadSource;
+  format?: "pdf" | "markdown";
+}): void {
+  track("download_completed", { source: args.source, format: args.format ?? "pdf" });
 }
 
 /** Which format the shareable audit report (#343) was exported in. */
