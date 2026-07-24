@@ -75,6 +75,43 @@ export interface JobQuery {
    *  to union together. Undefined when the parse has no location and the
    *  user hasn't typed one. */
   location?: string;
+  /** Title-only exclude terms (#563) — a posting is dropped when its TITLE
+   *  (never its description) contains one of these as a case-insensitive
+   *  substring. User-editable chips, same interaction as `titles`/`skills`.
+   *  Optional (rather than always-present) so every pre-existing `JobQuery`
+   *  literal across the lane's tests keeps compiling unchanged; every reader
+   *  MUST treat `undefined` the same as `[]` — see `filterPostingsByExcludeTerms`
+   *  in `role-keywords.ts`, the sole place that applies it. Not derived here:
+   *  `buildJobQuery`'s caller (`FindJobsPanel`) seeds it from the role-family
+   *  classification (`seedExcludeTermsForFamilies` in `role-keywords.ts`) and
+   *  passes the result in, so this module stays free of a runtime dependency
+   *  on `role-keywords.ts` (which already depends on this module for
+   *  `parseSeniorityLabel` — importing back would cycle the two). */
+  excludeTerms?: string[];
+  /** Optional user-entered minimum ANNUAL compensation (#564) — a SOFT
+   *  signal only, following the #545/#561/#562 precedent: `rank.ts` reads it
+   *  for a sort-key penalty and `JobResultCard` reads it for a "below your
+   *  floor" badge, but a below-floor posting is never dropped. Undefined
+   *  (the default) means no floor is set, byte-identical to pre-#564
+   *  behavior for every existing caller. Not derived by `buildJobQuery` —
+   *  purely user input, wired from `FindJobsPanel`'s `CompFloorInput`. */
+  compFloor?: number;
+  /** Résumé-derived role families (#568) — seeded from
+   *  `roleFilterForResume(parsed).families` (role-keywords.ts) and rendered as
+   *  REMOVABLE chips by `RoleFamilyChips`; there is no free-text add, since
+   *  the family vocabulary is the fixed `ROLE_FAMILIES` enum, not user text.
+   *  Typed as `string[]` (elements are `RoleFamily` labels) rather than
+   *  importing that type, mirroring `excludeTerms`'s reasoning above — this
+   *  module stays free of a runtime dependency on `role-keywords.ts`.
+   *  TWO distinct states, both load-bearing: `undefined` means "not
+   *  asserted" — every reader falls back to deriving the filter from the
+   *  résumé (`roleFilterForResume`), byte-identical to pre-#568 behavior for
+   *  every existing caller/test. `[]` means "the user removed every seeded
+   *  chip" — readers resolve that to `roleFilterForFamilies([])`, the
+   *  PERMISSIVE "all" filter (never-fail-closed, same floor
+   *  `roleFilterForResume` already guarantees for an unclassified résumé) —
+   *  never to zero results. */
+  families?: string[];
 }
 
 /**
@@ -168,7 +205,16 @@ function deriveTitles(parsed: ResumeQueryInput): string[] {
   return current ? [current] : [];
 }
 
-function deriveSeniority(title: string): string | undefined {
+/**
+ * Parse a single seniority label out of one title by walking `SENIORITY_PATTERNS`
+ * top-to-bottom (first match wins — see that table's ordering notes). Returns
+ * `undefined` when the title carries no recognized level keyword.
+ *
+ * Exported (#562) so the ranker can parse a level out of a *posting* title with
+ * the exact same table the query derivation uses — no second taxonomy. Also the
+ * fn #565/#568 reuse for their own title-side level reads.
+ */
+export function parseSeniorityLabel(title: string): string | undefined {
   for (const { label, pattern } of SENIORITY_PATTERNS) {
     if (pattern.test(title)) return label;
   }
@@ -185,7 +231,7 @@ function deriveSeniority(title: string): string | undefined {
  */
 function deriveSeniorityAcrossTitles(titles: string[]): string | undefined {
   for (const title of titles) {
-    const match = deriveSeniority(title);
+    const match = parseSeniorityLabel(title);
     if (match) return match;
   }
   return undefined;
@@ -240,11 +286,31 @@ function deriveLocation(parsed: ResumeQueryInput): string | undefined {
   return location || undefined;
 }
 
-export function buildJobQuery(parsed: ResumeQueryInput): JobQuery {
+/**
+ * @param excludeTermSeeds Pre-computed exclude-term chips to seed the query
+ *   with (#563) — pass `seedExcludeTermsForFamilies(roleFilterForResume(parsed).families)`
+ *   from the call site (`FindJobsPanel`). Defaults to `[]` (byte-identical to
+ *   pre-#563 behavior) so every other/test caller is unaffected. Kept as a
+ *   plain parameter rather than computed in here — see the `excludeTerms`
+ *   doc on `JobQuery` for why this module doesn't import `role-keywords.ts`.
+ * @param familySeeds The résumé-derived role families (#568) — pass
+ *   `roleFilterForResume(parsed).families` from the call site. Defaults to
+ *   `undefined` (via the empty-array-becomes-undefined normalization below)
+ *   so every other/test caller keeps the pre-#568 "families not asserted"
+ *   behavior on `JobQuery` — see that field's doc for the `undefined` vs `[]`
+ *   distinction.
+ */
+export function buildJobQuery(
+  parsed: ResumeQueryInput,
+  excludeTermSeeds: readonly string[] = [],
+  familySeeds?: readonly string[],
+): JobQuery {
   const titles = deriveTitles(parsed);
   // Primary title first, then fall back across the rest of the titles (#540).
   const seniority = deriveSeniorityAcrossTitles(titles);
   const skills = deriveSkills(parsed);
   const location = deriveLocation(parsed);
-  return { titles, skills, seniority, location };
+  const excludeTerms = [...excludeTermSeeds];
+  const families = familySeeds === undefined ? undefined : [...familySeeds];
+  return { titles, skills, seniority, location, excludeTerms, families };
 }

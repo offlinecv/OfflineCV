@@ -15,6 +15,8 @@
 
 import { Button, ErrorState, StatusBadge } from "@design-system";
 import { JobResultCard } from "./JobResultCard.tsx";
+import { WeakMatchesSection } from "./WeakMatchesSection.tsx";
+import { isWeakMatch } from "./weakMatchThreshold.ts";
 import type { JobSearchResult } from "../../lib/job-search/search.ts";
 
 /** Cap on rendered cards — the sample is a taster, not a firehose (spec §4). */
@@ -85,7 +87,7 @@ function Loaded({
   result: JobSearchResult;
   onRetry: () => void;
 }) {
-  const { jobs, degradedProviders, providerCount } = result;
+  const { jobs, degradedProviders, providerCount, excludeSuppressed, roleSuppressed } = result;
 
   // Every provider rejected → hard error (with retry). Guarded on a non-zero
   // provider count so an empty registry (possible once #320 makes the set
@@ -105,6 +107,13 @@ function Loaded({
   }
 
   const shown = jobs.slice(0, RENDER_CAP);
+  // Split BENEATH the cap, not the ranking — #561's star rating is the only fit
+  // number, this just partitions the already-ranked, already-capped list on it.
+  // Never-empty-by-construction (issue 567): if every shown posting is weak,
+  // the strong list renders nothing, so the weak section is auto-expanded
+  // instead of leaving the page looking result-free behind a click.
+  const strong = shown.filter((job) => !isWeakMatch(job.rating));
+  const weak = shown.filter((job) => isWeakMatch(job.rating));
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
@@ -121,13 +130,31 @@ function Loaded({
             from the other feeds.
           </p>
         )}
+        {excludeSuppressed && (
+          <p className="text-xs text-content-tertiary">
+            Your exclude terms would have removed every match, so we skipped
+            them for this search — remove or narrow a term above to apply
+            exclusion again.
+          </p>
+        )}
+        {roleSuppressed && (
+          <p className="text-xs text-content-tertiary">
+            Role filter skipped — it would have hidden every result, so we kept
+            them all for this search. Adjust the Role chips above to apply role
+            filtering again.
+          </p>
+        )}
       </div>
 
-      <div className="flex flex-col gap-2">
-        {shown.map((job) => (
-          <JobResultCard key={job.posting.id} job={job} />
-        ))}
-      </div>
+      {strong.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {strong.map((job) => (
+            <JobResultCard key={job.posting.id} job={job} />
+          ))}
+        </div>
+      )}
+
+      <WeakMatchesSection jobs={weak} defaultOpen={strong.length === 0} />
 
       {jobs.length > RENDER_CAP && (
         <p className="text-xs text-content-muted">

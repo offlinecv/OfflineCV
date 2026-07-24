@@ -215,6 +215,130 @@ describe("searchJobs", () => {
       expect(job.score).toBe(job.jdMatch.coverage.score);
     }
   });
+
+  it("(issue 563) drops a posting whose TITLE matches an exclude term, keeps a description-only mention", async () => {
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({
+          id: "alpha:excluded-title",
+          title: "Solutions Architect",
+          description: "React and TypeScript work.",
+        }),
+        posting({
+          id: "alpha:kept-description-mention",
+          title: "Frontend Engineer",
+          description: "We work closely with our solutions architect team.",
+        }),
+      ]),
+    ];
+    const res = await searchJobs(
+      { ...query, excludeTerms: ["solutions architect"] },
+      parsed,
+      new AbortController().signal,
+    );
+    expect(res.jobs.map((j) => j.posting.id)).toEqual([
+      "alpha:kept-description-mention",
+    ]);
+    expect(res.excludeSuppressed).toBe(false);
+  });
+
+  it("(issue 563) empty excludeTerms is byte-identical to no exclusion at all", async () => {
+    holder.providers = [
+      provider("alpha", async () => [posting({ id: "alpha:1" })]),
+    ];
+    const withEmpty = await searchJobs(
+      { ...query, excludeTerms: [] },
+      parsed,
+      new AbortController().signal,
+    );
+    const withoutField = await searchJobs(
+      query,
+      parsed,
+      new AbortController().signal,
+    );
+    expect(withEmpty.jobs.map((j) => j.posting.id)).toEqual(
+      withoutField.jobs.map((j) => j.posting.id),
+    );
+    expect(withEmpty.excludeSuppressed).toBe(false);
+  });
+
+  it("(issue 563) never fails closed: an exclude term matching every result is skipped, not applied", async () => {
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({ id: "alpha:1", title: "Frontend Engineer" }),
+        posting({ id: "alpha:2", title: "Frontend Engineer II" }),
+      ]),
+    ];
+    const res = await searchJobs(
+      { ...query, excludeTerms: ["engineer"] },
+      parsed,
+      new AbortController().signal,
+    );
+    expect(res.jobs.map((j) => j.posting.id).sort()).toEqual([
+      "alpha:1",
+      "alpha:2",
+    ]);
+    expect(res.excludeSuppressed).toBe(true);
+  });
+
+  it("(issue 568) leaves results unfiltered when query.families is unasserted (undefined)", async () => {
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({ id: "alpha:eng", title: "Frontend Engineer" }),
+        posting({ id: "alpha:design", title: "Product Designer", company: "Other" }),
+      ]),
+    ];
+    const res = await searchJobs(query, parsed, new AbortController().signal);
+    expect(res.jobs.map((j) => j.posting.id).sort()).toEqual([
+      "alpha:design",
+      "alpha:eng",
+    ]);
+  });
+
+  it("(issue 568) narrows to postings matching the asserted role families", async () => {
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({ id: "alpha:fe", title: "Frontend Engineer" }),
+        posting({ id: "alpha:designer", title: "Product Designer" }),
+      ]),
+    ];
+    const res = await searchJobs(
+      { ...query, families: ["frontend"] },
+      parsed,
+      new AbortController().signal,
+    );
+    expect(res.jobs.map((j) => j.posting.id)).toEqual(["alpha:fe"]);
+  });
+
+  it("(issue 568) never fails closed: an empty families list is the permissive 'all' filter, not zero results", async () => {
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({ id: "alpha:fe", title: "Frontend Engineer" }),
+        posting({ id: "alpha:designer", title: "Product Designer", description: "React and TypeScript" }),
+      ]),
+    ];
+    const res = await searchJobs(
+      { ...query, families: [] },
+      parsed,
+      new AbortController().signal,
+    );
+    expect(res.jobs.map((j) => j.posting.id).sort()).toEqual([
+      "alpha:designer",
+      "alpha:fe",
+    ]);
+  });
+
+  it("(issue 568) exposes the deduped, matchesQuery-filtered postings as rawPostings for live re-rank", async () => {
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({ id: "alpha:1" }),
+        // Off-query, dropped by matchesQuery before rawPostings is captured.
+        posting({ id: "alpha:off", title: "Forklift Operator", description: "warehouse work" }),
+      ]),
+    ];
+    const res = await searchJobs(query, parsed, new AbortController().signal);
+    expect(res.rawPostings.map((p) => p.id)).toEqual(["alpha:1"]);
+  });
 });
 
 /**

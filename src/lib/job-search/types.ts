@@ -18,6 +18,7 @@
  */
 
 import type { JobQuery } from "./query-builder.ts";
+import type { Compensation } from "./compensation.ts";
 
 /** A single normalized job posting, provider-agnostic. */
 export interface JobPosting {
@@ -40,6 +41,13 @@ export interface JobPosting {
    *  Greenhouse board's `departments[].name`). Optional — most keyless feeds
    *  don't have this axis. Consumed by the #534 title/board-size filter. */
   departments?: string[];
+  /** A pay range regexed out of `description` (#564) — undefined when none
+   *  could be extracted (the common, neutral case; see `compensation.ts`'s
+   *  docblock for the silence-is-neutral invariant). Not set by provider
+   *  adapters directly: `rankPostings` (`rank.ts`) populates it lazily from
+   *  `description`, the one point downstream of hydration where every
+   *  posting's text is guaranteed present regardless of source. */
+  compensation?: Compensation;
 }
 
 /** One keyless job feed, adapted to the normalized shape. */
