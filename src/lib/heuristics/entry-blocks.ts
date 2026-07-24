@@ -570,6 +570,26 @@ function isWrappedContinuation(line: PdfLine, markerX: number): boolean {
 /** x tolerance (pt) for treating two lines as sitting at the same left margin. */
 const MARGIN_TOL = 2;
 
+/** Left-x spread (pt) above which a section is treated as MULTI-COLUMN. A
+ *  single-column résumé clusters every line within a dozen points of one left
+ *  margin (header, indented wrap tail, hanging-indent bullet); a two-column
+ *  layout parks a whole column 200–370 pt to the right, so this sits safely
+ *  between. Gates the #436 complete-date header fold. */
+const MULTI_COLUMN_SPREAD = 150;
+
+/** True when every line sits within {@link MULTI_COLUMN_SPREAD} of the section's
+ *  leftmost x — one column, no far-right sidebar. No-op-safe for a no-geometry
+ *  section (all x = 0 → spread 0 → single column). */
+function isSingleColumnSection(lines: PdfLine[]): boolean {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const l of lines) {
+    if (l.x < min) min = l.x;
+    if (l.x > max) max = l.x;
+  }
+  return max - min <= MULTI_COLUMN_SPREAD;
+}
+
 /**
  * The entry-header left margin of a `date_range` section — the x at which the
  * dated anchor lines (and the company / title lines that band with them) sit.
@@ -697,10 +717,21 @@ function isDateColumnFragment(line: PdfLine, markerX: number): boolean {
 function mergeWrappedHeaderRows(lines: PdfLine[], maxConts: number): PdfLine[] {
   if (lines.length === 0) return lines;
   const markerX = bulletMarkerX(lines);
+  // The complete-date fold (#436) targets the single-column reconstructed export,
+  // where a too-wide one-line header wraps its org tail onto an INDENTED row. It
+  // must NOT run on a TWO-COLUMN source, whose far-right sidebar cells also sit
+  // "indented past the marker" and would be vacuumed into a header. A
+  // single-column section clusters every line near one left margin; a two-column
+  // layout parks a whole column far to the right, so a wide x-spread is the tell.
+  const singleColumn = isSingleColumnSection(lines);
   const out: PdfLine[] = [];
   let i = 0;
   while (i < lines.length) {
-    const folded = tryFoldHeaderAt(lines, i, markerX, maxConts);
+    const folded =
+      tryFoldHeaderAt(lines, i, markerX, maxConts) ??
+      (singleColumn
+        ? tryFoldCompleteDateHeader(lines, i, markerX, maxConts)
+        : null);
     if (folded) {
       out.push(folded.line);
       i = folded.next;
@@ -710,6 +741,81 @@ function mergeWrappedHeaderRows(lines: PdfLine[], maxConts: number): PdfLine[] {
     }
   }
   return out;
+}
+
+/**
+ * Fold a wrapped role header whose date range is already COMPLETE on its first
+ * physical row but whose company / team text overran the flush-right date column
+ * and wrapped onto the INDENTED row below (#436).
+ *
+ * The reconstructed one-line exporter draws "Title · Company, Location · Team"
+ * with the date flush-right AND a hanging indent on the header, so a header wider
+ * than the page word-wraps its org tail onto a marker-less row indented past the
+ * bullet margin while the date stays put:
+ *
+ *     "Founding … Team Lead ·            Mar. 2021 – Jun. 2023"   ← complete range
+ *         "Danggeun Pay Inc. (KarrotPay), Seoul, S.Korea"        ← indented tail
+ *
+ * {@link tryFoldHeaderAt} folds the INCOMPLETE-range wrap (the date itself
+ * wrapped); this is its complete-range twin (the date stayed, the org wrapped).
+ * Word-wrap preserves every token — including the " · " middot joiners — so
+ * re-inserting the tail BEFORE the date region reconstructs the exact one-line
+ * header, which then disambiguates title/company as if never wrapped.
+ *
+ * The tail must be INDENTED past the bullet-marker margin
+ * ({@link isWrappedContinuation}) — the hanging-indent signature the exporter
+ * stamps on a wrapped header. That is what separates a genuine wrap from a
+ * STACKED second header line (a company on its OWN row at the SAME left margin —
+ * the #342/#466 shapes), which sits AT the margin and must stay a distinct line
+ * for the anchor logic to map. Further guarded: the header row must carry a
+ * complete range AND real text before a locatable date region; each folded row
+ * must be non-empty and neither a bullet (`isBulletLine`) nor its own dated
+ * anchor (`startsNewAnchor`). Bounded by `maxConts`.
+ */
+function tryFoldCompleteDateHeader(
+  lines: PdfLine[],
+  i: number,
+  markerX: number,
+  maxConts: number,
+): { line: PdfLine; next: number } | null {
+  const line = lines[i];
+  if (isBulletLine(line) || !hasCompleteDateRange(line.text)) return null;
+  const dateIdx = dateRegionStart(line.text);
+  if (dateIdx < 0) return null;
+  const textPart = line.text.slice(0, dateIdx).trim();
+  // A date-first row ("04/2021 – Present  Mountain View, CA") is a bare date/loc
+  // cell, not a wrapped role header — it must not absorb the line below it.
+  if (textPart.length === 0) return null;
+
+  const conts: PdfLine[] = [];
+  let j = i + 1;
+  while (
+    j < lines.length &&
+    conts.length < maxConts &&
+    !isBulletLine(lines[j]) &&
+    !startsNewAnchor(lines[j].text) &&
+    isWrappedContinuation(lines[j], markerX) &&
+    lines[j].text.trim().length > 0
+  ) {
+    conts.push(lines[j]);
+    j++;
+  }
+  if (conts.length === 0) return null;
+
+  const datePart = line.text.slice(dateIdx).trim();
+  const folded = [textPart, ...conts.map((c) => c.text.trim()), datePart]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return {
+    line: {
+      ...line,
+      text: folded,
+      items: [...line.items, ...conts.flatMap((c) => c.items)],
+    },
+    next: j,
+  };
 }
 
 /**

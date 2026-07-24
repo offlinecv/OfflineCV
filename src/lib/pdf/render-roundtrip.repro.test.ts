@@ -85,17 +85,17 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
     expect(reExp.length).toBe(origExp.length);
   });
 
-  // SUSPENDED (#436): the one-line experience header ("Title · Company,
-  // Location  Dates") removes the two-line structural signal the parser used to
-  // tell title from company. #436 has TWO roots: the title↔company SWAP on
-  // neutral middot segments (fixed — the `middot` title-first default in
-  // `mapWithoutCompanyMatch`), and company TRUNCATION on a PARENTHETICAL company
-  // ("Danggeun Pay Inc. (KarrotPay)" → "(KarrotPay)"), which this dense 8-role
-  // fixture exercises and which is NOT the swap. The truncation root is still
-  // open; the role COUNT (AC#1) and the education round-trip (#291) below are
-  // unaffected and still enforced. Un-skip when the parenthetical-company
-  // truncation lands.
-  it.skip("re-parses each role's title / company back into the right fields (AC#3)", () => {
+  // #436 — the one-line experience header ("Title · Company, Location  Dates")
+  // removes the two-line structural signal the parser used to tell title from
+  // company. Both roots are now fixed: the title↔company SWAP on neutral middot
+  // segments (the `middot` title-first default in `mapWithoutCompanyMatch`), and
+  // company TRUNCATION on a PARENTHETICAL / multi-word company
+  // ("Danggeun Pay Inc. (KarrotPay)", "R.O.K Cyber Command, MND") — this dense
+  // 8-role fixture exercises the truncation, which wrapped the org tail onto the
+  // row below. The renderer now reserves the flush-right date column only when
+  // the header reaches it, and `tryFoldCompleteDateHeader` folds the wrapped tail
+  // back before disambiguation, so every role's title/company round-trips.
+  it("re-parses each role's title / company back into the right fields (AC#3)", () => {
     const origExp = original.canonical.fields.experience ?? [];
     const reExp = reparsed.canonical.fields.experience ?? [];
     origExp.forEach((orig, i) => {

@@ -602,6 +602,52 @@ describe("parseEntryBlocks — wrapped multi-line role header (#166)", () => {
     expect(blocks[0].headerLines).toContain("Senior Engineer");
   });
 
+  it("folds a COMPLETE-range one-line header whose org tail wrapped indented (#436)", () => {
+    // The reconstructed "Download PDF" shape: the header carries the whole date
+    // range on its first physical row, but its "· Company, Location" tail overran
+    // the flush-right date column and word-wrapped onto the row below, INDENTED
+    // past the bullet margin (the exporter's hanging indent). Left un-folded the
+    // company re-parses truncated ("Danggeun Pay Inc. (KarrotPay)" → the tail is
+    // stranded). `tryFoldCompleteDateHeader` re-inserts the tail before the date
+    // region, reconstructing the one-line header so the full company survives.
+    const section = xSection("experience", [
+      { text: "Founding Engineer, Team Lead · Mar 2021 - Jun 2023", x: 70 },
+      { text: "Danggeun Pay Inc. (KarrotPay), Seoul, S.Korea", x: 82 }, // indented tail
+      { text: "● Built the payments platform.", x: 70 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(1);
+    const [b] = blocks;
+    // Full company preserved — no truncation to the parenthetical tail.
+    expect(b.headerLines.join(" ")).toContain("Danggeun Pay Inc. (KarrotPay)");
+    expect(b.dates.start_date).toBe("Mar 2021");
+    expect(b.dates.end_date).toBe("Jun 2023");
+    expect(b.bulletCount).toBe(1);
+  });
+
+  it("does not fold a complete-range header whose next line sits AT the margin (#342/#466)", () => {
+    // Same complete-range header, but the company is on its OWN row at the SAME
+    // left margin — a stacked second header line, not a wrapped tail. The indent
+    // gate must leave it a distinct line so the anchor/title mapping still works.
+    const section = xSection("experience", [
+      { text: "Founding Engineer, Team Lead · Mar 2021 - Jun 2023", x: 70 },
+      { text: "Danggeun Pay Inc. (KarrotPay)", x: 70 }, // same margin — not a wrap
+      { text: "● Built the payments platform.", x: 70 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(1);
+    // The company line stays a separate header line (not folded into the date row).
+    expect(blocks[0].headerLines).toContain("Danggeun Pay Inc. (KarrotPay)");
+  });
+
   it("reassembles a wrapped open-ended range (date sep on the header, 'Present' wrapped)", () => {
     // "… Jan 2022 -" with "Present" wrapped onto its own line. `Present` reads as
     // a complete range on its own, so the gather must treat it as a wrapped tail

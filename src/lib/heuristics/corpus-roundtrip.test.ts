@@ -159,22 +159,22 @@ const KNOWN_FAILURES: Record<string, Category[]> = {
   //      ("…, Remote") is peeled by `stripLocationSuffix` Pass F (achievements-
   //      oneline, two-column, chromium-asymmetric, weasyprint-two-column cleared).
   //   2. TRUNCATION — a PARENTHETICAL / multi-word company on the one-line shape
-  //      ("Danggeun Pay Inc. (KarrotPay)" → "(KarrotPay)") still re-parses
-  //      truncated. STILL OPEN — the four lines below are this root (plus
-  //      two-column re-segmentation). The fix needs a wrapped-header rejoin AND a
-  //      render-side date-column reserve, which perturb two-column round-trips
-  //      and so warrant their own follow-up, kept separate from the swap fix.
+  //      ("Danggeun Pay Inc. (KarrotPay)" → "(KarrotPay)") re-parsed truncated
+  //      when the too-wide header WRAPPED its org tail onto the row below and the
+  //      wrapped words were stranded (or glued to the flush-right date). FIXED:
+  //      the renderer now reserves the flush-right date column only when the
+  //      header actually reaches it (`drawText` in render-ats-pdf.ts), so the org
+  //      wraps clear of the date; and the parser folds that wrapped tail back
+  //      into the header before disambiguation (`tryFoldCompleteDateHeader` in
+  //      entry-blocks.ts), gated to single-column sections so a two-column source
+  //      is untouched. awesome-cv-cv / awesome-cv-resume cleared.
   //
   // Delete each line below as its root lands (the ratchet forces it — a fixed
   // fixture trips the stale-entry check).
+  //
+  // honors-subheadings: NOT the one-line header roots above — a bullet-as-title
+  // parse defect on a subheading-style role, tracked separately.
   "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["experience"],
-  // awesome-cv-cv: #383 cleared its earlier abbreviated-date baseline (see the
-  // #383 note above), but main's one-line header re-regresses `experience` for
-  // the #436 TRUNCATION reason — 12 roles re-parse company-truncated/swapped off
-  // the one-line "Title · Company … Dates" shape. Removed when the truncation
-  // root lands.
-  "latex/awesome-cv-cv.pdf": ["experience"],
-  "latex/awesome-cv-resume.pdf": ["experience"],
 };
 
 const CATEGORIES: Category[] = [

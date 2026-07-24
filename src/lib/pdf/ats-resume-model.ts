@@ -44,6 +44,15 @@ import type {
   EditableParse,
 } from "../../hooks/useEditableParse.ts";
 
+/**
+ * Hanging indent (pt) for a wrapped experience-header tail (#436). Matches the
+ * renderer's bullet text indent so the tail sits just PAST the bullet-marker
+ * margin — the threshold `isWrappedContinuation` (entry-blocks.ts) uses to fold
+ * a marker-less continuation into the line it wraps from. Any value clear of that
+ * margin works; 12 pt keeps the indented tail visually aligned with the bullets.
+ */
+const HEADER_WRAP_INDENT = 12;
+
 // ── Model shape ───────────────────────────────────────────────────────────────
 
 export interface AtsContact {
@@ -160,6 +169,17 @@ export interface AtsEntry {
    * word-wrap normally, so this defaults to `false`/unset everywhere else.
    */
   atomicSegments?: boolean;
+  /**
+   * Hanging indent (pt) applied to the header's WRAPPED continuation lines
+   * (#436). Set on the one-line experience header ("Title · Company, Location ·
+   * Team", date flush-right): when it is too wide to fit, its org tail wraps onto
+   * the row below, and indenting that tail past the bullet-marker margin lets the
+   * parser's `mergeWrappedContinuations` fold it back into the header before
+   * disambiguation — so a wrapped "…Company, Location" re-parses whole instead of
+   * stranding its leading words. A header that fits one line is unaffected (only
+   * wrapped lines are indented). Unset elsewhere.
+   */
+  headerHangingIndent?: number;
   /** Structured source fields for the JSON-Resume export (#334). See
    *  {@link AtsEntryFields}. Display/render code never reads this. */
   fields?: AtsEntryFields;
@@ -591,6 +611,9 @@ export function buildAtsResumeModel(
         headerLine: headerText,
         headerLineDate: dateRange,
         ...(emptyCompanySubLine ? { subLine: emptyCompanySubLine } : {}),
+        // Indent a wrapped org tail so `mergeWrappedContinuations` re-folds it
+        // (#436) — see AtsEntry.headerHangingIndent.
+        headerHangingIndent: HEADER_WRAP_INDENT,
         bullets,
         fields,
       };
@@ -598,6 +621,7 @@ export function buildAtsResumeModel(
     return {
       headerLine: [headerText, dateRange].filter(Boolean).join("  ") || "Experience",
       ...(emptyCompanySubLine ? { subLine: emptyCompanySubLine } : {}),
+      headerHangingIndent: HEADER_WRAP_INDENT,
       bullets,
       fields,
     };

@@ -134,7 +134,7 @@
     "phoneChangedAcrossRoundtrip": false,
     "locationChangedAcrossRoundtrip": false,
     "linkedinUrlChangedAcrossRoundtrip": false,
-    "experienceChangedAcrossRoundtrip": true,
+    "experienceChangedAcrossRoundtrip": false,
     "educationChangedAcrossRoundtrip": false,
     "skillsChangedAcrossRoundtrip": false,
     "summaryChangedAcrossRoundtrip": false,

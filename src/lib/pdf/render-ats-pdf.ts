@@ -83,6 +83,14 @@ const GAP_AFTER_HEADER = 2;
 const BULLET_MARKER = "• ";
 const BULLET_INDENT = 12; // hanging-indent width for wrapped bullet lines
 
+// Minimum blank gutter (pt) kept between the wrapped header text and the
+// flush-right date tail (#436). Without a reserve the header text wraps to the
+// full content width and its last word runs UNDER the date on re-extraction
+// ("…Inc." + "Mar. 2021" → "Inc.Mar. 2021"), corrupting the company on
+// round-trip. Reserving the date's measured width + this gutter forces the
+// header to wrap BEFORE the date column.
+const DATE_COLUMN_GAP = 8;
+
 // The middot list/org-line join separator emitted by ats-resume-model.ts
 // (skills, "Company · Location", "Institution · Location", ...). Wrap logic
 // treats each middot-delimited segment as atomic — see `wrap()` (#301).
@@ -525,6 +533,37 @@ class Layout {
   }
 
   /**
+   * Wrap `value` at `maxWidth`, but reserve `rightReserve` pt for a flush-right
+   * tail (the header's date column, #436) — and ONLY when the first line would
+   * actually reach it. Wrapping at the full width first and re-wrapping just the
+   * colliding case keeps every header that already fits one line (or wraps clear
+   * of the date) byte-identical; a blanket reserve instead forces borderline
+   * headers to wrap and re-parse worse, regressing fixtures whose reconstructed
+   * header sat just shy of the date column. When the first line DOES overrun the
+   * date, its trailing word extracts glued to the date ("…Inc." + "Mar. 2021" →
+   * "Inc.Mar. 2021"), corrupting the company; re-wrapping at the reserved width
+   * (atomic, so "Company, Location" moves whole rather than splitting mid-name)
+   * restores the round-trip. A zero reserve is a plain {@link wrap}.
+   */
+  private wrapReservingRight(
+    value: string,
+    font: PdfFont,
+    size: number,
+    maxWidth: number,
+    atomic: boolean,
+    rightReserve: number,
+  ): string[] {
+    const lines = this.wrap(value, font, size, maxWidth, atomic);
+    if (
+      rightReserve > 0 &&
+      font.widthOfTextAtSize(lines[0], size) > maxWidth - rightReserve
+    ) {
+      return this.wrap(value, font, size, maxWidth - rightReserve, atomic);
+    }
+    return lines;
+  }
+
+  /**
    * Draw a wrapped block of text. `x` is the left edge; `hangingIndent`
    * indents continuation lines (for bullet hanging indent). `atomicSegments`
    * opts into segment-atomic middot wrapping (see `wrap()` above) — leave it
@@ -571,14 +610,28 @@ class Layout {
     // — see the constructor doc) since Poppins encodes the glyphs directly.
     const cased = opts.uppercase ? text.toUpperCase() : text;
     const value = this.sanitize ? toWinAnsi(cased) : cased;
+    const atomic = opts.atomicSegments ?? false;
     const maxWidth = CONTENT_WIDTH - (x - MARGIN);
+    const rSize = opts.rightSize ?? size;
+    const rValue = opts.rightText
+      ? this.sanitize
+        ? toWinAnsi(opts.rightText)
+        : opts.rightText
+      : "";
+    const rightReserve = rValue
+      ? this.fonts.regular.widthOfTextAtSize(rValue, rSize) + DATE_COLUMN_GAP
+      : 0;
 
-    const lines = this.wrap(
+    // Reserve the flush-right date column when the header collides with it
+    // (#436) — see wrapReservingRight for why this is collision-gated, not a
+    // blanket reserve.
+    const lines = this.wrapReservingRight(
       value,
       font,
       size,
       maxWidth,
-      opts.atomicSegments ?? false,
+      atomic,
+      rightReserve,
     );
     const lineHeight = size * LINE_GAP;
     const singleLine = lines.length === 1;
@@ -597,9 +650,7 @@ class Layout {
         // Flush-right date tail on the first line's baseline (#425), right-
         // aligned to the content margin and drawn regular-weight/muted.
         if (opts.rightText) {
-          const rSize = opts.rightSize ?? size;
           const rFont = this.fonts.regular;
-          const rValue = this.sanitize ? toWinAnsi(opts.rightText) : opts.rightText;
           const rX = PAGE_WIDTH - MARGIN - rFont.widthOfTextAtSize(rValue, rSize);
           this.page.drawText(rValue, {
             x: rX,
@@ -898,6 +949,7 @@ function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
         bold: entry.headerBold ?? true,
         size: SIZE_HEADER,
         atomicSegments: entry.atomicSegments,
+        hangingIndent: entry.headerHangingIndent,
         // Flush-right date on the header line (#425) — set for a title-less role /
         // degree-less program, where the org/date anchor lives on the header.
         rightText: entry.headerLineDate,
