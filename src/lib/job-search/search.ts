@@ -47,6 +47,19 @@
  *    `Promise.allSettled`, because its width grows with the number of selected
  *    companies. `mapWithConcurrency` preserves allSettled's index-ordered,
  *    never-rejecting contract, so the degraded-provider mapping is unchanged.
+ *
+ * Exclude terms (#563): `query.excludeTerms` is applied here too, uniformly
+ * across the FULL merged set (keyless feeds + company boards alike) — the
+ * same "user's editable query is the final say on every source" reasoning as
+ * `matchesQuery` above. Company-board postings already ran through this exact
+ * filter once in `company-boards.ts` (before `capPerCompany`, so an excluded
+ * posting never eats a cap slot); re-applying it here is a no-op for them and
+ * is what makes the filter actually reach the keyless-feed postings, which
+ * never pass through `company-boards.ts` at all. This is also the ONE place
+ * that can see the true whole-panel result count, so it's the one place the
+ * never-fail-closed "skip and notify" decision (`excludeSuppressed` below) is
+ * made — a single board emptying out in `company-boards.ts` is normal, not a
+ * panel-level failure.
  */
 
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
@@ -54,7 +67,9 @@ import type { JobQuery } from "./query-builder.ts";
 import type { JobPosting } from "./types.ts";
 import type { RankedJob } from "./rank.ts";
 import type { CompanyEntry } from "./company-registry.ts";
+import type { RoleFamily } from "./role-keywords.ts";
 import { mapWithConcurrency } from "./concurrency.ts";
+import { refineSearchResult } from "./refine.ts";
 
 /**
  * Providers fetched at once. Bounds the burst when company boards join the
@@ -73,6 +88,27 @@ export interface JobSearchResult {
   degradedProviders: string[];
   /** How many providers were attempted (denominator for the error state). */
   providerCount: number;
+  /** True when `query.excludeTerms` would have emptied the WHOLE merged
+   *  result set (#563) — exclusion was skipped (never-fail-closed) and every
+   *  posting below is un-excluded. The panel surfaces this as a notice rather
+   *  than silently ignoring the user's exclude chips. */
+  excludeSuppressed: boolean;
+  /** True when `query.families` (the role chips) would have emptied the WHOLE
+   *  merged result set (#566) — role filtering was skipped (never-fail-closed,
+   *  the same floor as `excludeSuppressed`) and every posting below is
+   *  un-role-filtered. Role keywords are narrow title substrings while
+   *  `matchesQuery` admits postings on skills/description too, so an
+   *  all-generic keyless feed can pass the query yet match no role title. The
+   *  panel surfaces this as a notice pointing at the Role chips rather than
+   *  showing a misleading empty state. */
+  roleSuppressed: boolean;
+  /** The deduped, `matchesQuery`-filtered postings BEFORE role/exclude
+   *  filtering and ranking (#568) — everything `refineSearchResult` needs to
+   *  redo that local work. `FindJobsPanel` keeps this snapshot from the last
+   *  fetch and re-feeds it through `refineSearchResult` on every refinement-
+   *  control edit (role family, target level, exclude term, comp floor,
+   *  location) for a LIVE re-rank with no new fetch. */
+  rawPostings: JobPosting[];
 }
 
 /** Normalized dedup key: each of title/company lowercased and
@@ -147,17 +183,19 @@ export async function searchJobs(
   signal: AbortSignal,
   companies: readonly CompanyEntry[] = [],
 ): Promise<JobSearchResult> {
-  const [{ getProviders }, { rankPostings }] = await Promise.all([
-    import("./providers/index.ts"),
-    import("./rank.ts"),
-  ]);
+  const { getProviders } = await import("./providers/index.ts");
 
   // Only pull in the company-board tier (and, through it, the role-keyword
   // taxonomy and the board cache) when the user actually selected companies —
   // an empty selection is byte-for-byte the pre-#533 keyless search.
   const companyProviders =
     companies.length > 0
-      ? (await import("./company-boards.ts")).makeBoardProviders(companies, parsed)
+      ? (await import("./company-boards.ts")).makeBoardProviders(
+          companies,
+          parsed,
+          undefined,
+          query.families as RoleFamily[] | undefined,
+        )
       : [];
 
   const providers = getProviders(companyProviders);
@@ -187,9 +225,12 @@ export async function searchJobs(
     }
   });
 
-  return {
-    jobs: rankPostings(parsed, merged, query),
-    degradedProviders,
-    providerCount: providers.length,
-  };
+  // Role families (#568) + title-only exclude terms (#563), applied once over
+  // the FULL merged set, and ranked — see `refine.ts`'s docblock for why this
+  // re-applies (a no-op for company-board postings, which already ran through
+  // the role/exclude filters once in `company-boards.ts`) and is the only
+  // place that reaches keyless-feed postings at all. `FindJobsPanel` calls
+  // `refineSearchResult` again, locally, on every subsequent refinement-
+  // control edit — this is the same pipeline, just the FIRST run of it.
+  return refineSearchResult(merged, parsed, query, degradedProviders, providers.length);
 }

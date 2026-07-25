@@ -11,8 +11,15 @@
  *
  *   cached light index (or fetch it)   board-cache.ts / the slice-1/2 adapters
  *     → filterPostingsByRole           role-keywords.ts (#534)
+ *     → filterPostingsByExcludeTerms   role-keywords.ts (#563)
+ *     → orderPostingsByTitleScore      role-keywords.ts (#565)
  *     → capPerCompany                  role-keywords.ts (#534)
  *     → hydrate ONLY the survivors     hydrateGreenhouse / hydrateLever
+ *
+ * Exclusion runs BEFORE the order/cap stages on purpose (#563): an excluded
+ * posting (title matches a user or seeded exclude term) must never consume a
+ * company's `capPerCompany` slot, and never fails closed — see
+ * `filterPostingsByExcludeTerms`'s own doc for the per-call skip behavior.
  *
  * ORDER IS THE WHOLE POINT. A 1000-role Greenhouse board costs exactly one
  * light-index request plus at most `perCompanyCap` description fetches, because
@@ -40,9 +47,10 @@
  * behind the provider interface rather than in a parallel fan-out.
  *
  * PRIVACY: the request carries the public company slug (and a job id when
- * hydrating) and nothing else. `roleFilterForResume` and `filterPostingsByRole`
- * run purely on-device over already-fetched postings, so this slice adds no
- * egress. `providers/keywords.ts` — the single audited resume-derived egress
+ * hydrating) and nothing else. `roleFilterForResume`, `filterPostingsByRole`,
+ * and `orderPostingsByTitleScore` all run purely on-device over
+ * already-fetched postings, so this slice adds no egress.
+ * `providers/keywords.ts` — the single audited resume-derived egress
  * helper — is used only by the keyless feeds and is deliberately not imported
  * here.
  */
@@ -52,9 +60,13 @@ import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { JobProvider, JobPosting } from "./types.ts";
 import {
   roleFilterForResume,
+  roleFilterForFamilies,
   filterPostingsByRole,
+  filterPostingsByExcludeTerms,
+  orderPostingsByTitleScore,
   capPerCompany,
   DEFAULT_PER_COMPANY_CAP,
+  type RoleFamily,
   type RoleFilter,
 } from "./role-keywords.ts";
 import { makeCompanyProvider } from "./providers/index.ts";
@@ -179,14 +191,30 @@ export function makeBoardProvider(
         if (cacheable) await writeCachedBoard(entry.ats, entry.slug, index);
       }
 
-      // `capPerCompany` truncates in the board's NATIVE order, before hydrate
-      // and before `rankPostings` — a deliberate request-bounding tradeoff: a
-      // strong-fit role past the cap in board order is dropped before ranking
-      // can see it. Fit-aware selection here would need a pre-hydrate signal
-      // (title/skill-in-title); today the cap is board-order, and rank only
-      // reorders the survivors. See the epic-#528 follow-up on skills ranking.
+      // `capPerCompany` truncates in the ORDER IT'S GIVEN, before hydrate and
+      // before `rankPostings` — a deliberate request-bounding tradeoff, so
+      // WHICH postings reach it matters. `filterPostingsByExcludeTerms` (#563)
+      // drops title-matched exclusions BEFORE `orderPostingsByTitleScore`
+      // (#565) reorders the survivors by a cheap, title-only, no-I/O score
+      // against `query.titles`/`query.seniority` and BEFORE the cap slices —
+      // so an excluded posting never consumes a company's cap slot, and the
+      // survivors are the best title-side matches per company rather than an
+      // arbitrary board-order prefix. A degenerate query (no derivable titles)
+      // scores everything 0 and keeps ties in board order; an empty
+      // `excludeTerms` is a no-op — both byte-identical to pre-#563/#565
+      // behavior, the never-fail-closed floor.
+      const roleFiltered = filterPostingsByRole(index, filter);
+      // `suppressed` is intentionally discarded here: one board's own survivor
+      // set emptying out is a normal, local outcome (that board just doesn't
+      // have any non-excluded roles), not a whole-panel failure. The
+      // panel-level never-fail-closed notice is computed once in `search.ts`,
+      // over the full merged result set across every provider.
+      const { postings: excludeFiltered } = filterPostingsByExcludeTerms(
+        roleFiltered,
+        query.excludeTerms,
+      );
       const survivors = capPerCompany(
-        filterPostingsByRole(index, filter),
+        orderPostingsByTitleScore(excludeFiltered, query),
         perCompanyCap,
       );
       return hydrateDescriptions(entry, survivors, signal);
@@ -195,15 +223,24 @@ export function makeBoardProvider(
 }
 
 /**
- * Bounded providers for every selected company. The role filter is derived from
- * the resume ONCE here and shared by every board — it does not vary per company,
- * and recomputing it per board would re-scan the resume for each one.
+ * Bounded providers for every selected company. The role filter is derived
+ * from the resume ONCE here and shared by every board — it does not vary per
+ * company, and recomputing it per board would re-scan the resume for each one.
+ *
+ * @param families Explicit family override (#568) — pass `query.families`
+ *   from `FindJobsPanel`'s refinement chips. `undefined` (every pre-#568
+ *   caller, including this module's own tests) keeps the resume-derived
+ *   filter, byte-identical to prior behavior. An empty array (every chip
+ *   removed) resolves through `roleFilterForFamilies([])` to the permissive
+ *   "all" filter — never-fail-closed, not zero results.
  */
 export function makeBoardProviders(
   entries: readonly CompanyEntry[],
   parsed: HeuristicParsedResume,
   perCompanyCap: number = DEFAULT_PER_COMPANY_CAP,
+  families?: readonly RoleFamily[],
 ): JobProvider[] {
-  const filter = roleFilterForResume(parsed);
+  const filter =
+    families !== undefined ? roleFilterForFamilies(families) : roleFilterForResume(parsed);
   return entries.map((entry) => makeBoardProvider(entry, filter, perCompanyCap));
 }

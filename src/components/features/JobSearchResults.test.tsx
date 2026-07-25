@@ -45,16 +45,38 @@ function posting(id: string): JobPosting {
   };
 }
 
+/** Shares none of the parsed résumé's skills, so `rankPostings` scores it 0. */
+function weakPosting(id: string): JobPosting {
+  return {
+    id,
+    title: `Rust Engineer ${id}`,
+    company: `Co ${id}`,
+    location: "Remote",
+    url: `https://example.com/${id}`,
+    description: "We need Rust and Kubernetes and Terraform experts.",
+    source: "Remotive",
+  };
+}
+
 function loaded(
   count: number,
   degradedProviders: string[] = [],
   providerCount = 3,
+  excludeSuppressed = false,
+  roleSuppressed = false,
 ): JobSearchResult {
   const jobs = rankPostings(
     parsed,
     Array.from({ length: count }, (_, i) => posting(String(i))),
   );
-  return { jobs, degradedProviders, providerCount };
+  return {
+    jobs,
+    degradedProviders,
+    providerCount,
+    excludeSuppressed,
+    roleSuppressed,
+    rawPostings: [],
+  };
 }
 
 let container: HTMLDivElement;
@@ -126,5 +148,62 @@ describe("JobSearchResults", () => {
     });
     expect(el.textContent).toContain("Couldn't reach any of the job feeds");
     expect(el.textContent).toContain("Retry search");
+  });
+
+  it("collapses below-threshold postings into a labelled, expandable weak-matches section (issue 567)", () => {
+    const jobs = rankPostings(parsed, [posting("s1"), weakPosting("w1")]);
+    const result: JobSearchResult = {
+      jobs,
+      degradedProviders: [],
+      providerCount: 1,
+      excludeSuppressed: false,
+      roleSuppressed: false,
+      rawPostings: [],
+    };
+    const el = render({ kind: "loaded", result });
+
+    // Strong posting renders immediately; the weak one is named in the
+    // collapsed toggle but its card is not yet in the DOM.
+    expect(el.querySelectorAll("h3").length).toBe(1);
+    expect(el.textContent).toContain("React Engineer s1");
+    expect(el.textContent).not.toContain("Rust Engineer w1");
+    expect(el.textContent).toContain("weak matches (1)");
+    // Header names the cut, derived from the single threshold constant.
+    expect(el.textContent).toContain("below 2.5★ match");
+
+    const toggle = [...el.querySelectorAll("button")].find((b) =>
+      b.getAttribute("aria-expanded") === "false" &&
+      b.textContent?.includes("weak matches"),
+    ) as HTMLButtonElement;
+    expect(toggle).toBeTruthy();
+
+    act(() => toggle.click());
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(el.querySelectorAll("h3").length).toBe(2);
+    expect(el.textContent).toContain("Rust Engineer w1");
+  });
+
+  it("an all-weak result set still shows results — auto-expands rather than rendering empty (issue 567)", () => {
+    const jobs = rankPostings(parsed, [weakPosting("w1"), weakPosting("w2")]);
+    const result: JobSearchResult = {
+      jobs,
+      degradedProviders: [],
+      providerCount: 1,
+      excludeSuppressed: false,
+      roleSuppressed: false,
+      rawPostings: [],
+    };
+    const el = render({ kind: "loaded", result });
+
+    // No strong matches, but the weak section is auto-expanded, not hidden.
+    expect(el.querySelectorAll("h3").length).toBe(2);
+    expect(el.textContent).toContain("Rust Engineer w1");
+    expect(el.textContent).toContain("Rust Engineer w2");
+    const toggle = [...el.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("weak matches"),
+    ) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.textContent).toContain("Hide weak matches (2)");
   });
 });

@@ -18,18 +18,24 @@
  * (useEditableParse) — editing the search query is not editing the résumé.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, EditableField } from "@design-system";
 import { buildJobQuery, type JobQuery } from "../../lib/job-search/query-builder.ts";
 import { buildDeepLinks } from "../../lib/job-search/deep-links.ts";
-import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import {
-  JobSearchResults,
-  type SearchPhase,
-} from "./JobSearchResults.tsx";
+  roleFilterForResume,
+  seedExcludeTermsForFamilies,
+  type RoleFamily,
+} from "../../lib/job-search/role-keywords.ts";
+import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
+import { JobSearchResults } from "./JobSearchResults.tsx";
 import { ChipListEditor } from "./ChipListEditor.tsx";
+import { CompFloorInput } from "./CompFloorInput.tsx";
+import { RoleFamilyChips } from "./RoleFamilyChips.tsx";
+import { LevelSelect } from "./LevelSelect.tsx";
 import { CompanyTargets } from "./CompanyTargets.tsx";
 import { useCompanyTargets } from "../../hooks/useCompanyTargets.ts";
+import { useJobSearch } from "../../hooks/useJobSearch.ts";
 import { AddPill } from "./ReconstructedAdd.tsx";
 
 interface FindJobsPanelProps {
@@ -42,8 +48,18 @@ interface FindJobsPanelProps {
 
 export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   // Seed local query state from the parse once (lazy initializer — runs only
-  // on mount); the user edits it from here.
-  const [query, setQuery] = useState<JobQuery>(() => buildJobQuery(parsed));
+  // on mount); the user edits it from here. Exclude-term chips (#563) AND
+  // role-family chips (#568) are seeded from the SAME role-family
+  // classification the company-board pipeline derives — visibly, as ordinary
+  // removable chips below, never applied invisibly.
+  const [query, setQuery] = useState<JobQuery>(() => {
+    const roleFilter = roleFilterForResume(parsed);
+    return buildJobQuery(
+      parsed,
+      seedExcludeTermsForFamilies(roleFilter.families),
+      roleFilter.families,
+    );
+  });
   // Progressive disclosure for Seniority (#540): a résumé whose titles carry
   // no recognized seniority keyword renders no inert placeholder field — the
   // row appears only once a seniority was derived, or the user opts in via
@@ -65,12 +81,25 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   const removeSkill = (skill: string) =>
     setQuery((q) => ({ ...q, skills: q.skills.filter((s) => s !== skill) }));
 
-  // In-app search state. The fetch fires ONLY from runSearch (the Search
-  // click) — never on drop, tab open, or query edit. searchJobs dynamic-imports
-  // the provider/rank tiers, so nothing job-fetch-related is in the entry chunk.
-  const [phase, setPhase] = useState<SearchPhase>({ kind: "idle" });
-  const abortRef = useRef<AbortController | null>(null);
-  const isLoading = phase.kind === "loading";
+  const addExcludeTerm = (term: string) =>
+    setQuery((q) => ({ ...q, excludeTerms: [...(q.excludeTerms ?? []), term] }));
+  const removeExcludeTerm = (term: string) =>
+    setQuery((q) => ({
+      ...q,
+      excludeTerms: (q.excludeTerms ?? []).filter((t) => t !== term),
+    }));
+
+  // Role families (#568): REMOVAL only — see RoleFamilyChips' doc for why
+  // there's no free-text add. Narrowing to an empty list is safe: readers
+  // resolve `families: []` to the permissive "all" filter, never zero results.
+  const removeRoleFamily = (family: RoleFamily) =>
+    setQuery((q) => ({
+      ...q,
+      families: (q.families ?? []).filter((f) => f !== family),
+    }));
+
+  const setLevel = (level: string | undefined) =>
+    setQuery((q) => ({ ...q, seniority: level }));
 
   // Sector-suggested companies whose ATS boards join the fan-out. Selecting
   // none is a supported state: the search falls back to the keyless feeds
@@ -78,33 +107,8 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   const companyTargets = useCompanyTargets(parsed);
   const selectedCompanies = companyTargets.selected;
 
-  // Abort any in-flight search on unmount so a late response can't try to
-  // update state on an unmounted component.
-  useEffect(() => () => abortRef.current?.abort(), []);
-
-  const runSearch = () => {
-    // Supersede any in-flight search so its results can't land after this one.
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setPhase({ kind: "loading" });
-    void (async () => {
-      try {
-        const { searchJobs } = await import("../../lib/job-search/search.ts");
-        const result = await searchJobs(
-          query,
-          parsed,
-          ctrl.signal,
-          selectedCompanies,
-        );
-        if (ctrl.signal.aborted) return;
-        setPhase({ kind: "loaded", result });
-      } catch {
-        if (ctrl.signal.aborted) return;
-        setPhase({ kind: "failed" });
-      }
-    })();
-  };
+  // Fetch lifecycle + #568's live re-rank — see the hook's own docblock.
+  const { phase, runSearch, isLoading } = useJobSearch(query, parsed, selectedCompanies);
 
   return (
     <div className="flex flex-col gap-4">
@@ -133,11 +137,19 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
           placeholder="Add a title…"
           addAriaLabel="Add title"
         />
-        {/* Location (#545): always shown, unlike Seniority's AddPill-gated
-         *  disclosure — location is a primary axis of every job-board search
-         *  form (not an auxiliary facet the way seniority is), and a résumé
-         *  with no parsed location still needs a visible place to type one to
-         *  get any location-aware ranking or deep-link behavior at all. */}
+        {/* Role families (#568): seeded from the same classification the
+         *  company-board pipeline uses, removable so a fullstack résumé that
+         *  also matched `data` can drop it. */}
+        <RoleFamilyChips
+          families={(query.families ?? []) as RoleFamily[]}
+          onRemove={removeRoleFamily}
+        />
+        {/* Location (#545): always shown, unlike the target level's
+         *  AddPill-gated disclosure — location is a primary axis of every
+         *  job-board search form (not an auxiliary facet the way level is),
+         *  and a résumé with no parsed location still needs a visible place
+         *  to type one to get any location-aware ranking or deep-link
+         *  behavior at all. */}
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-xs text-content-tertiary">Location</span>
           <EditableField
@@ -149,20 +161,15 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
             }
           />
         </div>
+        {/* Target level (#562/#568): progressive disclosure, same pattern as
+         *  pre-#568 free-text Seniority — a résumé whose titles carry no
+         *  recognized level renders no inert control until the user opts in
+         *  via "+ Seniority". Changing the level re-runs the #562 rung-
+         *  distance penalty (live, via the refinement effect above). */}
         {query.seniority || seniorityExpanded ? (
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-            <span className="text-xs text-content-tertiary">Seniority</span>
-            <EditableField
-              value={query.seniority}
-              placeholder="seniority"
-              label="Seniority"
-              onCommit={(v) =>
-                setQuery((q) => ({ ...q, seniority: v || undefined }))
-              }
-            />
-          </div>
+          <LevelSelect value={query.seniority} onChange={setLevel} />
         ) : (
-          <AddPill label="Seniority" onClick={() => setSeniorityExpanded(true)} />
+          <AddPill label="Target level" onClick={() => setSeniorityExpanded(true)} />
         )}
         <ChipListEditor
           label="Skills"
@@ -171,6 +178,22 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
           onRemove={removeSkill}
           placeholder="Add a skill…"
           addAriaLabel="Add skill"
+        />
+        {/* Exclude (#563): title-only — a posting is dropped when its TITLE
+         *  contains one of these, never when only its description does.
+         *  Removable chips may already be seeded from the role-family
+         *  classification (e.g. GTM/field roles for an engineering search). */}
+        <ChipListEditor
+          label="Exclude (title only)"
+          items={query.excludeTerms ?? []}
+          onAdd={addExcludeTerm}
+          onRemove={removeExcludeTerm}
+          placeholder="Add a title to exclude…"
+          addAriaLabel="Add exclude term"
+        />
+        <CompFloorInput
+          value={query.compFloor}
+          onCommit={(v) => setQuery((q) => ({ ...q, compFloor: v }))}
         />
         {isDegenerate && (
           <p className="text-xs text-content-tertiary">

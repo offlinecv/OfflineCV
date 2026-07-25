@@ -178,6 +178,32 @@ describe("makeBoardProvider — filter and cap run BEFORE hydration", () => {
     expect(hoisted.hydrateCalls).toHaveLength(DEFAULT_PER_COMPANY_CAP);
   });
 
+  it("(issue 563) excludes title-matched postings BEFORE the per-company cap, so they never consume a cap slot", async () => {
+    // DEFAULT_PER_COMPANY_CAP (8) rows that pass the "backend" role filter
+    // (title contains "backend") but should be excluded on title, followed by
+    // 3 real "Backend Engineer" rows. If exclusion ran AFTER the cap (or not
+    // at all), the 8 excluded rows would fill the cap and the 3 real roles
+    // would never be hydrated.
+    hoisted.board = [
+      ...Array.from({ length: DEFAULT_PER_COMPANY_CAP }, (_, i) =>
+        ghPosting(i, "Backend Solutions Architect"),
+      ),
+      ghPosting(100, "Senior Backend Engineer"),
+      ghPosting(101, "Staff Backend Engineer"),
+      ghPosting(102, "Backend Engineer, Payments"),
+    ];
+
+    const [provider] = makeBoardProviders([STRIPE], backendResume);
+    const results = await provider.search(
+      { ...query, excludeTerms: ["solutions architect"] },
+      signal,
+    );
+
+    expect(results.map((p) => p.id).sort()).toEqual(
+      ["greenhouse:stripe:100", "greenhouse:stripe:101", "greenhouse:stripe:102"].sort(),
+    );
+  });
+
   it("honours an explicit per-company cap", async () => {
     hoisted.board = Array.from({ length: 40 }, (_, i) =>
       ghPosting(i, "Backend Engineer"),

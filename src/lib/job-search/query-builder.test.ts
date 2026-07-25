@@ -33,7 +33,20 @@ describe("buildJobQuery", () => {
       skills: [],
       seniority: undefined,
       location: undefined,
+      excludeTerms: [],
     });
+  });
+
+  it("defaults excludeTerms to [] when no seeds are passed (issue 563)", () => {
+    expect(buildJobQuery(baseParsed()).excludeTerms).toEqual([]);
+    expect(
+      buildJobQuery(baseParsed({ skills: ["Python"] })).excludeTerms,
+    ).toEqual([]);
+  });
+
+  it("seeds excludeTerms verbatim from the passed seed list (issue 563)", () => {
+    const query = buildJobQuery(baseParsed(), ["solutions architect"]);
+    expect(query.excludeTerms).toEqual(["solutions architect"]);
   });
 
   it("seeds location from the parsed résumé's top-level location (#545)", () => {
@@ -51,6 +64,18 @@ describe("buildJobQuery", () => {
       "Denver, CO",
     );
     expect(buildJobQuery(baseParsed({ location: "   " })).location).toBeUndefined();
+  });
+
+  it("leaves families undefined when no familySeeds are passed (issue 568)", () => {
+    expect(buildJobQuery(baseParsed()).families).toBeUndefined();
+    expect(buildJobQuery(baseParsed(), ["solutions architect"]).families).toBeUndefined();
+  });
+
+  it("seeds families verbatim from the passed seed list, even an empty one (issue 568)", () => {
+    expect(buildJobQuery(baseParsed(), [], ["backend"]).families).toEqual(["backend"]);
+    // An explicit empty array is a real "user removed every chip" assertion,
+    // distinct from the undefined "never asserted" default above.
+    expect(buildJobQuery(baseParsed(), [], []).families).toEqual([]);
   });
 
   it("derives the distinct titles across experience, most-recent-first", () => {
