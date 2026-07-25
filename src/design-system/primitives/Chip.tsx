@@ -79,7 +79,14 @@ export function Chip({
           variant="icon"
           aria-label={removeLabel ?? "Remove"}
           onClick={onRemove}
-          className="shrink-0 text-content-muted hover:text-content-secondary"
+          // WCAG 2.2 SC 2.5.8 Target Size (Minimum, AA) needs a 24x24 CSS px
+          // hit area; the visible glyph + `icon` variant padding is ~14px
+          // (10px svg + p-0.5). `relative` + an invisible `after:` overlay
+          // expand the CLICKABLE area to 24x24 (5px on every side) without
+          // touching the control's visual size or the chip's layout box, so
+          // no row re-spacing is needed (#591). Measured zero-overlap against
+          // neighbouring chips in a real browser — see #591.
+          className="relative shrink-0 text-content-muted hover:text-content-secondary after:absolute after:-inset-[5px] after:content-['']"
         >
           <ChipRemoveIcon />
         </Button>

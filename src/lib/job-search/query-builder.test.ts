@@ -296,6 +296,30 @@ describe("buildJobQuery", () => {
     expect(query.skills).toEqual(["javascript", "react", "python"]);
   });
 
+  it("annotates which of the emitted skills are canonical names, and only those", () => {
+    // The fact `term-quality.ts` cannot recover on its own: a title-cased
+    // free-text phrase is indistinguishable from a canonical label downstream,
+    // and judging one as the other is what marked real skills weak.
+    const parsed = baseParsed({
+      skills: ["JS", "Team Building & Mentorship", "python3", "Engineering Leadership"],
+    });
+    const query = buildJobQuery(parsed);
+    expect(query.skills).toEqual([
+      "javascript",
+      "python",
+      "Team Building & Mentorship",
+      "Engineering Leadership",
+    ]);
+    expect(query.canonicalSkills).toEqual(["javascript", "python"]);
+  });
+
+  it("leaves canonicalSkills absent when no skill is a canonical name", () => {
+    // Absent means "not asserted", which readers treat as no standing to judge —
+    // never as "none are canonical, so all are weak".
+    const query = buildJobQuery(baseParsed({ skills: ["Engineering Leadership"] }));
+    expect(query.canonicalSkills).toBeUndefined();
+  });
+
   it("passes through an unrecognized skill verbatim (title-cased)", () => {
     const parsed = baseParsed({ skills: ["underwater basket weaving"] });
     const query = buildJobQuery(parsed);

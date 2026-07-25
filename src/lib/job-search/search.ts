@@ -69,6 +69,12 @@ import type { RankedJob } from "./rank.ts";
 import type { CompanyEntry } from "./company-registry.ts";
 import type { RoleFamily } from "./role-keywords.ts";
 import { mapWithConcurrency } from "./concurrency.ts";
+import {
+  isAdmittingTitleTerm,
+  isSignificantSkillTerm,
+  titleNoiseTokens,
+  titleTokens,
+} from "./query-terms.ts";
 import { refineSearchResult } from "./refine.ts";
 import { dedupKey } from "./raw-postings.ts";
 
@@ -117,53 +123,8 @@ function isSafeUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
 }
 
-/** Tokens too generic to carry query intent on their own. */
-const STOPWORDS = new Set([
-  "and", "or", "the", "of", "for", "with", "in", "at", "to", "on", "an", "a",
-]);
-
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * A skill term is significant enough to filter on when it is 3+ chars, or
- * shorter but symbol-bearing (`c#`, `c++`, `f#`, `.net`) — those are
- * unambiguous, whereas a bare 2-char alpha token (`ai`, `go`, `ml`) matches
- * most of a tech feed's prose and reduces `matchesQuery` to a pass-through.
- *
- * Accepted cost: bare `Go`, `R`, `AI`, `ML` stop contributing to admission.
- * This is acceptable because admission is an OR across all terms (dropping
- * one rarely empties a result set), `matchesQuery` never fails closed (an
- * empty pattern list admits everything), and the dropped term is still
- * rendered as a chip and still reaches the deep links — only its filtering
- * role is removed.
- */
-function isSignificantSkillTerm(term: string): boolean {
-  if (STOPWORDS.has(term)) return false;
-  if (term.length >= 3) return true;
-  return /[^a-z0-9]/.test(term);
-}
-
-/**
- * Split one title-ish string into this filter's title tokens: lowercased, split
- * on everything outside `a-z0-9+#.`, with leading/trailing dots stripped so
- * "Node.js." reads as `node.js`.
- *
- * Used for BOTH `query.titles` (the admission terms) and `query.titleNoise`
- * (#579, the tokens that must NOT admit), so the two are compared in exactly the
- * same token space. That matters: `titleNoise` is derived with
- * `role-keywords.ts`'s `tokenizeWords`, whose punctuation rule differs — "Acme
- * Corp." tokenizes as `corp.` there and `corp` here, and "Yahoo!" as `yahoo!`
- * there and `yahoo` here — so comparing the raw noise strings against these
- * tokens would silently miss every employer name carrying punctuation.
- */
-function titleTokens(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9+#.]+/)
-    .map((token) => token.replace(/^\.+|\.+$/g, ""))
-    .filter(Boolean);
 }
 
 /**
@@ -183,13 +144,17 @@ function titleTokens(text: string): string[] {
  * they are user-editable chips carrying a different signal, and the noise set is
  * derived from experience places/companies, not from the skills section.
  * `undefined` ⇒ no noise, byte-identical to pre-#579 admission.
+ *
+ * The token rules themselves live in `query-terms.ts` (a leaf module) rather
+ * than here, because `term-quality.ts` explains this admission decision to the
+ * user and must read the SAME rule — see that module's docblock.
  */
 function buildQueryTermPatterns(query: JobQuery): RegExp[] {
   const terms = new Set<string>();
-  const noise = new Set((query.titleNoise ?? []).flatMap(titleTokens));
+  const noise = titleNoiseTokens(query.titleNoise);
   for (const title of query.titles) {
     for (const term of titleTokens(title)) {
-      if (term.length < 3 || STOPWORDS.has(term) || noise.has(term)) continue;
+      if (!isAdmittingTitleTerm(term, noise)) continue;
       terms.add(term);
     }
   }

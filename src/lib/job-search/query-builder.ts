@@ -33,7 +33,10 @@
  * alias the same canonical skill (e.g. "JS" and "Javascript") collapse into
  * one. Skills that don't match a known canonical alias pass through verbatim
  * (title-cased raw string) rather than being dropped, so an unusual but real
- * skill still surfaces.
+ * skill still surfaces. Which of them were recognized is no longer discarded:
+ * it ships as `canonicalSkills`, because a title-cased free-text phrase is
+ * indistinguishable from a canonical label downstream and being judged as one
+ * is what made `term-quality.ts` call a real skill weak. See that field.
  *
  * Ranking (#541): a résumé's skills section is typically NOT already ordered
  * by relevance — an incidental early entry (a soft skill, a one-off tool) can
@@ -66,6 +69,7 @@ import { getSkillIndex } from "../jd-match/skills.ts";
 import { parseSeniorityLabel } from "./seniority.ts";
 export { parseSeniorityLabel };
 import { ROLE_KEYWORDS, tokenizeWords } from "./role-keywords.ts";
+import { normalizeSkillKey } from "./role-profiles.ts";
 
 export interface JobQuery {
   /** Distinct role titles, most-recent-first, deduped case-insensitively and
@@ -126,6 +130,29 @@ export interface JobQuery {
    *  `roleFilterForResume` already guarantees for an unclassified résumé) —
    *  never to zero results. */
   families?: string[];
+  /** The subset of `skills` — verbatim, same strings — that jd-match's canonical
+   *  skill index recognizes (#584 follow-up). It is the ANSWER TO ONE QUESTION a
+   *  downstream classifier cannot ask for itself: *is this chip a canonical skill
+   *  name, or free résumé prose?* `deriveSkills` already computes it (that is what
+   *  ranks canonical entries first) and used to throw it away, emitting a
+   *  title-cased raw phrase that looks exactly like a canonical label — so
+   *  `term-quality.ts` judged "Team Building & Mentorship" as if it were one and
+   *  called a real, on-role skill weak.
+   *
+   *  It travels on the query rather than being recomputed downstream because
+   *  `term-quality.ts` must not gain a runtime import of jd-match (its own
+   *  docblock and `role-profiles.ts`'s draw that boundary — it keeps the skill
+   *  dictionary out of the `/` entry chunk). Data, not a dependency.
+   *
+   *  `undefined` ⇒ NOT ASSERTED, and every reader must treat that as "no basis to
+   *  judge any skill", never as "none are canonical and all are therefore weak" —
+   *  see `assessQueryTerms`. Emitted only when non-empty, the same optional-field
+   *  contract as `titleNoise`, so a hand-built query literal keeps compiling and
+   *  an existing whole-object assertion keeps passing.
+   *
+   *  NOT EGRESS. `providers/keywords.ts` — the sole resume-derived egress helper —
+   *  reads `titles` and `skills` only; no adapter serializes the query object. */
+  canonicalSkills?: string[];
   /** Lowercased tokens that appear in the résumé's own experience LOCATIONS and
    *  COMPANY names — geography/employer words that ride along inside a role
    *  title ("Berlin Site Lead", "Acme Cloud Lead") and would otherwise score as
@@ -270,6 +297,60 @@ function deriveSkills(parsed: ResumeQueryInput): string[] {
   return ranked.slice(0, MAX_SKILLS).map((entry) => entry.label);
 }
 
+/**
+ * Every comparison key jd-match's dictionary recognizes — each alias, each
+ * canonical id, and each display label, all through `normalizeSkillKey`. Built
+ * once, lazily, so importing this module still costs nothing until a query is
+ * actually built.
+ *
+ * Keyed rather than looked up through `aliasToId` directly on purpose: that map
+ * is keyed on the RAW lowercased alias, so it misses a label that is not itself
+ * an alias ("CI/CD" for `ci-cd`) and any separator variant ("Team-Building").
+ * `normalizeSkillKey` is the same folding `term-quality.ts` compares with, so
+ * "is this canonical" and "does this match what the role expects" can never
+ * disagree about whether two spellings are the same skill.
+ */
+let canonicalSkillKeys: ReadonlySet<string> | undefined;
+function getCanonicalSkillKeys(): ReadonlySet<string> {
+  if (!canonicalSkillKeys) {
+    const index = getSkillIndex();
+    const keys = new Set<string>();
+    const add = (value: string) => {
+      const key = normalizeSkillKey(value);
+      if (key) keys.add(key);
+    };
+    for (const [alias, id] of index.aliasToId) {
+      add(alias);
+      add(id);
+    }
+    for (const label of index.idToLabel.values()) add(label);
+    canonicalSkillKeys = keys;
+  }
+  return canonicalSkillKeys;
+}
+
+/**
+ * The entries of `skills` that name a canonical jd-match skill, verbatim and in
+ * input order — the value of `JobQuery.canonicalSkills` (see that field for why
+ * the fact travels on the query at all).
+ *
+ * Exported because the query is EDITABLE: a chip the user types has to be
+ * annotated the same way a derived one was, or the annotation would silently
+ * describe only the original parse. `JobQueryEditor` recomputes the whole list
+ * through this same function on every skill add, so there is one rule, not two.
+ * Pure and total — non-string entries are dropped rather than coerced.
+ */
+export function canonicalSkillLabels(skills: readonly string[] | undefined): string[] {
+  const keys = getCanonicalSkillKeys();
+  const out: string[] = [];
+  for (const skill of skills ?? []) {
+    if (typeof skill !== "string") continue;
+    const key = normalizeSkillKey(skill);
+    if (key && keys.has(key)) out.push(skill);
+  }
+  return out;
+}
+
 function deriveLocation(parsed: ResumeQueryInput): string | undefined {
   const location = parsed.location?.trim();
   return location || undefined;
@@ -380,9 +461,23 @@ export function buildJobQuery(
   // Primary title first, then fall back across the rest of the titles (#540).
   const seniority = deriveSeniorityAcrossTitles(titles);
   const skills = deriveSkills(parsed);
+  // Annotated from the EMITTED labels, not from `deriveSkills`' internal flag:
+  // that flag reads `aliasToId` on the raw résumé string, while every downstream
+  // comparison is against the label this function actually ships. Annotating the
+  // shipped value is what makes the two agree by construction.
+  const canonical = canonicalSkillLabels(skills);
   const location = deriveLocation(parsed);
   const excludeTerms = [...excludeTermSeeds];
   const families = familySeeds === undefined ? undefined : [...familySeeds];
   const titleNoise = deriveTitleNoise(parsed);
-  return { titles, skills, seniority, location, excludeTerms, families, titleNoise };
+  return {
+    titles,
+    skills,
+    canonicalSkills: canonical.length > 0 ? canonical : undefined,
+    seniority,
+    location,
+    excludeTerms,
+    families,
+    titleNoise,
+  };
 }
