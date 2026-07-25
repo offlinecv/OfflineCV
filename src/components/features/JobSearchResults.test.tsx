@@ -6,8 +6,10 @@
 /**
  * Render coverage for JobSearchResults (#319) — the five-state Results region.
  * Drives each SearchPhase directly (idle / loading / failed / loaded) plus the
- * loaded sub-branches inside `Loaded` (results, capped list, empty, partial
+ * loaded sub-branches inside `Loaded` (results, paged list, empty, partial
  * degrade, total degrade → hard error) so every state from UX spec §2 renders.
+ * The paging assertions are the regression guard for the old `RENDER_CAP`: they
+ * check the 21st match is REACHABLE, not merely that a footnote counts it.
  * Real `RankedJob`s built via `rankPostings`; raw createRoot + act.
  */
 
@@ -82,6 +84,19 @@ function loaded(
 let container: HTMLDivElement;
 let root: Root;
 
+/** Pagination controls, found by their visible label inside the results nav. */
+function navButton(el: HTMLElement, text: string): HTMLButtonElement {
+  const nav = el.querySelector("nav");
+  const button = [...(nav?.querySelectorAll("button") ?? [])].find((b) =>
+    b.textContent?.includes(text),
+  );
+  if (!button) throw new Error(`no "${text}" button in the pagination nav`);
+  return button as HTMLButtonElement;
+}
+
+const prevButton = (el: HTMLElement) => navButton(el, "Prev");
+const nextButton = (el: HTMLElement) => navButton(el, "Next");
+
 function render(phase: SearchPhase) {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -122,10 +137,68 @@ describe("JobSearchResults", () => {
     expect(el.querySelectorAll("h3").length).toBe(2);
   });
 
-  it("caps the rendered list at 20 and notes the cap", () => {
+  it("pages the list instead of capping it — page 1 shows the first 20 of 25", () => {
     const el = render({ kind: "loaded", result: loaded(25) });
     expect(el.querySelectorAll("h3").length).toBe(20);
-    expect(el.textContent).toContain("Showing the top 20 of 25");
+    expect(el.textContent).toContain("Showing 1–20 of 25 matches");
+    // No "narrow the query" instruction: every match is reachable by paging.
+    expect(el.textContent).not.toContain("Narrow the query");
+    const nav = el.querySelector("nav");
+    expect(nav?.getAttribute("aria-label")).toContain("page 1 of 2");
+    // Prev is unreachable on the first page; Next is not.
+    expect(prevButton(el).disabled).toBe(true);
+    expect(nextButton(el).disabled).toBe(false);
+  });
+
+  it("Next reveals the REMAINING matches — the tail is not discarded", () => {
+    const el = render({ kind: "loaded", result: loaded(25) });
+    act(() => nextButton(el).click());
+
+    expect(el.querySelectorAll("h3").length).toBe(5);
+    expect(el.textContent).toContain("Showing 21–25 of 25 matches");
+    // Postings 20–24 are exactly the ones page 1 could never show.
+    expect(el.textContent).toContain("React Engineer 20");
+    expect(el.textContent).toContain("React Engineer 24");
+    expect(el.textContent).not.toContain("React Engineer 0★");
+    expect(nextButton(el).disabled).toBe(true);
+    expect(prevButton(el).disabled).toBe(false);
+  });
+
+  it("a numbered jump goes straight to that page", () => {
+    const el = render({ kind: "loaded", result: loaded(45) });
+    const page3 = [...el.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Page 3",
+    ) as HTMLButtonElement;
+    act(() => page3.click());
+
+    expect(el.textContent).toContain("Showing 41–45 of 45 matches");
+    expect(page3.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("a single page renders no pagination control at all", () => {
+    const el = render({ kind: "loaded", result: loaded(20) });
+    expect(el.querySelectorAll("h3").length).toBe(20);
+    expect(el.querySelector("nav")).toBeNull();
+    expect(el.textContent).not.toContain("Showing 1–20");
+  });
+
+  it("a new, shorter result set resets the page instead of showing nothing", () => {
+    const el = render({ kind: "loaded", result: loaded(45) });
+    act(() => nextButton(el).click());
+    expect(el.textContent).toContain("Showing 21–40 of 45");
+
+    // Same component, new result identity (a fresh Search or a live re-rank).
+    act(() => {
+      root.render(
+        createElement(JobSearchResults, {
+          phase: { kind: "loaded", result: loaded(3) },
+          onRetry: () => {},
+        }),
+      );
+    });
+
+    expect(el.querySelectorAll("h3").length).toBe(3);
+    expect(el.querySelector("nav")).toBeNull();
   });
 
   it("loaded with a partial degrade notes the missing feed", () => {

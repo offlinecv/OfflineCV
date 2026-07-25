@@ -1,9 +1,11 @@
 # CLAUDE.md — job-search lane
 
-Query builder → provider search → rank by resume fit → deep links. Rides inside the
-main page (`FindJobsPanel`), not a separate HTML entry. Consumes the parsed resume,
-never the raw PDF. Read the root `CLAUDE.md` first; this file adds only the
-lane-specific rules that are silent to break.
+Query builder → provider search → rank by resume fit → deep links. Owns its own HTML
+entry, `/jobs/` (`jobs/index.html` → `src/jobs/JobsApp.tsx` → `FindJobsPanel`); `/`
+keeps only `FindJobsLauncher`, which hands the parse over through
+`src/lib/jobs-handoff.ts`. Consumes the parsed resume, never the raw PDF — this
+surface cannot parse a PDF at all. Read the root `CLAUDE.md` first; this file adds
+only the lane-specific rules that are silent to break.
 
 ## Privacy invariant (hard)
 

@@ -64,12 +64,13 @@
 
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { JobQuery } from "./query-builder.ts";
-import type { JobPosting } from "./types.ts";
+import type { JobPosting, JobProvider } from "./types.ts";
 import type { RankedJob } from "./rank.ts";
 import type { CompanyEntry } from "./company-registry.ts";
 import type { RoleFamily } from "./role-keywords.ts";
 import { mapWithConcurrency } from "./concurrency.ts";
 import { refineSearchResult } from "./refine.ts";
+import { dedupKey } from "./raw-postings.ts";
 
 /**
  * Providers fetched at once. Bounds the burst when company boards join the
@@ -109,17 +110,6 @@ export interface JobSearchResult {
    *  control edit (role family, target level, exclude term, comp floor,
    *  location) for a LIVE re-rank with no new fetch. */
   rawPostings: JobPosting[];
-}
-
-/** Normalized dedup key: each of title/company lowercased and
- *  whitespace-collapsed independently, then joined — so trailing/among-word
- *  spacing differences between feeds collapse to the same key. */
-function normalizeField(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function dedupKey(posting: JobPosting): string {
-  return `${normalizeField(posting.title)}::${normalizeField(posting.company)}`;
 }
 
 /** Only ever render feed-supplied urls that are plain web links. */
@@ -172,6 +162,50 @@ function matchesQuery(posting: JobPosting, patterns: RegExp[]): boolean {
 }
 
 /**
+ * Fetch `providers` concurrently and reduce them to one deduped, url-safe,
+ * query-matched posting list plus the labels that failed.
+ *
+ * Shared by the full search and the incremental company-board fetch so both
+ * apply the SAME three admission rules (url trust boundary, `matchesQuery`,
+ * cross-provider dedup). A second copy of this loop is how an incrementally
+ * added board would start admitting postings the main search would have
+ * rejected.
+ */
+async function fanOut(
+  providers: readonly JobProvider[],
+  query: JobQuery,
+  signal: AbortSignal,
+): Promise<{ merged: JobPosting[]; degradedProviders: string[] }> {
+  const settled = await mapWithConcurrency(
+    providers,
+    PROVIDER_CONCURRENCY,
+    (p) => p.search(query, signal),
+  );
+
+  const degradedProviders: string[] = [];
+  const seen = new Set<string>();
+  const merged: JobPosting[] = [];
+  const termPatterns = buildQueryTermPatterns(query);
+
+  settled.forEach((outcome, i) => {
+    if (outcome.status === "rejected") {
+      degradedProviders.push(providers[i].label);
+      return;
+    }
+    for (const posting of outcome.value) {
+      if (!isSafeUrl(posting.url)) continue;
+      if (!matchesQuery(posting, termPatterns)) continue;
+      const key = dedupKey(posting);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(posting);
+    }
+  });
+
+  return { merged, degradedProviders };
+}
+
+/**
  * Run the search. Never rejects on a provider failure — inspect the returned
  * `degradedProviders` / `providerCount` for partial or total failure. May
  * reject only if the dynamic chunk import itself fails (offline first-load);
@@ -199,31 +233,7 @@ export async function searchJobs(
       : [];
 
   const providers = getProviders(companyProviders);
-  const settled = await mapWithConcurrency(
-    providers,
-    PROVIDER_CONCURRENCY,
-    (p) => p.search(query, signal),
-  );
-
-  const degradedProviders: string[] = [];
-  const seen = new Set<string>();
-  const merged: JobPosting[] = [];
-  const termPatterns = buildQueryTermPatterns(query);
-
-  settled.forEach((outcome, i) => {
-    if (outcome.status === "rejected") {
-      degradedProviders.push(providers[i].label);
-      return;
-    }
-    for (const posting of outcome.value) {
-      if (!isSafeUrl(posting.url)) continue;
-      if (!matchesQuery(posting, termPatterns)) continue;
-      const key = dedupKey(posting);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.push(posting);
-    }
-  });
+  const { merged, degradedProviders } = await fanOut(providers, query, signal);
 
   // Role families (#568) + title-only exclude terms (#563), applied once over
   // the FULL merged set, and ranked — see `refine.ts`'s docblock for why this
@@ -233,4 +243,49 @@ export async function searchJobs(
   // `refineSearchResult` again, locally, on every subsequent refinement-
   // control edit — this is the same pipeline, just the FIRST run of it.
   return refineSearchResult(merged, parsed, query, degradedProviders, providers.length);
+}
+
+/** What an incremental company-board fetch adds to an existing snapshot. */
+export interface CompanyBoardFetch {
+  /** Url-safe, `matchesQuery`-passing, internally-deduped postings from the
+   *  requested boards — NOT yet merged against the caller's snapshot
+   *  (`mergeRawPostings` in `raw-postings.ts` does that). */
+  postings: JobPosting[];
+  /** Labels of the requested boards that failed, to append to the snapshot's. */
+  degradedProviders: string[];
+  /** How many boards were attempted, to add to the snapshot's denominator. */
+  providerCount: number;
+}
+
+/**
+ * Fetch ONLY the given company boards — no keyless feeds, no ranking.
+ *
+ * The narrow counterpart to `searchJobs`, for the case where a result set already
+ * exists and the user selected a company that wasn't part of it. Re-running the
+ * whole search would refetch every keyless feed and every already-searched board
+ * to learn one board's postings; this fetches the one board (usually from the
+ * IndexedDB board cache — see `makeBoardProvider`) and leaves merging and ranking
+ * to the caller, which already holds the snapshot.
+ *
+ * Same never-rejects-on-provider-failure contract as `searchJobs`: a board that
+ * fails comes back as a label in `degradedProviders`.
+ */
+export async function searchCompanyBoards(
+  query: JobQuery,
+  parsed: HeuristicParsedResume,
+  signal: AbortSignal,
+  companies: readonly CompanyEntry[],
+): Promise<CompanyBoardFetch> {
+  if (companies.length === 0) {
+    return { postings: [], degradedProviders: [], providerCount: 0 };
+  }
+  const { makeBoardProviders } = await import("./company-boards.ts");
+  const providers = makeBoardProviders(
+    companies,
+    parsed,
+    undefined,
+    query.families as RoleFamily[] | undefined,
+  );
+  const { merged, degradedProviders } = await fanOut(providers, query, signal);
+  return { postings: merged, degradedProviders, providerCount: providers.length };
 }

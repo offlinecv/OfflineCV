@@ -25,6 +25,7 @@ export * from "./shared/CapabilityStrip.tsx";
 export * from "./shared/Card.tsx";
 export * from "./shared/InlineResult.tsx";
 export * from "./shared/ModelLoadProgress.tsx";
+export * from "./shared/Pagination.tsx";
 export * from "./shared/StatusBadge.tsx";
 export * from "./shared/Tabs.tsx";
 export * from "./shared/CountBadge.tsx";

@@ -2,41 +2,70 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * FindJobsPanel — first slice of the job-search lane (#318). Builds a search
- * query from the parsed resume, lets the user edit it, and renders inert
- * deep-link buttons to major job boards. Zero network calls: deep links open
- * in a new tab under the user's own navigation; nothing here fetches.
+ * FindJobsPanel — the job-search workbench body, the whole of `/jobs/`.
  *
- * This is the STABLE SKELETON for the whole "Find Jobs" panel arc (epic
- * #317): header + Query block + Actions row (see the UX spec at
- * `find-jobs-ux-spec.md`). Slice #319 appends a Search button + Results
- * region below the Actions row; slice #320 appends a BYOK footer. Neither
- * restructures what this slice ships — only append here.
+ * It used to be a tab on `/` with the results stacked underneath the query, at
+ * the bottom of a long parser-audit page. Results moved to their own entry
+ * (`jobs/index.html`) because a ranked list of dozens of postings is a
+ * destination, not a footnote: it needs a URL you can reload, its own scroll,
+ * and the full page width. `/` keeps `FindJobsLauncher`, which hands the parse
+ * over via `lib/jobs-handoff.ts`.
  *
- * The query is local, scratch-editable state seeded once from the parse; it
- * intentionally does NOT write back into the résumé override model
- * (useEditableParse) — editing the search query is not editing the résumé.
+ * LAYOUT: full-width bands stacked down the page, never a sidebar. Reading order
+ * is the order of the work — who we search, then what we search for, then what we
+ * found:
+ *
+ *  1. **Company targets, permanent.** The one query control that stays visible
+ *     with the results. It's the axis users retune WHILE reading postings ("drop
+ *     that one, add this one"), and #533's toggle is now live against an existing
+ *     result set, so hiding it behind a fold would bury the panel's most
+ *     immediate feedback loop.
+ *  2. **The rest of the query, foldable.** Titles, skills, location, level,
+ *     excludes, pay floor, external boards — a form, worth the full page width
+ *     while being filled in and worth none of it afterwards. Folded, it is a
+ *     one-line `JobQuerySummary` + Search again.
+ *  3. **Results**, owning the full width.
+ *
+ * Folding on submit rather than on the first successful result is deliberate:
+ * the transition is then tied to the user's own click, so it never happens under
+ * their cursor a second later, and the loading skeleton already gets the full
+ * width it will render results into. A failed search stays folded too — its
+ * error state carries Retry, and Edit search is one click away.
+ *
+ * Nothing is sticky. With the company chips permanently on top, a pinned band
+ * would be ~3 chip rows tall and would cost more viewport on every scroll than
+ * the Search button it keeps in reach is worth.
+ *
+ * #568's live re-rank means a refinement chip edited while the panel is open
+ * updates the results with no refetch, so re-opening the form over a results set
+ * is a cheap, non-destructive thing to do. The company selector is the one
+ * control that can outrun the results — removing a target re-filters live, but
+ * ADDING one needs its board fetched, which is what `PendingCompaniesNotice`
+ * offers rather than doing on the checkbox click.
+ *
+ * Still a layout shell: the query fields are `JobQueryEditor`, the deep links
+ * `ExternalBoardLinks`, the fetch lifecycle `useJobSearch`, the company picker
+ * `useCompanyTargets`. The query state is owned HERE because the editor, the
+ * ranking, and the re-rank effect all read it.
  */
 
 import { useMemo, useState } from "react";
-import { Button, EditableField } from "@design-system";
+import { Button } from "@design-system";
 import { buildJobQuery, type JobQuery } from "../../lib/job-search/query-builder.ts";
 import { buildDeepLinks } from "../../lib/job-search/deep-links.ts";
 import {
   roleFilterForResume,
   seedExcludeTermsForFamilies,
-  type RoleFamily,
 } from "../../lib/job-search/role-keywords.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import { JobSearchResults } from "./JobSearchResults.tsx";
-import { ChipListEditor } from "./ChipListEditor.tsx";
-import { CompFloorInput } from "./CompFloorInput.tsx";
-import { RoleFamilyChips } from "./RoleFamilyChips.tsx";
-import { LevelSelect } from "./LevelSelect.tsx";
+import { JobQueryEditor } from "./JobQueryEditor.tsx";
+import { JobQuerySummary } from "./JobQuerySummary.tsx";
+import { ExternalBoardLinks } from "./ExternalBoardLinks.tsx";
+import { PendingCompaniesNotice } from "./PendingCompaniesNotice.tsx";
 import { CompanyTargets } from "./CompanyTargets.tsx";
 import { useCompanyTargets } from "../../hooks/useCompanyTargets.ts";
 import { useJobSearch } from "../../hooks/useJobSearch.ts";
-import { AddPill } from "./ReconstructedAdd.tsx";
 
 interface FindJobsPanelProps {
   /** The live cascade's parsed résumé. `buildJobQuery` reads only titles/skills;
@@ -51,7 +80,7 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   // on mount); the user edits it from here. Exclude-term chips (#563) AND
   // role-family chips (#568) are seeded from the SAME role-family
   // classification the company-board pipeline derives — visibly, as ordinary
-  // removable chips below, never applied invisibly.
+  // removable chips, never applied invisibly.
   const [query, setQuery] = useState<JobQuery>(() => {
     const roleFilter = roleFilterForResume(parsed);
     return buildJobQuery(
@@ -60,190 +89,104 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
       roleFilter.families,
     );
   });
-  // Progressive disclosure for Seniority (#540): a résumé whose titles carry
-  // no recognized seniority keyword renders no inert placeholder field — the
-  // row appears only once a seniority was derived, or the user opts in via
-  // the "+ Seniority" pill.
-  const [seniorityExpanded, setSeniorityExpanded] = useState(false);
+
+  // Open until the first Search, then folded — see the docblock. Purely
+  // presentational, so it stays local rather than moving to a hook.
+  const [open, setOpen] = useState(true);
 
   const links = useMemo(() => buildDeepLinks(query), [query]);
   const isDegenerate = query.titles.length === 0 && query.skills.length === 0;
 
-  // ChipListEditor already trims + case-insensitively dedups before calling
-  // onAdd, so these handlers just append / filter the controlled list.
-  const addTitle = (title: string) =>
-    setQuery((q) => ({ ...q, titles: [...q.titles, title] }));
-  const removeTitle = (title: string) =>
-    setQuery((q) => ({ ...q, titles: q.titles.filter((t) => t !== title) }));
-
-  const addSkill = (skill: string) =>
-    setQuery((q) => ({ ...q, skills: [...q.skills, skill] }));
-  const removeSkill = (skill: string) =>
-    setQuery((q) => ({ ...q, skills: q.skills.filter((s) => s !== skill) }));
-
-  const addExcludeTerm = (term: string) =>
-    setQuery((q) => ({ ...q, excludeTerms: [...(q.excludeTerms ?? []), term] }));
-  const removeExcludeTerm = (term: string) =>
-    setQuery((q) => ({
-      ...q,
-      excludeTerms: (q.excludeTerms ?? []).filter((t) => t !== term),
-    }));
-
-  // Role families (#568): REMOVAL only — see RoleFamilyChips' doc for why
-  // there's no free-text add. Narrowing to an empty list is safe: readers
-  // resolve `families: []` to the permissive "all" filter, never zero results.
-  const removeRoleFamily = (family: RoleFamily) =>
-    setQuery((q) => ({
-      ...q,
-      families: (q.families ?? []).filter((f) => f !== family),
-    }));
-
-  const setLevel = (level: string | undefined) =>
-    setQuery((q) => ({ ...q, seniority: level }));
-
   // Sector-suggested companies whose ATS boards join the fan-out. Selecting
   // none is a supported state: the search falls back to the keyless feeds
-  // alone, exactly as it behaved before #533.
+  // alone, the same way it behaved before #533.
   const companyTargets = useCompanyTargets(parsed);
   const selectedCompanies = companyTargets.selected;
 
-  // Fetch lifecycle + #568's live re-rank — see the hook's own docblock.
-  const { phase, runSearch, isLoading } = useJobSearch(query, parsed, selectedCompanies);
+  // Fetch lifecycle, #568's live re-rank, and the asymmetric company handling
+  // (remove = live, add = a prompt) — see the hook's own docblock.
+  const {
+    phase,
+    runSearch,
+    isLoading,
+    pendingCompanies,
+    searchPendingCompanies,
+    isUpdating,
+  } = useJobSearch(query, parsed, selectedCompanies);
+  const hasSearched = phase.kind !== "idle";
+
+  const submit = () => {
+    setOpen(false);
+    runSearch();
+  };
 
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
-            Find jobs
-          </h2>
-          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
-            alpha
-          </span>
-        </div>
-        <p className="max-w-prose text-xs text-content-tertiary">
-          We built this search from your parsed resume. Edit it, then search
-          job boards. Your resume text never leaves this browser — only the
-          keywords below are sent.
-        </p>
-      </header>
-
-      <div className="flex flex-col gap-3">
-        <ChipListEditor
-          label="Titles"
-          items={query.titles}
-          onAdd={addTitle}
-          onRemove={removeTitle}
-          placeholder="Add a title…"
-          addAriaLabel="Add title"
-        />
-        {/* Role families (#568): seeded from the same classification the
-         *  company-board pipeline uses, removable so a fullstack résumé that
-         *  also matched `data` can drop it. */}
-        <RoleFamilyChips
-          families={(query.families ?? []) as RoleFamily[]}
-          onRemove={removeRoleFamily}
-        />
-        {/* Location (#545): always shown, unlike the target level's
-         *  AddPill-gated disclosure — location is a primary axis of every
-         *  job-board search form (not an auxiliary facet the way level is),
-         *  and a résumé with no parsed location still needs a visible place
-         *  to type one to get any location-aware ranking or deep-link
-         *  behavior at all. */}
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span className="text-xs text-content-tertiary">Location</span>
-          <EditableField
-            value={query.location}
-            placeholder="location"
-            label="Location"
-            onCommit={(v) =>
-              setQuery((q) => ({ ...q, location: v || undefined }))
-            }
-          />
-        </div>
-        {/* Target level (#562/#568): progressive disclosure, same pattern as
-         *  pre-#568 free-text Seniority — a résumé whose titles carry no
-         *  recognized level renders no inert control until the user opts in
-         *  via "+ Seniority". Changing the level re-runs the #562 rung-
-         *  distance penalty (live, via the refinement effect above). */}
-        {query.seniority || seniorityExpanded ? (
-          <LevelSelect value={query.seniority} onChange={setLevel} />
-        ) : (
-          <AddPill label="Target level" onClick={() => setSeniorityExpanded(true)} />
-        )}
-        <ChipListEditor
-          label="Skills"
-          items={query.skills}
-          onAdd={addSkill}
-          onRemove={removeSkill}
-          placeholder="Add a skill…"
-          addAriaLabel="Add skill"
-        />
-        {/* Exclude (#563): title-only — a posting is dropped when its TITLE
-         *  contains one of these, never when only its description does.
-         *  Removable chips may already be seeded from the role-family
-         *  classification (e.g. GTM/field roles for an engineering search). */}
-        <ChipListEditor
-          label="Exclude (title only)"
-          items={query.excludeTerms ?? []}
-          onAdd={addExcludeTerm}
-          onRemove={removeExcludeTerm}
-          placeholder="Add a title to exclude…"
-          addAriaLabel="Add exclude term"
-        />
-        <CompFloorInput
-          value={query.compFloor}
-          onCommit={(v) => setQuery((q) => ({ ...q, compFloor: v }))}
-        />
-        {isDegenerate && (
-          <p className="text-xs text-content-tertiary">
-            We couldn&apos;t derive a search from this resume — add a title or
-            skills above to search.
-          </p>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <span className="text-xs text-content-tertiary">
-          Search external boards
-        </span>
-        <div className="flex flex-wrap gap-2">
-          {links.map((link) => (
-            <a
-              key={link.label}
-              href={link.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-content-secondary transition-colors hover:bg-surface-subtle focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
-            >
-              {link.label}
-              <span aria-hidden="true">↗</span>
-            </a>
-          ))}
-        </div>
-        <p className="text-xs text-content-tertiary">
-          Only your search keywords are sent, and only when you click a link
-          above.
-        </p>
-      </div>
-
+      {/* Band 1 — the only query control that outlives the fold. */}
       <CompanyTargets targets={companyTargets} />
 
-      <div className="flex flex-col gap-2">
-        <div>
+      <section
+        aria-label="Job search query"
+        className="flex flex-col gap-3 border-y border-border-light py-3"
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? "Hide search details" : "Edit search"}
+          </Button>
+          {!open && (
+            <JobQuerySummary
+              query={query}
+              companyCount={selectedCompanies.length}
+            />
+          )}
           <Button
             variant="primary"
             size="md"
-            onClick={runSearch}
+            className="ml-auto"
+            onClick={submit}
             disabled={isDegenerate || isLoading}
           >
-            {isLoading ? "Searching…" : "Search jobs"}
+            {isLoading
+              ? "Searching…"
+              : hasSearched
+                ? "Search again"
+                : "Search jobs"}
           </Button>
         </div>
+
+        {/* Sits under the Search button rather than at the foot of the section:
+         *  the claim is about what THAT button does, and `ExternalBoardLinks`
+         *  carries its own (different) claim about the deep links. */}
         <p className="text-xs text-content-tertiary">
           Only your search keywords are sent, and only when you click Search.
         </p>
-      </div>
+
+        {open && (
+          <div className="flex flex-col gap-4">
+            <JobQueryEditor
+              query={query}
+              onChange={setQuery}
+              isDegenerate={isDegenerate}
+            />
+            <ExternalBoardLinks links={links} />
+          </div>
+        )}
+      </section>
+
+      {/* Only over an existing result set: before the first search every
+       *  selected company is unsearched, which is not news. */}
+      {phase.kind === "loaded" && (
+        <PendingCompaniesNotice
+          companies={pendingCompanies}
+          onSearch={searchPendingCompanies}
+          isUpdating={isUpdating}
+        />
+      )}
 
       <JobSearchResults phase={phase} onRetry={runSearch} />
     </div>
