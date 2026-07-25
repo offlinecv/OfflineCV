@@ -45,11 +45,11 @@ There is **no BYOK LLM provider in the tree** — `#320` is future; App.tsx / Ca
 
 ### Product lanes and entry points
 
-The build ships exactly two HTML entries (`vite.config.ts` `rollupOptions.input`):
+The build ships exactly three HTML entries (`vite.config.ts` `rollupOptions.input`):
 
 - **`/` (index.html)** — the parser-audit lane: drop → parse cascade → score → editable reconstructed resume (`ReconstructedResume` + `EditableField`) → Download PDF (`src/lib/pdf/render-ats-pdf.ts`). On-device WebLLM insights (parse disagreement, resume-quality critique, rewrite) layer on top when WebGPU is available (`src/lib/webllm/`).
 - **`/jd-fit/` (jd-fit/index.html)** — the JD-match lane: paste a JD, get requirement/evidence coverage (`src/lib/jd-match/`, semantic via WebLLM with keyword fallback) and JD-driven section rewrites. Resume state hands off from `/` via `src/lib/jd-fit-handoff.ts`.
-- The **job-search lane** (`src/lib/job-search/`: query builder → provider search → rank by resume fit → deep links) rides inside the main page (`FindJobsPanel`), not a third entry.
+- **`/jobs/` (jobs/index.html)** — the job-search lane (`src/lib/job-search/`: query builder → provider search → rank by resume fit → deep links). `FindJobsPanel` is the whole page: a full-width query form that folds into a sticky one-line summary (`JobQuerySummary`) the moment Search is clicked, with the paged ranked results owning the full width below it. The parsed résumé arrives from `/` via `src/lib/jobs-handoff.ts` (sessionStorage, read but NOT consumed, so a reload survives); `/` keeps only `FindJobsLauncher`, which stashes the parse and navigates. This surface has no DropZone — parsing is `/`'s job.
 
 `jd-spike.html` and `eval-rewrite.html` are dev-only harnesses, deliberately excluded from the production build.
 

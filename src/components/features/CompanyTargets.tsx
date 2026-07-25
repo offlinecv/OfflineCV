@@ -96,12 +96,15 @@ export function CompanyTargets({ targets }: { targets: CompanyTargetsState }) {
       {/* #542: large employers with self-hosted careers sites (Apple, Google,
        *  Meta, …) aren't on Greenhouse/Lever/Ashby, so they can never appear
        *  in this list — a structural boundary of the three-vendor design, not
-       *  a curation gap. "Search external boards" above (LinkedIn / Indeed /
-       *  Google Jobs) is the intended path to those. */}
+       *  a curation gap. "Search external boards" (LinkedIn / Indeed / Google
+       *  Jobs) is the intended path to those. No "above"/"below" here: this
+       *  block is pinned to the top of `/jobs/` while the board links live in
+       *  the foldable search details, so any direction word would be wrong
+       *  half the time. */}
       <p className="max-w-prose text-xs text-content-tertiary">
         Large employers with their own careers site (e.g. Apple, Google,
-        Meta) aren&apos;t reachable here — find them via the external boards
-        above.
+        Meta) aren&apos;t reachable here — find them via the external board
+        links in the search details.
       </p>
     </div>
   );

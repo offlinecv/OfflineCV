@@ -25,13 +25,13 @@ const queue: Array<[string, Record<string, unknown>]> = [];
 /**
  * Which root surface emitted an event (#226 / #52). `/` (main.tsx) is the
  * parser audit; `/jd-fit` (jd-fit/main.tsx) is the JD-match + JD-driven rewrite
- * surface. Each entry calls `setAnalyticsSurface` once at boot; every `track()`
- * stamps the value so the two products are distinguishable in PostHog without a
- * whole event-category system. Defaults to "parser" so an un-tagged caller (or
+ * surface; `/jobs` (jobs/main.tsx) is the job-search workbench. Each entry calls
+ * `setAnalyticsSurface` once at boot; every `track()` stamps the value so the
+ * surfaces are distinguishable in PostHog without a whole event-category system. Defaults to "parser" so an un-tagged caller (or
  * a test) attributes to the original surface. Dead-code-safe: when
  * VITE_POSTHOG_KEY is unset, `track()` short-circuits before reading this.
  */
-export type AnalyticsSurface = "parser" | "jd-fit";
+export type AnalyticsSurface = "parser" | "jd-fit" | "jobs";
 let surface: AnalyticsSurface = "parser";
 
 /** Tag every subsequent event with the emitting surface. Call once at boot. */

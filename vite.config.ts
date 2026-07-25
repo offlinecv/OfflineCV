@@ -157,6 +157,7 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         jdFit: fileURLToPath(new URL("./jd-fit/index.html", import.meta.url)),
+        jobs: fileURLToPath(new URL("./jobs/index.html", import.meta.url)),
       },
     },
   },
