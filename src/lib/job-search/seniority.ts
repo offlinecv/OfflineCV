@@ -54,6 +54,45 @@ export const SENIORITY_LADDER: Readonly<Record<string, number>> = {
   Executive: 9, // > VP
 };
 
+const SENIORITY_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
+  // Leadership/exec tier (#540) — most specific/senior first.
+  { label: "Executive", pattern: /\bco-?founder\b|\bfounder\b/i },
+  { label: "Executive", pattern: /\bchief\s+.+?\s+officer\b/i },
+  { label: "Executive", pattern: /\bceo\b|\bcto\b|\bcfo\b|\bcoo\b|\bcio\b|\bcmo\b|\bciso\b|\bcxo\b/i },
+  { label: "VP", pattern: /\bsvp\b|\bsenior\s+vice\s+president\b/i },
+  { label: "VP", pattern: /\bevp\b|\bexecutive\s+vice\s+president\b/i },
+  { label: "VP", pattern: /\bvp\b|\bvice\s+president\b/i },
+  { label: "Director", pattern: /\bdirector\b|\bhead\s+of\b/i },
+  { label: "Manager", pattern: /\bmanager\b/i },
+  // "Chief of Staff" is an exec/leadership role, not the IC "Staff" rung — it
+  // lacks the trailing "officer" the generic Chief row requires, so it must be
+  // caught explicitly ABOVE the IC ladder or it falls through to `\bstaff\b`.
+  { label: "Executive", pattern: /\bchief\s+of\s+staff\b/i },
+  // IC ladder (original #539 table) — specific before general.
+  { label: "Staff", pattern: /\bstaff\b/i },
+  { label: "Principal", pattern: /\bprincipal\b/i },
+  { label: "Lead", pattern: /\blead\b/i },
+  { label: "Senior", pattern: /\bsenior\b|\bsr\.?\b/i },
+  { label: "Junior", pattern: /\bjunior\b|\bjr\.?\b/i },
+  { label: "Intern", pattern: /\bintern(?:ship)?\b/i },
+];
+
+/**
+ * Parse a single seniority label out of one title by walking `SENIORITY_PATTERNS`
+ * top-to-bottom (first match wins — see that table's ordering notes). Returns
+ * `undefined` when the title carries no recognized level keyword.
+ *
+ * Exported (#562) so the ranker can parse a level out of a *posting* title with
+ * the exact same table the query derivation uses — no second taxonomy. Also the
+ * fn #565/#568 reuse for their own title-side level reads.
+ */
+export function parseSeniorityLabel(title: string): string | undefined {
+  for (const { label, pattern } of SENIORITY_PATTERNS) {
+    if (pattern.test(title)) return label;
+  }
+  return undefined;
+}
+
 /**
  * The ladder position of a seniority `label`, or `undefined` when the label is
  * absent or not a recognized rung. `undefined` is the neutral case the ranker
@@ -80,3 +119,4 @@ export function seniorityRungDistance(
   if (ra === undefined || rb === undefined) return undefined;
   return Math.abs(ra - rb);
 }
+

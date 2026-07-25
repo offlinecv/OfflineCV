@@ -69,4 +69,13 @@ describe("summarizeQuery", () => {
       "anywhere",
     );
   });
+
+  it("omits the companies clause when companyCount is not provided", () => {
+    // The `/` launcher (#581) has no `useCompanyTargets` result to report —
+    // `undefined` means "not computed here", distinct from the `/jobs/`
+    // editor's genuine "0 companies selected".
+    const summary = summarizeQuery({ ...base, titles: ["Designer"] });
+    expect(summary).toEqual(["Designer", "anywhere"]);
+    expect(summary.join(" · ")).not.toMatch(/compan/);
+  });
 });

@@ -68,10 +68,13 @@ describe("FindJobsLauncher", () => {
   it("previews the derived query terms without an editor", () => {
     const el = render({ parsed });
     expect(el.textContent).toContain("Starting from these terms");
-    // `buildJobQuery` lowercases skill terms, so the preview shows what will
-    // actually be searched, not the résumé's casing.
+    // The title is listed in full — no silent cut (#581).
     expect(el.textContent).toContain("Staff Frontend Engineer");
+    // `buildJobQuery` lowercases skill terms, so the preview shows what will
+    // actually be searched, not the résumé's casing. Skills render as one
+    // exemplar + an honest count, e.g. "react +2" — never a bare "+9".
     expect(el.textContent).toContain("react");
+    expect(el.textContent).toContain("+2");
     // No chip-add inputs here — editing belongs to /jobs/ only.
     expect(el.querySelectorAll("input").length).toBe(0);
   });
