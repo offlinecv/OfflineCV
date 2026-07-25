@@ -137,6 +137,97 @@ describe("searchJobs", () => {
     expect(ids).toEqual(["alpha:skill", "alpha:title"]);
   });
 
+  it("(#578) drops a 2-char alpha skill from the significance gate — 'AI' no longer admits on description alone", async () => {
+    const aiSkillQuery: JobQuery = { titles: ["Frontend Engineer"], skills: ["AI"] };
+    holder.providers = [
+      provider("alpha", async () => [
+        // Title is unrelated to the query and the ONLY hit is "AI" in the
+        // description — pre-fix, the bare 2-char skill admitted this.
+        posting({
+          id: "alpha:ai-only",
+          title: "Warehouse Associate",
+          description: "We use AI to route packages.",
+        }),
+      ]),
+    ];
+    const res = await searchJobs(aiSkillQuery, parsed, new AbortController().signal);
+    expect(res.jobs).toEqual([]);
+  });
+
+  it("(#578) keeps symbol-bearing short skills like 'c#' and '.net' significant", async () => {
+    const symbolSkillQuery: JobQuery = { titles: ["Frontend Engineer"], skills: ["c#", ".net"] };
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({
+          id: "alpha:csharp",
+          title: "Backend Developer",
+          description: "You will write c# services on .net.",
+        }),
+      ]),
+    ];
+    const res = await searchJobs(symbolSkillQuery, parsed, new AbortController().signal);
+    expect(res.jobs.map((j) => j.posting.id)).toEqual(["alpha:csharp"]);
+  });
+
+  it("(#578) never fails closed: a query whose every term is insignificant still admits everything", async () => {
+    const degenerateQuery: JobQuery = { titles: ["a of"], skills: ["ai", "ml", "go"] };
+    holder.providers = [
+      provider("alpha", async () => [posting({ id: "alpha:anything", title: "Anything Goes" })]),
+    ];
+    const res = await searchJobs(degenerateQuery, parsed, new AbortController().signal);
+    expect(res.jobs.map((j) => j.posting.id)).toEqual(["alpha:anything"]);
+  });
+
+  it("(#579) a posting matching only on a titleNoise place token is no longer admitted", async () => {
+    // The résumé's title carries its own city, so `berlin` is derived noise —
+    // it must not ADMIT a posting that shares no role word.
+    const noisyTitleQuery: JobQuery = {
+      titles: ["Berlin Site Lead"],
+      skills: [],
+      titleNoise: ["berlin"],
+    };
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({
+          id: "alpha:place-only",
+          title: "Warehouse Associate",
+          description: "Our Berlin office is hiring.",
+        }),
+        // A real role-word match on the same query still gets through.
+        posting({
+          id: "alpha:role",
+          title: "Site Lead",
+          description: "Run the facility.",
+        }),
+      ]),
+    ];
+    const res = await searchJobs(noisyTitleQuery, parsed, new AbortController().signal);
+    expect(res.jobs.map((j) => j.posting.id)).toEqual(["alpha:role"]);
+  });
+
+  it("(#579) an employer token carrying punctuation is normalized into the same token space", async () => {
+    // `buildJobQuery` tokenizes "Acme Corp." with role-keywords' tokenizer,
+    // which keeps the trailing dot (`corp.`); this filter's own title tokenizer
+    // strips it (`corp`). The noise set must be normalized or the skip silently
+    // never fires.
+    const punctuatedNoiseQuery: JobQuery = {
+      titles: ["Acme Corp. Cloud Lead"],
+      skills: [],
+      titleNoise: ["acme", "corp."],
+    };
+    holder.providers = [
+      provider("alpha", async () => [
+        posting({
+          id: "alpha:employer-only",
+          title: "Warehouse Associate",
+          description: "A subsidiary of Acme Corp.",
+        }),
+      ]),
+    ];
+    const res = await searchJobs(punctuatedNoiseQuery, parsed, new AbortController().signal);
+    expect(res.jobs).toEqual([]);
+  });
+
   it("keeps postings matching ANY title token, not just the primary title (#539)", async () => {
     // A leadership résumé: primary title is an exec title, a prior title is an
     // IC/engineering-leadership one. Postings for the SECOND title must survive.

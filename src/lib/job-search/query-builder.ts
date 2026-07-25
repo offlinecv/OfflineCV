@@ -50,10 +50,22 @@
  * only ranking proves too coarse in practice. Capped at MAX_SKILLS after
  * ranking, so the cap drops the least-relevant tail instead of an arbitrary
  * one.
+ *
+ * Title noise (#579): site-lead and regional-lead titles carry a GEOGRAPHY or
+ * EMPLOYER word inside the title itself ("Berlin Site Lead", "Acme Cloud
+ * Lead"), and the title scorer paid that word the same weight as a real role
+ * word — deciding, upstream of the star rating, which postings survived
+ * `capPerCompany`. Rather than ship a gazetteer, `titleNoise` is derived from
+ * the résumé's OWN experience locations and company names, which we already
+ * parse. See that field's doc and `deriveTitleNoise` for the required guard
+ * rail that keeps a genuine role word out of the noise set.
  */
 
 import type { ParsedResume } from "../score/types.ts";
 import { getSkillIndex } from "../jd-match/skills.ts";
+import { parseSeniorityLabel } from "./seniority.ts";
+export { parseSeniorityLabel };
+import { ROLE_KEYWORDS, tokenizeWords } from "./role-keywords.ts";
 
 export interface JobQuery {
   /** Distinct role titles, most-recent-first, deduped case-insensitively and
@@ -82,11 +94,13 @@ export interface JobQuery {
    *  literal across the lane's tests keeps compiling unchanged; every reader
    *  MUST treat `undefined` the same as `[]` — see `filterPostingsByExcludeTerms`
    *  in `role-keywords.ts`, the sole place that applies it. Not derived here:
-   *  `buildJobQuery`'s caller (`FindJobsPanel`) seeds it from the role-family
+   *  these are user-editable chips, so their seed is the CALLER's to choose —
+   *  `buildJobQuery`'s caller (`FindJobsPanel`) computes it from the role-family
    *  classification (`seedExcludeTermsForFamilies` in `role-keywords.ts`) and
-   *  passes the result in, so this module stays free of a runtime dependency
-   *  on `role-keywords.ts` (which already depends on this module for
-   *  `parseSeniorityLabel` — importing back would cycle the two). */
+   *  passes the result in. (This module used to justify the seed parameter by
+   *  staying free of any runtime dependency on `role-keywords.ts`; #579's
+   *  `titleNoise` guard rail made that dependency necessary, so the seed pattern
+   *  now stands on the "user-editable state belongs to its UI" reason alone.) */
   excludeTerms?: string[];
   /** Optional user-entered minimum ANNUAL compensation (#564) — a SOFT
    *  signal only, following the #545/#561/#562 precedent: `rank.ts` reads it
@@ -101,8 +115,8 @@ export interface JobQuery {
    *  REMOVABLE chips by `RoleFamilyChips`; there is no free-text add, since
    *  the family vocabulary is the fixed `ROLE_FAMILIES` enum, not user text.
    *  Typed as `string[]` (elements are `RoleFamily` labels) rather than
-   *  importing that type, mirroring `excludeTerms`'s reasoning above — this
-   *  module stays free of a runtime dependency on `role-keywords.ts`.
+   *  importing that type, so `JobQuery` stays a plain, structurally-typed
+   *  record that any caller can build without pulling in the role taxonomy.
    *  TWO distinct states, both load-bearing: `undefined` means "not
    *  asserted" — every reader falls back to deriving the filter from the
    *  résumé (`roleFilterForResume`), byte-identical to pre-#568 behavior for
@@ -112,6 +126,20 @@ export interface JobQuery {
    *  `roleFilterForResume` already guarantees for an unclassified résumé) —
    *  never to zero results. */
   families?: string[];
+  /** Lowercased tokens that appear in the résumé's own experience LOCATIONS and
+   *  COMPANY names — geography/employer words that ride along inside a role
+   *  title ("Berlin Site Lead", "Acme Cloud Lead") and would otherwise score as
+   *  role relevance at full `TITLE_WORD_OVERLAP_WEIGHT`. Derived here, never
+   *  user-facing: there is no chip for it. `undefined` ⇒ treat as `[]`, so every
+   *  pre-existing `JobQuery` literal and test keeps its current behaviour — the
+   *  same optional-field contract as `excludeTerms` / `families`.
+   *
+   *  Unlike those two, this one IS derived in this module rather than seeded by
+   *  the caller: it is not user-editable state that a UI owns, it is a pure
+   *  function of the parse, and an opt-in guard rail is no guard rail. That is
+   *  what makes the `ROLE_KEYWORDS` import below necessary — see it for why the
+   *  resulting `role-keywords.ts` ↔ this-module cycle is safe. */
+  titleNoise?: string[];
 }
 
 /**
@@ -163,29 +191,6 @@ export const MAX_TITLES = 4;
 //     above the generic VP row, and the whole leadership tier sits above the
 //     IC tier so a compound title like "Senior Director" reads as Director,
 //     not Senior (#540).
-const SENIORITY_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
-  // Leadership/exec tier (#540) — most specific/senior first.
-  { label: "Executive", pattern: /\bco-?founder\b|\bfounder\b/i },
-  { label: "Executive", pattern: /\bchief\s+.+?\s+officer\b/i },
-  { label: "Executive", pattern: /\bceo\b|\bcto\b|\bcfo\b|\bcoo\b|\bcio\b|\bcmo\b|\bciso\b|\bcxo\b/i },
-  { label: "VP", pattern: /\bsvp\b|\bsenior\s+vice\s+president\b/i },
-  { label: "VP", pattern: /\bevp\b|\bexecutive\s+vice\s+president\b/i },
-  { label: "VP", pattern: /\bvp\b|\bvice\s+president\b/i },
-  { label: "Director", pattern: /\bdirector\b|\bhead\s+of\b/i },
-  { label: "Manager", pattern: /\bmanager\b/i },
-  // "Chief of Staff" is an exec/leadership role, not the IC "Staff" rung — it
-  // lacks the trailing "officer" the generic Chief row requires, so it must be
-  // caught explicitly ABOVE the IC ladder or it falls through to `\bstaff\b`.
-  { label: "Executive", pattern: /\bchief\s+of\s+staff\b/i },
-  // IC ladder (original #539 table) — specific before general.
-  { label: "Staff", pattern: /\bstaff\b/i },
-  { label: "Principal", pattern: /\bprincipal\b/i },
-  { label: "Lead", pattern: /\blead\b/i },
-  { label: "Senior", pattern: /\bsenior\b|\bsr\.?\b/i },
-  { label: "Junior", pattern: /\bjunior\b|\bjr\.?\b/i },
-  { label: "Intern", pattern: /\bintern(?:ship)?\b/i },
-];
-
 function deriveTitles(parsed: ResumeQueryInput): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -203,22 +208,6 @@ function deriveTitles(parsed: ResumeQueryInput): string[] {
   // an empty set (skills-only / degenerate query).
   const current = parsed.current_title?.trim();
   return current ? [current] : [];
-}
-
-/**
- * Parse a single seniority label out of one title by walking `SENIORITY_PATTERNS`
- * top-to-bottom (first match wins — see that table's ordering notes). Returns
- * `undefined` when the title carries no recognized level keyword.
- *
- * Exported (#562) so the ranker can parse a level out of a *posting* title with
- * the exact same table the query derivation uses — no second taxonomy. Also the
- * fn #565/#568 reuse for their own title-side level reads.
- */
-export function parseSeniorityLabel(title: string): string | undefined {
-  for (const { label, pattern } of SENIORITY_PATTERNS) {
-    if (pattern.test(title)) return label;
-  }
-  return undefined;
 }
 
 /**
@@ -287,6 +276,88 @@ function deriveLocation(parsed: ResumeQueryInput): string | undefined {
 }
 
 /**
+ * The flattened `ROLE_KEYWORDS` vocabulary as TOKENS — the guard-rail set for
+ * `deriveTitleNoise`. `ROLE_KEYWORDS`' values are multi-word PHRASES ("data
+ * engineer", "site reliability", "front-end"), so flattening them into single
+ * tokens is a real step: a direct membership test against the phrase list would
+ * never match a one-word candidate, and the guard would silently never fire.
+ * Tokenized with `tokenizeWords`, the same rule the scorer uses.
+ *
+ * Built lazily and memoized — see the import docblock: reading `ROLE_KEYWORDS`
+ * at module-evaluation time would depend on which side of the cycle loads first.
+ */
+let roleVocabularyTokens: ReadonlySet<string> | undefined;
+function getRoleVocabularyTokens(): ReadonlySet<string> {
+  if (!roleVocabularyTokens) {
+    const tokens = new Set<string>();
+    for (const phrases of Object.values(ROLE_KEYWORDS)) {
+      for (const phrase of phrases) {
+        for (const token of tokenizeWords(phrase)) tokens.add(token);
+      }
+    }
+    roleVocabularyTokens = tokens;
+  }
+  return roleVocabularyTokens;
+}
+
+/**
+ * The REQUIRED #579 guard rail: true when a candidate noise token is part of the
+ * role vocabulary and must therefore stay a query term. A company literally
+ * named after a role word ("Engineering Inc.", "Design Studio") would otherwise
+ * strip `engineering` / `design` from the query entirely — a far worse failure
+ * than the geography bleed being fixed, and for a leadership résumé ("VP
+ * Engineering", where `vp` is below the 3-char token gate) it can strip the
+ * ONLY scoring word the title has.
+ *
+ * Membership is EXACT. The flattened vocabulary carries both `engineer` and a
+ * bare `engineering` (from "engineering manager" / "engineering lead" /
+ * "engineering director" / "engineering leadership"), plus bare `design`, so an
+ * equality test already covers both worked examples — "Engineering Inc." keeps
+ * `engineering` and drops `inc.`; "Design Studio" keeps `design` and drops
+ * `studio`. A PREFIX test would additionally protect every employer/place token
+ * that merely STARTS with a vocabulary token — `datadog`/`databricks` (`data`),
+ * `salesforce` (`sales`), `webflow` (`web`), `mobileye` (`mobile`), `seoul`
+ * (`seo`) — leaving exactly the geography/employer bleed #579 exists to fix
+ * unsuppressed. Exact membership protects the role words and nothing else.
+ */
+function isRoleVocabularyToken(token: string): boolean {
+  return getRoleVocabularyTokens().has(token);
+}
+
+/**
+ * Derive `JobQuery.titleNoise` (#579) — the union of the tokens in every
+ * `experience[].location` and `experience[].company`, minus anything the role
+ * vocabulary protects. `ResumeQueryInput` already `Pick`s `experience`, which
+ * carries both fields, so no signature widening is needed.
+ *
+ * Returns `undefined` (not `[]`) when nothing survives — experience with neither
+ * a location nor a company, or a résumé with no experience at all — so the field
+ * is simply ABSENT on a query built from such a parse, which is what keeps the
+ * whole-object assertions in this module's tests passing unchanged.
+ */
+function extractUnseenTokens(field: string, seen: Set<string>): string[] {
+  const tokens: string[] = [];
+  for (const token of tokenizeWords(field)) {
+    if (seen.has(token)) continue;
+    seen.add(token); // protected tokens are recorded too — tested once, not per row
+    if (!isRoleVocabularyToken(token)) {
+      tokens.push(token);
+    }
+  }
+  return tokens;
+}
+
+function deriveTitleNoise(parsed: ResumeQueryInput): string[] | undefined {
+  const noise: string[] = [];
+  const seen = new Set<string>();
+  for (const exp of parsed.experience ?? []) {
+    if (exp.location) noise.push(...extractUnseenTokens(exp.location, seen));
+    if (exp.company) noise.push(...extractUnseenTokens(exp.company, seen));
+  }
+  return noise.length > 0 ? noise : undefined;
+}
+
+/**
  * @param excludeTermSeeds Pre-computed exclude-term chips to seed the query
  *   with (#563) — pass `seedExcludeTermsForFamilies(roleFilterForResume(parsed).families)`
  *   from the call site (`FindJobsPanel`). Defaults to `[]` (byte-identical to
@@ -312,5 +383,6 @@ export function buildJobQuery(
   const location = deriveLocation(parsed);
   const excludeTerms = [...excludeTermSeeds];
   const families = familySeeds === undefined ? undefined : [...familySeeds];
-  return { titles, skills, seniority, location, excludeTerms, families };
+  const titleNoise = deriveTitleNoise(parsed);
+  return { titles, skills, seniority, location, excludeTerms, families, titleNoise };
 }

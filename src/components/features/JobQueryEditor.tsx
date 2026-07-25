@@ -35,12 +35,27 @@
 import { useState } from "react";
 import { EditableField } from "@design-system";
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
+import { parseSeniorityLabel } from "../../lib/job-search/query-builder.ts";
+import { searchPhrase } from "../../lib/job-search/providers/keywords.ts";
 import type { RoleFamily } from "../../lib/job-search/role-keywords.ts";
 import { ChipListEditor } from "./ChipListEditor.tsx";
 import { CompFloorInput } from "./CompFloorInput.tsx";
 import { RoleFamilyChips } from "./RoleFamilyChips.tsx";
 import { LevelSelect } from "./LevelSelect.tsx";
 import { AddPill } from "./ReconstructedAdd.tsx";
+
+/**
+ * The title that produced `query.seniority`, or `undefined` when the level
+ * was set by the user rather than derived. Mirrors `deriveSeniorityAcrossTitles`'
+ * scan order (`query.titles` is already most-recent-first) using the exported
+ * `parseSeniorityLabel` — no second taxonomy, no new state on `JobQuery` (#581).
+ */
+function seniorityProvenance(query: JobQuery): string | undefined {
+  if (!query.seniority) return undefined;
+  return query.titles.find(
+    (title) => parseSeniorityLabel(title) === query.seniority,
+  );
+}
 
 export function JobQueryEditor({
   query,
@@ -65,6 +80,20 @@ export function JobQueryEditor({
     onChange((q) => ({ ...q, titles: [...q.titles, title] }));
   const removeTitle = (title: string) =>
     onChange((q) => ({ ...q, titles: q.titles.filter((t) => t !== title) }));
+  // Promote (#581): move-to-front of `titles`, a whole-query replacement that
+  // touches nothing else on `q` — `titleNoise` (#579) is a derived,
+  // non-user-facing field on the same object and must survive untouched, so
+  // this spreads `q` rather than rebuilding it. Rides the existing `onChange`
+  // → live re-rank path, so promoting never refetches.
+  const promoteTitle = (title: string) =>
+    onChange((q) => {
+      const index = q.titles.indexOf(title);
+      if (index <= 0) return q; // already primary, or not found
+      return {
+        ...q,
+        titles: [title, ...q.titles.slice(0, index), ...q.titles.slice(index + 1)],
+      };
+    });
 
   const addSkill = (skill: string) =>
     onChange((q) => ({ ...q, skills: [...q.skills, skill] }));
@@ -91,6 +120,10 @@ export function JobQueryEditor({
   const setLevel = (level: string | undefined) =>
     onChange((q) => ({ ...q, seniority: level }));
 
+  /** The literal string that egresses to the keyless feeds — empty when the
+   *  query carries neither a title nor a skill. */
+  const egressPhrase = searchPhrase(query);
+
   return (
     <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
       <div className="flex flex-col gap-3">
@@ -101,7 +134,20 @@ export function JobQueryEditor({
           onRemove={removeTitle}
           placeholder="Add a title…"
           addAriaLabel="Add title"
+          primaryIndex={query.titles.length > 0 ? 0 : undefined}
+          onPromote={promoteTitle}
         />
+        {/* #581: this reads the SAME `searchPhrase` the keyless feeds are
+         *  called with, rather than a copy, so it can never drift from what
+         *  actually egresses. Gated on the phrase itself being non-empty, NOT
+         *  on `titles.length` — with no title `searchPhrase` falls back to
+         *  `skills.slice(0, 3)`, so gating on titles hid this line in the one
+         *  case where skills are what egress. */}
+        {egressPhrase.length > 0 && (
+          <p className="text-xs text-content-tertiary">
+            Searching feeds for &quot;{egressPhrase}&quot;
+          </p>
+        )}
         {/* Role families (#568): seeded from the same classification the
          *  company-board pipeline uses, removable so a fullstack résumé that
          *  also matched `data` can drop it. */}
@@ -160,11 +206,19 @@ export function JobQueryEditor({
        *  via "+ Seniority". Changing the level re-runs the #562 rung-
        *  distance penalty (live, via the workbench's refinement effect).
        *  Full-width row: 12 rungs wrap badly inside a third of the page. */}
-      <div className="sm:col-span-2 lg:col-span-3">
+      <div className="sm:col-span-2 lg:col-span-3 flex flex-col gap-1">
         {query.seniority || seniorityExpanded ? (
           <LevelSelect value={query.seniority} onChange={setLevel} />
         ) : (
           <AddPill label="Target level" onClick={() => setSeniorityExpanded(true)} />
+        )}
+        {/* #581: names the title `deriveSeniorityAcrossTitles` matched, so an
+         *  overridable derived value is explicable rather than a new lever.
+         *  Absent once the user overrides to a level no title produces. */}
+        {seniorityProvenance(query) && (
+          <p className="text-xs text-content-tertiary">
+            {query.seniority} — from &quot;{seniorityProvenance(query)}&quot;
+          </p>
         )}
       </div>
 

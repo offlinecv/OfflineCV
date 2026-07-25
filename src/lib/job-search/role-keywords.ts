@@ -60,8 +60,7 @@
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { JobPosting } from "./types.ts";
 import type { JobQuery } from "./query-builder.ts";
-import { parseSeniorityLabel } from "./query-builder.ts";
-import { seniorityRungDistance } from "./seniority.ts";
+import { parseSeniorityLabel, seniorityRungDistance } from "./seniority.ts";
 
 /**
  * Fixed role-family taxonomy — the SINGLE SOURCE OF TRUTH for "which roles
@@ -80,6 +79,7 @@ export const ROLE_FAMILIES = [
   "sre-devops",
   "security",
   "qa",
+  "eng-leadership",
   "design",
   "pm",
   "sales",
@@ -177,6 +177,34 @@ export const ROLE_KEYWORDS: Readonly<Record<RoleFamily, readonly string[]>> = {
     "sdet",
     "automation engineer",
     "quality engineer",
+  ],
+  // Bare "tech lead" / "technical lead" are deliberately OMITTED: they are
+  // IC-ladder titles on many résumés, and including them would pull a
+  // senior IC out of their real family and into this one — a regression
+  // worse than the gap this family closes (#580). "technical lead manager"
+  // is included because the "manager" suffix disambiguates it from the bare
+  // IC title.
+  //
+  // Bare "development manager" is OMITTED for the same reason, one taxonomy
+  // over: it is a substring of "Business Development Manager", a sales/GTM
+  // title. Because `filterPostingsByRole` matches by plain substring, the bare
+  // form made a business-development résumé classify as `eng-leadership` —
+  // which, being engineering-adjacent, then auto-seeded ENGINEERING_EXCLUDE_SEEDS
+  // ("account executive", "sales engineer", …) against that candidate's own real
+  // jobs, violating the invariant stated on ENGINEERING_ADJACENT_FAMILIES below.
+  // "software development manager" carries the disambiguating prefix.
+  "eng-leadership": [
+    "engineering manager",
+    "software engineering manager",
+    "engineering lead",
+    "engineering director",
+    "director of engineering",
+    "head of engineering",
+    "vp engineering",
+    "vp of engineering",
+    "engineering leadership",
+    "technical lead manager",
+    "software development manager",
   ],
   design: [
     "designer",
@@ -280,6 +308,7 @@ const ENGINEERING_ADJACENT_FAMILIES: ReadonlySet<RoleFamily> = new Set([
   "sre-devops",
   "security",
   "qa",
+  "eng-leadership",
 ]);
 
 /**
@@ -499,9 +528,16 @@ export function capPerCompany(
   return kept;
 }
 
-/** Split a lowercased string into significant (length > 2) word tokens. */
 const WORD_SPLIT = /[\s/,&()-]+/;
-function tokenizeWords(text: string): Set<string> {
+/**
+ * Split a lowercased string into significant (length > 2) word tokens.
+ *
+ * Exported (#579) so `query-builder.ts` derives `JobQuery.titleNoise` with the
+ * EXACT rule the title scorer below tokenizes query titles by — the noise set
+ * is compared against these tokens by set membership, so a second tokenizer
+ * with a slightly different punctuation rule would silently never match.
+ */
+export function tokenizeWords(text: string): Set<string> {
   return new Set(
     text
       .toLowerCase()
@@ -538,20 +574,37 @@ const SENIORITY_MATCH_MAX_BONUS = 4;
  * otherwise-tied adjacent-level posting, but never dominates the word-overlap
  * signal.
  *
+ * `query.titleNoise` (#579) is subtracted from the query's own words before the
+ * overlap count: a geography or employer word that rides along inside a résumé
+ * title ("Berlin Site Lead") is not role relevance, and paying it a full
+ * `TITLE_WORD_OVERLAP_WEIGHT` let it decide which postings survive
+ * `capPerCompany`'s slice — damage upstream of the star rating and invisible to
+ * it. `undefined` is treated as `[]`, so a query literal without the field
+ * scores exactly as it did pre-#579.
+ *
  * Returns 0 when `query.titles` is empty (a skills-only/degenerate query has
  * no title signal to score against) or when nothing overlaps — a uniform 0
  * across a whole board is harmless: `orderPostingsByTitleScore` keeps ties in
- * their original (board) order, so the never-fail-closed floor holds.
+ * their original (board) order, so the never-fail-closed floor holds. That
+ * floor also covers the degenerate noise case (every query word is noise):
+ * the score collapses to the seniority nudge alone, uniform across the board,
+ * never to an empty result.
  */
 export function scoreByTitleAgainstQuery(
   posting: JobPosting,
-  query: Pick<JobQuery, "titles" | "seniority">,
+  query: Pick<JobQuery, "titles" | "seniority" | "titleNoise">,
 ): number {
   if (query.titles.length === 0) return 0;
 
+  // Lowercased defensively: `buildJobQuery` already emits lowercased tokens
+  // (`tokenizeWords`), but a hand-written query literal may not.
+  const noise = new Set((query.titleNoise ?? []).map((token) => token.toLowerCase()));
   const queryWords = new Set<string>();
   for (const title of query.titles) {
-    for (const word of tokenizeWords(title)) queryWords.add(word);
+    for (const word of tokenizeWords(title)) {
+      if (noise.has(word)) continue;
+      queryWords.add(word);
+    }
   }
 
   let overlap = 0;
@@ -585,7 +638,7 @@ export function scoreByTitleAgainstQuery(
  */
 export function orderPostingsByTitleScore(
   postings: readonly JobPosting[],
-  query: Pick<JobQuery, "titles" | "seniority">,
+  query: Pick<JobQuery, "titles" | "seniority" | "titleNoise">,
 ): JobPosting[] {
   return postings
     .map((posting, index) => ({

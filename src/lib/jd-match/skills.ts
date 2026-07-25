@@ -214,6 +214,35 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "soc2", aliases: ["soc 2", "soc2"] },
   { id: "gdpr", aliases: ["gdpr"] },
   { id: "hipaa", aliases: ["hipaa"] },
+
+  // ── Leadership / management ─────────────────────────────────────────────
+  // Phrase-heavy by design: a bare "management" / "strategy" / "leadership"
+  // is exactly the noisy single-word alias the docblock above warns against
+  // — it would fire on ordinary bullet prose. Every alias here is a
+  // multi-word phrase (see `skills.test.ts` for the enforcing check).
+  { id: "people-management", label: "people management", aliases: ["people management", "managed a team", "managing a team", "team management"] },
+  { id: "technical-recruiting", label: "technical recruiting", aliases: ["technical recruiting", "led hiring", "technical hiring"] },
+  { id: "performance-management", label: "performance management", aliases: ["performance management", "performance reviews", "performance review"] },
+  { id: "coaching-mentorship", label: "coaching / mentorship", aliases: ["coaching and mentorship", "coaching & mentorship", "mentoring engineers"] },
+  { id: "career-development", label: "career development", aliases: ["career development", "career growth planning"] },
+  { id: "org-design", label: "org design", aliases: ["org design", "organizational design", "organization design"] },
+  { id: "team-building", label: "team building", aliases: ["team building", "built and scaled a team", "grew the team"] },
+  { id: "roadmap-ownership", label: "roadmap ownership", aliases: ["roadmap ownership", "owned the roadmap", "product roadmap ownership"] },
+  { id: "project-delivery", label: "project delivery", aliases: ["project delivery", "delivery leadership"] },
+  { id: "program-management", label: "program management", aliases: ["program management", "technical program management"] },
+  { id: "agile-leadership", label: "agile / scrum leadership", aliases: ["scrum leadership", "agile leadership", "agile transformation"] },
+  { id: "incident-management", label: "incident management", aliases: ["incident management", "incident commander", "incident response leadership"] },
+  { id: "on-call-ownership", label: "on-call ownership", aliases: ["on-call ownership", "owned on-call", "on-call rotation ownership"] },
+  { id: "technical-strategy", label: "technical strategy", aliases: ["technical strategy", "engineering strategy"] },
+  { id: "architecture-review", label: "architecture review", aliases: ["architecture review", "architectural review board"] },
+  { id: "platform-ownership", label: "platform ownership", aliases: ["platform ownership", "owned the platform"] },
+  { id: "vendor-management", label: "vendor management", aliases: ["vendor management", "vendor negotiations"] },
+  { id: "budget-headcount-planning", label: "budget / headcount planning", aliases: ["budget planning", "headcount planning", "budget and headcount planning"] },
+  { id: "pnl-ownership", label: "P&L ownership", aliases: ["p&l ownership", "profit and loss ownership", "p and l ownership"] },
+  { id: "stakeholder-management", label: "stakeholder management", aliases: ["stakeholder management", "stakeholder alignment"] },
+  { id: "cross-functional-collaboration", label: "cross-functional collaboration", aliases: ["cross-functional collaboration", "cross functional collaboration"] },
+  { id: "executive-communication", label: "executive communication", aliases: ["executive communication", "executive presentations", "communicating with executives"] },
+  { id: "technical-writing", label: "technical writing", aliases: ["technical writing", "wrote technical documentation"] },
 ];
 
 /**

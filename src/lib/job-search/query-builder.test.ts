@@ -331,9 +331,13 @@ describe("buildJobQuery", () => {
   });
 
   it("ranks canonical (taxonomy-recognized) skills ahead of unrecognized ones, past the old cap of 5 (#541)", () => {
-    // First 5 entries are incidental/unrecognized strings; a coherent AI/ML
-    // cluster sits at positions 6-10. Under the OLD unranked cap of 5, the
-    // whole cluster would have been truncated away entirely.
+    // The first 5 entries are typed first but are NOT uniformly incidental any
+    // more: #583 made "stakeholder management" and "cross-functional
+    // collaboration" canonical, while "team leadership", "public speaking" and
+    // "mentoring" stay unrecognized. A coherent AI/ML cluster sits at positions
+    // 6-10. Under the OLD unranked cap of 5, the whole cluster would have been
+    // truncated away entirely. What this asserts is the surviving property:
+    // canonical outranks non-canonical regardless of input order.
     const parsed = baseParsed({
       skills: [
         "team leadership",
@@ -351,6 +355,9 @@ describe("buildJobQuery", () => {
     const query = buildJobQuery(parsed);
     // The AI/ML cluster (canonical skills) surfaces ahead of the incidental,
     // unrecognized entries that were typed first.
+    // Pin the #583 canonicality: the leadership skill the taxonomy now
+    // recognizes leads the ranked list, ahead of the AI/ML cluster.
+    expect(query.skills[0]).toBe("stakeholder management");
     const aiClusterIndex = query.skills.indexOf("python");
     const incidentalIndex = query.skills.indexOf("Team Leadership");
     expect(aiClusterIndex).toBeGreaterThanOrEqual(0);
@@ -379,5 +386,136 @@ describe("buildJobQuery", () => {
     expect(query.skills.indexOf("Underwater Basket Weaving")).toBeLessThan(
       query.skills.indexOf("Competitive Juggling"),
     );
+  });
+
+  it("ranks leadership-competency skills as canonical, not just tool skills (#583)", () => {
+    // Before #583, every entry in a leadership résumé's skill list was
+    // non-canonical, so `isCanonical` tied across the board and the
+    // canonical-first sort collapsed to a no-op (résumé order only).
+    const parsed = baseParsed({
+      skills: [
+        "public speaking",
+        "people management",
+        "led hiring",
+        "owned the roadmap",
+        "cross-functional collaboration",
+      ],
+    });
+    const query = buildJobQuery(parsed);
+    // The leadership competencies now resolve to canonical labels...
+    expect(query.skills).toEqual(
+      expect.arrayContaining([
+        "people management",
+        "technical recruiting",
+        "roadmap ownership",
+        "cross-functional collaboration",
+      ]),
+    );
+    // ...and rank ahead of the one entry that still has no canonical match,
+    // proving the sort is no longer a tie.
+    const firstCanonicalIndex = query.skills.indexOf("people management");
+    const incidentalIndex = query.skills.indexOf("Public Speaking");
+    expect(firstCanonicalIndex).toBeGreaterThanOrEqual(0);
+    expect(incidentalIndex).toBeGreaterThanOrEqual(0);
+    expect(firstCanonicalIndex).toBeLessThan(incidentalIndex);
+  });
+});
+
+describe("buildJobQuery titleNoise (issue 579)", () => {
+  it("derives it from experience LOCATIONS and COMPANY names", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        experience: [
+          experience({
+            title: "Berlin Site Lead",
+            company: "Globex Holdings",
+            location: "Berlin, Germany",
+          }),
+        ],
+      }),
+    );
+    // Both surfaces contribute, tokenized the same way the title scorer
+    // tokenizes query titles (>2 chars, lowercased).
+    expect(query.titleNoise).toEqual(
+      expect.arrayContaining(["berlin", "germany", "globex", "holdings"]),
+    );
+  });
+
+  it("unions across every experience row and dedupes", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        experience: [
+          experience({ company: "Globex", location: "Berlin, Germany" }),
+          experience({ company: "Globex", location: "Munich, Germany" }),
+        ],
+      }),
+    );
+    expect(query.titleNoise).toEqual(["berlin", "germany", "globex", "munich"]);
+  });
+
+  it("is ABSENT when experience carries neither a location nor a company", () => {
+    // No experience at all.
+    expect(buildJobQuery(baseParsed()).titleNoise).toBeUndefined();
+    // Experience rows with an empty company and no location.
+    expect(
+      buildJobQuery(
+        baseParsed({
+          experience: [{ title: "Software Engineer", company: "" }],
+        }),
+      ).titleNoise,
+    ).toBeUndefined();
+  });
+
+  it("drops sub-3-char tokens, matching the title scorer's tokenizer", () => {
+    const query = buildJobQuery(
+      baseParsed({ experience: [experience({ company: "IBM", location: "Austin, TX" })] }),
+    );
+    // "ibm" survives (3 chars); "tx" does not (2).
+    expect(query.titleNoise).toEqual(["austin", "ibm"]);
+  });
+
+  it("GUARD RAIL: never adds a token that is in the ROLE_KEYWORDS vocabulary", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        experience: [experience({ title: "Design Lead", company: "Design Studio" })],
+      }),
+    );
+    // `design` is real role vocabulary (ROLE_KEYWORDS.design carries "design
+    // lead" / "visual design"), so it must stay a query term even though it is
+    // literally part of this employer's name. Only `studio` is noise.
+    expect(query.titleNoise).toEqual(["studio"]);
+  });
+
+  it("GUARD RAIL: keeps a role word that is also the employer's name, on a title whose only other word is below the token gate", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        experience: [experience({ title: "VP Engineering", company: "Engineering Inc." })],
+      }),
+    );
+    // `engineering` is an exact member of the flattened vocabulary (from
+    // "engineering manager" / "engineering lead" / …). Without the guard rail it
+    // would be suppressed as employer noise, stripping the ONLY scoring word
+    // this title has — "vp" is below the 3-char token gate.
+    expect(query.titleNoise).not.toContain("engineering");
+    expect(query.titleNoise).toEqual(["inc."]);
+  });
+
+  // The membership test is EXACT, not prefix. This is the case that separates
+  // the two: none of these employer/place tokens is in the vocabulary, but each
+  // STARTS with one that is (`data`, `sales`, `seo`). A prefix guard would
+  // protect all three and leave them scoring as query terms — precisely the
+  // employer/geography bleed #579 exists to suppress.
+  it("GUARD RAIL: does NOT protect an employer or place token that merely starts with a vocabulary token", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        experience: [
+          experience({ title: "Data Engineer", company: "Datadog", location: "Seoul" }),
+          experience({ title: "Data Engineer", company: "Salesforce", location: "Seattle" }),
+        ],
+      }),
+    );
+    expect(query.titleNoise).toContain("datadog");
+    expect(query.titleNoise).toContain("seoul");
+    expect(query.titleNoise).toContain("salesforce");
   });
 });

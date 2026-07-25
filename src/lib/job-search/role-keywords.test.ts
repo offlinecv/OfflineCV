@@ -168,6 +168,65 @@ describe("roleFilterForResume — titles, not skills", () => {
   it("never throws on a malformed/empty parsed model", () => {
     expect(() => roleFilterForResume(makeParsed())).not.toThrow();
   });
+
+  // #580: an engineering-leadership résumé must classify eng-leadership as
+  // the SOLE winner (no runner-up clearing RUNNER_UP_SHARE) and must reach
+  // the ENGINEERING_EXCLUDE_SEEDS via ENGINEERING_ADJACENT_FAMILIES — this
+  // is the entire point of the issue, so assert it rather than assume it.
+  it("classifies a 3-4 title leadership resume as eng-leadership, sole winner, and seeds GTM excludes", () => {
+    const filter = roleFilterForResume(
+      makeParsed({
+        experience: [
+          { title: "Engineering Manager", company: "A" },
+          { title: "Senior Engineering Manager", company: "B" },
+          { title: "Director of Engineering", company: "C" },
+          { title: "VP Engineering", company: "D" },
+        ],
+      }),
+    );
+    expect(filter.families).toEqual(["eng-leadership"]);
+    expect(filter.keywords).toContain("engineering manager");
+
+    const seeds = seedExcludeTermsForFamilies(filter.families);
+    expect(seeds).toContain("solutions architect");
+    expect(seeds).toContain("sales engineer");
+    expect(seeds.length).toBeGreaterThan(0);
+  });
+
+  // Bare "Tech Lead" is a deliberate omission (see role-keywords.ts docblock)
+  // — a senior IC titled that way must keep their real family, not get
+  // pulled into eng-leadership.
+  it("does not pull a senior IC carrying bare 'Tech Lead' into eng-leadership", () => {
+    const filter = roleFilterForResume(
+      makeParsed({
+        experience: [
+          { title: "Backend Engineer", company: "A" },
+          { title: "Senior Backend Engineer", company: "B" },
+          { title: "Backend Tech Lead", company: "C" },
+        ],
+      }),
+    );
+    expect(filter.families).toEqual(["backend"]);
+    expect(filter.families).not.toContain("eng-leadership");
+  });
+
+  // Same precedent, one taxonomy over: bare "development manager" is a
+  // substring of "Business Development Manager", and `filterPostingsByRole`
+  // matches by plain substring. The two-sided regression it caused: the GTM
+  // résumé classified as eng-leadership (which wins the declaration-order
+  // tie-break over sales), and eng-leadership being engineering-adjacent then
+  // seeded ENGINEERING_EXCLUDE_SEEDS — "account executive", "sales engineer",
+  // "customer success" — against that candidate's own real jobs.
+  it("classifies a business-development résumé as sales, and seeds NO engineering negatives against it", () => {
+    const filter = roleFilterForResume(
+      makeParsed({
+        experience: [{ title: "Business Development Manager", company: "A" }],
+      }),
+    );
+    expect(filter.families).toEqual(["sales"]);
+    expect(filter.families).not.toContain("eng-leadership");
+    expect(seedExcludeTermsForFamilies(filter.families)).toEqual([]);
+  });
 });
 
 describe("roleFilterForFamilies (issue 568)", () => {
@@ -351,6 +410,31 @@ describe("scoreByTitleAgainstQuery", () => {
       scoreByTitleAgainstQuery(noOverlapSameLevel, query),
     );
   });
+
+  it("(#579) pays a titleNoise place token nothing while a real role word still pays 10", () => {
+    // The résumé's own title carries its city ("Berlin Site Lead"), so `berlin`
+    // is derived as noise; `engineering` is a genuine role word.
+    const query: JobQuery = {
+      titles: ["Engineering Manager", "Berlin Site Lead"],
+      skills: [],
+      titleNoise: ["berlin"],
+    };
+    // Only overlap is the noise token → no role relevance at all.
+    expect(scoreByTitleAgainstQuery(makePosting({ title: "Berlin Analyst" }), query)).toBe(0);
+    // A single genuine role-word overlap still pays exactly the full weight.
+    expect(scoreByTitleAgainstQuery(makePosting({ title: "Engineering" }), query)).toBe(10);
+  });
+
+  it("(#579) treats an absent titleNoise exactly as an empty one", () => {
+    const posting = makePosting({ title: "Berlin Analyst" });
+    const withoutField: JobQuery = { titles: ["Berlin Site Lead"], skills: [] };
+    const withEmpty: JobQuery = { titles: ["Berlin Site Lead"], skills: [], titleNoise: [] };
+    expect(scoreByTitleAgainstQuery(posting, withoutField)).toBe(
+      scoreByTitleAgainstQuery(posting, withEmpty),
+    );
+    // And both still score the place token, the pre-#579 behaviour.
+    expect(scoreByTitleAgainstQuery(posting, withoutField)).toBe(10);
+  });
 });
 
 describe("orderPostingsByTitleScore", () => {
@@ -397,6 +481,33 @@ describe("orderPostingsByTitleScore", () => {
     expect(postings.findIndex((p) => p.id === "job-30")).toBeGreaterThan(
       DEFAULT_PER_COMPANY_CAP,
     );
+  });
+
+  it("(#579) geography/employer tokens no longer decide who survives the per-company cap", () => {
+    // The pathological résumé title carries city + country + employer suffix.
+    const query: JobQuery = {
+      titles: ["Berlin Germany GmbH Site Lead"],
+      skills: [],
+      titleNoise: ["berlin", "germany", "gmbh"],
+    };
+    // The board is front-loaded with postings that share ONLY those three
+    // noise tokens (3 hits, 30 points pre-fix) while the one genuine role match
+    // shares two real role words (2 hits, 20 points) and sits past the cap in
+    // board order — so pre-#579 the noise postings strictly outscored it and
+    // consumed every cap slot.
+    const postings: JobPosting[] = Array.from({ length: 20 }, (_, i) =>
+      makePosting({
+        id: `job-${i}`,
+        company: "BigCo",
+        title: i === 15 ? "Site Lead" : `Berlin Germany GmbH Warehouse Role ${i}`,
+      }),
+    );
+
+    const survivors = capPerCompany(
+      orderPostingsByTitleScore(postings, query),
+      DEFAULT_PER_COMPANY_CAP,
+    );
+    expect(survivors[0].id).toBe("job-15");
   });
 });
 

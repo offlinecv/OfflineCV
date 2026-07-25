@@ -21,15 +21,12 @@
  */
 
 import { useMemo } from "react";
-import { Button } from "@design-system";
+import { Button, Chip } from "@design-system";
 import { buildJobQuery } from "../../lib/job-search/query-builder.ts";
 import { roleFilterForResume, seedExcludeTermsForFamilies } from "../../lib/job-search/role-keywords.ts";
 import { writeJobsHandoff } from "../../lib/jobs-handoff.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
-
-/** Terms previewed before the jump. Enough to show the derivation worked
- *  without reproducing the full editor. */
-const PREVIEW_LIMIT = 6;
+import { JobQuerySummary } from "./JobQuerySummary.tsx";
 
 export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) {
   // Same seed `/jobs/` will compute from the same parse — this is a preview of
@@ -44,7 +41,6 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
   }, [parsed]);
 
   const isDegenerate = query.titles.length === 0 && query.skills.length === 0;
-  const preview = [...query.titles, ...query.skills].slice(0, PREVIEW_LIMIT);
 
   const go = () => {
     writeJobsHandoff({ parsed });
@@ -70,21 +66,37 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
         </p>
       </header>
 
-      {preview.length > 0 && (
+      {!isDegenerate && (
         <div className="flex flex-col gap-1.5">
           <span className="text-xs text-content-tertiary">
             Starting from these terms
           </span>
-          <div className="flex flex-wrap gap-1.5">
-            {preview.map((term) => (
-              <span
-                key={term}
-                className="rounded bg-surface-subtle px-2 py-0.5 text-xs text-content-secondary"
-              >
-                {term}
-              </span>
-            ))}
-          </div>
+          {/* #581: `JobQuerySummary` is the Reuse Gate answer — same
+           *  `summarizeQuery` `/jobs/` uses once folded, no second
+           *  summarizer. `companyCount` is omitted (not 0): `useCompanyTargets`
+           *  has not run here, so there is nothing to report yet. */}
+          <JobQuerySummary query={query} />
+          {/* Every title shown (#581 fixes the old 6-slice silent cut) —
+           *  there are at most `MAX_TITLES` of these, few enough to list in
+           *  full without an expand control. */}
+          {query.titles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {query.titles.map((title) => (
+                <Chip key={title}>{title}</Chip>
+              ))}
+            </div>
+          )}
+          {/* Skills are named as one exemplar + an honest count rather than a
+           *  bare number or a silent cut — "Cloud Infrastructure +8", never
+           *  "+9" alone. */}
+          {query.skills.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              <Chip>
+                {query.skills[0]}
+                {query.skills.length > 1 ? ` +${query.skills.length - 1}` : ""}
+              </Chip>
+            </div>
+          )}
         </div>
       )}
 

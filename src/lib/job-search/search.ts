@@ -127,26 +127,75 @@ function escapeRegExp(value: string): string {
 }
 
 /**
+ * A skill term is significant enough to filter on when it is 3+ chars, or
+ * shorter but symbol-bearing (`c#`, `c++`, `f#`, `.net`) — those are
+ * unambiguous, whereas a bare 2-char alpha token (`ai`, `go`, `ml`) matches
+ * most of a tech feed's prose and reduces `matchesQuery` to a pass-through.
+ *
+ * Accepted cost: bare `Go`, `R`, `AI`, `ML` stop contributing to admission.
+ * This is acceptable because admission is an OR across all terms (dropping
+ * one rarely empties a result set), `matchesQuery` never fails closed (an
+ * empty pattern list admits everything), and the dropped term is still
+ * rendered as a chip and still reaches the deep links — only its filtering
+ * role is removed.
+ */
+function isSignificantSkillTerm(term: string): boolean {
+  if (STOPWORDS.has(term)) return false;
+  if (term.length >= 3) return true;
+  return /[^a-z0-9]/.test(term);
+}
+
+/**
+ * Split one title-ish string into this filter's title tokens: lowercased, split
+ * on everything outside `a-z0-9+#.`, with leading/trailing dots stripped so
+ * "Node.js." reads as `node.js`.
+ *
+ * Used for BOTH `query.titles` (the admission terms) and `query.titleNoise`
+ * (#579, the tokens that must NOT admit), so the two are compared in exactly the
+ * same token space. That matters: `titleNoise` is derived with
+ * `role-keywords.ts`'s `tokenizeWords`, whose punctuation rule differs — "Acme
+ * Corp." tokenizes as `corp.` there and `corp` here, and "Yahoo!" as `yahoo!`
+ * there and `yahoo` here — so comparing the raw noise strings against these
+ * tokens would silently miss every employer name carrying punctuation.
+ */
+function titleTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9+#.]+/)
+    .map((token) => token.replace(/^\.+|\.+$/g, ""))
+    .filter(Boolean);
+}
+
+/**
  * Significant query terms as whole-word-ish case-insensitive patterns:
- * the tokens of EVERY query title (minus stopwords/short tokens) plus every
- * skill verbatim. `matchesQuery` ORs across these, so a posting survives when
+ * the tokens of EVERY query title (minus stopwords/short tokens/résumé
+ * geography+employer noise) plus every skill verbatim, gated by
+ * `isSignificantSkillTerm` (see there for the
+ * accepted cost). `matchesQuery` ORs across these, so a posting survives when
  * it matches ANY title's tokens — the multi-title broadening from #539: an
  * exec whose prior roles were engineering-leadership titles keeps postings for
  * both facets, not just the most-recent title. Lookarounds instead of `\b` so
  * symbol-bearing skills ("C++", "Node.js") still match on word-ish edges.
+ *
+ * `query.titleNoise` (#579) is subtracted from the TITLE tokens only: a posting
+ * that merely mentions the candidate's city or a former employer has not thereby
+ * matched a role word, so such a token must not ADMIT it. Skills are left alone —
+ * they are user-editable chips carrying a different signal, and the noise set is
+ * derived from experience places/companies, not from the skills section.
+ * `undefined` ⇒ no noise, byte-identical to pre-#579 admission.
  */
 function buildQueryTermPatterns(query: JobQuery): RegExp[] {
   const terms = new Set<string>();
+  const noise = new Set((query.titleNoise ?? []).flatMap(titleTokens));
   for (const title of query.titles) {
-    for (const token of title.toLowerCase().split(/[^a-z0-9+#.]+/)) {
-      const term = token.replace(/^\.+|\.+$/g, "");
-      if (term.length < 3 || STOPWORDS.has(term)) continue;
+    for (const term of titleTokens(title)) {
+      if (term.length < 3 || STOPWORDS.has(term) || noise.has(term)) continue;
       terms.add(term);
     }
   }
   for (const skill of query.skills) {
     const term = skill.trim().toLowerCase();
-    if (term) terms.add(term);
+    if (term && isSignificantSkillTerm(term)) terms.add(term);
   }
   return [...terms].map(
     (term) => new RegExp(`(?<![a-z0-9])${escapeRegExp(term)}(?![a-z0-9])`),

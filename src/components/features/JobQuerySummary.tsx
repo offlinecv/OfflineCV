@@ -20,6 +20,11 @@
  *
  * `summarizeQuery` is exported separately from the component so the segment logic
  * is testable without a DOM.
+ *
+ * `companyCount` is `undefined` (#581) on the `/` launcher preview, where
+ * `useCompanyTargets` has never run — there is no "0 companies selected" to
+ * report, only "not computed here". `0` keeps meaning what it always has on
+ * `/jobs/`: the user reviewed the suggested boards and kept none.
  */
 
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
@@ -27,11 +32,12 @@ import type { JobQuery } from "../../lib/job-search/query-builder.ts";
 /**
  * Human-readable segments describing `query`, in the order the fields appear in
  * the editor. `companyCount` is the number of selected company boards, which is
- * part of the query's reach but lives outside `JobQuery` (`useCompanyTargets`).
+ * part of the query's reach but lives outside `JobQuery` (`useCompanyTargets`);
+ * omitted entirely when the caller has no count to report (see above).
  */
 export function summarizeQuery(
   query: JobQuery,
-  companyCount: number,
+  companyCount?: number,
 ): string[] {
   const parts: string[] = [];
   if (query.titles.length > 0) parts.push(query.titles.join(" / "));
@@ -46,9 +52,9 @@ export function summarizeQuery(
   if (query.compFloor !== undefined) {
     parts.push(`≥ $${Math.round(query.compFloor / 1000)}k`);
   }
-  parts.push(
-    `${companyCount} compan${companyCount === 1 ? "y" : "ies"}`,
-  );
+  if (companyCount !== undefined) {
+    parts.push(`${companyCount} compan${companyCount === 1 ? "y" : "ies"}`);
+  }
   return parts;
 }
 
@@ -57,7 +63,7 @@ export function JobQuerySummary({
   companyCount,
 }: {
   query: JobQuery;
-  companyCount: number;
+  companyCount?: number;
 }) {
   return (
     <p className="min-w-0 text-xs text-content-tertiary">
