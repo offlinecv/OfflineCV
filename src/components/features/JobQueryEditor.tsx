@@ -2,24 +2,34 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * JobQueryEditor — the editable search query of the job-search workbench.
+ * JobQueryEditor — the editable search query of the job-search workbench,
+ * emitted as the four panels of `FindJobsPanel`'s `Stepper` (#602).
  *
- * Extracted verbatim out of `FindJobsPanel` when the results moved to their own
- * `/jobs/` page: the panel became a foldable full-width search form above the
- * results, and the fields shouldn't own the layout that folds them. Nothing
- * about the controls changed in the move.
+ * WHAT CHANGED IN #602 AND WHY. This used to be a three-column grid that put
+ * every field on screen at once: ~40 chips at one visual weight, a 12-rung
+ * level rail, a mark legend, the whole-query advisory and (via the panel) the
+ * outbound contract and the external-board links. Everything was reachable and
+ * nothing was findable — and the contract card, which the form exists to lead
+ * up to, rendered LAST, about a thousand pixels below the chips it describes.
+ * The fields are now grouped into an ordered walk whose reading order is the
+ * order of the work:
  *
- * The fields lay themselves out across the full width rather than stacking in one
- * narrow column: the panel hands this component the whole page, and a single
- * column would leave a ~470px form on a 1080px page — which is what the layout
- * looked like when the neighbouring blocks owned the other columns.
+ *   1. **Role** — the titles, one of which is what actually leaves the browser.
+ *   2. **Skills** — the second egressing term, and the fit evidence.
+ *   3. **Narrow** — the narrowing axes: where, what to drop, a pay floor, and
+ *      which company boards to check.
+ *   4. **Review** — the pre-flight contract (`SearchPlanCard`), the whole-query
+ *      findings, and the external deep links, immediately above the button they
+ *      describe.
  *
- * Grouping is by how the fields are used, not by size: what you SEARCH FOR
- * (titles + role) and what you're MADE OF (skills) get a column each, because
- * both are long removable-chip lists; the narrow modifiers (location, exclude,
- * pay floor) share the third. Target level spans the full width on its own row —
- * it's a 12-rung segmented control that would wrap into three ragged lines inside
- * a third of the page.
+ * The per-kind suggestions and the mark legend moved to sit under the chip rows
+ * they belong to; a key to marks a screen away was decoration.
+ *
+ * This component does NOT own the `Stepper` — `FindJobsPanel` does, because the
+ * rail's summaries need the selected-company count and the terminal action is
+ * that panel's Search button. `StepPanel` reads its position from context, so
+ * emitting the panels from here costs no wiring. Panels stay mounted when
+ * inactive (see `Stepper`), so a half-typed chip draft survives stepping away.
  *
  * Controlled by the parent through `query` / `onChange` — the query is the
  * workbench's single source of truth (the fit ranking and the #568 live re-rank
@@ -33,20 +43,27 @@
  */
 
 import { useState } from "react";
-import { EditableField } from "@design-system";
+import { EditableField, StepPanel } from "@design-system";
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
 import {
   canonicalSkillLabels,
   parseSeniorityLabel,
 } from "../../lib/job-search/query-builder.ts";
-import { searchPhrase } from "../../lib/job-search/providers/keywords.ts";
+import { promoteSkill, promoteTitle } from "../../lib/job-search/search-plan.ts";
 import type { RoleFamily } from "../../lib/job-search/role-keywords.ts";
 import { assessQueryTerms, type MissingTerm } from "../../lib/job-search/term-quality.ts";
+import type { JobBoardLink } from "../../lib/job-search/deep-links.ts";
+import type { CompanyTargets as CompanyTargetsState } from "../../hooks/useCompanyTargets.ts";
 import { ChipListEditor } from "./ChipListEditor.tsx";
+import { CompanyTargets } from "./CompanyTargets.tsx";
 import { CompFloorInput } from "./CompFloorInput.tsx";
+import { ExternalBoardLinks } from "./ExternalBoardLinks.tsx";
 import { RoleFamilyChips } from "./RoleFamilyChips.tsx";
 import { LevelSelect } from "./LevelSelect.tsx";
 import { AddPill } from "./ReconstructedAdd.tsx";
+import { QueryStepSection } from "./QueryStepSection.tsx";
+import { SearchPlanCard } from "./SearchPlanCard.tsx";
+import { TermGlyphLegend } from "./TermGlyphLegend.tsx";
 import { missingTermLabel, TermQualityAdvisory } from "./TermQualityAdvisory.tsx";
 
 /**
@@ -66,17 +83,23 @@ export function JobQueryEditor({
   query,
   onChange,
   isDegenerate,
+  links,
+  companyTargets,
 }: {
   query: JobQuery;
   onChange: (next: (q: JobQuery) => JobQuery) => void;
   /** True when the parse yielded neither a title nor a skill — the search
    *  cannot run, and the hint below tells the user what to type. */
   isDegenerate: boolean;
+  /** Deep links for the Review step, built by the parent from the same query. */
+  links: readonly JobBoardLink[];
+  /** The company-board picker's state, rendered in the Narrow step (#602). */
+  companyTargets: CompanyTargetsState;
 }) {
   // Progressive disclosure for Seniority (#540): a résumé whose titles carry
   // no recognized seniority keyword renders no inert placeholder field — the
   // row appears only once a seniority was derived, or the user opts in via
-  // the "+ Seniority" pill. Purely presentational, so it stays local here.
+  // the "+ Target level" pill. Purely presentational, so it stays local here.
   const [seniorityExpanded, setSeniorityExpanded] = useState(false);
 
   // ChipListEditor already trims + case-insensitively dedups before calling
@@ -85,20 +108,6 @@ export function JobQueryEditor({
     onChange((q) => ({ ...q, titles: [...q.titles, title] }));
   const removeTitle = (title: string) =>
     onChange((q) => ({ ...q, titles: q.titles.filter((t) => t !== title) }));
-  // Promote (#581): move-to-front of `titles`, a whole-query replacement that
-  // touches nothing else on `q` — `titleNoise` (#579) is a derived,
-  // non-user-facing field on the same object and must survive untouched, so
-  // this spreads `q` rather than rebuilding it. Rides the existing `onChange`
-  // → live re-rank path, so promoting never refetches.
-  const promoteTitle = (title: string) =>
-    onChange((q) => {
-      const index = q.titles.indexOf(title);
-      if (index <= 0) return q; // already primary, or not found
-      return {
-        ...q,
-        titles: [title, ...q.titles.slice(0, index), ...q.titles.slice(index + 1)],
-      };
-    });
 
   // Skills carry a second, derived field: `canonicalSkills`, the subset the
   // shared dictionary recognizes, which is what gives `assessQueryTerms` standing
@@ -161,126 +170,196 @@ export function JobQueryEditor({
     );
   };
 
-  /** The literal string that egresses to the keyless feeds — empty when the
-   *  query carries neither a title nor a skill. */
-  const egressPhrase = searchPhrase(query);
+  const hasChips = query.titles.length > 0 || query.skills.length > 0;
 
   return (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-      <div className="flex flex-col gap-3">
-        <ChipListEditor
-          label="Titles"
-          items={query.titles}
-          onAdd={addTitle}
-          onRemove={removeTitle}
-          placeholder="Add a title…"
-          addAriaLabel="Add title"
-          primaryIndex={query.titles.length > 0 ? 0 : undefined}
-          onPromote={promoteTitle}
-          qualityFor={(item) => titleVerdicts.get(item)}
-        />
-        {/* #581: this reads the SAME `searchPhrase` the keyless feeds are
-         *  called with, rather than a copy, so it can never drift from what
-         *  actually egresses. Gated on the phrase itself being non-empty, NOT
-         *  on `titles.length` — with no title `searchPhrase` falls back to
-         *  `skills.slice(0, 3)`, so gating on titles hid this line in the one
-         *  case where skills are what egress. */}
-        {egressPhrase.length > 0 && (
-          <p className="text-xs text-content-tertiary">
-            Searching feeds for &quot;{egressPhrase}&quot;
-          </p>
-        )}
+    <>
+      <StepPanel id="role">
+        <QueryStepSection
+          title="Titles"
+          hint="The starred title is the one sent to the job feeds. Everything else narrows and ranks on your device."
+        >
+          <ChipListEditor
+            label="Your titles"
+            labelHidden
+            items={query.titles}
+            onAdd={addTitle}
+            onRemove={removeTitle}
+            placeholder="Add a title…"
+            addAriaLabel="Add title"
+            primaryIndex={query.titles.length > 0 ? 0 : undefined}
+            onPromote={(title) => onChange((q) => promoteTitle(q, title))}
+            qualityFor={(item) => titleVerdicts.get(item)}
+          />
+          {query.titles.length > 0 && <TermGlyphLegend />}
+          {/* #597: the suggestions sit under the list they write into, not in a
+           *  trailing section the user has to connect back up. */}
+          <TermQualityAdvisory
+            kind="title"
+            missing={assessment.missing}
+            onAdd={addMissingTerm}
+          />
+        </QueryStepSection>
+
+        {/* Target level (#562/#568): progressive disclosure, same pattern as
+         *  pre-#568 free-text Seniority — a résumé whose titles carry no
+         *  recognized level renders no inert control until the user opts in.
+         *  Changing the level re-runs the #562 rung-distance penalty (live, via
+         *  the workbench's refinement effect). It sits with Role rather than in
+         *  Narrow because it is derived FROM a title and its provenance line
+         *  names that title — the two are unreadable apart. */}
+        <QueryStepSection title="Target level">
+          {query.seniority || seniorityExpanded ? (
+            <LevelSelect value={query.seniority} onChange={setLevel} />
+          ) : (
+            <AddPill label="Target level" onClick={() => setSeniorityExpanded(true)} />
+          )}
+          {/* #581: names the title `deriveSeniorityAcrossTitles` matched, so an
+           *  overridable derived value is explicable rather than a new lever.
+           *  Absent once the user overrides to a level no title produces. */}
+          {seniorityProvenance(query) && (
+            <p className="text-sm text-content-secondary">
+              {query.seniority} — from &quot;{seniorityProvenance(query)}&quot;
+            </p>
+          )}
+        </QueryStepSection>
+
         {/* Role families (#568): seeded from the same classification the
          *  company-board pipeline uses, removable so a fullstack résumé that
          *  also matched `data` can drop it. */}
-        <RoleFamilyChips
-          families={(query.families ?? []) as RoleFamily[]}
-          onRemove={removeRoleFamily}
-        />
-      </div>
+        <QueryStepSection title="Role family">
+          <RoleFamilyChips
+            families={(query.families ?? []) as RoleFamily[]}
+            onRemove={removeRoleFamily}
+          />
+        </QueryStepSection>
+      </StepPanel>
 
-      <ChipListEditor
-        label="Skills"
-        items={query.skills}
-        onAdd={addSkill}
-        onRemove={removeSkill}
-        placeholder="Add a skill…"
-        addAriaLabel="Add skill"
-        qualityFor={(item) => skillVerdicts.get(item)}
-      />
+      <StepPanel id="skills">
+        <QueryStepSection
+          title="Skills"
+          hint="The starred skill is sent as the topic tag. The rest rank how well each posting fits you, on your device."
+        >
+          {/* Skills carry a primary too (#597): `primaryKeyword` sends
+           *  `skills[0]` as the topic tag, so the `★` control means the same
+           *  thing here as on Titles — hence the same opt-in pair, with the noun
+           *  the label needs. */}
+          <ChipListEditor
+            label="Your skills"
+            labelHidden
+            items={query.skills}
+            onAdd={addSkill}
+            onRemove={removeSkill}
+            placeholder="Add a skill…"
+            addAriaLabel="Add skill"
+            primaryIndex={query.skills.length > 0 ? 0 : undefined}
+            onPromote={(skill) => onChange((q) => promoteSkill(q, skill))}
+            primaryNoun="skill"
+            qualityFor={(item) => skillVerdicts.get(item)}
+          />
+          {query.skills.length > 0 && <TermGlyphLegend />}
+          <TermQualityAdvisory
+            kind="skill"
+            missing={assessment.missing}
+            onAdd={addMissingTerm}
+          />
+        </QueryStepSection>
+      </StepPanel>
 
-      <div className="flex flex-col gap-3">
+      <StepPanel id="filters">
         {/* Location (#545): always shown, unlike the target level's
          *  AddPill-gated disclosure — location is a primary axis of every
          *  job-board search form (not an auxiliary facet the way level is),
          *  and a résumé with no parsed location still needs a visible place
          *  to type one to get any location-aware ranking or deep-link
          *  behavior at all. */}
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span className="text-xs text-content-tertiary">Location</span>
-          <EditableField
-            value={query.location}
-            placeholder="location"
-            label="Location"
-            onCommit={(v) => onChange((q) => ({ ...q, location: v || undefined }))}
-          />
-        </div>
+        <QueryStepSection title="Location">
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
+            <EditableField
+              value={query.location}
+              placeholder="location"
+              label="Location"
+              onCommit={(v) => onChange((q) => ({ ...q, location: v || undefined }))}
+            />
+          </div>
+        </QueryStepSection>
+
         {/* Exclude (#563): title-only — a posting is dropped when its TITLE
          *  contains one of these, never when only its description does.
          *  Removable chips may already be seeded from the role-family
          *  classification (e.g. GTM/field roles for an engineering search). */}
-        <ChipListEditor
-          label="Exclude (title only)"
-          items={query.excludeTerms ?? []}
-          onAdd={addExcludeTerm}
-          onRemove={removeExcludeTerm}
-          placeholder="Add a title to exclude…"
-          addAriaLabel="Add exclude term"
-        />
-        <CompFloorInput
-          value={query.compFloor}
-          onCommit={(v) => onChange((q) => ({ ...q, compFloor: v }))}
-        />
-      </div>
+        <QueryStepSection
+          title="Exclude"
+          hint="A posting is dropped when its title contains one of these — its description is not checked."
+        >
+          <ChipListEditor
+            label="Excluded titles"
+            labelHidden
+            items={query.excludeTerms ?? []}
+            onAdd={addExcludeTerm}
+            onRemove={removeExcludeTerm}
+            placeholder="Add a title to exclude…"
+            addAriaLabel="Add exclude term"
+          />
+        </QueryStepSection>
 
-      {/* Target level (#562/#568): progressive disclosure, same pattern as
-       *  pre-#568 free-text Seniority — a résumé whose titles carry no
-       *  recognized level renders no inert control until the user opts in
-       *  via "+ Seniority". Changing the level re-runs the #562 rung-
-       *  distance penalty (live, via the workbench's refinement effect).
-       *  Full-width row: 12 rungs wrap badly inside a third of the page. */}
-      <div className="sm:col-span-2 lg:col-span-3 flex flex-col gap-1">
-        {query.seniority || seniorityExpanded ? (
-          <LevelSelect value={query.seniority} onChange={setLevel} />
-        ) : (
-          <AddPill label="Target level" onClick={() => setSeniorityExpanded(true)} />
-        )}
-        {/* #581: names the title `deriveSeniorityAcrossTitles` matched, so an
-         *  overridable derived value is explicable rather than a new lever.
-         *  Absent once the user overrides to a level no title produces. */}
-        {seniorityProvenance(query) && (
-          <p className="text-xs text-content-tertiary">
-            {query.seniority} — from &quot;{seniorityProvenance(query)}&quot;
+        <QueryStepSection title="Minimum pay">
+          <CompFloorInput
+            value={query.compFloor}
+            onCommit={(v) => onChange((q) => ({ ...q, compFloor: v }))}
+          />
+        </QueryStepSection>
+
+        {/* #602: the company picker moved from a permanent band above the form
+         *  into the step it belongs to. It was pinned there (pre-#602) so it
+         *  would survive the post-search fold; `JobQuerySummary` already
+         *  carries the selected count through that fold, so the readout it was
+         *  protecting is not lost — and as a lone unheaded grey sentence at the
+         *  top of the page it was the least legible control on the form. */}
+        <QueryStepSection title="Company boards">
+          <CompanyTargets targets={companyTargets} />
+        </QueryStepSection>
+      </StepPanel>
+
+      <StepPanel id="review">
+        {/* Contract first: this is the block the whole form leads up to, and
+         *  before #602 it rendered below every field instead of above the
+         *  button it describes. The pickers call the SAME promote reducers the
+         *  chip rows' `★` control calls — one mutation path, and every reorder
+         *  is a click the user made. */}
+        <SearchPlanCard
+          query={query}
+          companyCount={companyTargets.selected.length}
+          onPromoteTitle={(title) => onChange((q) => promoteTitle(q, title))}
+          onPromoteSkill={(skill) => onChange((q) => promoteSkill(q, skill))}
+        />
+
+        {/* Whole-query findings: the #587 coherence note and the #597 dropped
+         *  terms. The per-kind suggestions render in their own steps instead,
+         *  so `missing` is deliberately not passed here. Renders nothing when
+         *  it has nothing to say, including the unresolved-role case — no
+         *  "we couldn't identify your role" nag, no all-clear. */}
+        <TermQualityAdvisory
+          coherence={assessment.coherence}
+          dropped={assessment.verdicts}
+          onAdd={addMissingTerm}
+        />
+
+        {/* Legend repeated here only when the findings above can render a mark
+         *  the user has not seen in context. */}
+        {hasChips && <TermGlyphLegend />}
+
+        <QueryStepSection title="Search somewhere else">
+          <ExternalBoardLinks links={links} />
+        </QueryStepSection>
+
+        {isDegenerate && (
+          <p className="max-w-prose text-sm text-content-secondary">
+            We couldn&apos;t derive a search from this resume — add a title or
+            skills to search.
           </p>
         )}
-      </div>
-
-      {/* Term-quality advisory (#585 missing terms + #587 title/skill
-       *  coherence): renders nothing when it has nothing to say, including the
-       *  unresolved-role case — no fourth panel, no "we couldn't identify your
-       *  role" nag, no all-clear. */}
-      <TermQualityAdvisory
-        missing={assessment.missing}
-        coherence={assessment.coherence}
-        onAdd={addMissingTerm}
-      />
-
-      {isDegenerate && (
-        <p className="text-xs text-content-tertiary sm:col-span-2 lg:col-span-3">
-          We couldn&apos;t derive a search from this resume — add a title or
-          skills to search.
-        </p>
-      )}
-    </div>
+      </StepPanel>
+    </>
   );
 }

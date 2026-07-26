@@ -15,8 +15,25 @@
  * GROUPED BY KIND (see {@link GROUPS}), because the two kinds write to two
  * different fields of the query and a flat row said nothing about which.
  *
+ * TWO PLACEMENTS, one component (#597). Passing `kind` puts ONE group inline
+ * under its own chip column — the suggestion pills belong beside the list they
+ * write into, not in a trailing section at the foot of the page the user has to
+ * connect back up. Omitting `kind` keeps the original full-width block, which is
+ * where the findings that are ABOUT the query as a whole live: the coherence
+ * note and the dropped terms. The full-width mode is the only one that spans the
+ * grid, so a column instance can never break its parent's layout.
+ *
+ * DROPPED TERMS (#597) are the chips that narrow nothing — the `noise` verdicts
+ * `term-quality.ts` already produces, rendered with their `reason` VERBATIM.
+ * There is no second scoring path and no new reason string: the glyph on the
+ * chip said this already, but only as a mark and a tooltip, which is not an
+ * answer to "why do my results look wrong". Only `noise` is listed, not `weak`:
+ * a weak term still participates in local matching, so calling it dropped would
+ * be false — and "weak" is the destructive verdict this lane is careful with
+ * (`term-quality.ts`, STRONG NEEDS EVIDENCE; WEAK NEEDS STANDING).
+ *
  * Renders nothing when it has nothing to say — `missing` empty AND no
- * coherence finding, which covers the unresolved-role case where
+ * coherence finding AND no dropped term, which covers the unresolved-role case where
  * `assessQueryTerms` returns `[]`/`undefined` by contract. No empty-state box,
  * no "we couldn't identify your role" nag, and no "your résumé looks
  * consistent" all-clear (term-quality docblock, rule 1). The two conditions
@@ -44,7 +61,11 @@
  */
 
 import { getSkillIndex } from "../../lib/jd-match/skills.ts";
-import type { CoherenceFinding, MissingTerm } from "../../lib/job-search/term-quality.ts";
+import type {
+  CoherenceFinding,
+  MissingTerm,
+  TermVerdict,
+} from "../../lib/job-search/term-quality.ts";
 import { AddPill } from "./ReconstructedAdd.tsx";
 
 /** The display text for a missing term — the term itself for a title, or the
@@ -72,21 +93,52 @@ const GROUPS: readonly { kind: MissingTerm["kind"]; heading: string }[] = [
   { kind: "skill", heading: "Add to your skills — this role is usually hired on these" },
 ];
 
+/** The one heading over the dropped-term list. Names the consequence the
+ *  verdicts' own `reason` strings then explain per term — the reasons stay
+ *  verbatim from the lib, so this component still composes no per-term copy. */
+const DROPPED_HEADING = "These terms aren't narrowing your search";
+
+/** The copy this component composes itself — the group headings and the
+ *  dropped-term heading. Per-term text is NOT here on purpose: `reason` and
+ *  `note` come verbatim from `term-quality.ts`, which asserts its own strings.
+ *  Exported so the denylist covers these too (`job-search-copy.test.ts`). */
+export const TERM_ADVISORY_COPY: readonly string[] = [
+  DROPPED_HEADING,
+  ...GROUPS.map((group) => group.heading),
+];
+
 export function TermQualityAdvisory({
-  missing,
+  missing = [],
   coherence,
+  dropped = [],
+  kind,
   onAdd,
 }: {
-  missing: readonly MissingTerm[];
+  missing?: readonly MissingTerm[];
   /** A confident title/skill mismatch (#587), or `undefined` — the normal
    *  state, which renders nothing rather than an all-clear. */
   coherence?: CoherenceFinding;
+  /** Verdicts to surface as dropped terms (#597). Only `noise` entries are
+   *  rendered — see the docblock; the caller may pass the whole verdict list. */
+  dropped?: readonly TermVerdict[];
+  /** Set to render ONLY that group, inline under its own chip column (#597).
+   *  Omit for the full-width block, the only mode that shows `coherence` and
+   *  `dropped`. */
+  kind?: MissingTerm["kind"];
   /** Called with the term the user clicked to add; `JobQueryEditor` maps it
    *  through {@link missingTermLabel} before writing it into the query, the
    *  same way this component renders it. */
   onAdd: (term: MissingTerm) => void;
 }) {
-  if (missing.length === 0 && !coherence) return null;
+  if (kind !== undefined) {
+    const group = GROUPS.find((g) => g.kind === kind);
+    const terms = missing.filter((term) => term.kind === kind);
+    if (!group || terms.length === 0) return null;
+    return <MissingGroup heading={group.heading} terms={terms} onAdd={onAdd} />;
+  }
+
+  const noise = dropped.filter((verdict) => verdict.quality === "noise");
+  if (missing.length === 0 && !coherence && noise.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-3 sm:col-span-2 lg:col-span-3">
@@ -94,7 +146,7 @@ export function TermQualityAdvisory({
        *  colour and glyph are never the only carriers); the sr-only prefix is
        *  what gives the block an accessible name in the reading order. */}
       {coherence && (
-        <p className="flex items-start gap-1.5 text-xs text-feedback-warning-text">
+        <p className="flex items-start gap-1.5 text-sm text-feedback-warning-text">
           <span aria-hidden="true">⚠︎</span>
           <span>
             <span className="sr-only">Check these terms: </span>
@@ -102,24 +154,59 @@ export function TermQualityAdvisory({
           </span>
         </p>
       )}
-      {GROUPS.map(({ kind, heading }) => {
-        const terms = missing.filter((term) => term.kind === kind);
+      {/* The terms that reach nothing, said in words rather than only as the
+       *  chip's `⚠︎` mark. `reason` is the lib's own string, verbatim. */}
+      {noise.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-content-secondary">{DROPPED_HEADING}</span>
+          <ul className="flex flex-col gap-0.5">
+            {noise.map((verdict) => (
+              <li
+                key={`${verdict.kind}:${verdict.term}`}
+                className="text-sm text-content-secondary"
+              >
+                <span className="text-content-secondary">{verdict.term}</span>
+                {" — "}
+                {verdict.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {GROUPS.map(({ kind: groupKind, heading }) => {
+        const terms = missing.filter((term) => term.kind === groupKind);
         if (terms.length === 0) return null;
         return (
-          <div key={kind} className="flex flex-col gap-1.5">
-            <span className="text-xs text-content-tertiary">{heading}</span>
-            <div className="flex flex-wrap gap-1.5">
-              {terms.map((term) => (
-                <AddPill
-                  key={term.term}
-                  label={missingTermLabel(term)}
-                  onClick={() => onAdd(term)}
-                />
-              ))}
-            </div>
-          </div>
+          <MissingGroup key={groupKind} heading={heading} terms={terms} onAdd={onAdd} />
         );
       })}
+    </div>
+  );
+}
+
+/** One heading + its add-pill row. Shared by both placements so the inline
+ *  column and the full-width block cannot render the suggestion differently. */
+function MissingGroup({
+  heading,
+  terms,
+  onAdd,
+}: {
+  heading: string;
+  terms: readonly MissingTerm[];
+  onAdd: (term: MissingTerm) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium text-content-secondary">{heading}</span>
+      <div className="flex flex-wrap gap-1.5">
+        {terms.map((term) => (
+          <AddPill
+            key={term.term}
+            label={missingTermLabel(term)}
+            onClick={() => onAdd(term)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

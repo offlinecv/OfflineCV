@@ -26,7 +26,10 @@ interface CompFloorInputProps {
 export function CompFloorInput({ value, onCommit }: CompFloorInputProps) {
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-      <span className="text-xs text-content-tertiary">Minimum pay ($/yr)</span>
+      {/* Named visibly by the caller's section heading (#602); the units stay
+          here, where the value is typed. */}
+      <span className="sr-only">Minimum pay</span>
+      <span className="text-sm text-content-secondary">$/yr</span>
       <EditableField
         value={value !== undefined ? String(value) : undefined}
         placeholder="minimum pay"

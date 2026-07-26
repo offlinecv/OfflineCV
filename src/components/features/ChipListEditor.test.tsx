@@ -52,3 +52,30 @@ describe("ChipListEditor promote control target size", () => {
     expect(html).toContain('aria-current="true"');
   });
 });
+
+/**
+ * #597 extends the promote control to Skills, where `primaryKeyword` sends
+ * `skills[0]`. The label was hardcoded to "title", which would have told a
+ * screen-reader user that a skill chip promotes a title.
+ */
+describe("ChipListEditor promote label", () => {
+  const base = {
+    items: ["Kubernetes", "TypeScript"],
+    onAdd: () => {},
+    onRemove: () => {},
+    placeholder: "Add a skill",
+    addAriaLabel: "Add skill",
+    primaryIndex: 0,
+    onPromote: () => {},
+  };
+
+  it("names the list's own noun", () => {
+    const html = render({ ...base, label: "Skills", primaryNoun: "skill" });
+    expect(html).toContain('aria-label="Make TypeScript the primary skill"');
+  });
+
+  it("defaults to 'title' so the original Titles call site is unchanged", () => {
+    const html = render({ ...base, label: "Titles" });
+    expect(html).toContain('aria-label="Make TypeScript the primary title"');
+  });
+});

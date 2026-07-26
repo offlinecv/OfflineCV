@@ -20,9 +20,9 @@ import type { JobBoardLink } from "../../lib/job-search/deep-links.ts";
 export function ExternalBoardLinks({ links }: { links: readonly JobBoardLink[] }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs text-content-tertiary">
-        Search external boards
-      </span>
+      {/* Named visibly by the caller's section heading (#602); kept so the
+          link row is still named in the accessibility tree. */}
+      <span className="sr-only">Search external boards</span>
       <div className="flex flex-wrap gap-2">
         {links.map((link) => (
           <a
@@ -30,14 +30,14 @@ export function ExternalBoardLinks({ links }: { links: readonly JobBoardLink[] }
             href={link.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-content-secondary transition-colors hover:bg-surface-subtle focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
+            className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-sm font-medium text-content-secondary transition-colors hover:bg-surface-subtle focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
           >
             {link.label}
             <span aria-hidden="true">↗</span>
           </a>
         ))}
       </div>
-      <p className="text-xs text-content-tertiary">
+      <p className="max-w-prose text-sm text-content-secondary">
         Only your search keywords are sent, and only when you click a link above.
       </p>
     </div>

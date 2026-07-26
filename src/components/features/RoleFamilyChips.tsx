@@ -31,7 +31,8 @@ interface RoleFamilyChipsProps {
 export function RoleFamilyChips({ families, onRemove }: RoleFamilyChipsProps) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs text-content-tertiary">Role</span>
+      {/* Named visibly by the caller's section heading (#602). */}
+      <span className="sr-only">Role family</span>
       {families.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {families.map((family) => (
@@ -45,7 +46,7 @@ export function RoleFamilyChips({ families, onRemove }: RoleFamilyChipsProps) {
           ))}
         </div>
       ) : (
-        <p className="text-xs text-content-tertiary">
+        <p className="text-sm text-content-secondary">
           No role narrowing — searching every role.
         </p>
       )}

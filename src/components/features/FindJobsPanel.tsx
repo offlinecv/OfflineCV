@@ -11,20 +11,39 @@
  * and the full page width. `/` keeps `FindJobsLauncher`, which hands the parse
  * over via `lib/jobs-handoff.ts`.
  *
- * LAYOUT: full-width bands stacked down the page, never a sidebar. Reading order
- * is the order of the work — who we search, then what we search for, then what we
- * found:
+ * LAYOUT: full-width bands stacked down the page, never a sidebar.
  *
- *  1. **Company targets, permanent.** The one query control that stays visible
- *     with the results. It's the axis users retune WHILE reading postings ("drop
- *     that one, add this one"), and #533's toggle is now live against an existing
- *     result set, so hiding it behind a fold would bury the panel's most
- *     immediate feedback loop.
- *  2. **The rest of the query, foldable.** Titles, skills, location, level,
- *     excludes, pay floor, external boards — a form, worth the full page width
- *     while being filled in and worth none of it afterwards. Folded, it is a
- *     one-line `JobQuerySummary` + Search again.
- *  3. **Results**, owning the full width.
+ *  1. **The query, as an ordered four-step walk** (#602) — Role → Skills →
+ *     Narrow → Review, on the `Stepper` composition. The pre-#602 form put
+ *     every field on screen at once in a three-column grid: ~40 chips, a
+ *     12-rung level rail, a mark legend, an advisory block, the deep links and
+ *     the outbound contract, all at one typographic weight with no headings.
+ *     Everything was reachable and nothing was findable. The steps ARE the
+ *     reading order of the work, and each rail entry states its own current
+ *     value (`describeQuerySteps`), so a closed step is still legible.
+ *  2. **Results**, owning the full width.
+ *
+ * The whole query folds to a one-line `JobQuerySummary` + Search again on
+ * submit — the rail included, since a form worth the full page width while
+ * being filled in is worth none of it afterwards.
+ *
+ * ORDER IS CAUSE → CONTRACT → ACTION (#597, kept by #602). The fields come
+ * first, then `SearchPlanCard` at the head of the Review step — which single
+ * title and which single skill will actually leave the browser, with a
+ * **change** control on each — and then Search. Before #597 the button floated
+ * top-right, where a user read the outbound terms (if at all) after clicking
+ * rather than before; before #602 the contract card rendered at the FOOT of the
+ * form, below every field it describes.
+ *
+ * The Search button is mounted on every step (`StepperNav`'s `finalAction`), not
+ * gated behind reaching Review: the query arrives already seeded, so a user who
+ * is happy with it must never have to walk four steps to run it. Its fixed
+ * position at the end of the nav row is what marks it as the end of the flow.
+ *
+ * The plan card carries the ONE form-level statement of what is sent and when.
+ * `ExternalBoardLinks` and `CompanyTargets` keep their own sentences — those are
+ * different triggers (clicking a deep link; reading a company board), and
+ * deleting them would leave those egress paths unexplained.
  *
  * Folding on submit rather than on the first successful result is deliberate:
  * the transition is then tied to the user's own click, so it never happens under
@@ -32,9 +51,9 @@
  * width it will render results into. A failed search stays folded too — its
  * error state carries Retry, and Edit search is one click away.
  *
- * Nothing is sticky. With the company chips permanently on top, a pinned band
- * would be ~3 chip rows tall and would cost more viewport on every scroll than
- * the Search button it keeps in reach is worth.
+ * Nothing is sticky: a pinned band tall enough to hold the rail and the nav row
+ * would cost more viewport on every scroll than the Search button it keeps in
+ * reach is worth.
  *
  * #568's live re-rank means a refinement chip edited while the panel is open
  * updates the results with no refetch, so re-opening the form over a results set
@@ -50,9 +69,13 @@
  */
 
 import { useMemo, useState } from "react";
-import { Button } from "@design-system";
+import { Button, Stepper, StepperNav, StepperRail } from "@design-system";
 import { buildJobQuery, type JobQuery } from "../../lib/job-search/query-builder.ts";
 import { buildDeepLinks } from "../../lib/job-search/deep-links.ts";
+import {
+  describeQuerySteps,
+  type QueryStepId,
+} from "../../lib/job-search/query-steps.ts";
 import {
   roleFilterForResume,
   seedExcludeTermsForFamilies,
@@ -61,9 +84,7 @@ import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import { JobSearchResults } from "./JobSearchResults.tsx";
 import { JobQueryEditor } from "./JobQueryEditor.tsx";
 import { JobQuerySummary } from "./JobQuerySummary.tsx";
-import { ExternalBoardLinks } from "./ExternalBoardLinks.tsx";
 import { PendingCompaniesNotice } from "./PendingCompaniesNotice.tsx";
-import { CompanyTargets } from "./CompanyTargets.tsx";
 import { useCompanyTargets } from "../../hooks/useCompanyTargets.ts";
 import { useJobSearch } from "../../hooks/useJobSearch.ts";
 
@@ -94,6 +115,10 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   // presentational, so it stays local rather than moving to a hook.
   const [open, setOpen] = useState(true);
 
+  // Which step of the query walk is showing (#602). Also presentational; the
+  // query itself is the state that matters and lives above.
+  const [step, setStep] = useState<QueryStepId>("role");
+
   const links = useMemo(() => buildDeepLinks(query), [query]);
   const isDegenerate = query.titles.length === 0 && query.skills.length === 0;
 
@@ -102,6 +127,11 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   // alone, the same way it behaved before #533.
   const companyTargets = useCompanyTargets(parsed);
   const selectedCompanies = companyTargets.selected;
+
+  // Pure string assembly over already-derived values (see `query-steps.ts`), so
+  // no memoization is warranted; it must recompute on every query edit anyway,
+  // which is what makes a closed step's summary trustworthy.
+  const steps = describeQuerySteps(query, selectedCompanies.length);
 
   // Fetch lifecycle, #568's live re-rank, and the asymmetric company handling
   // (remove = live, add = a prompt) — see the hook's own docblock.
@@ -120,11 +150,21 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
     runSearch();
   };
 
+  // One Search button, rendered in two different places by the fold — declared
+  // once so the disabled rule and the label cannot drift between them.
+  const searchButton = (
+    <Button
+      variant="primary"
+      size="md"
+      onClick={submit}
+      disabled={isDegenerate || isLoading}
+    >
+      {isLoading ? "Searching…" : hasSearched ? "Search again" : "Search jobs"}
+    </Button>
+  );
+
   return (
     <div className="flex flex-col gap-4">
-      {/* Band 1 — the only query control that outlives the fold. */}
-      <CompanyTargets targets={companyTargets} />
-
       <section
         aria-label="Job search query"
         className="flex flex-col gap-3 border-y border-border-light py-3"
@@ -132,49 +172,40 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <Button
             variant="ghost"
-            size="sm"
+            size="md"
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >
             {open ? "Hide search details" : "Edit search"}
           </Button>
           {!open && (
-            <JobQuerySummary
-              query={query}
-              companyCount={selectedCompanies.length}
-            />
+            <>
+              <JobQuerySummary
+                query={query}
+                companyCount={selectedCompanies.length}
+              />
+              <div className="ml-auto">{searchButton}</div>
+            </>
           )}
-          <Button
-            variant="primary"
-            size="md"
-            className="ml-auto"
-            onClick={submit}
-            disabled={isDegenerate || isLoading}
-          >
-            {isLoading
-              ? "Searching…"
-              : hasSearched
-                ? "Search again"
-                : "Search jobs"}
-          </Button>
         </div>
 
-        {/* Sits under the Search button rather than at the foot of the section:
-         *  the claim is about what THAT button does, and `ExternalBoardLinks`
-         *  carries its own (different) claim about the deep links. */}
-        <p className="text-xs text-content-tertiary">
-          Only your search keywords are sent, and only when you click Search.
-        </p>
-
         {open && (
-          <div className="flex flex-col gap-4">
+          <Stepper
+            id="job-query"
+            value={step}
+            onValueChange={(next) => setStep(next as QueryStepId)}
+            steps={steps}
+          >
+            <StepperRail aria-label="Search steps" />
             <JobQueryEditor
               query={query}
               onChange={setQuery}
               isDegenerate={isDegenerate}
+              links={links}
+              companyTargets={companyTargets}
             />
-            <ExternalBoardLinks links={links} />
-          </div>
+            <StepperNav finalAction={searchButton} />
+          </Stepper>
         )}
       </section>
 
