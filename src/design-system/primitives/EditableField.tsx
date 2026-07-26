@@ -224,7 +224,7 @@ export function EditableField({
     textWeight === "semibold" ? "font-semibold" : "font-normal";
   const sizeCls =
     textSize === "xs"
-      ? "text-xs"
+      ? "text-sm"
       : textSize === "lg"
         ? "text-lg"
         : textSize === "base"

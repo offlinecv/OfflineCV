@@ -70,7 +70,7 @@ function BulletFindingRow({
         </div>
       </div>
       {suggestion && (
-        <p className="text-xs text-content-tertiary">
+        <p className="text-sm text-content-tertiary">
           <span className="font-medium text-content-secondary">Suggestion: </span>
           {suggestion}
         </p>
@@ -140,7 +140,7 @@ export function CritiqueResults({
         <>
           {flaggedBullets.length > 0 && (
             <div className="flex flex-col gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
                 Bullet findings ({flaggedBullets.length} flagged)
               </h3>
               <ul className="flex flex-col gap-2 list-none">
@@ -157,7 +157,7 @@ export function CritiqueResults({
 
           {critique.missingSections.length > 0 && (
             <div className="flex flex-col gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
                 Possibly missing sections
               </h3>
               <ul className="flex flex-col gap-2 list-none">

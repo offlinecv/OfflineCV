@@ -229,7 +229,7 @@ export function Tab({ id, children, count, warn, description }: TabProps) {
               </>
             )}
           </span>
-          <span className="hidden text-xs font-normal text-content-secondary sm:block">
+          <span className="hidden text-sm font-normal text-content-secondary sm:block">
             {description}
           </span>
         </span>

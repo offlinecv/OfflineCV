@@ -91,7 +91,7 @@ export function Pagination({
             // one on each side and neither carries a page number.
             key={`gap-${i}`}
             aria-hidden="true"
-            className="px-1 text-xs text-content-muted"
+            className="px-1 text-sm text-content-muted"
           >
             …
           </span>

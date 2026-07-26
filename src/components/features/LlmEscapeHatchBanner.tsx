@@ -97,7 +97,7 @@ export function LlmEscapeHatchBanner({
           <p className="text-sm font-medium text-content-primary">
             Not everything parsed cleanly.
           </p>
-          <p className="text-xs text-content-tertiary">
+          <p className="text-sm text-content-tertiary">
             Try a local AI pass? Runs entirely in your browser — nothing leaves
             this tab. One-time ~1.2&nbsp;GB download, cached for next time.
           </p>
@@ -123,19 +123,19 @@ export function LlmEscapeHatchBanner({
       )}
 
       {status.kind === "running" && (
-        <p className="text-xs text-content-secondary" role="status">
+        <p className="text-sm text-content-secondary" role="status">
           Parsing with on-device AI…
         </p>
       )}
 
       {status.kind === "error" && (
-        <p role="alert" className="text-xs text-feedback-error-text">
+        <p role="alert" className="text-sm text-feedback-error-text">
           {status.message}
         </p>
       )}
 
       {status.kind === "done" && (
-        <p className="text-xs text-feedback-success-text">
+        <p className="text-sm text-feedback-success-text">
           Recovered with on-device AI — result updated below.
         </p>
       )}

@@ -125,7 +125,7 @@ export function JobResultCard({ job }: { job: RankedJob }) {
         )}
       </div>
 
-      <p className="text-xs text-content-tertiary">{reasons.join(" · ")}</p>
+      <p className="text-sm text-content-tertiary">{reasons.join(" · ")}</p>
 
       {matched.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -150,7 +150,7 @@ export function JobResultCard({ job }: { job: RankedJob }) {
           href={posting.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs font-medium text-content-secondary transition-colors hover:text-content-primary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
+          className="text-sm font-medium text-content-secondary transition-colors hover:text-content-primary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary"
         >
           Open posting <span aria-hidden="true">↗</span>
         </a>

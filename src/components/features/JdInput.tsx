@@ -111,11 +111,11 @@ export function JdInput({ value, onChange, resumeParsed = false }: JdInputProps)
       <div className="flex flex-col gap-1">
         <h2
           id="jd-input-label"
-          className="text-xs font-semibold uppercase tracking-wider text-content-muted"
+          className="text-sm font-semibold uppercase tracking-wider text-content-muted"
         >
           Paste a job description
         </h2>
-        <p className="max-w-prose text-xs text-content-tertiary">
+        <p className="max-w-prose text-sm text-content-tertiary">
           Lint your resume against the JD's skills and key phrases. Your JD
           text stays in this browser tab.
         </p>
@@ -171,7 +171,7 @@ export function JdInput({ value, onChange, resumeParsed = false }: JdInputProps)
       />
 
       {value.trim().length > 0 && !resumeParsed && (
-        <p className="text-xs text-content-muted">
+        <p className="text-sm text-content-muted">
           Drop a resume above to see what the JD asks for that's not in your
           resume.
         </p>

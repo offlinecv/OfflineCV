@@ -30,7 +30,7 @@
  */
 
 const SIZE_CLS = {
-  sm: "text-xs",
+  sm: "text-sm",
   md: "text-base",
 } as const;
 

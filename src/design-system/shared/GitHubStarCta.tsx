@@ -37,7 +37,7 @@ const REPO_URL = "https://github.com/offlinecv/OfflineCV";
 const STAR_COUNT_DISPLAY_THRESHOLD = 25;
 
 /** Inline SVG GitHub mark (octocat silhouette path). Sized at 14×14 so it
- *  sits on the same baseline as text-xs / text-sm copy without vertical shift.
+ *  sits on the same baseline as text-sm / text-sm copy without vertical shift.
  *  Uses `currentColor` so it inherits the surrounding text token. */
 function GitHubIcon() {
   return (
@@ -77,7 +77,7 @@ function StarLink({ count }: { count?: number }) {
       href={REPO_URL}
       target="_blank"
       rel="noreferrer noopener"
-      className="inline-flex items-center gap-1.5 text-xs text-content-secondary transition-colors hover:text-content-primary"
+      className="inline-flex items-center gap-1.5 text-sm text-content-secondary transition-colors hover:text-content-primary"
       aria-label={
         showCount
           ? `Star offlinecv on GitHub — ${formatCount(count)} stars`

@@ -35,7 +35,7 @@ export function ResumeLibrary({ library, onLoad }: ResumeLibraryProps) {
           <h2 className="text-sm font-semibold text-content-primary">
             Saved resumes
           </h2>
-          <span className="text-xs text-content-muted">
+          <span className="text-sm text-content-muted">
             {entries.length}
             {usageBytes !== null && <> · {formatBytes(usageBytes)} used</>}
           </span>
@@ -50,7 +50,7 @@ export function ResumeLibrary({ library, onLoad }: ResumeLibraryProps) {
         </div>
       </header>
 
-      <p className="text-xs text-content-tertiary">
+      <p className="text-sm text-content-tertiary">
         Saved only in this browser — no account, no sync.{" "}
         {!persisted && EVICTION_NOTICE}
       </p>

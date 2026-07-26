@@ -132,7 +132,7 @@ function BulletSegment({
       <p className="text-sm font-medium text-content-primary">
         {flagged} of {total} bullet{total === 1 ? "" : "s"} need attention
       </p>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-content-secondary">
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-content-secondary">
         {missingMetric > 0 && (
           <li className="tabular-nums">
             <span className="font-semibold text-feedback-warning-text">
@@ -177,7 +177,7 @@ function ContactSegment({ missing }: { missing: ContactDisplayField[] }) {
       <p className="text-sm font-medium text-content-primary">
         {count} contact field{count === 1 ? "" : "s"} missing
       </p>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-content-secondary">
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-content-secondary">
         {missing.map((f) => (
           <li key={f.key}>
             <span className="font-semibold text-feedback-warning-text">
@@ -236,7 +236,7 @@ function AttentionStrip({
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+    <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
       {children}
     </h2>
   );
@@ -1202,7 +1202,7 @@ export function ReconstructedResume({
     >
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
             Reconstructed resume
           </h2>
           <div className="flex flex-wrap items-center gap-2">

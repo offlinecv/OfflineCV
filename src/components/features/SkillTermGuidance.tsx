@@ -76,7 +76,7 @@ export function SkillTermGuidance({
 
   return (
     <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-subtle p-3">
-      <p className="flex items-start gap-1.5 text-xs font-semibold text-content-secondary">
+      <p className="flex items-start gap-1.5 text-sm font-semibold text-content-secondary">
         <span aria-hidden="true">⚠︎</span>
         <span>
           <span className="sr-only">Term guidance: </span>
@@ -86,7 +86,7 @@ export function SkillTermGuidance({
 
       {missingSkills.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-content-tertiary">
+          <span className="text-sm text-content-tertiary">
             Roles like yours are usually described with terms not in your résumé
           </span>
           <div className="flex flex-wrap gap-1.5">
@@ -102,7 +102,7 @@ export function SkillTermGuidance({
       )}
 
       {recognized.length > 0 && (
-        <p className="text-xs text-content-tertiary">
+        <p className="text-sm text-content-tertiary">
           <span className="font-medium text-content-secondary">
             Recognized in your résumé:
           </span>{" "}
@@ -112,7 +112,7 @@ export function SkillTermGuidance({
 
       {unrecognized.length > 0 && (
         <div className="flex flex-col gap-1">
-          <p className="text-xs text-content-tertiary">
+          <p className="text-sm text-content-tertiary">
             <span className="font-medium text-content-secondary">
               Not recognized by matchers:
             </span>{" "}
@@ -120,7 +120,7 @@ export function SkillTermGuidance({
           </p>
           {/* `reason` rendered verbatim, per term-quality.ts's contract — the
            *  same explanation `/jobs/` would show for the same skill. */}
-          <ul className="flex flex-col gap-0.5 pl-4 text-xs text-content-tertiary">
+          <ul className="flex flex-col gap-0.5 pl-4 text-sm text-content-tertiary">
             {unrecognized.map((v) => (
               <li key={v.term} className="list-disc">
                 <span className="font-medium">{v.term}</span> — {v.reason}

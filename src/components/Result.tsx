@@ -238,7 +238,7 @@ function LimitedParsingCard({
       <header className="flex items-center justify-between">
         <span className="flex items-center gap-3">
           <StatusBadge tone="limited">Not machine-readable</StatusBadge>
-          <span className="text-xs text-content-muted">
+          <span className="text-sm text-content-muted">
             {pages} page{pages === 1 ? "" : "s"}
           </span>
         </span>
@@ -259,7 +259,7 @@ function LimitedParsingCard({
 
       {/* 3. Recovered links — visually primary content */}
       <section className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
           Recovered links
         </h3>
         {uniqueUrls.length === 0 ? (
@@ -274,7 +274,7 @@ function LimitedParsingCard({
                   href={url}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="font-mono text-xs text-content-secondary underline decoration-dotted hover:decoration-solid"
+                  className="font-mono text-sm text-content-secondary underline decoration-dotted hover:decoration-solid"
                 >
                   {url}
                 </a>

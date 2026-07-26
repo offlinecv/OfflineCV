@@ -262,7 +262,7 @@ export function ResumeRewritePanel({
   }
   if (status.kind === "error") {
     return (
-      <p role="alert" className="text-xs text-feedback-error-text">
+      <p role="alert" className="text-sm text-feedback-error-text">
         {status.message}
       </p>
     );
@@ -335,7 +335,7 @@ export function StepIndicator({
   const pct = totalSections > 0 ? Math.round((done / totalSections) * 100) : 0;
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-xs text-content-secondary">
+      <div className="flex items-center justify-between text-sm text-content-secondary">
         <span>
           Rewriting {Math.min(currentIndex + 1, totalSections)} of {totalSections}: {label}
         </span>
@@ -364,7 +364,7 @@ function CompletedList({
   outcomes: readonly SectionOutcome[];
 }) {
   return (
-    <ul className="flex flex-col gap-1 list-none text-xs text-content-secondary">
+    <ul className="flex flex-col gap-1 list-none text-sm text-content-secondary">
       {outcomes.map((outcome, i) => (
         <li key={`${outcome.kind}-${i}`} className="flex items-center gap-2">
           <span aria-hidden="true" className="text-content-muted">

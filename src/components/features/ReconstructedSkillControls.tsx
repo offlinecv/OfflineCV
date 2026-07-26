@@ -122,7 +122,7 @@ export function SkillChip({
             }
           : undefined
       }
-      className="inline-flex items-center gap-1 rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-secondary"
+      className="inline-flex items-center gap-1 rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-secondary"
     >
       {skill}
       {moveTargets && onMove && <MoveMenu targets={moveTargets} onMove={onMove} />}
@@ -211,7 +211,7 @@ export function AddSkillInput({
         size="sm"
         onClick={() => setExpanded(true)}
         aria-label={label}
-        className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-accent-primary"
+        className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
       >
         + {label}
       </Button>
@@ -269,7 +269,7 @@ export function AddSkillInput({
               size="sm"
               onClick={() => commit(s)}
               aria-label={`Add ${s}`}
-              className="rounded-full bg-surface-subtle px-2.5 py-0.5 text-xs text-content-tertiary hover:text-accent-primary"
+              className="rounded-full bg-surface-subtle px-2.5 py-0.5 text-sm text-content-tertiary hover:text-accent-primary"
             >
               + {s}
             </Button>

@@ -41,7 +41,7 @@ export function ParsedHeader({
         {isEdited(isLlmRecovered, hasEdits) && (
           <StatusBadge tone="warning">Edited</StatusBadge>
         )}
-        <span className="text-xs text-content-muted">
+        <span className="text-sm text-content-muted">
           {pages} {pageCountLabel(pages)} &middot;{" "}
           {elapsedMs} ms
         </span>

@@ -161,7 +161,7 @@ export function StepperRail({
                   {step.label}
                 </span>
                 {step.summary != null && (
-                  <span className="hidden max-w-full truncate text-xs font-normal text-content-secondary sm:block">
+                  <span className="hidden max-w-full truncate text-sm font-normal text-content-secondary sm:block">
                     {step.summary}
                   </span>
                 )}

@@ -90,7 +90,7 @@ export function ProfileLinkAdd({
         }
       }}
     >
-      <span className="text-xs font-medium text-content-secondary">{label}</span>
+      <span className="text-sm font-medium text-content-secondary">{label}</span>
 
       {/* Network quick-picks — tap to pre-fill the host, then type your handle. */}
       <div className="flex flex-wrap gap-1.5">
@@ -101,7 +101,7 @@ export function ProfileLinkAdd({
             size="sm"
             onClick={() => pick(p.prefix)}
             aria-label={`Add ${p.label}`}
-            className="rounded-full bg-surface-card px-2.5 py-1 text-xs text-content-secondary hover:text-accent-primary"
+            className="rounded-full bg-surface-card px-2.5 py-1 text-sm text-content-secondary hover:text-accent-primary"
           >
             {p.label}
           </Button>
@@ -141,7 +141,7 @@ export function ProfileLinkAdd({
         </Button>
       </div>
 
-      <span className="text-xs text-content-tertiary">
+      <span className="text-sm text-content-tertiary">
         {HELPER_EXAMPLES
           ? `${HELPER_EXAMPLES}, and more are recognized automatically.`
           : "Any profile or portfolio link is recognized automatically."}

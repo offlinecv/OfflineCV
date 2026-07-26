@@ -61,7 +61,7 @@ export function PdfPreview({ bytes, maxPages = 2 }: PdfPreviewProps) {
   return (
     <div className="flex flex-col gap-2" ref={containerRef}>
       {error && (
-        <p className="text-xs text-feedback-error-text">
+        <p className="text-sm text-feedback-error-text">
           Preview failed: {error}
         </p>
       )}

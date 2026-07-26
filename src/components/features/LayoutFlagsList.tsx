@@ -16,7 +16,7 @@ interface LayoutFlagsListProps {
 export function LayoutFlagsList({ triggers }: LayoutFlagsListProps) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
         Layout flags
       </h2>
       {triggers.length === 0 ? (
@@ -27,7 +27,7 @@ export function LayoutFlagsList({ triggers }: LayoutFlagsListProps) {
         <ul className="flex flex-col gap-1.5">
           {triggers.map((t) => (
             <li key={t} className="text-sm">
-              <span className="font-mono text-xs text-content-secondary">
+              <span className="font-mono text-sm text-content-secondary">
                 {t}
               </span>{" "}
               <span className="text-content-tertiary">

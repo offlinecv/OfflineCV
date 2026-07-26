@@ -102,7 +102,7 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline gap-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
           Your resume score
         </h2>
         <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-content-secondary">
@@ -129,7 +129,7 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
           <ScoreRing score={score.overall} />
           <VerdictHeader score={score.overall} recommendation={recommendation} />
         </div>
-        <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+        <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-sm sm:grid-cols-3">
           <Dimension
             label="Specificity"
             value={score.specificity.score}

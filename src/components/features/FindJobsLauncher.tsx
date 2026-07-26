@@ -51,14 +51,14 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
     <div className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
         <div className="flex items-baseline gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
             Find jobs
           </h2>
           <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
             alpha
           </span>
         </div>
-        <p className="max-w-prose text-xs text-content-tertiary">
+        <p className="max-w-prose text-sm text-content-tertiary">
           We built a search from your parsed resume. Open the job workbench to
           edit it, search job boards, and page through every match ranked by
           fit. Your resume text never leaves this browser — only the keywords
@@ -68,7 +68,7 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
 
       {!isDegenerate && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-content-tertiary">
+          <span className="text-sm text-content-tertiary">
             Starting from these terms
           </span>
           {/* #581: `JobQuerySummary` is the Reuse Gate answer — same
@@ -105,7 +105,7 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
        *  with a dead tab and no control to fix it. The button opens the same
        *  editor, which shows its own "add a title or skills" hint. */}
       {isDegenerate && (
-        <p className="text-xs text-content-tertiary">
+        <p className="text-sm text-content-tertiary">
           We couldn&apos;t derive a search from this resume — add a title or
           skills in the workbench and search from there.
         </p>

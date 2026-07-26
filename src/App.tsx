@@ -166,7 +166,7 @@ export default function App() {
                   PDF, score it, fix it, match a JD, and find jobs — all without
                   your resume leaving your browser.
                 </p>
-                <p className="text-xs text-content-muted">
+                <p className="text-sm text-content-muted">
                   Built in response to a hiring process job seekers say they
                   can&apos;t see into — source:{" "}
                   <a

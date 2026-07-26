@@ -50,7 +50,7 @@ export function ResumeQualityPanel({
     <section className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
             Resume Quality
           </h2>
           <p className="max-w-prose text-sm text-content-tertiary">
@@ -101,7 +101,7 @@ export function ResumeQualityPanel({
 
           {status.disagreements.length > 0 && (
             <section className="flex flex-col gap-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
                 What an ATS misses
               </h3>
               <p className="text-sm text-content-secondary">

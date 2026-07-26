@@ -65,7 +65,7 @@ export function JobSearchResults({
 function LoadingState() {
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-content-tertiary">
+      <p className="text-sm text-content-tertiary">
         Searching remote/tech boards…
       </p>
       <div className="flex flex-col gap-2">
@@ -168,26 +168,26 @@ function Loaded({
       <div ref={topRef} className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge tone="info">sample</StatusBadge>
-          <span className="text-xs text-content-tertiary">
+          <span className="text-sm text-content-tertiary">
             {jobs.length} match{jobs.length === 1 ? "" : "es"} ranked by fit
           </span>
         </div>
-        <p className="max-w-prose text-xs text-content-tertiary">{SAMPLE_LABEL}</p>
+        <p className="max-w-prose text-sm text-content-tertiary">{SAMPLE_LABEL}</p>
         {degradedProviders.length > 0 && (
-          <p className="text-xs text-content-tertiary">
+          <p className="text-sm text-content-tertiary">
             Couldn&apos;t reach {degradedProviders.join(", ")} — showing results
             from the other feeds.
           </p>
         )}
         {excludeSuppressed && (
-          <p className="text-xs text-content-tertiary">
+          <p className="text-sm text-content-tertiary">
             Your exclude terms would have removed every match, so we skipped
             them for this search — open Edit search to remove or narrow a term
             and apply exclusion again.
           </p>
         )}
         {roleSuppressed && (
-          <p className="text-xs text-content-tertiary">
+          <p className="text-sm text-content-tertiary">
             Role filter skipped — it would have hidden every result, so we kept
             them all for this search. Open Edit search to adjust the Role chips
             and apply role filtering again.
@@ -207,7 +207,7 @@ function Loaded({
 
       {pageCount > 1 && (
         <div className="flex flex-col gap-2 border-t border-border-light pt-3">
-          <p className="text-xs text-content-muted">
+          <p className="text-sm text-content-muted">
             Showing {start + 1}–{Math.min(start + PAGE_SIZE, jobs.length)} of{" "}
             {jobs.length} matches, ranked by fit.
           </p>

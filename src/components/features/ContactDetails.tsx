@@ -164,7 +164,7 @@ function FieldValue({ field }: { field: ContactDisplayField }) {
  *  is spotted at a glance (restores the pre-#146 yellowish affordance). */
 function MissingToken({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-feedback-warning-bg px-2 py-0.5 text-xs text-feedback-warning-text">
+    <span className="inline-flex items-center gap-1 rounded-full bg-feedback-warning-bg px-2 py-0.5 text-sm text-feedback-warning-text">
       <span aria-hidden="true">⚠</span>
       {label} not detected
     </span>
@@ -202,7 +202,7 @@ function EditableValue({
 
   if (absent) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-feedback-warning-bg px-2 py-0.5 text-xs text-feedback-warning-text">
+      <span className="inline-flex items-center gap-1 rounded-full bg-feedback-warning-bg px-2 py-0.5 text-sm text-feedback-warning-text">
         <span aria-hidden="true">⚠</span>
         {editor}
       </span>

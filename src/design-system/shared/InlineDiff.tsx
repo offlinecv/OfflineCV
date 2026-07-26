@@ -39,7 +39,7 @@ interface InlineDiffProps {
 
 export function InlineDiff({ segments, className }: InlineDiffProps) {
   const base =
-    "whitespace-pre-wrap break-words text-xs leading-snug";
+    "whitespace-pre-wrap break-words text-sm leading-snug";
   const cls = className ? `${base} ${className}` : base;
   return (
     <p className={cls}>
