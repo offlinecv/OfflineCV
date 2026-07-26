@@ -134,7 +134,7 @@ function lengthTitle(b: BulletObservation): string {
  */
 export function BulletFlagLegend() {
   return (
-    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-tertiary">
+    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-content-tertiary">
       <li className="inline-flex items-center gap-1.5">
         <FlagChip title="No metric" ariaLabel="No metric" decorative>
           <MetricIcon />

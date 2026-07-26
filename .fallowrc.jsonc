@@ -18,7 +18,8 @@
     "jd-spike.html",
     "eval-rewrite.html",
     "parse-eval.html",
-    "scripts/**/*.test.mjs"
+    "scripts/**/*.test.mjs",
+    "scripts/check-contrast.mjs"
   ],
 
   // `@design-tokens` is a Vite CSS-import alias (vite.config.ts resolve.alias),

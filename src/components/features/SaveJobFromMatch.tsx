@@ -83,7 +83,7 @@ export function SaveJobFromMatch({
 
   if (savedFor === jdText) {
     return (
-      <p className="text-xs text-content-muted">
+      <p className="text-sm text-content-muted">
         Saved to your tracked jobs — open the parser-audit page to rename it,
         set a status, or link the resume you used. Stored in this browser only.
       </p>
@@ -95,7 +95,7 @@ export function SaveJobFromMatch({
       <Button variant="ghost" size="sm" disabled={saving} onClick={() => void save()}>
         {saving ? "Saving…" : "Save as tracked job"}
       </Button>
-      <span className="text-xs text-content-muted">
+      <span className="text-sm text-content-muted">
         {failed
           ? "Couldn't save — this browser may be out of storage or in private mode. Your JD match is unaffected."
           : "Keeps this JD and its match result in your browser."}

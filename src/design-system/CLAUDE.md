@@ -38,3 +38,12 @@ that inherit `currentColor` and carry an `aria-hidden` + `sr-only`/label pair (e
 decorative toggles, `★ ☆` in `StarRating`, `⚠︎` written `U+26A0 U+FE0E` in `Tabs.tsx`).
 Banned: colour pictographs from the OS emoji font. Before flagging a hit, check for an
 adjacent `U+FE0E` and an `aria-hidden`/`sr-only` pair.
+
+## Type ramp
+
+Audit sizes by consumption: `rg -o 'text-(xs|sm|base|lg|xl|2xl|3xl)' src/ | sort | uniq -c`.
+- `text-xs`: **Never for body prose.** Allowed only for metadata that sits alongside stronger text: a chip's quality mark, a units suffix, a count badge, a timestamp.
+- `text-sm`: The default body text size.
+- `text-base`: Subheadings or large body prose.
+- `text-lg`: Primary headings for cards/sections.
+- `text-2xl`+: Page-level headings.

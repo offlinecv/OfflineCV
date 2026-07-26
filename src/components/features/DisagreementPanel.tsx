@@ -126,7 +126,7 @@ function DisagreementRow({ d }: { d: ParseDisagreement }) {
         </span>
       </div>
       {d.likelyCause && (
-        <p className="text-xs text-content-tertiary">
+        <p className="text-sm text-content-tertiary">
           Likely cause: {CAUSE_COPY[d.likelyCause]}.
         </p>
       )}
@@ -192,7 +192,7 @@ function HeuristicVsLlm({ d }: { d: ParseDisagreement }) {
   const { heuristic, llm } = sideValues(d);
   return (
     <div className="flex flex-col gap-1">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 text-xs">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 text-sm">
         <div className="flex flex-col gap-0.5 rounded border border-border-light bg-surface-subtle p-2">
           <span className="font-semibold uppercase tracking-wide text-content-muted">
             Generic ATS extracted
@@ -212,7 +212,7 @@ function HeuristicVsLlm({ d }: { d: ParseDisagreement }) {
           <span className="font-mono text-feedback-success-text">{llm}</span>
         </div>
       </div>
-      <p className="text-xs text-content-muted">
+      <p className="text-sm text-content-muted">
         → the highlighted content is on your résumé but missed by a generic ATS.
       </p>
     </div>

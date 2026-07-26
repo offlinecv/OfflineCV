@@ -227,7 +227,7 @@ function FeedbackRatingForm() {
       // side is empty) — turns two stacked footnote rows into one, killing the
       // empty band below the score. Right-aligned, so the lift can't misalign.
       <div className="flex items-center justify-end gap-2 -mt-8">
-        <span className="text-xs text-content-muted">Rate OfflineCV</span>
+        <span className="text-sm text-content-muted">Rate OfflineCV</span>
         <StarRating
           value={rating}
           onChange={(v) => {
@@ -269,7 +269,7 @@ function FeedbackRatingForm() {
             <p
               id={errorId}
               role="alert"
-              className="text-xs text-feedback-error-text"
+              className="text-sm text-feedback-error-text"
             >
               Please select a rating before submitting.
             </p>
@@ -281,7 +281,7 @@ function FeedbackRatingForm() {
           <div className="flex flex-col gap-4">
             {/* Category (optional) */}
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-content-secondary">
+              <span className="text-sm font-medium text-content-secondary">
                 What area needs improvement? (optional)
               </span>
               <div className="flex flex-wrap gap-2">
@@ -308,7 +308,7 @@ function FeedbackRatingForm() {
             <div className="flex flex-col gap-1">
               <label
                 htmlFor={textId}
-                className="text-xs font-medium text-content-secondary"
+                className="text-sm font-medium text-content-secondary"
               >
                 Any other thoughts? (optional)
               </label>
@@ -327,7 +327,7 @@ function FeedbackRatingForm() {
             <div className="flex flex-col gap-2">
               <label
                 htmlFor={contactId}
-                className="flex min-h-11 cursor-pointer items-center gap-2 text-xs font-medium text-content-secondary"
+                className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium text-content-secondary"
               >
                 <input
                   id={contactId}
@@ -343,7 +343,7 @@ function FeedbackRatingForm() {
                 <div className="flex flex-col gap-1">
                   <label
                     htmlFor={emailId}
-                    className="text-xs font-medium text-content-secondary"
+                    className="text-sm font-medium text-content-secondary"
                   >
                     Your email
                   </label>

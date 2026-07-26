@@ -66,7 +66,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
       <p className="text-sm font-semibold text-feedback-warning-text">
         {HEADLINE[capability]}
       </p>
-      <p className="text-xs text-content-tertiary">
+      <p className="text-sm text-content-tertiary">
         Your ATS score and parsed résumé are unaffected — only the optional
         on-device AI analysis and rewrite need a GPU.
       </p>
@@ -75,7 +75,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
           variant="link"
           size="sm"
           onClick={() => setOpen(true)}
-          className="text-xs text-content-secondary"
+          className="text-sm text-content-secondary"
         >
           How to turn this on →
         </Button>
@@ -92,7 +92,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
               {guidance.platformLabel}
             </p>
-            <ol className="flex list-decimal flex-col gap-1 pl-4 text-xs text-content-secondary">
+            <ol className="flex list-decimal flex-col gap-1 pl-4 text-sm text-content-secondary">
               {guidance.steps.map((step) => (
                 <li key={step}>{step}</li>
               ))}
@@ -116,7 +116,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
                       href={link.href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-accent-primary hover:underline underline-offset-2"
+                      className="text-sm text-accent-primary hover:underline underline-offset-2"
                     >
                       {link.label} ↗
                     </a>
@@ -127,7 +127,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
           </div>
 
           <details className="border-t border-border-light pt-2">
-            <summary className="cursor-pointer text-xs text-content-tertiary hover:underline">
+            <summary className="cursor-pointer text-sm text-content-tertiary hover:underline">
               Using a different browser?
             </summary>
             <ul className="mt-1.5 flex flex-col gap-1 pl-1 text-[11px] text-content-tertiary list-none">

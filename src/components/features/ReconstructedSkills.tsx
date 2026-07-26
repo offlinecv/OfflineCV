@@ -42,7 +42,7 @@ import {
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+    <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
       {children}
     </h2>
   );
@@ -101,7 +101,7 @@ function SkillCategoryRow({
           textWeight="semibold"
           onCommit={onRename}
         />
-        <span className="text-xs text-content-muted">:</span>
+        <span className="text-sm text-content-muted">:</span>
         <DeleteCategoryButton label={category.label} onDelete={onDelete} />
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -116,7 +116,7 @@ function SkillCategoryRow({
           />
         ))}
         {category.skills.length === 0 && (
-          <span className="text-xs text-content-tertiary">
+          <span className="text-sm text-content-tertiary">
             (empty — add a skill or delete this category)
           </span>
         )}

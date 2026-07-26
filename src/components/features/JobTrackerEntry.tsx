@@ -94,7 +94,7 @@ export function JobTrackerEntry({
           href={job.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="truncate text-xs text-accent-primary hover:underline"
+          className="truncate text-sm text-accent-primary hover:underline"
         >
           {job.url}
         </a>
@@ -107,7 +107,7 @@ export function JobTrackerEntry({
         onCommit={(v) => onUpdate(job.id, { notes: v })}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-content-muted">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-content-muted">
         <span>
           {linkedResumeName ? (
             <>

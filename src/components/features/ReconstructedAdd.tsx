@@ -97,7 +97,7 @@ export function AddPill({
       size="sm"
       onClick={onClick}
       aria-label={label}
-      className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-xs text-content-tertiary hover:text-accent-primary"
+      className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
     >
       + {label}
     </Button>

@@ -82,7 +82,7 @@ export function ReportDownloadControl({
           </p>
 
           <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-xs font-semibold uppercase tracking-wider text-content-muted">
+            <legend className="mb-1 text-sm font-semibold uppercase tracking-wider text-content-muted">
               Format
             </legend>
             {(

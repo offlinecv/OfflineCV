@@ -7,7 +7,7 @@
  *
  * WHY IT EXISTS. Every label on the pre-#602 form — "Titles", "Skills",
  * "Location", "Target level", the advisory headings — was rendered at the same
- * `text-xs text-content-tertiary` as the body copy beneath it. With no weight,
+ * `text-sm text-content-tertiary` as the body copy beneath it. With no weight,
  * size or colour step anywhere, the page had ~40 chips and zero headings: no
  * scanning order, and nothing for a screen reader's heading navigation to land
  * on either. This is the one heading level the form uses, so the step of one

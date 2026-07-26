@@ -77,16 +77,16 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
       <p className="text-sm font-medium">
         Drop a resume PDF or DOCX here, or click to pick one
       </p>
-      <p className="text-xs text-content-muted">
+      <p className="text-sm text-content-muted">
         Your file stays in this browser tab.
       </p>
       {status && (
-        <p className="mt-2 text-xs text-content-tertiary">
+        <p className="mt-2 text-sm text-content-tertiary">
           {status}
         </p>
       )}
       {error && (
-        <p className="mt-2 text-xs text-feedback-error-text">{error}</p>
+        <p className="mt-2 text-sm text-feedback-error-text">{error}</p>
       )}
     </label>
   );

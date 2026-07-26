@@ -44,7 +44,7 @@ const EDUCATION_FIELD_MAP: Record<
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+    <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
       {children}
     </h2>
   );

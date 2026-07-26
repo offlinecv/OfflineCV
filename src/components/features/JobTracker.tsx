@@ -79,7 +79,7 @@ export function JobTracker({ tracker, resumeName, resumeOptions }: JobTrackerPro
           <h2 className="text-sm font-semibold text-content-primary">
             Tracked jobs
           </h2>
-          <span className="text-xs text-content-muted">
+          <span className="text-sm text-content-muted">
             {jobs.length}
             {usageBytes !== null && <> · {formatBytes(usageBytes)} used</>}
           </span>
@@ -101,7 +101,7 @@ export function JobTracker({ tracker, resumeName, resumeOptions }: JobTrackerPro
         </div>
       </header>
 
-      <p className="text-xs text-content-tertiary">
+      <p className="text-sm text-content-tertiary">
         Saved only in this browser — no account, no sync.{" "}
         {!persisted && EVICTION_NOTICE}
       </p>
@@ -114,7 +114,7 @@ export function JobTracker({ tracker, resumeName, resumeOptions }: JobTrackerPro
         <div className="flex flex-col gap-4">
           {groups.map(({ status, jobs: group }) => (
               <section key={status} className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
                   {jobStatusLabel(status)} · {group.length}
                 </h3>
                 <ul className="flex flex-col gap-2">

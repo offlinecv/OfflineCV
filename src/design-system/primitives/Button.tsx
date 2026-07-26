@@ -55,8 +55,8 @@ const VARIANT: Record<ButtonVariant, string> = {
 };
 
 const SIZE: Record<ButtonSize, string> = {
-  sm: "text-xs",
-  md: "text-sm",
+  sm: "text-sm",
+  md: "text-base",
 };
 
 export function Button({

@@ -30,7 +30,7 @@ export function JdMatch({ result }: JdMatchProps) {
     <Card className="flex flex-col gap-4 shadow-xs">
       <header className="flex flex-col gap-1">
         <div className="flex items-baseline gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
             JD match
           </h2>
           <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
@@ -40,7 +40,7 @@ export function JdMatch({ result }: JdMatchProps) {
         <p className="text-base font-semibold text-content-primary">
           Your resume mentions {covered} of {total} terms from this JD.
         </p>
-        <p className="text-xs text-content-tertiary">
+        <p className="text-sm text-content-tertiary">
           Weighted coverage:{" "}
           <span className="font-mono text-content-secondary">
             {coverage.score}/100
@@ -48,7 +48,7 @@ export function JdMatch({ result }: JdMatchProps) {
           — skill {coverage.weights.skill.toFixed(1)}, phrase{" "}
           {coverage.weights.noun.toFixed(1)}.
         </p>
-        <p className="max-w-prose text-xs text-content-tertiary">
+        <p className="max-w-prose text-sm text-content-tertiary">
           Diagnostic, not a verdict. We look for skills and phrases by name —
           we don't read context. Your JD text stays in this browser tab.
         </p>
@@ -94,11 +94,11 @@ function TermColumn({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-content-muted">
+      <h3 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
         {heading}
       </h3>
       {terms.length === 0 ? (
-        <p className="text-xs text-content-tertiary">{emptyCopy}</p>
+        <p className="text-sm text-content-tertiary">{emptyCopy}</p>
       ) : (
         <ul className="flex flex-col gap-1">
           {terms.map((term) => (

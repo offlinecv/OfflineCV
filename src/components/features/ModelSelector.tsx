@@ -298,14 +298,14 @@ export function ModelSelector() {
             onClick={() => setExpanded((v) => !v)}
             disabled={loadState.kind === "loading"}
             aria-expanded={true}
-            className="text-xs"
+            className="text-sm"
           >
             Done
           </Button>
         </div>
       ) : (
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-xs text-content-tertiary">
+          <p className="text-sm text-content-tertiary">
             Rewrite model via{" "}
             <span className="font-semibold text-content-primary">
               {selectedModel.name}
@@ -322,7 +322,7 @@ export function ModelSelector() {
                   variant="link"
                   size="sm"
                   onClick={onDownloadAhead}
-                  className="text-xs"
+                  className="text-sm"
                 >
                   Try again
                 </Button>
@@ -336,7 +336,7 @@ export function ModelSelector() {
                 variant="link"
                 size="sm"
                 onClick={onDownloadAhead}
-                className="text-xs"
+                className="text-sm"
               >
                 Download model · ~{(selectedModel.downloadSizeMb / 1024).toFixed(1)}{" "}
                 GB
@@ -347,7 +347,7 @@ export function ModelSelector() {
               size="sm"
               onClick={() => setExpanded((v) => !v)}
               aria-expanded={false}
-              className="text-xs"
+              className="text-sm"
             >
               Edit
             </Button>
@@ -443,7 +443,7 @@ export function ModelRow({
         }`}
       >
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <span className="text-xs font-semibold text-content-primary">
+          <span className="text-sm font-semibold text-content-primary">
             {model.name}
             {isDefault && (
               <span className="ml-1.5 text-[10px] font-normal text-content-tertiary">

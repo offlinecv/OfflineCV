@@ -54,7 +54,7 @@ export function ConsentDialog({
       className="max-w-md"
     >
       <div className="flex flex-col gap-3">
-        <p className="text-xs leading-relaxed text-content-secondary">
+        <p className="text-sm leading-relaxed text-content-secondary">
           <strong className="text-content-primary">{model.name}</strong> is
           released under the{" "}
           {model.licenseUrl ? (

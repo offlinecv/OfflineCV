@@ -41,7 +41,7 @@ export function ReplaceResumeDropOverlay({
             <p className="text-base font-medium text-content-primary">
               Drop to analyze a new resume
             </p>
-            <p className="text-xs text-content-muted">
+            <p className="text-sm text-content-muted">
               We&apos;ll swap out the one you&apos;re viewing now.
             </p>
           </div>

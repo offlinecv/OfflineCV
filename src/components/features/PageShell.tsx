@@ -73,7 +73,7 @@ export function PageShell({
           </div>
           <div className="flex items-center gap-4">
             {headerExtra}
-            <p className="hidden text-xs text-content-muted sm:block">
+            <p className="hidden text-sm text-content-muted sm:block">
               {subtitle}
             </p>
             <GitHubStarCta variant="inline" count={starCount} />
@@ -84,7 +84,7 @@ export function PageShell({
 
       {children}
 
-      <footer className="mt-auto flex flex-col items-center gap-2 border-t border-border-light pt-6 text-center text-xs text-content-tertiary">
+      <footer className="mt-auto flex flex-col items-center gap-2 border-t border-border-light pt-6 text-center text-sm text-content-tertiary">
         <p>Your PDF stays in this browser tab by default and is never used to train AI. AI analysis is optional.</p>
         <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
           <a

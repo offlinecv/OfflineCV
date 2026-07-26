@@ -114,7 +114,7 @@ export function ReportGapSection({
             Download diagnostic file
           </Button>
           {disagreements && disagreements.length > 0 && (
-            <span className="text-xs text-content-muted">
+            <span className="text-sm text-content-muted">
               Includes {disagreements.length} characterized gap
               {disagreements.length === 1 ? "" : "s"} from the on-device
               comparison (kinds only — no recovered text).
@@ -124,7 +124,7 @@ export function ReportGapSection({
       )}
 
       {error && (
-        <p role="alert" className="text-xs text-feedback-error-text">
+        <p role="alert" className="text-sm text-feedback-error-text">
           {error}
         </p>
       )}
