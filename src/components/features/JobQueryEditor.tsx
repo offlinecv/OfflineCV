@@ -35,14 +35,19 @@
 import { useState } from "react";
 import { EditableField } from "@design-system";
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
-import { parseSeniorityLabel } from "../../lib/job-search/query-builder.ts";
+import {
+  canonicalSkillLabels,
+  parseSeniorityLabel,
+} from "../../lib/job-search/query-builder.ts";
 import { searchPhrase } from "../../lib/job-search/providers/keywords.ts";
 import type { RoleFamily } from "../../lib/job-search/role-keywords.ts";
+import { assessQueryTerms, type MissingTerm } from "../../lib/job-search/term-quality.ts";
 import { ChipListEditor } from "./ChipListEditor.tsx";
 import { CompFloorInput } from "./CompFloorInput.tsx";
 import { RoleFamilyChips } from "./RoleFamilyChips.tsx";
 import { LevelSelect } from "./LevelSelect.tsx";
 import { AddPill } from "./ReconstructedAdd.tsx";
+import { missingTermLabel, TermQualityAdvisory } from "./TermQualityAdvisory.tsx";
 
 /**
  * The title that produced `query.seniority`, or `undefined` when the level
@@ -95,10 +100,21 @@ export function JobQueryEditor({
       };
     });
 
+  // Skills carry a second, derived field: `canonicalSkills`, the subset the
+  // shared dictionary recognizes, which is what gives `assessQueryTerms` standing
+  // to call a skill weak. Recomputed from the whole list on every edit through
+  // the same `canonicalSkillLabels` `buildJobQuery` used, so a chip the user
+  // types is annotated exactly like a derived one and the annotation can never
+  // describe only the original parse.
+  const withSkills = (q: JobQuery, skills: string[]): JobQuery => ({
+    ...q,
+    skills,
+    canonicalSkills: canonicalSkillLabels(skills),
+  });
   const addSkill = (skill: string) =>
-    onChange((q) => ({ ...q, skills: [...q.skills, skill] }));
+    onChange((q) => withSkills(q, [...q.skills, skill]));
   const removeSkill = (skill: string) =>
-    onChange((q) => ({ ...q, skills: q.skills.filter((s) => s !== skill) }));
+    onChange((q) => withSkills(q, q.skills.filter((s) => s !== skill)));
 
   const addExcludeTerm = (term: string) =>
     onChange((q) => ({ ...q, excludeTerms: [...(q.excludeTerms ?? []), term] }));
@@ -120,6 +136,31 @@ export function JobQueryEditor({
   const setLevel = (level: string | undefined) =>
     onChange((q) => ({ ...q, seniority: level }));
 
+  // Term quality (#585): pure classification, computed fresh each render off
+  // the current `query` — `assessQueryTerms` is total and cheap (no I/O), so
+  // no memoization is warranted. `ChipListEditor` stays display-only: it
+  // looks up a verdict by chip text, it never classifies.
+  const assessment = assessQueryTerms(query);
+  const titleVerdicts = new Map(
+    assessment.verdicts.filter((v) => v.kind === "title").map((v) => [v.term, v]),
+  );
+  const skillVerdicts = new Map(
+    assessment.verdicts.filter((v) => v.kind === "skill").map((v) => [v.term, v]),
+  );
+  // Adding a missing term to the QUERY, never the résumé (#585) — a plain
+  // whole-query replacement through the same `onChange` every other handler
+  // here uses, so it rides the live re-rank with no refetch. `missingTermLabel`
+  // is the same mapping `TermQualityAdvisory` rendered the pill with, so the
+  // text the user clicked is exactly the text that lands in the query.
+  const addMissingTerm = (term: MissingTerm) => {
+    const label = missingTermLabel(term);
+    onChange((q) =>
+      term.kind === "title"
+        ? { ...q, titles: [...q.titles, label] }
+        : withSkills(q, [...q.skills, label]),
+    );
+  };
+
   /** The literal string that egresses to the keyless feeds — empty when the
    *  query carries neither a title nor a skill. */
   const egressPhrase = searchPhrase(query);
@@ -136,6 +177,7 @@ export function JobQueryEditor({
           addAriaLabel="Add title"
           primaryIndex={query.titles.length > 0 ? 0 : undefined}
           onPromote={promoteTitle}
+          qualityFor={(item) => titleVerdicts.get(item)}
         />
         {/* #581: this reads the SAME `searchPhrase` the keyless feeds are
          *  called with, rather than a copy, so it can never drift from what
@@ -164,6 +206,7 @@ export function JobQueryEditor({
         onRemove={removeSkill}
         placeholder="Add a skill…"
         addAriaLabel="Add skill"
+        qualityFor={(item) => skillVerdicts.get(item)}
       />
 
       <div className="flex flex-col gap-3">
@@ -221,6 +264,16 @@ export function JobQueryEditor({
           </p>
         )}
       </div>
+
+      {/* Term-quality advisory (#585 missing terms + #587 title/skill
+       *  coherence): renders nothing when it has nothing to say, including the
+       *  unresolved-role case — no fourth panel, no "we couldn't identify your
+       *  role" nag, no all-clear. */}
+      <TermQualityAdvisory
+        missing={assessment.missing}
+        coherence={assessment.coherence}
+        onAdd={addMissingTerm}
+      />
 
       {isDegenerate && (
         <p className="text-xs text-content-tertiary sm:col-span-2 lg:col-span-3">

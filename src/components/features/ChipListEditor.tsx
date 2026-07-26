@@ -24,22 +24,46 @@
  * becomes a second control — "Make X the primary title" — beside the
  * existing remove button.
  *
- * KNOWN GAP — chip-control touch targets are under 44×44 (#581 AC8, deferred).
- * The promote control is `Button variant="link"` (`p-0` + `text-xs`, ~16px tall)
- * and `Chip`'s remove is `variant="icon"` (`p-0.5` around a 10px glyph, ~14px),
- * sitting `gap-1` (4px) apart. Growing either to 44px is NOT a contained change:
- * `min-h`/`min-w` re-lays out every chip row, and the zero-layout-cost
- * alternative (a transparent `::after` overlay) makes the hit areas overlap the
- * NEIGHBOURING chips — the chip row is 24px tall with a 6px wrap gap and a 6px
- * horizontal gap, so a 44px overlay reaches ~4px into the next row and ~5px into
- * the next chip, and the later-painted remove overlay would win those taps.
- * Trading a small target for a destructive mis-tap is worse. Raising both
- * controls to 44px needs a Chip/Button hit-area redesign sized as its own issue;
- * keyboard tab order (the other half of AC8) is verified and correct.
+ * TARGET SIZE (#591, resolves the #581 AC8 gap). WCAG 2.2 SC 2.5.8 Target Size
+ * (Minimum) is level AA at 24x24 CSS px — the AAA figure some UIs use (44x44,
+ * SC 2.5.5) is explicitly NOT the bar here: chasing it forces a row-spacing
+ * redesign (chips wrap at `gap-1.5` = 6px, so a 44px hit area would reach
+ * ~4px into the next wrapped row and ~5px into the neighbouring chip, letting
+ * a tap near one chip's edge fire a NEIGHBOUR's remove control). The chosen
+ * target size is what the current spacing supports, not the reverse. Both
+ * controls meet 24x24 via an invisible `after:` overlay that expands only the
+ * CLICKABLE area, not the visual box or the chip's layout: `Chip`'s remove
+ * control (`variant="icon"`, ~14px visible) gets a 5px overlay on every side;
+ * the promote control (`Button variant="link"`, ~16px tall, its width is
+ * already the item text) gets a 4px vertical-only overlay — sized to reach the
+ * chip's own top/bottom edge and no further, so it cannot cross the 6px wrap
+ * gap into the next row. Measured zero-overlap against neighbouring chips and
+ * against each other in a real browser — see #591. Keyboard tab order is
+ * verified and correct.
+ *
+ * QUALITY MARK (#585). Opt-in `qualityFor` looks up a `TermVerdict` (from
+ * `term-quality.ts`) by the chip's own text. A term with no verdict — not
+ * judgeable, per that module's contract — renders as a plain chip; this
+ * component substitutes no default. When a verdict exists it renders as a
+ * DECORATIVE sibling of the chip's existing content (glyph + `title` tooltip,
+ * `aria-hidden`) plus a separate `sr-only` span carrying `reason` verbatim —
+ * the same "new child, not inside the interactive control" placement the
+ * `isPrimary` star already uses, and deliberately outside the promote
+ * `Button` so the mark's reason is never swallowed by that button's own
+ * `aria-label` (an inner `sr-only` node cannot contribute to a labelled
+ * button's accessible name). No classification logic lives here — the glyph
+ * is a pure function of `verdict.quality`.
  */
 
 import { useState } from "react";
 import { Button, Chip } from "@design-system";
+import type { TermQuality, TermVerdict } from "../../lib/job-search/term-quality.ts";
+
+const QUALITY_MARK: Record<TermQuality, { glyph: string; className: string }> = {
+  strong: { glyph: "✓", className: "text-feedback-success-text" },
+  weak: { glyph: "○", className: "text-content-tertiary" },
+  noise: { glyph: "⚠︎", className: "text-feedback-warning-text" },
+};
 
 interface ChipListEditorProps {
   /** Row label shown above the chips (e.g. "Titles", "Skills"). */
@@ -59,6 +83,10 @@ interface ChipListEditorProps {
   /** Opt-in (#581): called with the item to promote to primary. Required
    *  alongside `primaryIndex` to make a chip's body clickable. */
   onPromote?: (value: string) => void;
+  /** Opt-in (#585): looks up the `TermVerdict` for a chip's own text. Omit
+   *  (or return `undefined` for a given item) to render that chip plain — a
+   *  term with no verdict was not judgeable, see `term-quality.ts`. */
+  qualityFor?: (value: string) => TermVerdict | undefined;
 }
 
 export function ChipListEditor({
@@ -70,6 +98,7 @@ export function ChipListEditor({
   addAriaLabel,
   primaryIndex,
   onPromote,
+  qualityFor,
 }: ChipListEditorProps) {
   const [draft, setDraft] = useState("");
 
@@ -90,12 +119,19 @@ export function ChipListEditor({
         <div className="flex flex-wrap gap-1.5">
           {items.map((item, index) => {
             const isPrimary = onPromote !== undefined && index === primaryIndex;
+            const verdict = qualityFor?.(item);
+            const mark = verdict && QUALITY_MARK[verdict.quality];
             return (
               <Chip
                 key={item}
                 onRemove={() => onRemove(item)}
                 removeLabel={`Remove ${item}`}
               >
+                {mark && (
+                  <span aria-hidden="true" className={mark.className} title={verdict!.reason}>
+                    {mark.glyph}
+                  </span>
+                )}
                 {onPromote === undefined ? (
                   item
                 ) : isPrimary ? (
@@ -107,13 +143,20 @@ export function ChipListEditor({
                   <Button
                     variant="link"
                     size="sm"
-                    className="p-0 text-content-secondary hover:text-content-primary"
+                    // See TARGET SIZE docblock above: vertical-only overlay
+                    // reaches the chip's own edge (24px chip, ~16px control)
+                    // without crossing into the wrap gap or the neighbouring
+                    // remove control's horizontal hit area.
+                    className="relative p-0 text-content-secondary hover:text-content-primary after:absolute after:-inset-y-[4px] after:inset-x-0 after:content-['']"
                     onClick={() => onPromote(item)}
                     aria-label={`Make ${item} the primary title`}
                   >
                     {item}
                   </Button>
                 )}
+                {/* Outside the (possibly labelled) promote button on purpose —
+                 *  see the QUALITY MARK docblock note above. */}
+                {mark && <span className="sr-only"> — {verdict!.reason}</span>}
               </Chip>
             );
           })}

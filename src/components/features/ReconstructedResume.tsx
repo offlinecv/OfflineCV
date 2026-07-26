@@ -98,6 +98,7 @@ import {
 import { validateDate } from "../../lib/edit/field-validators.ts";
 import { EducationSection } from "./ReconstructedEducationSkills.tsx";
 import { SkillsSection } from "./ReconstructedSkills.tsx";
+import { SkillTermGuidance } from "./SkillTermGuidance.tsx";
 import { Button, EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
@@ -1340,6 +1341,11 @@ export function ReconstructedResume({
           removeCategorySkill(parsed.skillCategories ?? [], skill)
         }
       />
+      {/* Term-quality guidance (#586): same classifier as `/jobs/`'s
+       *  `TermQualityAdvisory`, résumé-framed copy, writes only through the
+       *  existing `addSkill` inline-edit path. Renders nothing when there's
+       *  no suggestion, including the unresolved-role case. */}
+      <SkillTermGuidance parsed={parsed} onAddSkill={addSkill} />
     </section>
   );
 }

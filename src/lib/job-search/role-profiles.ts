@@ -807,7 +807,7 @@ function profileTitleTokens(raw: string): ReadonlySet<string> {
  * every separator removed, so "People Management", "people-management" and
  * "people management" collide, and "CI/CD" meets "ci-cd". Total.
  */
-function normalizeSkillKey(raw: string): string {
+export function normalizeSkillKey(raw: string): string {
   return String(raw).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
@@ -872,6 +872,23 @@ function isSubset(needle: ReadonlySet<string>, haystack: ReadonlySet<string>): b
     if (!haystack.has(token)) return false;
   }
   return true;
+}
+
+/**
+ * The TITLE-MATCHING RULE (module docblock) as a public predicate: true when
+ * `profileTitle`'s token set is a SUBSET of `resumeTitle`'s, both normalized by
+ * `profileTitleTokens`. Note the asymmetry — the résumé side may carry extra
+ * words, the profile side may not.
+ *
+ * Exported for consumers that need the per-TITLE answer rather than the
+ * per-PROFILE one the resolvers give: `term-quality.ts` asks both "does this
+ * résumé title match anything the resolved role is called?" and its inverse,
+ * "does the résumé already cover this expected title?" — the same relation read
+ * in both directions. Sharing this predicate is what keeps those answers from
+ * drifting from the resolvers'. Total; never throws.
+ */
+export function profileTitleMatches(profileTitle: string, resumeTitle: string): boolean {
+  return isSubset(profileTitleTokens(profileTitle), profileTitleTokens(resumeTitle));
 }
 
 /** Sort scored entries by score desc, then declaration order asc, then cap. */
