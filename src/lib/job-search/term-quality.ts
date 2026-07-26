@@ -123,9 +123,22 @@ import {
 } from "./role-profiles.ts";
 
 /**
- * Version of the classification rules + the copy they emit. Bump when a change
- * can move what `assessQueryTerms` returns for the same query — a rule change,
- * a cap change, or a `reason` rewrite (the strings are user-visible).
+ * Version of THIS MODULE'S classification rules + the copy they emit. Bump when
+ * a change here can move what `assessQueryTerms` returns for the same query — a
+ * rule change, a cap change, or a `reason` rewrite (the strings are
+ * user-visible).
+ *
+ * DELIBERATELY NOT A VERSION OF THE ANSWER. The output is also a function of the
+ * upstream data this module reads — chiefly `ROLE_PROFILES`, whose `titles` /
+ * `skills` ORDER decides which terms survive `MAX_MISSING_TITLES` /
+ * `MAX_MISSING_SKILLS`, and which since #588 is prevalence-ranked from a
+ * regenerable snapshot. Folding that into this number would mean bumping it on
+ * every mining run with no rule changed, which makes it useless as a marker of
+ * "the rules moved". That data carries its own versions and this one does not
+ * shadow them: reproduce an answer from the pair `TERM_QUALITY_VERSION` +
+ * `ROLE_PROFILES_VERSION`, plus `PREVALENCE_SNAPSHOT.generatedAt` for the exact
+ * ordering. #588 accordingly bumped `ROLE_PROFILES_VERSION` (1.0 → 1.1) and left
+ * this at 1.2.
  *
  * Changelog:
  * - 1.0 (2026-07-25): initial classifier (#584).
@@ -243,9 +256,20 @@ const COHERENCE_NOTES: Readonly<Record<CoherenceDirection, (titles: string) => s
 // Small on purpose: `missing` is advice, and a list of fifteen things a résumé
 // "should" say is not advice. Both lists are already most-expected-first in
 // `ROLE_PROFILES`, so the cap keeps the head and drops the tail.
+//
+// That "already most-expected-first" is where these caps meet #588: for the
+// profiles whose evidence cleared the prevalence gates the head is measured, and
+// for the rest it is the curator's ordering. Either way the caps read POSITION,
+// so a change to `ROLE_PROFILES`' ordering changes which terms ship as advice
+// without changing a single rule in this module.
+//
+// `MAX_MISSING_SKILLS` is exported for the tests only: a test that needs a
+// profile short enough that nothing falls out of the head has to be able to
+// assert that precondition rather than assume it, or a sixth curated skill
+// voids it silently.
 
 const MAX_MISSING_TITLES = 3;
-const MAX_MISSING_SKILLS = 5;
+export const MAX_MISSING_SKILLS = 5;
 
 /** How many of the query's own titles the coherence sentence names before it
  *  stops listing — a sentence quoting six titles is not readable. */

@@ -2,9 +2,14 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect } from "vitest";
-import { assessQueryTerms, TERM_QUALITY_VERSION } from "./term-quality.ts";
+import {
+  assessQueryTerms,
+  MAX_MISSING_SKILLS,
+  TERM_QUALITY_VERSION,
+} from "./term-quality.ts";
 import type { TermVerdict } from "./term-quality.ts";
 import type { JobQuery } from "./query-builder.ts";
+import { roleProfileById } from "./role-profiles.ts";
 
 /** Minimal typed query stub — only the fields the classifier reads. */
 function makeQuery(overrides: Partial<JobQuery> = {}): JobQuery {
@@ -322,7 +327,30 @@ describe("assessQueryTerms — missing terms", () => {
     const titles = missing.filter((entry) => entry.kind === "title").map((e) => e.term);
     const skills = missing.filter((entry) => entry.kind === "skill").map((e) => e.term);
     expect(titles).toContain("engineering team lead");
-    expect(skills).toContain("coaching-mentorship");
+    // Not asserted by naming one skill: since #588 the head of
+    // `RoleProfile.skills` is prevalence-ranked from a regenerable snapshot, and
+    // `MAX_MISSING_SKILLS` keeps only that head — so naming a single expected
+    // term would fail on a mining run that reordered it, for no behavioural
+    // reason.
+    //
+    // Asserted instead as a PREFIX, which is ordering-insensitive in the same
+    // way but is NOT satisfied by an arbitrary subset: the suggestions must be
+    // the profile's own leading skills, in the profile's own order, minus only
+    // the ones the query already carries. That pins the thing the cap actually
+    // promises — that it keeps the HEAD — so a change that made the cap sample
+    // from the tail fails here.
+    //
+    // It does NOT pin that the prevalence ordering reaches this module: both
+    // sides read `roleProfileById`, so they move together. (Concretely:
+    // `engineering-manager`'s skill axis is `thin-observations`, so its shipped
+    // order IS its curated order.) The ordering's arrival is covered where it
+    // belongs, in `role-profiles.test.ts`.
+    const expected = roleProfileById("engineering-manager")?.skills ?? [];
+    expect(skills.length).toBeGreaterThan(0);
+    const covered = new Set(["people-management"]);
+    const wanted = expected.filter((s) => !covered.has(s)).slice(0, MAX_MISSING_SKILLS);
+    expect(skills).toEqual(wanted);
+    expect(skills).not.toContain("people-management");
   });
 
   it("never names a term the résumé already carries", () => {
@@ -374,12 +402,39 @@ describe("assessQueryTerms — missing terms", () => {
   });
 
   it("still suggests a skill that only shares a qualifier with one the query has", () => {
-    // The over-suppression guard. "Performance Optimization" is not
-    // `performance-management`, and suppressing it would hide a real gap.
-    const { missing } = assessQueryTerms(
-      makeQuery({ titles: ["Engineering Manager"], skills: ["Performance Optimization"] }),
+    // The over-suppression guard. The reproduction was "Performance
+    // Optimization" against the expected `performance-management`: a shared
+    // qualifier word is not the same skill, and suppressing on it hides a real
+    // gap. Asserted here on the SAME relation but through `account-executive`,
+    // whose curated skill list is exactly `MAX_MISSING_SKILLS` long, so nothing
+    // can fall out of `missing` via the head-cap. That matters since #588 made
+    // the head a function of a regenerable prevalence snapshot: run against a
+    // longer profile, this assertion would report the snapshot's ordering
+    // instead of the suppression rule, and pass or fail for the wrong reason.
+    // The precondition, asserted rather than assumed: a sixth curated skill on
+    // `account-executive` would push a term past the head-cap and this test
+    // would start reporting the cap instead of the suppression rule — silently,
+    // and in whichever direction the snapshot happened to order things.
+    expect(roleProfileById("account-executive")?.skills).toHaveLength(
+      MAX_MISSING_SKILLS,
     );
-    expect(missing.map((entry) => entry.term)).toContain("performance-management");
+    const query = makeQuery({
+      titles: ["Account Executive"],
+      skills: ["Executive Search"],
+    });
+    expect(assessQueryTerms(query).missing.map((entry) => entry.term)).toContain(
+      "executive-communication",
+    );
+    // Not vacuous: the query saying the skill FOR REAL does suppress it, so the
+    // assertion above is evidence the guard held rather than evidence that
+    // nothing is ever suppressed.
+    const saidForReal = makeQuery({
+      titles: ["Account Executive"],
+      skills: ["Executive Communication"],
+    });
+    expect(
+      assessQueryTerms(saidForReal).missing.map((entry) => entry.term),
+    ).not.toContain("executive-communication");
   });
 
   it("never suggests a wordier spelling of a title the query already carries, but keeps a different market phrasing", () => {
