@@ -29,7 +29,8 @@
  * answers a different question — *"what do people in this role call
  * themselves, and in what order of prevalence"* — so it carries surface forms
  * `ROLE_KEYWORDS` must not carry, and its head element is the one term we can
- * honestly call "the common title for this role". Merging the two would break
+ * honestly call "a common title for this role" — measured where the sample
+ * supports it, curated otherwise. Merging the two would break
  * posting matching. They stay reconcilable through `RoleProfile.family`, which
  * is a real `RoleFamily`; `role-profiles.test.ts` asserts that, so the two
  * assets cannot drift into contradiction.
@@ -90,8 +91,50 @@
  * Curation: hand-written on 2026-07-25 from common software job-title
  * phrasings. Staleness is tolerable in the same way `ROLE_KEYWORDS`' is — a
  * missing surface form narrows an answer, it never makes one wrong.
+ *
+ * ORDERING IS MEASURED WHERE IT CAN BE, MEMBERSHIP IS CURATED (#588). The two
+ * docstrings above — "most-used first", "most-expected first" — used to be one
+ * person's judgement of what the market says. Where the evidence supports it
+ * they are now backed by counts mined from real postings and baked into
+ * `prevalence-snapshot.ts`: `applyPrevalenceOrder` re-sorts a profile's `titles`
+ * and `skills` by observed frequency, and `ROLE_PROFILES` is that reordering of
+ * `CURATED_ROLE_PROFILES`. The split of authority is strict and
+ * one-directional — the snapshot may only REORDER what curation admitted. A
+ * snapshot term with no curated counterpart is dropped, so a junk title form
+ * trending in some feed can never write itself into a profile.
+ *
+ * IT IS A MINORITY OF THE TABLE. The two axes are gated separately and most
+ * profiles clear neither, keeping their curated order verbatim; read each
+ * snapshot entry's `audit` to see which way a given profile went and why. And
+ * the corpus is not "the market": it is what a handful of keyless remote-jobs
+ * aggregators answered on one dated run, with one of them supplying the large
+ * majority of postings (the snapshot header names it and its share). Remote-first
+ * aggregators over-represent remote-friendly, English-language, often
+ * smaller-company listings. Treat a ranked ordering as "what these feeds said",
+ * which is still strictly more than the previous "what one curator assumed", and
+ * not as a market-wide measurement.
+ *
+ * NO NEW EGRESS. This module still fetches nothing: the snapshot is a static
+ * committed module, not a runtime call to a prevalence service (which would be a
+ * brand-new egress path). The mining itself is offline and dev-only — the
+ * harness is a `.test.ts` excluded from the production build, and it seeds its
+ * feed queries from `CURATED_ROLE_PROFILES` below (the hand-written table, NOT
+ * the reordered export — see that constant for why), so no résumé is anywhere in
+ * that loop and `providers/keywords.ts` remains the sole résumé-derived egress
+ * helper. Regenerate the snapshot with:
+ *
+ *   RL_MINE_PREVALENCE=1 npx vitest run src/lib/job-search/mine-prevalence.test.ts
+ *
+ * then copy `internal/job-search/prevalence-snapshot.generated.ts` over
+ * `prevalence-snapshot.ts` and review the diff.
  */
 
+import {
+  PREVALENCE_SNAPSHOT,
+  type PrevalenceEntry,
+  type PrevalenceSnapshot,
+  type ProfilePrevalence,
+} from "./prevalence-snapshot.ts";
 import type { RoleFamily } from "./role-keywords.ts";
 import { SENIORITY_LADDER } from "./seniority.ts";
 
@@ -103,8 +146,21 @@ import { SENIORITY_LADDER } from "./seniority.ts";
  * Changelog:
  * - 1.0 (2026-07-25): initial table (#582) — leadership ladder + one profile
  *   per existing role family.
+ * - 1.1 (2026-07-25): `titles` / `skills` ordering is prevalence-ranked from a
+ *   mined snapshot (#588) for the profiles whose evidence clears the per-axis
+ *   gates; the rest keep their curated order, and a ranked profile whose modal
+ *   title only tied with its curated head keeps that head at position 0
+ *   (`ranked-head-pinned`). Membership is unchanged, but both
+ *   resolvers' prevalence nudges read position, so a tie can now break
+ *   differently — and downstream `term-quality.ts` head-caps `missing` at
+ *   `MAX_MISSING_TITLES` / `MAX_MISSING_SKILLS`, so the advice that ships
+ *   selects different terms. This version covers the MECHANISM; regenerating
+ *   the snapshot changes the data under it without changing these rules, which
+ *   is why `term-quality.ts` does not bump on a mining run — an answer for a
+ *   given query is a function of both this version and
+ *   `PREVALENCE_SNAPSHOT.generatedAt`.
  */
-export const ROLE_PROFILES_VERSION = "1.0";
+export const ROLE_PROFILES_VERSION = "1.1";
 
 /** One curated role: the titles it is called by and the skills it is described with. */
 export interface RoleProfile {
@@ -117,8 +173,10 @@ export interface RoleProfile {
   readonly family: RoleFamily;
   /** Seniority rungs this profile normally spans (see seniority.ts). */
   readonly rungs: readonly number[];
-  /** Title surface forms, most-used first. The head of this list is what we
-   *  can honestly call "the common title for this role". */
+  /** Title surface forms, most-used first. The head of this list is what we can
+   *  honestly call "a common title for this role" — measured where the sample
+   *  supports it (#588), curated otherwise; never "the" one, and never a term
+   *  the observations only tied with. */
   readonly titles: readonly string[];
   /** Canonical skill IDs (keys into jd-match SKILLS) this role is normally
    *  described with, most-expected first. */
@@ -155,10 +213,37 @@ const PROGRAM_RUNGS: readonly number[] = [
 ];
 
 /**
- * The curated table — the SINGLE SOURCE OF TRUTH for "what is this role called
- * and what is it described with". DECLARATION ORDER IS THE DETERMINISTIC
- * TIE-BREAK for both resolvers (same contract as `ROLE_FAMILIES`), so entries
- * are ordered by `ROLE_FAMILIES` and, within a family, most-common role first.
+ * The curated table — the SINGLE SOURCE OF TRUTH for MEMBERSHIP: "what is this
+ * role called and what is it described with". DECLARATION ORDER IS THE
+ * DETERMINISTIC TIE-BREAK for both resolvers (same contract as `ROLE_FAMILIES`),
+ * so entries are ordered by `ROLE_FAMILIES` and, within a family, most-common
+ * role first.
+ *
+ * EXPORTED FOR THE MINING HARNESS ONLY, and consumers must not read it. The
+ * table the lane reads is `ROLE_PROFILES`, this one passed through
+ * `applyPrevalenceOrder`; two consumer-facing tables that agree on membership
+ * and disagree on order is exactly the drift #588's single-table rule exists to
+ * prevent. The harness is the one legitimate reader, because it must SEED its
+ * feed queries from an order that does not depend on the snapshot it is about to
+ * overwrite — seeding from `ROLE_PROFILES` makes the corpus a function of the
+ * previous run, so a title that fell to the tail is never queried again and is
+ * pinned there permanently. Seeding here is snapshot-independent by construction.
+ *
+ * WITHIN a profile, the order of `titles` / `skills` here is the order that
+ * SHIPS for every profile the snapshot could not rank — which, on the committed
+ * run, is most of them. Write them most-plausible-first and treat that as the
+ * answer, not as a placeholder.
+ *
+ * The mining can also be WRONG about a profile rather than merely thin, and the
+ * curator needs to be able to tell the two apart. The failure mode is bucket
+ * contamination: `resolveProfilesByTitles` routes each posting to exactly one
+ * profile, so a neighbouring role whose market name is a curated title here
+ * arrives in this profile's bucket and its counts redefine the role.
+ * `MIN_CURATED_HEAD_TITLE_SHARE` refuses the ranking when that happens, and the
+ * snapshot's per-profile `audit` names the modal observed title and its share —
+ * so a `bucket-not-this-role` verdict, or a modal title that is not the role,
+ * is the signal that the curated MEMBERSHIP here is too wide, not that the
+ * ordering needs another run.
  *
  * Depth is deliberately uneven. The leadership ladder is the gap this asset was
  * built to close and carries full title + competency lists; the pre-existing IC
@@ -168,7 +253,7 @@ const PROGRAM_RUNGS: readonly number[] = [
  * thinnest `skills` because jd-match `SKILLS` is itself engineering-shaped;
  * that is a known limitation of the source dictionary, not an omission here.
  */
-export const ROLE_PROFILES: readonly RoleProfile[] = [
+export const CURATED_ROLE_PROFILES: readonly RoleProfile[] = [
   {
     id: "frontend-engineer",
     label: "Frontend Engineer",
@@ -810,6 +895,437 @@ function profileTitleTokens(raw: string): ReadonlySet<string> {
 export function normalizeSkillKey(raw: string): string {
   return String(raw).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
+
+// ── Prevalence ordering (#588) ──────────────────────────────────────────────
+
+/**
+ * THE TWO AXES ARE GATED SEPARATELY, and the reason is that they do not share
+ * an evidence base. A posting joins the corpus on its TITLE, so every bucketed
+ * posting is one observation of the title axis; but its skills come from its
+ * DESCRIPTION, and a feed that returned a title with a stub description
+ * contributes nothing to the skill axis at all. Gating both on the posting
+ * count therefore authorises a skill ranking with the title axis's evidence —
+ * which is how a profile with 37 postings but 5 skill observations came to
+ * offer a single 4-count term as the head of its expected skills.
+ *
+ * So each axis clears its own floor, independently: a profile may have its
+ * `titles` ranked while its `skills` stay curated, or the reverse.
+ * `auditPrevalence` is the one place both decisions are made, and the harness
+ * bakes its verdict into every snapshot entry so the split is legible in a diff
+ * rather than reconstructible only by rerunning the code.
+ */
+
+/**
+ * Postings a profile needs before its mined TITLE counts may reorder anything.
+ *
+ * A floor on *interpretability*, not a statistical result: ranking six title
+ * forms off four postings is noise dressed as data, and the element at risk is
+ * the head — the one element the product quotes as a common title for this
+ * role. Twenty-five is the point where one unusual listing can no longer move
+ * that head by itself.
+ *
+ * What it does NOT do, and what the sibling constants exist for: it says nothing
+ * about whether the postings are of the right ROLE (see
+ * `MIN_CURATED_HEAD_TITLE_SHARE`) and nothing about whether any of them carried
+ * a readable description (see `MIN_PREVALENCE_SKILL_OBSERVATIONS`). On the run
+ * that produced the committed snapshot only a minority of the table cleared it,
+ * and most of the leadership ladder did not — that is the honest shape of a
+ * corpus mined from remote-jobs aggregators, not a threshold to lower.
+ */
+export const MIN_PREVALENCE_SAMPLE = 25;
+
+/**
+ * Share of a profile's TITLE observations that must land on the profile's OWN
+ * curated head title before a ranking is trusted, in the case where the modal
+ * observed form is something else.
+ *
+ * This is the bucketing-concentration guard. `resolveProfilesByTitles` assigns
+ * every posting to exactly one profile, so a neighbouring role whose market name
+ * happens to be a curated title of this profile fills this profile's bucket —
+ * and the counts then redefine the role. Raising `MIN_PREVALENCE_SAMPLE` cannot
+ * help: the failure is a systematic majority, not an outlier.
+ *
+ * The distinction the number has to draw is "the market renamed this role"
+ * versus "this bucket is mostly a different job". A rename leaves the curated
+ * head a strong runner-up; a takeover leaves it a rounding error. One in five is
+ * where those separate on the observed corpus, and it is not a knife edge —
+ * nothing that clears `MIN_PREVALENCE_SAMPLE` lands between 12.5% and 27.5%:
+ *
+ * - `machine-learning-engineer` — modal "ai engineer" at 35%, own head
+ *   "machine learning engineer" still 27.5%. A rename, not a takeover, so this
+ *   guard passes it — `headFlipBeatsNoise` is what then decides whether the
+ *   14-vs-11 lead is big enough to actually move the head.
+ * - `technical-program-manager` — modal "project manager" at 47%, own head
+ *   12.5%. Two neighbouring roles collapsed into one bucket. DECLINED.
+ * - `support-engineer` — modal "customer success manager" at 84.8%, own head
+ *   6.1%. A different job wearing this profile's id. DECLINED.
+ *
+ * The guard only applies when the modal form is NOT the curated head: a profile
+ * whose own head leads its bucket needs no permission to sort the tail.
+ */
+export const MIN_CURATED_HEAD_TITLE_SHARE = 0.2;
+
+/**
+ * The other half of the same standard: the largest share a FOREIGN modal title
+ * may hold before the bucket is refused outright, whatever the curated head's
+ * own share is.
+ *
+ * `MIN_CURATED_HEAD_TITLE_SHARE` alone only floors the loser, and the docblock
+ * above states a two-sided test it cannot actually run — "a rename leaves the
+ * curated head a strong runner-up" is a claim about the RELATION between the two
+ * forms. A bucket at head 21% / foreign modal 70% clears the floor and is
+ * plainly not a runner-up story; it is a neighbouring role that brought a long
+ * tail with it. Nothing in the committed snapshot is near this (`support-engineer`
+ * at 84.8% is already refused on the head's 6.1%), but a regeneration can reach
+ * it, and the failure is silent: the profile ranks and adopts the other role's
+ * name as its head.
+ *
+ * The margin gate below does NOT subsume this. That gate asks whether the LEAD
+ * is bigger than noise, and a dominant modal's lead is enormous — 70 vs 21 beats
+ * its 9.5-observation noise floor many times over, so it would rank. The two
+ * measure different things: one that the flip is real, this one that the bucket
+ * is ours to flip.
+ *
+ * One half is the line because a majority is the point where the foreign form is
+ * no longer competing with the curated head for the role's identity — it simply
+ * IS the bucket's identity. Compared strictly, so an even split is not a
+ * majority.
+ */
+export const MAX_FOREIGN_MODAL_TITLE_SHARE = 0.5;
+
+/**
+ * Skill observations a profile needs before its mined SKILL counts may reorder
+ * anything. Counted over observations that join to a curated skill — the
+ * evidence that actually drives the sort — not over postings.
+ *
+ * `MAX_MISSING_SKILLS` (5) of the ranked list becomes user-facing advice, so the
+ * ranking must have resolution across at least five positions. Forty is eight
+ * observations per surviving slot: enough that a slot is a pattern rather than a
+ * coincidence, while still well inside what a profile with readable descriptions
+ * supplies. On the committed run the technical profiles cleared it with room
+ * (site-reliability-engineer 132, machine-learning-engineer 112,
+ * software-engineer 94, data-engineer 60, product-manager 54) and the profiles
+ * whose vocabulary the jd-match dictionary barely reads did not
+ * (account-executive 10, marketing-manager 7). Nor did `engineering-manager`,
+ * at 24, whose people-leadership vocabulary is exactly the gap jd-match's
+ * engineering-shaped `SKILLS` has. Its curated order therefore ships, which is
+ * the correct answer: a measured ranking off 24 observations of a six-skill
+ * list would have replaced a considered order with a coin toss.
+ */
+export const MIN_PREVALENCE_SKILL_OBSERVATIONS = 40;
+
+/**
+ * Observations the most-observed curated skill must itself carry before the
+ * SKILL ranking is trusted. Guards the shape a bare total cannot: forty
+ * observations spread four-apiece across ten skills ranks nothing, it just
+ * arranges ten coin flips, and the top of that arrangement is what ships as
+ * advice. Ten is the point where a term is a repeated ask rather than one
+ * unusual posting's vocabulary.
+ */
+export const MIN_PREVALENCE_SKILL_HEAD_COUNT = 10;
+
+/**
+ * Why the TITLE axis did or did not rank.
+ *
+ * `ranked-head-pinned` is a THIRD state, not a flavour of either: the tail was
+ * prevalence-ordered but the curated head kept position 0 because the observed
+ * lead over it was inside the noise (`headFlipBeatsNoise`). It exists as its own
+ * verdict because #588's whole design is that every decision is legible in the
+ * snapshot diff, and a head that was silently held in place is the one decision
+ * a reader of that diff could not otherwise see.
+ */
+export type TitleAxisVerdict =
+  | "ranked"
+  | "ranked-head-pinned"
+  | "thin-sample"
+  | "bucket-not-this-role";
+/** Why the SKILL axis did or did not rank. */
+export type SkillAxisVerdict = "ranked" | "thin-observations";
+
+/**
+ * The per-axis decision plus the measurements it was made from. Baked into every
+ * snapshot entry so a human reading the generated diff sees WHY a profile was
+ * ranked or declined — and, in the `bucket-not-this-role` case, sees the modal
+ * title that would otherwise have silently become the role's identity.
+ */
+export interface PrevalenceAudit {
+  readonly titles: TitleAxisVerdict;
+  readonly skills: SkillAxisVerdict;
+  /** Postings that bucketed here. Denominator for nothing — see the shares. */
+  readonly sampleSize: number;
+  /** The profile's most-observed CURATED title (the snapshot's surface forms
+   *  folded onto the terms they join to); `""` when nothing was observed. */
+  readonly modalTitle: string;
+  /** `modalTitle`'s share of all title observations, 0–1, 3dp. */
+  readonly modalTitleShare: number;
+  /** The profile's own curated HEAD title's share of the same, 0–1, 3dp. */
+  readonly curatedHeadTitleShare: number;
+  /** Observations joining a curated skill — the skill axis's real evidence. */
+  readonly skillObservations: number;
+  /** The largest single such observation count. */
+  readonly skillHeadCount: number;
+}
+
+/**
+ * Canonical comparison key for a title surface form: its `profileTitleTokens`
+ * SET, order-normalised. Set equality is the right join here because it is the
+ * same relation the title matcher works in — "Director of Engineering" and
+ * "Engineering Director" are one form, so a snapshot naming either ranks the
+ * curated entry regardless of which way round it was written.
+ */
+function titlePrevalenceKey(raw: string): string {
+  return [...profileTitleTokens(raw)].sort().join(" ");
+}
+
+/**
+ * Does the modal title's lead over the curated head EXCEED THE NOISE in the
+ * split that produced it? Only asked when the two are different terms, and only
+ * about position 0.
+ *
+ * WHAT IT GUARDS. The gates above floor the loser's share and the denominator;
+ * neither floors the SEPARATION, so a head flip can ride on one posting. Thirty
+ * observations split 8 (modal) to 7 (head) clears both, and the head — the term
+ * the product turns into advice — changes hands on a coin toss. That is not a
+ * measurement of which title is more common; it is a measurement that they are
+ * comparably common, which is a different claim and not one that should reorder
+ * anything.
+ *
+ * WHY `sqrt`, AND NOT A CHOSEN RATIO. Take the null hypothesis this has to rule
+ * out: the two forms are equally prevalent and each of the `modal + head`
+ * observations landed on one of them by a fair coin. The DIFFERENCE between the
+ * two counts is then a symmetric random walk over that many steps, whose
+ * standard deviation is exactly the square root of it. So `sqrt(modal + head)`
+ * is not a tuned number at all — it is one sigma of the very hypothesis being
+ * rejected, and it falls out of the counts rather than out of a judgement about
+ * them. A fitted constant (`0.2` of the total, "at least 5 more") would carry
+ * the objection that it was picked to make some particular case decline; this
+ * cannot, because there was nothing to pick.
+ *
+ * Consequences, all intended: a one-posting lead never flips the head at any
+ * sample size; a genuine rename at 30-vs-10 clears it comfortably (20 > 6.32);
+ * and the bar scales with the evidence, so a bigger corpus buys a flip with a
+ * proportionally smaller lead rather than a bigger one.
+ *
+ * ONE SIGMA, not two or three, and deliberately so: this is a tie-breaker
+ * between two curated terms that both stay in the list either way, so the cost
+ * of a wrong call is one position in an ordering, not a false claim. A stricter
+ * bar would pin heads that the corpus really did move.
+ */
+function headFlipBeatsNoise(modalCount: number, headCount: number): boolean {
+  return modalCount - headCount > Math.sqrt(modalCount + headCount);
+}
+
+/** Shares are stored, so they must round-trip a JSON bake exactly. */
+function share(part: number, whole: number): number {
+  return whole > 0 ? Math.round((part / whole) * 1000) / 1000 : 0;
+}
+
+/**
+ * Snapshot counts folded onto the CURATED terms they join to, keyed by `keyOf`.
+ * Entries with no curated counterpart are dropped here for the same reason
+ * `rankByPrevalence` cannot use them: they are not evidence about this profile.
+ * Keeping the two in step is what stops a gate being cleared by observations the
+ * ranking then ignores.
+ */
+function joinToCurated(
+  curated: readonly string[],
+  entries: readonly PrevalenceEntry[] | undefined,
+  keyOf: (raw: string) => string,
+): Map<string, number> {
+  const wanted = new Set(curated.map(keyOf));
+  const counts = new Map<string, number>();
+  for (const entry of entries ?? []) {
+    const key = keyOf(entry.form);
+    if (key.length === 0 || !wanted.has(key)) continue;
+    counts.set(key, (counts.get(key) ?? 0) + entry.count);
+  }
+  return counts;
+}
+
+/**
+ * Decide both axes for one profile against its snapshot entry, and report the
+ * numbers behind the decision. Pure and total: an absent, empty or degenerate
+ * entry yields a fully-declined audit rather than throwing.
+ *
+ * `profile` must be the CURATED profile — the guard reads `titles[0]` as the
+ * role's declared identity, and reading it off an already-reordered table would
+ * make the guard agree with whatever the last run produced.
+ */
+export function auditPrevalence(
+  profile: RoleProfile,
+  // Structurally typed, not `ProfilePrevalence`: the harness calls this while
+  // BUILDING an entry, before the `audit` field it is about to compute exists.
+  mined: Omit<ProfilePrevalence, "audit"> | undefined,
+): PrevalenceAudit {
+  // Aggregated by KEY, not per entry, so the audit measures exactly what
+  // `rankByPrevalence` sorts on — two entries that normalise to one curated term
+  // are one term's evidence in both places.
+  const titleCounts = joinToCurated(profile.titles, mined?.titles, titlePrevalenceKey);
+  const titleTotal = [...titleCounts.values()].reduce((a, b) => a + b, 0);
+  const headKey = titlePrevalenceKey(profile.titles[0] ?? "");
+  const headCount = titleCounts.get(headKey) ?? 0;
+  let modalTitle = "";
+  let modalCount = 0;
+  for (const term of profile.titles) {
+    const count = titleCounts.get(titlePrevalenceKey(term)) ?? 0;
+    if (count > modalCount) {
+      modalCount = count;
+      modalTitle = term;
+    }
+  }
+
+  const skillCounts = joinToCurated(profile.skills, mined?.skills, normalizeSkillKey);
+  const skillObservations = [...skillCounts.values()].reduce((a, b) => a + b, 0);
+  const skillHeadCount = Math.max(0, ...skillCounts.values());
+
+  const sampleSize = mined?.sampleSize ?? 0;
+  const curatedHeadTitleShare = share(headCount, titleTotal);
+  const modalTitleShare = share(modalCount, titleTotal);
+  const modalIsCuratedHead =
+    modalTitle.length > 0 && titlePrevalenceKey(modalTitle) === headKey;
+
+  // Three questions in order of how much they disqualify: is there enough
+  // evidence at all, is this bucket even this role, and only then — is the one
+  // position the product quotes actually changing hands, or is it a coin toss?
+  let titles: TitleAxisVerdict;
+  if (sampleSize < MIN_PREVALENCE_SAMPLE) {
+    titles = "thin-sample";
+  } else if (
+    !modalIsCuratedHead &&
+    (curatedHeadTitleShare < MIN_CURATED_HEAD_TITLE_SHARE ||
+      modalTitleShare > MAX_FOREIGN_MODAL_TITLE_SHARE)
+  ) {
+    titles = "bucket-not-this-role";
+  } else if (!modalIsCuratedHead && !headFlipBeatsNoise(modalCount, headCount)) {
+    titles = "ranked-head-pinned";
+  } else {
+    titles = "ranked";
+  }
+
+  const skills: SkillAxisVerdict =
+    skillObservations >= MIN_PREVALENCE_SKILL_OBSERVATIONS &&
+    skillHeadCount >= MIN_PREVALENCE_SKILL_HEAD_COUNT
+      ? "ranked"
+      : "thin-observations";
+
+  return {
+    titles,
+    skills,
+    sampleSize,
+    modalTitle,
+    modalTitleShare,
+    curatedHeadTitleShare,
+    skillObservations,
+    skillHeadCount,
+  };
+}
+
+/**
+ * Re-sort `curated` by the counts in `entries`, most-observed first.
+ *
+ * THE MEMBERSHIP GUARD RAIL LIVES HERE and is structural rather than checked:
+ * the output is built by sorting `curated` itself, and `entries` is only ever
+ * read through a lookup keyed off a curated term. A snapshot entry with no
+ * curated counterpart therefore has nothing to attach to and cannot appear in
+ * the result — there is no code path that appends. Curated terms the snapshot
+ * never observed score 0 and keep their relative curated order at the tail,
+ * because the sort is stable via the index tie-break (`Array.sort` is spec-
+ * stable since ES2019; the explicit index compare states the contract rather
+ * than relying on it).
+ *
+ * A ZERO IS NOT A MEASUREMENT OF ABSENCE. A curated skill scores 0 both when
+ * postings genuinely never ask for it and when jd-match's alias regex simply
+ * cannot see the phrasing they asked for it with — the mining reads descriptions
+ * through that dictionary and inherits its blind spots. The sort treats the two
+ * identically, so an unobserved term sinking to the tail is weak evidence, which
+ * is tolerable only because sinking to the tail is all it does: membership is
+ * curated and nothing here can drop a term.
+ */
+function rankByPrevalence(
+  curated: readonly string[],
+  entries: readonly PrevalenceEntry[],
+  keyOf: (raw: string) => string,
+): readonly string[] {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const key = keyOf(entry.form);
+    if (key.length === 0) continue;
+    counts.set(key, (counts.get(key) ?? 0) + entry.count);
+  }
+  return curated
+    .map((term, index) => ({ term, index, count: counts.get(keyOf(term)) ?? 0 }))
+    .sort((a, b) => b.count - a.count || a.index - b.index)
+    .map(({ term }) => term);
+}
+
+/**
+ * `ranked` order with the curated head put back at position 0. Everything below
+ * it keeps the ranked order it was given, so this is the narrowest possible
+ * intervention: the ONE position the product converts into a claim is protected,
+ * the tail — which nothing quotes — is still measured.
+ *
+ * Total: an empty `head` cannot be pinned (and cannot occur — a profile with no
+ * titles has no head to flip, so it is refused upstream), and the result is a
+ * permutation of `ranked` either way.
+ */
+function pinHead(head: string, ranked: readonly string[]): readonly string[] {
+  const key = titlePrevalenceKey(head);
+  if (key.length === 0) return ranked;
+  return [head, ...ranked.filter((term) => titlePrevalenceKey(term) !== key)];
+}
+
+/**
+ * The curated table with each profile's `titles` / `skills` reordered by mined
+ * prevalence, PER AXIS. Pure, total, and exported so the guard rails above are
+ * testable against fabricated snapshots rather than against the committed one,
+ * whose contents change on every regeneration.
+ *
+ * A profile is returned BY REFERENCE, untouched, when NEITHER axis clears its
+ * gate — the snapshot does not mention it, or it failed both. That is the
+ * fallback and it is deliberately identity-preserving, so a caller can tell
+ * "unranked" from "ranked to the same order" if it ever needs to. A profile that
+ * clears one axis is rebuilt with the other axis's curated list copied across
+ * unchanged.
+ *
+ * `ranked-head-pinned` counts as clearing the title axis: the tail is sorted by
+ * prevalence and only position 0 is held at its curated term. See `pinHead`.
+ */
+export function applyPrevalenceOrder(
+  curated: readonly RoleProfile[],
+  snapshot: PrevalenceSnapshot,
+): readonly RoleProfile[] {
+  const profiles = snapshot?.profiles ?? {};
+  return curated.map((profile) => {
+    const audit = auditPrevalence(profile, profiles[profile.id]);
+    const titlesRanked =
+      audit.titles === "ranked" || audit.titles === "ranked-head-pinned";
+    if (!titlesRanked && audit.skills !== "ranked") return profile;
+    const mined = profiles[profile.id];
+    const rankedTitles = titlesRanked
+      ? rankByPrevalence(profile.titles, mined?.titles ?? [], titlePrevalenceKey)
+      : profile.titles;
+    return {
+      ...profile,
+      titles:
+        audit.titles === "ranked-head-pinned"
+          ? pinHead(profile.titles[0] ?? "", rankedTitles)
+          : rankedTitles,
+      skills:
+        audit.skills === "ranked"
+          ? rankByPrevalence(profile.skills, mined?.skills ?? [], normalizeSkillKey)
+          : profile.skills,
+    };
+  });
+}
+
+/**
+ * The table every consumer reads: curated membership, measured order. The one
+ * exported table — see `CURATED_ROLE_PROFILES` for why there is not a second.
+ */
+export const ROLE_PROFILES: readonly RoleProfile[] = applyPrevalenceOrder(
+  CURATED_ROLE_PROFILES,
+  PREVALENCE_SNAPSHOT,
+);
 
 // ── Scoring weights ─────────────────────────────────────────────────────────
 // Integers throughout: a resolver whose ordering depends on float accumulation
