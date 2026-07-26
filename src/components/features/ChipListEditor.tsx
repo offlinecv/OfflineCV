@@ -16,12 +16,17 @@
  * removable chips are the `Chip` primitive's `onRemove` variant, not a copy).
  *
  * `onPromote` + `primaryIndex` (#581) are an opt-in pair, not baked into the
- * shared surface: only the Titles call site (`JobQueryEditor`) passes them,
- * because only titles have a "which one is searched" axis (`searchPhrase`
- * sends `titles[0]`). Skills and Exclude leave both undefined and render
- * unchanged. When set, the chip at `primaryIndex` gets a `★` text
+ * shared surface: a list qualifies only when ONE of its entries is singled out
+ * by what actually leaves the browser. Titles qualify because `searchPhrase`
+ * sends `titles[0]` to the keyless feeds; Skills qualify too (#597) because
+ * `primaryKeyword` sends `skills[0]` as Jobicy's tag — both are `keywords.ts`
+ * reading index 0 of one list. `primaryNoun` is what the promote control calls
+ * that list's entries, so the label reads "the primary skill" on one and "the
+ * primary title" on the other. Exclude has no such axis — it filters locally,
+ * every entry equally — so it leaves both undefined and renders unchanged.
+ * When set, the chip at `primaryIndex` gets a `★` text
  * mark (never colour alone) + `aria-current="true"`; every other chip's body
- * becomes a second control — "Make X the primary title" — beside the
+ * becomes a second control — "Make X the primary {primaryNoun}" — beside the
  * existing remove button.
  *
  * TARGET SIZE (#591, resolves the #581 AC8 gap). WCAG 2.2 SC 2.5.8 Target Size
@@ -59,7 +64,9 @@ import { useState } from "react";
 import { Button, Chip } from "@design-system";
 import type { TermQuality, TermVerdict } from "../../lib/job-search/term-quality.ts";
 
-const QUALITY_MARK: Record<TermQuality, { glyph: string; className: string }> = {
+/** The glyph + token for each verdict. Exported so `TermGlyphLegend` (#597)
+ *  explains the SAME marks this renders rather than a second copy of them. */
+export const QUALITY_MARK: Record<TermQuality, { glyph: string; className: string }> = {
   strong: { glyph: "✓", className: "text-feedback-success-text" },
   weak: { glyph: "○", className: "text-content-tertiary" },
   noise: { glyph: "⚠︎", className: "text-feedback-warning-text" },
@@ -68,6 +75,11 @@ const QUALITY_MARK: Record<TermQuality, { glyph: string; className: string }> = 
 interface ChipListEditorProps {
   /** Row label shown above the chips (e.g. "Titles", "Skills"). */
   label: string;
+  /** Render `label` for screen readers only (#602). For a caller whose own
+   *  section heading already names the row — two visible names for one control
+   *  is worse than none, and dropping the label outright would leave the chip
+   *  list unnamed in the accessibility tree. */
+  labelHidden?: boolean;
   /** The controlled chip values, in display order. */
   items: string[];
   /** Called with a trimmed, non-duplicate value when the user adds one. */
@@ -83,6 +95,10 @@ interface ChipListEditorProps {
   /** Opt-in (#581): called with the item to promote to primary. Required
    *  alongside `primaryIndex` to make a chip's body clickable. */
   onPromote?: (value: string) => void;
+  /** What one entry of this list is called in the promote control's accessible
+   *  label ("Make X the primary title"). Only meaningful alongside
+   *  `onPromote`; defaults to `"title"`, the original #581 call site. */
+  primaryNoun?: string;
   /** Opt-in (#585): looks up the `TermVerdict` for a chip's own text. Omit
    *  (or return `undefined` for a given item) to render that chip plain — a
    *  term with no verdict was not judgeable, see `term-quality.ts`. */
@@ -91,6 +107,7 @@ interface ChipListEditorProps {
 
 export function ChipListEditor({
   label,
+  labelHidden = false,
   items,
   onAdd,
   onRemove,
@@ -98,6 +115,7 @@ export function ChipListEditor({
   addAriaLabel,
   primaryIndex,
   onPromote,
+  primaryNoun = "title",
   qualityFor,
 }: ChipListEditorProps) {
   const [draft, setDraft] = useState("");
@@ -114,7 +132,13 @@ export function ChipListEditor({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs text-content-tertiary">{label}</span>
+      <span
+        className={
+          labelHidden ? "sr-only" : "text-sm font-medium text-content-secondary"
+        }
+      >
+        {label}
+      </span>
       {items.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {items.map((item, index) => {
@@ -149,7 +173,7 @@ export function ChipListEditor({
                     // remove control's horizontal hit area.
                     className="relative p-0 text-content-secondary hover:text-content-primary after:absolute after:-inset-y-[4px] after:inset-x-0 after:content-['']"
                     onClick={() => onPromote(item)}
-                    aria-label={`Make ${item} the primary title`}
+                    aria-label={`Make ${item} the primary ${primaryNoun}`}
                   >
                     {item}
                   </Button>
@@ -175,7 +199,7 @@ export function ChipListEditor({
               commit();
             }
           }}
-          className="min-w-0 max-w-56 flex-1 rounded border border-border-light bg-surface-card px-2 py-1 text-xs text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
+          className="min-w-0 max-w-56 flex-1 rounded border border-border-light bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
         />
         <Button
           variant="ghost"

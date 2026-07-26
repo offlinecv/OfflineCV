@@ -43,7 +43,9 @@ export function LevelSelect({ value, onChange }: LevelSelectProps) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
-        <span id="level-select-label" className="text-xs text-content-tertiary">
+        {/* Named visibly by the caller's section heading (#602); kept here so
+            the radiogroup still has an accessible name. */}
+        <span id="level-select-label" className="sr-only">
           Target level
         </span>
         {value !== undefined && (

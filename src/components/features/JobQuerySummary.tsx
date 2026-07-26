@@ -66,7 +66,7 @@ export function JobQuerySummary({
   companyCount?: number;
 }) {
   return (
-    <p className="min-w-0 text-xs text-content-tertiary">
+    <p className="min-w-0 text-sm text-content-secondary">
       {summarizeQuery(query, companyCount).join(" · ")}
     </p>
   );

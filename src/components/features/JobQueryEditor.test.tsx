@@ -4,29 +4,74 @@
 // @vitest-environment jsdom
 
 /**
- * Coverage for the #581 primary-title marker + click-to-promote: the property
- * under test is that promoting a chip is a plain reorder of `query.titles`
- * flowing through the existing `onChange` — the "Searching feeds for …" line
- * (which reads `searchPhrase`, i.e. `titles[0]`) must follow the reorder, and
- * `titleNoise` — a derived, non-user-facing field on the same `JobQuery` —
- * must survive the promotion untouched.
+ * Coverage for the #581 primary-title marker + click-to-promote, extended to
+ * skills in #597: the property under test is that promoting a chip is a plain
+ * reorder of the relevant list flowing through the existing `onChange`, and
+ * that `titleNoise` — a derived, non-user-facing field on the same `JobQuery` —
+ * survives the promotion untouched. The old "Searching feeds for …" line is
+ * gone: `SearchPlanCard` states the outbound terms now (#597), and it is
+ * `FindJobsPanel` that renders it, so the assertion moved with the surface.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { Stepper } from "@design-system";
 import { JobQueryEditor } from "./JobQueryEditor.tsx";
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
+import { describeQuerySteps } from "../../lib/job-search/query-steps.ts";
 import { assessQueryTerms } from "../../lib/job-search/term-quality.ts";
 import { missingTermLabel, TermQualityAdvisory } from "./TermQualityAdvisory.tsx";
 import type { CoherenceFinding } from "../../lib/job-search/term-quality.ts";
+import type { CompanyTargets } from "../../hooks/useCompanyTargets.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
 let container: HTMLDivElement;
 let root: Root;
+
+/** A company picker that never resolved its registry — `CompanyTargets`
+ *  renders nothing until `ready`, so the Filters step reduces to the fields
+ *  these tests are actually about. `FindJobsPanel` owns the real hook. */
+const NO_COMPANIES: CompanyTargets = {
+  ready: false,
+  sector: null,
+  runnerUp: null,
+  suggested: [],
+  selected: [],
+  isSelected: () => false,
+  toggle: () => {},
+  switchToRunnerUp: () => {},
+};
+
+/**
+ * `JobQueryEditor` emits `StepPanel`s (#602), which read their position from
+ * `Stepper`'s context, so every render goes through the same host the panel
+ * uses. Inactive panels stay MOUNTED (only `hidden`), which is what keeps these
+ * tests able to assert across all four steps from one render — the same
+ * property that lets a half-typed chip draft survive stepping away.
+ */
+function element(
+  query: JobQuery,
+  onChange: (next: (q: JobQuery) => JobQuery) => void,
+  isDegenerate: boolean,
+) {
+  return createElement(Stepper, {
+    id: "test",
+    value: "role",
+    onValueChange: () => {},
+    steps: describeQuerySteps(query, 0),
+    children: createElement(JobQueryEditor, {
+      query,
+      onChange,
+      isDegenerate,
+      links: [],
+      companyTargets: NO_COMPANIES,
+    }),
+  });
+}
 
 function render(
   query: JobQuery,
@@ -37,9 +82,7 @@ function render(
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root.render(
-      createElement(JobQueryEditor, { query, onChange, isDegenerate }),
-    );
+    root.render(element(query, onChange, isDegenerate));
   });
   return container;
 }
@@ -52,9 +95,7 @@ function rerender(
   isDegenerate = false,
 ) {
   act(() => {
-    root.render(
-      createElement(JobQueryEditor, { query, onChange, isDegenerate }),
-    );
+    root.render(element(query, onChange, isDegenerate));
   });
   return container;
 }
@@ -156,7 +197,9 @@ describe("JobQueryEditor — primary title promotion", () => {
       query = next(query);
     });
 
-    expect(el.textContent).toContain('Searching feeds for "Berlin Site Lead"');
+    // Superseded by `SearchPlanCard` (#597) — the editor no longer states what
+    // egresses, so a duplicate here would be a second place to keep in sync.
+    expect(el.textContent).not.toContain("Searching feeds for");
 
     const promote = [...el.querySelectorAll("button")].find((b) =>
       b.getAttribute("aria-label")?.includes("Make VP Engineering the primary title"),
@@ -175,16 +218,36 @@ describe("JobQueryEditor — primary title promotion", () => {
 
     act(() => {
       root.render(
-        createElement(JobQueryEditor, {
+        element(
           query,
-          onChange: (next) => {
+          (next) => {
             query = next(query);
           },
-          isDegenerate: false,
-        }),
+          false,
+        ),
       );
     });
-    expect(el.textContent).toContain('Searching feeds for "VP Engineering"');
+    // The star follows the reorder, which is what the plan card reads.
+    expect(el.querySelector('[aria-current="true"]')?.textContent).toContain(
+      "VP Engineering",
+    );
+  });
+
+  it("promotes a skill through the same whole-query replacement, recomputing canonicalSkills", () => {
+    let query: JobQuery = {
+      titles: [],
+      skills: ["Team Building & Mentorship", "TypeScript"],
+      canonicalSkills: ["TypeScript"],
+    };
+    const el = render(query, (next) => {
+      query = next(query);
+    });
+
+    const promote = findButton(el, "Make TypeScript the primary skill");
+    act(() => promote.click());
+
+    expect(query.skills).toEqual(["TypeScript", "Team Building & Mentorship"]);
+    expect(query.canonicalSkills).toEqual(["TypeScript"]);
   });
 
   it("marks the primary chip with a star and aria-current", () => {
@@ -193,6 +256,52 @@ describe("JobQueryEditor — primary title promotion", () => {
 
     const current = el.querySelector('[aria-current="true"]');
     expect(current?.textContent).toContain("Staff Engineer");
+  });
+});
+
+/**
+ * #597's information-architecture claims, each of which is a placement the user
+ * can see: a term that reaches nothing is named in words rather than only as a
+ * chip mark, and a suggestion sits under the list it writes into instead of in
+ * a trailing section at the foot of the form.
+ */
+describe("JobQueryEditor — dropped terms and in-column suggestions (issue 597)", () => {
+  it("names a term that narrows nothing, with the lib's own reason verbatim", () => {
+    const query: JobQuery = {
+      titles: ["Berlin", "Engineering Manager"],
+      skills: [],
+      titleNoise: ["berlin"],
+    };
+    const verdict = assessQueryTerms(query).verdicts.find((v) => v.term === "Berlin");
+    expect(verdict?.quality).toBe("noise");
+
+    const el = render(query, () => query);
+    expect(el.textContent).toContain("aren't narrowing your search");
+    // Verbatim from `term-quality.ts`, not a second sentence written here.
+    expect(el.textContent).toContain(verdict!.reason);
+  });
+
+  it("says nothing about the terms it is entitled to judge but not to call dropped", () => {
+    // A clean query has no noise verdict, so the block must not appear at all —
+    // no empty state, no all-clear.
+    const query: JobQuery = { titles: ["Engineering Manager"], skills: [] };
+    const el = render(query, () => query);
+    expect(el.textContent).not.toContain("aren't narrowing your search");
+  });
+
+  it("renders the title suggestions inside the Role step, not in a trailing block", () => {
+    const query: JobQuery = { titles: ["Engineering Manager"], skills: [] };
+    const missing = assessQueryTerms(query).missing.filter((t) => t.kind === "title");
+    expect(missing.length).toBeGreaterThan(0);
+
+    const el = render(query, () => query);
+    // Scoped to the panel, not merely "appears somewhere on the page" — with
+    // every step mounted (see `element`), a page-wide text search would pass
+    // even if the suggestions had drifted back into a trailing section.
+    const rolePanel = el.querySelector("#test-steppanel-role");
+    const skillsPanel = el.querySelector("#test-steppanel-skills");
+    expect(rolePanel?.textContent).toContain("Add to your titles");
+    expect(skillsPanel?.textContent).not.toContain("Add to your titles");
   });
 });
 
@@ -473,7 +582,12 @@ describe("JobQueryEditor — term quality (issue 585)", () => {
     const el = render(query, () => query);
     // The glyph is decorative (aria-hidden); the accessible label is the
     // separate sr-only span carrying `reason` unchanged.
-    expect(el.querySelector('[aria-hidden="true"].text-feedback-success-text')).not.toBeNull();
+    // Scoped by `title`: only a CHIP's quality mark carries the reason as a
+    // tooltip, so this can't be satisfied by the glyph legend (#597), which
+    // reuses the same tokens with no per-term reason behind them.
+    expect(
+      el.querySelector('[aria-hidden="true"][title].text-feedback-success-text'),
+    ).not.toBeNull();
     expect(el.textContent).toContain(verdict!.reason);
   });
 
@@ -485,7 +599,8 @@ describe("JobQueryEditor — term quality (issue 585)", () => {
     expect(verdicts).toHaveLength(0);
 
     const el = render(query, () => query);
-    const marks = [...el.querySelectorAll('[aria-hidden="true"]')].filter(
+    // Same `title` scoping as above — the glyph legend is not a chip mark.
+    const marks = [...el.querySelectorAll('[aria-hidden="true"][title]')].filter(
       (node) =>
         node.classList.contains("text-feedback-success-text") ||
         node.classList.contains("text-feedback-warning-text") ||

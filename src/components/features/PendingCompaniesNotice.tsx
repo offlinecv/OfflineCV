@@ -38,7 +38,7 @@ export function PendingCompaniesNotice({
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border-light bg-surface-subtle px-3 py-2">
       <StatusBadge tone="info">not searched yet</StatusBadge>
-      <p className="min-w-0 text-xs text-content-secondary">
+      <p className="min-w-0 text-sm text-content-secondary">
         These results don&apos;t include{" "}
         {companies.map((entry) => entry.name).join(", ")}.
       </p>

@@ -71,7 +71,16 @@ function Host({ parsed }: { parsed: HeuristicParsedResume }) {
   return createElement(CompanyTargets, { targets });
 }
 
-async function mount(parsed: HeuristicParsedResume): Promise<void> {
+/**
+ * Mounts and, by default, EXPANDS the block: #597 collapsed it to a single
+ * summary line, and everything that asserts on the per-company toggles has to
+ * open it the way a user would. Pass `{ expand: false }` to assert the
+ * collapsed default itself.
+ */
+async function mount(
+  parsed: HeuristicParsedResume,
+  options: { expand?: boolean } = {},
+): Promise<void> {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -87,6 +96,16 @@ async function mount(parsed: HeuristicParsedResume): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
+  if (options.expand !== false) await expand();
+}
+
+/** Clicks the disclosure, the same control a user clicks. */
+async function expand(): Promise<void> {
+  const toggle = buttons().find((b) => b.hasAttribute("aria-expanded"));
+  if (!toggle) throw new Error("no companies disclosure control");
+  await act(async () => {
+    toggle.click();
+  });
 }
 
 function buttons(): HTMLButtonElement[] {
@@ -219,16 +238,50 @@ describe("CompanyTargets rendering", () => {
   it("degrades to a plain explanation when no sector companies exist", async () => {
     // An unclassifiable resume falls to the "other" sector, which by design has
     // no registry entries.
-    await mount({ skills: [], experience: [], education: [] });
+    await mount({ skills: [], experience: [], education: [] }, { expand: false });
     expect(latest?.suggested).toEqual([]);
     expect(companyButtons()).toHaveLength(0);
-    expect(container?.textContent).toContain("job feeds only");
+    // NOT merely "job feeds only" — both this state and a user who deselected
+    // every board end in those words, so that substring alone cannot tell them
+    // apart and would pass even if this said "No companies selected".
+    expect(container?.textContent).toContain(
+      "couldn't match your resume to a sector",
+    );
+    expect(container?.textContent).not.toContain("No companies selected");
+  });
+
+  // #597: with nothing to choose from, the disclosure would open onto its own
+  // apology — so there is no disclosure.
+  it("offers no expand control when no sector companies exist", async () => {
+    await mount({ skills: [], experience: [], education: [] }, { expand: false });
+    expect(buttons().filter((b) => b.hasAttribute("aria-expanded"))).toHaveLength(0);
   });
 
   // #542
   it("notes that self-hosted-careers employers aren't reachable here", async () => {
     await mount(fintechResume);
     expect(container?.textContent).toContain("their own careers site");
+  });
+});
+
+/** #597: the block leads `/jobs/` but is not what the page is for, so it opens
+ *  as one line that still makes the whole claim. */
+describe("CompanyTargets disclosure", () => {
+  it("renders collapsed by default, with the count and the sent-data claim intact", async () => {
+    await mount(fintechResume, { expand: false });
+    expect(companyButtons()).toHaveLength(0);
+    expect(container?.textContent).toContain("public job boards");
+    expect(container?.textContent).toContain("only the company name is sent");
+    const toggle = buttons().find((b) => b.hasAttribute("aria-expanded"));
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("reveals the per-company toggles on expand", async () => {
+    await mount(fintechResume, { expand: false });
+    await expand();
+    expect(companyButtons().length).toBe(latest!.suggested.length);
+    const toggle = buttons().find((b) => b.hasAttribute("aria-expanded"));
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
   });
 });
 
