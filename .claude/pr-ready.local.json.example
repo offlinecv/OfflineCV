@@ -1,0 +1,9 @@
+{
+  "channel": "<chat channel id>",
+  "reviewers": [
+    { "name": "<display name>", "chat_id": "<chat user id>", "gh_login": "<github login>" }
+  ],
+  "reminder_at_minutes": 60,
+  "default_deadline_minutes": 90,
+  "ack_reactions": ["eyes", "white_check_mark", "raising_hand"]
+}

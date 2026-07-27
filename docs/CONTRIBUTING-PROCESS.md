@@ -9,9 +9,9 @@ walkthrough (setup, branch workflow, tests, code style) lives in
 This file is the **rationale**. The rules it explains are enforced closer to where they bite:
 the binding one-liners sit in `CLAUDE.md` → **Hard rules** (always in an agent's context), the
 fixture-PII check is a directory-scoped `CLAUDE.md` in `tests/fixtures/pdfs/`, and each shipping
-skill (`/open-pr`, `/pr-review`, `/revise-pr`, `/implement-batch`) carries its own operational
-copy. Nothing here is load-bearing on its own — if you change a rule, change it in those places
-too, not only here.
+skill (`/open-pr`, `/pr-review`, `/revise-pr`, `/implement-batch`, `/pr-ready`) carries its own
+operational copy. Nothing here is load-bearing on its own — if you change a rule, change it in
+those places too, not only here.
 
 ## Test fixtures — PII policy (non-negotiable)
 
@@ -106,6 +106,32 @@ Rules:
 - **Never bypass the queue with `--admin`** just to hand-write a merge message. The collapse achieves the same thing without skipping required checks.
 - **Nothing is lost that squash-merge wasn't already going to discard.** `main` only ever receives one commit per PR; collapsing early changes *when* the intermediate commits are dropped, not *whether*. The collapsed commit's tree is byte-identical to the branch tip's.
 - **Recovery, if a collapse goes wrong:** the pre-push SHA is permanently recorded on the PR timeline (`HeadRefForcePushedEvent`, `before`/`after`), the orphaned commit stays viewable at `github.com/<org>/<repo>/commit/<sha>` and downloadable via `gh api repos/<org>/<repo>/commits/<sha> -H "Accept: application/vnd.github.patch"`, and the pusher's local `git reflog` holds it for 90 days. Note that `git fetch origin <sha>` will **not** retrieve it — the server rejects unreachable objects — so restore from the reflog, or apply the patch.
+
+## Soliciting review (`/pr-ready`)
+
+Opening a PR (`/open-pr`) doesn't get a human to look at it — silence from a
+reviewer who's mid-review and silence from a reviewer who hasn't opened the
+PR look identical to the author. `/pr-ready` runs the ask as a small protocol
+instead of a hand-typed message: it preflights the PR (open, mergeable,
+checks green, one commit), posts a single ping with a stated ack mechanism
+and an absolute-time deadline, waits, sends at most one reminder if still
+silent, and reports whether anyone engaged — across chat reactions, thread
+replies, or GitHub review activity. It never changes the PR's merge state;
+the terminal state is always a report, and the merge call stays a human's.
+
+It takes a **list** too — `/pr-ready 572,605,606` is one ping covering all
+three, with one deadline and one reminder, and a report that says per PR who
+engaged. That is deliberately not the same as running the skill three times:
+three runs would @-mention the same reviewers three times and hold three
+sequential deadlines, which is what being chased feels like from the other
+side. A PR that fails preflight is dropped from the ask and named — both when
+you approve the message and in the final report — rather than blocking the
+PRs that are ready.
+
+**One-time setup, per checkout:** copy `.claude/pr-ready.local.json.example`
+to `.claude/pr-ready.local.json` (git-ignored) and fill in your chat channel
+and reviewer roster — the skill file itself carries no identity, by design.
+Full config schema and process detail: `.claude/skills/pr-ready/SKILL.md`.
 
 ## Deploy
 
