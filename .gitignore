@@ -19,6 +19,11 @@ coverage/
 .claude/worktrees/
 .claude/settings.local.json
 
+# /pr-ready local config — chat channel id, reviewer roster, and IDs. Never
+# tracked; the checked-in sibling is .claude/pr-ready.local.json.example
+# (placeholder values only).
+.claude/pr-ready.local.json
+
 # Python bytecode cache from hook scripts under scripts/hooks/.
 __pycache__/
 
