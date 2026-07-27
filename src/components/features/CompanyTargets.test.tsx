@@ -88,13 +88,26 @@ async function mount(
     root!.render(createElement(Host, { parsed }));
   });
   // The hook seeds itself from two dynamic imports, so the first render lands
-  // before `ready`. A fixed number of ticks is not enough: the FIRST mount in
-  // the file pays a cold module load while later ones hit the module cache, so
-  // flush until the hook reports ready rather than guessing a tick count.
-  for (let i = 0; i < 50 && !latest?.ready; i += 1) {
+  // before `ready`. Bound the flush by WALL CLOCK, not by a tick count: the
+  // FIRST mount in the file pays a cold module load (~10 ticks / 17ms warm)
+  // while every later one hits the module cache and needs zero, and 50 ticks
+  // is only ~85ms of budget. Under coverage on a loaded CI runner that one
+  // cold load outlasts the budget, the loop gives up with `ready` still false,
+  // and `CompanyTargets` returns null behind its own `ready` guard — so the
+  // next line failed as "no companies disclosure control", blaming the markup
+  // for a wait that ended early. 3s stays under the 5s default `testTimeout`,
+  // so the explicit throw below wins the race against a timeout and says which
+  // of the two actually happened.
+  const deadline = Date.now() + 3_000;
+  while (!latest?.ready && Date.now() < deadline) {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+  }
+  if (!latest?.ready) {
+    throw new Error(
+      "useCompanyTargets never reported ready within 3s — the lazy registry/taxonomy import never settled",
+    );
   }
   if (options.expand !== false) await expand();
 }
@@ -102,7 +115,16 @@ async function mount(
 /** Clicks the disclosure, the same control a user clicks. */
 async function expand(): Promise<void> {
   const toggle = buttons().find((b) => b.hasAttribute("aria-expanded"));
-  if (!toggle) throw new Error("no companies disclosure control");
+  // With the ready-wait above now hard-failing on its own, the only remaining
+  // way to land here is `ready` with an empty pool — which means the hook's
+  // `catch` swallowed a failed registry/taxonomy import. Say so, rather than
+  // reporting a missing control: the disclosure is correctly absent in that
+  // state, by the `suggested.length > 0` guard in `CompanyTargets`.
+  if (!toggle) {
+    throw new Error(
+      `no companies disclosure control (ready=${latest?.ready}, suggested=${latest?.suggested.length}) — an empty pool means the hook's catch path swallowed the registry import`,
+    );
+  }
   await act(async () => {
     toggle.click();
   });
