@@ -2,10 +2,14 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * ChipListEditor — a labelled list of removable chips plus an "add" input, the
- * shared editing surface for both the Titles and Skills rows of `FindJobsPanel`
- * (#539). Extracted so the two lists share one implementation rather than the
- * panel hand-rolling a second copy of the chip + add-input pattern for titles.
+ * ChipListEditor — a labelled list of chips with opt-in add input, removal controls,
+ * and primary promotion controls. The shared editing surface for `JobQueryEditor`
+ * (#539, #581, #597) and `RolesPanel` (#599).
+ *
+ * Supports three shapes:
+ *  1. Removable chips + add input + optional promote/quality controls (used by `JobQueryEditor` on `/jobs/`).
+ *  2. Non-removable chips + promote control + no add input (used by `RolesPanel` on `/`).
+ *  3. Non-removable chips + add input (or removable chips without add input).
  *
  * Owns only its own draft-input state; the chip list itself is fully
  * controlled by the parent (`items` / `onAdd` / `onRemove`). Adds are
@@ -72,7 +76,26 @@ export const QUALITY_MARK: Record<TermQuality, { glyph: string; className: strin
   noise: { glyph: "⚠︎", className: "text-feedback-warning-text" },
 };
 
-interface ChipListEditorProps {
+/**
+ * The add-input trio, as a discriminated union rather than three independent
+ * optionals (#605 review). "`placeholder`/`addAriaLabel` are required when
+ * `onAdd` is set" used to live only in a doc comment, so a caller that passed
+ * `onAdd` and forgot `addAriaLabel` rendered `<input aria-label="">` — an
+ * unlabelled text input (WCAG 4.1.2) — with `tsc` green. Here the compiler
+ * rejects it, and the `""` defaults that used to paper over it are gone.
+ */
+type AddProps =
+  | {
+      /** Called with a trimmed, non-duplicate value when the user adds one. */
+      onAdd: (value: string) => void;
+      /** Placeholder for the add input. */
+      placeholder: string;
+      /** Accessible label for the add input. */
+      addAriaLabel: string;
+    }
+  | { onAdd?: undefined; placeholder?: never; addAriaLabel?: never };
+
+interface ChipListEditorBaseProps {
   /** Row label shown above the chips (e.g. "Titles", "Skills"). */
   label: string;
   /** Render `label` for screen readers only (#602). For a caller whose own
@@ -82,14 +105,8 @@ interface ChipListEditorProps {
   labelHidden?: boolean;
   /** The controlled chip values, in display order. */
   items: string[];
-  /** Called with a trimmed, non-duplicate value when the user adds one. */
-  onAdd: (value: string) => void;
-  /** Called with the exact item string to remove. */
-  onRemove: (value: string) => void;
-  /** Placeholder for the add input. */
-  placeholder: string;
-  /** Accessible label for the add input. */
-  addAriaLabel: string;
+  /** Called with the exact item string to remove. Omit for non-removable chips. */
+  onRemove?: (value: string) => void;
   /** Opt-in (#581): index of the primary chip. Omit to render plain chips. */
   primaryIndex?: number;
   /** Opt-in (#581): called with the item to promote to primary. Required
@@ -104,6 +121,8 @@ interface ChipListEditorProps {
    *  term with no verdict was not judgeable, see `term-quality.ts`. */
   qualityFor?: (value: string) => TermVerdict | undefined;
 }
+
+type ChipListEditorProps = ChipListEditorBaseProps & AddProps;
 
 export function ChipListEditor({
   label,
@@ -121,6 +140,7 @@ export function ChipListEditor({
   const [draft, setDraft] = useState("");
 
   const commit = () => {
+    if (!onAdd) return;
     const trimmed = draft.trim();
     if (!trimmed) return;
     const alreadyPresent = items.some(
@@ -148,8 +168,8 @@ export function ChipListEditor({
             return (
               <Chip
                 key={item}
-                onRemove={() => onRemove(item)}
-                removeLabel={`Remove ${item}`}
+                onRemove={onRemove ? () => onRemove(item) : undefined}
+                removeLabel={onRemove ? `Remove ${item}` : undefined}
               >
                 {mark && (
                   <span aria-hidden="true" className={mark.className} title={verdict!.reason}>
@@ -186,30 +206,32 @@ export function ChipListEditor({
           })}
         </div>
       )}
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={draft}
-          aria-label={addAriaLabel}
-          placeholder={placeholder}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commit();
-            }
-          }}
-          className="min-w-0 max-w-56 flex-1 rounded border border-border-light bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
-        />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={commit}
-          disabled={draft.trim().length === 0}
-        >
-          Add
-        </Button>
-      </div>
+      {onAdd && (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={draft}
+            aria-label={addAriaLabel}
+            placeholder={placeholder}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commit();
+              }
+            }}
+            className="min-w-0 max-w-56 flex-1 rounded border border-border-light bg-surface-card px-2 py-1 text-sm text-content-primary outline-hidden focus:ring-1 focus:ring-accent-primary"
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={commit}
+            disabled={draft.trim().length === 0}
+          >
+            Add
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

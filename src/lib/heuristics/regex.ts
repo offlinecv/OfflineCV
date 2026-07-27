@@ -667,6 +667,9 @@ export const PROGRAM_NOTE_RE =
   /^(?:GPA[:\s]|Minor\b|Major\b|Concentration\b|Relevant Coursework\b|Coursework\b)/i;
 
 // ── Company suffix hints ────────────────────────────────────────────────────
-
-export const COMPANY_SUFFIX_RE =
-  /\b(Inc\.?|LLC|Ltd\.?|Limited|Corp\.?|Corporation|Company|Co\.?|GmbH|S\.A\.?|Pty\.?|plc|Group|Holdings|Technologies|Systems|Labs|Solutions)\b/i;
+//
+// `COMPANY_SUFFIX_RE` used to live here. It moved to the leaf
+// `extract/title-shape.ts` alongside `looksLikeTitle`, the only predicate that
+// pairs with it, so `ContactCard → edit/headline` no longer drags this whole
+// file onto the entry graph. `extract/shared.ts` — its sole importer — now
+// imports it from there directly, so no re-export shim is left behind here.

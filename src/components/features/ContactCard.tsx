@@ -28,6 +28,7 @@
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
+import type { ContactDisplayField } from "../../lib/contact.ts";
 import { applyContactOverrides, buildContactFields } from "../../lib/contact.ts";
 import { Card, EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
@@ -37,6 +38,7 @@ import type {
 } from "../../hooks/useEditableParse.ts";
 import type { LegacyLinkKey } from "../../lib/score/types.ts";
 import { ContactDetails } from "./ContactDetails.tsx";
+import { headlineRoundTripWarning } from "../../lib/edit/headline.ts";
 
 interface ContactCardProps {
   result: CascadeResult;
@@ -58,6 +60,48 @@ interface ContactCardProps {
   onRemoveProfile?: (id: string) => void;
 }
 
+/**
+ * The tagline line under the name (#599) — the user's chosen primary role when
+ * one is set, otherwise the standalone title the parser lifted from the profile
+ * block. Rendered as its own component rather than inline in `ContactCard`
+ * because the gated-vs-editable-vs-absent branching is what pushed the card's
+ * cognitive complexity past the bar; `ContactCard` is already at the top of the
+ * repo's ~200 LOC budget, so the house rule is to extract into a sibling.
+ *
+ * Renders nothing when there is no headline AND the card is display-only — a
+ * blank editable slot is the affordance that lets a user add one, but on a
+ * read-only card it would just be dead space.
+ */
+function HeadlineField({
+  headline,
+  editable,
+  onCommit,
+}: {
+  headline: ContactDisplayField | undefined;
+  editable: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const shown = headline && !headline.gated ? headline.value : undefined;
+  if (!editable) {
+    return shown ? (
+      <div className="mt-1 text-sm font-normal text-content-muted">{shown}</div>
+    ) : null;
+  }
+  return (
+    <div className="mt-1 text-sm font-normal text-content-muted">
+      <EditableField
+        value={shown}
+        placeholder="headline"
+        label="Headline"
+        textSize="sm"
+        textWeight="normal"
+        onCommit={onCommit}
+        validate={headlineRoundTripWarning}
+      />
+    </div>
+  );
+}
+
 export function ContactCard({
   result,
   overrides,
@@ -77,7 +121,8 @@ export function ContactCard({
     editable ? overrides : undefined,
   );
 
-  const name = displayFields.find((f) => f.group === "identity");
+  const name = displayFields.find((f) => f.key === "full_name");
+  const headline = displayFields.find((f) => f.key === "headline");
   const contactLine = displayFields.filter((f) => f.group === "contact");
   const links = displayFields.filter((f) => f.group === "link");
 
@@ -105,6 +150,12 @@ export function ContactCard({
           </span>
         )}
       </h2>
+
+      <HeadlineField
+        headline={headline}
+        editable={editable}
+        onCommit={(v) => commit("headline", v)}
+      />
 
       <ContactDetails
         contactLine={contactLine}

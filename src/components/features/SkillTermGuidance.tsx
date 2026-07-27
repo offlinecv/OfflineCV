@@ -5,10 +5,27 @@
  * SkillTermGuidance — surfaces the term-quality classifier's verdict on the
  * résumé's OWN skills, in the résumé review lane (#586). `TermQualityAdvisory`
  * (#585) does the equivalent job on `/jobs/`, but that surface can only edit
- * the search *query* — it has no DropZone and no editor. This one sits beside
- * `SkillsSection` on `/`, where `onAddSkill` writes through the existing
- * inline-edit path (`useEditableParse`), so a suggestion here can actually
- * land in the document.
+ * the search *query* — it has no DropZone and no editor. This one lives on `/`,
+ * where `onAddSkill` writes through the existing inline-edit path
+ * (`useEditableParse`), so a suggestion here can actually land in the document.
+ *
+ * PLACEMENT: directly under `RolesPanel`, above Experience (#605 review). It
+ * used to render last, below `SkillsSection`. Two reasons it moved up:
+ *
+ *  1. Its content is a FUNCTION of the starred role. `buildJobQuery` →
+ *     `deriveTitles` puts the promoted headline at `titles[0]`, and
+ *     `assessQueryTerms` resolves the role profile from it. Star a different
+ *     title and this whole list changes. Cause and effect have to be adjacent
+ *     or the dependency is invisible; four résumé sections apart, it read as a
+ *     static footer.
+ *  2. It is advice about the document, not part of the document. Sitting last
+ *     among the résumé sections framed it as one.
+ *
+ * The cost of moving is that its `onAddSkill` target — `SkillsSection` — is now
+ * off-screen, so the general "put feedback next to the thing it affects" rule
+ * is being paid for rather than followed. It is paid with a confirm-in-place
+ * trail plus an `aria-live` announcement (there is no toast primitive in this
+ * design system), so an add still reports where it landed.
  *
  * SAME CLASSIFIER, NO SECOND JUDGEMENT. Builds a `JobQuery` from the current
  * parse with `buildJobQuery` and reads it through `assessQueryTerms` — the
@@ -47,6 +64,8 @@
  * So this is a new, narrowly-scoped sibling, not a parallel copy of either.
  */
 
+import { useState } from "react";
+import { Card } from "@design-system";
 import { assessQueryTerms } from "../../lib/job-search/term-quality.ts";
 import { buildJobQuery, type ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
 import { missingTermLabel } from "./TermQualityAdvisory.tsx";
@@ -62,6 +81,12 @@ export function SkillTermGuidance({
    *  way a suggestion here reaches the résumé. */
   onAddSkill: (skill: string) => void;
 }) {
+  // Terms added from this panel, in click order. Purely a confirmation trail:
+  // the résumé itself is written by `onAddSkill`, and an added term leaves
+  // `missing` on the next assessment anyway — so the pill vanishing is the state
+  // change, and this is the acknowledgement that the vanish alone can't give.
+  const [added, setAdded] = useState<string[]>([]);
+
   const query = buildJobQuery(parsed);
   const assessment = assessQueryTerms(query);
 
@@ -74,37 +99,60 @@ export function SkillTermGuidance({
     return null;
   }
 
+  const add = (label: string) => {
+    onAddSkill(label);
+    setAdded((prev) => (prev.includes(label) ? prev : [...prev, label]));
+  };
+
   return (
-    <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-subtle p-3">
-      <p className="flex items-start gap-1.5 text-sm font-semibold text-content-secondary">
-        <span aria-hidden="true">⚠︎</span>
-        <span>
-          <span className="sr-only">Term guidance: </span>
-          Terms worth adding
-        </span>
-      </p>
+    <Card className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold text-content-primary">
+          Skills this role usually asks for
+        </h2>
+        <p className="max-w-prose text-sm text-content-tertiary">
+          Based on the first role title above. Star a different one and this
+          list changes with it.
+        </p>
+      </div>
 
       {missingSkills.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm text-content-tertiary">
-            Roles like yours are usually described with terms not in your résumé
+          <span className="text-sm text-content-secondary">
+            Not in your résumé yet — add the ones you actually have:
           </span>
           <div className="flex flex-wrap gap-1.5">
             {missingSkills.map((term) => (
               <AddPill
                 key={term.term}
                 label={missingTermLabel(term)}
-                onClick={() => onAddSkill(missingTermLabel(term))}
+                onClick={() => add(missingTermLabel(term))}
               />
             ))}
           </div>
         </div>
       )}
 
+      {/* Confirm in place — there is no toast primitive here, and this panel now
+       *  sits far above the Skills section it writes into, so an add would
+       *  otherwise have no visible destination. `aria-live` announces it once;
+       *  the text carries the meaning, never colour alone. */}
+      <p aria-live="polite" className="sr-only">
+        {added.length > 0
+          ? `Added to your skills: ${added.join(", ")}.`
+          : ""}
+      </p>
+      {added.length > 0 && (
+        <p className="text-sm text-content-tertiary">
+          <span className="font-medium text-feedback-success-text">Added</span>{" "}
+          to your Skills section: {added.join(", ")}.
+        </p>
+      )}
+
       {recognized.length > 0 && (
         <p className="text-sm text-content-tertiary">
           <span className="font-medium text-content-secondary">
-            Recognized in your résumé:
+            Already in your résumé:
           </span>{" "}
           {recognized.map((v) => v.term).join(", ")}
         </p>
@@ -114,7 +162,7 @@ export function SkillTermGuidance({
         <div className="flex flex-col gap-1">
           <p className="text-sm text-content-tertiary">
             <span className="font-medium text-content-secondary">
-              Not recognized by matchers:
+              We could not match these to a known skill:
             </span>{" "}
             {unrecognized.map((v) => v.term).join(", ")}
           </p>
@@ -129,6 +177,6 @@ export function SkillTermGuidance({
           </ul>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

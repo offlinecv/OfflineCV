@@ -2,7 +2,13 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect } from "vitest";
-import { buildJobQuery, MAX_SKILLS, MAX_TITLES } from "./query-builder.ts";
+import {
+  buildJobQuery,
+  splitHeadline,
+  MAX_SKILLS,
+  MAX_TITLES,
+} from "./query-builder.ts";
+import { searchPhrase } from "./providers/keywords.ts";
 import type { ParsedResume, ResumeExperience } from "../score/types.ts";
 
 function baseParsed(overrides: Partial<ParsedResume> = {}): ParsedResume {
@@ -541,5 +547,159 @@ describe("buildJobQuery titleNoise (issue 579)", () => {
     expect(query.titleNoise).toContain("datadog");
     expect(query.titleNoise).toContain("seoul");
     expect(query.titleNoise).toContain("salesforce");
+  });
+
+  // ── The stated target (#599) and the audited egress (#605 review) ──────────
+  //
+  // `titles[0]` is not just a display slot: `providers/keywords.ts` sends it
+  // verbatim as the keyless feeds' `search=` param — the single resume-derived
+  // egress in the app. So what lands at index 0 is a privacy-surface decision,
+  // and these assert it through `searchPhrase` rather than through `titles`
+  // alone, so a change to that mapping cannot pass them silently.
+
+  it("leads titles with the stated target so it becomes the egress phrase", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        headline: "Platform Engineer",
+        experience: [experience({ title: "Software Engineer" })],
+      }),
+    );
+    expect(query.titles[0]).toBe("Platform Engineer");
+    expect(searchPhrase(query)).toBe("Platform Engineer");
+  });
+
+  // A headline is a tagline, not a title: `extractHeadline` routinely lifts
+  // "DevOps Engineer · Software Architect" off a real résumé. Sent whole it is
+  // a single-intent full-text query naming two intents — exactly what
+  // `keywords.ts`'s docblock says it avoids — and it returns near-nothing.
+  it("splits a separator-stacked headline so only ONE role reaches the feeds", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        headline: "DevOps Engineer · Software Architect",
+        experience: [experience({ title: "Site Reliability Engineer" })],
+      }),
+    );
+    expect(query.titles[0]).toBe("DevOps Engineer");
+    expect(searchPhrase(query)).toBe("DevOps Engineer");
+    expect(searchPhrase(query)).not.toContain("·");
+    // The second role is not discarded — it still widens the LOCAL
+    // `matchesQuery` broadening, it just never leaves the browser.
+    expect(query.titles).toContain("Software Architect");
+    expect(query.titles).toContain("Site Reliability Engineer");
+  });
+
+  // The split must not manufacture the egress phrase. Before the space guard,
+  // "React/Node Engineer" left the browser as "React" and "VP, Engineering" as
+  // "VP" — a term the user never held, and one `looksLikeTitle` would have
+  // rejected outright had anything re-checked the parts (#605 review).
+  it.each([
+    "React/Node Engineer",
+    "VP, Engineering",
+    "Engineer, Data Platform",
+  ])("egresses %s whole, not a fragment of it", (headline) => {
+    const query = buildJobQuery(
+      baseParsed({
+        headline,
+        experience: [experience({ title: "Software Engineer" })],
+      }),
+    );
+    expect(query.titles[0]).toBe(headline);
+    expect(searchPhrase(query)).toBe(headline);
+  });
+
+  it("keeps the split titles within MAX_TITLES", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        headline: "Engineer / Architect / Manager",
+        experience: [
+          experience({ title: "Staff Engineer" }),
+          experience({ title: "Principal Engineer" }),
+          experience({ title: "Director of Engineering" }),
+        ],
+      }),
+    );
+    expect(query.titles.length).toBeLessThanOrEqual(MAX_TITLES);
+  });
+
+  it("does not duplicate a headline that repeats an experience title", () => {
+    const query = buildJobQuery(
+      baseParsed({
+        headline: "Software Engineer",
+        experience: [experience({ title: "Software Engineer" })],
+      }),
+    );
+    expect(query.titles).toEqual(["Software Engineer"]);
+  });
+
+  describe("splitHeadline", () => {
+    it("returns a single entry for a plain headline", () => {
+      expect(splitHeadline("Engineering Lead")).toEqual(["Engineering Lead"]);
+    });
+
+    it("splits on every stacking separator and trims the parts", () => {
+      expect(
+        splitHeadline("Engineer · Architect | Consultant / Manager - Director"),
+      ).toEqual([
+        "Engineer",
+        "Architect",
+        "Consultant",
+        "Manager",
+        "Director",
+      ]);
+    });
+
+    // `titles[0]` is what `keywords.ts` sends verbatim as the feeds' `search=`
+    // param, so an unguarded `/` or `,` does not merely mis-chip — it egresses
+    // "React" or "VP" in place of the role the user actually holds (#605
+    // review). Both characters appear INSIDE a single role far more often than
+    // they stack two.
+    it("does NOT split a single role on an unspaced / or on a comma", () => {
+      expect(splitHeadline("React/Node Engineer")).toEqual([
+        "React/Node Engineer",
+      ]);
+      expect(splitHeadline("VP, Engineering")).toEqual(["VP, Engineering"]);
+      expect(splitHeadline("Engineer, Data Platform")).toEqual([
+        "Engineer, Data Platform",
+      ]);
+      // A genuinely stacked pair still splits — the space is the signal.
+      expect(splitHeadline("Product Manager / Data Analyst")).toEqual([
+        "Product Manager",
+        "Data Analyst",
+      ]);
+    });
+
+    // The shape gates upstream run on the COMPOUND; the split invents parts
+    // nothing has checked. `looksLikeTitle("Software Engineer · Coffee Lover")`
+    // is true, `looksLikeTitle("Coffee Lover")` is not.
+    it("drops a manufactured part that does not read as a title", () => {
+      expect(splitHeadline("Software Engineer · Coffee Lover")).toEqual([
+        "Software Engineer",
+      ]);
+      expect(splitHeadline("Engineer | Globex Labs")).toEqual(["Engineer"]);
+    });
+
+    it("keeps the whole headline when NO part reads as a title", () => {
+      expect(splitHeadline("Coffee Lover · Dog Dad")).toEqual([
+        "Coffee Lover · Dog Dad",
+      ]);
+    });
+
+    // "&"/"and" join ONE compound role ("Founding Member & Site Reliability
+    // Engineer"), so splitting on them would mint titles nobody holds.
+    it("does NOT split a compound role joined by & or a hyphenated word", () => {
+      expect(splitHeadline("Founding Member & Site Reliability Engineer")).toEqual([
+        "Founding Member & Site Reliability Engineer",
+      ]);
+      expect(splitHeadline("Full-Stack Engineer")).toEqual(["Full-Stack Engineer"]);
+    });
+
+    it("is empty for absent or blank input, and drops empty parts", () => {
+      expect(splitHeadline(undefined)).toEqual([]);
+      expect(splitHeadline("   ")).toEqual([]);
+      expect(splitHeadline("Engineer ·  · Architect")).toEqual([
+        "Engineer",
+        "Architect",
+      ]);
+    });
   });
 });

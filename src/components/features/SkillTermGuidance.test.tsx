@@ -56,13 +56,40 @@ function resolvableParsed(): ResumeQueryInput {
 describe("SkillTermGuidance", () => {
   it("renders recognized and not-recognized skills for a role-resolvable résumé", () => {
     const el = render(resolvableParsed(), () => {});
-    expect(el.textContent).toContain("Terms worth adding");
+    expect(el.textContent).toContain("Skills this role usually asks for");
+    // The subhead names the ROLE as the source, which is what makes the panel's
+    // new position (directly under RolesPanel) legible — its content is derived
+    // from `titles[0]`. Worded "first", not "starred": `titles[0]` drives this
+    // list whether or not it carries a ★ (a résumé with no headline has no ★
+    // at all, by design — see RolesPanel).
+    expect(el.textContent).toContain("Based on the first role title above");
     // `query.skills` canonicalizes through the jd-match skill index
     // (`buildJobQuery` → `getSkillIndex`), so the rendered term is the
     // canonical id/label ("postgresql", "csharp"), not the résumé's raw
     // casing — same behaviour `/jobs/` renders.
-    expect(el.textContent).toContain("Recognized in your résumé: postgresql");
-    expect(el.textContent).toContain("Not recognized by matchers: csharp");
+    expect(el.textContent).toContain("Already in your résumé: postgresql");
+    expect(el.textContent).toContain(
+      "We could not match these to a known skill: csharp",
+    );
+    // The old wording blamed the user's term rather than our index; assert it
+    // is gone, not merely that the new sentence is present.
+    expect(el.textContent).not.toContain("Not recognized by matchers");
+  });
+
+  it("confirms in place where an added term landed", () => {
+    const el = render(resolvableParsed(), () => {});
+    const pill = el.querySelector("button[aria-label]") as HTMLButtonElement;
+    const label = pill.getAttribute("aria-label")!;
+
+    expect(el.textContent).not.toContain("to your Skills section");
+    act(() => pill.click());
+
+    // This panel now sits far above the Skills section it writes into, so the
+    // add needs an acknowledgement the vanishing pill alone cannot give.
+    expect(el.textContent).toContain(`to your Skills section: ${label}`);
+    const live = el.querySelector('[aria-live="polite"]');
+    expect(live).not.toBeNull();
+    expect(live?.textContent).toContain(label);
   });
 
   it("renders the reason for an unrecognized skill verbatim from the classifier", () => {

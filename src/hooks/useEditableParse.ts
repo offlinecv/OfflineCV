@@ -52,6 +52,7 @@ export interface ContactOverrides {
   email?: string;
   phone?: string;
   location?: string;
+  headline?: string;
 }
 
 // ── Experience overrides ──────────────────────────────────────────────────────

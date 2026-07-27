@@ -10,6 +10,7 @@ import {
   INSTITUTION_HINTS,
 } from "../regex.ts";
 import { looksLikeTitle } from "./shared.ts";
+import { MAX_HEADLINE_LENGTH } from "../../edit/headline.ts";
 
 // ── Name ────────────────────────────────────────────────────────────────────
 
@@ -385,7 +386,7 @@ export function extractHeadline(
     if (isNameLine(text, name)) continue; // the name is not its own headline
     if (matchSectionHeader(text)) break; // reached a section — header block over
     if (startsContactCluster(text)) break; // contact cluster — header block over
-    if (text.length > 60) continue;
+    if (text.length > MAX_HEADLINE_LENGTH) continue;
     if (!looksLikeTitle(text)) continue;
     return { value: text, confidence: 0.7 };
   }
