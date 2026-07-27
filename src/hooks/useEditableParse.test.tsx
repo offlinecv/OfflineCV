@@ -217,4 +217,16 @@ describe("useEditableParse — Skills category edits (#476)", () => {
       "Go",
     ]);
   });
+
+  it("headline override flips hasEdits to true and is cleared by resetAll (issue 599)", () => {
+    expect(api.hasEdits).toBe(false);
+    act(() => api.setContactField("headline", "Staff Engineer"));
+    expect(api.contactOverrides.headline).toBe("Staff Engineer");
+    expect(api.hasEdits).toBe(true);
+
+    act(() => api.resetAll());
+    expect(api.contactOverrides.headline).toBeUndefined();
+    expect(api.hasEdits).toBe(false);
+  });
 });
+

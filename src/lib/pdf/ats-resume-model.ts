@@ -57,10 +57,10 @@ const HEADER_WRAP_INDENT = 12;
 
 export interface AtsContact {
   name: string;
-  /** Professional headline shown regular-weight under the name (#425). Absent
-   *  until the parser surfaces a genuine headline distinct from the most-recent
-   *  role title — see the follow-up note in `buildContact`. When present, the
-   *  renderer draws it between the name and the contact line. */
+  /** Professional headline shown regular-weight under the name (#425, #599). Set to
+   *  the candidate's chosen primary role title when selected (#599), falling back to
+   *  the standalone title tagline the parser lifted from the profile block. When
+   *  present, the renderer draws it between the name and the contact line. */
   headline?: string;
   email?: string;
   phone?: string;
@@ -256,10 +256,19 @@ export function buildContact(
   };
 
   const name = valueFor("full_name") || result.canonical.fields.full_name || "";
-  // Header headline (#425 follow-up): the standalone title tagline the parser
-  // lifted from the profile block ("Engineering Lead"), redrawn under the name.
-  // Not inline-editable (no ContactOverrides key), so read straight off parsed.
-  const headline = (result.canonical.fields.headline ?? "").trim();
+  // Header headline (#425, #599): the user's chosen primary role title when set,
+  // falling back to the standalone title tagline the parser lifted from the profile
+  // block ("Engineering Lead"), redrawn under the name.
+  //
+  // Read through `valueFor` like its five siblings rather than off
+  // `canonical.fields` directly. Both resolve to the same string on the app path
+  // — `useAnalyzedResume` folds `contactOverrides` into `canonical.fields` via
+  // `applyOverrides` before `displayResult` reaches this builder, and `headline`
+  // is in that fold's `CONTACT_KEYS` — so this is not a behaviour fix. It closes
+  // the gap between the two: a caller that hands `buildContact` a RAW cascade
+  // result plus overrides (as a unit test naturally does) would otherwise get
+  // the parsed headline back while every other field honoured the override.
+  const headline = valueFor("headline");
   const email = valueFor("email");
   const phone = valueFor("phone");
   const location = valueFor("location");

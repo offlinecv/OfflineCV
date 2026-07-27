@@ -70,19 +70,21 @@ import { parseSeniorityLabel } from "./seniority.ts";
 export { parseSeniorityLabel };
 import { ROLE_KEYWORDS, tokenizeWords } from "./role-keywords.ts";
 import { normalizeSkillKey } from "./role-profiles.ts";
+import { looksLikeTitle } from "../heuristics/extract/title-shape.ts";
 
 export interface JobQuery {
   /** Distinct role titles, most-recent-first, deduped case-insensitively and
    *  capped at MAX_TITLES. Empty when none could be derived (skills-only /
-   *  degenerate query). `titles[0]` is the primary (most-recent) title. */
+   *  degenerate query). `titles[0]` is the stated target when there is one,
+   *  or the primary (most-recent) title. */
   titles: string[];
   /** Top-ranked skills, canonicalized + deduped, capped at MAX_SKILLS. */
   skills: string[];
   /** Seniority keyword found across the résumé's titles (Executive/VP/
    *  Director/Manager/Staff/Principal/Lead/Senior/Junior/Intern) — the
-   *  PRIMARY title wins when it has a keyword, otherwise the first match
-   *  scanning the rest of `titles` in order (#540) — or undefined when none
-   *  of them carries a recognized keyword. */
+   *  PRIMARY title (titles[0], which may be the headline) wins when it has
+   *  a keyword, otherwise the first match scanning the rest of `titles` in
+   *  order (#540) — or undefined when none of them carries a recognized keyword. */
   seniority?: string;
   /** Candidate location, seeded from the parsed résumé's top-level
    *  `location` (contact address, e.g. "Austin, TX") when present (#545).
@@ -180,7 +182,7 @@ export interface JobQuery {
  */
 export type ResumeQueryInput = Pick<
   ParsedResume,
-  "skills" | "experience" | "current_title" | "location"
+  "skills" | "experience" | "current_title" | "location" | "headline"
 >;
 
 /**
@@ -206,6 +208,59 @@ export const MAX_SKILLS = 12;
  */
 export const MAX_TITLES = 4;
 
+/** Separators a headline stacks distinct roles on.
+ *
+ *  `·`, `•` and `|` split bare — none of them occurs inside a single role.
+ *  `-` and `/` do occur inside one, so both split only when a space sits on
+ *  each side, the way a person writes a genuine stack ("Product Manager /
+ *  Data Analyst"). Unguarded, `/` turns "React/Node Engineer" into `React` +
+ *  `Node Engineer`, and `titles[0]` is what egresses (#605 review).
+ *
+ *  `,` is absent from the set entirely rather than space-guarded. Nobody
+ *  writes " , ", so a guarded comma would never fire — a dead branch — while
+ *  a bare one splits "VP, Engineering" and "Engineer, Data Platform", which
+ *  are single roles, into fragments.
+ *
+ *  `&` and `and` are excluded for the same reason: "Founding Member & Site
+ *  Reliability Engineer" is one compound role, not two, and splitting it
+ *  would mint titles nobody holds. */
+const HEADLINE_SEPARATOR_RE = /[·•|]|\s[-–—/]\s/;
+
+/**
+ * The distinct role titles a headline names, in stated order — one entry for a
+ * plain headline, N for a separator-stacked tagline. Empty for absent/blank,
+ * and any part that reduces to nothing is dropped rather than emitted as "".
+ *
+ * A MANUFACTURED PART IS RE-SHAPE-GATED (#605 review). Both routes into a
+ * headline shape the WHOLE string — `extractHeadline` admits a parsed one only
+ * past `looksLikeTitle`, and a user-typed one is warned by
+ * `headlineRoundTripWarning` — and neither says anything about a fragment this
+ * split invents. `looksLikeTitle("Software Engineer · Coffee Lover")` is true;
+ * `looksLikeTitle("Coffee Lover")` is not. Since `titles[0]` is the one audited
+ * resume-derived egress (`providers/keywords.ts`) and every part also renders
+ * as a chip in `RolesPanel`, a part that does not read as a title is dropped
+ * rather than egressed and shown as a chip the user never typed.
+ *
+ * A single part is NOT re-gated: it is the caller's own headline unchanged, and
+ * this function is not the place to overrule a headline the user typed.
+ */
+export function splitHeadline(headline: string | undefined): string[] {
+  const whole = (headline ?? "").trim();
+  if (!whole) return [];
+
+  const parts = whole
+    .split(HEADLINE_SEPARATOR_RE)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length <= 1) return parts;
+
+  const titled = parts.filter(looksLikeTitle);
+  // Every part failing means the string read as a title only in aggregate.
+  // Keep it whole rather than dropping the headline outright: it is still the
+  // user's stated target, and `RolesPanel` needs it among the chips to star it.
+  return titled.length > 0 ? titled : [whole];
+}
+
 // Order matters throughout this table: every row is checked top-to-bottom and
 // the FIRST match wins, so a more specific keyword must sit above the more
 // general one it would otherwise be swallowed by. Two ordering constraints in
@@ -218,23 +273,64 @@ export const MAX_TITLES = 4;
 //     above the generic VP row, and the whole leadership tier sits above the
 //     IC tier so a compound title like "Senior Director" reads as Director,
 //     not Senior (#540).
-function deriveTitles(parsed: ResumeQueryInput): string[] {
+export function deriveTitles(parsed: ResumeQueryInput): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const exp of parsed.experience ?? []) {
-    const title = exp.title?.trim();
-    if (!title) continue;
-    const key = title.toLowerCase();
-    if (seen.has(key)) continue; // dedup case-insensitively, keep first-seen casing
-    seen.add(key);
-    out.push(title);
-    if (out.length >= MAX_TITLES) break; // most-recent-first, so we keep the recent ones
+
+  /**
+   * Admits one candidate title. Trims, drops blanks, dedups case-insensitively
+   * (keeping first-seen casing), and enforces `MAX_TITLES`. Returns `false` once
+   * the list is full, so each source below stops at the cap without repeating
+   * the check — three loops applying the same three rules inline is what pushed
+   * this function over the cognitive-complexity bar.
+   */
+  const push = (raw: string | undefined): boolean => {
+    if (out.length >= MAX_TITLES) return false;
+    const title = raw?.trim();
+    if (title && !seen.has(title.toLowerCase())) {
+      seen.add(title.toLowerCase());
+      out.push(title);
+    }
+    return out.length < MAX_TITLES;
+  };
+
+  // The stated target (#599) leads, because `titles[0]` is what `searchPhrase`
+  // sends as the feeds' `search=` param — the one audited resume-derived egress.
+  //
+  // SPLIT IT FIRST. A headline is a tagline, not a title: `extractHeadline`
+  // routinely lifts "DevOps Engineer · Software Architect" — two roles stacked
+  // on a separator. Sent whole, that is a single-intent full-text query naming
+  // two intents, which is exactly what `keywords.ts`'s own docblock says it
+  // avoids ("stacking distinct titles … would over-constrain the feed"), and it
+  // returns near-nothing. Splitting is preferred over gating the compound out:
+  // each part IS a real title, so the first becomes a clean egress phrase and
+  // the rest still widen the local `matchesQuery` broadening.
+  //
+  // The WHOLE headline arrives already shaped — `extractHeadline` admits a
+  // parsed one only past `looksLikeTitle`, and a user-typed one is warned by
+  // `headlineRoundTripWarning` in the ContactCard editor. The PARTS do not
+  // inherit that: the split invents them, so `splitHeadline` re-gates them
+  // itself. See its docblock.
+  for (const part of splitHeadline(parsed.headline)) {
+    if (!push(part)) break;
   }
-  if (out.length > 0) return out;
+
+  // `hasExpTitle` is set before the cap check on purpose: a résumé whose
+  // experience titles were all crowded out by the headline still HAS experience
+  // titles, so it must not fall through to the `current_title` fallback below.
+  // Most-recent-first, so the cap keeps the recent ones.
+  let hasExpTitle = false;
+  for (const exp of parsed.experience ?? []) {
+    if (!exp.title?.trim()) continue;
+    hasExpTitle = true;
+    if (!push(exp.title)) break;
+  }
+  if (hasExpTitle) return out;
+
   // No experience title at all → fall back to the top-level current_title, or
   // an empty set (skills-only / degenerate query).
-  const current = parsed.current_title?.trim();
-  return current ? [current] : [];
+  push(parsed.current_title);
+  return out;
 }
 
 /**

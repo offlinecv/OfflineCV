@@ -89,6 +89,7 @@ const CONTACT_KEYS: readonly (keyof ContactOverrides)[] = [
   "email",
   "phone",
   "location",
+  "headline",
 ];
 
 /** Leading bullet/numbered markers — mirrors group-bullets.ts LEADING_MARKER_RE. */

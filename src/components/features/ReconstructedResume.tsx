@@ -45,6 +45,8 @@ import {
   toBulletExperience,
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
+import { RolesPanel } from "./RolesPanel.tsx";
+import { deriveTitles } from "../../lib/job-search/query-builder.ts";
 import {
   applyContactOverrides,
   buildContactFields,
@@ -1014,6 +1016,7 @@ export function ReconstructedResume({
   // section headings, read off the canonical model rather than `result` directly.
   const display = projectDisplay(result.canonical);
   const parsed = display.parsed;
+  const titles = deriveTitles(result.canonical.fields);
   const bullets = score.bullets ?? [];
   const projects = parsed.projects ?? [];
   const achievements = parsed.heuristic_achievements ?? [];
@@ -1259,6 +1262,22 @@ export function ReconstructedResume({
         onEditProfile={setProfileUrl}
         onRemoveProfile={removeProfile}
       />
+      {/* Decision zone (#605 review), in order: what needs fixing
+       *  (AttentionStrip, above) → who you are (ContactCard) → what you're
+       *  aiming at (RolesPanel) → what that target expects (SkillTermGuidance).
+       *  The last two are adjacent on purpose: the guidance is derived from the
+       *  starred title, via buildJobQuery → deriveTitles → titles[0]. Below
+       *  this line the page is the résumé document itself. */}
+      <RolesPanel
+        titles={titles}
+        primary={contactOverrides.headline ?? result.canonical.fields.headline}
+        onPrimaryChange={(value) => setContactField("headline", value)}
+      />
+      {/* Term-quality guidance (#586): same classifier as `/jobs/`'s
+       *  `TermQualityAdvisory`, résumé-framed copy, writes only through the
+       *  existing `addSkill` inline-edit path. Renders nothing when there's
+       *  no suggestion, including the unresolved-role case. */}
+      <SkillTermGuidance parsed={parsed} onAddSkill={addSkill} />
       {achievementsAbove && achievementsSection}
       <ExperienceSection
         heading={display.sectionHeadings?.get("experience")}
@@ -1341,11 +1360,6 @@ export function ReconstructedResume({
           removeCategorySkill(parsed.skillCategories ?? [], skill)
         }
       />
-      {/* Term-quality guidance (#586): same classifier as `/jobs/`'s
-       *  `TermQualityAdvisory`, résumé-framed copy, writes only through the
-       *  existing `addSkill` inline-edit path. Renders nothing when there's
-       *  no suggestion, including the unresolved-role case. */}
-      <SkillTermGuidance parsed={parsed} onAddSkill={addSkill} />
     </section>
   );
 }

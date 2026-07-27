@@ -79,3 +79,24 @@ describe("ChipListEditor promote label", () => {
     expect(html).toContain('aria-label="Make TypeScript the primary title"');
   });
 });
+
+describe("ChipListEditor optional add and remove (issue 599)", () => {
+  it("renders with no add input when onAdd is omitted", () => {
+    const html = render({
+      label: "Role Titles",
+      items: ["Engineering Lead"],
+    });
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain("Add");
+  });
+
+  it("renders non-removable chips when onRemove is omitted", () => {
+    const html = render({
+      label: "Role Titles",
+      items: ["Engineering Lead", "Senior Developer"],
+    });
+    expect(html).not.toContain("Remove Engineering Lead");
+    expect(html).not.toContain("Remove Senior Developer");
+  });
+});
+

@@ -47,6 +47,7 @@ const CONTACT_ROWS: readonly {
   optional?: boolean;
 }[] = [
   { key: "full_name", label: "Name", group: "identity" },
+  { key: "headline", label: "Headline", group: "identity", optional: true },
   { key: "email", label: "Email", group: "contact" },
   { key: "phone", label: "Phone", group: "contact" },
   // Brand-neutral required row (#335): a "Professional profile" gap, satisfied
@@ -64,6 +65,7 @@ const CONTACT_ROWS: readonly {
 // TypeScript trick: enumerate the valid keys for indexing `parsed`.
 const FIELD_KEYS = {
   full_name: true,
+  headline: true,
   email: true,
   phone: true,
   linkedin_url: true,
@@ -140,13 +142,31 @@ export function applyContactOverrides(
   overrides: ContactOverrides | undefined,
 ): ContactDisplayField[] {
   if (overrides === undefined) return fields;
-  return fields.map((field): ContactDisplayField => {
+  const result = fields.map((field): ContactDisplayField => {
     const ov = overrides[field.key as keyof ContactOverrides];
     if (ov === undefined) return field;
     if (ov === "")
       return { ...field, value: "", gated: true, reason: "absent" };
     return { ...field, value: ov, gated: false, reason: undefined };
   });
+
+  // Optional fields dropped by buildContactFields might have been overridden.
+  // Add them back to the display list so the UI can render the user's edit.
+  for (const row of CONTACT_ROWS) {
+    if (row.optional && overrides[row.key as keyof ContactOverrides]) {
+      const exists = result.some((f) => f.key === row.key);
+      if (!exists) {
+        result.push({
+          key: row.key,
+          label: row.label,
+          group: row.group,
+          value: overrides[row.key as keyof ContactOverrides]!,
+          gated: false,
+        });
+      }
+    }
+  }
+  return result;
 }
 
 export interface ContactCompleteness {

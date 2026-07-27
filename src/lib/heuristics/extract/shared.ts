@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import {
-  COMPANY_SUFFIX_RE,
-  INSTITUTION_HINTS,
-} from "../regex.ts";
+import { INSTITUTION_HINTS } from "../regex.ts";
+import { COMPANY_SUFFIX_RE, looksLikeTitle } from "./title-shape.ts";
+// Re-exported so the ~dozen parser call sites that import `looksLikeTitle`
+// from here are unchanged; the definition moved to the leaf `title-shape.ts`
+// so `edit/headline.ts` can use it without pulling `regex.ts` onto `/`'s
+// eager graph (#605 review).
+export { looksLikeTitle };
 
 /** First regex hit as trimmed string, or undefined. */
 export function firstMatch(re: RegExp, text: string): string | undefined {
@@ -91,24 +94,6 @@ export function isStandaloneUrl(
   const wordBefore = /\w$/.test(before);
   const wordAfter = /^\w/.test(after);
   return !(wordBefore && wordAfter);
-}
-
-/**
- * Keywords that commonly appear in a job title. Used as a tiebreaker when
- * neither header line carries a company suffix:
- * modern resumes often flip the "Company first, then Title" convention
- * and put Title on the top (H2) with Company below (H3). Without this
- * heuristic the default fallback misattributes a `**Sr. Engineering
- * Manager (L7)**` header as the company and `**Globex / CloudWave**`
- * as the title.
- */
-const TITLE_KEYWORDS_RE =
-  /\b(Engineer|Engineering|Developer|Manager|Director|Lead|Consultant|Analyst|Specialist|Associate|Architect|Principal|Officer|Designer|Scientist|Researcher|Administrator|Founder|Co-?founder|President|VP|Vice President|Head|Chief|CTO|CEO|COO|CFO|CIO|PM|TPM|SRE|DevOps|Assistant|Intern|Internship|Trainee|Apprentice|Coordinator|Technician|Representative|Supervisor|Strategist|Advisor|Adviser|Counselor|Recruiter|Accountant|Auditor|Editor|Writer|Producer|Teacher|Instructor|Lecturer|Professor|Tutor|Agent|Clerk|Ambassador|Volunteer|Fellow)\b/i;
-
-/** Heuristic: text contains title-like keywords but no company suffix. */
-export function looksLikeTitle(text: string): boolean {
-  if (COMPANY_SUFFIX_RE.test(text)) return false;
-  return TITLE_KEYWORDS_RE.test(text);
 }
 
 /** Employer signal: a legal suffix ("Inc", "LLC") OR an institution word

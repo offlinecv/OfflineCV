@@ -45,6 +45,7 @@
 import { useState } from "react";
 import { EditableField, StepPanel } from "@design-system";
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
+import { ROLE_HINT } from "../../lib/job-search/query-steps.ts";
 import {
   canonicalSkillLabels,
   parseSeniorityLabel,
@@ -177,7 +178,7 @@ export function JobQueryEditor({
       <StepPanel id="role">
         <QueryStepSection
           title="Titles"
-          hint="The starred title is the one sent to the job feeds. Everything else narrows and ranks on your device."
+          hint={ROLE_HINT}
         >
           <ChipListEditor
             label="Your titles"

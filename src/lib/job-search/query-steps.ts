@@ -57,6 +57,22 @@ const NO_SKILLS = "No skills yet";
 const NO_FILTERS = "Anywhere, nothing ruled out";
 const NOTHING_TO_SEND = "Nothing to search for yet";
 
+/**
+ * The one hint on the Titles step. Two facts, in the order they matter:
+ * what leaves the browser, and where the starred title came from.
+ *
+ * Both are verified, not assumed. `providers/keywords.ts` sends `titles[0]`
+ * as the feeds' `search=` param and nothing else résumé-derived; every other
+ * title filters locally in `search.ts`'s `matchesQuery`. And the star does
+ * survive the handoff: `useAnalyzedResume` folds the `headline` override into
+ * `canonical.fields` (it is in `applyOverrides`' `CONTACT_KEYS`), that becomes
+ * `displayResult`, and `ResultDetailTabs` hands exactly those fields to
+ * `FindJobsLauncher` — so re-launching from `/` does re-seed from the role
+ * marked there, replacing a title edited only here.
+ */
+export const ROLE_HINT =
+  "Only the starred title is sent to the job feeds. Every other title narrows and ranks the results right here on your device. The star starts from the role you marked on the résumé page, so going back and launching again will replace a title you changed here.";
+
 /** `n` of a thing, pluralised — the whole of a count summary's grammar. */
 function count(n: number, singular: string): string {
   return `${n} ${singular}${n === 1 ? "" : "s"}`;
@@ -99,6 +115,7 @@ export const QUERY_STEP_COPY: readonly string[] = [
   NO_SKILLS,
   NO_FILTERS,
   NOTHING_TO_SEND,
+  ROLE_HINT,
 ];
 
 /**
