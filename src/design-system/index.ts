@@ -36,3 +36,4 @@ export * from "./shared/UpdateBanner.tsx";
 export * from "./shared/GitHubStarCta.tsx";
 export * from "./shared/InlineDiff.tsx";
 export * from "./shared/RatingStars.tsx";
+export * from "./shared/SectionHeading.tsx";

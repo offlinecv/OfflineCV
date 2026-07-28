@@ -28,7 +28,7 @@
 
 import { useState } from "react";
 import type { SkillCategory } from "../../lib/heuristics/types.ts";
-import { EditableField } from "@design-system";
+import { EditableField, SectionHeading } from "@design-system";
 import {
   AddCategoryInput,
   AddSkillInput,
@@ -39,14 +39,6 @@ import {
 } from "./ReconstructedSkillControls.tsx";
 
 // ── Shared section chrome (mirrors ReconstructedEducationSkills' local helpers) ─
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-      {children}
-    </h2>
-  );
-}
 
 function NotDetected({ what }: { what: string }) {
   return <p className="text-sm text-content-tertiary">No {what} detected.</p>;

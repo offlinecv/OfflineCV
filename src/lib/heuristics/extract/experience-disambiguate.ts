@@ -53,9 +53,18 @@ const LEGAL_SUFFIX_RE =
  *  the middle segment stayed whole ("Google, Mountain View" → company). Same
  *  closed-vocab discipline as the pre-existing entries: a real company that
  *  merely contains one of these tokens ("Mountain View Software") still fails
- *  the `^…$`-anchored full-string match. */
+ *  the `^…$`-anchored full-string match.
+ *
+ *  #634 review follow-up: "Santa Clara", "Redwood City" and "Ann Arbor" close
+ *  the three headers the review reproduced as still-broken (Nvidia, Meta, Ford).
+ *  They do NOT make the vocabulary complete — this list is a closed set by
+ *  design, so any multi-word city outside it still folds into `company`. That
+ *  narrowing is the standing limitation of the approach, not a bug to be fixed
+ *  by growing the list without bound; see `experience.multiword-city.test.ts`,
+ *  which pins both halves (a listed city splits; an unlisted one does not, and
+ *  a company merely containing a listed city stays whole). */
 const MULTIWORD_US_CITY_ALT =
-  "New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City|Mountain View|Palo Alto|Menlo Park";
+  "New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City|Mountain View|Palo Alto|Menlo Park|Santa Clara|Redwood City|Ann Arbor";
 
 /** Bare city/region names (no "City, ST" state tail, so `US_LOCATION_RE` misses
  *  them) that show up as a `"Title, Location"` header tail — must NOT be cleaved

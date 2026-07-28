@@ -19,14 +19,16 @@
  * the round-trip invariant). PII-free: asserts recognition of heading strings
  * (synthetic-persona fixtures), never dumps field values.
  *
- * It also enforces the PAGINATION half of the contract (#629, #631, #632): a
- * section heading or an entry header may never be the final drawn line on a page;
- * a bullet that wraps may never leave one of its lines alone on a page — neither
- * its first at a page bottom (#629) nor its last at a page top (#631); and an
- * entry may never open a page with its last bullet alone (#632). Those
- * cases are exercised on SYNTHESIZED models (no PDF fixture) — see the second
- * describe block, whose helpers locate the exact filler length that puts the
- * natural page break on the subject line.
+ * It also enforces the PAGINATION half of the contract (#629, #631, #632, #635):
+ * a section heading or an entry header may never be the final drawn line on a
+ * page; a bullet that wraps may never leave one of its lines alone on a page —
+ * neither its first at a page bottom (#629) nor its last at a page top (#631);
+ * an entry may never open a page with its last bullet alone (#632); and the
+ * summary body — the one wrapped block those three left uncovered — may not
+ * widow its last line either (#635). Those cases are exercised on SYNTHESIZED
+ * models (no PDF fixture) — see the second and third describe blocks, whose
+ * helpers locate by bisection the exact input length that puts the natural page
+ * break on the subject line.
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -791,4 +793,91 @@ describe("export layout contract — keep-with-next pagination (#629)", () => {
       ).toBeGreaterThan(densest / 2);
     }
   });
+});
+
+/**
+ * The Summary body is the one wrapped block #629/#631/#632 left uncovered: it is
+ * plain body text on the `drawText` path, so before this it paginated per line
+ * and could widow its last line onto a page of its own.
+ *
+ * Reaching it takes a summary long enough to outrun page one on its own — the
+ * summary is always drawn immediately after the contact block, so nothing can
+ * push a SHORT one across a break. That makes the case remote, not impossible:
+ * the summary is a free-text field the user can edit and paste into (#625), and
+ * the boundary is located here by measurement rather than assumed.
+ *
+ * The ORPHAN half needs no test. `drawSectionHeading` already reserves the
+ * heading plus one body line, and the block can only ever begin on page one's
+ * first content line, so its opening can never sit at a page bottom.
+ */
+describe("export layout contract — the Summary body honours widow control", () => {
+  /** A summary of `words` filler tokens, each wrapped line individually
+   *  identifiable by its token index. No digits-only tokens that would read as a
+   *  metric, and no middot, so it takes the plain wrapped-body path. */
+  function summaryModel(words: number): AtsResumeModel {
+    return {
+      contact: { name: "Jane Candidate", links: [] },
+      summary: Array.from({ length: words }, (_, i) => `token${i}`).join(" "),
+      summaryHeading: "Professional Profile",
+      sections: [],
+    };
+  }
+
+  /** Drawn summary lines per page, in page order — the same shape
+   *  {@link bulletLinesPerPage} returns, so a `1` is the widow. */
+  async function summaryLinesPerPage(words: number): Promise<number[]> {
+    const lines = await extractPdfDrawnLines(
+      await renderAtsResumePdf(summaryModel(words)),
+    );
+    const perPage = new Map<number, number>();
+    for (const line of lines) {
+      if (!/\btoken\d+\b/.test(line.text)) continue;
+      perPage.set(line.page, (perPage.get(line.page) ?? 0) + 1);
+    }
+    return [...perPage.entries()].sort(([a], [b]) => a - b).map(([, n]) => n);
+  }
+
+  /**
+   * The smallest summary that spills onto page two at all. Monotone in `words`
+   * (every extra word only ever pushes the block down), so a bisection is exact.
+   * Bracketed on both sides: the low end must fit page one entirely and the high
+   * end must spill, which is what stops the window below from being vacuous.
+   */
+  async function spillBoundary(max = 800): Promise<number> {
+    expect(
+      (await summaryLinesPerPage(0)).length,
+      "an empty summary must not spill onto page two",
+    ).toBeLessThan(2);
+    expect(
+      (await summaryLinesPerPage(max)).length,
+      `a ${max}-word summary must spill onto page two`,
+    ).toBeGreaterThan(1);
+    let lo = 0;
+    let hi = max;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if ((await summaryLinesPerPage(mid)).length > 1) hi = mid;
+      else lo = mid;
+    }
+    return hi;
+  }
+
+  it("never leaves the summary's last line alone at the top of a page", async () => {
+    const n = await spillBoundary();
+    // The widow can only occur in the first few words past the boundary — beyond
+    // that the tail is naturally two or more lines — so the window is where the
+    // defect lives, and every count in it must clear the same minimum a wrapped
+    // bullet must (#631).
+    for (let words = n; words <= n + 24; words += 4) {
+      const perPage = await summaryLinesPerPage(words);
+      expect(
+        perPage.length,
+        `words=${words}: summary no longer spans a page break`,
+      ).toBe(2);
+      expect(
+        Math.min(...perPage),
+        `words=${words}: summary widowed ${JSON.stringify(perPage)}`,
+      ).toBeGreaterThanOrEqual(MIN_BULLET_LINES_PER_PAGE);
+    }
+  }, 60000);
 });

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { buildResumeSections, roleLabel } from "./ReconstructedResume.tsx";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
+import { countWords } from "../../lib/score/score.ts";
 
 function bullet(index: number, text: string): BulletObservation {
   return {
@@ -20,7 +21,7 @@ function bullet(index: number, text: string): BulletObservation {
     hasMetric: false,
     startsWithActionVerb: false,
     wellFormedLength: false,
-    wordCount: text.split(/\s+/).length,
+    wordCount: countWords(text),
   };
 }
 

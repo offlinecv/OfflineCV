@@ -23,7 +23,7 @@ import type {
   AddedEntryField,
 } from "../../hooks/useEditableParse.ts";
 import { buildEducationDates } from "../../lib/score/entry-dates.ts";
-import { EditableField } from "@design-system";
+import { EditableField, SectionHeading } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
 import { AddPill, RemoveButton, sectionExitBlur } from "./ReconstructedAdd.tsx";
 
@@ -41,14 +41,6 @@ const EDUCATION_FIELD_MAP: Record<
 };
 
 // ── Shared section chrome (mirrors ReconstructedResume's local helpers) ────────
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-      {children}
-    </h2>
-  );
-}
 
 function NotDetected({ what }: { what: string }) {
   return <p className="text-sm text-content-tertiary">No {what} detected.</p>;

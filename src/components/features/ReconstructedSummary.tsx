@@ -29,7 +29,7 @@
  * is always shown the user's latest text rather than the stale parsed one.
  */
 
-import { EditableField } from "@design-system";
+import { EditableField, SectionHeading } from "@design-system";
 import type { SectionInput } from "../../lib/webllm/rewrite-resume.ts";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { roleLabel } from "../../lib/score/group-bullets.ts";
@@ -40,15 +40,6 @@ import type { SectionRewriteApply } from "./SectionRewrite.tsx";
  *  key `buildResumeSections` mints and `summaryRewriteApply` is registered
  *  under, so the proposal panel can join an outcome to its writer. */
 export const SUMMARY_SECTION_ID = "summary";
-
-/** Mirrors ReconstructedResume's local heading (and Education's copy of it). */
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-      {children}
-    </h2>
-  );
-}
 
 /**
  * The Summary section: the verbatim source heading (#285, the same one the

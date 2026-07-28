@@ -14,6 +14,7 @@ import {
   type BulletExperience,
 } from "./group-bullets.ts";
 import type { BulletObservation } from "./score.ts";
+import { countWords } from "./score.ts";
 import { runCascade } from "../heuristics/cascade.ts";
 import { computeAnonymousAtsScore } from "./score.ts";
 
@@ -33,7 +34,7 @@ function makeBullet(
     hasMetric: false,
     startsWithActionVerb: true,
     wellFormedLength: true,
-    wordCount: text.split(/\s+/).length,
+    wordCount: countWords(text),
     ...overrides,
   };
 }
