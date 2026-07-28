@@ -43,9 +43,19 @@ const LEGAL_SUFFIX_RE =
  *  (case-sensitive Title-case). Single source of truth so the two can't drift
  *  apart. Longest-first so "New York City" wins over "New York" in the embedded
  *  alternation (regex first-match); order is irrelevant for the `^…$`-anchored
- *  `BARE_LOCATION_RE`. */
+ *  `BARE_LOCATION_RE`.
+ *
+ *  Silicon-Valley/Peninsula additions (#616): "Mountain View", "Palo Alto",
+ *  "Menlo Park" are the multi-word tech-hub cities that show up co-located
+ *  with Google/Meta/Stanford in a `Title · Company, City · Team` middot header
+ *  with NO trailing state suffix. Without the vocab entry, Pass F of
+ *  `stripLocationSuffix` (bare-city tail check) failed to full-match them and
+ *  the middle segment stayed whole ("Google, Mountain View" → company). Same
+ *  closed-vocab discipline as the pre-existing entries: a real company that
+ *  merely contains one of these tokens ("Mountain View Software") still fails
+ *  the `^…$`-anchored full-string match. */
 const MULTIWORD_US_CITY_ALT =
-  "New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City";
+  "New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City|Mountain View|Palo Alto|Menlo Park";
 
 /** Bare city/region names (no "City, ST" state tail, so `US_LOCATION_RE` misses
  *  them) that show up as a `"Title, Location"` header tail — must NOT be cleaved
