@@ -10,6 +10,7 @@ import type {
 } from "../heuristics/types.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "../heuristics/sections.ts";
 import type { AnonymousAtsScore, BulletObservation } from "../score/score.ts";
+import { countWords } from "../score/score.ts";
 
 function bullet(text: string, index: number): BulletObservation {
   return {
@@ -18,7 +19,7 @@ function bullet(text: string, index: number): BulletObservation {
     hasMetric: true,
     startsWithActionVerb: true,
     wellFormedLength: true,
-    wordCount: text.split(/\s+/).length,
+    wordCount: countWords(text),
   };
 }
 

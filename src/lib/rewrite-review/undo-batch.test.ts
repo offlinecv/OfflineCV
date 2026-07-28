@@ -24,6 +24,7 @@ import {
 import type { ResolvedWrite } from "./apply-accepted.ts";
 import { applyOverrides } from "../edit/apply-overrides.ts";
 import type { BulletObservation } from "../score/score.ts";
+import { countWords } from "../score/score.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 
@@ -210,7 +211,7 @@ function obs(index: number, text: string): BulletObservation {
     hasMetric: false,
     startsWithActionVerb: false,
     wellFormedLength: false,
-    wordCount: text.split(/\s+/).filter(Boolean).length,
+    wordCount: countWords(text),
   };
 }
 

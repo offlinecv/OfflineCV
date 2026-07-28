@@ -44,6 +44,14 @@
  * bullets paginate freely and no reservation ever spans the entry — because
  * reserving a whole entry is the density failure #630 measured at ~100pt.
  *
+ * The widow half is not bullets-only. The SUMMARY body is the other wrapped
+ * block on the plain `drawText` path, and it takes the same `widowControl`
+ * (#635). Its orphan half needs no reservation beyond the one line its heading
+ * already keeps: the summary always begins at the top of page one, so it can
+ * only ever straddle a break by outrunning a whole page on its own. The capped
+ * body-header (skills) path is deliberately left uncovered — divisibility past
+ * `BODY_HEADER_KEEP_LINES` is the entire point of the cap.
+ *
  * Two deliberate limits keep those reservations from costing page density: a
  * BODY-TEXT "header" (`headerBold: false` — the skills list) contributes at most
  * `BODY_HEADER_KEEP_LINES`, and a reservation taller than a whole page is
@@ -513,9 +521,10 @@ type DrawTextOpts = {
    *  when the text fits on ONE line, so measured offsets are accurate. */
   linkSpans?: Array<{ display: string; href: string }>;
   /** Paginate the wrapped lines under widow control (#631) — see
-   *  {@link Layout.ensureWrappedLine}. Set only by {@link Layout.drawBullet}; a
-   *  header/contact/summary block keeps the plain per-line behaviour. Not an
-   *  input to wrapping, so {@link Layout.measureTextHeight} ignores it. */
+   *  {@link Layout.ensureWrappedLine}. Set by {@link Layout.drawBullet} and by
+   *  the summary body (#635), the two wrapped free-text blocks; a name/contact/
+   *  header line keeps the plain per-line behaviour. Not an input to wrapping,
+   *  so {@link Layout.measureTextHeight} ignores it. */
   widowControl?: boolean;
   /** Height (pt) that must land on the same page as this block's FINAL drawn
    *  line — the NEXT bullet's keep-opening (#632). Set only by
@@ -630,8 +639,14 @@ class Layout {
    * earlier line breaking naturally leaves the tail intact, and every later line
    * is inside a tail already placed.
    *
-   * The other side of the break is guaranteed by the caller's OPENING
-   * reservation ({@link bulletKeepLines}): it committed `BULLET_KEEP_LINES` lines
+   * The other side of the break is guaranteed by the CALLER's opening
+   * reservation, which is why this method owns only the tail. For a bullet that
+   * is {@link bulletKeepLines}; for the summary body (#635) it is the one line
+   * its section heading keeps, which suffices there because the block always
+   * begins at the top of page one and so never opens at a page bottom.
+   *
+   * For a bullet specifically ({@link bulletKeepLines}): it committed
+   * `BULLET_KEEP_LINES` lines
    * to the page the block starts on, and a block reaching this branch has
    * `total >= 2 * BULLET_KEEP_LINES`, so the lines before the tail are at least
    * that many. A block whose own height exceeds a page simply breaks more than
@@ -1253,7 +1268,17 @@ export async function renderAtsResumePdf(
     // The summary body is plain wrapped text, so the heading must keep one BODY
     // line with it (#629).
     drawSectionHeading(layout, model.summaryHeading ?? "Summary", SIZE_BODY * LINE_GAP);
-    layout.drawText(model.summary, { size: SIZE_BODY });
+    // The body takes `widowControl` for the same reason a bullet does (#631): it
+    // is a wrapped block, so per-line pagination can leave its last line alone at
+    // a page top. It is the only NON-bullet caller — a summary long enough to
+    // outrun page one is remote (the block always starts on page one's first
+    // content line), but it is free text the user can edit and paste into (#625),
+    // and the mechanism costs one option.
+    //
+    // The orphan half needs nothing: the heading above already reserves one body
+    // line, and this block can only ever BEGIN at the top of page one, so its
+    // opening can never sit at a page bottom.
+    layout.drawText(model.summary, { size: SIZE_BODY, widowControl: true });
     layout.advance(GAP_BETWEEN_ENTRIES);
   }
 
@@ -1379,6 +1404,14 @@ function subLineOpts(entry: AtsEntry, mutedColor: RGB): DrawTextOpts {
  * bullet: the block's first line is never left alone at a page bottom. One would
  * add nothing over the plain per-line `ensure`; three or more starts trading real
  * page density for a guarantee body text does not need, since it is divisible.
+ *
+ * NOT pinned by a test, and deliberately so: `1` and `2` produce identical output
+ * on every case the suite measures, so any assertion here would be a tautology.
+ * The load-bearing part of this rule is not the number but the GATE that applies
+ * it — see {@link entryHeadHeight}, where the cap is conditional on the model
+ * declaring the header to be body text. Tune the number here and you change
+ * nothing measurable; move the gate there and you change what a real header
+ * reserves. Read that docblock before touching either.
  */
 const BODY_HEADER_KEEP_LINES = 2;
 

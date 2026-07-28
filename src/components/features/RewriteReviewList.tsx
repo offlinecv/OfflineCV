@@ -115,10 +115,13 @@ export function BulletReviewRow({
 }: {
   pair: AlignedPair;
   review: RewriteReview;
-  /** What this row's content IS, for the kind label and the control
-   *  `aria-label`s ("Edited bullet" / "Accept this bullet"). Defaults to
-   *  "bullet"; the whole-résumé review passes "summary" for the one-field
-   *  summary section (#625), whose row is otherwise identical. */
+  /** What this row's content IS, for the kind label, the control
+   *  `aria-label`s ("Edited bullet" / "Accept this bullet") and the editor's
+   *  placeholder + label. Defaults to "bullet"; the whole-résumé review passes
+   *  "summary" for the one-field summary section (#625), whose row is
+   *  otherwise identical. Every user-visible noun on the row routes through
+   *  this — a hardcoded "bullet" left behind reads as the wrong thing on the
+   *  summary row while the header above it says "summary". */
   noun?: string;
 }) {
   const decision = review.decisionOf(pair.id);
@@ -176,9 +179,9 @@ export function BulletReviewRow({
           {/* Primary line: the clean, finished bullet — editable in place. */}
           <EditableField
             value={newSideText(pair, review)}
-            placeholder="edit this bullet"
+            placeholder={`edit this ${noun}`}
             emptyAffordance="plain"
-            label="Edit proposed bullet"
+            label={`Edit proposed ${noun}`}
             textSize="sm"
             display="inline"
             multiline

@@ -8,6 +8,7 @@ import { computeAnonymousAtsScore } from "../score/score.ts";
 import { groupBulletsByExperience } from "../score/group-bullets.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { BulletObservation } from "../score/score.ts";
+import { countWords } from "../score/score.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 
 /** Minimal BulletObservation factory — only `text` and `index` matter here. */
@@ -18,7 +19,7 @@ function obs(index: number, text: string): BulletObservation {
     hasMetric: false,
     startsWithActionVerb: false,
     wellFormedLength: false,
-    wordCount: text.split(/\s+/).filter(Boolean).length,
+    wordCount: countWords(text),
   };
 }
 

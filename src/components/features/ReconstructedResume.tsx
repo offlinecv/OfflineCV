@@ -111,7 +111,7 @@ import {
 } from "./ReconstructedSummary.tsx";
 import { SkillsSection } from "./ReconstructedSkills.tsx";
 import { SkillTermGuidance } from "./SkillTermGuidance.tsx";
-import { Button, EditableField } from "@design-system";
+import { Button, EditableField, SectionHeading } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 import { useDownloadMarkdown } from "../../hooks/useDownloadMarkdown.ts";
@@ -245,14 +245,6 @@ function AttentionStrip({
 }
 
 // ── Section heading + "not detected" gap ──────────────────────────────────────
-
-function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-      {children}
-    </h2>
-  );
-}
 
 /** Explicit gap marker — a section the parser found nothing for. */
 function NotDetected({ what }: { what: string }) {

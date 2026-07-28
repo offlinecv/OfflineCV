@@ -52,6 +52,30 @@ describe("multi-word city on space-folded header (#368)", () => {
     expect(role.title?.toLowerCase()).toContain("intern");
   });
 
+  // The vocabulary is shared between BARE_LOCATION_RE (the middot path, #616)
+  // and KNOWN_MULTIWORD_US_CITY_RE (this space-folded path, #368), so the three
+  // cities added for #634's review improve BOTH — an effect worth pinning
+  // because it was a side effect rather than the goal. A/B against the previous
+  // vocabulary: "Acme Santa Clara, CA" split as company "Acme Santa" /
+  // location "Clara, CA", exactly the Pass B single-token truncation #368
+  // exists to prevent. Untested, this could silently regress.
+  it.each([
+    ["Santa Clara", "CA"],
+    ["Redwood City", "CA"],
+    ["Ann Arbor", "MI"],
+  ])("space-folded `Acme %s, %s` keeps the city whole too", (city, state) => {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: `Acme ${city}, ${state}`, fontSize: 11 },
+      { text: "Software Engineer", fontSize: 11 },
+      { text: "May 2023 - Jun. 2024", fontSize: 11 },
+      { text: "• Built a document generator on a hosted LLM API.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].company).toBe("Acme");
+    expect(roles[0].location).toBe(`${city}, ${state}`);
+  });
+
   it("still extracts a single-word city (no regression to Pass B)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
@@ -95,26 +119,42 @@ describe("multi-word city on space-folded header (#368)", () => {
 // single-source MULTIWORD_US_CITY_ALT vocab so BARE_LOCATION_RE full-matches it.
 // The trailing-segment case is covered too so behavior is position-independent.
 describe("multi-word city without state/country suffix on middot header (#616)", () => {
-  it("row (b) — middle segment: `Company, MultiWordCity` splits into company + location", () => {
-    // "Google, Mountain View" sits in the MIDDLE middot segment. Before the fix
-    // the whole string landed in `company` and `location` dropped.
-    const roles = roleFromSection([
-      { text: "EXPERIENCE", fontSize: 13 },
-      {
-        text: "Engineering Lead · Google, Mountain View · GFiber",
-        fontSize: 11,
-      },
-      { text: "04/2021 – 12/2023", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
-    ]);
-    expect(roles.length).toBeGreaterThanOrEqual(1);
-    const role = roles[0];
+  // Table-driven so EVERY city added to MULTIWORD_US_CITY_ALT for #616 is
+  // guarded, not just the one the original fix demonstrated. The first five
+  // rows shipped with #634; the last three were added by its review, which
+  // reproduced them as still-broken on that branch. With one row per vocab
+  // entry, dropping an entry from the alternation string fails a test instead
+  // of passing silently.
+  it.each([
+    ["Google", "Mountain View", "GFiber"],
+    ["Meta", "Menlo Park", "Ads"],
+    ["Stanford", "Palo Alto", "SLAC"],
+    ["Nvidia", "Santa Clara", "Compute"],
+    ["Meta", "Redwood City", "Ads"],
+    ["Ford", "Ann Arbor", "Research"],
+  ])(
+    "row (b) — middle segment: `%s, %s` splits into company + location",
+    (company, city, team) => {
+      // The city sits in the MIDDLE middot segment. Before the fix the whole
+      // "Company, City" string landed in `company` and `location` dropped.
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        {
+          text: `Engineering Lead · ${company}, ${city} · ${team}`,
+          fontSize: 11,
+        },
+        { text: "04/2021 – 12/2023", fontSize: 11 },
+        { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      ]);
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      const role = roles[0];
 
-    expect(role.title?.toLowerCase()).toContain("engineering lead");
-    expect(role.company).toBe("Google");
-    expect(role.location).toBe("Mountain View");
-    expect(role.team).toBe("GFiber");
-  });
+      expect(role.title?.toLowerCase()).toContain("engineering lead");
+      expect(role.company).toBe(company);
+      expect(role.location).toBe(city);
+      expect(role.team).toBe(team);
+    },
+  );
 
   it("row (a) unchanged — middle `Company, MultiWordCity, ST` still splits with state suffix", () => {
     const roles = roleFromSection([
@@ -186,5 +226,63 @@ describe("multi-word city without state/country suffix on middot header (#616)",
 
     expect(role.company).toBe("Google");
     expect(role.location).toBe("Mountain View");
+  });
+
+  // The load-bearing safety claim for the whole closed-vocab approach, which
+  // MULTIWORD_US_CITY_ALT's docblock asserts in prose: a real company that
+  // merely CONTAINS a listed city still fails the `^…$`-anchored full-string
+  // match, so the vocabulary can grow without shredding company names. It was
+  // true but tested nowhere (#634 review), and a prose-only invariant drifts
+  // silently — the moment someone relaxes the anchor, these are what break.
+  it.each([
+    // City token leads the company name, alone in its middot segment.
+    ["Engineer · Mountain View Software · Core", "Mountain View Software"],
+    ["Engineer · Redwood City Ventures · Core", "Redwood City Ventures"],
+    ["Engineer · Santa Clara University · Research", "Santa Clara University"],
+  ])(
+    "does not cleave a company that merely contains a vocab city: %s",
+    (header, expectedCompany) => {
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        { text: header, fontSize: 11 },
+        { text: "04/2021 – 12/2023", fontSize: 11 },
+        { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
+      ]);
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      expect(roles[0].company).toBe(expectedCompany);
+      expect(roles[0].location).toBeUndefined();
+    },
+  );
+
+  it("holds in the comma-tail position too — `Acme, Mountain View Software` stays unsplit", () => {
+    // The tail is where Pass F actually runs BARE_LOCATION_RE, so this is the
+    // position the anchor has to earn its keep in.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Engineer · Acme, Mountain View Software", fontSize: 11 },
+      { text: "04/2021 – 12/2023", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].company).toBe("Acme, Mountain View Software");
+    expect(roles[0].location).toBeUndefined();
+  });
+
+  // The standing LIMITATION, pinned so closing #616 cannot be read as a general
+  // guarantee. MULTIWORD_US_CITY_ALT is a closed set by design — an open
+  // "two Title-Case words" rule would split `Acme, Northwind Systems` — so a
+  // multi-word city outside the vocabulary still folds into `company`. This
+  // test failing is the EXPECTED signal when a city is added: move the row up
+  // into the table above rather than deleting it.
+  it("closed vocabulary is closed — an unlisted multi-word city still folds into company", () => {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Engineering Lead · Vertex Health, Coral Gables · Claims", fontSize: 11 },
+      { text: "04/2021 – 12/2023", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].company).toBe("Vertex Health, Coral Gables");
+    expect(roles[0].location).toBeUndefined();
   });
 });

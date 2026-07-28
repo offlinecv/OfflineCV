@@ -91,12 +91,20 @@ const WEIGHTS = {
  *   punctuation-only tokens (a spaced em-dash, mid-dot, etc. no longer counts
  *   as a word), so bullets that use spaced dashes score shorter and more of
  *   them land in the 8–30 well-formed window, raising Structure.
+ * - 1.7 (2026-07-28): the 1.6 spelled-year guard is separator-consistent with
+ *   the cardinal matcher it guards (#633 review). WORD_YEAR_TOKEN joined its
+ *   parts with `\s+` while QUANTIFYING_CARDINAL accepts a hyphen, so a spelled
+ *   year written with hyphens ("two-thousand-nineteen", "nineteen-hundred-
+ *   ninety-eight") escaped the strip and then registered as quantification off
+ *   its own leftover fragment. Both now share CARDINAL_SEPARATOR. Strictly
+ *   removes false Specificity credit; a bullet that genuinely quantifies is
+ *   unaffected, so scores move only DOWN and only on this rare shape.
  */
 // Surfaced to the UI via the `algoVersion` score field, and consumed by the
 // #321 resume-library cache to version persisted parse+score records (a bump
 // here invalidates stale cached snapshots, which then re-parse from the stored
 // PDF blob — see `resume-library.ts`).
-export const ATS_SCORE_ALGO_VERSION = "1.6";
+export const ATS_SCORE_ALGO_VERSION = "1.7";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -120,9 +128,13 @@ const BULLET_MARKER_RE = /^[\s ]*[-*•●–▪◦‣▶►·�]\s+/;
 /** Numbered-list prefix: "1." or "1)". */
 const NUMBERED_BULLET_RE = /^[\s ]*\d+[.)]\s+/;
 
-/** Word-count window for a "well-formed" bullet (Structure dimension). */
-const BULLET_LENGTH_MIN_WORDS = 8;
-const BULLET_LENGTH_MAX_WORDS = 30;
+/** Word-count window for a "well-formed" bullet (Structure dimension).
+ *  Exported so the Structure card's tooltip states the criterion from the same
+ *  source that enforces it — #624 shortened the visible hint to bare counts
+ *  (`length 13/23`), and a hand-typed "8–30" in the UI would drift the moment
+ *  the window moves. */
+export const BULLET_LENGTH_MIN_WORDS = 8;
+export const BULLET_LENGTH_MAX_WORDS = 30;
 
 /** A token counts as a word when it contains at least one letter or digit
  *  (#627). `text.split(/\s+/)` alone tokenizes a spaced em-dash, mid-dot, or
@@ -237,9 +249,20 @@ const YEAR_TAIL_WORD =
  *  otherwise trip a cardinal above ("**two thousand** nineteen", "**nineteen
  *  hundred** twelve") need guarding — "twenty twenty-four" contains no accepted
  *  cardinal. The trailing year word is REQUIRED, so a genuine quantity like
- *  "processed two thousand records" survives the strip and still counts. */
+ *  "processed two thousand records" survives the strip and still counts.
+ *
+ *  Separator is CARDINAL_SEPARATOR, NOT `\s`, and that is load-bearing (#633
+ *  review): this guard only works if it recognises every shape the matcher it
+ *  guards against does. QUANTIFYING_CARDINAL accepts a hyphen between the
+ *  cardinal and the next word, so a hyphenated spelled year
+ *  ("two-thousand-nineteen") used to survive the strip and then register as
+ *  quantification off its own leftover fragment. Any future widening of
+ *  CARDINAL_SEPARATOR must stay shared with this constant or the same class of
+ *  false positive reopens. */
+const YEAR_SEPARATOR = `${CARDINAL_SEPARATOR}+`;
 const WORD_YEAR_TOKEN = new RegExp(
-  `\\b(?:two\\s+thousand|nineteen\\s+hundred)(?:\\s+and)?\\s+(?:${YEAR_TAIL_WORD})\\b`,
+  `\\b(?:two${YEAR_SEPARATOR}thousand|nineteen${YEAR_SEPARATOR}hundred)` +
+    `(?:${YEAR_SEPARATOR}and)?${YEAR_SEPARATOR}(?:${YEAR_TAIL_WORD})\\b`,
   "gi",
 );
 

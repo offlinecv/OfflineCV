@@ -8,7 +8,11 @@
  */
 
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
-import { getScoreTier } from "../../lib/score/score.ts";
+import {
+  getScoreTier,
+  BULLET_LENGTH_MIN_WORDS,
+  BULLET_LENGTH_MAX_WORDS,
+} from "../../lib/score/score.ts";
 import type { SectionAnchor } from "../../lib/anchors.ts";
 import { getScoreRecommendation } from "../../lib/score/recommendation.ts";
 import { ScoreRing } from "./ScoreRing.tsx";
@@ -24,6 +28,11 @@ interface DimensionProps {
   max: number;
   gradable: boolean;
   hint: string;
+  /** Spelled-out criterion behind a terse `hint`, surfaced as a tooltip. #624
+   *  shortened the Structure hint to bare counts (`length 13/23`), which no
+   *  longer states what "length" is measured against; this restores the
+   *  criterion without re-lengthening the visible line. */
+  hintTitle?: string;
   /** Hash-prefixed scroll target — narrowed to a known section so a dead link
    *  (a `#foo` with no matching rendered id) is a compile error (#153). */
   anchor: SectionAnchor;
@@ -35,6 +44,7 @@ function Dimension({
   max,
   gradable,
   hint,
+  hintTitle,
   anchor,
 }: DimensionProps) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
@@ -68,7 +78,9 @@ function Dimension({
           />
         </div>
       )}
-      <p className="text-[11px] text-content-tertiary">{hint}</p>
+      <p className="text-[11px] text-content-tertiary" title={hintTitle}>
+        {hint}
+      </p>
     </a>
   );
 }
@@ -147,6 +159,7 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
             max={score.structure.max}
             gradable={score.structure.gradable}
             hint={structureHint}
+            hintTitle={`Verb-led: bullet opens with an action verb. Length: bullet is ${BULLET_LENGTH_MIN_WORDS}–${BULLET_LENGTH_MAX_WORDS} words.`}
             anchor="#reconstructed-resume"
           />
           <Dimension

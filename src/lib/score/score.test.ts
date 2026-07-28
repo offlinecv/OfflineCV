@@ -229,6 +229,10 @@ describe("bulletHasMetric — industry-aligned detection", () => {
       "Ran dozens of experiments across the onboarding funnel",
       "Owned twenty-two dashboards across the analytics estate", // compound: "two" closes it
       "Processed two thousand records per day through the ingest path", // year-guard must NOT eat this
+      // The other side of the #633-review widening: the year guard now accepts
+      // hyphens as separators, so it must still require a YEAR TAIL word.
+      // "two-thousand records" is a genuine quantity and survives the strip.
+      "Processed two-thousand records per day through the ingest path",
     ];
     it.each(quantified)("registers as a metric: %s", (bullet) => {
       expect(bulletRegistersAsMetric(bullet)).toBe(true);
@@ -242,6 +246,13 @@ describe("bulletHasMetric — industry-aligned detection", () => {
       "Shipped one-off tooling for the internal support team", // `one` again
       "Joined the company in two thousand nineteen and stayed", // spelled year
       "Hired in nineteen hundred ninety-eight before the merger", // spelled year
+      // Hyphenated spelled years (#633 review). The two rows above bracketed
+      // this bug without crossing it: the guard joined its parts with `\s+`
+      // while QUANTIFYING_CARDINAL accepts a hyphen, so the hyphenated form
+      // escaped the strip and matched off its own leftover ("two-t").
+      "Joined the company in two-thousand-nineteen and stayed",
+      "Joined the company in two thousand-nineteen and stayed", // mixed separators
+      "Hired in nineteen-hundred-ninety-eight before the merger",
       "Led Six Sigma initiatives across the manufacturing org", // proper noun
       "Advised Big Four clients on their reporting stack", // proper noun
       "Reduced the escalation backlog by three", // cardinal modifies nothing

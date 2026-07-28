@@ -22,7 +22,7 @@ import { act } from "react";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-import { RewriteReviewList } from "./RewriteReviewList.tsx";
+import { RewriteReviewList, BulletReviewRow } from "./RewriteReviewList.tsx";
 import type { AlignedPair } from "../../lib/rewrite-review/align-bullets.ts";
 import type { RewriteReview } from "../../hooks/useRewriteReview.ts";
 
@@ -178,5 +178,75 @@ describe("RewriteReviewList", () => {
     )!;
     act(() => acceptAll.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(review.acceptMany).toHaveBeenCalledWith(["m:0:0", "add:1", "del:1"]);
+  });
+});
+
+describe("BulletReviewRow — the `noun` prop names the row's content everywhere", () => {
+  // #625 gave the row a `noun` so the whole-résumé review could reuse it for the
+  // one-field summary section. The prop reached the kind label and the two
+  // control `aria-label`s but NOT the editor's placeholder or label, which stayed
+  // hardcoded "bullet" — so accepting a summary rewrite read "Edited summary" in
+  // the header and "edit this bullet" in the textarea, with the same mismatch in
+  // the screen-reader label. Every user-visible noun on the row is asserted here
+  // so a future control added without threading `noun` fails rather than ships.
+  const filled: AlignedPair = {
+    kind: "matched",
+    id: "m:0:0",
+    original: "Engineer with a decade of experience",
+    originalIndex: 0,
+    proposed: "Engineer with a decade of platform experience",
+    proposedIndex: 0,
+  };
+  // The placeholder only paints when the edited side is empty, so it needs its
+  // own pair — asserting it on `filled` would pass vacuously.
+  const empty: AlignedPair = { ...filled, proposed: "" };
+
+  it("names the noun on the kind label, both controls, and the editor label", () => {
+    const el = render(
+      createElement(BulletReviewRow, {
+        pair: filled,
+        review: makeReview(),
+        noun: "summary",
+      }),
+    );
+
+    expect(el.querySelector("li span")?.textContent).toBe("Edited summary");
+    expect(
+      el.querySelector('button[aria-label="Accept this edited summary"]'),
+    ).not.toBeNull();
+    expect(
+      el.querySelector('button[aria-label="Reject this edited summary"]'),
+    ).not.toBeNull();
+    // The editor's own label — half of the pair that stayed hardcoded.
+    expect(
+      el.querySelector('[aria-label="Edit Edit proposed summary"]'),
+    ).not.toBeNull();
+    // Nothing anywhere on the row still calls it a bullet.
+    expect(el.innerHTML).not.toContain("bullet");
+  });
+
+  it("names the noun in the empty-state placeholder — the other half", () => {
+    const el = render(
+      createElement(BulletReviewRow, {
+        pair: empty,
+        review: makeReview(),
+        noun: "summary",
+      }),
+    );
+
+    expect(el.textContent).toContain("edit this summary");
+    expect(el.innerHTML).not.toContain("bullet");
+  });
+
+  it("defaults to \"bullet\", so every caller that omits the prop is unchanged", () => {
+    const el = render(
+      createElement(BulletReviewRow, { pair: empty, review: makeReview() }),
+    );
+
+    expect(el.querySelector("li span")?.textContent).toBe("Edited bullet");
+    expect(
+      el.querySelector('[aria-label="Edit Edit proposed bullet"]'),
+    ).not.toBeNull();
+    expect(el.textContent).toContain("edit this bullet");
   });
 });
