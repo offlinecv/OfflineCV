@@ -1,6 +1,7 @@
 ---
 name: revise-pr
-description: Revise a pull request in response to review — check out the PR branch, fix what each unresolved thread asks for (or reply explaining why not), run the gates, commit + push to the PR branch, then reply to and resolve the threads on GitHub. Use when the user says "revise the PR", "/revise-pr", "address the review comments", "fix the review feedback", "clear the comments so it's ready to merge", or a reviewer left changes to act on.
+description: Revise a pull request in response to review — check out the PR branch, fix what each unresolved thread asks for (or reply explaining why not), run the gates, commit + push to the PR branch, then reply to and resolve the threads on GitHub. Feedback can be imported from another PR (--from-pr), a single comment URL (--from-comment), or free prose (--notes), re-verified against this branch before anything is changed. Use when the user says "revise the PR", "/revise-pr", "address the review comments", "fix the review feedback", "apply another PR's review comments here", "clear the comments so it's ready to merge", or a reviewer left changes to act on.
+argument-hint: "[<pr-number>] [--repo owner/repo] [--from-pr <n>]... [--from-comment <url>]... [--notes <file>]"
 ---
 
 # Revise PR
@@ -16,8 +17,9 @@ this one closes the loop *after* review.
 
 ## Input
 
-Parse the argument for a **PR number** (`100`, `#100`) and optionally
-`--repo owner/repo`. If no PR number is given, infer it from the current branch:
+Parse the argument for a **PR number** (`100`, `#100`) — the **target**, the PR
+whose branch gets the code changes — and optionally `--repo owner/repo`. If no PR
+number is given, infer it from the current branch:
 
 ```bash
 gh pr view --json number,headRefName,state -q '{n:.number,head:.headRefName,state:.state}'
@@ -26,6 +28,61 @@ gh pr view --json number,headRefName,state -q '{n:.number,head:.headRefName,stat
 If that finds no PR for the current branch and none was passed, list open PRs and
 ask which one. Never guess.
 
+### Where the feedback comes from — three sources, not one
+
+By default the work items are the target PR's own unresolved threads. But review
+feedback does not always arrive on the PR that should carry the fix: a reviewer
+finds a pattern bug on PR #A that also exists in the sibling #B, or a review lands
+in chat, or the same defect class shows up across a batch. These flags widen the
+source without moving the target:
+
+| Flag | Source | Reply lands on |
+|---|---|---|
+| *(none)* | the target PR's unresolved threads | the target's own threads |
+| `--from-pr <N>` | every unresolved thread on PR `<N>` | `<N>`'s threads |
+| `--from-comment <url>` | one specific review thread, by comment URL | that thread |
+| `--notes <file>` | free prose — a review that arrived over chat or in person | nowhere; report only |
+
+Flags are repeatable and combine: `--from-pr 640 --from-pr 641 --notes /tmp/x.md`
+is one run. **The target PR is always the one from the argument** — an imported
+thread never redirects where the code lands.
+
+**A zero-thread run is legal.** With `--notes` or `--from-pr` supplying the work,
+the target can have no unresolved threads of its own, and that is not an error —
+say so and proceed. (The reverse is also fine: a target whose threads are all
+resolved and no import flags means there is nothing to do; report that and stop
+rather than inventing work.)
+
+Extract the PR and comment ids from a `--from-comment` URL — GitHub spells a
+review-thread comment as `…/pull/<N>#discussion_r<COMMENT_ID>`:
+
+**Shape-check the URL before extracting, not after.** `sed` passes its input
+through unchanged when the pattern doesn't match, so an unguarded extraction
+turns `https://example.com/not-a-pr` into `SRC_PR=https://example.com/not-a-pr`,
+which then lands in `repos/$REPO/pulls/$SRC_PR/comments` and 404s. That fails
+loudly and can never write to the wrong PR — but the user sees a 404 on a
+nonsense path instead of "that isn't a review-thread comment URL." Match first,
+extract second:
+
+```bash
+# https://github.com/<owner>/<repo>/pull/640#discussion_r123456789
+case "$URL" in
+  *"/pull/"*"#discussion_r"*) ;;
+  *"/pull/"*"#issuecomment-"*)
+    echo "issue-level comment, not a review thread — treat as a --notes item: $URL" >&2
+    exit 1 ;;
+  *) echo "not a review-thread comment URL: $URL" >&2; exit 1 ;;
+esac
+SRC_PR="$(sed -E 's|.*/pull/([0-9]+).*|\1|' <<<"$URL")"
+SRC_COMMENT="$(sed -E 's|.*#discussion_r([0-9]+).*|\1|' <<<"$URL")"
+```
+
+An `#issuecomment-<id>` URL is an issue-level comment, not a review thread — it
+has no thread to resolve, so treat it like a `--notes` item: usable as a work
+item, replied to via `issues/<N>/comments` if at all, never resolved. The `case`
+above rejects it by name rather than letting the extraction run and produce a
+`SRC_COMMENT` that is the whole URL.
+
 ## Why this skill exists
 
 `main` is protected with **dismiss-stale-reviews-on-push**: pushing new commits
@@ -33,6 +90,13 @@ to a PR branch *dismisses any existing approval*. So the order matters — addre
 everything in one pass, push once, then re-request review. This skill encodes
 that order so a contributor doesn't push piecemeal and burn approvals, and so
 every thread gets a visible reply (the PR-author signal norm: don't push silent).
+
+It also owns the case where the feedback isn't on this PR. A reviewer who finds a
+pattern bug on one PR of a batch has found it on all of them, but the fix belongs
+wherever the code is — so `--from-pr` / `--from-comment` / `--notes` let one run
+pull a finding in from elsewhere, re-verify it here (Step 2.5), fix it here, and
+reply *there*. Without that, the alternative is hand-copying a finding across
+branches, which loses both the re-verification and the reply.
 
 ## Process
 
@@ -61,10 +125,16 @@ command (do **not** compound it with a later `git commit` in one `&&` line — t
 `block_commit` hook evaluates the branch at the *start* of the command, so a
 compound `switch && commit` is judged on the pre-switch branch).
 
-### Step 2: Fetch the unresolved review threads
+### Step 2: Collect the work items
 
 Threads, not flat comments: only GraphQL exposes `isResolved`, the thread node
 `id` (needed to resolve), and each comment's `databaseId` (needed to reply).
+
+Run the query below **once per source PR** — the target, plus every `--from-pr`
+(and the `SRC_PR` behind a `--from-comment`, filtered to that one comment id).
+**Tag every item with the PR it came from**; the reply routing in Step 6 and the
+report both key off it, and a merged untagged list will send replies to the wrong
+thread.
 
 ```bash
 gh api graphql -f query='
@@ -87,12 +157,47 @@ query($owner:String!,$name:String!,$pr:Int!){
 ```
 
 Work only the threads where `isResolved==false`. For each, note `threadId` (to
-resolve) and `replyTo` (the first comment's `databaseId`, to reply).
+resolve), `replyTo` (the first comment's `databaseId`, to reply), and the
+**source PR number**.
+
+`--notes` items have none of those three — read the file and treat each item as a
+work item with `source: notes`. They can produce code changes like any other, but
+there is nothing to reply to and nothing to resolve.
+
+### Step 2.5: Re-verify every IMPORTED item against this branch
+
+**Skip this step for the target's own threads** — a comment on this PR is already
+about this code. It applies to everything from `--from-pr`, `--from-comment`, and
+`--notes`.
+
+An imported finding is a claim about *another* branch's code. It may be true
+there and false here: the file may not exist, the pattern may already be fixed,
+the surrounding code may make the concern moot, or the fix may have to take a
+different shape. So read the relevant code **on this branch** and classify each
+import before changing anything:
+
+| Verdict | Meaning | Do |
+|---|---|---|
+| `reproduces` | the same defect is present here | fix it |
+| `partially applies` | related but the shape differs | fix what's real; say in the reply how it differed |
+| `does not apply` | not present on this branch | **change nothing**; record the reason |
+
+**Never fix a non-reproducing import.** A finding that arrived with a reviewer's
+authority attached is the easiest kind to apply on faith, and applying it on faith
+is how a fix for #A's code becomes an unrequested, untested edit to #B — a change
+nobody reviewed, justified by a comment that was never about this file. The whole
+value of importing is that the *finding* travels; the *verdict* has to be
+re-earned here.
+
+Carry each verdict into Step 6 — a `does not apply` still gets a reply on its
+source thread, because the reviewer is owed the reason their finding was not
+acted on.
 
 ### Step 3: Address each thread
 
-For every unresolved thread, read the file at `path` (the code may have moved
-since the comment), decide, and act:
+For every work item that survived Step 2.5, read the file at `path` (the code may
+have moved since the comment — and for an import, `path` is the *source*
+branch's), decide, and act:
 
 - **Actionable change requested** → make the fix in code. Keep the diff scoped to
   what the thread asks; don't fold in unrelated cleanup.
@@ -156,12 +261,19 @@ message concatenated as `* ` bullets — which is how `fix lint` and
 So the PR should reach the queue as one commit. But **do not collapse on every
 round.** Gate it:
 
-- **Leaving any thread open** (you pushed back, or deferred to a follow-up
-  issue) → the reviewer is coming back for another round. **Keep the fixup commit
-  separate.** They need to diff *just your delta*, not re-read the whole change.
-- **Every unresolved thread is now addressed** and you're re-requesting a clean
-  approval → **collapse.** This is the last round; the branch's single commit is
-  what lands in `main`.
+- **Leaving any thread open *on the target*** (you pushed back, or deferred to a
+  follow-up issue) → the reviewer is coming back for another round. **Keep the
+  fixup commit separate.** They need to diff *just your delta*, not re-read the
+  whole change.
+- **Every unresolved thread on the target is now addressed** and you're
+  re-requesting a clean approval → **collapse.** This is the last round; the
+  branch's single commit is what lands in `main`.
+
+**Judge the gate on the target's threads only.** An imported thread left open on
+its *source* PR is the normal, correct outcome (Step 6) — it says nothing about
+whether this PR is getting another review round, and letting it block the collapse
+would strand a finished PR on a multi-commit branch waiting for a thread on a
+different PR that nobody is going to close.
 
 When the gate passes:
 
@@ -215,13 +327,43 @@ retrofit provenance you can't establish for work you didn't do.
 
 ### Step 6: Reply to each thread, then resolve what you fixed
 
-Reply on the same thread (uses `in_reply_to`, so no inline-line 422 risk):
+Reply on the same thread (uses `in_reply_to`, so no inline-line 422 risk). **The
+PR number in the path is the thread's SOURCE PR, not the target** — that is the
+one line in this skill where a merged, untagged work-list silently posts replies
+to the wrong PR:
 
 ```bash
-gh api "repos/$REPO/pulls/$PR_NUM/comments" \
+gh api "repos/$REPO/pulls/$SRC_PR/comments" \
   -f body="<concise reply: what changed + commit sha, or why deferred + issue link>" \
   -F in_reply_to="$REPLY_TO"
 ```
+
+For an imported thread, the reply must name **where** the fix landed, because the
+reader is looking at a different PR than the one that changed:
+
+> Fixed in #<target> (`<sha>`) — the same missing guard was present in
+> `src/lib/<file>.ts`. Leaving this thread open for #<source>'s own copy.
+
+**Routing by source and verdict:**
+
+| Item | Reply on | Resolve? |
+|---|---|---|
+| Target's own thread, fixed | target thread | **yes** |
+| Target's own thread, deferred / pushed back | target thread | no — leave for the reviewer |
+| Imported, `reproduces`, fixed in target | source thread | **only** if the source PR's own copy of the defect is also gone; otherwise no |
+| Imported, `does not apply` | source thread, with the reason | **no** |
+| Source PR is merged or closed | source thread (replies still work) | **never** |
+| `--notes` item | nowhere — no thread exists | n/a; report only |
+
+**Fixing a defect in #B does not resolve it in #A.** The source thread is about
+the source PR's code, which your commit did not touch — resolving it there would
+mark a live defect as handled and it would merge. Resolve a source thread only
+when the source's own copy is genuinely gone (the source PR was closed in favour
+of this one, or the code moved wholesale), and say which in the reply.
+
+Resolving another PR's thread also needs write access on that PR; a fork-based
+source will simply fail the mutation. That is non-blocking — the reply is the
+load-bearing part — but note it in the report.
 
 Then resolve **only** the threads you actually addressed or that are outdated:
 
@@ -231,13 +373,17 @@ mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved
   -f id="$THREAD_ID"
 ```
 
-- Reply to **every** unresolved thread — addressed or deferred. Silence isn't an
-  option (PR-author signal norm).
+- Reply to **every** unresolved thread — addressed, deferred, or non-reproducing.
+  Silence isn't an option (PR-author signal norm), and that includes a reviewer on
+  another PR whose finding you imported and then didn't act on.
 - Resolve threads you fixed or that are outdated. **Don't** resolve a thread where
   you pushed back or deferred — leave it open for the reviewer to close, with your
   rationale visible.
 - The reply must match what you did: "Fixed in `<sha>`" only if the code changed;
-  "Deferred to #N because …" otherwise. No claiming a fix you didn't make.
+  "Deferred to #N because …" otherwise. No claiming a fix you didn't make. For an
+  imported fix, the sha lives in a different PR — name that PR in the reply, or
+  the reviewer is sent looking for a commit that isn't on the branch they're
+  reading.
 - If `resolveReviewThread` fails (you may lack write on a fork), that's
   non-blocking — the reply is the load-bearing part. Note it in the report.
 
@@ -249,9 +395,20 @@ The push dismissed the prior approval, so ask the reviewers back:
 gh pr edit "$PR_NUM" --repo "$REPO" --add-reviewer <reviewer-login>
 ```
 
-Then report: each thread and how it was handled (fixed / answered / deferred +
-issue), the commit sha pushed, gates status (typecheck + test), and that review
-was re-requested. Link the PR.
+Then report **one row per work item**, with its source — a run that pulled from
+three places and reports one flat list leaves the author unable to tell which
+reviewer is still owed something:
+
+| Source | Item | Verdict | Handled |
+|---|---|---|---|
+| #<target> thread | `<path>:<line>` | — | fixed, resolved |
+| #<source> thread (imported) | `<path>:<line>` | reproduces | fixed in `<sha>`, replied on #<source>, left open |
+| #<source> thread (imported) | `<path>:<line>` | does not apply | replied with reason, not resolved |
+| `--notes` | "<the note>" | reproduces | fixed in `<sha>`, no thread to reply to |
+
+Plus: the commit sha pushed, gates status (typecheck + test), that review was
+re-requested, and any `resolveReviewThread` that failed for lack of write access
+on a source PR. Link the target PR.
 
 ## Rules
 
@@ -264,6 +421,16 @@ was re-requested. Link the PR.
   back for.
 - **Reply to every unresolved thread**, even deferred ones. Resolve only the ones
   you actually fixed (or that are outdated); leave pushback/deferred threads open.
+- **Feedback can come from elsewhere; the code always lands on the target.**
+  `--from-pr` / `--from-comment` / `--notes` widen the source, never the
+  destination. A run with no unresolved threads of its own is legal.
+- **Re-verify every import on this branch before touching code (Step 2.5).** A
+  finding from another PR is a claim about another branch — fix it only if it
+  reproduces here, and reply with the reason when it doesn't. A reviewer's
+  authority does not transfer across branches; the verdict has to be re-earned.
+- **Reply on the SOURCE thread, resolve only where the defect is actually gone.**
+  Fixing #A's finding in #B leaves #A's copy live — resolving it there marks a
+  real defect handled and it merges.
 - **Replies must round-trip to the code.** "Fixed in `<sha>`" requires a real
   change in that sha; otherwise say what you deferred and why.
 - **Gates are green before push** — `npm run typecheck` clean and `npm run test`

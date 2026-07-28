@@ -1,26 +1,35 @@
 ---
 name: pr-ready
-description: Solicit review on one or more open PRs — post one ping with an explicit ack mechanism and an absolute deadline, wait, send at most one reminder, and report per PR whether anyone engaged. Detects the ack across chat and GitHub. Never changes a PR's merge state. Use when the user says "pr-ready", "/pr-ready", "ask for review on this PR", "ping reviewers", or has open PRs nobody has looked at yet.
+description: Solicit review on one or more open PRs — post one short ping asking for a single explicit 👍 by an absolute merge time, wait, send at most one reminder, and report per PR which of SILENT / ACKED / REVIEWING / REVIEWED was reached and by whom. Detects an in-progress review from GitHub (the 👀 /pr-review posts) and grants it one bounded grace extension. Carries no review guidance — that lives in the PR body. Never changes a PR's merge state. Use when the user says "pr-ready", "/pr-ready", "ask for review on this PR", "ping reviewers", or has open PRs nobody has looked at yet.
 argument-hint: [<pr-number>[,<pr-number>...]]
 ---
 
 # PR Ready
 
 Take a PR — or a list of them — from "open and silent" to "a human has visibly
-engaged, or the author knows exactly who to nudge": preflight → post one ping
-with a stated ack mechanism and an absolute-time deadline → wait → check once
-at the reminder checkpoint and send at most one reminder if still silent →
-wait to the deadline → report. A list is **one** ask: one ping, one deadline,
-one reminder, one report that breaks down per PR. This skill only ever produces a **report** — the merge decision stays
-with a human, made outside this skill, every time.
+engaged, or the author knows exactly who to nudge": preflight → post one **short**
+ping asking for a single 👍 by an absolute merge time → wait → check once at the
+reminder checkpoint and send at most one reminder if still silent → wait to the
+deadline, plus one bounded grace window if someone is demonstrably mid-review →
+report. A list is **one** ask: one ping, one deadline, one reminder, one report
+that breaks down per PR. This skill only ever produces a **report** — the merge
+decision stays with a human, made outside this skill, every time.
 
 This is the missing middle of the review loop: `open-pr` creates the PR and
 stops; `pr-review` is the reviewer performing a review; `revise-pr` is the
 author closing out threads afterward. Nothing today owns "did anyone actually
 pick this up" — silence reads identically whether a reviewer is mid-review or
-not looking at all, and the parts that make an ask work (a one-click ack, a
-stated deadline, an escape hatch for late review, named entry points into a
-large diff) are exactly what get dropped when the ask is typed by hand.
+not looking at all, and the parts that make an ask work (one unambiguous ack, a
+stated merge time, an escape hatch for late review) are exactly what get dropped
+when the ask is typed by hand.
+
+Two things this skill deliberately does **not** do, both of them things an earlier
+version did: it does not brief the reviewer (that's the PR body's
+`## Review focus`), and it does not accept "any signal at all" as an ack. The
+second was the more expensive mistake — accepting a reaction *or* a reply *or* any
+comment meant no state distinguished "someone is reading this right now" from
+"nobody has looked", so a second person with approval rights had no way to tell
+whether merging would cut across a review in flight.
 
 ## One-time setup
 
@@ -44,6 +53,16 @@ identifiers, and nothing can infer the link, so it must be declared. If
 `.claude/pr-ready.local.json` is missing, stop and point at this section; do
 not guess a channel or roster.
 
+**`ack_reactions` must contain the emoji your reviewers actually send.** It is an
+allowlist, so an entry that nobody uses is inert and an emoji in use that is
+missing from it is invisible — the predicate reports SILENT while the reaction sits
+on the message in plain sight, and the reminder fires at people who already
+answered. The example ships `["+1", "thumbsup"]` because 👍 is what reviewers
+reach for unprompted; `thumbsup` is Slack's alias for the same glyph and both
+spellings appear in the API depending on how it was sent, so keep both. Before
+trusting a SILENT verdict on a checkout you didn't configure, read the channel and
+check what emoji are actually on the ping.
+
 ## Non-goals — read before running
 
 - **This skill never changes what a PR can do next.** Its terminal state is
@@ -59,7 +78,18 @@ not guess a channel or roster.
   outlives it. A scheduled/headless variant is a different tool, not this one.
 - **At most one reminder, ever**, regardless of how long the wait runs — and
   one per *ask*, not one per PR. A list of three PRs is one ping, one
-  checkpoint, one reminder, one report.
+  checkpoint, one reminder, one report. The Phase 5.1 grace extension posts
+  nothing at all.
+- **The ping carries no review guidance.** Where to look lives in the PR body's
+  `## Review focus` (`open-pr` Step 5), never in the chat message. This skill
+  asks for attention; it does not brief the reviewer, and it must not grow a
+  summary or a file list back into the template.
+- **One asked-for signal: 👍.** No second emoji convention for "I'm reviewing" —
+  that state is detected from GitHub (`/pr-review` posts 👀 when a review starts),
+  so it costs a reviewer nothing to emit and cannot fall out of use.
+- **No indefinite hold.** A claim buys exactly one grace window measured from the
+  claim itself, and then the run terminates with a report. There is no state in
+  which this skill waits forever for a reviewer who went quiet.
 - **No cross-PR judgement.** With a list, this skill reports which PRs were
   acked and which weren't. It does not rank them, decide which deserves review
   first, or drop one for being less important — the order is the author's, and
@@ -287,6 +317,15 @@ Falling through to Phase 4 in that state posts a reminder quoting a deadline
 that already elapsed, which reads as noise to every reviewer it @-mentions. If
 the deadline is still ahead, continue to Phase 3 as normal.
 
+**This shortcut deliberately ignores the grace window** — it compares against the
+base `default_deadline_minutes` only, and reports even if a claim's
+`hold_grace_minutes` has not run out. That is the right call for an adopted ping:
+the original session's wait already ended when that session closed, so there is no
+wait in progress to resume, and re-entering one would restart a clock the
+reviewer never agreed to. Phase 6 still reports the claim as REVIEWING with its
+timestamp, so the author sees the in-flight review — they just get the report now
+instead of after another wait.
+
 Use `slack_read_channel`, not a search tool. `slack_search_public` covers
 public channels only, and its consent-gated sibling can be declined — either
 way a private-channel run would silently have **no** existing-ping check and
@@ -297,40 +336,50 @@ If no existing ping is found, compose the message from the fixed template —
 but do not send it yet:
 
 ```
-:mag: Review requested — <PR title, or "<n> PRs" when the ask covers a list>
+:mag: Review requested
 
-<for EACH eligible PR, in the order given:>
+<for EACH eligible PR, in the order given — exactly two lines each:>
 *<PR title>* (<+adds/-dels>, <n> files)
 <PR url>
-<1–2 sentence summary: what changed and why it's worth a look>
-- `<path 1>` — <the question to ask of it>
-- `<path 2>` — <the question to ask of it>
 
 <@reviewer 1> <@reviewer 2>
 
-*Ack:* react <ack emoji — render from the config's `ack_reactions`, not a
-fixed list> on this message, reply in the thread, or leave any comment/review
-on any of the PRs — any of those counts.
-*Deadline:* <absolute local time, e.g. "Thu Jul 24, 4:30 PM PT">. Review after
-the deadline still counts — findings become issues, treated the same as PR
-comments. (One reminder at most, and only while my session stays open — no
-bot is watching this thread.)
+Merging *<absolute local time, e.g. "Thu Jul 24, 4:30 PM PT">* — late findings
+still welcome, they become issues.
+*React :+1: if you'll review before then* — that's the one signal I read.
+Where to look is in the PR description; `/pr-review` is the review itself.
 ```
 
-**One PR keeps one block; the shape doesn't change.** A single-PR ask renders
-exactly one of these and reads as it always did — the list case is the same
-template repeated, not a second format to maintain.
+**That is the entire message. Do not add to it.** No per-PR summary, no file
+slices, no "here's what changed and why" — every one of those was moved into the
+PR body's `## Review focus` (see `open-pr` Step 5), which is where the reviewer
+already is when they act on it. A pointer delivered in chat costs the reviewer a
+context switch to use and costs everyone else in the channel the scroll to get
+past it. The ping's only job is **"this exists, here's when it merges, say if
+you're on it."**
 
-**Every PR carries its own size and its own slices.** They are what let a
-reviewer triage the ask instead of reading it front-to-back: a one-file test
-fix and a 23-file feature want different amounts of attention, and saying so is
-what makes it reasonable to put them in one message. A list with no per-PR
-slices is just a pile of links, and it costs the reviewer the very thing this
-message exists to give them — a place to start.
+**One PR keeps its two lines; the shape doesn't change.** A single-PR ask renders
+one title/url pair; a list renders several. Same template either way.
 
 **Order the blocks as the user passed them** (Input), and don't fold two PRs
 into one block even when they're related — each needs its own URL on its own
 line, because the ack predicate and the report both key off individual PRs.
+
+**Render the ack emoji from the config's `ack_reactions`, not a fixed list**, and
+name exactly one — the message asks for a single unambiguous signal, so listing
+three alternatives reintroduces the ambiguity this template exists to remove.
+Render the first entry; the predicate still accepts every entry (`thumbsup` is
+just Slack's alias for `+1`, and a reviewer may send either).
+
+**Why the ask is 👍 and nothing else.** The old template accepted a reaction *or*
+a thread reply *or* any comment on any PR — "any of those counts". That made the
+absence of a signal unreadable: silence and mid-review looked identical, so
+nobody could tell whether an approval was still coming. One asked-for signal, with
+one stated meaning, is the fix. **Do not ask reviewers for a second emoji to mean
+"I'm reviewing"** — that state is now detected from GitHub without anyone opting
+in (see the ack predicate: `/pr-review` posts 👀 on the PR when a review starts).
+Asking humans to hand-maintain a signal a machine already emits is how conventions
+die.
 
 Render `*Deadline:*` as an absolute local time, not a duration — "in 90
 minutes" is useless to someone reading the message an hour later. Compute it
@@ -397,9 +446,9 @@ ping sorts as after it, and the skill reports an ack nobody gave — the exact
 "silence counted as engagement" this skill exists to prevent. The `||` is the
 same BSD-vs-GNU portability pair as the deadline render above.
 
-Both the reactions list and the review slices come from the config /
-diff — never invent placeholder reviewers or slices if the config or diff
-doesn't supply them; ask instead.
+The reviewer mentions and the ack emoji come from the config, and the sizes come
+from the diff — never invent a placeholder reviewer or a made-up size; ask
+instead.
 
 ### Phase 3: Wait to the reminder checkpoint
 
@@ -416,6 +465,11 @@ a team can nudge at 60 of 90 minutes rather than at some fixed midpoint. Assert
 stop if it doesn't hold: a checkpoint at or past the deadline means Phase 3
 falls through, Phase 4 fires the reminder, and Phase 5's wait is already over —
 the reminder and the report land together, which is not a reminder at all.
+
+Assert `hold_grace_minutes > 0` in the same place, and default it to 60 if the
+key is absent (an older config predates it). A zero or negative grace makes
+Phase 5.1's extension a no-op while still reporting a claim as held, so the
+report would promise a wait that never happened.
 
 A Slack `ts` is **already epoch seconds** with a fractional part
 (`1721862000.123456`) — no date parsing is involved, and none should be
@@ -455,12 +509,13 @@ manually. When it returns, proceed to Phase 4.
 
 ### Phase 4: Check + at most one reminder
 
-Evaluate the **ack predicate** (below). If acked, skip straight to Phase 6
-and report who. If still silent, compose the reminder — a short "still open,
-deadline is `<time>`" message — and **confirm it the same way as the Phase 2
-ping**: show the exact text and wait for an explicit go-ahead, since
-`reply_broadcast` puts it in the shared channel, not just the thread. Use
-`slack_send_message_draft` if the user hasn't reviewed the text.
+Evaluate the **ack predicate** (below). If **any** state above SILENT was
+reached, skip straight to Phase 6 and report who and which. If still SILENT,
+compose the reminder — a short "still open, merging `<time>`" message — and
+**confirm it the same way as the Phase 2 ping**: show the exact text and wait
+for an explicit go-ahead, since `reply_broadcast` puts it in the shared channel,
+not just the thread. Use `slack_send_message_draft` if the user hasn't reviewed
+the text.
 
 **With a list, the reminder fires only when NOTHING has been acked** — no chat
 ack on the ping, and no post-ping GitHub activity on **any** listed PR. Once a
@@ -469,6 +524,11 @@ says "you still haven't looked at #605" to someone who just reviewed #606 reads
 as being chased, not nudged. Chasing the remaining PRs is the author's call,
 made from the Phase 6 report with a name attached — not something a skill
 should do automatically to a person who already showed up.
+
+**ACKED suppresses the reminder without moving the deadline.** That is the whole
+point of the state: the reminder's job is to break silence, and a 👍 broke it, so
+re-asking is pure noise — but a promise is not evidence of reading, so it buys no
+time. The deadline in the reminder-suppressed case is still the original one.
 
 When it does fire, the reminder **names only the still-unacked PRs**, which in
 this branch is all of them; it never re-lists a PR that has activity, even
@@ -501,92 +561,212 @@ validates its own input instead of trusting a caller — a bad `PING_TS` that
 slipped through would put the checkpoint in Jan 1970 and drop straight through
 the loop.
 
+#### Phase 5.1: The grace extension — at most one
+
+When the loop returns, re-evaluate the predicate. If **any** PR reached
+**REVIEWING** (input 3 or 4) and **no** review has been submitted yet, extend
+once — `hold_grace_minutes` measured from the **earliest claim's** `created_at`,
+not from now:
+
+```bash
+CLAIM_ISO="<the earliest REVIEWING created_at, UTC Z-form>"
+CLAIM_EPOCH=$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "$CLAIM_ISO" +%s 2>/dev/null \
+           || date -u -d "$CLAIM_ISO" +%s)          # BSD/macOS, then GNU
+GRACE_EPOCH=$(( CLAIM_EPOCH + <hold_grace_minutes>*60 ))
+if [ "$GRACE_EPOCH" -gt "$(date +%s)" ]; then
+  until [ "$(date +%s)" -ge "$GRACE_EPOCH" ]; do sleep 60; done
+fi
+```
+
+**From the claim, not from now** — measuring from the current moment lets a claim
+that landed one minute after the ping buy the *full* grace on top of the *full*
+deadline. From the claim, a reviewer who started early has usually already spent
+their window by the time the deadline arrives, and the `-gt` test skips the wait
+entirely in that case.
+
+**Extend exactly once, ever.** Do not re-check for new claims after the grace
+loop and extend again — a window that renews on each check is an indefinite hold
+with extra steps, and an indefinite hold is the thing this design refuses. If the
+grace lapses with still no submitted review, that is the terminal state
+`HELD BUT STALE`, and Phase 6 reports it with the claimant's login so the author
+has a specific person to nudge rather than an open-ended wait.
+
+**No message is posted at the grace boundary.** The reminder budget is one per
+ask and Phase 4 owns it; a second "still waiting?" is exactly the chasing this
+skill refuses to do to someone who demonstrably showed up.
+
 Then Phase 6.
 
 ### Phase 6: Final check + report
 
-Re-evaluate the ack predicate one last time and print a terminal summary:
-acked or not, by whom and through which channel (reaction / thread reply /
-GitHub activity), each PR's current `state`/`mergeable`/check status, and the
-author's options ("nobody's engaged — nudge directly, extend the deadline, or
-proceed with your own judgment"). Stop there. Nothing after this phase runs
-automatically.
+Re-evaluate the ack predicate one last time and print a terminal summary: the
+state reached per PR, by whom and through which signal, each PR's current
+`state`/`mergeable`/check status, and the author's options. Stop there. Nothing
+after this phase runs automatically.
 
-**With a list, report per PR — one row each, never one verdict for the set.**
+**Report per PR — one row each, never one verdict for the set.**
 
-| PR | Acked by | How | State / checks |
-|---|---|---|---|
-| #606 | `<login>` | GitHub review comment | OPEN / green |
-| #605 | — | — | OPEN / green |
+| PR | State | Who | Signal | Since | State / checks |
+|---|---|---|---|---|---|
+| #606 | REVIEWED (`APPROVED`) | `<login>` | submitted review | 15:42 | OPEN / green |
+| #607 | REVIEWING | `<login>` | 👀 on the PR | 16:10 | OPEN / green |
+| #608 | HELD BUT STALE | `<login>` | 👀 at 14:05, grace lapsed 15:05 | — | OPEN / green |
+| #605 | SILENT | — | — | — | OPEN / green |
+
+Above the table, on their own line, name the **ask-level** acks — a 👍 or a thread
+reply on the ping. They say someone picked up the ask, but they cannot say which
+PR they picked up, and the table must not imply otherwise by attributing them to
+a row.
 
 A rolled-up "2 of 3 acked" hides exactly the thing the author needs to act on:
 *which* PR is still unread, and *who* has already spent attention elsewhere and
-shouldn't be asked again first. Name the ask-level chat acks (a reaction or
-thread reply on the ping) in their own line above the table — they say someone
-picked up the ask, but they cannot say which PR they picked up, and the table
-must not imply otherwise by attributing them to a row.
+shouldn't be asked again first.
+
+**Then state the author's options, keyed to the worst state in the table** — and
+state them as options, never as a recommendation to merge:
+
+- any **SILENT** → "nobody engaged on #N — nudge directly, re-run with a later
+  deadline, or proceed on your own judgment."
+- any **REVIEWING** → "`<login>` is mid-review on #N as of `<time>`. Merging now
+  discards work someone is actively doing."
+- any **HELD BUT STALE** → "`<login>` started #N at `<t>` and posted nothing by
+  `<t+grace>` — ask them directly whether they're still on it."
+- **REVIEWED / `CHANGES_REQUESTED`** → "#N has requested changes; that is a
+  blocking review, not an ack to merge past."
+
+**The merge decision is still not this skill's, in any state.** Even an
+all-`APPROVED` table is a report that approvals exist, not an instruction — see
+Non-goals.
 
 **Repeat the Phase 1 exclusions below the table**, with their reasons. The
 report is the artifact that outlives the session; a table of three PRs that
 never mentions the fourth reads as complete coverage of what was asked.
 
+**Say that the wait was session-bound here**, since the ping no longer carries
+that caveat: the deadline held only while this session stayed open, and no bot
+was watching the thread after it closed.
+
 ## The ack predicate
 
-Acked if **any** of the following holds for **any** configured reviewer,
-**timestamped strictly after the ping**:
+Every input below counts only for a **configured reviewer** and only when
+**timestamped strictly after the ping**. What differs is *which of three states*
+each input establishes.
 
-**Two scopes, and the difference is not cosmetic.** Inputs 1 and 2 are
-**ask-level**: a reaction or a thread reply lands on the *ping*, which names
-every PR in the list, so nothing about it identifies which PR the reviewer
-opened. Input 3 is **per PR**: it reads that PR's own activity. So evaluate
-input 3 once per listed PR and keep the results separate, and never spread an
-ask-level ack across the rows — a 👀 means "I'm on it", not "I read all three".
-Phases 4 and 6 consume the two scopes differently: the reminder needs the union
-(has *anything* been acked?), the report needs them apart (which PR is still
+### Three states, not one boolean
+
+| State | Established by | Effect on the deadline |
+|---|---|---|
+| **SILENT** | nothing | reminder fires at the checkpoint; deadline stands |
+| **ACKED** | input 1 (👍 on the ping) or input 2 (thread reply) | reminder suppressed; **deadline unchanged** |
+| **REVIEWING** | input 3 (👀 on the PR) or input 4 (a post-ping PR comment) | **one** grace extension of `hold_grace_minutes` from the claim |
+| **REVIEWED** | input 5 (a submitted review) | terminal — the ask worked |
+
+The states are ordered; report the **strongest** one reached per reviewer. A 👍
+followed by a real review reports as REVIEWED, not both.
+
+**Why ACKED does not move the deadline.** A 👍 is a promise, and a promise is
+exactly enough to stop the nagging — the reminder exists to break silence, and the
+silence is broken. It is not evidence that any reading has happened, so it must
+not buy time. Only input 3/4 — evidence a review is genuinely underway — earns the
+grace window. Collapsing the two would let a one-second reaction extend every
+deadline indefinitely, which is the failure mode the deadline exists to prevent.
+
+**Grace is one-shot, never rolling.** Extend from the *first* claim only. If the
+window lapses with no submitted review, that is its own reportable state:
+`HELD BUT STALE — <login> started at <t>, nothing posted by <t+grace>`. Naming the
+person is the point — the author now has a specific human to nudge instead of an
+open-ended wait. Never extend a second time; a hold that renews itself on every
+check is an indefinite hold with extra steps.
+
+### Two scopes, and the difference is not cosmetic
+
+Inputs 1 and 2 are **ask-level**: a reaction or a thread reply lands on the
+*ping*, which names every PR in the list, so nothing about it identifies which PR
+the reviewer opened. Inputs 3–5 are **per PR**: they read that PR's own activity.
+So evaluate them once per listed PR and keep the results separate, and never
+spread an ask-level ack across the rows — a 👍 means "I'm on it", not "I read all
+three". Phases 4 and 6 consume the scopes differently: the reminder needs the
+union (has *anything* been acked?), the report needs them apart (which PR is still
 unread, and who is already busy elsewhere?).
 
 1. **A reaction on the ping message**, from that reviewer's `chat_id`, whose
-   emoji is in the config's `ack_reactions` allowlist.
+   emoji is in the config's `ack_reactions` allowlist. → **ACKED**
    > **Chat seam.** `slack_get_reactions` on the ping's `channel_id` +
    > `message_ts`; check the `users` list under each allowlisted emoji for the
    > reviewer's `chat_id`. A reaction can only exist on a message that already
    > posted, so it is inherently after the ping — no separate timestamp check
    > needed. Caveat: each emoji's `users` list is truncated at 50, so on a
    > heavily-reacted message a reviewer's ack can fall outside it — treat a
-   > miss there as inconclusive, not as "not acked", and let inputs 2 and 3
+   > miss there as inconclusive, not as "not acked", and let inputs 2–5
    > decide.
 2. **Any threaded reply on the ping**, from that reviewer's `chat_id`.
+   → **ACKED**
    > **Chat seam.** `slack_read_thread` on the ping's `channel_id` +
    > `message_ts`; any reply whose `user` is the reviewer's `chat_id` counts.
    > Same reasoning — a thread reply cannot predate its parent.
-3. **Any PR activity by that reviewer's `gh_login`** — a review of any state,
-   a review comment, or an issue-level PR comment — with a timestamp after
-   the ping's wall-clock time (`PING_ISO`, the UTC Z-form value pinned once in
-   Phase 2 when the `ts` is recorded or adopted — reuse it for every
-   comparison, and never re-derive it in local time here).
 
-   Both exclusions below are already folded into these three commands — run
-   them as written, don't strip the `select(...)`. **Run all three per listed
-   PR**, tagging each result with its `<PR_NUM>` so the Phase 6 table can
-   attribute it; a flat merged list answers "did anyone review anything", which
-   is the one question the report is not allowed to stop at:
+Inputs 3–5 are GitHub, evaluated **per listed PR**, and every one of them
+compares against `PING_ISO` — the UTC Z-form value pinned once in Phase 2 when
+the `ts` is recorded or adopted. Reuse it for every comparison; never re-derive
+it in local time here. Both exclusions described below are already folded into
+the commands — run them as written, don't strip the `select(...)`. **Tag every
+result with its `<PR_NUM>`** so the Phase 6 table can attribute it; a flat merged
+list answers "did anyone review anything", which is the one question the report is
+not allowed to stop at.
+
+3. **A 👀 reaction on the PR** from that reviewer's `gh_login`, created after
+   the ping. → **REVIEWING** (starts the grace window at its `created_at`)
 
    ```bash
-   gh api repos/$REPO/pulls/<PR_NUM>/reviews \
-     --jq ".[] | select(.user.type != \"Bot\" and .user.login != \"$AUTHOR\") | {login:.user.login, at:.submitted_at}"
+   gh api "repos/$REPO/issues/<PR_NUM>/reactions" --paginate \
+     --jq ".[] | select(.content == \"eyes\" and .user.type != \"Bot\" and .user.login != \"$AUTHOR\") | {login:.user.login, at:.created_at}"
+   ```
+
+   **This is the machine-emitted claim, and it is the reason this skill asks
+   humans for only one signal.** `/pr-review` posts this reaction at Step 0.6, the
+   moment a review actually starts — so "someone is reading this right now" is
+   detected from a byproduct of the work instead of from a convention a reviewer
+   has to remember. Nothing else on GitHub reports it: a *pending* review is
+   invisible to everyone but its author.
+
+   `issues/` is correct — reactions on a PR's top-level body live on the issues
+   endpoint; `pulls/<N>/reactions` 404s.
+
+   **The `created_at > PING_ISO` filter is what keeps this honest.** The reaction
+   is never removed once posted, so last week's review leaves a 👀 sitting on the
+   PR forever. Without the timestamp filter, every re-run of this skill against
+   that PR would read a months-old marker as a live hold and extend the deadline
+   for a review nobody is doing.
+
+4. **A post-ping comment by that reviewer** — a review comment on the diff, or an
+   issue-level comment on the PR. → **REVIEWING**
+
+   ```bash
    gh api repos/$REPO/pulls/<PR_NUM>/comments \
      --jq ".[] | select(.user.type != \"Bot\" and .user.login != \"$AUTHOR\") | {login:.user.login, at:.created_at}"
    gh api repos/$REPO/issues/<PR_NUM>/comments \
      --jq ".[] | select(.user.type != \"Bot\" and .user.login != \"$AUTHOR\") | {login:.user.login, at:.created_at}"
    ```
 
-   Then keep only rows whose `at` is later than `PING_ISO`, and whose `login`
-   equals a configured reviewer's `gh_login`. Both sides are UTC Z-form of the
-   same width, so a plain string `>` is a correct time comparison — that is the
-   only reason no date parsing is needed on this path.
+5. **A submitted review by that reviewer**, of any state. → **REVIEWED**
+
+   ```bash
+   gh api repos/$REPO/pulls/<PR_NUM>/reviews \
+     --jq ".[] | select(.user.type != \"Bot\" and .user.login != \"$AUTHOR\") | {login:.user.login, at:.submitted_at, state:.state}"
+   ```
+
+   Carry the `state` through to the report: `APPROVED`, `CHANGES_REQUESTED`, and
+   `COMMENTED` are all REVIEWED for this skill's purposes — the ask worked — but
+   they mean very different things for what the author does next, and the report
+   is where that distinction has to survive.
+
+For 3–5, keep only rows whose `at` is later than `PING_ISO` and whose `login`
+equals a configured reviewer's `gh_login`. Both sides are UTC Z-form of the same
+width, so a plain string `>` is a correct time comparison — that is the only
+reason no date parsing is needed on this path.
 
 **Why those two `select(...)` clauses are there** — they are the exclusions,
-and they must stay inside every one of the three queries above. Filtering
+and they must stay inside every one of the queries above. Filtering
 "afterwards, by eye" is how the author's own comment gets counted as an ack:
 
 - **Bots** — `.user.type == "Bot"` (the checks app, the deploy-preview bot,
@@ -658,7 +838,11 @@ be added later, not as work to do now.
   than starting the deadline over.
 - **Ack predicate can't reach GitHub** (rate limit, auth) → report that the
   GitHub half of the predicate couldn't be evaluated and fall back to the
-  chat-only signals; don't report "not acked" on a check that didn't run.
+  chat-only signals; don't report "not acked" on a check that didn't run. Note
+  specifically that **REVIEWING and REVIEWED are undetectable in this state** —
+  inputs 3–5 are all GitHub — so the run can distinguish only SILENT from ACKED,
+  and no grace extension can be granted. Say that rather than reporting SILENT,
+  which would read as "nobody looked" when the truth is "nobody could check."
 
 ## Rules
 
@@ -675,10 +859,23 @@ be added later, not as work to do now.
   state is always a report, and the decision that follows it is a human's,
   made outside this skill.
 - **At most one reminder per run**, regardless of how long the wait runs, and
-  regardless of how many PRs the run covers.
-- **The wait is session-bound.** Say so in the ping and in the report — this
-  is not a durable/background timer, and closing the session cancels
-  whatever wait phase is in flight.
+  regardless of how many PRs the run covers. The grace extension is silent.
+- **Keep the ping short and signal-only.** Two lines per PR, the mentions, the
+  merge time, the 👍 ask. Review guidance belongs in the PR body — a reviewer
+  who has to read a chat message to know where to look pays a context switch to
+  use it, and everyone else in the channel pays the scroll.
+- **One human signal, one meaning.** Ask for 👍 and nothing else; detect
+  "reviewing" from GitHub rather than asking for it. An allowlist that omits the
+  emoji people actually send reports SILENT while the reaction sits in plain
+  sight — check `ack_reactions` against real channel behaviour before trusting a
+  silent verdict.
+- **A claim extends once, from the claim.** `hold_grace_minutes` measured from the
+  earliest 👀/comment, never from now, never renewed. Then report — `HELD BUT
+  STALE` names the person to nudge instead of waiting on them indefinitely.
+- **The wait is session-bound.** Say so in the report — this is not a
+  durable/background timer, and closing the session cancels whatever wait phase
+  is in flight. (It is deliberately *not* in the ping any more; the ping is for
+  reviewers, and this is the author's operational caveat.)
 - **Idempotent posting.** Always scan the channel for an existing ping
   (Phase 2, via `slack_read_channel`) before sending a new one; adopt it and
   resume instead of double-posting. With a list, adopt only on an **exact**

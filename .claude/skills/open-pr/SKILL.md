@@ -218,6 +218,13 @@ gh pr create --repo "$REPO" --base "$BASE" --head "$BRANCH" \
 
 Closes #<N>   <!-- omit if not fully resolving an issue; use "Refs #<N>" if partial -->
 
+## Review focus
+
+<!-- OPTIONAL — include only when the risk isn't obvious from the diff. Omit entirely
+     (heading and all) on a small or self-evident change. Max ~4 entries. -->
+
+- `src/lib/<file>.ts:<line>` — <the question to ask of it, not a claim about it>
+
 ## Test plan
 
 - [ ] `npm run typecheck` clean
@@ -234,6 +241,28 @@ BODY
 
 If the PR adds fixtures, add a line to the Test plan:
 `- [ ] Fixture personas verified synthetic — no real PII (Step 3.5)`.
+
+**`## Review focus` is optional, and it belongs here rather than in the review
+request.** `pr-ready` used to carry these pointers in its chat ping; they now live
+in the body, where the reviewer already is when they start reading — a pointer in
+a chat message costs them a context switch to act on, and costs everyone else in
+the channel the tokens to scroll past.
+
+Three rules for writing one, all of them about not doing the reviewer's thinking
+for them:
+
+- **Ask, don't assert.** "does the guard fire on the `Title · Team · City` shape
+  too?" — not "the guard handles all header shapes." An assertion invites the
+  reviewer to confirm it; a question invites them to check.
+- **Name the risk, not the change.** The diff already says what changed. This
+  section says where you'd look first if it were wrong.
+- **Omit it when it's obvious.** A one-file test fix has no review focus. An empty
+  or padded section trains reviewers to skip the heading entirely, which costs you
+  the one time it mattered.
+
+It is explicitly **not** a scope bound. `pr-review` treats it as the author's
+hypothesis — a lead to check and then audit for accuracy — and reviews the whole
+diff regardless. Do not use it to steer attention away from anything.
 
 `gh pr create --fill` derives title/body from the commits — fine for small PRs,
 but it won't produce a `## Provenance` block — append one (Step 5.5) if you use it.
@@ -303,6 +332,10 @@ merge their own PR via admin bypass.)
   `Claude-Session:` URL or `🤖 Generated with …` badge anywhere (this repo is
   public; a session URL is an account-scoped identifier with no reader value).
   Declare the models in the PR body instead (Step 5.5).
+- **Review pointers go in the body, never in a chat ping.** `## Review focus` is
+  optional and phrased as questions; omit the heading when the risk is obvious.
+  It is a lead for the reviewer, never a scope bound — `pr-review` audits it for
+  accuracy and reviews the whole diff either way.
 - **Every provenance row is self-reported or first-hand.** Name your own model
   from your system prompt; take a subagent's from what it reported. Never infer a
   version string from a `model:` alias, and never invent a row — omit it instead.
