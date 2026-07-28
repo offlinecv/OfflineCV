@@ -13,6 +13,12 @@
  * no I/O: the caller reads the File via `file.text()` before calling this.
  */
 
+import {
+  extractLinkDefinitions,
+  flattenAutolinks,
+  resolveReferenceLinks,
+} from "../markdown-link-refs.ts";
+
 export interface MarkdownParseResult {
   rawText: string;
   markdown: string;
@@ -29,15 +35,43 @@ export interface MarkdownParseResult {
  * underscores (`snake_case_name`, an SDK symbol, a slug) survive verbatim —
  * matching CommonMark, which disallows single-underscore emphasis mid-word.
  * Asterisk emphasis has no intraword ambiguity and is stripped directly.
+ *
+ * EVERY link rule here is shared with `markdown-lines.ts` or mirrors it exactly,
+ * because the two readings of one `.md` must agree: `rawText` is not merely
+ * scorer input — `EvidencePanel` prints it back to the user verbatim — so any
+ * shape this misses is raw markdown shown to the user AND a disagreement with
+ * what the extractors saw.
+ *
+ *   - Autolinks (`<https://…>`) flatten through the shared `flattenAutolinks`
+ *     (#610). Skipping them here left `<https://linkedin.com/in/…>` — angle
+ *     brackets and all — in the panel while the extractors read the bare URL.
+ *   - Reference-style links are the one shape that cannot be handled
+ *     line-by-line, so their `[ref]: url` definition table is built over the
+ *     whole document first (#611). A definition line surviving here is a
+ *     visible markdown artifact; a `[label][ref]` surviving here disagrees with
+ *     the `label url` the other reading produces.
+ *   - The inline rule is title-aware, matching `markdown-lines.ts`'s
+ *     `INLINE_LINK_RE`. Without that, `[writeup](url "Pricing rebuild")`
+ *     swallowed the CommonMark title into the target and printed
+ *     `writeup url "Pricing rebuild"`.
  */
 export function mdToPlainText(text: string): string {
-  return text
+  const { definitions, body } = extractLinkDefinitions(text);
+  return body
     .split("\n")
     .map((line) =>
-      line
-        .replace(/^\s{0,3}#{1,6}\s+/, "") // heading markers
-        .replace(/^\s*[-*+]\s+/, "") // list bullet markers
-        .replace(/\[([^\]]*)\]\(([^)]+)\)/g, "$1 $2") // [text](url) → text url
+      // Reference resolution runs with the link rules, before emphasis: it
+      // must see the brackets that `[text](url)` has already surrendered.
+      resolveReferenceLinks(
+        flattenAutolinks(
+          line
+            .replace(/^\s{0,3}#{1,6}\s+/, "") // heading markers
+            .replace(/^\s*[-*+]\s+/, "") // list bullet markers
+            // [text](url) → text url, dropping an optional CommonMark title
+            .replace(/\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g, "$1 $2"),
+        ),
+        definitions,
+      )
         .replace(/\*\*(.+?)\*\*/g, "$1") // bold (asterisk)
         .replace(/\*(.+?)\*/g, "$1") // italic (asterisk)
         .replace(/(^|\W)__(\S(?:.*?\S)?)__(?=\W|$)/g, "$1$2") // bold (underscore, word-boundary)

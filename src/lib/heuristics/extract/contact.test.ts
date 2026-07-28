@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest";
 import { extractContact } from "./contact.ts";
+import { isStandaloneUrl } from "./shared.ts";
 import type { PdfLinkAnnotation } from "../types.ts";
 import type { PdfLine, PdfSection } from "../sections.ts";
 
@@ -119,18 +120,28 @@ describe("extractContact — mid-sentence domain is not promoted to website_url 
   // fallback scan and promoted to website_url. The standalone check in
   // extractOtherUrls now rejects domains that appear mid-sentence.
 
+  // Both prose lines are kept IN the profile section, the same treatment the
+  // positive test below already applies. #610 banded the website/portfolio text
+  // tier to the profile, so a prose line parked in the body would make these
+  // pass no matter what `isStandaloneUrl` does — the doc-wide fallback is never
+  // consulted for those two fields, so the assertion would hold vacuously and
+  // #237's guard would be pinned nowhere.
+
   it("does not promote a domain mid-sentence to website_url", () => {
     const contactLine = mkLine(
       "Jane Doe | jane@example.com | (312) 555-0123",
       0,
     );
-    // Body line that contains a domain mid-sentence
-    const bodyLine = mkLine(
+    // Prose line that contains a domain mid-sentence
+    const proseLine = mkLine(
       "Exit · Founded and sold return2india.com to Satyam Infoway (NASDAQ: SIFY). 200K monthly visits.",
-      100,
+      1,
     );
-    const profile: PdfSection = { name: "profile", lines: [contactLine] };
-    const allLines: PdfLine[] = [contactLine, bodyLine];
+    const profile: PdfSection = {
+      name: "profile",
+      lines: [contactLine, proseLine],
+    };
+    const allLines: PdfLine[] = [contactLine, proseLine];
 
     const result = extractContact(profile, allLines);
 
@@ -139,13 +150,30 @@ describe("extractContact — mid-sentence domain is not promoted to website_url 
 
   it("does not promote a domain with surrounding words to website_url", () => {
     const contactLine = mkLine("Jane Doe | jane@example.com", 0);
-    const bodyLine = mkLine("Launched mysite.com for 10K users in 2023", 100);
-    const profile: PdfSection = { name: "profile", lines: [contactLine] };
-    const allLines: PdfLine[] = [contactLine, bodyLine];
+    const proseLine = mkLine("Launched mysite.com for 10K users in 2023", 1);
+    const profile: PdfSection = {
+      name: "profile",
+      lines: [contactLine, proseLine],
+    };
+    const allLines: PdfLine[] = [contactLine, proseLine];
 
     const result = extractContact(profile, allLines);
 
     expect(result.website_url).toBeUndefined();
+  });
+
+  // Direct unit test of the guard itself — `isStandaloneUrl` is exported from
+  // `./shared.ts`, so it needs no test-only export. The two cases above run it
+  // through `extractContact`; these pin the predicate's own contract.
+  it("isStandaloneUrl rejects a bare domain flanked by words and accepts a schemed one", () => {
+    const prose = "Launched mysite.com for 10K users in 2023";
+    expect(isStandaloneUrl("mysite.com", prose)).toBe(false);
+    expect(
+      isStandaloneUrl("https://mysite.com", "Launched https://mysite.com for"),
+    ).toBe(true);
+    expect(
+      isStandaloneUrl("janedoe.com", "Jane Doe | jane@example.com | janedoe.com"),
+    ).toBe(true);
   });
 
   it("still promotes a standalone domain on its own line to website_url", () => {
@@ -162,9 +190,34 @@ describe("extractContact — mid-sentence domain is not promoted to website_url 
 
   it("still promotes an https:// URL even when mid-sentence text surrounds it", () => {
     const contactLine = mkLine("Jane Doe | jane@example.com", 0);
-    // An explicit https:// URL is always a link regardless of surrounding text
+    // An explicit https:// URL is always a link regardless of surrounding text.
+    // Kept IN the profile section: #610 banded the website/portfolio text tier
+    // to the profile, so putting this line in the body would now assert the
+    // banding rather than the `isStandaloneUrl` scheme rule it exists to pin.
+    const proseLine = mkLine("Sold https://return2india.com to Satyam Infoway", 1);
+    const profile: PdfSection = {
+      name: "profile",
+      lines: [contactLine, proseLine],
+    };
+    const allLines: PdfLine[] = [contactLine, proseLine];
+
+    const result = extractContact(profile, allLines);
+
+    expect(result.website_url).toBe("https://return2india.com");
+  });
+});
+
+describe("extractContact — body-section URLs never reach the contact card (#610)", () => {
+  // The doc-wide text tier made `website_url` — an explicit catch-all — claim
+  // the first scheme-bearing URL ANYWHERE in the résumé. #237's guard cannot
+  // stop it: a scheme-bearing URL is unconditionally `isStandaloneUrl`. The
+  // portfolio/website text tier is now banded to the profile section, matching
+  // what the annotation tier already did via `inProfileSection`.
+
+  it("does not promote a scheme-bearing URL that lives in a body section", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
     const bodyLine = mkLine(
-      "Sold https://return2india.com to Satyam Infoway",
+      "Led the catalog migration https://example.org/eng-blog/catalog-migration that cut checkout latency 40%",
       100,
     );
     const profile: PdfSection = { name: "profile", lines: [contactLine] };
@@ -172,7 +225,35 @@ describe("extractContact — mid-sentence domain is not promoted to website_url 
 
     const result = extractContact(profile, allLines);
 
-    expect(result.website_url).toBe("https://return2india.com");
+    expect(result.website_url).toBeUndefined();
+    expect(result.profiles).toEqual([]);
+  });
+
+  it("does not promote a portfolio-shaped body URL to portfolio_url", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
+    const bodyLine = mkLine("Shipped the redesign at https://acme.io/case-study", 100);
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const allLines: PdfLine[] = [contactLine, bodyLine];
+
+    const result = extractContact(profile, allLines);
+
+    expect(result.portfolio_url).toBeUndefined();
+    expect(result.website_url).toBeUndefined();
+  });
+
+  it("still promotes linkedin/github identity links found outside the profile", () => {
+    const contactLine = mkLine("Jane Doe | jane@example.com", 0);
+    const footerLine = mkLine(
+      "Links: https://linkedin.com/in/janedoe · github.com/janedoe",
+      100,
+    );
+    const profile: PdfSection = { name: "profile", lines: [contactLine] };
+    const allLines: PdfLine[] = [contactLine, footerLine];
+
+    const result = extractContact(profile, allLines);
+
+    expect(result.linkedin_url).toBe("https://linkedin.com/in/janedoe");
+    expect(result.github_url).toBe("https://github.com/janedoe");
   });
 });
 

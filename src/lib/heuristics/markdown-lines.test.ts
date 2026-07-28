@@ -106,3 +106,133 @@ describe("sectionizeMarkdown — rawHeading capture (#285)", () => {
     expect(profile?.rawHeading).toBeUndefined();
   });
 });
+
+describe("sectionizeMarkdown — inline link flattening (#610)", () => {
+  /** Convenience: the text of the single line produced by `md`. */
+  const lineText = (md: string): string => {
+    const { lines } = sectionizeMarkdown(md);
+    expect(lines).toHaveLength(1);
+    return lines[0].text;
+  };
+
+  it("flattens `[label](url)` to `label url`, matching mdToPlainText", () => {
+    expect(lineText("Led the [catalog migration](https://example.org/blog/x) last year")).toBe(
+      "Led the catalog migration https://example.org/blog/x last year",
+    );
+  });
+
+  it("drops the optional CommonMark link title", () => {
+    expect(lineText('See the [writeup](https://example.net/w "Pricing rebuild").')).toBe(
+      "See the writeup https://example.net/w.",
+    );
+  });
+
+  it("flattens every link on a line, not just the first", () => {
+    expect(
+      lineText("[one](https://example.org/1) and [two](https://example.org/2)"),
+    ).toBe("one https://example.org/1 and two https://example.org/2");
+  });
+
+  it("flattens a link inside a bullet, keeping the bullet glyph", () => {
+    expect(lineText("- Led the [migration](https://example.org/m) work")).toBe(
+      "- Led the migration https://example.org/m work",
+    );
+  });
+
+  it("emits the bare target for a degenerate empty label", () => {
+    expect(lineText("Portfolio [](https://example.org/p) here")).toBe(
+      "Portfolio https://example.org/p here",
+    );
+  });
+
+  it("flattens a bare URI autolink to the URL itself", () => {
+    expect(lineText("Site: <https://example.org/me>")).toBe(
+      "Site: https://example.org/me",
+    );
+  });
+
+  it("flattens an email autolink to the address itself", () => {
+    expect(lineText("<riley.nakamura@example.com>")).toBe(
+      "riley.nakamura@example.com",
+    );
+  });
+
+  it("leaves a stray HTML-ish angle token alone — an autolink needs a scheme or an @", () => {
+    expect(lineText("Wrote <b>bold</b> copy for the landing page")).toBe(
+      "Wrote <b>bold</b> copy for the landing page",
+    );
+  });
+
+  it("still strips markdown IMAGES entirely rather than flattening them", () => {
+    // The `!`-prefixed form must never start reading as `alt url`: `stripImages`
+    // runs first, so by the time `flattenLinks` sees the text the image is gone.
+    expect(lineText("Headshot ![Riley Nakamura](https://example.org/me.png) here")).toBe(
+      "Headshot  here",
+    );
+    expect(lineText("Logo ![logo](data:image/png;base64,AAAA) here")).toBe(
+      "Logo  here",
+    );
+  });
+
+});
+
+describe("sectionizeMarkdown — reference-link flattening (#611)", () => {
+  /** Convenience: the text of the single NON-blank line produced by `md`. */
+  const lineText = (md: string): string => {
+    const { lines } = sectionizeMarkdown(md);
+    expect(lines).toHaveLength(1);
+    return lines[0].text;
+  };
+
+  const DEFS = [
+    "",
+    "[cat]: https://example.org/eng-blog/catalog-migration",
+    "[pricing rebuild]: https://example.net/pricing-rebuild",
+  ].join("\n");
+
+  it("flattens `[label][ref]` to `label url`, matching the inline shape", () => {
+    // Was `leaves reference-style links unflattened` — #610 deferred this shape
+    // and #611 claims it, so the assertion inverts rather than being deleted.
+    expect(lineText(`Led the [catalog migration][cat] work${DEFS}`)).toBe(
+      "Led the catalog migration https://example.org/eng-blog/catalog-migration work",
+    );
+  });
+
+  it("flattens the collapsed `[label][]` and shortcut `[label]` forms too", () => {
+    expect(lineText(`Wrote the [Pricing Rebuild][] doc${DEFS}`)).toBe(
+      "Wrote the Pricing Rebuild https://example.net/pricing-rebuild doc",
+    );
+    expect(lineText(`Wrote the [Pricing Rebuild] doc${DEFS}`)).toBe(
+      "Wrote the Pricing Rebuild https://example.net/pricing-rebuild doc",
+    );
+  });
+
+  it("drops the `[ref]: url` definition lines entirely", () => {
+    const { lines } = sectionizeMarkdown(
+      `Led the [catalog migration][cat] work${DEFS}`,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines.map((l) => l.text).join("\n")).not.toContain("]:");
+  });
+
+  it("leaves an undefined reference — and plain bracketed prose — untouched", () => {
+    expect(lineText(`Owned the [warehouse indexer][missing] rewrite${DEFS}`)).toBe(
+      "Owned the [warehouse indexer][missing] rewrite",
+    );
+    // `[2019]` is a shortcut-reference SHAPE, but nothing defines it, so it
+    // stays the year marker the achievements extractor reads.
+    expect(lineText(`Issued a patent. [2019]${DEFS}`)).toBe(
+      "Issued a patent. [2019]",
+    );
+  });
+
+  it("still flattens an INLINE link when the same line also holds a reference", () => {
+    // Inline flattening runs first and consumes its own brackets, so the
+    // shortcut rule can never re-read `[label](url)` as `[label]`.
+    expect(
+      lineText(`See [the post](https://example.org/p) and [catalog migration][cat]${DEFS}`),
+    ).toBe(
+      "See the post https://example.org/p and catalog migration https://example.org/eng-blog/catalog-migration",
+    );
+  });
+});

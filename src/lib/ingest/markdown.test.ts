@@ -60,3 +60,30 @@ describe("mdToPlainText", () => {
     );
   });
 });
+
+describe("mdToPlainText — reference-style links (#611)", () => {
+  // `rawText` is rendered verbatim by `EvidencePanel`, so these two rewrites
+  // are user-visible in their own right — and they are what keeps this reading
+  // of a `.md` in agreement with the `markdown-lines.ts` one (#610).
+  it("expands [text][ref] to 'text url' and drops the definition line", () => {
+    expect(
+      mdToPlainText("- Led the [catalog migration][cat] work\n\n[cat]: https://example.org/c"),
+    ).toBe("Led the catalog migration https://example.org/c work\n\n");
+  });
+
+  it("expands the collapsed and shortcut forms as well", () => {
+    const defs = "\n\n[handbook]: https://example.org/h";
+    expect(mdToPlainText(`The [Handbook][] page${defs}`)).toBe(
+      "The Handbook https://example.org/h page\n\n",
+    );
+    expect(mdToPlainText(`The [handbook] page${defs}`)).toBe(
+      "The handbook https://example.org/h page\n\n",
+    );
+  });
+
+  it("leaves an undefined reference — and bracketed prose — untouched", () => {
+    expect(mdToPlainText("Owned the [warehouse indexer][missing] rewrite. [2019]")).toBe(
+      "Owned the [warehouse indexer][missing] rewrite. [2019]",
+    );
+  });
+});
