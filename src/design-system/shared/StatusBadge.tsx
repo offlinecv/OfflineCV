@@ -45,7 +45,7 @@ export function StatusBadge({
   return (
     <span
       aria-hidden={ariaHidden}
-      className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${TONE_CLS[tone]}`}
+      className={`inline-flex w-fit rounded-full px-2 py-0.5 text-2xs font-semibold uppercase tracking-wider ${TONE_CLS[tone]}`}
     >
       {children}
     </span>

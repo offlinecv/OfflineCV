@@ -54,7 +54,7 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
           <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
             Find jobs
           </h2>
-          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
+          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-4xs font-semibold uppercase tracking-wider text-content-secondary">
             alpha
           </span>
         </div>

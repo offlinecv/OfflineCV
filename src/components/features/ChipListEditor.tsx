@@ -42,7 +42,9 @@
  * target size is what the current spacing supports, not the reverse. Both
  * controls meet 24x24 via an invisible `after:` overlay that expands only the
  * CLICKABLE area, not the visual box or the chip's layout: `Chip`'s remove
- * control (`variant="icon"`, ~14px visible) gets a 5px overlay on every side;
+ * control (`variant="icon"`, ~14px visible) gets the fixed, centred 24x24
+ * overlay the `icon` variant itself carries (`Button.tsx`, #638 — moved off
+ * `Chip` so every `variant="icon"` caller gets the floor, not just this one);
  * the promote control (`Button variant="link"`, ~16px tall, its width is
  * already the item text) gets a 4px vertical-only overlay — sized to reach the
  * chip's own top/bottom edge and no further, so it cannot cross the 6px wrap

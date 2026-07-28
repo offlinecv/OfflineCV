@@ -80,7 +80,7 @@ function BulletFindingRow({
           variant="link"
           size="sm"
           onClick={onGoToRewrite}
-          className="self-start text-[11px] font-medium text-accent-primary"
+          className="self-start text-2xs font-medium text-accent-primary"
           aria-label="Go to Reconstructed resume tab to rewrite this bullet"
         >
           Rewrite this section →
@@ -123,7 +123,7 @@ export function CritiqueResults({
     <div className="flex flex-col gap-4">
       {critique.summaryFeedback && (
         <Card className="flex flex-col gap-1 p-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+          <span className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
             Summary
           </span>
           <p className="text-sm text-content-secondary">{critique.summaryFeedback}</p>

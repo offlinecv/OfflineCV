@@ -33,7 +33,7 @@ export function JdMatch({ result }: JdMatchProps) {
           <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
             JD match
           </h2>
-          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-content-secondary">
+          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-4xs font-semibold uppercase tracking-wider text-content-secondary">
             alpha
           </span>
         </div>
@@ -70,7 +70,7 @@ export function JdMatch({ result }: JdMatchProps) {
       </div>
 
       {nounsDropped > 0 && (
-        <p className="text-[11px] text-content-muted">
+        <p className="text-2xs text-content-muted">
           +{nounsDropped} more capitalized phrase{nounsDropped === 1 ? "" : "s"}{" "}
           in this JD weren't surfaced — the noun-phrase pass ranks hits by how
           often they recur (weighting the requirements section) and keeps the
@@ -130,7 +130,7 @@ function TermRow({
     >
       <span className={`text-sm font-semibold ${markerCls}`}>{marker}</span>
       <span className="text-sm text-content-primary">{term.display}</span>
-      <span className="ml-auto font-mono text-[10px] uppercase tracking-wider text-content-muted">
+      <span className="ml-auto font-mono text-3xs uppercase tracking-wider text-content-muted">
         {sourceLabel}
       </span>
     </li>

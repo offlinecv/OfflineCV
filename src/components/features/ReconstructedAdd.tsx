@@ -107,12 +107,27 @@ export function AddPill({
 /**
  * A quiet remove (X) control for a user-added entry or bullet.
  *
- * `min-h-6 min-w-6` is the 24×24 CSS-px target WCAG 2.2 AA SC 2.5.8 asks for
- * (24, not 44 — see #581/#591). The `CloseIcon` glyph is 10×10 and the `icon`
- * Button variant adds only `p-0.5`, so without the minimum the hit box is
- * 14×14; the `inline-flex items-center justify-center` in Button's BASE keeps
- * the glyph centred as the box grows. Set here rather than on the variant so
- * the change stays scoped to the controls this file owns.
+ * The `icon` Button variant carries the 24×24 CSS-px WCAG 2.2 AA SC 2.5.8 TOUCH
+ * TARGET (24, not 44 — see #581/#591) on its own, via a fixed, centred invisible
+ * `after:` overlay (`Button.tsx`, #638). `min-h-6 min-w-6` here is NOT redundant
+ * with that overlay — it sizes the VISIBLE box, and it is what makes the overlay
+ * cost zero overflow:
+ *
+ *   - Visible affordance. `variant="icon"` paints `hover:bg-surface-subtle` and
+ *     a `focus-visible` ring on the real box. The `CloseIcon` glyph is 10×10 and
+ *     the variant adds only `p-0.5`, so without the minimum the hover rectangle
+ *     and the focus ring shrink to ~14×14 — a ~40%-per-dimension regression in
+ *     the affordance the user actually sees and aims at (#638 review).
+ *   - Zero overflow. A 24×24 visible box means the centred 24×24 overlay lands
+ *     entirely inside it, so the target never bleeds past the button. At 14×14 it
+ *     overhangs 5px per side, which is wider than the `gap-1` (4px) separating
+ *     this control from its neighbour in `ReconstructedRole`'s and
+ *     `ContactExtraLinks`' action rows — and, being DOM-later, it would win
+ *     hit-testing over that neighbour's visible box (the #581/#591 class).
+ *
+ * `inline-flex items-center justify-center` in Button's BASE keeps the glyph
+ * centred as the box grows. Set here rather than on the variant so the change
+ * stays scoped to the controls this file owns.
  */
 export function RemoveButton({
   label,

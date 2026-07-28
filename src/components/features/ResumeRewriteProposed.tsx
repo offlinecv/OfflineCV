@@ -243,7 +243,7 @@ export function ProposedPanel({
           variant="link"
           size="sm"
           onClick={onDismiss}
-          className="text-[11px] font-medium text-content-tertiary"
+          className="text-2xs font-medium text-content-tertiary"
         >
           Discard
         </Button>
@@ -266,7 +266,7 @@ function ReviewSectionGroup({
   return (
     <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+        <h4 className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
           {section.label}
         </h4>
         <div className="flex shrink-0 items-center gap-1">
@@ -274,7 +274,7 @@ function ReviewSectionGroup({
             variant="ghost"
             size="sm"
             onClick={() => review.acceptMany(ids)}
-            className="rounded-md px-2 py-0.5 text-[11px]"
+            className="rounded-md px-2 py-0.5 text-2xs"
           >
             Accept all
           </Button>
@@ -282,7 +282,7 @@ function ReviewSectionGroup({
             variant="ghost"
             size="sm"
             onClick={() => review.rejectMany(ids)}
-            className="rounded-md px-2 py-0.5 text-[11px] text-content-tertiary"
+            className="rounded-md px-2 py-0.5 text-2xs text-content-tertiary"
           >
             Reject all
           </Button>
@@ -337,7 +337,7 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
   if (outcome.kind === "summary") {
     return (
       <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-card p-3">
-        <h4 className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+        <h4 className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
           {outcome.input.label}
         </h4>
         <InlineDiff
@@ -354,7 +354,7 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
   );
   return (
     <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-card p-3">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+      <h4 className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
         {outcome.input.label}
       </h4>
       <InlineDiff
