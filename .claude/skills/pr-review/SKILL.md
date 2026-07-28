@@ -1,19 +1,41 @@
 ---
 name: pr-review
-description: Review an offlinecv pull request the way a maintainer does — pull the diff, run the generic /code-review correctness pass, then layer offlinecv's own gates (fixture PII, design-system reuse, style tokens, fallow dead-code, command-level bugs in skill/script files), structure the findings Blocking / Secondary / Nits, and post a PR review whose verdict matches what was found. Use when the user says "review PR #N", "/pr-review", "review this PR", or hands you a PR to critique before merge.
+description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates (fixture PII, design-system reuse, style tokens, fallow dead-code, command-level bugs in skill/script files), then read the PR description LAST and audit it for claims the code doesn't back, structure the findings Blocking / Secondary / Nits, and post a PR review whose verdict matches what was found. Use when the user says "review PR #N", "/pr-review", "review this PR", or hands you a PR to critique before merge.
 argument-hint: <#|#N> [--repo owner/repo] [--post|--local] [--effort low|medium|high]
 ---
 
 # Review PR
 
 Take an offlinecv PR from "someone opened it" to "a maintainer-grade review is on
-the thread": check out the diff → run the built-in `/code-review` for the generic
-correctness pass → **layer the offlinecv-specific gates** → structure findings
+the thread": check out the diff → **signal that review started** → read the
+**issue**, not the PR's prose → run the built-in `/code-review` for the generic
+correctness pass → **layer the offlinecv-specific gates** → **then** read the PR
+description and audit it against what the code actually does → structure findings
 **Blocking / Secondary / Nits** → draft the review → confirm → post a `gh` PR
 review whose **verdict matches the findings**.
 
 This is the **reviewer-side** sibling of the author-side loop: `open-pr` creates
 the PR, `revise-pr` addresses the review — this skill *is* the review in between.
+
+## The review is adversarial — read the description LAST
+
+**The spec is the issue. The code is the evidence. The PR description is a claim
+to falsify.** That ordering is the whole stance, and it is not a formality:
+
+A description read *first* becomes the map — you check the three things it points
+at, find them fine, and approve. Every defect it failed to mention is now
+invisible, and the author's blind spots have silently become the reviewer's.
+Worse, a description that *misdescribes* the change can only be caught by someone
+who formed an independent picture of the change first; read it up front and you
+will read the diff through it, confirming rather than checking. So Steps 1–3 form
+findings from the diff and the issue alone, and Step 3f is where the description
+finally gets read — as a **hypothesis to test against what you already found**,
+never as a guide to what to look at.
+
+`## Review focus` in the body is subject to exactly the same treatment. It is the
+author's guess at where the risk is: a useful lead, and a real signal when it
+turns out to be wrong. **A review that visits only the files it names is not a
+review.**
 
 ## Why this skill exists
 
@@ -57,6 +79,96 @@ gh pr view "$PR_NUM" --repo "$REPO" \
 
 If the PR is not `OPEN`, stop and say so. Note the **author login** — it tunes the
 review stance (see the careful-review note in Rules).
+
+**Note what this call deliberately does not fetch: `body`.** The field list above
+is title/state/refs/author/files and nothing else, so the PR's prose never enters
+the review until Step 3f. Don't add `body` to it "while you're there."
+
+### Step 0.5 — Read the issue, not the PR's prose
+
+The linked issue is the spec this PR is judged against. Get the issue *numbers*
+without pulling the description's prose into the review — pipe the body straight
+through a matcher so only digits come back:
+
+```bash
+# auto-closing links, resolved by GitHub itself
+gh pr view "$PR_NUM" --repo "$REPO" --json closingIssuesReferences \
+  -q '.closingIssuesReferences[].number'
+# plus partial links GitHub does not resolve (`Refs #N`), matched out of the body
+gh pr view "$PR_NUM" --repo "$REPO" --json body -q .body \
+  | grep -oiE '\b(closes|fixes|resolves|refs?):? +#[0-9]+' | grep -oE '[0-9]+' | sort -u
+```
+
+**The `grep` is load-bearing, not decoration.** You cannot un-read prose once it
+is in the transcript, so the discipline has to be enforced at the tool boundary
+rather than by intention: piping through `grep -o` means the tool result is a list
+of numbers and the description is never rendered. Run it as written — a bare
+`--json body` here defeats the entire ordering rule three steps before Step 3f.
+
+**The `:?` covers the colon form** — `Closes: #123` is valid GitHub syntax and the
+whitespace-only pattern misses it. For the *closing* keywords that costs nothing
+in practice, since GitHub's own resolver picks them up and they arrive via
+`closingIssuesReferences` above; the two commands are belt-and-braces and their
+union covers it. The one shape that falls through **both** is `Refs: #N` — a
+non-closing keyword in colon form, which GitHub never resolves. `closes#789`
+staying unmatched is correct: GitHub doesn't accept that form either.
+
+Then read each issue in full, and write down its acceptance criteria before you
+look at any code:
+
+```bash
+for N in $ISSUE_NUMS; do gh issue view "$N" --repo "$REPO" --comments; done
+```
+
+Carry those ACs into Step 4 as a checklist. **An unimplemented AC on a PR that
+says `Closes #N` is Blocking** — the merge closes the issue, so the gap ships as
+"done" and nothing will ever re-open it. If the PR links no issue at all, say so
+in the report and review against the diff alone; don't invent a spec.
+
+### Step 0.6 — Signal that the review has started
+
+Post a 👀 reaction on the PR. Do this **now**, before the slow work, not at the
+end — its entire value is telling everyone else that this PR is being read *while*
+you read it:
+
+```bash
+gh api "repos/$REPO/issues/$PR_NUM/reactions" -f content=eyes --silent
+```
+
+No confirmation needed for this one write (it is the exception to the
+confirm-before-posting rule): it is a single reversible reaction, it notifies
+nobody, and it carries no prose that could be wrong. Say you posted it in the
+Step 7 report.
+
+`issues/` is correct — reactions on a PR's top-level body go through the issues
+endpoint; `pulls/$PR_NUM/reactions` does not exist and 404s. Re-reacting is
+idempotent (GitHub returns the existing reaction), so a re-run of this skill will
+not double-post or fail.
+
+**Why this reaction exists.** `pr-ready` reads it as the machine-emitted "someone
+is actually reviewing this" signal, and extends its deadline by a grace window
+when it sees one. Nothing else on GitHub carries that information: a *pending*
+review is invisible to everyone but its author, and the alternatives that are
+visible (a `COMMENT` review, a label, a self-assign) all cost a notification or a
+repo-config change to say the same thing. Leave the reaction in place when the
+review is submitted — it is then a permanent marker of who read this PR, and
+`pr-ready` only counts reactions newer than its own ping, so a stale one from an
+earlier cycle can never read as a live hold.
+
+A review abandoned *within* a cycle is the case that filter doesn't cover — Step
+0.6 posts 👀 before the slow work, so a run that dies, or one where the user
+declines to post at Step 6, leaves a reaction genuinely newer than the ping that
+does read as `REVIEWING`. That is bounded rather than unhandled: `pr-ready` grants
+one grace window from the claim and then reports `HELD BUT STALE` with your login.
+It is also the honest argument for posting 👀 early and unconfirmed — an abandoned
+claim degrades to naming a person to nudge, which beats a reaction that is
+worthless because it landed after the review was already done.
+
+**Honest limit, so nobody over-trusts it:** 👀 does not *block* anything. `main`
+requires one approving review, and any approver can merge over a 👀. The only
+merge-blocking signal GitHub offers is `REQUEST_CHANGES`, which is far too heavy
+to mean "wait for me." This is a social hold that `pr-ready` surfaces by name, not
+enforcement.
 
 ### Step 1 — Get the diff onto disk
 
@@ -199,6 +311,41 @@ shown command for:
 Severity: a bug that fires on **normal** invocation → **Blocking**; one that fires
 only on an edge (bad `--order`, partial-failure re-run) → **Secondary/Nit**.
 
+#### 3f — Description accuracy (the LAST gate — read the body only now)
+
+Your findings are formed. **Now** read the PR description, and audit it as a claim
+about a change you already understand:
+
+```bash
+gh pr view "$PR_NUM" --repo "$REPO" --json body -q .body
+```
+
+Take every checkable statement in `## Summary`, `## Review focus`, and
+`## Test plan` and round-trip it to the diff you just read:
+
+| Finding | Severity |
+|---|---|
+| Claims a behaviour the code does not implement | **Blocking** |
+| `Closes #N` while an AC of #N is unimplemented (Step 0.5) | **Blocking** |
+| Test plan box ticked for a gate that demonstrably didn't run or isn't green | **Blocking** |
+| Omits a behaviour change the diff makes — especially one outside the stated scope | **Secondary** |
+| Describes the change accurately but the *rationale* is wrong (cites a constraint that doesn't exist) | **Secondary** |
+| `## Review focus` points at a file the diff barely touches, or misses the riskiest hunk | **Nit** |
+
+**A wrong description is a real defect, not a documentation nit.** It is the
+artifact the next reader — a bisecting maintainer, a reviewer of the follow-up,
+the squash message in `main` — trusts when the code has stopped being fresh in
+anyone's mind. And a description that overclaims is how an unimplemented AC gets
+merged as `Closes`.
+
+**The asymmetry to hold onto:** the description can *add* findings, never subtract
+them. If it explains away something you found, that explanation is itself a claim
+to check against the code — not permission to drop the finding. Dropping a
+verified finding because the body says it's fine is the exact failure this gate's
+placement exists to prevent.
+
+Skip this gate only if the body is empty, and say so in the report.
+
 ### Step 4 — Structure the findings
 
 Merge `/code-review`'s findings with the gate results into three buckets. **Verify
@@ -206,9 +353,14 @@ each finding against the file first** — read the code at the cited line; drop
 anything that doesn't reproduce (a plausible-but-wrong finding erodes the whole
 review):
 
+Run the **AC checklist from Step 0.5** here as its own pass: for each acceptance
+criterion of each linked issue, point at the code that satisfies it or record it as
+unmet. An unmet AC under a `Closes #N` is Blocking (3f).
+
 - **Blocking** — must fix before merge: correctness bugs that fire on normal use,
   real PII, hardcoded colors / wrong component tier, a command bug that breaks every
-  invocation, a missing gate CI will fail on.
+  invocation, a missing gate CI will fail on, an unimplemented AC under `Closes`,
+  or a description that claims behaviour the code doesn't have.
 - **Secondary** — a consistent pattern worth fixing but not a merge-blocker; prose
   vs behaviour mismatches; edge-case bugs.
 - **Nits** — style, idempotency niceties, doc polish. Explicitly labelled
@@ -319,15 +471,29 @@ and stop.
 ### Step 7 — Report
 
 Print: the verdict + the rule that produced it, the finding counts
-(Blocking/Secondary/Nits), **how many landed inline vs stayed in the body** (and why
-the body ones had no anchor), the head SHA reviewed, which gates ran vs were skipped,
-and the review URL (or "local only"). If any gate couldn't run (missing `pdftotext`,
+(Blocking/Secondary/Nits), **the AC checklist result per linked issue** (met /
+unmet / no issue linked), **the 3f description-accuracy verdict** (accurate /
+overclaims / omits — with what), **how many landed inline vs stayed in the body**
+(and why the body ones had no anchor), that the 👀 start-signal was posted
+(Step 0.6), the head SHA reviewed, which gates ran vs were skipped, and the review
+URL (or "local only"). If any gate couldn't run (missing `pdftotext`,
 `fallow` not installed), say so — a skipped gate is not a passed gate. If you fell
 back to body-only after a `422`, say that too — the author should know the anchors
 were lost to a mid-review push, not to laziness.
 
 ## Rules
 
+- **Issue first, code second, description last.** The issue is the spec, the code
+  is the evidence, the body is a claim to falsify (gate 3f). Never let the
+  description set the scope of the review, and never drop a verified finding
+  because the body explains it away — that explanation is one more claim to check.
+- **`## Review focus` is a lead, not a boundary.** Check what it names, then review
+  everything else too. A focus section that points at the wrong place is itself a
+  finding (3f), which is only visible to a reviewer who looked elsewhere.
+- **Signal the start (Step 0.6).** Post 👀 on the PR before the slow work — it is
+  the only visible "review in progress" marker GitHub has, `pr-ready` reads it, and
+  it is worthless posted at the end. It is advisory, not a merge block; don't
+  describe it as one.
 - **Wrap, don't duplicate.** `/code-review` owns the generic correctness pass; this
   skill owns the offlinecv gates + workflow + posting. Don't re-litigate what
   `/code-review` already found — fold it in.
@@ -351,7 +517,9 @@ were lost to a mid-review push, not to laziness.
 - **One `422` is information, not a puzzle.** It almost always means the author pushed
   mid-review. Re-anchor against the fresh patch once; if that fails, post body-only
   and move on. Never loop on anchoring.
-- Confirm before posting to a public PR.
+- Confirm before posting to a public PR — with one carve-out: the Step 0.6 👀
+  reaction posts unconfirmed (single reversible reaction, no notification, no
+  prose). Everything with words in it gets confirmed.
 - **Tune stance to the author** — historically complex/untested contributions get an
   extra-careful pass; don't relax the gates because a diff "looks" clean.
 - Pure `gh` + `git` + `npm`/`npx` — no external services, no machine-specific paths.
