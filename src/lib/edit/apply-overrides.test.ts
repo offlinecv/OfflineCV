@@ -1362,3 +1362,102 @@ describe("applyOverrides — achievements", () => {
     });
   });
 });
+
+// ── Summary override (#625) ───────────────────────────────────────────────────
+
+/** applyOverrides with ONLY the summary override set — the 17th positional
+ *  arg — so the cases below read as one input, one output. */
+function applySummary(
+  parsed: HeuristicParsedResume,
+  summaryOverride: Parameters<typeof applyOverrides>[16],
+) {
+  return applyOverrides(
+    parsed,
+    "raw",
+    makeSections(),
+    {},
+    {},
+    {},
+    [],
+    {},
+    undefined,
+    [],
+    {},
+    undefined,
+    undefined,
+    undefined,
+    {},
+    {},
+    summaryOverride,
+  );
+}
+
+function summaryParsed(): HeuristicParsedResume {
+  return { ...baseParsed(), summary: "Engineer with ten years of experience." };
+}
+
+describe("applyOverrides — summary (#625)", () => {
+  it("leaves the parsed summary alone when there is no override", () => {
+    const { fields: out } = applySummary(summaryParsed(), undefined);
+    expect(out.summary).toBe("Engineer with ten years of experience.");
+  });
+
+  it("replaces the parsed summary with the edited text", () => {
+    const { fields: out } = applySummary(
+      summaryParsed(),
+      "Platform engineer who cut deploy time 60%.",
+    );
+    expect(out.summary).toBe("Platform engineer who cut deploy time 60%.");
+  });
+
+  it("stores the edited text verbatim rather than re-trimming it", () => {
+    const { fields: out } = applySummary(summaryParsed(), "  Two  spaces  ");
+    expect(out.summary).toBe("  Two  spaces  ");
+  });
+
+  it("writes a summary onto a résumé the parser found none for", () => {
+    const parsed = baseParsed();
+    expect(parsed.summary).toBeUndefined();
+    const { fields: out } = applySummary(parsed, "Newly authored summary.");
+    expect(out.summary).toBe("Newly authored summary.");
+  });
+
+  // The clear must DELETE the key, not store "": `buildAtsResumeModel` emits
+  // `parsed.summary?.trim() || undefined` and `render-ats-pdf` gates the
+  // heading AND the body on the result, so an absent summary is what drops the
+  // whole section — heading included — from the export.
+  it.each([
+    ["an empty string", ""],
+    ["a whitespace-only string", "   \n\t "],
+  ])("clears the summary outright for %s", (_label, override) => {
+    const { fields: out } = applySummary(summaryParsed(), override);
+    expect(out.summary).toBeUndefined();
+    expect("summary" in out).toBe(false);
+  });
+
+  it("never mutates the input parse", () => {
+    const parsed = summaryParsed();
+    applySummary(parsed, "");
+    expect(parsed.summary).toBe("Engineer with ten years of experience.");
+  });
+
+  // AC4: the >=20-char Completeness threshold must evaluate the EDITED value.
+  it("re-grades Completeness off the edited summary, both directions", () => {
+    const short = applySummary(summaryParsed(), "Too short.");
+    const long = applySummary(
+      { ...baseParsed(), summary: "Too short." },
+      "A comfortably long summary, well past the twenty-character floor.",
+    );
+    const grade = (fields: HeuristicParsedResume) =>
+      computeAnonymousAtsScore({
+        parsed: fields,
+        fieldConfidence: {},
+        triggers: [],
+        rawText: "raw",
+        sections: makeSections(),
+      }).completeness.missing.includes("summary");
+
+    expect(grade(short.fields)).toBe(true);
+    expect(grade(long.fields)).toBe(false);
+  });
+});

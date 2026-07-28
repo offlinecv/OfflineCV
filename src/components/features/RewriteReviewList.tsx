@@ -111,9 +111,15 @@ function DisclosureChevron() {
 export function BulletReviewRow({
   pair,
   review,
+  noun = "bullet",
 }: {
   pair: AlignedPair;
   review: RewriteReview;
+  /** What this row's content IS, for the kind label and the control
+   *  `aria-label`s ("Edited bullet" / "Accept this bullet"). Defaults to
+   *  "bullet"; the whole-résumé review passes "summary" for the one-field
+   *  summary section (#625), whose row is otherwise identical. */
+  noun?: string;
 }) {
   const decision = review.decisionOf(pair.id);
   const accepted = decision === "accepted";
@@ -122,10 +128,10 @@ export function BulletReviewRow({
 
   const kindLabel =
     pair.kind === "added"
-      ? "New bullet"
+      ? `New ${noun}`
       : pair.kind === "removed"
-        ? "Removed bullet"
-        : "Edited bullet";
+        ? `Removed ${noun}`
+        : `Edited ${noun}`;
 
   const lower = kindLabel.toLowerCase();
 

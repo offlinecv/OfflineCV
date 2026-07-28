@@ -87,7 +87,10 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
 
   // Hint strings for the three Dimension cards.
   const specificityHint = `${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`;
-  const structureHint = `${score.structure.goodBullets}/${score.structure.totalBullets} bullets within 8–30 words`;
+  // Two distinct direct counts, not the fused half-credit sum (#624) — a
+  // résumé can lose all its Structure points on verbs alone, and the old
+  // single "goodBullets" number hid that from the user.
+  const structureHint = `verb-led ${score.structure.verbLedBullets}/${score.structure.totalBullets} · length ${score.structure.inWindowBullets}/${score.structure.totalBullets}`;
   const completenessHint =
     (score.completeness.missing.length === 0
       ? "All expected fields present"

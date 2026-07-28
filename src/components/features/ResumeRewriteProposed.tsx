@@ -42,16 +42,28 @@ import {
 import { BulletReviewRow } from "./RewriteReviewList.tsx";
 
 /** Per-section apply wiring for the whole-résumé review, keyed by the
- *  `SectionInput.id` (`experience:<index>`). Summary sections have no entry —
- *  they stay read-only redlines (no per-bullet model). */
+ *  `SectionInput.id` (`experience:<index>`, or `summary`). A section with no
+ *  entry stays a read-only redline. */
 export type ResumeRewriteApply = ReadonlyMap<string, SectionRewriteApply>;
 
-/** One experience section made reviewable: its aligned pairs (ids namespaced
- *  by section so they're unique across the combined decision map) plus the
- *  apply handlers that write accepted bullets back. */
+/**
+ * A section made reviewable: its aligned pairs (ids namespaced by section so
+ * they're unique across the combined decision map) plus the apply handlers that
+ * write accepted content back.
+ *
+ * The summary joins on the same shape as an experience role (#625) — one
+ * `matched` pair standing for the whole field — so it reviews, counts toward
+ * "Apply N changes", and undoes through the identical machinery, and its
+ * accepted text lands in the same `summaryOverride` slot the inline Summary
+ * field writes to. Before #625 the summary was rendered read-only here, which
+ * made this panel the only surface in the app that showed the summary at all,
+ * and made an on-device rewrite of it unapplyable.
+ */
 interface ReviewSection {
   id: string;
   label: string;
+  /** What one row of this section IS, for the row's kind label. */
+  noun: string;
   pairs: AlignedPair[];
   apply: SectionRewriteApply;
 }
@@ -92,13 +104,29 @@ export function ProposedPanel({
   const reviewSections = useMemo<ReviewSection[]>(() => {
     const out: ReviewSection[] = [];
     for (const outcome of result.sections) {
-      if (outcome.kind !== "experience") continue;
       const apply = applyBySection?.get(outcome.input.id);
       if (!apply) continue;
-      const pairs = alignBullets(outcome.input.bullets, outcome.data.bullets).map(
-        (p): AlignedPair => ({ ...p, id: `${outcome.input.id}|${p.id}` }),
-      );
-      out.push({ id: outcome.input.id, label: outcome.input.label, pairs, apply });
+      const pairs =
+        outcome.kind === "summary"
+          ? summaryPairs(
+              outcome.input.id,
+              outcome.input.text,
+              outcome.data.text || "",
+            )
+          : alignBullets(outcome.input.bullets, outcome.data.bullets).map(
+              (p): AlignedPair => ({ ...p, id: `${outcome.input.id}|${p.id}` }),
+            );
+      // A model that returned nothing for a section has nothing to review; fall
+      // through to the read-only redline rather than offering an accept that
+      // would blank the field.
+      if (pairs.length === 0) continue;
+      out.push({
+        id: outcome.input.id,
+        label: outcome.input.label,
+        noun: outcome.kind === "summary" ? "summary" : "bullet",
+        pairs,
+        apply,
+      });
     }
     return out;
   }, [result, applyBySection]);
@@ -187,10 +215,7 @@ export function ProposedPanel({
       )}
       <ul className="flex flex-col gap-4 list-none">
         {result.sections.map((outcome, i) => {
-          const rs =
-            outcome.kind === "experience"
-              ? reviewById.get(outcome.input.id)
-              : undefined;
+          const rs = reviewById.get(outcome.input.id);
           return (
             <li key={`${outcome.kind}-${i}`}>
               {rs ? (
@@ -265,11 +290,47 @@ function ReviewSectionGroup({
       </div>
       <ul className="flex flex-col gap-2 list-none">
         {section.pairs.map((pair) => (
-          <BulletReviewRow key={pair.id} pair={pair} review={review} />
+          <BulletReviewRow
+            key={pair.id}
+            pair={pair}
+            review={review}
+            noun={section.noun}
+          />
         ))}
       </ul>
     </div>
   );
+}
+
+/**
+ * The summary as a one-element alignment (#625): a single `matched` pair whose
+ * original is the summary the model was shown and whose proposal is what it
+ * returned.
+ *
+ * Returns no pairs — leaving the section a read-only redline — when the
+ * proposal is blank or identical to the original. Blank matters: `matched` +
+ * accepted resolves to a `replace` with the proposed text, so a blank proposal
+ * would offer the user an "accept" that silently CLEARS their summary. Clearing
+ * is a deliberate act with its own affordance (emptying the inline field), never
+ * something a degenerate model response can do by proxy.
+ */
+function summaryPairs(
+  sectionId: string,
+  original: string,
+  proposed: string,
+): AlignedPair[] {
+  const next = proposed.trim();
+  if (!next || next === original.trim()) return [];
+  return [
+    {
+      kind: "matched",
+      id: `${sectionId}|s:0`,
+      originalIndex: 0,
+      original,
+      proposed: next,
+      proposedIndex: 0,
+    },
+  ];
 }
 
 function SectionResult({ outcome }: { outcome: SectionOutcome }) {

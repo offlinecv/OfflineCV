@@ -71,6 +71,7 @@ function pristineResult(): CascadeResult {
     canonical: {
       fields: {
         full_name: "Jane Candidate",
+        summary: "Engineer with ten years of experience.",
         skills: [],
         experience: [],
         education: [],
@@ -178,6 +179,21 @@ describe("useJdFitResume — the handoff carries edit STATE (#456)", () => {
     mount();
 
     expect(api?.parsed.projects?.[0].description).toBe("New rewritten blurb.");
+  });
+
+  // Same failure mode one arg later: `summaryOverride` is the 17th positional
+  // `applyOverrides` arg (issue 625). Both directions, because the CLEAR is the
+  // one a truthiness check would silently drop.
+  it("replays a summary edit — and a summary CLEAR — onto the pristine parse", () => {
+    seedHandoff({ ...EMPTY_EDIT, summaryOverride: "Rewritten on the parse lane." });
+    mount();
+    expect(api?.parsed.summary).toBe("Rewritten on the parse lane.");
+  });
+
+  it("replays a summary clear, dropping the section from this lane too", () => {
+    seedHandoff({ ...EMPTY_EDIT, summaryOverride: "" });
+    mount();
+    expect(api?.parsed.summary).toBeUndefined();
   });
 
   it("keeps a user-ADDED entry editable here — it does not arrive baked in", () => {

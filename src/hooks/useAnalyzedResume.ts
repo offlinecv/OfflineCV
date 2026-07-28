@@ -115,6 +115,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     educationOverrides,
     achievementOverrides,
     skillsOverride,
+    summaryOverride,
     addedEntries,
     addedBullets,
     profileOverrides,
@@ -164,6 +165,7 @@ export function useAnalyzedResume(): AnalyzedResume {
       base.canonical.fieldConfidence,
       achievementOverrides,
       descriptionOverrides,
+      summaryOverride,
     );
   }, [
     base,
@@ -175,6 +177,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     educationOverrides,
     achievementOverrides,
     skillsOverride,
+    summaryOverride,
     addedEntries,
     addedBullets,
     removedBullets,
@@ -256,6 +259,9 @@ export function useAnalyzedResume(): AnalyzedResume {
     educationOverrides,
     achievementOverrides,
     skillsOverride,
+    // Completeness reads `parsed.summary` (the >=20-char threshold), so an
+    // edited summary MUST re-grade — this dep is what makes #625 AC4 hold.
+    summaryOverride,
     addedEntries,
     addedBullets,
     removedBullets,

@@ -74,12 +74,29 @@ const WEIGHTS = {
  *   Structure entirely, because the old gate only backfilled when NO section
  *   had any glyph bullets. Only affects resumes with this mixed glyph/no-glyph
  *   shape; unaffected resumes score unchanged.
+ * - 1.6 (2026-07-27): ACTION_VERBS widened (#622) — promoted the past-tense,
+ *   general-register verbs the rewrite eval already accepted ("shipped",
+ *   "owned", "secured", "deployed", "engineered", "rewrote", "authored",
+ *   "analyzed", "conducted", "identified", "presented", "produced",
+ *   "published", "planned") plus verbs missing from both sets ("won", "ran",
+ *   "grew", "founded", "hired", "partnered", "defined", "cut", "ported",
+ *   "rebuilt", "advised", "shaped", "standardized", "instrumented"). Bullets
+ *   leading with any of these now score verb-led, raising Structure on
+ *   affected résumés. Also (#623): `bulletHasMetric` now recognises
+ *   spelled-out cardinals in a quantifying position ("two tools",
+ *   "four-month engagement", "millions of records"), so a bullet that
+ *   quantifies in words instead of digits earns Specificity credit. `one`
+ *   and `a`/`an` are excluded, and spelled-out years are stripped the way
+ *   YEAR_TOKEN strips digit years. Also (#627): word counting now ignores
+ *   punctuation-only tokens (a spaced em-dash, mid-dot, etc. no longer counts
+ *   as a word), so bullets that use spaced dashes score shorter and more of
+ *   them land in the 8–30 well-formed window, raising Structure.
  */
 // Surfaced to the UI via the `algoVersion` score field, and consumed by the
 // #321 resume-library cache to version persisted parse+score records (a bump
 // here invalidates stale cached snapshots, which then re-parse from the stored
 // PDF blob — see `resume-library.ts`).
-export const ATS_SCORE_ALGO_VERSION = "1.5";
+export const ATS_SCORE_ALGO_VERSION = "1.6";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -106,6 +123,22 @@ const NUMBERED_BULLET_RE = /^[\s ]*\d+[.)]\s+/;
 /** Word-count window for a "well-formed" bullet (Structure dimension). */
 const BULLET_LENGTH_MIN_WORDS = 8;
 const BULLET_LENGTH_MAX_WORDS = 30;
+
+/** A token counts as a word when it contains at least one letter or digit
+ *  (#627). `text.split(/\s+/)` alone tokenizes a spaced em-dash, mid-dot, or
+ *  any other whitespace-delimited punctuation run as its own "word" — a
+ *  bullet like "Owned the surface — a 50-engineer org" then over-counts by
+ *  one word per dash. Hyphenated/slashed compounds ("four-month", "AI/ML")
+ *  stay a single token because they're never whitespace-split in the first
+ *  place, and `\p{L}\p{N}` is Unicode-aware so non-Latin scripts still count.
+ *  Single source of truth for every caller that needs "how many words is
+ *  this bullet" — the per-bullet badge (`analyzeBullets`) and the aggregate
+ *  Structure math (`scoreBulletPool`) must agree on the same bullet, or the
+ *  UI and the score silently disagree the way the `isLoneDateRange` docblock
+ *  warns about for its two call sites. */
+export function countWords(text: string): number {
+  return text.split(/\s+/).filter((token) => /[\p{L}\p{N}]/u.test(token)).length;
+}
 
 /** Ratio of metric-bearing bullets that earns full Specificity credit (100). */
 const SPECIFICITY_TARGET_RATIO = 0.6;
@@ -154,10 +187,73 @@ const REDACTED_DATE_RE = new RegExp(
   "i",
 );
 
+// ── Spelled-out cardinals (#623) ────────────────────────────────────────────
+//
+// A bullet can quantify without a digit: "shipped two internal tools", "led a
+// four-month migration". Everything above is digit-anchored, so those scored as
+// carrying no metric — and Specificity is a pure ratio over the bullet pool, so
+// each false negative costs 40 / (0.6 × totalBullets) points outright.
+//
+// Three deliberate limits keep the widening from hollowing out the dimension:
+//
+//   1. `one` and `a`/`an` are NOT cardinals here. "Owned one product surface"
+//      is not quantification, and `one` is overwhelmingly non-numeric on a
+//      résumé ("one of the senior voices", "no one", "one-off"). Admitting
+//      either would let nearly every bullet pass.
+//   2. The cardinal must sit in a *quantifying position* — immediately followed
+//      by a separator and another word, i.e. modifying a noun ("two tools",
+//      "four-month engagement"). A bare trailing cardinal ("reduced churn by
+//      three") does not count. This is an adjacency check, not a parser, on
+//      purpose: the realistic cases are all adjacency.
+//   3. Constructions where a cardinal is not counting anything are stripped
+//      first — spelled-out years (the word-path equivalent of YEAR_TOKEN) and
+//      the handful of proper nouns that embed a numeral word.
+
+/** Cardinals we accept. `one` is deliberately absent (see above). Scale nouns
+ *  take an optional plural so "processed millions of records" registers. */
+const CARDINAL_WORD =
+  "(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve" +
+  "|dozens?|hundreds?|thousands?|millions?|billions?)";
+
+/** Separator between the cardinal and the noun it modifies: whitespace, or any
+ *  hyphen-ish glyph a PDF may emit for the compound form ("four-month"). */
+const CARDINAL_SEPARATOR = "[\\s\\u2010-\\u2015\\-]";
+
+/** A cardinal in a quantifying position — modifying the word that follows it. */
+const QUANTIFYING_CARDINAL = new RegExp(
+  `\\b${CARDINAL_WORD}\\b${CARDINAL_SEPARATOR}\\w`,
+  "i",
+);
+
+/** Number words that can close out a spelled year ("two thousand **nineteen**",
+ *  "two thousand **twenty-four**"). */
+const YEAR_TAIL_WORD =
+  "(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)" +
+  "(?:[\\s-](?:one|two|three|four|five|six|seven|eight|nine))?" +
+  "|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen" +
+  "|one|two|three|four|five|six|seven|eight|nine";
+
+/** Word-path equivalent of YEAR_TOKEN. Only the two prefixes that would
+ *  otherwise trip a cardinal above ("**two thousand** nineteen", "**nineteen
+ *  hundred** twelve") need guarding — "twenty twenty-four" contains no accepted
+ *  cardinal. The trailing year word is REQUIRED, so a genuine quantity like
+ *  "processed two thousand records" survives the strip and still counts. */
+const WORD_YEAR_TOKEN = new RegExp(
+  `\\b(?:two\\s+thousand|nineteen\\s+hundred)(?:\\s+and)?\\s+(?:${YEAR_TAIL_WORD})\\b`,
+  "gi",
+);
+
+/** Proper nouns that embed a numeral word without counting anything. Same
+ *  category as the year guard: "Led Six Sigma initiatives" quantifies nothing. */
+const NON_QUANTIFYING_PHRASE = /\b(?:six\s+sigma|big\s+four)\b/gi;
+
 function bulletHasMetric(text: string): boolean {
   if (STRONG_METRIC_PATTERNS.some((p) => p.test(text))) return true;
   const stripped = text.replace(YEAR_TOKEN, "");
-  return ANY_DIGIT.test(stripped);
+  if (ANY_DIGIT.test(stripped)) return true;
+  return QUANTIFYING_CARDINAL.test(
+    stripped.replace(WORD_YEAR_TOKEN, " ").replace(NON_QUANTIFYING_PHRASE, " "),
+  );
 }
 
 /**
@@ -182,6 +278,15 @@ export const ACTION_VERBS: ReadonlySet<string> = new Set([
   "facilitated", "generated", "integrated", "migrated", "overhauled",
   "redesigned", "refactored", "resolved", "revamped", "simplified",
   "supervised", "trained", "unified", "upgraded",
+  // Promoted from the eval-only extension (#622) — past-tense, general
+  // register, and squarely in the eng/PM lane this base set already covers.
+  "shipped", "owned", "secured", "deployed", "engineered", "rewrote",
+  "authored", "analyzed", "conducted", "identified", "presented",
+  "produced", "published", "planned",
+  // Newly added (#622) — strong outcome verbs missing from both this set
+  // and the eval extension.
+  "won", "ran", "grew", "founded", "hired", "partnered", "defined", "cut",
+  "ported", "rebuilt", "advised", "shaped", "standardized", "instrumented",
 ]);
 
 function startsWithActionVerb(bullet: string): boolean {
@@ -230,7 +335,7 @@ export interface BulletObservation {
  */
 function analyzeBullets(bullets: string[]): BulletObservation[] {
   return bullets.map((text, index) => {
-    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const wordCount = countWords(text);
     return {
       text,
       index,
@@ -253,6 +358,11 @@ function scoreBulletPool(bullets: string[]): {
   total: number;
   metric: number;
   goodStructure: number;
+  /** Direct count of bullets that open with an action verb (#624) — never a
+   *  half-credit sum, so it can be shown next to `inWindow` as its own number. */
+  verbLed: number;
+  /** Direct count of bullets whose word count falls in the 8–30 window (#624). */
+  inWindow: number;
   /** 0..100 — Specificity using SPECIFICITY_TARGET_RATIO. */
   specificity: number;
   /** 0..100 — Structure averaging verb + length half-credits. */
@@ -263,19 +373,27 @@ function scoreBulletPool(bullets: string[]): {
       total: 0,
       metric: 0,
       goodStructure: 0,
+      verbLed: 0,
+      inWindow: 0,
       specificity: 0,
       structure: 0,
     };
   }
   let metric = 0;
   let goodStructure = 0;
+  let verbLed = 0;
+  let inWindow = 0;
   for (const b of bullets) {
     if (bulletHasMetric(b)) metric++;
     let bulletScore = 0;
-    if (startsWithActionVerb(b)) bulletScore += 0.5;
-    const wc = b.split(/\s+/).filter(Boolean).length;
+    if (startsWithActionVerb(b)) {
+      bulletScore += 0.5;
+      verbLed++;
+    }
+    const wc = countWords(b);
     if (wc >= BULLET_LENGTH_MIN_WORDS && wc <= BULLET_LENGTH_MAX_WORDS) {
       bulletScore += 0.5;
+      inWindow++;
     }
     goodStructure += bulletScore;
   }
@@ -284,6 +402,8 @@ function scoreBulletPool(bullets: string[]): {
     total: bullets.length,
     metric,
     goodStructure,
+    verbLed,
+    inWindow,
     specificity: Math.min(
       100,
       Math.round((ratio / SPECIFICITY_TARGET_RATIO) * 100),
@@ -508,7 +628,15 @@ export interface AnonymousAtsScore {
     totalBullets: number;
   };
   structure: AnonymousAtsScoreDimension & {
+    /** Rounded half-credit sum (0.5 verb-led + 0.5 in-window). Kept for
+     *  existing consumers (corpus snapshots) — do NOT render this as "N
+     *  bullets"; it is not a count of anything. Use `verbLedBullets` /
+     *  `inWindowBullets` for display (#624). */
     goodBullets: number;
+    /** Direct count of bullets that open with an action verb (#624). */
+    verbLedBullets: number;
+    /** Direct count of bullets within the 8–30 word window (#624). */
+    inWindowBullets: number;
     totalBullets: number;
   };
   completeness: AnonymousAtsScoreDimension & {
@@ -671,7 +799,7 @@ function extractBulletsFromLines(lines: readonly string[]): string[] {
       if (stripped === rawLine) continue;
     }
     const trimmed = stripped.trim();
-    if (trimmed.split(/\s+/).filter(Boolean).length < ANON_BULLET_MIN_WORDS) continue;
+    if (countWords(trimmed) < ANON_BULLET_MIN_WORDS) continue;
     out.push(trimmed);
   }
   return out;
@@ -924,6 +1052,8 @@ export function computeAnonymousAtsScore(
       max: 30,
       gradable,
       goodBullets: Math.round(pool.goodStructure),
+      verbLedBullets: pool.verbLed,
+      inWindowBullets: pool.inWindow,
       totalBullets: pool.total,
     },
     completeness: {

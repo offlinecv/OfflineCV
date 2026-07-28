@@ -33,13 +33,13 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 31,
-    "preLayoutOverall": 31,
+    "overall": 53,
+    "preLayoutOverall": 53,
     "specificity": {
-      "score": 0,
+      "score": 22,
       "max": 40,
       "gradable": true,
-      "metricBullets": 0,
+      "metricBullets": 1,
       "totalBullets": 3
     },
     "structure": {
@@ -65,7 +65,7 @@
       "scanned": false
     },
     "bulletCount": 3,
-    "algoVersion": "1.5"
+    "algoVersion": "1.6"
   },
   "reproArtifact": {
     "artifactVersion": "v1",
