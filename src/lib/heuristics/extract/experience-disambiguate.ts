@@ -595,11 +595,47 @@ function mapSegmentsToFields(
   // keyword) has no such corroboration, so we fall through to the old default
   // (company = first line) — the only case this narrows, and one no corpus fixture
   // exercises, so every round-trip that relied on the tiebreak stays intact.
+  //
+  // #614 gate — the reconstructed-export shape emits a BARE title on the line
+  // above (no middot delim), so if a line above the anchor already carries its
+  // own company via the `Title · Team · Company` middot shape (rows a/b/c/e of
+  // the issue's condition matrix), the anchor line's middot is not the export
+  // signature at all. It is data noise on the date sub-line — a role scope
+  // tail like `dates · L7 · 18 engineers, 2 TLMs`, whose post-`stripDateRange`
+  // residue `L7 · 18 engineers, ...` also trips {@link anchorCarriesOrgSignal}.
+  // Without this narrowing, `L7` was picked as the company via the else-if
+  // branch below, silently discarding the real trailing-segment company on
+  // the title line and dropping location.
+  //
+  // Gated tightly on the SHAPE that carries a trailing company (#639 review) —
+  // 3 same-source middot segments where the middle is title-keyword-shaped and
+  // the trailing is not-a-title AND not-a-bare-location. This is the same
+  // predicate the middot exception's rotate below uses to detect
+  // `Title · Team · Company`. A 2-segment `Title · Team` above line carries NO
+  // company, so leaving the anchor-signature branch ON there is correct
+  // (`Relationship Banking · Retail` over `Northern Trust · Chicago  Dates`
+  // must still resolve to `company=Northern Trust`, matching `main`).
+  const aboveCarriesTrailingCompany =
+    anchorIdx !== undefined &&
+    [...new Set(splits.filter((s) => s.source < anchorIdx).map((s) => s.source))].some(
+      (src) => {
+        const segs = splits.filter((s) => s.source === src && s.middot);
+        if (segs.length !== 3) return false;
+        const s1 = segs[1];
+        const s2 = segs[2];
+        return (
+          looksLikeTitle(s1.text) &&
+          !looksLikeTitle(s2.text) &&
+          !isBareLocationString(s2.text)
+        );
+      },
+    );
   const anchorHasReconstructedSignature =
     anchorIdx !== undefined &&
     anchorIdx >= 0 &&
     anchorIdx < filtered.length &&
-    anchorCarriesOrgSignal(filtered[anchorIdx]);
+    anchorCarriesOrgSignal(filtered[anchorIdx]) &&
+    !aboveCarriesTrailingCompany;
 
   // Choose which split is the company. A single company-suffix match is a
   // decisive content signal (rule 1). When MULTIPLE splits look like a company,
@@ -886,6 +922,49 @@ function mapWithoutCompanyMatch(
     splits[1] !== undefined &&
     splits[0].source === splits[1].source
   ) {
+    // #614 — a three-segment middot header where the MIDDLE segment is
+    // title-keyword-shaped ("Site Lead, Enterprise Platforms") and the
+    // TRAILING segment is not ("Google") reads as the OTHER canonical ordering:
+    // `Title · Team · Company` (rows a/b/c/e of the issue), not `Title ·
+    // Company · Team`. Detect the ordering by the title-keyword split:
+    // `secondLooksTitle && !thirdLooksTitle` → the trailing segment is the
+    // company. Two-segment headers and neutral-vs-neutral three-segment
+    // headers keep the exporter's `Title · Company [· Team]` default.
+    // Symmetric to `mapTitleFirst`'s handling of the reverse ordering.
+    //
+    // Additional guard on `!isBareLocationString(s2)` (#639 review): a segment
+    // that is entirely a bare location ("New York, NY", "Hyderabad, India")
+    // fails `looksLikeTitle` too — but it is the LOCATION, not the company.
+    // Promoting it here would shred it: `recoverLocation`'s `stripLocationSuffix`
+    // then peels its own tail as location, so `New York, NY` → company="New" /
+    // location="York, NY". That shape parses correctly on `main` via
+    // `rescueTeamLocation`'s rotate (the trailing bare-location segment lands
+    // in `team`, gets recognised as a whole-string location, and clears with
+    // no company promotion). Keeping this rotate off the bare-location shape
+    // lets that existing path do its job — same predicate the file already
+    // uses at :383 for `splitRoleComma`.
+    //
+    // KNOWN TRADEOFF (#639 review, documented not fixed): `isBareLocationString`
+    // is closed-vocab, so a trailing single-token city OUTSIDE `BARE_LOCATION_RE`
+    // ("Pune", "Zurich") with no state/country tail still promotes to `company`
+    // via this rotate. Both readings (this branch and the older team-swallowed
+    // shape on `main`) are wrong, so this is no regression against `main`; a
+    // broader fix wants an open-vocab city predicate, which is a separate change.
+    const s2 = splits[2];
+    const trailingIsCompany =
+      s2 !== undefined &&
+      s2.source === splits[0].source &&
+      s2.middot &&
+      looksLikeTitle(splits[1].text) &&
+      !looksLikeTitle(s2.text) &&
+      !isBareLocationString(s2.text);
+    if (trailingIsCompany) {
+      return {
+        title: splits[0].text,
+        team: splits[1].text,
+        company: s2.text,
+      };
+    }
     return {
       title: splits[0].text,
       company: splits[1].text,
