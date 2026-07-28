@@ -215,6 +215,57 @@ function findConsumedLines(
 }
 
 /**
+ * Band `portfolio_url` / `website_url` to the profile section on the TEXT tier
+ * as well as the annotation tier (#610) — option (a) of the two the issue put
+ * up. When true, `pickUrl` skips the doc-wide text fallback for those two
+ * fields; `linkedin_url` / `github_url` keep theirs.
+ *
+ * WHY THIS EXISTS. `website_url` is the explicit catch-all — "any remaining URL
+ * not already claimed by linkedin/github/portfolio". Run over a doc-wide join
+ * of every line, catch-all semantics degrade to *the first scheme-bearing URL
+ * anywhere in the résumé*, so a link that lives in an Achievements entry or an
+ * Experience bullet renders on the contact line. #237's guard does not stop it:
+ * that fixed the scheme-LESS case, and a `https://` URL is unconditionally
+ * `isStandaloneUrl`. This also makes the #134 docblock claim below
+ * ("portfolio/website stay header-banded") true on BOTH tiers rather than only
+ * the annotation one, which is what it already asserted.
+ *
+ * WHY NOT OPTION (b) — subtract URLs already claimed by an achievement/project
+ * entry. It cannot satisfy the issue's own acceptance criterion, which names
+ * *Experience* alongside Achievements and Projects: an Experience bullet has no
+ * `url` slot, so its link is never "claimed by a body entry" and there is
+ * nothing to subtract. Generalising (b) to "any URL on a non-profile line" is
+ * option (a) wearing a post-pass, at the cost of re-ordering extraction.
+ *
+ * COST, MEASURED. The stated risk was a résumé that genuinely prints its
+ * personal site in a footer, which would now be lost. Ran the banded build over
+ * all 54 corpus fixtures: exactly ONE snapshot moves —
+ * `tests/fixtures/pdfs/unknown/two-column-achievements-sidebar.pdf` drops
+ * `website_url` from `fieldsPopulated` — and it is a false positive being
+ * removed, not a footer site: the value was `LaunchPadCart.com`, lifted out of
+ * a STRENGTHS-sidebar sentence ("Successfully launched and sold a consumer
+ * website LaunchPadCart.com."). That is a product the candidate sold, not their
+ * contact website, and it is #237's own defect class reaching the card by the
+ * one route #237 left open. No fixture in the corpus sources either field
+ * legitimately from below the profile band, so the footer shape the issue
+ * worried about is not represented and is not being traded away here.
+ *
+ * WHAT THIS COSTS, STATED PLAINLY. A personal site printed in a FOOTER is lost.
+ * The text tier no longer reaches it, and the annotation tier does not rescue
+ * it either: `pdf-extract.ts` flips pdfjs' bottom-origin y to top-origin
+ * (`yTop = viewport.height - yBottom`), so y grows DOWNWARD, and
+ * `inProfileSection` accepts `ann.yTop <= profileLineMaxY + 12` — at or above
+ * the last profile line plus about one line-height of slack. That band is the
+ * header, the opposite end of the page from a footer. The only surviving route
+ * is the résumé hyperlinking the site from its header block, where the
+ * annotation lands inside the band. That is the accepted cost of option (a),
+ * which #610 explicitly permits; no corpus fixture exercises the footer shape.
+ * (`linkedin_url` / `github_url` are unaffected — their doc-wide `anywhereOnDoc`
+ * fallback is deliberately kept, so a footer profile icon still resolves.)
+ */
+const PORTFOLIO_WEBSITE_BAND_TO_PROFILE = true;
+
+/**
  * Scans `lines` for a candidate location string, checking US patterns first
  * then international. Returns the first match found, or `undefined`.
  *
@@ -444,14 +495,20 @@ export function extractContact(
   // `/in/` redirect printed as its own label (LaTeX `\href{url}{url}`) fills
   // `linkedin_url` from the annotation AND `website_url` from the text scan —
   // the exact double-render this PR removes (#378).
+  //
+  // `bandToProfileSection` (#610) drops the doc-wide TEXT tier for a field,
+  // leaving only the profile-band text scan and the profile-band annotation
+  // lookup — see `PORTFOLIO_WEBSITE_BAND_TO_PROFILE` for why the two link
+  // catch-alls opt in and the two identity links do not.
   const pickUrl = <K extends "linkedin_url" | "github_url" | "portfolio_url" | "website_url">(
     key: K,
     resolveAnnotation: () => string | undefined,
     reject?: (url: string) => boolean,
+    bandToProfileSection = false,
   ): { value: string | undefined; confidence: number } => {
     if (primary[key] && !reject?.(primary[key]!))
       return { value: primary[key], confidence: primary.confidence[key] };
-    if (fallback[key] && !reject?.(fallback[key]!))
+    if (!bandToProfileSection && fallback[key] && !reject?.(fallback[key]!))
       return {
         value: fallback[key],
         confidence: fallback.confidence[key] * 0.9,
@@ -503,6 +560,7 @@ export function extractContact(
         inProfileSection,
       ),
     (u) => claimedByIdentity.has(claimKey(u)),
+    PORTFOLIO_WEBSITE_BAND_TO_PROFILE,
   );
   // Website is the catch-all: any remaining URL not already claimed by
   // linkedin/github/portfolio — on ANY tier (text scan or annotation), so a
@@ -525,6 +583,7 @@ export function extractContact(
         inProfileSection,
       ),
     (u) => claimedUrls.has(claimKey(u)),
+    PORTFOLIO_WEBSITE_BAND_TO_PROFILE,
   );
 
   // Ownership (#134): claim the document-wide body lines that are nothing but a

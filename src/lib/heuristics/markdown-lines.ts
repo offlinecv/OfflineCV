@@ -16,6 +16,16 @@
  *   - Strip base64 data URIs in `![...](data:...)` — mammoth+turndown emits
  *     embedded images this way and they can bloat markdown 3× with zero
  *     signal for parsing.
+ *   - Flatten inline links `[label](url)` and autolinks `<url>` to `label url`
+ *     (#610). Without this the bracket-paren syntax reaches every extractor
+ *     verbatim, so a `.md` renders literal markdown in the exported PDF and
+ *     `liftHeaderLabel` leaves an orphaned `[label]()` behind.
+ *   - Resolve reference-style links — `[label][ref]`, `[label][]` and bare
+ *     `[label]` — against the document's `[ref]: url` definition table, and
+ *     blank the definition lines themselves (#611). Same `label url` output as
+ *     the inline shape; the table and the reasoning live in
+ *     `src/lib/markdown-link-refs.ts`, shared with `mdToPlainText` so the
+ *     `rawText` and `markdown` readings of one `.md` stay in agreement.
  *   - Unescape turndown's backslash-escapes (`\_`, `\*`, `\[`, `\.`). These
  *     would otherwise break email / URL regex (e.g. `Jordan\_Lee@foo`
  *     parses as `_Lee@foo`).
@@ -38,6 +48,12 @@
  * " | "; rare in resumes and not worth a dedicated extractor today.
  */
 
+import {
+  extractLinkDefinitions,
+  flattenAutolinks,
+  resolveReferenceLinks,
+  stripReferenceImages,
+} from "../markdown-link-refs.ts";
 import type { PdfLine, PdfSection } from "./sections.ts";
 import {
   matchSectionHeaderDetailed,
@@ -81,6 +97,27 @@ const DATA_URI_IMAGE_RE = /!\[[^\]]*\]\(data:[^)]*\)/g;
 // it doesn't pollute the line text.
 const ANY_IMAGE_RE = /!\[[^\]]*\]\([^)]*\)/g;
 
+// Reference-style images (`![alt][ref]`, `![alt][]`, `![alt]`) cannot be
+// stripped here: unlike the two shapes above they are not self-identifying —
+// whether `![great]` is an image or literal prose depends on the document's
+// `[ref]: url` definition table, which does not exist yet at this point in the
+// pipeline. They are handled inside `flattenLinks` via the shared
+// `stripReferenceImages`, one step later, once the table has been built.
+
+// Inline markdown links: `[label](url)`, optionally with a CommonMark title
+// (`[label](url "Title")`). Unlike images, BOTH halves carry signal — the label
+// is the visible résumé text and the target is a real link — so we flatten to
+// `label url` rather than dropping the ref (#610). The label class excludes
+// newlines so an unmatched `[` on one line can never pair with a `](url)` on a
+// later one; the target class excludes whitespace, which is also what makes a
+// `)`-bearing URL out of scope (CommonMark requires those be angle-bracketed or
+// escaped, and neither shape appears in a résumé).
+const INLINE_LINK_RE = /\[([^\]\n]*)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
+
+// Autolinks (`<https://…>`, `<jane@example.com>`) flatten through the shared
+// `flattenAutolinks` in `../markdown-link-refs.ts` — see the import above. The
+// rule lives there so `mdToPlainText` applies the identical one to `rawText`.
+
 // Turndown backslash-escapes characters that have markdown meaning: `_`,
 // `*`, `[`, `]`, `(`, `)`, `.`, `+`, `-`, `!`, `` ` ``, `#`, `>`. Undo the
 // escapes that appear in contact data / prose. We keep `\n` as-is.
@@ -91,6 +128,56 @@ function stripImages(markdown: string): string {
   return markdown
     .replace(DATA_URI_IMAGE_RE, "")
     .replace(ANY_IMAGE_RE, "");
+}
+
+/**
+ * Flatten every markdown link shape to its plain-text reading — inline links
+ * and autolinks (#610), then reference-style links (#611).
+ *
+ * Also where the REFERENCE-style image shape is dropped, because this is the
+ * first point that has the definition table `stripReferenceImages` needs to
+ * tell an image (`![badge][ci]`, with `[ci]` defined) from prose that merely
+ * puts a `!` beside a bracket (`Grew revenue 40%![details][cat]`, with nothing
+ * defining `[cat]`). Deciding it a step earlier, in `stripImages`, is not
+ * possible without the table and deleted the prose.
+ *
+ * An image that the table does NOT resolve therefore survives into
+ * `resolveReferenceLinks` — as does every image on `mdToPlainText`'s path,
+ * which has no strip pass at all. Both are safe: the image alternative in that
+ * scan consumes the whole usage and returns it untouched, so no image can
+ * start flattening to `alt url` on either path.
+ *
+ * `label url` (not bare `label`) is deliberate: it mirrors the `$1 $2` rewrite
+ * `mdToPlainText` (`src/lib/ingest/markdown.ts`) already applies to the
+ * `rawText` half of a dropped `.md`, so the two representations of the same
+ * file finally agree — that convergence is the actual invariant this restores.
+ * (A degenerate empty-label `[](url)` emits the bare target rather than a
+ * leading space, which is the only place the two rewrites differ.)
+ * It also keeps the target visible to `liftHeaderLabel`, which lifts it into
+ * `project.url` / `achievement.url` exactly as it does for a plain-text
+ * résumé; emitting bare `label` would silently discard structured data.
+ *
+ * The internal ORDER is load-bearing (#611). Definition lines are blanked
+ * first, so a `[ref]: <https://…>` target can never be mistaken for an
+ * autolink and a definition label can never be resolved as a shortcut
+ * reference against itself. Inline links go next, because they are the one
+ * shape identified by a token the reference rule cannot see (`](`) — flattening
+ * them first consumes their brackets, so `[label](url)` is never re-read as the
+ * shortcut reference `[label]`. Reference resolution runs last, over text that
+ * by then holds only brackets no other rule claimed.
+ */
+function flattenLinks(markdown: string): string {
+  const { definitions, body } = extractLinkDefinitions(markdown);
+  return resolveReferenceLinks(
+    flattenAutolinks(
+      stripReferenceImages(body, definitions).replace(
+        INLINE_LINK_RE,
+        (_m, label: string, url: string) =>
+          label.trim() ? `${label} ${url}` : url,
+      ),
+    ),
+    definitions,
+  );
 }
 
 /** Undo turndown's backslash-escapes of markdown-meaningful characters. */
@@ -155,6 +242,7 @@ function normalizeSplitLetterHeaders(markdown: string): string {
 function preprocessMarkdown(markdown: string): string {
   let out = markdown;
   out = stripImages(out);
+  out = flattenLinks(out);
   out = unescapeBackslashes(out);
   out = normalizeSplitLetterHeaders(out);
   return out;
