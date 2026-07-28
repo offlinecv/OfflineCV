@@ -41,7 +41,7 @@
       "score": 40,
       "max": 40,
       "gradable": true,
-      "metricBullets": 4,
+      "metricBullets": 5,
       "totalBullets": 5
     },
     "structure": {
@@ -63,7 +63,7 @@
       "scanned": false
     },
     "bulletCount": 5,
-    "algoVersion": "1.5"
+    "algoVersion": "1.6"
   },
   "reproArtifact": {
     "artifactVersion": "v1",

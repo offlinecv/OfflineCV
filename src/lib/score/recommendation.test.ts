@@ -30,6 +30,8 @@ function makeScore(overrides: {
       max: 30,
       gradable: true,
       goodBullets: 9,
+      verbLedBullets: 9,
+      inWindowBullets: 9,
       totalBullets: 10,
       ...overrides.structure,
     },

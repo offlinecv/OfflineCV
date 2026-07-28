@@ -4,6 +4,7 @@
 import {
   computeAtsScore,
   computeAnonymousAtsScore,
+  countWords,
   getScoreTier,
   getScoreLabel,
 } from "./score";
@@ -212,11 +213,90 @@ describe("bulletHasMetric — industry-aligned detection", () => {
     });
   });
 
+  // #623: the digit-only detector missed bullets that quantify in words.
+  // These cases pin the boundary the widening drew — what a cardinal has to
+  // be doing to count, and what still must not count — so a future widening
+  // can't quietly turn this into "any number word anywhere".
+  describe("spelled-out cardinals (#623)", () => {
+    const quantified = [
+      "Shipped two internal tools", // issue AC
+      "Led a four-month migration", // issue AC — hyphenated compound modifier
+      "Shipped and open-sourced two tools with public users across teams",
+      "Advised the team during a six-week engagement with the platform org",
+      "Rolled out three sites for the regional marketing organization",
+      "Consolidated twelve services into a single deployment pipeline",
+      "Processed millions of records nightly without manual intervention", // plural scale noun
+      "Ran dozens of experiments across the onboarding funnel",
+      "Owned twenty-two dashboards across the analytics estate", // compound: "two" closes it
+      "Processed two thousand records per day through the ingest path", // year-guard must NOT eat this
+    ];
+    it.each(quantified)("registers as a metric: %s", (bullet) => {
+      expect(bulletRegistersAsMetric(bullet)).toBe(true);
+    });
+
+    const notQuantified = [
+      "Owned one product surface", // issue AC — `one` is never a cardinal here
+      "One of the senior engineering voices on the team", // issue AC
+      "Worked on the platform", // issue AC
+      "Owned a product surface end to end", // `a`/`an` is never a cardinal here
+      "Shipped one-off tooling for the internal support team", // `one` again
+      "Joined the company in two thousand nineteen and stayed", // spelled year
+      "Hired in nineteen hundred ninety-eight before the merger", // spelled year
+      "Led Six Sigma initiatives across the manufacturing org", // proper noun
+      "Advised Big Four clients on their reporting stack", // proper noun
+      "Reduced the escalation backlog by three", // cardinal modifies nothing
+      "Reviewed the fourth quarter roadmap with the leadership team", // ordinal, not cardinal
+      "Rewrote the tenure tracking service for the HR platform", // substring, not a word
+      "Presented at nineteen internal forums", // "nineteen" is outside the accepted set
+    ];
+    it.each(notQuantified)("does not register as a metric: %s", (bullet) => {
+      expect(bulletRegistersAsMetric(bullet)).toBe(false);
+    });
+  });
+
   describe("strong-signal patterns still work end-to-end", () => {
     it("% metric", () => expect(bulletRegistersAsMetric("Reduced latency by 40%")).toBe(true));
     it("$ metric", () => expect(bulletRegistersAsMetric("Saved $500K annually")).toBe(true));
     it("K/M/B suffix", () => expect(bulletRegistersAsMetric("Served 2M users")).toBe(true));
     it("Nx multiplier", () => expect(bulletRegistersAsMetric("Achieved 3x throughput")).toBe(true));
+  });
+});
+
+// #627: a spaced em-dash (or any whitespace-delimited punctuation run)
+// tokenized as its own "word" under a plain `.split(/\s+/).filter(Boolean)`,
+// inflating the count the 8–30 well-formed-bullet window applies to. These
+// cases pin the boundary countWords draws — what counts as a word, and what
+// doesn't — so a future change can't quietly regress either direction.
+describe("countWords (#627)", () => {
+  it("does not count a spaced em-dash as a word — issue AC", () => {
+    // The issue's AC text states this bullet counts "10 words, not 12"; the
+    // literal string it gives tokenizes to 11 (old, buggy) / 9 (new) — the
+    // issue's own numbers are off by one, but the delta (each em-dash costs
+    // exactly one phantom word) matches. Asserting the number the given
+    // regex/string actually produce, not the issue's arithmetic.
+    expect(countWords("Owned the surface — a 50-engineer org — across 3 sites")).toBe(9);
+  });
+
+  it.each([
+    ["four-month", 1], // hyphenated compound stays one token
+    ["AI/ML", 1], // slashed compound stays one token
+    ["US-India", 1], // hyphenated compound stays one token
+    ["37+", 1], // alphanumeric survives punctuation
+    ["1.9", 1], // alphanumeric survives punctuation
+  ])("counts %s as %i word(s)", (text, expected) => {
+    expect(countWords(text)).toBe(expected);
+  });
+
+  it("counts a bullet of only punctuation as 0 words", () => {
+    expect(countWords("— · — |")).toBe(0);
+  });
+
+  it("still counts ordinary whitespace-separated words", () => {
+    expect(countWords("Led a four-month migration across US-India teams")).toBe(7);
+  });
+
+  it("is Unicode-aware — counts non-Latin scripts as words, not punctuation", () => {
+    expect(countWords("领导了三个团队 — 跨越两个大洲")).toBe(2);
   });
 });
 
@@ -384,6 +464,41 @@ describe("computeAnonymousAtsScore", () => {
       makeAnonInput({ rawText: noVerbs }),
     );
     expect(result.structure.score).toBeLessThan(20); // half-credit at most
+  });
+
+  // #622: ACTION_VERBS was widened to include strong past-tense verbs the
+  // rewrite eval already accepted (shipped/owned/secured/...) plus verbs
+  // missing from both sets (won/ran/...). Assert the boundary moved exactly
+  // where intended — the new verbs count, the documented weak verbs still
+  // don't, so the widening didn't quietly turn into "accept everything".
+  it("counts bullets leading with the #622 promoted/new verbs as verb-led", () => {
+    const bullets = [
+      "- Shipped and open-sourced two tools with public users across teams",
+      "- Won new AI platform charters for the site across four quarters",
+      "- Ran performance reviews and promotion calibration for the org",
+      "- Owned the entire user-facing application surface for the product",
+    ].join("\n");
+    const result = computeAnonymousAtsScore(
+      makeAnonInput({ rawText: bullets }),
+    );
+    expect(result.bullets).toHaveLength(4);
+    result.bullets!.forEach((b) => expect(b.startsWithActionVerb).toBe(true));
+  });
+
+  it("still rejects bullets leading with the documented weak verbs (#622)", () => {
+    const bullets = [
+      "- Worked on cross-functional projects across the whole organization",
+      "- Helped the team ship features across several quarters this year",
+      "- Participated in planning meetings across the whole department team",
+      "- Responsible for the day to day operations of the whole team",
+    ].join("\n");
+    const result = computeAnonymousAtsScore(
+      makeAnonInput({ rawText: bullets }),
+    );
+    expect(result.bullets).toHaveLength(4);
+    result.bullets!.forEach((b) =>
+      expect(b.startsWithActionVerb).toBe(false),
+    );
   });
 
   it("does not credit contact fields below the confidence floor", () => {
@@ -570,6 +685,47 @@ describe("computeAnonymousAtsScore", () => {
       // And the per-bullet hasMetric flags must sum to the dimension's metricBullets.
       const metricCount = result.bullets!.filter((b) => b.hasMetric).length;
       expect(metricCount).toBe(result.specificity.metricBullets);
+    });
+
+    // #624: `verbLedBullets` / `inWindowBullets` must be direct counts over
+    // the bullet pool, never the rounded half-credit sum `goodBullets` fuses
+    // them into. All bullets below are in the 8–30 word window and NONE opens
+    // with an action verb — the old mislabeled hint would have shown "12/23"
+    // (half of goodStructure) for a claim about a 23-bullet-wide window that
+    // is actually 23/23 true, while burying the real 0/23 verb gap.
+    it("reports verb-led and in-window as independent direct counts, not a fused half-credit sum (#624)", () => {
+      const nonVerbLedInWindow = Array.from(
+        { length: 23 },
+        (_, i) =>
+          `- This bullet describes accomplishment number ${i + 1} across eight to thirty words total`,
+      ).join("\n");
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({
+          sections: makeSections({
+            experience: nonVerbLedInWindow.split("\n"),
+          }),
+        }),
+      );
+      expect(result.structure.totalBullets).toBe(23);
+      expect(result.structure.verbLedBullets).toBe(0);
+      expect(result.structure.inWindowBullets).toBe(23);
+      // goodBullets is unchanged legacy math (kept for corpus snapshots) —
+      // pinned here to prove this is a reporting fix, not a scoring change.
+      expect(result.structure.goodBullets).toBe(12);
+    });
+
+    // #627: the per-bullet badge (`wordCount`, feeding `Nw`) and the aggregate
+    // Structure math (`scoreBulletPool`'s `wc`) must agree on the same
+    // bullet — asserted directly against the shared countWords helper both
+    // call sites now use, not by inspection of the resulting score.
+    it("the per-bullet badge's wordCount matches countWords for the same bullet", () => {
+      const emDashBullet =
+        "Owned the surface — a 50-engineer org — across 3 sites and teams";
+      const result = computeAnonymousAtsScore(
+        makeAnonInput({ rawText: `- ${emDashBullet}` }),
+      );
+      expect(result.bullets).toHaveLength(1);
+      expect(result.bullets![0].wordCount).toBe(countWords(emDashBullet));
     });
   });
 

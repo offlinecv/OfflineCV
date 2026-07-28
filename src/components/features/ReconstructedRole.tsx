@@ -14,13 +14,19 @@
  * in-memory only.
  *
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
+ * `ResumeBulletRow` / `BulletFlagLegend` live in the sibling `ResumeBulletRow.tsx`
+ * (#626), split out for the same reason.
+ *
+ * Per-bullet remove confirmation (#626) is NOT owned here — it lives in
+ * `useBulletRemoveStatus` (`BulletRemoveStatus.tsx`). A parsed role hosts its
+ * own instance; the "Other bullets" bucket, whose group disappears entirely
+ * when its last bullet goes, is driven by an `ExperienceSection`-owned control
+ * passed in as `removeControl`. See that module's docblock for why.
  */
 
-import { useCallback, useMemo } from "react";
-import type { ReactNode } from "react";
+import { useMemo } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
-import { needsAttention, roleLabel } from "../../lib/score/group-bullets.ts";
-import type { BulletObservation } from "../../lib/score/score.ts";
+import { roleLabel } from "../../lib/score/group-bullets.ts";
 import { EditableField } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
 import type {
@@ -32,252 +38,11 @@ import {
   type SectionRewriteApply,
 } from "./SectionRewrite.tsx";
 import { InlineBulletAdd, RemoveButton } from "./ReconstructedAdd.tsx";
-
-// ── Bullet flags ──────────────────────────────────────────────────────────────
-
-/**
- * Each failed grading rule renders as a compact amber glyph chip inline on the
- * bullet row (was a wide text label per #57–59 — the repeated "no metric" /
- * "weak verb" strings ate horizontal space and forced long bullets to wrap).
- * Glyphs are SVG, not emoji (emoji don't theme and render per-platform). The
- * meaning is never icon-only: each chip carries an `aria-label` + `title`, and
- * `BulletFlagLegend` keys the glyphs at the top of the section.
- */
-
-/** Stroke bar-chart — the missing-metric flag ("quantify this bullet"). */
-function MetricIcon() {
-  return (
-    <svg
-      className="h-3.5 w-3.5"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <line x1="4" x2="20" y1="20" y2="20" />
-      <line x1="7" x2="7" y1="20" y2="13" />
-      <line x1="12" x2="12" y1="20" y2="9" />
-      <line x1="17" x2="17" y1="20" y2="5" />
-    </svg>
-  );
-}
-
-/** Stroke bolt — the weak-opening-verb flag. */
-function BoltIcon() {
-  return (
-    <svg
-      className="h-3.5 w-3.5"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  );
-}
-
-/**
- * One amber glyph chip. `decorative` mode (used in the legend, where an
- * adjacent text label already names the flag) drops the redundant
- * role/aria-label so screen readers don't announce it twice.
- */
-function FlagChip({
-  title,
-  ariaLabel,
-  decorative = false,
-  className = "",
-  children,
-}: {
-  title: string;
-  ariaLabel: string;
-  decorative?: boolean;
-  /** Extra layout classes (e.g. inline spacing/alignment at the call site). */
-  className?: string;
-  children: ReactNode;
-}) {
-  const a11y = decorative
-    ? { "aria-hidden": true as const }
-    : { role: "img", "aria-label": ariaLabel, title };
-  return (
-    <span
-      {...a11y}
-      className={`inline-flex shrink-0 items-center justify-center rounded px-1 py-0.5 bg-feedback-warning-bg text-feedback-warning-text ${className}`}
-    >
-      {children}
-    </span>
-  );
-}
-
-/** Short word-count token shown in the length chip (the number is the signal). */
-function lengthToken(b: BulletObservation): string {
-  return `${b.wordCount}w`;
-}
-
-function lengthTitle(b: BulletObservation): string {
-  const aim = "aim 8–30 words";
-  return b.wordCount < 8
-    ? `Too short — ${aim} (${b.wordCount})`
-    : `Too long — ${aim} (${b.wordCount})`;
-}
-
-/**
- * Glyph key for the bullet flags. Rendered once at the top of the
- * reconstructed-resume section so the inline glyphs stay decodable
- * (`color-not-only` / discoverability).
- */
-export function BulletFlagLegend() {
-  return (
-    <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-content-tertiary">
-      <li className="inline-flex items-center gap-1.5">
-        <FlagChip title="No metric" ariaLabel="No metric" decorative>
-          <MetricIcon />
-        </FlagChip>
-        no metric
-      </li>
-      <li className="inline-flex items-center gap-1.5">
-        <FlagChip title="Weak opening verb" ariaLabel="Weak opening verb" decorative>
-          <BoltIcon />
-        </FlagChip>
-        weak verb
-      </li>
-      <li className="inline-flex items-center gap-1.5">
-        <FlagChip
-          title="Word count outside 8–30"
-          ariaLabel="Word count outside 8–30"
-          decorative
-        >
-          <span className="text-[11px] font-medium tabular-nums">#w</span>
-        </FlagChip>
-        length (8–30 words)
-      </li>
-    </ul>
-  );
-}
-
-/**
- * The trailing check badges for one bullet — "no metric" / "weak verb" /
- * length. Shared by both the read-only and editable bullet layouts so the
- * flags never disappear when the reconstructed résumé is editable (the edit
- * branch previously rendered none). Renders nothing for a passing bullet.
- * Inline-level so the chips flow right after the bullet text and wrap with it.
- */
-function BulletFlagsInline({ bullet }: { bullet: BulletObservation }) {
-  if (!needsAttention(bullet)) return null;
-  return (
-    <>
-      {!bullet.hasMetric && (
-        <FlagChip title="No metric" ariaLabel="No metric" className="ml-1 align-middle">
-          <MetricIcon />
-        </FlagChip>
-      )}
-      {!bullet.startsWithActionVerb && (
-        <FlagChip
-          title="Weak opening verb"
-          ariaLabel="Weak opening verb"
-          className="ml-1 align-middle"
-        >
-          <BoltIcon />
-        </FlagChip>
-      )}
-      {!bullet.wellFormedLength && (
-        <FlagChip
-          title={lengthTitle(bullet)}
-          ariaLabel={lengthTitle(bullet)}
-          className="ml-1 align-middle"
-        >
-          <span className="text-[11px] font-medium tabular-nums">
-            {lengthToken(bullet)}
-          </span>
-        </FlagChip>
-      )}
-    </>
-  );
-}
-
-// ── Bullet row ────────────────────────────────────────────────────────────────
-
-/**
- * One bullet line in the reconstructed resume. The bullet text is editable
- * (#82) via the shared EditableField primitive — committing an edit feeds the
- * authoritative re-grade in App (rawText + description), so the inline check
- * badges below re-evaluate live. Flagged bullets show the checks they failed;
- * passing bullets render plain.
- */
-export function ResumeBulletRow({
-  bullet,
-  override,
-  onBulletChange,
-}: {
-  bullet: BulletObservation;
-  /** In-memory override text for this bullet, if any. */
-  override?: string;
-  /** Commit an edit on this bullet (keyed by bullet.index in the caller). */
-  onBulletChange?: (value: string) => void;
-}) {
-  const editable = onBulletChange !== undefined;
-  const displayText = override ?? bullet.text;
-
-  const handleCommit = useCallback(
-    (v: string) => {
-      onBulletChange?.(v);
-    },
-    [onBulletChange],
-  );
-
-  /*
-    Read-mode layout: single inline formatting context (a plain block `<li>`,
-    NOT a flexbox). The bullet text, the check badges, and the rewrite trigger
-    are all inline-level, so the badges flow right after the *last word* of the
-    text and wrap with it.
-
-    Edit-mode layout: the multiline EditableField breaks to a block (full-width
-    <div>) so the textarea + action row have room. The rework pane (if open)
-    stacks below the action row as a block child of the `<li>`.
-  */
-  return (
-    <li className="py-1 text-sm leading-snug text-content-secondary">
-      {editable ? (
-        /* Multiline edit mode: block layout, full-width textarea + Save/Cancel */
-        <div className="flex gap-1.5">
-          <span aria-hidden="true" className="mt-1.5 shrink-0 text-content-muted">
-            •
-          </span>
-          <div className="min-w-0 flex-1">
-            <EditableField
-              value={displayText || undefined}
-              placeholder="empty bullet"
-              emptyAffordance="plain"
-              label="Bullet text"
-              textSize="sm"
-              display="inline"
-              multiline
-              onCommit={handleCommit}
-            />
-            {/* Check badges trail the field inline (read mode) so the flags
-                stay visible while the résumé is editable. */}
-            <BulletFlagsInline bullet={bullet} />
-          </div>
-        </div>
-      ) : (
-        /* Read-only: inline flow — bullet text then trailing check badges inline */
-        <>
-          <span aria-hidden="true" className="mr-1.5 text-content-muted">
-            •
-          </span>
-          {displayText}
-          <BulletFlagsInline bullet={bullet} />
-        </>
-      )}
-    </li>
-  );
-}
+import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
+import {
+  useBulletRemoveStatus,
+  type BulletRemoveControl,
+} from "./BulletRemoveStatus.tsx";
 
 // ── Role header ───────────────────────────────────────────────────────────────
 
@@ -498,6 +263,13 @@ interface RoleEntryProps {
   /** Remove this role (only set for user-ADDED roles). Renders an X control in
    *  the header row when provided. */
   onRemove?: () => void;
+  /** A remove-confirmation control owned by an ANCESTOR, for a group that can
+   *  disappear from the render list when its last bullet goes (the "Other
+   *  bullets" bucket — see `useBulletRemoveStatus`). When provided, this role
+   *  drives it instead of its own and does NOT render the strip; the owner
+   *  does. Absent (every parsed role, which survives losing its bullets) → the
+   *  role owns and renders its own. */
+  removeControl?: BulletRemoveControl;
 }
 
 /**
@@ -515,7 +287,18 @@ export function RoleEntry({
   onRemoveBullet,
   captureUndo,
   onRemove,
+  removeControl,
 }: RoleEntryProps) {
+  // Per-bullet remove confirmation (#626), mirroring SectionRewrite's own
+  // applied/undone strip so a mis-click (or an empty-commit auto-remove, see
+  // ResumeBulletRow) is recoverable the same way a rewrite-review batch is.
+  // Owned by an ancestor for a group that can vanish on its last remove; owned
+  // here otherwise. The hook runs unconditionally either way (hooks rule); its
+  // result is simply unused when the ancestor supplied one.
+  const ownRemove = useBulletRemoveStatus(onRemoveBullet, captureUndo);
+  const removes = removeControl ?? ownRemove;
+  const hostsStrip = removeControl === undefined;
+
   // Bullet display text honors #82 overrides — section rewrite must see the
   // text the user actually edited, not the stale parsed text.
   const sectionBullets = group.bullets.map(
@@ -573,6 +356,11 @@ export function RoleEntry({
                     ? (value) => onBulletChange(b.index, value)
                     : undefined
                 }
+                onRemove={
+                  onRemoveBullet
+                    ? () => removes.removeBullet(b.index)
+                    : undefined
+                }
               />
             ))}
           </ul>
@@ -582,13 +370,23 @@ export function RoleEntry({
         // A user-added role (onRemove set) starts empty — the "+ Add bullet"
         // affordance below is its call to action, so suppress the note for it.
         // A PARSED role with no bullets still shows the note: that the parser
-        // found none is the diagnostic signal this surface exists to expose.
-        !onRemove && (
+        // found none is the diagnostic signal this surface exists to expose —
+        // UNLESS the empty state is because the last bullet was just removed
+        // (#626), which the confirmation strip below already explains.
+        !onRemove &&
+        !removes.pending && (
           <p className="text-sm text-content-tertiary">
             No bullet-shaped lines detected.
           </p>
         )
       )}
+      {/* Outside the bullet-list branch above (#626): removing the LAST bullet
+          drops `group.bullets` to empty on the next render, which would
+          otherwise unmount this strip along with the list. Rendered only when
+          this role OWNS the control — an ancestor-owned one (the "Other
+          bullets" bucket) is rendered by that ancestor, which outlives this
+          role's own disappearance. */}
+      {hostsStrip && ownRemove.strip}
       {onAddBullet && <InlineBulletAdd onAdd={onAddBullet} />}
     </div>
   );

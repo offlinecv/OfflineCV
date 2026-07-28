@@ -32,13 +32,13 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 23,
-    "preLayoutOverall": 23,
+    "overall": 34,
+    "preLayoutOverall": 34,
     "specificity": {
-      "score": 0,
+      "score": 11,
       "max": 40,
       "gradable": true,
-      "metricBullets": 0,
+      "metricBullets": 1,
       "totalBullets": 6
     },
     "structure": {
@@ -66,7 +66,7 @@
       "scanned": false
     },
     "bulletCount": 6,
-    "algoVersion": "1.5"
+    "algoVersion": "1.6"
   },
   "reproArtifact": {
     "artifactVersion": "v1",

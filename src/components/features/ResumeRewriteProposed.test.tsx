@@ -251,3 +251,141 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     expect(el.textContent).toContain("Senior Engineer — Acme");
   });
 });
+
+// ── Summary section (#625) ────────────────────────────────────────────────────
+
+/** A one-section proposal over the summary — the only section the panel used to
+ *  render as a read-only redline, with no way to apply it. */
+function summaryResult(proposed: string): ResumeRewriteResult {
+  return {
+    allNumbersPreserved: true,
+    sections: [
+      {
+        kind: "summary",
+        input: {
+          kind: "summary",
+          id: "summary",
+          label: "Summary",
+          text: "Engineer with ten years of experience.",
+        },
+        data: {
+          text: proposed,
+          numbersPreserved: true,
+          droppedNumbers: [],
+          addedNumbers: [],
+        },
+      },
+    ],
+  };
+}
+
+function summaryApply(): {
+  map: ResumeRewriteApply;
+  handlers: SectionRewriteApply;
+} {
+  // The real wiring from `summaryRewriteApply` — one positional slot, and every
+  // verb pointed at the single `summaryOverride`.
+  const handlers: SectionRewriteApply = {
+    obsIndices: [0],
+    onReplace: vi.fn(),
+    onRemove: vi.fn(),
+    onAdd: vi.fn(),
+  };
+  return { map: new Map([["summary", handlers]]), handlers };
+}
+
+describe("ProposedPanel — summary review + apply (issue 625)", () => {
+  it("reviews the summary as one row, labelled as a summary and not a bullet", () => {
+    const { map } = summaryApply();
+    const el = render(
+      createElement(ProposedPanel, {
+        result: summaryResult("Platform engineer who cut deploy time 60%."),
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+        applyBySection: map,
+      }),
+    );
+
+    const accepts = [...el.querySelectorAll("button")].filter((b) =>
+      b.getAttribute("aria-label")?.startsWith("Accept this"),
+    );
+    expect(accepts).toHaveLength(1);
+    expect(accepts[0]!.getAttribute("aria-label")).toBe("Accept this edited summary");
+    expect(el.textContent).toContain("Edited summary");
+  });
+
+  it("writes an accepted summary through the single override handler", () => {
+    const { map, handlers } = summaryApply();
+    const onApplied = vi.fn();
+    const el = render(
+      createElement(ProposedPanel, {
+        result: summaryResult("Platform engineer who cut deploy time 60%."),
+        onDismiss: vi.fn(),
+        onApplied,
+        applyBySection: map,
+      }),
+    );
+
+    click(
+      [...el.querySelectorAll("button")].find(
+        (b) => b.textContent === "Accept all",
+      ) as HTMLButtonElement,
+    );
+    click(
+      el.querySelector(
+        'button[aria-label="Apply accepted changes to the resume"]',
+      ) as HTMLButtonElement,
+    );
+
+    expect(handlers.onReplace).toHaveBeenCalledWith(
+      0,
+      "Platform engineer who cut deploy time 60%.",
+    );
+    expect(handlers.onRemove).not.toHaveBeenCalled();
+    expect(handlers.onAdd).not.toHaveBeenCalled();
+    expect(onApplied).toHaveBeenCalledWith(1, ["Summary"], undefined);
+  });
+
+  // A degenerate model response must not offer an "accept" that silently blanks
+  // the user's summary — clearing has its own affordance (emptying the field).
+  it.each([
+    ["a blank proposal", "   "],
+    ["a proposal identical to the original", "Engineer with ten years of experience."],
+  ])("falls back to the read-only redline for %s", (_label, proposed) => {
+    const { map } = summaryApply();
+    const el = render(
+      createElement(ProposedPanel, {
+        result: summaryResult(proposed),
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+        applyBySection: map,
+      }),
+    );
+
+    expect(
+      [...el.querySelectorAll("button")].filter((b) =>
+        b.getAttribute("aria-label")?.startsWith("Accept this"),
+      ),
+    ).toHaveLength(0);
+    const apply = el.querySelector(
+      'button[aria-label="Apply accepted changes to the resume"]',
+    ) as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+  });
+
+  it("stays a read-only redline when no summary writer is wired at all", () => {
+    const el = render(
+      createElement(ProposedPanel, {
+        result: summaryResult("Platform engineer who cut deploy time 60%."),
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+        applyBySection: new Map(),
+      }),
+    );
+    expect(
+      [...el.querySelectorAll("button")].filter((b) =>
+        b.getAttribute("aria-label")?.startsWith("Accept this"),
+      ),
+    ).toHaveLength(0);
+  });
+});

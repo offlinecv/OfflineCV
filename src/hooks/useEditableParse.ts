@@ -14,6 +14,10 @@
  * folded by the same applyOverrides path so a corrected degree or an
  * added/removed skill re-grades Completeness + JD coverage AND flows into the
  * downloaded PDF (App passes the edited parse to both the scorer and the export).
+ * Issue #625 adds a summary override on the same single-value shape as the
+ * skills one — the Summary was parsed, scored and exported but had no edit
+ * channel at all, so a mis-segmented summary was uncorrectable and an emptied
+ * one uncleanable.
  * Overrides are held in component state and lost on reset — no persistence
  * is expected or provided.
  *
@@ -166,6 +170,11 @@ export interface EditSnapshot {
   /** Optional: drafts persisted before #454 carry no such key. */
   achievementOverrides?: Record<number, AchievementFieldOverrides>;
   skillsOverride: SkillsOverride;
+  /** Optional: drafts persisted before #625 carry no such key. `""` is a real
+   *  value (an authoritative clear), so absent — not empty — means "no
+   *  override"; `JSON.stringify` drops the key exactly when it is `undefined`,
+   *  which is the same thing. */
+  summaryOverride?: string;
   addedEntries: AddedEntry[];
   addedBullets: AddedBullets;
   /** Optional: drafts persisted before #427 carry link edits on
@@ -341,6 +350,24 @@ export interface SkillsOverride {
 
 const EMPTY_SKILLS_OVERRIDE: SkillsOverride = { removed: [], added: [] };
 
+// ── Summary override (#625) ───────────────────────────────────────────────────
+//
+// The Summary is ONE text field, not a keyed collection, so it follows the
+// single-value {@link SkillsOverride} shape rather than the keyed-map shape the
+// per-entry sections use: one slot of state, one setter, one reset.
+//
+// Three states, and the distinction between the last two is load-bearing:
+//   - `undefined` — no override; `parsed.summary` shows through.
+//   - `""` (or whitespace) — an authoritative CLEAR. `applyOverrides` deletes
+//     `parsed.summary`, so `buildAtsResumeModel` emits no `summary`, so
+//     `render-ats-pdf` draws neither the heading nor the body — the whole
+//     section leaves the export, with no orphan heading (#625 AC3).
+//   - any other string — the replacement text, verbatim.
+//
+// It is the SINGLE summary write channel: the inline `EditableField` and an
+// accepted on-device summary rewrite both land here, so applying one after the
+// other can never resurrect the other's value (#625 AC6).
+
 // ── Hook return type ──────────────────────────────────────────────────────────
 
 export interface EditableParse {
@@ -444,6 +471,15 @@ export interface EditableParse {
   /** Remove a previously-added profile override by id (extras only; a legacy
    *  correction is dropped via `setLegacyLink(key, undefined)`). */
   removeProfile: (id: string) => void;
+  /** The ONE summary edit channel (#625): `undefined` = no override, `""` =
+   *  an authoritative clear that drops the whole section from the export,
+   *  anything else = the replacement text. */
+  summaryOverride: string | undefined;
+  /** Set the summary text. `""` clears the section (heading and body both leave
+   *  the exported PDF); `undefined` drops the override, reverting to the parsed
+   *  summary. Both the inline edit and an accepted on-device rewrite call this,
+   *  so neither can resurrect the other's value. */
+  setSummaryField: (value: string | undefined) => void;
   /** Add/remove edits against parsed.skills. */
   skillsOverride: SkillsOverride;
   /** Add a (canonicalized) skill. No-op for blank input or an exact dupe of an
@@ -524,6 +560,9 @@ export function useEditableParse(): EditableParse {
   >({});
   const [skillsOverride, setSkillsOverride] = useState<SkillsOverride>(
     EMPTY_SKILLS_OVERRIDE,
+  );
+  const [summaryOverride, setSummaryOverride] = useState<string | undefined>(
+    undefined,
   );
   const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
   const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
@@ -647,6 +686,13 @@ export function useEditableParse(): EditableParse {
     },
     [],
   );
+
+  // Narrowed wrapper, not the raw `useState` setter: `Dispatch<SetStateAction>`
+  // would also accept a function and silently treat it as an updater, and this
+  // setter is called from two independent writers (#625).
+  const setSummaryField = useCallback((value: string | undefined) => {
+    setSummaryOverride(value);
+  }, []);
 
   const addSkill = useCallback((skill: string) => {
     const canonical = canonicalizeSkill(skill);
@@ -904,6 +950,7 @@ export function useEditableParse(): EditableParse {
     setEducationOverrides({});
     setAchievementOverrides({});
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
+    setSummaryOverride(undefined);
     setAddedEntries([]);
     setAddedBullets({});
     setProfileOverrides([]);
@@ -919,6 +966,7 @@ export function useEditableParse(): EditableParse {
       educationOverrides,
       achievementOverrides,
       skillsOverride,
+      summaryOverride,
       addedEntries,
       addedBullets,
       profileOverrides,
@@ -932,6 +980,7 @@ export function useEditableParse(): EditableParse {
       educationOverrides,
       achievementOverrides,
       skillsOverride,
+      summaryOverride,
       addedEntries,
       addedBullets,
       profileOverrides,
@@ -996,6 +1045,13 @@ export function useEditableParse(): EditableParse {
       so.added.forEach((skill) => addSkill(skill));
       so.removed.forEach((skill) => removeSkill(skill));
 
+      // Summary (#625). `""` is a real value (the authoritative clear), so the
+      // guard tests for the KEY being present, not for the string being
+      // non-empty — an `if (snap.summaryOverride)` here would silently drop a
+      // persisted clear and resurrect the parsed summary on reload.
+      if (snap.summaryOverride !== undefined)
+        setSummaryField(snap.summaryOverride);
+
       const idMap = new Map<string, string>();
       for (const entry of snap.addedEntries) {
         const newId = addEntry(entry.section);
@@ -1033,6 +1089,7 @@ export function useEditableParse(): EditableParse {
       addSkill,
       removeSkill,
       setSkillCategories,
+      setSummaryField,
       addEntry,
       setEntryField,
       addBullet,
@@ -1047,6 +1104,9 @@ export function useEditableParse(): EditableParse {
     if (Object.keys(descriptionOverrides).length > 0) return true;
     if (removedBullets.size > 0) return true;
     if (!isEmptySkillsOverride(skillsOverride)) return true;
+    // Present-vs-absent, not truthy: `""` is an authoritative clear of the
+    // summary and is very much an edit.
+    if (summaryOverride !== undefined) return true;
     if (addedEntries.length > 0) return true;
     if (Object.keys(addedBullets).length > 0) return true;
     if (profileOverrides.length > 0) return true;
@@ -1074,6 +1134,7 @@ export function useEditableParse(): EditableParse {
     educationOverrides,
     achievementOverrides,
     skillsOverride,
+    summaryOverride,
     addedEntries,
     addedBullets,
     profileOverrides,
@@ -1107,6 +1168,8 @@ export function useEditableParse(): EditableParse {
     addProfile,
     setProfileUrl,
     removeProfile,
+    summaryOverride,
+    setSummaryField,
     skillsOverride,
     addSkill,
     removeSkill,

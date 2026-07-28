@@ -36,20 +36,20 @@
     "sectionSource": "regex"
   },
   "score": {
-    "overall": 62,
-    "preLayoutOverall": 62,
+    "overall": 96,
+    "preLayoutOverall": 96,
     "specificity": {
-      "score": 17,
+      "score": 40,
       "max": 40,
       "gradable": true,
-      "metricBullets": 1,
+      "metricBullets": 4,
       "totalBullets": 4
     },
     "structure": {
-      "score": 15,
+      "score": 26,
       "max": 30,
       "gradable": true,
-      "goodBullets": 2,
+      "goodBullets": 4,
       "totalBullets": 4
     },
     "completeness": {
@@ -64,7 +64,7 @@
       "scanned": false
     },
     "bulletCount": 4,
-    "algoVersion": "1.5"
+    "algoVersion": "1.6"
   },
   "reproArtifact": {
     "artifactVersion": "v1",

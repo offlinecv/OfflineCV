@@ -45,7 +45,7 @@
       "score": 0,
       "max": 30,
       "gradable": false,
-      "goodBullets": 0,
+      "goodBullets": 1,
       "totalBullets": 1
     },
     "completeness": {
@@ -65,7 +65,7 @@
       "scanned": false
     },
     "bulletCount": 1,
-    "algoVersion": "1.5"
+    "algoVersion": "1.6"
   },
   "reproArtifact": {
     "artifactVersion": "v1",

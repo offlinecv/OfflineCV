@@ -21,10 +21,15 @@
  * This replaces PerBulletFeedback as the owner of the "render + grade the
  * parsed resume" capability. Editing (#58) and per-bullet rewrite (#59) layer
  * on top: #58 attaches to RoleEntry's header and ContactCard; #59 re-attaches
- * to ResumeBulletRow's flagged branch (both in ReconstructedRole.tsx).
+ * to ResumeBulletRow's flagged branch.
  *
- * Decomposed: RoleEntry / ResumeBulletRow live in ReconstructedRole.tsx to keep
- * this container under ~200 LOC.
+ * Decomposed to keep this container closer to ~200 LOC: `RoleEntry` lives in
+ * `ReconstructedRole.tsx`, `ResumeBulletRow` / `BulletFlagLegend` in
+ * `ResumeBulletRow.tsx` (split out of ReconstructedRole by #626), and the
+ * per-bullet remove confirmation in `BulletRemoveStatus.tsx`. `ExperienceSection`
+ * below owns one instance of that last one for the "Other bullets" bucket —
+ * the one group that disappears when its last bullet goes, taking a
+ * role-hosted strip with it.
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
@@ -55,12 +60,10 @@ import {
   type ContactDisplayField,
 } from "../../lib/contact.ts";
 import { DownloadGateDialog } from "./DownloadGateDialog.tsx";
-import {
-  RoleEntry,
-  ResumeBulletRow,
-  BulletFlagLegend,
-} from "./ReconstructedRole.tsx";
-import { Fragment, useMemo, useState } from "react";
+import { RoleEntry } from "./ReconstructedRole.tsx";
+import { useBulletRemoveStatus } from "./BulletRemoveStatus.tsx";
+import { ResumeBulletRow, BulletFlagLegend } from "./ResumeBulletRow.tsx";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
 import type { SectionRewriteApply } from "./SectionRewrite.tsx";
@@ -84,6 +87,7 @@ import {
   batchUndoTargets,
   type BulletUndoTargets,
 } from "../../lib/rewrite-review/undo-batch.ts";
+import type { ResolvedWrite } from "../../lib/rewrite-review/apply-accepted.ts";
 import {
   AddPill,
   RemoveButton,
@@ -99,6 +103,12 @@ import {
 } from "../../lib/score/entry-dates.ts";
 import { validateDate } from "../../lib/edit/field-validators.ts";
 import { EducationSection } from "./ReconstructedEducationSkills.tsx";
+import {
+  SummarySection,
+  buildResumeSections,
+  summaryRewriteApply,
+  SUMMARY_SECTION_ID,
+} from "./ReconstructedSummary.tsx";
 import { SkillsSection } from "./ReconstructedSkills.tsx";
 import { SkillTermGuidance } from "./SkillTermGuidance.tsx";
 import { Button, EditableField } from "@design-system";
@@ -387,7 +397,11 @@ function computeExperienceHeadings(
   return { topHeading: firstLabel ?? heading ?? "Experience", inlineHeadings };
 }
 
-function ExperienceSection({
+// Exported for `ExperienceSection.test.tsx` only — the lifted "Other bullets"
+// remove control (#626) is a property of THIS component (it is what survives
+// the group's disappearance), so the regression test has to render it. Not
+// part of the surface any other module imports.
+export function ExperienceSection({
   heading,
   sectionLabels,
   groups,
@@ -406,6 +420,7 @@ function ExperienceSection({
   onEntryField,
   onAddBullet,
   captureBulletUndo,
+  summaryApply,
   onPruneEmpty,
 }: {
   /** Verbatim source heading (#285); falls back to "Experience" when absent. */
@@ -443,11 +458,32 @@ function ExperienceSection({
   /** Snapshot the slots a rewrite batch will write, for a one-action undo of
    *  the whole batch (issue 510). */
   captureBulletUndo: (targets: BulletUndoTargets) => () => void;
+  /** Write-back wiring for the summary section of the same proposal (#625), so
+   *  an accepted summary rewrite lands in `summaryOverride` — the slot the
+   *  inline Summary field writes — instead of being read-only redline. */
+  summaryApply: SectionRewriteApply;
   /** Drop a blank added entry when focus leaves the section (#379). */
   onPruneEmpty: () => void;
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
+
+  // The "Other bullets" bucket's remove confirmation is owned HERE, not in its
+  // RoleEntry (#626). `groupBulletsByExperience` appends that group only while
+  // it has at least one bullet, so removing its LAST bullet unmounts the role
+  // that triggered the remove — and would take the Undo strip with it. Every
+  // parsed role keeps owning its own (it survives losing its bullets, via
+  // `sliceGroups`' empty-group fallback), so only this one bucket lifts.
+  const otherCaptureUndo = useCallback(
+    (writes: readonly ResolvedWrite[]) =>
+      // No `onAddBullet` for this bucket — there is no experience entry to
+      // append to — so the entry key is never read by `batchUndoTargets`
+      // (it is consulted only for an "add" write, which this bucket never
+      // issues). A single-bullet remove is all #626 needs from this call site.
+      captureBulletUndo(batchUndoTargets(writes, "other-bullets")),
+    [captureBulletUndo],
+  );
+  const otherRemove = useBulletRemoveStatus(onRemoveBullet, otherCaptureUndo);
 
   const { topHeading, inlineHeadings } = computeExperienceHeadings(
     groups,
@@ -462,6 +498,9 @@ function ExperienceSection({
   // `SectionRewriteApply` so both rewrite paths write through one edit model.
   const rewriteApplyBySection = useMemo<ResumeRewriteApply>(() => {
     const map = new Map<string, SectionRewriteApply>();
+    // Section 0 of the chain is the summary; it is keyed by the same id
+    // `buildResumeSections` mints (#625).
+    map.set(SUMMARY_SECTION_ID, summaryApply);
     for (const group of groups) {
       const idx = group.experienceIndex;
       if (idx === null) continue;
@@ -488,6 +527,7 @@ function ExperienceSection({
     onRemoveBullet,
     onAddBullet,
     captureBulletUndo,
+    summaryApply,
   ]);
   // The whole-résumé rewrite CTA (#67) lives at the top of Experience next to
   // the picker. Trigger + panel render only when WebGPU is available AND
@@ -539,6 +579,11 @@ function ExperienceSection({
                   experienceIndex={null}
                   bulletOverrides={bulletOverrides}
                   onBulletChange={onBulletChange}
+                  onRemoveBullet={onRemoveBullet}
+                  // Section-owned control (see `otherRemove` above): this
+                  // RoleEntry drives it but does not host its strip, because
+                  // this RoleEntry is the thing that disappears.
+                  removeControl={otherRemove}
                 />
               );
             }
@@ -588,6 +633,10 @@ function ExperienceSection({
           })}
         </div>
       )}
+      {/* The "Other bullets" bucket's Removed/Reverted strip, hosted at section
+          level so it outlives the group. That bucket is always appended last,
+          so this is where its own strip would have rendered anyway. */}
+      {otherRemove.strip}
       <AddPill label="Add experience" onClick={onAddEntry} />
     </section>
   );
@@ -933,53 +982,11 @@ function AchievementsSection({
 
 // ── Whole-résumé rewrite (issue #67) ─────────────────────────────────────────
 
-/**
- * Build the chain-of-sections input the orchestrator (#67) sees.
- *
- * Summary (when non-empty) is section 0; every real experience role is then
- * appended in display order. Bullets honor #82 overrides so the model sees
- * the user's latest edits, not stale parsed text. The "Other bullets" group
- * (`experienceIndex === null`) is intentionally excluded — it has no parsed
- * role to anchor the prompt to, and rewriting it would produce orphan
- * bullets the panel has nowhere to attribute.
- *
- * Section ids are stable across renders for the same parse — `summary` for
- * the summary, `experience:<index>` for each role — so the hook's
- * stale-source guard (which compares ids) can tell "the section list
- * changed" from "react re-rendered with the same data."
- */
-export function buildResumeSections(
-  summary: string | undefined,
-  experienceGroups: readonly BulletGroup[],
-  bulletOverrides: BulletOverrides,
-): readonly SectionInput[] {
-  const out: SectionInput[] = [];
-  const trimmedSummary = summary?.trim();
-  if (trimmedSummary) {
-    out.push({
-      kind: "summary",
-      id: "summary",
-      label: "Summary",
-      text: trimmedSummary,
-    });
-  }
-  for (const group of experienceGroups) {
-    if (group.experienceIndex === null) continue;
-    if (group.bullets.length === 0) continue;
-    const exp = group.experience;
-    const label = roleLabel(exp);
-    const sectionBullets = group.bullets.map(
-      (b) => bulletOverrides?.[b.index] ?? b.text,
-    );
-    out.push({
-      kind: "experience",
-      id: `experience:${group.experienceIndex}`,
-      label,
-      bullets: sectionBullets,
-    });
-  }
-  return out;
-}
+// `buildResumeSections` — the chain-of-sections builder whose section 0 is the
+// summary — moved to ReconstructedSummary.tsx alongside the summary's other
+// writer (#625), so both sides of the one-override invariant sit in one file.
+// Re-exported so the existing public surface (and this file's test) is unchanged.
+export { buildResumeSections };
 
 // `roleLabel` now lives in group-bullets.ts (#508 — the per-role
 // SectionRewrite apply-confirmation copy needed the same label without a
@@ -1044,6 +1051,8 @@ export function ReconstructedResume({
     setEntryField,
     addBullet,
     captureBulletUndo,
+    summaryOverride,
+    setSummaryField,
     addSkill,
     removeSkill,
     renameSkillCategory,
@@ -1178,6 +1187,14 @@ export function ReconstructedResume({
     bulletOverrides,
   );
 
+  // The summary's second writer (#625). Memoized on the override slot alone
+  // (`setSummaryField` is stable) so an unrelated re-render doesn't churn the
+  // identity of `rewriteApplyBySection`, which feeds the proposal panel.
+  const summaryApply = useMemo(
+    () => summaryRewriteApply(summaryOverride, setSummaryField),
+    [summaryOverride, setSummaryField],
+  );
+
   // Always rendered (even with zero parsed achievements) so the "+ Add
   // achievement" affordance is reachable on every resume — matching Education /
   // Skills, which also render an add affordance unconditionally.
@@ -1278,6 +1295,14 @@ export function ReconstructedResume({
        *  existing `addSkill` inline-edit path. Renders nothing when there's
        *  no suggestion, including the unresolved-role case. */}
       <SkillTermGuidance parsed={parsed} onAddSkill={addSkill} />
+      {/* Summary leads the document body, matching the exported model's own
+       *  order (`ats-resume-model.ts`: Summary → Experience → …) so the preview
+       *  reads in the same sequence as the artifact (#625). */}
+      <SummarySection
+        heading={display.sectionHeadings?.get("summary")}
+        summary={parsed.summary}
+        onSummaryChange={setSummaryField}
+      />
       {achievementsAbove && achievementsSection}
       <ExperienceSection
         heading={display.sectionHeadings?.get("experience")}
@@ -1301,6 +1326,7 @@ export function ReconstructedResume({
         onEntryField={setEntryField}
         onAddBullet={addBullet}
         captureBulletUndo={captureBulletUndo}
+        summaryApply={summaryApply}
       />
       <ProjectsSection
         heading={display.sectionHeadings?.get("projects")}

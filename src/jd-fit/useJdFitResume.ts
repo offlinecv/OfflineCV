@@ -106,6 +106,7 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
       base.canonical.fieldConfidence,
       handoffEdit.achievementOverrides,
       handoffEdit.descriptionOverrides,
+      handoffEdit.summaryOverride,
     );
     const parsed = applied.fields;
     const score = computeAnonymousAtsScore({
@@ -130,6 +131,7 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
     handoffEdit.achievementOverrides,
     handoffEdit.descriptionOverrides,
     handoffEdit.skillsOverride,
+    handoffEdit.summaryOverride,
     handoffEdit.addedEntries,
     handoffEdit.addedBullets,
     handoffEdit.removedBullets,

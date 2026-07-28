@@ -17,24 +17,32 @@ import { ACTION_VERBS as SCORER_ACTION_VERBS } from "../../score/score.ts";
  *      present-progressive forms ("Building / Driving / Owning") in
  *      rewrite output. The scorer never sees those because users write
  *      résumés in past tense.
- *   2. Cross-discipline verbs — "analyzed / authored / wrote / programmed"
+ *   2. Cross-discipline verbs — "configured / debugged / drafted / wrote"
  *      are normal for IC and writing-heavy roles. The scorer set leans
  *      eng/PM and would over-penalize a research-coded résumé.
+ *
+ * (#622) Past-tense, general-register verbs that used to live only here
+ * ("shipped", "owned", "secured", "deployed", "engineered", "rewrote",
+ * "authored", "analyzed", "conducted", "identified", "presented",
+ * "produced", "published", "planned") were promoted into the scorer's base
+ * set — they belonged there, not in an eval-only carve-out. A test asserts
+ * this list stays disjoint from `ACTION_VERBS` so the two can't silently
+ * re-diverge.
  *
  * Weak generic verbs ("worked", "helped", "responsible", "assisted",
  * "participated") are deliberately absent — a bullet leading with one of
  * those SHOULD fail the criterion. That's the whole point.
  */
 
-const EVAL_ONLY_EXTENSIONS: readonly string[] = [
+// Exported so `verbs.test.ts` can assert this set stays disjoint from
+// `score.ts`'s `ACTION_VERBS` (#622) — everything else in this module stays
+// module-internal.
+export const EVAL_ONLY_EXTENSIONS: readonly string[] = [
   // Eng / data IC verbs the scorer set doesn't cover.
-  "analyzed", "authored", "configured", "debugged", "deployed",
-  "engineered", "investigated", "prototyped", "rewrote", "shipped",
-  "tested", "validated", "wrote",
+  "configured", "debugged", "investigated", "prototyped", "tested",
+  "validated", "wrote",
   // Cross-discipline (research / ops / comms) IC verbs.
-  "completed", "conducted", "drafted", "identified", "owned",
-  "performed", "planned", "presented", "produced", "published",
-  "secured", "tracked",
+  "completed", "drafted", "performed", "tracked",
   // Present-progressive forms small models sometimes emit.
   "building", "driving", "leading", "managing", "designing",
   "shipping", "scaling", "owning",

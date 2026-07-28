@@ -118,6 +118,35 @@ function applyContactOverrides(
   }
 }
 
+// ── Summary (#625) ──────────────────────────────────────────────────────────
+
+/**
+ * Fold the single-value summary override onto `nextParsed.summary` in place.
+ *
+ * `undefined` is "no override" — the parsed summary shows through. Any other
+ * value is authoritative, and a blank one CLEARS the field by deleting the key
+ * rather than storing `""`. Deleting is what makes the clear reach the export:
+ * `buildAtsResumeModel` emits `summary: parsed.summary?.trim() || undefined`,
+ * and `render-ats-pdf` gates BOTH the section heading and the body on
+ * `model.summary`, so an absent summary drops the whole section instead of
+ * leaving an orphan "Summary" heading over nothing.
+ *
+ * The scorer reads the same field (`COMPLETENESS_SUMMARY_MIN_CHARS`), so the
+ * edited text — not the parsed one — is what the ≥20-char threshold sees.
+ *
+ * A non-blank value is stored VERBATIM, untrimmed: the export and the scorer
+ * each trim for their own purposes, and re-trimming here would quietly rewrite
+ * text the user typed.
+ */
+function applySummaryOverride(
+  nextParsed: HeuristicParsedResume,
+  summary: string | undefined,
+): void {
+  if (summary === undefined) return;
+  if (summary.trim() === "") delete nextParsed.summary;
+  else nextParsed.summary = summary;
+}
+
 // ── Profile links (#335) ────────────────────────────────────────────────────
 
 /** The network label (`classifyProfile`) → legacy `_url` slot a back-fill
@@ -892,6 +921,11 @@ function applyAddedBulletsToExistingEntries(
  *                  edit path for a prose-body project (no `•` bullets). An empty
  *                  string clears the description; a non-empty value replaces it.
  *                  Default `{}`.
+ * @param summaryOverride the single-value summary edit (#625). `undefined` means
+ *                  no override; a blank string CLEARS `parsed.summary` (which
+ *                  drops the heading AND the body from the exported PDF); any
+ *                  other value replaces it verbatim. Feeds the Completeness
+ *                  ≥20-char threshold, so an edit re-grades. Default `undefined`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -910,6 +944,7 @@ export function applyOverrides(
   fieldConfidence: FieldConfidence = {},
   achievements: Record<number, AchievementFieldOverrides> = {},
   descriptionOverrides: DescriptionOverrides = {},
+  summaryOverride: string | undefined = undefined,
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -922,6 +957,9 @@ export function applyOverrides(
   };
 
   applyContactOverrides(nextParsed, contact);
+  // Summary (#625) — a top-level scalar like the contact fields, so it folds
+  // here rather than in one of the per-entry passes below.
+  applySummaryOverride(nextParsed, summaryOverride);
   // Fold the consolidated contact-link list (#427) into the legacy slots +
   // profiles mirror, returning the per-slot confidence edits (corrections → 1,
   // clears → 0, extra back-fills → 1) so the score + ContactCard read the edit.

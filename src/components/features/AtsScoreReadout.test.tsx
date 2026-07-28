@@ -50,6 +50,8 @@ function makeScore(): AnonymousAtsScore {
       max: 30,
       gradable: true,
       goodBullets: 8,
+      verbLedBullets: 8,
+      inWindowBullets: 8,
       totalBullets: 10,
     },
     completeness: {
@@ -126,6 +128,26 @@ describe("AtsScoreReadout tile anchors", () => {
   it("does not resurrect the dead #per-bullet-feedback anchor", () => {
     expect(tileAnchors(render(makeScore()))).not.toContain(
       "#per-bullet-feedback",
+    );
+  });
+});
+
+describe("Structure hint — two direct counts, not the fused sum (issue 624)", () => {
+  // The mislabel this guards: the Structure tile used to print the half-credit
+  // `goodBullets` sum under a "verb-led" label, so a résumé whose bullets were
+  // all in-window and none verb-led read as partially verb-led. `score.test.ts`
+  // pins the two new fields on the score object; this pins what the tile RENDERS
+  // from them — the layer the bug actually lived at.
+  it("renders 'verb-led 0/23 · length 23/23' for an all-in-window, none-verb-led résumé", () => {
+    const score = makeScore();
+    score.structure = {
+      ...score.structure,
+      verbLedBullets: 0,
+      inWindowBullets: 23,
+      totalBullets: 23,
+    };
+    expect(render(score).textContent).toContain(
+      "verb-led 0/23 · length 23/23",
     );
   });
 });
