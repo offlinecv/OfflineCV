@@ -175,7 +175,7 @@ describe("applyOverrides", () => {
 
   it("applies an experience team override and clears it on empty string", () => {
     const parsed = baseParsed();
-    parsed.experience[0].team = "Enterprise Platforms";
+    parsed.experience[0].team = "Payments Platform";
     const { fields: out } = applyOverrides(
       parsed,
       "raw",
@@ -199,7 +199,7 @@ describe("applyOverrides", () => {
     // A cleared team drops off entirely so the render/PDF emits no "· Team".
     expect(cleared.experience[0].team).toBeUndefined();
     // Original untouched.
-    expect(parsed.experience[0].team).toBe("Enterprise Platforms");
+    expect(parsed.experience[0].team).toBe("Payments Platform");
   });
 
   it("propagates a bullet edit to rawText, sections, and the matching description", () => {

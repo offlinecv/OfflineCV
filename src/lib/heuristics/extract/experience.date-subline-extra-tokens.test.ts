@@ -12,9 +12,9 @@
  * (`anchorCarriesOrgSignal`) checked only for a `·` on the anchor line,
  * without distinguishing the export's own signature from a real-résumé date
  * sub-line whose post-strip residue happens to contain middots — so a date
- * line like `01/2024 – 12/2024 · L7 · 18 engineers, 2 TLMs` reduced to
- * `L7 · 18 engineers, 2 TLMs`, tripped the check, and the branch took the
- * first anchor-line token (`L7`) as the company — silently discarding the
+ * line like `01/2024 – 12/2024 · M4 · 22 engineers, 3 squads` reduced to
+ * `M4 · 22 engineers, 3 squads`, tripped the check, and the branch took the
+ * first anchor-line token (`M4`) as the company — silently discarding the
  * real company on the title line above and dropping the location.
  *
  * The fix narrows the gate: the reconstructed-export shape emits a BARE title
@@ -48,93 +48,93 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google, Hyderabad",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad",
         fontSize: 11,
       },
       { text: "01/2024 – 12/2024", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
     ]);
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Hyderabad");
-    expect(role.team).toBe("Site Lead, Enterprise Platforms");
+    expect(role.team).toBe("Site Lead, Payments Platform");
   });
 
   it("row (b) — extra `·`-tokens on the date line MUST NOT become the company", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google, Hyderabad",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad",
         fontSize: 11,
       },
-      { text: "01/2024 – 12/2024 · L7 · 18 engineers, 2 TLMs", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      { text: "01/2024 – 12/2024 · M4 · 22 engineers, 3 squads", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
     ]);
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Hyderabad");
-    expect(role.team).toBe("Site Lead, Enterprise Platforms");
+    expect(role.team).toBe("Site Lead, Payments Platform");
     // The date-line data token must not appear in any parsed field.
-    expect(role.company).not.toBe("L7");
-    expect(role.team).not.toContain("L7");
+    expect(role.company).not.toBe("M4");
+    expect(role.team).not.toContain("M4");
   });
 
   it("row (c) — same as (b) with a country-suffixed location", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google, Hyderabad, India",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad, India",
         fontSize: 11,
       },
-      { text: "01/2024 – 12/2024 · L7 · 18 engineers, 2 TLMs", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      { text: "01/2024 – 12/2024 · M4 · 22 engineers, 3 squads", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
     ]);
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Hyderabad, India");
-    expect(role.team).toBe("Site Lead, Enterprise Platforms");
+    expect(role.team).toBe("Site Lead, Payments Platform");
   });
 
   it("row (d) unchanged — MIDDLE-segment company with extra date tokens still parses", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Google, Hyderabad, India · Site Lead, Enterprise Platforms",
+        text: "Sr. Engineering Manager · Globex, Hyderabad, India · Site Lead, Payments Platform",
         fontSize: 11,
       },
-      { text: "01/2024 – 12/2024 · L7 · 18 engineers, 2 TLMs", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      { text: "01/2024 – 12/2024 · M4 · 22 engineers, 3 squads", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
     ]);
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Hyderabad, India");
-    expect(role.team).toBe("Site Lead, Enterprise Platforms");
+    expect(role.team).toBe("Site Lead, Payments Platform");
   });
 
   it("row (e) — trailing-segment BARE company (no location) survives extra date tokens", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex",
         fontSize: 11,
       },
-      { text: "01/2024 – 12/2024 · L7 · 18 engineers, 2 TLMs", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      { text: "01/2024 – 12/2024 · M4 · 22 engineers, 3 squads", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
     ]);
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
-    expect(role.team).toBe("Site Lead, Enterprise Platforms");
-    expect(role.company).not.toBe("L7");
+    expect(role.company).toBe("Globex");
+    expect(role.team).toBe("Site Lead, Payments Platform");
+    expect(role.company).not.toBe("M4");
   });
 
   // Negative case (#639 review): the rotate that fixes rows b/c/e must NOT
@@ -150,7 +150,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
       { text: "EXPERIENCE", fontSize: 13 },
       { text: "Engineer · Team Lead · New York, NY", fontSize: 11 },
       { text: "01/2024 – 12/2024", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
     ]);
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
@@ -190,11 +190,11 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Hyderabad, India",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Hyderabad, India",
         fontSize: 11,
       },
       { text: "01/2024 – 12/2024", fontSize: 11 },
-      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
     ]);
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];

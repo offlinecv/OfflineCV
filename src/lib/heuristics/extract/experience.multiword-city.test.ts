@@ -178,7 +178,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Google, Hyderabad · Enterprise Platforms",
+        text: "Sr. Engineering Manager · Globex, Hyderabad · Payments Platform",
         fontSize: 11,
       },
       { text: "04/2021 – 12/2023", fontSize: 11 },
@@ -187,16 +187,16 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Hyderabad");
-    expect(role.team).toBe("Enterprise Platforms");
+    expect(role.team).toBe("Payments Platform");
   });
 
   it("row (d) unchanged — trailing `Company, SingleWordCity` still splits", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google, Hyderabad",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad",
         fontSize: 11,
       },
       { text: "04/2021 – 12/2023", fontSize: 11 },
@@ -205,7 +205,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Hyderabad");
   });
 
@@ -215,7 +215,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google, Mountain View",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Mountain View",
         fontSize: 11,
       },
       { text: "04/2021 – 12/2023", fontSize: 11 },
@@ -224,7 +224,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Mountain View");
   });
 
