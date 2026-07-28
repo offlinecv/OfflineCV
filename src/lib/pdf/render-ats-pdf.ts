@@ -19,6 +19,40 @@
  * word-wrapped by measuring with `font.widthOfTextAtSize`; bullets get a "• "
  * marker with a hanging indent.
  *
+ * Pagination is per line (`ensure`) PLUS keep-with-next reservations
+ * (`ensureBlock`, #629): a section heading reserves its rule and the first
+ * entry's keep-block, an entry header reserves all its wrapped header/sub-line
+ * lines plus its first bullet's keep-opening, and a standalone bullet that wraps
+ * reserves that same opening. So a heading or header can never be the last drawn
+ * line on a page.
+ *
+ * A wrapped bullet gets BOTH halves of the break-position guarantee: at least
+ * `BULLET_KEEP_LINES` of its lines sit on each side of any page break it
+ * straddles — never one line alone at a page bottom (#629, the orphan half) and
+ * never one line alone at a page top (#631, the widow half). The opening
+ * reservation (`bulletKeepLines`) covers the first side and, for a bullet too
+ * short to admit any legal split, the whole bullet; `ensureWrappedLine` places
+ * the break for the second side, pushing the trailing lines forward together
+ * rather than reserving the entire bullet — long bullets must stay divisible or
+ * pages de-densify.
+ *
+ * The same "never exactly one alone" rule applies one level up, to the BULLETS of
+ * an entry (#632): a page never opens on an entry's last bullet with nothing else
+ * of that entry above it. The second-to-last bullet carries the last one's
+ * keep-opening (`followKeepHeight`), so a break at that boundary moves both
+ * bullets forward together. Only that one boundary is constrained — earlier
+ * bullets paginate freely and no reservation ever spans the entry — because
+ * reserving a whole entry is the density failure #630 measured at ~100pt.
+ *
+ * Two deliberate limits keep those reservations from costing page density: a
+ * BODY-TEXT "header" (`headerBold: false` — the skills list) contributes at most
+ * `BODY_HEADER_KEEP_LINES`, and a reservation taller than a whole page is
+ * unsatisfiable and ignored outright. Every reservation is MEASURED by the same
+ * wrapping code that draws it (`measureTextHeight` / `measureBulletLines` /
+ * `measureHeaderRunsHeight` all share the draw path's line breaking), never
+ * estimated. This is manual pdf-lib layout, not an HTML/Chromium print path —
+ * CSS `break-after: avoid` / `orphans` / `widows` do not apply here.
+ *
  * The `rgb()` colors here are PDF graphics-state values (black text, a muted
  * gray rule) — NOT Tailwind tokens. The style guard scans component/feature
  * code, not this draw module.
@@ -43,6 +77,11 @@ const PAGE_HEIGHT = 792;
 const MARGIN = 54;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const CONTENT_BOTTOM = MARGIN;
+// Drawable height of a FRESH page — `newPage()` resets the cursor to
+// `PAGE_HEIGHT - MARGIN` and `ensure` stops at `CONTENT_BOTTOM`. This is exactly
+// the tallest reservation {@link Layout.ensureBlock} can satisfy, so anything
+// taller is unsatisfiable and must not be reserved (#629).
+const USABLE_PAGE_HEIGHT = PAGE_HEIGHT - MARGIN - CONTENT_BOTTOM;
 
 // ── Type scale (points) ───────────────────────────────────────────────────────
 //
@@ -79,9 +118,41 @@ const GAP_BEFORE_SECTION = 12;
 const GAP_AFTER_RULE = 6;
 const GAP_BETWEEN_ENTRIES = 7;
 const GAP_AFTER_HEADER = 2;
+// Vertical space the section-heading rule consumes (`drawRule`). Named because
+// the keep-with-next reservation for a section heading must include it (#629) —
+// the heading, its rule, and the first line of its content move as one unit.
+const RULE_HEIGHT = 2;
 
 const BULLET_MARKER = "• ";
 const BULLET_INDENT = 12; // hanging-indent width for wrapped bullet lines
+
+// Minimum drawn lines of a wrapped bullet that must land on EACH side of a page
+// break it straddles — the orphan half (#629, no lone line at a page bottom) and
+// the widow half (#631, no lone line at a page top) of one symmetric rule. It
+// follows that the legal split positions of an N-line bullet are exactly
+// `[BULLET_KEEP_LINES, N - BULLET_KEEP_LINES]`, an interval that is EMPTY when
+// `N < 2 * BULLET_KEEP_LINES` — which is why a three-line bullet is indivisible
+// and has to move whole (see `bulletKeepLines`).
+const BULLET_KEEP_LINES = 2;
+
+/**
+ * How many of a bullet's `total` drawn lines its OPENING reservation must keep
+ * together (#629/#631).
+ *
+ * A bullet with no legal split position (`total < 2 * BULLET_KEEP_LINES`) is
+ * indivisible: every break inside it would strand fewer than `BULLET_KEEP_LINES`
+ * lines on one side, so the reservation is the whole bullet and the break falls
+ * before it. That is the three-line case #631 is about — reserving two lines
+ * draws two and leaves the third alone at the next page's top.
+ *
+ * A longer bullet reserves ONLY its orphan-safe opening and stays divisible;
+ * {@link Layout.ensureWrappedLine} then places the break so the tail keeps
+ * `BULLET_KEEP_LINES` lines too. Reserving such a bullet whole would de-densify
+ * pages by its full height — the failure mode #630 measured on the skills list.
+ */
+function bulletKeepLines(total: number): number {
+  return total < 2 * BULLET_KEEP_LINES ? total : BULLET_KEEP_LINES;
+}
 
 // Minimum blank gutter (pt) kept between the wrapped header text and the
 // flush-right date tail (#436). Without a reserve the header text wraps to the
@@ -417,6 +488,43 @@ function groupRunsIntoWords(
 }
 
 /**
+ * Options for {@link Layout.drawText}. Named (rather than inlined in the
+ * signature) so {@link Layout.measureTextHeight} can take the IDENTICAL options
+ * — a keep-with-next reservation (#629) is only sound if it is measured by the
+ * same wrapping decision that will draw it.
+ */
+type DrawTextOpts = {
+  bold?: boolean;
+  size?: number;
+  color?: RGB;
+  x?: number;
+  hangingIndent?: number;
+  uppercase?: boolean;
+  atomicSegments?: boolean;
+  /** A short tail (a role/degree date range) drawn FLUSH-RIGHT, regular
+   *  weight, on the first wrapped line's baseline (#425). */
+  rightText?: string;
+  rightColor?: RGB;
+  rightSize?: number;
+  /** Register a clickable URI annotation over the whole first line (#425). */
+  linkUrl?: string;
+  /** Register a clickable URI annotation over each `display` substring found
+   *  in the first line (#425 — the contact line's link slugs). Applied only
+   *  when the text fits on ONE line, so measured offsets are accurate. */
+  linkSpans?: Array<{ display: string; href: string }>;
+  /** Paginate the wrapped lines under widow control (#631) — see
+   *  {@link Layout.ensureWrappedLine}. Set only by {@link Layout.drawBullet}; a
+   *  header/contact/summary block keeps the plain per-line behaviour. Not an
+   *  input to wrapping, so {@link Layout.measureTextHeight} ignores it. */
+  widowControl?: boolean;
+  /** Height (pt) that must land on the same page as this block's FINAL drawn
+   *  line — the NEXT bullet's keep-opening (#632). Set only by
+   *  {@link Layout.drawBullet}, and only for an entry's second-to-last bullet.
+   *  Like `widowControl`, not an input to wrapping. */
+  followKeepHeight?: number;
+};
+
+/**
  * Mutable cursor + page state threaded through the draw routines. We keep one
  * "current page" and append new pages as the cursor overflows.
  */
@@ -480,6 +588,81 @@ class Layout {
   /** Ensure room for `height` pt; add a page if the cursor would overflow. */
   private ensure(height: number) {
     if (this.y - height < CONTENT_BOTTOM) this.newPage();
+  }
+
+  /**
+   * Reserve `height` pt for an INDIVISIBLE block — a keep-with-next group such
+   * as "entry header + its first bullet line" or "section heading + rule + one
+   * line of content" (#629). Arithmetically identical to the per-line
+   * {@link ensure}; the difference is the caller's contract, not the maths.
+   * `ensure` is handed one line and may legitimately break right after it,
+   * whereas this is handed a whole group and guarantees the group STARTS on a
+   * page that can hold all of it — so the per-line `ensure` calls that draw the
+   * group cannot fire a second break inside it.
+   *
+   * A reservation TALLER than a whole empty page is UNSATISFIABLE, and is
+   * therefore ignored outright rather than broken to (#629). Deferring it cannot
+   * make it fit, and doing so actively causes the defect this method exists to
+   * prevent: on a "heading + oversized first entry" pair, the heading's
+   * reservation breaks to a fresh page, the entry's own equally-unsatisfiable
+   * reservation immediately breaks again, and the heading is left alone on a page
+   * of its own — a wasted page plus the exact stranding AC3 forbids. Ignoring it
+   * hands the block back to the per-line {@link ensure} calls that draw it, which
+   * fill the current page and break naturally. The comparison is against
+   * {@link USABLE_PAGE_HEIGHT}, so a block exactly that tall still counts as
+   * satisfiable.
+   */
+  ensureBlock(height: number) {
+    if (height > USABLE_PAGE_HEIGHT) return;
+    this.ensure(height);
+  }
+
+  /**
+   * Paginate ONE line (`index` of `total`) of a wrapped block, honouring widow
+   * control (#631).
+   *
+   * Without it, or on a block too short to split legally, this is the plain
+   * per-line {@link ensure}. With it, the line `BULLET_KEEP_LINES` from the end
+   * reserves the whole TAIL rather than itself: if the tail fits, the block
+   * cannot end with fewer than `BULLET_KEEP_LINES` lines on the next page; if it
+   * does not, the break happens HERE instead of one line later, carrying the tail
+   * forward as a unit. Only that one line needs the wider reservation — every
+   * earlier line breaking naturally leaves the tail intact, and every later line
+   * is inside a tail already placed.
+   *
+   * The other side of the break is guaranteed by the caller's OPENING
+   * reservation ({@link bulletKeepLines}): it committed `BULLET_KEEP_LINES` lines
+   * to the page the block starts on, and a block reaching this branch has
+   * `total >= 2 * BULLET_KEEP_LINES`, so the lines before the tail are at least
+   * that many. A block whose own height exceeds a page simply breaks more than
+   * once; a fresh page always holds a tail this short, so the reservation here
+   * can never be unsatisfiable.
+   *
+   * `followKeep` (#632) is height that must land on the SAME page as this block's
+   * FINAL line — the next bullet's keep-opening. The tail reservation is the one
+   * that covers that final line for a DIVISIBLE block, so it is also the one that
+   * must carry the follow: either both fit here, or the break moves up and the
+   * tail travels forward together with what follows it. An indivisible block
+   * never reaches this branch — its opening reservation covers its final line, so
+   * {@link drawBullet} folds the follow in there instead. Bounded by construction:
+   * `BULLET_KEEP_LINES` plus at most `2 * BULLET_KEEP_LINES - 1` follow lines,
+   * far under a page, so this stays satisfiable.
+   */
+  private ensureWrappedLine(
+    index: number,
+    total: number,
+    lineHeight: number,
+    opts: { widowControl?: boolean; followKeepHeight?: number },
+  ) {
+    const startsTail =
+      (opts.widowControl ?? false) &&
+      total >= 2 * BULLET_KEEP_LINES &&
+      index === total - BULLET_KEEP_LINES;
+    this.ensure(
+      startsTail
+        ? BULLET_KEEP_LINES * lineHeight + (opts.followKeepHeight ?? 0)
+        : lineHeight,
+    );
   }
 
   advance(points: number) {
@@ -564,41 +747,28 @@ class Layout {
   }
 
   /**
-   * Draw a wrapped block of text. `x` is the left edge; `hangingIndent`
-   * indents continuation lines (for bullet hanging indent). `atomicSegments`
-   * opts into segment-atomic middot wrapping (see `wrap()` above) — leave it
-   * unset/`false` for ordinary header/entry lines; the skills entry is the
-   * only caller that sets it `true` (#307).  Returns nothing; mutates the
-   * cursor and paginates as needed.
+   * Resolve everything a {@link drawText} call needs BEFORE it touches the page:
+   * the font, the sanitized value, the flush-right tail, and the wrapped lines.
+   * Shared with {@link measureTextHeight} so a keep-with-next reservation (#629)
+   * is measured by exactly the wrapping that will draw it — one layout pass'
+   * worth of logic, called once per measure and once per draw, never forked into
+   * a second implementation that could disagree.
    */
-  drawText(
+  private resolveDrawLines(
     text: string,
-    opts: {
-      bold?: boolean;
-      size?: number;
-      color?: RGB;
-      x?: number;
-      hangingIndent?: number;
-      uppercase?: boolean;
-      atomicSegments?: boolean;
-      /** A short tail (a role/degree date range) drawn FLUSH-RIGHT, regular
-       *  weight, on the first wrapped line's baseline (#425). */
-      rightText?: string;
-      rightColor?: RGB;
-      rightSize?: number;
-      /** Register a clickable URI annotation over the whole first line (#425). */
-      linkUrl?: string;
-      /** Register a clickable URI annotation over each `display` substring found
-       *  in the first line (#425 — the contact line's link slugs). Applied only
-       *  when the text fits on ONE line, so measured offsets are accurate. */
-      linkSpans?: Array<{ display: string; href: string }>;
-    } = {},
-  ) {
+    opts: DrawTextOpts,
+  ): {
+    lines: string[];
+    font: PdfFont;
+    size: number;
+    x: number;
+    lineHeight: number;
+    rValue: string;
+    rSize: number;
+  } {
     const size = opts.size ?? SIZE_BODY;
     const font = opts.bold ? this.fonts.bold : this.fonts.regular;
-    const color = opts.color ?? this.black;
     const x = opts.x ?? MARGIN;
-    const hanging = opts.hangingIndent ?? 0;
     // Sanitize LAST — after the case transform — so a case-expansion can never
     // produce an un-encodable glyph downstream. `toUpperCase()` maps some
     // WinAnsi-native lowercase letters to glyphs with NO WinAnsi representation
@@ -633,10 +803,36 @@ class Layout {
       atomic,
       rightReserve,
     );
-    const lineHeight = size * LINE_GAP;
+    return { lines, font, size, x, lineHeight: size * LINE_GAP, rValue, rSize };
+  }
+
+  /**
+   * Height (pt) a {@link drawText} call with the SAME `text`/`opts` will
+   * occupy — its wrapped line count times its line height. Pure: measures
+   * without touching the page or the cursor. The keep-with-next reservations
+   * (#629) are built from this, so a reservation can never be a guess.
+   */
+  measureTextHeight(text: string, opts: DrawTextOpts = {}): number {
+    const { lines, lineHeight } = this.resolveDrawLines(text, opts);
+    return lines.length * lineHeight;
+  }
+
+  /**
+   * Draw a wrapped block of text. `x` is the left edge; `hangingIndent`
+   * indents continuation lines (for bullet hanging indent). `atomicSegments`
+   * opts into segment-atomic middot wrapping (see `wrap()` above) — leave it
+   * unset/`false` for ordinary header/entry lines; the skills entry is the
+   * only caller that sets it `true` (#307).  Returns nothing; mutates the
+   * cursor and paginates as needed.
+   */
+  drawText(text: string, opts: DrawTextOpts = {}) {
+    const { lines, font, size, x, lineHeight, rValue, rSize } =
+      this.resolveDrawLines(text, opts);
+    const color = opts.color ?? this.black;
+    const hanging = opts.hangingIndent ?? 0;
     const singleLine = lines.length === 1;
     for (let i = 0; i < lines.length; i++) {
-      this.ensure(lineHeight);
+      this.ensureWrappedLine(i, lines.length, lineHeight, opts);
       const lineX = i === 0 ? x : x + hanging;
       const topY = this.y;
       this.page.drawText(lines[i], {
@@ -647,48 +843,85 @@ class Layout {
         color,
       });
       if (i === 0) {
-        // Flush-right date tail on the first line's baseline (#425), right-
-        // aligned to the content margin and drawn regular-weight/muted.
-        if (opts.rightText) {
-          const rFont = this.fonts.regular;
-          const rX = PAGE_WIDTH - MARGIN - rFont.widthOfTextAtSize(rValue, rSize);
-          this.page.drawText(rValue, {
-            x: rX,
-            y: topY - size,
-            size: rSize,
-            font: rFont,
-            color: opts.rightColor ?? color,
-          });
-        }
-        // Clickable annotation over the whole first line (#425).
-        if (opts.linkUrl) {
-          const w = font.widthOfTextAtSize(lines[0], size);
-          this.registerLink(lineX, topY - size, lineX + w, topY, opts.linkUrl);
-        }
-        // Per-substring link annotations (#425 contact-line slugs). Measure
-        // against the DRAWN first line (whitespace already collapsed by wrap);
-        // skip if the text wrapped so offsets stay accurate. Drawn glyphs are
-        // untouched either way, so the text round-trip is unaffected.
-        //
-        // Search from a running offset that advances past each matched span, so
-        // a display that is a SUBSTRING of an earlier part (e.g. website slug
-        // `example.com` inside email `jane@example.com`, and the email is drawn
-        // first) can't match inside that earlier part and land the rect on the
-        // wrong text. The spans are supplied in draw order, so a monotonic offset
-        // maps each to its own occurrence.
-        if (opts.linkSpans && singleLine) {
-          let searchFrom = 0;
-          for (const span of opts.linkSpans) {
-            const idx = lines[0].indexOf(span.display, searchFrom);
-            if (idx < 0) continue;
-            const x0 = lineX + font.widthOfTextAtSize(lines[0].slice(0, idx), size);
-            const x1 = x0 + font.widthOfTextAtSize(span.display, size);
-            this.registerLink(x0, topY - size, x1, topY, span.href);
-            searchFrom = idx + span.display.length;
-          }
-        }
+        this.decorateFirstLine(opts, {
+          line: lines[0],
+          lineX,
+          topY,
+          font,
+          size,
+          color,
+          rValue,
+          rSize,
+          singleLine,
+        });
       }
       this.advance(lineHeight);
+    }
+  }
+
+  /**
+   * Draw the first line's optional decorations: the flush-right date tail, a
+   * whole-line link annotation, and per-substring link annotations (#425).
+   *
+   * Split out of {@link drawText} purely to keep that method's line loop
+   * readable — all three apply only to `i === 0`, none touches the cursor, and
+   * none participates in wrapping or pagination. Extracting them therefore
+   * cannot drift measurement from drawing (the #629 invariant): the geometry
+   * they consume is passed in, already resolved by `resolveDrawLines`.
+   */
+  private decorateFirstLine(
+    opts: DrawTextOpts,
+    geom: {
+      line: string;
+      lineX: number;
+      topY: number;
+      font: PdfFont;
+      size: number;
+      color: RGB;
+      rValue: string;
+      rSize: number;
+      singleLine: boolean;
+    },
+  ) {
+    const { line, lineX, topY, font, size, color, rValue, rSize } = geom;
+    // Flush-right date tail on the first line's baseline (#425), right-aligned
+    // to the content margin and drawn regular-weight/muted.
+    if (opts.rightText) {
+      const rFont = this.fonts.regular;
+      const rX = PAGE_WIDTH - MARGIN - rFont.widthOfTextAtSize(rValue, rSize);
+      this.page.drawText(rValue, {
+        x: rX,
+        y: topY - size,
+        size: rSize,
+        font: rFont,
+        color: opts.rightColor ?? color,
+      });
+    }
+    // Clickable annotation over the whole first line (#425).
+    if (opts.linkUrl) {
+      const w = font.widthOfTextAtSize(line, size);
+      this.registerLink(lineX, topY - size, lineX + w, topY, opts.linkUrl);
+    }
+    // Per-substring link annotations (#425 contact-line slugs). Measure against
+    // the DRAWN first line (whitespace already collapsed by wrap); skip if the
+    // text wrapped so offsets stay accurate. Drawn glyphs are untouched either
+    // way, so the text round-trip is unaffected.
+    //
+    // Search from a running offset that advances past each matched span, so a
+    // display that is a SUBSTRING of an earlier part (e.g. website slug
+    // `example.com` inside email `jane@example.com`, and the email is drawn
+    // first) can't match inside that earlier part and land the rect on the wrong
+    // text. The spans are supplied in draw order, so a monotonic offset maps each
+    // to its own occurrence.
+    if (!opts.linkSpans || !geom.singleLine) return;
+    let searchFrom = 0;
+    for (const span of opts.linkSpans) {
+      const idx = line.indexOf(span.display, searchFrom);
+      if (idx < 0) continue;
+      const x0 = lineX + font.widthOfTextAtSize(line.slice(0, idx), size);
+      const x1 = x0 + font.widthOfTextAtSize(span.display, size);
+      this.registerLink(x0, topY - size, x1, topY, span.href);
+      searchFrom = idx + span.display.length;
     }
   }
 
@@ -701,13 +934,85 @@ class Layout {
    * sentinel markers, so the round-trip text is byte-identical to the source —
    * including any literal `**` a user typed, which is drawn verbatim (#284/#425).
    */
-  drawBullet(text: string, size: number, hangingIndent: number) {
+  drawBullet(
+    text: string,
+    size: number,
+    hangingIndent: number,
+    opts: { alreadyReserved?: boolean; followKeepHeight?: number } = {},
+  ) {
+    // Break-position control (#629 orphan half, #631 widow half): a wrapped
+    // bullet reserves `bulletKeepLines` lines before it starts, so it can never
+    // leave its first line alone at a page bottom — and, when it is too short to
+    // split legally at all, that reservation IS its full height, so it can never
+    // leave its last line alone at a page top either. A longer bullet stays
+    // divisible; `widowControl` below places its break so the tail keeps
+    // `BULLET_KEEP_LINES` lines too. A one-line bullet keeps the plain per-line
+    // behaviour.
+    //
+    // `alreadyReserved` is the entry header's first bullet — `entryKeepHeight`
+    // already folded THIS reservation into the keep-block, so re-reserving here
+    // would move the bullet and STRAND the header that reservation just
+    // guaranteed against. Per #629's composition decision the two rules compose
+    // rather than sum: both call `bulletKeepLines`, so neither reserves a long
+    // bullet's FULL height. Widow control is unaffected either way — it lives in
+    // the draw loop, not the reservation, so the first bullet gets it too.
+    //
+    // `followKeepHeight` (#632) is the NEXT bullet's keep-opening, and the rule
+    // placing it is one line: whichever reservation covers THIS bullet's final
+    // drawn line must also cover the follow. For an INDIVISIBLE bullet
+    // (`bulletKeepLines(total) === total`) that is this opening reservation, so it
+    // is added here; for a divisible one it is the tail reservation, so
+    // {@link ensureWrappedLine} adds it instead and this opening stays exactly
+    // what #629/#631 made it. The two cases are exclusive — never summed — so the
+    // follow is reserved once and the reservation stays bounded to two bullets'
+    // keep-openings, never the whole entry.
+    const lineHeight = size * LINE_GAP;
+    const followKeep = opts.followKeepHeight ?? 0;
+    if (!opts.alreadyReserved) {
+      const total = this.measureBulletLines(text, size, hangingIndent);
+      const keep = bulletKeepLines(total);
+      const height = keep * lineHeight + (keep === total ? followKeep : 0);
+      // A bare one-line reservation is what the first line's own `ensure` already
+      // does, so reserve only when the block asks for more than that.
+      if (height > lineHeight) this.ensureBlock(height);
+    }
     const marked = autoBoldMetrics(text);
     if (!marked.includes(EMPHASIS_OPEN)) {
-      this.drawText(`${BULLET_MARKER}${text}`, { size, hangingIndent });
+      this.drawText(`${BULLET_MARKER}${text}`, {
+        size,
+        hangingIndent,
+        widowControl: true,
+        followKeepHeight: followKeep,
+      });
       return;
     }
-    this.drawRuns(parseBoldRuns(marked), size, hangingIndent);
+    this.drawRuns(parseBoldRuns(marked), size, hangingIndent, {
+      widowControl: true,
+      followKeepHeight: followKeep,
+    });
+  }
+
+  /**
+   * How many lines {@link drawBullet} will draw for the same arguments, counted
+   * through whichever wrapping path will draw it (#629). A LINE COUNT rather
+   * than a height because both reservation rules are stated in lines
+   * ({@link bulletKeepLines}), and deriving the count back out of a height would
+   * put a division between the measurement and the decision it feeds.
+   */
+  measureBulletLines(
+    text: string,
+    size: number,
+    hangingIndent: number,
+  ): number {
+    const marked = autoBoldMetrics(text);
+    if (!marked.includes(EMPHASIS_OPEN)) {
+      return this.resolveDrawLines(`${BULLET_MARKER}${text}`, {
+        size,
+        hangingIndent,
+      }).lines.length;
+    }
+    return this.wrapRuns(parseBoldRuns(marked), size, hangingIndent, BULLET_MARKER)
+      .length;
   }
 
   /**
@@ -721,29 +1026,30 @@ class Layout {
     this.drawRuns(parseBoldRuns(text), size, 0, { marker: "", color: this.black });
   }
 
+  /** Height (pt) {@link drawHeaderRuns} will occupy for the same text (#629). */
+  measureHeaderRunsHeight(text: string, size: number): number {
+    return (
+      this.wrapRuns(parseBoldRuns(text), size, 0, "").length * (size * LINE_GAP)
+    );
+  }
+
   /**
-   * Draw a sequence of `{ text, bold }` runs with word-level wrapping. A "word"
-   * is a run of non-whitespace that may span a bold→regular boundary (so mid-
-   * word emphasis draws correctly); words are separated by a single space. A
-   * leading `marker` (the bullet "• " by default, "" for a header) leads the
-   * first line; continuation lines use `hangingIndent`. Bold is preserved across
-   * wraps because it is tracked per chunk, not per line.
+   * Break `runs` into drawn lines WITHOUT touching the page — the pure half of
+   * {@link drawRuns}, so a reservation and the draw that follows it agree by
+   * construction (#629). A "word" is a run of non-whitespace that may span a
+   * bold→regular boundary (so mid-word emphasis draws correctly); words are
+   * separated by a single space. The `marker` (the bullet "• ", or "" for a
+   * header) occupies the start of the first line; continuation lines start at
+   * `hangingIndent`. An empty run list yields one empty line, matching what the
+   * draw loop emits.
    */
-  private drawRuns(
+  private wrapRuns(
     runs: Array<{ text: string; bold: boolean }>,
     size: number,
     hangingIndent: number,
-    opts: { marker?: string; color?: RGB } = {},
-  ) {
-    const marker = opts.marker ?? BULLET_MARKER;
-    const color = opts.color ?? this.black;
-    const words = groupRunsIntoWords(
-      runs,
-      size,
-      this.fonts,
-      this.sanitize,
-    );
-
+    marker: string,
+  ): WordChunk[][][] {
+    const words = groupRunsIntoWords(runs, size, this.fonts, this.sanitize);
     const wordWidth = (w: WordChunk[]) =>
       w.reduce((sum, c) => sum + c.width, 0);
     const space = this.fonts.regular.widthOfTextAtSize(" ", size);
@@ -751,32 +1057,94 @@ class Layout {
       ? this.fonts.regular.widthOfTextAtSize(marker, size)
       : 0;
     const rightEdge = PAGE_WIDTH - MARGIN;
-    const lineHeight = size * LINE_GAP;
 
-    this.ensure(lineHeight);
-    if (marker) {
-      this.page.drawText(marker, {
-        x: MARGIN,
-        y: this.y - size,
-        size,
-        font: this.fonts.regular,
-        color,
-      });
-    }
+    const lines: WordChunk[][][] = [];
+    let current: WordChunk[][] = [];
     let x = MARGIN + markerWidth;
     let atLineStart = true;
-
     for (const word of words) {
       const ww = wordWidth(word);
       // Wrap before a word (never the first on a line) that would overflow.
       if (!atLineStart && x + space + ww > rightEdge) {
-        this.advance(lineHeight);
-        this.ensure(lineHeight);
+        lines.push(current);
+        current = [];
         x = MARGIN + hangingIndent;
         atLineStart = true;
       }
       if (!atLineStart) x += space;
-      for (const chunk of word) {
+      x += ww;
+      current.push(word);
+      atLineStart = false;
+    }
+    lines.push(current);
+    return lines;
+  }
+
+  /**
+   * Draw a sequence of `{ text, bold }` runs with word-level wrapping, breaking
+   * to a new page between lines as needed. Line breaking itself lives in
+   * {@link wrapRuns}; this walks the resulting lines and draws them. Bold is
+   * preserved across wraps because it is tracked per chunk, not per line.
+   */
+  private drawRuns(
+    runs: Array<{ text: string; bold: boolean }>,
+    size: number,
+    hangingIndent: number,
+    opts: {
+      marker?: string;
+      color?: RGB;
+      widowControl?: boolean;
+      followKeepHeight?: number;
+    } = {},
+  ) {
+    const marker = opts.marker ?? BULLET_MARKER;
+    const color = opts.color ?? this.black;
+    const lines = this.wrapRuns(runs, size, hangingIndent, marker);
+    const space = this.fonts.regular.widthOfTextAtSize(" ", size);
+    const markerWidth = marker
+      ? this.fonts.regular.widthOfTextAtSize(marker, size)
+      : 0;
+    const lineHeight = size * LINE_GAP;
+
+    for (let i = 0; i < lines.length; i++) {
+      this.ensureWrappedLine(i, lines.length, lineHeight, opts);
+      if (i === 0 && marker) {
+        this.page.drawText(marker, {
+          x: MARGIN,
+          y: this.y - size,
+          size,
+          font: this.fonts.regular,
+          color,
+        });
+      }
+      this.drawRunWords(
+        lines[i],
+        i === 0 ? MARGIN + markerWidth : MARGIN + hangingIndent,
+        { size, color, space },
+      );
+      this.advance(lineHeight);
+    }
+  }
+
+  /**
+   * Draw one already-wrapped line of runs, left to right from `startX`, switching
+   * font per chunk so bold survives a wrap.
+   *
+   * Split out of {@link drawRuns} to flatten its loop nest; this walks words and
+   * their chunks at a fixed baseline and never paginates or moves the cursor, so
+   * line breaking stays wholly in {@link wrapRuns} and cannot drift from what was
+   * measured (#629).
+   */
+  private drawRunWords(
+    words: Array<Array<{ str: string; bold: boolean; width: number }>>,
+    startX: number,
+    opts: { size: number; color: RGB; space: number },
+  ) {
+    const { size, color, space } = opts;
+    let x = startX;
+    for (let w = 0; w < words.length; w++) {
+      if (w > 0) x += space;
+      for (const chunk of words[w]) {
         this.page.drawText(chunk.str, {
           x,
           y: this.y - size,
@@ -786,20 +1154,18 @@ class Layout {
         });
         x += chunk.width;
       }
-      atLineStart = false;
     }
-    this.advance(lineHeight);
   }
 
   drawRule() {
-    this.ensure(2);
+    this.ensure(RULE_HEIGHT);
     this.page.drawLine({
       start: { x: MARGIN, y: this.y },
       end: { x: PAGE_WIDTH - MARGIN, y: this.y },
       thickness: 0.75,
       color: this.gray,
     });
-    this.advance(2);
+    this.advance(RULE_HEIGHT);
   }
 }
 
@@ -884,14 +1250,26 @@ export async function renderAtsResumePdf(
 
   // ── Summary ──
   if (model.summary) {
-    drawSectionHeading(layout, model.summaryHeading ?? "Summary");
+    // The summary body is plain wrapped text, so the heading must keep one BODY
+    // line with it (#629).
+    drawSectionHeading(layout, model.summaryHeading ?? "Summary", SIZE_BODY * LINE_GAP);
     layout.drawText(model.summary, { size: SIZE_BODY });
     layout.advance(GAP_BETWEEN_ENTRIES);
   }
 
   // ── Sections ──
   for (const section of model.sections) {
-    drawSectionHeading(layout, section.heading);
+    // Keep-with-next (#629): the heading reserves its rule, its trailing gap AND
+    // the whole keep-block of its first entry. Reserving only "heading + one
+    // line" would let the entry's own reservation fire immediately afterwards and
+    // move the entry to the next page, stranding the heading it just committed.
+    drawSectionHeading(
+      layout,
+      section.heading,
+      section.entries.length > 0
+        ? entryKeepHeight(layout, section.entries[0], muted)
+        : 0,
+    );
     for (let i = 0; i < section.entries.length; i++) {
       drawEntry(layout, section.entries[i], muted);
       if (i < section.entries.length - 1) layout.advance(GAP_BETWEEN_ENTRIES);
@@ -928,14 +1306,233 @@ export async function renderAtsResumePdf(
   return doc.save();
 }
 
-function drawSectionHeading(layout: Layout, heading: string) {
+/** The `drawText` options for a section/summary heading — shared by the draw and
+ *  its keep-with-next measurement (#629) so the two cannot drift. */
+const HEADING_OPTS = {
+  bold: true,
+  size: SIZE_SECTION,
+  uppercase: true,
+} as const;
+
+/**
+ * Draw a section (or Summary) heading plus its rule. `followHeight` is the
+ * keep-with-next payload — the height of the first thing that must land on the
+ * SAME page as the heading (#629), i.e. the first entry's keep-block, or one body
+ * line for the Summary. Passing `0` (an empty section) degrades to the plain
+ * "heading must itself fit" behaviour.
+ */
+function drawSectionHeading(
+  layout: Layout,
+  heading: string,
+  followHeight: number,
+) {
   layout.advance(GAP_BEFORE_SECTION);
-  layout.drawText(heading, { bold: true, size: SIZE_SECTION, uppercase: true });
+  layout.ensureBlock(
+    layout.measureTextHeight(heading, HEADING_OPTS) +
+      RULE_HEIGHT +
+      GAP_AFTER_RULE +
+      followHeight,
+  );
+  layout.drawText(heading, HEADING_OPTS);
   layout.drawRule();
   layout.advance(GAP_AFTER_RULE);
 }
 
+/** The `drawText` options for an entry's header line — shared by the draw and its
+ *  keep-with-next measurement (#629). */
+function headerLineOpts(entry: AtsEntry, mutedColor: RGB): DrawTextOpts {
+  return {
+    // Every header is bold EXCEPT where the model opts out — the skills list,
+    // which reads as regular-weight body text (#425).
+    bold: entry.headerBold ?? true,
+    size: SIZE_HEADER,
+    atomicSegments: entry.atomicSegments,
+    hangingIndent: entry.headerHangingIndent,
+    // Flush-right date on the header line (#425) — set for a title-less role /
+    // degree-less program, where the org/date anchor lives on the header.
+    rightText: entry.headerLineDate,
+    rightColor: mutedColor,
+    rightSize: SIZE_SUB,
+  };
+}
+
+/** The `drawText` options for an entry's sub-line — shared by the draw and its
+ *  keep-with-next measurement (#629). See `drawEntry` for why the middot
+ *  segments are atomic here. */
+function subLineOpts(entry: AtsEntry, mutedColor: RGB): DrawTextOpts {
+  return {
+    size: SIZE_SUB,
+    color: mutedColor,
+    atomicSegments: true,
+    // Flush-right date on the sub-line (#425) — set for a titled role /
+    // degreed entry, where the org anchor lives on the sub-line.
+    rightText: entry.subLineDate,
+    rightColor: mutedColor,
+    rightSize: SIZE_SUB,
+  };
+}
+
+/**
+ * How many header lines a BODY-TEXT header line contributes to a keep-with-next
+ * reservation, at most (#629). Two, because that is the smallest unit with any
+ * widow value — it is the same orphan rule `drawBullet` applies to a wrapped
+ * bullet: the block's first line is never left alone at a page bottom. One would
+ * add nothing over the plain per-line `ensure`; three or more starts trading real
+ * page density for a guarantee body text does not need, since it is divisible.
+ */
+const BODY_HEADER_KEEP_LINES = 2;
+
+/**
+ * The entry header block's contribution (pt) to the keep-with-next reservation —
+ * its (possibly wrapped) header line plus, when present, the gap and its
+ * (possibly wrapped) sub-line. `0` for a bullets-only entry. Measured through the
+ * SAME option builders the draw uses, so a multi-line header reserves ALL of its
+ * wrapped lines, not one (#629).
+ *
+ * ALL of them, that is, for a real header. `headerBold: false` is the model saying
+ * this entry's "header" is regular-weight BODY text, not a header — set only by
+ * the two skills paths in `ats-resume-model.ts` (the flat `skills.join(" · ")`
+ * entry and one per category), whose single header line carries the entire skills
+ * list and can wrap to dozens of lines. Reserving every one of those would make an
+ * arbitrarily tall body block indivisible, and `drawSectionHeading` inherits that
+ * through `followHeight` — de-densifying real pages by up to ~100pt and, past a
+ * page, hitting {@link Layout.ensureBlock}'s unsatisfiable case. Body text is
+ * divisible, so it is capped at {@link BODY_HEADER_KEEP_LINES}.
+ *
+ * The achievement headers that also set `headerBold: false` are NOT caught by
+ * this: they set it because their per-run sentinels carry the weight instead
+ * (`buildAchievementHeader` returns `emphasized` iff the line contains
+ * `EMPHASIS_OPEN`), so they take the run-measuring branch above and keep the full
+ * multi-line reservation a genuine header deserves.
+ *
+ * The `bullets.length === 0` half of the gate is what makes the cap SAFE rather
+ * than merely correct-today. `headerBold` is a styling flag, so on its own it
+ * would let a capped entry keep bullets: reserving 2 header lines + 1 bullet line
+ * for a 3-line header leaves the per-line `ensure` free to draw header line 3 and
+ * break before the bullet — page ends on header text, bullet orphaned, AC1
+ * violated. Capping only a BULLETLESS entry gates on the property that actually
+ * licenses the cap (nothing must be kept with it), so AC1 holds unconditionally
+ * instead of "unless `headerBold === false`". Both skills paths hard-code
+ * `bullets: []`, so this changes no output today.
+ */
+function entryHeadHeight(
+  layout: Layout,
+  entry: AtsEntry,
+  mutedColor: RGB,
+): number {
+  let height = 0;
+  if (entry.headerLine) {
+    if (entry.headerLine.includes(EMPHASIS_OPEN)) {
+      height += layout.measureHeaderRunsHeight(entry.headerLine, SIZE_HEADER);
+    } else {
+      const full = layout.measureTextHeight(
+        entry.headerLine,
+        headerLineOpts(entry, mutedColor),
+      );
+      height +=
+        entry.headerBold === false && entry.bullets.length === 0
+          ? Math.min(full, BODY_HEADER_KEEP_LINES * SIZE_HEADER * LINE_GAP)
+          : full;
+    }
+  }
+  if (entry.subLine) {
+    height +=
+      GAP_AFTER_HEADER +
+      layout.measureTextHeight(entry.subLine, subLineOpts(entry, mutedColor));
+  }
+  return height;
+}
+
+/**
+ * Height (pt) of the entry's keep-with-next group — the indivisible unit that
+ * must start on a page able to hold all of it (#629):
+ *
+ *   - header block (all wrapped header + sub-line lines) + the first bullet's own
+ *     keep-opening, so a header can never be the last thing on a page;
+ *   - a header block with NO bullets reserves just the header block — no phantom
+ *     bullet line;
+ *   - a bullets-only entry (no header, no sub-line) reduces to exactly that first
+ *     bullet reservation, since its head measures `0`;
+ *   - an entirely empty entry reserves nothing.
+ *
+ * The first bullet's reservation is exactly {@link bulletKeepLines} of its lines
+ * — the same opening {@link Layout.drawBullet} reserves for a bullet it starts on
+ * its own, so the two agree by construction rather than by coincidence. That is
+ * what lets `drawEntry` pass `alreadyReserved` for the first bullet: the lines
+ * really are reserved here, so suppressing the bullet's own reservation cannot
+ * re-orphan its first line (#629) nor widow its last (#631 — a first bullet
+ * wrapping to three lines is indivisible, so all three are reserved here). It
+ * does not violate #629's "compose rather than sum" decision either: a first
+ * bullet long enough to split still reserves only its opening, never its full
+ * height.
+ *
+ * Used both by the entry itself and by the section heading above it, so the two
+ * agree on what "the first thing that must stay with the heading" costs.
+ */
+function entryKeepHeight(
+  layout: Layout,
+  entry: AtsEntry,
+  mutedColor: RGB,
+): number {
+  const bulletLine = SIZE_BODY * LINE_GAP;
+  const head = entryHeadHeight(layout, entry, mutedColor);
+  if (entry.bullets.length === 0) return head;
+  const firstBulletLines = layout.measureBulletLines(
+    entry.bullets[0],
+    SIZE_BODY,
+    BULLET_INDENT,
+  );
+  const keep = bulletKeepLines(firstBulletLines);
+  const base = head + keep * bulletLine;
+  // #632, and ONLY for a two-bullet entry whose first bullet is INDIVISIBLE. In
+  // that one shape the reservation covering the first bullet's final line is its
+  // opening — which `drawEntry` suppresses via `alreadyReserved` — so the
+  // trailing bullet's keep-opening has nowhere else to ride and must be folded in
+  // here. Every other shape reserves the follow later and cheaper: a divisible
+  // first bullet carries it on its tail reservation (not suppressed, it lives in
+  // the draw loop), and a 3+ bullet entry carries it on a bullet this block never
+  // covers at all. So the entry-level cost of the rule is at most one trailing
+  // bullet's keep-opening (≤ `2 * BULLET_KEEP_LINES - 1` lines), never the entry.
+  if (entry.bullets.length !== 2 || keep !== firstBulletLines) return base;
+  const withFollow = base + trailingBulletKeepHeight(layout, entry);
+  // #629 outranks #632. Growing this block past a page would make it
+  // UNSATISFIABLE, and `ensureBlock` then ignores it outright — surrendering the
+  // header-stranding guarantee to buy a lone-bullet one. Drop the follow instead:
+  // the lone trailing bullet degrades, the header keep-with-next does not.
+  return withFollow > USABLE_PAGE_HEIGHT ? base : withFollow;
+}
+
+/**
+ * The keep-opening (pt) of an entry's LAST bullet — what must fit after the
+ * second-to-last bullet's final line so the last bullet is never left alone at a
+ * page top (#632).
+ *
+ * It is exactly the reservation that bullet will make for itself when
+ * {@link Layout.drawBullet} starts it ({@link bulletKeepLines} of its measured
+ * lines), so reserving it in advance is exact rather than approximate: the
+ * trailing bullet's own reservation is then guaranteed to be already satisfied
+ * and cannot fire a second page break that would undo the placement. Measured
+ * through {@link Layout.measureBulletLines}, the same wrapping that draws it.
+ */
+function trailingBulletKeepHeight(layout: Layout, entry: AtsEntry): number {
+  const lines = layout.measureBulletLines(
+    entry.bullets[entry.bullets.length - 1],
+    SIZE_BODY,
+    BULLET_INDENT,
+  );
+  return bulletKeepLines(lines) * SIZE_BODY * LINE_GAP;
+}
+
 function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
+  // Keep-with-next (#629): commit to this page only if the header AND its first
+  // bullet's keep-opening (`bulletKeepLines` of its lines — all of them when it
+  // is too short to split) fit together, so the header is never the final drawn
+  // line on a page. The
+  // reservation covers everything the draws below consume up to that point, so
+  // their own per-line `ensure` calls cannot fire a second page break inside the
+  // group.
+  const keepHeight = entryKeepHeight(layout, entry, mutedColor);
+  if (keepHeight > 0) layout.ensureBlock(keepHeight);
   if (entry.headerLine) {
     if (entry.headerLine.includes(EMPHASIS_OPEN)) {
       // Mixed-weight header (#425 — an achievement "type" label bolded, the rest
@@ -943,19 +1540,7 @@ function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
       // date, so the marker-less run path covers them.
       layout.drawHeaderRuns(entry.headerLine, SIZE_HEADER);
     } else {
-      layout.drawText(entry.headerLine, {
-        // Every header is bold EXCEPT where the model opts out — the skills list,
-        // which reads as regular-weight body text (#425).
-        bold: entry.headerBold ?? true,
-        size: SIZE_HEADER,
-        atomicSegments: entry.atomicSegments,
-        hangingIndent: entry.headerHangingIndent,
-        // Flush-right date on the header line (#425) — set for a title-less role /
-        // degree-less program, where the org/date anchor lives on the header.
-        rightText: entry.headerLineDate,
-        rightColor: mutedColor,
-        rightSize: SIZE_SUB,
-      });
+      layout.drawText(entry.headerLine, headerLineOpts(entry, mutedColor));
     }
   }
   if (entry.subLine) {
@@ -966,21 +1551,33 @@ function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
     // inside a multi-word location (e.g. "San Francisco Bay Area") re-parses it
     // into fragmented location tokens (#301). Unlike the 3+ segment achievement
     // HEADER lines (#307), these must stay atomic, so opt in unconditionally.
-    layout.drawText(entry.subLine, {
-      size: SIZE_SUB,
-      color: mutedColor,
-      atomicSegments: true,
-      // Flush-right date on the sub-line (#425) — set for a titled role /
-      // degreed entry, where the org anchor lives on the sub-line.
-      rightText: entry.subLineDate,
-      rightColor: mutedColor,
-      rightSize: SIZE_SUB,
-    });
+    layout.drawText(entry.subLine, subLineOpts(entry, mutedColor));
   }
-  for (const bullet of entry.bullets) {
+  // #632: the LAST bullet of a multi-bullet entry must never be the only thing
+  // its page opens with. The whole rule is one hand-off — the SECOND-TO-LAST
+  // bullet carries the last one's keep-opening as `followKeepHeight`, so the only
+  // page break the pair admits is one that moves BOTH forward. It is deliberately
+  // not an entry-level reservation: only this one boundary is constrained, the
+  // earlier bullets paginate freely, and the extra height is one bullet's opening
+  // — the blanket "keep the whole entry together" alternative is what cost a real
+  // fixture ~100pt of page-1 density in #630.
+  const trailingKeep =
+    entry.bullets.length >= 2 ? trailingBulletKeepHeight(layout, entry) : 0;
+  for (let i = 0; i < entry.bullets.length; i++) {
     // Auto-bold quantified metrics inside the bullet, then draw per-word runs
     // (#425). Markers are stripped before drawing, so the round-trip text is
     // unchanged; a metric-free bullet takes the legacy single-string path.
-    layout.drawBullet(bullet, SIZE_BODY, BULLET_INDENT);
+    //
+    // The FIRST bullet is already covered by the keep-block reserved above, so it
+    // must not re-reserve for its own orphan rule — that would move it and strand
+    // the header (#629's composition decision). When it is ALSO the second-to-last
+    // bullet, `entryKeepHeight` has already folded `trailingKeep` into that block
+    // for the one shape where it must (see there), and passing it on here is
+    // harmless: `drawBullet` uses it only on the reservation covering the bullet's
+    // final line, which for a divisible bullet is its tail — not suppressed.
+    layout.drawBullet(entry.bullets[i], SIZE_BODY, BULLET_INDENT, {
+      alreadyReserved: i === 0 && keepHeight > 0,
+      followKeepHeight: i === entry.bullets.length - 2 ? trailingKeep : 0,
+    });
   }
 }
