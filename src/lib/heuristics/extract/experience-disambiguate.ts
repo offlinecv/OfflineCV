@@ -610,9 +610,9 @@ function mapSegmentsToFields(
   // own company via the `Title · Team · Company` middot shape (rows a/b/c/e of
   // the issue's condition matrix), the anchor line's middot is not the export
   // signature at all. It is data noise on the date sub-line — a role scope
-  // tail like `dates · L7 · 18 engineers, 2 TLMs`, whose post-`stripDateRange`
-  // residue `L7 · 18 engineers, ...` also trips {@link anchorCarriesOrgSignal}.
-  // Without this narrowing, `L7` was picked as the company via the else-if
+  // tail like `dates · M4 · 22 engineers, 3 squads`, whose post-`stripDateRange`
+  // residue `M4 · 22 engineers, ...` also trips {@link anchorCarriesOrgSignal}.
+  // Without this narrowing, `M4` was picked as the company via the else-if
   // branch below, silently discarding the real trailing-segment company on
   // the title line and dropping location.
   //
@@ -932,8 +932,8 @@ function mapWithoutCompanyMatch(
     splits[0].source === splits[1].source
   ) {
     // #614 — a three-segment middot header where the MIDDLE segment is
-    // title-keyword-shaped ("Site Lead, Enterprise Platforms") and the
-    // TRAILING segment is not ("Google") reads as the OTHER canonical ordering:
+    // title-keyword-shaped ("Site Lead, Payments Platform") and the
+    // TRAILING segment is not ("Globex") reads as the OTHER canonical ordering:
     // `Title · Team · Company` (rows a/b/c/e of the issue), not `Title ·
     // Company · Team`. Detect the ordering by the title-keyword split:
     // `secondLooksTitle && !thirdLooksTitle` → the trailing segment is the
