@@ -84,3 +84,107 @@ describe("multi-word city on space-folded header (#368)", () => {
     expect(role.location).toBeUndefined();
   });
 });
+
+// Companion coverage to #368/#347: those covered the two-column space-fold
+// `Company City, ST` shape. #616 is the same "multi-word bare city" weakness on
+// the single-line MIDDOT header path: `Title · Company, City · Team` where the
+// city carries NO state/country suffix — the closed BARE_LOCATION_RE vocab (Pass
+// F of stripLocationSuffix) knows single-word "Hyderabad" but not multi-word
+// "Mountain View", so the middle segment stayed whole and `company` swallowed
+// the city. Fixed by adding Mountain View (a canonical tech-hub example) to the
+// single-source MULTIWORD_US_CITY_ALT vocab so BARE_LOCATION_RE full-matches it.
+// The trailing-segment case is covered too so behavior is position-independent.
+describe("multi-word city without state/country suffix on middot header (#616)", () => {
+  it("row (b) — middle segment: `Company, MultiWordCity` splits into company + location", () => {
+    // "Google, Mountain View" sits in the MIDDLE middot segment. Before the fix
+    // the whole string landed in `company` and `location` dropped.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      {
+        text: "Engineering Lead · Google, Mountain View · GFiber",
+        fontSize: 11,
+      },
+      { text: "04/2021 – 12/2023", fontSize: 11 },
+      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.title?.toLowerCase()).toContain("engineering lead");
+    expect(role.company).toBe("Google");
+    expect(role.location).toBe("Mountain View");
+    expect(role.team).toBe("GFiber");
+  });
+
+  it("row (a) unchanged — middle `Company, MultiWordCity, ST` still splits with state suffix", () => {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      {
+        text: "Engineering Lead · Google, Mountain View, CA · GFiber",
+        fontSize: 11,
+      },
+      { text: "04/2021 – 12/2023", fontSize: 11 },
+      { text: "• Built an 18-engineer org in under 6 months.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.company).toBe("Google");
+    expect(role.location).toBe("Mountain View, CA");
+    expect(role.team).toBe("GFiber");
+  });
+
+  it("row (c) unchanged — middle `Company, SingleWordCity` in existing bare-location vocab still splits", () => {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      {
+        text: "Sr. Engineering Manager · Google, Hyderabad · Enterprise Platforms",
+        fontSize: 11,
+      },
+      { text: "04/2021 – 12/2023", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.company).toBe("Google");
+    expect(role.location).toBe("Hyderabad");
+    expect(role.team).toBe("Enterprise Platforms");
+  });
+
+  it("row (d) unchanged — trailing `Company, SingleWordCity` still splits", () => {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      {
+        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google, Hyderabad",
+        fontSize: 11,
+      },
+      { text: "04/2021 – 12/2023", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.company).toBe("Google");
+    expect(role.location).toBe("Hyderabad");
+  });
+
+  it("position-independence — trailing `Company, MultiWordCity` splits the same way as middle", () => {
+    // The acceptance criteria's core structural requirement: splitting behaviour
+    // does not depend on the segment's position in the header.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      {
+        text: "Sr. Engineering Manager · Site Lead, Enterprise Platforms · Google, Mountain View",
+        fontSize: 11,
+      },
+      { text: "04/2021 – 12/2023", fontSize: 11 },
+      { text: "• Ran a cross-team migration to a shared platform.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+
+    expect(role.company).toBe("Google");
+    expect(role.location).toBe("Mountain View");
+  });
+});
