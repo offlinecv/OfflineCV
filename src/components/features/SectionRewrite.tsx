@@ -421,7 +421,7 @@ export function useSectionRewrite(
         )}
 
         {status.kind === "rewriting" && (
-          <p className="text-[11px] text-content-muted">
+          <p className="text-2xs text-content-muted">
             Rewriting the section…
           </p>
         )}
@@ -496,7 +496,7 @@ export function useSectionRewrite(
         )}
 
         {status.kind === "error" && (
-          <p role="alert" className="text-[11px] text-feedback-error-text">
+          <p role="alert" className="text-2xs text-feedback-error-text">
             {status.message}
           </p>
         )}
@@ -564,7 +564,7 @@ export function ProposedSection({
           variant="ghost"
           size="sm"
           onClick={onCopyAll}
-          className="rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-[11px] text-content-primary hover:border-border hover:bg-surface-hover"
+          className="rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-2xs text-content-primary hover:border-border hover:bg-surface-hover"
         >
           {copied ? "Copied" : "Use this — copy all bullets"}
         </Button>
@@ -572,7 +572,7 @@ export function ProposedSection({
           variant="link"
           size="sm"
           onClick={onReject}
-          className="text-[11px] font-medium text-content-tertiary"
+          className="text-2xs font-medium text-content-tertiary"
         >
           Discard
         </Button>
@@ -595,7 +595,7 @@ export function NumberPreservationWarning({
   return (
     <p
       role="alert"
-      className="text-[11px] leading-snug text-feedback-warning-text"
+      className="text-2xs leading-snug text-feedback-warning-text"
     >
       <span aria-hidden="true">⚠ </span>
       AI altered a metric — {detail}. Review before saving.

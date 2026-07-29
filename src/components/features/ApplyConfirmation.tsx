@@ -114,7 +114,7 @@ export function ApplyConfirmation({
         <StatusBadge tone="ok" aria-hidden>
           {verb}
         </StatusBadge>
-        <span className="text-[11px] text-content-secondary">
+        <span className="text-2xs text-content-secondary">
           {verb} {count} change{count === 1 ? "" : "s"}
           {/* No trailing "— " when nothing was named; an empty list left a
               dangling em dash. */}
@@ -138,7 +138,7 @@ export function UndoBatchButton({ onUndo }: { onUndo: () => void }) {
       variant="link"
       size="sm"
       onClick={onUndo}
-      className="text-[11px] font-medium text-content-secondary"
+      className="text-2xs font-medium text-content-secondary"
       aria-label="Undo the changes just applied to the résumé"
     >
       Undo

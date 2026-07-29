@@ -89,7 +89,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
       >
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
+            <p className="text-2xs font-semibold uppercase tracking-wider text-content-muted">
               {guidance.platformLabel}
             </p>
             <ol className="flex list-decimal flex-col gap-1 pl-4 text-sm text-content-secondary">
@@ -130,7 +130,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
             <summary className="cursor-pointer text-sm text-content-tertiary hover:underline">
               Using a different browser?
             </summary>
-            <ul className="mt-1.5 flex flex-col gap-1 pl-1 text-[11px] text-content-tertiary list-none">
+            <ul className="mt-1.5 flex flex-col gap-1 pl-1 text-2xs text-content-tertiary list-none">
               <li>
                 <span className="font-semibold text-content-secondary">
                   Chrome / Edge:
@@ -192,9 +192,9 @@ function CopyablePath({ path }: { path: CopyPath }) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] text-content-tertiary">{path.label}</span>
+      <span className="text-2xs text-content-tertiary">{path.label}</span>
       <div className="flex items-center gap-2 rounded border border-border-light bg-surface-subtle px-2 py-1">
-        <code className="flex-1 overflow-x-auto text-[11px] text-content-primary">
+        <code className="flex-1 overflow-x-auto text-2xs text-content-primary">
           {path.value}
         </code>
         <Button
@@ -202,7 +202,7 @@ function CopyablePath({ path }: { path: CopyPath }) {
           size="sm"
           onClick={onCopy}
           aria-label={`Copy ${path.value}`}
-          className="shrink-0 text-[11px] text-accent-primary"
+          className="shrink-0 text-2xs text-accent-primary"
         >
           {copied ? "Copied ✓" : "Copy"}
         </Button>

@@ -57,7 +57,7 @@ function Dimension({
       href={anchor}
       className="block flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3 hover:border-border-light"
     >
-      <dt className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
+      <dt className="text-2xs font-semibold uppercase tracking-wider text-content-muted">
         {label}
       </dt>
       <dd className="text-sm font-medium">
@@ -78,7 +78,7 @@ function Dimension({
           />
         </div>
       )}
-      <p className="text-[11px] text-content-tertiary" title={hintTitle}>
+      <p className="text-2xs text-content-tertiary" title={hintTitle}>
         {hint}
       </p>
     </a>
@@ -120,7 +120,7 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
         <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
           Your resume score
         </h2>
-        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-content-secondary">
+        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wider text-content-secondary">
           alpha
         </span>
       </div>
@@ -173,12 +173,12 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
         </dl>
       </div>
       {score.layout.multiplier < 1 && (
-        <p className="text-[11px] text-feedback-warning-text">
+        <p className="text-2xs text-feedback-warning-text">
           Layout penalty applied (multiplier {score.layout.multiplier.toFixed(2)}
           ): pre-layout score was {score.preLayoutOverall}.
         </p>
       )}
-      <p className="text-[11px] text-content-muted">
+      <p className="text-2xs text-content-muted">
         {score.algoVersion && <>algo v{score.algoVersion} · </>}Built{" "}
         <span title={buildDate}>{buildAgo}</span>
       </p>

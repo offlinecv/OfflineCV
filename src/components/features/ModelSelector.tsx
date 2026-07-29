@@ -285,10 +285,10 @@ export function ModelSelector() {
       {showRows ? (
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="flex flex-wrap items-baseline gap-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
+            <h3 className="text-2xs font-semibold uppercase tracking-wider text-content-muted">
               Rewrite model
             </h3>
-            <p className="text-[11px] text-content-tertiary">
+            <p className="text-2xs text-content-tertiary">
               Picks here apply to every "Rewrite" button below.
             </p>
           </div>
@@ -315,7 +315,7 @@ export function ModelSelector() {
             {loadState.kind === "error" &&
             loadState.modelId === selectedModel.id ? (
               <span className="flex items-baseline gap-2">
-                <span className="text-[11px] text-feedback-error-text">
+                <span className="text-2xs text-feedback-error-text">
                   Couldn't download.
                 </span>
                 <Button
@@ -328,7 +328,7 @@ export function ModelSelector() {
                 </Button>
               </span>
             ) : cachedIds.has(selectedModel.id) ? (
-              <span className="text-[11px] text-feedback-success-text">
+              <span className="text-2xs text-feedback-success-text">
                 ✓ Ready · runs offline
               </span>
             ) : (
@@ -446,19 +446,19 @@ export function ModelRow({
           <span className="text-sm font-semibold text-content-primary">
             {model.name}
             {isDefault && (
-              <span className="ml-1.5 text-[10px] font-normal text-content-tertiary">
+              <span className="ml-1.5 text-3xs font-normal text-content-tertiary">
                 default
               </span>
             )}
           </span>
-          <span className="text-[10px] uppercase tracking-wider text-content-muted">
+          <span className="text-3xs uppercase tracking-wider text-content-muted">
             {model.tier} tier · {licenseLabel(model)}
           </span>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-content-tertiary">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-2xs text-content-tertiary">
           <span>{downloadLabel}</span>
           {selected && (
-            <span className="text-[10px] uppercase tracking-wider text-feedback-success-text">
+            <span className="text-3xs uppercase tracking-wider text-feedback-success-text">
               ✓ Selected
             </span>
           )}
@@ -477,13 +477,13 @@ export function ModelRow({
 
       {error && (
         <div role="alert" className="mt-1 flex flex-col gap-0.5">
-          <p className="text-[11px] text-feedback-error-text">{error.message}</p>
+          <p className="text-2xs text-feedback-error-text">{error.message}</p>
           {error.detail && (
             <details>
-              <summary className="cursor-pointer text-[10px] text-content-tertiary hover:underline">
+              <summary className="cursor-pointer text-3xs text-content-tertiary hover:underline">
                 Technical details
               </summary>
-              <pre className="mt-1 max-w-prose overflow-x-auto whitespace-pre-wrap text-[10px] text-content-tertiary">
+              <pre className="mt-1 max-w-prose overflow-x-auto whitespace-pre-wrap text-3xs text-content-tertiary">
                 {error.detail}
               </pre>
             </details>
@@ -493,7 +493,7 @@ export function ModelRow({
 
       {cached && !disabled && (
         confirming ? (
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-2xs">
             <span className="text-content-tertiary">
               Remove {model.name}? Frees ~{sizeGb} GB · re-downloads next use.
             </span>
@@ -501,7 +501,7 @@ export function ModelRow({
               variant="link"
               size="sm"
               onClick={onClear}
-              className="text-[11px] text-feedback-error-text"
+              className="text-2xs text-feedback-error-text"
             >
               Remove
             </Button>
@@ -509,7 +509,7 @@ export function ModelRow({
               variant="link"
               size="sm"
               onClick={() => setConfirming(false)}
-              className="text-[11px] text-content-tertiary"
+              className="text-2xs text-content-tertiary"
             >
               Cancel
             </Button>
@@ -519,7 +519,7 @@ export function ModelRow({
             variant="link"
             size="sm"
             onClick={() => setConfirming(true)}
-            className="mt-1 text-[11px] text-content-tertiary"
+            className="mt-1 text-2xs text-content-tertiary"
           >
             Clear download
           </Button>

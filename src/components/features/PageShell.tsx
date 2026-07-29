@@ -67,7 +67,7 @@ export function PageShell({
               O
             </a>
             <h1 className="text-2xl font-semibold tracking-tight">offlinecv</h1>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+            <span className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
               {badge}
             </span>
           </div>

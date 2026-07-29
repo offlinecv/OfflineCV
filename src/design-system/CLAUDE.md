@@ -41,9 +41,11 @@ adjacent `U+FE0E` and an `aria-hidden`/`sr-only` pair.
 
 ## Type ramp
 
-Audit sizes by consumption: `rg -o 'text-(xs|sm|base|lg|xl|2xl|3xl)' src/ | sort | uniq -c`.
+Audit sizes by consumption: `rg -o 'text-(4xs|3xs|2xs|xs|sm|base|lg|xl|2xl|3xl)' src/ | sort | uniq -c`.
+- `text-2xs` / `text-3xs` / `text-4xs`: **Below `text-xs` — never for body prose.** Named descending from `text-xs` (0.75rem/12px) the way the built-in scale ascends from it: `2xs` (0.6875rem/11px), `3xs` (0.625rem/10px), `4xs` (0.5625rem/9px). Declared in `theme.css`'s `@theme inline` block. Reserved for the same kind of subordinate metadata as `text-xs` but smaller still — badge/pill labels, footer captions, model-load progress detail — never a step chosen to squeeze more text into a fixed box.
 - `text-xs`: **Never for body prose.** Allowed only for metadata that sits alongside stronger text: a chip's quality mark, a units suffix, a count badge, a timestamp.
 - `text-sm`: The default body text size.
 - `text-base`: Subheadings or large body prose.
 - `text-lg`: Primary headings for cards/sections.
 - `text-2xl`+: Page-level headings.
+- **No arbitrary sizes.** An arbitrary font size in any CSS length unit — `text-[11px]`, `text-[0.6875rem]`, `text-[1.2em]`, `text-[10pt]`, `text-[2vw]`, or the explicit `text-[length:12px]` form — is blocked by ESLint (`no-restricted-syntax` in `eslint.config.js`) — add a named step above instead of reaching for an arbitrary value. Arbitrary *non-size* values (`text-[color:var(--x)]`) are not this rule's business. The `files:` scope is every surface that writes markup: `src/components/**`, `src/design-system/**`, and the three shipped entry roots `src/App.tsx`, `src/jobs/JobsApp.tsx`, `src/jd-fit/JdFitApp.tsx`. Keep this sentence and the config's `files:` block in step — they drifted once already.

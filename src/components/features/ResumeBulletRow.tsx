@@ -153,7 +153,7 @@ export function BulletFlagLegend() {
           ariaLabel="Word count outside 8–30"
           decorative
         >
-          <span className="text-[11px] font-medium tabular-nums">#w</span>
+          <span className="text-2xs font-medium tabular-nums">#w</span>
         </FlagChip>
         length (8–30 words)
       </li>
@@ -192,7 +192,7 @@ function BulletFlagsInline({ bullet }: { bullet: BulletObservation }) {
           ariaLabel={lengthTitle(bullet)}
           className="ml-1 align-middle"
         >
-          <span className="text-[11px] font-medium tabular-nums">
+          <span className="text-2xs font-medium tabular-nums">
             {lengthToken(bullet)}
           </span>
         </FlagChip>

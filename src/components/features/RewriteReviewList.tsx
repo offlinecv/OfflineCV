@@ -141,7 +141,7 @@ export function BulletReviewRow({
   return (
     <li className="flex flex-col gap-1.5 rounded border border-border-light bg-surface-card p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-content-muted">
+        <span className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
           {kindLabel}
         </span>
         <div className="flex shrink-0 items-center gap-0.5">
@@ -190,7 +190,7 @@ export function BulletReviewRow({
           {/* Secondary: the redline, collapsed by default. Word-level so it
               reads as whole words, not the char-level "SupportLed" mash-up. */}
           <details className="mt-0.5">
-            <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-[11px] text-content-tertiary hover:text-content-secondary list-none [&::-webkit-details-marker]:hidden">
+            <summary className="inline-flex cursor-pointer select-none items-center gap-1 text-2xs text-content-tertiary hover:text-content-secondary list-none [&::-webkit-details-marker]:hidden">
               <DisclosureChevron />
               Show changes
             </summary>
@@ -237,7 +237,7 @@ export function RewriteReviewList({
       {warning}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-[11px] text-content-secondary">
+        <span className="text-2xs text-content-secondary">
           {total} change{total === 1 ? "" : "s"} proposed — review each below.
         </span>
         <div className="flex shrink-0 items-center gap-1">
@@ -245,7 +245,7 @@ export function RewriteReviewList({
             variant="ghost"
             size="sm"
             onClick={() => review.acceptMany(ids)}
-            className="rounded-md px-2 py-0.5 text-[11px]"
+            className="rounded-md px-2 py-0.5 text-2xs"
           >
             Accept all
           </Button>
@@ -253,7 +253,7 @@ export function RewriteReviewList({
             variant="ghost"
             size="sm"
             onClick={() => review.rejectMany(ids)}
-            className="rounded-md px-2 py-0.5 text-[11px] text-content-tertiary"
+            className="rounded-md px-2 py-0.5 text-2xs text-content-tertiary"
           >
             Reject all
           </Button>
@@ -280,7 +280,7 @@ export function RewriteReviewList({
           variant="link"
           size="sm"
           onClick={onDiscard}
-          className="text-[11px] font-medium text-content-tertiary"
+          className="text-2xs font-medium text-content-tertiary"
         >
           Discard
         </Button>

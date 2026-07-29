@@ -73,7 +73,7 @@ export function ConsentDialog({
           on your device, but downloading the model means accepting those
           terms.
         </p>
-        <p className="text-[11px] leading-relaxed text-content-tertiary">
+        <p className="text-2xs leading-relaxed text-content-tertiary">
           You only need to accept once per license type — switching to
           another model under the same license won't re-prompt you.
         </p>

@@ -53,7 +53,7 @@ export function ModelLoadProgress({
   const pct = Math.max(0, Math.min(100, Math.round(progress * 100)));
   return (
     <div className="flex flex-col gap-1 rounded border border-border-light bg-surface-subtle p-2">
-      <div className="flex items-center justify-between text-[11px] text-content-secondary">
+      <div className="flex items-center justify-between text-2xs text-content-secondary">
         <span>{label}</span>
         <span className="font-mono">{pct}%</span>
       </div>
@@ -71,14 +71,14 @@ export function ModelLoadProgress({
         />
       </div>
       {text && (
-        <p className="font-mono text-[10px] text-content-muted">{text}</p>
+        <p className="font-mono text-3xs text-content-muted">{text}</p>
       )}
       {showExplainer && (
         <details className="mt-1">
-          <summary className="cursor-pointer text-[10px] text-content-tertiary hover:underline">
+          <summary className="cursor-pointer text-3xs text-content-tertiary hover:underline">
             What's happening?
           </summary>
-          <p className="mt-1 max-w-prose text-[10px] leading-relaxed text-content-tertiary">
+          <p className="mt-1 max-w-prose text-3xs leading-relaxed text-content-tertiary">
             A small open-source language model is downloading to your
             browser. It runs entirely on your device — your text never
             leaves this tab. The download is cached for next time.

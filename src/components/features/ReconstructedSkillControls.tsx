@@ -41,7 +41,24 @@ function MoveMenu({
         size="sm"
         aria-label="Move to another category"
         onClick={() => setOpen(true)}
-        className="text-content-muted hover:text-accent-primary"
+        // `mr-2` separates this trigger from the Remove control beside it
+        // (#638). Both are `variant="icon"` ~14px boxes and the variant's 24x24
+        // target overlay extends 5px past each box on every side, so at the
+        // row's own `gap-1` (4px) the two overlays overlapped by 6px AND
+        // Remove's overlay covered ~1px of THIS button's visible glyph — a tap
+        // on the Move icon fired Remove. Measured in a browser, not reasoned
+        // about. 8px takes the real gap to 12px = a 26px centre-to-centre
+        // distance; WCAG 2.2 AA SC 2.5.8's spacing exception only needs 24, but
+        // at exactly 24 the overlays abut and hit-testing on the shared
+        // boundary pixel still resolved to the later-painted sibling. 26 leaves
+        // 2px of daylight.
+        //
+        // The margin lives HERE rather than on Remove because this trigger is
+        // the conditional one: `MoveMenu` renders nothing without `moveTargets`
+        // and returns null at `targets.length === 0`, so an uncategorised chip
+        // has no Move control and needs no separation. Putting it on Remove
+        // added 8px of dead space to every chip in the ungrouped `SkillChipRow`.
+        className="mr-2 text-content-muted hover:text-accent-primary"
       >
         <svg
           aria-hidden="true"
@@ -67,7 +84,7 @@ function MoveMenu({
           setOpen(false);
       }}
     >
-      <span className="text-[11px] text-content-muted">Move to</span>
+      <span className="text-2xs text-content-muted">Move to</span>
       {targets.map((t) => (
         <Button
           key={t.index}
@@ -82,7 +99,7 @@ function MoveMenu({
           onKeyDown={(e) => {
             if (e.key === "Escape") setOpen(false);
           }}
-          className="rounded-full bg-surface-subtle px-2 py-0.5 text-[11px] text-content-tertiary hover:text-accent-primary"
+          className="rounded-full bg-surface-subtle px-2 py-0.5 text-2xs text-content-tertiary hover:text-accent-primary"
         >
           {t.label}
         </Button>
@@ -130,6 +147,10 @@ export function SkillChip({
         variant="icon"
         aria-label={`Remove ${skill}`}
         onClick={onRemove}
+        // Separation from the `MoveMenu` trigger is owned by that trigger's own
+        // `mr-2` (#638) — see the rationale there. It lives on the conditional
+        // control so an uncategorised chip, which renders no Move trigger, gets
+        // no dead space.
         className="shrink-0 text-content-muted hover:text-content-secondary"
       >
         <svg

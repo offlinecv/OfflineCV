@@ -89,7 +89,7 @@ function StarLink({ count }: { count?: number }) {
       {showCount && (
         <span
           aria-hidden="true"
-          className="rounded bg-surface-subtle px-1 py-0.5 text-[10px] font-semibold tabular-nums text-content-tertiary"
+          className="rounded bg-surface-subtle px-1 py-0.5 text-3xs font-semibold tabular-nums text-content-tertiary"
         >
           {formatCount(count)}
         </span>

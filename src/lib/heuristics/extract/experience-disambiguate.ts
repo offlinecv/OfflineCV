@@ -99,6 +99,9 @@ function looksLikeLocationTail(after: string): boolean {
  *     multi-word ("Mountain View", "Santa Clara").
  *   Pass B — space-delimited US "Role … City, ST": single-token city only (no
  *     comma boundary means greedy multi-word would consume role keywords).
+ *     Defers on a `COMPANY_TAIL_TOKENS_RE` "city" (#641) — a corporate tail noun
+ *     immediately before ", ST" is the company's last word, not a city — and
+ *     peels only the state code in that case.
  *   Pass C — comma-delimited international "…, City, Country": validates the
  *     trailing token against `COUNTRY_GAZETTEER` (closed ~249-entry ISO set +
  *     colloquial aliases) to avoid false-matching any capitalized word.
@@ -159,9 +162,28 @@ const LOCALITY_SUFFIX_RE =
  *  the current false-positive silently steals the company's tail into location.
  *  Deliberately closed-set (open-shape "single-word remnant looks wrong" would
  *  over-correct: `Citi Bank` legitimately reduces to `Citi Bank`, and `Citi`
- *  alone is a real company — a one-token-remnant rule would be unsafe.) */
+ *  alone is a real company — a one-token-remnant rule would be unsafe.)
+ *
+ *  Shared with Pass B (#641): the identical failure exists on the US
+ *  "…Company <word>, ST" space fold ("Palo Alto Networks, CA"), so the same
+ *  vocabulary gates both. Keeping ONE list means a corporate tail added for
+ *  either path protects both; it also means an entry that is a real single-word
+ *  place ("Media, PA") is deliberately traded away in favour of the company, per
+ *  the deferral rationale above.
+ *
+ *  The trailing `\.?` is load-bearing (#641 review): the captured "city" comes
+ *  from `[A-Z][A-Za-z.\-]+`, which INCLUDES the period, so the abbreviated —
+ *  and canonical written — forms `Corp.` / `Inc.` / `Ltd.` / `Labs.` reach this
+ *  test with the dot attached and a bare `$` anchor rejected every one of them.
+ *  Matches the sibling {@link COMPANY_LEGAL_TAIL_RE}, which already writes
+ *  `Inc\.?|Ltd\.?|Corp\.?`. `Co` is here for the same reason `LEGAL_SUFFIX_RE`
+ *  carries `co\.?` — "Acme Co, CA" is the same cleave — and is safe despite
+ *  being short: it is a two-letter *word* before the comma, never the `, ST`
+ *  state code (that is group 2), and no US or gazetteer locality is named "Co".
+ *  A deferral misfire is harmless by construction anyway: the whole string
+ *  stays company and the state/country is still peeled on its own. */
 const COMPANY_TAIL_TOKENS_RE =
-  /^(?:Bank|Corp|Corporation|Group|Systems|Solutions|Technologies|Studios|Media|Software|Consulting|Partners|Ventures|Holdings|Industries|Financial|Health|Healthcare|Networks|Digital|Analytics|Labs|Ltd|LLC|Inc|GmbH|SA|PLC)$/i;
+  /^(?:Bank|Co|Corp|Corporation|Group|Systems|Solutions|Technologies|Studios|Media|Software|Consulting|Partners|Ventures|Holdings|Industries|Financial|Health|Healthcare|Networks|Digital|Analytics|Labs|Ltd|LLC|Inc|GmbH|SA|PLC)\.?$/i;
 
 /** Unambiguous LEGAL-ENTITY markers — a strictly narrower closed vocabulary
  *  than {@link COMPANY_TAIL_TOKENS_RE}, used by `mapTitleFirst` case 3a to
@@ -232,14 +254,46 @@ function stripLocationSuffix(s: string): {
   // Pass B — space-delimited "Role … City, ST": single-token city only.
   const SPACE_LOCATION_RE = /\s+([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
 
-  const mUS =
-    s.match(COMMA_LOCATION_RE) ??
-    s.match(SPACE_MULTIWORD_LOCATION_RE) ??
-    s.match(SPACE_LOCATION_RE);
+  // Evaluated in order, but kept as separate bindings (not a `??` chain over
+  // `s.match(...)`) so the branch below can tell WHICH pass matched: the
+  // corporate-tail deferral applies to the single-token space fold ONLY.
+  const mComma = s.match(COMMA_LOCATION_RE);
+  const mMultiword =
+    mComma === null ? s.match(SPACE_MULTIWORD_LOCATION_RE) : null;
+  const mSpace =
+    mComma === null && mMultiword === null ? s.match(SPACE_LOCATION_RE) : null;
+  const mUS = mComma ?? mMultiword ?? mSpace;
   if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
-    // Guard: stripping must leave a non-empty remainder.
-    const before = stripDanglingSeparator(s.slice(0, mUS.index));
-    if (before) return { text: before, location: `${mUS[1]}, ${mUS[2]}` };
+    // #641 — Pass B's single-token rule calls the last space-delimited word
+    // before the comma the city, so a company whose LAST word is a corporate
+    // noun that precedes a state tail gets cleaved and that word is promoted to
+    // a location: "Palo Alto Networks, CA" → company "Palo Alto" + location
+    // "Networks, CA". Both halves are wrong. Apply the same closed-vocabulary
+    // deferral Pass D already uses (COMPANY_TAIL_TOKENS_RE): a corporate tail
+    // noun immediately before ", ST" is company text, not a city.
+    //
+    // Scoped to `mSpace` — the comma-delimited Pass A has a real comma boundary
+    // before its city, and Pass B-multi's city comes from the closed
+    // MULTIWORD_US_CITY_ALT vocabulary (no entry of which is a corporate tail),
+    // so neither can produce this cleave and neither is narrowed here. That
+    // keeps `Acme Palo Alto, CA` / `Acme Santa Clara, CA` splitting exactly as
+    // #636 made them.
+    //
+    // The state tail is still peeled on its own, mirroring Pass E's
+    // trailing-country-only strip after the identical Pass D deferral
+    // ("Deutsche Bank, India" → "Deutsche Bank" + "India"): the company keeps
+    // every one of its words and the location survives as the bare state code,
+    // rather than the ", CA" residue staying glued to the company name.
+    if (mSpace !== null && COMPANY_TAIL_TOKENS_RE.test(mUS[1])) {
+      // The match is end-anchored on ", ST", and a state code carries no comma,
+      // so the last comma in `s` is exactly the city/state boundary.
+      const beforeState = stripDanglingSeparator(s.slice(0, s.lastIndexOf(",")));
+      if (beforeState) return { text: beforeState, location: mUS[2] };
+    } else {
+      // Guard: stripping must leave a non-empty remainder.
+      const before = stripDanglingSeparator(s.slice(0, mUS.index));
+      if (before) return { text: before, location: `${mUS[1]}, ${mUS[2]}` };
+    }
   }
 
   // Pass C — comma-delimited "…, City, Country" (international). Only fires

@@ -201,7 +201,7 @@ function RewriteSteeringBox({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-medium text-content-secondary">
+        <span className="text-2xs font-medium text-content-secondary">
           Target length:
         </span>
         {PAGE_PRESETS.map((preset) => {
@@ -214,7 +214,7 @@ function RewriteSteeringBox({
               disabled={disabled}
               aria-pressed={selected}
               onClick={() => onChipClick(preset)}
-              className="rounded-full border border-border-light px-2.5 py-0.5 text-[11px]"
+              className="rounded-full border border-border-light px-2.5 py-0.5 text-2xs"
             >
               {preset.label}
             </Button>
@@ -339,7 +339,7 @@ export function StepIndicator({
         <span>
           Rewriting {Math.min(currentIndex + 1, totalSections)} of {totalSections}: {label}
         </span>
-        <span className="font-mono text-[11px]">{pct}%</span>
+        <span className="font-mono text-2xs">{pct}%</span>
       </div>
       <div
         role="progressbar"
@@ -373,7 +373,7 @@ function CompletedList({
           <span>{outcome.input.label}</span>
           {!outcome.data.numbersPreserved && (
             <span
-              className="rounded bg-feedback-warning-bg px-1.5 py-0.5 text-[10px] text-feedback-warning-text"
+              className="rounded bg-feedback-warning-bg px-1.5 py-0.5 text-3xs text-feedback-warning-text"
               title="A metric was altered or removed"
             >
               metric drift
