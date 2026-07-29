@@ -34,10 +34,40 @@ export interface SkillEntry {
   readonly aliases: readonly string[];
   /** Human display form. Omit when the `id` already reads cleanly (`react`,
    *  `kubernetes`); set it where the kebab/lowercased id reads poorly in the
-   *  UI (`a-b-testing` → `A/B testing`, `ci-cd` → `CI/CD`). Falls back to
-   *  `id`. */
+   *  UI (`a-b-testing` → `A/B Testing`, `ci-cd` → `CI/CD`). Falls back to
+   *  `id`.
+   *
+   *  MUST START WITH A CAPITAL (or a digit) — `skills.test.ts` enforces it.
+   *  A `label` is rendered verbatim: `deriveSkills`
+   *  (`job-search/query-builder.ts`) uses it for a recognized résumé skill and
+   *  title-cases the free-text ones itself, so a lowercase label put two casings
+   *  in one sentence — "cross-functional collaboration, Team Building &
+   *  Mentorship" — and it was the RECOGNIZED skill that looked unpolished (#607).
+   *  Inside the label, follow the entry's own house casing (`iOS`, `P&L
+   *  Ownership`); only the first character is machine-checked. Aliases stay
+   *  lowercase — they are matched, never shown. */
   readonly label?: string;
 }
+
+/**
+ * Version of the dictionary's DATA — the entries, their aliases, their labels.
+ *
+ * Exists because this table is upstream of an answer that is versioned
+ * elsewhere: `job-search/term-quality.ts` reproduces a query's advice from
+ * `TERM_QUALITY_VERSION` (its rules) + `ROLE_PROFILES_VERSION` (which terms a
+ * role expects), and neither moves when an alias here does — yet an added alias
+ * changes which suggestions that module emits for an unchanged résumé, because
+ * `deriveSkills` canonicalizes a chip through `aliasToId` before the advice is
+ * computed. Without this number that class of change is unreproducible.
+ *
+ * Changelog:
+ * - 1.0: initial curated dictionary, plus the #583 leadership/management block.
+ * - 1.1 (2026-07-29): leadership aliases widened to the phrasings a leadership
+ *   résumé's SKILLS ROW actually uses, and every authored `label` title-cased
+ *   (#594, #607). Moves both the canonicalization of a chip and its display
+ *   text; no entry was removed and no `id` renamed.
+ */
+export const SKILLS_DICTIONARY_VERSION = "1.1";
 
 export const SKILLS: readonly SkillEntry[] = [
   // ── Languages ────────────────────────────────────────────────────────────
@@ -153,8 +183,8 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "git", aliases: ["git"] },
 
   // ── Data / ML ────────────────────────────────────────────────────────────
-  { id: "machine-learning", label: "machine learning", aliases: ["machine learning", "ml"] },
-  { id: "deep-learning", label: "deep learning", aliases: ["deep learning"] },
+  { id: "machine-learning", label: "Machine Learning", aliases: ["machine learning", "ml"] },
+  { id: "deep-learning", label: "Deep Learning", aliases: ["deep learning"] },
   { id: "pytorch", aliases: ["pytorch"] },
   { id: "tensorflow", aliases: ["tensorflow"] },
   { id: "keras", aliases: ["keras"] },
@@ -166,14 +196,14 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "langchain", aliases: ["langchain", "lang chain"] },
   { id: "llm", aliases: ["llm", "large language model", "large language models"] },
   { id: "nlp", aliases: ["nlp", "natural language processing"] },
-  { id: "computer-vision", label: "computer vision", aliases: ["computer vision", "cv (computer vision)"] },
+  { id: "computer-vision", label: "Computer Vision", aliases: ["computer vision", "cv (computer vision)"] },
   { id: "rag", aliases: ["rag", "retrieval augmented generation", "retrieval-augmented generation"] },
   { id: "etl", aliases: ["etl", "elt"] },
   { id: "dbt", aliases: ["dbt"] },
   { id: "tableau", aliases: ["tableau"] },
   { id: "looker", aliases: ["looker"] },
   { id: "power-bi", label: "Power BI", aliases: ["power bi", "powerbi"] },
-  { id: "data-warehouse", label: "data warehouse", aliases: ["data warehouse", "data warehousing"] },
+  { id: "data-warehouse", label: "Data Warehouse", aliases: ["data warehouse", "data warehousing"] },
 
   // ── Mobile ──────────────────────────────────────────────────────────────
   { id: "ios", aliases: ["ios"] },
@@ -201,9 +231,9 @@ export const SKILLS: readonly SkillEntry[] = [
   { id: "confluence", aliases: ["confluence"] },
   { id: "figma", aliases: ["figma"] },
   { id: "sketch", aliases: ["sketch"] },
-  { id: "product-management", label: "product management", aliases: ["product management", "product manager"] },
-  { id: "a-b-testing", label: "A/B testing", aliases: ["a/b testing", "ab testing", "a/b test"] },
-  { id: "user-research", label: "user research", aliases: ["user research", "user interviews"] },
+  { id: "product-management", label: "Product Management", aliases: ["product management", "product manager"] },
+  { id: "a-b-testing", label: "A/B Testing", aliases: ["a/b testing", "ab testing", "a/b test"] },
+  { id: "user-research", label: "User Research", aliases: ["user research", "user interviews"] },
   { id: "okrs", aliases: ["okrs", "okr"] },
 
   // ── Security / misc ─────────────────────────────────────────────────────
@@ -220,29 +250,44 @@ export const SKILLS: readonly SkillEntry[] = [
   // is exactly the noisy single-word alias the docblock above warns against
   // — it would fire on ordinary bullet prose. Every alias here is a
   // multi-word phrase (see `skills.test.ts` for the enforcing check).
-  { id: "people-management", label: "people management", aliases: ["people management", "managed a team", "managing a team", "team management"] },
-  { id: "technical-recruiting", label: "technical recruiting", aliases: ["technical recruiting", "led hiring", "technical hiring"] },
-  { id: "performance-management", label: "performance management", aliases: ["performance management", "performance reviews", "performance review"] },
-  { id: "coaching-mentorship", label: "coaching / mentorship", aliases: ["coaching and mentorship", "coaching & mentorship", "mentoring engineers"] },
-  { id: "career-development", label: "career development", aliases: ["career development", "career growth planning"] },
-  { id: "org-design", label: "org design", aliases: ["org design", "organizational design", "organization design"] },
-  { id: "team-building", label: "team building", aliases: ["team building", "built and scaled a team", "grew the team"] },
-  { id: "roadmap-ownership", label: "roadmap ownership", aliases: ["roadmap ownership", "owned the roadmap", "product roadmap ownership"] },
-  { id: "project-delivery", label: "project delivery", aliases: ["project delivery", "delivery leadership"] },
-  { id: "program-management", label: "program management", aliases: ["program management", "technical program management"] },
-  { id: "agile-leadership", label: "agile / scrum leadership", aliases: ["scrum leadership", "agile leadership", "agile transformation"] },
-  { id: "incident-management", label: "incident management", aliases: ["incident management", "incident commander", "incident response leadership"] },
-  { id: "on-call-ownership", label: "on-call ownership", aliases: ["on-call ownership", "owned on-call", "on-call rotation ownership"] },
-  { id: "technical-strategy", label: "technical strategy", aliases: ["technical strategy", "engineering strategy"] },
-  { id: "architecture-review", label: "architecture review", aliases: ["architecture review", "architectural review board"] },
-  { id: "platform-ownership", label: "platform ownership", aliases: ["platform ownership", "owned the platform"] },
-  { id: "vendor-management", label: "vendor management", aliases: ["vendor management", "vendor negotiations"] },
-  { id: "budget-headcount-planning", label: "budget / headcount planning", aliases: ["budget planning", "headcount planning", "budget and headcount planning"] },
-  { id: "pnl-ownership", label: "P&L ownership", aliases: ["p&l ownership", "profit and loss ownership", "p and l ownership"] },
-  { id: "stakeholder-management", label: "stakeholder management", aliases: ["stakeholder management", "stakeholder alignment"] },
-  { id: "cross-functional-collaboration", label: "cross-functional collaboration", aliases: ["cross-functional collaboration", "cross functional collaboration"] },
-  { id: "executive-communication", label: "executive communication", aliases: ["executive communication", "executive presentations", "communicating with executives"] },
-  { id: "technical-writing", label: "technical writing", aliases: ["technical writing", "wrote technical documentation"] },
+  //
+  // THE SKILLS-ROW PHRASINGS ARE LOAD-BEARING, NOT DECORATION (#594, #607). Most
+  // aliases here are BULLET phrasings ("managed a team"); the ones that read like
+  // a section heading — "engineering leadership", "hiring & talent acquisition",
+  // "talent acquisition" — are how a leadership résumé's SKILLS ROW spells the
+  // same competency, and they earn their place for a second reason. `deriveSkills`
+  // (`job-search/query-builder.ts`) canonicalizes a chip by EXACT full-string
+  // alias lookup, so an unlisted spelling stays raw free text; `term-quality.ts`
+  // may not import jd-match at runtime and so compares word-wise, finds no overlap
+  // between {hiring} and {technical, recruiting}, and offers the person a skill
+  // their own chip already states. Add the spelling here; never loosen that
+  // comparison. The cost is that the chip then RENDERS as the canonical label —
+  // "Engineering Leadership" shows up as "People Management" — which is the same
+  // trade "k8s" → "kubernetes" already makes, and is why an alias must be a true
+  // synonym of the entry, not merely adjacent to it.
+  { id: "people-management", label: "People Management", aliases: ["people management", "managed a team", "managing a team", "team management", "engineering leadership", "engineering management", "people leadership"] },
+  { id: "technical-recruiting", label: "Technical Recruiting", aliases: ["technical recruiting", "led hiring", "technical hiring", "talent acquisition", "hiring & talent acquisition", "hiring and talent acquisition"] },
+  { id: "performance-management", label: "Performance Management", aliases: ["performance management", "performance reviews", "performance review"] },
+  { id: "coaching-mentorship", label: "Coaching / Mentorship", aliases: ["coaching and mentorship", "coaching & mentorship", "mentoring engineers"] },
+  { id: "career-development", label: "Career Development", aliases: ["career development", "career growth planning"] },
+  { id: "org-design", label: "Org Design", aliases: ["org design", "organizational design", "organization design", "organizational leadership"] },
+  { id: "team-building", label: "Team Building", aliases: ["team building", "built and scaled a team", "grew the team"] },
+  { id: "roadmap-ownership", label: "Roadmap Ownership", aliases: ["roadmap ownership", "owned the roadmap", "product roadmap ownership"] },
+  { id: "project-delivery", label: "Project Delivery", aliases: ["project delivery", "delivery leadership", "delivery management", "project execution"] },
+  { id: "program-management", label: "Program Management", aliases: ["program management", "technical program management"] },
+  { id: "agile-leadership", label: "Agile / Scrum Leadership", aliases: ["scrum leadership", "agile leadership", "agile transformation"] },
+  { id: "incident-management", label: "Incident Management", aliases: ["incident management", "incident commander", "incident response leadership"] },
+  { id: "on-call-ownership", label: "On-Call Ownership", aliases: ["on-call ownership", "owned on-call", "on-call rotation ownership"] },
+  { id: "technical-strategy", label: "Technical Strategy", aliases: ["technical strategy", "engineering strategy"] },
+  { id: "architecture-review", label: "Architecture Review", aliases: ["architecture review", "architectural review board"] },
+  { id: "platform-ownership", label: "Platform Ownership", aliases: ["platform ownership", "owned the platform"] },
+  { id: "vendor-management", label: "Vendor Management", aliases: ["vendor management", "vendor negotiations"] },
+  { id: "budget-headcount-planning", label: "Budget / Headcount Planning", aliases: ["budget planning", "headcount planning", "budget and headcount planning"] },
+  { id: "pnl-ownership", label: "P&L Ownership", aliases: ["p&l ownership", "profit and loss ownership", "p and l ownership"] },
+  { id: "stakeholder-management", label: "Stakeholder Management", aliases: ["stakeholder management", "stakeholder alignment"] },
+  { id: "cross-functional-collaboration", label: "Cross-Functional Collaboration", aliases: ["cross-functional collaboration", "cross functional collaboration"] },
+  { id: "executive-communication", label: "Executive Communication", aliases: ["executive communication", "executive presentations", "communicating with executives"] },
+  { id: "technical-writing", label: "Technical Writing", aliases: ["technical writing", "wrote technical documentation"] },
 ];
 
 /**
@@ -271,7 +316,7 @@ interface CompiledIndex {
   readonly idToAliases: ReadonlyMap<string, readonly string[]>;
   /** Canonical ID → human display label (falls back to the id when an entry
    *  has no explicit `label`). Lets the extractor render a clean term name
-   *  instead of the kebab id (`a-b-testing` → `A/B testing`). */
+   *  instead of the kebab id (`a-b-testing` → `A/B Testing`). */
   readonly idToLabel: ReadonlyMap<string, string>;
   /** Per-canonical-ID mention probe — `mentionPatterns.get("kubernetes")`
    *  returns a single regex that fires on any of {"kubernetes", "k8s"}. */

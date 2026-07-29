@@ -135,10 +135,13 @@ import {
  * regenerable snapshot. Folding that into this number would mean bumping it on
  * every mining run with no rule changed, which makes it useless as a marker of
  * "the rules moved". That data carries its own versions and this one does not
- * shadow them: reproduce an answer from the pair `TERM_QUALITY_VERSION` +
- * `ROLE_PROFILES_VERSION`, plus `PREVALENCE_SNAPSHOT.generatedAt` for the exact
- * ordering. #588 accordingly bumped `ROLE_PROFILES_VERSION` (1.0 → 1.1) and left
- * this at 1.2.
+ * shadow them: reproduce an answer from the triple `TERM_QUALITY_VERSION` +
+ * `ROLE_PROFILES_VERSION` + `SKILLS_DICTIONARY_VERSION` (jd-match's alias table,
+ * which decides whether a chip arrives here canonicalized at all), plus
+ * `PREVALENCE_SNAPSHOT.generatedAt` for the exact ordering. #588 accordingly
+ * bumped `ROLE_PROFILES_VERSION` (1.0 → 1.1) and left this at 1.2; #594/#607
+ * bumped `SKILLS_DICTIONARY_VERSION` (1.0 → 1.1) and left this at 1.2 again —
+ * both dropped suggestions for an unchanged résumé without touching a rule here.
  *
  * Changelog:
  * - 1.0 (2026-07-25): initial classifier (#584).

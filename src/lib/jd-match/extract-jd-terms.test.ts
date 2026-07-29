@@ -117,7 +117,7 @@ Kubernetes is a core piece of the platform.
   it("renders a human label for skills whose id reads poorly, not the kebab id", () => {
     const { skills } = extractJdTerms("Experience running A/B testing and CI/CD pipelines.");
     const abTest = skills.find((s) => s.id === "a-b-testing");
-    expect(abTest?.display).toBe("A/B testing");
+    expect(abTest?.display).toBe("A/B Testing");
     const cicd = skills.find((s) => s.id === "ci-cd");
     expect(cicd?.display).toBe("CI/CD");
   });

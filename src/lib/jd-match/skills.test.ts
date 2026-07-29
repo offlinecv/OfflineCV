@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect } from "vitest";
-import { SKILLS, getSkillIndex, skillCount } from "./skills.ts";
+import { SKILLS, SKILLS_DICTIONARY_VERSION, getSkillIndex, skillCount } from "./skills.ts";
 
 describe("skills dictionary", () => {
   it("ships at least 100 canonical skills (issue acceptance criterion)", () => {
@@ -39,6 +39,33 @@ describe("skills dictionary", () => {
     const captured = matches.map((m) => m[1].toLowerCase());
     expect(captured).toContain("ruby on rails");
     expect(captured).not.toContain("ruby");
+  });
+
+  it("starts every authored label with a capital or a digit (#607)", () => {
+    // A `label` is rendered verbatim beside chips `deriveSkills` title-cased
+    // itself, so a lowercase one puts two casings in one sentence — and the
+    // recognized skill is the one that looks unpolished. Checked on the first
+    // character only: inside the label the entry's own house casing rules
+    // ("iOS", "P&L Ownership", "A/B Testing"), which no rule can derive.
+    const offenders = SKILLS.filter((s) => s.label && !/^[A-Z0-9]/.test(s.label)).map(
+      (s) => `${s.id}: "${s.label}"`,
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps every alias lowercase — aliases are matched, never shown", () => {
+    // The matcher lowercases both sides, so an uppercase alias is not wrong so
+    // much as a sign someone pasted a display string into the wrong field.
+    for (const entry of SKILLS) {
+      for (const alias of entry.aliases) {
+        expect(alias).toBe(alias.toLowerCase());
+      }
+    }
+  });
+
+  it("pins the dictionary data version so an alias edit is a conscious bump", () => {
+    // Upstream of `term-quality.ts`'s answer, which no other version covers.
+    expect(SKILLS_DICTIONARY_VERSION).toBe("1.1");
   });
 
   it("matches aliases case-insensitively at word boundaries", () => {
@@ -110,6 +137,19 @@ describe("leadership/management competencies (#583)", () => {
         }
       }
     }
+  });
+
+  it("recognizes the skills-row phrasings a leadership résumé actually uses (#594)", () => {
+    // Not bullet prose: these are the literal chips off a real leadership
+    // résumé's SKILLS row. `deriveSkills` canonicalizes by EXACT full-string
+    // lookup, so each spelling has to be its own alias — a near miss leaves the
+    // chip as free text and the advisory then offers a skill the chip states.
+    const { aliasToId } = getSkillIndex();
+    expect(aliasToId.get("engineering leadership")).toBe("people-management");
+    expect(aliasToId.get("engineering management")).toBe("people-management");
+    expect(aliasToId.get("hiring & talent acquisition")).toBe("technical-recruiting");
+    expect(aliasToId.get("hiring and talent acquisition")).toBe("technical-recruiting");
+    expect(aliasToId.get("talent acquisition")).toBe("technical-recruiting");
   });
 
   it("matches realistic bullet phrasing for a sample of the new competencies", () => {

@@ -69,7 +69,13 @@ import type {
 import { AddPill } from "./ReconstructedAdd.tsx";
 
 /** The display text for a missing term — the term itself for a title, or the
- *  skill's human label (falling back to the id) for a skill. */
+ *  skill's human label (falling back to the id) for a skill.
+ *
+ *  The label is the dictionary's `label` verbatim, which is also what a click
+ *  appends to `query.skills` — so a pill and the chip it creates read
+ *  identically, and both match the chips `deriveSkills` already produced. That
+ *  only holds because every authored `label` is title-cased (#607); a lowercase
+ *  one would render `+ people management` beside title-cased chips. */
 export function missingTermLabel(term: MissingTerm): string {
   if (term.kind === "title") return term.term;
   return getSkillIndex().idToLabel.get(term.term) ?? term.term;
