@@ -307,22 +307,24 @@ describe("buildJobQuery", () => {
     // free-text phrase is indistinguishable from a canonical label downstream,
     // and judging one as the other is what marked real skills weak.
     const parsed = baseParsed({
-      skills: ["JS", "Team Building & Mentorship", "python3", "Engineering Leadership"],
+      skills: ["JS", "Team Building & Mentorship", "python3", "Competitive Juggling"],
     });
     const query = buildJobQuery(parsed);
     expect(query.skills).toEqual([
       "javascript",
       "python",
       "Team Building & Mentorship",
-      "Engineering Leadership",
+      "Competitive Juggling",
     ]);
     expect(query.canonicalSkills).toEqual(["javascript", "python"]);
   });
 
   it("leaves canonicalSkills absent when no skill is a canonical name", () => {
     // Absent means "not asserted", which readers treat as no standing to judge —
-    // never as "none are canonical, so all are weak".
-    const query = buildJobQuery(baseParsed({ skills: ["Engineering Leadership"] }));
+    // never as "none are canonical, so all are weak". "Engineering Leadership"
+    // used to be the example here and stopped working as one: #594 made it an
+    // alias of `people-management`, which is the whole point of that change.
+    const query = buildJobQuery(baseParsed({ skills: ["Underwater Basket Weaving"] }));
     expect(query.canonicalSkills).toBeUndefined();
   });
 
@@ -387,7 +389,10 @@ describe("buildJobQuery", () => {
     // unrecognized entries that were typed first.
     // Pin the #583 canonicality: the leadership skill the taxonomy now
     // recognizes leads the ranked list, ahead of the AI/ML cluster.
-    expect(query.skills[0]).toBe("stakeholder management");
+    // The canonical label verbatim — title-cased in the dictionary since #607,
+    // so a recognized skill no longer renders lowercase beside a title-cased
+    // free-text one.
+    expect(query.skills[0]).toBe("Stakeholder Management");
     const aiClusterIndex = query.skills.indexOf("python");
     const incidentalIndex = query.skills.indexOf("Team Leadership");
     expect(aiClusterIndex).toBeGreaterThanOrEqual(0);
@@ -397,7 +402,7 @@ describe("buildJobQuery", () => {
     expect(query.skills).toEqual(
       expect.arrayContaining([
         "python",
-        "machine learning",
+        "Machine Learning",
         "pytorch",
         "tensorflow",
         "nlp",
@@ -435,15 +440,15 @@ describe("buildJobQuery", () => {
     // The leadership competencies now resolve to canonical labels...
     expect(query.skills).toEqual(
       expect.arrayContaining([
-        "people management",
-        "technical recruiting",
-        "roadmap ownership",
-        "cross-functional collaboration",
+        "People Management",
+        "Technical Recruiting",
+        "Roadmap Ownership",
+        "Cross-Functional Collaboration",
       ]),
     );
     // ...and rank ahead of the one entry that still has no canonical match,
     // proving the sort is no longer a tie.
-    const firstCanonicalIndex = query.skills.indexOf("people management");
+    const firstCanonicalIndex = query.skills.indexOf("People Management");
     const incidentalIndex = query.skills.indexOf("Public Speaking");
     expect(firstCanonicalIndex).toBeGreaterThanOrEqual(0);
     expect(incidentalIndex).toBeGreaterThanOrEqual(0);

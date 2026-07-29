@@ -730,11 +730,18 @@ describe("JobQueryEditor — title/skill coherence (issue 587)", () => {
    * heading text appears somewhere on the page.
    */
   describe("grouped suggestions", () => {
-    /** The group element whose heading starts with `heading`, or undefined. */
+    /** The group element whose heading starts with `heading`, or undefined.
+     *
+     *  Takes the INNERMOST match, not the first: any ancestor whose leading child
+     *  is this group satisfies the same predicate, and picking it would sweep the
+     *  other group's pills in too — making the `not.toContain` assertions below
+     *  vacuous. `querySelectorAll` is document order, so the ancestor comes
+     *  first and the group itself comes last. */
     function group(el: HTMLElement, heading: string): Element | undefined {
-      return [...el.querySelectorAll("div")].find(
+      const matches = [...el.querySelectorAll("div")].filter(
         (node) => node.firstElementChild?.textContent?.startsWith(heading) === true,
       );
+      return matches[matches.length - 1];
     }
 
     it("puts each suggestion under a heading that names the field it writes to", () => {

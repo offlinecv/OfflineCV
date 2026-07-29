@@ -378,6 +378,11 @@ function deriveSkills(parsed: ResumeQueryInput): string[] {
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     ranked.push({
+      // A recognized skill renders the dictionary's own `label`, a free-text one
+      // is title-cased here. Those two only agree on casing because #607
+      // title-cased every authored `label` in `jd-match/skills.ts` — before
+      // that, recognition status leaked into casing and the card read
+      // "cross-functional collaboration, Team Building & Mentorship".
       label: canonicalId ? (index.idToLabel.get(canonicalId) ?? trimmed) : titleCase(trimmed),
       isCanonical: Boolean(canonicalId),
       index: order++,

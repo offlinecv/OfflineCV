@@ -8,6 +8,7 @@ import {
   TERM_QUALITY_VERSION,
 } from "./term-quality.ts";
 import type { TermVerdict } from "./term-quality.ts";
+import { buildJobQuery } from "./query-builder.ts";
 import type { JobQuery } from "./query-builder.ts";
 import { roleProfileById } from "./role-profiles.ts";
 
@@ -437,6 +438,26 @@ describe("assessQueryTerms — missing terms", () => {
     ).not.toContain("executive-communication");
   });
 
+  it("still suggests a leadership skill the query only says in a spelling jd-match does not know", () => {
+    // The pre-#594 state of the world, pinned so the fix is attributable to the
+    // alias data and not to some coincidence downstream: this module compares
+    // word-wise and cannot see jd-match's aliases (its docblock forbids the
+    // import), so a RAW skills-row phrasing shares no word with the expected id
+    // and is correctly — from this module's point of view — not a match.
+    // `buildJobQuery` is what makes the end-to-end case below pass, by rewriting
+    // the chip to the canonical label first. Delete the alias and that test goes
+    // red while this one keeps passing.
+    const { missing } = assessQueryTerms(
+      makeQuery({
+        titles: ["Senior Engineering Manager"],
+        skills: ["Hiring & Talent Acquisition", "Engineering Leadership"],
+      }),
+    );
+    const skills = missing.filter((entry) => entry.kind === "skill").map((e) => e.term);
+    expect(skills).toContain("technical-recruiting");
+    expect(skills).toContain("people-management");
+  });
+
   it("never suggests a wordier spelling of a title the query already carries, but keeps a different market phrasing", () => {
     // The reproduction's titles. "+ engineering team lead" was offered to
     // someone titled "Engineering Lead" — {engineering, lead} ⊂ {engineering,
@@ -474,6 +495,101 @@ describe("assessQueryTerms — missing terms", () => {
     expect(missing.filter((e) => e.kind === "title").map((e) => e.term)).toContain(
       "machine learning engineer",
     );
+  });
+});
+
+/**
+ * The #594/#607 reproduction, end to end — the only level at which it reproduces.
+ *
+ * A hand-built `JobQuery` cannot show the fix: this module compares word-wise and
+ * may not read jd-match's aliases, so the bridge is `buildJobQuery` canonicalizing
+ * "Hiring & Talent Acquisition" to the chip "Technical Recruiting" BEFORE the
+ * advice is computed. Both halves of the pipe therefore have to be in the test.
+ *
+ * Each case asserts `missing` is still `MAX_MISSING_SKILLS` long alongside the
+ * `not.toContain`, because suppression back-fills: without that, an assertion
+ * passes when the term merely fell off the tail of a re-ordered head-cap, which
+ * is exactly the wrong reason.
+ */
+describe("assessQueryTerms + buildJobQuery — a suggestion the résumé already states (#594, #607)", () => {
+  function queryFor(skills: string[], titles = ["Engineering Lead", "Sr. Engineering Manager"]): JobQuery {
+    return buildJobQuery({
+      skills,
+      experience: titles.map((title, i) => ({ title, company: i ? "Globex" : "Acme Corp" })),
+    });
+  }
+
+  function missingSkills(skills: string[], titles?: string[]): string[] {
+    return assessQueryTerms(queryFor(skills, titles))
+      .missing.filter((entry) => entry.kind === "skill")
+      .map((entry) => entry.term);
+  }
+
+  it("does not offer '+ technical recruiting' beside a 'Hiring & Talent Acquisition' chip", () => {
+    // Titled into `senior-engineering-manager` on purpose: that is the profile
+    // whose prevalence-ranked head CARRIES `technical-recruiting` (asserted
+    // below, not assumed), so the term had a place in `missing` to lose. Run
+    // against `engineering-manager` this would pass whether the fix exists or
+    // not, because the term never reaches the head-cap there.
+    const titles = ["Senior Engineering Manager"];
+    const head = (roleProfileById("senior-engineering-manager")?.skills ?? []).slice(
+      0,
+      MAX_MISSING_SKILLS,
+    );
+    expect(head).toContain("technical-recruiting");
+    expect(missingSkills([], titles)).toContain("technical-recruiting");
+
+    const skills = missingSkills(["Hiring & Talent Acquisition"], titles);
+    expect(skills).not.toContain("technical-recruiting");
+    expect(skills).toHaveLength(MAX_MISSING_SKILLS);
+  });
+
+  it("does not offer '+ people management' beside an 'Engineering Leadership' chip", () => {
+    // On its own, so the suppression cannot be riding on "Team Building &
+    // Mentorship" happening to sit in the same query. Same non-vacuity check:
+    // the same résumé without that chip IS told to add the skill.
+    expect(missingSkills([])).toContain("people-management");
+    const skills = missingSkills(["Engineering Leadership"]);
+    expect(skills).not.toContain("people-management");
+    expect(skills).toHaveLength(MAX_MISSING_SKILLS);
+  });
+
+  it("suppresses both across the full reproduction résumé, and still fills the row", () => {
+    const skills = missingSkills([
+      "Engineering Leadership",
+      "Technical Architecture & System Design",
+      "Distributed Systems & Cloud Computing",
+      "Team Building & Mentorship",
+      "Hiring & Talent Acquisition",
+      "Cross-functional Collaboration",
+      "Product Development & Strategy",
+      "Performance Optimization",
+      "AI / LLM Orchestration",
+      "Prompt Engineering & Evals",
+    ]);
+    // Not asserted for `technical-recruiting`: these titles resolve to
+    // `engineering-manager`, whose head-cap never reaches it, so the assertion
+    // would pass without the fix. It is asserted where it bites, above.
+    expect(skills).not.toContain("people-management");
+    expect(skills).not.toContain("team-building");
+    expect(skills).not.toContain("cross-functional-collaboration");
+    expect(skills).toHaveLength(MAX_MISSING_SKILLS);
+    // The advice that WAS right stays right: that résumé never says agile,
+    // scrum, or sprints, and "Performance Optimization" is latency work, not
+    // performance management.
+    expect(skills).toContain("agile-leadership");
+    expect(skills).toContain("performance-management");
+  });
+
+  it("never lets a recognized leadership chip read weak", () => {
+    // The #585 standing rule, re-asserted on the chips canonicalization now
+    // produces: recognition must upgrade a verdict, never manufacture a "this is
+    // not what the role is hired on" about a skill the role plainly expects.
+    const query = queryFor(["Engineering Leadership", "Hiring & Talent Acquisition"]);
+    const { verdicts } = assessQueryTerms(query);
+    expect(verdicts.filter((v) => v.kind === "skill" && v.quality === "weak")).toEqual([]);
+    expect(qualityOf(verdicts, "People Management")).toBe("strong");
+    expect(qualityOf(verdicts, "Technical Recruiting")).toBe("strong");
   });
 });
 
