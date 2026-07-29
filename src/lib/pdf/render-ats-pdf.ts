@@ -259,6 +259,72 @@ const WINANSI_TRANSLITERATIONS: Record<string, string> = {
 };
 
 /**
+ * Sanitize `text` for an EMBEDDED font, keeping every glyph that font can
+ * actually draw.
+ *
+ * An embedded font is not a licence to skip sanitization. pdf-lib does not
+ * throw on a code point the embedded font lacks — it emits the font's
+ * `.notdef` glyph, which extracts back as **U+0000**. So a character Poppins
+ * has no glyph for (U+2192 "→", U+2605 "★", U+2713 "✓" — verified against the
+ * vendored `Poppins-Regular.ttf`) survived to `drawText` unsanitized and
+ * landed in the downloaded PDF as a NUL byte. Re-parsing that PDF reads the
+ * NUL straight back into a user-facing field (a role title, a name), where it
+ * is invisible on screen and travels into every downstream consumer.
+ *
+ * That is strictly worse than the WinAnsi path's "?" degradation: "?" is
+ * visible and self-explaining, a NUL is neither. Both are the #664 family —
+ * this fixes the embedded half, whose scope note wrongly assumed an embedded
+ * font could not reproduce it.
+ *
+ * `hasGlyph` is the font's own coverage predicate, so this degrades ONLY what
+ * the font genuinely cannot draw. Latin-Extended glyphs Poppins does cover
+ * (e.g. "ś" in a candidate's name) still pass through untouched — the reason
+ * the embedded path skipped `toWinAnsi()` in the first place, preserved here.
+ *
+ * The predicate is NOT trusted for control characters, which are dropped
+ * before it runs: Poppins answers `true` for U+0000, so a NUL already in an
+ * input field (re-uploading a PDF exported by a pre-fix build puts one there)
+ * would otherwise pass the probe and ride straight back out.
+ */
+function toEmbeddedFontSafe(
+  text: string,
+  hasGlyph: (codePoint: number) => boolean,
+): string {
+  if (!text) return text;
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    // Tab/newline/CR: layout whitespace, never drawn as a glyph.
+    if (code === 0x09 || code === 0x0a || code === 0x0d) {
+      out += ch;
+      continue;
+    }
+    // Other C0/C1 control characters: drop silently (as toWinAnsi does).
+    // This MUST precede the coverage probe. Poppins reports a real glyph for
+    // U+0000 (`hasGlyphForCodePoint(0) === true` in both vendored faces — the
+    // one control code point it claims), so probing first would let the exact
+    // byte this function exists to eliminate through verbatim, and would make
+    // this drop unreachable for it. No entry in WINANSI_TRANSLITERATIONS is in
+    // the control range, so nothing transliterable is lost by dropping first.
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) continue;
+    if (hasGlyph(code)) {
+      out += ch;
+      continue;
+    }
+    // Same transliteration table the WinAnsi path uses: these are ASCII
+    // spellings of the glyph's MEANING ("→" ⇒ "->"), so they read correctly
+    // whichever font is in use — they are not WinAnsi-specific.
+    const replacement = WINANSI_TRANSLITERATIONS[ch];
+    if (replacement !== undefined) {
+      out += replacement;
+      continue;
+    }
+    out += "?";
+  }
+  return out;
+}
+
+/**
  * Sanitize `text` to the WinAnsi (Windows-1252) subset that pdf-lib's
  * StandardFonts can encode. Glyphs WinAnsi already supports (en/em dash,
  * curly quotes, bullet, ellipsis, NBSP, ...) pass through unchanged; glyphs
@@ -345,15 +411,23 @@ function loadPoppinsBytes(): Promise<{
  * since pdf-lib's built-in `embedFont` can only parse the 14 standard fonts
  * without it); on ANY failure — fetch error, corrupt bytes, an embed
  * rejection — falls back to pdf-lib's built-in Helvetica / Helvetica-Bold, so
- * a font problem never blocks the download. `isEmbedded` tells the caller
- * whether Poppins is actually in use: only then can `toWinAnsi()`
- * sanitization be skipped (StandardFonts can only encode WinAnsi; embedded
- * Poppins encodes the glyphs directly — see `toWinAnsi()` above).
+ * a font problem never blocks the download.
+ *
+ * Returns the `sanitize` step to run before every `drawText`, chosen to match
+ * the font that was actually loaded — never skipped. On the Helvetica fallback
+ * that is `toWinAnsi()` (StandardFonts encode WinAnsi only, #295); on the
+ * embedded path it is {@link toEmbeddedFontSafe} bound to Poppins' own glyph
+ * coverage, because an embedded font silently emits `.notdef` (extracting as
+ * U+0000) for a glyph it lacks rather than throwing.
  */
 async function loadFonts(
   doc: Doc,
   parts: PdfLibParts,
-): Promise<{ regular: PdfFont; bold: PdfFont; isEmbedded: boolean }> {
+): Promise<{
+  regular: PdfFont;
+  bold: PdfFont;
+  sanitize: (text: string) => string;
+}> {
   try {
     // `@pdf-lib/fontkit` ships no usable default-export `.d.ts` shape, so it
     // is typed `unknown` in `PdfLibParts` and cast here at the one call site
@@ -364,11 +438,15 @@ async function loadFonts(
     // `subset: true` prunes the embedded font to only the glyphs the résumé
     // actually uses — a downloaded PDF touches ~60–80 glyphs, so this trims the
     // full Poppins Regular + Bold (a few hundred KB) down to what's on the page.
-    // Orthogonal to the skip-`toWinAnsi()` path: subsetting prunes unused
-    // glyphs, it doesn't change the embedded-encoding logic.
+    // Orthogonal to the sanitizer choice: subsetting prunes unused glyphs, it
+    // doesn't change which code points the font can encode.
     const regular = await doc.embedFont(bytes.regular, { subset: true });
     const bold = await doc.embedFont(bytes.bold, { subset: true });
-    return { regular, bold, isEmbedded: true };
+    return {
+      regular,
+      bold,
+      sanitize: makePoppinsSanitizer(parts, bytes.regular, bytes.bold),
+    };
   } catch (err) {
     console.warn(
       "Poppins font embed failed, falling back to Helvetica:",
@@ -377,7 +455,68 @@ async function loadFonts(
   }
   const regular = await doc.embedFont(parts.StandardFonts.Helvetica);
   const bold = await doc.embedFont(parts.StandardFonts.HelveticaBold);
-  return { regular, bold, isEmbedded: false };
+  return { regular, bold, sanitize: toWinAnsi };
+}
+
+/**
+ * The sanitizer for the embedded-Poppins path: {@link toEmbeddedFontSafe}
+ * bound to Poppins' real coverage, read off the same TTF bytes pdf-lib just
+ * embedded (so the predicate cannot drift from the font on the page).
+ *
+ * BOTH faces are probed and a code point must be covered by both to survive.
+ * `groupRunsIntoWords` draws bold runs — every role title and section heading
+ * — with `fonts.bold`, a different TTF from `fonts.regular`. The two vendored
+ * files happen to have identical coverage today (diffed across U+0020–U+10FFFF
+ * minus surrogates: zero differences), so a Regular-only probe would be
+ * correct by accident; requiring both makes the fix independent of that, so a
+ * weight swap, a variable-font migration or a Poppins bump cannot silently
+ * reinstate `.notdef` in bold text.
+ *
+ * Coverage is memoized per byte-buffer and probed lazily — `hasGlyphForCodePoint`
+ * is only called for code points a résumé actually contains, which is a few
+ * dozen distinct values per document.
+ *
+ * Falls back to `toWinAnsi` if fontkit can't parse the bytes here for any
+ * reason. That is deliberately the CONSERVATIVE direction: `toWinAnsi` may
+ * degrade a Latin-Extended glyph Poppins could have drawn, but it can never
+ * emit a NUL — and a fallback that silently returned the text unsanitized
+ * would reinstate the exact defect this function exists to prevent.
+ */
+function makePoppinsSanitizer(
+  parts: PdfLibParts,
+  regularBytes: ArrayBuffer,
+  boldBytes: ArrayBuffer,
+): (text: string) => string {
+  try {
+    const fk = parts.fontkit as {
+      create: (b: Uint8Array) => { hasGlyphForCodePoint: (cp: number) => boolean };
+    };
+    const faces = [regularBytes, boldBytes].map((b) =>
+      fk.create(new Uint8Array(b)),
+    );
+    const cache = new Map<number, boolean>();
+    const hasGlyph = (cp: number): boolean => {
+      let hit = cache.get(cp);
+      if (hit === undefined) {
+        hit = faces.every((f) => f.hasGlyphForCodePoint(cp));
+        cache.set(cp, hit);
+      }
+      return hit;
+    };
+    // Probe once up front: a fontkit build whose `hasGlyphForCodePoint` throws
+    // (or is absent) must be caught HERE, not on the first draw call. It also
+    // catches `fk.create` handing back a font *collection*, which has no
+    // `hasGlyphForCodePoint` at all — the call throws, so the seam covers
+    // shape mismatches as well as version skew.
+    hasGlyph(0x41);
+    return (text) => toEmbeddedFontSafe(text, hasGlyph);
+  } catch (err) {
+    console.warn(
+      "Poppins glyph-coverage probe failed, sanitizing to WinAnsi:",
+      err,
+    );
+    return toWinAnsi;
+  }
 }
 
 /**
@@ -465,7 +604,7 @@ function groupRunsIntoWords(
   runs: Array<{ text: string; bold: boolean }>,
   size: number,
   fonts: { regular: PdfFont; bold: PdfFont },
-  sanitize: boolean,
+  sanitize: (text: string) => string,
 ): WordChunk[][] {
   const words: WordChunk[][] = [];
   let current: WordChunk[] = [];
@@ -476,7 +615,7 @@ function groupRunsIntoWords(
     }
   };
   for (const run of runs) {
-    const value = sanitize ? toWinAnsi(run.text) : run.text;
+    const value = sanitize(run.text);
     const font = run.bold ? fonts.bold : fonts.regular;
     for (const piece of value.split(/(\s+)/)) {
       if (piece === "") continue;
@@ -549,13 +688,14 @@ class Layout {
     // Literal-string constructor from pdf-lib, used to build Link-annotation
     // `/URI` values (#425 — see `registerLink`).
     private pdfString: PdfLibParts["PDFString"],
-    // When true (the default — the Helvetica fallback), every string is run
-    // through `toWinAnsi()` before drawing, since StandardFonts can only
-    // encode WinAnsi (#295). When false (a custom font — Poppins — embedded
-    // successfully), sanitization is skipped: the embedded font encodes the
-    // glyphs directly, so skipping it avoids needlessly degrading
-    // Latin-Extended glyphs Poppins can render but WinAnsi can't (e.g. "ł").
-    private sanitize = true,
+    // The font-matched sanitizer every string passes through before it is
+    // measured or drawn — `toWinAnsi` on the Helvetica fallback, Poppins'
+    // coverage-aware sanitizer on the embedded path (see `loadFonts`). It is
+    // never a no-op: an embedded font emits `.notdef` (which extracts as
+    // U+0000) for a glyph it lacks, so "the font can encode it" is a claim
+    // that has to be checked, not assumed. Defaults to the strictest option
+    // so a caller that forgets it degrades visibly rather than silently.
+    private sanitize: (text: string) => string = toWinAnsi,
   ) {
     this.page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     this.y = PAGE_HEIGHT - MARGIN;
@@ -790,19 +930,14 @@ class Layout {
     // (e.g. µ U+00B5 → Μ U+039C Greek Capital Mu, ſ → S, ﬁ ligature → FI), so
     // uppercasing BEFORE toWinAnsi would let `drawText` throw `WinAnsi cannot
     // encode "Μ"` and reintroduce the #295 crash. Uppercase the raw text, then
-    // sanitize the result — toWinAnsi is the final step before measure/draw.
-    // Skipped entirely on the embedded-Poppins path (`this.sanitize === false`
-    // — see the constructor doc) since Poppins encodes the glyphs directly.
+    // sanitize the result — `sanitize` is the final step before measure/draw,
+    // and it runs on BOTH font paths (see the constructor doc).
     const cased = opts.uppercase ? text.toUpperCase() : text;
-    const value = this.sanitize ? toWinAnsi(cased) : cased;
+    const value = this.sanitize(cased);
     const atomic = opts.atomicSegments ?? false;
     const maxWidth = CONTENT_WIDTH - (x - MARGIN);
     const rSize = opts.rightSize ?? size;
-    const rValue = opts.rightText
-      ? this.sanitize
-        ? toWinAnsi(opts.rightText)
-        : opts.rightText
-      : "";
+    const rValue = opts.rightText ? this.sanitize(opts.rightText) : "";
     const rightReserve = rValue
       ? this.fonts.regular.widthOfTextAtSize(rValue, rSize) + DATE_COLUMN_GAP
       : 0;
@@ -1196,7 +1331,7 @@ export async function renderAtsResumePdf(
   const doc = await PDFDocument.create();
   doc.setTitle(model.contact.name || "Resume");
 
-  const { regular, bold, isEmbedded } = await loadFonts(doc, parts);
+  const { regular, bold, sanitize } = await loadFonts(doc, parts);
 
   const black = rgb(0.1, 0.1, 0.1);
   const gray = rgb(0.55, 0.55, 0.55);
@@ -1208,7 +1343,7 @@ export async function renderAtsResumePdf(
     black,
     gray,
     parts.PDFString,
-    !isEmbedded,
+    sanitize,
   );
 
   // ── Header: name + (headline) + contact line ──
