@@ -2,7 +2,9 @@
 // Copyright 2026 The offlinecv Authors
 
 import { checkNumbersPreserved } from "../preserve-numbers.ts";
+import { scoreAdherence } from "./adherence.ts";
 import type {
+  FixtureSteering,
   FixtureKind,
   PerBulletDiagnostic,
   RawRewriteOutput,
@@ -22,6 +24,8 @@ import { startsWithActionVerb } from "./verbs.ts";
  *   4. lengthSanity       — each bullet in a sane char band
  *   5. noPreambleLeak     — output doesn't echo prompt scaffolding
  *   6. dedupEffective     — for `redundant` fixtures only: output < input
+ *   7. steeringAdherence  — for steering fixtures only (#608): did the output
+ *                           obey the instruction it was steered with?
  *
  * Each criterion is computed independently — one failing does NOT
  * short-circuit the others, because the report's per-criterion pass rate
@@ -69,6 +73,7 @@ export function emptyRubricForError(): RubricResult {
     lengthSanity: false,
     noPreambleLeak: false,
     dedupEffective: null,
+    steeringAdherence: null,
     judgeCoherence: null,
     perBullet: [],
     droppedNumbers: [],
@@ -80,12 +85,19 @@ export interface ScoreRubricInput {
   input: readonly string[];
   output: RawRewriteOutput;
   fixtureKind: FixtureKind;
+  /**
+   * The fixture's steering probe (#608), when it carries one. Absent → the
+   * `steeringAdherence` criterion is `null` and every pre-#608 fixture scores
+   * exactly as it did.
+   */
+  steering?: FixtureSteering;
 }
 
 export function scoreRubric({
   input,
   output,
   fixtureKind,
+  steering,
 }: ScoreRubricInput): RubricResult {
   const outputBullets = output.bullets;
 
@@ -162,6 +174,14 @@ export function scoreRubric({
       ? outputBullets.length > 0 && outputBullets.length < input.length
       : null;
 
+  // ── (7) Steering adherence (#608) ─────────────────────────────────────
+  // Only meaningful for a fixture that steers. `null` otherwise, so the
+  // aggregate ignores it and the report renders `—`, exactly like dedup.
+  const steeringAdherence: boolean | null =
+    steering === undefined
+      ? null
+      : scoreAdherence(steering.check, outputBullets);
+
   const perBullet: PerBulletDiagnostic[] = outputBullets.map((b, i) => ({
     index: i,
     text: b,
@@ -177,6 +197,7 @@ export function scoreRubric({
     lengthSanity,
     noPreambleLeak,
     dedupEffective,
+    steeringAdherence,
     judgeCoherence: null,
     perBullet,
     droppedNumbers: preservation.dropped,

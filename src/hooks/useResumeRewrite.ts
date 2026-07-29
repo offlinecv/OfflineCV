@@ -51,11 +51,16 @@ import type {
 } from "../lib/webllm/types.ts";
 import { useModelSelection } from "./useModelSelection.ts";
 import { usePersistentFlag } from "./usePersistentFlag.ts";
+import { findingsFromCritique } from "../lib/webllm/rewrite-findings.ts";
+import { findingsKey } from "../lib/webllm/steering.ts";
+import type { ResumeCritique } from "../lib/webllm/critique-resume.ts";
 import { useSectionRewriteLock } from "./useSectionRewriteLock.ts";
 
 /** localStorage keys for the last-used steering (issue #210). */
 const INSTRUCTIONS_KEY = "ocv_rewrite_instructions";
 const PAGE_TARGET_KEY = "ocv_rewrite_page_target";
+/** Findings channel opt-out (#608). "1" = on (the default), "" = off. */
+const USE_FINDINGS_KEY = "ocv_rewrite_use_findings";
 
 function parsePageTarget(stored: string): PageTarget | null {
   return stored === "1" || stored === "2" || stored === "3"
@@ -133,6 +138,19 @@ export interface ResumeRewriteController {
   pageTarget: PageTarget | null;
   /** Set/clear the page-length target (persists to localStorage). */
   setPageTarget: (target: PageTarget | null) => void;
+  /**
+   * True when a critique has produced at least one ACTIONABLE finding for a
+   * line this run would rewrite (#608). Drives whether the steering dialog
+   * offers the toggle at all — a user who never ran the critique, or whose
+   * résumé came back clean, is shown nothing rather than a dead control.
+   */
+  hasFindings: boolean;
+  /** Whether to feed the critique's findings into the rewrite (#608).
+   *  Persisted; defaults ON — a user who ran a critique and then clicked
+   *  Rewrite has already expressed the intent. */
+  useFindings: boolean;
+  /** Toggle the findings channel (persists to localStorage). */
+  setUseFindings: (value: boolean) => void;
 }
 
 export function labelForResumeRewrite(
@@ -186,6 +204,13 @@ export function useResumeRewrite(
    * rewrite prompt.
    */
   jdContext?: string,
+  /**
+   * The LLM critique of THIS résumé, when the user has run one (#608). Its
+   * per-bullet findings are folded into the rewrite steering so a rewrite acts
+   * on the feedback the app already showed the user. Undefined (no critique
+   * run, or WebGPU unavailable) → byte-identical pre-#608 prompt.
+   */
+  critique?: ResumeCritique,
 ): ResumeRewriteController {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<ResumeRewriteStatus>({ kind: "idle" });
@@ -199,6 +224,20 @@ export function useResumeRewrite(
     usePersistentFlag(INSTRUCTIONS_KEY);
   const [pageTargetRaw, setPageTargetRaw] = usePersistentFlag(PAGE_TARGET_KEY);
   const pageTarget = parsePageTarget(pageTargetRaw);
+
+  // Findings channel (#608). Default "1" (on): reaching the Rewrite button
+  // after running a critique already expresses the intent to act on it, and an
+  // opt-in that starts off would leave the defect this issue fixes in place for
+  // everyone who doesn't find the checkbox.
+  const [useFindingsRaw, setUseFindingsRaw] = usePersistentFlag(
+    USE_FINDINGS_KEY,
+    "1",
+  );
+  const useFindings = useFindingsRaw === "1";
+  const setUseFindings = useCallback(
+    (value: boolean) => setUseFindingsRaw(value ? "1" : ""),
+    [setUseFindingsRaw],
+  );
   const setPageTarget = useCallback(
     (target: PageTarget | null) => {
       setPageTargetRaw(target === null ? "" : String(target));
@@ -210,6 +249,29 @@ export function useResumeRewrite(
     () => sections.filter(isNonEmptyForUi),
     [sections],
   );
+
+  // The critique's findings, keyed by the line they describe (#608). Built off
+  // `rewriteableSections` so `summaryFeedback` is filed under the very summary
+  // string this run will rewrite — `findingsFromCritique` has no other way to
+  // key it, and a mismatch would silently drop it.
+  const findings = useMemo(() => {
+    const summary = rewriteableSections.find((s) => s.kind === "summary");
+    return findingsFromCritique(critique, summary?.text);
+  }, [critique, rewriteableSections]);
+
+  // Whether the toggle is worth showing: findings exist AND at least one of
+  // them names a line this run would actually rewrite. A critique whose only
+  // actionable findings are on bullets the user has since deleted leaves the
+  // map non-empty while contributing nothing, and offering a control that
+  // provably changes no prompt is worse than offering none.
+  const hasFindings = useMemo(() => {
+    if (findings === undefined) return false;
+    return rewriteableSections.some((section) =>
+      section.kind === "summary"
+        ? findings.has(findingsKey(section.text))
+        : section.bullets.some((b) => findings.has(findingsKey(b))),
+    );
+  }, [findings, rewriteableSections]);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,13 +321,19 @@ export function useResumeRewrite(
       const combinedInstructions = [jd, userText]
         .filter((s): s is string => !!s)
         .join("\n\n");
+      // The app's own findings (#608) ride the SAME steering channel rather
+      // than a fourth parameter on `rewriteResumeWithLlm` — one intent channel,
+      // per the issue's reuse analysis. Gated on the user's toggle, so opting
+      // out restores the pre-#608 prompt exactly.
+      const activeFindings = useFindings ? findings : undefined;
       const steering: RewriteSteering | undefined =
-        combinedInstructions || pageTarget !== null
+        combinedInstructions || pageTarget !== null || activeFindings
           ? {
               ...(combinedInstructions
                 ? { userInstructions: combinedInstructions }
                 : {}),
               ...(pageTarget !== null ? { pageTarget } : {}),
+              ...(activeFindings ? { findings: activeFindings } : {}),
             }
           : undefined;
       const result = await rewriteResumeWithLlm(
@@ -299,7 +367,22 @@ export function useResumeRewrite(
       releaseInference(modelId);
       release();
     }
-  }, [acquire, rewriteableSections, selectedModelId, userInstructions, pageTarget, jdContext]);
+    // `findings` + `useFindings` are read inside, so both are deps — the lint
+    // plugin is not registered in this repo (CLAUDE.md → Data & hooks), so a
+    // stale closure here would lint green and silently ignore the toggle until
+    // some unrelated dep changed. `findings` is a `useMemo` over
+    // `[critique, rewriteableSections]`, both already stable across renders
+    // that don't change them, so this adds no re-creation of its own.
+  }, [
+    acquire,
+    rewriteableSections,
+    selectedModelId,
+    userInstructions,
+    pageTarget,
+    jdContext,
+    findings,
+    useFindings,
+  ]);
 
   const dismiss = useCallback(() => {
     setStatus({ kind: "idle" });
@@ -348,6 +431,9 @@ export function useResumeRewrite(
     setUserInstructions: setUserInstructionsRaw,
     pageTarget,
     setPageTarget,
+    hasFindings,
+    useFindings,
+    setUseFindings,
   };
 }
 

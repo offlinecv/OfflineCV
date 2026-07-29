@@ -16,6 +16,7 @@
 
 export * from "./icons/TrustIcons.tsx";
 export * from "./primitives/Button.tsx";
+export * from "./primitives/Checkbox.tsx";
 export * from "./primitives/Chip.tsx";
 export * from "./primitives/Dialog.tsx";
 export * from "./primitives/EditableField.tsx";

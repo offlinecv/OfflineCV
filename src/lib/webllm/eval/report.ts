@@ -40,16 +40,16 @@ export function renderMarkdownReport(report: EvalReport): string {
   lines.push("## Aggregate (per model × variant)");
   lines.push("");
   lines.push(
-    "| Model | Variant | Numbers | One-line | Verb | Length | No-preamble | Dedup | Judge | **Aggregate** |",
+    "| Model | Variant | Numbers | One-line | Verb | Length | No-preamble | Dedup | Steering | Judge | **Aggregate** |",
   );
   lines.push(
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const row of report.aggregates) {
     const modelLabel = getModelById(row.modelId)?.name ?? row.modelId;
     const variantLabel = getVariantById(row.variantId)?.label ?? row.variantId;
     lines.push(
-      `| ${modelLabel} | ${variantLabel} | ${pct(row.numbersPreservedRate)} | ${pct(row.oneLineRate)} | ${pct(row.actionVerbRate)} | ${pct(row.lengthSanityRate)} | ${pct(row.noPreambleLeakRate)} | ${pctOrDash(row.dedupEffectiveRate)} | ${numOrDash(row.judgeMean)} | **${pct(row.aggregateScore)}** |`,
+      `| ${modelLabel} | ${variantLabel} | ${pct(row.numbersPreservedRate)} | ${pct(row.oneLineRate)} | ${pct(row.actionVerbRate)} | ${pct(row.lengthSanityRate)} | ${pct(row.noPreambleLeakRate)} | ${pctOrDash(row.dedupEffectiveRate)} | ${pctOrDash(row.steeringAdherenceRate)} | ${numOrDash(row.judgeMean)} | **${pct(row.aggregateScore)}** |`,
     );
   }
   lines.push("");
@@ -65,15 +65,15 @@ export function renderMarkdownReport(report: EvalReport): string {
       lines.push(`#### ${variantLabel}`);
       lines.push("");
       lines.push(
-        "| Fixture | Kind | In → Out | Numbers | Verb | Length | Preamble | Dedup | Error |",
+        "| Fixture | Kind | In → Out | Numbers | Verb | Length | Preamble | Dedup | Steering | Error |",
       );
       lines.push(
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
       );
       for (const r of report.records) {
         if (r.modelId !== modelId || r.variantId !== variantId) continue;
         lines.push(
-          `| ${r.fixtureId} | ${r.fixtureKind} | ${r.inputBulletCount} → ${r.outputBulletCount} | ${tick(r.rubric.numbersPreserved)} | ${tick(r.rubric.actionVerbLead)} | ${tick(r.rubric.lengthSanity)} | ${tick(r.rubric.noPreambleLeak)} | ${tickOrDash(r.rubric.dedupEffective)} | ${r.error ? `\`${r.error}\`` : ""} |`,
+          `| ${r.fixtureId} | ${r.fixtureKind} | ${r.inputBulletCount} → ${r.outputBulletCount} | ${tick(r.rubric.numbersPreserved)} | ${tick(r.rubric.actionVerbLead)} | ${tick(r.rubric.lengthSanity)} | ${tick(r.rubric.noPreambleLeak)} | ${tickOrDash(r.rubric.dedupEffective)} | ${tickOrDash(r.rubric.steeringAdherence)} | ${r.error ? `\`${r.error}\`` : ""} |`,
         );
       }
       lines.push("");

@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, expect, it } from "vitest";
-import { buildSteeringSuffix } from "./steering.ts";
+import { buildSteeringSuffix, findingsKey } from "./steering.ts";
 
 describe("buildSteeringSuffix", () => {
   it("returns empty string for undefined steering", () => {
@@ -62,5 +62,98 @@ describe("buildSteeringSuffix", () => {
     expect(buildSteeringSuffix({ pageTarget: 1 })).toContain("one-page");
     expect(buildSteeringSuffix({ pageTarget: 2 })).toContain("two-page");
     expect(buildSteeringSuffix({ pageTarget: 3 })).toContain("three-page");
+  });
+});
+
+// ── Findings channel (#608) ──────────────────────────────────────────────────
+
+describe("buildSteeringSuffix — app findings", () => {
+  const findings = new Map<string, readonly string[]>([
+    [findingsKey("Worked on the API"), ["add a concrete metric or outcome"]],
+    [findingsKey("Helped with deploys"), ["lead with a stronger action verb"]],
+    [findingsKey("A bullet in ANOTHER section"), ["make this specific"]],
+  ]);
+
+  it("contributes nothing when `units` is omitted", () => {
+    // Every pre-#608 caller (the eval harness, a direct single-section
+    // rewrite) passes no units, and must keep its byte-identical prompt.
+    expect(buildSteeringSuffix({ findings })).toBe("");
+  });
+
+  it("contributes nothing when no unit has a finding", () => {
+    expect(
+      buildSteeringSuffix({ findings }, ["An entirely unflagged bullet"]),
+    ).toBe("");
+  });
+
+  it("emits only the findings for the units it was given", () => {
+    const suffix = buildSteeringSuffix({ findings }, [
+      "Worked on the API",
+      "An unflagged bullet",
+    ]);
+    expect(suffix).toContain("add a concrete metric or outcome");
+    // The load-bearing half: a finding for a bullet in a DIFFERENT section
+    // must not ride along. A test that only checks presence passes trivially
+    // when all findings are dumped into every section.
+    expect(suffix).not.toContain("make this specific");
+    expect(suffix).not.toContain("lead with a stronger action verb");
+  });
+
+  it("numbers each note to match the user message's bullet list", () => {
+    const suffix = buildSteeringSuffix({ findings }, [
+      "An unflagged bullet",
+      "Worked on the API",
+      "Helped with deploys",
+    ]);
+    expect(suffix).toContain("- Bullet 2: add a concrete metric or outcome");
+    expect(suffix).toContain("- Bullet 3: lead with a stronger action verb");
+    // Bullet 1 carries no finding, so it is absent rather than listed as "ok".
+    expect(suffix).not.toContain("Bullet 1");
+  });
+
+  it("drops the ordinal for a single-unit call (the summary)", () => {
+    const summary = "Engineer with a decade of backend work.";
+    const suffix = buildSteeringSuffix(
+      { findings: new Map([[findingsKey(summary), ["name a specialism"]]]) },
+      [summary],
+      "Summary",
+    );
+    expect(suffix).toContain("- Summary: name a specialism");
+    expect(suffix).not.toContain("Summary 1");
+  });
+
+  it("carries the anti-fabrication guardrail with the notes", () => {
+    // A critique suggestion is free to invent an illustrative number
+    // ("e.g. cut latency 40%"). A rewriter told to address the note will copy
+    // it unless told not to, and the base prompt's rule is far upstream.
+    const suffix = buildSteeringSuffix({ findings }, ["Worked on the API"]);
+    expect(suffix).toContain("never copy a number");
+  });
+
+  it("orders budget → findings → user instructions, user text last", () => {
+    const suffix = buildSteeringSuffix(
+      { pageTarget: 2, findings, userInstructions: "lean technical" },
+      ["Worked on the API"],
+    );
+    const budget = suffix.indexOf("two-page");
+    const finding = suffix.indexOf("add a concrete metric");
+    const user = suffix.indexOf("lean technical");
+    expect(budget).toBeGreaterThan(-1);
+    expect(budget).toBeLessThan(finding);
+    // The user's own words stay the final thing the model reads — they are the
+    // only part typed seconds earlier with a specific intent.
+    expect(finding).toBeLessThan(user);
+  });
+
+  it("is byte-identical to the no-findings suffix when nothing matches", () => {
+    const without = buildSteeringSuffix({
+      pageTarget: 1,
+      userInstructions: "target staff",
+    });
+    const withUnmatched = buildSteeringSuffix(
+      { pageTarget: 1, userInstructions: "target staff", findings },
+      ["An entirely unflagged bullet"],
+    );
+    expect(withUnmatched).toBe(without);
   });
 });

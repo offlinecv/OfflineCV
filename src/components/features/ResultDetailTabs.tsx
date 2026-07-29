@@ -111,6 +111,16 @@ export function ResultDetailTabs({
               score={activeScore}
               edit={edit}
               jdContext={jdContext}
+              // #608: the critique the "Resume quality" tab is already showing
+              // feeds the rewrite, so clicking Rewrite acts on the findings the
+              // user just read instead of discarding them. Only available once
+              // the analysis has completed; every other status contributes
+              // nothing and leaves the prompt at its pre-#608 form.
+              critique={
+                analysis.status.kind === "done"
+                  ? analysis.status.critique
+                  : undefined
+              }
             />
           </TabPanel>
           <TabPanel id="find-jobs">

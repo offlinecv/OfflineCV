@@ -76,6 +76,7 @@ export function buildSectionUserPrompt(bullets: readonly string[]): string {
 export function buildSectionSystemPrompt(
   context?: string,
   steering?: RewriteSteering,
+  bullets?: readonly string[],
 ): string {
   const base =
     !context || context.trim().length === 0
@@ -86,7 +87,11 @@ Earlier sections of this résumé have already been rewritten. The user's NEXT m
 
 Context from earlier sections (reference only — never echo into your output):
 ${context.trim()}`;
-  return `${base}${buildSteeringSuffix(steering)}`;
+  // `bullets` scopes `steering.findings` to THIS section (#608) and is passed
+  // in the same order `buildSectionUserPrompt` numbers them, so a note reading
+  // "Bullet 3" names the line the user message labels `3.`. Omitted → the
+  // findings channel contributes nothing and the prompt is byte-identical.
+  return `${base}${buildSteeringSuffix(steering, bullets)}`;
 }
 
 /**
@@ -169,7 +174,11 @@ export async function rewriteSectionWithLlm(
       messages: [
         {
           role: "system",
-          content: buildSectionSystemPrompt(options.context, options.steering),
+          content: buildSectionSystemPrompt(
+            options.context,
+            options.steering,
+            bullets,
+          ),
         },
         { role: "user", content: buildSectionUserPrompt(bullets) },
       ],

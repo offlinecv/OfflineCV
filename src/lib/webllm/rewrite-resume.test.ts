@@ -34,6 +34,9 @@ import {
   type SectionOutcome,
 } from "./rewrite-resume.ts";
 import { _resetSectionRewriteFlagsForTesting } from "./rewrite-section.ts";
+import { findingsKey, type RewriteSteering } from "./steering.ts";
+import { findingsFromCritique } from "./rewrite-findings.ts";
+import type { ResumeCritique } from "./critique-resume.ts";
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
@@ -361,5 +364,263 @@ describe("rewriteResumeWithLlm", () => {
       rewriteResumeWithLlm(sections, engine, TEST_MODEL, () => {}),
     ).rejects.toBe(boom);
     expect(completedMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── The app's own findings reach the prompt, scoped per section (#608) ────────
+//
+// Phase 0 of #608: the reproduction runs entirely on synthetic literals — no
+// PDF, no persona, no personal résumé. `SectionInput[]` plus a hand-built
+// findings map is the whole input, and the assertion is on the prompt string
+// `runOne` produces, which is a pure function of them.
+
+describe("app findings reach the rewrite prompt (#608)", () => {
+  /** Two roles plus a summary, each with one FLAGGED and one clean bullet. */
+  const multiSection = (): SectionInput[] => [
+    summarySection("Engineer with a decade of backend work."),
+    experienceSection("exp-0", "Staff Engineer — Globex", [
+      "Worked on the payments API",
+      "Cut deploy time from 42 minutes to 9 minutes",
+    ]),
+    experienceSection("exp-1", "Senior Engineer — Initech", [
+      "Helped with the ingest pipeline",
+      "Mentored four engineers on the on-call rotation",
+    ]),
+  ];
+
+  const findings = new Map<string, readonly string[]>([
+    [findingsKey("Worked on the payments API"), ["ROLE-ZERO-NOTE"]],
+    [findingsKey("Helped with the ingest pipeline"), ["ROLE-ONE-NOTE"]],
+    [
+      findingsKey("Engineer with a decade of backend work."),
+      ["SUMMARY-NOTE"],
+    ],
+  ]);
+
+  async function run(steering?: RewriteSteering) {
+    const { engine, calls } = makeEngine(async () => reply("Rewritten line"));
+    await rewriteResumeWithLlm(
+      multiSection(),
+      engine,
+      TEST_MODEL,
+      () => {},
+      steering,
+    );
+    // calls[0] = summary, calls[1] = exp-0, calls[2] = exp-1.
+    return calls.map((c) => String(c.messages[0]?.content ?? ""));
+  }
+
+  it("puts each section's OWN findings in that section's system prompt", async () => {
+    const [summaryPrompt, roleZero, roleOne] = await run({ findings });
+    expect(summaryPrompt).toContain("SUMMARY-NOTE");
+    expect(roleZero).toContain("ROLE-ZERO-NOTE");
+    expect(roleOne).toContain("ROLE-ONE-NOTE");
+  });
+
+  it("does NOT leak one section's findings into another's prompt", async () => {
+    // The assertion the whole design turns on. Dumping every finding into
+    // every prompt would satisfy the presence test above and still be the
+    // prompt-balloon failure mode `PRIOR_PREVIEW_CHAR_CAP` warns about.
+    const [summaryPrompt, roleZero, roleOne] = await run({ findings });
+
+    expect(roleZero).not.toContain("ROLE-ONE-NOTE");
+    expect(roleZero).not.toContain("SUMMARY-NOTE");
+
+    expect(roleOne).not.toContain("ROLE-ZERO-NOTE");
+    expect(roleOne).not.toContain("SUMMARY-NOTE");
+
+    expect(summaryPrompt).not.toContain("ROLE-ZERO-NOTE");
+    expect(summaryPrompt).not.toContain("ROLE-ONE-NOTE");
+  });
+
+  it("numbers a note to match the bullet's position in the user message", async () => {
+    const { engine, calls } = makeEngine(async () => reply("Rewritten line"));
+    await rewriteResumeWithLlm(
+      [
+        experienceSection("exp-0", "Staff Engineer", [
+          "Cut deploy time from 42 minutes to 9 minutes",
+          "Worked on the payments API",
+        ]),
+      ],
+      engine,
+      TEST_MODEL,
+      () => {},
+      { findings },
+    );
+    const system = String(calls[0]!.messages[0]?.content ?? "");
+    const user = String(calls[0]!.messages[1]?.content ?? "");
+    // The flagged bullet is second in the input, so it is `2.` in the user
+    // message and must be "Bullet 2" in the note — an off-by-one here would
+    // aim every note at the wrong line.
+    expect(user).toContain("2. Worked on the payments API");
+    expect(system).toContain("- Bullet 2: ROLE-ZERO-NOTE");
+  });
+
+  it("leaves the prompt BYTE-IDENTICAL when findings are absent", async () => {
+    // Not "behaves the same" — the same string. This is the contract that lets
+    // a user who never ran a critique be unaffected by #608 entirely.
+    const withFindings = await run({ userInstructions: "target staff" });
+    const without = await run({ userInstructions: "target staff" });
+    expect(withFindings).toEqual(without);
+
+    const baseline = await run(undefined);
+    const withEmptyMap = await run({ findings: new Map() });
+    expect(withEmptyMap).toEqual(baseline);
+  });
+
+  it("keeps every guardrail, and keeps it BEFORE the findings block", async () => {
+    const [summaryPrompt, roleZero] = await run({ findings });
+
+    // The number-preservation + no-fabrication rules are what the suffix
+    // design exists to protect (steering.ts docblock): user- and app-supplied
+    // text is appended AFTER them so a small model cannot drop one.
+    const guardrail = "Preserve every concrete number from the input EXACTLY";
+    expect(roleZero).toContain(guardrail);
+    expect(roleZero).toContain("Do not invent new numbers or metrics.");
+    expect(roleZero.indexOf(guardrail)).toBeLessThan(
+      roleZero.indexOf("ROLE-ZERO-NOTE"),
+    );
+
+    // The summary prompt carries its own guardrail wording.
+    expect(summaryPrompt).toContain("Do not invent");
+    expect(summaryPrompt.indexOf("Do not invent")).toBeLessThan(
+      summaryPrompt.indexOf("SUMMARY-NOTE"),
+    );
+  });
+
+  it("still catches a fabricated number when a finding names one", async () => {
+    // A finding is allowed to mention a number (a critique suggestion routinely
+    // does). If the model copies it into the résumé, `allNumbersPreserved` must
+    // still report the invention — a finding must not become a fabrication
+    // vector that the deterministic checker stops seeing.
+    const numeric = new Map<string, readonly string[]>([
+      [
+        findingsKey("Worked on the payments API"),
+        ["add a concrete metric or outcome (suggested: cut latency 40%)"],
+      ],
+    ]);
+    const { engine } = makeEngine(async () =>
+      // The model took the bait and copied the suggested figure.
+      reply("Cut payments API latency 40%"),
+    );
+    const result = await rewriteResumeWithLlm(
+      [experienceSection("exp-0", "Staff Engineer", ["Worked on the payments API"])],
+      engine,
+      TEST_MODEL,
+      () => {},
+      { findings: numeric },
+    );
+    expect(result.allNumbersPreserved).toBe(false);
+    // `checkNumbersPreserved` tokenizes the percent with its unit, so the
+    // invented token is "40%" — the point is that it is reported as ADDED.
+    expect(result.sections[0]!.data.addedNumbers).toContain("40%");
+  });
+});
+
+// ── The full seam: a real ResumeCritique through to the prompt (#608) ─────────
+//
+// The tests above build the findings Map by hand, which verifies SCOPING but
+// not that `findingsFromCritique` produces a map those lookups can find. The
+// mapper has its own unit tests, which verify the map but not the scoping.
+// Neither notices if the two stop composing — a change to `findingsKey` on one
+// side, or to how the critique echoes a bullet back, would leave both suites
+// green and every finding silently missing from every prompt. This drives the
+// real adapter end to end, as the #608 AC words it ("with a `ResumeCritique` in
+// hand").
+
+describe("a real ResumeCritique reaches the prompt end-to-end (#608)", () => {
+  const SUMMARY = "Engineer with a decade of backend work.";
+  const FLAGGED = "Worked on the payments API";
+  const CLEAN = "Cut deploy time from 42 minutes to 9 minutes";
+
+  const critique: ResumeCritique = {
+    // The critique echoes bullets back through the model, which routinely
+    // re-adds a marker and re-wraps whitespace — so the fixture states them
+    // that way rather than byte-identical to the résumé's copy.
+    bulletFindings: [
+      {
+        bullet: "•  Worked   on the payments API",
+        issue: "no_quantification",
+        suggestion: "name the throughput",
+      },
+      { bullet: CLEAN, issue: "ok" },
+      { bullet: "Helped with the ingest pipeline", issue: "vague" },
+    ],
+    missingSections: [],
+    summaryFeedback: "Too generic — name a specialism.",
+  };
+
+  it("joins the critique's own wording to the résumé's copy of the line", async () => {
+    const { engine, calls } = makeEngine(async () => reply("Rewritten line"));
+    await rewriteResumeWithLlm(
+      [
+        summarySection(SUMMARY),
+        experienceSection("exp-0", "Staff Engineer", [FLAGGED, CLEAN]),
+        experienceSection("exp-1", "Senior Engineer", [
+          "Helped with the ingest pipeline",
+        ]),
+      ],
+      engine,
+      TEST_MODEL,
+      () => {},
+      { findings: findingsFromCritique(critique, SUMMARY) },
+    );
+    const [summaryPrompt, roleZero, roleOne] = calls.map((c) =>
+      String(c.messages[0]?.content ?? ""),
+    );
+
+    // Marker + whitespace differences did not lose the join.
+    expect(roleZero).toContain("add a concrete metric or outcome");
+    expect(roleZero).toContain("name the throughput");
+    // The `ok` finding contributes nothing — it would spend prompt budget to
+    // say a bullet is fine, and teach the model the list is ignorable.
+    expect(roleZero).not.toContain("Bullet 2");
+
+    expect(summaryPrompt).toContain("Too generic");
+    expect(roleOne).toContain("make this specific");
+
+    // Still scoped, through the real adapter.
+    expect(roleZero).not.toContain("make this specific");
+    expect(roleZero).not.toContain("Too generic");
+  });
+
+  it("changes nothing when the user never ran a critique", async () => {
+    // `findingsFromCritique(undefined)` is `undefined`, which is the single
+    // "contributes nothing" signal the byte-identical guarantee keys on.
+    const sections = [
+      summarySection(SUMMARY),
+      experienceSection("exp-0", "Staff Engineer", [FLAGGED, CLEAN]),
+    ];
+    const run = async (steering?: RewriteSteering) => {
+      const { engine, calls } = makeEngine(async () => reply("Rewritten line"));
+      await rewriteResumeWithLlm(sections, engine, TEST_MODEL, () => {}, steering);
+      return calls.map((c) => String(c.messages[0]?.content ?? ""));
+    };
+
+    const noCritique = await run({
+      userInstructions: "target staff",
+      findings: findingsFromCritique(undefined),
+    });
+    const preChange = await run({ userInstructions: "target staff" });
+    expect(noCritique).toEqual(preChange);
+  });
+
+  it("changes nothing when every finding is `ok`", async () => {
+    const allOk: ResumeCritique = {
+      bulletFindings: [
+        { bullet: FLAGGED, issue: "ok" },
+        { bullet: CLEAN, issue: "ok" },
+      ],
+      missingSections: [],
+    };
+    const sections = [experienceSection("exp-0", "Staff", [FLAGGED, CLEAN])];
+    const run = async (steering?: RewriteSteering) => {
+      const { engine, calls } = makeEngine(async () => reply("Rewritten line"));
+      await rewriteResumeWithLlm(sections, engine, TEST_MODEL, () => {}, steering);
+      return calls.map((c) => String(c.messages[0]?.content ?? ""));
+    };
+    expect(
+      await run({ findings: findingsFromCritique(allOk) }),
+    ).toEqual(await run(undefined));
   });
 });

@@ -39,7 +39,39 @@ export interface RewriteFixture {
   description: string;
   /** The input bullets passed to the rewrite. */
   bullets: readonly string[];
+  /**
+   * Steering-adherence probe (#608 half 2). When present, the runner passes
+   * `instruction` to the rewrite as `RewriteSteering.userInstructions` and the
+   * rubric scores whether the output obeyed it, via `check`.
+   *
+   * Absent on every pre-#608 fixture, which keeps their prompts and their
+   * scores exactly as they were — `steeringAdherence` is `null` for them and
+   * the aggregate ignores it.
+   */
+  steering?: FixtureSteering;
 }
+
+/** The instruction a fixture steers with, plus how to verify compliance. */
+export interface FixtureSteering {
+  /** Passed verbatim as the user's rewrite instruction. */
+  instruction: string;
+  /** Deterministic verification of `instruction` — see `adherence.ts`. */
+  check: AdherenceCheck;
+}
+
+/**
+ * A mechanically-checkable instruction.
+ *
+ * Every variant must be verifiable by inspecting the output string alone, with
+ * no judge model — that is the constraint that makes an adherence number worth
+ * arguing from (see `adherence.ts`). Adding a variant means adding a case to
+ * `scoreAdherence` and `describeCheck`; both switch exhaustively, so TypeScript
+ * flags a half-done addition.
+ */
+export type AdherenceCheck =
+  | { kind: "forbidden-word"; word: string }
+  | { kind: "max-words"; limit: number }
+  | { kind: "distinct-verbs" };
 
 /**
  * Per-criterion pass/fail booleans + diagnostic detail. Each field is a
@@ -63,6 +95,12 @@ export interface RubricResult {
    * `null` for non-redundant fixtures (the criterion does not apply).
    */
   dedupEffective: boolean | null;
+  /**
+   * For fixtures carrying a `steering` probe (#608): did the output obey the
+   * instruction? `null` for fixtures without one (the criterion does not
+   * apply), which is every pre-#608 fixture.
+   */
+  steeringAdherence: boolean | null;
   /**
    * Flag-gated LLM-judge coherence score, 0..1. `null` when the judge is
    * off (default in CI and the committed scripts). Never required for any
@@ -185,6 +223,9 @@ export interface AggregateRow {
   noPreambleLeakRate: number;
   /** 0..1 across `redundant` fixtures only; `null` if none in the set. */
   dedupEffectiveRate: number | null;
+  /** 0..1 across steering-probe fixtures only; `null` if none in the set.
+   *  The #608 half-2 number. */
+  steeringAdherenceRate: number | null;
   /** Mean judge score across scored fixtures; `null` when judge is off. */
   judgeMean: number | null;
   /** Equal-weight mean of the deterministic rates (judge excluded). */

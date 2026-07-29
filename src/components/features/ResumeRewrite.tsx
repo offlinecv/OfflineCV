@@ -31,7 +31,8 @@
  */
 
 import { useState } from "react";
-import { Button, Dialog, InlineResult, ModelLoadProgress, TextAreaField } from "@design-system";
+import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
+import { Button, Checkbox, Dialog, InlineResult, ModelLoadProgress, TextAreaField } from "@design-system";
 import {
   labelForResumeRewrite,
   useResumeRewrite,
@@ -80,8 +81,14 @@ export function useResumeRewriteUi(
   applyBySection?: ResumeRewriteApply,
   /** Optional JD-driven rewrite steering (#226). Undefined on `/` → generic. */
   jdContext?: string,
+  /**
+   * The on-device critique of this résumé, when one has been run (#608). Its
+   * per-bullet findings steer the rewrite so the app acts on the feedback it
+   * already showed the user. Undefined → byte-identical pre-#608 prompt.
+   */
+  critique?: ResumeCritique,
 ): ResumeRewriteParts {
-  const controller = useResumeRewrite(sections, jdContext);
+  const controller = useResumeRewrite(sections, jdContext, critique);
 
   if (!controller.isAvailable) {
     return { trigger: null, panel: null };
@@ -169,8 +176,15 @@ function RewriteSteeringBox({
 }: {
   controller: ResumeRewriteController;
 }) {
-  const { pageTarget, setPageTarget, userInstructions, setUserInstructions } =
-    controller;
+  const {
+    pageTarget,
+    setPageTarget,
+    userInstructions,
+    setUserInstructions,
+    hasFindings,
+    useFindings,
+    setUseFindings,
+  } = controller;
   const disabled = controller.isLocked;
 
   const onChipClick = (preset: (typeof PAGE_PRESETS)[number]) => {
@@ -221,13 +235,36 @@ function RewriteSteeringBox({
           );
         })}
       </div>
+      {hasFindings && (
+        <Checkbox
+          checked={useFindings}
+          onChange={setUseFindings}
+          disabled={disabled}
+          label="Use the quality findings from the critique"
+          hint="Each flagged line is rewritten with its own note attached."
+        />
+      )}
       <TextAreaField
         label="Instructions for the rewrite (optional)"
         value={userInstructions}
         onChange={setUserInstructions}
-        placeholder="e.g. 'target a staff engineer role' or 'keep bullets under 20 words'"
+        placeholder="e.g. 'lead with impact, not responsibilities' or 'keep bullets under 20 words'"
         disabled={disabled}
       />
+      {/* #608 Phase 3 — the global/per-section mismatch, stated instead of
+          silently disappointing. The rewriter runs section by section and the
+          model never sees the whole résumé, so a whole-document instruction
+          ("cut this to one page") is asking for something the architecture
+          cannot do — `pageTarget` is explicitly an approximation, not
+          pagination (steering.ts). Say which instructions actually work rather
+          than letting the user discover it from a rewrite that ignored them.
+          Decomposing an instruction per section is the real fix and is out of
+          scope for #608. */}
+      <p className="text-2xs text-content-muted">
+        Applied to one section at a time, so per-bullet guidance (tone, verbs,
+        length, what to emphasise) works best. Use the length chips above for
+        whole-résumé sizing.
+      </p>
     </div>
   );
 }

@@ -226,3 +226,56 @@ describe("emptyRubricForError", () => {
     expect(r.perBullet).toEqual([]);
   });
 });
+
+// ── Steering adherence (#608 half 2) ─────────────────────────────────────────
+
+describe("scoreRubric — steeringAdherence", () => {
+  const input = ["Spearheaded the billing migration across 12 markets."];
+  const steering = {
+    instruction: 'Do not use the word "spearheaded" anywhere in your output.',
+    check: { kind: "forbidden-word", word: "spearheaded" },
+  } as const;
+
+  it("is null for a fixture that carries no steering probe", () => {
+    // Every pre-#608 fixture. `null` is what makes the aggregate ignore it and
+    // the report render `—`, so their scores are untouched by this criterion.
+    const r = scoreRubric({
+      input,
+      output: out(["Led the billing migration across 12 markets."]),
+      fixtureKind: "weak",
+    });
+    expect(r.steeringAdherence).toBeNull();
+  });
+
+  it("is true when the output obeyed the instruction", () => {
+    const r = scoreRubric({
+      input,
+      output: out(["Led the billing migration across 12 markets."]),
+      fixtureKind: "weak",
+      steering,
+    });
+    expect(r.steeringAdherence).toBe(true);
+  });
+
+  it("is FALSE when the output ignored it — the criterion bites", () => {
+    const r = scoreRubric({
+      input,
+      output: out(["Spearheaded the billing migration across 12 markets."]),
+      fixtureKind: "weak",
+      steering,
+    });
+    expect(r.steeringAdherence).toBe(false);
+    // The other criteria are computed independently — a steering failure must
+    // not drag them down, or the report can't tell "ignored the instruction"
+    // from "produced garbage".
+    expect(r.numbersPreserved).toBe(true);
+    expect(r.actionVerbLead).toBe(true);
+  });
+
+  it("is null on an errored row, so a crash is not scored as non-adherence", () => {
+    // An error row already fails every applicable criterion; recording a
+    // steering FAILURE there too would blame the instruction for a model that
+    // never produced output, and inflate the "ignored" count in the report.
+    expect(emptyRubricForError().steeringAdherence).toBeNull();
+  });
+});
