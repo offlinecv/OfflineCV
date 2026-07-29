@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. `skills` covers the Programming Languages and Applications rows; the 'Language: Fluent in Spanish' row is a language proficiency, not a skill token, and is deliberately excluded.",
+  "contact": {
+    "full_name": "Jordan A. Patel",
+    "email": "jordan.patel@example.com",
+    "phone": "(805) 555-0143"
+  },
+  "experience": [
+    {
+      "title": "Quality Assurance Intern (40 hours per week)",
+      "company": "Northwind Robotics",
+      "dates": "June 2023 – Sept. 2023"
+    },
+    {
+      "title": "Peer Tutor (15 to 20 hours per week)",
+      "company": "Multicultural Engineering Program – State Polytechnic University",
+      "dates": "August 2022 – Present"
+    }
+  ],
+  "education": [
+    {
+      "degree": "Bachelor of Science in Computer Engineering",
+      "institution": "State Polytechnic University, Springfield"
+    }
+  ],
+  "skills": [
+    "C",
+    "HTML",
+    "CSS",
+    "Java",
+    "VHDL",
+    "Assembly",
+    "Eclipse",
+    "Xilinx",
+    "ModelSim",
+    "PSpice",
+    "Microsoft Word/Excel/PowerPoint"
+  ],
+  "knownWrong": {
+    "experience.company": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "Role 2's employer line reads “Multicultural Engineering Program – State Polytechnic University”; `company` comes back as just the university — the program half is not lost, the parser puts it on `team`, but `experience.company` scores the `company` field alone. The identical shape is measured on unknown/single-column-title-below-anchor. Possibly a defensible org/team split rather than a defect — recorded rather than assumed, because ground truth's job is to state what the page says and let a human adjudicate."
+    },
+    "skills": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "Two independent disagreements on one field: the single-letter token “C” is DROPPED from the Programming Languages row (the identical drop is measured on latex/multi-degree-coursework, so it is not fixture-specific), and “Fluent in Spanish” is admitted as a skill from the “Language:” row."
+    }
+  }
+}

@@ -57,6 +57,7 @@ import type {
   BulletOverrides,
   DescriptionOverrides,
 } from "../../hooks/useEditableParse.ts";
+import { bulletIdText, isLegacyBulletKey } from "../score/bullet-id.ts";
 
 /**
  * The edit result (#445, Stage D+E): the mutated {@link CanonicalResume} plus
@@ -657,12 +658,56 @@ function removeBulletFromDescriptions(
 // ── Bullet override application ─────────────────────────────────────────────
 
 /**
+ * The original bullet text an override key names, or `undefined` when the key
+ * resolves to nothing.
+ *
+ * Two key spaces meet here (#648). A modern key is a {@link bulletId} and
+ * CARRIES its text, so it resolves with no pool at all — which is the whole
+ * point: the UI writes against the re-graded pool while `byIndex` is the frozen
+ * base parse, and after a removal the two disagree about what index 1 means. A
+ * legacy key is a bare base-pool index from a snapshot written before #648 (a
+ * persisted draft, a saved-library résumé, a `/jd-fit` handoff) and still
+ * resolves through `byIndex`, exactly as it did then. See `bullet-id.ts` for why
+ * the two spaces cannot collide.
+ */
+function resolveOverrideOriginal(
+  key: string,
+  byIndex: ReadonlyMap<number, BulletObservation>,
+): string | undefined {
+  if (isLegacyBulletKey(key)) return byIndex.get(Number(key))?.text;
+  return bulletIdText(key);
+}
+
+/**
  * Fold `bullets` text edits into `views` (rawText + sections) and the
  * matching role's description, in that priority order — first-match wins per
  * container, same as the original inline loop. A no-op edit (equal to the
- * original, or empty) is skipped: an empty edit doesn't drop a bullet (that
- * would silently change the bullet count); clearing the field reverts to the
- * parsed text instead.
+ * original, or empty) is skipped, so an empty edit doesn't drop a bullet — that
+ * would silently change the bullet count.
+ *
+ * An empty edit does NOT "revert to the parsed text", as this docblock used to
+ * claim. Since #648 a key names the text it replaces, so the override that
+ * produced the row's CURRENT text is keyed by that row's PREVIOUS text; writing
+ * `""` at the row's current id therefore appends a new, inert entry and leaves
+ * the earlier one — the one actually doing the work — untouched. Nothing
+ * reverts. The clear-to-revert affordance does not exist and no surface offers
+ * it: `ResumeBulletRow` routes an empty commit to `onRemove` instead, so this
+ * path is unreachable from the UI. Undo is what reverts an edit
+ * (`captureBulletUndo`), by restoring the map, not by writing a blank.
+ *
+ * INSERTION ORDER IS LOAD-BEARING. Editing a bullet twice leaves two entries —
+ * `id("A") → "B"` from the first edit and `id("B") → "C"` from the second,
+ * because the row's id follows its current text (see `bullet-id.ts`). Walking
+ * `Object.entries` in insertion order composes them (A→B, then B→C); any other
+ * order leaves the résumé reading "B".
+ *
+ * An `id` key preserves insertion order because it always contains a `|` and so
+ * is never integer-like. The map CAN still hold integer-like keys — the legacy
+ * migration space is all-digits — and V8 hoists those to the front, ahead of
+ * every inserted id, regardless of when they were written. That is safe only
+ * because a legacy key can arrive by exactly one route: `replay`, which runs
+ * before any interactive edit, so nothing an id key would have to compose with
+ * exists yet. A legacy key minted mid-session would break the chain silently.
  */
 function applyBulletTextOverrides(
   views: BulletViews,
@@ -671,42 +716,48 @@ function applyBulletTextOverrides(
   byIndex: ReadonlyMap<number, BulletObservation>,
 ): BulletViews {
   let { rawText, sections } = views;
-  for (const [idxStr, editedRaw] of Object.entries(bullets)) {
-    const idx = Number(idxStr);
-    const obs = byIndex.get(idx);
-    if (!obs) continue;
+  for (const [key, editedRaw] of Object.entries(bullets)) {
+    const original = resolveOverrideOriginal(key, byIndex);
+    if (original === undefined) continue;
     const edited = editedRaw.trim();
-    if (edited === obs.text) continue;
+    if (edited === original) continue;
     if (edited === "") continue;
-    rawText = replaceBulletInRawText(rawText, obs.text, edited);
-    sections = replaceBulletInSections(sections, obs.text, edited);
-    replaceBulletInDescriptions(experience, obs.text, edited);
+    rawText = replaceBulletInRawText(rawText, original, edited);
+    sections = replaceBulletInSections(sections, original, edited);
+    replaceBulletInDescriptions(experience, original, edited);
   }
   return { rawText, sections };
 }
 
 /**
- * Fold `removedBullets` (accepted "this bullet was removed" decisions from
- * the rewrite review, #211) into `views` and the matching role's
- * description. Removal changes the bullet COUNT, so re-grading produces
- * fresh BulletObservation indices; that's fine because removals are applied
- * as a batch and the proposal is dismissed afterward (the override maps that
- * key by index are reconciled on the next render against the new
- * observations).
+ * Fold `removedBullets` (a per-row Remove, or an accepted "this bullet was
+ * removed" decision from the rewrite review, #211) into `views` and the matching
+ * role's description.
+ *
+ * Keyed by {@link bulletId} since #648, which is what makes SEQUENTIAL removals
+ * independent: each id names its own line, so removing A and then the displayed
+ * C stores two ids that drop A and C. Under the old index keys the second click
+ * wrote the re-graded pool's index — which after the first removal named B — and
+ * the set `{0,1}` dropped A and B, a bullet the user never touched.
+ *
+ * Runs AFTER {@link applyBulletTextOverrides}, deliberately: a row removed after
+ * being edited carries the id of its EDITED text, and the edit has landed in
+ * these views by the time we look for it. Reverse the two and that removal
+ * silently misses.
  */
 function applyRemovedBulletOverrides(
   views: BulletViews,
   experience: HeuristicParsedResume["experience"],
-  removedBullets: ReadonlySet<number>,
+  removedBullets: ReadonlySet<string>,
   byIndex: ReadonlyMap<number, BulletObservation>,
 ): BulletViews {
   let { rawText, sections } = views;
-  for (const idx of removedBullets) {
-    const obs = byIndex.get(idx);
-    if (!obs) continue;
-    rawText = removeBulletFromRawText(rawText, obs.text);
-    sections = removeBulletFromSections(sections, obs.text);
-    removeBulletFromDescriptions(experience, obs.text);
+  for (const key of removedBullets) {
+    const text = resolveOverrideOriginal(key, byIndex);
+    if (text === undefined) continue;
+    rawText = removeBulletFromRawText(rawText, text);
+    sections = removeBulletFromSections(sections, text);
+    removeBulletFromDescriptions(experience, text);
   }
   return { rawText, sections };
 }
@@ -881,10 +932,14 @@ function applyAddedBulletsToExistingEntries(
  *                  here to re-grade Specificity / Structure.
  * @param contact   contact-field overrides (full_name/email/phone/linkedin/location).
  * @param experience experience-header overrides keyed by experience array index.
- * @param bullets   bullet-text overrides keyed by BulletObservation.index.
- * @param observations the `score.bullets` array — links a bullet override index
- *                  back to the original bullet text it should replace. Pass `[]`
- *                  when there are no bullet overrides.
+ * @param bullets   bullet-text overrides keyed by {@link BulletObservation.id}
+ *                  (#648). Applied in insertion order — see
+ *                  {@link applyBulletTextOverrides}.
+ * @param observations the BASE parse's `score.bullets` array. Needed ONLY to
+ *                  resolve LEGACY numeric keys out of a pre-#648 snapshot back
+ *                  to their bullet text; an id-keyed override carries its own
+ *                  text and never consults it. Pass `[]` when there are no
+ *                  legacy overrides to migrate.
  * @param education education-field overrides keyed by education array index
  *                  (degree/institution/start_date/end_date). Empty string clears
  *                  a field. Default `{}`.
@@ -898,8 +953,8 @@ function applyAddedBulletsToExistingEntries(
  *                  entry's id. Folded into the entry description AND the graded
  *                  bullet pool so an addition moves Specificity / Structure.
  *                  Default `{}`.
- * @param removedBullets accepted "this bullet was removed" indices (#211).
- *                  Default empty set.
+ * @param removedBullets ids of bullets the user dropped (#211), same key space
+ *                  as `bullets`. Default empty set.
  * @param profileOverrides the ONE consolidated contact-link edit list (#427):
  *                  corrections to the four legacy slots (entries with a
  *                  `legacyKey`) AND user-added extras (untagged). Folded into the
@@ -939,7 +994,7 @@ export function applyOverrides(
   skills: SkillsOverride = { removed: [], added: [] },
   addedEntries: readonly AddedEntry[] = [],
   addedBullets: AddedBullets = {},
-  removedBullets: ReadonlySet<number> = new Set(),
+  removedBullets: ReadonlySet<string> = new Set(),
   profileOverrides: readonly ProfileOverride[] = [],
   fieldConfidence: FieldConfidence = {},
   achievements: Record<number, AchievementFieldOverrides> = {},

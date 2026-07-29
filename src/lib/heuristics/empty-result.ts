@@ -19,7 +19,7 @@
  */
 
 import { emptyParsed } from "./cascade.ts";
-import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./line-model.ts";
 import { toCanonicalResume } from "./canonical.ts";
 import type { CascadeResult } from "./types.ts";
 

@@ -68,18 +68,18 @@ import { RewriteReviewList } from "./RewriteReviewList.tsx";
 
 /**
  * Wiring a per-role rewrite to the reconstructed-résumé edit model so accepted
- * bullets can be written back (#211). `obsIndices` is parallel to the `bullets`
+ * bullets can be written back (#211). `obsIds` is parallel to the `bullets`
  * passed to `useSectionRewrite` (same order/length, BEFORE blank-trimming), so
  * an accepted change at trimmed position i resolves to its
- * BulletObservation.index. When omitted, the proposed panel keeps its legacy
+ * BulletObservation.id. When omitted, the proposed panel keeps its legacy
  * copy-all/discard surface (used by callers without an edit model).
  */
 export interface SectionRewriteApply {
-  obsIndices: readonly number[];
-  /** Replace a parsed bullet's text (→ setBulletField). */
-  onReplace: (obsIndex: number, text: string) => void;
-  /** Drop a parsed bullet (→ removeBullet). */
-  onRemove: (obsIndex: number) => void;
+  obsIds: readonly string[];
+  /** Replace a bullet's text (→ setBulletField). */
+  onReplace: (obsId: string, text: string) => void;
+  /** Drop a bullet (→ removeBullet). */
+  onRemove: (obsId: string) => void;
   /** Append a new bullet to this role (→ addBullet on the role's entry key). */
   onAdd: (text: string) => void;
   /**
@@ -214,17 +214,19 @@ export function useSectionRewrite(
   // Trim blank bullets here once — passed to both the model (so it doesn't
   // see empties) and the before/after panel (so the original column matches
   // what the model actually saw). When an edit model is wired (`apply`), the
-  // surviving bullets' BulletObservation indices are kept parallel so an
-  // accepted change at trimmed position i maps back to the right bullet.
-  const { trimmedBullets, keptObsIndices } = useMemo(() => {
+  // surviving bullets' BulletObservation ids are kept parallel so an accepted
+  // change at trimmed position i maps back to the right bullet. A missing id
+  // becomes "" — the sentinel `resolveSectionWrites` drops (it was `-1` while
+  // these were indices).
+  const { trimmedBullets, keptObsIds } = useMemo(() => {
     const texts: string[] = [];
-    const idxs: number[] = [];
+    const ids: string[] = [];
     bullets.forEach((b, i) => {
       if (b.trim().length === 0) return;
       texts.push(b);
-      if (apply) idxs.push(apply.obsIndices[i] ?? -1);
+      if (apply) ids.push(apply.obsIds[i] ?? "");
     });
-    return { trimmedBullets: texts, keptObsIndices: idxs };
+    return { trimmedBullets: texts, keptObsIds: ids };
   }, [bullets, apply]);
 
   // Per-bullet review state (#211). Aligned against the snapshot the model
@@ -333,13 +335,13 @@ export function useSectionRewrite(
 
   // Apply accepted decisions back into the reconstructed résumé via the edit
   // model, then dismiss the proposal. Each action's `originalIndex` is a
-  // position in the trimmed snapshot, mapped to its BulletObservation.index
-  // through `keptObsIndices`.
+  // position in the trimmed snapshot, mapped to its BulletObservation.id
+  // through `keptObsIds`.
   const onApply = useCallback(() => {
     if (!apply) return;
     const writes = resolveSectionWrites(
       pairs,
-      keptObsIndices,
+      keptObsIds,
       review.decisions,
       review.edits,
     );
@@ -358,8 +360,8 @@ export function useSectionRewrite(
     const undo = apply.captureUndo?.(writes);
     for (const write of writes) {
       if (write.kind === "add") apply.onAdd(write.text);
-      else if (write.kind === "replace") apply.onReplace(write.obsIndex, write.text);
-      else apply.onRemove(write.obsIndex);
+      else if (write.kind === "replace") apply.onReplace(write.obsId, write.text);
+      else apply.onRemove(write.obsId);
     }
     setStatus({
       kind: "applied",
@@ -374,7 +376,7 @@ export function useSectionRewrite(
     pairs,
     review.decisions,
     review.edits,
-    keptObsIndices,
+    keptObsIds,
     sectionLabel,
   ]);
 

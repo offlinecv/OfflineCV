@@ -76,7 +76,6 @@ import type {
 import type {
   EditableParse,
   ExperienceFieldOverrides,
-  BulletOverrides,
   DescriptionOverrides,
   AddedEntry,
   AddedEntryField,
@@ -404,7 +403,6 @@ export function ExperienceSection({
   hasBullets,
   experienceOverrides,
   onExperienceFieldChange,
-  bulletOverrides,
   onBulletChange,
   onRemoveBullet,
   addedExperience,
@@ -437,12 +435,15 @@ export function ExperienceSection({
     field: keyof ExperienceFieldOverrides,
     value: string,
   ) => void;
-  bulletOverrides: BulletOverrides;
-  onBulletChange: (index: number, value: string) => void;
-  /** Drop a bullet by BulletObservation.index (rewrite-review apply, #211),
-   *  plus the optional added-bullets bucket + line that is the only way to
-   *  reach a USER-ADDED bullet (#637). */
-  onRemoveBullet: (index: number, added?: AddedBulletRef) => void;
+  /** Commit a bullet edit by BulletObservation.id, plus the optional
+   *  added-bullets bucket + line that is the only way to reach a USER-ADDED
+   *  bullet (#657). */
+  onBulletChange: (id: string, value: string, added?: AddedBulletRef) => void;
+  /** Drop a bullet by BulletObservation.id (rewrite-review apply, #211), plus
+   *  the same optional bucket reference (#637). Returns whether the removal was
+   *  recorded — false when the write found nothing to drop, which the
+   *  confirmation strip must not report as a success (#648). */
+  onRemoveBullet: (id: string, added?: AddedBulletRef) => boolean;
   /** User-added experience entries, append-aligned to indices ≥ originalCount. */
   addedExperience: AddedEntry[];
   /** Count of PARSED experience roles; indices at/above this are user-added. */
@@ -495,7 +496,7 @@ export function ExperienceSection({
   // punctuation ("•", "-", "–") IS accepted and DOES land here, where its Remove
   // is inert. Tracked separately rather than widened here.
   const otherRemoveBullet = useCallback(
-    (index: number) => onRemoveBullet(index),
+    (id: string) => onRemoveBullet(id),
     [onRemoveBullet],
   );
   const otherRemove = useBulletRemoveStatus(otherRemoveBullet, otherCaptureUndo);
@@ -512,7 +513,7 @@ export function ExperienceSection({
   );
   // Per-section write-back handlers for the whole-résumé review (#211 apply on
   // the whole-résumé path), keyed by the same `experience:<index>` id
-  // `buildResumeSections` mints. `obsIndices` is parallel to each section's
+  // `buildResumeSections` mints. `obsIds` is parallel to each section's
   // bullet list (same order the model saw); adds target that role's entry key
   // (its added id, or the parsed-entry key). Mirrors `RoleEntry`'s per-role
   // `SectionRewriteApply` so both rewrite paths write through one edit model.
@@ -527,19 +528,17 @@ export function ExperienceSection({
       const added =
         idx >= originalCount ? addedExperience[idx - originalCount] : undefined;
       const entryKey = added ? added.id : parsedEntryKey("experience", idx);
+      const bucketRef = (obsId: string): AddedBulletRef | undefined => {
+        const text = group.bullets.find((b) => b.id === obsId)?.text;
+        return text === undefined ? undefined : { entryKey, text };
+      };
       map.set(`experience:${idx}`, {
-        obsIndices: group.bullets.map((b) => b.index),
-        onReplace: (obsIndex, text) => onBulletChange(obsIndex, text),
-        // Entry-aware like the per-role path (#637): a removal accepted on a
-        // user-added role has to splice that role's bucket, since the bullet
-        // has no base-parse observation for `removedBullets` to key on.
-        onRemove: (obsIndex) => {
-          const text = group.bullets.find((b) => b.index === obsIndex)?.text;
-          onRemoveBullet(
-            obsIndex,
-            text === undefined ? undefined : { entryKey, text },
-          );
-        },
+        obsIds: group.bullets.map((b) => b.id),
+        // Entry-aware like the per-role path (#637, #657): a rewrite accepted on
+        // a user-added role has to reach that role's bucket, since its bullets
+        // live nowhere the id-keyed override maps can fold into.
+        onReplace: (obsId, text) => onBulletChange(obsId, text, bucketRef(obsId)),
+        onRemove: (obsId) => onRemoveBullet(obsId, bucketRef(obsId)),
         onAdd: (text) => onAddBullet(entryKey, text),
         // Adds land in THIS role's bucket, so the entry key the snapshot
         // records is the same one `onAdd` writes to (issue 510).
@@ -606,7 +605,6 @@ export function ExperienceSection({
                   key={`other-${i}`}
                   group={group}
                   experienceIndex={null}
-                  bulletOverrides={bulletOverrides}
                   onBulletChange={onBulletChange}
                   onRemoveBullet={onRemoveBullet}
                   // Section-owned control (see `otherRemove` above): this
@@ -637,7 +635,6 @@ export function ExperienceSection({
                     ? onEntryField(added.id, EXPERIENCE_FIELD_MAP[field], value)
                     : onExperienceFieldChange(idx, field, value)
                 }
-                bulletOverrides={bulletOverrides}
                 onBulletChange={onBulletChange}
                 onRemoveBullet={onRemoveBullet}
                 onAddBullet={(text) => onAddBullet(roleEntryKey, text)}
@@ -680,7 +677,6 @@ function ProjectsSection({
   heading,
   projects,
   groups,
-  bulletOverrides,
   descriptionOverrides,
   addedProjects,
   originalCount,
@@ -696,7 +692,6 @@ function ProjectsSection({
   projects: ResumeProject[];
   /** Pre-built project groups, index-aligned with `projects`. */
   groups: BulletGroup[];
-  bulletOverrides: BulletOverrides;
   /** Prose-description edits keyed by parsedEntryKey (#489) — read only to keep
    *  a CLEARED prose field mounted (so the clear is reversible in-session). */
   descriptionOverrides: DescriptionOverrides;
@@ -760,9 +755,8 @@ function ProjectsSection({
                 <ul className="list-none">
                   {group.bullets.map((b) => (
                     <ResumeBulletRow
-                      key={b.index}
+                      key={b.id}
                       bullet={b}
-                      override={bulletOverrides?.[b.index]}
                     />
                   ))}
                 </ul>
@@ -896,7 +890,6 @@ function AchievementsSection({
   heading,
   achievements,
   groups,
-  bulletOverrides,
   addedAchievements,
   originalCount,
   onAddEntry,
@@ -911,7 +904,6 @@ function AchievementsSection({
   achievements: HeuristicAchievement[];
   /** Pre-built achievement groups, index-aligned with `achievements`. */
   groups: BulletGroup[];
-  bulletOverrides: BulletOverrides;
   addedAchievements: AddedEntry[];
   originalCount: number;
   onAddEntry: () => void;
@@ -980,9 +972,8 @@ function AchievementsSection({
                 <ul className="list-none">
                   {group.bullets.map((b) => (
                     <ResumeBulletRow
-                      key={b.index}
+                      key={b.id}
                       bullet={b}
-                      override={bulletOverrides?.[b.index]}
                     />
                   ))}
                 </ul>
@@ -1144,12 +1135,12 @@ export function ReconstructedResume({
   // Download the reconstructed (possibly edited) résumé as an ATS-safe,
   // text-only PDF — built fully client-side from the already-parsed fields,
   // so no PDF bytes ever leave the browser (#171).
-  const { download, isGenerating } = useDownloadPdf(result, score, edit);
+  const { download, isGenerating } = useDownloadPdf(result, score);
 
   // Download the same reconstructed résumé as a career-ops-shaped `cv.md`
   // (#552) — a plain-text sibling artifact, not a competing "primary" export.
   const { download: downloadMarkdown, isGenerating: isGeneratingMarkdown } =
-    useDownloadMarkdown(result, score, edit);
+    useDownloadMarkdown(result, score);
 
   // Pre-download checklist popover (#312) — a soft guardrail, not a hard
   // block. Download click re-derives the gate from the CURRENT (override-
@@ -1230,7 +1221,6 @@ export function ReconstructedResume({
       heading={display.sectionHeadings?.get("achievements")}
       achievements={achievements}
       groups={achievementGroups}
-      bulletOverrides={bulletOverrides}
       addedAchievements={addedAchievements}
       originalCount={originalAchCount}
       onAddEntry={() => addEntry("achievements")}
@@ -1253,7 +1243,7 @@ export function ReconstructedResume({
             Reconstructed resume
           </h2>
           <div className="flex flex-wrap items-center gap-2">
-            <ReportDownloadControl result={result} score={score} edit={edit} />
+            <ReportDownloadControl result={result} score={score} />
             {/* No pre-download checklist gate here (unlike the PDF button):
                 cv.md is a plain-text interchange file, not an ATS-submitted
                 artifact, so the "missing name/contact/experience" nudge that
@@ -1342,8 +1332,9 @@ export function ReconstructedResume({
         onExperienceFieldChange={(index, field, value) =>
           setExperienceField(index, field, value)
         }
-        bulletOverrides={bulletOverrides}
-        onBulletChange={(index, value) => setBulletField(index, value)}
+        onBulletChange={(index, value, original) =>
+          setBulletField(index, value, original)
+        }
         onRemoveBullet={removeBullet}
         addedExperience={addedExperience}
         originalCount={originalExpCount}
@@ -1359,7 +1350,6 @@ export function ReconstructedResume({
         heading={display.sectionHeadings?.get("projects")}
         projects={projects}
         groups={projectGroups}
-        bulletOverrides={bulletOverrides}
         descriptionOverrides={descriptionOverrides}
         addedProjects={addedProjects}
         originalCount={originalProjCount}

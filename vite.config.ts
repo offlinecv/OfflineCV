@@ -207,7 +207,11 @@ export default defineConfig({
       // crashes `fallow audit`'s u32 coverage parser and silently zeroes the
       // whole report. Enumerating inverts that failure mode: forget to add a new
       // tested gate here and fallow merely scores it 0% and complains, loudly.
-      include: ["src/**/*.{ts,tsx}", "scripts/check-fixture-pii.mjs"],
+      include: [
+        "src/**/*.{ts,tsx}",
+        "scripts/check-fixture-pii.mjs",
+        "scripts/check-known-failures.mjs",
+      ],
       exclude: [
         "src/**/*.test.ts",
         "src/**/__test-utils__/**",

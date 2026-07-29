@@ -19,7 +19,9 @@ the exception: they stay here because breaking them is silent, and for two of th
   **`npm run check:fixtures` enforces part of this** (`scripts/check-fixture-pii.mjs`, wired into
   `verify` and CI). It checks every **PDF** under `tests/fixtures/pdfs/` — its text, its link
   annotations (`tel:`/`mailto:` hrefs) and its metadata — for four things: the email domain, the
-  phone shape, a denylist of real people from OSS templates, and a metadata author. It exits
+  phone shape, a denylist of real people from OSS templates, and a metadata author. Since #654 it
+  also sweeps the ground-truth sidecars (`*.truth.json`) — the one place in the repo that
+  deliberately commits résumé field *values* as text. It exits
   non-zero naming the offending value. It does **not** check the other fixture types (png/jpeg/
   docx), and it **cannot** tell whether a *name* is synthetic — no check can. **That judgement is
   still yours.** Run it before adding a fixture or approving a PR that adds one, and also read

@@ -2,6 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, expect, it } from "vitest";
+import { bulletId } from "../score/bullet-id.ts";
 import {
   buildAuditReportJson,
   serializeAuditReportJson,
@@ -37,6 +38,7 @@ const SCORE: AnonymousAtsScore = {
   bullets: [
     {
       text: BULLET_TEXT,
+      id: bulletId(BULLET_TEXT, 0),
       index: 0,
       hasMetric: true,
       startsWithActionVerb: true,

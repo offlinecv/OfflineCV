@@ -22,6 +22,7 @@
  */
 
 import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
+import { bulletId } from "../../lib/score/bullet-id.ts";
 import { createElement, useCallback, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
@@ -37,6 +38,7 @@ import type { BulletObservation } from "../../lib/score/score.ts";
 function bullet(index: number, text: string): BulletObservation {
   return {
     text,
+    id: bulletId(text, 0),
     index,
     hasMetric: true,
     startsWithActionVerb: true,
@@ -62,10 +64,10 @@ const POOL = [bullet(0, MATCHED), bullet(1, UNMATCHED)];
  * removes the "Other" group entirely on the next render.
  */
 function Harness() {
-  const [removed, setRemoved] = useState<readonly number[]>([]);
+  const [removed, setRemoved] = useState<readonly string[]>([]);
   const groups = useMemo(() => {
     const grouped = groupBulletsByExperience(
-      POOL.filter((b) => !removed.includes(b.index)),
+      POOL.filter((b) => !removed.includes(b.id)),
       EXPERIENCES,
     );
     const byIndex = new Map(
@@ -83,10 +85,12 @@ function Harness() {
     );
     return other ? [...withFallback, other] : withFallback;
   }, [removed]);
-  const onRemoveBullet = useCallback(
-    (index: number) => setRemoved((prev) => [...prev, index]),
-    [],
-  );
+  // Returns true — the strip only arms on a write that landed (#648), and this
+  // stand-in always records the removal.
+  const onRemoveBullet = useCallback((id: string) => {
+    setRemoved((prev) => [...prev, id]);
+    return true;
+  }, []);
   const restore = useCallback(
     () => () => setRemoved([]),
     [],
@@ -98,7 +102,6 @@ function Harness() {
     hasBullets: false,
     experienceOverrides: {},
     onExperienceFieldChange: () => {},
-    bulletOverrides: {},
     onBulletChange: () => {},
     onRemoveBullet,
     addedExperience: [],
@@ -111,7 +114,7 @@ function Harness() {
     // restores the pool, which is all the strip needs to offer a real Undo.
     captureBulletUndo: restore,
     summaryApply: {
-      obsIndices: [],
+      obsIds: [],
       onReplace: () => {},
       onRemove: () => {},
       onAdd: () => {},

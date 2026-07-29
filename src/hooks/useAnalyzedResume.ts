@@ -40,17 +40,14 @@ import {
   applyProfileOverrides,
   type LegacyLinkFields,
 } from "../lib/edit/apply-overrides.ts";
-import {
-  computeAnonymousAtsScore,
-  type AnonymousAtsScore,
-} from "../lib/score/score.ts";
+import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import { scoreEditedResume } from "../lib/edit/score-edited.ts";
 import type {
   CascadeResult,
   HeuristicParsedResume,
   FieldConfidence,
 } from "../lib/heuristics/types.ts";
 import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
-import { projectScoreSections } from "../lib/heuristics/projections.ts";
 
 export interface EditedResume {
   parsed: HeuristicParsedResume;
@@ -211,6 +208,15 @@ export function useAnalyzedResume(): AnalyzedResume {
     };
   }, [base, profileOverrides]);
 
+  // Every key the two bullet maps already hold, so the re-graded pool allocates
+  // AROUND them instead of re-minting an id an existing instruction is filed
+  // under (#648 — see `bullet-id.ts`). Both maps are already deps of the `score`
+  // memo below, so this adds no re-grade the score didn't already do.
+  const claimedBulletKeys = useMemo(
+    () => [...Object.keys(bulletOverrides), ...removedBullets],
+    [bulletOverrides, removedBullets],
+  );
+
   // Re-grade live. Deps deliberately mirror `editedCore`'s EXCEPT
   // `profileOverrides` is replaced by `scoreAffectingProfileSlots` — so
   // adding a non-scoring profile (Behance, GitLab, a second GitHub that
@@ -236,15 +242,11 @@ export function useAnalyzedResume(): AnalyzedResume {
     // bullet edit would not move Specificity / Structure. `fieldConfidence` is
     // the edited view (contact edits + added linkedin/github bumped to present),
     // so a user-added professional profile moves completeness (#421).
-    return computeAnonymousAtsScore({
-      parsed: editedCore.fields,
-      fieldConfidence: editedCore.fieldConfidence,
-      triggers: base.triggers,
-      rawText: editedCore.rawText,
-      // Score projection off the edited canonical model (`editedCore` IS the
-      // mutated CanonicalResume as of #445).
-      sections: projectScoreSections(editedCore),
-    });
+    // Score projection off the edited canonical model (`editedCore` IS the
+    // mutated CanonicalResume as of #445), through the shared recipe the
+    // corpus edit-leg gate also runs — see `score-edited.ts` for why grading
+    // the BASE sections instead silently drops an edited bullet from the export.
+    return scoreEditedResume(editedCore, base.triggers, claimedBulletKeys);
     // `editedCore` is deliberately NOT a dep: this memo reads its latest
     // value whenever it actually runs, but must not re-run on an
     // `editedCore` change driven solely by a non-scoring profile edit —
@@ -265,6 +267,9 @@ export function useAnalyzedResume(): AnalyzedResume {
     addedEntries,
     addedBullets,
     removedBullets,
+    // Derived from `bulletOverrides` + `removedBullets`, both already above, so
+    // this dep adds no re-grade of its own — listed because the memo reads it.
+    claimedBulletKeys,
     // Primitive fields, not the wrapper object — `scoreAffectingProfileSlots`
     // is a fresh object literal every time `profileOverrides` changes, so
     // depending on ITS reference would defeat the whole point (#428).

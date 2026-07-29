@@ -17,7 +17,7 @@
  * reverse diff would have to re-derive the prior value of each slot from the
  * write itself, and for two of the three channels it simply cannot:
  *
- *   - `remove` writes into a SET. `removeBullet(i)` on an already-removed
+ *   - `remove` writes into a SET. `removeBullet(id)` on an already-removed
  *     bullet is a no-op, so the inverse of "remove i" is "restore i" only when
  *     i was not already removed. That fact lives in the pre-state, nowhere in
  *     the write.
@@ -44,22 +44,24 @@ import type { ResolvedWrite } from "./apply-accepted.ts";
 
 /** The bullet slots one section's batch is about to write. */
 export interface BulletUndoTargets {
-  /** BulletObservation indices a `replace` will overwrite. */
-  replaced: readonly number[];
-  /** BulletObservation indices a `remove` will drop. */
-  removed: readonly number[];
-  /** The added-bullet entry key an `add` appends to — or a `remove` splices out
-   *  of (#637). Set iff the batch has at least one `add` or `remove` write. */
+  /** BulletObservation ids a `replace` will overwrite. */
+  replaced: readonly string[];
+  /** BulletObservation ids a `remove` will drop. */
+  removed: readonly string[];
+  /** The added-bullet entry key an `add` appends to, a `remove` splices out of
+   *  (#637), or a `replace` rewrites in place (#657). Set iff the batch has at
+   *  least one write of any kind. */
   addedEntryKey?: string;
 }
 
 /**
  * Which slots `writes` will touch. `entryKey` is the caller's own added-bullet
  * bucket (the role's `AddedEntry.id` or its `parsedEntryKey`); it is recorded
- * when the batch adds — and, since #637, when it removes, because a remove of a
- * USER-ADDED bullet is a splice out of that same bucket rather than an entry in
- * the observation-indexed `removedBullets` set, so `restore` alone cannot undo
- * it. A replace-only batch still snapshots no array.
+ * for EVERY write kind, because each of the three can land in that bucket rather
+ * than in the id-keyed maps when its target is a USER-ADDED bullet: an `add`
+ * appends to it (always), a `remove` splices out of it (#637), and a `replace`
+ * rewrites a line in place (#657). For the latter two, `restore` / the override
+ * snapshot alone cannot undo the write — nothing was written there.
  *
  * Recording the bucket for a remove that turns out to have targeted a PARSED
  * bullet is harmless: the snapshot then holds the bucket's unchanged value and
@@ -70,17 +72,13 @@ export function batchUndoTargets(
   writes: readonly ResolvedWrite[],
   entryKey: string,
 ): BulletUndoTargets {
-  const replaced: number[] = [];
-  const removed: number[] = [];
-  let touchesBucket = false;
+  const replaced: string[] = [];
+  const removed: string[] = [];
   for (const write of writes) {
-    if (write.kind === "replace") replaced.push(write.obsIndex);
-    else if (write.kind === "remove") {
-      removed.push(write.obsIndex);
-      touchesBucket = true;
-    } else touchesBucket = true;
+    if (write.kind === "replace") replaced.push(write.obsId);
+    else if (write.kind === "remove") removed.push(write.obsId);
   }
-  return touchesBucket
+  return writes.length > 0
     ? { replaced, removed, addedEntryKey: entryKey }
     : { replaced, removed };
 }
@@ -88,20 +86,20 @@ export function batchUndoTargets(
 /** The live edit state the snapshot reads. Structural on purpose — this module
  *  must not import the hook that owns it. */
 export interface BulletEditReadModel {
-  bulletOverrides: Readonly<Record<number, string>>;
-  removedBullets: ReadonlySet<number>;
+  bulletOverrides: Readonly<Record<string, string>>;
+  removedBullets: ReadonlySet<string>;
   addedBullets: Readonly<Record<string, readonly string[]>>;
 }
 
 /** Pre-apply state of exactly the targeted slots. */
 export interface BulletUndoSnapshot {
-  /** `[obsIndex, prior override]` — `undefined` means "no override", which
+  /** `[obsId, prior override]` — `undefined` means "no override", which
    *  restores by DELETING the key, not by writing an empty string. */
-  overrides: readonly (readonly [number, string | undefined])[];
-  /** Indices the batch will newly remove — i.e. those NOT already removed.
-   *  An already-removed index is left out so undo can't un-remove a bullet
+  overrides: readonly (readonly [string, string | undefined])[];
+  /** Ids the batch will newly remove — i.e. those NOT already removed.
+   *  An already-removed id is left out so undo can't un-remove a bullet
    *  the user had dropped before the batch ran. */
-  restore: readonly number[];
+  restore: readonly string[];
   /** `[entryKey, prior bullet list]` for the one bucket the batch appends to. */
   added?: readonly [string, readonly string[]];
 }
@@ -112,9 +110,9 @@ export function captureBulletUndoSnapshot(
   model: BulletEditReadModel,
 ): BulletUndoSnapshot {
   const overrides = targets.replaced.map(
-    (index) => [index, model.bulletOverrides[index]] as const,
+    (id) => [id, model.bulletOverrides[id]] as const,
   );
-  const restore = targets.removed.filter((index) => !model.removedBullets.has(index));
+  const restore = targets.removed.filter((id) => !model.removedBullets.has(id));
   const key = targets.addedEntryKey;
   return key === undefined
     ? { overrides, restore }
@@ -124,9 +122,9 @@ export function captureBulletUndoSnapshot(
 /** The inverse writes. Mirrors `useEditableParse`'s own edit primitives. */
 export interface BulletUndoWriter {
   /** `undefined` deletes the override (back to the parsed text). */
-  setBulletField: (index: number, value: string | undefined) => void;
+  setBulletField: (id: string, value: string | undefined) => void;
   /** Un-remove a bullet the batch dropped. */
-  restoreBullet: (index: number) => void;
+  restoreBullet: (id: string) => void;
   /** Replace an entry's added-bullet list wholesale; `[]` clears the bucket. */
   setAddedBullets: (entryKey: string, bullets: readonly string[]) => void;
 }
@@ -137,7 +135,7 @@ export function restoreBulletUndoSnapshot(
   snapshot: BulletUndoSnapshot,
   writer: BulletUndoWriter,
 ): void {
-  for (const [index, value] of snapshot.overrides) writer.setBulletField(index, value);
-  for (const index of snapshot.restore) writer.restoreBullet(index);
+  for (const [id, value] of snapshot.overrides) writer.setBulletField(id, value);
+  for (const id of snapshot.restore) writer.restoreBullet(id);
   if (snapshot.added) writer.setAddedBullets(snapshot.added[0], snapshot.added[1]);
 }

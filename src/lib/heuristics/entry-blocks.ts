@@ -26,7 +26,7 @@
  * agree on what a date range, a bullet, and a header line are.
  */
 
-import type { PdfLine, PdfSection } from "./sections.ts";
+import type { PdfLine, PdfSection } from "./line-model.ts";
 import {
   DATE_RANGE_RE,
   PRESENT_RE,

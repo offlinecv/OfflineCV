@@ -37,11 +37,12 @@ import {
 } from "./ApplyConfirmation.tsx";
 
 export interface BulletRemoveControl {
-  /** Drop one bullet by its `BulletObservation.index` and arm the strip. `text`
-   *  is the bullet's observation text, which the owner forwards so a USER-ADDED
-   *  bullet can be located in its `addedBullets` bucket — the index alone
-   *  cannot reach one (#637, see `added-bullets.ts`). */
-  removeBullet: (index: number, text: string) => void;
+  /** Drop one bullet by its `BulletObservation.id` and arm the strip. `text` is
+   *  the bullet's observation text, which the owner forwards so a USER-ADDED
+   *  bullet can be located in its `addedBullets` bucket — the id alone cannot
+   *  reach one (#637, see `added-bullets.ts`). The strip arms only if the write
+   *  actually landed (#648). */
+  removeBullet: (id: string, text: string) => void;
   /** True while a confirmation is showing. Callers use it to suppress an
    *  "empty section" note that would otherwise contradict the strip. */
   pending: boolean;
@@ -51,14 +52,19 @@ export interface BulletRemoveControl {
 }
 
 /**
- * @param onRemoveBullet Drop a bullet by `BulletObservation.index`, plus its
+ * @param onRemoveBullet Drop a bullet by `BulletObservation.id`, plus its
  *   text for the added-bullet path (#637). Absent → `removeBullet` is inert
- *   (the caller renders no remove control either).
+ *   (the caller renders no remove control either). Returns whether the removal
+ *   was RECORDED: this hook used to set `{kind:"removed"}` unconditionally after
+ *   calling it, so a write that dropped nothing still confirmed "Removed" — with
+ *   an Undo that had nothing to restore, since `captureBulletUndoSnapshot`
+ *   filters an already-removed id out of `restore` (#648). The strip now follows
+ *   the write.
  * @param captureUndo Snapshot the slot the remove will clear, BEFORE the write
  *   (issue 510). Absent → the confirmation renders without an Undo action.
  */
 export function useBulletRemoveStatus(
-  onRemoveBullet?: (index: number, text: string) => void,
+  onRemoveBullet?: (id: string, text: string) => boolean,
   captureUndo?: SectionRewriteApply["captureUndo"],
 ): BulletRemoveControl {
   const [status, setStatus] = useState<
@@ -68,14 +74,17 @@ export function useBulletRemoveStatus(
   >({ kind: "idle" });
 
   const removeBullet = useCallback(
-    (index: number, text: string) => {
+    (id: string, text: string) => {
       if (!onRemoveBullet) return;
       // Snapshot BEFORE the write — once it lands the prior value is gone
       // (issue 510, same rule the rewrite-review Apply follows). For an added
       // bullet the snapshotted slot is the entry's `addedBullets` bucket, which
       // `batchUndoTargets` now records for a `remove` too (#637).
-      const undo = captureUndo?.([{ kind: "remove", obsIndex: index }]);
-      onRemoveBullet(index, text);
+      const undo = captureUndo?.([{ kind: "remove", obsId: id }]);
+      // Nothing was dropped → nothing to confirm, and the snapshot just taken
+      // describes a write that never happened. Leave the strip idle rather than
+      // arm an Undo over an unchanged slot.
+      if (!onRemoveBullet(id, text)) return;
       setStatus({ kind: "removed", undo });
     },
     [onRemoveBullet, captureUndo],

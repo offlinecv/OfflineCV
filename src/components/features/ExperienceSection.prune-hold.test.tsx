@@ -23,6 +23,7 @@
  */
 
 import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
+import { bulletId } from "../../lib/score/bullet-id.ts";
 import { createElement, useMemo } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
@@ -146,7 +147,6 @@ function Harness() {
     hasBullets: false,
     experienceOverrides: {},
     onExperienceFieldChange: () => {},
-    bulletOverrides: edit.bulletOverrides,
     onBulletChange: edit.setBulletField,
     onRemoveBullet: edit.removeBullet,
     addedExperience: edit.addedEntries.filter((e) => e.section === "experience"),
@@ -158,7 +158,7 @@ function Harness() {
     onAddBullet: edit.addBullet,
     captureBulletUndo: edit.captureBulletUndo,
     summaryApply: {
-      obsIndices: [],
+      obsIds: [],
       onReplace: () => {},
       onRemove: () => {},
       onAdd: () => {},
@@ -369,16 +369,21 @@ describe("useEditableParse.pruneEmptyAddedEntries — isHeld (#637 half 2)", () 
   });
 });
 
-describe("batchUndoTargets records the bucket for a remove (#637 half 1)", () => {
+describe("batchUndoTargets records the bucket for every write (#637, #657)", () => {
+  const ID = bulletId("Shipped the thing", 0);
+
   it("carries addedEntryKey for a remove-only batch", () => {
-    expect(
-      batchUndoTargets([{ kind: "remove", obsIndex: 3 }], "added:7"),
-    ).toEqual({ replaced: [], removed: [3], addedEntryKey: "added:7" });
+    expect(batchUndoTargets([{ kind: "remove", obsId: ID }], "added:7")).toEqual(
+      { replaced: [], removed: [ID], addedEntryKey: "added:7" },
+    );
   });
 
-  it("still omits it for a replace-only batch", () => {
+  it("carries it for a replace-only batch too, since #657", () => {
+    // A replace on a user-ADDED bullet rewrites its line inside the bucket
+    // (`replaceAddedBulletLine`), not in the override map, so the bucket is the
+    // only slot an undo can restore it from.
     expect(
-      batchUndoTargets([{ kind: "replace", obsIndex: 3, text: "x" }], "added:7"),
-    ).toEqual({ replaced: [3], removed: [] });
+      batchUndoTargets([{ kind: "replace", obsId: ID, text: "x" }], "added:7"),
+    ).toEqual({ replaced: [ID], removed: [], addedEntryKey: "added:7" });
   });
 });

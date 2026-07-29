@@ -14,6 +14,14 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { bulletId } from "../score/bullet-id.ts";
+
+/** Opaque per-slot bullet ids for the store-level tests, which only need
+ *  DISTINCT keys — the identity scheme itself is `bullet-id.ts`'s contract, not
+ *  this module's. The export-invariant suite below uses real ids. */
+const SLOT = Object.fromEntries(
+  Array.from({ length: 12 }, (_, i) => [i, bulletId(`slot ${i}`, 0)]),
+) as Record<number, string>;
 import {
   batchUndoTargets,
   captureBulletUndoSnapshot,
@@ -30,17 +38,17 @@ import type { SectionedResume } from "../heuristics/sections.ts";
 
 /** In-memory mirror of the bullet slice of `useEditableParse`. */
 class EditStore implements BulletEditReadModel, BulletUndoWriter {
-  bulletOverrides: Record<number, string> = {};
-  removedBullets: Set<number> = new Set();
+  bulletOverrides: Record<string, string> = {};
+  removedBullets: Set<string> = new Set();
   addedBullets: Record<string, string[]> = {};
 
   // ── forward writes (what an Apply issues) ──
-  setBulletField = (index: number, value: string | undefined) => {
-    if (value === undefined) delete this.bulletOverrides[index];
-    else this.bulletOverrides[index] = value;
+  setBulletField = (id: string, value: string | undefined) => {
+    if (value === undefined) delete this.bulletOverrides[id];
+    else this.bulletOverrides[id] = value;
   };
-  removeBullet = (index: number) => {
-    this.removedBullets.add(index);
+  removeBullet = (id: string) => {
+    this.removedBullets.add(id);
   };
   addBullet = (entryKey: string, text: string) => {
     const trimmed = text.trim();
@@ -49,8 +57,8 @@ class EditStore implements BulletEditReadModel, BulletUndoWriter {
   };
 
   // ── inverse writes ──
-  restoreBullet = (index: number) => {
-    this.removedBullets.delete(index);
+  restoreBullet = (id: string) => {
+    this.removedBullets.delete(id);
   };
   setAddedBullets = (entryKey: string, bullets: readonly string[]) => {
     if (bullets.length === 0) delete this.addedBullets[entryKey];
@@ -61,7 +69,7 @@ class EditStore implements BulletEditReadModel, BulletUndoWriter {
   freeze() {
     return {
       bulletOverrides: { ...this.bulletOverrides },
-      removedBullets: [...this.removedBullets].sort((a, b) => a - b),
+      removedBullets: [...this.removedBullets].sort(),
       addedBullets: JSON.parse(JSON.stringify(this.addedBullets)) as Record<
         string,
         string[]
@@ -73,8 +81,8 @@ class EditStore implements BulletEditReadModel, BulletUndoWriter {
   apply(entryKey: string, writes: readonly ResolvedWrite[]) {
     for (const w of writes) {
       if (w.kind === "add") this.addBullet(entryKey, w.text);
-      else if (w.kind === "replace") this.setBulletField(w.obsIndex, w.text);
-      else this.removeBullet(w.obsIndex);
+      else if (w.kind === "replace") this.setBulletField(w.obsId, w.text);
+      else this.removeBullet(w.obsId);
     }
   }
 }
@@ -94,36 +102,40 @@ describe("batchUndoTargets", () => {
   it("splits writes into replaced / removed slots", () => {
     const targets = batchUndoTargets(
       [
-        { kind: "replace", obsIndex: 3, text: "a" },
-        { kind: "remove", obsIndex: 7 },
-        { kind: "replace", obsIndex: 4, text: "b" },
+        { kind: "replace", obsId: SLOT[3], text: "a" },
+        { kind: "remove", obsId: SLOT[7] },
+        { kind: "replace", obsId: SLOT[4], text: "b" },
       ],
       "experience:0",
     );
-    expect(targets.replaced).toEqual([3, 4]);
-    expect(targets.removed).toEqual([7]);
+    expect(targets.replaced).toEqual([SLOT[3], SLOT[4]]);
+    expect(targets.removed).toEqual([SLOT[7]]);
   });
 
-  it("records the added-bullet entry key when the batch adds OR removes", () => {
+  it("records the added-bullet entry key for every write kind", () => {
     // #637 widened this from "adds" to "touches the bucket". A remove can now
-    // be a splice out of `addedBullets` (a user-ADDED bullet has no base-parse
-    // observation for `removedBullets` to key on), so `restore` alone can no
-    // longer undo it — the bucket has to be in the snapshot too.
+    // be a splice out of `addedBullets` (a user-ADDED bullet has no entry in the
+    // id-keyed `removedBullets` set that applyOverrides can fold), so `restore`
+    // alone can no longer undo it — the bucket has to be in the snapshot too.
     expect(
-      batchUndoTargets([{ kind: "remove", obsIndex: 1 }], "experience:0")
+      batchUndoTargets([{ kind: "remove", obsId: SLOT[1] }], "experience:0")
         .addedEntryKey,
     ).toBe("experience:0");
     expect(
       batchUndoTargets([{ kind: "add", text: "new" }], "experience:0")
         .addedEntryKey,
     ).toBe("experience:0");
-    // A replace-only batch still snapshots no array.
+    // #657 widened it again, to every write kind: a REPLACE of a user-added
+    // bullet rewrites its line inside that same bucket (the override map cannot
+    // reach it), so a replace-only batch has to snapshot the bucket too.
     expect(
       batchUndoTargets(
-        [{ kind: "replace", obsIndex: 1, text: "x" }],
+        [{ kind: "replace", obsId: SLOT[1], text: "x" }],
         "experience:0",
       ).addedEntryKey,
-    ).toBeUndefined();
+    ).toBe("experience:0");
+    // Only a batch with no writes at all snapshots no bucket.
+    expect(batchUndoTargets([], "experience:0").addedEntryKey).toBeUndefined();
   });
 });
 
@@ -131,25 +143,25 @@ describe("undo of an applied batch", () => {
   it("restores every touched slot to its exact pre-apply value", () => {
     const store = new EditStore();
     // Pre-existing edit state the batch must not disturb or lose.
-    store.setBulletField(1, "hand-edited bullet one");
-    store.setBulletField(9, "an untouched bullet");
-    store.removeBullet(5); // already removed BEFORE the batch
+    store.setBulletField(SLOT[1], "hand-edited bullet one");
+    store.setBulletField(SLOT[9], "an untouched bullet");
+    store.removeBullet(SLOT[5]); // already removed BEFORE the batch
     store.addBullet("experience:0", "hand-added");
     store.addBullet("experience:0", "hand-added"); // duplicate text on purpose
     const before = store.freeze();
 
     const undo = applyWithUndo(store, "experience:0", [
-      { kind: "replace", obsIndex: 1, text: "rewritten one" }, // over an override
-      { kind: "replace", obsIndex: 2, text: "rewritten two" }, // no prior override
-      { kind: "remove", obsIndex: 4 }, // newly removed
-      { kind: "remove", obsIndex: 5 }, // already removed — a no-op
+      { kind: "replace", obsId: SLOT[1], text: "rewritten one" }, // over an override
+      { kind: "replace", obsId: SLOT[2], text: "rewritten two" }, // no prior override
+      { kind: "remove", obsId: SLOT[4] }, // newly removed
+      { kind: "remove", obsId: SLOT[5] }, // already removed — a no-op
       { kind: "add", text: "hand-added" }, // same text as an existing add
     ]);
 
     // The batch really landed.
-    expect(store.bulletOverrides[1]).toBe("rewritten one");
-    expect(store.bulletOverrides[2]).toBe("rewritten two");
-    expect(store.removedBullets.has(4)).toBe(true);
+    expect(store.bulletOverrides[SLOT[1]]).toBe("rewritten one");
+    expect(store.bulletOverrides[SLOT[2]]).toBe("rewritten two");
+    expect(store.removedBullets.has(SLOT[4])).toBe(true);
     expect(store.addedBullets["experience:0"]).toHaveLength(3);
 
     undo();
@@ -157,9 +169,9 @@ describe("undo of an applied batch", () => {
     expect(store.freeze()).toEqual(before);
     // The specific traps: a bullet with no prior override is DELETED, not
     // blanked; a pre-batch removal survives the undo.
-    expect(2 in store.bulletOverrides).toBe(false);
-    expect(store.removedBullets.has(5)).toBe(true);
-    expect(store.removedBullets.has(4)).toBe(false);
+    expect(SLOT[2] in store.bulletOverrides).toBe(false);
+    expect(store.removedBullets.has(SLOT[5])).toBe(true);
+    expect(store.removedBullets.has(SLOT[4])).toBe(false);
   });
 
   it("clears the added-bullet bucket rather than leaving an empty array", () => {
@@ -176,11 +188,11 @@ describe("undo of an applied batch", () => {
 
   it("is idempotent — replaying the restore changes nothing", () => {
     const store = new EditStore();
-    store.setBulletField(1, "original");
+    store.setBulletField(SLOT[1], "original");
     const before = store.freeze();
     const undo = applyWithUndo(store, "experience:0", [
-      { kind: "replace", obsIndex: 1, text: "rewritten" },
-      { kind: "remove", obsIndex: 3 },
+      { kind: "replace", obsId: SLOT[1], text: "rewritten" },
+      { kind: "remove", obsId: SLOT[3] },
       { kind: "add", text: "added" },
     ]);
     undo();
@@ -190,7 +202,7 @@ describe("undo of an applied batch", () => {
 
   it("reverses a MULTI-SECTION batch as one action", () => {
     const store = new EditStore();
-    store.setBulletField(0, "role A bullet, hand-edited");
+    store.setBulletField(SLOT[0], "role A bullet, hand-edited");
     store.addBullet("experience:1", "role B pre-existing add");
     const before = store.freeze();
 
@@ -198,12 +210,12 @@ describe("undo of an applied batch", () => {
     // shape `ResumeRewriteProposed` builds for the whole-résumé apply.
     const undos = [
       applyWithUndo(store, "experience:0", [
-        { kind: "replace", obsIndex: 0, text: "A rewritten" },
+        { kind: "replace", obsId: SLOT[0], text: "A rewritten" },
         { kind: "add", text: "A new bullet" },
       ]),
       applyWithUndo(store, "experience:1", [
-        { kind: "remove", obsIndex: 10 },
-        { kind: "replace", obsIndex: 11, text: "B rewritten" },
+        { kind: "remove", obsId: SLOT[10] },
+        { kind: "replace", obsId: SLOT[11], text: "B rewritten" },
       ]),
     ];
     expect(store.freeze()).not.toEqual(before);
@@ -218,6 +230,7 @@ describe("undo of an applied batch", () => {
 function obs(index: number, text: string): BulletObservation {
   return {
     text,
+    id: bulletId(text, 0),
     index,
     hasMetric: false,
     startsWithActionVerb: false,
@@ -276,12 +289,16 @@ describe("an undone batch exports identically to one never applied", () => {
       );
 
     const store = new EditStore();
-    store.setBulletField(0, "Built a thing, carefully");
+    store.setBulletField(observations[0].id, "Built a thing, carefully");
     const neverApplied = fold(store);
 
     const undo = applyWithUndo(store, "experience:0", [
-      { kind: "replace", obsIndex: 0, text: "Drove a 30% lift in throughput" },
-      { kind: "remove", obsIndex: 1 },
+      {
+        kind: "replace",
+        obsId: observations[0].id,
+        text: "Drove a 30% lift in throughput",
+      },
+      { kind: "remove", obsId: observations[1].id },
       { kind: "add", text: "Owned the migration end to end" },
     ]);
     // Sanity: the applied batch really does change the exported parse, so the

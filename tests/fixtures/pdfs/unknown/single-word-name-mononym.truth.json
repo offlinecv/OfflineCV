@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. The persona is a MONONYM: the page draws one name token.",
+  "contact": {
+    "full_name": "Etta",
+    "email": "etta@example.com",
+    "phone": "(312) 555-0123",
+    "location": "Chicago, IL"
+  },
+  "experience": [
+    {
+      "title": "Senior Software Engineer",
+      "company": "Northwind Labs",
+      "dates": "Jan 2021 - Present"
+    },
+    {
+      "title": "Software Engineer",
+      "company": "Brightwater Systems",
+      "dates": "Jun 2017 - Dec 2020"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "University of Illinois Urbana-Champaign"
+    }
+  ],
+  "skills": [
+    "Python",
+    "Go",
+    "TypeScript",
+    "PostgreSQL",
+    "Kafka",
+    "Kubernetes",
+    "Terraform",
+    "AWS",
+    "gRPC",
+    "Distributed Systems"
+  ],
+  "knownWrong": {
+    "skills": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "The two-word skill “Distributed Systems” is split into two tokens, “Distributed” and “Systems”, so the list runs one entry long and neither half is a real skill."
+    }
+  }
+}

@@ -3,15 +3,22 @@
 
 /**
  * ats-resume-model — a pure, UI-free adapter that flattens a parsed résumé
- * (the same `result` / `score` / `edit` the ReconstructedResume surface renders)
- * into a render-ready model for the ATS-safe PDF exporter (#171).
+ * (the same `result` / `score` the ReconstructedResume surface renders) into a
+ * render-ready model for the ATS-safe PDF exporter (#171).
  *
  * Goals:
- *   - Mirror the on-screen reconstructed view: same contact fields (with
- *     in-memory edits applied the way ContactCard does), same per-experience
- *     bullet attribution (via `groupBulletsByExperience`), same edited bullet
- *     text (via `bulletOverrides`), same section order.
+ *   - Mirror the on-screen reconstructed view: same contact fields, same
+ *     per-experience bullet attribution (via `groupBulletsByExperience`), same
+ *     bullet text, same section order.
  *   - Stay free of React / pdf-lib so it is directly unit-testable.
+ *
+ * It takes NO override maps (#648 Phase 3). It reads the ALREADY-FOLDED
+ * `displayResult` + its re-graded `score` — the very pair the surface renders —
+ * so override semantics have exactly one implementation, in
+ * `applyOverrides`. The second copy that lived here (`resolveBullets` applying
+ * `bulletOverrides[b.index]` on top of a pool whose text was already edited)
+ * was a re-application by INDEX over a RE-GRADED pool: the same aliasing #648
+ * removes everywhere else, and one an id-keyed map could not express at all.
  *
  * Section order is standard ATS top-to-bottom:
  *   Summary → (Achievements if "above_experience") → Experience → Projects →
@@ -44,10 +51,7 @@ import { isLoneDateRange } from "../heuristics/line-primitives.ts";
 import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import { buildContactFields, formatLinkDisplay } from "../contact.ts";
-import type {
-  ContactOverrides,
-  EditableParse,
-} from "../../hooks/useEditableParse.ts";
+import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
 
 /**
  * Hanging indent (pt) for a wrapped experience-header tail (#436). Matches the
@@ -238,26 +242,24 @@ function ensureScheme(url: string): string {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
-/** Apply ContactCard's override semantics: "" clears, undefined keeps parsed. */
-function resolveContactValue(
-  parsedValue: string,
-  override: string | undefined,
-): string {
-  if (override === undefined) return parsedValue;
-  return override; // "" clears, non-empty replaces
-}
-
-export function buildContact(
-  result: CascadeResult,
-  contactOverrides: ContactOverrides,
-): AtsContact {
+/**
+ * Contact block for the export, read entirely off the canonical résumé (#648
+ * Phase 3).
+ *
+ * It used to take `contactOverrides` and re-apply them here. That was a second
+ * copy of `applyOverrides`' contact semantics with nothing to fold on the app
+ * path: `useAnalyzedResume` folds contact edits into `canonical.fields` — and
+ * bumps their `fieldConfidence` to 1, which is what lifts the `gated` flag read
+ * below — before `displayResult` ever reaches this builder. So `result` IS the
+ * edited contact; a caller that hands over a raw parse gets the raw parse.
+ */
+export function buildContact(result: CascadeResult): AtsContact {
   const fields = buildContactFields(result.canonical);
   const byKey = new Map(fields.map((f) => [f.key, f]));
 
   const valueFor = (key: keyof ContactOverrides): string => {
     const field = byKey.get(key);
-    const parsed = field && !field.gated ? field.value : "";
-    return resolveContactValue(parsed, contactOverrides[key]).trim();
+    return (field && !field.gated ? field.value : "").trim();
   };
 
   const name = valueFor("full_name") || result.canonical.fields.full_name || "";
@@ -265,14 +267,8 @@ export function buildContact(
   // falling back to the standalone title tagline the parser lifted from the profile
   // block ("Engineering Lead"), redrawn under the name.
   //
-  // Read through `valueFor` like its five siblings rather than off
-  // `canonical.fields` directly. Both resolve to the same string on the app path
-  // — `useAnalyzedResume` folds `contactOverrides` into `canonical.fields` via
-  // `applyOverrides` before `displayResult` reaches this builder, and `headline`
-  // is in that fold's `CONTACT_KEYS` — so this is not a behaviour fix. It closes
-  // the gap between the two: a caller that hands `buildContact` a RAW cascade
-  // result plus overrides (as a unit test naturally does) would otherwise get
-  // the parsed headline back while every other field honoured the override.
+  // Read through `valueFor` like its five siblings, so the confidence gating
+  // applies to it too.
   const headline = valueFor("headline");
   const email = valueFor("email");
   const phone = valueFor("phone");
@@ -340,20 +336,18 @@ function bulletsFromDescription(description: string | undefined): string[] {
 }
 
 /**
- * Resolve the bullets for one entry. Prefers the graded `BulletObservation`
- * pool (which mirrors what the surface shows, including edited text via
- * `bulletOverrides`); falls back to the raw `description` split when no graded
- * bullets were attributed to the entry.
+ * Resolve the bullets for one entry from the graded `BulletObservation` pool —
+ * which already IS what the surface shows, edits included, because the score
+ * handed in here is re-graded off the override-applied sections. Falls back to
+ * the raw `description` split when no graded bullets were attributed to the
+ * entry.
  */
 function resolveBullets(
   observations: BulletObservation[] | undefined,
-  bulletOverrides: Record<number, string>,
   description: string | undefined,
 ): string[] {
   if (observations && observations.length > 0) {
-    return observations
-      .map((b) => (bulletOverrides[b.index] ?? b.text).trim())
-      .filter(Boolean);
+    return observations.map((b) => b.text.trim()).filter(Boolean);
   }
   return bulletsFromDescription(description);
 }
@@ -514,20 +508,19 @@ function groupExperienceEntriesByLabel(
  * Field/heading reads route through the projection here. The rendered bytes
  * stay byte-identical — the corpus + render round-trip goldens are the gate.
  *
- * `edit` is optional — when omitted, no in-memory overrides are applied and the
- * model reflects the raw parse (used by tests / non-edit callers).
+ * TAKES NO OVERRIDE MAPS (#648 Phase 3). `result` must be the override-APPLIED
+ * `displayResult` and `score` its re-graded score — the pair `useAnalyzedResume`
+ * already produces and the surface already renders. Handing it a raw parse
+ * exports the raw parse, which is the honest reading of its inputs.
  */
 export function buildAtsResumeModel(
   result: CascadeResult,
   score: AnonymousAtsScore,
-  edit?: Pick<EditableParse, "contactOverrides" | "bulletOverrides">,
 ): AtsResumeModel {
   const display = projectDisplay(result.canonical);
   const parsed = display.parsed;
-  const contactOverrides = edit?.contactOverrides ?? {};
-  const bulletOverrides = edit?.bulletOverrides ?? {};
 
-  const contact = buildContact(result, contactOverrides);
+  const contact = buildContact(result);
 
   const experiences = parsed.experience ?? [];
   const projects: ResumeProject[] = parsed.projects ?? [];
@@ -609,7 +602,6 @@ export function buildAtsResumeModel(
     }
     const bullets = resolveBullets(
       bulletsByIndex.get(expOffset + i),
-      bulletOverrides,
       exp.description,
     );
     // Structured JSON-Resume source (#334): name←company, position←title.
@@ -651,11 +643,7 @@ export function buildAtsResumeModel(
     headerLine: joinHeader([proj.name, buildProjectDates(proj)], " · ") ||
       "Project",
     subLine: undefined,
-    bullets: resolveBullets(
-      bulletsByIndex.get(projOffset + i),
-      bulletOverrides,
-      proj.description,
-    ),
+    bullets: resolveBullets(bulletsByIndex.get(projOffset + i), proj.description),
     // JSON-Resume `projects[]` source (#334): name←proj.name, plus optional
     // header URL and dates.
     fields: {
@@ -684,11 +672,7 @@ export function buildAtsResumeModel(
       // so the base line is drawn regular; a plain header stays fully bold.
       headerBold: emphasized ? false : true,
       subLine: undefined,
-      bullets: resolveBullets(
-        bulletsByIndex.get(achOffset + i),
-        bulletOverrides,
-        ach.description,
-      ),
+      bullets: resolveBullets(bulletsByIndex.get(achOffset + i), ach.description),
       // Structured source for the JSON Resume `awards[]` export (#421). Display
       // code never reads `fields`; it renders `headerLine`/`bullets` above.
       //

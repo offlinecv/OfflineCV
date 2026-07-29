@@ -39,8 +39,8 @@
 import type { CanonicalResume } from "./canonical.ts";
 import { toCanonicalResume } from "./canonical.ts";
 import type { HeuristicParsedResume } from "./types.ts";
-import type { SectionedResume } from "./sections.ts";
-import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
+import type { SectionedResume } from "./line-model.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./line-model.ts";
 import type { SectionName } from "./sections.config.ts";
 import type { LlmParsedResume } from "../webllm/parse-resume.ts";
 

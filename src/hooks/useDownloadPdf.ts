@@ -17,7 +17,6 @@ import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { buildAtsResumeModel } from "../lib/pdf/ats-resume-model.ts";
 import { renderAtsResumePdf } from "../lib/pdf/render-ats-pdf.ts";
 import { slugifyName, triggerBlobDownload } from "../lib/download/blob-download.ts";
-import type { EditableParse } from "./useEditableParse.ts";
 import { trackDownloadCompleted, type DownloadSource } from "../lib/analytics.ts";
 import { clearBlankDraft } from "./useResumeAnalysis.ts";
 
@@ -36,7 +35,6 @@ function filenameFromName(name: string | undefined): string {
 export function useDownloadPdf(
   result: CascadeResult,
   score: AnonymousAtsScore,
-  edit?: Pick<EditableParse, "contactOverrides" | "bulletOverrides">,
 ): UseDownloadPdf {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +43,7 @@ export function useDownloadPdf(
     setIsGenerating(true);
     setError(null);
     try {
-      const model = buildAtsResumeModel(result, score, edit);
+      const model = buildAtsResumeModel(result, score);
       const bytes = await renderAtsResumePdf(model);
       // `bytes.slice()` copies into a fresh ArrayBuffer-backed view so Blob gets
       // a clean buffer.
@@ -71,7 +69,7 @@ export function useDownloadPdf(
     } finally {
       setIsGenerating(false);
     }
-  }, [result, score, edit]);
+  }, [result, score]);
 
   return { download, isGenerating, error };
 }

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here.",
+  "contact": {
+    "full_name": "Jordan Avery",
+    "email": "jordan.avery@example.com",
+    "phone": "(614) 555-0137",
+    "location": "Columbus, Ohio"
+  },
+  "experience": [
+    {
+      "title": "Data Analyst Intern",
+      "company": "Brightwave Analytics LLC",
+      "dates": "Jul 2024 - Present"
+    },
+    {
+      "title": "Data Analyst",
+      "company": "Ohio Valley State University — IT Service Desk",
+      "dates": "Jan 2023 - May 2024"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Ohio Valley State University"
+    }
+  ],
+  "skills": [
+    "Python",
+    "SQL",
+    "Power BI",
+    "PostgreSQL",
+    "Pandas",
+    "Git",
+    "Excel",
+    "Tableau"
+  ],
+  "knownWrong": {
+    "experience.company": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "Role 2's employer line is drawn “Ohio Valley State University — IT Service Desk — Columbus, Ohio”; `company` comes back as just “Ohio Valley State University”. The sub-org is not lost — the parser puts it on `team` and peels the location onto `location` — but `experience.company` scores the `company` field alone, so the org–suborg half is invisible to this measurement. Recorded so company recall is comparable with google-docs/google-docs-skia-proxy-role-first-experience, whose employer line has the identical org–suborg shape and whose truth already records the full drawn line. Possibly a defensible org/team split rather than a defect — recorded rather than assumed, because ground truth's job is to state what the page says and let a human adjudicate. The trailing location is deliberately EXCLUDED from the truth value, matching how this file's `education.institution` truth excludes the same em-dash location suffix."
+    },
+    "education.institution": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "The institution absorbs its flush-right location: “Ohio Valley State University — Columbus, Ohio” instead of “Ohio Valley State University”."
+    }
+  }
+}

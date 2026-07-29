@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import type { PdfSection } from "../sections.ts";
+import type { PdfSection } from "../line-model.ts";
 import type { PdfTextItem, SkillCategory } from "../types.ts";
-import { mergeItemText } from "../sections.ts";
+import { mergeItemText } from "../line-assembly.ts";
 import { isBulletGlyph, stripBullet } from "../line-primitives.ts";
 
 // ── Skills ──────────────────────────────────────────────────────────────────

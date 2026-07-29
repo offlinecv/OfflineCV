@@ -14,11 +14,22 @@
   // on its own but does not pick up the `.mjs` tests, so the suite reads as a
   // file "not reachable from any entry point" — dead code. It is a test, and a
   // test is an entry point.
+  //
+  // `scripts/fixtures/gen-*.mjs` are the one-shot corpus fixture generators —
+  // maintainer-run CLIs (`node scripts/fixtures/gen-foo.mjs`) that emit a PDF
+  // under `tests/fixtures/pdfs/`. Nothing imports them BY DESIGN: the committed
+  // artifact is the PDF, and the generator is kept beside it so the fixture can
+  // be regenerated and reviewed rather than being an opaque binary. Every one of
+  // them reads as an unreachable file, so before this entry the whole class sat
+  // in fallow's excluded-inherited bucket and each newly added generator
+  // resurfaced as a fresh "dead code" finding on whichever PR added it (#665).
+  // They are entry points in the same sense the `.mjs` tests above are.
   "entry": [
     "jd-spike.html",
     "eval-rewrite.html",
     "parse-eval.html",
     "scripts/**/*.test.mjs",
+    "scripts/fixtures/gen-*.mjs",
     "scripts/check-contrast.mjs"
   ],
 

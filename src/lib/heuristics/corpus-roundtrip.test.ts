@@ -62,7 +62,10 @@ import {
   relKey,
   assertNoStaleKeys,
   assertRatchet,
+  baselineCategories,
+  loadKnownFailures,
 } from "./corpus-gate.test-utils.ts";
+import knownFailuresFile from "./corpus-roundtrip.known-failures.json";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -72,111 +75,34 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 type Category = RoundtripCategory;
 
 /**
- * Per-fixture invariant categories currently allowed to fail. Keyed by the
- * fixture path relative to `tests/fixtures/pdfs/`. Shrink this as the follow-up
- * round-trip bugs are fixed — a fixed bug makes its category pass, which trips
- * the stale-entry check below and forces the line's removal.
+ * Per-fixture invariant categories currently allowed to fail, loaded from the
+ * ISSUE-LINKED baseline (`./corpus-roundtrip.known-failures.json`, #654).
  *
- * Grouped by the likely shared root cause so follow-up issues map cleanly:
+ * The map used to be a TypeScript literal whose reasoning lived in comments; it
+ * is JSON now for one reason: an exemption whose issue has since been CLOSED is
+ * orphaned baseline, no test can see that (issue state lives on GitHub), and CI
+ * cannot import a `.ts` test module to check it. `scripts/check-known-failures.mjs`
+ * reads the JSON directly. Each entry carries `{category, issue, status, note}` —
+ * the prose that used to float in a comment block now sits on the entry it
+ * explains. `loadKnownFailures` validates the shape and pins the file's
+ * `categories` list against `CATEGORIES` below, so the two cannot drift.
+ *
+ * Shrink it as the follow-up round-trip bugs are fixed — a fixed bug makes its
+ * category pass, which trips the stale-entry check and forces the entry's removal.
+ *
+ * ── What has already been retired here, kept because a reader will wonder ──
+ * The experience header title/company SWAP (#298) is FIXED: `disambiguateCompanyTitle`
+ * uses the date-anchor line position as a tiebreak, so the reconstructed stacked
+ * shape re-segments to the title/company it was built from. The skills-line token
+ * split (#299/#E) is fixed by #301 (`wrap()` keeps each " · "-delimited skill
+ * atomic). The total re-parse collapse (#296) is fixed by removing the spurious
+ * `avgItems < 15` arm from `probeScanned`. Education "institution pollution" was
+ * fixed in #294 via the " · " middot boundary. The awesome-cv "Expected" end-date
+ * qualifier was absorbed into `DATE_RANGE_RE` by #383. Both #436 one-line-header
+ * roots — the neutral two-segment middot SWAP and the wrapped-org TRUNCATION —
+ * landed (#495 plus the renderer's conditional date-column reservation and
+ * `tryFoldCompleteDateHeader`), which is why only the entries in the JSON remain.
  */
-const KNOWN_FAILURES: Record<string, Category[]> = {
-  // The experience header title/company SWAP (#298) — title and company traded
-  // places on re-parse in denser / multi-role / two-column layouts — is FIXED:
-  // `disambiguateCompanyTitle` now uses the date-anchor line position as a
-  // tiebreak (anchor line = company, line above = title) when text-content
-  // heuristics can't decide, so the reconstructed stacked shape re-segments to
-  // the same title/company it was built from. Fixtures cleared by that fix have
-  // had their `experience` line removed here (the ratchet forces it).
-  //
-  // The `experience` entries that REMAIN below are NOT the swap — they are
-  // distinct, separately-rooted round-trip bugs that the swap fix does not (and
-  // should not) touch; each warrants its own follow-up:
-  //
-  //   - classic / weasyprint (#326, wontfix by-design): the ONLY diff is a
-  //     Unicode glyph the #295 `toWinAnsi` sanitizer rewrites lossily — a role
-  //     title "… Intern → Junior Engineer" round-trips as "… Intern -> Junior
-  //     Engineer" (→ U+2192 → "->"). A #295 render-sanitizer artifact, not the
-  //     header swap. Accepted tradeoff (no-crash > glyph fidelity); a real fix
-  //     needs a Unicode-capable embedded font. See #326 for the decision record.
-  "google-docs/google-docs-skia-proxy-classic.pdf": ["experience"],
-  "unknown/weasyprint-cairo-classic.pdf": ["experience"],
-
-  //   - deedy macfonts/openfonts: experience now round-trips (all 6 roles, same
-  //     company/title P1↔P3) after the Phase 4b middot-only anchor gate — the old
-  //     location/keyword org-signal disjuncts were inverting a reconstructed role
-  //     differently from the first parse, breaking fidelity; dropping them fixed
-  //     it. The skills-line token split (#299/#E) is ALSO fixed now (#301 —
-  //     `wrap()` keeps each " · "-delimited skill atomic instead of breaking mid-
-  //     word), so these fixtures round-trip clean; no line remains here.
-
-  //   - openresume-react-pdf: a dateless role whose title carries an inline year
-  //     ("Software Engineer Intern Summer 2022") round-trips with the year split
-  //     out as `start_date` ("… Summer" + 2022) — an inline-year-in-title
-  //     asymmetry, not the swap. (The #299/#E skills split is fixed by #301.)
-  "unknown/openresume-react-pdf.pdf": ["experience"],
-
-  //   - awesome-cv-cv: the #341 isProseLine fix RECOVERS a real role this CV was
-  //     dropping (an "Undergraduate Research, … Lab(Prof. …)" header the old
-  //     "Company. City" prose false-positive had swallowed). Net +1 real role
-  //     (16 → 17). That recovered role's header packed inline abbreviated dates
-  //     with an "Expected" marker ("Researcher … Mar. 2016 Exp. Jun. 2017").
-  //     #383 taught DATE_RANGE_RE to absorb the optional "Expected"/"Exp." end-
-  //     date qualifier, so the role now splits its title from a clean
-  //     "Mar. 2016 – Jun. 2017" range and the experience round-trips; baseline
-  //     removed.
-
-  // Experience SWAP cleared by #298 (removed from these lines). The skills-line
-  // token split (#299/#E) is fixed by #301, so google-docs-skia-proxy-role-first-
-  // experience and -programs-skills-software round-trip clean; no line remains
-  // for either. (For programs-skills-software the education "institution
-  // pollution" was already fixed in #294 — "University of California" → "… ·
-  // Berkeley, CA" glued — via the " · " middot boundary; education round-trips.)
-
-  // Total re-parse collapse (#296) — FIXED: the reconstructed PDF read back
-  // empty because the compact single-role + single-degree résumé rendered as
-  // only ~11 line-granular text items, tripping the `avgItems < 15` arm of the
-  // scanned probe despite 439 real characters. That arm short-circuited the
-  // whole cascade (contact, experience, and education all dropped). Removing the
-  // spurious item-count arm from `probeScanned` (character sparsity is the
-  // reliable scanned signal) restores the full round-trip; no line remains.
-
-  // ── One-line experience header (#436) ──
-  // The Download-PDF exporter emits a ONE-LINE experience header
-  // ("Title · Company, Location · Team", date flush-right) instead of the older
-  // stacked two-line shape (#284/#298). The text-only parser has no font signal,
-  // so it used the two-line STRUCTURE to tell title from company; on one line
-  // that signal is gone. #436 has TWO roots:
-  //
-  //   1. SWAP — a neutral two-segment middot header ("Composer · Northwind
-  //      Ensemble", no company-suffix / title-keyword either side) re-parsed
-  //      title↔company-swapped because the no-signal default read the first
-  //      segment as the company. FIXED (#495): the `middot` title-first default
-  //      in `mapWithoutCompanyMatch`. A related swap where BOTH segments look
-  //      like a company on one middot line — a soft title keyword vs a hard legal
-  //      tail ("Solutions Engineer · Acme Cloud, Inc.") — is now also fixed by
-  //      the `chooseCompanyIdx` hard-legal preference (certifications cleared).
-  //      A bare-location tail the exporter joins into the company cell
-  //      ("…, Remote") is peeled by `stripLocationSuffix` Pass F (achievements-
-  //      oneline, two-column, chromium-asymmetric, weasyprint-two-column cleared).
-  //   2. TRUNCATION — a PARENTHETICAL / multi-word company on the one-line shape
-  //      ("Danggeun Pay Inc. (KarrotPay)" → "(KarrotPay)") re-parsed truncated
-  //      when the too-wide header WRAPPED its org tail onto the row below and the
-  //      wrapped words were stranded (or glued to the flush-right date). FIXED:
-  //      the renderer now reserves the flush-right date column only when the
-  //      header actually reaches it (`drawText` in render-ats-pdf.ts), so the org
-  //      wraps clear of the date; and the parser folds that wrapped tail back
-  //      into the header before disambiguation (`tryFoldCompleteDateHeader` in
-  //      entry-blocks.ts), gated to single-column sections so a two-column source
-  //      is untouched. awesome-cv-cv / awesome-cv-resume cleared.
-  //
-  // Delete each line below as its root lands (the ratchet forces it — a fixed
-  // fixture trips the stale-entry check).
-  //
-  // honors-subheadings: NOT the one-line header roots above — a bullet-as-title
-  // parse defect on a subheading-style role, tracked separately.
-  "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": ["experience"],
-};
-
 const CATEGORIES: Category[] = [
   "contact",
   "experience",
@@ -185,6 +111,8 @@ const CATEGORIES: Category[] = [
   "summary",
   "render",
 ];
+
+const KNOWN_FAILURES = loadKnownFailures<Category>(knownFailuresFile, CATEGORIES);
 
 // Fixture-read + full runCascade→render→runCascade round-trip per fixture is
 // slow under a coverage-instrumented full-suite `verify` run; scope a higher
@@ -224,7 +152,7 @@ describe("corpus round-trip invariants (#293)", { timeout: 20000 }, () => {
             };
       // Shared ratchet (#459): non-baselined category must pass; a baselined
       // category that now passes fails with "remove it from KNOWN_FAILURES".
-      assertRatchet(rel, CATEGORIES, fails, new Set(KNOWN_FAILURES[rel] ?? []));
+      assertRatchet(rel, CATEGORIES, fails, baselineCategories(KNOWN_FAILURES, rel));
     });
   }
 });

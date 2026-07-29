@@ -1,0 +1,71 @@
+{
+  "_readme": [
+    "Issue-linked known-failure baseline for the corpus round-trip invariant gate",
+    "(#293, corpus-roundtrip.test.ts). See that file's docblock for the ratchet,",
+    "and corpus-gate.test-utils.ts for the loader that validates this shape.",
+    "",
+    "It is JSON, not a TypeScript literal, so `scripts/check-known-failures.mjs`",
+    "can read it without a TS toolchain — an exemption whose issue has been closed",
+    "must be catchable by CI, and CI cannot import a .ts test file.",
+    "",
+    "Every entry carries the issue that OWNS the failure. `status` says what the",
+    "citation means:",
+    "  open     — a live bug; the issue must still be OPEN. A closed issue means",
+    "             the fix landed and this line is orphaned baseline: CI fails.",
+    "  accepted — a recorded by-design decision (the issue is normally closed).",
+    "             `accepted` is for a tradeoff someone WROTE DOWN, never for",
+    "             silencing the script.",
+    "`note` is required and explains the failure in its own words; the surrounding",
+    "prose that used to live in comments belongs here, next to the entry it is about."
+  ],
+  "categories": [
+    "contact",
+    "experience",
+    "education",
+    "skills",
+    "summary",
+    "render"
+  ],
+  "baselines": {
+    "google-docs/google-docs-skia-proxy-classic.pdf": [
+      {
+        "category": "experience",
+        "issue": 326,
+        "status": "accepted",
+        "note": "The ONLY diff is a Unicode glyph the #295 toWinAnsi() render sanitizer rewrites lossily: a role title '… Intern → Junior Engineer' round-trips as '… Intern -> Junior Engineer' (→ U+2192 → '->'). #326 records the decision: no-crash beats glyph fidelity, and a real fix needs a Unicode-capable embedded font. Delete when such a font lands."
+      }
+    ],
+    "unknown/weasyprint-cairo-classic.pdf": [
+      {
+        "category": "experience",
+        "issue": 326,
+        "status": "accepted",
+        "note": "Same single-glyph toWinAnsi() substitution as google-docs-skia-proxy-classic; see #326's decision record."
+      }
+    ],
+    "unknown/openresume-react-pdf.pdf": [
+      {
+        "category": "experience",
+        "issue": 663,
+        "status": "open",
+        "note": "A dateless role whose TITLE carries an inline year ('Software Engineer Intern Summer 2022') round-trips with the year split out as start_date ('… Summer' + 2022) — an asymmetry between what the exporter composes and what the parser splits. Previously cited #649; that was the wrong owner, because #649 is a pure extraction whose own acceptance criterion is 'changes ZERO rendered bytes' and whose plan explicitly defers the date dialect to a separate PR — so it could never clear this line and this entry would have orphaned the day it merged. Not the #298 title/company swap and not the #436 one-line header."
+      }
+    ],
+    "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": [
+      {
+        "category": "experience",
+        "issue": 543,
+        "status": "open",
+        "note": "A bullet-as-title parse defect on a subheading-style role: the role's title is taken from a bullet line, so it does not survive the round-trip. It reproduces the title-drop category #543's acceptance criteria ask for. NOT the only fixture that does — four others parse a literally EMPTY title (google-docs/google-docs-skia-proxy-multiline-bullets-coursework role[2], unknown/pdflib-leading-glyph-skills-header role[0], unknown/student-projects-activities-singlecol role[2], word/openresume-laverne-word-quartz role[1]); the earlier note claimed it was, and that was false. Not the #436 one-line-header roots."
+      }
+    ],
+    "unknown/extended-latin-name-roundtrip.pdf": [
+      {
+        "category": "contact",
+        "issue": 664,
+        "status": "open",
+        "note": "full_name 'ANNA WIŚNIEWSKA' → 'ANNA WI?NIEWSKA'. ś (U+015B) is Latin Extended-A, outside WinAnsi, so toWinAnsi() degrades it to '?' on the standard-font path (always under Node/CI; in the browser only when the Poppins fetch fails). Minted under #654 as the corpus's first evidence for roundtrip-contact-value-changed. The MECHANISM is #326's, but this is filed OPEN under #664 rather than accepted under #326 on purpose: #326 weighed a punctuation glyph in a role TITLE against a crash, and nobody has weighed a candidate's own NAME being mangled in a PDF they send to employers. Marking it accepted would permanently exempt it from CI on a decision no one made."
+      }
+    ]
+  }
+}

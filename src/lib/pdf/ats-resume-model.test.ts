@@ -2,6 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, expect, it } from "vitest";
+import { bulletId } from "../score/bullet-id.ts";
 import { buildAtsResumeModel } from "./ats-resume-model.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import type {
@@ -15,6 +16,7 @@ import { countWords } from "../score/score.ts";
 function bullet(text: string, index: number): BulletObservation {
   return {
     text,
+    id: bulletId(text, 0),
     index,
     hasMetric: true,
     startsWithActionVerb: true,
@@ -174,26 +176,43 @@ describe("buildAtsResumeModel", () => {
     ]);
   });
 
-  it("applies contact overrides like ContactCard ('' clears, value replaces)", () => {
-    const result = makeResult();
-    const model = buildAtsResumeModel(result, makeScore([]), {
-      contactOverrides: { full_name: "Janet Q. Candidate", phone: "" },
-      bulletOverrides: {},
-    });
+  // #648 Phase 3: the builder takes NO override maps. It renders the
+  // already-folded canonical résumé + its re-graded score, so these two pin the
+  // contract "what applyOverrides produced is what the PDF draws" rather than a
+  // second copy of the override semantics living here.
+  it("renders the contact edits already folded into the canonical fields", () => {
+    const result = makeResult({ full_name: "Janet Q. Candidate" });
+    // An edit CLEARS phone: applyOverrides zeroes its confidence, and that
+    // gating — not an override map — is what drops it from the export.
+    result.canonical.fieldConfidence.phone = 0;
+    const model = buildAtsResumeModel(result, makeScore([]));
     expect(model.contact.name).toBe("Janet Q. Candidate");
     expect(model.contact.phone).toBeUndefined();
   });
 
-  it("applies bullet overrides to the rendered bullet text", () => {
-    const result = makeResult();
+  it("renders the bullet text carried by the (re-graded) pool", () => {
+    // The pool and the entry description are BOTH post-edit, which is what
+    // `applyOverrides` guarantees — `groupBulletsByExperience` attributes a
+    // pooled bullet to its entry by matching normalised text, so a pool that
+    // disagreed with the description would strand the bullet (that desync,
+    // manufactured by a test harness, was #487).
+    const result = makeResult({
+      experience: [
+        {
+          title: "Senior PM",
+          company: "Acme",
+          start_date: "2020",
+          end_date: "2024",
+          description:
+            "Rewrote the auth layer, cutting login latency 40%\nDrove 30% revenue growth across the platform",
+        },
+      ],
+    });
     const score = makeScore([
-      bullet("Led migration of legacy auth system to OAuth", 0),
+      bullet("Rewrote the auth layer, cutting login latency 40%", 0),
       bullet("Drove 30% revenue growth across the platform", 1),
     ]);
-    const model = buildAtsResumeModel(result, score, {
-      contactOverrides: {},
-      bulletOverrides: { 0: "Rewrote the auth layer, cutting login latency 40%" },
-    });
+    const model = buildAtsResumeModel(result, score);
     expect(model.sections[0].entries[0].bullets[0]).toBe(
       "Rewrote the auth layer, cutting login latency 40%",
     );

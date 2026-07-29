@@ -126,3 +126,32 @@ The `.expected.json` shape is intentionally lossy. **Captured:**
 - Per-bullet observations (covered separately by `score.test.ts`)
 
 Schema is versioned via `schemaVersion` in the snapshot. Bump `SNAPSHOT_SCHEMA_VERSION` in [`corpus.test.ts`](../../../src/lib/heuristics/corpus.test.ts) whenever the shape changes so stale snapshots visibly fail until re-baked.
+
+## Ground truth — `<name>.truth.json` (#654)
+
+The snapshot above measures **change**, and `corpus-roundtrip.test.ts` measures
+**self-consistency**. Neither measures whether the parse is *right*: a fixture whose
+company is parsed as its city passes both forever, as long as it keeps being parsed
+that way. A `<name>.truth.json` sidecar closes that — it states what the PDF actually
+says, so `corpus.test.ts` can score the parse against it and print per-field
+precision/recall.
+
+**Author it by reading the PDF.** `pdftotext -layout <file>.pdf -` and type what you
+see. Never generate it from the parser's output: that is a snapshot with extra steps,
+and it bakes in exactly the wrong parses the file exists to find. The required
+`provenance` string is where you say how you authored it.
+
+**Where the parser disagrees, record the disagreement — do not edit the truth.** Add a
+`knownWrong` entry for that field naming the issue that owns it (`status: "open"`), or
+the recorded decision that tolerates it (`"accepted"`). If no issue describes it yet,
+use `status: "unfiled"` with `issue: null` and state the wrong parse in the `note`;
+`npm run check:baselines` prints every unfiled entry and `corpus.test.ts` caps how many
+may exist. A field nobody has read yet goes in `unannotated` instead — that is *not*
+the same as recording an empty list, which asserts the page carries none.
+
+A truth file holds literal contact details, so it is swept by `npm run check:fixtures`
+along with the PDFs. The persona rules on this page apply to it unchanged.
+
+Annotating a fixture is the highest-leverage contribution to this corpus: the harness
+can only measure the fixtures that have been read. `TRUTH_ANNOTATED_FLOOR` in
+`corpus.test.ts` only goes up.

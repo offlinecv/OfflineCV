@@ -165,7 +165,7 @@ export function ProposedPanel({
     for (const sec of reviewSections) {
       const writes = resolveSectionWrites(
         sec.pairs,
-        sec.apply.obsIndices,
+        sec.apply.obsIds,
         review.decisions,
         review.edits,
       );
@@ -177,8 +177,8 @@ export function ProposedPanel({
       else reversible = false;
       for (const w of writes) {
         if (w.kind === "add") sec.apply.onAdd(w.text);
-        else if (w.kind === "replace") sec.apply.onReplace(w.obsIndex, w.text);
-        else sec.apply.onRemove(w.obsIndex);
+        else if (w.kind === "replace") sec.apply.onReplace(w.obsId, w.text);
+        else sec.apply.onRemove(w.obsId);
       }
     }
     // An all-verbatim batch commits nothing — no confirmation at all, or the

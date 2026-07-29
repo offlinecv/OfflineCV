@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. Authored from the generator's own drawn content (scripts/fixtures/gen-extended-latin-name.mjs) and confirmed against pdftotext. This fixture exists to exhibit roundtrip-contact-value-changed.",
+  "contact": {
+    "full_name": "ANNA WIŚNIEWSKA",
+    "email": "anna.wisniewska@example.com",
+    "phone": "(312) 555-0164",
+    "location": "Chicago, IL"
+  },
+  "experience": [
+    {
+      "title": "Staff Engineer",
+      "company": "Globex Systems LLC",
+      "dates": "Mar 2021 - Present"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Ridgemont State University"
+    }
+  ],
+  "skills": [
+    "Distributed Systems",
+    "Kubernetes",
+    "Terraform",
+    "PostgreSQL"
+  ]
+}

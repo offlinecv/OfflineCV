@@ -54,7 +54,7 @@ import {
   resolveReferenceLinks,
   stripReferenceImages,
 } from "../markdown-link-refs.ts";
-import type { PdfLine, PdfSection } from "./sections.ts";
+import type { PdfLine, PdfSection } from "./line-model.ts";
 import {
   matchSectionHeaderDetailed,
   SECTION_KEYWORDS,

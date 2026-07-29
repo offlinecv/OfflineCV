@@ -31,7 +31,7 @@ import type {
   TierEngagementReason,
 } from "./types.ts";
 import { CASCADE_VERSION } from "./types.ts";
-import { ACCOMPLISHMENT_SECTION_NAMES } from "./sections.ts";
+import { ACCOMPLISHMENT_SECTION_NAMES } from "./line-model.ts";
 import { toCanonicalResume } from "./canonical.ts";
 import { computeConfidence } from "./confidence.ts";
 

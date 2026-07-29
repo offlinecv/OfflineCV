@@ -32,7 +32,6 @@ import { validateDate } from "../../lib/edit/field-validators.ts";
 import type {
   AddedBulletRef,
   ExperienceFieldOverrides,
-  BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
 import { isAddedEntryKey } from "../../hooks/useEditableParse.ts";
 import {
@@ -252,19 +251,22 @@ interface RoleEntryProps {
     field: keyof ExperienceFieldOverrides,
     value: string,
   ) => void;
-  /** Bullet-text overrides keyed by BulletObservation.index (#82). */
-  bulletOverrides?: BulletOverrides;
-  /** Commit a bullet edit, keyed by BulletObservation.index (#82). */
-  onBulletChange?: (index: number, value: string) => void;
+  /** Commit a bullet edit, keyed by BulletObservation.id (#82, #648). The
+   *  optional third argument identifies the added-bullets bucket + line, which
+   *  is the ONLY way to reach a user-ADDED bullet (#657); this component
+   *  supplies it from `entryKey`, exactly as it does for a removal. */
+  onBulletChange?: (id: string, value: string, added?: AddedBulletRef) => void;
   /** Append a new bullet to this role (#180-followup). Renders a "+ Add bullet"
    *  affordance under the bullet list when provided. */
   onAddBullet?: (text: string) => void;
-  /** Drop a bullet by its BulletObservation.index (#211). Required — alongside
+  /** Drop a bullet by its BulletObservation.id (#211). Required — alongside
    *  onBulletChange + onAddBullet — to wire the section-rewrite per-bullet
    *  Apply (accept/reject/edit writes back here). The optional second argument
    *  identifies the added-bullets bucket + line, which is the ONLY way to reach
-   *  a user-ADDED bullet (#637); this component supplies it from `entryKey`. */
-  onRemoveBullet?: (index: number, added?: AddedBulletRef) => void;
+   *  a user-ADDED bullet (#637); this component supplies it from `entryKey`.
+   *  Returns whether the removal was recorded — the confirmation strip keys its
+   *  success state off that rather than off having called it (#648). */
+  onRemoveBullet?: (id: string, added?: AddedBulletRef) => boolean;
   /** This role's `addedBullets` bucket — its `AddedEntry.id` when the user
    *  added the role, else its `parsedEntryKey`. Absent for the "Other bullets"
    *  bucket, which owns no entry. */
@@ -297,7 +299,6 @@ export function RoleEntry({
   group,
   overrides,
   onFieldChange,
-  bulletOverrides,
   onBulletChange,
   onAddBullet,
   onRemoveBullet,
@@ -307,16 +308,18 @@ export function RoleEntry({
   entryKey,
   pruneHold,
 }: RoleEntryProps) {
-  // Tag every remove issued from this role's own rows with the bucket that
-  // owns them, so a USER-ADDED bullet is spliced out of `addedBullets` rather
-  // than filed under an observation index that reaches nothing (#637).
+  // Tag every write issued from this role's own rows with the bucket that owns
+  // them, so a USER-ADDED bullet is spliced (#637) or rewritten (#657) in
+  // `addedBullets` rather than filed under an id that reaches nothing there.
+  const ownBucketRef = useCallback(
+    (text: string): AddedBulletRef | undefined =>
+      entryKey === undefined ? undefined : { entryKey, text },
+    [entryKey],
+  );
   const removeOwnBullet = useCallback(
-    (index: number, text: string) =>
-      onRemoveBullet?.(
-        index,
-        entryKey === undefined ? undefined : { entryKey, text },
-      ),
-    [onRemoveBullet, entryKey],
+    (id: string, text: string) =>
+      onRemoveBullet?.(id, ownBucketRef(text)) ?? false,
+    [onRemoveBullet, ownBucketRef],
   );
   // Per-bullet remove confirmation (#626), mirroring SectionRewrite's own
   // applied/undone strip so a mis-click (or an empty-commit auto-remove, see
@@ -337,44 +340,58 @@ export function RoleEntry({
     hostsStrip && removes.pending,
   );
 
-  // Bullet display text honors #82 overrides — section rewrite must see the
-  // text the user actually edited, not the stale parsed text.
-  const sectionBullets = group.bullets.map(
-    (b) => bulletOverrides?.[b.index] ?? b.text,
-  );
+  // Section rewrite sees the text the user actually edited — `group.bullets`
+  // comes from the RE-GRADED pool, so `b.text` IS the post-edit text. This used
+  // to read `bulletOverrides?.[b.id] ?? b.text`; that lookup could never hit,
+  // because `assignBulletIds` allocates a live row's id AROUND the keys the
+  // override map already holds (#648), so no live row's id is ever a key in it.
+  const sectionBullets = group.bullets.map((b) => b.text);
   // Wire the per-bullet rewrite review/apply (#211) only when the full editable
-  // surface is present (replace + add + remove). The obsIndices are parallel to
+  // surface is present (replace + add + remove). The obsIds are parallel to
   // sectionBullets so an accepted change maps back to its BulletObservation.
   // Memoized so the proposal's decision state doesn't reset on every render.
-  const obsIndices = group.bullets.map((b) => b.index);
-  const obsIndicesKey = obsIndices.join(",");
+  const obsIds = group.bullets.map((b) => b.id);
+  // NOT `,`: an id is `"<n>|<normalised bullet text>"` (#648) and bullet prose
+  // routinely contains commas, so a comma join lets two DIFFERENT id sets
+  // stringify identically and strand a stale memo. `\u0000` cannot occur in one.
+  const obsIdsKey = obsIds.join("\u0000");
   // Latest bullets, read at CALL time by the rewrite-apply below: the memo is
-  // keyed on `obsIndicesKey`, which cannot see a text change that leaves the
-  // index set alone, and the added-bullet splice matches on text (#637).
+  // keyed on `obsIdsKey`, and both added-bullet writes match on text (#637,
+  // #657) so they need the row's live text, not the memo's snapshot.
   const bulletsRef = useRef(group.bullets);
   bulletsRef.current = group.bullets;
   const rewriteApply = useMemo<SectionRewriteApply | undefined>(() => {
     if (!onBulletChange || !onAddBullet || !onRemoveBullet) return undefined;
+    const textOf = (id: string) =>
+      bulletsRef.current.find((b) => b.id === id)?.text;
     return {
-      obsIndices,
-      onReplace: (index, text) => onBulletChange(index, text),
-      // Same entry-aware removal the per-row control uses (#637) — an accepted
-      // "remove this bullet" on a user-added role must splice the bucket too.
-      onRemove: (index) => {
-        const text = bulletsRef.current.find((b) => b.index === index)?.text;
-        if (text === undefined) onRemoveBullet(index);
-        else removeOwnBullet(index, text);
+      obsIds,
+      // Same entry-aware routing the per-row controls use: an accepted rewrite
+      // of a user-added role's bullet must reach the bucket (#637, #657).
+      onReplace: (id, text) => {
+        const current = textOf(id);
+        onBulletChange(
+          id,
+          text,
+          current === undefined ? undefined : ownBucketRef(current),
+        );
+      },
+      onRemove: (id) => {
+        const text = textOf(id);
+        if (text === undefined) onRemoveBullet(id);
+        else removeOwnBullet(id, text);
       },
       onAdd: (text) => onAddBullet(text),
       captureUndo,
     };
-    // obsIndices identity churns each render; key on its stable string form.
+    // obsIds identity churns each render; key on its stable string form.
   }, [
-    obsIndicesKey,
+    obsIdsKey,
     onBulletChange,
     onAddBullet,
     onRemoveBullet,
     removeOwnBullet,
+    ownBucketRef,
     captureUndo,
   ]);
   // The "Rewrite section" trigger sits on the header row (right of the title);
@@ -404,17 +421,16 @@ export function RoleEntry({
           <ul className="list-none">
             {group.bullets.map((b) => (
               <ResumeBulletRow
-                key={b.index}
+                key={b.id}
                 bullet={b}
-                override={bulletOverrides?.[b.index]}
                 onBulletChange={
                   onBulletChange
-                    ? (value) => onBulletChange(b.index, value)
+                    ? (value) => onBulletChange(b.id, value, ownBucketRef(b.text))
                     : undefined
                 }
                 onRemove={
                   onRemoveBullet
-                    ? () => removes.removeBullet(b.index, b.text)
+                    ? () => removes.removeBullet(b.id, b.text)
                     : undefined
                 }
               />
