@@ -73,6 +73,7 @@ import type {
   ResumeProject,
   HeuristicAchievement,
 } from "../../lib/score/types.ts";
+import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
 import type {
   EditableParse,
   ExperienceFieldOverrides,
@@ -400,6 +401,7 @@ export function ExperienceSection({
   groups,
   resumeSections,
   jdContext,
+  critique,
   hasBullets,
   experienceOverrides,
   onExperienceFieldChange,
@@ -428,6 +430,9 @@ export function ExperienceSection({
   resumeSections: readonly SectionInput[];
   /** Optional JD-driven rewrite steering (#226). Undefined on `/` → generic. */
   jdContext?: string;
+  /** On-device critique of this résumé (#608). Steers the whole-résumé rewrite
+   *  with the per-bullet findings the user was already shown. */
+  critique?: ResumeCritique;
   hasBullets: boolean;
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
   onExperienceFieldChange: (
@@ -564,7 +569,12 @@ export function ExperienceSection({
   const {
     trigger: resumeRewriteTrigger,
     panel: resumeRewritePanel,
-  } = useResumeRewriteUi(resumeSections, rewriteApplyBySection, jdContext);
+  } = useResumeRewriteUi(
+    resumeSections,
+    rewriteApplyBySection,
+    jdContext,
+    critique,
+  );
   return (
     <section
       className="flex flex-col gap-3"
@@ -1026,6 +1036,7 @@ export function ReconstructedResume({
   score,
   edit,
   jdContext,
+  critique,
 }: {
   result: CascadeResult;
   /** EDITED score — re-graded by App from the current overrides. Its
@@ -1036,6 +1047,10 @@ export function ReconstructedResume({
   edit: EditableParse;
   /** Optional JD-driven rewrite steering (#226). Set only on `/jd-fit`. */
   jdContext?: string;
+  /** On-device critique of this résumé (#608), when the user has run one.
+   *  Threaded to the whole-résumé rewrite so it acts on the findings already
+   *  on screen. Undefined → byte-identical pre-#608 rewrite prompt. */
+  critique?: ResumeCritique;
 }) {
   // Display projection (#443, Stage B) — parsed field core + the user's own
   // section headings, read off the canonical model rather than `result` directly.
@@ -1327,6 +1342,7 @@ export function ReconstructedResume({
         groups={experienceRenderGroups}
         resumeSections={resumeSections}
         jdContext={jdContext}
+        critique={critique}
         hasBullets={bullets.length > 0}
         experienceOverrides={experienceOverrides}
         onExperienceFieldChange={(index, field, value) =>

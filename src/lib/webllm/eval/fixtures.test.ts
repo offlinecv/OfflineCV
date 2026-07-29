@@ -6,8 +6,13 @@ import { describe, expect, it } from "vitest";
 import { parseFixture, REWRITE_FIXTURES, getFixtureById } from "./fixtures.ts";
 
 describe("REWRITE_FIXTURES", () => {
-  it("loads exactly the four canonical fixture kinds", () => {
-    const kinds = REWRITE_FIXTURES.map((f) => f.kind).sort();
+  it("covers all four canonical fixture kinds", () => {
+    // Was "exactly four", one fixture per kind. #608 added a second `weak`
+    // fixture (the steering-adherence probe), so the invariant that actually
+    // matters is COVERAGE of the kinds — every rubric criterion gated on a kind
+    // must have at least one fixture to fire on. Counting fixtures instead
+    // would have to be bumped by hand on every addition and asserts nothing.
+    const kinds = [...new Set(REWRITE_FIXTURES.map((f) => f.kind))].sort();
     expect(kinds).toEqual(["numeric", "redundant", "strong", "weak"]);
   });
 

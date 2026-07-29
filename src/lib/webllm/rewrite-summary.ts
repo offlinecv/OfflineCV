@@ -59,6 +59,7 @@ export function buildSummaryUserPrompt(summary: string): string {
 export function buildSummarySystemPrompt(
   context?: string,
   steering?: RewriteSteering,
+  summary?: string,
 ): string {
   const base =
     !context || context.trim().length === 0
@@ -69,7 +70,15 @@ Other sections of this résumé will be rewritten next. The user's NEXT message 
 
 Context for tone consistency (reference only — never echo into your output):
 ${context.trim()}`;
-  return `${base}${buildSteeringSuffix(steering)}`;
+  // The summary is a single unit, so it scopes `steering.findings` as a
+  // one-element list (#608) and renders unnumbered ("- Summary: …"). The
+  // critique's `summaryFeedback` is filed under this very text by
+  // `findingsFromCritique`. Omitted → findings contribute nothing.
+  return `${base}${buildSteeringSuffix(
+    steering,
+    summary === undefined ? undefined : [summary],
+    "Summary",
+  )}`;
 }
 
 export interface SummaryRewriteOptions {
@@ -118,7 +127,11 @@ export async function rewriteSummaryWithLlm(
       messages: [
         {
           role: "system",
-          content: buildSummarySystemPrompt(options.context, options.steering),
+          content: buildSummarySystemPrompt(
+            options.context,
+            options.steering,
+            summary,
+          ),
         },
         { role: "user", content: buildSummaryUserPrompt(summary) },
       ],

@@ -1,0 +1,15 @@
+{
+  "id": "steering-forbidden-word",
+  "kind": "weak",
+  "description": "Steering-adherence probe (#608 half 2). Every input bullet leads with the word 'Spearheaded', and the instruction forbids it — so obeying requires the model to act on the instruction against the pull of the input it is copying from. Compliance is checkable by string inspection, with no judge model: the word is either absent from the output or it is not.",
+  "bullets": [
+    "Spearheaded the migration of the billing platform to a new payments provider across 12 regional markets.",
+    "Spearheaded a quarterly planning process for a 9-person team, cutting scope churn by 30%.",
+    "Spearheaded the rollout of an internal design system adopted by 4 product squads.",
+    "Spearheaded incident response for the checkout service, reducing mean time to recovery from 45 minutes to 11 minutes."
+  ],
+  "steering": {
+    "instruction": "Do not use the word \"spearheaded\" anywhere in your output. Use a different action verb for every bullet.",
+    "check": { "kind": "forbidden-word", "word": "spearheaded" }
+  }
+}

@@ -97,6 +97,9 @@ export async function runEval({
             input: fixture.bullets,
             output,
             fixtureKind: fixture.kind,
+            // #608: the fixture carries its own steering probe, so the runner
+            // stays agnostic about which instruction is being measured.
+            ...(fixture.steering ? { steering: fixture.steering } : {}),
           });
           record = {
             modelId,
@@ -178,6 +181,19 @@ function aggregateRecords(
           : redundantCell.filter((r) => r.rubric.dedupEffective === true).length /
             redundantCell.length;
 
+      // #608 half 2. Selected on the RUBRIC slot rather than on a fixture kind:
+      // adherence is orthogonal to weak/strong/numeric/redundant, so any
+      // fixture may carry a steering probe and `null` is the "did not probe"
+      // signal — the same shape dedup uses, one level down.
+      const steeringCell = scored.filter(
+        (r) => r.rubric.steeringAdherence !== null,
+      );
+      const steeringAdherenceRate =
+        steeringCell.length === 0
+          ? null
+          : steeringCell.filter((r) => r.rubric.steeringAdherence === true)
+              .length / steeringCell.length;
+
       const judgeScores = scored
         .map((r) => r.rubric.judgeCoherence)
         .filter((v): v is number => v !== null);
@@ -193,6 +209,7 @@ function aggregateRecords(
         lengthSanityRate,
         noPreambleLeakRate,
         ...(dedupEffectiveRate === null ? [] : [dedupEffectiveRate]),
+        ...(steeringAdherenceRate === null ? [] : [steeringAdherenceRate]),
       ];
       const aggregateScore =
         deterministicRates.reduce((s, v) => s + v, 0) / deterministicRates.length;
@@ -207,6 +224,7 @@ function aggregateRecords(
         lengthSanityRate,
         noPreambleLeakRate,
         dedupEffectiveRate,
+        steeringAdherenceRate,
         judgeMean,
         aggregateScore,
       });

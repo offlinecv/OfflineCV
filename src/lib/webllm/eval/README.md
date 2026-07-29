@@ -10,8 +10,9 @@ model + prompt are picked from measurement rather than vibes.
 src/lib/webllm/eval/
 ├── types.ts              # FixtureKind, RubricResult, EvalReport, RewriteFn
 ├── verbs.ts              # curated action-verb set (superset of scorer's)
+├── adherence.ts          # deterministic steering-adherence checks (#608)
 ├── fixtures.ts           # loads + validates JSON fixtures
-├── rubric.ts             # the six deterministic criteria
+├── rubric.ts             # the seven deterministic criteria
 ├── prompt-variants.ts    # the shipped prompt + experimental variants
 ├── runner.ts             # iterates (model × variant × fixture)
 ├── report.ts             # JSON + Markdown formatters
@@ -71,7 +72,8 @@ specific fixture.
 
 The dedup column is `—` for non-redundant fixtures (the criterion
 doesn't apply); the aggregate's dedup rate is computed over `redundant`
-fixtures only.
+fixtures only. The **Steering** column behaves the same way for fixtures
+that carry a steering probe — see below.
 
 The judge column is `—` until the optional LLM-judge gate is enabled.
 That path is flag-plumbed (`runEval({ judgeEnabled })`) but the
@@ -112,3 +114,57 @@ deterministic rates. If two models tie within ~3 points, prefer the
 smaller / Apache-2.0 one — the eval is a measurement floor, not the only
 input (license, download size, and consent friction matter for the
 shipped default).
+
+## Steering adherence (#608)
+
+`RewriteSteering.userInstructions` demonstrably reaches the system prompt,
+but a user reported that rewrites ignore it anyway. That is either a real
+prompt-adherence defect or per-model variance, and nothing could tell them
+apart because nothing measured adherence. The **Steering** column is that
+measurement.
+
+A fixture opts in by carrying a `steering` block:
+
+```json
+"steering": {
+  "instruction": "Do not use the word \"spearheaded\" anywhere in your output.",
+  "check": { "kind": "forbidden-word", "word": "spearheaded" }
+}
+```
+
+The runner appends `instruction` to the variant's system prompt through the
+**production** `buildSteeringSuffix` — not a hand-inlined string — so the
+prompt shape being graded is the one that ships. `check` is then verified
+deterministically by `adherence.ts`. Three kinds exist:
+
+| kind | verifies |
+|---|---|
+| `forbidden-word` | the word is absent from every output bullet |
+| `max-words` | every bullet is within a word limit |
+| `distinct-verbs` | every bullet leads with a *different* action verb |
+
+**Only mechanically-checkable instructions are allowed.** No judge model: a
+judge would make the adherence number a function of the thing under test, and
+a flaky judge cannot settle an argument. That rules out the instructions users
+actually type ("make it punchier"), and that is the trade — an instruction we
+can verify beats one we can only feel.
+
+A fixture without `steering` scores `null` (rendered `—`), contributes nothing
+to the aggregate, and gets a byte-identical prompt to the pre-#608 run.
+
+### Reading the result
+
+A low rate says the model did not follow a *mechanical* instruction. It does
+**not** by itself distinguish the three candidate causes — read it across the
+model and variant axes:
+
+- **low on every model and variant** → prompt-shape problem. The instruction is
+  repeated per section (the model only ever sees one section), or it is
+  crowded out by the rolling context + verb/phrase briefs. Try moving the user
+  text ahead of the briefs, or trimming the context when instructions are set.
+- **low on some models only** → a default-model question, not a prompt one.
+- **high everywhere** → half 2 is not reproducible on mechanical instructions.
+  That is a legitimate outcome, and the criterion stays as a regression guard.
+
+Adding a check kind means a case in `scoreAdherence` *and* `describeCheck`;
+both switch exhaustively, so TypeScript flags a half-done addition.

@@ -36,6 +36,7 @@ import {
   buildSectionUserPrompt,
   sectionMaxTokens,
 } from "../rewrite-section.ts";
+import { buildSteeringSuffix } from "../steering.ts";
 import { MODEL_REGISTRY, getModelById } from "../models.ts";
 import {
   acquireInference,
@@ -66,9 +67,23 @@ function makeRealRewriteFn(engine: WebLlmEngine): RewriteFn {
     const variant = PROMPT_VARIANTS.find((v) => v.id === variantId);
     if (!variant) throw new Error(`unknown variant: ${variantId}`);
 
+    // A steering fixture (#608) carries the instruction it is measuring
+    // adherence to. It rides the SAME `buildSteeringSuffix` the product uses,
+    // appended after the variant's own prompt — measuring a hand-inlined
+    // instruction here would grade a prompt shape that never ships, which is
+    // the harness fault #487 was. A fixture without `steering` appends "" and
+    // its prompt is byte-identical to the pre-#608 run.
+    const systemPrompt =
+      variant.systemPrompt +
+      buildSteeringSuffix(
+        fixture.steering
+          ? { userInstructions: fixture.steering.instruction }
+          : undefined,
+      );
+
     const response = await engine.chat.completions.create({
       messages: [
-        { role: "system", content: variant.systemPrompt },
+        { role: "system", content: systemPrompt },
         { role: "user", content: buildSectionUserPrompt(fixture.bullets) },
       ],
       temperature: SECTION_TEMPERATURE,
