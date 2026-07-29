@@ -278,11 +278,62 @@ const SEASON_LEAD_RE = /^(?:Spring|Summer|Fall|Autumn|Winter)\b/i;
  * text (a course name, a skill, an org fragment) does not — so a genuine
  * multi-column grid's trailing column still splits.
  *
- * Two shapes are deliberately NOT matched, so they stay glued rather than
- * flush-right — both fully round-trip-safe (gluing is the #430 behavior), and
- * both narrowing the blast radius of this core line-splitter change:
+ * `allowSingle: true` (#618) EXTENDS the predicate to also match a bare
+ * `(19|20)\d{2}` single graduation year ("2023" — the common shape for
+ * certificates, bootcamps, and non-degree programs), so an Education entry
+ * with a lone year gets the same right-aligned slot a range gets. Every other
+ * guard is preserved: the season-lead exclusion still applies (a bare year
+ * has no season anyway), and the bare-numeric guard still holds — the
+ * `^(?:19|20)\d{2}$` full-match ensures a bare `5000` (salary column) stays
+ * a splittable grid column. `allowSingle` also intentionally does NOT admit
+ * month-year (`May 2020`) or apostrophe-year (`'19`) alone; only bare 4-digit
+ * years qualify. Used by the EXPORTER only (`experienceEntries`' `headerLineDate`
+ * gate and `educationEntries`' `rightAlignEduDate`, both in
+ * `ats-resume-model.ts`) — deliberately NOT applied to the parser-side
+ * `columnGapCuts` in `sections.ts`, which stays range-only. Cited by symbol
+ * rather than `path:line` on purpose: this docblock's own insertion shifted both
+ * call sites, so the line numbers were stale in the commit that wrote them
+ * (#620, #661).
+ *
+ * The parser side stays range-only for two reasons:
+ *
+ *  1. It is not needed, because `pdfjs` synthesizes a whitespace item across
+ *     ANY wide intra-line gap — this is pdfjs behaviour for flush-right text in
+ *     general, not a property of our own renderer. It extracts such a line as
+ *     three items: the org text at the left margin, a synthesized whitespace
+ *     item filling the wide gap, and the year at the right margin. Empirically
+ *     that filler's width is set so the measured `x`-gap to the year is ≈ 0 pt,
+ *     well under `COLUMN_GAP_THRESHOLD`, so `columnGapCuts` never computes a cut
+ *     in the first place. Measured identically on our export and on the
+ *     hand-drawn `drawRight` fixture, which never goes through
+ *     `render-ats-pdf.ts` — so the reasoning covers third-party flush-right PDFs
+ *     too, not only round-trips. Range and lone-year both re-parse cleanly.
+ *
+ *     This rests on a pdfjs implementation detail with no pinned contract. If an
+ *     upgrade stopped emitting the filler the gap becomes ≈ 360 pt, far over
+ *     `COLUMN_GAP_THRESHOLD`, and unlike the range path the lone-year path has
+ *     NO `flush()` exemption to fall back on. What guards that is
+ *     `render-roundtrip-education-lone-year.repro.test.ts`: it round-trips
+ *     through pdfjs, so it is the test that pins this pdfjs behaviour and it
+ *     fails loudly if the behaviour changes. Read it before a pdfjs bump.
+ *
+ *  2. It ACTIVELY breaks an external fixture. `columnGapCuts` also feeds
+ *     `rowIsMultiColumn`, which drives embedded-column reorder detection —
+ *     and admitting a lone year there flips a wrap-continuation row like
+ *     `[Museum, 2024]` (the second physical line of a `[Company / Museum,
+ *     May 2023 – / June 2024]` two-column entry) from "multi-column" to
+ *     "single-column". That breaks the reorder chain and drops the whole
+ *     entry, verified against
+ *     `google-docs/google-docs-skia-proxy-multiline-bullets-coursework.pdf`
+ *     where an Experience entry vanished from the count on the initial
+ *     wider fix. So `allowSingle` stays opt-in and only the exporter opts in.
+ *
+ * Two shapes are deliberately NOT matched under DEFAULT mode (allowSingle=false),
+ * so they stay glued rather than flush-right — both fully round-trip-safe
+ * (gluing is the #430 behavior), and both narrowing the blast radius of this
+ * core line-splitter change:
  *   - a bare single date/year: `DATE_RANGE_RE` needs two anchors, so a lone
- *     `2020` returns false; and
+ *     `2020` returns false (opt into it explicitly with `allowSingle: true`); and
  *   - a SEASON-led range (`Fall 2013 – Spring 2014`, `Summer 2013, 2014`): this
  *     exclusion is load-bearing for an EXTERNAL fixture, not our own export.
  *     `word/openresume-laverne-word-quartz.pdf` carries a flush-right honors
@@ -305,7 +356,10 @@ const SEASON_LEAD_RE = /^(?:Spring|Summer|Fall|Autumn|Winter)\b/i;
  *     rail still reaches `flush()`, where merging vs. splitting is exactly what
  *     the season exclusion controls — so the carve-out is still required.
  */
-export function isLoneDateRange(text: string): boolean {
+export function isLoneDateRange(
+  text: string,
+  opts: { allowSingle?: boolean } = {},
+): boolean {
   const t = text.trim();
   if (t.length === 0 || SEASON_LEAD_RE.test(t)) return false;
   // `DATE_RANGE_RE`'s bare-year anchor is `\d{4}`, so a plain numeric range that
@@ -315,6 +369,14 @@ export function isLoneDateRange(text: string): boolean {
   // slash, or apostrophe). A bare non-year numeric range has none, so it stays a
   // normal splittable grid column instead of being merged as a flush-right rail.
   if (!/(?:19|20)\d{2}|[A-Za-z'/]/.test(t)) return false;
+  // #618 — a bare `(19|20)\d{2}` graduation year qualifies under `allowSingle`.
+  // Kept BEFORE the `DATE_RANGE_RE` match so the strict single-year shape is
+  // recognised even though the range regex needs two anchors. The `^…$` full
+  // match plus the numeric gate above keep the bare-numeric guard load-bearing:
+  // `5000` stays out (fails the year gate) and so does `Institution 2023` (fails
+  // the full-string anchor). Month-year and apostrophe-year alone stay out too
+  // — only 4-digit 19xx/20xx years qualify.
+  if (opts.allowSingle && /^(?:19|20)\d{2}$/.test(t)) return true;
   const m = DATE_RANGE_RE.exec(t);
   DATE_RANGE_RE.lastIndex = 0;
   return m !== null && m.index === 0 && m[0].length === t.length;

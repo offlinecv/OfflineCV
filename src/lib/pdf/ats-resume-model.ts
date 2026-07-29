@@ -614,10 +614,15 @@ export function buildAtsResumeModel(
       endDate: exp.is_current ? undefined : exp.end_date || undefined,
       isCurrent: exp.is_current || undefined,
     };
-    // A genuine range draws flush-right on the header (the `flush()` date-range
-    // exemption keeps it merged into the header `PdfLine` on re-parse); a
-    // single-token date (or none) glues after a whitespace gap.
-    if (headerText && isLoneDateRange(dateRange)) {
+    // A genuine range — OR a bare single graduation year (`allowSingle: true`,
+    // #618, applied uniformly across Experience and Education so both entry
+    // types get the same flush-right slot) — draws flush-right on the header;
+    // anything else glues after a whitespace gap. The parser side is unchanged;
+    // see the `isLoneDateRange` docblock for why (`columnGapCuts` never sees a
+    // wide gap on our own export because pdfjs synthesizes a whitespace item
+    // spanning the flush-right space, and extending it to lone years broke a
+    // wrap-continuation corpus fixture).
+    if (headerText && isLoneDateRange(dateRange, { allowSingle: true })) {
       return {
         headerLine: headerText,
         headerLineDate: dateRange,
@@ -714,12 +719,18 @@ export function buildAtsResumeModel(
       edu.year ||
       "";
     // The graduation date is drawn FLUSH-RIGHT on the org line's baseline
-    // (#425), carried in `subLineDate`/`headerLineDate` rather than glued — the
-    // `flush()` date-range exemption (`sections.ts`) keeps the wide same-`y` gap
-    // from splitting it off. Only a genuine range (`isLoneDateRange`) is
-    // right-aligned; a single graduation year stays glued (the exemption only
-    // protects ranges).
-    const rightAlignEduDate = isLoneDateRange(eduDates);
+    // (#425), carried in `subLineDate`/`headerLineDate` rather than glued. A
+    // genuine range AND a bare single graduation year (`allowSingle: true`,
+    // #618) are both right-aligned. For a RANGE the existing `flush()`
+    // date-range exemption (`sections.ts`) keeps the wide same-`y` gap from
+    // splitting it off on re-parse; for a lone YEAR the parser side is
+    // deliberately unchanged — `columnGapCuts` never computes a wide gap on
+    // our own export because pdfjs synthesizes a whitespace item spanning the
+    // flush-right space (measured gap ≈ 0), so the year re-parses onto the
+    // org line without any predicate change. See the `isLoneDateRange`
+    // docblock for the corpus-fixture reasoning behind not extending the
+    // parser side.
+    const rightAlignEduDate = isLoneDateRange(eduDates, { allowSingle: true });
     // Entry-boundary cue (#302). The re-parser's education segmenter opens a NEW
     // entry when a line reads as an entry lead — a DEGREE line, an
     // institution-hint line, or an `isInlineDatedProgram` header (a program/field
