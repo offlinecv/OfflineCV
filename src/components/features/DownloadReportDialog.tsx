@@ -27,29 +27,22 @@ import { useId, useState } from "react";
 import { Button, Dialog } from "@design-system";
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
-import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import type { ReportFormat } from "../../lib/analytics.ts";
 import { useDownloadReport } from "../../hooks/useDownloadReport.ts";
 
 export function ReportDownloadControl({
   result,
   score,
-  edit,
 }: {
   result: CascadeResult;
   score: AnonymousAtsScore;
-  edit?: Pick<EditableParse, "contactOverrides" | "bulletOverrides">;
 }) {
   const [open, setOpen] = useState(false);
   const [format, setFormat] = useState<ReportFormat>("pdf");
   const [includeIdentity, setIncludeIdentity] = useState(false);
   const identityId = useId();
   const formatName = useId();
-  const { download, isGenerating, error } = useDownloadReport(
-    result,
-    score,
-    edit,
-  );
+  const { download, isGenerating, error } = useDownloadReport(result, score);
 
   async function handleConfirm() {
     // Close ONLY on success — a failed generation sets `error`, and closing

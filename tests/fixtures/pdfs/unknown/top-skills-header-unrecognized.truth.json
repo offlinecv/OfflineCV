@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. Authored from the generator's own drawn content (scripts/fixtures/gen-top-skills-header.mjs) and confirmed against pdftotext. This fixture exists to exhibit skills-header-unrecognized (#575).",
+  "contact": {
+    "full_name": "PRIYA IYER",
+    "email": "priya.iyer@example.com",
+    "phone": "(312) 555-0157",
+    "location": "Seattle, WA"
+  },
+  "experience": [
+    {
+      "title": "Staff Engineer",
+      "company": "Globex Systems LLC",
+      "dates": "Mar 2021 - Present"
+    },
+    {
+      "title": "Senior Engineer",
+      "company": "Initech Analytics",
+      "dates": "Jun 2017 - Feb 2021"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Ridgemont State University"
+    }
+  ],
+  "skills": [
+    "Distributed Systems",
+    "Kubernetes",
+    "Terraform"
+  ],
+  "knownWrong": {
+    "skills": {
+      "issue": 575,
+      "status": "open",
+      "note": "skills comes back EMPTY although three skills are drawn under a “Top Skills” heading — the defect this fixture exists to exhibit (skills-header-unrecognized)."
+    }
+  }
+}

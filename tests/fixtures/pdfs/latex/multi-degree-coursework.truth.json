@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. `skills` covers the Technical Skills section's Languages and Technologies rows; the Interests row (Science Fiction Novels, Weightlifting, …) is not a skill list and is deliberately excluded.",
+  "contact": {
+    "full_name": "Jordan Bennett",
+    "email": "jordan.bennett@example.com",
+    "phone": "973-555-0123"
+  },
+  "experience": [
+    {
+      "title": "Software Engineering Intern on the Machine Learning Team",
+      "company": "Northwind Labs",
+      "dates": "Sep. 2025 – Apr. 2026"
+    },
+    {
+      "title": "Software Engineering Intern",
+      "company": "Beacon Financial",
+      "dates": "Jun. 2024 – Aug. 2024"
+    },
+    {
+      "title": "Software Engineering Intern",
+      "company": "Greenfield Studios",
+      "dates": "May 2023 – Jun. 2023"
+    },
+    {
+      "title": "Software Engineering Intern",
+      "company": "Meridian Analytics",
+      "dates": "Jun. 2023 – Aug. 2023"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Lakeside Institute of Technology"
+    },
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Northgate State University"
+    }
+  ],
+  "skills": [
+    "Python",
+    "Go",
+    "C",
+    "C++",
+    "Java",
+    "JavaScript",
+    "Swift",
+    "PHP",
+    "HTML",
+    "CSS",
+    "Linux",
+    "Unix",
+    "Amazon Web Services",
+    "Microsoft Azure",
+    "Postman",
+    "Docker",
+    "Raspberry Pi",
+    "iOS"
+  ],
+  "knownWrong": {
+    "skills": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "The single-letter token “C” is DROPPED from the Languages row while “C++” survives. Second independent measurement of the same drop (see google-docs/google-docs-skia-proxy-role-first-experience)."
+    }
+  }
+}

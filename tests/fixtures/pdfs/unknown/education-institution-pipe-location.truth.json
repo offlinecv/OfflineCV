@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here.",
+  "contact": {
+    "full_name": "ELENA VOSS",
+    "email": "elena.voss@example.com",
+    "phone": "(503) 555-0164",
+    "location": "Portland, OR"
+  },
+  "experience": [
+    {
+      "title": "Software Engineer",
+      "company": "Globex Corporation",
+      "dates": "Jul 2021 - Present"
+    }
+  ],
+  "education": [
+    {
+      "degree": "Master of Science in Computer Science",
+      "institution": "Ridgemont State University (STEM)"
+    },
+    {
+      "degree": "Bachelor of Science in Computer Science",
+      "institution": "Lakeside Institute of Technology (Honors)"
+    }
+  ],
+  "skills": []
+}

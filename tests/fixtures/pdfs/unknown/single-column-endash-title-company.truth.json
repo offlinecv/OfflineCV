@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here.",
+  "contact": {
+    "full_name": "DANA WHITFIELD",
+    "email": "dana.whitfield@example.com",
+    "phone": "(312) 555-0142",
+    "location": "Austin, TX"
+  },
+  "experience": [
+    {
+      "title": "Software Engineer",
+      "company": "Globex Systems LLC",
+      "dates": "Jul 2023 - Present"
+    },
+    {
+      "title": "Data Analyst",
+      "company": "Initech Analytics",
+      "dates": "Jun 2021 - Jun 2023"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Ridgemont State University"
+    }
+  ],
+  "skills": []
+}

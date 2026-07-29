@@ -170,36 +170,36 @@ describe("resolveBulletActions", () => {
 });
 
 describe("resolveSectionWrites — join section-relative index to obsIndex", () => {
-  it("maps replace/remove originalIndex through obsIndices; adds pass through", () => {
+  it("maps replace/remove originalIndex through obsIds; adds pass through", () => {
     // original[0] replaced, original[1] removed, one pure add.
     const original = ["Managed a team of 5", "Filler bullet to drop"];
     const proposed = ["Led a team of 5 engineers", "Mentored two interns"];
     const pairs = alignBullets(original, proposed);
-    // obsIndices: section bullet 0 → observation 12, bullet 1 → observation 7.
-    const obsIndices = [12, 7];
-    const writes = resolveSectionWrites(pairs, obsIndices, accept(pairs.map((p) => p.id)));
+    // obsIds: section bullet 0 → observation "0|a", bullet 1 → "0|b".
+    const obsIds = ["0|a", "0|b"];
+    const writes = resolveSectionWrites(pairs, obsIds, accept(pairs.map((p) => p.id)));
 
     const replace = writes.find((w) => w.kind === "replace");
     const remove = writes.find((w) => w.kind === "remove");
     const add = writes.find((w) => w.kind === "add");
-    expect(replace).toMatchObject({ kind: "replace", obsIndex: 12 });
-    expect(remove).toMatchObject({ kind: "remove", obsIndex: 7 });
+    expect(replace).toMatchObject({ kind: "replace", obsId: "0|a" });
+    expect(remove).toMatchObject({ kind: "remove", obsId: "0|b" });
     expect(add).toMatchObject({ kind: "add", text: "Mentored two interns" });
   });
 
-  it("drops a write whose originalIndex has no (or a -1) observation index", () => {
+  it("drops a write whose originalIndex has no (or an empty) observation id", () => {
     const original = ["Built feature A here", "Built feature B here"];
     const proposed = ["Built feature A reworded", "Built feature B reworded"];
     const pairs = alignBullets(original, proposed);
-    // Second bullet maps to a -1 placeholder → its replace must be dropped.
-    const writes = resolveSectionWrites(pairs, [9, -1], accept(pairs.map((p) => p.id)));
+    // Second bullet maps to the "" placeholder → its replace must be dropped.
+    const writes = resolveSectionWrites(pairs, ["0|a", ""], accept(pairs.map((p) => p.id)));
     expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({ kind: "replace", obsIndex: 9 });
+    expect(writes[0]).toMatchObject({ kind: "replace", obsId: "0|a" });
   });
 
   it("returns nothing when no pair is accepted", () => {
     const pairs = alignBullets(["a b c d"], ["a b c d e"]);
-    expect(resolveSectionWrites(pairs, [3], new Map())).toEqual([]);
+    expect(resolveSectionWrites(pairs, ["0|a"], new Map())).toEqual([]);
   });
 });
 

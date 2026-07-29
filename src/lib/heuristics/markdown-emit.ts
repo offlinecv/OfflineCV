@@ -21,7 +21,7 @@
  */
 
 import type { PdfTextItem, PdfPageInfo } from "./types.ts";
-import { orderItemsByColumn } from "./sections.ts";
+import { orderItemsByColumn } from "./line-assembly.ts";
 
 // ── Thresholds (tuneable) ───────────────────────────────────────────────────
 

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. A Word résumé TEMPLATE: the dates are literal '20XX' placeholders and the bodies are instructional prose. Recorded as drawn.",
+  "contact": {
+    "full_name": "Chanchal Sharma",
+    "email": "chanchals@example.com",
+    "phone": "(718) 555-0100",
+    "location": "4567 Main Street City, ST 98052"
+  },
+  "experience": [
+    {
+      "title": "Office manager",
+      "company": "The Phone Company",
+      "dates": "January 20XX - Current"
+    },
+    {
+      "title": "Office manager",
+      "company": "Nod Publishing",
+      "dates": "March 20XX – December 20XX"
+    },
+    {
+      "title": "Office manager",
+      "company": "Southridge Video",
+      "dates": "August 20XX – March 20XX"
+    }
+  ],
+  "education": [
+    {
+      "degree": "Associate degree, H.R. Management",
+      "institution": "Bellows College"
+    }
+  ],
+  "skills": [
+    "Project management",
+    "Data analysis",
+    "Communication",
+    "Organization",
+    "Problem-solving",
+    "Management"
+  ],
+  "knownWrong": {
+    "location": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "The address loses its street number and its ZIP: “4567 Main Street City, ST 98052” comes back as “Main Street City, ST”."
+    }
+  }
+}

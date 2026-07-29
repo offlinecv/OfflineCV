@@ -70,9 +70,12 @@ export interface JdFitHandoff {
   /** The PRISTINE CascadeResult — the parse as it came off the cascade, with NO
    *  overrides applied. `/jd-fit` folds `edit` onto this itself. */
   result: CascadeResult;
-  /** The PRISTINE anonymous ATS score for that parse. Its `bullets` pool is the
-   *  one `edit.bulletOverrides` / `removedBullets` are keyed against, so it must
-   *  be the un-edited pool, not a re-graded one. */
+  /** The PRISTINE anonymous ATS score for that parse. Since #648 the override
+   *  maps are keyed by `BulletObservation.id`, which is self-describing, so this
+   *  pool is no longer what resolves them — it is still handed over un-edited
+   *  because `/jd-fit` folds the edits onto the pristine parse itself, and
+   *  because a LEGACY numeric key (a handoff written before #648) resolves
+   *  against exactly this pool. A re-graded pool would mis-resolve those. */
   score: AnonymousAtsScore;
   /** The user's edit state from `/`, replayed into `/jd-fit`'s own edit layer so
    *  their corrections carry over AND stay editable (an added entry is still an

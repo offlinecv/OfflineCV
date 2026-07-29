@@ -23,12 +23,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AnalyzedResume } from "../hooks/useAnalyzedResume.ts";
 import { useEditableParse, type EditableParse } from "../hooks/useEditableParse.ts";
 import { applyOverrides } from "../lib/edit/apply-overrides.ts";
-import {
-  computeAnonymousAtsScore,
-  type AnonymousAtsScore,
-} from "../lib/score/score.ts";
+import { scoreEditedResume } from "../lib/edit/score-edited.ts";
+import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import type { CascadeResult, HeuristicParsedResume } from "../lib/heuristics/types.ts";
-import { projectScoreSections } from "../lib/heuristics/projections.ts";
 import {
   consumeJdFitHandoff,
   type JdFitHandoff,
@@ -109,16 +106,39 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
       handoffEdit.summaryOverride,
     );
     const parsed = applied.fields;
-    const score = computeAnonymousAtsScore({
-      parsed,
-      fieldConfidence: base.canonical.fieldConfidence,
-      triggers: base.triggers,
-      rawText: applied.rawText,
-      // Score projection off the handoff-edited canonical model (#445).
-      sections: projectScoreSections(applied),
-    });
+    // Through the ONE shared edited-grade recipe (`score-edited.ts`), the same
+    // one `/` runs — NOT a hand-rolled `computeAnonymousAtsScore` call. This
+    // lane replays `/`'s overrides into its own edit layer, so it is an
+    // override-applied grade in exactly the sense that makes `claimedBulletKeys`
+    // load-bearing: without it the re-graded pool re-mints ids the replayed
+    // `bulletOverrides` / `removedBullets` are already filed under, and #648's
+    // three defects (an edit to one of two identical bullets destroying the
+    // other, the second duplicate being un-removable, an edit cycle diverging
+    // display from export) all reproduce here for a real user. Passing the keys
+    // the two maps hold makes the re-grade allocate AROUND them — see
+    // `bullet-id.ts`.
+    const score = scoreEditedResume(applied, base.triggers, [
+      ...Object.keys(handoffEdit.bulletOverrides),
+      ...handoffEdit.removedBullets,
+    ]);
     return {
-      result: { ...base, canonical: { ...base.canonical, fields: parsed } },
+      // `fieldConfidence` is the EDITED one `applyOverrides` just returned, not
+      // `base.canonical.fieldConfidence` — the same fold `/` does at
+      // `useAnalyzedResume.ts:297-304`. It is load-bearing for the EXPORT, not
+      // just the score: `buildContact` reads confidence off the canonical model
+      // alone (#648 dropped its `contactOverrides` fallback), and
+      // `buildContactFields` gates a field out of the exported PDF when its
+      // confidence sits under `CONTACT_DISPLAY_CONFIDENCE_FLOOR`. Carrying the
+      // base confidence forward left a user-corrected contact field rendering on
+      // screen (retained at `low_confidence`) while dropping out of the download.
+      result: {
+        ...base,
+        canonical: {
+          ...base.canonical,
+          fields: parsed,
+          fieldConfidence: applied.fieldConfidence,
+        },
+      },
       score,
       parsed,
     };
@@ -158,9 +178,15 @@ export function useJdFitResume(analyzed: AnalyzedResume): JdFitResume | null {
   const { state, edited, edit, reset } = analyzed;
   if (state.phase === "done" && edited) {
     return {
+      // Same edited-confidence fold as the handoff branch above — see the
+      // comment there for why the export, not just the score, depends on it.
       result: {
         ...state.result,
-        canonical: { ...state.result.canonical, fields: edited.parsed },
+        canonical: {
+          ...state.result.canonical,
+          fields: edited.parsed,
+          fieldConfidence: edited.fieldConfidence,
+        },
       },
       score: edited.score,
       parsed: edited.parsed,

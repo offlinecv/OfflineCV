@@ -6,7 +6,7 @@
  *
  * Scope (issue #58): contact fields (name, email, phone, linkedin, location)
  * and experience role headers (title, company, start_date, end_date).
- * Issue #82 adds bullet-text overrides (keyed by BulletObservation.index) and
+ * Issue #82 adds bullet-text overrides (keyed by BulletObservation.id) and
  * a `resetAll`, and the overrides are now authoritative — App folds them back
  * into the parse via applyOverrides and re-grades the score + JD coverage.
  * Issue #176 adds education field overrides (keyed by education index, mirroring
@@ -18,13 +18,29 @@
  * skills one — the Summary was parsed, scored and exported but had no edit
  * channel at all, so a mis-segmented summary was uncorrectable and an emptied
  * one uncleanable.
- * Issue #637 makes `removeBullet` ENTRY-AWARE. Every other override map is
- * keyed by `BulletObservation.index` against the FROZEN base parse, which a
- * user-ADDED bullet has no entry in — so removing one was silently inert. It
- * now splices the bullet out of its `addedBullets` bucket instead, which is the
- * only place an added bullet exists, and `pruneEmptyAddedEntries` grew a
- * per-entry hold so the removal's Undo strip survives the newly-reachable
- * prune.
+ * Issue #637 makes `removeBullet` ENTRY-AWARE, and #657 does the same for
+ * `setBulletField`. Neither a removal nor an edit can be expressed as an entry
+ * in the override maps for a user-ADDED bullet: those maps name a line to find
+ * and rewrite in rawText / sections / the role description, and an added bullet
+ * is in none of them — `applyAddedEntriesAndBullets` mints its line downstream,
+ * out of the `addedBullets` bucket. Both writes therefore go to that bucket,
+ * which is the one place an added bullet exists; keeping it authoritative is
+ * also what lets a removal still find a row that was edited first (#657).
+ * `pruneEmptyAddedEntries` grew a per-entry hold so the removal's Undo strip
+ * survives the newly-reachable prune.
+ * Issue #648 re-keys `bulletOverrides` and `removedBullets` from pool INDEX to
+ * `BulletObservation.id` — a stable, self-describing identity (`bullet-id.ts`).
+ * An index is a position in a pool, and two pools disagree: the UI writes
+ * against the re-graded one, `applyOverrides` resolved against the frozen base
+ * parse. That aliasing let an edit after a removal overwrite an untouched
+ * bullet (#647) and made two sequential removals drop the wrong second line.
+ * The id's ORDINAL is allocated by `assignBulletIds` around the keys these maps
+ * already hold, not re-derived from the pool being graded — without that, two
+ * verbatim-identical bullets collided on one key (the second edit overwrote the
+ * first; the second removal was a silent no-op) and re-editing a bullet back to
+ * an earlier text re-entered the ordered chain at an existing key. Both writers
+ * below therefore assume a live row's id is FREE, and `removeBullet` reports
+ * whether its write landed so the confirmation strip cannot claim a no-op.
  * Overrides are held in component state and lost on reset — no persistence
  * is expected or provided.
  *
@@ -39,7 +55,10 @@ import {
   type BulletUndoTargets,
 } from "../lib/rewrite-review/undo-batch.ts";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
-import { removeAddedBulletLine } from "../lib/edit/added-bullets.ts";
+import {
+  removeAddedBulletLine,
+  replaceAddedBulletLine,
+} from "../lib/edit/added-bullets.ts";
 import {
   addCategory as addSkillCategoryTx,
   addSkillToCategory as addSkillToCategoryTx,
@@ -87,8 +106,21 @@ export interface ExperienceFieldOverrides {
 
 // ── Bullet overrides ──────────────────────────────────────────────────────────
 
-/** Bullet-text overrides, keyed by BulletObservation.index (stable rawText order). */
-export type BulletOverrides = Record<number, string>;
+/**
+ * Bullet-text overrides, keyed by {@link BulletObservation.id} — the stable,
+ * self-describing bullet identity minted in `bullet-id.ts` (#648).
+ *
+ * NOT by pool index, which is a position and therefore aliases: the UI writes
+ * against the RE-GRADED pool (`edited.score.bullets`, one row shorter after
+ * every removal) while `applyOverrides` resolved against the FROZEN base-parse
+ * pool, so after a removal index 1 meant a different bullet on each side and an
+ * edit destroyed a bullet the user never touched (#647).
+ *
+ * A key from a snapshot written BEFORE #648 is a bare numeric index and still
+ * resolves, through the base-parse observations — see `bullet-id.ts` for that
+ * migration and for why the two key spaces cannot collide.
+ */
+export type BulletOverrides = Record<string, string>;
 
 // ── Description overrides (#489) ──────────────────────────────────────────────
 
@@ -98,8 +130,8 @@ export type BulletOverrides = Record<number, string>;
  * the edit channel for a parsed entry whose body is a prose paragraph rather
  * than `•` bullets: a project like "Ridgemont Resume Studio" whose two-sentence
  * blurb the parser stores on `project.description` with zero graded bullets.
- * bulletOverrides can't key it — that map is keyed by the resume-wide graded
- * bullet-pool index, and a prose paragraph produces no such observation — so
+ * bulletOverrides can't key it — that map is keyed by a graded bullet's own id,
+ * and a prose paragraph produces no such observation — so
  * this parallel map carries the edit instead (#489). `applyOverrides` folds an
  * entry straight onto the matching parsed entry's `description`; an empty string
  * clears it (treated as absent), a non-empty value replaces it verbatim.
@@ -162,8 +194,6 @@ export interface AchievementFieldOverrides {
  *     plus this snapshot, so `/jd-fit` re-applies the edits itself rather than
  *     inheriting an already-applied result it can no longer take apart.
  *
- * `removedBullets` is an array, not a `Set` — a `Set` isn't JSON-safe.
- *
  * Every override map must appear here. A silently-absent one is exactly how
  * `team` (#425) and `achievementType` (#455) got dropped on restore.
  */
@@ -173,7 +203,18 @@ export interface EditSnapshot {
   bulletOverrides: BulletOverrides;
   /** Optional: drafts persisted before #489 carry no such key. */
   descriptionOverrides?: DescriptionOverrides;
-  removedBullets: number[];
+  /**
+   * Bullet ids the user dropped. An array, not a `Set` — a `Set` isn't JSON-safe.
+   *
+   * MIGRATION (#648): a snapshot written earlier holds `number` base-pool
+   * indices here, and `bulletOverrides` is keyed by the same numbers. Both are
+   * still honoured — `replay` stringifies them and `applyOverrides` routes an
+   * all-digits key back through the base-parse observations — so a saved-library
+   * résumé or a localStorage draft from before this change replays exactly as it
+   * did, rather than silently resolving its indices against a pool that has
+   * since re-keyed. New writes are always ids.
+   */
+  removedBullets: Array<string | number>;
   educationOverrides: Record<number, EducationFieldOverrides>;
   /** Optional: drafts persisted before #454 carry no such key. */
   achievementOverrides?: Record<number, AchievementFieldOverrides>;
@@ -313,17 +354,21 @@ export function isAddedEntryKey(entryKey: string): boolean {
 }
 
 /**
- * Identifies the user-ADDED bullet line a removal targets: the bucket its entry
- * owns, plus the bullet's own (pre-override) text. `removeBullet` takes this
- * alongside the `BulletObservation.index` because the index alone cannot reach
- * an added bullet — see `added-bullets.ts`.
+ * Identifies the user-ADDED bullet line a write targets: the bucket its entry
+ * owns, plus the bullet's own current text. Both `removeBullet` (#637) and
+ * `setBulletField` (#657) take this alongside the bullet id, because a
+ * `bulletOverrides` / `removedBullets` key cannot reach an added bullet at all —
+ * it exists ONLY in its bucket, minted into the résumé downstream of every
+ * override pass. See `added-bullets.ts`.
  */
 export interface AddedBulletRef {
   /** The `addedBullets` bucket this row's entry owns — an added entry's `id`,
    *  or the entry's {@link parsedEntryKey}. */
   entryKey: string;
-  /** The bullet's `BulletObservation.text`, i.e. the line as it sits in the
-   *  bucket. NOT the `bulletOverrides` display text. */
+  /** The bullet's `BulletObservation.text` — the line as the row currently
+   *  renders it, which for an added bullet IS the line in the bucket (an
+   *  accepted edit rewrites the bucket rather than recording an override, so
+   *  the two never drift). */
   text: string;
 }
 
@@ -427,10 +472,30 @@ export interface EditableParse {
     field: keyof ExperienceFieldOverrides,
     value: string | undefined,
   ) => void;
-  /** Override map for bullet text, keyed by BulletObservation.index. */
+  /** Override map for bullet text, keyed by {@link BulletObservation.id}. */
   bulletOverrides: BulletOverrides;
-  /** Set the override text for one bullet. Pass undefined to clear it. */
-  setBulletField: (index: number, value: string | undefined) => void;
+  /**
+   * Set the override text for one bullet. Pass undefined to clear it.
+   *
+   * `id` is its `BulletObservation.id`, which reaches PARSED bullets only —
+   * `applyOverrides` find-and-replaces the text the id names in rawText /
+   * sections / the role description, none of which carry a user-ADDED bullet
+   * yet. `added` additionally identifies the row's `addedBullets` bucket + line,
+   * so an added bullet's edit is written straight into that bucket instead;
+   * without it such an edit is silently inert (#657). Pass it whenever the
+   * caller knows which entry owns the row — a row that turns out to be a parsed
+   * bullet falls through to the override map by itself (no bucket line matches).
+   *
+   * Clearing (`undefined`) drops the override, reverting a parsed bullet to its
+   * parsed text. An added bullet has no parsed text to revert TO — its edit
+   * already replaced the only copy of the line — so a clear there is a no-op by
+   * construction; the row's Remove control is the way to drop it.
+   */
+  setBulletField: (
+    id: string,
+    value: string | undefined,
+    added?: AddedBulletRef,
+  ) => void;
   /** Override map for a parsed entry's prose description, keyed by
    *  {@link parsedEntryKey} (`"<section>:<index>"`). */
   descriptionOverrides: DescriptionOverrides;
@@ -438,21 +503,27 @@ export interface EditableParse {
    *  clear the override (revert to the parsed prose); an empty string is an
    *  authoritative clear of the description itself. */
   setDescriptionField: (key: string, value: string | undefined) => void;
-  /** Indices of parsed bullets the user dropped (rewrite-review removals, #211),
-   *  keyed by BulletObservation.index — folded by applyOverrides to drop the
-   *  line from the graded pool, rawText, and the role description. */
-  removedBullets: ReadonlySet<number>;
+  /** Ids of parsed bullets the user dropped (per-row Remove, rewrite-review
+   *  removals, #211) — folded by applyOverrides to drop the line from the graded
+   *  pool, rawText, and the role description. */
+  removedBullets: ReadonlySet<string>;
   /**
    * Drop one bullet.
    *
-   * `index` is its `BulletObservation.index`, which reaches PARSED bullets only
-   * — `applyOverrides` resolves it against the frozen base-parse observations.
-   * `added` additionally identifies the row's `addedBullets` bucket + line, so a
-   * user-ADDED bullet (which has no base observation) is spliced out of that
-   * bucket instead; without it such a removal is silently inert (#637). Pass it
-   * whenever the caller knows which entry owns the row. Idempotent.
+   * `id` is its `BulletObservation.id`, which reaches PARSED bullets only —
+   * `applyOverrides` drops the line the id names. `added` additionally
+   * identifies the row's `addedBullets` bucket + line, so a user-ADDED bullet
+   * (which exists nowhere but that bucket) is spliced out of it instead; without
+   * it such a removal is silently inert (#637). Pass it whenever the caller
+   * knows which entry owns the row. Idempotent.
+   *
+   * Returns whether the removal was actually RECORDED. False means the write
+   * found nothing to drop — an added bullet whose bucket line is already gone,
+   * or a re-removal of an id already in the set. Callers that confirm the action
+   * to the user (`useBulletRemoveStatus`) must not claim success on a false,
+   * because the undo they armed alongside it has nothing to undo either.
    */
-  removeBullet: (index: number, added?: AddedBulletRef) => void;
+  removeBullet: (id: string, added?: AddedBulletRef) => boolean;
   /** Override map for education entries, keyed by education array index. */
   educationOverrides: Record<number, EducationFieldOverrides>;
   /** Update one field on a specific education entry by its array index.
@@ -608,7 +679,7 @@ export function useEditableParse(): EditableParse {
   const [bulletOverrides, setBulletOverrides] = useState<BulletOverrides>({});
   const [descriptionOverrides, setDescriptionOverrides] =
     useState<DescriptionOverrides>({});
-  const [removedBullets, setRemovedBullets] = useState<ReadonlySet<number>>(
+  const [removedBullets, setRemovedBullets] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [educationOverrides, setEducationOverrides] = useState<
@@ -636,6 +707,19 @@ export function useEditableParse(): EditableParse {
   const [profileOverrides, setProfileOverrides] = useState<ProfileOverride[]>(
     [],
   );
+
+  // Live edit state readable synchronously at capture time. Refs, not the
+  // render closure, so `captureBulletUndo` keeps a STABLE identity — it is
+  // memo-dep of the rewrite-apply wiring, and a churning identity there resets
+  // the in-flight proposal's accept/reject decisions. `removeBullet` also reads
+  // the removed-set ref to report whether its write landed; that ref carries the
+  // last COMMITTED set, which is exact for the one-click-per-render flow the
+  // confirmation strip drives (two calls in a single tick would both report a
+  // write, and the Set would still record one — a lie no UI path can produce).
+  const bulletOverridesRef = useRef(bulletOverrides);
+  bulletOverridesRef.current = bulletOverrides;
+  const removedBulletsRef = useRef(removedBullets);
+  removedBulletsRef.current = removedBullets;
 
   // The ONE writer of `addedBullets`. The ref — not React state — is the source
   // of pending truth: it is assigned synchronously here, before the setState, so
@@ -692,18 +776,39 @@ export function useEditableParse(): EditableParse {
   );
 
   const setBulletField = useCallback(
-    (index: number, value: string | undefined) => {
+    (id: string, value: string | undefined, added?: AddedBulletRef) => {
+      if (added !== undefined && value !== undefined) {
+        // Try the added-bullets bucket FIRST: a user-added bullet exists nowhere
+        // else, so an override — which `applyOverrides` folds in by
+        // find-and-replacing the text in rawText / sections / the description,
+        // none of which carry that line yet — cannot reach it (#657).
+        const prev = addedBulletsRef.current;
+        const next = replaceAddedBulletLine(prev, added.entryKey, added.text, value);
+        if (next !== prev) {
+          writeAddedBullets(next);
+          return;
+        }
+        // No matching line. Under an ADDED entry that means there is nothing to
+        // edit — its description is built solely from this bucket, so every row
+        // under it is a bucket line — and the edit is either a no-op or aimed at
+        // a line already rewritten. Recording an override instead would be inert
+        // AND permanent: nothing downstream can ever resolve it, yet it would
+        // keep `hasEdits` true and ride along in every snapshot. A parsed entry
+        // legitimately carries non-added bullets too, so only that case falls
+        // through to the override map below.
+        if (isAddedEntryKey(added.entryKey)) return;
+      }
       setBulletOverrides((prev) => {
         const next = { ...prev };
         if (value === undefined) {
-          delete next[index];
+          delete next[id];
         } else {
-          next[index] = value;
+          next[id] = value;
         }
         return next;
       });
     },
-    [],
+    [writeAddedBullets],
   );
 
   const setDescriptionField = useCallback(
@@ -722,32 +827,39 @@ export function useEditableParse(): EditableParse {
   );
 
   const removeBullet = useCallback(
-    (index: number, added?: AddedBulletRef) => {
+    (id: string, added?: AddedBulletRef): boolean => {
       if (added !== undefined) {
         // Try the added-bullets bucket FIRST: an added bullet exists nowhere
-        // else, so `index` (a re-graded observation index) cannot reach it
-        // (#637).
+        // else, so a `removedBullets` id — which `applyOverrides` resolves by
+        // dropping that line from rawText / sections / the description — cannot
+        // reach it (#637).
         const prev = addedBulletsRef.current;
         const next = removeAddedBulletLine(prev, added.entryKey, added.text);
         if (next !== prev) {
           writeAddedBullets(next);
-          return;
+          return true;
         }
         // No matching line. Under an ADDED entry that means the bullet is
         // already gone (its description is built solely from this bucket), so
-        // there is nothing left to remove — and falling through would push a
-        // now-stale observation index into `removedBullets`, where it can
-        // collide with an UNRELATED base-parse bullet once earlier removals
-        // have re-indexed the pool. A parsed entry legitimately carries
-        // non-added bullets too, so only that case falls through.
-        if (isAddedEntryKey(added.entryKey)) return;
+        // there is nothing left to remove — and falling through would leave a
+        // permanent, unresolvable id in `removedBullets`. A parsed entry
+        // legitimately carries non-added bullets too, so only that case falls
+        // through.
+        if (isAddedEntryKey(added.entryKey)) return false;
       }
+      // Read the committed set to decide the RESULT, then write through a
+      // functional updater so a second write in the same tick still composes.
+      // `id` is minted by `assignBulletIds` against these very keys (#648), so a
+      // live row can never collide with an existing entry — a hit here means the
+      // same row was asked to remove itself twice, which stays a no-op.
+      if (removedBulletsRef.current.has(id)) return false;
       setRemovedBullets((prev) => {
-        if (prev.has(index)) return prev;
+        if (prev.has(id)) return prev;
         const next = new Set(prev);
-        next.add(index);
+        next.add(id);
         return next;
       });
+      return true;
     },
     [writeAddedBullets],
   );
@@ -945,11 +1057,11 @@ export function useEditableParse(): EditableParse {
   // A bare "un-remove" or "overwrite this entry's bullets" control would be a
   // second, un-snapshotted mutation path into the same state.
 
-  const restoreBullet = useCallback((index: number) => {
+  const restoreBullet = useCallback((id: string) => {
     setRemovedBullets((prev) => {
-      if (!prev.has(index)) return prev;
+      if (!prev.has(id)) return prev;
       const next = new Set(prev);
-      next.delete(index);
+      next.delete(id);
       return next;
     });
   }, []);
@@ -966,15 +1078,6 @@ export function useEditableParse(): EditableParse {
     },
     [writeAddedBullets],
   );
-
-  // Live edit state readable synchronously at capture time. Refs, not the
-  // render closure, so `captureBulletUndo` keeps a STABLE identity — it is
-  // memo-dep of the rewrite-apply wiring, and a churning identity there resets
-  // the in-flight proposal's accept/reject decisions.
-  const bulletOverridesRef = useRef(bulletOverrides);
-  bulletOverridesRef.current = bulletOverrides;
-  const removedBulletsRef = useRef(removedBullets);
-  removedBulletsRef.current = removedBullets;
 
   const captureBulletUndo = useCallback(
     (targets: BulletUndoTargets) => {
@@ -1117,15 +1220,20 @@ export function useEditableParse(): EditableParse {
         );
       });
 
-      Object.entries(snap.bulletOverrides).forEach(([index, value]) =>
-        setBulletField(Number(index), value),
+      // Bullet keys replay VERBATIM — an id stays an id, and a pre-#648
+      // snapshot's numeric index stays that number's string form, which
+      // `applyOverrides` still resolves against the base-parse pool. Rewriting
+      // one space into the other is impossible here: this hook never sees the
+      // parse those indices were captured against.
+      Object.entries(snap.bulletOverrides).forEach(([key, value]) =>
+        setBulletField(key, value),
       );
 
       Object.entries(snap.descriptionOverrides ?? {}).forEach(([key, value]) =>
         setDescriptionField(key, value),
       );
 
-      snap.removedBullets.forEach((index) => removeBullet(index));
+      snap.removedBullets.forEach((key) => removeBullet(String(key)));
 
       Object.entries(snap.educationOverrides).forEach(([index, fields]) => {
         (

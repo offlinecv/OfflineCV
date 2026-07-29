@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here.",
+  "contact": {
+    "full_name": "MARCUS HALLOWAY",
+    "email": "marcus.halloway@example.com",
+    "phone": "(415) 555-0173",
+    "location": "San Francisco, CA"
+  },
+  "experience": [
+    {
+      "title": "Software Engineer",
+      "company": "Globex Corporation",
+      "dates": "Jul 2021 - Present"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Ridgemont State University"
+    }
+  ],
+  "skills": []
+}

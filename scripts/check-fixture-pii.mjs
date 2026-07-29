@@ -16,6 +16,9 @@
  * dependency) rather than poppler's `pdftotext`/`pdfinfo`, so CI needs no extra
  * system binary.
  *
+ * Since #654 it ALSO sweeps the ground-truth sidecars (`*.truth.json`) — see
+ * `checkTruthSidecar` for why that surface needs a machine behind it.
+ *
  * The gate's one VERIFIED advantage over eyeballing `pdftotext` is that
  * `pdftotext` cannot see a LINK ANNOTATION at all (hazard 3 below): at HEAD,
  * `awesome-cv-cv.pdf` drew a compliant number on the page while its `tel:` href
@@ -654,6 +657,43 @@ function walkPdfs(dir) {
   return found;
 }
 
+/**
+ * The GROUND-TRUTH sidecars (#654) — `<name>.truth.json`, which hold the
+ * fixture's literal name, email, phone and employers so first-parse correctness
+ * can be measured at all.
+ *
+ * They are swept here for the same reason the PDFs are, and the reason is not
+ * symmetry: the truth file is the ONLY place in the repo that deliberately
+ * commits résumé field VALUES as text (every corpus snapshot is lossy by design
+ * and carries none), so it is the one new surface where a non-synthetic address
+ * or a real number could land while every existing check stayed green. Whoever
+ * annotates a fixture is reading contact details off a page and typing them into
+ * a committed file; that is exactly the moment a policy needs a machine behind it.
+ *
+ * The email PRESENCE rule is not applied: a truth file for a résumé that draws no
+ * email legitimately has none, and demanding one would push an annotator to
+ * invent a value. Every value the file DOES carry is checked, which is the half
+ * that matters.
+ */
+function checkTruthSidecar(text) {
+  const context = { exception: { noText: true }, excepted: () => false };
+  return [
+    ...checkEmailRule(text, context),
+    ...checkPhoneRule(text, context),
+    ...checkPersonaRule(text),
+  ];
+}
+
+function walkTruthSidecars(dir) {
+  const found = [];
+  for (const entry of readdirSync(dir).sort()) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) found.push(...walkTruthSidecars(path));
+    else if (entry.endsWith(".truth.json")) found.push(path);
+  }
+  return found;
+}
+
 /** Run every rule over every PDF; returns only the fixtures that failed. */
 async function scanPdfs(pdfs) {
   const failed = [];
@@ -687,14 +727,23 @@ async function main() {
   }
 
   const failed = await scanPdfs(pdfs);
+
+  const truthFiles = walkTruthSidecars(FIXTURE_ROOT);
+  for (const absPath of truthFiles) {
+    const relPath = relative(FIXTURE_ROOT, absPath).split(sep).join("/");
+    const failures = checkTruthSidecar(readFileSync(absPath, "utf8"));
+    if (failures.length > 0) failed.push({ relPath, failures });
+  }
+
   if (failed.length === 0) {
     console.log(
-      `✓ fixture PII: ${pdfs.length} PDFs under ${FIXTURE_ROOT}/ — all personas synthetic.`,
+      `✓ fixture PII: ${pdfs.length} PDFs and ${truthFiles.length} ground-truth ` +
+        `sidecars under ${FIXTURE_ROOT}/ — all personas synthetic.`,
     );
     return;
   }
 
-  reportFailures(failed, pdfs.length);
+  reportFailures(failed, pdfs.length + truthFiles.length);
   process.exitCode = 1;
 }
 

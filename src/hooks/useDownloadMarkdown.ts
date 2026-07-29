@@ -17,7 +17,6 @@ import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { buildAtsResumeModel } from "../lib/pdf/ats-resume-model.ts";
 import { slugifyName, triggerBlobDownload } from "../lib/download/blob-download.ts";
-import type { EditableParse } from "./useEditableParse.ts";
 import { trackDownloadCompleted, type DownloadSource } from "../lib/analytics.ts";
 
 export interface UseDownloadMarkdown {
@@ -35,7 +34,6 @@ function filenameFromName(name: string | undefined): string {
 export function useDownloadMarkdown(
   result: CascadeResult,
   score: AnonymousAtsScore,
-  edit?: Pick<EditableParse, "contactOverrides" | "bulletOverrides">,
 ): UseDownloadMarkdown {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +42,7 @@ export function useDownloadMarkdown(
     setIsGenerating(true);
     setError(null);
     try {
-      const model = buildAtsResumeModel(result, score, edit);
+      const model = buildAtsResumeModel(result, score);
       const { toCareerOpsMarkdown } = await import("../lib/pdf/to-markdown.ts");
       const bytes = new TextEncoder().encode(toCareerOpsMarkdown(model));
       triggerBlobDownload(
@@ -67,7 +65,7 @@ export function useDownloadMarkdown(
     } finally {
       setIsGenerating(false);
     }
-  }, [result, score, edit]);
+  }, [result, score]);
 
   return { download, isGenerating, error };
 }

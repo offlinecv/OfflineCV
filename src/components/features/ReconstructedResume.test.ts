@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { bulletId } from "../../lib/score/bullet-id.ts";
 import { buildResumeSections, roleLabel } from "./ReconstructedResume.tsx";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
@@ -17,6 +18,7 @@ import { countWords } from "../../lib/score/score.ts";
 function bullet(index: number, text: string): BulletObservation {
   return {
     text,
+    id: bulletId(text, 0),
     index,
     hasMetric: false,
     startsWithActionVerb: false,
@@ -110,7 +112,7 @@ describe("buildResumeSections", () => {
       ]),
     ];
     const sections = buildResumeSections(undefined, groups, {
-      5: "Edited text",
+      [bulletId("Stale text", 0)]: "Edited text",
     });
     expect(sections).toEqual([
       {

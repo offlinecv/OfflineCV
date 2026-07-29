@@ -12,7 +12,7 @@
  * layer imports back into it — so it sits cleanly below both.
  */
 
-import type { PdfLine } from "./sections.ts";
+import type { PdfLine } from "./line-model.ts";
 import {
   DATE_RANGE_RE,
   MONTH_YEAR_RE,

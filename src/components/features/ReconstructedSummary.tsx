@@ -84,6 +84,10 @@ export function SummarySection({
   );
 }
 
+/** Placeholder id for the summary's single pseudo-bullet slot. Any non-empty
+ *  string works — see {@link summaryRewriteApply}. */
+const SUMMARY_OBS_ID = "summary";
+
 /**
  * The write-back wiring that lets an accepted on-device summary rewrite land in
  * the SAME `summaryOverride` slot the inline field writes (#625).
@@ -95,9 +99,9 @@ export function SummarySection({
  * write. In practice only `onReplace` fires: the panel builds the summary as a
  * single `matched` pair, and a matched accept resolves to a single `replace`.
  *
- * `obsIndices: [0]` is a positional placeholder, not a `BulletObservation.index`
- * — `resolveSectionWrites` only needs `obsIndices[0]` to exist and be
- * non-negative for the write to survive, and `onReplace` ignores it.
+ * `obsIds: [SUMMARY_OBS_ID]` is a positional placeholder, not a real
+ * `BulletObservation.id` — `resolveSectionWrites` only needs `obsIds[0]` to
+ * exist and be non-empty for the write to survive, and `onReplace` ignores it.
  *
  * `captureUndo` snapshots the override slot itself (not a bullet pool), so undo
  * restores the exact prior state including "there was no override at all"
@@ -110,8 +114,8 @@ export function summaryRewriteApply(
   setSummaryField: (value: string | undefined) => void,
 ): SectionRewriteApply {
   return {
-    obsIndices: [0],
-    onReplace: (_obsIndex, text) => setSummaryField(text),
+    obsIds: [SUMMARY_OBS_ID],
+    onReplace: (_obsId, text) => setSummaryField(text),
     onRemove: () => setSummaryField(""),
     onAdd: (text) => setSummaryField(text),
     captureUndo: () => {
@@ -157,8 +161,16 @@ export function buildResumeSections(
     if (group.bullets.length === 0) continue;
     const exp = group.experience;
     const label = roleLabel(exp);
+    // The `bulletOverrides` lookup is DEAD, and deliberately left in place: it
+    // can never hit, because `assignBulletIds` allocates each live row's ordinal
+    // to be free of every key in `claimed` — which is
+    // `[...Object.keys(bulletOverrides), ...removedBullets]`. A live row's id is
+    // therefore absent from `bulletOverrides` by construction, so this is always
+    // `b.text`. Kept rather than removed because dropping it would change
+    // `buildResumeSections`' signature for no behavioural gain; noted here so the
+    // next reader does not have to re-derive it (#648).
     const sectionBullets = group.bullets.map(
-      (b) => bulletOverrides?.[b.index] ?? b.text,
+      (b) => bulletOverrides?.[b.id] ?? b.text,
     );
     out.push({
       kind: "experience",

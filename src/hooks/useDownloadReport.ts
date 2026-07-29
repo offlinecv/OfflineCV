@@ -31,7 +31,6 @@ import { buildContact } from "../lib/pdf/ats-resume-model.ts";
 import { basicsFromContact } from "../lib/pdf/to-json-resume.ts";
 import { slugifyName, triggerBlobDownload } from "../lib/download/blob-download.ts";
 import type { AuditReportInput } from "../lib/report/serialize.ts";
-import type { EditableParse } from "./useEditableParse.ts";
 import { trackReportDownloaded, type ReportFormat } from "../lib/analytics.ts";
 
 export interface DownloadReportOptions {
@@ -53,7 +52,6 @@ export interface UseDownloadReport {
 export function useDownloadReport(
   result: CascadeResult,
   score: AnonymousAtsScore,
-  edit?: Pick<EditableParse, "contactOverrides" | "bulletOverrides">,
 ): UseDownloadReport {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +66,7 @@ export function useDownloadReport(
         // Build it from the contact block directly (no full resume-model walk
         // just to read `.basics`, #421 Secondary #6).
         const identity = includeIdentity
-          ? basicsFromContact(buildContact(result, edit?.contactOverrides ?? {}))
+          ? basicsFromContact(buildContact(result))
           : undefined;
 
         const input: AuditReportInput = {
@@ -113,7 +111,7 @@ export function useDownloadReport(
         setIsGenerating(false);
       }
     },
-    [result, score, edit],
+    [result, score],
   );
 
   return { download, isGenerating, error };

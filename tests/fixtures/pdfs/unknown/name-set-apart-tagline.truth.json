@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. The first drawn line is the TAGLINE ('Product Designer'); the name is below it.",
+  "contact": {
+    "full_name": "Jane Smith",
+    "email": "jane.smith@example.com",
+    "phone": "(312) 555-0147",
+    "location": "San Francisco, CA"
+  },
+  "experience": [
+    {
+      "title": "Senior Product Designer",
+      "company": "Northwind Labs",
+      "dates": "Jan 2021 - Present"
+    },
+    {
+      "title": "Product Designer",
+      "company": "Brightside Studio",
+      "dates": "Jun 2017 - Dec 2020"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.F.A. in Graphic Design",
+      "institution": "State University"
+    }
+  ],
+  "skills": [],
+  "knownWrong": {
+    "education.degree": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "The whole education line “State University — B.F.A. in Graphic Design” lands in institution and the degree comes back EMPTY: the em-dash Institution—Degree shape is never split."
+    },
+    "education.institution": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "Same root as education.degree: institution holds the entire “State University — B.F.A. in Graphic Design” line rather than the institution alone."
+    }
+  }
+}

@@ -37,6 +37,7 @@ import { scoreForCascade } from "../heuristics/roundtrip-hop.ts";
 import type { CascadeResult } from "../heuristics/types.ts";
 import { applyOverrides } from "./apply-overrides.ts";
 import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
+import { scoreEditedResume } from "./score-edited.ts";
 import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
 import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
 
@@ -86,7 +87,7 @@ describe("descriptionOverrides edit-leg round-trip (#489)", { timeout: 20000 }, 
       { removed: [], added: [] }, // skills
       [], // addedEntries
       {}, // addedBullets
-      new Set<number>(), // removedBullets
+      new Set<string>(), // removedBullets
       [], // profileOverrides
       p1.canonical.fieldConfidence,
       {}, // achievements
@@ -107,10 +108,12 @@ describe("descriptionOverrides edit-leg round-trip (#489)", { timeout: 20000 }, 
         fieldConfidence: applied.fieldConfidence,
       },
     };
-    const model = buildAtsResumeModel(display, scoreForCascade(display), {
-      contactOverrides: {},
-      bulletOverrides: {},
-    });
+    // Same production recipe the corpus edit-leg gate runs (#487): the score
+    // must be graded off the EDITED sections, not `display`'s base ones.
+    const model = buildAtsResumeModel(
+      display,
+      scoreEditedResume(applied, p1.triggers, []),
+    );
     const p3 = await runCascade(await renderAtsResumePdf(model));
 
     const p3Text = JSON.stringify(p3.canonical.fields);

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. Every role on this page is deliberately DATELESS.",
+  "contact": {
+    "full_name": "Jordan Rivera",
+    "email": "jordan.rivera@example.com",
+    "phone": "(312) 555-0142",
+    "location": "Chicago, IL"
+  },
+  "experience": [
+    {
+      "title": "Production Intern",
+      "company": "Example Opera Company"
+    },
+    {
+      "title": "Community Outreach Coordinator",
+      "company": "Example Arts Nonprofit Inc"
+    },
+    {
+      "title": "Retail Sales Associate",
+      "company": "Example Music Store LLC"
+    }
+  ],
+  "education": [],
+  "skills": []
+}

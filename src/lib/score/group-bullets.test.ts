@@ -2,6 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { promises as fsp } from "node:fs";
+import { bulletId } from "./bullet-id.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
@@ -30,6 +31,7 @@ function makeBullet(
 ): BulletObservation {
   return {
     text,
+    id: bulletId(text, 0),
     index,
     hasMetric: false,
     startsWithActionVerb: true,

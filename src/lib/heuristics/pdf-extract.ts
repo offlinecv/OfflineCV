@@ -13,7 +13,7 @@
  * left-to-right, top-to-bottom without surprises.
  */
 
-import { groupIntoLines } from "./sections.ts";
+import { groupIntoLines } from "./line-assembly.ts";
 import { detectColumnBoundaries } from "./pdf-layout.ts";
 import type {
   PdfExtractResult,

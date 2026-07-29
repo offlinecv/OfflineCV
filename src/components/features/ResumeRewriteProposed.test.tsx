@@ -84,8 +84,8 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     handlers: SectionRewriteApply;
   } {
     const handlers: SectionRewriteApply = {
-      // section bullet 0 → observation 10, bullet 1 → observation 11.
-      obsIndices: [10, 11],
+      // section bullet 0 → observation "0|a", bullet 1 → "0|b".
+      obsIds: ["0|a", "0|b"],
       onReplace: vi.fn(),
       onRemove: vi.fn(),
       onAdd: vi.fn(),
@@ -117,7 +117,7 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     expect(apply.disabled).toBe(true);
   });
 
-  it("Accept all + global Apply writes back through mapped obsIndices, then reports what was applied", () => {
+  it("Accept all + global Apply writes back through mapped obsIds, then reports what was applied", () => {
     const { map, handlers } = makeApply();
     const onApplied = vi.fn();
     const el = render(
@@ -141,10 +141,13 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     expect(apply.textContent).toContain("Apply 3 changes");
     click(apply);
 
-    // matched bullet 0 (obs 10) replaced; removed bullet 1 (obs 11) removed;
-    // the new bullet added — section-relative index joined to obsIndices.
-    expect(handlers.onReplace).toHaveBeenCalledWith(10, "Led a team of 5 engineers");
-    expect(handlers.onRemove).toHaveBeenCalledWith(11);
+    // matched bullet 0 (obs "0|a") replaced; removed bullet 1 (obs "0|b")
+    // removed; the new bullet added — section-relative index joined to obsIds.
+    expect(handlers.onReplace).toHaveBeenCalledWith(
+      "0|a",
+      "Led a team of 5 engineers",
+    );
+    expect(handlers.onRemove).toHaveBeenCalledWith("0|b");
     expect(handlers.onAdd).toHaveBeenCalledWith("Mentored two interns");
     // Apply no longer dismisses synchronously — it reports the count and the
     // touched section labels so the caller can confirm in place (#508).
@@ -188,9 +191,9 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     // BEFORE any of them landed — otherwise it captures post-apply values.
     expect(captureUndo).toHaveBeenCalledTimes(1);
     expect(captureUndo.mock.calls[0]![0]).toEqual([
-      { kind: "replace", obsIndex: 10, text: "Led a team of 5 engineers" },
+      { kind: "replace", obsId: "0|a", text: "Led a team of 5 engineers" },
       { kind: "add", text: "Mentored two interns" },
-      { kind: "remove", obsIndex: 11 },
+      { kind: "remove", obsId: "0|b" },
     ]);
     expect(captureUndo.mock.invocationCallOrder[0]!).toBeLessThan(
       vi.mocked(withUndo.onReplace).mock.invocationCallOrder[0]!,
@@ -208,7 +211,7 @@ describe("ProposedPanel — whole-résumé per-bullet review + apply", () => {
     // A partial revert would leave the résumé in a state the user never
     // authored, so the control is withheld for the whole batch.
     const bare: SectionRewriteApply = {
-      obsIndices: [10, 11],
+      obsIds: ["0|a", "0|b"],
       onReplace: vi.fn(),
       onRemove: vi.fn(),
       onAdd: vi.fn(),
@@ -286,7 +289,7 @@ function summaryApply(): {
   // The real wiring from `summaryRewriteApply` — one positional slot, and every
   // verb pointed at the single `summaryOverride`.
   const handlers: SectionRewriteApply = {
-    obsIndices: [0],
+    obsIds: ["summary"],
     onReplace: vi.fn(),
     onRemove: vi.fn(),
     onAdd: vi.fn(),
@@ -338,7 +341,7 @@ describe("ProposedPanel — summary review + apply (issue 625)", () => {
     );
 
     expect(handlers.onReplace).toHaveBeenCalledWith(
-      0,
+      "summary",
       "Platform engineer who cut deploy time 60%.",
     );
     expect(handlers.onRemove).not.toHaveBeenCalled();

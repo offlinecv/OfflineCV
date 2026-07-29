@@ -29,6 +29,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useEditableParse, type EditableParse } from "./useEditableParse.ts";
 import { applyOverrides } from "../lib/edit/apply-overrides.ts";
+import { bulletId } from "../lib/score/bullet-id.ts";
 import {
   computeAnonymousAtsScore,
   countWords,
@@ -91,6 +92,7 @@ function baseResult(): CascadeResult {
 const OBSERVATIONS: readonly BulletObservation[] = [
   {
     text: PARSED_BULLET,
+    id: bulletId(PARSED_BULLET, 0),
     index: 0,
     hasMetric: true,
     startsWithActionVerb: true,
@@ -142,10 +144,7 @@ function regrade(api: EditableParse): {
       fieldConfidence: core.fieldConfidence,
     },
   };
-  const model = buildAtsResumeModel(display, score, {
-    contactOverrides: api.contactOverrides,
-    bulletOverrides: api.bulletOverrides,
-  });
+  const model = buildAtsResumeModel(display, score);
   return {
     score,
     bulletTexts: (score.bullets ?? []).map((b) => b.text),
@@ -190,11 +189,17 @@ function addRoleWithBullet(): string {
 }
 
 /** The added bullet's index in the RE-GRADED pool (never in OBSERVATIONS). */
-function addedObsIndex(): number {
+function addedObsId(): string {
   const at = regrade(api).bulletTexts.indexOf(ADDED_BULLET);
   expect(at).toBeGreaterThanOrEqual(0);
-  return regrade(api).score.bullets![at].index;
+  return regrade(api).score.bullets![at].id;
 }
+
+/** The PARSED bullet's own id — the one a wrongly-filed removal would hit. */
+const PARSED_ID = bulletId(PARSED_BULLET, 0);
+/** An id that names no line anywhere: the stand-in for the stale observation
+ *  index these call sites used before #648. */
+const STALE_ID = bulletId("no bullet reads like this", 0);
 
 describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
   it("drops the bullet from the pool, the score and the exported PDF", () => {
@@ -204,10 +209,8 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
     expect(before.bulletTexts).toEqual([PARSED_BULLET, ADDED_BULLET]);
     expect(before.exportedBullets).toContain(ADDED_BULLET);
 
-    const obsIndex = addedObsIndex();
-    act(() =>
-      api.removeBullet(obsIndex, { entryKey: id, text: ADDED_BULLET }),
-    );
+    const obsId = addedObsId();
+    act(() => api.removeBullet(obsId, { entryKey: id, text: ADDED_BULLET }));
 
     const after = regrade(api);
     // 1. Gone from the rendered/graded bullet pool.
@@ -223,11 +226,9 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
 
   it("empties the bucket so the now-blank-bodied role is prunable", () => {
     const id = addRoleWithBullet();
-    const obsIndex = addedObsIndex();
+    const obsId = addedObsId();
 
-    act(() =>
-      api.removeBullet(obsIndex, { entryKey: id, text: ADDED_BULLET }),
-    );
+    act(() => api.removeBullet(obsId, { entryKey: id, text: ADDED_BULLET }));
 
     // The bucket is DELETED, not left as `{id: []}` — `hasEdits` and
     // `isAddedEntryEmpty` both key off its presence/length.
@@ -236,15 +237,15 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
 
   it("restores the bullet through the captured undo", () => {
     const id = addRoleWithBullet();
-    const obsIndex = addedObsIndex();
+    const obsId = addedObsId();
 
     // Exactly the capture-then-write order `useBulletRemoveStatus` performs.
     let undo = () => {};
     act(() => {
       undo = api.captureBulletUndo(
-        batchUndoTargets([{ kind: "remove", obsIndex }], id),
+        batchUndoTargets([{ kind: "remove", obsId }], id),
       );
-      api.removeBullet(obsIndex, { entryKey: id, text: ADDED_BULLET });
+      api.removeBullet(obsId, { entryKey: id, text: ADDED_BULLET });
     });
     expect(regrade(api).bulletTexts).toEqual([PARSED_BULLET]);
 
@@ -264,8 +265,8 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
     // Both removes land in ONE act(), so the second reads the ref rather than
     // a committed render — the case a render closure would get wrong.
     act(() => {
-      api.removeBullet(99, { entryKey: id, text: ADDED_BULLET });
-      api.removeBullet(98, {
+      api.removeBullet(STALE_ID, { entryKey: id, text: ADDED_BULLET });
+      api.removeBullet(bulletId("Mentored 6 engineers to promotion.", 0), {
         entryKey: id,
         text: "Mentored 6 engineers to promotion.",
       });
@@ -273,7 +274,7 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
 
     expect(id in api.addedBullets).toBe(false);
     expect(regrade(api).bulletTexts).toEqual([PARSED_BULLET]);
-    // Neither stale index leaked into the observation-keyed set.
+    // Neither id leaked into the removal-keyed set.
     expect(api.removedBullets.size).toBe(0);
   });
 
@@ -287,7 +288,7 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
 
     act(() => {
       api.addBullet(id, "Cut infra spend 22% by right-sizing clusters.");
-      api.removeBullet(99, { entryKey: id, text: ADDED_BULLET });
+      api.removeBullet(STALE_ID, { entryKey: id, text: ADDED_BULLET });
     });
 
     expect(api.addedBullets[id]).toEqual([
@@ -311,7 +312,7 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
 
     act(() => {
       api.addBullet(b, "Grew the platform team from 4 to 11.");
-      api.removeBullet(99, { entryKey: a, text: ADDED_BULLET });
+      api.removeBullet(STALE_ID, { entryKey: a, text: ADDED_BULLET });
     });
 
     expect(api.addedBullets[b]).toEqual(["Grew the platform team from 4 to 11."]);
@@ -325,7 +326,7 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
 
     act(() => {
       api.addBullet("experience:0", "Owned the migration to Postgres 16.");
-      api.removeBullet(1, { entryKey: "experience:0", text: ADDED_BULLET });
+      api.removeBullet(STALE_ID, { entryKey: "experience:0", text: ADDED_BULLET });
     });
 
     expect(api.addedBullets["experience:0"]).toEqual([
@@ -334,17 +335,14 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
     expect(api.removedBullets.size).toBe(0);
   });
 
-  it("never files a removal under an observation index for an added entry", () => {
+  it("never files a removal under another bullet's id for an added entry", () => {
     const id = addRoleWithBullet();
-    const obsIndex = addedObsIndex();
+    const obsId = addedObsId();
 
-    act(() =>
-      api.removeBullet(obsIndex, { entryKey: id, text: ADDED_BULLET }),
-    );
-    // A repeat click (the row is already gone) must NOT fall through: index 0
-    // is the PARSED bullet's observation, and filing it there would remove an
-    // unrelated bullet.
-    act(() => api.removeBullet(0, { entryKey: id, text: ADDED_BULLET }));
+    act(() => api.removeBullet(obsId, { entryKey: id, text: ADDED_BULLET }));
+    // A repeat click (the row is already gone) must NOT fall through: filing
+    // the PARSED bullet's id there would remove an unrelated bullet.
+    act(() => api.removeBullet(PARSED_ID, { entryKey: id, text: ADDED_BULLET }));
 
     expect(api.removedBullets.size).toBe(0);
     expect(regrade(api).bulletTexts).toEqual([PARSED_BULLET]);
@@ -354,13 +352,13 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
 describe("removeBullet still reaches PARSED bullets (#637 scoping)", () => {
   it("falls through to removedBullets for a parsed role's own bullet", () => {
     act(() =>
-      api.removeBullet(0, {
+      api.removeBullet(PARSED_ID, {
         entryKey: "experience:0",
         text: PARSED_BULLET,
       }),
     );
 
-    expect(api.removedBullets.has(0)).toBe(true);
+    expect(api.removedBullets.has(PARSED_ID)).toBe(true);
     const after = regrade(api);
     expect(after.bulletTexts).toEqual([]);
     expect(after.exportedBullets).not.toContain(PARSED_BULLET);
@@ -371,18 +369,21 @@ describe("removeBullet still reaches PARSED bullets (#637 scoping)", () => {
     expect(regrade(api).bulletTexts).toEqual([PARSED_BULLET, ADDED_BULLET]);
 
     act(() =>
-      api.removeBullet(1, { entryKey: "experience:0", text: ADDED_BULLET }),
+      api.removeBullet(addedObsId(), {
+        entryKey: "experience:0",
+        text: ADDED_BULLET,
+      }),
     );
 
-    // Spliced from the bucket, NOT filed as observation 1 (which does not
-    // exist in the base pool at all).
+    // Spliced from the bucket, NOT filed in `removedBullets` (the added
+    // bullet's id names a line that only exists inside that bucket).
     expect(api.removedBullets.size).toBe(0);
     expect(regrade(api).bulletTexts).toEqual([PARSED_BULLET]);
   });
 
   it("still works with no ref at all (the 'Other bullets' call path)", () => {
-    act(() => api.removeBullet(0));
-    expect(api.removedBullets.has(0)).toBe(true);
+    act(() => api.removeBullet(PARSED_ID));
+    expect(api.removedBullets.has(PARSED_ID)).toBe(true);
     expect(regrade(api).bulletTexts).toEqual([]);
   });
 });

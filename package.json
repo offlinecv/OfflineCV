@@ -21,8 +21,9 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "check:fixtures": "node scripts/check-fixture-pii.mjs",
+    "check:baselines": "node scripts/check-known-failures.mjs",
     "test:coverage": "vitest run --coverage",
-    "verify": "tsc -b --noEmit && eslint . && npm run check:fixtures && vitest run --coverage && vite build && (fallow audit --base origin/main --coverage coverage/coverage-final.json || echo 'fallow audit exited non-zero (report-only, ignored)')"
+    "verify": "tsc -b --noEmit && eslint . && npm run check:fixtures && npm run check:baselines && vitest run --coverage && vite build && (fallow audit --base origin/main --coverage coverage/coverage-final.json || echo 'fallow audit exited non-zero (report-only, ignored)')"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",

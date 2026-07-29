@@ -16,6 +16,7 @@ import type {
   ProfileLink,
 } from "./types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
+import { assignBulletIds } from "./bullet-id.ts";
 import {
   deriveContactProfiles,
   isProfileConfident,
@@ -340,8 +341,16 @@ function splitBullets(description: string): string[] {
 export interface BulletObservation {
   /** Original text of the bullet, as extracted from the accomplishment sections. */
   text: string;
+  /**
+   * Stable identity for the OVERRIDE maps (#648) — `"<occurrence>|<normalised
+   * text>"`, minted by {@link bulletId}. Unlike {@link index} this does not
+   * shift when another bullet is removed, added or re-ordered, which is what
+   * made index-keyed overrides land on the wrong bullet. Every consumer that
+   * keys an edit / removal / undo slot by a bullet keys it by THIS.
+   */
+  id: string;
   /** Index in the order bullets were extracted from the accomplishment sections.
-   *  Stable for UI lists. */
+   *  Stable for UI lists. NOT an identity — see {@link id}. */
   index: number;
   hasMetric: boolean;
   startsWithActionVerb: boolean;
@@ -356,11 +365,16 @@ export interface BulletObservation {
  * aggregate math signature stays stable for downstream consumers and only
  * callers that need the per-bullet detail pay for it.
  */
-function analyzeBullets(bullets: string[]): BulletObservation[] {
+function analyzeBullets(
+  bullets: string[],
+  claimedBulletKeys: Iterable<string>,
+): BulletObservation[] {
+  const ids = assignBulletIds(bullets, claimedBulletKeys);
   return bullets.map((text, index) => {
     const wordCount = countWords(text);
     return {
       text,
+      id: ids[index],
       index,
       hasMetric: bulletHasMetric(text),
       startsWithActionVerb: startsWithActionVerb(text),
@@ -749,6 +763,17 @@ export interface AnonymousAtsScoreInput {
    *  never in the pool and never judged by the action-verb / metric / length
    *  rules. The pure scorer does not re-derive sections from `rawText`. */
   sections: SectionedResume;
+  /**
+   * Every key the caller's bullet-override + removed-bullet maps already hold.
+   * Threaded straight into {@link assignBulletIds} so a re-graded pool cannot
+   * re-mint an id an existing instruction is already filed under — see
+   * `bullet-id.ts` for the three ways that silently destroyed an edit (#648).
+   *
+   * Omit ONLY when grading a pool that carries no edits (the base parse). Every
+   * EDITED grade must supply it; `scoreEditedResume` is the one recipe that
+   * does, and it takes the argument as REQUIRED so a new caller cannot forget.
+   */
+  claimedBulletKeys?: Iterable<string>;
 }
 
 const ANON_CONTACT_CONFIDENCE_FLOOR = 0.5;
@@ -916,7 +941,7 @@ export function computeAnonymousAtsScore(
     bullets.push(...poolExperienceDescriptions(input.parsed.experience));
   }
   const pool = scoreBulletPool(bullets);
-  const observations = analyzeBullets(bullets);
+  const observations = analyzeBullets(bullets, input.claimedBulletKeys ?? []);
   const gradable = pool.total >= ANON_MIN_BULLETS_TO_GRADE;
   const specScore = gradable ? Math.round((pool.specificity / 100) * 40) : 0;
   const structScore = gradable ? Math.round((pool.structure / 100) * 30) : 0;

@@ -2,6 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect } from "vitest";
+import { bulletId } from "../score/bullet-id.ts";
 import { applyOverrides, applyProfileOverrides } from "./apply-overrides.ts";
 import type { LegacyLinkFields } from "./apply-overrides.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
@@ -15,6 +16,7 @@ import type { SectionedResume } from "../heuristics/sections.ts";
 function obs(index: number, text: string): BulletObservation {
   return {
     text,
+    id: bulletId(text, 0),
     index,
     hasMetric: false,
     startsWithActionVerb: false,
@@ -289,7 +291,7 @@ describe("applyOverrides", () => {
       undefined,
       [],
       {},
-      new Set([0]),
+      new Set([bulletId("Built a thing", 0)]),
     );
     expect(outRaw).toBe("• Shipped another thing");
     expect(out.experience[0].description).toBe("Shipped another thing");
@@ -298,7 +300,7 @@ describe("applyOverrides", () => {
     ]);
   });
 
-  it("removal is a no-op when the index has no matching observation", () => {
+  it("removal is a no-op when the id names no line", () => {
     const rawText = "• Built a thing\n• Shipped another thing";
     const { rawText: outRaw } = applyOverrides(
       baseParsed(),
@@ -312,7 +314,7 @@ describe("applyOverrides", () => {
       undefined,
       [],
       {},
-      new Set([99]), // index not in observations
+      new Set([bulletId("no such bullet", 0)]), // names no line
     );
     expect(outRaw).toBe(rawText);
   });

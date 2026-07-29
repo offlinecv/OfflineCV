@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here.",
+  "contact": {
+    "full_name": "Jane Smith",
+    "email": "jane.smith@example.com",
+    "phone": "(312) 555-0123",
+    "location": "Springfield, IL"
+  },
+  "experience": [
+    {
+      "title": "Software Engineer",
+      "company": "Globex Corporation",
+      "dates": "2022 – Present"
+    },
+    {
+      "title": "Junior Engineer",
+      "company": "Acme Corp",
+      "dates": "2020 – 2022"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. Computer Science",
+      "institution": "Springfield State University"
+    }
+  ],
+  "skills": [
+    "Python",
+    "JavaScript",
+    "Git",
+    "SQL",
+    "Linux",
+    "AWS"
+  ],
+  "knownWrong": {
+    "education.degree": {
+      "issue": null,
+      "status": "unfiled",
+      "note": "The degree's FIELD comes back carrying the header line's own separator: field = “Computer Science ·”, so the degree reads “B.S. Computer Science ·”. The middot is punctuation from the line, not part of the field of study."
+    }
+  }
+}

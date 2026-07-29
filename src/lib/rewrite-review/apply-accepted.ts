@@ -13,8 +13,8 @@
  *     per-original-bullet WRITE actions (replace / remove / add) the UI layer
  *     maps onto the reconstructed-résumé edit primitives
  *     (`setBulletField` / `removeBullet` / `addBullet`). It carries no
- *     BulletObservation indices itself — the caller joins `originalIndex`
- *     (position within the section) to the real observation index.
+ *     BulletObservation ids itself — the caller joins `originalIndex`
+ *     (position within the section) to the real observation id.
  *
  * Decision semantics (per aligned pair id):
  *   - matched, accepted  → original is REPLACED by the edited value (if the
@@ -89,7 +89,7 @@ export function applyAcceptedBullets(
 
 /** A write action against the reconstructed résumé's bullet edit model. The
  *  caller resolves `originalIndex` (position in the section's bullet list) to
- *  the real `BulletObservation.index` before calling the edit primitives. */
+ *  the real `BulletObservation.id` before calling the edit primitives. */
 export type BulletAction =
   | { kind: "replace"; originalIndex: number; text: string }
   | { kind: "remove"; originalIndex: number }
@@ -99,8 +99,8 @@ export type BulletAction =
  * Express the accepted decisions as the minimal set of write actions, skipping
  * every no-op (a rejected/undecided pair, or a matched-accept whose text is
  * unchanged from the original). The caller applies these to the edit model:
- *   - `replace` → `setBulletField(obsIndexOf(originalIndex), text)`
- *   - `remove`  → `removeBullet(obsIndexOf(originalIndex))`
+ *   - `replace` → `setBulletField(obsIdOf(originalIndex), text)`
+ *   - `remove`  → `removeBullet(obsIdOf(originalIndex))`
  *   - `add`     → `addBullet(entryKey, text)`
  *
  * `add` actions come out in alignment order, so insertions read in the
@@ -137,27 +137,27 @@ export function resolveBulletActions(
   return actions;
 }
 
-/** A write resolved against a real `BulletObservation.index`. The whole-résumé
+/** A write resolved against a real `BulletObservation.id`. The whole-résumé
  *  review (`ResumeRewriteProposed`) reviews many sections under one combined
  *  decision map, then resolves each section's accepted actions to these — the
- *  section-relative `originalIndex` is joined to `obsIndices` here, and any
- *  unmapped index (no observation, or a `-1` placeholder) is dropped. */
+ *  section-relative `originalIndex` is joined to `obsIds` here, and any unmapped
+ *  position (no observation, or an empty-string placeholder) is dropped. */
 export type ResolvedWrite =
-  | { kind: "replace"; obsIndex: number; text: string }
-  | { kind: "remove"; obsIndex: number }
+  | { kind: "replace"; obsId: string; text: string }
+  | { kind: "remove"; obsId: string }
   | { kind: "add"; text: string };
 
 /**
  * Resolve one section's accepted decisions into concrete writes against the
- * reconstructed-résumé edit model. `obsIndices` is parallel to the section's
- * bullet list (the same order `alignBullets` saw), so `originalIndex` indexes
- * straight into it; an absent or negative index drops the write rather than
- * editing the wrong bullet. `add` actions carry no index and always pass
- * through. Pure — no I/O, the caller dispatches the returned writes.
+ * reconstructed-résumé edit model. `obsIds` is parallel to the section's bullet
+ * list (the same order `alignBullets` saw), so `originalIndex` indexes straight
+ * into it; an absent or empty id drops the write rather than editing the wrong
+ * bullet. `add` actions carry no position and always pass through. Pure — no
+ * I/O, the caller dispatches the returned writes.
  */
 export function resolveSectionWrites(
   pairs: readonly AlignedPair[],
-  obsIndices: readonly number[],
+  obsIds: readonly string[],
   decisions: Decisions,
   edits: Edits = new Map(),
 ): ResolvedWrite[] {
@@ -167,12 +167,12 @@ export function resolveSectionWrites(
       writes.push({ kind: "add", text: action.text });
       continue;
     }
-    const obsIndex = obsIndices[action.originalIndex];
-    if (obsIndex === undefined || obsIndex < 0) continue;
+    const obsId = obsIds[action.originalIndex];
+    if (!obsId) continue;
     writes.push(
       action.kind === "replace"
-        ? { kind: "replace", obsIndex, text: action.text }
-        : { kind: "remove", obsIndex },
+        ? { kind: "replace", obsId, text: action.text }
+        : { kind: "remove", obsId },
     );
   }
   return writes;

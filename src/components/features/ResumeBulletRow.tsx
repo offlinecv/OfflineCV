@@ -212,13 +212,17 @@ function BulletFlagsInline({ bullet }: { bullet: BulletObservation }) {
  */
 export function ResumeBulletRow({
   bullet,
-  override,
   onBulletChange,
   onRemove,
 }: {
+  /** The graded row as the RE-GRADED pool minted it, so `bullet.text` is
+   *  already the post-edit text. There is deliberately no `override` prop to
+   *  layer on top: since #648 `assignBulletIds` allocates every live row's id
+   *  AROUND the keys `bulletOverrides` already holds, so a live row's id can
+   *  never BE such a key and a lookup here would always miss. The old
+   *  `override ?? bullet.text` read as the thing that made an edit visible
+   *  while being dead code — the re-grade is what makes it visible. */
   bullet: BulletObservation;
-  /** In-memory override text for this bullet, if any. */
-  override?: string;
   /** Commit an edit on this bullet (keyed by bullet.index in the caller). */
   onBulletChange?: (value: string) => void;
   /** Drop this bullet outright (#626) — keyed by bullet.index in the caller,
@@ -229,7 +233,7 @@ export function ResumeBulletRow({
   onRemove?: () => void;
 }) {
   const editable = onBulletChange !== undefined;
-  const displayText = override ?? bullet.text;
+  const displayText = bullet.text;
 
   const handleCommit = useCallback(
     (v: string) => {

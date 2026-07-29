@@ -21,9 +21,12 @@ import { act } from "react";
 
 import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
 import type { BulletObservation } from "../../lib/score/score.ts";
+import { bulletId } from "../../lib/score/bullet-id.ts";
 
+const BULLET_TEXT = "Cut p99 checkout latency by 38% via edge caching.";
 const BULLET: BulletObservation = {
-  text: "Cut p99 checkout latency by 38% via edge caching.",
+  text: BULLET_TEXT,
+  id: bulletId(BULLET_TEXT, 0),
   index: 0,
   hasMetric: true,
   startsWithActionVerb: true,

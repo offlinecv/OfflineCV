@@ -240,7 +240,7 @@ describe("useEditableParse — Skills category edits (#476)", () => {
 function applyRewrite(text: string) {
   act(() =>
     summaryRewriteApply(api.summaryOverride, api.setSummaryField).onReplace(
-      0,
+      "summary",
       text,
     ),
   );
@@ -302,7 +302,7 @@ describe("useEditableParse — summaryOverride (#625)", () => {
     let undo = () => {};
     act(() => {
       undo = apply.captureUndo!([]);
-      apply.onReplace(0, "Rewritten by the model.");
+      apply.onReplace("summary", "Rewritten by the model.");
     });
     expect(api.summaryOverride).toBe("Rewritten by the model.");
 
@@ -317,7 +317,7 @@ describe("useEditableParse — summaryOverride (#625)", () => {
     let undo = () => {};
     act(() => {
       undo = apply.captureUndo!([]);
-      apply.onReplace(0, "Rewritten by the model.");
+      apply.onReplace("summary", "Rewritten by the model.");
     });
     act(() => undo());
     expect(api.summaryOverride).toBeUndefined();
@@ -328,7 +328,7 @@ describe("useEditableParse — summaryOverride (#625)", () => {
       summaryRewriteApply(api.summaryOverride, api.setSummaryField);
     act(() => apply().onAdd("Authored by the model."));
     expect(api.summaryOverride).toBe("Authored by the model.");
-    act(() => apply().onRemove(0));
+    act(() => apply().onRemove("summary"));
     expect(api.summaryOverride).toBe("");
   });
 
