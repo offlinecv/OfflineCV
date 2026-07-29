@@ -48,16 +48,23 @@ export interface BulletUndoTargets {
   replaced: readonly number[];
   /** BulletObservation indices a `remove` will drop. */
   removed: readonly number[];
-  /** The added-bullet entry key an `add` appends to — set iff the batch has
-   *  at least one `add` write. */
+  /** The added-bullet entry key an `add` appends to — or a `remove` splices out
+   *  of (#637). Set iff the batch has at least one `add` or `remove` write. */
   addedEntryKey?: string;
 }
 
 /**
  * Which slots `writes` will touch. `entryKey` is the caller's own added-bullet
  * bucket (the role's `AddedEntry.id` or its `parsedEntryKey`); it is recorded
- * only when the batch actually adds, so a replace-only batch snapshots no
- * array.
+ * when the batch adds — and, since #637, when it removes, because a remove of a
+ * USER-ADDED bullet is a splice out of that same bucket rather than an entry in
+ * the observation-indexed `removedBullets` set, so `restore` alone cannot undo
+ * it. A replace-only batch still snapshots no array.
+ *
+ * Recording the bucket for a remove that turns out to have targeted a PARSED
+ * bullet is harmless: the snapshot then holds the bucket's unchanged value and
+ * restoring writes it straight back (and an absent bucket snapshots as `[]`,
+ * which restores as a delete — a no-op).
  */
 export function batchUndoTargets(
   writes: readonly ResolvedWrite[],
@@ -65,13 +72,17 @@ export function batchUndoTargets(
 ): BulletUndoTargets {
   const replaced: number[] = [];
   const removed: number[] = [];
-  let adds = false;
+  let touchesBucket = false;
   for (const write of writes) {
     if (write.kind === "replace") replaced.push(write.obsIndex);
-    else if (write.kind === "remove") removed.push(write.obsIndex);
-    else adds = true;
+    else if (write.kind === "remove") {
+      removed.push(write.obsIndex);
+      touchesBucket = true;
+    } else touchesBucket = true;
   }
-  return adds ? { replaced, removed, addedEntryKey: entryKey } : { replaced, removed };
+  return touchesBucket
+    ? { replaced, removed, addedEntryKey: entryKey }
+    : { replaced, removed };
 }
 
 /** The live edit state the snapshot reads. Structural on purpose — this module

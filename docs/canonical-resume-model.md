@@ -199,3 +199,75 @@ Minted **after** this plan is accepted, one per stage, each with its round-trip-
 4. **Stage D+E** (shipped combined, #445 — supersedes the separate #446) — collapse `LlmParsedResume` + `ApplyOverridesResult` into projections and delete the hand-sync note, **and** cut over: remove the `CascadeResult` façade + ship #321 cache versioning/invalidation (§6). Combined so the façade removal is provable in one round-trip gate rather than two.
 
 Refs [#438](https://github.com/offlinecv/OfflineCV/issues/438), [#321](https://github.com/offlinecv/OfflineCV/issues/321), [#401](https://github.com/offlinecv/OfflineCV/issues/401), [#425](https://github.com/offlinecv/OfflineCV/issues/425), [#434](https://github.com/offlinecv/OfflineCV/issues/434), [#435](https://github.com/offlinecv/OfflineCV/issues/435).
+
+---
+
+## 10. Separator contract
+
+Dogfooding once read a role header as `Role - Subtitle · Company, Location` and asked
+whether the ASCII hyphen was a bug or a deliberate parser constraint. It is neither: the
+exporter never chooses a hyphen. Every separator `AtsResumeModel` emits is a fixed literal;
+the hyphen came from the **role title string itself** — user-authored text, passed through
+verbatim.
+
+**The invariant:** the exporter's separator set is fixed and parser-coupled; user text
+passes through verbatim and may contain any glyph.
+
+| Join | Separator | Site |
+|---|---|---|
+| `Title · Company, Location · Team` | `" · "` | `ats-resume-model.ts:583`, `:608` (`joinHeader`) |
+| `Company, Location` | `", "` | `ats-resume-model.ts:580-582` |
+| `Title, Team` (empty-company branch, #466) | `", "` | `ats-resume-model.ts:605` |
+| `Institution · Location` | `" · "` | `ats-resume-model.ts:720` |
+| `Degree, Field` | `", "` | `ats-resume-model.ts:719` |
+| `Type · Title` (achievement) | `" · "` | `ats-resume-model.ts:441` |
+| Skills, within a category | `" · "` | `ats-resume-model.ts:829`, `:838` |
+| Header ↔ trailing single-token date | `"  "` (two spaces) | `ats-resume-model.ts:641`, `:780`, `:796`, `:808` |
+| Experience/education date **range** | `" – "` spaced en dash | `ats-resume-model.ts:368` (`experienceDateRange`) |
+| Project/education-fallback date **range** | `"–"` unspaced en dash | `score/entry-dates.ts:19` (`buildProjectDates`), `:33` (`buildEducationDates`) |
+
+Every `ats-resume-model.ts` row above is `src/lib/pdf/ats-resume-model.ts`; the date-range
+row is `src/lib/score/entry-dates.ts`, a different directory.
+
+Plus one deliberate exception: an **achievement's** title↔year separator echoes the
+*source's own* punctuation (`achievementYearJoiner`, `score/entry-dates.ts:57`, #380) — a hyphen
+there is also user-sourced, by design, so the export re-parses to the same `year_separator`
+it came from.
+
+`render-ats-pdf.ts` holds exactly one separator constant of its own —
+`MIDDOT_SEGMENT_SEP = " · "` (`render-ats-pdf.ts:176`) — used only to keep a middot-joined
+segment atomic across a wrap point; it does not choose which fields get middot-joined.
+
+There is **no** ASCII hyphen anywhere in this set. A `Role - Subtitle` header is a title
+field whose value literally contains `" - "`, drawn verbatim.
+
+**Why it's load-bearing, not cosmetic:**
+
+- `joinHeader([title, org], " · ")` is what the re-parser's `mapTitleFirst` splits on to
+  recover title / company / location / team.
+- The **#466 empty-company branch** exists precisely because swapping one separator changes
+  the parse: a naive `"Title · Team"` middot join re-parses as a `Title · Company` shape and
+  mislabels the team as the company. The fix emits a **comma** instead (`"Title, Team"`), so
+  the parser's role-comma split routes it back to `team`.
+- The `", "` in `Company, Location` and the `" · "` before `Team` are load-bearing the same
+  way — the comma marks the location boundary, the middot marks the team boundary.
+- The two-space header↔date join is also a contract: the wide same-`y` gap is what
+  `columnGapCuts` / `flush()` in `sections.ts` read as a flush-right date rail (#425).
+- The en dash in a date range feeds `DATE_RANGE_RE` / `isLoneDateRange`
+  (`line-primitives.ts`), the shared discriminator between the exporter's flush-right
+  decision and the splitter's exemption.
+
+Widening the accepted charset — teaching the exporter to emit `-` or `|` where it emits
+`·`, or teaching the parser to treat them as equivalent — changes field routing on real
+fixtures. §7 above documents an adjacent tradeoff of this class (the one-line header
+removing the title/company structural signal, baselined in `KNOWN_FAILURES`).
+
+**Explicitly out of scope for this contract:**
+
+- Normalizing user-authored hyphens inside a title. `Role - Subtitle` is the user's text;
+  rewriting it would be the exporter editing résumé content, which it must never do.
+- Widening the parser to accept alternative separators (a source résumé using `|` or `—`
+  between title and company parses worse today) — a parser-input question, separate from
+  this export-side contract.
+
+Refs [#620](https://github.com/offlinecv/OfflineCV/issues/620), [#466](https://github.com/offlinecv/OfflineCV/issues/466), [#425](https://github.com/offlinecv/OfflineCV/issues/425), [#380](https://github.com/offlinecv/OfflineCV/issues/380).
