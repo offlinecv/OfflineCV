@@ -81,8 +81,10 @@ import type {
   AddedEntry,
   AddedEntryField,
   AchievementFieldOverrides,
+  AddedBulletRef,
 } from "../../hooks/useEditableParse.ts";
 import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
+import { useAddedEntryPruneHold } from "../../hooks/useAddedEntryPruneHold.ts";
 import {
   batchUndoTargets,
   type BulletUndoTargets,
@@ -437,8 +439,10 @@ export function ExperienceSection({
   ) => void;
   bulletOverrides: BulletOverrides;
   onBulletChange: (index: number, value: string) => void;
-  /** Drop a parsed bullet by BulletObservation.index (rewrite-review apply, #211). */
-  onRemoveBullet: (index: number) => void;
+  /** Drop a bullet by BulletObservation.index (rewrite-review apply, #211),
+   *  plus the optional added-bullets bucket + line that is the only way to
+   *  reach a USER-ADDED bullet (#637). */
+  onRemoveBullet: (index: number, added?: AddedBulletRef) => void;
   /** User-added experience entries, append-aligned to indices ≥ originalCount. */
   addedExperience: AddedEntry[];
   /** Count of PARSED experience roles; indices at/above this are user-added. */
@@ -454,8 +458,10 @@ export function ExperienceSection({
    *  an accepted summary rewrite lands in `summaryOverride` — the slot the
    *  inline Summary field writes — instead of being read-only redline. */
   summaryApply: SectionRewriteApply;
-  /** Drop a blank added entry when focus leaves the section (#379). */
-  onPruneEmpty: () => void;
+  /** Drop a blank added entry when focus leaves the section (#379). `isHeld`
+   *  spares individual entries whose remove-undo strip is still live — see
+   *  {@link useAddedEntryPruneHold} (#637). */
+  onPruneEmpty: (isHeld?: (entryId: string) => boolean) => void;
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
@@ -475,7 +481,29 @@ export function ExperienceSection({
       captureBulletUndo(batchUndoTargets(writes, "other-bullets")),
     [captureBulletUndo],
   );
-  const otherRemove = useBulletRemoveStatus(onRemoveBullet, otherCaptureUndo);
+  // The "Other bullets" bucket owns no entry, so in practice it does not carry
+  // an added bullet: `applyAddedEntriesAndBullets` writes every added line into
+  // its entry's own description, and `buildEntryGroups` grades experiences,
+  // projects and achievements against one combined index space — so an added
+  // line normally matches its entry and never falls through to "Other". The
+  // row's `text` is therefore dropped rather than forwarded as an
+  // `AddedBulletRef` that would almost always miss (#637).
+  //
+  // Not an absolute, though: `groupBulletsByExperience` keys on
+  // `normalizeBulletText` and skips a line whose key is empty, while `addBullet`
+  // only rejects blank-after-`trim()`. So a degenerate added line that is pure
+  // punctuation ("•", "-", "–") IS accepted and DOES land here, where its Remove
+  // is inert. Tracked separately rather than widened here.
+  const otherRemoveBullet = useCallback(
+    (index: number) => onRemoveBullet(index),
+    [onRemoveBullet],
+  );
+  const otherRemove = useBulletRemoveStatus(otherRemoveBullet, otherCaptureUndo);
+
+  // Per-entry prune hold (#637 half 2). Created HERE — the ids it holds are
+  // only meaningful to this section's `pruneEmptyAddedEntries` call, and the
+  // holders are the `RoleEntry`s rendered below.
+  const pruneHold = useAddedEntryPruneHold();
 
   const { topHeading, inlineHeadings } = computeExperienceHeadings(
     groups,
@@ -502,7 +530,16 @@ export function ExperienceSection({
       map.set(`experience:${idx}`, {
         obsIndices: group.bullets.map((b) => b.index),
         onReplace: (obsIndex, text) => onBulletChange(obsIndex, text),
-        onRemove: (obsIndex) => onRemoveBullet(obsIndex),
+        // Entry-aware like the per-role path (#637): a removal accepted on a
+        // user-added role has to splice that role's bucket, since the bullet
+        // has no base-parse observation for `removedBullets` to key on.
+        onRemove: (obsIndex) => {
+          const text = group.bullets.find((b) => b.index === obsIndex)?.text;
+          onRemoveBullet(
+            obsIndex,
+            text === undefined ? undefined : { entryKey, text },
+          );
+        },
         onAdd: (text) => onAddBullet(entryKey, text),
         // Adds land in THIS role's bucket, so the entry key the snapshot
         // records is the same one `onAdd` writes to (issue 510).
@@ -532,7 +569,7 @@ export function ExperienceSection({
   return (
     <section
       className="flex flex-col gap-3"
-      onBlur={sectionExitBlur(onPruneEmpty)}
+      onBlur={sectionExitBlur(() => onPruneEmpty(pruneHold.isHeld))}
     >
       {/* Heading row: the flag legend sits beside the Experience title (next to
           where the inline glyphs actually appear), not at the top of the
@@ -583,6 +620,12 @@ export function ExperienceSection({
               idx >= originalCount
                 ? addedExperience[idx - originalCount]
                 : undefined;
+            // The one bucket this role owns — its added id, or its parsed-entry
+            // key. Adds append to it, a rewrite batch's undo snapshots it, and
+            // (since #637) a remove of a user-added bullet splices it.
+            const roleEntryKey = added
+              ? added.id
+              : parsedEntryKey("experience", idx);
             const entry = (
               <RoleEntry
                 key={added ? added.id : idx}
@@ -597,21 +640,13 @@ export function ExperienceSection({
                 bulletOverrides={bulletOverrides}
                 onBulletChange={onBulletChange}
                 onRemoveBullet={onRemoveBullet}
-                onAddBullet={(text) =>
-                  onAddBullet(
-                    added ? added.id : parsedEntryKey("experience", idx),
-                    text,
-                  )
-                }
+                onAddBullet={(text) => onAddBullet(roleEntryKey, text)}
                 captureUndo={(writes) =>
-                  captureBulletUndo(
-                    batchUndoTargets(
-                      writes,
-                      added ? added.id : parsedEntryKey("experience", idx),
-                    ),
-                  )
+                  captureBulletUndo(batchUndoTargets(writes, roleEntryKey))
                 }
                 onRemove={added ? () => onRemoveEntry(added.id) : undefined}
+                entryKey={roleEntryKey}
+                pruneHold={pruneHold}
               />
             );
             return subHeading ? (
@@ -1309,11 +1344,11 @@ export function ReconstructedResume({
         }
         bulletOverrides={bulletOverrides}
         onBulletChange={(index, value) => setBulletField(index, value)}
-        onRemoveBullet={(index) => removeBullet(index)}
+        onRemoveBullet={removeBullet}
         addedExperience={addedExperience}
         originalCount={originalExpCount}
         onAddEntry={() => addEntry("experience")}
-        onPruneEmpty={() => pruneEmptyAddedEntries("experience")}
+        onPruneEmpty={(isHeld) => pruneEmptyAddedEntries("experience", isHeld)}
         onRemoveEntry={removeEntry}
         onEntryField={setEntryField}
         onAddBullet={addBullet}

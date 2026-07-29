@@ -104,15 +104,26 @@ describe("batchUndoTargets", () => {
     expect(targets.removed).toEqual([7]);
   });
 
-  it("records the added-bullet entry key only when the batch adds", () => {
+  it("records the added-bullet entry key when the batch adds OR removes", () => {
+    // #637 widened this from "adds" to "touches the bucket". A remove can now
+    // be a splice out of `addedBullets` (a user-ADDED bullet has no base-parse
+    // observation for `removedBullets` to key on), so `restore` alone can no
+    // longer undo it — the bucket has to be in the snapshot too.
     expect(
       batchUndoTargets([{ kind: "remove", obsIndex: 1 }], "experience:0")
         .addedEntryKey,
-    ).toBeUndefined();
+    ).toBe("experience:0");
     expect(
       batchUndoTargets([{ kind: "add", text: "new" }], "experience:0")
         .addedEntryKey,
     ).toBe("experience:0");
+    // A replace-only batch still snapshots no array.
+    expect(
+      batchUndoTargets(
+        [{ kind: "replace", obsIndex: 1, text: "x" }],
+        "experience:0",
+      ).addedEntryKey,
+    ).toBeUndefined();
   });
 });
 

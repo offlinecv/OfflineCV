@@ -16,6 +16,11 @@
  * Section order is standard ATS top-to-bottom:
  *   Summary → (Achievements if "above_experience") → Experience → Projects →
  *   Achievements (default placement) → Education → Skills.
+ *
+ * Every join literal below (` · `, `, `, two-space date gap, en dash) is a
+ * parser-coupled separator, not a cosmetic choice — see the #466 empty-company
+ * branch and the #425 flush-right-date notes inline, and the full table in
+ * "Separator contract" (docs/canonical-resume-model.md §10, #620).
  */
 
 import type { CascadeResult } from "../heuristics/types.ts";

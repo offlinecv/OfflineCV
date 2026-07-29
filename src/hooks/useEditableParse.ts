@@ -18,6 +18,13 @@
  * skills one — the Summary was parsed, scored and exported but had no edit
  * channel at all, so a mis-segmented summary was uncorrectable and an emptied
  * one uncleanable.
+ * Issue #637 makes `removeBullet` ENTRY-AWARE. Every other override map is
+ * keyed by `BulletObservation.index` against the FROZEN base parse, which a
+ * user-ADDED bullet has no entry in — so removing one was silently inert. It
+ * now splices the bullet out of its `addedBullets` bucket instead, which is the
+ * only place an added bullet exists, and `pruneEmptyAddedEntries` grew a
+ * per-entry hold so the removal's Undo strip survives the newly-reachable
+ * prune.
  * Overrides are held in component state and lost on reset — no persistence
  * is expected or provided.
  *
@@ -32,6 +39,7 @@ import {
   type BulletUndoTargets,
 } from "../lib/rewrite-review/undo-batch.ts";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
+import { removeAddedBulletLine } from "../lib/edit/added-bullets.ts";
 import {
   addCategory as addSkillCategoryTx,
   addSkillToCategory as addSkillToCategoryTx,
@@ -281,9 +289,42 @@ export function isAddedEntryEmpty(
  */
 export type AddedBullets = Record<string, string[]>;
 
+/** Prefix of every ADDED entry's id. The one place the two bullet-key
+ *  namespaces are told apart — see {@link isAddedEntryKey}. */
+const ADDED_ENTRY_ID_PREFIX = "added:";
+
 /** The stable bullet key for a PARSED entry at `index` within `section`. */
 export function parsedEntryKey(section: AddableSection, index: number): string {
   return `${section}:${index}`;
+}
+
+/**
+ * True when `entryKey` names a user-ADDED entry rather than a parsed one.
+ *
+ * Load-bearing for bullet removal (#637): an added entry's description is built
+ * SOLELY from its `addedBullets` bucket (`pushAddedEntry`), so every bullet
+ * rendered under it is an added bullet and a removal there must never fall
+ * through to the observation-indexed `removedBullets` path. A parsed entry
+ * carries both kinds, so a removal there falls through when the bucket has no
+ * matching line.
+ */
+export function isAddedEntryKey(entryKey: string): boolean {
+  return entryKey.startsWith(ADDED_ENTRY_ID_PREFIX);
+}
+
+/**
+ * Identifies the user-ADDED bullet line a removal targets: the bucket its entry
+ * owns, plus the bullet's own (pre-override) text. `removeBullet` takes this
+ * alongside the `BulletObservation.index` because the index alone cannot reach
+ * an added bullet — see `added-bullets.ts`.
+ */
+export interface AddedBulletRef {
+  /** The `addedBullets` bucket this row's entry owns — an added entry's `id`,
+   *  or the entry's {@link parsedEntryKey}. */
+  entryKey: string;
+  /** The bullet's `BulletObservation.text`, i.e. the line as it sits in the
+   *  bucket. NOT the `bulletOverrides` display text. */
+  text: string;
 }
 
 // ── Profile-link overrides (#427, consolidates #335) ──────────────────────────
@@ -401,8 +442,17 @@ export interface EditableParse {
    *  keyed by BulletObservation.index — folded by applyOverrides to drop the
    *  line from the graded pool, rawText, and the role description. */
   removedBullets: ReadonlySet<number>;
-  /** Drop a parsed bullet by its BulletObservation.index. Idempotent. */
-  removeBullet: (index: number) => void;
+  /**
+   * Drop one bullet.
+   *
+   * `index` is its `BulletObservation.index`, which reaches PARSED bullets only
+   * — `applyOverrides` resolves it against the frozen base-parse observations.
+   * `added` additionally identifies the row's `addedBullets` bucket + line, so a
+   * user-ADDED bullet (which has no base observation) is spliced out of that
+   * bucket instead; without it such a removal is silently inert (#637). Pass it
+   * whenever the caller knows which entry owns the row. Idempotent.
+   */
+  removeBullet: (index: number, added?: AddedBulletRef) => void;
   /** Override map for education entries, keyed by education array index. */
   educationOverrides: Record<number, EducationFieldOverrides>;
   /** Update one field on a specific education entry by its array index.
@@ -433,8 +483,17 @@ export interface EditableParse {
   /** Drop every EMPTY user-added entry in a section — one the user opened with
    *  "+ Add …" and left with no populated field and no bullets (#379). Called
    *  when focus leaves the section, so a blank ghost entry never persists in the
-   *  list, the score, or the exported PDF. No-op when nothing is empty. */
-  pruneEmptyAddedEntries: (section: AddableSection) => void;
+   *  list, the score, or the exported PDF. No-op when nothing is empty.
+   *
+   *  `isHeld` spares individual entries by id (#637): once removing an added
+   *  role's last bullet genuinely empties it, this prune would unmount the very
+   *  `RoleEntry` hosting that removal's "Removed · Undo" strip, taking the undo
+   *  with it. The hold is PER ENTRY, not per section, so an empty SIBLING with
+   *  no live undo is still dropped in the same pass. */
+  pruneEmptyAddedEntries: (
+    section: AddableSection,
+    isHeld?: (entryId: string) => boolean,
+  ) => void;
   /** Edit one header field on an added entry. */
   setEntryField: (id: string, field: AddedEntryField, value: string) => void;
   /** Bullet lines appended to entries, keyed by entry key (parsedEntryKey or
@@ -566,14 +625,33 @@ export function useEditableParse(): EditableParse {
   );
   const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
   const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
-  // Latest bullets, readable synchronously inside `pruneEmptyAddedEntries` —
-  // which is called deferred (a tick after a blur), by which point an in-flight
-  // add-bullet may have landed. A render-time closure would read a stale map.
+  // Latest bullets, readable synchronously by every writer and by
+  // `pruneEmptyAddedEntries` — which is called deferred (a tick after a blur),
+  // by which point an in-flight add-bullet may have landed. A render-time
+  // closure would read a stale map. See `writeAddedBullets` below: this ref, not
+  // the state, is the source of PENDING truth. The render-phase assignment only
+  // re-syncs it with what React committed, which the writer already matches.
   const addedBulletsRef = useRef(addedBullets);
   addedBulletsRef.current = addedBullets;
   const [profileOverrides, setProfileOverrides] = useState<ProfileOverride[]>(
     [],
   );
+
+  // The ONE writer of `addedBullets`. The ref — not React state — is the source
+  // of pending truth: it is assigned synchronously here, before the setState, so
+  // a second write in the SAME tick composes on top of the first instead of on
+  // the last committed render. Mixing this with a functional updater elsewhere
+  // is what silently loses an edit: a literal write lands last and discards the
+  // queued updater, so `addBullet(id, x)` followed in one handler by a splicing
+  // `removeBullet(...)` dropped `x` entirely. `resolveSectionWrites` emits an
+  // `add` before a `remove` in ordinary pair order and the rewrite-apply loops
+  // (`SectionRewrite`, `ResumeRewriteProposed`) run every write synchronously,
+  // so that ordering is not exotic. Every writer routes through here and every
+  // one computes its `next` from `addedBulletsRef.current`.
+  const writeAddedBullets = useCallback((next: AddedBullets) => {
+    addedBulletsRef.current = next;
+    setAddedBullets(next);
+  }, []);
   // Monotonic source of stable added-entry ids. A ref (not state) because a new
   // id must not itself trigger a re-render, and the value need only be unique
   // within the session — never reset, even across resetAll.
@@ -643,14 +721,36 @@ export function useEditableParse(): EditableParse {
     [],
   );
 
-  const removeBullet = useCallback((index: number) => {
-    setRemovedBullets((prev) => {
-      if (prev.has(index)) return prev;
-      const next = new Set(prev);
-      next.add(index);
-      return next;
-    });
-  }, []);
+  const removeBullet = useCallback(
+    (index: number, added?: AddedBulletRef) => {
+      if (added !== undefined) {
+        // Try the added-bullets bucket FIRST: an added bullet exists nowhere
+        // else, so `index` (a re-graded observation index) cannot reach it
+        // (#637).
+        const prev = addedBulletsRef.current;
+        const next = removeAddedBulletLine(prev, added.entryKey, added.text);
+        if (next !== prev) {
+          writeAddedBullets(next);
+          return;
+        }
+        // No matching line. Under an ADDED entry that means the bullet is
+        // already gone (its description is built solely from this bucket), so
+        // there is nothing left to remove — and falling through would push a
+        // now-stale observation index into `removedBullets`, where it can
+        // collide with an UNRELATED base-parse bullet once earlier removals
+        // have re-indexed the pool. A parsed entry legitimately carries
+        // non-added bullets too, so only that case falls through.
+        if (isAddedEntryKey(added.entryKey)) return;
+      }
+      setRemovedBullets((prev) => {
+        if (prev.has(index)) return prev;
+        const next = new Set(prev);
+        next.add(index);
+        return next;
+      });
+    },
+    [writeAddedBullets],
+  );
 
   const setEducationField = useCallback(
     (
@@ -780,33 +880,41 @@ export function useEditableParse(): EditableParse {
   );
 
   const addEntry = useCallback((section: AddableSection) => {
-    const id = `added:${idCounter.current++}`;
+    const id = `${ADDED_ENTRY_ID_PREFIX}${idCounter.current++}`;
     setAddedEntries((prev) => [...prev, { id, section, title: "" }]);
     return id;
   }, []);
 
-  const removeEntry = useCallback((id: string) => {
-    setAddedEntries((prev) => prev.filter((e) => e.id !== id));
-    setAddedBullets((prev) => {
-      if (!(id in prev)) return prev;
+  const removeEntry = useCallback(
+    (id: string) => {
+      setAddedEntries((prev) => prev.filter((e) => e.id !== id));
+      const prev = addedBulletsRef.current;
+      if (!(id in prev)) return;
       const next = { ...prev };
       delete next[id];
-      return next;
-    });
-  }, []);
+      writeAddedBullets(next);
+    },
+    [writeAddedBullets],
+  );
 
-  const pruneEmptyAddedEntries = useCallback((section: AddableSection) => {
-    const bullets = addedBulletsRef.current;
-    setAddedEntries((prev) => {
-      const kept = prev.filter(
-        (e) => e.section !== section || !isAddedEntryEmpty(e, bullets),
-      );
-      // An empty entry has no bullets by definition, so `addedBullets` needs no
-      // cleanup here (unlike `removeEntry`). Preserve identity when nothing
-      // changed so an idle blur doesn't churn a re-render.
-      return kept.length === prev.length ? prev : kept;
-    });
-  }, []);
+  const pruneEmptyAddedEntries = useCallback(
+    (section: AddableSection, isHeld?: (entryId: string) => boolean) => {
+      const bullets = addedBulletsRef.current;
+      setAddedEntries((prev) => {
+        const kept = prev.filter(
+          (e) =>
+            e.section !== section ||
+            !isAddedEntryEmpty(e, bullets) ||
+            isHeld?.(e.id) === true,
+        );
+        // An empty entry has no bullets by definition, so `addedBullets` needs
+        // no cleanup here (unlike `removeEntry`). Preserve identity when nothing
+        // changed so an idle blur doesn't churn a re-render.
+        return kept.length === prev.length ? prev : kept;
+      });
+    },
+    [],
+  );
 
   const setEntryField = useCallback(
     (id: string, field: AddedEntryField, value: string) => {
@@ -817,14 +925,18 @@ export function useEditableParse(): EditableParse {
     [],
   );
 
-  const addBullet = useCallback((entryKey: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setAddedBullets((prev) => ({
-      ...prev,
-      [entryKey]: [...(prev[entryKey] ?? []), trimmed],
-    }));
-  }, []);
+  const addBullet = useCallback(
+    (entryKey: string, text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const prev = addedBulletsRef.current;
+      writeAddedBullets({
+        ...prev,
+        [entryKey]: [...(prev[entryKey] ?? []), trimmed],
+      });
+    },
+    [writeAddedBullets],
+  );
 
   // ── Rewrite-batch undo primitives (issue 510) ─────────────────────────────
   // The inverses of removeBullet / addBullet. Deliberately NOT on the public
@@ -844,17 +956,15 @@ export function useEditableParse(): EditableParse {
 
   const replaceAddedBullets = useCallback(
     (entryKey: string, bullets: readonly string[]) => {
-      setAddedBullets((prev) => {
-        const next = { ...prev };
-        // An empty list must DELETE the bucket, not leave `{key: []}` behind —
-        // `hasEdits` keys off `Object.keys(addedBullets).length`, so a stray
-        // empty bucket would leave the résumé permanently "dirty" after undo.
-        if (bullets.length === 0) delete next[entryKey];
-        else next[entryKey] = [...bullets];
-        return next;
-      });
+      const next = { ...addedBulletsRef.current };
+      // An empty list must DELETE the bucket, not leave `{key: []}` behind —
+      // `hasEdits` keys off `Object.keys(addedBullets).length`, so a stray
+      // empty bucket would leave the résumé permanently "dirty" after undo.
+      if (bullets.length === 0) delete next[entryKey];
+      else next[entryKey] = [...bullets];
+      writeAddedBullets(next);
     },
-    [],
+    [writeAddedBullets],
   );
 
   // Live edit state readable synchronously at capture time. Refs, not the
@@ -952,9 +1062,12 @@ export function useEditableParse(): EditableParse {
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
     setSummaryOverride(undefined);
     setAddedEntries([]);
-    setAddedBullets({});
+    // Through the writer, so the ref is cleared too — otherwise a reset leaves
+    // the pending-truth ref holding the pre-reset buckets, and the next
+    // `addBullet`/`removeBullet` in that same tick would resurrect them.
+    writeAddedBullets({});
     setProfileOverrides([]);
-  }, []);
+  }, [writeAddedBullets]);
 
   const snapshot = useMemo<EditSnapshot>(
     () => ({

@@ -24,15 +24,21 @@
  * passed in as `removeControl`. See that module's docblock for why.
  */
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { roleLabel } from "../../lib/score/group-bullets.ts";
 import { EditableField } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
 import type {
+  AddedBulletRef,
   ExperienceFieldOverrides,
   BulletOverrides,
 } from "../../hooks/useEditableParse.ts";
+import { isAddedEntryKey } from "../../hooks/useEditableParse.ts";
+import {
+  useHoldWhile,
+  type AddedEntryPruneHold,
+} from "../../hooks/useAddedEntryPruneHold.ts";
 import {
   useSectionRewrite,
   type SectionRewriteApply,
@@ -253,10 +259,20 @@ interface RoleEntryProps {
   /** Append a new bullet to this role (#180-followup). Renders a "+ Add bullet"
    *  affordance under the bullet list when provided. */
   onAddBullet?: (text: string) => void;
-  /** Drop a parsed bullet by its BulletObservation.index (#211). Required —
-   *  alongside onBulletChange + onAddBullet — to wire the section-rewrite
-   *  per-bullet Apply (accept/reject/edit writes back here). */
-  onRemoveBullet?: (index: number) => void;
+  /** Drop a bullet by its BulletObservation.index (#211). Required — alongside
+   *  onBulletChange + onAddBullet — to wire the section-rewrite per-bullet
+   *  Apply (accept/reject/edit writes back here). The optional second argument
+   *  identifies the added-bullets bucket + line, which is the ONLY way to reach
+   *  a user-ADDED bullet (#637); this component supplies it from `entryKey`. */
+  onRemoveBullet?: (index: number, added?: AddedBulletRef) => void;
+  /** This role's `addedBullets` bucket — its `AddedEntry.id` when the user
+   *  added the role, else its `parsedEntryKey`. Absent for the "Other bullets"
+   *  bucket, which owns no entry. */
+  entryKey?: string;
+  /** Per-entry stay of execution over the section's empty-added-entry prune
+   *  (#637). This role registers its own strip's pending state; the section
+   *  hands the same registry's `isHeld` to `pruneEmptyAddedEntries`. */
+  pruneHold?: AddedEntryPruneHold;
   /** Snapshot the slots a rewrite batch will write, so the whole batch can be
    *  reversed in one action (issue 510). Omitted → no Undo is offered. */
   captureUndo?: SectionRewriteApply["captureUndo"];
@@ -288,16 +304,38 @@ export function RoleEntry({
   captureUndo,
   onRemove,
   removeControl,
+  entryKey,
+  pruneHold,
 }: RoleEntryProps) {
+  // Tag every remove issued from this role's own rows with the bucket that
+  // owns them, so a USER-ADDED bullet is spliced out of `addedBullets` rather
+  // than filed under an observation index that reaches nothing (#637).
+  const removeOwnBullet = useCallback(
+    (index: number, text: string) =>
+      onRemoveBullet?.(
+        index,
+        entryKey === undefined ? undefined : { entryKey, text },
+      ),
+    [onRemoveBullet, entryKey],
+  );
   // Per-bullet remove confirmation (#626), mirroring SectionRewrite's own
   // applied/undone strip so a mis-click (or an empty-commit auto-remove, see
   // ResumeBulletRow) is recoverable the same way a rewrite-review batch is.
   // Owned by an ancestor for a group that can vanish on its last remove; owned
   // here otherwise. The hook runs unconditionally either way (hooks rule); its
   // result is simply unused when the ancestor supplied one.
-  const ownRemove = useBulletRemoveStatus(onRemoveBullet, captureUndo);
+  const ownRemove = useBulletRemoveStatus(removeOwnBullet, captureUndo);
   const removes = removeControl ?? ownRemove;
   const hostsStrip = removeControl === undefined;
+
+  // Half 2 of #637: hold this entry back from the section-exit prune while its
+  // own strip is live, so the undo the remove just armed survives the tick.
+  // Only a user-ADDED entry can be pruned at all, so only its id is ever held.
+  useHoldWhile(
+    pruneHold,
+    entryKey !== undefined && isAddedEntryKey(entryKey) ? entryKey : undefined,
+    hostsStrip && removes.pending,
+  );
 
   // Bullet display text honors #82 overrides — section rewrite must see the
   // text the user actually edited, not the stale parsed text.
@@ -310,17 +348,35 @@ export function RoleEntry({
   // Memoized so the proposal's decision state doesn't reset on every render.
   const obsIndices = group.bullets.map((b) => b.index);
   const obsIndicesKey = obsIndices.join(",");
+  // Latest bullets, read at CALL time by the rewrite-apply below: the memo is
+  // keyed on `obsIndicesKey`, which cannot see a text change that leaves the
+  // index set alone, and the added-bullet splice matches on text (#637).
+  const bulletsRef = useRef(group.bullets);
+  bulletsRef.current = group.bullets;
   const rewriteApply = useMemo<SectionRewriteApply | undefined>(() => {
     if (!onBulletChange || !onAddBullet || !onRemoveBullet) return undefined;
     return {
       obsIndices,
       onReplace: (index, text) => onBulletChange(index, text),
-      onRemove: (index) => onRemoveBullet(index),
+      // Same entry-aware removal the per-row control uses (#637) — an accepted
+      // "remove this bullet" on a user-added role must splice the bucket too.
+      onRemove: (index) => {
+        const text = bulletsRef.current.find((b) => b.index === index)?.text;
+        if (text === undefined) onRemoveBullet(index);
+        else removeOwnBullet(index, text);
+      },
       onAdd: (text) => onAddBullet(text),
       captureUndo,
     };
     // obsIndices identity churns each render; key on its stable string form.
-  }, [obsIndicesKey, onBulletChange, onAddBullet, onRemoveBullet, captureUndo]);
+  }, [
+    obsIndicesKey,
+    onBulletChange,
+    onAddBullet,
+    onRemoveBullet,
+    removeOwnBullet,
+    captureUndo,
+  ]);
   // The "Rewrite section" trigger sits on the header row (right of the title);
   // its result panel renders full-width below the bullet list.
   const { trigger: rewriteTrigger, panel: rewritePanel } = useSectionRewrite(
@@ -358,7 +414,7 @@ export function RoleEntry({
                 }
                 onRemove={
                   onRemoveBullet
-                    ? () => removes.removeBullet(b.index)
+                    ? () => removes.removeBullet(b.index, b.text)
                     : undefined
                 }
               />

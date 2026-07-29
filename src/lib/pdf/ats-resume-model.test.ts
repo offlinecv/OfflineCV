@@ -419,6 +419,62 @@ describe("buildAtsResumeModel", () => {
     expect(exp.entries[0].subLine).toBeUndefined();
   });
 
+  it("pins the separator contract: middot header join vs comma empty-company join (#620)", () => {
+    // Standard shape: title/company-location/team all join with " · ", and
+    // company/location join with ", " — the exporter's fixed, parser-coupled
+    // separator set (docs/canonical-resume-model.md §10). A future "normalize
+    // the separators" refactor should fail THIS assertion, not silently
+    // re-route fields on a real résumé.
+    const standard = buildAtsResumeModel(
+      makeResult({
+        experience: [
+          {
+            title: "Senior PM",
+            company: "Acme",
+            location: "Chicago, IL",
+            team: "Growth",
+            start_date: "2021",
+            end_date: "2024",
+            description: "Owned the roadmap",
+          },
+        ],
+      }),
+      makeScore([]),
+    );
+    const standardExp = standard.sections.find(
+      (s) => s.heading === "Experience",
+    )!;
+    expect(standardExp.entries[0].headerLine).toBe(
+      "Senior PM · Acme, Chicago, IL · Growth",
+    );
+
+    // #466 empty-company branch: with `company` empty and `team` set, the
+    // header joins Title and Team with a COMMA (not " · ") so the re-parser's
+    // role-comma split routes the segment back into `team` instead of
+    // mislabeling it as the company.
+    const emptyCompany = buildAtsResumeModel(
+      makeResult({
+        experience: [
+          {
+            title: "Chair",
+            company: "",
+            team: "Leadership Council",
+            start_date: "2021",
+            end_date: "2024",
+            description: "Ran the committee",
+          },
+        ],
+      }),
+      makeScore([]),
+    );
+    const emptyCompanyExp = emptyCompany.sections.find(
+      (s) => s.heading === "Experience",
+    )!;
+    expect(emptyCompanyExp.entries[0].headerLine).toBe(
+      "Chair, Leadership Council",
+    );
+  });
+
   it("fully display-formats contact links (scheme + www stripped) so the www round-trip holds (#425)", () => {
     const result = makeResult({
       linkedin_url: "https://www.linkedin.com/in/janesmith",
