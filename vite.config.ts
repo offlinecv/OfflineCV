@@ -9,6 +9,23 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 
+// Dev-server TLS opt-out. `basicSsl()` below makes `npm run dev` serve HTTPS,
+// which is what a LAN client needs for WebGPU (see the plugin's comment) — but
+// it also means a plain `http://<host>.local:5173/` from another machine simply
+// does not connect: the port speaks TLS and the browser is speaking cleartext.
+// The self-signed cert is the other half of the friction — every LAN visitor
+// has to click through an interstitial, which is a bad first ten seconds when
+// you are demoing to someone.
+//
+// `OFFLINECV_DEV_HTTP=1 npm run dev` (or `npm run dev:http`) drops the plugin
+// so the same URL works over http. The trade-off is real and one-directional:
+// over http a non-localhost origin is NOT a secure context, so `navigator.gpu`
+// is hidden and every on-device-AI surface degrades to "no-webgpu" — the "AI
+// feedback" tab renders its unavailable notice instead of running. Parse,
+// score, edit, export, JD-match keyword fallback and job search all work.
+// Default stays HTTPS so nobody loses WebGPU by accident.
+const DEV_HTTP = process.env.OFFLINECV_DEV_HTTP === "1";
+
 // Token-values swap seam. `src/styles.css` imports the raw `--color-*` values
 // via the bare `@design-tokens` specifier; this alias points it at the in-tree
 // default (`src/design-system/styles/tokens.css`), so the standalone build is
@@ -136,7 +153,12 @@ export default defineConfig({
     // disables (detectWebGpu → "no-webgpu"). TLS gives every LAN client a
     // secure context; the cert is untrusted, so each client accepts a one-time
     // browser warning — encryption and the secure-context flag hold regardless.
-    basicSsl(),
+    //
+    // Spread, not a ternary returning `false`: Vite tolerates falsy plugin
+    // entries, but the array type here is `Plugin[]` and a `false` member
+    // fails `tsc -b` in `verify`. See DEV_HTTP at the top of this file for
+    // when and why you would want it gone.
+    ...(DEV_HTTP ? [] : [basicSsl()]),
     tailwindcss(),
     react(),
     emitVersionJson(APP_VERSION),
