@@ -1262,8 +1262,13 @@ export function ReconstructedResume({
     >
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          {/* Deliberately NOT the tab label ("Your resume"). A heading that
+              repeats its own tab label is noise, and it makes every
+              `toContain("Your resume")` assertion ambiguous about which
+              element it matched. This states what the section IS; the tab
+              states where you are. */}
           <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-            Reconstructed resume
+            What the parser read
           </h2>
           <div className="flex flex-wrap items-center gap-2">
             <ReportDownloadControl result={result} score={score} />

@@ -4,7 +4,7 @@
 // @vitest-environment jsdom
 
 /**
- * Render coverage for LlmEscapeHatchBanner (#243) — the degenerate-case recovery
+ * Render coverage for LlmEscapeHatchPanel (#243) — the degenerate-case recovery
  * CTA. Drives a fake controller through each status so every render branch plus
  * the `ctaLabel` lookup executes, and asserts the done state fires `onRecovered`.
  * Raw createRoot, matching the other feature render tests.
@@ -14,7 +14,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { LlmEscapeHatchBanner } from "./LlmEscapeHatchBanner.tsx";
+import { LlmEscapeHatchPanel } from "./LlmEscapeHatchPanel.tsx";
 import type { EscapeHatchController } from "../../hooks/useLlmEscapeHatch.ts";
 import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
 
@@ -48,7 +48,7 @@ function render(
   root = createRoot(container);
   act(() => {
     root.render(
-      createElement(LlmEscapeHatchBanner, { controller: controller(status), onRecovered }),
+      createElement(LlmEscapeHatchPanel, { controller: controller(status), onRecovered }),
     );
   });
   return container;
@@ -59,7 +59,7 @@ afterEach(() => {
   container.remove();
 });
 
-describe("LlmEscapeHatchBanner", () => {
+describe("LlmEscapeHatchPanel", () => {
   it("renders the idle CTA", () => {
     expect(render({ kind: "idle" }).textContent).toContain("Try a local AI pass");
   });
@@ -97,5 +97,19 @@ describe("LlmEscapeHatchBanner", () => {
     const onRecovered = vi.fn();
     render({ kind: "done", llmParsed }, onRecovered);
     expect(onRecovered).toHaveBeenCalledWith(llmParsed);
+  });
+
+  it("collapses to a confirmation row once the pass has completed", () => {
+    // `done` hands the tab back to ResumeQualityPanel, so the offer must stop
+    // occupying it — but the component stays MOUNTED (the effect above is what
+    // reports the recovered parse upward), so it has to shrink itself rather
+    // than be unmounted by the caller.
+    const text = render({ kind: "done", llmParsed }).textContent ?? "";
+    expect(text).toContain("Recovered with on-device AI");
+    expect(text).toContain("Re-run AI recovery");
+    // The offer's heading and explainer are gone — no second primary CTA
+    // sitting above the quality panel's own.
+    expect(text).not.toContain("Not everything parsed cleanly");
+    expect(text).not.toContain("One-time");
   });
 });

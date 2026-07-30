@@ -55,11 +55,20 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
       }}
       className={[
         "flex cursor-pointer flex-col items-center justify-center gap-2",
-        "rounded-xl border-2 border-dashed px-6 py-12 text-center",
+        "rounded-xl border-2 px-6 py-14 text-center",
         "transition-colors",
+        // Accented at rest, not neutral (user testing, Jul 2026): the pre-drop
+        // screen previously rendered every block on the same neutral surface,
+        // so the one thing a first-time visitor must do did not read as the
+        // primary action. This is now the only accent-bordered, accent-filled
+        // surface above the fold — the hero above it is plain text.
+        //
+        // Drag feedback is dashed → solid, not colour alone: the border colour
+        // is already accent at rest, so a colour-only drag state would be
+        // invisible in a greyscale render (and to a red/green-blind user).
         dragOver
-          ? "border-content-primary bg-surface-hover"
-          : "border-border hover:border-border-strong",
+          ? "border-solid border-accent-primary bg-surface-hover"
+          : "border-dashed border-accent-primary bg-accent-forward-bg hover:border-accent-primary-hover",
         disabled && "cursor-not-allowed opacity-60",
       ]
         .filter(Boolean)
@@ -74,8 +83,23 @@ export function DropZone({ onFile, disabled, status }: DropZoneProps) {
         disabled={disabled}
         onChange={(e) => acceptFile(e.target.files?.[0] ?? null)}
       />
-      <p className="text-sm font-medium">
-        Drop a resume PDF or DOCX here, or click to pick one
+      {/* Size/weight step is deliberate: this prompt has to out-rank the hero
+          headline above it, and at `text-sm font-medium` it out-ranked nothing.
+          The privacy line stays attached to the action it qualifies.
+
+          On the repo's type scale, not beside it: `sm:text-xl` (20px) was the
+          only `text-xl` in all of src/ — every other heading in the app steps
+          14 → 16 → 18 → 24 → 30, so a lone 20px was an arbitrary size in the
+          sense the Font Size Scale rule means. `sm:text-2xl` lands on the step
+          the app already uses, and 24px is also what a 56px-padded box needs to
+          stop reading as an empty panel with a caption. The hero headline is
+          still one step above at `sm:text-3xl`; the drop zone leads on colour
+          and fill, which is the contrast that survives a greyscale render. */}
+      <p className="text-lg font-semibold text-content-primary sm:text-2xl">
+        Drop your resume here
+      </p>
+      <p className="text-sm text-content-secondary">
+        PDF or DOCX &middot; or click to pick a file
       </p>
       <p className="text-sm text-content-muted">
         Your file stays in this browser tab.

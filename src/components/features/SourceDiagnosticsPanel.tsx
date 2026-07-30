@@ -2,7 +2,8 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * SourceDiagnosticsPanel — the "Source & diagnostics" primary tab body (#263).
+ * SourceDiagnosticsPanel — the "Raw text & flags" primary tab body (#263;
+ * the tab's id is still `diagnostics`).
  *
  * Collapses the three former evidence tabs (Source PDF, Extracted text, Layout
  * flags) into one primary tab. A nested segmented control switches between the
@@ -49,7 +50,7 @@ export function SourceDiagnosticsPanel({
     <div className="flex flex-col gap-4">
       <div
         role="group"
-        aria-label="Source & diagnostics views"
+        aria-label="Raw text & flags views"
         className="inline-flex gap-1 self-start rounded-md border border-border-light bg-surface-subtle p-1"
       >
         <SegmentButton

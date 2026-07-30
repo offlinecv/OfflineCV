@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * CritiquePanel — body-only "Resume quality" results (issue #244).
+ * CritiquePanel — body-only "AI feedback" results (issue #244).
  *
  * Exports `CritiqueResults`, a display-only component that renders the
  * on-device LLM content-quality critique body: summary feedback card (if
@@ -16,7 +16,7 @@
  * instead of the overclaiming "All bullets look strong" message (AC #6).
  *
  * Bullet finding rows include a "Rewrite this section →" nudge that
- * navigates to the "Reconstructed resume" tab, where the per-role wand
+ * navigates to the "Your resume" tab, where the per-role wand
  * button (useSectionRewrite) already lives.
  *
  * Design rules (CLAUDE.md):
@@ -51,7 +51,7 @@ function BulletFindingRow({
   onGoToRewrite,
 }: {
   finding: BulletFinding;
-  /** Switch to the "Reconstructed resume" tab where the rewrite affordance lives. */
+  /** Switch to the "Your resume" tab where the rewrite affordance lives. */
   onGoToRewrite?: () => void;
 }) {
   const { issue, bullet, suggestion } = finding;
@@ -81,7 +81,7 @@ function BulletFindingRow({
           size="sm"
           onClick={onGoToRewrite}
           className="self-start text-2xs font-medium text-accent-primary"
-          aria-label="Go to Reconstructed resume tab to rewrite this bullet"
+          aria-label="Go to the Your resume tab to rewrite this bullet"
         >
           Rewrite this section →
         </Button>

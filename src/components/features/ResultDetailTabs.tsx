@@ -8,10 +8,13 @@ import { FindJobsLauncher } from "./FindJobsLauncher.tsx";
 import { ResumeQualityPanel } from "./ResumeQualityPanel.tsx";
 import { SourceDiagnosticsPanel } from "./SourceDiagnosticsPanel.tsx";
 import { WebGpuUnavailableNotice } from "./WebGpuUnavailableNotice.tsx";
+import { LlmEscapeHatchPanel } from "./LlmEscapeHatchPanel.tsx";
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
+import type { EscapeHatchController } from "../../hooks/useLlmEscapeHatch.ts";
+import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
 
@@ -25,6 +28,14 @@ interface ResultDetailTabsProps {
   edit: EditableParse;
   jdContext?: string;
   analysis: AnalysisController;
+  /**
+   * Degenerate-parse recovery pass (#243), owned by `ParsedCard` because its
+   * result re-grades the score card above this one. Rendered inside the
+   * on-device-AI tab rather than as its own banner — see the label logic below.
+   */
+  escapeHatch: EscapeHatchController;
+  /** Forwarded to the recovery banner; `ParsedCard` swaps in the LLM parse. */
+  onRecovered: (llmParsed: LlmParsedResume) => void;
   triggerCount: number;
 }
 
@@ -37,13 +48,15 @@ export function ResultDetailTabs({
   edit,
   jdContext,
   analysis,
+  escapeHatch,
+  onRecovered,
   triggerCount,
 }: ResultDetailTabsProps) {
   // `tab` state lives here — only used within this component, not in ParsedCard.
   const [tab, setTab] = useState("reconstructed");
 
-  // The "Resume Quality" tab is the canonical on-device-AI surface (#276). It
-  // shows whenever there's résumé text to analyze — either running the live
+  // The on-device-AI tab (id `quality`) is the canonical on-device-AI surface
+  // (#276). It shows whenever there's résumé text to analyze — either running the live
   // analysis (WebGPU available) OR, when WebGPU can't run here, explaining that
   // in place instead of silently vanishing. `capability === null` (still
   // detecting) and "no text" both leave the tab absent, as before.
@@ -53,7 +66,43 @@ export function ResultDetailTabs({
     analysis.capability !== "available"
       ? analysis.capability
       : null;
-  const showQualityTab = analysis.isAvailable || unavailableCapability !== null;
+  // `escapeHatch.isAvailable` already IMPLIES `analysis.isAvailable` — both gate
+  // on `capability === "available"` and on the identical `hasText` expression
+  // over the same `result`, and the hatch adds `suggestedEscalation === "llm"`
+  // on top. The `||` is therefore redundant today and deliberate anyway: the two
+  // gates live in two hooks that can drift, and the failure mode if they do is
+  // an unreachable recovery offer — the exact thing this tab now owns.
+  const showQualityTab =
+    analysis.isAvailable ||
+    unavailableCapability !== null ||
+    escapeHatch.isAvailable;
+
+  // The recovery offer is what this tab LEADS with while it stands, so the tab
+  // label is the offer (user request, Jul 2026: replace the label "when
+  // applicable, and use 'Local AI feedback' when it is not"). That buys the
+  // offer a permanent slot the layout was already paying for, instead of a
+  // banner above the score — but it also means the label is the only pre-click
+  // signal that the parse was degenerate, which is why it takes the warn mark
+  // too.
+  //
+  // Gated on `!== "done"`: the hatch stays `isAvailable` after a successful
+  // recovery (it is keyed on the ORIGINAL result so the pass can be re-run), so
+  // without this the tab would keep inviting a pass the user has already taken.
+  const recoveryOffered =
+    escapeHatch.isAvailable && escapeHatch.status.kind !== "done";
+
+  // "Local AI feedback", not "AI feedback": in the tab strip the word that
+  // matters is the one saying the model runs here. The panel's own heading and
+  // the `description` below carry the rest.
+  const qualityLabel = recoveryOffered
+    ? "Try a local AI pass"
+    : "Local AI feedback";
+
+  const qualityDescription = recoveryOffered
+    ? "some of your file didn't parse cleanly — a local model can re-read it"
+    : analysis.isAvailable
+      ? "on-device AI review of your wording"
+      : "on-device AI review — needs browser support";
 
   return (
     /* Detail sits behind tabs in its own card so only one panel shows at a
@@ -65,16 +114,26 @@ export function ResultDetailTabs({
       <Tabs id="result" value={tab} onValueChange={setTab}>
         {/* Primary tabs ordered by value: insight first, evidence last
             (#263, #273). The evidence tab is always present and always last, so
-            the "Source & diagnostics" tab no longer shifts position when the
-            conditional Resume Quality tab is absent. The layout-flag count badge
+            the "Raw text & flags" tab no longer shifts position when the
+            conditional on-device-AI tab is absent. The layout-flag count badge
             is promoted to this parent tab so the warning count stays visible
-            without opening it. */}
+            without opening it.
+
+            Labels name what the user GETS, in words they arrive with. The
+            previous set — "Reconstructed resume", "Resume quality", "Source &
+            diagnostics" — was our internal vocabulary: in user testing (Jul
+            2026) a reader who knows the product still had to open each tab to
+            learn what it was ("what is a reconstructed resume? what is a
+            parser?"). The `description` subtitle (#519) carries the precise
+            meaning; the label only has to be decodable without clicking. Keep
+            the ids — they are the tab-switch contract with CritiquePanel and
+            ResumeQualityPanel's `onGoToRewrite`. */}
         <TabList aria-label="Parsed result views">
           <Tab
             id="reconstructed"
-            description="what a parser pulled out — edit it here"
+            description="what a parser read from your file — edit it here"
           >
-            Reconstructed resume
+            Your resume
           </Tab>
           <Tab
             id="find-jobs"
@@ -85,14 +144,16 @@ export function ResultDetailTabs({
           {showQualityTab && (
             <Tab
               id="quality"
-              warn={!analysis.isAvailable}
-              description={
-                analysis.isAvailable
-                  ? "on-device critique and rewrites"
-                  : "on-device critique — needs browser support"
+              warn={recoveryOffered || !analysis.isAvailable}
+              // Same dot, two meanings — so it says which. "setup needed" is
+              // right for the WebGPU case and wrong for the recovery one,
+              // where nothing is broken in the browser.
+              warnLabel={
+                recoveryOffered ? "parse needs attention" : "setup needed"
               }
+              description={qualityDescription}
             >
-              Resume quality
+              {qualityLabel}
             </Tab>
           )}
           <Tab
@@ -100,7 +161,7 @@ export function ResultDetailTabs({
             count={triggerCount}
             description="raw text, layout flags, what went wrong"
           >
-            Source &amp; diagnostics
+            Raw text &amp; flags
           </Tab>
         </TabList>
 
@@ -111,7 +172,7 @@ export function ResultDetailTabs({
               score={activeScore}
               edit={edit}
               jdContext={jdContext}
-              // #608: the critique the "Resume quality" tab is already showing
+              // #608: the critique the on-device-AI tab is already showing
               // feeds the rewrite, so clicking Rewrite acts on the findings the
               // user just read instead of discarding them. Only available once
               // the analysis has completed; every other status contributes
@@ -133,7 +194,35 @@ export function ResultDetailTabs({
           </TabPanel>
           {showQualityTab && (
             <TabPanel id="quality">
-              {analysis.isAvailable ? (
+              {/* One offer at a time. While recovery is on the table this tab
+                  shows ONLY the recovery panel: a wording critique of a parse
+                  the parser itself flagged as degenerate is close to
+                  worthless, and stacking both put two model-loading CTAs on
+                  one screen. Once the pass has run (or if it was never
+                  offered), the quality panel takes the tab back — with the
+                  recovery panel collapsed to its one-line confirmation above,
+                  because unmounting it on `done` would kill the effect that
+                  reports the recovered parse upward. */}
+              {/* The wrapper is unconditional on purpose, even though it is
+                  bare when `recoveryOffered`. Only the className varies, so
+                  React keeps the same element at this position and the panel
+                  stays mounted across the `done` transition. Gating the
+                  wrapper itself — rendering the panel bare in one branch and
+                  inside a div in the other — changes the element TYPE at this
+                  position at the moment recovery completes, which unmounts and
+                  remounts the panel in the render that fires `onRecovered`
+                  (see LlmEscapeHatchPanel's docblock). Not worth trading a
+                  documented mount invariant for one empty div. */}
+              {escapeHatch.isAvailable && (
+                <div className={recoveryOffered ? undefined : "mb-4"}>
+                  <LlmEscapeHatchPanel
+                    controller={escapeHatch}
+                    onRecovered={onRecovered}
+                  />
+                </div>
+              )}
+              {!recoveryOffered &&
+                (analysis.isAvailable ? (
                 /* onGoToRewrite: switch back to reconstructed tab where the
                    per-role wand button (#3 / useSectionRewrite) already lives.
                    The quality panel links each flagged bullet to this affordance
@@ -145,12 +234,15 @@ export function ResultDetailTabs({
                 />
               ) : (
                 /* WebGPU can't run here — explain in place instead of hiding
-                   the tab (#276). `unavailableCapability` is non-null whenever
-                   this branch renders (see showQualityTab). */
-                unavailableCapability && (
-                  <WebGpuUnavailableNotice capability={unavailableCapability} />
-                )
-              )}
+                   the tab (#276). Still guarded: `showQualityTab` now has a
+                   third opener (`escapeHatch.isAvailable`), and while that one
+                   implies `analysis.isAvailable` — so it takes the branch above,
+                   never this one — the guard is what makes that reasoning
+                   non-load-bearing. */
+                  unavailableCapability && (
+                    <WebGpuUnavailableNotice capability={unavailableCapability} />
+                  )
+                ))}
             </TabPanel>
           )}
           <TabPanel id="diagnostics">

@@ -2,16 +2,29 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * LlmEscapeHatchBanner — the degenerate-case recovery CTA (issue #243).
+ * LlmEscapeHatchPanel — the degenerate-case recovery offer (issue #243).
  *
- * Shown above the result tabs when the cascade returned a degenerate parse
- * (`suggestedEscalation === "llm"`) and WebGPU is available. Offers the user
- * an opt-in on-device LLM re-parse and renders the download progress while it
- * runs.
+ * Was `LlmEscapeHatchBanner`: a tinted, bordered banner rendered ABOVE the
+ * score card, so the first thing on the post-drop screen was our suggestion
+ * rather than the user's own result. It now renders as the body of the
+ * on-device-AI tab (`ResultDetailTabs`), and while the offer stands it is the
+ * ONLY thing in that tab — `ResumeQualityPanel` is withheld until the pass has
+ * run. Showing both put two model-loading CTAs on one screen, one of them
+ * still wrapped in banner chrome that belonged to the old placement (user
+ * testing, Jul 2026).
+ *
+ * So the shape here is deliberately `ResumeQualityPanel`'s, not a banner's:
+ * same `section` + heading + `max-w-prose` explainer + right-aligned primary
+ * Button. A user switching between the two states should see one surface
+ * change its offer, not two differently-dressed widgets.
  *
  * When the LLM pass completes, calls `onRecovered(llmParsed)` so the parent
  * (`ParsedCard` in `Result.tsx`) can substitute the LLM-parsed fields into the
  * result surface and show the "recovered with on-device AI" provenance badge.
+ * The panel stays mounted through `done` — that transition is what fires the
+ * callback, so a `status.kind !== "done"` mount gate in the parent would swap
+ * the panel out in the same render that produces the result and the callback
+ * would never fire. It collapses to a single confirmation row instead.
  *
  * Reuse analysis (CLAUDE.md 3-tier rule):
  *   - Primitive: `Button` (the opt-in CTA) — no raw `<button>`.
@@ -19,8 +32,8 @@
  *     and SectionRewrite) — no parallel progress component.
  *   - Semantic tokens only; no hardcoded hex or raw palette classes.
  *
- * Returns `null` when the controller flags the feature unavailable. Silent
- * absence — matches the rewrite and disagreement paths.
+ * Rendered only when the controller flags the feature available — the caller
+ * gates on `escapeHatch.isAvailable`, so there is no internal guard.
  */
 
 import { Button, ModelLoadProgress } from "@design-system";
@@ -41,20 +54,16 @@ function ctaLabel(status: EscapeHatchStatus): string {
   return CTA_LABELS[status.kind];
 }
 
-interface LlmEscapeHatchBannerProps {
+interface LlmEscapeHatchPanelProps {
   controller: EscapeHatchController;
   /** Called with the LLM-parsed result once the pass completes. */
   onRecovered: (llmParsed: LlmParsedResume) => void;
 }
 
-/**
- * The banner is only mounted when `controller.isAvailable` (the parent gates
- * on this), so no internal availability guard is needed.
- */
-export function LlmEscapeHatchBanner({
+export function LlmEscapeHatchPanel({
   controller,
   onRecovered,
-}: LlmEscapeHatchBannerProps) {
+}: LlmEscapeHatchPanelProps) {
   const { status } = controller;
 
   // Notify parent once per done-transition. The ref guard makes this one-shot:
@@ -73,14 +82,36 @@ export function LlmEscapeHatchBanner({
     }
   }, [status, onRecovered]);
 
+  // Post-recovery this collapses to one quiet row: the offer has been taken,
+  // the quality panel renders directly below it, and re-running is a rare
+  // repair action — a `link` Button, not a second primary CTA competing with
+  // the one in that panel.
+  if (status.kind === "done") {
+    return (
+      <div
+        role="status"
+        className="flex flex-wrap items-center justify-between gap-2"
+      >
+        <p className="text-sm text-feedback-success-text">
+          Recovered with on-device AI — your score and fields are updated.
+        </p>
+        <Button
+          variant="link"
+          size="sm"
+          onClick={() => void controller.run()}
+          disabled={controller.isBusy}
+          aria-label="Run the on-device AI recovery pass again"
+        >
+          {ctaLabel(status)}
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <div
-      role="region"
-      aria-label="AI recovery suggestion"
-      className="flex flex-col gap-2 rounded-lg border border-feedback-info-border bg-feedback-info-bg px-4 py-3"
-    >
+    <section aria-label="AI recovery suggestion" className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-1">
           {/*
             Headline copy must stay honest across every firing path in
             `chooseEscalation` (confidence.ts): hard failures (missing email,
@@ -93,13 +124,18 @@ export function LlmEscapeHatchBanner({
             neutrally: "not everything parsed cleanly" is true across all
             paths without misattributing content-quality issues to a parser
             failure.
+
+            Heading level and treatment match `ResumeQualityPanel`'s, since
+            the two alternate in the same tab body.
           */}
-          <p className="text-sm font-medium text-content-primary">
-            Not everything parsed cleanly.
-          </p>
-          <p className="text-sm text-content-tertiary">
-            Try a local AI pass? Runs entirely in your browser — nothing leaves
-            this tab. One-time ~1.2&nbsp;GB download, cached for next time.
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
+            Not everything parsed cleanly
+          </h2>
+          <p className="max-w-prose text-sm text-content-tertiary">
+            A small model running in this tab can re-read your file and rebuild
+            the fields the parser got wrong. Runs entirely in your browser —
+            nothing leaves this tab. One-time ~1.2&nbsp;GB download, cached for
+            next time.
           </p>
         </div>
         <Button
@@ -133,12 +169,6 @@ export function LlmEscapeHatchBanner({
           {status.message}
         </p>
       )}
-
-      {status.kind === "done" && (
-        <p className="text-sm text-feedback-success-text">
-          Recovered with on-device AI — result updated below.
-        </p>
-      )}
-    </div>
+    </section>
   );
 }

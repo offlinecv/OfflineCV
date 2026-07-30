@@ -5,7 +5,7 @@
  * WebGpuUnavailableNotice — the shared explainer that replaces the silent
  * `return null` when WebGPU isn't available (#276).
  *
- * Rendered as the body of the "Resume Quality" tab (the canonical on-device-AI
+ * Rendered as the body of the on-device-AI tab (the canonical on-device-AI
  * surface) when WebGPU can't run here — the tab used to vanish entirely. Instead
  * of a blank, the user gets: (1) a compact, capability-specific headline, (2)
  * reassurance that the core ATS score + parsed résumé are unaffected (on-device

@@ -11,7 +11,7 @@
  *
  * The shell (header, Analyze CTA, status lifecycle, empty-state copy) moved
  * into `ResumeQualityPanel`, which hosts both this component and
- * `CritiqueResults` under a single "Resume Quality" tab (#273).
+ * `CritiqueResults` under a single on-device-AI tab (#273).
  *
  * All helpers remain here: `DisagreementRow`, `HeuristicVsLlm`,
  * `headlineFor`, `sideValues`, `roleSides`, `pluralize`, and all the

@@ -12,7 +12,6 @@ import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
 import { isScoreRevealed } from "../lib/contact.ts";
 import { useResumeAnalysisLlm } from "../hooks/useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
-import { LlmEscapeHatchBanner } from "./features/LlmEscapeHatchBanner.tsx";
 import type { LlmParsedResume } from "../lib/webllm/parse-resume.ts";
 import { mergeLlmParse } from "../lib/webllm/merge-override.ts";
 import { ParsedHeader } from "./features/ParsedHeader.tsx";
@@ -92,7 +91,7 @@ function ParsedCard({
   const triggerCount = result.triggers.length;
 
   // Opt-in combined WebLLM analysis (#262, #273). One controller feeds the
-  // single "Resume Quality" tab (the LLM critique plus "What an ATS misses" as
+  // single on-device-AI tab (the LLM critique plus "What an ATS misses" as
   // a bottom section) from one inference. Lifted here so the tab is only
   // advertised on WebGPU-capable browsers with extractable text; on everything
   // else the tab (and panel) is silently absent. The panel's single CTA triggers
@@ -103,6 +102,17 @@ function ParsedCard({
   // `result.suggestedEscalation === "llm"` AND WebGPU is available AND there is
   // text. When the user opts in and the pass completes, `llmOverride` is set and
   // the entire result surface re-renders from the LLM-parsed fields.
+  //
+  // The controller is created here (it must outlive a tab switch and it feeds
+  // `llmOverride`, which re-grades the score card below) but its BANNER now
+  // renders inside `ResultDetailTabs`' on-device-AI tab, not above this card.
+  // It used to be the first thing on the post-drop screen — a full-width
+  // primary-button banner sitting above the user's own score, so the page
+  // opened on our suggestion instead of their result (user testing, Jul 2026:
+  // "we should not have 'Try a local AI pass' so prominently at the top").
+  // The tab strip already reserves permanent space for the on-device-AI
+  // surface, so the offer moves into space the layout was paying for anyway
+  // and the tab's own label carries the signal. See ResultDetailTabs.
   const escapeHatch = useLlmEscapeHatch(result);
   // `llmOverride` is NOT keyed/reset on `result` change. Safe today because a new
   // file passes through the `parsing` phase, which unmounts `Result` and discards
@@ -163,15 +173,6 @@ function ParsedCard({
     // card below. The gap + each card's own border draws the separator the
     // single-card layout lacked (the tab strip reads as its own section).
     <div className="flex flex-col gap-4">
-      {/* Escape hatch banner — shown above the score card when the cascade
-          flagged a degenerate result and WebGPU is available (#243). */}
-      {escapeHatch.isAvailable && (
-        <LlmEscapeHatchBanner
-          controller={escapeHatch}
-          onRecovered={handleRecovered}
-        />
-      )}
-
       <Card className="flex flex-col gap-6 shadow-xs">
         <ParsedHeader
           isLlmRecovered={isLlmRecovered}
@@ -198,7 +199,7 @@ function ParsedCard({
           </p>
         )}
         {/* Star-rating feedback (#51). The "Report a parsing gap" affordance
-            lives in the "What an ATS misses" bottom section of the Resume Quality
+            lives in the "What an ATS misses" bottom section of the "AI feedback"
             tab (#273), next to the disagreements it characterizes. */}
         <FeedbackPanel />
       </Card>
@@ -212,6 +213,8 @@ function ParsedCard({
         edit={edit}
         jdContext={jdContext}
         analysis={analysis}
+        escapeHatch={escapeHatch}
+        onRecovered={handleRecovered}
         triggerCount={triggerCount}
       />
     </div>
