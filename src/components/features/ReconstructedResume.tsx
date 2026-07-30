@@ -347,7 +347,7 @@ function buildEntryGroups(
 
 /** Map a RoleHeader field name to the flat AddedEntry field it edits. */
 const EXPERIENCE_FIELD_MAP: Record<
-  keyof ExperienceFieldOverrides,
+  Exclude<keyof ExperienceFieldOverrides, "is_current">,
   AddedEntryField
 > = {
   title: "title",
@@ -645,11 +645,14 @@ export function ExperienceSection({
                 group={group}
                 experienceIndex={idx}
                 overrides={added ? undefined : experienceOverrides[idx]}
-                onFieldChange={(field, value) =>
-                  added
-                    ? onEntryField(added.id, EXPERIENCE_FIELD_MAP[field], value)
-                    : onExperienceFieldChange(idx, field, value)
-                }
+                onFieldChange={(field, value) => {
+                  if (field === "is_current") return;
+                  if (added) {
+                    onEntryField(added.id, EXPERIENCE_FIELD_MAP[field], value);
+                  } else {
+                    onExperienceFieldChange(idx, field, value);
+                  }
+                }}
                 onBulletChange={onBulletChange}
                 onRemoveBullet={onRemoveBullet}
                 onAddBullet={(text) => onAddBullet(roleEntryKey, text)}
@@ -1360,7 +1363,7 @@ export function ReconstructedResume({
         hasBullets={bullets.length > 0}
         experienceOverrides={experienceOverrides}
         onExperienceFieldChange={(index, field, value) =>
-          setExperienceField(index, field, value)
+          setExperienceField(index, field, value, parsed.experience[index])
         }
         onBulletChange={(index, value, original) =>
           setBulletField(index, value, original)

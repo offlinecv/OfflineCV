@@ -40,6 +40,10 @@ import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
 import { normalizeBulletText } from "../score/group-bullets.ts";
 import {
+  applyNormalizedExperienceDates,
+  normalizeExperienceDates,
+} from "./experience-dates.ts";
+import {
   computeEditedSkills,
   isEmptySkillsOverride,
 } from "./skills-categories.ts";
@@ -287,8 +291,20 @@ function dedupeConfEdits(confEdits: readonly LegacyConfEdit[]): LegacyConfEdit[]
 
 // ── Experience / education header fields ────────────────────────────────────
 
-/** Fold `experience` header overrides (title/company/location/team/dates) into
- *  the cloned experience entries in place, keyed by array index. */
+/**
+ * Fold `experience` header overrides (title/company/location/team/dates) into the
+ * cloned experience entries in place, keyed by array index.
+ *
+ * NOT a plain field fold: the date pair is NORMALISED after it is written (#672).
+ * A date edit is the only way an experience entry can reach a shape the
+ * export/parse pair cannot represent — an end date with no start date, which
+ * Download-PDF silently returns as a START date. `normalizeExperienceDates` is the
+ * one rule for what the pair means; `ReconstructedRole` renders the card's date
+ * cells through the same helper, so what the user sees is what the file gets.
+ *
+ * The normalisation is GATED on a date field actually appearing in the override —
+ * see the call site for why re-titling a role must not rewrite its dates.
+ */
 function applyExperienceHeaderOverrides(
   experience: HeuristicParsedResume["experience"],
   overrides: Record<number, ExperienceFieldOverrides>,
@@ -307,6 +323,22 @@ function applyExperienceHeaderOverrides(
     if (fields.team !== undefined) exp.team = fields.team || undefined;
     if (fields.start_date !== undefined) exp.start_date = fields.start_date;
     if (fields.end_date !== undefined) exp.end_date = fields.end_date;
+    if (fields.is_current !== undefined) {
+      if (fields.is_current) exp.is_current = true;
+      else delete exp.is_current;
+    }
+    // #672, the normalisation this function's docblock describes. Gated on a date
+    // field actually being in THIS override, not run for every touched entry: a
+    // role the parser produced with `is_current` and no start date is not
+    // something the user asked us to change, and re-titling it must not silently
+    // drop its flag.
+    if (
+      fields.start_date !== undefined ||
+      fields.end_date !== undefined ||
+      fields.is_current !== undefined
+    ) {
+      applyNormalizedExperienceDates(exp);
+    }
   }
 }
 
@@ -805,8 +837,16 @@ function pushAddedEntry(
       company: entry.subtitle ?? "",
       ...(entry.location ? { location: entry.location } : {}),
       ...(entry.team ? { team: entry.team } : {}),
-      start_date: entry.start_date,
-      end_date: entry.end_date,
+      // Through the same #672 rule the edit path uses: "+ Add role" with only an
+      // end date filled in reaches the identical unrepresentable shape, and a
+      // second convention here would mean an added role and an edited one export
+      // differently. Education is deliberately NOT normalised — a lone education
+      // date is a GRADUATION date and belongs in `end_date` (#97, pinned by
+      // #668).
+      ...normalizeExperienceDates({
+        start_date: entry.start_date,
+        end_date: entry.end_date,
+      }),
       description,
     });
   } else if (entry.section === "education") {
