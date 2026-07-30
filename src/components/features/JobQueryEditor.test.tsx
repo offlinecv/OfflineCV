@@ -303,6 +303,30 @@ describe("JobQueryEditor — dropped terms and in-column suggestions (issue 597)
     expect(rolePanel?.textContent).toContain("Add to your titles");
     expect(skillsPanel?.textContent).not.toContain("Add to your titles");
   });
+
+  it("renders the skill suggestions inside the Skills step, and no pill in Review (#595)", () => {
+    // The other half of the adjacency claim, and the one #595 was filed about:
+    // every pill has to be visible with the field it writes into. Asserted per
+    // panel, because the failure mode is a pill drifting back into the trailing
+    // Review block — which is page-wide text a whole-page search would still find.
+    const query: JobQuery = { titles: ["Engineering Manager"], skills: [] };
+    const missing = assessQueryTerms(query).missing.filter((t) => t.kind === "skill");
+    expect(missing.length).toBeGreaterThan(0);
+
+    const el = render(query, () => query);
+    const skillsPanel = el.querySelector("#test-steppanel-skills");
+    const rolePanel = el.querySelector("#test-steppanel-role");
+    const reviewPanel = el.querySelector("#test-steppanel-review");
+    // Asserted, not assumed: a renamed panel id would turn every `not.toContain`
+    // below into a check against `undefined`.
+    expect(reviewPanel).not.toBeNull();
+    expect(skillsPanel?.textContent).toContain("Add to your skills");
+    expect(rolePanel?.textContent).not.toContain("Add to your skills");
+    // Review carries whole-query findings only — the coherence note and the
+    // dropped terms — so neither suggestion heading may appear there.
+    expect(reviewPanel?.textContent).not.toContain("Add to your skills");
+    expect(reviewPanel?.textContent).not.toContain("Add to your titles");
+  });
 });
 
 /**
