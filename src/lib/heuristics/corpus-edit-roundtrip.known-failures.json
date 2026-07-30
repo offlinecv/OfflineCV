@@ -44,14 +44,6 @@
         "status": "accepted",
         "note": "The one fixture Group A's deletion did not clear, for an unrelated reason. Its first pooled bullet IS a title-only achievement's whole header line ('Patent · … [2019]'): the parser stores it as type/title/year with an EMPTY description while the scorer still pools the raw line, so the synthesized edit lands in the section pool but the achievement ENTRY it belongs to is untouched and the exporter renders that entry from its fields. #224 fixed the PRODUCT path — `ReconstructedResume` runs `suppressTitleOwnedBullets` over the 'Other bullets' group, the only group this line can land in, so no editable row is ever offered for it. What remains is reachable only from this gate, which synthesizes an edit the surface does not offer; `accepted` records that, and it is deliberately NOT 'fixed' by teaching `synthesizeOverrides` to skip such a bullet — moving a gate's INPUT until it passes is how a gate stops meaning anything."
       }
-    ],
-    "unknown/date-heading-bulleted-roles.pdf": [
-      {
-        "category": "bullets",
-        "issue": 662,
-        "status": "open",
-        "note": "COLLATERAL of the fixture's own defect, not a separate edit bug: this fixture parses ZERO experience entries (it is the corpus's reproducer for `experience-parser-miss`), so the pooled bullet the gate edits belongs to no entry and the exporter has nothing to render it under. Clears when #662 does. Previously cited #492 with a prose caveat saying #492 did NOT cover this shape — that citation was wrong and is exactly the failure mode issue-linked baselines exist to prevent: check:baselines judges the issue NUMBER and cannot read a caveat, so the gate certified an attribution the fixture's own generator docblock contradicts ('NOT #492')."
-      }
     ]
   }
 }

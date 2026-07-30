@@ -30,22 +30,5 @@
     "Kubernetes",
     "Terraform",
     "PostgreSQL"
-  ],
-  "knownWrong": {
-    "experience.title": {
-      "issue": 662,
-      "status": "open",
-      "note": "ZERO experience entries parsed from two plainly dated roles — the defect this fixture exists to exhibit (experience-parser-miss). #662 owns this shape specifically: a date-range HEADING with the role line bulleted under it. Previously cited #492 with a prose caveat; that citation was wrong — #492's trigger is a HEADERLESS section and its acceptance criteria do not cover this fixture, as this fixture's own generator docblock states. A caveat in prose is invisible to check:baselines, which certifies the issue NUMBER."
-    },
-    "experience.company": {
-      "issue": 662,
-      "status": "open",
-      "note": "Same drop as experience.title — zero entries parsed. See that entry."
-    },
-    "experience.dates": {
-      "issue": 662,
-      "status": "open",
-      "note": "Same drop as experience.title — zero entries parsed. See that entry."
-    }
-  }
+  ]
 }

@@ -17,6 +17,7 @@ import type {
 } from "./types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import { assignBulletIds } from "./bullet-id.ts";
+import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
 import {
   deriveContactProfiles,
   isProfileConfident,
@@ -100,12 +101,20 @@ const WEIGHTS = {
  *   its own leftover fragment. Both now share CARDINAL_SEPARATOR. Strictly
  *   removes false Specificity credit; a bullet that genuinely quantifies is
  *   unaffected, so scores move only DOWN and only on this rare shape.
+ * - 1.8 (2026-07-30): a role header the parser recovered from its block's first
+ *   body bullet (#662, `header_from_bullet`) no longer enters the graded pool.
+ *   Date-heading templates write `Title, Company` in bullet position; once
+ *   `promoteBulletedRoleHeader` promotes that unit to a structured header,
+ *   grading it as an accomplishment double-counts it. This changes WHICH
+ *   bullets are graded — observable as a lower `bulletCount` — so Specificity /
+ *   Structure move on résumés of that shape. Same class as 1.5. Scoped to
+ *   promoted entries; a normally-parsed role's bullets are untouched.
  */
 // Surfaced to the UI via the `algoVersion` score field, and consumed by the
 // #321 resume-library cache to version persisted parse+score records (a bump
 // here invalidates stale cached snapshots, which then re-parse from the stored
 // PDF blob — see `resume-library.ts`).
-export const ATS_SCORE_ALGO_VERSION = "1.7";
+export const ATS_SCORE_ALGO_VERSION = "1.8";
 
 // ── Shared scoring rules ────────────────────────────────────────────────────
 //
@@ -278,44 +287,6 @@ function bulletHasMetric(text: string): boolean {
   return QUANTIFYING_CARDINAL.test(
     stripped.replace(WORD_YEAR_TOKEN, " ").replace(NON_QUANTIFYING_PHRASE, " "),
   );
-}
-
-/**
- * Curated past-tense action verbs used to grade the user's *existing*
- * bullets. Exported so the rewrite eval (`src/lib/webllm/eval/verbs.ts`)
- * can reuse this as the base set without duplicating it — the eval set
- * adds present-tense and IC-discipline verbs on top, but the scorer's
- * specificity-dimension semantics stay anchored here.
- *
- * Kept narrow on purpose: weak generic verbs ("worked", "helped",
- * "supported", "responsible", "assisted", "participated") are deliberately
- * NOT here. A bullet leading with one of those SHOULD fail the
- * specificity check.
- */
-export const ACTION_VERBS: ReadonlySet<string> = new Set([
-  "led", "managed", "developed", "built", "designed", "implemented",
-  "created", "launched", "drove", "increased", "reduced", "improved",
-  "delivered", "established", "optimized", "architected", "scaled",
-  "automated", "streamlined", "coordinated", "negotiated", "achieved",
-  "spearheaded", "mentored", "transformed", "pioneered", "orchestrated",
-  "accelerated", "consolidated", "eliminated", "enhanced", "executed",
-  "facilitated", "generated", "integrated", "migrated", "overhauled",
-  "redesigned", "refactored", "resolved", "revamped", "simplified",
-  "supervised", "trained", "unified", "upgraded",
-  // Promoted from the eval-only extension (#622) — past-tense, general
-  // register, and squarely in the eng/PM lane this base set already covers.
-  "shipped", "owned", "secured", "deployed", "engineered", "rewrote",
-  "authored", "analyzed", "conducted", "identified", "presented",
-  "produced", "published", "planned",
-  // Newly added (#622) — strong outcome verbs missing from both this set
-  // and the eval extension.
-  "won", "ran", "grew", "founded", "hired", "partnered", "defined", "cut",
-  "ported", "rebuilt", "advised", "shaped", "standardized", "instrumented",
-]);
-
-function startsWithActionVerb(bullet: string): boolean {
-  const firstWord = bullet.split(/\s/)[0]?.toLowerCase().replace(/[^a-z]/g, "");
-  return ACTION_VERBS.has(firstWord);
 }
 
 /**
@@ -728,6 +699,8 @@ export interface AnonymousAtsScoreInput {
     experience?: {
       title?: string;
       company?: string;
+      location?: string;
+      team?: string;
       start_date?: string;
       end_date?: string;
       is_current?: boolean;
@@ -919,6 +892,80 @@ function poolExperienceDescriptions(
   return out;
 }
 
+interface ExperienceHeaderSource {
+  title?: string;
+  company?: string;
+  location?: string;
+  team?: string;
+  header_from_bullet?: boolean;
+}
+
+/** Normalize only for exact role-header ownership checks. Punctuation is a
+ * separator here because source headers may use comma, middot, dash, pipe, or
+ * `@` while resolving to the same structured fields. */
+function normalizeExperienceHeaderUnit(text: string): string {
+  return text
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Remove marker bullets that are already represented by a structured
+ * experience header. Date-heading templates put `Title, Company` in the first
+ * bullet position; once the parser promotes that unit, grading it as an
+ * accomplishment would duplicate it in editor observations and PDF export.
+ *
+ * SCOPED TO PROMOTED ENTRIES ONLY — `header_from_bullet` (#662). Do not widen
+ * this to every experience entry: the keys are matched against the WHOLE pooled
+ * bullet set, so an unscoped filter reaches across sections. A résumé with an
+ * ordinary parsed header and an authored Achievements line that restates it
+ * ("Staff Engineer, Globex Systems LLC") would lose that line with no promotion
+ * anywhere in the parse — and losing it is not cosmetic. Dropping a bullet here
+ * drops it from `score.bullets`, which costs it its editable row on the
+ * reconstructed surface AND its slot in the exported PDF, because
+ * `resolveBullets` in `ats-resume-model.ts` falls back to the raw `description`
+ * split only when an entry has NO graded bullets — a restatement sitting beside
+ * real achievements is simply gone. For a promoted entry the line is genuinely
+ * parser-owned metadata, so suppression is correct there and only there.
+ *
+ * Both title/company orders are accepted because the disambiguator supports
+ * company-first source headers. Optional location/team suffixes are exact: an
+ * achievement with any additional prose cannot collide with these keys.
+ */
+function suppressExperienceHeaderBullets(
+  bullets: string[],
+  experience: readonly ExperienceHeaderSource[] | undefined,
+): string[] {
+  const headerKeys = new Set<string>();
+  const addKey = (parts: Array<string | undefined>) => {
+    const key = normalizeExperienceHeaderUnit(
+      parts.filter((part): part is string => Boolean(part?.trim())).join(" "),
+    );
+    if (key) headerKeys.add(key);
+  };
+
+  for (const entry of experience ?? []) {
+    if (!entry.header_from_bullet) continue;
+    if (!entry.title?.trim() || !entry.company?.trim()) continue;
+    const suffixes: Array<Array<string | undefined>> = [
+      [],
+      [entry.location],
+      [entry.team],
+      [entry.location, entry.team],
+    ];
+    for (const suffix of suffixes) {
+      addKey([entry.title, entry.company, ...suffix]);
+      addKey([entry.company, entry.title, ...suffix]);
+    }
+  }
+
+  if (headerKeys.size === 0) return bullets;
+  return bullets.filter(
+    (bullet) => !headerKeys.has(normalizeExperienceHeaderUnit(bullet)),
+  );
+}
+
 export function computeAnonymousAtsScore(
   input: AnonymousAtsScoreInput,
 ): AnonymousAtsScore {
@@ -936,7 +983,10 @@ export function computeAnonymousAtsScore(
   // pool, so a résumé whose OTHER accomplishment sections (e.g. Achievements)
   // still carry glyph bullets doesn't mask a glyph-less Experience section —
   // see `poolExperienceDescriptions` for the full rationale.
-  const bullets = extractBulletsFromSections(input.sections);
+  const bullets = suppressExperienceHeaderBullets(
+    extractBulletsFromSections(input.sections),
+    input.parsed.experience,
+  );
   if (extractExperienceSectionBullets(input.sections).length === 0) {
     bullets.push(...poolExperienceDescriptions(input.parsed.experience));
   }

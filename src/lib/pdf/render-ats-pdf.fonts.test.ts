@@ -38,20 +38,49 @@ function stubFetchSucceeds() {
     expect(url).not.toMatch(/^https?:\/\//);
     expect(url.toLowerCase()).not.toContain("fonts.gstatic.com");
     const bytes = url.includes("Bold") ? BOLD_BYTES : REGULAR_BYTES;
-    return { arrayBuffer: async () => toArrayBuffer(bytes) } as Response;
+    // `ok: true` is not decoration — `fetchFontBytes` rejects a non-ok response
+    // (#664), and a mock that omits `ok` reads as `undefined`/falsy, which would
+    // send every case in this file down the Helvetica path while claiming to
+    // test the embedded one.
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      arrayBuffer: async () => toArrayBuffer(bytes),
+    } as Response;
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
-/** Stub `fetch` to fail, forcing the Helvetica-fallback path. */
+/** Stub `fetch` to fail at the network layer, forcing the Helvetica fallback. */
 function stubFetchFails() {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async () => {
-      throw new Error("network unavailable (simulated)");
-    }),
+  const fetchMock = vi.fn(async () => {
+    throw new Error("network unavailable (simulated)");
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/**
+ * Stub `fetch` to RESOLVE with an HTTP error — the case `fetch` itself does not
+ * reject on (#664). Before the status check this reached the Helvetica fallback
+ * anyway, but only because fontkit choked on the error page's bytes.
+ */
+function stubFetchHttpError(status = 404) {
+  // The body reader is a spy, because it is the ONLY observable difference the
+  // status check makes. Without the check the fallback is still reached — via
+  // fontkit failing on the error page's bytes — so asserting "we fell back"
+  // passes either way. Asserting the body was never read is what distinguishes
+  // "rejected on the status" from "rejected on corrupt bytes".
+  const arrayBuffer = vi.fn(
+    async () => new TextEncoder().encode("<html>nope</html>").buffer,
   );
+  const fetchMock = vi.fn(async () => {
+    return { ok: false, status, statusText: "Not Found", arrayBuffer } as unknown as Response;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { fetchMock, arrayBuffer };
 }
 
 /**
@@ -248,6 +277,174 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       expect(text).not.toContain("\0");
       expect(text).toContain("Engineer");
       expect(text).toContain("Acme");
+    });
+  });
+
+  // The two failure-handling defects behind #664's refusal. Both are about the
+  // LOAD path, not the sanitizers — a refusal the user cannot clear is worse
+  // than the silent degradation it replaces.
+  describe("font-load failure handling (#664)", () => {
+    it("rejects an HTTP error response without reading its body, which `fetch` alone does not do", async () => {
+      const { fetchMock, arrayBuffer } = stubFetchHttpError(404);
+      vi.resetModules();
+      const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
+
+      const bytes = await renderAtsResumePdf(model("http error check"));
+
+      expect(fetchMock).toHaveBeenCalled();
+      // The load bailed on the status. Without the check we would have read the
+      // error page and handed it to fontkit — reaching the same fallback, but
+      // reporting a font-parse failure instead of a 404.
+      expect(arrayBuffer).not.toHaveBeenCalled();
+      // The fallback is still intact: a bad status must not break the download.
+      await expect(hasEmbeddedFontFile2(bytes)).resolves.toBe(false);
+    });
+
+    it("re-fetches after a failure instead of replaying the cached rejection", async () => {
+      // The defect: `poppinsBytesPromise` is memoized and the guard is
+      // `!poppinsBytesPromise`, so a REJECTED promise used to stay cached for
+      // the life of the page. Every later download replayed it without issuing
+      // a request, which silently made "check your connection and try again"
+      // impossible to satisfy.
+      const failing = stubFetchFails();
+      vi.resetModules();
+      const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
+
+      const first = await renderAtsResumePdf(model("attempt one"));
+      await expect(hasEmbeddedFontFile2(first)).resolves.toBe(false);
+      const callsWhileFailing = failing.mock.calls.length;
+      expect(callsWhileFailing).toBeGreaterThan(0);
+
+      // Network recovers. NOTE: no `vi.resetModules()` here — that is the whole
+      // point. The same module instance, with its cache already poisoned by the
+      // failure above, must issue a fresh request.
+      const recovered = stubFetchSucceeds();
+      const second = await renderAtsResumePdf(model("attempt two"));
+
+      expect(recovered).toHaveBeenCalled();
+      await expect(hasEmbeddedFontFile2(second)).resolves.toBe(true);
+    });
+
+    it("keeps memoizing a SUCCESSFUL fetch — only the failure path is cleared", async () => {
+      const fetchMock = stubFetchSucceeds();
+      vi.resetModules();
+      const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
+
+      await renderAtsResumePdf(model("first"));
+      const afterFirst = fetchMock.mock.calls.length;
+      await renderAtsResumePdf(model("second"));
+
+      // Two assets, fetched once between them — clearing the memo on success
+      // too would turn every repeat download into a re-download.
+      expect(afterFirst).toBe(2);
+      expect(fetchMock.mock.calls.length).toBe(2);
+    });
+  });
+
+  // The probe behind the refusal. It must be silent for the common case and
+  // specific for the rare one.
+  describe("findExportGlyphLosses (#664)", () => {
+    const polish = (): AtsResumeModel => ({
+      contact: { name: "ANNA WIŚNIEWSKA", links: [] },
+      sections: [],
+    });
+
+    it("reports nothing when the embedded font loads, even with Latin-Extended text", async () => {
+      // Poppins covers ś/ł, so there is no loss to refuse over — the whole
+      // reason this issue's original framing stopped being accurate.
+      stubFetchSucceeds();
+      vi.resetModules();
+      const { findExportGlyphLosses } = await import("./render-ats-pdf.ts");
+
+      await expect(findExportGlyphLosses(polish())).resolves.toEqual([]);
+    });
+
+    it("reports nothing for a pure-ASCII résumé even when the font fetch fails", async () => {
+      // The gate that keeps a font hiccup from blocking every user: Helvetica
+      // draws ASCII perfectly, so there is nothing to warn about.
+      stubFetchFails();
+      vi.resetModules();
+      const { findExportGlyphLosses } = await import("./render-ats-pdf.ts");
+
+      await expect(
+        findExportGlyphLosses({
+          contact: {
+            name: "Jane Candidate",
+            email: "jane@example.com",
+            links: ["linkedin.com/in/jane"],
+          },
+          summary: "Shipped things. Cut deploy time from 42 minutes to 9.",
+          sections: [
+            {
+              kind: "experience",
+              heading: "Experience",
+              entries: [
+                { headerLine: "Engineer · Acme", bullets: ["Did the work"] },
+              ],
+            },
+          ],
+        }),
+      ).resolves.toEqual([]);
+    });
+
+    it("names the contact field when the fallback would mangle the candidate's name", async () => {
+      stubFetchFails();
+      vi.resetModules();
+      const { findExportGlyphLosses } = await import("./render-ats-pdf.ts");
+
+      const losses = await findExportGlyphLosses(polish());
+
+      expect(losses).toEqual([
+        {
+          where: "Name",
+          original: "ANNA WIŚNIEWSKA",
+          degraded: "ANNA WI?NIEWSKA",
+        },
+      ]);
+    });
+
+    it("labels a loss inside a section by that section's own heading", async () => {
+      // The label is shown to the user, so it must be their heading — not an
+      // index into a model they have never seen.
+      stubFetchFails();
+      vi.resetModules();
+      const { findExportGlyphLosses } = await import("./render-ats-pdf.ts");
+
+      const losses = await findExportGlyphLosses({
+        contact: { name: "Jane Candidate", links: [] },
+        sections: [
+          {
+            kind: "experience",
+            heading: "Work History",
+            entries: [
+              {
+                headerLine: "Engineer · Acme",
+                bullets: ["Migrated ★ to ✓"],
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(losses.map((l) => l.where)).toEqual(["Work History"]);
+      expect(losses[0].degraded).toBe("Migrated ? to ?");
+    });
+
+    it("does not report a WinAnsi-representable glyph that merely looks exotic", async () => {
+      // An em dash, curly quotes and a bullet ARE valid WinAnsi (cp1252's upper
+      // range assigns them), so refusing over them would be a false positive on
+      // text the fallback draws correctly.
+      stubFetchFails();
+      vi.resetModules();
+      const { findExportGlyphLosses } = await import("./render-ats-pdf.ts");
+
+      await expect(
+        findExportGlyphLosses({
+          contact: { name: "Jane “Jay” Candidate — Engineer", links: [] },
+          summary: "Led • owned • shipped … end",
+          sections: [],
+        }),
+      ).resolves.toEqual([]);
     });
   });
 });

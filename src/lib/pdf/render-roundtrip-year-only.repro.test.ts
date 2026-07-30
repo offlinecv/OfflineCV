@@ -2,9 +2,9 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * Round-trip regression for #358 — a single-column experience role whose ONLY
- * date is a bare YEAR ("Company · Location  2022") lost both its identity and
- * its date on the Download-PDF round-trip.
+ * Round-trip regressions for the two sides of a bare-year experience header:
+ * #358 keeps a genuine year-only date, while #663 keeps a year that belongs to
+ * a dateless role's title.
  *
  * Pipeline: build the ATS model from a parsed résumé → `renderAtsResumePdf`
  * → RE-parse the rendered bytes with `runCascade`. Before the fix, the
@@ -45,6 +45,12 @@ function makeResult(): CascadeResult {
           { title: "Composer", company: "Northwind Ensemble", location: "Boston, MA", start_date: "2022", description: "• Scored the winter program." },
           // Year-only, no location (org-signature form).
           { title: "Lecturer", company: "Fabrikam Institute", start_date: "2019", description: "• Taught the seminar." },
+          // Dateless title whose final segment happens to carry a year (#663).
+          {
+            title: "Software Engineer Intern Summer 2022",
+            company: "DEF Organization",
+            description: "• Built the release dashboard.",
+          },
         ],
         education: [],
         projects: [],
@@ -93,5 +99,14 @@ describe("#358 — year-only experience role round-trips (no title/company swap,
     expect(lecturer).toBeDefined();
     expect(lecturer!.company).toBe("Fabrikam Institute");
     expect(lecturer!.start_date).toBe("2019");
+  });
+
+  it("keeps a dateless role's inline year in its title (#663)", () => {
+    const exp = reparsed.canonical.fields.experience ?? [];
+    const intern = exp.find((e) => e.company === "DEF Organization");
+    expect(intern).toBeDefined();
+    expect(intern!.title).toBe("Software Engineer Intern Summer 2022");
+    expect(intern!.start_date).toBeUndefined();
+    expect(intern!.end_date).toBeUndefined();
   });
 });

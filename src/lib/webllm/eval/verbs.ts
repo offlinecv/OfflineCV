@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { ACTION_VERBS as SCORER_ACTION_VERBS } from "../../score/score.ts";
+import { ACTION_VERBS as SCORER_ACTION_VERBS } from "../../lexicon/action-verbs.ts";
 
 /**
  * Action-verb list used by the eval rubric's `actionVerbLead` criterion.
  *
  * Built as the scorer's curated past-tense set + a small eval-only
- * extension. The scorer set lives in `src/lib/score/score.ts` so when a
- * verb is added there it lights up here automatically — single source of
+ * extension. The base set lives in `src/lib/lexicon/action-verbs.ts` so when
+ * a verb is added there it lights up here automatically — single source of
  * truth, no drift.
  *
  * The extension covers two cases the scorer set doesn't:
@@ -34,8 +34,8 @@ import { ACTION_VERBS as SCORER_ACTION_VERBS } from "../../score/score.ts";
  * those SHOULD fail the criterion. That's the whole point.
  */
 
-// Exported so `verbs.test.ts` can assert this set stays disjoint from
-// `score.ts`'s `ACTION_VERBS` (#622) — everything else in this module stays
+// Exported so `verbs.test.ts` can assert this set stays disjoint from the
+// shared `ACTION_VERBS` (#622) — everything else in this module stays
 // module-internal.
 export const EVAL_ONLY_EXTENSIONS: readonly string[] = [
   // Eng / data IC verbs the scorer set doesn't cover.
@@ -49,15 +49,15 @@ export const EVAL_ONLY_EXTENSIONS: readonly string[] = [
 ];
 
 // Module-internal: only `startsWithActionVerb` is consumed by the rubric.
-// Not exported — keeping it local avoids a dead public export and a
-// name collision with `score.ts`'s `ACTION_VERBS` (both flagged by fallow).
+// Not exported — keeping it local avoids a dead public export and a name
+// collision with the shared `ACTION_VERBS` (both flagged by fallow).
 const ACTION_VERBS: ReadonlySet<string> = new Set([
   ...SCORER_ACTION_VERBS,
   ...EVAL_ONLY_EXTENSIONS,
 ]);
 
 /**
- * First-token check that mirrors `score.ts::startsWithActionVerb`:
+ * First-token check that mirrors the shared `startsWithActionVerb`:
  * lowercase the first whitespace-delimited token, strip everything that
  * isn't a-z, and look up in the union set. The strip handles trailing
  * punctuation (`Led,`, `Shipped:`) without expanding the set with

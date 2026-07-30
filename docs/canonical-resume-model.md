@@ -2,120 +2,121 @@
 
 Design for [#439](https://github.com/offlinecv/OfflineCV/issues/439), the follow-up to the architecture decision in [#438](https://github.com/offlinecv/OfflineCV/issues/438) ("one canonical representation, staged").
 
-**Status:** design only — no production code changed by this issue (acceptance criterion). Implementation lands as the sequenced, per-stage follow-up issues at the end of this doc. Each stage is separately reviewable and keeps the round-trip invariant green; **nothing here is a big-bang PR.**
+**Status:** the design issue itself was docs-only; its implementation stages have since shipped through the combined Stage D+E cutover (#445). Sections 0–3 and 6 describe the current implementation. Section 4 preserves the staged migration as implementation history.
 
-**Baseline the design is written against:** `main` as of the mapping in this doc. All `file:line` citations are against that baseline. `ATS_SCORE_ALGO_VERSION` is `"1.4"` (`src/lib/score/score.ts:73`); [#435](https://github.com/offlinecv/OfflineCV/issues/435) bumps it to `1.5` in flight — the cache-version hook in §6 keys off whatever value is current at each stage's cutover, not a pinned literal.
-
----
-
-## 0. The thesis, restated precisely
-
-We carry **five** parallel shapes for the same underlying résumé, and every adjacent pair needs a hand-written adapter kept in lockstep by hand:
-
-| # | Shape | Home | Role |
-|---|---|---|---|
-| 1 | `HeuristicParsedResume` / `CascadeResult` | `heuristics/types.ts:121` / `:174` | what the parser produces |
-| 2 | `SectionedResume` | `heuristics/sections.ts:85` | section pools the scorer + editor grade from |
-| 3 | `LlmParsedResume` | `webllm/parse-resume.ts:56` | on-device LLM parse, **field names hand-synced** to #1 |
-| 4 | `AtsResumeModel` / `AtsEntry` / `AtsSection` / `AtsEntryFields` | `pdf/ats-resume-model.ts:181` / `:114` / `:173` / `:87` | render + PDF-export model |
-| 5 | `JsonResume` | `pdf/to-json-resume.ts:113` | JSON Resume export |
-
-The decision (#438) is to collapse these toward **one canonical internal model** with **thin projections** (display / score / render+export / JSON-Resume / llm-diff) derived off it, retiring the N hand-written adapters and the `apply-overrides` lockstep. This doc says *what the canonical model is* and *how we reach it in green stages*.
-
-Two structural costs the canonical model must dissolve, not just relocate:
-
-- **Cost 1 — N peer shapes, N hand-sync adapters.** `apply-overrides.ts` is the sharpest tell: `ApplyOverridesResult` (`edit/apply-overrides.ts:52`) must return `parsed` **and** `rawText` **and** `sections` **and** `fieldConfidence` **together**, because one un-mirrored user edit re-grades or re-parses wrong (comments cite [#133](https://github.com/offlinecv/OfflineCV/issues/133), [#421](https://github.com/offlinecv/OfflineCV/issues/421) Blocking #1/#3). The `LlmParsedResume` hand-sync note (`parse-resume.ts:52-54`: *"Keep field names in sync with that interface"*) is the same cost in a second place.
-- **Cost 2 — the render model encodes re-parse invariants.** `AtsEntry` is doing triple duty (display, PDF layout, **and** export hint via `AtsEntryFields`). Its layout fields exist to satisfy the parse→export→parse identity: `headerLineDate` (#425/#302 entry-boundary date cue), `subLineDate` (#425, avoids the #298 title↔company re-parse swap), `atomicSegments` (#301 skills-middot atomicity), `headerBold` (#425) — each documented in terms of how the exported PDF must re-parse (`ats-resume-model.ts:118-158`). So the renderer knows parser internals, and a fidelity fix touches model + renderer + the parser exemption it leans on + regenerated corpus goldens — four surfaces **by construction**. That is why #425/#434/#435 each landed at 40–54 files.
+**Implementation baseline:** the current source tree. Source citations are symbol-anchored (`path` → `Symbol`) rather than line-anchored, except where a historical line reference is itself the subject. This avoids line drift while preserving an unambiguous source lookup. `ATS_SCORE_ALGO_VERSION` is currently `"1.7"` (`src/lib/score/score.ts` → `ATS_SCORE_ALGO_VERSION`); the persisted-cache key composes it with `CANONICAL_SHAPE_VERSION` (§6).
 
 ---
 
-## 1. The five shapes today (grounded inventory)
+## 0. The thesis and current outcome
 
-### 1 · `HeuristicParsedResume` + `CascadeResult`
-- `HeuristicParsedResume = Partial<ParsedResume> & { skills; experience; education; phoneIsValid? }` — `heuristics/types.ts:121`. `phoneIsValid?` (`:126-129`) precomputes libphonenumber `isValid()` so the scorer skips importing `libphonenumber-js` (entry-chunk budget).
-- `CascadeResult` — `heuristics/types.ts:174`: `parsed`, `rawText` (`:185`), `markdown?` (`:188`), **`sections: SectionedResume`** (`:194`, cites [#132](https://github.com/offlinecv/OfflineCV/issues/132) — replaces the retired `skillsSectionText` side-channel), `linkAnnotations`, `diagnostics.sectionSource`, `timings`.
+The original design identified five peer shapes for the same underlying résumé. That is no longer the current architecture: `CanonicalResume` is now the single parse core, while the remaining shapes are boundary DTOs or one-way projections.
+
+| Shape | Home | Current role |
+|---|---|---|
+| `CanonicalResume` | `heuristics/canonical.ts` → `CanonicalResume` | single parse core: `fields`, `sections`, and `fieldConfidence` |
+| `HeuristicParsedResume` | `heuristics/types.ts` → `HeuristicParsedResume` | field core held at `CanonicalResume.fields` |
+| `SectionedResume` | `heuristics/line-model.ts` → `SectionedResume` | section-membership core held at `CanonicalResume.sections` |
+| `CascadeResult` | `heuristics/types.ts` → `CascadeResult` | cascade envelope with one `canonical` member plus extraction/layout metadata; no top-level `parsed`/`sections`/`fieldConfidence` façade |
+| `LlmParsedResume` | `webllm/parse-resume.ts` → `LlmParsedResume` | on-device LLM boundary DTO; `projectLlmDiff` owns the field-name mapping into a canonical-shaped diff input |
+| `AtsResumeModel` / `JsonResume` | `pdf/ats-resume-model.ts` → `AtsResumeModel`; `pdf/to-json-resume.ts` → `JsonResume` | one-way render/export projections; neither is synchronized back into the parse core |
+
+The decision in #438 was to collapse the peer shapes toward **one canonical internal model** with thin display, score, render/export, JSON-Resume, and LLM-diff projections. The combined D+E cutover completed the ownership change; the stage history below records how it stayed green.
+
+The two original structural costs now have different statuses:
+
+- **Cost 1 — peer shapes and hand-sync adapters: resolved.** `ApplyOverridesResult` is already `CanonicalResume & { rawText: string }` (`edit/apply-overrides.ts` → `ApplyOverridesResult`). `projectLlmDiff` (`heuristics/projections.ts` → `projectLlmDiff`) is the single adapter from `LlmParsedResume`; the old “keep field names in sync” contract is gone.
+- **Cost 2 — render/parser coupling: still explicit.** `AtsEntry` carries parser-sensitive layout fields such as `headerLineDate`, `subLineDate`, `atomicSegments`, and `headerBold` (`pdf/ats-resume-model.ts` → `AtsEntry`). The canonical core is the source, but the render projection still records the layout cues required by parse→export→parse fidelity.
+
+---
+
+## 1. Current shapes and boundaries (grounded inventory)
+
+### 1 · `CanonicalResume` and its field core
+- `CanonicalResume` (`heuristics/canonical.ts` → `CanonicalResume`) owns `fields: HeuristicParsedResume`, `sections: SectionedResume`, and `fieldConfidence: FieldConfidence`.
+- `HeuristicParsedResume = Partial<ParsedResume> & { skills; experience; education; phoneIsValid? }` (`heuristics/types.ts` → `HeuristicParsedResume`). `phoneIsValid?` precomputes libphonenumber `isValid()` so the scorer skips importing `libphonenumber-js` on the entry graph.
 
 ### 2 · `SectionedResume`
-- `heuristics/sections.ts:85` (cites #127 §2.1, #132). `byName: ReadonlyMap<SectionName|"profile", readonly string[]>` (`:89`), `accomplishmentSections` (`:90`, *not yet consumed by pool sourcing*), `sectionHeadings?` (`:94`, #285), `source: "markdown"|"regex"` (`:101`). Built by `toSectionedResume` (`sections.ts:122`) over `PdfSection` (`:62`).
+- `SectionedResume` lives in `heuristics/line-model.ts` → `SectionedResume`. It owns `byName`, `accomplishmentSections`, optional `sectionHeadings`, and splitter `source`. `toSectionedResume` (`heuristics/sections.ts` → `toSectionedResume`) builds it from `PdfSection[]`; `projectScoreSections` exposes the scorer's view.
 
-### 3 · `LlmParsedResume`
-- `webllm/parse-resume.ts:56`. Fields mirror the heuristic parser **by hand** (`:52-54`) so the disagreement detector can diff field-by-field ([#242](https://github.com/offlinecv/OfflineCV/issues/242)). No converter exists between #1 and #3 — the "adapter" is the intentional structural mirror; `diffParses(heuristic, llm)` at `heuristics/disagreement.ts:186` consumes both.
+### 3 · `CascadeResult`
+- `CascadeResult` (`heuristics/types.ts` → `CascadeResult`) has `canonical: CanonicalResume` plus genuinely additional cascade metadata: `confidence`, layout `triggers`, `suggestedEscalation`, `tiers`, `rawText`, optional `markdown`, `linkAnnotations`, `diagnostics`, and `timings`. It does **not** duplicate `canonical.fields`, `canonical.sections`, or `canonical.fieldConfidence` at top level.
 
-### 4 · `AtsResumeModel`
-- `pdf/ats-resume-model.ts:181` (`sections: AtsSection[]` `:188`). `AtsSection` `:173`; `AtsEntry` `:114` with the four round-trip-encoding layout fields above; `AtsEntryFields` `:87` (machine-readable mirror; *"Display/render code never reads this"* `:160`). Built by `buildAtsResumeModel(result, score, edit?)` — `ats-resume-model.ts:425`; date-slot routing to `headerLineDate`/`subLineDate` at `:597-613` cites #425/#302. Round-trip-tradeoff note at `:469`.
+### 4 · `LlmParsedResume`
+- `LlmParsedResume` (`webllm/parse-resume.ts` → `LlmParsedResume`) is the strict DTO produced by on-device JSON coercion. `projectLlmDiff(llm)` (`heuristics/projections.ts` → `projectLlmDiff`) maps it once to a `CanonicalResume`-shaped value; `diffParses` consumes canonical inputs. The type is no longer hand-synchronized with `HeuristicParsedResume`.
 
-### 5 · `JsonResume`
-- `pdf/to-json-resume.ts:113` (jsonresume.org v1.0.0). Produced by `toJsonResume(model: AtsResumeModel)` — `to-json-resume.ts:409` — a **pure** `(model) => JsonResume` adapter (`:5-13`, no `pdf-lib`, no I/O). So JSON-Resume export today reads the **render** model, inheriting its layout coupling.
+### 5 · Render and export projections
+- `buildAtsResumeModel(result, score)` (`pdf/ats-resume-model.ts` → `buildAtsResumeModel`) reads the canonical core through `projectDisplay` and produces `AtsResumeModel` / `AtsEntry` layout data.
+- `toJsonResume(model)` (`pdf/to-json-resume.ts` → `toJsonResume`) is a pure JSON Resume v1.0.0 adapter. It reads the semantic `projectAtsExport(model)` projection (`pdf/ats-export-projection.ts` → `projectAtsExport`), not `AtsEntry` layout fields directly.
 
 ### Adapter chain today
 ```
-PDF ─ runCascade ─▶ CascadeResult ──buildAtsResumeModel──▶ AtsResumeModel ──toJsonResume──▶ JsonResume
-                        │  ▲                                    │
-                        │  └── applyOverrides (edit) ───────────┘ (re-derives parsed+rawText+sections+fieldConfidence)
-                        └── (mirror, no converter) ──▶ LlmParsedResume ──diffParses──▶ disagreement
+PDF ─ runCascade ─▶ CascadeResult.canonical ──projectDisplay──▶ AtsResumeModel ──projectAtsExport/toJsonResume──▶ JsonResume
+                              │
+                              ├── projectScoreSections ──▶ anonymous score
+                              ├── applyOverrides ──▶ CanonicalResume + rawText
+                              └── diffParses ◀── projectLlmDiff(LlmParsedResume)
 ```
 
 ---
 
-## 2. Target representation
+## 2. Implemented canonical representation
 
 ### 2.1 The canonical model + projections
 
-One canonical internal shape, `CanonicalResume`, is the **single source of truth**. Every other shape becomes a **projection** — a pure `(CanonicalResume) => T` function, never a peer shape hand-synced back.
+One canonical internal shape, `CanonicalResume`, is the **single source of truth**. Other internal views are one-way projections; external/parser-boundary DTOs are mapped into it once and are never synchronized back.
 
 ```mermaid
 flowchart TD
     PDF[PDF bytes] --> CASC[runCascade]
     CASC --> CR[("CanonicalResume<br/>(single source of truth)")]
-    EDIT[user edit] -->|mutate one field| CR
-    LLM[on-device LLM parse] -.->|coerced into| CR
+    EDIT[user edit] -->|applyOverrides| CR
+    LLM[on-device LLM parse] --> LDTO[LlmParsedResume]
+    LDTO -->|projectLlmDiff| LCR[canonical-shaped diff input]
 
-    CR --> PD["display projection<br/>(replaces the read side of<br/>HeuristicParsedResume + SectionedResume)"]
-    CR --> PS["score projection<br/>(section pools — replaces<br/>SectionedResume.byName)"]
-    CR --> PR["render+export projection<br/>(replaces AtsResumeModel layout;<br/>round-trip-stable by construction)"]
-    CR --> PJ["JSON-Resume projection<br/>(replaces JsonResume — reads<br/>canonical semantics, not layout)"]
-    CR --> PL["llm-diff projection<br/>(replaces the hand-synced<br/>LlmParsedResume mirror)"]
+    CR --> PD["projectDisplay<br/>(parsed fields + headings)"]
+    CR --> PS["projectScoreSections<br/>(section pools)"]
+    CR --> PR["buildAtsResumeModel<br/>(render projection)"]
+    PR --> PE["projectAtsExport<br/>(semantic export projection)"]
+    PE --> PJ[JsonResume]
 
     PD --> UI[ReconstructedResume / EditableField]
     PS --> SCORE[computeAnonymousAtsScore]
     PR --> RENDER[render-ats-pdf]
     PJ --> JSONEXP[JSON Resume download]
-    PL --> DIS[diffParses / disagreement]
+    CR --> DIS[diffParses / disagreement]
+    LCR --> DIS
 ```
 
-### 2.2 What each of today's five shapes becomes
+### 2.2 Where the original five shapes landed
 
-| Today | Becomes | Note |
+| Original shape | Current state | Note |
 |---|---|---|
-| `HeuristicParsedResume` | the **field core** of `CanonicalResume` | cascade writes it once; nothing else is a peer copy |
-| `SectionedResume` | the **section-membership core** of `CanonicalResume` + a `score` projection | section membership is a property of the model, not re-derived from `rawText` downstream |
-| `LlmParsedResume` | an **input coercion** into `CanonicalResume` + an `llm-diff` projection | the hand-sync note (`parse-resume.ts:52-54`) is deleted — diff reads a projection of the canonical model, not a parallel type |
-| `AtsResumeModel` (`AtsEntry` layout fields) | a **render+export projection** | the four re-parse-encoding fields (`headerLineDate`/`subLineDate`/`atomicSegments`/`headerBold`) move **behind** the projection; see §3 |
-| `JsonResume` | a **JSON-Resume projection off canonical semantics** | stops reading the render model, so it no longer inherits layout coupling |
+| `HeuristicParsedResume` | `CanonicalResume.fields` | cascade writes the field core once |
+| `SectionedResume` | `CanonicalResume.sections` + `projectScoreSections` | section membership is stored once and not re-derived from `rawText` downstream |
+| `LlmParsedResume` | boundary DTO mapped by `projectLlmDiff` | the hand-sync note is gone; disagreement compares canonical-shaped inputs |
+| `AtsResumeModel` (`AtsEntry` layout fields) | one-way render projection built from the canonical core | parser-sensitive layout cues remain behind this projection boundary; see §3 |
+| `JsonResume` | output DTO built through `projectAtsExport` | JSON mapping reads semantic entry fields rather than layout hints |
 
 ### 2.3 Where `apply-overrides` lands
-One user edit mutates **one** field on `CanonicalResume`. `parsed` / `rawText` / `sections` / `fieldConfidence` stop being lockstep return values and become projections read on demand. `ApplyOverridesResult` (`apply-overrides.ts:52`) collapses to `CanonicalResume` (or a thin `{ model }`); the #133 "re-grade a live bullet edit" and #421 "fieldConfidence in step" requirements are satisfied because the projections are *derived*, not *mirrored*.
+`ApplyOverridesResult` is `CanonicalResume & { rawText: string }` (`edit/apply-overrides.ts` → `ApplyOverridesResult`). Edits update the canonical `fields`, `sections`, and `fieldConfidence` members; `rawText` rides alongside because the redacted-date scan still consumes extraction text. There is no separate top-level `parsed`/`sections`/`fieldConfidence` return façade to keep synchronized.
 
 ---
 
 ## 3. Where the round-trip invariant lives
 
-Today the invariant lives in the **renderer** — `AtsEntry`'s layout fields are shaped so the exported PDF re-parses to the same fields (`ats-resume-model.ts:118-158`, `:469`; tests `corpus-roundtrip.test.ts` #293 `:303`, `render-roundtrip.repro.test.ts` #284 `:69`). That is Cost 2: the renderer must know parser internals.
+The canonical field core is the source of truth, but fidelity is enforced across the **canonical-to-render projection and parser**. `buildAtsResumeModel` derives `AtsEntry` values through `projectDisplay`; `AtsEntry` then carries parser-sensitive cues such as `headerLineDate`, `subLineDate`, `atomicSegments`, and `headerBold` (`pdf/ats-resume-model.ts` → `AtsEntry`). `corpus-roundtrip.test.ts` and the focused render round-trip tests pin the resulting parse→export→parse identity.
 
-**Target:** the invariant is a property of `CanonicalResume`. The render+export projection is derived from the canonical model and is round-trip-stable **by construction**, so:
-- the renderer draws from an already-stable shape and stops encoding date-cue / title↔company-swap / middot-atomicity rules (#425/#298/#301/#302 move behind the projection boundary);
-- a fidelity change edits the projection (or the canonical field it reads), **not** model + renderer + parser-exemption + goldens as four coupled surfaces.
-
-The parser-side exemption that today backstops flush-right dates — `columnGapCuts` + `isLoneDateRange` (`sections.ts:264-277`) — becomes an assertion the canonical model satisfies, rather than a rule the renderer must not violate.
+The parser-side flush-right exemption remains `columnGapCuts` + `isLoneDateRange` (`heuristics/line-assembly.ts` → `columnGapCuts`; `heuristics/line-primitives.ts` → `isLoneDateRange`). Stage C localized reads behind projections; it did not eliminate this deliberate render/parser contract.
 
 ---
 
-## 4. Staged migration plan
+## 4. Staged migration history
 
 Ordered stages, shipped as **A / B / C / (D+E)** — the final two were combined into one cutover at implementation time (#445; see the Stage D+E entry below). **Each stage keeps `corpus-roundtrip.test.ts`, `render-roundtrip.repro.test.ts`, and the golden snapshots green** — no half-baked intermediate state. Stages A–C were **additive** (the `AtsResumeModel` shape stayed live so in-flight fidelity PRs kept landing); the combined **D+E** is the one-time cutover that removes the `CascadeResult` façade and versions the persisted cache.
 
 ### Stage A — Split export-semantics from layout inside `AtsEntry`
-Extract `AtsEntryFields` (`ats-resume-model.ts:87`) into a standalone export-semantic projection so `toJsonResume` (`to-json-resume.ts:409`) reads **semantic** fields, not the render model's layout hints (`headerLineDate`/`subLineDate`/`atomicSegments`/`headerBold`). After this, a layout tweak cannot ripple into export mapping.
+Extract `AtsEntryFields` (`ats-resume-model.ts` → `AtsEntryFields`) into a standalone export-semantic projection so `toJsonResume` (`to-json-resume.ts` → `toJsonResume`) reads **semantic** fields, not the render model's layout hints (`headerLineDate`/`subLineDate`/`atomicSegments`/`headerBold`). After this, a layout tweak cannot ripple into export mapping.
 - **Round-trip story:** JSON-Resume output byte-identical (the projection reads the same values `AtsEntryFields` already held); corpus + render round-trip untouched (layout fields unmoved). Pure extraction.
 - **Blast radius:** `ats-resume-model.ts`, `to-json-resume.ts`, their tests. Small.
 
@@ -125,8 +126,8 @@ Define `CanonicalResume` (field core from `HeuristicParsedResume` + section core
 - **Blast radius:** new `canonical.ts`, `cascade.ts` wiring, `score.ts` + `ReconstructedResume` read-site swap. Medium.
 
 ### Stage C — Move the round-trip invariant onto the canonical model
-Make the render+export projection derive from `CanonicalResume` and be round-trip-stable by construction (§3). Renderer draws from the projection; `buildAtsResumeModel` (`ats-resume-model.ts:425`) becomes `canonical → render-projection`.
-- **Round-trip story:** this is the delicate stage — land it behind the projection with the corpus + render round-trip tests as the gate, and only flip the renderer's source once the projection reproduces every current golden. The `columnGapCuts`/`isLoneDateRange` exemption (`sections.ts:264-277`) becomes a canonical-model assertion.
+Make the render+export projection derive from `CanonicalResume` and be round-trip-stable by construction (§3). Renderer draws from the projection; `buildAtsResumeModel` (`ats-resume-model.ts` → `buildAtsResumeModel`) becomes `canonical → render-projection`.
+- **Round-trip story:** this is the delicate stage — land it behind the projection with the corpus + render round-trip tests as the gate, and only flip the renderer's source once the projection reproduces every current golden. The `columnGapCuts`/`isLoneDateRange` exemption (`heuristics/line-assembly.ts` → `columnGapCuts`; `heuristics/line-primitives.ts` → `isLoneDateRange`) becomes a canonical-model assertion.
 - **Blast radius:** `ats-resume-model.ts`, `render-ats-pdf.ts`, projection module, goldens. Medium-large, but **one-time** — it buys down every future fidelity PR.
 
 ### Stage D+E — Collapse the remaining peer shapes + cutover + cache migration (shipped as one, #445)
@@ -153,31 +154,35 @@ Per-stage implementation issues were minted from **this** list once it was fixed
 
 ## 6. Hard constraint — #321 parse-result cache
 
-The `resumes` IndexedDB store caches a **pre-canonical `CascadeResult`**: `SavedResumeSnapshot { result: CascadeResult; score; sourceKind }` (`resume-library.ts:37`), written in `saveResumeToLibrary` (`:90-99`), read via `readSnapshot` (`:66`); it round-trips through IndexedDB structured clone, which preserves the `sections` `Map` (`:6-13`, #321).
+The `resumes` IndexedDB store caches the **current canonical cascade envelope** in `SavedResumeSnapshot { result: CascadeResult; score; sourceKind; shapeVersion? }` (`resume-library.ts` → `SavedResumeSnapshot`). `result.canonical.sections.byName` survives IndexedDB structured clone as a `Map`; the storage layer continues to treat the parse as opaque.
 
-Any stage that changes the **persisted** shape (Stage E, and Stage B if the façade is persisted) MUST invalidate or migrate that cache — not only the in-memory model + corpus goldens. **Cheapest hook:** version the cached record by `ATS_SCORE_ALGO_VERSION` (`score.ts:73`, currently `"1.4"`, →`1.5` via #435) **plus a new parser-shape version constant**, so a representation change auto-invalidates on read and re-parses from the stored PDF `Blob` (#321 keeps the blob). A stale-shape read must **re-parse**, never silently deserialize an old shape into the canonical model. Refs [#321](https://github.com/offlinecv/OfflineCV/issues/321), [#401](https://github.com/offlinecv/OfflineCV/issues/401).
+`CACHE_SHAPE_VERSION` (`resume-library.ts` → `CACHE_SHAPE_VERSION`) composes `ATS_SCORE_ALGO_VERSION` (`score.ts` → `ATS_SCORE_ALGO_VERSION`, currently `"1.7"`) with `CANONICAL_SHAPE_VERSION` (`heuristics/canonical.ts` → `CANONICAL_SHAPE_VERSION`, currently `"2"`). `saveResumeToLibrary` stamps every snapshot. On a mismatch, `loadResumeFromLibrary` re-parses from the stored PDF `Blob`, recomputes the score, and re-stamps the record; if no source bytes exist, it refuses to hydrate the stale shape. A stale record is never silently deserialized as the current canonical model. Refs [#321](https://github.com/offlinecv/OfflineCV/issues/321), [#401](https://github.com/offlinecv/OfflineCV/issues/401).
 
 ---
 
-## 7. Hard constraint — header-vs-entry regression case (with a correction)
+## 7. Hard constraint — header-vs-entry regression case
 
-**Correction to #438/#439 as written.** Both issues cite `classifyLine` at `sections.ts:1854` with `lineLooksLikeDatedEntry = hasDateRange(line) || hasDateRange(nextLine)`. That identifier and that `hasDateRange` function **do not exist in the codebase.** `classifyLine` is really at `sections.ts:1829`; line 1854 sits inside its `isInstitutionRepeat` suppression branch. The **actual** one-line `Title  Dates` header-vs-entry mechanism is the #425 flush-right-date exemption in `columnGapCuts`:
+**#438/#439 were right, and this section's earlier "correction" of them is retracted.** Both issues attribute `lineLooksLikeDatedEntry = hasDateRange(line) || hasDateRange(nextLine)` to `classifyLine`. This section used to answer that neither identifier existed. **Both exist, verbatim and exactly as attributed:** `heuristics/sections.ts` → `classifyLine` computes `const lineLooksLikeDatedEntry = hasDateRange(line) || hasDateRange(nextLine)` and passes it to `isInstitutionRepeat`, over `heuristics/sections.ts` → `hasDateRange`.
+
+The retracted claim was true against the baseline it was written on, and stopped being true on the next parser merge. This doc landed in #440; **#435** (`fix(parser,score): experience field-mapping, section routing, bullet pooling, abbreviated dates`) introduced both identifiers afterwards, and §0 flagged #435 as in flight at the time. So a source claim written in the present tense outlived its baseline by one merge — which is why every citation in this doc is now symbol-anchored (`path` → `Symbol`) rather than line-anchored, and why a *negative* claim about the codebase ("X does not exist") does not belong in a document that is not re-verified on every merge.
+
+A second, adjacent mechanism is also real: the #425 flush-right-date exemption in `heuristics/line-assembly.ts` → `columnGapCuts` (not `sections.ts`, where an earlier revision of this section placed it):
 
 ```ts
-// sections.ts:264-277
+// src/lib/heuristics/line-assembly.ts → columnGapCuts
 if (cuts.length > 0 &&
     isLoneDateRange(mergeItemText(sorted.slice(cuts[cuts.length - 1])))) {
   cuts.pop();   // trailing lone-date segment stays merged into its org text
 }
 ```
 
-The *problem class* named in #438 is real — "is this line a category header or a dated entry?" is decided from **adjacent raw-line signals** (`isLoneDateRange` on the trailing segment) rather than from a structured field on a canonical model. The cited symbol is just wrong.
+The *problem class* named in #438 is real, and the live code makes the case more plainly than the issue did: "is this line a category header or a dated entry?" is decided from **adjacent raw-line signals** — `hasDateRange(nextLine)` reaching forward one raw line in `classifyLine`, and `isLoneDateRange` on the trailing segment in `columnGapCuts` — rather than from a structured field on a canonical model.
 
 **Acceptance test the canonical model must pass:** a one-line `Title  Dates` role under a section header routes as a **dated entry**, not a sub-section boundary, with the header-vs-entry call keyed off a **derived** `isDatedEntry` predicate over the entry's structured dates — not off `isLoneDateRange`/`hasDateRange` re-scanning neighboring raw lines.
 
 > **§7 correction (folded in at Stage C, #444).** Earlier this read "keyed off a structured `isDatedEntry` **property** on `CanonicalResume`." That over-specified: the structure (`start_date` / `end_date` + precision) is **already** on the entry (`fields.experience[]` / `fields.education[]`). A stored `isDatedEntry` field would be a second entries representation parallel to the field core — exactly the parallel-shape lockstep cost this epic removes (considered and **rejected** via `/clarify`, 2026-07-11). So `isDatedEntry` is a **derived predicate** — `Boolean(start_date || end_date)` — over the dates the entry already holds (`isDatedEntry` in `pdf/ats-resume-model.ts`), never a new core or field. It answers §7's coarse "is this a dated entry at all"; the finer flush-right routing (`headerLineDate` / `subLineDate`) stays on `isLoneDateRange` over the *formatted* range, a render-shape concern Stage C keeps byte-identical.
 
-Capture it as a fixture + assertion at Stage C (where the render+export projection takes over) and carry it green through the combined D+E cutover (#445).
+This remains the standing requirement rather than a shipped guarantee: the raw-line reads named above are still live, so the acceptance test above is the bar the header-vs-entry routing is held to, not a property the cutover established. Refs [#438](https://github.com/offlinecv/OfflineCV/issues/438), [#445](https://github.com/offlinecv/OfflineCV/issues/445).
 
 ---
 
@@ -215,27 +220,27 @@ passes through verbatim and may contain any glyph.
 
 | Join | Separator | Site |
 |---|---|---|
-| `Title · Company, Location · Team` | `" · "` | `ats-resume-model.ts:583`, `:608` (`joinHeader`) |
-| `Company, Location` | `", "` | `ats-resume-model.ts:580-582` |
-| `Title, Team` (empty-company branch, #466) | `", "` | `ats-resume-model.ts:605` |
-| `Institution · Location` | `" · "` | `ats-resume-model.ts:720` |
-| `Degree, Field` | `", "` | `ats-resume-model.ts:719` |
-| `Type · Title` (achievement) | `" · "` | `ats-resume-model.ts:441` |
-| Skills, within a category | `" · "` | `ats-resume-model.ts:829`, `:838` |
-| Header ↔ trailing single-token date | `"  "` (two spaces) | `ats-resume-model.ts:641`, `:780`, `:796`, `:808` |
-| Experience/education date **range** | `" – "` spaced en dash | `ats-resume-model.ts:368` (`experienceDateRange`) |
-| Project/education-fallback date **range** | `"–"` unspaced en dash | `score/entry-dates.ts:19` (`buildProjectDates`), `:33` (`buildEducationDates`) |
+| `Title · Company, Location · Team` | `" · "` | `ats-resume-model.ts` → `joinHeader` |
+| `Company, Location` | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (experience mapping) |
+| `Title, Team` (empty-company branch, #466) | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (empty-company branch) |
+| `Institution · Location` | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
+| `Degree, Field` | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
+| `Type · Title` (achievement) | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (achievement mapping) |
+| Skills, within a category | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (skills mapping) |
+| Header ↔ trailing single-token date | `"  "` (two spaces) | `ats-resume-model.ts` → `buildAtsResumeModel` |
+| Experience/education date **range** | `" – "` spaced en dash | `ats-resume-model.ts` → `experienceDateRange` |
+| Project/education-fallback date **range** | `"–"` unspaced en dash | `score/entry-dates.ts` → `buildProjectDates` / `buildEducationDates` |
 
 Every `ats-resume-model.ts` row above is `src/lib/pdf/ats-resume-model.ts`; the date-range
 row is `src/lib/score/entry-dates.ts`, a different directory.
 
 Plus one deliberate exception: an **achievement's** title↔year separator echoes the
-*source's own* punctuation (`achievementYearJoiner`, `score/entry-dates.ts:57`, #380) — a hyphen
+*source's own* punctuation (`score/entry-dates.ts` → `achievementYearJoiner`, #380) — a hyphen
 there is also user-sourced, by design, so the export re-parses to the same `year_separator`
 it came from.
 
 `render-ats-pdf.ts` holds exactly one separator constant of its own —
-`MIDDOT_SEGMENT_SEP = " · "` (`render-ats-pdf.ts:176`) — used only to keep a middot-joined
+`MIDDOT_SEGMENT_SEP = " · "` (`render-ats-pdf.ts` → `MIDDOT_SEGMENT_SEP`) — used only to keep a middot-joined
 segment atomic across a wrap point; it does not choose which fields get middot-joined.
 
 There is **no** ASCII hyphen anywhere in this set. A `Role - Subtitle` header is a title

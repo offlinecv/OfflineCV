@@ -17,7 +17,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { useDownloadPdf, type UseDownloadPdf } from "./useDownloadPdf.ts";
+import {
+  glyphLossMessage,
+  useDownloadPdf,
+  type UseDownloadPdf,
+} from "./useDownloadPdf.ts";
 import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import { computeAnonymousAtsScore } from "../lib/score/score.ts";
@@ -145,5 +149,93 @@ describe("useDownloadPdf — download-source tagging (#313)", () => {
     });
 
     expect(localStorage.getItem(BLANK_DRAFT_STORAGE_KEY)).not.toBeNull();
+  });
+});
+
+/**
+ * #664 — refuse rather than silently substituting "?" in the user's own fields.
+ *
+ * These cases need no font stub: under Node the Poppins `?url` asset is a bare
+ * path that `fetch` cannot resolve, so the export ALWAYS takes the Helvetica
+ * fallback here. That is the same condition a browser hits when the font fetch
+ * fails, which makes this environment the natural place to test the refusal —
+ * the ASCII cases above prove the same path still downloads normally.
+ */
+describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
+  function namedResult(fullName: string): CascadeResult {
+    const base = uploadedResult();
+    return {
+      ...base,
+      canonical: {
+        ...base.canonical,
+        fields: { ...base.canonical.fields, full_name: fullName },
+      },
+    };
+  }
+
+  it("refuses the download and names the field when the fallback would mangle the name", async () => {
+    mount(namedResult("ANNA WIŚNIEWSKA"));
+
+    await act(async () => {
+      await api.download();
+    });
+
+    expect(api.error).toContain("Name");
+    // The value itself must not be echoed back — a résumé's own text does not
+    // belong in an error banner.
+    expect(api.error).not.toContain("WIŚNIEWSKA");
+    expect(api.isGenerating).toBe(false);
+  });
+
+  it("fires no download and no analytics event when it refuses", async () => {
+    mount(namedResult("ANNA WIŚNIEWSKA"));
+
+    await act(async () => {
+      await api.download();
+    });
+
+    // A refused export is not a completed one — counting it would inflate the
+    // download metric with PDFs that were never produced.
+    expect(tracked).toEqual([]);
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+  });
+
+  it("still downloads a pure-ASCII résumé on the same failing-font path", async () => {
+    // The gate that keeps a font problem from blocking everyone: this is the
+    // identical code path as the refusal above, differing only in the data.
+    mount(namedResult("Jane Candidate"));
+
+    await act(async () => {
+      await api.download();
+    });
+
+    expect(api.error).toBeNull();
+    expect(tracked).toEqual([{ source: "upload", format: "pdf" }]);
+  });
+});
+
+describe("glyphLossMessage (#664)", () => {
+  it("collapses duplicate fields so a repeated loss reads as one item", () => {
+    const msg = glyphLossMessage([
+      { where: "Experience", original: "a→b", degraded: "a->b" },
+      { where: "Experience", original: "c→d", degraded: "c->d" },
+      { where: "Experience", original: "e→f", degraded: "e->f" },
+    ]);
+
+    expect(msg).toContain("your Experience.");
+    // Not "Experience, Experience and Experience".
+    expect(msg.match(/Experience/g)).toHaveLength(1);
+  });
+
+  it("joins multiple fields readably and never echoes the values", () => {
+    const msg = glyphLossMessage([
+      { where: "Name", original: "WIŚNIEWSKA", degraded: "WI?NIEWSKA" },
+      { where: "Location", original: "Kraków", degraded: "Krak?w" },
+      { where: "Experience", original: "★", degraded: "?" },
+    ]);
+
+    expect(msg).toContain("your Name, Location and Experience.");
+    expect(msg).not.toContain("WIŚNIEWSKA");
+    expect(msg).not.toContain("Kraków");
   });
 });

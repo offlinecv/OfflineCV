@@ -5,8 +5,13 @@ import type { ResumeExperience } from "../../score/types.ts";
 import type { PdfSection } from "../sections.ts";
 import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
-import { finalizeEntries, looksLikeCompany } from "./shared.ts";
+import {
+  finalizeEntries,
+  looksLikeCompany,
+  looksLikeTitle,
+} from "./shared.ts";
 import { disambiguateCompanyTitle } from "./experience-disambiguate.ts";
+import { startsWithActionVerb } from "../../lexicon/action-verbs.ts";
 
 // ── Experience ──────────────────────────────────────────────────────────────
 
@@ -40,6 +45,7 @@ export function extractExperience(
     anchor: "date_range",
     collectBody: true,
     headerLookback: 2,
+    dateParsing: "date_anchors_only",
   });
   // A dateless experience section yields zero `date_range` blocks. Fall back to
   // the `"first_line"` anchor so each header-run + bullet-group is recovered as
@@ -52,6 +58,7 @@ export function extractExperience(
     blocks = parseEntryBlocks(experience, {
       anchor: "first_line",
       collectBody: true,
+      dateParsing: "date_anchors_only",
     });
   }
   // Map each block, then carry a shared-employer banner down to the roles that
@@ -166,6 +173,144 @@ function propagateSharedEmployer(
   }
 }
 
+const HEADER_CONNECTOR_RE = /^(?:and|at|for|in|of|on|the)$/i;
+
+/**
+ * A promoted title must read as a standalone role designation, not merely
+ * contain a title keyword somewhere in accomplishment prose. Most titles end
+ * in the role noun ("Staff Engineer", "Product Manager"); executive titles
+ * may lead with it ("Director of Product", "Head of Engineering"). Keeping
+ * that grammar positive is what carries most of the work: it needs no verb list
+ * to reject "Engineering Roadmap, improving Distributed Systems".
+ *
+ * It is necessary but NOT sufficient, because the role noun it anchors on ends a
+ * sentence as readily as a title ("Hired Staff Engineer"). The verb-lead check
+ * in `looksLikeRoleHeaderTitle` covers that residue; keep both.
+ */
+const ROLE_TITLE_EDGE_RE =
+  /(?:^(?:ceo|cfo|chief|cio|co-?founder|coo|cto|director|founder|head|lead|manager|president|vice\s+president|vp)\b|\b(?:accountant|administrator|advisor|adviser|agent|ambassador|analyst|apprentice|architect|assistant|associate|auditor|ceo|cfo|cio|clerk|consultant|coordinator|coo|counselor|cto|designer|developer|devops|director|editor|engineer|fellow|founder|instructor|intern|internship|lead|lecturer|manager|officer|pm|president|principal|producer|professor|recruiter|representative|researcher|scientist|specialist|sre|strategist|supervisor|teacher|technician|tpm|trainee|tutor|volunteer|writer)(?:\s+(?:i{1,4}|l\d+|\d+))?$)/iu;
+
+/** True when every substantive token has header casing. Connectors may remain
+ * lowercase; brands such as iOS/eBay qualify through an internal capital. */
+function hasHeaderCase(text: string): boolean {
+  return text.split(/\s+/).every((raw) => {
+    const token = raw.replace(
+      /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,
+      "",
+    );
+    if (!token || HEADER_CONNECTOR_RE.test(token)) return true;
+    return (
+      /^[\p{Lu}\p{Lt}\p{N}]/u.test(token) ||
+      /^\p{Ll}+\p{Lu}/u.test(token)
+    );
+  });
+}
+
+/**
+ * Reject a candidate that LEADS with an action verb, however title-shaped its
+ * tail is.
+ *
+ * `ROLE_TITLE_EDGE_RE` is deliberately positive grammar, but positive grammar
+ * alone is not sufficient here: the role noun it anchors on can sit at the end
+ * of a *sentence* as easily as at the end of a title. "Hired Staff Engineer,
+ * Cloud Infrastructure" satisfies every other gate — the tail matches
+ * `engineer$`, every token has header casing, and the comma splits it into a
+ * plausible `Title, Company` pair — so it promoted to a fabricated role AND was
+ * then suppressed from the description, score pool, and export as "metadata".
+ * A staffing achievement disappeared and a role nobody held took its place.
+ *
+ * "Owned Developer Platform" was the only case covered before, and it failed for
+ * the wrong reason: "Platform" is not a role noun. Swap the noun for one that is
+ * and the guard evaporates. The verb, not the noun, is the discriminator, so
+ * this asks about the verb.
+ *
+ * The list is the shared `ACTION_VERBS` lexicon — the same set the scorer grades
+ * bullet specificity against — rather than a denylist maintained here, so a verb
+ * added for scoring cannot leave this gate behind. Accepted cost: a genuine
+ * title whose first word is in that set ("Managed Services Engineer") is
+ * rejected. That is the safe direction — dropping a real role is #145's
+ * long-standing date-only behavior, while fabricating one both invents history
+ * and deletes the bullet it was made from.
+ */
+function looksLikeRoleHeaderTitle(text: string): boolean {
+  return (
+    looksLikeTitle(text) &&
+    hasHeaderCase(text) &&
+    ROLE_TITLE_EDGE_RE.test(text) &&
+    !startsWithActionVerb(text)
+  );
+}
+
+interface PromotedRoleHeader {
+  fields: ReturnType<typeof disambiguateCompanyTitle>;
+  description: string | undefined;
+}
+
+/**
+ * Recover fields from the first source bullet of an otherwise date-only block.
+ *
+ * The narrow gates preserve #145's date-only-phantom contract:
+ * - the anchor carried a complete range but no header text;
+ * - another body bullet follows, distinguishing `role bullet + achievements`
+ *   from a lone achievement;
+ * - the candidate independently resolves to BOTH a title-like role and an
+ *   organization-shaped company; and
+ * - the title has a positive standalone-role shape rather than a title keyword
+ *   embedded in sentence-led accomplishment prose.
+ *
+ * Once promoted, the first body unit is metadata rather than an achievement.
+ * Remove it from the description so display and export do not duplicate the
+ * reconstructed role header. The scorer independently suppresses the matching
+ * source bullet from its section-derived observation pool — gated on the
+ * `header_from_bullet` flag this promotion stamps, so the suppression cannot
+ * reach a normally-parsed role's bullets.
+ *
+ * `block.bulletCount` and `block.body`'s line count are the same counter, not
+ * two that happen to agree: the anchored builder in `entry-blocks.ts` derives
+ * both from one `bodyUnits` array — `body` is `bodyUnits.join("\n")` and
+ * `bulletCount` is `bodyUnits.length` — and a wrapped tail is appended onto its
+ * unit with a space, never as a new line, so no unit contains a `\n`. Empty
+ * units are skipped before the push, so the `.trim()` on the join cannot shift
+ * index 0 either. The `anchorHeaderIndex !== -1` gate above keeps this exact:
+ * `parseBulletList`'s builder leaves `anchorHeaderIndex` undefined and is
+ * rejected before we ever split its body. So the `>= 2` gate guarantees
+ * `bodyLines[0]` is a whole bullet and `slice(1)` strands nothing.
+ */
+function promoteBulletedRoleHeader(
+  block: EntryBlock,
+): PromotedRoleHeader | undefined {
+  if (
+    block.headerLines.length !== 0 ||
+    block.anchorHeaderIndex !== -1 ||
+    block.bulletCount < 2 ||
+    !block.dates.start_date ||
+    (!block.dates.end_date && !block.dates.is_current)
+  ) {
+    return undefined;
+  }
+
+  const bodyLines = block.body?.split("\n") ?? [];
+  const candidate = bodyLines[0]?.trim();
+  if (!candidate) return undefined;
+
+  const fields = disambiguateCompanyTitle([candidate]);
+  if (
+    !fields.title ||
+    !fields.company ||
+    !looksLikeRoleHeaderTitle(fields.title)
+  ) {
+    return undefined;
+  }
+  if (!hasHeaderCase(fields.company)) {
+    return undefined;
+  }
+  const remainingBody = bodyLines.slice(1).join("\n").trim();
+  return {
+    fields,
+    description: remainingBody || undefined,
+  };
+}
+
 /** Map one dated entry block to a `ResumeExperience` and its confidence score.
  *  Extracted from `extractExperience` to keep each function below the
  *  complexity threshold; mirrors `projectFromBlock` / `achievementFromBlock`. */
@@ -174,11 +319,16 @@ function experienceFromBlock(block: EntryBlock): {
   score: number;
 } {
   const { dates } = block;
-  const { title, company, team, location } = disambiguateCompanyTitle(
+  const parsedFields = disambiguateCompanyTitle(
     block.headerLines,
     block.anchorHeaderIndex,
   );
-  const description = block.body;
+  const promoted =
+    parsedFields.title || parsedFields.company
+      ? undefined
+      : promoteBulletedRoleHeader(block);
+  const { title, company, team, location } = promoted?.fields ?? parsedFields;
+  const description = promoted ? promoted.description : block.body;
 
   // Score the entry.
   let score = 0;
@@ -197,6 +347,7 @@ function experienceFromBlock(block: EntryBlock): {
       ...(dates.start_date ? { start_date: dates.start_date } : {}),
       ...(dates.end_date ? { end_date: dates.end_date } : {}),
       ...(dates.is_current ? { is_current: true } : {}),
+      ...(promoted ? { header_from_bullet: true as const } : {}),
       description: description || undefined,
     },
     score: Math.min(score, 1),

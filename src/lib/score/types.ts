@@ -144,6 +144,17 @@ export interface ResumeExperience {
   seniority_level?: string;
   /** Optional extraction-quality score in [0, 1]. Missing means "trust it". */
   confidence?: number;
+  /** True when `title`/`company` were recovered from this block's FIRST BODY
+   *  BULLET rather than from a header line (#662, `promoteBulletedRoleHeader`) —
+   *  the date-heading templates that put `Title, Company` in bullet position.
+   *  Parser-internal provenance, not résumé content: it exists so the scorer can
+   *  suppress the source bullet from the graded pool for THESE entries only.
+   *  Suppressing on every entry silently deletes an authored line that merely
+   *  restates a normally-parsed header — it leaves `score.bullets`, so it loses
+   *  both its editable row and (via `resolveBullets`) its slot in the exported
+   *  PDF. Absent for every normally-parsed role, so consumers that ignore it
+   *  behave exactly as before. */
+  header_from_bullet?: boolean;
 }
 
 export interface ResumeEducation {

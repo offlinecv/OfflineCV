@@ -66,7 +66,7 @@
       "scanned": false
     },
     "bulletCount": 8,
-    "algoVersion": "1.7"
+    "algoVersion": "1.8"
   },
   "reproArtifact": {
     "artifactVersion": "v1",
@@ -127,7 +127,7 @@
     "phoneChangedAcrossRoundtrip": false,
     "locationChangedAcrossRoundtrip": false,
     "linkedinUrlChangedAcrossRoundtrip": false,
-    "experienceChangedAcrossRoundtrip": true,
+    "experienceChangedAcrossRoundtrip": false,
     "educationChangedAcrossRoundtrip": false,
     "skillsChangedAcrossRoundtrip": false,
     "summaryChangedAcrossRoundtrip": false,

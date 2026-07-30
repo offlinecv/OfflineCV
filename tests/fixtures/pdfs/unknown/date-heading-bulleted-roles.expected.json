@@ -1,16 +1,19 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.87,
     "triggers": [],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "llm",
+    "suggestedEscalation": "none",
     "fieldsPopulated": [
+      "current_company",
+      "current_title",
       "education",
       "email",
+      "experience",
       "family_name",
       "full_name",
       "given_name",
@@ -20,7 +23,7 @@
       "skills"
     ],
     "skillsCount": 4,
-    "experienceCount": 0,
+    "experienceCount": 2,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 0,
@@ -31,24 +34,24 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 83,
-    "preLayoutOverall": 83,
+    "overall": 94,
+    "preLayoutOverall": 94,
     "specificity": {
       "score": 40,
       "max": 40,
       "gradable": true,
       "metricBullets": 4,
-      "totalBullets": 6
+      "totalBullets": 4
     },
     "structure": {
-      "score": 20,
+      "score": 30,
       "max": 30,
       "gradable": true,
       "goodBullets": 4,
-      "totalBullets": 6
+      "totalBullets": 4
     },
     "completeness": {
-      "score": 23,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
@@ -61,8 +64,8 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 6,
-    "algoVersion": "1.7"
+    "bulletCount": 4,
+    "algoVersion": "1.8"
   },
   "reproArtifact": {
     "artifactVersion": "v1",
@@ -71,7 +74,7 @@
     "sectionSource": "markdown",
     "pageCount": 1,
     "rawCharCount": 570,
-    "extractedCharCount": 145,
+    "extractedCharCount": 440,
     "sections": [
       {
         "name": "profile",
@@ -96,7 +99,7 @@
       "hasPhone": true,
       "hasLocation": true,
       "hasSummary": false,
-      "experienceCount": 0,
+      "experienceCount": 2,
       "educationCount": 1,
       "skillsCount": 4
     },
@@ -111,7 +114,7 @@
     "educationHeaderCandidateRejected": false,
     "educationEntriesFewerThanDegreeTokens": false,
     "experienceRegionHasDateRangeLines": true,
-    "experienceEntriesFewerThanDateRangeLines": true,
+    "experienceEntriesFewerThanDateRangeLines": false,
     "achievementsParsedEmpty": true,
     "achievementsEntriesFewerThanHeaderLines": false,
     "fullNameChangedAcrossRoundtrip": false,
