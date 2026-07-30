@@ -196,6 +196,17 @@ export interface EntryBlockConfig {
    * it. Experience uses 2.
    */
   headerLookback?: number;
+  /**
+   * Which anchor lines may have date-looking text parsed and stripped.
+   *
+   * `"all"` (the default) preserves the date-optional project/achievement
+   * contract: their `first_line` anchor may carry a lone date. Experience uses
+   * `"date_anchors_only"` so a line recovered by the DATELESS-role boundary
+   * keeps title text such as `"Software Engineer Intern Summer 2022"` intact.
+   * A genuine year-only experience date still qualifies through the guarded
+   * `date_range` anchor (`"Title · Company  2022"`, #358).
+   */
+  dateParsing?: "all" | "date_anchors_only";
 }
 
 /**
@@ -283,6 +294,28 @@ function isAnchorLine(line: PdfLine, anchor: EntryAnchor): boolean {
       // a new entry.
       return !isBulletLine(line);
   }
+}
+
+/**
+ * Whether `buildEntryBlock` may interpret date-shaped text on this anchor.
+ *
+ * A `date_range` parse can contain anchors from two disjoint sources: genuine
+ * date syntax (`isAnchorLine`) and the conservative dateless-role recovery
+ * (`collectDatelessAnchors`). Issue #663 exposed the provenance loss between
+ * those stages: every recovered dateless line was later fed to
+ * `parseDateRange`, synthesizing a date from a year that belonged to the title.
+ * Re-checking the same date-anchor predicate preserves that distinction. The
+ * inverse is deliberate: #358's terminal `Title · Company  2022` shape passes
+ * the predicate and therefore remains a real `start_date`.
+ */
+function shouldParseAnchorDate(
+  line: PdfLine,
+  cfg: EntryBlockConfig,
+): boolean {
+  return (
+    cfg.dateParsing !== "date_anchors_only" ||
+    isAnchorLine(line, "date_range")
+  );
 }
 
 /**
@@ -1271,8 +1304,13 @@ function buildEntryBlock(
   );
 
   const anchorLine = lines[anchorIdx];
-  const dates = parseDateRange(anchorLine.text);
-  const anchorTextWithoutDates = stripDateRange(anchorLine.text);
+  const parseAnchorDate = shouldParseAnchorDate(anchorLine, cfg);
+  const dates: EntryBlock["dates"] = parseAnchorDate
+    ? parseDateRange(anchorLine.text)
+    : {};
+  const anchorTextWithoutDates = parseAnchorDate
+    ? stripDateRange(anchorLine.text)
+    : anchorLine.text;
 
   // Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
   // consecutive non-bullet lines until the body begins or the next anchor. The
@@ -1404,7 +1442,9 @@ function buildEntryBlock(
     headerLines,
     anchorHeaderIndex,
     dates,
-    dateSeparator: dateSeparator(anchorLine.text),
+    dateSeparator: parseAnchorDate
+      ? dateSeparator(anchorLine.text)
+      : undefined,
     body,
     bulletCount: bodyUnits.length,
   };

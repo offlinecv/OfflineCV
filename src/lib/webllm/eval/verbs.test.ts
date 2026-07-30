@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { ACTION_VERBS as SCORER_ACTION_VERBS } from "../../score/score.ts";
+import { ACTION_VERBS as SCORER_ACTION_VERBS } from "../../lexicon/action-verbs.ts";
 import { EVAL_ONLY_EXTENSIONS, startsWithActionVerb } from "./verbs.ts";
 
 // #622: the whole point of promoting a verb out of EVAL_ONLY_EXTENSIONS and

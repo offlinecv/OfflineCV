@@ -392,17 +392,141 @@ let poppinsBytesPromise: Promise<{
   bold: ArrayBuffer;
 }> | null = null;
 
+/**
+ * Fetch one font asset, failing loudly on an HTTP error (#664).
+ *
+ * `fetch` rejects only on a *network* failure — a 404 or 500 RESOLVES, so
+ * `res.arrayBuffer()` would hand the error page's bytes to `embedFont` and
+ * fontkit would throw on the unparseable input. The fallback was still reached,
+ * but by way of a font-parse error, which reports the wrong cause. The status
+ * check matters because {@link findExportGlyphLosses}' caller shows the reason
+ * to a user, and "you appear to be offline" and "the font asset is missing"
+ * have different remedies.
+ */
+async function fetchFontBytes(url: string): Promise<ArrayBuffer> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`font asset responded ${res.status} ${res.statusText}`);
+  }
+  return res.arrayBuffer();
+}
+
 function loadPoppinsBytes(): Promise<{
   regular: ArrayBuffer;
   bold: ArrayBuffer;
 }> {
   if (!poppinsBytesPromise) {
     poppinsBytesPromise = Promise.all([
-      fetch(poppinsRegularUrl).then((res) => res.arrayBuffer()),
-      fetch(poppinsBoldUrl).then((res) => res.arrayBuffer()),
-    ]).then(([regular, bold]) => ({ regular, bold }));
+      fetchFontBytes(poppinsRegularUrl),
+      fetchFontBytes(poppinsBoldUrl),
+    ])
+      .then(([regular, bold]) => ({ regular, bold }))
+      .catch((err: unknown) => {
+        // Clear the memo on failure so the NEXT call re-fetches (#664).
+        //
+        // The guard above is `!poppinsBytesPromise`, so without this the
+        // REJECTED promise stays cached forever: one transient blip degraded
+        // every subsequent download for the life of the page, even after the
+        // network recovered. That also made a user-facing "try again" a lie —
+        // the retry resolved to the same stored rejection without issuing a
+        // request. Only the failure path is cleared; a successful fetch stays
+        // memoized, which is what this cache is for.
+        poppinsBytesPromise = null;
+        throw err;
+      });
   }
   return poppinsBytesPromise;
+}
+
+/** One field whose text the Helvetica fallback cannot draw intact (#664). */
+export interface ExportGlyphLoss {
+  /** User-facing label for where the loss is — a contact field name, "Summary",
+   *  or the section's own heading. Not a code path; it is shown to the user. */
+  where: string;
+  /** The text as authored. */
+  original: string;
+  /** What the fallback font would draw instead. */
+  degraded: string;
+}
+
+/**
+ * Report the fields the Helvetica fallback would silently mangle (#664).
+ *
+ * This is the probe behind the Download-PDF refusal. `useDownloadPdf` calls it
+ * BEFORE rendering and refuses when it returns a non-empty list, so the user is
+ * never handed a PDF in which their own name has quietly become `WI?NIEWSKA`.
+ *
+ * Three design points, each load-bearing:
+ *
+ *  1. **It lives here, not in `renderAtsResumePdf`.** An earlier design gave the
+ *     renderer a policy parameter so the browser could ask to refuse while the
+ *     corpus harness asked to degrade. `renderAtsResumePdf` has ~35 call sites,
+ *     all typed `Promise<Uint8Array>` — every round-trip, export-layout and
+ *     repro test in the repo. A separate probe leaves all of them untouched, and
+ *     leaves the corpus round-trip oracle (which needs a rendered PDF, degraded
+ *     or not) working by construction rather than by opt-out.
+ *  2. **Empty when the embedded font loads.** It shares the memoized
+ *     {@link loadPoppinsBytes}, so the probe and the subsequent render make one
+ *     fetch attempt between them, not two. On the failure path the memo is
+ *     cleared (that is what makes Retry work), so a *no-loss* résumé costs a
+ *     second failing attempt when the render then re-tries — acceptable, since
+ *     it only happens when the font is already unavailable.
+ *  3. **It gates on actual loss, not on "the font failed."** Most résumés are
+ *     pure ASCII, and Helvetica draws them perfectly. Refusing on the font
+ *     failure alone would block every user to protect the few with a character
+ *     outside WinAnsi.
+ *
+ * Deliberate limit: this covers the **fallback** path only. On the embedded path
+ * `toEmbeddedFontSafe` can still emit `?` for a code point Poppins lacks (`★`,
+ * `✓`) — decorative symbols, not identity fields, and outside #664's scope. It
+ * is also mildly conservative: headings are uppercased before sanitizing at draw
+ * time, and this probe reads the un-cased text, so a character that would
+ * upper-case into WinAnsi could be reported as a loss it isn't. That errs toward
+ * asking the user, which is the safe direction.
+ */
+export async function findExportGlyphLosses(
+  model: AtsResumeModel,
+): Promise<ExportGlyphLoss[]> {
+  try {
+    await loadPoppinsBytes();
+    return [];
+  } catch {
+    // The embedded font is unavailable, so the render below would fall back to
+    // Helvetica/WinAnsi. Fall through and measure what that would cost.
+  }
+
+  const losses: ExportGlyphLoss[] = [];
+  const check = (where: string, text: string | undefined): void => {
+    if (!text) return;
+    const degraded = toWinAnsi(text);
+    if (degraded !== text) losses.push({ where, original: text, degraded });
+  };
+
+  const { contact } = model;
+  check("Name", contact.name);
+  check("Headline", contact.headline);
+  check("Email", contact.email);
+  check("Phone", contact.phone);
+  check("Location", contact.location);
+  for (const link of contact.links) check("Links", link);
+  check(model.summaryHeading || "Summary", model.summary);
+
+  for (const section of model.sections) {
+    // The section's own heading labels its entries, so a loss inside Experience
+    // reads as "Experience" rather than as an index into a model the user has
+    // never seen.
+    const where = section.heading || "Section";
+    check(where, section.heading);
+    for (const entry of section.entries) {
+      check(where, entry.headerLine);
+      check(where, entry.headerLineDate);
+      check(where, entry.subLine);
+      check(where, entry.subLineDate);
+      for (const bullet of entry.bullets) check(where, bullet);
+    }
+  }
+
+  return losses;
 }
 
 /**
@@ -419,6 +543,15 @@ function loadPoppinsBytes(): Promise<{
  * embedded path it is {@link toEmbeddedFontSafe} bound to Poppins' own glyph
  * coverage, because an embedded font silently emits `.notdef` (extracting as
  * U+0000) for a glyph it lacks rather than throwing.
+ *
+ * "A font problem never blocks the download" is deliberately still true HERE
+ * and is not the product behaviour (#664). Falling back silently is right for
+ * the ~35 non-user callers — every round-trip and export test, and the corpus
+ * oracle, which must render the degraded output in order to measure it. The
+ * user-facing refusal lives one layer up in `useDownloadPdf`, which asks
+ * {@link findExportGlyphLosses} whether the fallback would actually cost the
+ * user a character and stops before rendering if it would. Keep the split: a
+ * refusal wired in here would break every one of those callers to serve one.
  */
 async function loadFonts(
   doc: Doc,

@@ -163,6 +163,39 @@ describe("dateless trailing experience role (#219)", () => {
     );
   });
 
+  it("keeps an inline year in a dateless title but parses a terminal year-date (#663)", () => {
+    const { value } = extractExperience(
+      mkSection("experience", [
+        ["Staff Engineer · Acme Corp  Jan 2020 - Present", 0, 100],
+        ["• Led the platform migration", 10, 90],
+        [
+          "Software Engineer Intern Summer 2022 · DEF Organization",
+          0,
+          70,
+        ],
+        ["• Built the release dashboard", 10, 60],
+        ["Research Assistant · XYZ University  2021", 0, 40],
+        ["• Evaluated the ranking model", 10, 30],
+      ]),
+    );
+
+    expect(value).toHaveLength(3);
+    expect(value[1]).toMatchObject({
+      title: "Software Engineer Intern Summer 2022",
+      company: "DEF Organization",
+    });
+    expect(value[1].start_date).toBeUndefined();
+    expect(value[1].end_date).toBeUndefined();
+
+    // Deliberate inverse: a terminal year after the canonical middot-bearing
+    // org segment is #358's real year-only date shape, not title text.
+    expect(value[2]).toMatchObject({
+      title: "Research Assistant",
+      company: "XYZ University",
+      start_date: "2021",
+    });
+  });
+
   it("opens a dateless role whose predecessor bullet WRAPPED onto a continuation line (#239)", () => {
     // The previous role's last bullet wraps onto a marker-less continuation line
     // ("millions of users…") that ends on a period — so the dateless header sits
@@ -215,6 +248,27 @@ describe("dateless trailing experience role (#219)", () => {
     );
     expect(value).toHaveLength(1);
     expect(value[0].title).toBe("Volunteer Lead");
+    expect(value[0].start_date).toBeUndefined();
+    expect(value[0].end_date).toBeUndefined();
+  });
+
+  it("keeps an inline title year in the all-dateless first_line fallback (#663)", () => {
+    const { value } = extractExperience(
+      mkSection("experience", [
+        [
+          "Software Engineer Intern Summer 2022 · DEF Organization",
+          0,
+          100,
+        ],
+        ["• Built the release dashboard", 10, 90],
+      ]),
+    );
+
+    expect(value).toHaveLength(1);
+    expect(value[0]).toMatchObject({
+      title: "Software Engineer Intern Summer 2022",
+      company: "DEF Organization",
+    });
     expect(value[0].start_date).toBeUndefined();
     expect(value[0].end_date).toBeUndefined();
   });

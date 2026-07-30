@@ -113,7 +113,12 @@ import {
 } from "./ReconstructedSummary.tsx";
 import { SkillsSection } from "./ReconstructedSkills.tsx";
 import { SkillTermGuidance } from "./SkillTermGuidance.tsx";
-import { Button, EditableField, SectionHeading } from "@design-system";
+import {
+  Button,
+  EditableField,
+  ErrorState,
+  SectionHeading,
+} from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 import { useDownloadMarkdown } from "../../hooks/useDownloadMarkdown.ts";
@@ -1150,7 +1155,10 @@ export function ReconstructedResume({
   // Download the reconstructed (possibly edited) résumé as an ATS-safe,
   // text-only PDF — built fully client-side from the already-parsed fields,
   // so no PDF bytes ever leave the browser (#171).
-  const { download, isGenerating } = useDownloadPdf(result, score);
+  const { download, isGenerating, error: downloadError } = useDownloadPdf(
+    result,
+    score,
+  );
 
   // Download the same reconstructed résumé as a career-ops-shaped `cv.md`
   // (#552) — a plain-text sibling artifact, not a competing "primary" export.
@@ -1281,6 +1289,7 @@ export function ReconstructedResume({
             </Button>
           </div>
         </div>
+        {downloadError && <ErrorState>{downloadError}</ErrorState>}
         <p className="max-w-prose text-sm text-content-tertiary">
           What the parser recognized, in resume shape. Each bullet is checked
           against three rules — an action verb, the 8–30-word length window, and

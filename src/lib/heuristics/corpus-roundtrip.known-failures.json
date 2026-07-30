@@ -43,14 +43,6 @@
         "note": "Same single-glyph toWinAnsi() substitution as google-docs-skia-proxy-classic; see #326's decision record."
       }
     ],
-    "unknown/openresume-react-pdf.pdf": [
-      {
-        "category": "experience",
-        "issue": 663,
-        "status": "open",
-        "note": "A dateless role whose TITLE carries an inline year ('Software Engineer Intern Summer 2022') round-trips with the year split out as start_date ('… Summer' + 2022) — an asymmetry between what the exporter composes and what the parser splits. Previously cited #649; that was the wrong owner, because #649 is a pure extraction whose own acceptance criterion is 'changes ZERO rendered bytes' and whose plan explicitly defers the date dialect to a separate PR — so it could never clear this line and this entry would have orphaned the day it merged. Not the #298 title/company swap and not the #436 one-line header."
-      }
-    ],
     "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": [
       {
         "category": "experience",
@@ -63,8 +55,8 @@
       {
         "category": "contact",
         "issue": 664,
-        "status": "open",
-        "note": "full_name 'ANNA WIŚNIEWSKA' → 'ANNA WI?NIEWSKA'. ś (U+015B) is Latin Extended-A, outside WinAnsi, so toWinAnsi() degrades it to '?' on the standard-font path (always under Node/CI; in the browser only when the Poppins fetch fails). Minted under #654 as the corpus's first evidence for roundtrip-contact-value-changed. The MECHANISM is #326's, but this is filed OPEN under #664 rather than accepted under #326 on purpose: #326 weighed a punctuation glyph in a role TITLE against a crash, and nobody has weighed a candidate's own NAME being mangled in a PDF they send to employers. Marking it accepted would permanently exempt it from CI on a decision no one made."
+        "status": "accepted",
+        "note": "full_name 'ANNA WIŚNIEWSKA' → 'ANNA WI?NIEWSKA'. ś (U+015B) is Latin Extended-A, outside WinAnsi, so toWinAnsi() degrades it to '?' on the standard-font path. ACCEPTED under #664 with an explicit written decision — not inherited from #326, whose recorded tradeoff covers a punctuation glyph in a role TITLE and does not extend to an identity field. The decision: the USER-FACING export refuses rather than degrading. useDownloadPdf calls findExportGlyphLosses() before rendering and, on the Helvetica fallback, blocks the download and names the affected fields instead of handing back a mangled name. That refusal deliberately does NOT live in renderAtsResumePdf, so this corpus row keeps exercising the un-refused path: the round-trip oracle needs a rendered PDF to measure, and it is the only fixture in the corpus with a character outside WinAnsi (verified: 0 of 57 expected snapshots contain one). So the '?' recorded here is the intentional Node/CI behaviour, not an open defect. Delete this row if a Unicode-capable font ever removes the fallback entirely. Minted under #654 as the corpus's first evidence for roundtrip-contact-value-changed."
       }
     ]
   }
