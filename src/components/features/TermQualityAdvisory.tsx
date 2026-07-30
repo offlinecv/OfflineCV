@@ -15,10 +15,12 @@
  * GROUPED BY KIND (see {@link GROUPS}), because the two kinds write to two
  * different fields of the query and a flat row said nothing about which.
  *
- * TWO PLACEMENTS, one component (#597). Passing `kind` puts ONE group inline
- * under its own chip column — the suggestion pills belong beside the list they
- * write into, not in a trailing section at the foot of the page the user has to
- * connect back up. Omitting `kind` keeps the original full-width block, which is
+ * TWO PLACEMENTS, one component (#597) — and the split is what closed #595, which
+ * reported the full-width block rendering two sections away from the fields its
+ * pills write into. Adjacency is therefore a requirement here, not a preference:
+ * passing `kind` puts ONE group inline under its own chip column, because the
+ * suggestion pills belong beside the list they write into, not in a trailing
+ * section at the foot of the page the user has to connect back up. Omitting `kind` keeps the original full-width block, which is
  * where the findings that are ABOUT the query as a whole live: the coherence
  * note and the dropped terms. The full-width mode is the only one that spans the
  * grid, so a column instance can never break its parent's layout.
