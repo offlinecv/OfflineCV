@@ -125,8 +125,11 @@ describe("buildAtsResumeModel", () => {
     const edu = model.sections[1].entries[0];
     // Stacked shape (#291): degree leads the header, institution moves to the
     // sub-line (mirroring experience) so it round-trips back through the parser.
+    // Since #618 the lone graduation year is drawn flush-right via `subLineDate`
+    // rather than glued after a whitespace gap, matching the range shape.
     expect(edu.headerLine).toBe("BS Computer Science");
-    expect(edu.subLine).toBe("State University  2016");
+    expect(edu.subLine).toBe("State University");
+    expect(edu.subLineDate).toBe("2016");
     expect(edu.bullets[0]).toMatch(/Coursework: Algorithms, Databases/);
 
     const skills = model.sections[2].entries[0];
@@ -159,11 +162,15 @@ describe("buildAtsResumeModel", () => {
     );
     expect(edu.entries[0].subLine).toBe("Riverside College Of Engineering");
     // Degree-less program (#302): the header carries NO degree cue, so the
-    // graduation date stays INLINE on the header (making it an
+    // graduation date stays on the HEADER line (making it an
     // `isInlineDatedProgram` entry lead the re-parser segments on) and the
     // institution drops alone to the sub-line — otherwise two degree-less entries
-    // collapse to one on round-trip.
-    expect(edu.entries[1].headerLine).toBe("Applied Robotics Program  2024");
+    // collapse to one on round-trip. Since #618 the lone year is drawn
+    // flush-right via `headerLineDate` on that same header line rather than
+    // glued after a whitespace gap. No `columnGapCuts` change was needed — see
+    // the `isLoneDateRange` docblock for why the parser side stays range-only.
+    expect(edu.entries[1].headerLine).toBe("Applied Robotics Program");
+    expect(edu.entries[1].headerLineDate).toBe("2024");
     expect(edu.entries[1].subLine).toBe("ACME Professional Education");
   });
 
@@ -416,10 +423,14 @@ describe("buildAtsResumeModel", () => {
     expect(exp.entries[0].subLine).toBeUndefined();
   });
 
-  it("keeps a single-token (non-range) date glued rather than flush-right (#436)", () => {
-    // Only a lone year is known — not a range — so it is NOT drawn flush-right
-    // (the flush() exemption only protects ranges); it stays glued after a
-    // whitespace gap on the one-line header.
+  it("draws a lone-year Experience header flush-right, matching a range (#618)", () => {
+    // Since #618 the EXPORTER routes a bare `(19|20)\d{2}` year to
+    // `headerLineDate` via `isLoneDateRange(..., { allowSingle: true })`, so a
+    // lone year on an Experience header takes the same slot a range does. The
+    // parser side is unchanged; see the `isLoneDateRange` docblock. `subLine`
+    // stays undefined for the one-line shape. A single-token date that is NOT
+    // a bare year (e.g. `May 2020` — month-year) still glues, since
+    // `allowSingle` narrowly admits only 4-digit years.
     const result = makeResult({
       experience: [
         {
@@ -433,8 +444,8 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const exp = model.sections.find((s) => s.heading === "Experience")!;
-    expect(exp.entries[0].headerLine).toBe("Analyst · Globex, Austin, TX  2022");
-    expect(exp.entries[0].headerLineDate).toBeUndefined();
+    expect(exp.entries[0].headerLine).toBe("Analyst · Globex, Austin, TX");
+    expect(exp.entries[0].headerLineDate).toBe("2022");
     expect(exp.entries[0].subLine).toBeUndefined();
   });
 
@@ -492,6 +503,52 @@ describe("buildAtsResumeModel", () => {
     expect(emptyCompanyExp.entries[0].headerLine).toBe(
       "Chair, Leadership Council",
     );
+  });
+
+  // The GLUE branch, on both sections. #618 rewrote the test above from
+  // asserting that a single-token date stays glued to asserting that it goes
+  // flush-right — correct for a bare year, but it left the glue branches with no
+  // model-level coverage at all. `line-primitives.test.ts` pins the PREDICATE
+  // (`isLoneDateRange("May 2020", { allowSingle: true }) === false`); these pin
+  // the resulting MODEL SHAPE, which is a different layer: a later change to
+  // `rightAlignEduDate` or the Experience gate could route month-year to the
+  // flush-right slot and every predicate test would still pass.
+  it("keeps a non-year single-token date glued rather than flush-right (#436)", () => {
+    const result = makeResult({
+      experience: [
+        {
+          title: "Analyst",
+          company: "Globex",
+          location: "Austin, TX",
+          end_date: "May 2020",
+          description: "Cut latency by 40%",
+        },
+      ],
+    });
+    const exp = buildAtsResumeModel(result, makeScore([])).sections.find(
+      (s) => s.heading === "Experience",
+    )!;
+    expect(exp.entries[0].headerLine).toBe(
+      "Analyst · Globex, Austin, TX  May 2020",
+    );
+    expect(exp.entries[0].headerLineDate).toBeUndefined();
+  });
+
+  it("keeps a non-year single-token graduation date glued on Education (#436)", () => {
+    const result = makeResult({
+      education: [
+        {
+          degree: "BS Data Science",
+          institution: "Ridgemont State University",
+          end_date: "May 2020",
+        },
+      ],
+    });
+    const edu = buildAtsResumeModel(result, makeScore([])).sections.find(
+      (s) => s.heading === "Education",
+    )!;
+    expect(edu.entries[0].subLine).toBe("Ridgemont State University  May 2020");
+    expect(edu.entries[0].subLineDate).toBeUndefined();
   });
 
   it("fully display-formats contact links (scheme + www stripped) so the www round-trip holds (#425)", () => {
