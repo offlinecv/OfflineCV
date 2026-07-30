@@ -104,6 +104,9 @@ function Harness() {
     onExperienceFieldChange: () => {},
     onBulletChange: () => {},
     onRemoveBullet,
+    // No added bullets in this harness — the "Other bullets" remove path
+    // resolves no bucket and falls through to the id-keyed removal (#660).
+    addedBullets: {},
     addedExperience: [],
     originalCount: EXPERIENCES.length,
     onAddEntry: () => {},

@@ -50,7 +50,7 @@ export interface BulletUndoTargets {
   removed: readonly string[];
   /** The added-bullet entry key an `add` appends to, a `remove` splices out of
    *  (#637), or a `replace` rewrites in place (#657). Set iff the batch has at
-   *  least one write of any kind. */
+   *  least one write of any kind AND the caller could name the bucket. */
   addedEntryKey?: string;
 }
 
@@ -67,10 +67,22 @@ export interface BulletUndoTargets {
  * bullet is harmless: the snapshot then holds the bucket's unchanged value and
  * restoring writes it straight back (and an absent bucket snapshots as `[]`,
  * which restores as a delete — a no-op).
+ *
+ * `undefined` means the caller cannot name a bucket at all, which is a different
+ * thing and NOT interchangeable with a placeholder key. It is the "Other bullets"
+ * remove path (`useOtherBulletsRemove`) when the clicked row resolves to no
+ * bucket: nothing will be written there, so nothing is snapshotted, and the
+ * removal is undone through `restore` like any id-keyed one. A placeholder key
+ * instead would be actively destructive on the path where a bucket IS spliced —
+ * it snapshots as `[]`, restores as a delete of a key that never existed, and so
+ * arms a mounted, clickable Undo that reports success having put nothing back
+ * while the bucket the write really spliced was never captured. So the key passed
+ * here has to be the bucket the write will actually touch, resolved by the same
+ * rule the write resolves it by.
  */
 export function batchUndoTargets(
   writes: readonly ResolvedWrite[],
-  entryKey: string,
+  entryKey: string | undefined,
 ): BulletUndoTargets {
   const replaced: string[] = [];
   const removed: string[] = [];
@@ -78,7 +90,7 @@ export function batchUndoTargets(
     if (write.kind === "replace") replaced.push(write.obsId);
     else if (write.kind === "remove") removed.push(write.obsId);
   }
-  return writes.length > 0
+  return writes.length > 0 && entryKey !== undefined
     ? { replaced, removed, addedEntryKey: entryKey }
     : { replaced, removed };
 }
