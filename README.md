@@ -25,11 +25,26 @@ branch + commit conventions, and the PR checklist.
 
 ```bash
 npm install
-npm run dev        # vite dev server on http://localhost:5173
+npm run dev        # vite dev server on https://localhost:5173 (self-signed cert)
+npm run dev:http   # same, over plain http — for LAN demos (see below)
 npm run build      # static bundle into dist/
 npm run test       # vitest run
 npm run typecheck  # tsc --noEmit across the project
 ```
+
+`npm run dev` serves **HTTPS**, not http: WebGPU (which the on-device AI
+features need) is only exposed in a [secure context], and `localhost` is the
+only cleartext origin that qualifies. Over TLS every LAN client gets one too —
+at the cost of a one-time "not private" interstitial, since the cert is
+self-signed.
+
+That trade flips when you are showing the app to someone on another machine.
+`npm run dev:http` drops TLS so `http://<your-host>.local:5173/` connects with
+no interstitial. Parse, score, edit, export, JD match and job search all work;
+the on-device AI surfaces detect no WebGPU and say so. Same thing via the
+environment directly: `OFFLINECV_DEV_HTTP=1 npm run dev`.
+
+[secure context]: https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts
 
 The `npm` scripts above are the supported entry point — everything you
 need to develop, test, and build runs through them on any machine.
