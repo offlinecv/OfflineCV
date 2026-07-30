@@ -14,6 +14,13 @@
  * under one persistent local-processing rail. Static and non-interactive: it
  * is a description, not a second entry point competing with the drop zone.
  *
+ * Placement (user testing, Jul 2026): `App` renders this BELOW the drop zone,
+ * on the pre-drop screen only. It used to be passed as PageShell's `chips`,
+ * which renders in the header on every phase — so it sat above the hero before
+ * the drop, and stayed pinned above the score afterwards, restating three lanes
+ * the user had already chosen between. If you move it back into a header slot,
+ * you reintroduce both problems.
+ *
  * Composed entirely from existing `@design-system` exports (Card, StatusBadge,
  * Chip, LockIcon) — no new primitive. `StatusBadge` gives each lane the same
  * small-caps pill treatment a Tab label gets (#516's visual language); `Chip`
@@ -34,7 +41,7 @@
  *
  * The noun is "browser", not "device", and that is deliberate (#537): this
  * rail renders a few inches below `App`'s hero, which says "in your browser"
- * in the headline and "leaving your browser" in the subhead, so a visitor
+ * in the headline and "leaves your browser" in the subhead, so a visitor
  * reads all three at once. "Device" also understates the guarantee — another
  * app on the same device cannot read the resume either. If you change the
  * noun here, change it in `App.tsx`'s hero in the same commit. `PageShell`'s
@@ -61,7 +68,10 @@ const LANES: CapabilityLane[] = [
   {
     label: "Fix it",
     description:
-      "Edit inline, save it in your browser, or export a clean PDF",
+      // "or Markdown" because both exports have shipped since #552
+      // (`useDownloadMarkdown.ts`), and the block a few inches below this strip
+      // now names both — a strip that stops at PDF reads as the narrower truth.
+      "Edit inline, save it in your browser, or export a clean PDF or Markdown",
   },
   {
     label: "Match & find",

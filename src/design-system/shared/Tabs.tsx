@@ -137,6 +137,15 @@ interface TabProps {
    */
   warn?: boolean;
   /**
+   * What the warning dot MEANS, as the visually-hidden addendum to the tab's
+   * accessible name. Defaults to the original "setup needed" (#276's WebGPU
+   * case). Overridable because the same dot now also marks a tab that is
+   * offering an action rather than reporting a broken environment (#243's
+   * recovery pass) — a screen-reader user told "setup needed" there would be
+   * sent looking for a setting that does not exist.
+   */
+  warnLabel?: string;
+  /**
    * Optional one-line subtitle rendered under the label (issue #519), so a
    * tab's purpose is legible without clicking it. Omitting this prop
    * reproduces today's single-line rendering exactly — Tabs is a shared
@@ -157,7 +166,14 @@ interface TabProps {
   description?: string;
 }
 
-export function Tab({ id, children, count, warn, description }: TabProps) {
+export function Tab({
+  id,
+  children,
+  count,
+  warn,
+  warnLabel = "setup needed",
+  description,
+}: TabProps) {
   const { value, onValueChange, baseId } = useTabsContext("Tab");
   const isActive = value === id;
   // Selection carries a real surface (bg-surface-card, matching the panel
@@ -207,7 +223,7 @@ export function Tab({ id, children, count, warn, description }: TabProps) {
               <span aria-hidden="true" className="ml-1.5 text-feedback-warning-text">
                 {"⚠︎"}
               </span>
-              <span className="sr-only"> (setup needed)</span>
+              <span className="sr-only"> ({warnLabel})</span>
             </>
           )}
         </>
@@ -225,7 +241,7 @@ export function Tab({ id, children, count, warn, description }: TabProps) {
                 <span aria-hidden="true" className="text-feedback-warning-text">
                   {"⚠︎"}
                 </span>
-                <span className="sr-only"> (setup needed)</span>
+                <span className="sr-only"> ({warnLabel})</span>
               </>
             )}
           </span>

@@ -108,11 +108,23 @@ export default function App() {
     state.phase === "authoring" && state.pendingDraft !== null;
 
   return (
-    <PageShell
-      subtitle="A parser audit for your resume — not a judge"
-      badge="alpha"
-      chips={<CapabilityStrip />}
-    >
+    // `chips` is deliberately NOT passed: PageShell renders that slot in the
+    // header on every phase, so the capability strip stayed pinned above the
+    // result for the whole session — three lanes the user had already chosen
+    // between, restated over their score. It now renders once, below the drop
+    // zone, on the pre-drop screen only (see the idle section below).
+    // No `subtitle` either. It read "A parser audit for your resume — not a
+    // judge", which failed three ways at once: "parser audit" is the internal
+    // vocabulary this PR is removing from the tab labels, "not a judge"
+    // defends against an objection the visitor has not formed yet, and on the
+    // idle screen it was a second tagline sitting two inches above the
+    // headline. The one idea worth keeping — the score rates the file, not the
+    // person — now lives as a plain sentence in the block below the drop zone,
+    // next to the score it qualifies. Dropping it also leaves the star CTA
+    // alone on the header-right instead of sharing it. `/jd-fit` and `/jobs`
+    // still pass one: they open straight into a form with no headline of their
+    // own, so there the header line is the only orientation.
+    <PageShell badge="alpha">
       {(state.phase === "idle" ||
         state.phase === "parsing" ||
         state.phase === "error") && (
@@ -126,9 +138,9 @@ export default function App() {
             // One consolidated hero message (internal #265): a single,
             // non-hyperbolic headline — no "they don't read your PDF" claim and
             // no "parser" jargon — that says what OfflineCV does in one angle.
-            // The trust stat is the one supporting line; everything else (the
-            // recruiter-agent context) moves to the quiet block below the drop
-            // zone so the hero isn't three competing messages.
+            // The supporting context (recruiter-agent framing AND the trust
+            // stat that sources it) lives in the quiet block below the drop
+            // zone, so the hero is one message, not three.
             //
             // The headline claims custody, NOT runtime — the distinction is
             // load-bearing and must survive edits. "in your browser" scopes the
@@ -141,8 +153,8 @@ export default function App() {
             //
             // "Browser" is also the noun the sibling surfaces use, and the
             // three are read together on the idle screen: CapabilityStrip's
-            // rail ("Your resume stays in your browser") renders as PageShell's
-            // `chips` a few inches below, and PageShell's footer states its own
+            // rail ("Your resume stays in your browser") renders just below the
+            // drop zone, and PageShell's footer states its own
             // narrower, hedged claim about a different object ("your PDF stays
             // in this browser tab by default"). Same noun, three different
             // sentences — if you change the noun in one, change it in all.
@@ -156,45 +168,77 @@ export default function App() {
             // rescoped in the same PR that ships it. Keep the headline about
             // place and the subhead about the resume; do not merge them into a
             // blanket "everything stays on your device."
-            <Card className="flex flex-col items-center gap-5 bg-surface-card-warm">
-              <div className="flex max-w-2xl flex-col gap-4 text-center">
-                <h2 className="text-balance text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
-                  Your whole job search — in your browser.
-                </h2>
-                <p className="text-pretty text-base font-medium text-content-secondary sm:text-lg">
-                  OfflineCV is a free, open-source job-search workbench. Drop a
-                  PDF, score it, fix it, match a JD, and find jobs — all without
-                  your resume leaving your browser.
-                </p>
-                <p className="text-sm text-content-muted">
-                  Built in response to a hiring process job seekers say they
-                  can&apos;t see into — source:{" "}
-                  <a
-                    href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
-                    target="_blank"
-                    rel="nofollow noopener noreferrer"
-                    className="hover:underline"
-                  >
-                    Greenhouse, 2025 AI in Hiring Report (4,100+ job seekers and hiring managers)
-                  </a>
-                </p>
-              </div>
-            </Card>
+            // NOT a Card. `bg-surface-card-warm` made this the only tinted
+            // surface on the pre-drop screen, so the block a visitor cannot act
+            // on out-ranked the one they must (user testing, Jul 2026: "it's
+            // kind of hard to find what am I supposed to do here"). Orientation
+            // still comes first — a visitor needs to know what this is before a
+            // drop zone means anything — but as plain text, in two lines, with
+            // the accent reserved for the drop zone directly below.
+            //
+            // The lane list ("score it, fix it, match a JD, and find jobs") is
+            // gone from the subhead because `CapabilityStrip`, a few inches
+            // below, enumerates exactly those lanes with descriptions. The
+            // Greenhouse citation moved down to the recruiter-agent block,
+            // which is the claim it actually sources.
+            <div className="mx-auto flex max-w-2xl flex-col gap-2 text-center">
+              <h2 className="text-balance text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
+                Your whole job search — in your browser.
+              </h2>
+              <p className="text-pretty text-base text-content-secondary sm:text-lg">
+                A free, open-source job-search workbench — and your resume never
+                leaves your browser.
+              </p>
+            </div>
           )}
 
-          <DropZone
-            onFile={handleFile}
-            disabled={state.phase === "parsing"}
-            status={
-              state.phase === "parsing"
-                ? `Parsing ${state.fileName} (${formatBytes(state.fileSize)})…`
-                : undefined
-            }
-          />
+          {/* Drop zone + its own alternative, in one tight group. The section's
+              `gap-6` is the separation between *topics*; "no resume yet?" is not
+              a topic of its own, it is the other way to answer the question the
+              drop zone asks, so it sits a `gap-3` away from it rather than
+              below the capability strip, the library and the job tracker (user
+              testing, Jul 2026: "it is now separated"). Proximity is the whole
+              point — a fallback a visitor has to scroll past three unrelated
+              blocks to find is a fallback they never see. */}
+          <div className="flex flex-col gap-3">
+            <DropZone
+              onFile={handleFile}
+              disabled={state.phase === "parsing"}
+              status={
+                state.phase === "parsing"
+                  ? `Parsing ${state.fileName} (${formatBytes(state.fileSize)})…`
+                  : undefined
+              }
+            />
+
+            {(state.phase === "idle" || state.phase === "error") && (
+              // "Start from scratch" entry point (#313) — a clearly-secondary
+              // CTA for a user with no resume yet (or who wants a clean start).
+              // Reuses the existing editor/exporter surface (ReconstructedResume
+              // + useEditableParse + useDownloadPdf) via the "authoring" phase
+              // below; no new dropzone/editor/exporter is introduced.
+              <div className="flex justify-center">
+                <Button variant="ghost" onClick={startBlank}>
+                  No resume yet? Build one from scratch →
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {(state.phase === "idle" || state.phase === "error") && (
+            // Capability strip, moved out of PageShell's `chips` header slot.
+            // Below the drop zone, not above it: it answers "what else does
+            // this do?", which is a question a visitor asks *after* the primary
+            // action is legible, not before. Pre-drop only — post-parse the
+            // user has already picked a lane and the tab strip owns navigation.
+            <CapabilityStrip />
+          )}
 
           {(state.phase === "idle" || state.phase === "error") && (
             // Saved-resumes picker (#322) — self-hides when the library is
-            // empty. Sits directly beneath the drop zone; loading one restores
+            // empty, which is why it is not in the drop-zone group above: an
+            // invisible block there would leave a phantom gap between the drop
+            // zone and its "no resume yet?" fallback. Loading an entry restores
             // the results view from its cached parse (no re-upload).
             <ResumeLibrary library={library} onLoad={onLoadSavedResume} />
           )}
@@ -211,44 +255,79 @@ export default function App() {
           )}
 
           {(state.phase === "idle" || state.phase === "error") && (
-            // "Start from scratch" entry point (#313) — a clearly-secondary
-            // CTA for a user with no resume yet (or who wants a clean start).
-            // Reuses the existing editor/exporter surface (ReconstructedResume
-            // + useEditableParse + useDownloadPdf) via the "authoring" phase
-            // below; no new dropzone/editor/exporter is introduced.
-            <div className="flex justify-center">
-              <Button variant="ghost" onClick={startBlank}>
-                No resume yet? Build one from scratch →
-              </Button>
-            </div>
-          )}
-
-          {(state.phase === "idle" || state.phase === "error") && (
-            // "Screened by an agent" framing (internal #21): the recruiter-side
-            // proof point that the mirror positioning stands on. Quiet block
-            // below the drop zone — context, never competing with the primary
-            // action. Claims stay scoped per the fact-check rulings: privacy is
-            // file-scoped, determinism is score-scoped. Per the public-copy
-            // policy (internal #24) we never name other products here — the
-            // trend is described generically, no links to specific tools.
+            // What this is, plainly — plus the three claims displaced from the
+            // old trust-chip row (#517: speed, no-signup, determinism) and the
+            // citation. Quiet block below the drop zone: context, never
+            // competing with the primary action.
             //
-            // #517: this block also now carries the three claims displaced
-            // from the old trust-chip row (speed, no-signup, determinism) —
-            // real differentiators that moved here rather than vanishing when
-            // the chip row became the capability strip above.
+            // Rewritten Jul 2026 (user testing: "too long and not clear of its
+            // value"). The old copy opened on the *trend* — "recruiters are
+            // starting to run AI agents over resumes" — so the first thing a
+            // visitor read was someone else's behaviour, and what they
+            // personally get arrived in clause four, as a metaphor ("the
+            // candidate-side mirror"). It now opens on the three things the
+            // product does, in the order a user does them: parse, edit,
+            // download. 85 words → 27.
+            //
+            // The recruiter-trend sentence was cut outright, not demoted, on a
+            // second pass: an unhedged "recruiters increasingly screen with AI"
+            // is a claim about an industry we would have to defend, and the
+            // Greenhouse report below measures AI *trust* among hiring
+            // managers, not screening prevalence — it never sourced that
+            // sentence as tightly as the old comment here asserted. The
+            // citation now stands on its own weaker, supportable claim
+            // ("a hiring process job seekers say they can't see into").
+            //
+            // ⚠️ Cut with it: "the score rates how readable your file is, not
+            // how good you are." That framing is now nowhere in the app — the
+            // header subtitle that used to carry it ("not a judge") is deleted
+            // in this PR too, and `AtsScoreReadout` never stated it. If it
+            // comes back, it belongs next to the score, not on the landing.
+            //
+            // Both export formats are real, so the remaining claim round-trips:
+            // PDF via `useDownloadPdf.ts` → `render-ats-pdf.ts`, Markdown via
+            // `useDownloadMarkdown.ts` (#552). If either is removed, this
+            // sentence moves in the same PR. "A machine", never "the ATS" — we
+            // run one generic text extractor (pdfjs), so a definite article
+            // would claim a fidelity we have not measured. Determinism stays
+            // scoped to the score, not to the parse.
             <div className="rounded-lg border border-border-light bg-surface-subtle px-4 py-3">
-              <p className="mx-auto max-w-3xl text-pretty text-sm text-content-secondary">
-                <span className="font-medium text-content-primary">
-                  Recruiters are starting to run AI agents over resumes.
-                </span>{" "}
-                Several products score candidates for recruiters. OfflineCV is
-                the candidate-side
-                mirror: it shows you what survives the parse — before you hit
-                submit. The score isn&apos;t a verdict on you as a candidate —
-                it measures how well a machine can read your resume. It takes
-                a few seconds, needs no account or email, and the same PDF
-                always gets the same score.
-              </p>
+              {/* One shared `mx-auto max-w-3xl` wrapper, not three. Applied
+                  per-paragraph, `mx-auto` centres each block independently, so
+                  a paragraph long enough to wrap reads as left-aligned while a
+                  short one visibly centres itself — the three lines rendered
+                  with three different left edges. Centring the group once
+                  gives them one. */}
+              <div className="mx-auto flex max-w-3xl flex-col gap-2">
+                <p className="text-pretty text-sm font-medium text-content-primary">
+                  OfflineCV parses your resume, shows you what a machine read
+                  back, and lets you edit it and download a cleanly formatted
+                  PDF or Markdown file.
+                </p>
+                {/* The three claims displaced from the trust-chip row (#517).
+                    Muted and on their own line: they are reassurance a visitor
+                    scans for, not part of the argument above. */}
+                <p className="text-sm text-content-secondary">
+                  No account, no email, results in seconds — and the same file
+                  always gets the same score.
+                </p>
+                {/* The trust stat, relocated from the hero. It sources the
+                    "recruiters increasingly screen with AI" claim above it,
+                    which is what it was always evidence for — in the hero it
+                    was a third competing message ahead of the primary action. */}
+                <p className="text-sm text-content-muted">
+                  Built in response to a hiring process job seekers say they
+                  can&apos;t see into — source:{" "}
+                  <a
+                    href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
+                    target="_blank"
+                    rel="nofollow noopener noreferrer"
+                    className="hover:underline"
+                  >
+                    Greenhouse, 2025 AI in Hiring Report (4,100+ job seekers and hiring managers)
+                  </a>
+                </p>
+              </div>
             </div>
           )}
         </section>

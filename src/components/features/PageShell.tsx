@@ -21,8 +21,17 @@ import { useGitHubStars } from "../../hooks/useGitHubStars.ts";
 import { useUpdateChecker } from "../../hooks/useUpdateChecker.ts";
 
 export interface PageShellProps {
-  /** Subtitle shown beside the GitHub-star CTA on wide viewports. */
-  subtitle: string;
+  /**
+   * Optional subtitle shown beside the GitHub-star CTA on wide viewports.
+   *
+   * Optional because a surface that already states what it is in its own body
+   * should not restate it here. `/jd-fit` and `/jobs` open straight into a
+   * form, so the header line is their only orientation and they pass one; `/`
+   * opens with a headline two inches below the header and omits it, which also
+   * lets the star CTA sit alone on the header-right instead of sharing it with
+   * a competing tagline.
+   */
+  subtitle?: string;
   /** Small uppercase badge after the wordmark (e.g. "alpha", "JD Fit"). */
   badge: string;
   /** Optional block rendered under the header (e.g. the capability strip). */
@@ -73,9 +82,11 @@ export function PageShell({
           </div>
           <div className="flex items-center gap-4">
             {headerExtra}
-            <p className="hidden text-sm text-content-muted sm:block">
-              {subtitle}
-            </p>
+            {subtitle && (
+              <p className="hidden text-sm text-content-muted sm:block">
+                {subtitle}
+              </p>
+            )}
             <GitHubStarCta variant="inline" count={starCount} />
           </div>
         </div>

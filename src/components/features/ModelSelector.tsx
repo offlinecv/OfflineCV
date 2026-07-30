@@ -8,7 +8,7 @@
  * picker per page; all rewrite paths consume the persisted selection via
  * `useModelSelection`. Returns `null` when WebGPU is unavailable so the
  * surface stays out of the way for browsers that can't load any model — the
- * "WebGPU unavailable" explainer lives on the "Resume Quality" tab instead
+ * "WebGPU unavailable" explainer lives on the on-device-AI tab instead
  * (#276), the canonical on-device-AI surface.
  *
  * Flow on a user pick (model X ≠ current):
@@ -265,7 +265,7 @@ export function ModelSelector() {
   }, []);
 
   // Picker only shows when WebGPU can actually run a model. When it can't, the
-  // shared explainer lives on the "Resume Quality" tab (the canonical on-device
+  // shared explainer lives on the on-device-AI tab (the canonical on-device
   // AI surface, #276) — not inline here — so the notice isn't buried under
   // Experience or repeated per role. Renders nothing until detection resolves.
   if (capability !== "available") return null;

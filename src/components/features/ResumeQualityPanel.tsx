@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * ResumeQualityPanel — consolidated "Resume Quality" tab shell (issue #273).
+ * ResumeQualityPanel — consolidated "AI feedback" tab shell (issue #273).
  *
  * Replaces the two separate "What an ATS misses" (DisagreementPanel) and
  * "Resume quality" (CritiquePanel) tabs with a single tab driven by one
@@ -14,7 +14,8 @@
  *   2. "What an ATS misses" bottom section (only when gaps > 0):
  *      heading + intro + DisagreementResults + ReportGapSection.
  *
- * Tab order in Result.tsx: reconstructed → Resume Quality → Source & diagnostics.
+ * Tab order in ResultDetailTabs.tsx (by id): reconstructed → find-jobs →
+ * quality → diagnostics.
  *
  * Design rules (CLAUDE.md):
  *   - Semantic tokens only; no hardcoded hex or raw palette classes.
@@ -41,7 +42,7 @@ export function ResumeQualityPanel({
 }: {
   controller: AnalysisController;
   result: CascadeResult;
-  /** Navigate to the "Reconstructed resume" tab so the user can use the wand. */
+  /** Navigate to the "Your resume" tab so the user can use the wand. */
   onGoToRewrite: () => void;
 }) {
   const { status } = controller;
@@ -50,8 +51,13 @@ export function ResumeQualityPanel({
     <section className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
+          {/* Deliberately NOT the tab label ("Local AI feedback"), same rule
+              ReconstructedResume follows: a heading that repeats its own tab
+              label is noise, and it makes every `toContain("Local AI feedback")`
+              assertion ambiguous about which element it matched. This states
+              what the section DOES; the tab states where you are. */}
           <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-            Resume Quality
+            What the model checks
           </h2>
           <p className="max-w-prose text-sm text-content-tertiary">
             Run a small on-device model to judge bullet quality — weak verbs,
