@@ -65,6 +65,11 @@ __pycache__/
 # Local-only internal working directory — never ship in the OSS repo
 internal/
 
+# Private sibling repo cloned into this checkout so the extension can import the
+# shared, dependency-free fitness chain (src/lib/jd-match, src/lib/job-search)
+# by relative path. Same pattern as internal/ above. Never ship in the OSS repo.
+extension/
+
 # Maintainer-only skill whose source of truth lives in the private
 # offlinecv-internal repo (internal/.claude/skills/oss-translate). It is
 # surfaced here as a symlink so Claude Code discovers it as /oss-translate,
