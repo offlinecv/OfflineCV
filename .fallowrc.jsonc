@@ -99,10 +99,22 @@
       "TierEngagedEvent", "ParseCompletedEvent", "TierId", "TierEngagementReason",
       "FinalSource", "FileSizeBucket", "ParseMetadata"
     ] },
+    //
+    // `computeCoverageFromCorpus` (#700) is the newest name on the jd-match
+    // barrel and the reason it is here is worth stating precisely, because it is
+    // NOT the `captureJob` case below. Its IMPLEMENTATION has an in-tree
+    // consumer — `computeCoverage` is a thin wrapper over it, and coverage.test.ts
+    // exercises both — so the function itself can never quietly go dead. What has
+    // no in-repo consumer is only the barrel RE-EXPORT, which exists because the
+    // corpus seam's whole point is to be callable by someone holding just the
+    // lowercased digest rather than a whole `HeuristicParsedResume`. That is the
+    // intended external surface this block already describes, not a suppression
+    // standing in for a missing caller.
     { "file": "src/lib/jd-match/index.ts", "exports": [
       "extractJdTerms", "stripBoilerplate",
       "ExtractedTerm", "ExtractJdTermsResult", "ExtractOptions",
-      "computeCoverage", "buildCorpus", "SKILL_WEIGHT", "NOUN_WEIGHT",
+      "computeCoverage", "computeCoverageFromCorpus",
+      "buildCorpus", "SKILL_WEIGHT", "NOUN_WEIGHT",
       "CoverageResult", "SKILLS", "getSkillIndex", "skillCount", "SkillEntry",
       "fetchJdFromUrl", "parseAtsUrl", "htmlToPlaintext", "AtsPlatform",
       "JdMatchResult"

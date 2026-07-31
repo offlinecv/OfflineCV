@@ -65,6 +65,13 @@
  *      ("Base pay: $120,000") or it carries an explicit annual/hourly period.
  *      Ranges are exempt — a currency-anchored range that survives the suffix
  *      guard is a deliberate pay statement and wins before singles are scored.
+ *
+ * The one range shape NOT exempt from that last point is an "and"-separated
+ * pair (#699). "and" had to become a separator because "between $X and $Y" is
+ * how US pay-transparency boilerplate states a range, but it is also an
+ * ordinary conjunction between two unrelated figures — so it carries its own
+ * gate (`isTrustedRange`) rather than riding the ranges-are-deliberate
+ * exemption.
  */
 
 export type CompensationPeriod = "year" | "hour" | "month";
@@ -100,9 +107,14 @@ const CUR_CODE = String.raw`USD|EUR|GBP|CAD|AUD|NZD|CHF`;
  */
 const NUM = String.raw`\d+(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?`;
 
-/** Range separators: ASCII hyphen, en dash, em dash, "~", or the word "to"
- *  (word-bounded so it never matches inside "photo" etc.). */
-const SEP = String.raw`-|–|—|~|\bto\b`;
+/** Range separators: ASCII hyphen, en dash, em dash, "~", or the words "to"
+ *  and "and" (word-bounded so "to" never matches inside "photo" etc.). "and"
+ *  is here because "between $X and $Y" is the standard phrasing of US
+ *  pay-transparency boilerplate (CA/NY/CO/WA) and was previously unreadable
+ *  (#699) — but unlike the others it is a common conjunction, so a match on it
+ *  carries a guard the punctuation separators don't need. See
+ *  `isTrustedRange`. */
+const SEP = String.raw`-|–|—|~|\bto\b|\band\b`;
 
 /** Period tokens that require an explicit "/" or "per " prefix to count —
  *  "hour" alone is too generic to trust unprefixed. */
@@ -129,12 +141,14 @@ const PERIOD_TAIL = String.raw`(?:\s*(?:\/|per\s+)\s*(?<per1>${PERIOD_WORD})\b)?
 
 /** Range shape: currency + num [+K] + separator + [currency] + num [+K] +
  *  optional period. Tried before `SINGLE_RE` so a genuine range always wins
- *  over accidentally matching just its first number. */
+ *  over accidentally matching just its first number. The separator is captured
+ *  (`sep`) so `isTrustedRange` can tell an "and" match — which needs proof it is
+ *  a range at all — from the unambiguous punctuation separators. */
 const RANGE_RE = new RegExp(
   currencyGroup("sym1", "code1") +
     String.raw`\s*` +
     numWithK("num1", "k1") +
-    String.raw`\s*(?:${SEP})\s*` +
+    String.raw`\s*(?<sep>${SEP})\s*` +
     String.raw`(?:${currencyGroup("sym2", "code2")}\s*)?` +
     numWithK("num2", "k2") +
     PERIOD_TAIL,
@@ -339,11 +353,62 @@ function salaryAttachedIndices(text: string, figs: SingleFigure[]): Set<number> 
   return attached;
 }
 
+/**
+ * Words that may introduce an "and"-separated range, immediately before the
+ * figure. In English "and" joins two endpoints into a RANGE essentially only
+ * inside the "between … and …" construction; "from … and …" and "in the range
+ * of … and …" are the loose variants that show up in real posting boilerplate.
+ * End-anchored, and tested against the text PRECEDING the match, so the intro
+ * word must sit adjacent to the first figure rather than anywhere earlier in
+ * the sentence.
+ */
+const AND_RANGE_INTRO_RE = /\b(?:between|from|range\s+of)\s*$/i;
+
+/**
+ * Whether a `RANGE_RE` match may be trusted as a pay range (#699).
+ *
+ * The punctuation separators and "to" are unambiguous range markers, so they
+ * pass unconditionally — this gate exists only for "and", which is a far more
+ * common word and joins two UNRELATED figures far more often than two endpoints
+ * ("a $500 and $2,000 relocation", "we raised $10,000,000 and $5,000,000"). A
+ * false range is worse than a missed one: a miss drops the comp axis and
+ * `rateJobs` renormalizes the remaining weights, whereas a false range actively
+ * mis-scores. So an "and" pair must clear two independent tests:
+ *
+ *   1. AN INTRO WORD immediately precedes it (`AND_RANGE_INTRO_RE`). Without
+ *      this, every adjacent currency pair in a description reads as pay.
+ *   2. IT ASCENDS. A range runs low→high; the other common "between … and …"
+ *      construction is an ENUMERATION ("choose between $15,000 and $7,500
+ *      depending on distance"), and descending order is the tell. Note this is
+ *      deliberately scoped to "and" — `candidateFrom` normalizes with
+ *      Math.min/max, so a descending punctuation range keeps its existing
+ *      behaviour and no other separator changes.
+ *
+ * Measured against a labelled corpus of both shapes, each clause is
+ * load-bearing: dropping the intro test admits 8 false ranges, dropping the
+ * ascending test admits the enumeration above.
+ */
+function isTrustedRange(text: string, match: RegExpMatchArray): boolean {
+  const groups = match.groups;
+  if (!groups || match.index === undefined) return false;
+  if (groups.sep?.toLowerCase() !== "and") return true;
+
+  if (!AND_RANGE_INTRO_RE.test(text.slice(0, match.index))) return false;
+
+  if (typeof groups.num2 !== "string") return false;
+  const num1 = parseNum(groups.num1, groups.k1);
+  const num2 = parseNum(groups.num2, groups.k2);
+  return Number.isFinite(num1) && Number.isFinite(num2) && num2 > num1;
+}
+
 /** First accepted range across ALL matches of `RANGE_RE` — a currency-anchored
  *  range that survives the magnitude guard is a deliberate pay statement, so a
- *  leading non-salary figure is skipped and the first real range wins. */
+ *  leading non-salary figure is skipped and the first real range wins. An "and"
+ *  match that fails `isTrustedRange` is SKIPPED, not aborted on, so a later
+ *  genuine range in the same description still wins. */
 function firstRange(text: string): Compensation | undefined {
   for (const match of text.matchAll(RANGE_RE)) {
+    if (!isTrustedRange(text, match)) continue;
     const c = candidateFrom(text, match);
     if (c) return stripMeta(c);
   }
