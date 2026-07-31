@@ -396,3 +396,76 @@ describe("runCascadeFromMarkdown — escalation path", () => {
     expect(result.tiers).toContain("t0_layout");
   });
 });
+
+/**
+ * Below-anchor role-scope prose — #615's issue-variant coverage at the layer
+ * where the italic/blank-separated variants are actually different (PR #688
+ * Thread 2). At the extractor's mkItems input italic is just a text attribute
+ * and blank spacer lines are already collapsed by grouping, so both variants
+ * asserted there would be either identical to the plain case or an assertion
+ * about an upstream layer that isn't running. The markdown path is where the
+ * `*` wrappers get stripped and blank lines route through paragraph handling
+ * — the two places these variants can genuinely regress.
+ */
+describe("runCascadeFromMarkdown — below-anchor role scope (#615 issue variants)", () => {
+  const HEADER =
+    "### Sr. Engineering Manager · Google, Hyderabad, India · Enterprise Platforms";
+  const DATE = "*01/2024 – 12/2024*";
+  const BULLETS = [
+    "- Built an 18-engineer org in under 6 months.",
+    "- Won new AI/ML platform charters for the site.",
+  ];
+
+  async function parseFirstRole(mdLines: string[]) {
+    const md = ["## Experience", "", ...mdLines].join("\n");
+    const raw = md
+      .split("\n")
+      .map((l) =>
+        l
+          .replace(/^#{1,6}\s+/, "")
+          .replace(/^\s*[-*]\s+/, "")
+          .replace(/\*\*/g, "")
+          .replace(/^\*(.+)\*$/, "$1"),
+      )
+      .join("\n");
+    const result = await runCascadeFromMarkdown(raw, md);
+    return result.canonical.fields.experience[0];
+  }
+
+  it("blank-separated — a blank line between the date and the scope prose does not swallow it", async () => {
+    // The blank has to survive markdown paragraph handling and still route the
+    // scope line into `belowAnchorLines`. Assert at the cascade level, where
+    // that routing lives — the extractor-level test would have to construct
+    // synthetic mkItems and would then be exercising a shape that never leaves
+    // this layer.
+    const role = await parseFirstRole([
+      HEADER,
+      DATE,
+      "",
+      "Founding site leader; owned charter and headcount.",
+      "",
+      ...BULLETS,
+    ]);
+    expect(role?.title).toBe("Sr. Engineering Manager");
+    expect(role?.team).toBe("Enterprise Platforms");
+    expect(role?.description).toContain(
+      "Founding site leader; owned charter and headcount.",
+    );
+  });
+
+  it("italic — a `*…*` wrapped scope line survives the markdown `*` strip and lands in description", async () => {
+    // The italic variant is only distinguishable from plain BEFORE the `*`
+    // wrappers come off. If the strip runs wrong (or too aggressively), the
+    // shape reaching the extractor changes — asserting on the post-cascade
+    // description is what catches it.
+    const role = await parseFirstRole([
+      HEADER,
+      DATE,
+      "*L7 · 18 engineers, 2 TLMs reporting*",
+      ...BULLETS,
+    ]);
+    expect(role?.title).toBe("Sr. Engineering Manager");
+    expect(role?.team).toBe("Enterprise Platforms");
+    expect(role?.description).toContain("L7 · 18 engineers, 2 TLMs reporting");
+  });
+});

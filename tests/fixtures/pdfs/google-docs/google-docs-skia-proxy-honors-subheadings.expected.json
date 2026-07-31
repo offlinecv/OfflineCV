@@ -36,21 +36,21 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 24,
-    "preLayoutOverall": 24,
+    "overall": 71,
+    "preLayoutOverall": 71,
     "specificity": {
-      "score": 0,
+      "score": 17,
       "max": 40,
-      "gradable": false,
-      "metricBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "metricBullets": 1,
+      "totalBullets": 4
     },
     "structure": {
-      "score": 0,
+      "score": 30,
       "max": 30,
-      "gradable": false,
-      "goodBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "goodBullets": 4,
+      "totalBullets": 4
     },
     "completeness": {
       "score": 24,
@@ -66,7 +66,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 0,
+    "bulletCount": 4,
     "algoVersion": "1.8"
   },
   "reproArtifact": {
@@ -76,7 +76,7 @@
     "sectionSource": "markdown",
     "pageCount": 2,
     "rawCharCount": 2723,
-    "extractedCharCount": 2034,
+    "extractedCharCount": 2437,
     "sections": [
       {
         "name": "profile",
@@ -132,7 +132,7 @@
     "phoneChangedAcrossRoundtrip": false,
     "locationChangedAcrossRoundtrip": false,
     "linkedinUrlChangedAcrossRoundtrip": false,
-    "experienceChangedAcrossRoundtrip": true,
+    "experienceChangedAcrossRoundtrip": false,
     "educationChangedAcrossRoundtrip": false,
     "skillsChangedAcrossRoundtrip": false,
     "summaryChangedAcrossRoundtrip": false,

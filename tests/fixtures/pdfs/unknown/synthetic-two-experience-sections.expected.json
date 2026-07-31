@@ -1,7 +1,7 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0,
+    "confidence": 0.82,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -33,21 +33,21 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 21,
-    "preLayoutOverall": 21,
+    "overall": 81,
+    "preLayoutOverall": 81,
     "specificity": {
-      "score": 0,
+      "score": 40,
       "max": 40,
-      "gradable": false,
-      "metricBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "metricBullets": 5,
+      "totalBullets": 6
     },
     "structure": {
-      "score": 0,
+      "score": 20,
       "max": 30,
-      "gradable": false,
-      "goodBullets": 0,
-      "totalBullets": 0
+      "gradable": true,
+      "goodBullets": 4,
+      "totalBullets": 6
     },
     "completeness": {
       "score": 21,
@@ -64,7 +64,7 @@
       "multiplier": 1,
       "scanned": false
     },
-    "bulletCount": 0,
+    "bulletCount": 6,
     "algoVersion": "1.8"
   },
   "reproArtifact": {
@@ -74,7 +74,7 @@
     "sectionSource": "markdown",
     "pageCount": 1,
     "rawCharCount": 880,
-    "extractedCharCount": 230,
+    "extractedCharCount": 683,
     "sections": [
       {
         "name": "profile",
