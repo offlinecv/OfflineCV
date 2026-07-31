@@ -48,7 +48,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Toronto",
         fontSize: 11,
       },
       { text: "01/2024 – 12/2024", fontSize: 11 },
@@ -58,7 +58,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const role = roles[0];
 
     expect(role.company).toBe("Globex");
-    expect(role.location).toBe("Hyderabad");
+    expect(role.location).toBe("Toronto");
     expect(role.team).toBe("Site Lead, Payments Platform");
   });
 
@@ -66,7 +66,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Toronto",
         fontSize: 11,
       },
       { text: "01/2024 – 12/2024 · M4 · 22 engineers, 3 squads", fontSize: 11 },
@@ -76,7 +76,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const role = roles[0];
 
     expect(role.company).toBe("Globex");
-    expect(role.location).toBe("Hyderabad");
+    expect(role.location).toBe("Toronto");
     expect(role.team).toBe("Site Lead, Payments Platform");
     // The date-line data token must not appear in any parsed field.
     expect(role.company).not.toBe("M4");
@@ -87,7 +87,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad, India",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Toronto, Canada",
         fontSize: 11,
       },
       { text: "01/2024 – 12/2024 · M4 · 22 engineers, 3 squads", fontSize: 11 },
@@ -97,7 +97,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const role = roles[0];
 
     expect(role.company).toBe("Globex");
-    expect(role.location).toBe("Hyderabad, India");
+    expect(role.location).toBe("Toronto, Canada");
     expect(role.team).toBe("Site Lead, Payments Platform");
   });
 
@@ -105,7 +105,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Globex, Hyderabad, India · Site Lead, Payments Platform",
+        text: "Sr. Engineering Manager · Globex, Toronto, Canada · Site Lead, Payments Platform",
         fontSize: 11,
       },
       { text: "01/2024 – 12/2024 · M4 · 22 engineers, 3 squads", fontSize: 11 },
@@ -115,7 +115,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const role = roles[0];
 
     expect(role.company).toBe("Globex");
-    expect(role.location).toBe("Hyderabad, India");
+    expect(role.location).toBe("Toronto, Canada");
     expect(role.team).toBe("Site Lead, Payments Platform");
   });
 
@@ -190,7 +190,7 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Hyderabad, India",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Toronto, Canada",
         fontSize: 11,
       },
       { text: "01/2024 – 12/2024", fontSize: 11 },
@@ -199,8 +199,8 @@ describe("date sub-line extra tokens don't hijack company (#614)", () => {
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.location).toBe("Hyderabad, India");
-    expect(role.company).not.toBe("Hyderabad");
-    expect(role.company).not.toBe("Hyderabad, India");
+    expect(role.location).toBe("Toronto, Canada");
+    expect(role.company).not.toBe("Toronto");
+    expect(role.company).not.toBe("Toronto, Canada");
   });
 });

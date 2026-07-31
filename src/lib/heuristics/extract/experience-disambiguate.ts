@@ -47,10 +47,10 @@ const LEGAL_SUFFIX_RE =
  *
  *  Silicon-Valley/Peninsula additions (#616): "Mountain View", "Palo Alto",
  *  "Menlo Park" are the multi-word tech-hub cities that show up co-located
- *  with Google/Meta/Stanford in a `Title · Company, City · Team` middot header
+ *  with Globex/Meta/Stanford in a `Title · Company, City · Team` middot header
  *  with NO trailing state suffix. Without the vocab entry, Pass F of
  *  `stripLocationSuffix` (bare-city tail check) failed to full-match them and
- *  the middle segment stayed whole ("Google, Mountain View" → company). Same
+ *  the middle segment stayed whole ("Globex, Mountain View" → company). Same
  *  closed-vocab discipline as the pre-existing entries: a real company that
  *  merely contains one of these tokens ("Mountain View Software") still fails
  *  the `^…$`-anchored full-string match.
@@ -143,8 +143,8 @@ function cityStartsWithCompanyText(city: string): boolean {
  *  "Springs", "Heights", "Town", …) is never a standalone city — it is the
  *  truncated tail of a multi-word place ("Mexico City", "Long Beach", "Cape
  *  Town") whose earlier words the single-token space-fold regex left glued to the
- *  company. Peeling it would mis-split "Google Mexico City, Mexico" into company
- *  "Google Mexico" + location "City, Mexico" — both wrong (#286 review). Defer:
+ *  company. Peeling it would mis-split "Globex Mexico City, Mexico" into company
+ *  "Globex Mexico" + location "City, Mexico" — both wrong (#286 review). Defer:
  *  leave the whole string as company rather than fragment a real multi-word city.
  *  (A proper-noun compound like "Buenos Aires" has no generic tell and stays a
  *  known limitation — distinguishing it from a real company+city fold needs a
@@ -322,7 +322,7 @@ function stripLocationSuffix(s: string): {
     //   - single-token city (space boundary). A multi-word space-fold city whose
     //     last token is a locality generic ("…City", "…Beach") would otherwise be
     //     truncated to that generic tail and mis-split, so LOCALITY_SUFFIX_RE
-    //     defers it ("Google Mexico City, Mexico" stays company, not fragmented),
+    //     defers it ("Globex Mexico City, Mexico" stays company, not fragmented),
     //     and
     //   - a closed-vocabulary country (COUNTRY_GAZETTEER), not any capitalized
     //     word — so it fires on a real "City, Country" fold, not on a company
@@ -483,7 +483,7 @@ function anchorCarriesOrgSignal(text: string): boolean {
  * WHOLE string (not merely a trailing suffix). The full-length check on the
  * US/intl matches distinguishes a self-contained location ("Pomona, CA",
  * "Mountain View, CA") from a company that merely carries a trailing city
- * ("Globex, Hyderabad, India", where INTL_LOCATION_RE matches only a substring).
+ * ("Globex, Toronto, Canada", where INTL_LOCATION_RE matches only a substring).
  *
  * Shape is NOT sufficient — the comma-tail must resolve against a REAL location
  * signal, not merely a "CapWords, CapWords" shape. `US_LOCATION_RE` /
@@ -996,7 +996,7 @@ function mapWithoutCompanyMatch(
     // Symmetric to `mapTitleFirst`'s handling of the reverse ordering.
     //
     // Additional guard on `!isBareLocationString(s2)` (#639 review): a segment
-    // that is entirely a bare location ("New York, NY", "Hyderabad, India")
+    // that is entirely a bare location ("New York, NY", "Toronto, Canada")
     // fails `looksLikeTitle` too — but it is the LOCATION, not the company.
     // Promoting it here would shred it: `recoverLocation`'s `stripLocationSuffix`
     // then peels its own tail as location, so `New York, NY` → company="New" /
@@ -1047,8 +1047,8 @@ function mapWithoutCompanyMatch(
  * (3a) Try stripping a trailing location suffix from team — handles the case
  *      where `looksLikeCompany` mis-routed a "Group"/"Systems"/"Labs" segment
  *      as company (e.g. "Platform Group" in
- *      "Title · Globex, Hyderabad, India · Platform Group"), pushing
- *      "Globex, Hyderabad, India" into the team slot. If strip succeeds and
+ *      "Title · Globex, Toronto, Canada · Platform Group"), pushing
+ *      "Globex, Toronto, Canada" into the team slot. If strip succeeds and
  *      the team isn't itself a bare whole-string location (which the step-3b
  *      check below handles), rotate: remainder → company, old company → team.
  *
@@ -1057,8 +1057,8 @@ function mapWithoutCompanyMatch(
  *      but it IS already a bare location (US_LOCATION_RE covers the whole
  *      string). Exclude these by checking whether any location regex matches
  *      the FULL string (not just a substring), so "Mountain View, CA"
- *      (full match) vs. "Globex, Hyderabad, India" (INTL_LOCATION_RE only
- *      matches "Globex, Hyderabad", not the full "…India" tail) are
+ *      (full match) vs. "Globex, Toronto, Canada" (INTL_LOCATION_RE only
+ *      matches "Globex, Toronto", not the full "…Canada" tail) are
  *      distinguished correctly.
  *
  * (3b) Whole-string bare location check. Uses the SAME shared

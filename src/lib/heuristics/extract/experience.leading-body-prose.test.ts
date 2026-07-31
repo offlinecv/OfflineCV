@@ -47,7 +47,7 @@ function roleFromSection(specs: Array<{ text: string; fontSize?: number }>) {
 // Baseline: the shared header for every variant. Every field lands on line 1
 // via the middot split, so any surviving below-anchor line is pure body.
 const HEADER_LINE = {
-  text: "Sr. Engineering Manager · Google, Hyderabad, India · Enterprise Platforms",
+  text: "Sr. Engineering Manager · Globex, Toronto, Canada · Enterprise Platforms",
   fontSize: 11,
 };
 const DATE_LINE = { text: "01/2024 – 12/2024", fontSize: 11 };
@@ -67,9 +67,9 @@ function assertHeaderFieldsIntact(role: {
   // AC #3 — header fields (title/company/team/location/dates) unchanged by
   // the presence of the leading-body-prose line.
   expect(role.title).toBe("Sr. Engineering Manager");
-  expect(role.company).toBe("Google");
+  expect(role.company).toBe("Globex");
   expect(role.team).toBe("Enterprise Platforms");
-  expect(role.location).toBe("Hyderabad, India");
+  expect(role.location).toBe("Toronto, Canada");
   expect(role.start_date).toBe("01/2024");
   expect(role.end_date).toBe("12/2024");
 }
@@ -132,7 +132,7 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       // NOTE: no `· Enterprise Platforms` segment — this is the whole point.
-      { text: "Sr. Engineering Manager · Google, Hyderabad, India", fontSize: 11 },
+      { text: "Sr. Engineering Manager · Globex, Toronto, Canada", fontSize: 11 },
       DATE_LINE,
       { text: "Founding site leader; owned charter and headcount.", fontSize: 11 },
       ...BULLETS,
@@ -143,8 +143,8 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
     expect(role.team).toBeUndefined();
     // The other header fields still come off line 1 unchanged.
     expect(role.title).toBe("Sr. Engineering Manager");
-    expect(role.company).toBe("Google");
-    expect(role.location).toBe("Hyderabad, India");
+    expect(role.company).toBe("Globex");
+    expect(role.location).toBe("Toronto, Canada");
     expect(role.start_date).toBe("01/2024");
     expect(role.end_date).toBe("12/2024");
     // And the sentence surfaces on description, not team.
@@ -172,7 +172,7 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
       const roles = roleFromSection([
         { text: "EXPERIENCE", fontSize: 13 },
         // NOTE: no team segment — this is the case the preempt exists to protect.
-        { text: "Sr. Engineering Manager · Google, Hyderabad, India", fontSize: 11 },
+        { text: "Sr. Engineering Manager · Globex, Toronto, Canada", fontSize: 11 },
         DATE_LINE,
         { text: scope, fontSize: 11 },
         ...BULLETS,
@@ -181,8 +181,8 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
       const role = roles[0];
       expect(role.team).toBeUndefined();
       expect(role.title).toBe("Sr. Engineering Manager");
-      expect(role.company).toBe("Google");
-      expect(role.location).toBe("Hyderabad, India");
+      expect(role.company).toBe("Globex");
+      expect(role.location).toBe("Toronto, Canada");
       const lines = role.description!.split("\n");
       expect(lines[0]).toBe(scope);
     }
@@ -198,7 +198,7 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
     // the scope line is present, which the exported org header renders.
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
-      { text: "Sr. Engineering Manager · Google, Hyderabad, India", fontSize: 11 },
+      { text: "Sr. Engineering Manager · Globex, Toronto, Canada", fontSize: 11 },
       DATE_LINE,
       { text: "L7 · 18 engineers, 2 TLMs reporting", fontSize: 11 },
       ...BULLETS,
@@ -208,8 +208,8 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
     // AC #3 — `team` stays undefined (was "L7" without the preempt).
     expect(role.team).toBeUndefined();
     expect(role.title).toBe("Sr. Engineering Manager");
-    expect(role.company).toBe("Google");
-    expect(role.location).toBe("Hyderabad, India");
+    expect(role.company).toBe("Globex");
+    expect(role.location).toBe("Toronto, Canada");
     // Scope line lands on `description` and is not double-recorded.
     const lines = role.description!.split("\n");
     expect(lines[0]).toBe("L7 · 18 engineers, 2 TLMs reporting");
@@ -235,14 +235,14 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
       { text: "EXPERIENCE", fontSize: 13 },
       DATE_LINE,
       { text: "Founding site leader; owned charter and headcount.", fontSize: 11 },
-      { text: "• Sr. Engineering Manager, Google", fontSize: 11 },
+      { text: "• Sr. Engineering Manager, Globex", fontSize: 11 },
       ...BULLETS,
     ]);
     expect(roles).toHaveLength(1);
     const role = roles[0];
     // Promotion recovers title + company from the first bullet.
     expect(role.title).toBe("Sr. Engineering Manager");
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     // The scope line MUST NOT be silently dropped just because the
     // promotion path fired.
     expect(role.description).toBeDefined();
@@ -318,13 +318,13 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
     // The line reads as a bare location string (no `;`, no terminal `.!?`), so
     // `looksLikeBelowAnchorProse` returns false and it reaches disambiguation
     // as a header candidate. The token-coverage sweep is what protects it:
-    // every token in "Hyderabad, India" appears in the resolved `location`
+    // every token in "Toronto, Canada" appears in the resolved `location`
     // field, so the line is skipped rather than prepended.
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
-      { text: "Sr. Engineering Manager · Google, Hyderabad, India", fontSize: 11 },
+      { text: "Sr. Engineering Manager · Globex, Toronto, Canada", fontSize: 11 },
       DATE_LINE,
-      { text: "Hyderabad, India", fontSize: 11 },
+      { text: "Toronto, Canada", fontSize: 11 },
       ...BULLETS,
     ]);
     expect(roles).toHaveLength(1);
@@ -332,7 +332,7 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
     // The description must NOT lead with the redundant location line.
     expect(role.description).toBeDefined();
     const lines = role.description!.split("\n");
-    expect(lines[0]).not.toBe("Hyderabad, India");
-    expect(lines).not.toContain("Hyderabad, India");
+    expect(lines[0]).not.toBe("Toronto, Canada");
+    expect(lines).not.toContain("Toronto, Canada");
   });
 });
