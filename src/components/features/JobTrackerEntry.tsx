@@ -16,7 +16,7 @@
 import { useState } from "react";
 import { Button, EditableField, StatusBadge } from "@design-system";
 import { JobStatusPicker, jobStatusTone, jobStatusLabel } from "./JobStatusPicker.tsx";
-import type { JobRecord, JobStatus } from "../../lib/storage/types.ts";
+import type { JobRecord, JobStatus } from "../../lib/storage/index.ts";
 import type { JobPatch } from "../../lib/job-tracker.ts";
 
 /** A saved resume the user can link this job to — the light shape the picker
