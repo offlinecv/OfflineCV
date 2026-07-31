@@ -2,7 +2,9 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * FindJobsPanel — the job-search workbench body, the whole of `/jobs/`.
+ * FindJobsPanel — the job-search workbench body: the Search view of `/jobs/`
+ * (as of #690, one of two peer `Tabs` views — the other is the saved-jobs
+ * library — rather than the whole page).
  *
  * It used to be a tab on `/` with the results stacked underneath the query, at
  * the bottom of a long parser-audit page. Results moved to their own entry
@@ -72,6 +74,7 @@ import { useMemo, useState } from "react";
 import { Button, Stepper, StepperNav, StepperRail } from "@design-system";
 import { buildJobQuery, type JobQuery } from "../../lib/job-search/query-builder.ts";
 import { buildDeepLinks } from "../../lib/job-search/deep-links.ts";
+import { buildCompanySearchLinks } from "../../lib/job-search/company-search-link.ts";
 import {
   describeQuerySteps,
   type QueryStepId,
@@ -120,6 +123,11 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
   const [step, setStep] = useState<QueryStepId>("role");
 
   const links = useMemo(() => buildDeepLinks(query), [query]);
+  // Deep links into major self-hosted-careers employers' OWN search pages
+  // (#691) — a separate, static registry from the board links above; see
+  // `company-search-link.ts`'s docblock for why it doesn't touch `useJobSearch`
+  // or `buildSearchPlan`.
+  const companySearchLinks = useMemo(() => buildCompanySearchLinks(query), [query]);
   const isDegenerate = query.titles.length === 0 && query.skills.length === 0;
 
   // Sector-suggested companies whose ATS boards join the fan-out. Selecting
@@ -202,6 +210,7 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
               onChange={setQuery}
               isDegenerate={isDegenerate}
               links={links}
+              companySearchLinks={companySearchLinks}
               companyTargets={companyTargets}
             />
             <StepperNav finalAction={searchButton} />

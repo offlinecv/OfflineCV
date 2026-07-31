@@ -24,8 +24,10 @@ import {
   requestStoragePersistence,
   isStoragePersisted,
   downloadStorageBackup,
+  importFromJson,
+  type ImportCounts,
 } from "../lib/storage/index.ts";
-import { clearResumeLink } from "../lib/job-tracker.ts";
+import { clearResumeLink, reconcileResumeLinks } from "../lib/job-tracker.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 
@@ -53,6 +55,12 @@ export interface ResumeLibrary {
   remove: (id: string) => Promise<void>;
   /** Download the full storage export as a JSON backup file. */
   exportBackup: () => Promise<void>;
+  /** Restore a backup file into this origin's storage. `merge` upserts by id;
+   *  `replace` wipes both stores first. Refreshes the list on success. Jobs the
+   *  capture contract refused come back in `skippedJobs` (#693) — the caller
+   *  must surface them, since a silently-dropped record is indistinguishable
+   *  from a record the file never had. */
+  importBackup: (file: File, mode: "merge" | "replace") => Promise<ImportCounts>;
   refresh: () => Promise<void>;
 }
 
@@ -122,6 +130,43 @@ export function useResumeLibrary(): ResumeLibrary {
 
   const exportBackup = useCallback(() => downloadStorageBackup(), []);
 
+  const importBackup = useCallback(
+    async (file: File, mode: "merge" | "replace") => {
+      const counts = await importFromJson(await file.text(), mode);
+      if (mode === "merge") {
+        // Merge upserts by id and never deletes, so it can't itself drop an
+        // existing resume — but an INCOMING job can carry a resumeId this
+        // device never had and this backup didn't include either (e.g. a
+        // partial or stale export from another device). Read survivors
+        // straight from the store, after the write above, not from the
+        // `entries` state (stale — captured before this import ran), so the
+        // sweep reconciles against what's actually there. Same graceful
+        // degrade `remove()` gives the delete path, via the belt-and-
+        // suspenders sweep `reconcileResumeLinks` (#547) exists for.
+        //
+        // The sweep deliberately does NOT re-run the capture contract (#693).
+        // Every record it can reach is already in the store, having passed the
+        // validator on the way in or been written by the typechecked domain
+        // layer, and the only field it writes is `resumeId: undefined` — a
+        // narrowing write that cannot introduce an invalid value. Validating on
+        // a repair path would let a record the user can already see fail its
+        // way out of existence, turning a display problem into data loss.
+        const survivors = await listLibrary();
+        await reconcileResumeLinks(new Set(survivors.map((r) => r.id)));
+      }
+      // Replace mode skips the sweep: it wipes both stores and rebuilds them
+      // from the one imported document, and a document produced by our own
+      // `exportAll` is always internally consistent — resumes and jobs are
+      // read from the same store snapshot, so no job in it can reference a
+      // resume missing from that same snapshot. Only merge can graft an
+      // incoming job onto a resumeId absent from both the existing library
+      // and the imported file.
+      await refresh();
+      return counts;
+    },
+    [refresh],
+  );
+
   return {
     entries,
     ready,
@@ -132,6 +177,7 @@ export function useResumeLibrary(): ResumeLibrary {
     rename,
     remove,
     exportBackup,
+    importBackup,
     refresh,
   };
 }

@@ -261,6 +261,51 @@ export function splitHeadline(headline: string | undefined): string[] {
   return titled.length > 0 ? titled : [whole];
 }
 
+/**
+ * The ROLE HEAD of one title — the part a job search should actually match on,
+ * with a trailing scope qualifier dropped. `"Engineering Lead - Customer
+ * Experience"` searches as `"Engineering Lead"`.
+ *
+ * WHY THIS IS NOT `splitHeadline`, AND WHY IT DOES NOT LIVE IN `deriveTitles`.
+ * A scoped title is one role, not two — the qualifier names the org the role
+ * sits in. So the chip, the local `matchesQuery` broadening, and the exported
+ * PDF all want the string the user actually holds; only the outbound SEARCH
+ * TERM wants it narrowed, because a careers box matches the qualifier as a
+ * required term and finds nothing. Narrowing this in `deriveTitles` instead
+ * would hit all three surfaces at once — the #605 blast radius: `titles[0]`
+ * feeds the audited egress, `buildContact` prints the unsplit string into the
+ * PDF, and `RolesPanel` stars a chip by `titles.indexOf(primary)`. So this is a
+ * READ-SIDE narrowing applied by the egress caller, and `JobQuery.titles` is
+ * left holding the user's own words.
+ *
+ * It reuses `HEADLINE_SEPARATOR_RE` and the `looksLikeTitle` re-gate rather
+ * than inventing a second splitter, which is what keeps #605's two lessons in
+ * force here:
+ *
+ *  - **The separator set is already the safe one.** `-` and `/` split only when
+ *    spaced on both sides, so `React/Node Engineer` stays whole; `,` is absent
+ *    entirely, so `VP, Engineering` stays whole. Both are single roles whose
+ *    head alone (`React`, `VP`) would be a worse query than the compound.
+ *  - **The head is re-gated, not assumed.** The first part is not always the
+ *    role: `"Customer Experience - Engineering Lead"` inverts the order, and
+ *    `looksLikeTitle` rejects the qualifier so the real role is picked instead.
+ *    When NO part reads as a title the whole string is kept — the same refusal
+ *    `splitHeadline` makes, for the same reason: a manufactured fragment that
+ *    failed the shape gate is worse than the text the user typed.
+ *
+ * A title with no separator is returned unchanged, so callers can apply this
+ * unconditionally.
+ */
+export function roleHeadForSearch(title: string): string {
+  const whole = title.trim();
+  const parts = whole
+    .split(HEADLINE_SEPARATOR_RE)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length <= 1) return whole;
+  return parts.find(looksLikeTitle) ?? whole;
+}
+
 // Order matters throughout this table: every row is checked top-to-bottom and
 // the FIRST match wins, so a more specific keyword must sit above the more
 // general one it would otherwise be swallowed by. Two ordering constraints in

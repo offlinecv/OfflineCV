@@ -33,10 +33,10 @@ interface SaveJobFromMatchProps {
 }
 
 /**
- * Flag-gated entry point that OWNS the hook, mirroring `JobTrackerSection` on
- * `/`. Calling `useJobTracker` in `JdFitApp` above the flag check would open
- * IndexedDB on every `/jd-fit/` visit for a button nobody can see; a hook can't
- * be called conditionally, so the gate has to be a component boundary.
+ * Entry point that OWNS the hook, mirroring `JobTrackerSection` on `/jobs/`
+ * (#690) — a hook can't be called conditionally, so keeping `useJobTracker`
+ * out of `JdFitApp` itself means IndexedDB opens only where this button
+ * actually renders (once a JD match exists), not on every `/jd-fit/` visit.
  */
 export function SaveJobFromMatchSection(
   props: Omit<SaveJobFromMatchProps, "tracker">,

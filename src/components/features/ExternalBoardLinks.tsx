@@ -2,10 +2,10 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * ExternalBoardLinks — the "Search external boards" row of the job-search
- * workbench. Inert: each link is an ordinary `<a target="_blank">`, so the
- * navigation is the user's own and nothing here fetches. Only the query
- * keywords ride in the URL, never the résumé text.
+ * ExternalBoardLinks — a row of prefilled outbound search links for the
+ * job-search workbench. Inert: each link is an ordinary `<a target="_blank">`,
+ * so the navigation is the user's own and nothing here fetches. Only the
+ * query keywords ride in the URL, never the résumé text.
  *
  * Split out of `FindJobsPanel` in the `/jobs/` move so the workbench file stays
  * a layout shell (same reason `JobResultCard` and `LevelSelect` were split).
@@ -13,16 +13,38 @@
  * Not a `<Button>`: these are real cross-origin navigations, so an anchor is the
  * correct element — the design system's Button primitive renders a `<button>`
  * and would need a link-as-button escape hatch for no benefit.
+ *
+ * TWO CALLERS, ONE COMPONENT (#691). `JobQueryEditor`'s Review step renders
+ * this twice — once for the generic boards (`deep-links.ts`), once for the
+ * self-hosted-employer registry (`company-search-link.ts`) — rather than a
+ * second near-identical component, per the Golden Rule. `srLabel`/`note` are
+ * overridable so the two renders carry DISTINCT accessible names; two regions
+ * both named "Search external boards" would be indistinguishable to a screen
+ * reader (see `duplicate-control-labels-surface-only-in-browser` in memory —
+ * this bit before).
  */
 
 import type { JobBoardLink } from "../../lib/job-search/deep-links.ts";
 
-export function ExternalBoardLinks({ links }: { links: readonly JobBoardLink[] }) {
+const DEFAULT_SR_LABEL = "Search external boards";
+const DEFAULT_NOTE = "Only your search keywords are sent, and only when you click a link above.";
+
+export function ExternalBoardLinks({
+  links,
+  srLabel = DEFAULT_SR_LABEL,
+  note = DEFAULT_NOTE,
+}: {
+  links: readonly JobBoardLink[];
+  /** Accessible name for this link row — must be distinct per caller. */
+  srLabel?: string;
+  /** The outbound-contract sentence rendered under the links. */
+  note?: string;
+}) {
   return (
     <div className="flex flex-col gap-2">
       {/* Named visibly by the caller's section heading (#602); kept so the
           link row is still named in the accessibility tree. */}
-      <span className="sr-only">Search external boards</span>
+      <span className="sr-only">{srLabel}</span>
       <div className="flex flex-wrap gap-2">
         {links.map((link) => (
           <a
@@ -37,9 +59,7 @@ export function ExternalBoardLinks({ links }: { links: readonly JobBoardLink[] }
           </a>
         ))}
       </div>
-      <p className="max-w-prose text-sm text-content-secondary">
-        Only your search keywords are sent, and only when you click a link above.
-      </p>
+      <p className="max-w-prose text-sm text-content-secondary">{note}</p>
     </div>
   );
 }

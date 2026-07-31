@@ -55,14 +55,21 @@
  * STRUCTURAL LIMITATION — large self-hosted-careers employers (#542): Apple,
  * Google, Meta, and most other FAANG-scale companies run their own careers
  * site rather than a Greenhouse/Lever/Ashby board, so they cannot be added
- * here as-is — there is no API endpoint of the shape this registry (and
- * `company-boards.ts`) assumes. This is a structural boundary of the
- * three-vendor design, not a bug or a curation gap. Those employers are
- * reachable through `FindJobsPanel`'s "Search external boards" deep links
- * (LinkedIn / Indeed / Google Jobs), which crawl self-hosted sites too. A 4th
- * source (a scraper for company-owned careers pages) would close this gap
- * properly but is a separate, larger lane — see #542's "explicitly out of
- * scope".
+ * here as-is. CORRECTION (#691): the reason is NOT "there is no API endpoint
+ * of the shape this registry assumes" — several of these employers serve
+ * perfectly fetchable JSON or server-rendered HTML. The actual boundary is
+ * that their responses carry no `Access-Control-Allow-Origin` header, so a
+ * browser blocks OUR origin from reading them — a CORS rule, not a missing
+ * endpoint. That distinction matters because it is not a dead end: `company-
+ * search-link.ts` (#691) links a user's OWN browser, with the user's own
+ * session, directly into these employers' careers-search pages — a shape
+ * this registry cannot hold (see that module's docblock for why it is a
+ * separate registry rather than an optional field here), but a supported one.
+ * `FindJobsPanel`'s "Search external boards" deep links (LinkedIn / Indeed /
+ * Google Jobs) remain the other path to these employers. A 4th source (a
+ * scraper for company-owned careers pages, run somewhere CORS doesn't apply)
+ * would close the read-and-rank gap properly but is a separate, larger lane —
+ * see #542's "explicitly out of scope".
  */
 
 import type { Sector } from "./sector.ts";

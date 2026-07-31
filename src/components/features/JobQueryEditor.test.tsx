@@ -68,6 +68,7 @@ function element(
       onChange,
       isDegenerate,
       links: [],
+      companySearchLinks: [],
       companyTargets: NO_COMPANIES,
     }),
   });

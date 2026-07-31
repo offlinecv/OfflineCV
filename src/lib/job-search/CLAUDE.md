@@ -1,17 +1,21 @@
 # CLAUDE.md — job-search lane
 
 Query builder → provider search → rank by resume fit → deep links. Owns its own HTML
-entry, `/jobs/` (`jobs/index.html` → `src/jobs/JobsApp.tsx` → `FindJobsPanel`); `/`
-keeps only `FindJobsLauncher`, which hands the parse over through
-`src/lib/jobs-handoff.ts`. Consumes the parsed resume, never the raw PDF — this
-surface cannot parse a PDF at all. Read the root `CLAUDE.md` first; this file adds
-only the lane-specific rules that are silent to break.
+entry, `/jobs/` (`jobs/index.html` → `src/jobs/JobsApp.tsx`). Since #690, `JobsApp` is a
+`Tabs` host with two peer views — Search (`FindJobsPanel`, this lane) and Saved jobs (the
+job-tracker library) — not "`FindJobsPanel` is the whole page" as it was pre-#690; both
+panels stay mounted across the switch. `/` keeps only `FindJobsLauncher`, which hands the
+parse over through `src/lib/jobs-handoff.ts`. Consumes the parsed resume, never the raw
+PDF — this surface cannot parse a PDF at all. Read the root `CLAUDE.md` first; this file
+adds only the lane-specific rules that are silent to break.
 
 ## Privacy invariant (hard)
 
 - **`providers/keywords.ts` is the sole resume-derived egress helper** in the whole
   app. It builds a short keyword string from the user-editable query title + skills —
-  never the resume text. Used only by the keyless aggregator feeds.
+  never the resume text. Used by the keyless aggregator feeds, and (since #691's fix)
+  by `company-search-link.ts` for the term it templates into an employer's own careers
+  URL — that one leaves only when the **user clicks**, same as `deep-links.ts`.
 - **Company adapters egress only the public company slug** (plus static caps like
   `?limit=`) — never resume-derived data, not even via `keywords.ts`. The role filter
   (`filterPostingsByRole`) is local.

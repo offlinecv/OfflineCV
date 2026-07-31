@@ -85,6 +85,7 @@ export function JobQueryEditor({
   onChange,
   isDegenerate,
   links,
+  companySearchLinks,
   companyTargets,
 }: {
   query: JobQuery;
@@ -94,6 +95,9 @@ export function JobQueryEditor({
   isDegenerate: boolean;
   /** Deep links for the Review step, built by the parent from the same query. */
   links: readonly JobBoardLink[];
+  /** One-click links into self-hosted-careers employers' own search pages
+   *  (#691), built by the parent from the same query. */
+  companySearchLinks: readonly JobBoardLink[];
   /** The company-board picker's state, rendered in the Narrow step (#602). */
   companyTargets: CompanyTargetsState;
 }) {
@@ -352,6 +356,18 @@ export function JobQueryEditor({
 
         <QueryStepSection title="Search somewhere else">
           <ExternalBoardLinks links={links} />
+        </QueryStepSection>
+
+        {/* #691: a second, independent link row — major self-hosted-careers
+         *  employers (Apple, Google, Meta, …) that `company-registry.ts`
+         *  cannot hold a board for. Its own step heading + `srLabel`/`note`
+         *  keep it from reading as more of the row above. */}
+        <QueryStepSection title="Search a company directly">
+          <ExternalBoardLinks
+            links={companySearchLinks}
+            srLabel="Search major employers directly"
+            note="Only your search keywords are sent, and only when you click a link above — straight to that employer's own site."
+          />
         </QueryStepSection>
 
         {isDegenerate && (

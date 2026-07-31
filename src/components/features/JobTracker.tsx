@@ -32,12 +32,10 @@ interface JobTrackerProps {
 }
 
 /**
- * Flag-gated entry point that OWNS the hook, so `useJobTracker` mounts only
- * where the tracker actually renders. A hook can't be called conditionally, so
- * calling it in `App` above the flag check would open IndexedDB and list the
- * jobs store on every visit for a feature nobody can see — this child is what
- * makes "inert while the flag is off" true rather than aspirational.
- * {@link JobTracker} stays tracker-injected so tests drive it with a fake.
+ * Entry point that OWNS the hook, so `useJobTracker` mounts only where the
+ * tracker actually renders (on `/jobs/`, since #690) rather than on every
+ * surface that imports this module. {@link JobTracker} stays tracker-injected
+ * so tests drive it with a fake.
  */
 export function JobTrackerSection(props: Omit<JobTrackerProps, "tracker">) {
   const tracker = useJobTracker();
