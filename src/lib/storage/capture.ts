@@ -23,12 +23,13 @@
  * file) is the caller's problem — this module's contract is `unknown` in, a
  * validated record or a list of reasons out.
  *
- * NOTE: staged for #694 — no production caller yet. Nothing in this build
- * captures a job from outside its own UI: the tracker and the JD-match "save
- * this job" button are typechecked against `JobRecord` and write through
+ * NOTE: staged for the extension — no production caller yet. Nothing in this
+ * build captures a job from outside its own UI: the tracker and the JD-match
+ * "save this job" button are typechecked against `JobRecord` and write through
  * `job-tracker.ts`, and the backup import path has its own entry point
- * (`backup.ts`). The MV3 capture extension that calls this is #694, deferred
- * out of the batch that shipped `docs/job-capture-contract.md`. Until it lands
+ * (`backup.ts`). The MV3 capture extension that calls this is tracked outside
+ * this repo, deferred out of the batch that shipped
+ * `docs/job-capture-contract.md`. Until it lands
  * this module is exercised only by `capture.test.ts` and `storage.test.ts`; it
  * ships now, and is exported from the storage barrel, so the extension imports
  * the ownership merge below rather than reimplementing it against the store.

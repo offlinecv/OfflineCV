@@ -2,7 +2,8 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * `captureJob` (#693) — the producer-facing write path, staged for #694.
+ * `captureJob` (#693) — the producer-facing write path, staged for the browser
+ * extension (tracked outside this repo).
  *
  * Boundary with `storage.test.ts`: that file owns the store-level proof (two
  * captures of one posting leave exactly one row in `jobs`). This file owns the

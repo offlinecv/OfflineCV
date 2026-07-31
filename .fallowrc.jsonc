@@ -139,13 +139,13 @@
     //
     // `captureJob` / `JobCaptureResult` are the honest exception in this list.
     // They are not merely unconsumed in-tree — they have NO consumer anywhere
-    // yet, because the MV3 extension that calls them is #694, deferred out of
-    // the batch that shipped the contract (see the "staged for #694" note in
-    // `capture.ts`). Listing them here means fallow will not be the thing that
-    // tells us if #694 never lands. That is a deliberate, time-bounded trade:
-    // when #694 merges, its import makes these live and the two names should
-    // come back OUT of this list. If #694 is abandoned instead, delete
-    // `capture.ts` rather than leaving the suppression to rot.
+    // yet, because the browser extension that calls them is tracked outside
+    // this repo (see the "staged for the extension" note in `capture.ts`).
+    // Listing them here means fallow will not be the thing that tells us if
+    // that extension never lands. That is a deliberate, time-bounded trade:
+    // once something in-tree imports them, these two names should come back OUT
+    // of this list. If the extension is abandoned instead, delete `capture.ts`
+    // rather than leaving the suppression to rot.
     //
     // Enumerated, not `["*"]`, for the reason the barrel comment above gives:
     // `*` would silence the whole file and let a future accidentally-dead
