@@ -10,6 +10,7 @@ export type {
 
 export {
   computeCoverage,
+  computeCoverageFromCorpus,
   buildCorpus,
   SKILL_WEIGHT,
   NOUN_WEIGHT,

@@ -6,6 +6,7 @@ import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import { extractJdTerms } from "./extract-jd-terms.ts";
 import {
   computeCoverage,
+  computeCoverageFromCorpus,
   buildCorpus,
   buildResumeProjection,
   SKILL_WEIGHT,
@@ -141,5 +142,37 @@ Familiarity with Distributed Systems is a plus.
     expect(cov.score).toBe(0);
     expect(cov.covered).toHaveLength(0);
     expect(cov.missing).toHaveLength(0);
+  });
+});
+
+// The corpus seam (#700). `computeCoverage` is now a thin wrapper, so the two
+// entry points must stay one implementation — a caller holding only the
+// lowercased digest must score identically to one holding the whole résumé.
+describe("computeCoverageFromCorpus", () => {
+  const parsed = makeParsed({
+    summary: "Backend engineer who ships.",
+    skills: ["TypeScript", "Kubernetes"],
+    experience: [
+      { title: "Staff Engineer", company: "Acme", description: "Owned the Kafka pipeline." },
+    ],
+  });
+  const terms = extractJdTerms(
+    "We need a TypeScript engineer with Kubernetes experience and a Kafka pipeline background. Terraform is a plus.",
+  ).all;
+
+  it("is what computeCoverage delegates to — identical result for the same résumé", () => {
+    // Guard: an empty term list, or one nothing covers, would make this vacuous.
+    expect(terms.length).toBeGreaterThan(0);
+    const viaCorpus = computeCoverageFromCorpus(buildCorpus(parsed), terms);
+    expect(viaCorpus.covered.length).toBeGreaterThan(0);
+    expect(viaCorpus).toEqual(computeCoverage(parsed, terms));
+  });
+
+  it("scores from a corpus string alone, with no HeuristicParsedResume in hand", () => {
+    const cov = computeCoverageFromCorpus("typescript, kubernetes, kafka", terms);
+    expect(cov.covered.map((t) => t.id)).toEqual(
+      expect.arrayContaining(["typescript", "kubernetes"]),
+    );
+    expect(cov.score).toBeGreaterThan(0);
   });
 });

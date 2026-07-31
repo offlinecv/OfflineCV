@@ -6,6 +6,7 @@ import {
   extractCompensation,
   isBelowFloor,
   formatCompensationRange,
+  annualizedTop,
 } from "./compensation.ts";
 
 describe("extractCompensation", () => {
@@ -224,6 +225,136 @@ describe("extractCompensation", () => {
     expect(comp).toBeDefined();
     expect(comp!.min).toBe(120000);
     expect(comp!.currency).toBe("USD");
+  });
+});
+
+// "between $X and $Y" is how US pay-transparency boilerplate (CA/NY/CO/WA)
+// states a range (issue 699). Before the "and" separator existed, RANGE_RE never
+// matched, extraction fell through to SINGLE_RE, and the FIRST figure came back
+// as both min and max — so a posting was rated at the floor of its own range.
+describe("extractCompensation — 'and'-separated ranges (issue 699)", () => {
+  it("extracts the full range from real pay-transparency boilerplate", () => {
+    const comp = extractCompensation(
+      "The base pay range for this role is between $183,700 and $319,800, and your base pay will depend on your skills.",
+    );
+    expect(comp).toBeDefined();
+    // The defect: max collapsed to 183700, the bottom of the range.
+    expect(comp!.min).toBe(183700);
+    expect(comp!.max).toBe(319800);
+    expect(comp!.currency).toBe("USD");
+    expect(comp!.period).toBe("year");
+  });
+
+  it("extracts a bare 'between $X and $Y' with no salary-context word anywhere", () => {
+    // Previously undefined: no context word meant SINGLE_RE's gate also failed.
+    const comp = extractCompensation("between $183,700 and $319,800");
+    expect(comp).toBeDefined();
+    expect(comp!.min).toBe(183700);
+    expect(comp!.max).toBe(319800);
+  });
+
+  it("extracts a K-suffixed 'between $Xk and $Yk'", () => {
+    const comp = extractCompensation("between $183k and $319k");
+    expect(comp).toBeDefined();
+    expect(comp!.min).toBe(183000);
+    expect(comp!.max).toBe(319000);
+  });
+
+  it("extracts an 'and' range introduced by 'from' or 'in the range of'", () => {
+    const from = extractCompensation("Compensation ranges from $95,000 and $145,000.");
+    expect(from!.min).toBe(95000);
+    expect(from!.max).toBe(145000);
+
+    const rangeOf = extractCompensation("Pay is in the range of $70,000 and $90,000 annually.");
+    expect(rangeOf!.min).toBe(70000);
+    expect(rangeOf!.max).toBe(90000);
+  });
+
+  it("keeps the currency-code and non-USD 'and' forms working", () => {
+    const usd = extractCompensation("The pay range is between USD 180000 and USD 240000.");
+    expect(usd!.min).toBe(180000);
+    expect(usd!.max).toBe(240000);
+    expect(usd!.currency).toBe("USD");
+
+    const gbp = extractCompensation("Base salary between £65,000 and £85,000 per annum.");
+    expect(gbp!.min).toBe(65000);
+    expect(gbp!.max).toBe(85000);
+    expect(gbp!.currency).toBe("GBP");
+  });
+
+  // The guard. "and" joins two UNRELATED figures far more often than two
+  // endpoints, and a false range actively mis-scores (a miss merely drops the
+  // axis and rateJobs renormalizes). Each of these fails WITHOUT the intro-word
+  // clause of isTrustedRange.
+  it("does NOT read an adjacent pair of unrelated figures as a range", () => {
+    expect(
+      extractCompensation("New hires receive a $500 and $2,000 relocation package."),
+    ).toBeUndefined();
+    expect(
+      extractCompensation("Grants of $50,000 and $75,000 were awarded to two teams."),
+    ).toBeUndefined();
+    expect(
+      extractCompensation("Equity worth $100,000 and $250,000 vests over four years."),
+    ).toBeUndefined();
+    expect(
+      extractCompensation("We raised $5,000,000 and $10,000,000 across two rounds."),
+    ).toBeUndefined();
+  });
+
+  it("does NOT join a salary figure to an adjacent bonus figure", () => {
+    // "Base pay" attaches to $120,000 as a SINGLE — which is correct — but the
+    // pair must never become a $20,000–$120,000 range.
+    const comp = extractCompensation("Base pay $120,000 and $20,000 target bonus.");
+    expect(comp).toBeDefined();
+    expect(comp!.min).toBe(120000);
+    expect(comp!.max).toBe(120000);
+  });
+
+  // Fails WITHOUT the ascending clause of isTrustedRange: the intro word is
+  // present, so only the ordering separates a range from a menu of options.
+  it("does NOT read a descending 'choose between A and B' enumeration as a range", () => {
+    expect(
+      extractCompensation(
+        "Relocation support: you may choose between $15,000 and $7,500 depending on distance.",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not join two figures separated by a sentence boundary", () => {
+    // The separator is whitespace-tight — `\s*(?:SEP)\s*` — so punctuation
+    // between the figures structurally prevents a match, and neither figure
+    // carries salary context of its own.
+    expect(
+      extractCompensation("Signing bonus is $20,000. And equity is worth $80,000."),
+    ).toBeUndefined();
+  });
+
+  it("returns the FIRST accepted 'and' range when a posting states two", () => {
+    // Matches the documented firstRange behaviour: multi-location postings list
+    // a range per locale.
+    const comp = extractCompensation(
+      "In California the range is between $183,700 and $319,800. In Texas it is between $160,000 and $280,000.",
+    );
+    expect(comp!.min).toBe(183700);
+    expect(comp!.max).toBe(319800);
+  });
+
+  it("skips a rejected 'and' pair and still finds a later genuine range", () => {
+    // A rejected match must not abort the scan.
+    const comp = extractCompensation(
+      "You get a $500 and $2,000 relocation package. Base salary $150,000 - $190,000.",
+    );
+    expect(comp!.min).toBe(150000);
+    expect(comp!.max).toBe(190000);
+  });
+
+  it("rates an 'and' range at its top, not its floor", () => {
+    // The whole reason this matters: annualizedTop feeds the 0.35-weighted comp
+    // axis, and isBelowFloor reads the same value.
+    const comp = extractCompensation("The base pay range is between $183,700 and $319,800.");
+    expect(annualizedTop(comp!)).toBe(319800);
+    // A $250K floor must NOT badge this posting "below your floor".
+    expect(isBelowFloor(comp, 250000)).toBe(false);
   });
 });
 

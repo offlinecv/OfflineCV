@@ -51,17 +51,24 @@ export interface CoverageResult {
 }
 
 /**
- * Run the coverage check.
+ * Run the coverage check against an already-built corpus.
  *
- * `parsed` is the cascade's HeuristicParsedResume — `skills: string[]`,
- * `experience[].description`, `summary?`, `education[]`. We tolerate any
- * field being missing.
+ * The corpus — one lowercased string, as `buildCorpus` produces — is the only
+ * thing coverage matching ever reads. Splitting it out from `computeCoverage`
+ * (#700) makes "the résumé, reduced to what matching actually reads" a value a
+ * caller can hold, cache, or hand across a boundary WITHOUT holding a whole
+ * `HeuristicParsedResume`. A consumer that has only the digest can now score
+ * against it instead of forking a second coverage implementation, which is the
+ * fastest route to two scores that disagree.
+ *
+ * `corpus` MUST already be lowercased: the skill mention patterns and the
+ * phrase check below are matched case-insensitively against it on the
+ * assumption `buildCorpus` did that normalization.
  */
-export function computeCoverage(
-  parsed: HeuristicParsedResume,
+export function computeCoverageFromCorpus(
+  corpus: string,
   terms: readonly ExtractedTerm[],
 ): CoverageResult {
-  const corpus = buildCorpus(parsed);
   const covered: ExtractedTerm[] = [];
   const missing: ExtractedTerm[] = [];
 
@@ -90,6 +97,24 @@ export function computeCoverage(
     score,
     weights: { skill: SKILL_WEIGHT, noun: NOUN_WEIGHT },
   };
+}
+
+/**
+ * Run the coverage check against a parsed résumé.
+ *
+ * `parsed` is the cascade's HeuristicParsedResume — `skills: string[]`,
+ * `experience[].description`, `summary?`, `education[]`. We tolerate any
+ * field being missing.
+ *
+ * A thin wrapper over `computeCoverageFromCorpus`, kept at its original
+ * signature so every existing caller is untouched. This is the ONLY place the
+ * two are joined, so there is exactly one coverage implementation.
+ */
+export function computeCoverage(
+  parsed: HeuristicParsedResume,
+  terms: readonly ExtractedTerm[],
+): CoverageResult {
+  return computeCoverageFromCorpus(buildCorpus(parsed), terms);
 }
 
 /**
