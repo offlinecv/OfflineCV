@@ -41,6 +41,11 @@
  * an earlier text re-entered the ordered chain at an existing key. Both writers
  * below therefore assume a live row's id is FREE, and `removeBullet` reports
  * whether its write landed so the confirmation strip cannot claim a no-op.
+ * Issue #660 tightens `addBullet` from "reject blank after trim" to "reject no
+ * CONTENT", sharing one predicate with the grouper's normaliser: a line that is
+ * nothing but a marker normalises to the empty key, which is the one key
+ * `groupBulletsByExperience` skips, so it could never be attributed to the entry
+ * whose bucket held it.
  * Overrides are held in component state and lost on reset — no persistence
  * is expected or provided.
  *
@@ -56,6 +61,7 @@ import {
 } from "../lib/rewrite-review/undo-batch.ts";
 import { canonicalizeSkill } from "../lib/edit/skill-canonical.ts";
 import {
+  isContentlessBulletLine,
   removeAddedBulletLine,
   replaceAddedBulletLine,
 } from "../lib/edit/added-bullets.ts";
@@ -69,6 +75,7 @@ import {
   renameCategory as renameSkillCategoryTx,
 } from "../lib/edit/skills-categories.ts";
 import type { SkillCategory } from "../lib/heuristics/types.ts";
+import { isUnresolvableBulletKey } from "../lib/score/bullet-id.ts";
 import { classifyProfile } from "../lib/contact/profile-registry.ts";
 import type { LegacyLinkKey, ProfileLink } from "../lib/score/types.ts";
 
@@ -518,10 +525,11 @@ export interface EditableParse {
    * knows which entry owns the row. Idempotent.
    *
    * Returns whether the removal was actually RECORDED. False means the write
-   * found nothing to drop — an added bullet whose bucket line is already gone,
-   * or a re-removal of an id already in the set. Callers that confirm the action
-   * to the user (`useBulletRemoveStatus`) must not claim success on a false,
-   * because the undo they armed alongside it has nothing to undo either.
+   * found nothing to drop — an added bullet whose bucket line is already gone, a
+   * re-removal of an id already in the set, or an id whose text half is empty and
+   * so names no line at all (#660). Callers that confirm the action to the user
+   * (`useBulletRemoveStatus`) must not claim success on a false, because the undo
+   * they armed alongside it has nothing to undo either.
    */
   removeBullet: (id: string, added?: AddedBulletRef) => boolean;
   /** Override map for education entries, keyed by education array index. */
@@ -560,7 +568,14 @@ export interface EditableParse {
    *  role's last bullet genuinely empties it, this prune would unmount the very
    *  `RoleEntry` hosting that removal's "Removed · Undo" strip, taking the undo
    *  with it. The hold is PER ENTRY, not per section, so an empty SIBLING with
-   *  no live undo is still dropped in the same pass. */
+   *  no live undo is still dropped in the same pass.
+   *
+   *  Section exit is no longer the only trigger (#658): a strip collapsing
+   *  releases its entry's hold, and the registry calls this again with a
+   *  predicate that spares everything BUT that entry, so the ghost it was
+   *  protecting goes without waiting for the next exit. See
+   *  `useAddedEntryPruneHold` for the focus gate that keeps a timer from
+   *  dropping a row the user is typing in. */
   pruneEmptyAddedEntries: (
     section: AddableSection,
     isHeld?: (entryId: string) => boolean,
@@ -570,8 +585,10 @@ export interface EditableParse {
   /** Bullet lines appended to entries, keyed by entry key (parsedEntryKey or
    *  an added entry's id). */
   addedBullets: AddedBullets;
-  /** Append a bullet line to an entry. No-op on blank text. An added entry's
-   *  bullets are dropped wholesale when the entry is removed. */
+  /** Append a bullet line to an entry. No-op on text carrying no CONTENT —
+   *  blank, or nothing but a bullet/numbered marker (#660, see
+   *  `isContentlessBulletLine`). An added entry's bullets are dropped wholesale
+   *  when the entry is removed. */
   addBullet: (entryKey: string, text: string) => void;
   /**
    * Snapshot the pre-apply state of exactly the bullet slots a rewrite batch is
@@ -697,9 +714,10 @@ export function useEditableParse(): EditableParse {
   const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
   const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
   // Latest bullets, readable synchronously by every writer and by
-  // `pruneEmptyAddedEntries` — which is called deferred (a tick after a blur),
-  // by which point an in-flight add-bullet may have landed. A render-time
-  // closure would read a stale map. See `writeAddedBullets` below: this ref, not
+  // `pruneEmptyAddedEntries` — which is called deferred (a tick after a blur,
+  // or from the effect a collapsing undo strip releases, #658), by which point
+  // an in-flight add-bullet may have landed. A render-time closure would read a
+  // stale map. See `writeAddedBullets` below: this ref, not
   // the state, is the source of PENDING truth. The render-phase assignment only
   // re-syncs it with what React committed, which the writer already matches.
   const addedBulletsRef = useRef(addedBullets);
@@ -847,6 +865,18 @@ export function useEditableParse(): EditableParse {
         // through.
         if (isAddedEntryKey(added.entryKey)) return false;
       }
+      // An id that names no line removes nothing and can never be cleared: it
+      // sits in `removedBullets` forever, keeping `hasEdits` true with no row
+      // left to un-remove. Reachable, not defensive — a pooled line that is
+      // nothing but a marker carries the id `"<n>|"`; see
+      // {@link isUnresolvableBulletKey}, which also spells out why a LEGACY
+      // numeric key is not one of these (it still resolves through the base-parse
+      // pool, and `replay` funnels a pre-#648 snapshot's removals through here).
+      // Reporting `false` is what makes this satisfy #660 AC 2 and #659 AC 1
+      // together — the caller suppresses the "Removed" strip and takes no prune
+      // hold off a write that did nothing. The ADDED half is already handled
+      // above, where the bucket splice matches on text rather than id.
+      if (isUnresolvableBulletKey(id)) return false;
       // Read the committed set to decide the RESULT, then write through a
       // functional updater so a second write in the same tick still composes.
       // `id` is minted by `assignBulletIds` against these very keys (#648), so a
@@ -1040,7 +1070,18 @@ export function useEditableParse(): EditableParse {
   const addBullet = useCallback(
     (entryKey: string, text: string) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
+      // Rejected on CONTENT, not on blankness (#660). This used to be a bare
+      // `if (!trimmed) return`, which accepts a line that is nothing but a
+      // marker — `"•"`, `"-"`, `"1."` — and such a line normalises to the empty
+      // key, the one key `groupBulletsByExperience` skips. It could therefore
+      // never be attributed to the entry whose bucket holds it: it rendered
+      // under "Other bullets", where the Remove control had no entry to splice.
+      // `isContentlessBulletLine` is defined over the grouper's own
+      // `normalizeBulletText`, so the two cannot drift apart again. It subsumes
+      // the blank check (`normalizeBulletText("") === ""`), and it does NOT
+      // reject a marker-PREFIXED line with content — `"• Shipped X"` still
+      // lands, and still matches its entry.
+      if (isContentlessBulletLine(trimmed)) return;
       const prev = addedBulletsRef.current;
       writeAddedBullets({
         ...prev,

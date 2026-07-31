@@ -37,6 +37,10 @@ import {
   type BulletObservation,
 } from "../lib/score/score.ts";
 import { buildAtsResumeModel } from "../lib/pdf/ats-resume-model.ts";
+import {
+  groupBulletsByExperience,
+  type BulletGroup,
+} from "../lib/score/group-bullets.ts";
 import { projectScoreSections } from "../lib/heuristics/projections.ts";
 import { buildBlankResult } from "../lib/heuristics/empty-result.ts";
 import { toCanonicalResume } from "../lib/heuristics/canonical.ts";
@@ -108,6 +112,10 @@ function regrade(api: EditableParse): {
   roleDescriptions: (string | undefined)[];
   /** Every bullet the Download PDF would draw, across all entries. */
   exportedBullets: string[];
+  /** The rendered attribution: what each role's group holds, and what fell
+   *  through to the "Other bullets" group (#660). `buildEntryGroups` reduces to
+   *  this call with no projects/achievements in play. */
+  groups: BulletGroup[];
 } {
   const base = baseResult();
   const core = applyOverrides(
@@ -152,7 +160,17 @@ function regrade(api: EditableParse): {
     exportedBullets: model.sections.flatMap((s) =>
       s.entries.flatMap((e) => e.bullets),
     ),
+    groups: groupBulletsByExperience(
+      [...(score.bullets ?? [])],
+      core.fields.experience,
+    ),
   };
+}
+
+/** The texts the "Other bullets" group renders, or [] when it is absent. */
+function otherBullets(api: EditableParse): string[] {
+  const other = regrade(api).groups.find((g) => g.experienceIndex === null);
+  return other?.bullets.map((b) => b.text) ?? [];
 }
 
 let container: HTMLDivElement;
@@ -347,6 +365,30 @@ describe("removeBullet on a user-ADDED role (#637 half 1)", () => {
     expect(api.removedBullets.size).toBe(0);
     expect(regrade(api).bulletTexts).toEqual([PARSED_BULLET]);
   });
+
+  it("reports that repeat click as NOT recorded (#659)", () => {
+    // The side effect above (nothing filed) is only half the contract. The
+    // RESULT is the other half, and it is what `useBulletRemoveStatus` keys its
+    // "Removed 1 change · Undo" strip off — and, through that strip's `pending`,
+    // what holds the entry back from the section-exit prune. Flipping this
+    // branch's `false` to `true` leaves every OTHER assertion in this file
+    // green while re-arming both.
+    const id = addRoleWithBullet();
+    const obsId = addedObsId();
+
+    let first = false;
+    let second = false;
+    act(() => {
+      first = api.removeBullet(obsId, { entryKey: id, text: ADDED_BULLET });
+    });
+    act(() => {
+      second = api.removeBullet(obsId, { entryKey: id, text: ADDED_BULLET });
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(api.removedBullets.size).toBe(0);
+  });
 });
 
 describe("removeBullet still reaches PARSED bullets (#637 scoping)", () => {
@@ -385,5 +427,101 @@ describe("removeBullet still reaches PARSED bullets (#637 scoping)", () => {
     act(() => api.removeBullet(PARSED_ID));
     expect(api.removedBullets.has(PARSED_ID)).toBe(true);
     expect(regrade(api).bulletTexts).toEqual([]);
+  });
+});
+
+/**
+ * #660 half 1 — `addBullet` rejects a line carrying no CONTENT.
+ *
+ * Driven end-to-end for the same reason #637 was: the defect was not "the hook
+ * stored something odd", it was that the stored line could not be ATTRIBUTED.
+ * So each case folds the hook's state through the real `applyOverrides` →
+ * `computeAnonymousAtsScore` → `groupBulletsByExperience` chain and asserts on
+ * the group the row would render under, not on the bucket alone.
+ *
+ * `"1."` is the reachable reproducer, and the numeral is why: `extractBulletsFromLines`
+ * drops a pooled line whose `countWords` is 0, so a lone `"•"` never became a
+ * BulletObservation at all (it only polluted the description and the exported
+ * PDF). `"1."` carries a `\p{N}`, so it counts as one word, pools, and surfaces
+ * as a row under "Other bullets" whose Remove did nothing.
+ */
+describe("addBullet rejects a contentless line (#660 half 1)", () => {
+  const MARKER_ONLY = ["•", "-", "*", "–", "·", "‣", "1.", "2)", "  •  "];
+  /** A legitimate bullet that merely STARTS with a marker — AC 3's trap. */
+  const MARKED_BULLET = "• Shipped X to 40 engineers.";
+
+  it("stores none of them, on a PARSED role's bucket", () => {
+    act(() => {
+      for (const text of MARKER_ONLY) api.addBullet("experience:0", text);
+    });
+
+    expect(api.addedBullets).toEqual({});
+    expect(api.hasEdits).toBe(false);
+  });
+
+  it("stores none of them, on an ADDED role's bucket", () => {
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+    act(() => {
+      for (const text of MARKER_ONLY) api.addBullet(id, text);
+    });
+
+    expect(id in api.addedBullets).toBe(false);
+  });
+
+  it("keeps the numbered-marker line out of the pool AND out of 'Other bullets'", () => {
+    // The observable defect, asserted where the user sees it. Pre-fix this run
+    // pooled a second bullet whose id was `"0|"` and put it in the null group.
+    act(() => api.addBullet("experience:0", "1."));
+
+    const after = regrade(api);
+    expect(after.bulletTexts).toEqual([PARSED_BULLET]);
+    expect(otherBullets(api)).toEqual([]);
+    expect(after.groups.map((g) => g.experienceIndex)).toEqual([0]);
+  });
+
+  it("keeps a glyph-only line out of the description and the exported PDF", () => {
+    // The half a pool assertion cannot see: a lone "•" was never pooled (0
+    // words), so it rendered no row — but `applyAddedEntriesAndBullets` still
+    // wrote it into the role's description, which IS what the PDF draws.
+    act(() => api.addBullet("experience:0", "•"));
+
+    const after = regrade(api);
+    expect(after.roleDescriptions[0]).toBe(PARSED_BULLET);
+    expect(after.exportedBullets).toEqual([PARSED_BULLET]);
+  });
+
+  it("still ACCEPTS a marker-prefixed line and matches it to its own role", () => {
+    // The trap. `normalizeBulletText` strips one leading marker by design, so a
+    // guard phrased as "starts with a marker" — or one that compared the RAW
+    // text to a marker set — would reject every legitimately bulleted line a
+    // user pastes in. Attribution is asserted too, not just storage: a guard
+    // that let the line through but broke its key would strand it in "Other
+    // bullets", which is the very state #660 is about.
+    act(() => api.addBullet("experience:0", MARKED_BULLET));
+
+    // Stored VERBATIM, glyph and all — `addBullet` normalises only to decide
+    // whether to accept, never to rewrite. The pool copy keeps the glyph too:
+    // `applyAddedBulletsToExistingEntries` prefixes its own `"• "`, and
+    // `extractBulletsFromLines` strips exactly one marker back off.
+    expect(api.addedBullets["experience:0"]).toEqual([MARKED_BULLET]);
+    const after = regrade(api);
+    expect(after.bulletTexts).toContain(MARKED_BULLET);
+    expect(otherBullets(api)).toEqual([]);
+    const role = after.groups.find((g) => g.experienceIndex === 0);
+    expect(role?.bullets.map((b) => b.text)).toEqual([
+      PARSED_BULLET,
+      MARKED_BULLET,
+    ]);
+    expect(after.exportedBullets).toContain(MARKED_BULLET);
+  });
+
+  it("accepts a line whose only content is a numeral", () => {
+    // `"2019"` looks as degenerate as `"1."` but is real text: the guard keys on
+    // the normalised form, so a numeral that is not a list marker survives.
+    act(() => api.addBullet("experience:0", "2019"));
+    expect(api.addedBullets["experience:0"]).toEqual(["2019"]);
   });
 });

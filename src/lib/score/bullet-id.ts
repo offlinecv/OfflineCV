@@ -124,6 +124,28 @@ export function isLegacyBulletKey(key: string): boolean {
 }
 
 /**
+ * True when `key` can name no line in EITHER key space, so anything filed under
+ * it is inert AND permanent — it removes/rewrites nothing, yet sits in the map
+ * keeping `hasEdits` true with no row left to clear it from.
+ *
+ * The shape that qualifies is an id whose text half is empty (`"<n>|"`), minted
+ * for a pooled line that is nothing but a marker — `"• 4."`, or a bare `"•"`
+ * merged with the following `"4."` by `extractBulletsFromLines`' lone-bullet rule
+ * (#30). `normalizeBulletText` strips the marker to nothing while
+ * `countWords("4.")` is 1, so such a line survives into the pool as a real row
+ * with a Remove control (#660).
+ *
+ * A LEGACY numeric key is deliberately NOT one: it resolves through the frozen
+ * base-parse observations, which is what `resolveOverrideOriginal` does with it,
+ * so calling it unresolvable would silently drop every removal in a pre-#648
+ * snapshot as it replays. This mirrors that resolver's own two-space split —
+ * keep the two in step.
+ */
+export function isUnresolvableBulletKey(key: string): boolean {
+  return !isLegacyBulletKey(key) && bulletIdText(key) === undefined;
+}
+
+/**
  * Assign ids to `texts` in pool order. Exported so the scorer and any test
  * harness mint ids the one way.
  *

@@ -7,6 +7,7 @@ import {
   bulletId,
   bulletIdText,
   isLegacyBulletKey,
+  isUnresolvableBulletKey,
 } from "./bullet-id.ts";
 import { computeAnonymousAtsScore } from "./score.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
@@ -46,6 +47,41 @@ describe("isLegacyBulletKey", () => {
     // The load-bearing property: an id ALWAYS carries a separator, so the two
     // key spaces are disjoint and one resolver can serve both.
     expect(isLegacyBulletKey(bulletId("123", 9))).toBe(false);
+  });
+});
+
+describe("isUnresolvableBulletKey", () => {
+  it("is true for an id whose text half is empty", () => {
+    // What a pooled marker-only line mints — `"• 4."`, or `"•"` merged with the
+    // following `"4."` by the lone-bullet rule (#30). `normalizeBulletText`
+    // strips the marker to nothing, so the id carries no text to match on and a
+    // removal filed under it is inert and permanent (#660).
+    expect(bulletId("4.", 0)).toBe("0|");
+    expect(isUnresolvableBulletKey(bulletId("4.", 0))).toBe(true);
+    expect(isUnresolvableBulletKey(bulletId("•", 3))).toBe(true);
+  });
+
+  it("is FALSE for a legacy pre-#648 pool index", () => {
+    // The carve-out, and not a hypothetical: `useEditableParse.replay` funnels a
+    // persisted snapshot's `removedBullets` through `removeBullet`, so treating a
+    // legacy index as unresolvable silently drops every removal in a saved-library
+    // résumé or a localStorage draft as it replays. `resolveOverrideOriginal`
+    // resolves these through the frozen base-parse pool.
+    expect(isUnresolvableBulletKey("0")).toBe(false);
+    expect(isUnresolvableBulletKey("42")).toBe(false);
+  });
+
+  it("is false for any id that carries text", () => {
+    expect(isUnresolvableBulletKey(bulletId("Shipped it", 0))).toBe(false);
+    expect(isUnresolvableBulletKey(bulletId("• Led   the Team", 2))).toBe(false);
+  });
+
+  it("is true for a malformed key in neither space", () => {
+    // Not reachable from `assignBulletIds`, but these name no line either, so the
+    // predicate must not report them resolvable.
+    expect(isUnresolvableBulletKey("")).toBe(true);
+    expect(isUnresolvableBulletKey("|text")).toBe(true);
+    expect(isUnresolvableBulletKey("x|text")).toBe(true);
   });
 });
 

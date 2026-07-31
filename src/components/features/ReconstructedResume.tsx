@@ -27,9 +27,10 @@
  * `ReconstructedRole.tsx`, `ResumeBulletRow` / `BulletFlagLegend` in
  * `ResumeBulletRow.tsx` (split out of ReconstructedRole by #626), and the
  * per-bullet remove confirmation in `BulletRemoveStatus.tsx`. `ExperienceSection`
- * below owns one instance of that last one for the "Other bullets" bucket —
- * the one group that disappears when its last bullet goes, taking a
- * role-hosted strip with it.
+ * below owns one instance of that last one for the "Other bullets" bucket — the
+ * one group that disappears when its last bullet goes, taking a role-hosted strip
+ * with it — and that instance, with the bucket resolution, undo snapshot and
+ * prune hold that have to agree with each other, lives in `OtherBulletsRemove.ts`.
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
@@ -61,9 +62,9 @@ import {
 } from "../../lib/contact.ts";
 import { DownloadGateDialog } from "./DownloadGateDialog.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
-import { useBulletRemoveStatus } from "./BulletRemoveStatus.tsx";
+import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
 import { ResumeBulletRow, BulletFlagLegend } from "./ResumeBulletRow.tsx";
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
 import type { SectionRewriteApply } from "./SectionRewrite.tsx";
@@ -82,6 +83,7 @@ import type {
   AddedEntryField,
   AchievementFieldOverrides,
   AddedBulletRef,
+  AddedBullets,
 } from "../../hooks/useEditableParse.ts";
 import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
 import { useAddedEntryPruneHold } from "../../hooks/useAddedEntryPruneHold.ts";
@@ -89,7 +91,6 @@ import {
   batchUndoTargets,
   type BulletUndoTargets,
 } from "../../lib/rewrite-review/undo-batch.ts";
-import type { ResolvedWrite } from "../../lib/rewrite-review/apply-accepted.ts";
 import {
   AddPill,
   RemoveButton,
@@ -412,6 +413,7 @@ export function ExperienceSection({
   onExperienceFieldChange,
   onBulletChange,
   onRemoveBullet,
+  addedBullets,
   addedExperience,
   originalCount,
   onAddEntry,
@@ -454,6 +456,11 @@ export function ExperienceSection({
    *  recorded — false when the write found nothing to drop, which the
    *  confirmation strip must not report as a success (#648). */
   onRemoveBullet: (id: string, added?: AddedBulletRef) => boolean;
+  /** Every user-added bullet bucket, read ONLY by the "Other bullets" remove
+   *  path: that group carries no entry, so the bucket a degenerate added line
+   *  sits in has to be resolved from the line's text (#660). Every other path
+   *  knows its own `entryKey` and never consults this. */
+  addedBullets: AddedBullets;
   /** User-added experience entries, append-aligned to indices ≥ originalCount. */
   addedExperience: AddedEntry[];
   /** Count of PARSED experience roles; indices at/above this are user-added. */
@@ -469,52 +476,41 @@ export function ExperienceSection({
    *  an accepted summary rewrite lands in `summaryOverride` — the slot the
    *  inline Summary field writes — instead of being read-only redline. */
   summaryApply: SectionRewriteApply;
-  /** Drop a blank added entry when focus leaves the section (#379). `isHeld`
-   *  spares individual entries whose remove-undo strip is still live — see
-   *  {@link useAddedEntryPruneHold} (#637). */
+  /** Drop a blank added entry when focus leaves the section (#379). The
+   *  predicate spares individual entries: those whose remove-undo strip is still
+   *  live on the section-exit pass (#637), and every entry but the released one
+   *  on the pass a collapsing strip triggers (#658). Both come from
+   *  {@link useAddedEntryPruneHold}. */
   onPruneEmpty: (isHeld?: (entryId: string) => boolean) => void;
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
 
-  // The "Other bullets" bucket's remove confirmation is owned HERE, not in its
-  // RoleEntry (#626). `groupBulletsByExperience` appends that group only while
-  // it has at least one bullet, so removing its LAST bullet unmounts the role
-  // that triggered the remove — and would take the Undo strip with it. Every
-  // parsed role keeps owning its own (it survives losing its bullets, via
-  // `sliceGroups`' empty-group fallback), so only this one bucket lifts.
-  const otherCaptureUndo = useCallback(
-    (writes: readonly ResolvedWrite[]) =>
-      // No `onAddBullet` for this bucket — there is no experience entry to
-      // append to — so the entry key is never read by `batchUndoTargets`
-      // (it is consulted only for an "add" write, which this bucket never
-      // issues). A single-bullet remove is all #626 needs from this call site.
-      captureBulletUndo(batchUndoTargets(writes, "other-bullets")),
-    [captureBulletUndo],
-  );
-  // The "Other bullets" bucket owns no entry, so in practice it does not carry
-  // an added bullet: `applyAddedEntriesAndBullets` writes every added line into
-  // its entry's own description, and `buildEntryGroups` grades experiences,
-  // projects and achievements against one combined index space — so an added
-  // line normally matches its entry and never falls through to "Other". The
-  // row's `text` is therefore dropped rather than forwarded as an
-  // `AddedBulletRef` that would almost always miss (#637).
-  //
-  // Not an absolute, though: `groupBulletsByExperience` keys on
-  // `normalizeBulletText` and skips a line whose key is empty, while `addBullet`
-  // only rejects blank-after-`trim()`. So a degenerate added line that is pure
-  // punctuation ("•", "-", "–") IS accepted and DOES land here, where its Remove
-  // is inert. Tracked separately rather than widened here.
-  const otherRemoveBullet = useCallback(
-    (id: string) => onRemoveBullet(id),
-    [onRemoveBullet],
-  );
-  const otherRemove = useBulletRemoveStatus(otherRemoveBullet, otherCaptureUndo);
-
   // Per-entry prune hold (#637 half 2). Created HERE — the ids it holds are
   // only meaningful to this section's `pruneEmptyAddedEntries` call, and the
-  // holders are the `RoleEntry`s rendered below.
-  const pruneHold = useAddedEntryPruneHold();
+  // holders are the `RoleEntry`s rendered below, plus the "Other bullets" remove
+  // control right after (which holds the role its splice can empty).
+  //
+  // The handler is the SECOND caller of that prune (#658): when a role's
+  // remove-undo strip collapses, the registry re-runs the pass over the entry
+  // whose stay just ended, so the now-genuinely-empty ghost goes without waiting
+  // for another section exit. It supplies its own spare predicate — narrowed to
+  // that one entry, and stood down entirely while the entry holds focus. Takes
+  // it as an argument rather than closing over `pruneHold.isHeld`, which does not
+  // exist yet on this line.
+  const pruneHold = useAddedEntryPruneHold((isSpared) => onPruneEmpty(isSpared));
+  // The "Other bullets" bucket's remove confirmation is owned HERE, not in its
+  // RoleEntry (#626): that group vanishes with its last bullet, so a role-hosted
+  // strip would unmount with it. Its bucket has to be resolved from the row's
+  // text (#660 half 2), and the snapshot and the prune hold both hang off that
+  // one resolution — see `useOtherBulletsRemove` for the whole argument. The
+  // `strip` it returns is rendered below the group list.
+  const otherRemove = useOtherBulletsRemove({
+    addedBullets,
+    onRemoveBullet,
+    captureBulletUndo,
+    pruneHold,
+  });
 
   const { topHeading, inlineHeadings } = computeExperienceHeadings(
     groups,
@@ -1366,6 +1362,7 @@ export function ReconstructedResume({
           setBulletField(index, value, original)
         }
         onRemoveBullet={removeBullet}
+        addedBullets={edit.addedBullets}
         addedExperience={addedExperience}
         originalCount={originalExpCount}
         onAddEntry={() => addEntry("experience")}

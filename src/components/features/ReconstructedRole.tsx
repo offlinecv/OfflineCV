@@ -308,6 +308,14 @@ export function RoleEntry({
   entryKey,
   pruneHold,
 }: RoleEntryProps) {
+  // This entry's root element, handed to `useHoldWhile` (#658). The prune that
+  // runs when a remove-undo strip collapses asks it two things: does focus still
+  // sit inside this row, and does the row still hold an OPEN draft. Either
+  // stands the timer down, so it cannot drop a row the user is typing in — nor
+  // one whose draft has outlived a stray click elsewhere, which a focus-only
+  // gate let it destroy. Scoped to that timer: the section-exit prune (#379)
+  // still reads a draft as emptiness, which is pre-existing and filed on its own.
+  const rootRef = useRef<HTMLDivElement>(null);
   // Tag every write issued from this role's own rows with the bucket that owns
   // them, so a USER-ADDED bullet is spliced (#637) or rewritten (#657) in
   // `addedBullets` rather than filed under an id that reaches nothing there.
@@ -334,10 +342,15 @@ export function RoleEntry({
   // Half 2 of #637: hold this entry back from the section-exit prune while its
   // own strip is live, so the undo the remove just armed survives the tick.
   // Only a user-ADDED entry can be pruned at all, so only its id is ever held.
+  // `rootRef` is what the release prune (#658) tests before dropping this row:
+  // every field, input and control the user could be mid-edit in is a descendant
+  // of this entry's root element, so one node answers both halves of that gate
+  // (focus containment, and an open text control).
   useHoldWhile(
     pruneHold,
     entryKey !== undefined && isAddedEntryKey(entryKey) ? entryKey : undefined,
     hostsStrip && removes.pending,
+    rootRef,
   );
 
   // Section rewrite sees the text the user actually edited — `group.bullets`
@@ -402,7 +415,7 @@ export function RoleEntry({
     roleLabel(group.experience),
   );
   return (
-    <div className="flex flex-col gap-1.5">
+    <div ref={rootRef} className="flex flex-col gap-1.5">
       <div className="flex items-start justify-between gap-2">
         <RoleHeader
           group={group}
