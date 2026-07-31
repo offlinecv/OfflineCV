@@ -43,14 +43,6 @@
         "note": "Same single-glyph toWinAnsi() substitution as google-docs-skia-proxy-classic; see #326's decision record."
       }
     ],
-    "google-docs/google-docs-skia-proxy-honors-subheadings.pdf": [
-      {
-        "category": "experience",
-        "issue": 543,
-        "status": "open",
-        "note": "A bullet-as-title parse defect on a subheading-style role: the role's title is taken from a bullet line, so it does not survive the round-trip. It reproduces the title-drop category #543's acceptance criteria ask for. NOT the only fixture that does — four others parse a literally EMPTY title (google-docs/google-docs-skia-proxy-multiline-bullets-coursework role[2], unknown/pdflib-leading-glyph-skills-header role[0], unknown/student-projects-activities-singlecol role[2], word/openresume-laverne-word-quartz role[1]); the earlier note claimed it was, and that was false. Not the #436 one-line-header roots."
-      }
-    ],
     "unknown/extended-latin-name-roundtrip.pdf": [
       {
         "category": "contact",

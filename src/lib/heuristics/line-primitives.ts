@@ -88,6 +88,102 @@ export function isProseLine(text: string): boolean {
 }
 
 /**
+ * True when a below-anchor line (the run between a date sub-line and the first
+ * bullet) reads unambiguously as body prose rather than a header extension.
+ *
+ * Used by {@link buildEntryBlock} to PREEMPT such a line from `headerLines`
+ * before `disambiguateCompanyTitle` runs (#615 review, PR #688 Thread 1). Left
+ * in the header run, a line like "Founding site leader; owned charter and
+ * headcount." gets absorbed into the still-empty `team` slot — turning a body
+ * sentence into a team name in the exported header and violating #615 AC #3.
+ * `isProseLine` above is too strict here (it needs an internal sentence break
+ * AND ≥8 words); this predicate is targeted at the specific below-anchor
+ * signals no legitimate header field carries.
+ *
+ * Two signals qualify — either is sufficient, both are strict enough that no
+ * real title / company / team / location line trips them:
+ *
+ * 1. A semicolon (`;`) anywhere in the line. Titles, teams, companies and
+ *    locations never use `;` as a delimiter, so its presence is a strong
+ *    prose signal that costs nothing on legitimate headers.
+ *
+ * 2. A sentence-terminator ending (`.!?`), EXCEPT when the terminating token
+ *    is a legal-entity suffix from a closed Anglo-American list. "Google,
+ *    Inc." and "Acme Corp." are legitimate company names on their own line
+ *    — the {@link LEGAL_TERMINAL_SUFFIX_RE} guard keeps them out. The list
+ *    is deliberately narrow: adding `AG` / `AB` / `SE` / `NV` / `AS` / `Oy`
+ *    would widen the false-positive class rather than shrink it, because
+ *    each is a common English word ending (`lab.`, `case.`, `was.`, `has.`).
+ *    So `"Deutsche Bank AG."` on its own line trips this predicate as prose
+ *    — a known limitation, accepted because the scope of {@link
+ *    LEGAL_TERMINAL_SUFFIX_RE} is companies-that-round-trip-cleanly, not an
+ *    exhaustive international vocab.
+ *
+ * Deliberately NARROW: a middot-metadata line like `"L7 · 18 engineers, 2
+ * TLMs reporting"` matches neither signal and falls through to the header
+ * path. If disambiguation leaves any of its tokens unclaimed by fields, the
+ * second-chance {@link recoverLeadingBodyProse} in `experience.ts` catches
+ * it via token coverage; if disambiguation misroutes it (a separate defect
+ * class from #615), a broader predicate would need its own repro + tests.
+ */
+// `\b` at the start is load-bearing (PR #688 review B1): without it,
+// `Co\.?$` matches "co." at the end of any word — "San Francisco.", "off
+// Cisco.", "growth of Xerox." — and the whole sentence gets classified as
+// a legal-entity name, so the preemption skips a scope line that ends on a
+// common place/word suffix and the sentence lands in `team` instead of
+// `description`. `.?$` anchors to line end; the alternation is
+// Anglo-American legal suffixes only (adding `AG` / `AB` / `SE` / `NV` /
+// `AS` / `Oy` widens the same class of false positive, so it stays out).
+const LEGAL_TERMINAL_SUFFIX_RE =
+  /\b(?:Inc|Corp|Corporation|Ltd|LLC|L\.L\.C|GmbH|PLC|Co|SA|NA|LP|LLP|PC)\.?$/i;
+export function looksLikeBelowAnchorProse(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes(";")) return true;
+  if (looksLikeMiddotMetadata(trimmed)) return true;
+  if (!/[.!?]$/.test(trimmed)) return false;
+  return !LEGAL_TERMINAL_SUFFIX_RE.test(trimmed);
+}
+
+/**
+ * True when a middot-separated line reads as **role-scope metadata** rather
+ * than a header — specifically the shape #615 variant 3 names by example:
+ * "L7 · 18 engineers, 2 TLMs reporting" and its cousins ("M4 · 22 engineers,
+ * 3 squads", "L6/L7 · 30 engineers").
+ *
+ * A middot header is `Title · Company` / `Title · Company · Team` and the
+ * disambiguator handles it. A middot-metadata line ALSO uses ` · ` as a
+ * separator but leads with a **grade-code segment** (1–3 uppercase letters
+ * followed by 1–2 digits, whole segment, optionally slash-joined for
+ * dual-track "L6/L7" leveling), which no title / company / team / location
+ * ever is. That first-segment shape is the whole discriminator here — a
+ * cheap, high-precision preempt.
+ *
+ * Deliberately narrow, PR #688 review B3: middot lines that don't lead with
+ * a grade code fall through to disambiguation as usual, so a legitimate
+ * "Software Engineer · Google" header still routes correctly. Widening
+ * (quantity-plus-role-noun anywhere in the line, generic "any segment that
+ * looks like nothing else does") would want its own repro + tests — this
+ * predicate closes the issue's named variant and stops there. Follow-ups
+ * that widen it should add their own regression cases.
+ *
+ * Module-private, called only from {@link looksLikeBelowAnchorProse} — kept a
+ * named function rather than an inlined branch so a future widening and its
+ * tests key on this specific shape instead of sinking into the general
+ * predicate. Export it when a second caller actually exists; exporting it
+ * ahead of one is the forward-staging `fallow` flags as dead code.
+ */
+const MIDDOT_METADATA_GRADE_CODE_RE =
+  /^[A-Z]{1,3}\d{1,2}(?:\/[A-Z]{1,3}\d{1,2})*$/;
+function looksLikeMiddotMetadata(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.includes("·")) return false;
+  const segments = trimmed.split(/\s*·\s*/).filter((s) => s.length > 0);
+  if (segments.length < 2) return false;
+  return MIDDOT_METADATA_GRADE_CODE_RE.test(segments[0]);
+}
+
+/**
  * A page running-header / footer line — the candidate's own name + "Resume" /
  * "Résumé" / "CV" / "Curriculum Vitae" furniture a continuation page repeats at
  * its top or bottom (often beside a date and a page number, e.g. "June 10, 2026

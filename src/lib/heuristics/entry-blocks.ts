@@ -41,6 +41,7 @@ import {
   isBulletLine,
   isPageFurniture,
   isProseLine,
+  looksLikeBelowAnchorProse,
   stripBullet,
 } from "./line-primitives.ts";
 
@@ -251,6 +252,32 @@ export interface EntryBlock {
   body?: string;
   /** Number of bullet lines that fed `body` (0 when none / not collected). */
   bulletCount: number;
+  /**
+   * Below-anchor lines that {@link looksLikeBelowAnchorProse} pre-classifies as
+   * body prose (contains `;`, or ends in `.!?` and not on a legal-entity
+   * suffix). Wrap-continuations are already folded, so a wrapped role-scope
+   * paragraph is ONE entry, not N fragment lines — the caller can prepend
+   * them straight to `description` and the exporter emits one bullet per
+   * paragraph rather than one per visual line.
+   *
+   * Preempted from `headerLines` BEFORE `disambiguateCompanyTitle` runs (#615
+   * PR #688 Thread 1): left in the header run, a sentence like "Founding site
+   * leader; owned charter and headcount." fills the still-empty `team` slot
+   * on a header line that carries no team segment, violating #615 AC #3.
+   */
+  belowAnchorBodyProse?: string[];
+  /**
+   * Non-empty header-candidate lines that sat between the anchor and the first
+   * bullet AFTER pre-classification lifts obvious body prose into
+   * {@link belowAnchorBodyProse}. Same set that ends up in `headerLines`, but
+   * exposed separately (#615) so a caller can cross-check each line against
+   * the resolved header fields; anything whose tokens are NOT fully covered
+   * by title/company/team/location is body content disambiguation missed — the
+   * second-chance path for the shapes {@link looksLikeBelowAnchorProse} does
+   * not catch (e.g. middot metadata like `"L7 · 18 engineers, 2 TLMs
+   * reporting"`). Wrap-continuations are folded to match `belowAnchorBodyProse`.
+   */
+  belowAnchorLines?: string[];
 }
 
 /** True if the line is an anchor for the given config. */
@@ -1224,6 +1251,82 @@ function nextHeaderStart(
 }
 
 /**
+ * Fold consecutive below-anchor `PdfLine`s into logical strings using the same
+ * sub-paragraph y-gap signal `buildEntryBlock`'s `bodyUnits` loop uses on
+ * bullets. A wrapped role-scope paragraph rendered by pdfjs as three lines
+ * ({y decreasing by ~baseline each step}) becomes one string; two paragraphs
+ * separated by a real paragraph gap stay two strings.
+ *
+ * Consumed by {@link buildEntryBlock} (#615 PR #688 Thread 3): the previous
+ * shape (`belowAnchorLines: PdfLine[].map(l => l.text)`) discarded the y/x
+ * geometry the fold needed, so on a fixture where the scope line wrapped
+ * (`Researcher @ CORNELL ROBOT LEARNING LAB` on `deedy-resume-macfonts.pdf`)
+ * three fragment strings landed in `description` and exported as three
+ * mid-sentence bullets. Folding here means the caller only sees whole
+ * paragraphs and the exporter emits one bullet per paragraph.
+ *
+ * Empty spacer lines don't reset the fold — they're skipped, and the y-gap
+ * check runs against the previous NON-EMPTY line. Baseline 0 (no geometry,
+ * e.g. markdown input) disables the fold entirely, which is correct: each
+ * source line is already one logical line in that mode.
+ */
+function foldBelowAnchorLines(
+  lines: PdfLine[],
+  baseline: number,
+): string[] {
+  const folded: string[] = [];
+  let prev: PdfLine | undefined;
+  for (const l of lines) {
+    const text = l.text.trim();
+    if (!text) continue;
+    let wrapsPrev =
+      baseline > 0 &&
+      folded.length > 0 &&
+      prev !== undefined &&
+      l.y - prev.y > 0 &&
+      l.y - prev.y <= BODY_GAP_FACTOR * baseline;
+    // New-paragraph guard: don't fold across a sentence boundary. A
+    // predecessor ending in `.!?` is a completed sentence — whatever
+    // follows is a NEW paragraph, not a wrap-continuation, no matter how
+    // tight the y-gap is. Diverges deliberately from the `bodyUnits`
+    // reference's Capital-led-plus-dangling-connective guard (#215) after
+    // PR #688 review S1: that reference is designed to fold real bullet
+    // wraps in GLYPH mode, where `bodyMarginX` is Infinity, so any
+    // Capital-led guard would kill legitimate bullet wraps and the scope
+    // to `Number.isFinite(bodyMarginX)` is what preserves them.
+    //
+    // Here, the content is role-scope paragraphs sitting BETWEEN a date
+    // anchor and the first bullet — no bullet-wrap semantics to preserve.
+    // Scoping the guard to `Number.isFinite(bodyMarginX)` matches the
+    // reference exactly but regresses a real fixture
+    // (`synthetic-two-experience-sections.pdf`, glyph-less with no
+    // distinct header/body margin, so `bodyMarginX` is Infinity and the
+    // scoped guard doesn't fire — two "Performed…" / "Rehearsed…"
+    // sentences merged into one 200-char megabullet). Sentence-terminator
+    // is mode-independent and correct across all four fixtures the fold
+    // touches (this one, honors-subheadings, Deedy Researcher's wrap,
+    // the reviewer's Site Reliability / Engineering example): a wrap is
+    // by definition a mid-sentence cut, so a preceding `.!?` is a
+    // sufficient discriminator without also encoding the reference's
+    // Capital-led heuristic.
+    if (
+      wrapsPrev &&
+      prev !== undefined &&
+      /[.!?]$/.test(prev.text.trim())
+    ) {
+      wrapsPrev = false;
+    }
+    if (wrapsPrev) {
+      folded[folded.length - 1] += " " + text;
+    } else {
+      folded.push(text);
+    }
+    prev = l;
+  }
+  return folded;
+}
+
+/**
  * Build the single `EntryBlock` anchored at `anchors[a]`. The entry spans from
  * just after the previous anchor to just before the next: header lines are the
  * (lookback) non-bullet lines above the anchor, the anchor line with its dates
@@ -1351,6 +1454,26 @@ function buildEntryBlock(
   // in the trimmed/filtered array so the caller can use it as a title/company
   // structural signal (#298). Each group is trimmed and de-blanked
   // independently so the anchor index stays accurate after empties drop.
+  // #615 (PR #688 Thread 3) — fold wrap-continuations in the below-anchor run
+  // BEFORE converting to strings, so a wrapped role-scope paragraph is ONE
+  // logical line and not N fragments that would export as N bullets. Same
+  // sub-paragraph y-gap signal `bodyUnits` above uses, extracted here so
+  // the header-candidate strings and the pre-classified body-prose strings
+  // both come from the same folded pool.
+  const foldedBelow = foldBelowAnchorLines(belowHeaderLines, baseline);
+  // (PR #688 Thread 1) — split the folded below-anchor lines into two buckets
+  // by `looksLikeBelowAnchorProse`: obvious body prose is preempted from
+  // `headerLines` so `disambiguateCompanyTitle` can't absorb it into an empty
+  // `team` slot; the rest stays a header candidate.
+  const belowAnchorBodyProse: string[] = [];
+  const belowHeaderCandidates: string[] = [];
+  for (const text of foldedBelow) {
+    if (looksLikeBelowAnchorProse(text)) {
+      belowAnchorBodyProse.push(text);
+    } else {
+      belowHeaderCandidates.push(text);
+    }
+  }
   const aboveTexts = aboveLines.map((l) => l.text.trim()).filter(Boolean);
   // A "Date · Location" sub-line (two-column Google-Docs export, #347) leaves a
   // dangling LEADING separator once the date range is stripped off the front:
@@ -1363,11 +1486,10 @@ function buildEntryBlock(
   // (anchorCarriesOrgSignal) and an INTERNAL " · " is a real segment separator,
   // both of which must survive.
   const anchorText = anchorTextWithoutDates.replace(/^[\s·•‣|—–-]+/, "").trim();
-  const belowTexts = belowHeaderLines.map((l) => l.text.trim()).filter(Boolean);
   const headerLines = [
     ...aboveTexts,
     ...(anchorText ? [anchorText] : []),
-    ...belowTexts,
+    ...belowHeaderCandidates,
   ];
   const anchorHeaderIndex = anchorText ? aboveTexts.length : -1;
 
@@ -1447,5 +1569,13 @@ function buildEntryBlock(
       : undefined,
     body,
     bulletCount: bodyUnits.length,
+    // #615 — pre-classified body prose goes straight to `description`; the rest
+    // of the below-anchor run is exposed for the second-chance token-coverage
+    // recovery in `experienceFromBlock`. Both are already wrap-folded, so the
+    // caller emits one bullet per paragraph rather than one per visual line.
+    belowAnchorBodyProse:
+      belowAnchorBodyProse.length > 0 ? belowAnchorBodyProse : undefined,
+    belowAnchorLines:
+      belowHeaderCandidates.length > 0 ? belowHeaderCandidates : undefined,
   };
 }
