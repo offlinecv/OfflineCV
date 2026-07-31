@@ -11,13 +11,21 @@
  * vocabulary. Remove is a two-click inline confirm so a stray click can't drop
  * a tracked application. All state access is the caller's `useJobTracker`
  * handlers — this component is presentational.
+ *
+ * Fitness rating (#700): the row reuses `RatingStars` and `describeRating`
+ * verbatim, so a saved job and a searched one can never disagree about the same
+ * posting. The caller computes it on view and never stores it on the record. A
+ * record with no saved job description renders an explicit "not rated", NOT
+ * zero stars — a 0 reads as "terrible fit" when the truth is that there is
+ * nothing to match against.
  */
 
 import { useState } from "react";
-import { Button, EditableField, StatusBadge } from "@design-system";
+import { Button, EditableField, RatingStars, StatusBadge } from "@design-system";
 import { JobStatusPicker, jobStatusTone, jobStatusLabel } from "./JobStatusPicker.tsx";
 import type { JobRecord, JobStatus } from "../../lib/storage/index.ts";
 import type { JobPatch } from "../../lib/job-tracker.ts";
+import { describeRating, type JobRating } from "../../lib/job-search/rating.ts";
 
 /** A saved resume the user can link this job to — the light shape the picker
  *  renders, structurally satisfied by `ResumeLibraryEntry`. */
@@ -34,6 +42,12 @@ interface JobTrackerEntryProps {
   /** Saved resumes offered by the link picker. Empty (or omitted) hides it —
    *  a user with no saved resumes has nothing to link. */
   resumeOptions?: readonly LinkableResume[];
+  /** True once the library has been rated. False (the default) = nothing to rate
+   *  against yet, so the row shows no fitness block rather than a placeholder. */
+  rated?: boolean;
+  /** This row's rating. Undefined WHILE `rated` means the record carries no job
+   *  description → "Not rated", which is not the same state as 0 stars. */
+  rating?: JobRating;
   onUpdate: (id: string, patch: JobPatch) => void;
   onStatusChange: (id: string, status: JobStatus) => void;
   onLinkResume: (id: string, resumeId: string) => void;
@@ -53,6 +67,8 @@ export function JobTrackerEntry({
   job,
   linkedResumeName,
   resumeOptions = [],
+  rated = false,
+  rating,
   onUpdate,
   onStatusChange,
   onLinkResume,
@@ -79,9 +95,31 @@ export function JobTrackerEntry({
             onCommit={(v) => onUpdate(job.id, { company: v })}
           />
         </div>
-        <StatusBadge tone={jobStatusTone(job.status)}>
-          {jobStatusLabel(job.status)}
-        </StatusBadge>
+        <div className="flex flex-col items-end gap-1">
+          <StatusBadge tone={jobStatusTone(job.status)}>
+            {jobStatusLabel(job.status)}
+          </StatusBadge>
+          {rated && !rating && (
+            <span className="text-xs text-content-muted">
+              Not rated · no job description saved
+            </span>
+          )}
+          {rated && rating && (
+            <>
+              {/* No comp floor: the library carries no query, so `describeRating`
+                  yields the fitness phrase alone (see `rate-saved-jobs.ts`). */}
+              <RatingStars
+                value={rating.overall}
+                size="sm"
+                showValue
+                ariaLabel={`Resume fit: ${Math.round(rating.overall * 10) / 10} out of 5 stars`}
+              />
+              <span className="text-xs text-content-tertiary">
+                {describeRating(rating, { hasCompFloor: false }).join(" · ")}
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
       <JobStatusPicker

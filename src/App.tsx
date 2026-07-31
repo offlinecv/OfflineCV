@@ -20,6 +20,8 @@ import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { writeJdFitHandoff } from "./lib/jd-fit-handoff.ts";
+import { departToJobs } from "./lib/jobs-departure.ts";
+import { markDeparture } from "./lib/nav-return.ts";
 import { isScoreRevealed } from "./lib/contact.ts";
 import { useFlag } from "./lib/flags.ts";
 
@@ -83,7 +85,21 @@ export default function App() {
         edit: edit.snapshot,
       });
     }
+    // #706: mark the departure so /jd-fit/'s "Parser audit" back control can
+    // use a real history.back() instead of pushing a fresh, blank `/`.
+    markDeparture();
     window.location.href = `${import.meta.env.BASE_URL}jd-fit/`;
+  };
+
+  // The header's "Saved jobs" link (#707) is the second route from `/` into
+  // `/jobs/`, and only this surface knows there is a parse to hand over — so
+  // `PageShell` asks and `/` answers, with exactly what `FindJobsLauncher`'s
+  // button does (`departToJobs`). Without the handoff the library would rate
+  // nothing (#700) and tell a user who had just parsed a résumé to "open this
+  // workbench from your resume". `PageShell` fires this only on an unmodified
+  // primary click, so the marker always accompanies a real navigation.
+  const goToSavedJobs = () => {
+    departToJobs(displayResult?.canonical.fields);
   };
 
   // #313 — an unresolved draft prompt (from-scratch authoring, reload with a
@@ -109,7 +125,7 @@ export default function App() {
     // alone on the header-right instead of sharing it. `/jd-fit` and `/jobs`
     // still pass one: they open straight into a form with no headline of their
     // own, so there the header line is the only orientation.
-    <PageShell badge="alpha">
+    <PageShell badge="alpha" onSavedJobsNavigate={goToSavedJobs}>
       {(state.phase === "idle" ||
         state.phase === "parsing" ||
         state.phase === "error") && (

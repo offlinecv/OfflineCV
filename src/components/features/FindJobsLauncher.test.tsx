@@ -22,6 +22,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { FindJobsLauncher } from "./FindJobsLauncher.tsx";
 import { readJobsHandoff } from "../../lib/jobs-handoff.ts";
+import { readDepartureMarker } from "../../lib/nav-return.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -79,7 +80,7 @@ describe("FindJobsLauncher", () => {
     expect(el.querySelectorAll("input").length).toBe(0);
   });
 
-  it("stashes the parse before navigating", () => {
+  it("stashes the parse AND marks the departure before navigating", () => {
     const el = render({ parsed });
     act(() => launchButton(el).click());
 
@@ -87,6 +88,11 @@ describe("FindJobsLauncher", () => {
     expect(handoff).not.toBeNull();
     expect(handoff?.parsed.full_name).toBe("Dana Fixture");
     expect(handoff?.parsed.skills).toContain("GraphQL");
+    // #706: without the marker, `/jobs/`'s "Back to your resume" pushes a fresh
+    // `/` and this parse — plus every inline edit — is gone. Nothing else in
+    // the suite watches this wiring, so removing `departToJobs` from `go()`
+    // would otherwise stay green.
+    expect(readDepartureMarker()).toBe(true);
   });
 
   it("still offers the jump when no query could be derived", () => {

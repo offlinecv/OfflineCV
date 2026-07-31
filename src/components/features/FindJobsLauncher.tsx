@@ -16,6 +16,12 @@
  * under both the custom-domain "/" base and the "/OfflineCV/" Pages-fallback
  * base (same pattern as `App.tsx`'s /jd-fit cross-link).
  *
+ * The stash + the departure marker (#706, so `/jobs/`'s "Back to your resume"
+ * control knows this trip actually started at `/` and can use a real
+ * `history.back()` instead of pushing a fresh, blank `/`) both come from
+ * `departToJobs` — the same helper the header's parse-independent "Saved jobs"
+ * link (#707) calls, so the two routes off `/` cannot drift apart.
+ *
  * Nothing here fetches, and the navigation is same-origin, so no résumé data
  * leaves the browser at this step.
  */
@@ -24,7 +30,7 @@ import { useMemo } from "react";
 import { Button, Chip } from "@design-system";
 import { buildJobQuery } from "../../lib/job-search/query-builder.ts";
 import { roleFilterForResume, seedExcludeTermsForFamilies } from "../../lib/job-search/role-keywords.ts";
-import { writeJobsHandoff } from "../../lib/jobs-handoff.ts";
+import { departToJobs } from "../../lib/jobs-departure.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import { JobQuerySummary } from "./JobQuerySummary.tsx";
 
@@ -43,7 +49,7 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
   const isDegenerate = query.titles.length === 0 && query.skills.length === 0;
 
   const go = () => {
-    writeJobsHandoff({ parsed });
+    departToJobs(parsed);
     window.location.href = `${import.meta.env.BASE_URL}jobs/`;
   };
 

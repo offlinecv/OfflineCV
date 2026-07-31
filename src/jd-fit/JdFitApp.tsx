@@ -26,9 +26,16 @@ import { useAnalyzedResume } from "../hooks/useAnalyzedResume.ts";
 import { useJdFitResume } from "./useJdFitResume.ts";
 import { extractJdTerms, computeCoverage, type JdMatchResult } from "../lib/jd-match";
 import { buildJdRewriteContext } from "../lib/jd-match/rewrite-context.ts";
+import { returnToResumeRoot } from "../lib/nav-return.ts";
+import { useArrivedFromRoot } from "../hooks/useArrivedFromRoot.ts";
 
 export default function JdFitApp() {
   const [jdText, setJdText] = useState("");
+  // #706: answered ONCE, at mount. Consuming the marker here — even though this
+  // surface's back control may never be clicked — is what stops `/`'s marker
+  // from following the user on to `/jobs/` via the header link and answering
+  // THAT surface's back control. See `useArrivedFromRoot`.
+  const arrivedFromRoot = useArrivedFromRoot();
   const analyzed = useAnalyzedResume();
   // Resolve the résumé source: a one-shot handoff from `/` (rehydrated parsed
   // JSON) takes precedence; otherwise this surface's own DropZone parse. Both
@@ -67,13 +74,21 @@ export default function JdFitApp() {
     <PageShell
       subtitle="Tailor your resume to a job description"
       badge="JD Fit"
+      // No `onSavedJobsNavigate`: this surface is not the app root, so it has
+      // no jobs handoff to write and must NOT mark a departure — a marker from
+      // here would travel with the user to `/jobs/` and send its "Back to your
+      // resume" control to `/jd-fit/`, a real page but not the one the label
+      // names. (The marker `/` wrote for the leg INTO this page is already
+      // gone: `useArrivedFromRoot` retired it at mount.) See `nav-return.ts`.
       headerExtra={
+        // #706: a real back navigation when this tab arrived from `/` (a
+        // trip `App.tsx`'s `goToJdFit` marks via `markDeparture`), so the
+        // in-progress parse there survives via bfcache. Falls back to a
+        // fresh `/` for a deep link, a new tab, or a reload of /jd-fit/.
         <Button
           variant="link"
           size="sm"
-          onClick={() => {
-            window.location.href = import.meta.env.BASE_URL;
-          }}
+          onClick={() => returnToResumeRoot(arrivedFromRoot)}
         >
           ← Parser audit
         </Button>

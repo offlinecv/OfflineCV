@@ -38,11 +38,15 @@ import { PageShell } from "../components/features/PageShell.tsx";
 import { FindJobsPanel } from "../components/features/FindJobsPanel.tsx";
 import { JobTrackerSection } from "../components/features/JobTracker.tsx";
 import { readJobsHandoff } from "../lib/jobs-handoff.ts";
+import { returnToResumeRoot } from "../lib/nav-return.ts";
+import { resolveInitialJobsTab, type JobsTabId } from "../lib/jobs-landing.ts";
+import { useArrivedFromRoot } from "../hooks/useArrivedFromRoot.ts";
 import { useResumeLibrary } from "../hooks/useResumeLibrary.ts";
 
-type JobsTabId = "search" | "library";
-
-function backToResume() {
+// #706: goes to `/` directly, never via history.back() — the empty state only
+// shows when there is no in-progress parse to preserve, so this is a forward
+// action (like the DropZone CTA it replaces), not an undo of the trip here.
+function goToResume() {
   window.location.href = import.meta.env.BASE_URL;
 }
 
@@ -51,7 +55,19 @@ export default function JobsApp() {
   // the read is non-destructive, so there is no StrictMode double-invoke hazard
   // of the kind `useJdFitResume` needs a ref for.
   const [handoff] = useState(() => readJobsHandoff());
-  const [tab, setTab] = useState<JobsTabId>("search");
+  // #707: `PageShell`'s "Saved jobs" link arrives with `?tab=library` so this
+  // surface lands there directly instead of the Search tab a plain `/jobs/`
+  // visit defaults to. Lazy initializer (not an effect) — same read-once-on-
+  // mount shape as the handoff above; `window.location.search` is inert at
+  // mount and never needs to be re-read.
+  const [tab, setTab] = useState<JobsTabId>(() =>
+    resolveInitialJobsTab(window.location.search),
+  );
+
+  // #706: answered ONCE, at mount, not per click — the marker belongs to the
+  // leg that landed here, and a marker still live at click time is one that
+  // was written for some earlier hop. See `useArrivedFromRoot`.
+  const arrivedFromRoot = useArrivedFromRoot();
 
   // The library the resume-link picker offers on tracked-job rows. Independent
   // of the handoff — a saved resume can exist here even when this tab has no
@@ -64,8 +80,24 @@ export default function JobsApp() {
     <PageShell
       subtitle="Find jobs that fit your resume"
       badge="Jobs"
+      // #707: PageShell's "Saved jobs" link exists to get a user here from one
+      // of the other two surfaces — rendered on `/jobs/` itself it would point
+      // at the page already open, which is confusing rather than useful.
+      hideSavedJobsLink
       headerExtra={
-        <Button variant="link" size="sm" onClick={backToResume}>
+        // #706: a real back navigation when this tab arrived from `/` (either
+        // route off it marks the departure — see `jobs-departure.ts`), so the
+        // in-progress parse and its inline edits there survive via bfcache.
+        // Falls back to a fresh `/` for a deep link, a new tab, a reload of
+        // /jobs/, or an arrival from `/jd-fit/` — whose "Saved jobs" link marks
+        // nothing, and whose own mount already absorbed any marker `/` wrote
+        // for the earlier leg, so this control never lands on a page the label
+        // doesn't name.
+        <Button
+          variant="link"
+          size="sm"
+          onClick={() => returnToResumeRoot(arrivedFromRoot)}
+        >
           <span aria-hidden="true">‹</span> Back to your resume
         </Button>
       }
@@ -90,7 +122,7 @@ export default function JobsApp() {
                   your PDF there, then open the job workbench from the Find
                   jobs tab.
                 </ErrorState>
-                <Button variant="primary" size="md" onClick={backToResume}>
+                <Button variant="primary" size="md" onClick={goToResume}>
                   Go to your resume
                 </Button>
               </div>
@@ -100,6 +132,7 @@ export default function JobsApp() {
           </TabPanel>
           <TabPanel id="library">
             <JobTrackerSection
+              parsed={handoff?.parsed}
               resumeName={resumeName}
               resumeOptions={library.entries}
             />

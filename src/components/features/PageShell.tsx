@@ -2,23 +2,40 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * PageShell — the chrome both root surfaces share (issue #226).
+ * PageShell — the chrome all three root surfaces share (issue #226, #707).
  *
- * `/` (parser audit, App.tsx) and `/jd-fit` (JdFitApp.tsx) are two products
- * under one brand, so the header (logo + GitHub-star CTA + update banner) and
- * the footer (privacy line + links) are identical between them. This shell owns
- * that chrome once; each surface passes its own `subtitle`, `badge`, optional
- * `chips`, and an optional `headerExtra` slot (e.g. the cross-link CTA), then
- * renders its body as `children`.
+ * `/` (parser audit, App.tsx), `/jd-fit` (JdFitApp.tsx), and `/jobs`
+ * (JobsApp.tsx) are three products under one brand, so the header (logo +
+ * "Saved jobs" link + GitHub-star CTA + update banner) and the footer
+ * (privacy line + links) are identical between them. This shell owns that
+ * chrome once; each surface passes its own `subtitle`, `badge`, optional
+ * `chips`, and an optional `headerExtra` slot (e.g. a "back" cross-link CTA),
+ * then renders its body as `children`.
+ *
+ * The "Saved jobs" link (#707) is the one entry point into `/jobs/` that
+ * doesn't depend on a parse — `FindJobsLauncher` only renders once a résumé
+ * is parsed. It's a plain `<a href>`, not a `Button`, matching the wordmark
+ * link and the footer links above/below it: this is real navigation (right-
+ * click / open-in-new-tab should work), not an imperative action. `JobsApp`
+ * passes `hideSavedJobsLink`: a link to `/jobs/` rendered on `/jobs/` itself
+ * would point at the page already open.
+ *
+ * What the link must do BEFORE it navigates differs per surface — `/` has a
+ * parse to hand over and a departure to mark (#706), `/jd-fit/` has neither —
+ * and this shell cannot know which surface it is rendering on. So it owns none
+ * of that: it invokes an optional `onSavedJobsNavigate` and the surface decides.
+ * Calling `markDeparture()` from here instead was a real bug — the marker means
+ * "this trip started at the app root", and shared chrome renders everywhere.
  *
  * Reuse: consumes only `@design-system` primitives/shared components + the
  * useGitHubStars / useUpdateChecker hooks. No raw <button> / hardcoded palette.
  */
 
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { UpdateBanner, GitHubStarCta } from "@design-system";
 import { useGitHubStars } from "../../hooks/useGitHubStars.ts";
 import { useUpdateChecker } from "../../hooks/useUpdateChecker.ts";
+import { savedJobsHref } from "../../lib/jobs-landing.ts";
 
 export interface PageShellProps {
   /**
@@ -38,6 +55,19 @@ export interface PageShellProps {
   chips?: ReactNode;
   /** Optional header-right slot rendered before the GitHub CTA. */
   headerExtra?: ReactNode;
+  /**
+   * Suppress the "Saved jobs" link (#707). Only `JobsApp` sets this — a link
+   * to `/jobs/` on `/jobs/` itself would point at the page already open.
+   */
+  hideSavedJobsLink?: boolean;
+  /**
+   * Ran just before the browser follows the "Saved jobs" link, for whatever
+   * this surface must do on its way out (`/` writes the jobs handoff and marks
+   * the departure — see `jobs-departure.ts`; `/jd-fit/` passes nothing). Fires
+   * only on an unmodified primary click, i.e. only when THIS document is the
+   * one navigating.
+   */
+  onSavedJobsNavigate?: () => void;
   children: ReactNode;
 }
 
@@ -46,6 +76,8 @@ export function PageShell({
   badge,
   chips,
   headerExtra,
+  hideSavedJobsLink,
+  onSavedJobsNavigate,
   children,
 }: PageShellProps) {
   const { count: starCount } = useGitHubStars();
@@ -81,6 +113,34 @@ export function PageShell({
             </span>
           </div>
           <div className="flex items-center gap-4">
+            {!hideSavedJobsLink && (
+              <a
+                href={savedJobsHref()}
+                onClick={(e: MouseEvent<HTMLAnchorElement>) => {
+                  // A ⌘/ctrl/shift/alt-click, or a non-primary button, opens
+                  // the link somewhere else (new tab, new window, download)
+                  // and leaves THIS document exactly where it is — but it
+                  // still dispatches an ordinary `click`, unlike middle-click's
+                  // `auxclick`. Running the callback then would decouple its
+                  // side effects (a departure marker, a handoff write) from any
+                  // navigation at all. Never `preventDefault` — the browser
+                  // must still follow the link in every case.
+                  if (
+                    e.button !== 0 ||
+                    e.metaKey ||
+                    e.ctrlKey ||
+                    e.shiftKey ||
+                    e.altKey
+                  ) {
+                    return;
+                  }
+                  onSavedJobsNavigate?.();
+                }}
+                className="text-sm text-content-secondary transition-colors hover:text-content-primary"
+              >
+                Saved jobs
+              </a>
+            )}
             {headerExtra}
             {subtitle && (
               <p className="hidden text-sm text-content-muted sm:block">

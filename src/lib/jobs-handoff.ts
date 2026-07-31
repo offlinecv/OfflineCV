@@ -50,6 +50,26 @@ export function writeJobsHandoff(payload: JobsHandoff): void {
 }
 
 /**
+ * Drop the handoff payload.
+ *
+ * The counterpart to the "not one-shot" rule above: because a read never
+ * clears, a payload from an earlier launch survives until something overwrites
+ * it — and a route that leaves `/` with NO parse (the header link before a
+ * parse, or after the user reset one) would otherwise hand `/jobs/` a résumé
+ * the user has already discarded, silently ranking against it and suppressing
+ * the "open this workbench from your resume" hint that is the correct empty
+ * state. Departing with nothing must therefore say so, not stay silent.
+ */
+export function clearJobsHandoff(): void {
+  try {
+    sessionStorage.removeItem(JOBS_HANDOFF_KEY);
+  } catch {
+    // Inaccessible storage — nothing was readable either, so `/jobs/` already
+    // renders its empty state.
+  }
+}
+
+/**
  * Read the handoff payload. Returns null when absent or malformed so `/jobs/`
  * falls back to its empty state instead of rendering a broken query.
  *
