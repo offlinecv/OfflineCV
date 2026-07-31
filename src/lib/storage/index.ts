@@ -30,11 +30,34 @@ export {
   importAll,
   importFromJson,
   downloadStorageBackup,
+  type ImportCounts,
+  type SkippedJob,
 } from "./backup.ts";
+export {
+  validateJobRecord,
+  findJsonSafetyProblem,
+  isKnownStatus,
+  JOB_CAPTURE_CONTRACT_VERSION,
+  JOB_RECORD_RULES,
+  type JobRecordValidation,
+  type JobRecordIssue,
+  type JsonSafetyProblem,
+} from "./job-record-contract.ts";
+export {
+  canonicalJobUrl,
+  deriveJobId,
+  isAbsoluteUrl,
+  isCapturableJobUrl,
+  JOB_URL_ID_PREFIX,
+  JOB_URL_TRACKING_PARAMS,
+  JOB_URL_TRACKING_PARAM_PREFIXES,
+} from "./job-url.ts";
+export { captureJob, type JobCaptureResult } from "./capture.ts";
 export type {
   StoredRecord,
   ResumeRecord,
   JobRecord,
+  JobCaptureProvenance,
   StoreName,
   ExportedResume,
   StorageExport,

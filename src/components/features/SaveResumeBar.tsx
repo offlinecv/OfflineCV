@@ -57,7 +57,7 @@ export function SaveResumeBar({
       <p className="text-sm text-content-secondary">
         {savedId === null
           ? "Keep this resume to reload later — saved only in this browser."
-          : "Saved to your library on this browser."}
+          : "Saved in this browser on this device. Export a backup from your saved resumes to move it elsewhere."}
       </p>
       <Button variant="ghost" size="sm" disabled={saving} onClick={() => void save()}>
         {saving

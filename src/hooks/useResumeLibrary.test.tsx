@@ -43,6 +43,21 @@ afterEach(() => {
   container.remove();
 });
 
+/** jsdom's `File`/`Blob` don't implement `.text()` (checked against the
+ *  jsdom version this project pins) — `importBackup` calls it to read the
+ *  picked file, so a real `new File(...)` throws here. Same class of gap as
+ *  `ResumeLibrary.test.tsx`'s `HTMLDialogElement` polyfill: patch just the
+ *  method the code under test needs, on a real `Blob` instance so `instanceof
+ *  Blob` still holds. */
+function jsonFile(json: string, name = "backup.json"): File {
+  const blob = new Blob([json], { type: "application/json" });
+  return Object.assign(blob, {
+    name,
+    lastModified: Date.now(),
+    text: () => Promise.resolve(json),
+  }) as unknown as File;
+}
+
 /** Render the hook and hand its value back through a ref-ish capture. */
 async function mountLibrary(): Promise<() => ResumeLibrary> {
   let current: ResumeLibrary | undefined;
@@ -94,5 +109,79 @@ describe("useResumeLibrary: delete clears tracked-job links", () => {
       await library().remove(resume.id);
     });
     expect(library().entries).toHaveLength(0);
+  });
+});
+
+describe("useResumeLibrary: merge-mode import reconciles dangling resume links (#547)", () => {
+  it("clears the link on an incoming job whose resumeId nothing in the merge carries", async () => {
+    const survivor = await saveResume({
+      filename: "survivor.pdf",
+      blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }),
+    });
+    // A backup whose one job points at a resume this device never had, and
+    // this file doesn't carry either — the losing case: if the sweep didn't
+    // run, this job would stay linked to a resume that doesn't exist.
+    const backup = {
+      version: 1,
+      exportedAt: Date.now(),
+      resumes: [],
+      jobs: [
+        {
+          id: "orphaned-job",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          title: "Staff Engineer",
+          company: "Acme",
+          status: "interested",
+          resumeId: "ghost-resume",
+        },
+      ],
+    };
+    const file = jsonFile(JSON.stringify(backup));
+
+    const library = await mountLibrary();
+    await act(async () => {
+      await library().importBackup(file, "merge");
+    });
+
+    const jobs = await listJobs();
+    const job = jobs.find((j) => j.id === "orphaned-job");
+    expect(job).toBeDefined();
+    expect(job?.resumeId).toBeUndefined();
+    // The survivor resume (untouched by the merge) proves the sweep read ids
+    // AFTER the import write, not a stale pre-import snapshot.
+    expect(library().entries.map((e) => e.id)).toContain(survivor.id);
+  });
+
+  it("keeps a merge-imported job's link when its resume is included in the same file", async () => {
+    const resume = await saveResume({
+      filename: "linked.pdf",
+      blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }),
+    });
+    const backup = {
+      version: 1,
+      exportedAt: Date.now(),
+      resumes: [],
+      jobs: [
+        {
+          id: "linked-job",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          title: "Staff Engineer",
+          company: "Acme",
+          status: "interested",
+          resumeId: resume.id,
+        },
+      ],
+    };
+    const file = jsonFile(JSON.stringify(backup));
+
+    const library = await mountLibrary();
+    await act(async () => {
+      await library().importBackup(file, "merge");
+    });
+
+    const jobs = await listJobs();
+    expect(jobs.find((j) => j.id === "linked-job")?.resumeId).toBe(resume.id);
   });
 });

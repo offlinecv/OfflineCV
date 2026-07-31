@@ -47,16 +47,53 @@ export type JobStatus =
   | "rejected"
   | "archived";
 
+/**
+ * Where a job record came from, when it came from outside this app (#693).
+ *
+ * Absent on every record this app writes itself — an absent value means
+ * "offlinecv, contract version 1". Present on a captured record, and the reason
+ * it exists at all is that a producer version cannot be retrofitted: once a
+ * third-party extension is writing records, a record with no version is
+ * indistinguishable from one written before the field existed.
+ *
+ * Deliberately NOT `StorageExport.version`: that numbers the backup DOCUMENT
+ * format, and a record outlives the file it arrived in.
+ */
+export interface JobCaptureProvenance {
+  /** The capture-contract version this producer targeted
+   *  (`JOB_CAPTURE_CONTRACT_VERSION`). */
+  contract: number;
+  /** Free-text producer id, e.g. `"offlinecv-extension"`. */
+  producer?: string;
+  /** The producer's own release version. */
+  producerVersion?: string;
+  /** Epoch ms the producer captured the posting, which is not necessarily when
+   *  the record was written here. */
+  capturedAt?: number;
+}
+
 /** A tracked job (#323). Field shape pinned here now that the tracker UI exists;
  *  the store has lived in the foundation (#321) so both stores version together
  *  under one migration path. Every field is JSON-safe so the whole record
- *  survives the export/import round-trip (see backup.ts). */
+ *  survives the export/import round-trip (see backup.ts).
+ *
+ *  Since #693 this is a PUBLIC capture contract, not just an internal type:
+ *  records arrive from a picked backup file and from producers outside this
+ *  build. Adding a field here obliges you to add a rule for it in
+ *  `job-record-contract.ts` (the mapped type there will not compile otherwise)
+ *  and to describe it in `docs/job-capture-contract.md`. */
 export interface JobRecord extends StoredRecord {
   /** Posting title, e.g. "Senior Frontend Engineer". */
   title: string;
   /** Hiring company. May be empty when the user hasn't filled it in yet. */
   company: string;
-  /** Posting URL. Optional — the user pastes/types details; we never scrape. */
+  /** Posting URL. Optional — the user pastes/types details, the record arrives
+   *  via a restored backup import (see backup.ts), or a producer captured the
+   *  posting it was viewing (see capture.ts); we never scrape. Must be an
+   *  absolute `http`/`https` URL when it comes from outside this build: the
+   *  tracker renders it straight into an anchor's `href`. It is also the input
+   *  to id derivation, so two captures of one posting converge — see
+   *  `job-url.ts`. */
   url?: string;
   /** Free-text notes. */
   notes?: string;
@@ -68,8 +105,12 @@ export interface JobRecord extends StoredRecord {
   /** Optional pasted job description, when the job came from / ran a JD match. */
   jdText?: string;
   /** Optional JD-match result carried over from the JD-fit flow. Opaque +
-   *  JSON-safe by contract so it survives export/import. */
+   *  JSON-safe by contract so it survives export/import — enforced at the
+   *  external boundary by `findJsonSafetyProblem` (#693). */
   matchResult?: unknown;
+  /** Provenance for a record written by a producer outside this build (#693).
+   *  Absent for every record this app creates. */
+  capture?: JobCaptureProvenance;
 }
 
 /** The lifecycle order for display grouping and the "advance status" affordance

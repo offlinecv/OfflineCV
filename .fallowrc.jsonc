@@ -125,6 +125,46 @@
     // (README + prompt comments) even where no annotation consumes it; don't hold
     // dev scaffolding to the production dead-surface bar.
     { "file": "src/lib/webllm/spike/**", "exports": ["*"] },
-    { "file": "src/lib/webllm/eval/**", "exports": ["*"] }
+    { "file": "src/lib/webllm/eval/**", "exports": ["*"] },
+
+    // The job capture contract (#693). `docs/job-capture-contract.md` is
+    // normative for THIRD-PARTY producers — a browser extension or a script
+    // that writes a `JobRecord` on its own release cadence — and these are the
+    // symbols it tells them to reimplement or import: the validator, the URL
+    // canonicaliser, and the two constants (`JOB_CAPTURE_CONTRACT_VERSION`,
+    // `JOB_URL_ID_PREFIX`) the prose spells out as literals. In-tree, only
+    // `capture.ts` consumes them, and it deep-imports its siblings, so every
+    // barrel re-export reads as dead. Same shape as the heuristics/jd-match
+    // barrels above: intended external surface, not dead code.
+    //
+    // `captureJob` / `JobCaptureResult` are the honest exception in this list.
+    // They are not merely unconsumed in-tree — they have NO consumer anywhere
+    // yet, because the MV3 extension that calls them is #694, deferred out of
+    // the batch that shipped the contract (see the "staged for #694" note in
+    // `capture.ts`). Listing them here means fallow will not be the thing that
+    // tells us if #694 never lands. That is a deliberate, time-bounded trade:
+    // when #694 merges, its import makes these live and the two names should
+    // come back OUT of this list. If #694 is abandoned instead, delete
+    // `capture.ts` rather than leaving the suppression to rot.
+    //
+    // Enumerated, not `["*"]`, for the reason the barrel comment above gives:
+    // `*` would silence the whole file and let a future accidentally-dead
+    // storage export through unreported.
+    { "file": "src/lib/storage/index.ts", "exports": [
+      "validateJobRecord", "findJsonSafetyProblem", "isKnownStatus",
+      "JOB_CAPTURE_CONTRACT_VERSION", "JOB_RECORD_RULES",
+      "JobRecordValidation", "JobRecordIssue", "JsonSafetyProblem",
+      "canonicalJobUrl", "deriveJobId", "isAbsoluteUrl", "isCapturableJobUrl",
+      "JOB_URL_ID_PREFIX", "JOB_URL_TRACKING_PARAMS",
+      "JOB_URL_TRACKING_PARAM_PREFIXES",
+      "captureJob", "JobCaptureResult", "JobCaptureProvenance"
+    ] },
+
+    // The two contract constants that no in-tree caller reads at all — not even
+    // the deep-importing `capture.ts`. A barrel re-export whose barrel is itself
+    // ignored doesn't register as a consumer edge (same reason `ParseMetadata`
+    // is listed above), so the source export must be marked here too.
+    { "file": "src/lib/storage/job-record-contract.ts", "exports": ["JOB_CAPTURE_CONTRACT_VERSION"] },
+    { "file": "src/lib/storage/job-url.ts", "exports": ["JOB_URL_ID_PREFIX"] }
   ]
 }

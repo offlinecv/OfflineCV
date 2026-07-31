@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildJobQuery,
   splitHeadline,
+  roleHeadForSearch,
   MAX_SKILLS,
   MAX_TITLES,
 } from "./query-builder.ts";
@@ -634,6 +635,41 @@ describe("buildJobQuery titleNoise (issue 579)", () => {
       }),
     );
     expect(query.titles).toEqual(["Software Engineer"]);
+  });
+
+  describe("roleHeadForSearch", () => {
+    it("drops a trailing scope qualifier after a spaced dash", () => {
+      expect(roleHeadForSearch("Engineering Lead - Customer Experience")).toBe(
+        "Engineering Lead",
+      );
+      expect(roleHeadForSearch("Head of Engineering — EMEA")).toBe("Head of Engineering");
+    });
+
+    it("picks the part that reads as a role, not blindly the first (#605 re-gate)", () => {
+      // The qualifier leads here. `looksLikeTitle` rejects it, so the head is
+      // the second part — a blind `parts[0]` would search "Customer Experience".
+      expect(roleHeadForSearch("Customer Experience - Engineering Lead")).toBe(
+        "Engineering Lead",
+      );
+    });
+
+    it("keeps a single role whole when its punctuation is NOT a role stack (#605)", () => {
+      // These are the two shapes that made an unguarded splitter egress a
+      // fragment. The comma is not in the separator set at all, and `/` splits
+      // only when spaced — so both survive intact.
+      expect(roleHeadForSearch("VP, Engineering")).toBe("VP, Engineering");
+      expect(roleHeadForSearch("React/Node Engineer")).toBe("React/Node Engineer");
+      expect(roleHeadForSearch("Engineer, Data Platform")).toBe("Engineer, Data Platform");
+    });
+
+    it("keeps the whole string when NO part reads as a title", () => {
+      expect(roleHeadForSearch("Coffee Lover · Dog Dad")).toBe("Coffee Lover · Dog Dad");
+    });
+
+    it("returns a separator-free title unchanged, so callers can apply it always", () => {
+      expect(roleHeadForSearch("Sr. Engineering Manager")).toBe("Sr. Engineering Manager");
+      expect(roleHeadForSearch("  Staff Engineer  ")).toBe("Staff Engineer");
+    });
   });
 
   describe("splitHeadline", () => {

@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect } from "vitest";
-import { buildDeepLinks, MAX_DEEP_LINK_SKILLS } from "./deep-links.ts";
+import { buildDeepLinks, stripSearchOperators, MAX_DEEP_LINK_SKILLS } from "./deep-links.ts";
 import type { JobQuery } from "./query-builder.ts";
 
 function query(overrides: Partial<JobQuery> = {}): JobQuery {
@@ -28,6 +28,25 @@ describe("buildDeepLinks", () => {
     );
     const indeed = new URL(links[1].url);
     expect(indeed.searchParams.get("q")).toBe("Senior Backend Engineer python go");
+  });
+
+  it("strips a title's ' - ' separator so it can't act as a NOT operator", () => {
+    // Measured on Apple's careers search 2026-07-30: this exact title returned
+    // zero postings with the dash and 600+ without it. Every major job search
+    // reads a leading `-` as "exclude the next word".
+    const links = buildDeepLinks(query({ titles: ["Engineering Lead - Customer Experience"] }));
+    expect(new URL(links[0].url).searchParams.get("keywords")).toBe(
+      "Engineering Lead Customer Experience",
+    );
+  });
+
+  it("keeps an INTRA-word hyphen — spelling, not an operator", () => {
+    const links = buildDeepLinks(
+      query({ titles: ["Full-Stack Engineer"], skills: ["e-commerce", "end-to-end testing"] }),
+    );
+    expect(new URL(links[0].url).searchParams.get("keywords")).toBe(
+      "Full-Stack Engineer e-commerce end-to-end testing",
+    );
   });
 
   it("includes EVERY title in the keyword phrase, most-recent-first (#539)", () => {
@@ -135,5 +154,33 @@ describe("buildDeepLinks", () => {
     expect(linkedin.searchParams.get("keywords")).toBeNull();
     expect(indeed.searchParams.get("q")).toBeNull();
     expect(google.searchParams.get("q")).toBe("jobs");
+  });
+});
+
+describe("stripSearchOperators", () => {
+  it("drops a dash-only token without leaving a double space behind", () => {
+    // The failure mode a naive `.replace(/-/g, "")` leaves: the operator is
+    // gone but the phrase now carries "Lead  Customer", which a destination
+    // may re-tokenize differently than the single-spaced form we intended.
+    const out = stripSearchOperators("Engineering Lead - Customer Experience");
+    expect(out).toBe("Engineering Lead Customer Experience");
+    expect(out).not.toContain("  ");
+  });
+
+  it("strips a leading dash that is ATTACHED to the word it would exclude", () => {
+    // `-Customer` is the shape that actually excludes; the spaced `- Customer`
+    // above is the shape a résumé produces. Both must be neutralized.
+    expect(stripSearchOperators("Engineer -Customer --Support")).toBe(
+      "Engineer Customer Support",
+    );
+  });
+
+  it("leaves a phrase with no operator byte-identical", () => {
+    const phrase = "Sr. Engineering Manager People Management C++ C# R&D .NET";
+    expect(stripSearchOperators(phrase)).toBe(phrase);
+  });
+
+  it("returns an empty string for a phrase that was nothing but operators", () => {
+    expect(stripSearchOperators("  -  --  ")).toBe("");
   });
 });

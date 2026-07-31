@@ -125,13 +125,14 @@ export async function clearResumeLink(resumeId: string): Promise<number> {
 /**
  * Sweep dangling resume links against the set of resume ids that still exist —
  * a belt-and-suspenders reconcile for links orphaned by any delete path the
- * explicit {@link clearResumeLink} call missed (e.g. a merge-mode import that
- * dropped a resume). Returns the number of jobs repaired.
+ * explicit {@link clearResumeLink} call missed. Returns the number of jobs
+ * repaired.
  *
- * NOTE: staged for #547 — no production caller yet. The delete path uses
- * `clearResumeLink`, and the JSON import path (`storage/backup.ts`) that would
- * orphan links isn't wired to any UI. This is called from the import flow once
- * that lands; until then it's exercised only by its unit test.
+ * Called from `useResumeLibrary`'s `importBackup`, after a merge-mode JSON
+ * import writes: merge upserts by id and never deletes, but an incoming job
+ * can carry a resumeId neither this device nor the imported file has, and
+ * nothing else clears that dangling link (#547). Replace-mode import doesn't
+ * call this — see the comment at that call site for why.
  */
 export async function reconcileResumeLinks(
   existingResumeIds: ReadonlySet<string>,
