@@ -113,7 +113,7 @@ describe("multi-word city on space-folded header (#368)", () => {
 // `Company City, ST` shape. #616 is the same "multi-word bare city" weakness on
 // the single-line MIDDOT header path: `Title · Company, City · Team` where the
 // city carries NO state/country suffix — the closed BARE_LOCATION_RE vocab (Pass
-// F of stripLocationSuffix) knows single-word "Hyderabad" but not multi-word
+// F of stripLocationSuffix) knows single-word "Toronto" but not multi-word
 // "Mountain View", so the middle segment stayed whole and `company` swallowed
 // the city. Fixed by adding Mountain View (a canonical tech-hub example) to the
 // single-source MULTIWORD_US_CITY_ALT vocab so BARE_LOCATION_RE full-matches it.
@@ -126,7 +126,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
   // entry, dropping an entry from the alternation string fails a test instead
   // of passing silently.
   it.each([
-    ["Google", "Mountain View", "GFiber"],
+    ["Globex", "Mountain View", "GFiber"],
     ["Meta", "Menlo Park", "Ads"],
     ["Stanford", "Palo Alto", "SLAC"],
     ["Nvidia", "Santa Clara", "Compute"],
@@ -160,7 +160,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Engineering Lead · Google, Mountain View, CA · GFiber",
+        text: "Engineering Lead · Globex, Mountain View, CA · GFiber",
         fontSize: 11,
       },
       { text: "04/2021 – 12/2023", fontSize: 11 },
@@ -169,7 +169,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     expect(roles.length).toBeGreaterThanOrEqual(1);
     const role = roles[0];
 
-    expect(role.company).toBe("Google");
+    expect(role.company).toBe("Globex");
     expect(role.location).toBe("Mountain View, CA");
     expect(role.team).toBe("GFiber");
   });
@@ -178,7 +178,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Globex, Hyderabad · Payments Platform",
+        text: "Sr. Engineering Manager · Globex, Toronto · Payments Platform",
         fontSize: 11,
       },
       { text: "04/2021 – 12/2023", fontSize: 11 },
@@ -188,7 +188,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     const role = roles[0];
 
     expect(role.company).toBe("Globex");
-    expect(role.location).toBe("Hyderabad");
+    expect(role.location).toBe("Toronto");
     expect(role.team).toBe("Payments Platform");
   });
 
@@ -196,7 +196,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     const roles = roleFromSection([
       { text: "EXPERIENCE", fontSize: 13 },
       {
-        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Hyderabad",
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Toronto",
         fontSize: 11,
       },
       { text: "04/2021 – 12/2023", fontSize: 11 },
@@ -206,7 +206,7 @@ describe("multi-word city without state/country suffix on middot header (#616)",
     const role = roles[0];
 
     expect(role.company).toBe("Globex");
-    expect(role.location).toBe("Hyderabad");
+    expect(role.location).toBe("Toronto");
   });
 
   it("position-independence — trailing `Company, MultiWordCity` splits the same way as middle", () => {

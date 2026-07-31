@@ -153,16 +153,16 @@ describe("role location extraction (#218)", () => {
   describe("multi-word city in comma-delimited 'Company, City, ST' tail", () => {
     it("keeps a two-word city intact (Mountain View, not just View)", () => {
       // Regression: single-token city rule truncated "Mountain View" to "View"
-      // and glued "Mountain" onto company ("Google, Mountain" / "View, CA").
+      // and glued "Mountain" onto company ("Globex, Mountain" / "View, CA").
       const roles = roleFromSection([
         { text: "EXPERIENCE", fontSize: 13 },
-        { text: "Engineering Lead · Google, Mountain View, CA", fontSize: 11 },
+        { text: "Engineering Lead · Globex, Mountain View, CA", fontSize: 11 },
         { text: "01/2018 - 12/2020", fontSize: 11 },
         { text: "• Led the GFiber platform team.", fontSize: 11 },
       ]);
       expect(roles.length).toBeGreaterThanOrEqual(1);
       const role = roles[0];
-      expect(role.company).toBe("Google");
+      expect(role.company).toBe("Globex");
       expect(role.company).not.toContain("Mountain");
       expect(role.location).toBe("Mountain View, CA");
     });
@@ -217,12 +217,12 @@ describe("role location extraction (#218)", () => {
   });
 
   describe("international City, Country extraction (Pass C, #229)", () => {
-    it("extracts 'Hyderabad, India' from mid-dot header (primary AC)", () => {
-      // "Regional Engineering Lead · Globex, Hyderabad, India · Platform Group"
+    it("extracts 'Toronto, Canada' from mid-dot header (primary AC)", () => {
+      // "Regional Engineering Lead · Globex, Toronto, Canada · Platform Group"
       const roles = roleFromSection([
         { text: "EXPERIENCE", fontSize: 13 },
         {
-          text: "Regional Engineering Lead · Globex, Hyderabad, India · Platform Group",
+          text: "Regional Engineering Lead · Globex, Toronto, Canada · Platform Group",
           fontSize: 11,
         },
         { text: "03/2021 - 12/2023", fontSize: 11 },
@@ -233,9 +233,9 @@ describe("role location extraction (#218)", () => {
 
       expect(role.title?.toLowerCase()).toContain("engineering lead");
       expect(role.company).toBe("Globex");
-      expect(role.company).not.toContain("Hyderabad");
+      expect(role.company).not.toContain("Toronto");
       expect(role.team).toBe("Platform Group");
-      expect(role.location).toBe("Hyderabad, India");
+      expect(role.location).toBe("Toronto, Canada");
     });
 
     it("extracts 'London, United Kingdom' (multi-word country) from mid-dot header", () => {
@@ -282,24 +282,24 @@ describe("role location extraction (#218)", () => {
       // Regression: Pass A must fire before Pass C for US locations.
       const roles = roleFromSection([
         { text: "EXPERIENCE", fontSize: 13 },
-        { text: "Engineering Lead · Google, Mountain View, CA", fontSize: 11 },
+        { text: "Engineering Lead · Globex, Mountain View, CA", fontSize: 11 },
         { text: "01/2018 - 12/2020", fontSize: 11 },
         { text: "• Led the GFiber platform team.", fontSize: 11 },
       ]);
       expect(roles.length).toBeGreaterThanOrEqual(1);
       const role = roles[0];
-      expect(role.company).toBe("Google");
+      expect(role.company).toBe("Globex");
       expect(role.location).toBe("Mountain View, CA");
     });
 
     it("non-empty-remainder guard: does not consume entire string into location", () => {
-      // If company = "Hyderabad, India" (no company name before city), the guard
+      // If company = "Toronto, Canada" (no company name before city), the guard
       // must block stripping and leave the string intact rather than setting
-      // company = "" and location = "Hyderabad, India".
+      // company = "" and location = "Toronto, Canada".
       const roles = roleFromSection([
         { text: "EXPERIENCE", fontSize: 13 },
         {
-          text: "Software Engineer · Hyderabad, India",
+          text: "Software Engineer · Toronto, Canada",
           fontSize: 11,
         },
         { text: "05/2022 - Present", fontSize: 11 },
@@ -308,7 +308,7 @@ describe("role location extraction (#218)", () => {
       expect(roles.length).toBeGreaterThanOrEqual(1);
       const role = roles[0];
       // Either the location is extracted with a non-empty company, or the
-      // entire "Hyderabad, India" remains as company — either way company must
+      // entire "Toronto, Canada" remains as company — either way company must
       // be non-empty and we must not have eaten all text into location.
       expect(role.company).toBeTruthy();
     });
@@ -373,10 +373,10 @@ describe("role location extraction (#218)", () => {
 
     it("defers a multi-word city with a locality-generic tail ('Mexico City') (#286 review)", () => {
       // Single-token Pass D would grab "City" as the city and mis-split into
-      // company "Google Mexico" + location "City, Mexico". "City" is a locality
+      // company "Globex Mexico" + location "City, Mexico". "City" is a locality
       // generic (never a standalone city), so LOCALITY_SUFFIX_RE defers: the
       // whole string stays with the company rather than fragmenting the city.
-      const role = roleFromTwoLine("Google Mexico City, Mexico");
+      const role = roleFromTwoLine("Globex Mexico City, Mexico");
       expect(role.company).toContain("Mexico City");
       expect(role.location).not.toBe("City, Mexico");
     });

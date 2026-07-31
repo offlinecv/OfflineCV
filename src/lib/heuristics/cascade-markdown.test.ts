@@ -409,7 +409,7 @@ describe("runCascadeFromMarkdown — escalation path", () => {
  */
 describe("runCascadeFromMarkdown — below-anchor role scope (#615 issue variants)", () => {
   const HEADER =
-    "### Sr. Engineering Manager · Google, Hyderabad, India · Enterprise Platforms";
+    "### Sr. Engineering Manager · Globex, Toronto, Canada · Enterprise Platforms";
   const DATE = "*01/2024 – 12/2024*";
   const BULLETS = [
     "- Built an 18-engineer org in under 6 months.",
