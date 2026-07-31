@@ -10,8 +10,8 @@
  */
 
 import { Button, type StatusBadgeTone } from "@design-system";
-import { JOB_STATUS_ORDER } from "../../lib/storage/types.ts";
-import type { JobStatus } from "../../lib/storage/types.ts";
+import { JOB_STATUS_ORDER } from "../../lib/storage/index.ts";
+import type { JobStatus } from "../../lib/storage/index.ts";
 
 const STATUS_LABEL: Record<JobStatus, string> = {
   interested: "Interested",

@@ -14,8 +14,8 @@
  * `src/lib/storage`, and neither imports the parser graph.
  */
 
-import { saveJob, getJob, getAllJobs, deleteJob } from "./storage/jobs.ts";
-import type { JobRecord, JobStatus } from "./storage/types.ts";
+import { saveJob, getJob, getAllJobs, deleteJob } from "./storage/index.ts";
+import type { JobRecord, JobStatus } from "./storage/index.ts";
 
 /** Fields a caller supplies when creating a tracked job. `status` defaults to
  *  `"interested"`; id + timestamps are managed by the store. */

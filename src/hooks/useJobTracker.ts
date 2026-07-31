@@ -30,7 +30,7 @@ import {
   downloadStorageBackup,
 } from "../lib/storage/index.ts";
 import { estimateStorageUsage } from "../lib/resume-library.ts";
-import type { JobRecord, JobStatus } from "../lib/storage/types.ts";
+import type { JobRecord, JobStatus } from "../lib/storage/index.ts";
 
 export interface JobTracker {
   jobs: JobRecord[];

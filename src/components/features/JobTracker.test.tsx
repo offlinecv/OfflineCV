@@ -16,7 +16,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JobTracker } from "./JobTracker.tsx";
 import type { JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
-import type { JobRecord } from "../../lib/storage/types.ts";
+import type { JobRecord } from "../../lib/storage/index.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;

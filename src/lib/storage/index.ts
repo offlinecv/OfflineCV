@@ -4,10 +4,30 @@
 /**
  * Local-first storage foundation (#321) — public surface.
  *
- * Typed CRUD over an IndexedDB database with two stores (`resumes`, `jobs`),
- * durability control, and a JSON export/import backup path. Infrastructure only:
- * the resume-library and job-tracker UIs build on this. Import from
- * `../lib/storage` (the barrel), not the internal files.
+ * Typed CRUD over an IndexedDB database with three stores (`resumes`, `jobs`,
+ * `boards`), durability control, and a JSON export/import backup path.
+ * Infrastructure only: the resume-library and job-tracker UIs build on this.
+ * Product code imports from `../lib/storage` (the barrel), not the internal
+ * files — tests may reach past it to exercise a layer directly.
+ *
+ * Two admission rules, and they are what keep that first sentence true:
+ *
+ *  - A name earns a slot by having a consumer outside this directory, or by
+ *    being registered in `.fallowrc.jsonc` as intended external API (the job
+ *    capture contract below, normative for third-party producers per
+ *    `docs/job-capture-contract.md`). The vocabulary the module only talks to
+ *    itself in — `StoredRecord`, `StoreName`, `ResumeRecord`, `SaveResumeInput`,
+ *    `ExportedResume`, `StorageExport`, and the `exportAll`/`exportToJson`/
+ *    `importAll` primitives under {@link downloadStorageBackup} and
+ *    {@link importFromJson} — is deliberately absent.
+ *  - Conversely, a name a consumer needs belongs here. Withholding one is what
+ *    produced the deep imports of `./types.ts` this barrel exists to prevent:
+ *    `JobStatus` and `JOB_STATUS_ORDER` were reachable no other way.
+ *
+ * The one standing exception is `src/lib/job-search/board-cache.ts`, which
+ * reaches `./crud.ts` for the generic `getRecord`/`putRecord` accessors. There
+ * is no `boards.ts` domain module to wrap them, and routing it here would pull
+ * `backup.ts` + `resumes.ts` into the job-search chunk for two functions.
  */
 
 export { DB_NAME, closeDB } from "./db.ts";
@@ -16,7 +36,6 @@ export {
   getResume,
   getAllResumes,
   deleteResume,
-  type SaveResumeInput,
 } from "./resumes.ts";
 export { saveJob, getJob, getAllJobs, deleteJob } from "./jobs.ts";
 export {
@@ -25,9 +44,6 @@ export {
   EVICTION_NOTICE,
 } from "./persist.ts";
 export {
-  exportAll,
-  exportToJson,
-  importAll,
   importFromJson,
   downloadStorageBackup,
   type ImportCounts,
@@ -53,12 +69,9 @@ export {
   JOB_URL_TRACKING_PARAM_PREFIXES,
 } from "./job-url.ts";
 export { captureJob, type JobCaptureResult } from "./capture.ts";
+export { JOB_STATUS_ORDER } from "./types.ts";
 export type {
-  StoredRecord,
-  ResumeRecord,
   JobRecord,
+  JobStatus,
   JobCaptureProvenance,
-  StoreName,
-  ExportedResume,
-  StorageExport,
 } from "./types.ts";
