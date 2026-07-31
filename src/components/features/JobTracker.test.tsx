@@ -17,6 +17,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { JobTracker } from "./JobTracker.tsx";
 import type { JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import type { JobRecord } from "../../lib/storage/index.ts";
+import type { JobRating } from "../../lib/job-search/rating.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -119,6 +120,59 @@ describe("JobTracker", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("Not linked to a resume");
     expect(text).not.toContain("deleted-resume");
+  });
+});
+
+describe("JobTracker: fitness ratings (#700)", () => {
+  /** Fitness-only, as every saved-job rating is — the library carries no query,
+   *  so the comp/location/seniority axes are absent. */
+  const RATING: JobRating = {
+    overall: 4.2,
+    fitness: 4.2,
+    compensation: null,
+    location: null,
+    seniority: null,
+  };
+
+  it("shows the shared star widget and reason words for a rated job", () => {
+    const tracker = makeTracker([job({ id: "j1", jdText: "React" })]);
+    act(() =>
+      root.render(
+        <JobTracker tracker={tracker} ratings={new Map([["j1", RATING]])} hasResume />,
+      ),
+    );
+    // `RatingStars` — the shared read-only widget, not a hand-rolled star row.
+    const stars = container.querySelector('[role="img"]');
+    expect(stars?.getAttribute("aria-label")).toBe("Resume fit: 4.2 out of 5 stars");
+    // The same reason band the search cards print, off `describeRating`.
+    expect(container.textContent).toContain("Top fit here");
+    expect(container.textContent).not.toContain("Not rated");
+  });
+
+  it("renders 'not rated' — never zero stars — for a record with no job description", () => {
+    // The library HAS been rated (non-null map); this record simply has no JD to
+    // match against, so it is absent from the map. A 0-star row would read as
+    // "terrible fit", which is a different and false claim.
+    const tracker = makeTracker([job({ id: "j1" })]);
+    act(() =>
+      root.render(<JobTracker tracker={tracker} ratings={new Map()} hasResume />),
+    );
+    expect(container.textContent).toContain("Not rated");
+    expect(container.querySelector('[role="img"]')).toBeNull();
+  });
+
+  it("shows no fitness block, and says why, when no résumé reached this tab", () => {
+    const tracker = makeTracker([job({ id: "j1", jdText: "React" })]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    expect(container.querySelector('[role="img"]')).toBeNull();
+    // "Not rated" would be wrong here: the record has a JD, we have no résumé.
+    expect(container.textContent).not.toContain("Not rated");
+    expect(container.textContent).toContain("Open this workbench from your resume");
+  });
+
+  it("keeps the explanation off an empty library, where it would be noise", () => {
+    act(() => root.render(<JobTracker tracker={makeTracker([])} />));
+    expect(container.textContent).not.toContain("Open this workbench from your resume");
   });
 });
 

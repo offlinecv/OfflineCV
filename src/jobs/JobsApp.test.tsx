@@ -47,6 +47,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  window.history.pushState({}, "", "/");
 });
 
 function clickTab(label: string) {
@@ -56,6 +57,20 @@ function clickTab(label: string) {
   act(() => {
     tab?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
+}
+
+/** Drain `useJobTracker`'s and `useResumeLibrary`'s initial fake-indexeddb
+ *  reads — both resolve over several macrotask ticks (open → upgrade →
+ *  transaction), not one, so a single flush is flaky. Same shape as
+ *  `useSavedJobRatings.test.tsx`'s polling loop, just unconditional: nothing
+ *  here depends on a specific value settling, only on the requests draining
+ *  before the test ends and the next test's `beforeEach` tears the db down. */
+async function flushIndexedDb(turns = 10) {
+  for (let i = 0; i < turns; i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
 }
 
 describe("JobsApp: Search / Saved jobs tabs", () => {
@@ -104,5 +119,39 @@ describe("JobsApp: Search / Saved jobs tabs", () => {
     // The library's data survives the round trip — it was never unmounted,
     // so there is nothing to re-fetch.
     expect(libraryPanel?.textContent).toContain("Staff Frontend Engineer");
+  });
+});
+
+describe("JobsApp: landing tab from the URL (#707)", () => {
+  it("lands on Search for a plain /jobs/ visit — the losing case for the new param", async () => {
+    // No pushState here: default jsdom URL carries no `tab` param, matching a
+    // bookmark or a link minted before #707 existed.
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb();
+
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-search")?.hidden,
+    ).toBe(false);
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-library")?.hidden,
+    ).toBe(true);
+  });
+
+  it("lands on Saved jobs when arriving via ?tab=library", async () => {
+    window.history.pushState({}, "", "/jobs/?tab=library");
+
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb();
+
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-search")?.hidden,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-library")?.hidden,
+    ).toBe(false);
   });
 });

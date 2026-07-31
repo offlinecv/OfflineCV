@@ -55,7 +55,7 @@
 
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { JdMatchResult } from "../jd-match/types.ts";
-import { extractJdTerms } from "../jd-match/extract-jd-terms.ts";
+import { extractJdTerms, type ExtractedTerm } from "../jd-match/extract-jd-terms.ts";
 import { computeCoverage } from "../jd-match/coverage.ts";
 import type { JobPosting } from "./types.ts";
 import type { JobQuery } from "./query-builder.ts";
@@ -160,13 +160,38 @@ function seniorityDistance(
 }
 
 /**
+ * The signals `ratingInputFor` actually reads off a job — a structural subset
+ * that `RankedJob` already satisfies, so widening to it changes no call site.
+ *
+ * Why it exists (#700): `rateJobs` calls itself "the SINGLE rating computation
+ * the whole lane reads", and that guarantee is only as strong as its INPUT.
+ * Pinning the assembler's parameter to `RankedJob` meant any consumer holding
+ * something else — the saved job library holds a `JobRecord` plus a JD text,
+ * never a `RankedJob` — had to fork a second `RatingInput` mapping, which is the
+ * fastest route to two ratings that disagree. Narrowing the parameter to the
+ * fields the body reads lets those consumers feed the same assembler instead.
+ */
+export interface RatingSignalSource {
+  /** The three posting fields the axes read. `title` feeds the seniority ladder
+   *  and `location` the location match — both inert when the caller passes no
+   *  query seniority / location, which is the case off the search lane. */
+  posting: Pick<JobPosting, "title" | "location" | "compensation">;
+  /** Raw coverage 0..100, before the specificity discount below. */
+  score: number;
+  /** Only the term COUNT is read — it is the specificity denominator. */
+  jdMatch: { terms: readonly ExtractedTerm[] };
+}
+
+/**
  * Build the raw `RatingInput` for one already-coverage-scored posting — the
  * bridge between rank.ts's signal extraction and `rateJobs`. Exported so the
  * `probe-jobs` diagnostic can reconstruct exactly what fed a rating without
- * re-deriving the constants (the single source of truth for the rating inputs).
+ * re-deriving the constants, and so off-lane consumers (`rate-saved-jobs.ts`)
+ * assemble their inputs HERE rather than duplicating the mapping. This is the
+ * single `RatingInput` assembly site in the tree — keep it that way.
  */
 export function ratingInputFor(
-  job: RankedJob,
+  job: RatingSignalSource,
   queryLocation: string | undefined,
   querySeniorityRung: number | undefined,
   compFloor: number | undefined,

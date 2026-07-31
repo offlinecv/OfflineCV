@@ -9,6 +9,12 @@
  * sync. Row rendering + status transitions live in JobTrackerEntry; storage
  * access is the `useJobTracker` hook. Renders an empty-state prompt until the
  * first job is added.
+ *
+ * Fitness ratings (#700) are computed on VIEW by `useSavedJobRatings` and never
+ * stored on a record — a stored score would go stale the moment the résumé is
+ * edited, with nothing to invalidate it. Rating needs a parsed résumé, which
+ * this surface only has via the `/` handoff, so the library also stands alone
+ * with none: `ratings === null` simply drops the fitness block from every row.
  */
 
 import { useMemo } from "react";
@@ -20,9 +26,21 @@ import type { JobRecord, JobStatus } from "../../lib/storage/index.ts";
 import { jobStatusLabel } from "./JobStatusPicker.tsx";
 import { JobTrackerEntry, type LinkableResume } from "./JobTrackerEntry.tsx";
 import { useJobTracker, type JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
+import { useSavedJobRatings } from "../../hooks/useSavedJobRatings.ts";
+import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
+import type { JobRating } from "../../lib/job-search/rating.ts";
 
 interface JobTrackerProps {
   tracker: Tracker;
+  /** Fitness rating per job id, or null when the library has not been rated —
+   *  no résumé in this tab, or the pass is still resolving. A job id ABSENT from
+   *  a non-null map has no saved job description; its row says "not rated"
+   *  rather than showing a zero (see `rate-saved-jobs.ts`). */
+  ratings?: ReadonlyMap<string, JobRating> | null;
+  /** Whether a parsed résumé reached this tab at all — the difference between
+   *  "nothing to rate against" and "rated". Drives the one-line explanation, so
+   *  an unrated library is never silently unexplained. */
+  hasResume?: boolean;
   /** Resolve a linked resume id to its display name; returns undefined when the
    *  resume no longer exists, so the row degrades to "not linked". */
   resumeName?: (resumeId: string) => string | undefined;
@@ -37,12 +55,33 @@ interface JobTrackerProps {
  * surface that imports this module. {@link JobTracker} stays tracker-injected
  * so tests drive it with a fake.
  */
-export function JobTrackerSection(props: Omit<JobTrackerProps, "tracker">) {
+export function JobTrackerSection({
+  parsed,
+  ...props
+}: Omit<JobTrackerProps, "tracker" | "ratings" | "hasResume"> & {
+  /** The résumé saved jobs are rated against — the `/` handoff `JobsApp` holds.
+   *  Must be referentially stable; `useSavedJobRatings` deps on it directly. */
+  parsed?: HeuristicParsedResume;
+}) {
   const tracker = useJobTracker();
-  return <JobTracker tracker={tracker} {...props} />;
+  const ratings = useSavedJobRatings(tracker.jobs, parsed);
+  return (
+    <JobTracker
+      tracker={tracker}
+      ratings={ratings}
+      hasResume={parsed !== undefined}
+      {...props}
+    />
+  );
 }
 
-export function JobTracker({ tracker, resumeName, resumeOptions }: JobTrackerProps) {
+export function JobTracker({
+  tracker,
+  ratings = null,
+  hasResume = false,
+  resumeName,
+  resumeOptions,
+}: JobTrackerProps) {
   const { jobs, ready, persisted, usageBytes, update, setStatus, link, unlink, remove, create, exportBackup } =
     tracker;
 
@@ -104,6 +143,12 @@ export function JobTracker({ tracker, resumeName, resumeOptions }: JobTrackerPro
         {!persisted && EVICTION_NOTICE}
       </p>
 
+      {!hasResume && jobs.length > 0 && (
+        <p className="text-sm text-content-muted">
+          Open this workbench from your resume to see how each saved job fits it.
+        </p>
+      )}
+
       {jobs.length === 0 ? (
         <p className="text-sm text-content-muted">
           No tracked jobs yet. Add a job, or save one from a JD match.
@@ -126,6 +171,8 @@ export function JobTracker({ tracker, resumeName, resumeOptions }: JobTrackerPro
                           : undefined
                       }
                       resumeOptions={resumeOptions}
+                      rated={ratings !== null}
+                      rating={ratings?.get(job.id)}
                       onUpdate={(id, patch) => void update(id, patch)}
                       onStatusChange={(id, next) => void setStatus(id, next)}
                       onLinkResume={(id, resumeId) => void link(id, resumeId)}
