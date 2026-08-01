@@ -137,7 +137,14 @@ export function buildResumeProjection(parsed: HeuristicParsedResume): string {
     pushPresent(parts, exp.title, exp.company, exp.description);
   }
   for (const edu of parsed.education ?? []) {
-    pushPresent(parts, edu.degree, edu.institution, edu.description);
+    // `field` is the SUBJECT of study, and `degree` deliberately excludes it —
+    // the extractor splits "Bachelor of Technology, Computer Science &
+    // Engineering" into credential + field (`extract/education.ts`
+    // `parseDegreeAndField`). Projecting only `degree` therefore drops the one
+    // part of an education entry a JD ever asks for: measured on a real résumé,
+    // a posting requiring "Computer Science" scored it MISSING against a CS
+    // graduate purely because the field never reached the corpus.
+    pushPresent(parts, edu.degree, edu.field, edu.institution, edu.description);
   }
   return parts.join("\n");
 }

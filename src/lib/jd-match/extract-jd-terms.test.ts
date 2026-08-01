@@ -98,6 +98,26 @@ We also do a lot of Kotlin here.
     expect(reactHits).toHaveLength(1);
   });
 
+  it("does not read a clearance acronym as a two-letter language alias", () => {
+    // Observed on a live defense JD: "Active TS/SCI Clearance" was the ONLY
+    // skill hit in an 8000-character posting, and TypeScript appears nowhere
+    // in it. A false positive here credits a résumé for a skill the posting
+    // never asked for, so it must not survive.
+    const { skills } = extractJdTerms(
+      "Active TS/SCI Clearance required for work at IL-6 and above.",
+    );
+    expect(skills.find((s) => s.id === "typescript")).toBeUndefined();
+  });
+
+  it("keeps a two-letter alias when the other side of the slash is also a skill", () => {
+    // The discriminator is the neighbour, not the slash — "JS/TS" is how a
+    // résumé writes two real skills and must keep working.
+    const { skills } = extractJdTerms("Strong JS/TS fundamentals expected.");
+    const ids = skills.map((s) => s.id);
+    expect(ids).toContain("typescript");
+    expect(ids).toContain("javascript");
+  });
+
   it("includes a noun-phrase pass and drops any noun that also matched a skill", () => {
     const jd = `
 We work on Distributed Systems and Event Sourcing patterns.
@@ -147,6 +167,20 @@ Kubernetes is a core piece of the platform.
     const out = extractJdTerms(lines.join("\n"));
     expect(out.nouns.length).toBeLessThanOrEqual(25);
     expect(out.nounsDropped).toBeGreaterThan(0);
+  });
+
+  it("drops the outcomes-framing heading family from the noun pass (#156)", () => {
+    // Observed leaking from a live JD, where "What Success Looks Like" was
+    // surfaced as a requirement term the résumé was then marked as missing.
+    const jd = `
+What Success Looks Like:
+Authoritative data sources are onboarded with Data Modeling in place.
+`;
+    const { nouns } = extractJdTerms(jd);
+    const displays = nouns.map((n) => n.display);
+    expect(displays).not.toContain("What Success Looks Like");
+    // The real competency in the same block still comes through.
+    expect(displays).toEqual(expect.arrayContaining(["Data Modeling"]));
   });
 
   it("drops JD structural section headings from the noun pass (#156)", () => {
@@ -241,6 +275,81 @@ You'll work on Distributed Systems daily.
     expect(displays).not.toContain("The Summer Music Intern");
     // A genuine phrase in the same JD is unaffected.
     expect(displays).toContain("Distributed Systems");
+  });
+
+  it("drops prepositional sentence openers, not just articles", () => {
+    // Both observed on a live Apple posting: the phrase regex needs a leading
+    // capital, so these only ever fire at the head of a sentence — where the
+    // capture is a fragment, never a competency. The 4-word cap even truncates
+    // the second one mid-phrase.
+    const jd = `
+At Apple, new ideas have a way of becoming phenomenal products.
+As Senior Software Engineering Manager, you will lead a talented group.
+You'll work on Distributed Systems daily.
+`;
+    const displays = extractJdTerms(jd).nouns.map((n) => n.display);
+    expect(displays).not.toContain("At Apple");
+    expect(displays).not.toContain("As Senior Software Engineering");
+    expect(displays).toContain("Distributed Systems");
+  });
+
+  it("drops degree abbreviations but keeps the field of study", () => {
+    const jd = "BS or MS in Computer Science or equivalent experience.";
+    const displays = extractJdTerms(jd).nouns.map((n) => n.display);
+    expect(displays).not.toContain("BS");
+    expect(displays).not.toContain("MS");
+    // The matchable half of the requirement survives.
+    expect(displays).toContain("Computer Science");
+  });
+
+  it("does not read a gerund verb phrase as a competency", () => {
+    // "team" is the tail of "engineering team"; "building" opens a verb phrase.
+    // The `team building` alias straddles the two and would report a competency
+    // the posting never asked for.
+    const verbUsage = extractJdTerms(
+      "Ready to lead a high-performing engineering team building some of our most beloved apps?",
+    );
+    expect(verbUsage.all.map((t) => t.display)).not.toContain("Team Building");
+    // The competency reading is untouched — nothing here opens a direct object.
+    const realUsage = extractJdTerms(
+      "Strong team building and mentorship skills required.",
+    );
+    expect(realUsage.all.map((t) => t.display)).toContain("Team Building");
+  });
+
+  it("keeps the posting's own title and team out of its requirement terms", () => {
+    const jd = `
+Senior Engineering Manager, Info Apps
+The Info Apps team ships News, Stocks and Weather.
+You will work on Distributed Systems daily.
+`;
+    const displays = extractJdTerms(jd, {
+      postingTitle: "Senior Engineering Manager, Info Apps",
+    }).nouns.map((n) => n.display);
+    expect(displays).not.toContain("Senior Engineering Manager");
+    expect(displays).not.toContain("Info Apps");
+    // Everything the posting actually asks for is untouched.
+    expect(displays).toContain("Distributed Systems");
+  });
+
+  it("keeps title phrases when no postingTitle is supplied", () => {
+    // The JD-fit lane pastes bare JD text with no separate title field, so the
+    // guard must be opt-in rather than inferred from the first line.
+    const jd = `
+Senior Engineering Manager, Info Apps
+The Info Apps team ships News, Stocks and Weather.
+`;
+    const displays = extractJdTerms(jd).nouns.map((n) => n.display);
+    expect(displays).toContain("Info Apps");
+  });
+
+  it("does not drop a title-borne skill, which the skill pass owns", () => {
+    // Scoping the title guard to the NOUN pass is what makes it safe: a title
+    // naming a real technology still yields that technology as a term.
+    const out = extractJdTerms("Senior Rust Engineer\nYou will write Rust.", {
+      postingTitle: "Senior Rust Engineer",
+    });
+    expect(out.skills.map((t) => t.id)).toContain("rust");
   });
 
   it("does not over-strip skill phrases that share a heading tail word (#156)", () => {
