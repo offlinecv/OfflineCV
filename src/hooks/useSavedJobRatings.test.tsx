@@ -136,7 +136,7 @@ describe("useSavedJobRatings", () => {
     expect(latest!.get("j1")!.fitness).not.toBeCloseTo(before, 10);
   });
 
-  it("re-rates when a record joins the library, because the scale is set-relative", async () => {
+  it("re-rates when a record joins the library — covering it without disturbing the others", async () => {
     await renderProbe([{ id: "j1", title: "SWE", jdText: JD }], parsed);
     const alone = latest!.get("j1")!.fitness;
 
@@ -147,7 +147,13 @@ describe("useSavedJobRatings", () => {
       ],
       parsed,
     );
+    // The effect still has to re-fire — the new record needs an entry, and a map
+    // missing it renders as "not rated".
     expect(latest!.size).toBe(2);
-    expect(latest!.get("j1")!.fitness).not.toBeCloseTo(alone, 10);
+    expect(latest!.get("j2")).toBeDefined();
+    // But #716 made the fitness axis absolute, so the incumbent's stars must NOT
+    // move. This assertion is the inverse of what it was: while the axis was
+    // set-relative, j1's rating changed the moment j2 was saved.
+    expect(latest!.get("j1")!.fitness).toBe(alone);
   });
 });

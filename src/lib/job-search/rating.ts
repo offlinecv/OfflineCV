@@ -10,26 +10,33 @@
  * whose denominator is how much the posting SAID, not how well the candidate
  * fits. On a real senior résumé that number tops out ~57 and means ~10 — it
  * compresses into single digits, so the card reads "10% fit" for almost every
- * posting and stops discriminating. A star rating fixes both halves: it is
- * calibrated (a strong match reads as ~4–5★, not "57%"), and it is stretched
- * across the observed set so the good matches actually separate from the noise.
+ * posting and stops discriminating. A star rating fixes that by being
+ * calibrated to the base range real résumés actually produce, so a strong match
+ * reads as a strong rating rather than as "57%".
  *
  * The OVERALL star is a weighted blend of four axes, each a fraction in [0,1]:
- *   - fitness      (always present) — hybrid absolute+relative, see below
- *   - compensation (present iff comp was extracted) — vs floor, or set-relative
+ *   - fitness      (always present) — the absolute saturating curve, see below
+ *   - compensation (present iff comp was extracted) — vs the query's floor, or
+ *                  a bonus-only absolute curve when the query set no floor
  *   - location     (present iff the query carried a location) — match nudge
  *   - seniority    (present iff the query + posting title yield a level) — nudge
  * An ABSENT axis is dropped and its weight redistributed over the present ones,
  * so a posting with no extracted comp is rated on the axes we actually know, not
  * penalized for our silence (the #564 "silence is neutral" rule, generalized).
  *
- * fitness is HYBRID (the chosen #561 direction): an ABSOLUTE saturating curve of
- * the specificity-weighted coverage base anchors the meaning (a strong match is
- * a strong match regardless of the rest of the set), then a set-RELATIVE stretch
- * lifts the observed top toward 5★ so the ranking still separates the good
- * matches even when the whole set is compressed. Because both halves are
- * monotonic in the base, the fitness axis — and thus the fitness-dominant
- * overall — preserves fit ordering.
+ * fitness is ABSOLUTE (#716): a saturating curve of the specificity-weighted
+ * coverage base, `base / (base + FIT_HALF_SATURATION)`, and nothing else. It was
+ * a HYBRID until #716 — that curve blended 40/60 against a set-RELATIVE stretch
+ * that read the set's min/max and pulled the observed best match toward 5★. The
+ * stretch made the SAME posting rate differently depending on what else happened
+ * to be in the set: measured on one real résumé, a posting read 2.75★ "Partial
+ * fit" on its own and 1.10★ "Weak fit" once a second, stronger job joined the
+ * library. Both readings cannot be right, and the absolute one is — a fit rating
+ * is a claim about ONE posting and ONE résumé, and an unrelated third posting
+ * must not move it. The stretch existed (#561) because raw coverage compressed
+ * into single digits and stopped discriminating; the saturating curve alone
+ * already fixes that. Removing it changed no ORDERING (both halves were
+ * monotonic in the base) — what changed is that the number is now portable.
  *
  * Why the soft axes are now FRACTIONS, weighted small (#570/#562 fix): the old
  * ranker added a FLAT location boost (+10) and subtracted FLAT seniority (−5/rung)
@@ -41,17 +48,20 @@
  * be — soft nudges that break a near-tie but can never bury a clear fit lead.
  *
  * Parity (the invariant that replaces rank.ts's old "score === coverage"):
- * `rateJobs` is the ONE place a rating is computed, over the whole result set at
- * once. The card headline, the inline sub-stars, the detail view, and the sort
- * order all read the SAME `JobRating` object, so they can never diverge. NOTE
- * the set-dependence this introduces: because the relative stretch reads the
- * set's min/max base, the identical posting can rate differently in a different
- * search — that is intended (a 5★ means "the best of what this search found",
- * not an absolute universal score) and is why the rating is computed per result
- * set, never cached per posting. That is also why there is no algo-version stamp
- * here mirroring `ATS_SCORE_ALGO_VERSION`: that constant exists to invalidate a
- * *stored* score (`resume-library.ts`'s cache key), and nothing stores a rating.
- * If a rating ever is persisted, add the stamp then, with the consumer.
+ * `rateJobs` is the ONE place a rating is computed. The card headline, the
+ * inline sub-stars, the detail view, and the sort order all read the SAME
+ * `JobRating` object, so they can never diverge. Since #716 NO axis reads the
+ * set — every rating is a pure function of its own `RatingInput`, so
+ * `rateJobs([a, b])[0]` is exactly `rateJobs([a])[0]`. The array signature is a
+ * convenience for the two callers that happen to hold a whole set, never a
+ * dependency, and a 5★ now means "an excellent match for this résumé", not "the
+ * best of what this search found".
+ *
+ * That also makes a rating cacheable for the first time — but nothing caches one
+ * today, which is why there is still no algo-version stamp here mirroring
+ * `ATS_SCORE_ALGO_VERSION`: that constant exists to invalidate a *stored* score
+ * (`resume-library.ts`'s cache key), and nothing stores a rating. If a rating is
+ * ever persisted, add the stamp then, with the consumer.
  */
 
 /** The star scale. Ratings are real numbers in [0, MAX_STARS]; the display
@@ -59,25 +69,21 @@
 export const MAX_STARS = 5;
 
 /**
- * Half-saturation constant for the ABSOLUTE fitness curve:
- * `base / (base + FIT_HALF_SATURATION)`. A posting whose specificity-weighted
- * coverage base equals this value scores 0.5 absolute. Sized against the real
- * compressed base range (ceiling ~21, mean ~7): at 9, a top-of-set base ~21
- * reaches ~0.7 absolute (→ a strong ~3.5★ before the relative stretch lifts it
- * toward 5), while a mean base ~7 sits near ~0.44. Not the theoretical 0..100
- * coverage range — calibrated to what real résumés actually produce.
+ * Half-saturation constant for the absolute fitness curve,
+ * `base / (base + FIT_HALF_SATURATION)` — and since #716 the ONLY parameter
+ * shaping the fitness axis. A posting whose specificity-weighted coverage base
+ * equals this value scores exactly 0.5, i.e. 2.5★. Sized against the base range
+ * real résumés actually produce (ceiling ~21, mean ~7), not the theoretical
+ * 0..100 coverage range: at 9, a base ~21 reads ~0.70 (3.5★) and a mean base ~7
+ * reads ~0.44 (2.2★).
+ *
+ * It alone decides which BAND a posting's words come from — the cut-points in
+ * `fitPhrase` are fixed star values, so moving this constant re-words every card
+ * in the lane. #716 deliberately did NOT retune it: the two real postings
+ * measured there (2.75★ "Partial fit" and 3.31★ "Strong fit") already land in
+ * the bands their evidence warrants, and two points is not a calibration.
  */
 const FIT_HALF_SATURATION = 9;
-
-/**
- * Blend weight of the set-RELATIVE stretch against the ABSOLUTE curve in the
- * hybrid fitness fraction: `HYBRID_RELATIVE_WEIGHT · relative + (1 − it) ·
- * absolute`. At 0.6 the relative stretch leads (so the observed best match is
- * pulled decisively toward 5★ and the set separates) while the absolute curve
- * still contributes 40%, keeping a genuinely weak set from having its top posting
- * inflated to a perfect score purely for being the least-bad option.
- */
-const HYBRID_RELATIVE_WEIGHT = 0.6;
 
 /** Overall-blend weights per axis (#561 "balanced fit + comp"): fitness and
  *  compensation are the two drivers, location and seniority are minor nudges.
@@ -133,7 +139,8 @@ export interface RatingInput {
    *  when no comp was extracted for this posting. */
   compMax: number | null;
   /** The query's optional compensation floor (annual, USD-assumed) — anchors the
-   *  comp axis when set; when unset the comp axis is scored set-relative. */
+   *  comp axis when set; when unset the comp axis is a bonus-only absolute curve
+   *  (see `compensationFraction`). */
   compFloor: number | undefined;
   /** True when the query carried a location. `false` → the location axis is
    *  absent (null in the result) and its weight redistributes. */
@@ -151,7 +158,9 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-/** Absolute fitness fraction ∈ [0,1): the saturating curve of the base. */
+/** The fitness fraction ∈ [0,1): the saturating absolute curve of the base.
+ *  Strictly increasing, 0 at base 0, and asymptotic to 1 — so a bigger base is
+ *  always a bigger rating and no posting ever reaches a literal 5★ on fit. */
 function absoluteFitness(base: number): number {
   return base / (base + FIT_HALF_SATURATION);
 }
@@ -188,28 +197,21 @@ function seniorityFraction(distance: number): number {
 }
 
 /**
- * Rate every posting in a result set at once (the set is required for the hybrid
- * fitness stretch and the floor-less comp percentile). Returns one `JobRating`
- * per input, in the same order. This is the SINGLE rating computation the whole
- * lane reads — card, sub-stars, detail, and sort order — so they cannot diverge.
+ * Rate postings, one `JobRating` per input, in the same order. This is the
+ * SINGLE rating computation the whole lane reads — card, sub-stars, detail, and
+ * sort order — so they cannot diverge.
+ *
+ * Since #716 every axis is a pure function of its OWN input, so this is a plain
+ * per-item map and rating a posting alone gives the identical result to rating
+ * it inside a set. The array signature survives because the two callers
+ * (`rankPostings`, `rateSavedJobs`) hold a whole set anyway and routing them
+ * through one call site is what keeps the two lanes' numbers identical.
  */
 export function rateJobs(inputs: readonly RatingInput[]): JobRating[] {
-  if (inputs.length === 0) return [];
-
-  // Set-level context for the hybrid fitness stretch.
-  const absolutes = inputs.map((i) => absoluteFitness(i.base));
-  const aMax = Math.max(...absolutes);
-  const aMin = Math.min(...absolutes);
-  const spread = aMax - aMin;
-
-  return inputs.map((input, idx): JobRating => {
-    // Fitness — hybrid absolute + set-relative stretch. When the set has no
-    // spread (one posting, or all-equal bases) the stretch is undefined, so fall
-    // back to the pure absolute curve.
-    const absolute = absolutes[idx];
-    const relative = spread > 0 ? (absolute - aMin) / spread : absolute;
-    const fitnessFrac =
-      HYBRID_RELATIVE_WEIGHT * relative + (1 - HYBRID_RELATIVE_WEIGHT) * absolute;
+  return inputs.map((input): JobRating => {
+    // Fitness — the absolute saturating curve of the specificity-weighted base,
+    // and nothing about the rest of `inputs`.
+    const fitnessFrac = absoluteFitness(input.base);
 
     // Compensation — present only when a comp was extracted.
     const compFrac =
@@ -272,15 +274,30 @@ export function rateJobs(inputs: readonly RatingInput[]): JobRating[] {
  * 3. `location` and `seniority` were computed and never displayed at all. Words
  *    fit all four axes on one line where four star rows never could.
  *
- * Honesty note: the fitness axis is SET-RELATIVE by construction (the hybrid
- * stretch reads the set's min/max — see this module's docblock), so the fitness
- * phrasing is deliberately comparative ("Top fit here"), never an absolute claim
- * about the posting. The comp axis, by contrast, IS absolute — so its phrasing
- * may make an absolute claim, but its MEANING flips with `hasCompFloor` (vs the
- * user's floor when set, bonus-only otherwise), which is why the caller must say
- * which regime produced the number.
+ * Honesty note: the fitness phrasing used to be deliberately COMPARATIVE ("Top
+ * fit here") because the axis was set-relative and an absolute claim would have
+ * been unearned. #716 made the axis absolute, which makes the hedge dishonest in
+ * the other direction — "top fit here" understates a posting the résumé genuinely
+ * matches and overstates the best of a bad set — so the phrases now say what the
+ * number means. The comp axis is absolute too, but its MEANING flips with
+ * `hasCompFloor` (vs the user's floor when set, bonus-only otherwise), which is
+ * why the caller must say which regime produced the number.
  */
-const FIT_BAND_TOP = 4;
+
+/** Fitness band cut-points, in stars. Absolute since #716, so each reads
+ *  straight off the curve — inverting `base / (base + FIT_HALF_SATURATION)`,
+ *  ≥4★ needs base ≥ 36, ≥3★ needs base ≥ 13.5, ≥2★ needs base ≥ 6. "Excellent"
+ *  is deliberately hard to reach: under the old set-relative stretch the best
+ *  posting in ANY search got the top band by construction, and the word is worth
+ *  more when it has to be earned against the curve instead.
+ *
+ *  Be aware, though, that "Excellent fit" is currently UNATTESTED on real data:
+ *  base ≥ 36 is well past the ~21 ceiling `FIT_HALF_SATURATION`'s own note
+ *  records for real résumés, and no measured posting has reached it. The band is
+ *  not dead code — `base` ranges over the full coverage domain in the type, and
+ *  `rating.test.ts` exercises it — but nobody has yet seen a posting earn it, so
+ *  treat the top cut-point as unvalidated rather than as a calibrated target. */
+const FIT_BAND_EXCELLENT = 4;
 const FIT_BAND_STRONG = 3;
 const FIT_BAND_PARTIAL = 2;
 
@@ -306,7 +323,7 @@ const SENIORITY_BAND_MATCH = 4.5;
 const SENIORITY_BAND_GAP = 3;
 
 function fitPhrase(fitness: number): string {
-  if (fitness >= FIT_BAND_TOP) return "Top fit here";
+  if (fitness >= FIT_BAND_EXCELLENT) return "Excellent fit";
   if (fitness >= FIT_BAND_STRONG) return "Strong fit";
   if (fitness >= FIT_BAND_PARTIAL) return "Partial fit";
   return "Weak fit";

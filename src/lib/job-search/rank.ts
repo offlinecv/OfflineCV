@@ -9,7 +9,7 @@
  * The old card headline was raw JD-term coverage as a "score/100". Its
  * denominator is how much the posting SAID, not how well the candidate fits, so
  * on a real senior résumé it compressed into single digits (max ~57, mean ~10)
- * and stopped discriminating. It is replaced by a calibrated, set-stretched star
+ * and stopped discriminating. It is replaced by a calibrated, saturating star
  * rating computed in `rating.ts` (`rateJobs`) — see that module for the model.
  * `rank.ts` owns the raw signal extraction (coverage, comp, location, seniority)
  * and hands it to `rateJobs`; the resulting `JobRating` is attached to every
@@ -24,11 +24,12 @@
  * specificity-weighted base) and for the detail view's term legibility.
  *
  * ── Rating parity (the invariant that replaces the old "score === coverage") ──
- * The star rating is computed by `rateJobs` over the WHOLE result set at once
- * (it needs the set for the hybrid fitness stretch and the floor-less comp
- * percentile — see `rating.ts`). The card headline, the inline sub-stars, the
- * detail view, and the sort order all read the SAME attached `JobRating`, so they
- * cannot diverge. Sorting therefore happens AFTER rating, by `rating.overall`.
+ * The star rating is computed by `rateJobs` in one call over the whole result
+ * set. The card headline, the inline sub-stars, the detail view, and the sort
+ * order all read the SAME attached `JobRating`, so they cannot diverge. Sorting
+ * therefore happens AFTER rating, by `rating.overall`. Since #716 no axis reads
+ * the set — a posting's rating is a pure function of its own signals — so the
+ * batch call is about having ONE computation site, not about set context.
  *
  * ── The four rating signals this module extracts ──
  *   - fitness base — `coverage.score × specificityConfidence(termCount)`. The
@@ -47,7 +48,8 @@
  *     downstream of board hydration where every posting's `description` is
  *     present), folded into `posting.compensation`. `belowFloor` is retained for
  *     the card badge; the comp AXIS in `rateJobs` rates the range vs the floor
- *     (or set-relative), and an absent comp simply drops out (silence neutral).
+ *     (or, floor-less, as a bonus-only absolute curve), and an absent comp
+ *     simply drops out (silence neutral).
  *
  * Dynamic-imported by `search.ts` so jd-match's skill dictionary stays out of
  * the entry chunk.
@@ -263,9 +265,12 @@ export function rankPostings(
   // distance null — the axis drops out for the whole set.
   const querySeniorityRung = seniorityRung(query?.seniority);
 
-  // Pass 2 — rate the whole set at once, attach, then sort by overall. Rating
-  // needs the set (hybrid fitness stretch + floor-less comp percentile), so it
-  // cannot be folded into pass 1.
+  // Pass 2 — rate through the lane's single `rateJobs` site, attach, then sort
+  // by overall. Ratings are per-posting since #716, so the split is no longer
+  // forced by set context; it stays because pass 1 is what RESOLVES the fields
+  // `ratingInputFor` reads (notably the folded-in `posting.compensation`), and
+  // because assembling one uniform `RatingInput[]` is what lets the search lane
+  // and `rateSavedJobs` share the same assembler and the same call.
   const inputs = ranked.map((job) =>
     ratingInputFor(job, queryLocation, querySeniorityRung, query?.compFloor),
   );

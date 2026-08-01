@@ -16,7 +16,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JobTracker } from "./JobTracker.tsx";
 import type { JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
-import type { JobRecord } from "../../lib/storage/index.ts";
+import type { JobRecord, LetterRecord } from "../../lib/storage/index.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -145,7 +145,7 @@ describe("JobTracker: fitness ratings (#700)", () => {
     const stars = container.querySelector('[role="img"]');
     expect(stars?.getAttribute("aria-label")).toBe("Resume fit: 4.2 out of 5 stars");
     // The same reason band the search cards print, off `describeRating`.
-    expect(container.textContent).toContain("Top fit here");
+    expect(container.textContent).toContain("Excellent fit");
     expect(container.textContent).not.toContain("Not rated");
   });
 
@@ -227,5 +227,42 @@ describe("JobTracker: resume link picker", () => {
     expect(container.textContent).not.toContain("Link a resume");
     clickButton("Unlink");
     expect(tracker.unlink).toHaveBeenCalledWith("j1");
+  });
+});
+
+describe("JobTracker: letter indicator (#715)", () => {
+  function letterFor(jobId: string): LetterRecord {
+    return {
+      id: crypto.randomUUID(),
+      jobId,
+      createdAt: 1,
+      updatedAt: 1,
+      body: "Dear hiring team,",
+    };
+  }
+
+  it("shows the indicator only on the row whose id is a key in lettersById", () => {
+    const tracker = makeTracker([
+      job({ id: "j1", title: "Has a letter" }),
+      job({ id: "j2", title: "No letter" }),
+    ]);
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          lettersById={new Map([["j1", [letterFor("j1")]]])}
+        />,
+      ),
+    );
+    const icons = container.querySelectorAll('button[aria-label="View cover letter"]');
+    expect(icons).toHaveLength(1);
+  });
+
+  it("shows no indicator on any row when lettersById is omitted", () => {
+    const tracker = makeTracker([job({ id: "j1" })]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    expect(
+      container.querySelector('button[aria-label="View cover letter"]'),
+    ).toBeNull();
   });
 });
