@@ -17,9 +17,11 @@ What is different about letters, and why this is a separate skill:
 
 - A job is **captured**; a letter is **generated**. The quality bar is prose, not plumbing.
 - Letters have **no natural key** — no `deriveJobId`, no convergence. Ids are yours to own.
-- Letters are **write-only in the shipped build**. Nothing renders them (verified: zero
-  matches for `letter` under `src/components` and `src/design-system`). A letters UI is
-  tracked separately; until it ships, this skill must hand the user a readable file too.
+- Letters are visible in the app (#715): the Saved jobs library (`/jobs/#saved`) shows an
+  icon on any tracked job with a letter, which reveals it as plain text with a Copy to
+  clipboard button — several drafts are reachable there too, by `label`. This skill still
+  hands over a `.txt` file as well (Phase 7), so the user has something to paste immediately
+  without switching to the app.
 
 ## Say this once, at the start
 
@@ -406,9 +408,9 @@ storage layer — derive them from the diff and report each with its record.
 
 ## Phase 7 — Hand it back, twice
 
-**Store it, and also give them a file.** Nothing in the app renders letters yet, so a
-letter that exists only in IndexedDB is a letter the user cannot use today. Write
-`cover-letter-<company>-<role>.txt` into the session scratchpad and surface it with
+**Store it, and also give them a file.** The app shows the letter (#715), but a chat-side
+`.txt` is still the fastest way to get it into a form or an email without switching windows.
+Write `cover-letter-<company>-<role>.txt` into the session scratchpad and surface it with
 `SendUserFile`. Plain `.txt`, the exact body that went into the store.
 
 Report:
@@ -428,7 +430,7 @@ Report:
 - if `jdText` was thin and you re-fetched: say so, say the stored record is unchanged, and
   offer `job-hunt` to re-capture it
 - where the `.txt` landed
-- that the letter is not visible in the app yet, and that this is tracked
+- where to see it in the app: Saved jobs (`/jobs/#saved`) → the letter icon on this job
 
 ---
 

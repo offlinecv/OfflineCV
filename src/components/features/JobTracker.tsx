@@ -15,6 +15,11 @@
  * edited, with nothing to invalidate it. Rating needs a parsed résumé, which
  * this surface only has via the `/` handoff, so the library also stands alone
  * with none: `ratings === null` simply drops the fitness block from every row.
+ *
+ * Letters (#715): `JobTrackerSection` owns `useJobLetters` the same way it
+ * owns `useSavedJobRatings` — one read for the whole library, grouped by job
+ * id and handed down as `lettersById`. A job id absent from the map renders
+ * no indicator (`JobTrackerEntry` → `JobLetterIndicator`).
  */
 
 import { useMemo } from "react";
@@ -22,11 +27,12 @@ import { Card, Button, StatusBadge } from "@design-system";
 import { formatBytes } from "../../lib/format-bytes.ts";
 import { EVICTION_NOTICE } from "../../lib/storage/index.ts";
 import { JOB_STATUS_ORDER } from "../../lib/storage/index.ts";
-import type { JobRecord, JobStatus } from "../../lib/storage/index.ts";
+import type { JobRecord, JobStatus, LetterRecord } from "../../lib/storage/index.ts";
 import { jobStatusLabel } from "./JobStatusPicker.tsx";
 import { JobTrackerEntry, type LinkableResume } from "./JobTrackerEntry.tsx";
 import { useJobTracker, type JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import { useSavedJobRatings } from "../../hooks/useSavedJobRatings.ts";
+import { useJobLetters } from "../../hooks/useJobLetters.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
 
@@ -47,6 +53,9 @@ interface JobTrackerProps {
   /** Saved resumes a row's link picker offers. Omitted / empty hides the
    *  picker, so the tracker still stands alone with an empty library. */
   resumeOptions?: readonly LinkableResume[];
+  /** Every letter, grouped by job id (#715) — `useJobLetters`' shape. A job id
+   *  absent from the map has no letters, so its row renders no indicator. */
+  lettersById?: ReadonlyMap<string, readonly LetterRecord[]>;
 }
 
 /**
@@ -58,18 +67,20 @@ interface JobTrackerProps {
 export function JobTrackerSection({
   parsed,
   ...props
-}: Omit<JobTrackerProps, "tracker" | "ratings" | "hasResume"> & {
+}: Omit<JobTrackerProps, "tracker" | "ratings" | "hasResume" | "lettersById"> & {
   /** The résumé saved jobs are rated against — the `/` handoff `JobsApp` holds.
    *  Must be referentially stable; `useSavedJobRatings` deps on it directly. */
   parsed?: HeuristicParsedResume;
 }) {
   const tracker = useJobTracker();
   const ratings = useSavedJobRatings(tracker.jobs, parsed);
+  const letters = useJobLetters();
   return (
     <JobTracker
       tracker={tracker}
       ratings={ratings}
       hasResume={parsed !== undefined}
+      lettersById={letters.byJobId}
       {...props}
     />
   );
@@ -81,6 +92,7 @@ export function JobTracker({
   hasResume = false,
   resumeName,
   resumeOptions,
+  lettersById,
 }: JobTrackerProps) {
   const { jobs, ready, persisted, usageBytes, update, setStatus, link, unlink, remove, create, exportBackup } =
     tracker;
@@ -173,6 +185,7 @@ export function JobTracker({
                       resumeOptions={resumeOptions}
                       rated={ratings !== null}
                       rating={ratings?.get(job.id)}
+                      letters={lettersById?.get(job.id)}
                       onUpdate={(id, patch) => void update(id, patch)}
                       onStatusChange={(id, next) => void setStatus(id, next)}
                       onLinkResume={(id, resumeId) => void link(id, resumeId)}

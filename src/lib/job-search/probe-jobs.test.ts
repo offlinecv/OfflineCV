@@ -119,8 +119,39 @@ const COMP_SPARSE_SHARE = 0.8;
 const SENIORITY_UNPARSED_SHARE = 0.8;
 /** The overall star rating must spread at least this far (max − min) across the
  *  shown set, else it fails #561's whole point — it is not separating the fine
- *  jobs from the noise, just relabeling a flat percentage as flat stars. */
-const DISCRIMINATION_MIN_SPREAD = 2;
+ *  jobs from the noise, just relabeling a flat percentage as flat stars.
+ *
+ *  RECALIBRATED FOR #716 (was 2). That value was calibrated under the STRETCHED
+ *  HYBRID fitness axis #716 deleted, where fitness was
+ *  `0.4·base/(base+9) + 0.6·(base−min)/(max−min)` over the set. The stretch term
+ *  contributed a fixed 0.6 fraction (3.0★) between the set's own min and max, so
+ *  the hybrid FITNESS spread was `2·Δ(base/(base+9)) + 3.0` — always ≥ 3.0.
+ *  But this threshold reads `rating.overall`, not the fitness axis, and the
+ *  blend dilutes that: re-running the deleted hybrid with the other three axes
+ *  present and constant gave 1.98 (bases 0…21), 1.59 (4…12) and 1.41 (6…8) —
+ *  all UNDER 2. So the old value was mis-set toward false POSITIVES, firing on
+ *  healthy sets whenever comp/location/seniority were present, not inert as the
+ *  fitness-only arithmetic suggests. Either way it cannot be carried over.
+ *
+ *  The absolute curve is `5·base/(base+9)` with no set term, so the spread now
+ *  scales directly with the observed base range (`rating.ts`: real-résumé base
+ *  ceiling ~21, mean ~7). Measured `rating.overall` spread, by how many axes are
+ *  present — fitness carries 0.45/1.0 with all four, up to 1.0 alone, so the
+ *  dilution factor ranges 0.45…1.0 and BOTH ends are live regimes:
+ *
+ *                                  fitness only   +comp   all four
+ *    bases 0…21 (wide, healthy)        3.50        1.97      1.58   must pass
+ *    bases 4…12 (tight, healthy)       1.32        0.74      0.59   must pass
+ *    bases 6…8  (non-discriminating)   0.35        0.20      0.16   must fire
+ *
+ *  The threshold must clear the LEAST-diluted flat set (0.353, fitness only) and
+ *  stay under the MOST-diluted healthy one (0.593, all four axes) — a window of
+ *  (0.353, 0.593]. 0.5 takes it with ~1.4× headroom over the flat set and ~0.09★
+ *  under the diluted healthy one, biased toward the false-NEGATIVE side on
+ *  purpose: this defect is `severity: "blocking"` and is the probe-jobs skill's
+ *  issue-filing trigger, so a spurious blocking finding costs more than a missed
+ *  marginal one. */
+const DISCRIMINATION_MIN_SPREAD = 0.5;
 /** A "strong fit" is a posting in the top this-share by FITNESS. */
 const STRONG_FIT_SHARE = 0.1;
 /** A strong fit is BURIED (the #570/#562 pathology) if its overall rank falls
@@ -353,7 +384,8 @@ function classifyRating(rows: DecompRow[], n: number): Defect[] {
   // ── Raw coverage compression (the upstream cause the rating works around). ───
   // INFO, not blocking: the star rating exists precisely to handle this, so a
   // compressed raw coverage is expected. Surfaced so a reader sees the gap the
-  // rating is bridging and can confirm the fitness stretch actually bridged it.
+  // saturating fitness curve is bridging, and can check against
+  // `rating-distribution` above whether it actually bridged it.
   const scores = rows.map((r) => r.score);
   const rawMax = Math.max(...scores);
   const rawMean = scores.reduce((a, b) => a + b, 0) / n;
@@ -366,7 +398,7 @@ function classifyRating(rows: DecompRow[], n: number): Defect[] {
         rawMean: round2(rawMean),
         shareOver30: round2(scores.filter((s) => s >= 30).length / n),
         shown: n,
-        note: "raw JD-term coverage is compressed; the star rating stretches it — see rating-distribution",
+        note: "raw JD-term coverage is compressed; the star rating's saturating curve expands it — see rating-distribution",
       },
       ownerTest: "rating.test.ts",
     });

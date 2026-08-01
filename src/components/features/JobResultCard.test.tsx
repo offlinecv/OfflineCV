@@ -123,7 +123,7 @@ describe("JobResultCard", () => {
   it("renders a reason phrase per rating axis (issue 569)", () => {
     const el = render();
     // Fitness is always present, so a fit phrase always renders.
-    expect(el.textContent).toMatch(/(Top fit here|Strong fit|Partial fit|Weak fit)/);
+    expect(el.textContent).toMatch(/(Excellent fit|Strong fit|Partial fit|Weak fit)/);
   });
 
   it("drops a source that only repeats the company name (issue 569)", () => {

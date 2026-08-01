@@ -51,26 +51,68 @@ describe("rateJobs", () => {
     expect(ratings[1].fitness).toBeLessThan(ratings[2].fitness);
   });
 
-  it("HYBRID stretch lifts the observed top toward the max even on a compressed set", () => {
+  it("rates a posting identically alone and inside a set (#716)", () => {
+    // THE #716 defect. The fitness axis was 60% set-relative, so the same
+    // posting read 2.75★ "Partial fit" on its own and 1.10★ "Weak fit" once a
+    // stronger job joined the set. A fit rating is a claim about ONE posting and
+    // ONE résumé; an unrelated third posting must not move it. Exact equality,
+    // not "close": the arithmetic no longer touches the set at all.
+    const subject = fitOnly(11);
+    const [alone] = rateJobs([subject]);
+    const [first] = rateJobs([subject, fitOnly(40), fitOnly(0)]);
+    const inSet = rateJobs([fitOnly(40), fitOnly(0), subject])[2];
+    expect(first.fitness).toBe(alone.fitness);
+    expect(inSet.fitness).toBe(alone.fitness);
+    expect(inSet.overall).toBe(alone.overall);
+    // Not vacuous: the set's own members still differ from each other, so the
+    // stability above is set-independence and not a flattened axis.
+    expect(first.fitness).toBeLessThan(rateJobs([fitOnly(40)])[0].fitness);
+  });
+
+  it("separates a compressed real-data set on the absolute curve alone", () => {
     // Mirror the real distribution: bases compressed into single digits, ceiling
-    // ~21. The absolute curve alone would leave the top around 3.5★; the relative
-    // stretch must pull it clearly higher.
+    // ~21. The set-relative stretch (#561) existed because raw coverage stopped
+    // discriminating; #716 deleted it, so the saturating curve has to carry the
+    // separation by itself.
     const bases = [0, 3, 5, 7, 9, 12, 15, 21];
     const ratings = rateJobs(bases.map(fitOnly));
     const top = ratings[ratings.length - 1].fitness;
     const bottom = ratings[0].fitness;
-    // Top of a compressed set still reaches a strong rating.
-    expect(top).toBeGreaterThan(4);
+    // The top of a compressed set is a genuine "Strong fit" — 21/(21+9) = 0.7 —
+    // no longer inflated to ~4.4★ for being the least-bad option on offer.
+    expect(top).toBeCloseTo(3.5, 5);
     // The degenerate base-0 posting bottoms out at exactly 0 stars.
     expect(bottom).toBe(0);
-    // The set genuinely spreads (compression no longer flattens the ranking).
+    // The set genuinely spreads (compression no longer flattens the ranking)…
     expect(top - bottom).toBeGreaterThan(3);
+    // …and strictly, with no plateau where neighbouring bases read the same.
+    for (let i = 1; i < ratings.length; i++) {
+      expect(ratings[i].fitness).toBeGreaterThan(ratings[i - 1].fitness);
+    }
   });
 
-  it("falls back to the absolute curve when the set has no spread (single posting)", () => {
+  it("anchors the curve: a base of FIT_HALF_SATURATION is exactly half the scale", () => {
     const [one] = rateJobs([fitOnly(9)]);
-    // base 9 → absolute 9/18 = 0.5 → 2.5★, no relative stretch to apply.
-    expect(one.fitness).toBeCloseTo(2.5, 5);
+    // base 9 → 9/(9+9) = 0.5 → 2.5★. The half-saturation constant IS the 2.5★
+    // point, and since #716 it is the only parameter shaping this axis.
+    expect(one.fitness).toBeCloseTo(2.5, 10);
+  });
+
+  it("lands the two measured real postings in the bands their evidence warrants (#716)", () => {
+    // The #716 measurement: one real résumé, two real Apple postings, rated
+    // after the #717 extraction fixes. Bases back-solved from the reported stars
+    // (fitness = 5·base/(base+9)); the assertion that matters is the BAND, since
+    // the words are what the user actually reads.
+    const [infoApps, cxeManager] = rateJobs([fitOnly(11), fitOnly(17.6)]);
+    expect(infoApps.fitness).toBeCloseTo(2.75, 2);
+    expect(cxeManager.fitness).toBeCloseTo(3.31, 2);
+    // The candidate genuinely lacks the platform stack for the first and genuinely
+    // covers the second — "Partial" and "Strong" are the honest words, and rating
+    // the two together must not change either (under the old hybrid the weaker one
+    // collapsed to 1.10★ "Weak fit" purely for sharing a library).
+    expect(describeRating(infoApps, { hasCompFloor: false })).toEqual(["Partial fit"]);
+    expect(describeRating(cxeManager, { hasCompFloor: false })).toEqual(["Strong fit"]);
+    expect(rateJobs([fitOnly(11)])[0].fitness).toBe(infoApps.fitness);
   });
 
   it("does not penalize a posting for missing compensation — overall stays fitness-driven", () => {
@@ -183,8 +225,10 @@ describe("describeRating", () => {
   };
 
   it("always yields a fit phrase, since the fitness axis is always present", () => {
+    // Absolute claims since #716: the axis no longer hedges ("Top fit here" was
+    // worded that way only because it meant "top of THIS set").
     expect(describeRating({ ...base, fitness: 4.6 }, { hasCompFloor: false })).toEqual([
-      "Top fit here",
+      "Excellent fit",
     ]);
     expect(describeRating({ ...base, fitness: 3.2 }, { hasCompFloor: false })).toEqual([
       "Strong fit",

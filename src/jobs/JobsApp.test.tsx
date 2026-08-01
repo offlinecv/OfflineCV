@@ -154,4 +154,49 @@ describe("JobsApp: landing tab from the URL (#707)", () => {
       container.querySelector<HTMLElement>("#jobs-panel-library")?.hidden,
     ).toBe(false);
   });
+
+  it("lands on Saved jobs when arriving via the #saved hash (#715)", async () => {
+    window.history.pushState({}, "", "/jobs/#saved");
+
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb();
+
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-search")?.hidden,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-library")?.hidden,
+    ).toBe(false);
+  });
+
+  it("switches to Saved jobs when the hash changes on a page ALREADY open (#715)", async () => {
+    // The regression this pins: a user sitting on `/jobs/` who follows the
+    // `/jobs/#saved` link the cover-letter skill hands out changes only the
+    // fragment. Same document, no navigation, no remount — so a mount-only
+    // read leaves the tab where it was and nothing visible happens.
+    window.history.pushState({}, "", "/jobs/");
+
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb();
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-library")?.hidden,
+    ).toBe(true);
+
+    await act(async () => {
+      window.location.hash = "#saved";
+      // jsdom queues `hashchange` as a task rather than firing it inline.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-search")?.hidden,
+    ).toBe(true);
+    expect(
+      container.querySelector<HTMLElement>("#jobs-panel-library")?.hidden,
+    ).toBe(false);
+  });
 });

@@ -32,7 +32,7 @@
  * explicit Search — see `lib/job-search/providers/keywords.ts`).
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, ErrorState, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { PageShell } from "../components/features/PageShell.tsx";
 import { FindJobsPanel } from "../components/features/FindJobsPanel.tsx";
@@ -55,14 +55,35 @@ export default function JobsApp() {
   // the read is non-destructive, so there is no StrictMode double-invoke hazard
   // of the kind `useJdFitResume` needs a ref for.
   const [handoff] = useState(() => readJobsHandoff());
-  // #707: `PageShell`'s "Saved jobs" link arrives with `?tab=library` so this
-  // surface lands there directly instead of the Search tab a plain `/jobs/`
-  // visit defaults to. Lazy initializer (not an effect) — same read-once-on-
-  // mount shape as the handoff above; `window.location.search` is inert at
-  // mount and never needs to be re-read.
+  // #707/#715: `PageShell`'s "Saved jobs" link arrives with `?tab=library`,
+  // and a direct `/jobs/#saved` link (handed out by a producer like the
+  // cover-letter skill) arrives with the hash instead — either lands this
+  // surface on the Saved jobs tab rather than the Search tab a plain
+  // `/jobs/` visit defaults to. Lazy initializer for the FIRST render — the
+  // `hashchange` effect below covers the rest.
   const [tab, setTab] = useState<JobsTabId>(() =>
-    resolveInitialJobsTab(window.location.search),
+    resolveInitialJobsTab(window.location.search, window.location.hash),
   );
+
+  // #715: the mount read alone is not enough for the hash carrier. Following or
+  // pasting `/jobs/#saved` while ALREADY on `/jobs/` changes only the fragment —
+  // same document, no navigation, no re-render — so without this listener the
+  // tab would not switch and nothing visible would happen. That is the exact
+  // link `.claude/skills/cover-letter/SKILL.md` (Phase 7) hands a user, and a
+  // user who already has the workbench open is its likeliest reader. The query
+  // param needs no equivalent: changing it IS a document navigation, which
+  // remounts this component and re-runs the initializer above.
+  useEffect(() => {
+    const onHashChange = () =>
+      setTab(resolveInitialJobsTab(window.location.search, window.location.hash));
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+    // Deps hand-audited both ways (`exhaustive-deps` is NOT enforced here —
+    // CLAUDE.md): the handler closes over nothing but `setTab`, which React
+    // guarantees stable, and reads `window.location` at FIRE time rather than
+    // capturing it — so there is no value that could go stale and `[]` is
+    // complete. Adding any dep would only re-subscribe for no behaviour change.
+  }, []);
 
   // #706: answered ONCE, at mount, not per click — the marker belongs to the
   // leg that landed here, and a marker still live at click time is one that

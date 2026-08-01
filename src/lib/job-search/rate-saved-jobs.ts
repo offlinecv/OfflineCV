@@ -31,12 +31,16 @@
  *     by that edit. So the rating is recomputed on view and `JobRecord`'s shape
  *     is untouched — which also keeps the public capture contract
  *     (`job-record-contract.ts`, `docs/job-capture-contract.md`) out of it.
- *  3. **The library is rated as a SET, in one `rateJobs` call.** `rateJobs`'s
- *     fitness axis is hybrid absolute + set-relative: with a single input the
- *     spread is 0 and the stretch collapses to the pure absolute curve (see
- *     `rating.ts`). Rating records one at a time would therefore put the library
- *     on a different scale from the search lane, for the same posting. So the
- *     whole rateable set goes in at once, exactly as `rankPostings` pass 2 does.
+ *  3. **A record's rating depends only on THAT record and the résumé.** Saving
+ *     or deleting another job may not move a saved job's stars. This property
+ *     used to say the opposite — the library had to be rated as ONE set because
+ *     `rateJobs`'s fitness axis was hybrid absolute + set-RELATIVE, so rating
+ *     records one at a time put the library on a different scale from the search
+ *     lane for the same posting. #716 made the axis absolute and that reason
+ *     evaporated: the two are now identical by construction. The whole rateable
+ *     set still goes into ONE `rateJobs` call, exactly as `rankPostings` pass 2
+ *     does — but now for the shared-code reason (one computation site, so the
+ *     library and the search lane cannot drift apart), not for a scale reason.
  *
  * Which axes are present: fitness only. There is no query behind the library —
  * no location, no seniority, no comp floor — so those three axes are absent,
@@ -117,7 +121,9 @@ export function rateSavedJobs(
     );
   });
 
-  // ONE call over the whole set — property 3.
+  // ONE call, through the lane's single rating site — property 3. The set is not
+  // needed for the arithmetic (every rating is per-record since #716); sharing
+  // the call site is what keeps the library and the search lane identical.
   const ratings = rateJobs(inputs);
   return new Map(rateable.map(({ id }, i) => [id, ratings[i]]));
 }

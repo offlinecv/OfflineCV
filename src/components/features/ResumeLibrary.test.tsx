@@ -10,32 +10,25 @@
  * surfaces its message in place rather than silently failing. Uses raw
  * `createRoot` (no RTL), matching `FeedbackPanel.test.tsx`.
  *
- * jsdom has no `HTMLDialogElement.showModal`/`close` — `Dialog`'s effect
- * calls both, so this file polyfills them onto the prototype (open/close
- * toggle the `open` attribute + fire `close`), same shape as the browser's
- * own behaviour for the assertions this file makes.
+ * jsdom has no `HTMLDialogElement.showModal`/`close` — `Dialog`'s effect calls
+ * both, so the shared `__test-utils__/dialog-dom.ts` polyfill goes on. Only
+ * the polyfill is shared: this suite mounts on demand inside each test rather
+ * than from a `beforeEach`, so `setupDomRoot`'s lifecycle does not fit it.
  */
 
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { ResumeLibrary } from "./ResumeLibrary.tsx";
+import { installDialogPolyfill } from "./__test-utils__/dialog-dom.ts";
 import type { ResumeLibrary as Library } from "../../hooks/useResumeLibrary.ts";
 import type { ResumeLibraryEntry as Entry } from "../../lib/resume-library.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function (this: HTMLDialogElement) {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function (this: HTMLDialogElement) {
-    this.removeAttribute("open");
-    this.dispatchEvent(new Event("close"));
-  };
-});
+installDialogPolyfill();
 
 let container: HTMLDivElement | undefined;
 let root: Root | undefined;

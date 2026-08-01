@@ -4,8 +4,8 @@
 /**
  * `rateSavedJobs` (#700). The three properties the saved library's rating has to
  * hold — not-rated is distinct from zero, nothing is written back to the record,
- * and the whole library is rated as ONE set so its scale matches the search
- * lane's — plus parity with `rankPostings` on the shared fitness base.
+ * and (since #716) a record's rating depends only on that record and the résumé
+ * — plus parity with `rankPostings` on the shared fitness base.
  */
 
 import { describe, it, expect } from "vitest";
@@ -25,8 +25,8 @@ const parsed: HeuristicParsedResume = {
 const STRONG_JD =
   "We need a React and TypeScript engineer to build our frontend web application.";
 /** Deliberately PARTIALLY covered, not uncovered: an all-missing JD scores 0,
- *  whose absolute fitness is 0 both in a set and alone, so it would pass the
- *  set-relative test for the wrong reason. One skill hits, five miss. */
+ *  and 0 is 0 both in a set and alone, so the set-independence test below would
+ *  pass for the wrong reason. One skill hits, five miss. */
 const WEAK_JD =
   "We need Rust, Kubernetes, Terraform, Go and Postgres experts, with some React exposure, for our infrastructure platform team.";
 
@@ -106,12 +106,12 @@ describe("rateSavedJobs", () => {
     expect(ratings.size).toBe(0);
   });
 
-  it("rates the whole library in ONE set, not one record at a time", () => {
-    // The fitness axis is hybrid absolute + SET-relative (see rating.ts): rated
-    // as a set, the weakest member sits at the bottom of the stretch; rated
-    // alone, `spread === 0` collapses it to the pure absolute curve. So a
-    // per-record `rateJobs([one])` implementation is detectable — the weak job's
-    // fitness must be STRICTLY lower in the set than it is on its own.
+  it("rates a record off that record alone — saving another job cannot move it", () => {
+    // Property 3, post-#716, and it asserts the OPPOSITE of what it used to. The
+    // fitness axis was hybrid absolute + SET-relative, so the weakest member of a
+    // library sat at the bottom of the stretch and rated strictly lower than it
+    // did on its own — the library's stars moved every time an unrelated job was
+    // saved or deleted. The axis is absolute now, so the two must be identical.
     const asSet = rateSavedJobs(
       [saved({ id: "strong", jdText: STRONG_JD }), saved({ id: "weak", jdText: WEAK_JD })],
       parsed,
@@ -122,9 +122,12 @@ describe("rateSavedJobs", () => {
     const weakAlone = alone.get("weak");
     expect(weakInSet).toBeDefined();
     expect(weakAlone).toBeDefined();
-    expect(weakInSet!.fitness).toBeLessThan(weakAlone!.fitness);
+    expect(weakInSet!.fitness).toBe(weakAlone!.fitness);
+    expect(weakInSet!.overall).toBe(weakAlone!.overall);
 
-    // And the set still orders correctly.
+    // Not vacuous — WEAK_JD is partially covered, so this is a real non-zero
+    // rating — and the two records still order correctly against each other.
+    expect(weakInSet!.fitness).toBeGreaterThan(0);
     expect(asSet.get("strong")!.overall).toBeGreaterThan(weakInSet!.overall);
   });
 

@@ -18,12 +18,19 @@
  * record with no saved job description renders an explicit "not rated", NOT
  * zero stars — a 0 reads as "terrible fit" when the truth is that there is
  * nothing to match against.
+ *
+ * Letter indicator (#715): `letters` is this job's cover letters, most-
+ * recently-updated first — passed straight to `JobLetterIndicator`, which
+ * owns the click/acknowledge/reveal state machine and renders nothing when
+ * the array is empty. Kept as a whole sibling component rather than inlined
+ * here, both to reuse the "letters" concern and to avoid growing this file.
  */
 
 import { useState } from "react";
 import { Button, EditableField, RatingStars, StatusBadge } from "@design-system";
 import { JobStatusPicker, jobStatusTone, jobStatusLabel } from "./JobStatusPicker.tsx";
-import type { JobRecord, JobStatus } from "../../lib/storage/index.ts";
+import { JobLetterIndicator } from "./JobLetterIndicator.tsx";
+import type { JobRecord, JobStatus, LetterRecord } from "../../lib/storage/index.ts";
 import type { JobPatch } from "../../lib/job-tracker.ts";
 import { describeRating, type JobRating } from "../../lib/job-search/rating.ts";
 
@@ -48,6 +55,9 @@ interface JobTrackerEntryProps {
   /** This row's rating. Undefined WHILE `rated` means the record carries no job
    *  description → "Not rated", which is not the same state as 0 stars. */
   rating?: JobRating;
+  /** This job's letters, most-recently-updated first (#715). Empty/omitted
+   *  renders no indicator — see `JobLetterIndicator`. */
+  letters?: readonly LetterRecord[];
   onUpdate: (id: string, patch: JobPatch) => void;
   onStatusChange: (id: string, status: JobStatus) => void;
   onLinkResume: (id: string, resumeId: string) => void;
@@ -69,6 +79,7 @@ export function JobTrackerEntry({
   resumeOptions = [],
   rated = false,
   rating,
+  letters,
   onUpdate,
   onStatusChange,
   onLinkResume,
@@ -96,9 +107,12 @@ export function JobTrackerEntry({
           />
         </div>
         <div className="flex flex-col items-end gap-1">
-          <StatusBadge tone={jobStatusTone(job.status)}>
-            {jobStatusLabel(job.status)}
-          </StatusBadge>
+          <div className="flex items-center gap-1">
+            <StatusBadge tone={jobStatusTone(job.status)}>
+              {jobStatusLabel(job.status)}
+            </StatusBadge>
+            <JobLetterIndicator letters={letters} />
+          </div>
           {rated && !rating && (
             <span className="text-xs text-content-muted">
               Not rated · no job description saved
