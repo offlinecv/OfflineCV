@@ -226,7 +226,13 @@ export function rankPostings(
 
   // Pass 1 — coverage + comp per posting (rating still unset; filled in pass 2).
   const ranked = postings.map((posting): RankedJob => {
-    const extracted = extractJdTerms(posting.description);
+    // `postingTitle` keeps the posting's own name and team out of its
+    // requirement set — a posting cannot be evidence for itself (see
+    // `ExtractOptions`). Same call shape as `rateSavedJobs`, so the search lane
+    // and the saved library extract identically for the same text.
+    const extracted = extractJdTerms(posting.description, {
+      postingTitle: posting.title,
+    });
     const coverage = computeCoverage(parsed, extracted.all);
     const jdMatch: KeywordJdMatch = {
       path: "keyword",

@@ -241,6 +241,12 @@ const SECTION_HEADING_STOP_PHRASES = new Set<string>([
   "who we are",
   "what we do",
   "what to expect",
+  // The outcomes-framing heading family. Observed leaking from a live JD as
+  // the term "What Success Looks Like" — a heading over the requirements it
+  // introduces, so it is exactly the #156 case, and no résumé will ever
+  // "cover" it.
+  "what success looks like",
+  "what success means",
   "why join us",
   "why work here",
   "about the role",
@@ -299,6 +305,58 @@ function isSectionHeading(keyLower: string): boolean {
   return SECTION_HEADING_TAIL_WORDS.has(lastWord);
 }
 
+/**
+ * Words that, as the FIRST word of a captured noun phrase, mark it a sentence
+ * or title opener rather than a competency: articles, prepositions,
+ * conjunctions and pronouns. The phrase regex requires every word to be
+ * capitalized, so these only fire sentence-initially or in a title — exactly
+ * where the capture is a fragment.
+ *
+ * Observed on a live Apple posting: *"**At Apple**, new ideas…"* and *"**As
+ * Senior Software Engineering** Manager, you will…"* both became requirement
+ * terms, the second truncated mid-phrase by the 4-word cap. No résumé covers
+ * either, so each one is pure denominator.
+ *
+ * Note this is NOT the same guard as {@link ACRONYM_STOPLIST}, which contains
+ * several of the same words: that set governs the all-caps ACRONYM regex only.
+ * The two regexes are independent, so the stoplist did nothing for "At Apple".
+ */
+const LEADING_FUNCTION_WORDS = new Set<string>([
+  "the",
+  "an",
+  "as",
+  "at",
+  "in",
+  "on",
+  "of",
+  "for",
+  "to",
+  "by",
+  "with",
+  "from",
+  "and",
+  "or",
+  "but",
+  "if",
+  "this",
+  "these",
+  "those",
+  "we",
+  "you",
+  "your",
+  "our",
+  "it",
+  "is",
+  "are",
+]);
+
+/** True when a captured noun phrase leads with a function word — see
+ *  {@link LEADING_FUNCTION_WORDS}. */
+function hasLeadingFunctionWord(keyLower: string): boolean {
+  const first = keyLower.slice(0, keyLower.indexOf(" "));
+  return LEADING_FUNCTION_WORDS.has(first);
+}
+
 /** Single-token acronyms we never want as a noun-pass term. Matches things
  *  the regex would otherwise sweep up from JD copy. */
 const ACRONYM_STOPLIST = new Set<string>([
@@ -320,11 +378,40 @@ const ACRONYM_STOPLIST = new Set<string>([
   "US",
   "YOU",
   "YOUR",
+  // Degree abbreviations. "BS or MS in Computer Science" is a real requirement,
+  // but the CREDENTIAL half of it carries no matchable signal — the field of
+  // study does, and it is captured separately as its own phrase. Left as terms
+  // they are two more entries no résumé projection will ever contain (the
+  // parser stores "Bachelor of Technology", never "BS"), so they are pure
+  // denominator. MBA is deliberately absent: it is a specific, matchable
+  // credential rather than a generic level marker.
+  "BS",
+  "BA",
+  "MS",
+  "MA",
+  "BSC",
+  "MSC",
 ]);
 
 export interface ExtractOptions {
   /** Override the snippet length. Default 80. */
   snippetChars?: number;
+  /**
+   * The posting's own title, when the caller knows it. A posting cannot be
+   * evidence for itself: noun-pass phrases contained in the title are the job's
+   * IDENTITY, not its requirements, so they are dropped from the term list.
+   *
+   * Observed on a live Apple posting titled "Senior Engineering Manager, Info
+   * Apps": both `Senior Engineering Manager` and `Info Apps` (the team name)
+   * entered the coverage denominator, which no résumé can ever cover — the
+   * candidate is penalized for the posting having a name.
+   *
+   * Scoped to the NOUN pass on purpose. A title naming a real technology
+   * ("Senior Rust Engineer") is caught by the skill pass, which this never
+   * touches, and the noun pass already drops any hit the skill dictionary
+   * knows — so a genuine title skill survives while the job-identity phrases go.
+   */
+  postingTitle?: string;
 }
 
 /**
@@ -342,6 +429,7 @@ export function extractJdTerms(
 ): ExtractJdTermsResult {
   const snippetChars = options.snippetChars ?? 80;
   const body = stripBoilerplate(rawJd);
+  const titleLower = (options.postingTitle ?? "").toLowerCase();
 
   const skills = extractSkillPass(body, snippetChars);
   const skilledAliases = new Set(skills.map((t) => t.id));
@@ -353,6 +441,9 @@ export function extractJdTerms(
     // Drop noun hits that the skill pass already saw under a different alias.
     const index = getSkillIndex();
     if (index.aliasToId.has(lower)) return false;
+    // Drop the posting's own title/team words — see `ExtractOptions.postingTitle`.
+    // Word-boundary anchored so "Eng" inside "Engineering" is not a title hit.
+    if (titleLower && countOccurrences(titleLower, lower) > 0) return false;
     return true;
   });
 
@@ -408,6 +499,116 @@ export function stripBoilerplate(raw: string): string {
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/**
+ * Longest alias length that is short enough to collide with an unrelated
+ * acronym. Only `js`, `ts`, `c#` and `d3` are this short today, and only they
+ * are subject to the slash-compound guard below — a longer alias ("java",
+ * "rust") carries enough signal that a compound hit is almost certainly real.
+ */
+const SHORT_ALIAS_MAX_LEN = 2;
+
+/** Token characters an alias can be built from — the set `escapeRegex`'d into
+ *  the alias pattern, so a compound neighbour is read with the same alphabet
+ *  the dictionary uses (`c++`, `.net`, `react.js`). */
+const ALIAS_TOKEN_RE = /[A-Za-z0-9#+.]+/;
+
+/**
+ * Is a SHORT alias hit inside a slash compound whose other side is not itself
+ * a known skill?
+ *
+ * `/` is a word boundary in `ALIAS_BOUNDARY_PREFIX`/`SUFFIX`, and it has to be:
+ * "JS/TS" is how résumés write two real skills, and dropping slash boundaries
+ * would lose it. But the same boundary makes a security clearance read as a
+ * language — **"Active TS/SCI Clearance" matched the `ts` alias and reported
+ * TypeScript**, observed on a live defense JD where TypeScript appears nowhere.
+ * That is a false POSITIVE in the user's favour, which is worse than a miss: it
+ * credits a résumé for a skill the posting never asked for.
+ *
+ * The discriminator is the other side of the slash. In "JS/TS" it is itself an
+ * alias; in "TS/SCI" it is not. So a short alias in a compound is kept only
+ * when its neighbour is also in the dictionary — which preserves every
+ * legitimate compound without enumerating clearance jargon we would never
+ * finish listing (TS/SCI, NOFORN, JADC2 …).
+ *
+ * Scope, deliberately: this covers the COMPOUND only. A bare "TS clearance"
+ * still reads as TypeScript, because the only thing distinguishing it from a
+ * résumé's bare "TS" is domain knowledge this module does not have. Narrowing
+ * that would need either a clearance-phrase list (unbounded) or dropping the
+ * two-letter aliases outright (loses real résumé hits) — neither is worth it
+ * for a case the compound guard already covers in its common form.
+ */
+function isForeignSlashCompound(
+  body: string,
+  aliasStart: number,
+  aliasLen: number,
+  aliasToId: ReadonlyMap<string, string>,
+): boolean {
+  const before = body.slice(0, aliasStart);
+  const after = body.slice(aliasStart + aliasLen);
+
+  const neighbour = before.endsWith("/")
+    ? ALIAS_TOKEN_RE.exec(
+        before.slice(0, -1).split(/[^A-Za-z0-9#+.]/).pop() ?? "",
+      )?.[0]
+    : after.startsWith("/")
+      ? ALIAS_TOKEN_RE.exec(after.slice(1))?.[0]
+      : undefined;
+
+  return neighbour !== undefined && !aliasToId.has(neighbour.toLowerCase());
+}
+
+/**
+ * Words that can open a direct object, and so mark the word before them as a
+ * transitive VERB rather than the tail of a noun phrase.
+ */
+const DIRECT_OBJECT_OPENERS = new Set<string>([
+  "a",
+  "an",
+  "the",
+  "some",
+  "our",
+  "its",
+  "their",
+  "his",
+  "her",
+  "this",
+  "these",
+  "those",
+  "several",
+  "many",
+  "multiple",
+]);
+
+/**
+ * Is a multi-word alias ending in a GERUND actually a verb phrase here?
+ *
+ * Observed: the `team-building` alias `"team building"` matched *"lead a
+ * high-performing engineering **team building** some of Apple's most beloved
+ * apps"* — where "team" is the tail of "engineering team" and "building" opens
+ * a verb phrase. The alias straddles two constituents and reports a competency
+ * the posting never asked for. Same family as the TS/SCI false positive above,
+ * and judged the same way: a bogus requirement is worse than a missed one,
+ * because it enters the coverage denominator no résumé can cover.
+ *
+ * The discriminator is what FOLLOWS. A gerund used as a verb takes a direct
+ * object, which opens with a determiner or quantifier ("building **some** of
+ * Apple's apps"); the competency reading does not ("team building and
+ * mentorship", "strong team building skills", end of clause). So the guard
+ * fires only on a directly-following determiner, which leaves every ordinary
+ * usage of the alias intact.
+ */
+function isGerundVerbUsage(
+  body: string,
+  matchedAlias: string,
+  aliasStart: number,
+  aliasLen: number,
+): boolean {
+  const lastWord = matchedAlias.slice(matchedAlias.lastIndexOf(" ") + 1);
+  if (lastWord === matchedAlias || !lastWord.endsWith("ing")) return false;
+  const next = /^\s+([A-Za-z']+)/.exec(body.slice(aliasStart + aliasLen));
+  return next !== null && DIRECT_OBJECT_OPENERS.has(next[1].toLowerCase());
+}
+
 function extractSkillPass(body: string, snippetChars: number): ExtractedTerm[] {
   const index = getSkillIndex();
   const pattern = new RegExp(index.pattern.source, index.pattern.flags);
@@ -419,6 +620,13 @@ function extractSkillPass(body: string, snippetChars: number): ExtractedTerm[] {
     if (!id) continue;
     if (seen.has(id)) continue;
     const aliasStart = m.index + (m[0].length - m[1].length);
+    if (
+      matchedAlias.length <= SHORT_ALIAS_MAX_LEN &&
+      isForeignSlashCompound(body, aliasStart, m[1].length, index.aliasToId)
+    ) {
+      continue;
+    }
+    if (isGerundVerbUsage(body, matchedAlias, aliasStart, m[1].length)) continue;
     seen.set(id, {
       id,
       display: index.idToLabel.get(id) ?? id,
@@ -459,11 +667,11 @@ function extractNounPass(body: string, snippetChars: number): ExtractedTerm[] {
     // Drop JD structural section headings ("Minimum Qualifications",
     // "Physical Demands", …) — document structure, not a competency (#156).
     if (isSectionHeading(key)) continue;
-    // Drop "The …" sentence/title openers ("The Summer Music Intern", "The
-    // Ideal Candidate") — the capitalized run after a leading "The" is almost
-    // always a title or sentence subject, not a skill (#156). Real skill
-    // phrases don't lead with an article.
-    if (key.startsWith("the ")) continue;
+    // Drop sentence/title openers ("The Summer Music Intern", "At Apple", "As
+    // Senior Software Engineering") — the capitalized run after a leading
+    // function word is almost always a title or sentence subject, not a skill
+    // (#156). Real skill phrases don't lead with an article or preposition.
+    if (hasLeadingFunctionWord(key)) continue;
     if (seen.has(key)) continue;
     seen.set(key, {
       id: key,

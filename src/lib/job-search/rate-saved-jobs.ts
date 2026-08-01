@@ -85,7 +85,9 @@ export function rateSavedJobs(
   for (const job of jobs) {
     const jdText = (job.jdText ?? "").trim();
     if (jdText === "") continue;
-    const terms = extractJdTerms(jdText).all;
+    // `postingTitle` keeps the job's own name and team out of its requirement
+    // set — a posting cannot be evidence for itself (see `ExtractOptions`).
+    const terms = extractJdTerms(jdText, { postingTitle: job.title }).all;
     // Zero terms is an empty requirement set, which coverage scores 0 — the
     // "terrible fit" reading property 1 forbids. Not rateable.
     if (terms.length === 0) continue;

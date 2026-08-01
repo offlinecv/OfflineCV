@@ -34,6 +34,27 @@ describe("buildResumeProjection", () => {
     expect(projection).toContain("Staff Engineer");
     expect(buildCorpus(parsed)).toBe(projection.toLowerCase());
   });
+
+  it("projects an education entry's field of study, not just the credential", () => {
+    // The extractor splits a degree line into a bare credential + its subject
+    // (`extract/education.ts`), so `degree` alone carries no subject at all.
+    // Measured on a real résumé: a posting requiring "Computer Science" scored
+    // it MISSING against a CS graduate because only `degree` was projected.
+    const parsed = makeParsed({
+      education: [
+        {
+          degree: "Bachelor of Technology",
+          field: "Computer Science & Engineering",
+          institution: "JNTU College of Engineering",
+        },
+      ],
+    });
+    const coverage = computeCoverage(
+      parsed,
+      extractJdTerms("BS or MS in Computer Science required.").all,
+    );
+    expect(coverage.covered.map((t) => t.display)).toContain("Computer Science");
+  });
 });
 
 describe("buildCorpus", () => {
