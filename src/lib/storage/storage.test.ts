@@ -12,11 +12,18 @@ import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DB_NAME, getDB, closeDB } from "./db.ts";
-import { saveResume, getResume, getAllResumes, deleteResume } from "./resumes.ts";
+import {
+  saveResume,
+  getResume,
+  getAllResumes,
+  deleteResume,
+  listResumeChoices,
+} from "./resumes.ts";
 import { saveJob, getAllJobs } from "./jobs.ts";
 import { exportAll, exportToJson, importAll, importFromJson } from "./backup.ts";
 import { captureJob } from "./capture.ts";
 import { requestStoragePersistence, isStoragePersisted } from "./persist.ts";
+import { tick } from "./__test-utils__/clock.ts";
 import type { JobRecord, StorageExport } from "./types.ts";
 
 beforeEach(async () => {
@@ -30,6 +37,7 @@ const pdf = () => new Blob([bytes()], { type: "application/pdf" });
 async function blobBytes(blob: Blob): Promise<number[]> {
   return Array.from(new Uint8Array(await blob.arrayBuffer()));
 }
+
 
 describe("storage: schema", () => {
   it("upgrades an empty/v0 database to both stores", async () => {
@@ -74,6 +82,40 @@ describe("storage: resumes CRUD", () => {
   });
 });
 
+describe("storage: listResumeChoices (#712)", () => {
+  it("lists id/filename/updatedAt newest first, with no blob or parse", async () => {
+    const a = await saveResume({ filename: "a.pdf", blob: pdf(), parse: { score: 1 } });
+    // Past the millisecond before the second save: two writes inside one
+    // `Date.now()` tick give equal sort keys, and "newest first" then decides
+    // nothing — the assertion would pass or fail on how loaded the machine is.
+    await tick();
+    const b = await saveResume({ filename: "b.pdf", blob: pdf(), parse: { score: 2 } });
+    expect(b.updatedAt).toBeGreaterThan(a.updatedAt);
+
+    const choices = await listResumeChoices();
+    expect(choices).toEqual([
+      { id: b.id, filename: "b.pdf", updatedAt: b.updatedAt },
+      { id: a.id, filename: "a.pdf", updatedAt: a.updatedAt },
+    ]);
+  });
+
+  it("carries no Blob and is structured-cloneable — the property the bridge depends on", async () => {
+    await saveResume({ filename: "cv.pdf", blob: pdf(), parse: { score: 72 } });
+    const choices = await listResumeChoices();
+    expect(choices).toHaveLength(1);
+    for (const choice of choices) {
+      for (const value of Object.values(choice)) {
+        expect(value).not.toBeInstanceOf(Blob);
+      }
+    }
+    expect(structuredClone(choices)).toEqual(choices);
+  });
+
+  it("returns an empty list when nothing is saved", async () => {
+    expect(await listResumeChoices()).toEqual([]);
+  });
+});
+
 describe("storage: jobs CRUD", () => {
   it("saves a job with a generated id and open fields", async () => {
     const job = await saveJob({ title: "SWE", url: "https://example.com/j/1" });
@@ -97,7 +139,13 @@ describe("storage: export / import", () => {
     await closeDB();
     await deleteDB(DB_NAME);
     const counts = await importAll(dump);
-    expect(counts).toEqual({ resumes: 1, jobs: 1, skippedJobs: [] });
+    expect(counts).toEqual({
+      resumes: 1,
+      jobs: 1,
+      skippedJobs: [],
+      letters: 0,
+      skippedLetters: [],
+    });
 
     const [restored] = await getAllResumes();
     expect(restored.filename).toBe("cv.pdf");
@@ -122,7 +170,13 @@ describe("storage: export / import", () => {
     const b = await saveResume({ filename: "b.pdf", blob: pdf() });
 
     const counts = await importAll(dump, "merge");
-    expect(counts).toEqual({ resumes: 1, jobs: 0, skippedJobs: [] });
+    expect(counts).toEqual({
+      resumes: 1,
+      jobs: 0,
+      skippedJobs: [],
+      letters: 0,
+      skippedLetters: [],
+    });
 
     const all = await getAllResumes();
     expect(all.map((r) => r.id).sort()).toEqual([a.id, b.id].sort());
@@ -147,14 +201,15 @@ describe("storage: export / import", () => {
 
     it("rejects a version mismatch by name, without touching storage even in replace mode", async () => {
       await saveResume({ filename: "cv.pdf", blob: pdf() });
+      // 3, not 2: 2 became a real format when the letters store landed (#711).
       const doc = JSON.stringify({
-        version: 2,
+        version: 3,
         exportedAt: 0,
         resumes: [],
         jobs: [],
       });
       await expect(importFromJson(doc, "replace")).rejects.toThrow(
-        /Unsupported storage export version: 2/,
+        /Unsupported storage export version: 3/,
       );
       expect(await getAllResumes()).toHaveLength(1);
     });
@@ -168,7 +223,13 @@ describe("storage: export / import", () => {
       await deleteDB(DB_NAME);
 
       const counts = await importFromJson(json, "merge");
-      expect(counts).toEqual({ resumes: 1, jobs: 1, skippedJobs: [] });
+      expect(counts).toEqual({
+        resumes: 1,
+        jobs: 1,
+        skippedJobs: [],
+        letters: 0,
+        skippedLetters: [],
+      });
       expect(await getAllResumes()).toHaveLength(1);
     });
   });
@@ -263,7 +324,13 @@ describe("storage: import routes every job through the capture contract (#693)",
     await deleteDB(DB_NAME);
 
     const counts = await importFromJson(json, "replace");
-    expect(counts).toEqual({ resumes: 0, jobs: 2, skippedJobs: [] });
+    expect(counts).toEqual({
+      resumes: 0,
+      jobs: 2,
+      skippedJobs: [],
+      letters: 0,
+      skippedLetters: [],
+    });
     expect((await getAllJobs()).every((j) => j.status === "interested")).toBe(true);
   });
 });

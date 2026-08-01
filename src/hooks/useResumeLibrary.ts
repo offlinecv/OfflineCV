@@ -25,6 +25,7 @@ import {
   isStoragePersisted,
   downloadStorageBackup,
   importFromJson,
+  clearLetterResumeLink,
   type ImportCounts,
 } from "../lib/storage/index.ts";
 import { clearResumeLink, reconcileResumeLinks } from "../lib/job-tracker.ts";
@@ -111,18 +112,21 @@ export function useResumeLibrary(): ResumeLibrary {
   const remove = useCallback(
     async (id: string) => {
       await removeLibraryResume(id);
-      try {
-        // Graceful degrade (#323 AC): a tracked job that pointed at this resume
-        // keeps its record and loses only the dangling link. Runs after the
-        // delete so a failure here can never leave the resume undeleted — and
-        // is caught so it can't skip the refresh below either, which would
-        // leave the just-deleted resume on screen until something re-lists.
-        // `reconcileResumeLinks` is the backstop for a link missed here.
-        await clearResumeLink(id);
-      } catch {
-        // Swallowed deliberately: the resume IS gone, and a stale link is a
-        // cosmetic "Not linked" degrade, not a failure worth blocking the UI.
-      }
+      // Graceful degrade (#323 AC, #711): a tracked job and a cover letter both
+      // carry the same optional résumé link, and both keep their record and lose
+      // only the dangling link — the prose the user wrote is not the résumé's to
+      // take with it. Runs after the delete so a failure here can never leave the
+      // resume undeleted.
+      //
+      // `allSettled` does two jobs, which is why there is no `try`/`catch` here.
+      // It stops either repair starving the other — the asymmetry is what makes
+      // that matter, since jobs have `reconcileResumeLinks` (called on
+      // merge-import below) as a backstop for a link missed here while letters
+      // have no equivalent sweep, so a skipped letter link stays dangling until
+      // the letter is rewritten. And because it never rejects, it is also the
+      // swallow: the resume IS gone, and a stale link is a cosmetic "Not linked"
+      // degrade, not a failure worth blocking the UI or skipping the refresh for.
+      await Promise.allSettled([clearResumeLink(id), clearLetterResumeLink(id)]);
       await refresh();
     },
     [refresh],

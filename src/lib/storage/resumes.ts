@@ -46,3 +46,25 @@ export function getAllResumes(): Promise<ResumeRecord[]> {
 export function deleteResume(id: string): Promise<void> {
   return deleteRecord("resumes", id);
 }
+
+/** One saved resume, stripped to what a picker needs. No `blob`, no cached
+ *  `parse` — see {@link listResumeChoices}. */
+export interface ResumeChoice {
+  id: string;
+  filename: string;
+  /** Epoch ms of the last save (record `updatedAt`). */
+  updatedAt: number;
+}
+
+/** List saved resumes as picker choices, newest first (#712). `getAllResumes`
+ *  returns whole `ResumeRecord`s, each carrying the raw PDF `blob` — fine for
+ *  this app's own UI, but wasteful to structured-clone across a `postMessage`
+ *  bridge (e.g. to the browser extension) just to ask "which resume?". This is
+ *  the narrow, cross-origin-safe answer: id, filename, and a timestamp, and
+ *  nothing that touches the resume corpus. */
+export async function listResumeChoices(): Promise<ResumeChoice[]> {
+  const records = await getAllResumes();
+  return records
+    .map((r) => ({ id: r.id, filename: r.filename, updatedAt: r.updatedAt }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}

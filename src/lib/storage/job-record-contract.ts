@@ -18,6 +18,11 @@
  * The prose half is `docs/job-capture-contract.md`. It is normative for
  * producers; this module must never disagree with it.
  *
+ * The generic machinery — the rule shape, the JSON-safety walk, the
+ * preserve-unknown-keys pass — lives in `record-contract.ts` and is shared with
+ * the cover-letter contract (#711). What stays here is everything a JOB record
+ * specifically means.
+ *
  * ## The drift guard
  *
  * The danger the issue names is this file becoming a SECOND definition of
@@ -36,18 +41,32 @@
  * `job-record-contract.test.ts` then loops over the map, so a newly-added field
  * is exercised without anyone remembering to write a case for it. The one field
  * the type system cannot help with is `matchResult`, whose declared type is
- * `unknown`; its real check is {@link findJsonSafetyProblem}, wired explicitly.
+ * `unknown`; its real check is `findJsonSafetyProblem`, wired explicitly.
  */
 
 import type { JobRecord, JobStatus, JobCaptureProvenance } from "./types.ts";
 import { JOB_STATUS_ORDER } from "./types.ts";
 import { isAbsoluteUrl, isCapturableJobUrl } from "./job-url.ts";
+import {
+  checkDeclaredFields,
+  collectJsonSafeExtras,
+  explainJsonSafety,
+  findJsonSafetyProblem,
+  hasOwn,
+  isFiniteNumber,
+  isNonEmptyString,
+  isPlainObject,
+  isProvenanceLike,
+  isString,
+  FORBIDDEN_KEY,
+  type FieldRule,
+} from "./record-contract.ts";
 
 /**
  * Contract version a producer targets, carried on `JobRecord.capture.contract`.
- * Independent of `StorageExport.version` (the backup DOCUMENT format, still 1):
- * a record can outlive the file it arrived in, and the two evolve for different
- * reasons. Absent provenance means "written by this app against version 1".
+ * Independent of `StorageExport.version` (the backup DOCUMENT format): a record
+ * can outlive the file it arrived in, and the two evolve for different reasons.
+ * Absent provenance means "written by this app against version 1".
  *
  * Exported as part of the contract SURFACE, not awaiting a caller: §7 of
  * `docs/job-capture-contract.md` is normative for reimplementers, and this is
@@ -73,31 +92,6 @@ export type JobRecordIssue = string;
 export type JobRecordValidation =
   | { ok: true; record: JobRecord; warnings: JobRecordIssue[] }
   | { ok: false; reasons: JobRecordIssue[] };
-
-/** A type predicate over `unknown`, narrowing to one field's declared type. */
-type Guard<T> = (value: unknown) => value is T;
-
-interface FieldRule<T> {
-  /** False ⇒ the key may be absent. Absent is never the same as present-and-
-   *  wrong: an absent optional field is silent, a wrong one is a reason. */
-  required: boolean;
-  check: Guard<T>;
-  /** Phrased as the producer's obligation, because that is who reads it. */
-  expected: string;
-  /** A sharper reason for a value that failed `check`, when the rule can point
-   *  at WHERE inside a nested value it went wrong. `expected` alone is useless
-   *  for a 200-key `matchResult` — "not JSON-safe" doesn't tell a producer
-   *  which key to fix. Returns undefined to fall back to `expected`. */
-  explain?: (value: unknown) => string | undefined;
-}
-
-const isString = (value: unknown): value is string => typeof value === "string";
-
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0;
-
-const isFiniteNumber = (value: unknown): value is number =>
-  typeof value === "number" && Number.isFinite(value);
 
 /**
  * `status` accepts ANY string, including one outside {@link JOB_STATUS_ORDER},
@@ -134,15 +128,8 @@ const isUrlLike = (value: unknown): value is string =>
 const isJsonSafe = (value: unknown): value is unknown =>
   findJsonSafetyProblem(value, "value") === null;
 
-const isCaptureProvenance = (value: unknown): value is JobCaptureProvenance => {
-  if (!isPlainObject(value)) return false;
-  if (!isFiniteNumber(value.contract)) return false;
-  for (const key of ["producer", "producerVersion"] as const) {
-    if (value[key] !== undefined && !isString(value[key])) return false;
-  }
-  if (value.capturedAt !== undefined && !isFiniteNumber(value.capturedAt)) return false;
-  return findJsonSafetyProblem(value, "capture") === null;
-};
+const isCaptureProvenance = (value: unknown): value is JobCaptureProvenance =>
+  isProvenanceLike(value, "capturedAt", "capture");
 
 /**
  * One rule per `JobRecord` field. See the drift-guard note in the module
@@ -184,185 +171,9 @@ export const JOB_RECORD_RULES: {
   },
 };
 
-function explainJsonSafety(value: unknown, path: string): string | undefined {
-  const problem = findJsonSafetyProblem(value, path);
-  return problem ? `\`${problem.path}\`: ${problem.reason}.` : undefined;
-}
-
 /** Field names the rules cover — everything else on an incoming record is an
  *  unknown extra key. */
 const KNOWN_FIELDS = new Set(Object.keys(JOB_RECORD_RULES));
-
-/** Own-key name refused wherever it appears. `JSON.parse` turns `"__proto__"`
- *  into a real own property, and a later `Object.assign`-style merge would then
- *  reach the prototype setter. No legitimate producer emits it. `constructor`
- *  is deliberately allowed: shadowing it on a plain data object is inert here
- *  (nothing reads `record.constructor`), and refusing a plausible field name
- *  costs a producer more than it buys. */
-const FORBIDDEN_KEY = "__proto__";
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value) as object | null;
-  return proto === Object.prototype || proto === null;
-}
-
-function hasOwn(value: object, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-/** Where a value stopped being JSON-safe, and why. */
-export interface JsonSafetyProblem {
-  /** Dotted/bracketed path from the value's root, e.g. `matchResult.rows[2].score`. */
-  path: string;
-  reason: string;
-}
-
-/**
- * The definition of "JSON-safe" this contract enforces: a value built only from
- * `null`, booleans, strings, **finite** numbers, arrays, and plain objects (own
- * prototype `Object.prototype` or `null`), with no cycles and no own
- * `__proto__` key. Returns the first problem found, or null.
- *
- * It **refuses** rather than normalizes, and that is the point. The obvious
- * alternative — `JSON.parse(JSON.stringify(x))` — does not reject these values,
- * it silently rewrites them: `undefined` object properties vanish, `NaN` and
- * `Infinity` become `null`, a `Date` becomes a string, a `Map` becomes `{}`.
- * Only cycles and `BigInt` actually throw. A producer that sent a `Date` meant
- * a `Date`; handing it back a string and reporting success is the exact failure
- * this contract exists to prevent, so the producer is told instead.
- *
- * Why it matters even though a backup arrives via `JSON.parse` (and so is
- * JSON-safe almost by construction): the capture path does not. A record that
- * crosses `postMessage` or `chrome.runtime` is structured-cloned, which happily
- * carries `Date`s, `Map`s and cycles — and a function or symbol among them
- * makes IndexedDB's own clone throw `DataCloneError` mid-write.
- */
-export function findJsonSafetyProblem(
-  value: unknown,
-  path: string,
-  stack: Set<object> = new Set(),
-): JsonSafetyProblem | null {
-  if (value === null || typeof value !== "object") return findScalarJsonProblem(value, path);
-
-  // A path-stack, not a visited-set: an object reached twice down DIFFERENT
-  // branches is a DAG and perfectly serialisable, so it is removed on the way
-  // back up. Only an object that contains itself is a cycle.
-  if (stack.has(value)) return { path, reason: "a circular reference has no JSON representation" };
-  stack.add(value);
-  try {
-    return findContainerJsonProblem(value, path, stack);
-  } finally {
-    stack.delete(value);
-  }
-}
-
-/**
- * The terminal half of {@link findJsonSafetyProblem}'s dispatch — every value
- * that is `null` or a non-`object` `typeof`. Split out so neither half carries
- * the other's branch count; there is nothing here to recurse into, so each case
- * returns a verdict directly.
- */
-function findScalarJsonProblem(value: unknown, path: string): JsonSafetyProblem | null {
-  if (value === null) return null;
-  switch (typeof value) {
-    case "boolean":
-    case "string":
-      return null;
-    case "number":
-      return Number.isFinite(value)
-        ? null
-        : { path, reason: `${String(value)} has no JSON representation` };
-    case "bigint":
-      return { path, reason: "a BigInt has no JSON representation" };
-    case "function":
-      return { path, reason: "a function has no JSON representation" };
-    case "symbol":
-      return { path, reason: "a symbol has no JSON representation" };
-    default:
-      // `undefined` — `object` is excluded by the only caller's guard.
-      return { path, reason: "undefined has no JSON representation" };
-  }
-}
-
-/**
- * The recursive half — arrays and plain objects, walked element by element.
- * Called only with the cycle stack already holding `object`, so it recurses
- * through {@link findJsonSafetyProblem} rather than itself and the push/pop
- * stays in one place.
- */
-function findContainerJsonProblem(
-  object: object,
-  path: string,
-  stack: Set<object>,
-): JsonSafetyProblem | null {
-  if (Array.isArray(object)) {
-    for (let i = 0; i < object.length; i++) {
-      const problem = findJsonSafetyProblem(object[i], `${path}[${i}]`, stack);
-      if (problem) return problem;
-    }
-    return null;
-  }
-  if (!isPlainObject(object)) {
-    // `Object.prototype.toString` rather than `.constructor` — no property
-    // read on a value we have already decided we do not trust.
-    const tag = Object.prototype.toString.call(object).slice(8, -1);
-    return { path, reason: `a ${tag} is not a plain JSON object` };
-  }
-  for (const key of Object.keys(object)) {
-    if (key === FORBIDDEN_KEY) {
-      return { path: `${path}.${FORBIDDEN_KEY}`, reason: "a `__proto__` key is not accepted" };
-    }
-    const problem = findJsonSafetyProblem(object[key], `${path}.${key}`, stack);
-    if (problem) return problem;
-  }
-  return null;
-}
-
-/**
- * Run every {@link JOB_RECORD_RULES} entry against `value`, returning the
- * refusal reasons and the subset of fields that passed their guard.
- *
- * Split out of {@link validateJobRecord} so the rule loop's branch count sits
- * on its own: an absent-but-required field, a present-but-wrong field and a
- * field with a bespoke `explain` are three shapes, and reading them beside the
- * warning and extras passes was what pushed the caller over the complexity bar.
- */
-function checkDeclaredFields(value: Record<string, unknown>): {
-  reasons: JobRecordIssue[];
-  checked: Record<string, unknown>;
-} {
-  const reasons: JobRecordIssue[] = [];
-  const checked: Record<string, unknown> = {};
-
-  for (const field of Object.keys(JOB_RECORD_RULES)) {
-    // The map's value type is a union of `FieldRule<T>` for every field's own
-    // `T`, which is exactly what makes the drift guard bite at compile time.
-    // A store-agnostic loop can't hold that union, so it reads each rule
-    // through the erased boolean-returning shape — the narrowing is the
-    // declaration's job, not this loop's.
-    const rule = JOB_RECORD_RULES[field as keyof JobRecord] as {
-      required: boolean;
-      check: (value: unknown) => boolean;
-      expected: string;
-      explain?: (value: unknown) => string | undefined;
-    };
-    const present = hasOwn(value, field) && value[field] !== undefined;
-    if (!present) {
-      if (rule.required) reasons.push(`\`${field}\` is required and must be ${rule.expected}.`);
-      continue;
-    }
-    if (!rule.check(value[field])) {
-      reasons.push(
-        rule.explain?.(value[field]) ?? `\`${field}\` must be ${rule.expected}.`,
-      );
-      continue;
-    }
-    checked[field] = value[field];
-  }
-
-  return { reasons, checked };
-}
 
 /**
  * Warnings, not refusals: these run only on values that already passed their
@@ -397,7 +208,7 @@ function collectAcceptedWarnings(checked: Record<string, unknown>): JobRecordIss
  * does not render.
  *
  * The bounded exception is an own `__proto__` key, which is refused outright
- * (see {@link FORBIDDEN_KEY}) — it is never a forward-compatible field.
+ * (see `FORBIDDEN_KEY`) — it is never a forward-compatible field.
  *
  * ## What is repaired rather than refused
  *
@@ -413,7 +224,7 @@ export function validateJobRecord(value: unknown): JobRecordValidation {
     return { ok: false, reasons: ["A job record must not carry a `__proto__` key."] };
   }
 
-  const { reasons, checked } = checkDeclaredFields(value);
+  const { reasons, checked } = checkDeclaredFields(value, JOB_RECORD_RULES);
   const warnings = collectAcceptedWarnings(checked);
 
   if (reasons.length > 0) return { ok: false, reasons };
@@ -422,13 +233,9 @@ export function validateJobRecord(value: unknown): JobRecordValidation {
   // record has nothing to preserve. They are held to the same JSON-safety bar
   // as `matchResult`: a preserved key that can't survive the next export would
   // be preservation in name only.
-  const extras: Record<string, unknown> = {};
-  for (const key of Object.keys(value)) {
-    if (!KNOWN_FIELDS.has(key)) extras[key] = value[key];
-  }
-  const extraProblem = findJsonSafetyProblem(extras, "record");
-  if (extraProblem) {
-    return { ok: false, reasons: [`\`${extraProblem.path}\`: ${extraProblem.reason}.`] };
+  const { extras, problem } = collectJsonSafeExtras(value, KNOWN_FIELDS);
+  if (problem) {
+    return { ok: false, reasons: [`\`${problem.path}\`: ${problem.reason}.`] };
   }
 
   return {

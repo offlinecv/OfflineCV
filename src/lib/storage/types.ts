@@ -135,8 +135,70 @@ export interface BoardCacheRecord extends StoredRecord {
   postings: unknown[];
 }
 
+/**
+ * Where a letter came from, when it came from outside this build (#711).
+ *
+ * The same shape as {@link JobCaptureProvenance} and there for the same
+ * reason — a producer version cannot be retrofitted — but it is a SEPARATE
+ * type because the two number different contracts (`LETTER_CONTRACT_VERSION`
+ * vs `JOB_CAPTURE_CONTRACT_VERSION`) and carry different timestamps: a job is
+ * *captured* from a page that already existed, a letter is *generated*.
+ *
+ * Absent on everything this build writes. That absence is the whole point:
+ * #711 stores letters without generating them, so the first real writers are
+ * outside producers — a Claude Code skill driving the page, the browser
+ * extension — and a letter with no provenance must be readable as "offlinecv
+ * itself wrote this", not as "some producer that predates the field".
+ */
+export interface LetterProvenance {
+  /** The letter-contract version this producer targeted
+   *  (`LETTER_CONTRACT_VERSION`). */
+  contract: number;
+  /** Free-text producer id, e.g. `"claude-code-letter-skill"`. */
+  producer?: string;
+  /** The producer's own release version. */
+  producerVersion?: string;
+  /** Epoch ms the producer generated the draft, which is not necessarily when
+   *  the record was written here. */
+  generatedAt?: number;
+}
+
+/**
+ * A cover letter for one tracked job (#711).
+ *
+ * A separate store rather than a field on {@link JobRecord} because letters are
+ * ITERATED — several drafts per job, and versions of one draft, are the normal
+ * case, and a field gives you exactly one forever.
+ *
+ * Every field is JSON-safe (no `Blob`, unlike `ResumeRecord`), so the whole
+ * record rides through the export document as-is with no base64 step.
+ *
+ * Like `JobRecord`, this is a PUBLIC contract, not an internal type: #711
+ * stores letters without generating them, so every writer that matters is
+ * outside this build. Adding a field here obliges you to add a rule for it in
+ * `letter-contract.ts` (the mapped type there will not compile otherwise) and
+ * to describe it in `docs/cover-letter-contract.md`.
+ */
+export interface LetterRecord extends StoredRecord {
+  /** The job this letter is for (`JobRecord.id`). Required — a letter with no
+   *  job is unreachable from every surface. Deleting the job CASCADES to its
+   *  letters; see `deleteLettersForJob` and §5 of the contract doc. */
+  jobId: string;
+  /** Optional link to the saved resume this letter was written from
+   *  (`ResumeRecord.id`). Cleared (not orphaned) if that resume is later
+   *  deleted — the same rule `JobRecord.resumeId` follows. */
+  resumeId?: string;
+  /** The letter itself, markdown. */
+  body: string;
+  /** User-facing name, so two drafts for one job are tellable apart. */
+  label?: string;
+  /** Provenance for a record written by a producer outside this build. Absent
+   *  for every record this app creates. */
+  producer?: LetterProvenance;
+}
+
 /** Object-store names. Adding a store is a schema-version bump (see db.ts). */
-export type StoreName = "resumes" | "jobs" | "boards";
+export type StoreName = "resumes" | "jobs" | "boards" | "letters";
 
 /** A resume as it appears in an export file: blob replaced by base64 + MIME so
  *  the whole backup is a single JSON document. */
@@ -145,11 +207,35 @@ export interface ExportedResume extends Omit<ResumeRecord, "blob"> {
   blobType: string;
 }
 
-/** The full export document (see backup.ts). `version` tracks the export
- *  format, independent of the IndexedDB schema version. */
-export interface StorageExport {
+/**
+ * The export document as version 1 shipped it (see backup.ts). Kept as a named
+ * type, not folded into an optional `letters?` key, because the distinction is
+ * load-bearing: a v1 file has no `letters` key AT ALL, and saying so in the
+ * type is what stops a reader treating "no letters" and "an empty letters
+ * array" as the same evidence. Nothing writes one any more; import still reads
+ * one, forever.
+ */
+export interface StorageExportV1 {
   version: 1;
   exportedAt: number;
   resumes: ExportedResume[];
   jobs: JobRecord[];
 }
+
+/** The current export document — v1 plus the letters store (#711). */
+export interface StorageExportV2 extends Omit<StorageExportV1, "version"> {
+  version: 2;
+  letters: LetterRecord[];
+}
+
+/**
+ * The full export document. `version` tracks the export FORMAT, independent of
+ * the IndexedDB schema version (`DB_VERSION` in db.ts) and of the per-record
+ * contract versions — the three number different things and move for different
+ * reasons.
+ *
+ * A union rather than a single widening interface: `exportAll` only ever writes
+ * {@link StorageExportV2}, and `importAll` accepts BOTH, which is the whole
+ * back-compat requirement stated as a type.
+ */
+export type StorageExport = StorageExportV1 | StorageExportV2;

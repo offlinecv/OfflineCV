@@ -169,7 +169,31 @@
       "canonicalJobUrl", "deriveJobId", "isAbsoluteUrl", "isCapturableJobUrl",
       "JOB_URL_ID_PREFIX", "JOB_URL_TRACKING_PARAMS",
       "JOB_URL_TRACKING_PARAM_PREFIXES",
-      "captureJob", "JobCaptureResult", "JobCaptureProvenance"
+      "captureJob", "JobCaptureResult", "JobCaptureProvenance",
+      "listResumeChoices", "ResumeChoice",
+
+      // The cover-letter contract (#711). Same shape as the job capture
+      // contract above and then some: `letters` is the first store whose
+      // records this build never writes at all — #711 defines the artifact and
+      // deliberately leaves generation out, so EVERY writer is a producer
+      // outside this repo (a Claude Code skill driving the page, the extension
+      // later, an in-app generator whenever on-device prose quality justifies
+      // one). `docs/cover-letter-contract.md` is what they implement against
+      // and these are the names it points at. No PRODUCTION code in-tree
+      // consumes any of it — `backup.ts` and `jobs.ts` reach the two functions
+      // they need by deep import — so every barrel re-export here reads as
+      // dead.
+      //
+      // `clearLetterResumeLink` is deliberately NOT in this list: it has a real
+      // consumer (`useResumeLibrary`'s delete path), and listing it would hide
+      // the day that wiring is dropped. Same for `LETTER_RECORD_RULES`, which
+      // is not on the barrel at all — the drift-guard test deep-imports it.
+      //
+      // When a letters UI or the extension lands, take back out whatever it
+      // starts importing rather than letting the suppression rot.
+      "saveLetter", "getLetter", "getAllLetters", "lettersForJob", "deleteLetter",
+      "validateLetterRecord", "LETTER_CONTRACT_VERSION", "LetterRecordValidation",
+      "LetterRecord", "LetterProvenance", "SkippedLetter"
     ] },
 
     // The two contract constants that no in-tree caller reads at all — not even
@@ -177,6 +201,27 @@
     // ignored doesn't register as a consumer edge (same reason `ParseMetadata`
     // is listed above), so the source export must be marked here too.
     { "file": "src/lib/storage/job-record-contract.ts", "exports": ["JOB_CAPTURE_CONTRACT_VERSION"] },
-    { "file": "src/lib/storage/job-url.ts", "exports": ["JOB_URL_ID_PREFIX"] }
+    { "file": "src/lib/storage/job-url.ts", "exports": ["JOB_URL_ID_PREFIX"] },
+
+    // Same rule for the letter contract's own two: `LETTER_CONTRACT_VERSION` is
+    // a number the prose doc tells producers to send and nothing in-tree reads,
+    // and `LetterRecordValidation` names `validateLetterRecord`'s result for a
+    // caller that does not exist here yet. `SkippedLetter` is the third of the
+    // same kind — `ImportCounts` reports skipped letters from the first commit
+    // (a restore that drops one silently is the failure `backup.ts` exists to
+    // prevent) but nothing renders them until there is a letters surface.
+    { "file": "src/lib/storage/letter-contract.ts", "exports": [
+      "LETTER_CONTRACT_VERSION", "LetterRecordValidation"
+    ] },
+    { "file": "src/lib/storage/backup.ts", "exports": ["SkippedLetter"] },
+
+    // `listResumeChoices` / `ResumeChoice` (#712) are the same shape as
+    // `captureJob` above: no consumer anywhere yet, because the picker that
+    // calls this lives in the browser extension repo, not here. And per the
+    // `ParseMetadata` / job-capture-contract note, the barrel's ignored
+    // re-export above doesn't register as a consumer edge for the source
+    // file, so `resumes.ts` needs its own entry too. Once the extension (or an
+    // in-tree caller) imports it, take this back out.
+    { "file": "src/lib/storage/resumes.ts", "exports": ["listResumeChoices", "ResumeChoice"] }
   ]
 }

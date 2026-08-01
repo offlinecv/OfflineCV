@@ -7,12 +7,13 @@
  * useResumeLibrary — the one behaviour that lives in the hook rather than the
  * domain layer: deleting a resume must also clear it from any tracked job that
  * pointed at it (#323 AC, "deleting that resume degrades gracefully — link
- * cleared, job kept").
+ * cleared, job kept"), and since #711 from any cover letter too.
  *
- * The lib-level `clearResumeLink` is covered in `job-tracker.test.ts`; what is
- * asserted here is the *wiring* — that the resume-delete path actually calls
- * it. Exercised through a probe component against `fake-indexeddb`, since the
- * project has no @testing-library/react (same pattern as the other hook tests).
+ * The lib-level `clearResumeLink` / `clearLetterResumeLink` are covered in
+ * `job-tracker.test.ts` and `storage/letters.test.ts`; what is asserted here is
+ * the *wiring* — that the resume-delete path actually calls them. Exercised
+ * through a probe component against `fake-indexeddb`, since the project has no
+ * @testing-library/react (same pattern as the other hook tests).
  */
 
 import "fake-indexeddb/auto";
@@ -20,7 +21,13 @@ import { deleteDB } from "idb";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { DB_NAME, closeDB, saveResume } from "../lib/storage/index.ts";
+import {
+  DB_NAME,
+  closeDB,
+  saveResume,
+  saveLetter,
+  getLetter,
+} from "../lib/storage/index.ts";
 import { createJob, listJobs } from "../lib/job-tracker.ts";
 import { useResumeLibrary, type ResumeLibrary } from "./useResumeLibrary.ts";
 
@@ -97,6 +104,35 @@ describe("useResumeLibrary: delete clears tracked-job links", () => {
     expect(jobs.find((j) => j.id === untouched.id)?.resumeId).toBe(
       "other-resume",
     );
+  });
+
+  it("keeps a cover letter that pointed at the deleted resume, minus the link (#711)", async () => {
+    const resume = await saveResume({
+      filename: "resume-v1.pdf",
+      blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }),
+    });
+    const linked = await saveLetter({
+      jobId: "job-1",
+      body: "Dear hiring team,",
+      resumeId: resume.id,
+    });
+    const untouched = await saveLetter({
+      jobId: "job-2",
+      body: "Another draft",
+      resumeId: "other-resume",
+    });
+
+    const library = await mountLibrary();
+    await act(async () => {
+      await library().remove(resume.id);
+    });
+
+    // Same degrade jobs get: the prose survives, only the dangling link goes.
+    // `clearLetterResumeLink` itself is covered in `storage/letters.test.ts`;
+    // what this asserts is that the delete path actually calls it.
+    expect((await getLetter(linked.id))?.body).toBe("Dear hiring team,");
+    expect((await getLetter(linked.id))?.resumeId).toBeUndefined();
+    expect((await getLetter(untouched.id))?.resumeId).toBe("other-resume");
   });
 
   it("deletes a resume with no tracked jobs at all without throwing", async () => {
