@@ -13,6 +13,7 @@ import {
   getAllRecords,
   deleteRecord,
 } from "./crud.ts";
+import { deleteLettersForJob } from "./letters.ts";
 import type { JobRecord } from "./types.ts";
 
 /** Save a job record. Generates a UUID when `id` is absent; timestamps managed
@@ -43,6 +44,23 @@ export function getAllJobs(): Promise<JobRecord[]> {
   return getAllRecords<JobRecord>("jobs");
 }
 
-export function deleteJob(id: string): Promise<void> {
-  return deleteRecord("jobs", id);
+/**
+ * Delete a job and CASCADE to its cover letters (#711).
+ *
+ * The cascade lives here, at the store, rather than a layer up in
+ * `job-tracker.ts`: `LetterRecord.jobId` is a required parent link, so "no
+ * letter outlives its job" is referential integrity, not tracker policy, and
+ * putting it behind the one door means no future caller of `deleteJob` can
+ * forget it. (Contrast `clearResumeLink`, which is called from the resume-delete
+ * path a layer up — that one is cross-aggregate policy about a link, not about
+ * a child record's existence.)
+ *
+ * The job goes first. If the letter sweep then fails, the user's actual
+ * intent — the job is gone — still happened; the reverse order would let a
+ * failure delete the letters of a job that survives, which is data loss the
+ * user did not ask for and cannot see coming.
+ */
+export async function deleteJob(id: string): Promise<void> {
+  await deleteRecord("jobs", id);
+  await deleteLettersForJob(id);
 }

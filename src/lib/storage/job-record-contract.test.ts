@@ -20,10 +20,12 @@
 import { describe, expect, it } from "vitest";
 import {
   JOB_RECORD_RULES,
-  findJsonSafetyProblem,
   isKnownStatus,
   validateJobRecord,
 } from "./job-record-contract.ts";
+// Moved to `record-contract.ts` with the rest of the machinery the job and
+// letter contracts share (#711); the behaviour asserted below is unchanged.
+import { findJsonSafetyProblem } from "./record-contract.ts";
 
 /** A record every rule accepts — the baseline each case perturbs one field of. */
 function validRecord(): Record<string, unknown> {

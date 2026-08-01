@@ -4,8 +4,13 @@
 /**
  * Export / import (#321) — the user's own backup path and the mitigation for
  * browser eviction. Everything round-trips through a single JSON document:
- * resume blobs are base64-encoded (the only place bytes inflate), job records
- * pass through as-is. Import restores byte-identical blobs.
+ * resume blobs are base64-encoded (the only place bytes inflate), job and
+ * letter records pass through as-is. Import restores byte-identical blobs.
+ *
+ * The document is versioned separately from the IndexedDB schema. It is at
+ * **2** since the letters store landed (#711); a **1** document, which has no
+ * `letters` key at all, must import forever — a backup on a user's disk does
+ * not upgrade itself.
  *
  * Base64 goes through `btoa`/`atob` over a binary string so it works the same in
  * the browser and the Node test env (no `Buffer` dependency). Blobs are read via
@@ -14,11 +19,14 @@
 
 import { getAllRecords, putRecord, clearStore } from "./crud.ts";
 import { validateJobRecord } from "./job-record-contract.ts";
+import { validateLetterRecord } from "./letter-contract.ts";
 import type {
   ResumeRecord,
   JobRecord,
+  LetterRecord,
   ExportedResume,
   StorageExport,
+  StorageExportV2,
 } from "./types.ts";
 
 /** One job a restore refused, named well enough for the user to find it in the
@@ -31,21 +39,36 @@ export interface SkippedJob {
   reason: string;
 }
 
-/** What a restore did. `jobs` counts records actually WRITTEN, so it and
- *  `skippedJobs.length` together account for every job in the file. */
+/** One letter a restore refused. Sibling of {@link SkippedJob}; `label` rather
+ *  than `title` because that is the letter's own user-facing name. */
+export interface SkippedLetter {
+  id?: string;
+  label?: string;
+  /** Every reason the record failed, joined into one sentence. */
+  reason: string;
+}
+
+/** What a restore did. `jobs` / `letters` count records actually WRITTEN, so
+ *  each pairs with its `skipped…` list to account for every record in the file.
+ *
+ *  Nothing renders `skippedLetters` yet — #711 ships the store with no UI at
+ *  all. It is reported from the first commit anyway because the alternative is
+ *  a restore that drops a letter and says nothing, and a counter added later
+ *  cannot recover the ones already dropped. */
 export interface ImportCounts {
   resumes: number;
   jobs: number;
   skippedJobs: SkippedJob[];
+  letters: number;
+  skippedLetters: SkippedLetter[];
 }
 
-function describeCandidate(value: unknown): Pick<SkippedJob, "id" | "title"> {
-  if (value === null || typeof value !== "object") return {};
-  const record = value as Record<string, unknown>;
-  return {
-    id: typeof record.id === "string" ? record.id : undefined,
-    title: typeof record.title === "string" ? record.title : undefined,
-  };
+/** Read one string field off a candidate that failed validation — so `id` /
+ *  `title` / `label` can be reported without trusting the record's shape. */
+function readStringField(value: unknown, key: string): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : undefined;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -65,10 +88,14 @@ function base64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
-/** Serialize every store to one JSON-ready document (blobs → base64). */
-export async function exportAll(): Promise<StorageExport> {
+/** Serialize every store to one JSON-ready document (blobs → base64). Always
+ *  writes the current format; see {@link importAll} for what still reads. */
+export async function exportAll(): Promise<StorageExportV2> {
   const resumes = await getAllRecords<ResumeRecord>("resumes");
   const jobs = await getAllRecords<JobRecord>("jobs");
+  // Every `LetterRecord` field is JSON-safe by contract, so letters ride
+  // through with no encode step — unlike resumes, which carry a `Blob`.
+  const letters = await getAllRecords<LetterRecord>("letters");
 
   const exportedResumes: ExportedResume[] = await Promise.all(
     resumes.map(async ({ blob, ...rest }) => ({
@@ -79,10 +106,11 @@ export async function exportAll(): Promise<StorageExport> {
   );
 
   return {
-    version: 1,
+    version: 2,
     exportedAt: Date.now(),
     resumes: exportedResumes,
     jobs,
+    letters,
   };
 }
 
@@ -96,8 +124,13 @@ export async function exportToJson(): Promise<string> {
  * store is wiped first; otherwise records are merged (upsert by id). Resume
  * blobs are rebuilt byte-identically from base64.
  *
- * Every job is put through the capture contract (#693) BEFORE any store is
- * touched — the file is the boundary at which `JobRecord` stops being a type
+ * Both a v1 and a v2 document import: a v1 file simply has no letters. That
+ * back-compat is not a courtesy — an exported backup lives on the user's disk
+ * and never learns about a format bump.
+ *
+ * Every job is put through the capture contract (#693), and every letter
+ * through the letter contract (#711), BEFORE any store is touched — the file is
+ * the boundary at which `JobRecord` / `LetterRecord` stop being types
  * TypeScript can vouch for. Three things follow from where that check sits:
  *
  *  - **Skip the record, not the document.** One malformed job must not cost the
@@ -108,43 +141,105 @@ export async function exportToJson(): Promise<string> {
  *    unreachable.
  *  - **Report it.** A silently-dropped record is the real failure mode here, so
  *    the skips ride back on {@link ImportCounts} and `ResumeLibrary` announces
- *    them in its `aria-live` region.
+ *    them in its `aria-live` region. Skipped LETTERS ride back too but are not
+ *    announced yet — there is no letters surface to announce them next to. The
+ *    counter still lands now, because one added later cannot recover the
+ *    records already dropped in silence.
  */
 export async function importAll(
   data: StorageExport,
   mode: "replace" | "merge" = "replace",
 ): Promise<ImportCounts> {
-  if (data.version !== 1) {
-    throw new Error(`Unsupported storage export version: ${data.version}`);
+  // Widened to `number` so the guard survives the union narrowing: with
+  // `data.version` typed `1 | 2`, TypeScript would narrow the failing branch to
+  // `never` and the message could not read the value it is reporting. The check
+  // has to run at runtime regardless — the caller may be a JSON file.
+  const version: number = data.version;
+  if (version !== 1 && version !== 2) {
+    throw new Error(`Unsupported storage export version: ${version}`);
   }
 
-  const accepted: JobRecord[] = [];
-  const skippedJobs: SkippedJob[] = [];
-  for (const job of data.jobs) {
-    const validation = validateJobRecord(job);
-    if (validation.ok) accepted.push(validation.record);
-    else {
-      skippedJobs.push({
-        ...describeCandidate(job),
-        reason: validation.reasons.join(" "),
-      });
-    }
-  }
+  // A v1 document predates the letters store (#711) and carries no `letters`
+  // key at all. An empty list — not a refusal, and not an error — is what makes
+  // every backup a user already has on disk still restorable.
+  const incomingLetters: unknown[] = data.version === 2 ? data.letters : [];
+
+  const jobs = partitionJobs(data.jobs);
+  const letters = partitionLetters(incomingLetters);
 
   if (mode === "replace") {
     await clearStore("resumes");
     await clearStore("jobs");
+    // Cleared even when the document is v1 and therefore contributes no
+    // letters. Replace means "make storage match this file", and skipping the
+    // wipe would leave letters whose jobs were just deleted — orphans the
+    // `deleteJob` cascade exists to make impossible.
+    await clearStore("letters");
   }
 
   for (const { blobBase64, blobType, ...rest } of data.resumes) {
     const blob = new Blob([base64ToBytes(blobBase64)], { type: blobType });
     await putRecord<ResumeRecord>("resumes", { ...rest, blob });
   }
-  for (const job of accepted) {
+  for (const job of jobs.accepted) {
     await putRecord<JobRecord>("jobs", job);
   }
+  for (const letter of letters.accepted) {
+    await putRecord<LetterRecord>("letters", letter);
+  }
 
-  return { resumes: data.resumes.length, jobs: accepted.length, skippedJobs };
+  return {
+    resumes: data.resumes.length,
+    jobs: jobs.accepted.length,
+    skippedJobs: jobs.skipped,
+    letters: letters.accepted.length,
+    skippedLetters: letters.skipped,
+  };
+}
+
+/** Split a file's jobs into the ones the capture contract accepts and the ones
+ *  it refused, with a reason each. Runs before any store is touched — see
+ *  {@link importAll}. */
+function partitionJobs(candidates: unknown[]): {
+  accepted: JobRecord[];
+  skipped: SkippedJob[];
+} {
+  const accepted: JobRecord[] = [];
+  const skipped: SkippedJob[] = [];
+  for (const candidate of candidates) {
+    const validation = validateJobRecord(candidate);
+    if (validation.ok) accepted.push(validation.record);
+    else {
+      skipped.push({
+        id: readStringField(candidate, "id"),
+        title: readStringField(candidate, "title"),
+        reason: validation.reasons.join(" "),
+      });
+    }
+  }
+  return { accepted, skipped };
+}
+
+/** The letters half of {@link partitionJobs}. Same skip-don't-throw rule: one
+ *  malformed letter must not cost the user the file's other records. */
+function partitionLetters(candidates: unknown[]): {
+  accepted: LetterRecord[];
+  skipped: SkippedLetter[];
+} {
+  const accepted: LetterRecord[] = [];
+  const skipped: SkippedLetter[] = [];
+  for (const candidate of candidates) {
+    const validation = validateLetterRecord(candidate);
+    if (validation.ok) accepted.push(validation.record);
+    else {
+      skipped.push({
+        id: readStringField(candidate, "id"),
+        label: readStringField(candidate, "label"),
+        reason: validation.reasons.join(" "),
+      });
+    }
+  }
+  return { accepted, skipped };
 }
 
 /** Narrows `value` to `StorageExport`, or throws a readable message — never a
@@ -158,12 +253,22 @@ function assertStorageExport(value: unknown): asserts value is StorageExport {
   if (value === null || typeof value !== "object") {
     throw new Error("Not an offlinecv backup file.");
   }
-  const v = value as Partial<StorageExport>;
+  // Read through a loose shape rather than `Partial<StorageExport>`: the union
+  // types `version` as `1 | 2`, and comparing that against an arbitrary parsed
+  // value is exactly the comparison TypeScript would call unintentional. The
+  // point of this function is that nothing here is typed yet.
+  const v = value as Record<string, unknown>;
   if (!Array.isArray(v.resumes) || !Array.isArray(v.jobs)) {
     throw new Error("Not an offlinecv backup file.");
   }
-  if (v.version !== 1) {
+  if (v.version !== 1 && v.version !== 2) {
     throw new Error(`Unsupported storage export version: ${String(v.version)}`);
+  }
+  // A v2 document without a `letters` array is malformed, not a v1 document:
+  // the version number is the file's own claim about its shape, and a file that
+  // fails its own claim is the "wrong file picked" case, not a back-compat one.
+  if (v.version === 2 && !Array.isArray(v.letters)) {
+    throw new Error("Not an offlinecv backup file.");
   }
 }
 
