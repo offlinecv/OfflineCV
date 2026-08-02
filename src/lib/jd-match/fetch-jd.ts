@@ -13,7 +13,7 @@ export type AtsPlatform =
   | "recruitee"
   | "ashby";
 
-interface ParsedAtsUrl {
+export interface ParsedAtsUrl {
   platform: AtsPlatform;
   company: string;
   jobId: string;
@@ -300,10 +300,23 @@ export function classifyUnsupportedHost(url: string): UnsupportedHost | null {
  *
  * Analytics are wired in the caller (see `JdInput`), not here, so this
  * module stays pure (#75).
+ *
+ * `descriptionHtml` is passed through unconverted alongside `text` when the
+ * platform returned HTML. `text` is unchanged and remains what every existing
+ * caller reads; the raw HTML exists for `src/lib/jd-extract/`, which converts to
+ * Markdown rather than plaintext because list structure carries the requirements
+ * (see the note on `ExtractedPosting.body`). Without this, that lane would have to
+ * either re-fetch or accept an already-flattened body.
  */
 export async function fetchJdFromUrl(
   url: string,
-): Promise<{ text: string; title?: string; company?: string; source: AtsPlatform } | null> {
+): Promise<{
+  text: string;
+  title?: string;
+  company?: string;
+  descriptionHtml?: string;
+  source: AtsPlatform;
+} | null> {
   const parsed = parseAtsUrl(url);
   if (!parsed) return null;
 
@@ -318,6 +331,7 @@ export async function fetchJdFromUrl(
     text,
     title: result.title,
     company: result.company,
+    descriptionHtml: result.descriptionHtml,
     source: parsed.platform,
   };
 }
