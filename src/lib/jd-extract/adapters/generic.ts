@@ -17,6 +17,7 @@
 // claiming one would misreport how the posting was obtained.
 
 import { htmlToMarkdown } from "../html-to-markdown";
+import { pruneNonPosting } from "../prune";
 import type { ATSExtractor, ExtractedPosting } from "../types";
 
 /** See `./linkedin.ts` — below this, the container held page chrome, not a JD. */
@@ -57,7 +58,13 @@ export const generic: ATSExtractor = {
       doc.querySelector("article") ||
       doc.querySelector("main") ||
       doc.querySelector('[role="main"]');
-    const body = mainEl ? htmlToMarkdown(mainEl) : doc.body?.textContent?.trim() || "";
+    // Pruned for the same reason the landmark is preferred over `doc.body`: a
+    // landmark is the smallest container the page offers, not a clean one. An
+    // unknown board's `<main>` still carries a "Related jobs" rail, and those are
+    // other postings' terms landing in this posting's coverage denominator.
+    const body = mainEl
+      ? htmlToMarkdown(pruneNonPosting(mainEl))
+      : doc.body?.textContent?.trim() || "";
 
     if (body.length < MIN_BODY_LENGTH) return null;
 
