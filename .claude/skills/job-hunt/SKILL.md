@@ -60,6 +60,14 @@ Indeed and LinkedIn in a paired Chrome on the same day — URL parameters, selec
 every derived id in the table there are observed, not inferred. Where the obvious approach
 was tried and failed, that is called out — do not re-derive it.
 
+**One exception, stated so it is not mistaken for the rest.** Phase 2's extraction step
+(`jd-extract`, Appendix E) replaced hand-written page slicing in #719. The bundle, the call
+shape and the resulting record were verified against the real module in jsdom, and the
+module's own suite covers the adapters — but the inject-and-call round trip has **not** been
+run against live LinkedIn or Indeed. Treat the selectors it depends on as this repo's best
+current reading of those pages, not as observations from a paired run, and if something
+comes back empty on a real page, that is worth reporting rather than working around.
+
 ## The two doors
 
 | Direction | Mechanism | Why this one |
@@ -123,8 +131,10 @@ Load the Chrome tools in **one** `ToolSearch` call:
 select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__file_upload,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__list_connected_browsers,mcp__claude-in-chrome__switch_browser
 ```
 
-`get_page_text` and `read_page` are for Phase 2's posting pages, not for offlinecv itself —
-everything this skill reads out of the app comes from IndexedDB via `javascript_tool`.
+`get_page_text` and `read_page` are for Phase 2's **search result** pages, not for offlinecv
+itself and not for posting bodies — everything this skill reads out of the app comes from
+IndexedDB via `javascript_tool`, and posting bodies come from the injected extractor
+(Appendix E). A posting body assembled from `get_page_text` is the failure #719 removed.
 
 `tabs_context_mcp{createIfEmpty:true}`, then navigate to `https://offlinecv.org/`.
 Reuse an existing offlinecv tab only if the user asks you to.
@@ -394,30 +404,74 @@ So, before Phase 3, rewrite every posting URL to its canonical form and store *t
 Do not capture a search URL, and do not capture a redirect shortlink. A tracker full of
 `rc/clk` links grows a new record every time the user re-runs the hunt.
 
-### Take the posting's own body, and only the posting's
+Hand that canonical URL to `JD.toJobRecord` as its second argument — **the extractor does
+not rewrite it for you.** What the mapper does do is prefer the posting's `atsUrl` over it:
+when the page links through to a Greenhouse or Lever original, that ATS URL becomes
+`JobRecord.url` instead, so the same job found on LinkedIn, on Indeed, and on the company's
+own board collapses to one record. The cost is that a posting captured once where that
+link is readable and once where it is not forks into two records — a duplicate the user can
+delete, which is the side of the trade `job-url.ts` deliberately lands on.
 
-Hydrating the body is also the liveness check — a closed posting cannot give you one, which
-is the same signal the old "fetch it and match the `h1`" pass was buying, for one fetch
-instead of two. If the body does not come back, the posting is gone; drop it and say so.
+### Take the posting's body with `jd-extract`, never by reading the page yourself
 
-Read the rendered page (`get_page_text` on the posting URL). **Do not call a site's internal
-JSON API** — LinkedIn's `/voyager/` endpoints answer, but reaching them means lifting the
-page's CSRF token out of `document.cookie`, and that is both a permission the skill does not
-have and an interface with no promise of stability. The rendered page is the supported read.
+**Do not slice the page text by hand.** `src/lib/jd-extract/` is this repo's job-posting
+extractor, and the app and the browser extension run the same code — that is the whole point
+of it existing (#719, the same argument `src/lib/storage/job-url.ts` makes for id
+derivation). This section used to describe extraction as English prose over string sentinels
+— "keep the text between `About the job` and `Set alert for similar jobs`" — and that is the
+implementation the module replaced. Do not re-derive it.
 
-Then cut it down, because the page is mostly not the posting:
+Build the injectable bundle once per session:
 
-- **Slice to the body.** On LinkedIn, keep the text between `About the job` and `Set alert
-  for similar jobs`. Everything after is "More jobs", the company blurb, the footer, and a
-  list of 37 language names — roughly 60% of the payload, all of it noise the matcher would
-  score.
-- **Strip the people block.** A LinkedIn posting page surfaces the user's 2nd-degree
-  connections under "People you can reach out to", by name, current title and school. That is
-  a *third party's* personal data, and this skill is about to write its input into the user's
-  IndexedDB. Cut it before it reaches `jdText`. The repo's fixture-PII rule is the same
-  instinct: a name that arrives incidentally is still a name you chose to persist.
-- **Expand truncation first.** Both sites collapse long descriptions behind a "see more"
-  control; the collapsed text ends mid-posting. Expand it, then read.
+```bash
+node_modules/.bin/esbuild src/lib/jd-extract/index.ts \
+  --bundle --format=iife --global-name=JD --minify \
+  --outfile="$SCRATCH/jd-extract.js" --log-level=error
+```
+
+~24 KB, network-free by construction: the barrel deliberately omits the `ats_api` tier
+because that one imports `fetch()`, so nothing you inject into the user's page can make a
+request. Read the file and pass its contents to `javascript_tool` on the posting tab,
+followed by the call — see Appendix E for the exact shape.
+
+Injection runs in the **page's own context**, so `window.JD` survives until the tab
+navigates. On LinkedIn that is worth using: the jobs search is an SPA, so you can inject
+once and then read posting after posting by changing `currentJobId` without paying the
+bundle again. Anywhere each posting is a real navigation, re-inject.
+
+What comes back is one ~1 KB JSON object, not the page. That direction matters: a LinkedIn
+job page is 1–2 MB of HTML, so shipping the page out to slice it here costs far more than
+shipping ~24 KB of extractor in.
+
+`JD.extract` returns `null` when the page is not a posting — a closed listing, a search
+results page, an interstitial. That **is** the liveness check, for one read instead of two.
+A `null` is not an error to retry; drop the posting and report the URL as unhydrated.
+
+**Do not call a site's internal JSON API** — LinkedIn's `/voyager/` endpoints answer, but
+reaching them means lifting the page's CSRF token out of `document.cookie`, which is both a
+permission this skill does not have and an interface with no promise of stability. The
+rendered page is the supported read.
+
+**Expand truncation before you extract.** Both sites collapse long descriptions behind a
+"see more" control, and the extractor reads the DOM it is given — a collapsed description
+extracts cleanly and stops mid-posting, which is the failure that looks most like success.
+Click it, then inject.
+
+### What the extractor already handles, so you do not
+
+- **The people block.** A LinkedIn posting page surfaces the user's 2nd-degree connections
+  under "People you can reach out to", by name, current title and school. That is a *third
+  party's* personal data, and `jdText` gets persisted to the user's IndexedDB.
+  `src/lib/jd-extract/prune.ts` drops that subtree, along with "More jobs for you" rails and
+  page chrome, before the body is built. Verified by test, not by inspection — but if you
+  ever see a person's name in a body you are about to write, stop and say so rather than
+  editing it out by hand, because a name reaching that far means the guard has rotted and
+  the extension is leaking it too.
+- **Line structure.** The body comes back as Markdown, with the list structure the
+  requirements live in. The old advice to convert `<br>`/`</p>`/`</li>` to newlines before
+  stripping tags is now the module's job.
+- **The canonical ATS URL.** Where a listing links through to a Greenhouse or Lever
+  original, `toJobRecord` puts *that* in `url` — see Phase 3.
 
 The app's own `/jobs/` Search tab is the remaining option, and it is the user's to drive: it
 egresses a keyword string built from their query, a deliberate and documented boundary
@@ -426,12 +480,8 @@ saying so.
 
 ### `jdText` is the requirements body, not a summary — this is the #1 quality lever
 
-**Do not write your own précis of the posting.** Capture the posting's own text, from the
-role/responsibilities heading through the qualifications, and keep the line breaks: the
-noun pass matches phrases within a line and cannot span a line break, so flattening the
-whitespace destroys the terms.
-
-Measured on a live posting, same résumé, same everything else:
+**Never hand-write, paraphrase, or top-and-tail the body.** Pass through exactly what
+`JD.extract` returned. Measured on a live posting, same résumé, same everything else:
 
 | `jdText` | terms extracted | rating |
 |---|---|---|
@@ -439,43 +489,58 @@ Measured on a live posting, same résumé, same everything else:
 | 8000 chars of the real JD body | 26 terms incl. real skills | **2.34★** |
 
 A hand-written blurb reads well and rates zero, because what survives paraphrase is the
-company name and the job title — `DEFCON AI`, `USA`, `Data Lead` — and no résumé on earth
-contains those. The fit rating is only as good as the text you save, and the user cannot
-tell a bad capture from a bad match: both render as "Weak fit".
+company name and the job title — and no résumé on earth contains those. The fit rating is
+only as good as the text you save, and the user cannot tell a bad capture from a bad match:
+both render as "Weak fit".
 
-Aim for **≥2000 characters** of real posting body. Take the whole thing when it is
-reasonable; do not trim to be tidy. Sanity-check before writing: if a capture yields under
-~1500 characters, or reads like prose you composed rather than text you copied, go back and
-take the real body.
+**Add nothing to it.** No synthesized provenance header — no `Posted: … ReqID: … Type: …`
+line, no fetch timestamp, no source URL. A capture that prepended one put the junk term
+`REQ` straight into the coverage denominator, where it cost real rating and no résumé could
+ever cover it. Provenance belongs in `capture`, a structured field the matcher never reads.
 
-When fetching HTML yourself, convert `<br>`, `</p>`, `</li>` to newlines **before**
-stripping tags. Flattening whitespace first cost a whole diagnostic round: the same JD
-yielded 0 terms flattened and 26 line-structured.
+**Check the extraction before you keep it.** Two fields on the result say how much to trust
+it, and both belong in the report:
 
-**Save the posting's text and nothing else.** No synthesized provenance header — no
-`Posted: … ReqID: … Type: …` line, no fetch timestamp, no source URL. A capture that
-prepended one put the junk term `REQ` straight into the coverage denominator, where it
-cost real rating and no résumé could ever cover it. Provenance belongs in `capture`,
-which is a structured field the matcher never reads. The posting *title* on its own first
-line is fine and expected — `extractJdTerms` is told the title separately
-(`ExtractOptions.postingTitle`) and drops it from the requirement terms.
+- `extractionTier` — `schema_org` is the publisher's own machine-readable declaration and is
+  the best case. `ats_extractor` is a host adapter. `dom_metadata` is the floor, and on a
+  LinkedIn posting it is also the *expected* value, because LinkedIn's adapter reports that
+  tier deliberately — it is an aggregator, not an ATS.
+- `body.length` — aim for **≥2000 characters**. Under ~1500 usually means the description
+  was still collapsed behind "see more", or the SPA had not rendered when you injected.
+  Expand, re-inject, re-read. If it stays short, keep it and say so in the report; do not
+  pad it and do not silently drop it.
 
 ---
 
 ## Phase 3 — Build the import document
 
+### The record is already built — `JD.toJobRecord` made it
+
+Phase 2's injected call returned a capture payload, not raw extraction output. It carries
+`title`, `company`, `url`, `jdText`, the six posting facts the contract added in v2
+(`location`, `salaryRange`, `datePosted`, `workModel`, `employmentType`, `validThrough`),
+and a filled `capture` block. **Pass those fields through unchanged.** Do not re-derive one,
+do not add one the mapper omitted, and do not fill a blank — an omitted field means "the
+posting did not say", and inventing a value there is the drift `to-job-record.ts` exists to
+prevent.
+
+What it deliberately does **not** give you is an `id` or a `status`. Those are next.
+
 ### Derive ids with the repo's own code, never by hand
 
 `deriveJobId` is normative (§2 of `docs/job-capture-contract.md`). A producer that strips
-one parameter differently forks the id space and creates silent duplicates. Bundle the
-real module and call it:
+one parameter differently forks the id space and creates silent duplicates. It is not on the
+injectable barrel — the page has no reason to derive an id — so bundle it separately and
+call it here:
 
 ```bash
 node_modules/.bin/esbuild src/lib/storage/job-url.ts \
   --bundle --format=esm --outfile="$SCRATCH/job-url.mjs" --log-level=error
 ```
 
-Then `import { deriveJobId } from "$SCRATCH/job-url.mjs"` in a node one-liner. Verified:
+Then `import { deriveJobId } from "$SCRATCH/job-url.mjs"` in a node one-liner, and feed it
+**the `url` the mapper returned**, not the URL you navigated to — they differ whenever the
+`atsUrl` rule fired, and that difference is the entire point of it. Verified:
 `https://boards.greenhouse.io/exampleco/jobs/4455661?gh_src=abc&utm_source=alerts`
 → `job:boards.greenhouse.io/exampleco/jobs/4455661`.
 
@@ -492,6 +557,9 @@ between a skill the user can re-run and one that quietly resets their pipeline.
 
 `StorageExport` v2. `resumes: []` always — this skill never writes résumés.
 
+Each job is the mapper's payload plus the two fields it does not own — the derived `id` and
+`status: "interested"`:
+
 ```json
 {
   "version": 2,
@@ -500,22 +568,34 @@ between a skill the user can re-run and one that quietly resets their pipeline.
   "jobs": [
     {
       "id": "job:<derived>",
+      "status": "interested",
+
       "title": "…",
       "company": "…",
       "url": "https://…",
-      "status": "interested",
       "jdText": "…",
+      "location": "Austin, TX",
+      "salaryRange": "$180k – $220k",
+      "datePosted": "2026-07-28",
+      "workModel": "remote",
+      "employmentType": "FULL_TIME",
+      "validThrough": "2026-09-01",
       "capture": {
-        "contract": 1,
+        "contract": 2,
         "producer": "claude-code-jobs-skill",
-        "producerVersion": "0.1.0",
-        "capturedAt": 0
+        "producerVersion": "0.2.0",
+        "capturedAt": 1754006400000
       }
     }
   ],
   "letters": []
 }
 ```
+
+The blank line marks the seam: everything below it came from `JD.toJobRecord` verbatim.
+The six posting facts are all optional — **emit only the ones the mapper returned.** They
+are display-only record-keeping; nothing ranks on them, so a missing one costs the user
+nothing and a guessed one is just wrong.
 
 Rules the validator enforces, so get them right up front:
 
@@ -527,6 +607,10 @@ Rules the validator enforces, so get them right up front:
 - **Write the job and its letters in the same document.** `importAll` writes
   resumes → jobs → letters, so a letter's `jobId` resolves. A letter whose `jobId` matches
   no job imports cleanly and is then reachable from nothing — nothing reconciles it.
+- `datePosted` and `validThrough` are accepted whatever they say, but a value that does not
+  start `YYYY-MM-DD` earns a warning. Never convert a relative date — `"3 days ago"` is
+  wrong tomorrow and nothing downstream can tell. Pass through what the mapper returned;
+  it is already the posting's own declared value.
 
 Write the file into the session scratchpad. `file_upload` accepts scratchpad paths.
 
@@ -573,6 +657,13 @@ Report:
 - **how old the postings are** — the oldest one captured, and anything over a week. Say the
   age; do not quietly drop stale rows and do not quietly keep them
 - jobs written / already-present-and-skipped / refused, each refusal with its reason
+- **how well each posting extracted** — its `extractionTier` and body length. A run where
+  everything landed on `dom_metadata` at 600 characters produced worse ratings than one on
+  `schema_org` at 8000, and the ratings alone do not distinguish a weak match from a weak
+  capture. Say which it was
+- **any posting whose `url` came from `atsUrl` rather than the page you captured it on** —
+  the record points at the ATS original, so the user clicking through will not land back on
+  the LinkedIn or Indeed listing they would expect
 - **links parked unhydrated** — anything found but not captured because its body would not
   load, with the URL so the user can open it themselves
 - letters written / refused, if any
@@ -662,3 +753,45 @@ for (const j of await read("jobs")) {
 
 Deleting a job through the **app** cascades to its letters. Deleting it through raw
 IndexedDB like this does **not** — sweep `letters` by `jobId` yourself, or prefer the UI.
+
+## Appendix E — extract a posting
+
+Build once per session (Phase 2), then per posting: read `$SCRATCH/jd-extract.js` and send
+its contents as the **first part** of one `javascript_tool` call, with this appended.
+`javascript_tool` has REPL semantics — top-level `await` works and the last expression is
+the return value, so there is no `return` here and there must not be one.
+
+```js
+// …contents of $SCRATCH/jd-extract.js above this line, defining `JD`…
+
+const canonical = "https://www.indeed.com/viewjob?jk=<jk>"; // Phase 2's normalised URL
+const posting = await JD.extract(document, new URL(location.href));
+
+JSON.stringify(
+  posting && {
+    tier: posting.extractionTier,
+    bodyChars: posting.body.length,
+    fromAtsUrl: Boolean(posting.atsUrl),
+    record: JD.toJobRecord(posting, canonical, {
+      producer: "claude-code-jobs-skill",
+      producerVersion: "0.2.0",
+    }),
+  },
+);
+```
+
+`document` and `location.href` are the *page's* — what it actually rendered, including
+whatever you expanded. `canonical` is a separate argument on purpose: the extractor reads
+the page it is on, and normalising away tracking parameters is Phase 2's job, not its.
+
+`null` back means the page is not a posting — a closed listing, a search page, an
+interstitial. Drop it and report the URL; do not retry.
+
+**Keep the `JSON.stringify`.** The record must cross the tool boundary as JSON, not as an
+object — an object built in the page's realm has that realm's `Object.prototype`, and
+`validateJobRecord` refuses it with `` `capture`: a Object is not a plain JSON object ``,
+which reads like a malformed record and is not one. Serialising is what re-homes it.
+
+The bundle runs in the page's own context, so `window.JD` persists until the tab navigates.
+Re-sending it is harmless — it just redefines `JD` — but on a page that still has it,
+sending only the call is free.

@@ -23,6 +23,7 @@ import { workday } from "./adapters/workday";
 import { oracleHcm } from "./adapters/oracle-hcm";
 import { smartrecruiters } from "./adapters/smartrecruiters";
 import { generic } from "./adapters/generic";
+import { linkedin } from "./adapters/linkedin";
 
 function doc(html: string): Document {
   return new DOMParser().parseFromString(
@@ -349,5 +350,119 @@ describe("generic.extract", () => {
 
   it("returns null with no h1", () => {
     expect(generic.extract(doc(`<main>${LONG_BODY}</main>`), url)).toBeNull();
+  });
+
+  it("drops a related-jobs rail, whose titles would score as this posting's terms", () => {
+    const result = generic.extract(
+      doc(
+        `<h1>Platform Engineer</h1><main>${LONG_BODY}` +
+          "<section><h2>Related jobs</h2><ul><li>Principal Kubernetes Architect at OtherCo</li></ul></section>" +
+          "</main>",
+      ),
+      url,
+    );
+    expect(result!.body).not.toContain("Principal Kubernetes Architect");
+    expect(result!.body).toContain("distributed systems");
+  });
+});
+
+/**
+ * LinkedIn is the highest-volume source in the `job-hunt` lane and the one general
+ * tier that has nothing to fall back on — the logged-in job view ships neither
+ * JSON-LD nor `og:` tags, so if this adapter misses, the most commonly captured
+ * posting gets the worst extraction available.
+ */
+describe("linkedin.extract", () => {
+  const url = new URL("https://www.linkedin.com/jobs/view/4437835690/");
+
+  /** The logged-in job view's shape: description and page furniture share `<main>`. */
+  function linkedInDoc(extra = ""): Document {
+    const d = doc(
+      "<main>" +
+        "<h1>Staff Data Engineer</h1>" +
+        '<div class="job-details-jobs-unified-top-card__company-name"><a>ExampleCo</a></div>' +
+        '<div id="job-details"><h2>About the job</h2>' +
+        "<p>Own the streaming platform end to end, from ingestion through serving.</p>" +
+        "<h3>Qualifications</h3><ul><li>8+ years with Python and Spark</li></ul></div>" +
+        extra +
+        "</main>",
+    );
+    d.title = "Staff Data Engineer | ExampleCo | LinkedIn";
+    return d;
+  }
+
+  it("extracts title, company and body from the logged-in view", () => {
+    const result = linkedin.extract(linkedInDoc(), url);
+
+    expect(result!.title).toBe("Staff Data Engineer");
+    expect(result!.company).toBe("ExampleCo");
+    expect(result!.body).toContain("Python and Spark");
+    // LinkedIn is an aggregator, not an ATS — reporting one would misstate how the
+    // posting was obtained.
+    expect(result!.extractionTier).toBe("dom_metadata");
+    expect(result!.atsDetected).toBeUndefined();
+  });
+
+  it("falls back to the page title when the DOM carries no company", () => {
+    const d = doc(
+      '<main><h1>Staff Data Engineer</h1><div id="job-details">' +
+        `${LONG_BODY}</div></main>`,
+    );
+    d.title = "Staff Data Engineer | ExampleCo | LinkedIn";
+
+    expect(linkedin.extract(d, url)!.company).toBe("ExampleCo");
+  });
+
+  // Degrades rather than returning null: the body and URL still carry real value.
+  it("reports an unknown company rather than discarding the posting", () => {
+    const d = doc(`<main><h1>Staff Data Engineer</h1><div>${LONG_BODY}</div></main>`);
+    d.title = "";
+
+    expect(linkedin.extract(d, url)!.company).toBe("Unknown");
+  });
+
+  it("returns null when the SPA has not rendered the posting yet", () => {
+    const d = doc("<main><h1>Staff Data Engineer</h1><nav>Home Jobs Messaging</nav></main>");
+    expect(linkedin.extract(d, url)).toBeNull();
+  });
+
+  it("returns null with no title", () => {
+    expect(linkedin.extract(doc(`<main>${LONG_BODY}</main>`), url)).toBeNull();
+  });
+
+  /**
+   * The regression this adapter's pruning exists for. `body` becomes
+   * `JobRecord.jdText` and is persisted to the user's IndexedDB, so a connection's
+   * name reaching it is a privacy defect, not a quality one — asserted on the names
+   * themselves for that reason. Personas are synthetic.
+   */
+  it("keeps the 'People you can reach out to' block out of the body", () => {
+    const result = linkedin.extract(
+      linkedInDoc(
+        '<section class="people-who-can-help"><h2>People you can reach out to</h2>' +
+          "<ul><li><a>Dana Whitfield</a><span>Senior Recruiter at ExampleCo</span>" +
+          "<span>Purdue University</span></li></ul></section>",
+      ),
+      url,
+    );
+
+    expect(result!.body).not.toContain("Dana Whitfield");
+    expect(result!.body).not.toContain("Purdue University");
+    expect(result!.body).toContain("Python and Spark");
+  });
+
+  it("keeps other postings' titles out of the body", () => {
+    const result = linkedin.extract(
+      linkedInDoc(
+        "<section><h2>More jobs for you</h2>" +
+          "<ul><li>Principal Data Engineer at OtherCo</li></ul></section>" +
+          "<footer>Amharic Arabic Bangla Czech Danish</footer>",
+      ),
+      url,
+    );
+
+    expect(result!.body).not.toContain("Principal Data Engineer at OtherCo");
+    expect(result!.body).not.toContain("Amharic");
+    expect(result!.body).toContain("streaming platform");
   });
 });

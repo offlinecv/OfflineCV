@@ -16,6 +16,7 @@
 // posting was obtained.
 
 import { htmlToMarkdown } from "../html-to-markdown";
+import { pruneNonPosting } from "../prune";
 import type { ATSExtractor, ExtractedPosting } from "../types";
 import {
   extractLinkedInCompanyFromDOM,
@@ -52,9 +53,14 @@ export const linkedin: ATSExtractor = {
 
     if (!title) return null;
 
+    // `<main>` on the logged-in job view is not the posting: it also holds the
+    // "People you can reach out to" block — named 2nd-degree connections, their
+    // titles and their schools — and a list of other postings. Pruning is not a
+    // tidiness pass here; it is what keeps a third party's personal data out of
+    // `jdText`, which is persisted. See `../prune.ts`.
     const mainEl = doc.querySelector("main") || doc.querySelector('[role="main"]');
     const body = mainEl
-      ? htmlToMarkdown(mainEl)
+      ? htmlToMarkdown(pruneNonPosting(mainEl))
       : doc.body?.textContent?.trim() || "";
 
     if (body.length < MIN_BODY_LENGTH) return null;
