@@ -60,7 +60,8 @@ A record is a **plain JSON object**. Not an array, not `null`, not a class insta
 | `jdText` | string | The job description, verbatim. |
 | `matchResult` | JSON-safe value | An opaque match payload. See §6. |
 | `capture` | object | Provenance. See §7. |
-| `createdAt` / `updatedAt` | finite number (epoch ms) | Timestamps. **`captureJob` ignores yours** and lets the store own them; a backup file carries them so a restore preserves `createdAt`. |
+| `createdAt` / `updatedAt` | finite number (epoch ms) | Timestamps. **`captureJob` ignores yours** and lets the store own them; a backup file carries them so a restore preserves both. |
+| `deletedAt` | finite number (epoch ms) | A **tombstone**: the record is deleted, and its presence says so. **`captureJob` ignores yours** — see §5. A backup file carries it. |
 
 ### Optional — the posting facts (added in v2)
 
@@ -239,6 +240,54 @@ was meant to prevent.
 A re-capture does **not** stamp `updatedAt`, so it will not float the job to the top of a list
 sorted most-recently-updated-first. `created: false` in the result tells you the record was already
 there.
+
+### Deleted records, and why you cannot capture one
+
+A deleted job is **tombstoned**, not removed: the row stays with a `deletedAt` timestamp on it. It
+has to. A record that is simply gone is indistinguishable from one that was never there, so any
+second holder of the library — another device, a backup file, you — has no way to tell a deletion
+from a gap, and re-adds it.
+
+Two rules follow, and they point in opposite directions on purpose:
+
+- **`captureJob` strips a `deletedAt` you send.** You are authoritative about the posting; you are
+  not in a position to state that the user deleted their record of it. Deletion is not a fact about
+  the job market.
+- **Capturing a posting the user deleted brings the record back**, reported as `created: true`. The
+  tombstone exists to stop a *replica* resurrecting the record behind the user's back — not to stop
+  the user saving the posting again. `createdAt` survives from the tombstone, so the revived record
+  keeps the date it was first saved.
+
+If you are replicating rather than capturing — propagating a deletion made somewhere else — this is
+the wrong entry point. Use the store's own delete path.
+
+### Tombstones ARE in the backup document
+
+A backup carries deleted records, `deletedAt` and all, and restoring one restores them as deleted.
+If you read or write export files, expect them.
+
+The decision is not obvious, so here is the whole of it. Omitting tombstones looks tidier and is
+wrong in **merge** mode, which is the mode that exists to combine two copies of a library: device A
+deletes a job and exports, device B still has it live, and B merging A's file would hand the job
+straight back — because a record missing from a file is indistinguishable from one its author never
+had. The deletion silently undoes itself and the user cannot tell which device is right. In
+**replace** mode the visible result is identical either way, since the stores are wiped first. So
+the tie breaks toward carrying them: it costs a few bytes in the mode where it does not matter and
+buys convergence in the mode where it does.
+
+Two consequences worth knowing: the document is the state of the store rather than a list of what
+the user has, so `export → import → export` is stable rather than quietly shedding rows; and the
+counts a restore reports are **live** records, because "restored 40 jobs" has to mean forty the user
+can see.
+
+The document **version is not bumped** for this, and the older build's behaviour is the reason. An
+export written today still declares version 2, so a build that predates tombstones imports it,
+treats `deletedAt` as an unknown field, preserves it, and — having no filter — shows those jobs as
+live. That is not great, and every alternative is worse: bumping the version would make that build
+reject the whole file with "Unsupported storage export version", costing the user every record
+rather than resurrecting a few, and stripping tombstones on export would reintroduce the merge bug
+above for everyone. A few deleted jobs reappearing on an old build is exactly what that build did
+before deletions were recorded at all.
 
 ---
 

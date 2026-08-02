@@ -78,6 +78,23 @@ function resolveCaptureId(input: Record<string, unknown>): string {
  * most-recently-updated-first, and a producer with a wrong clock would
  * otherwise bury or float its own captures. Hence `touch: false` — a brand-new
  * capture still gets `now` from `putRecord`, an update keeps what was there.
+ *
+ * `deletedAt` is dropped for a different reason (#730): a capture is a producer
+ * saying *this posting exists*, which is not a claim it can make about whether
+ * the user deleted their record of it. A producer that wants to replicate a
+ * deletion is doing replication, not capture, and goes through the store's own
+ * delete path.
+ *
+ * ## Capturing a posting the user deleted REVIVES it
+ *
+ * `getJob` reads a tombstoned job as absent, so the merge below sees no
+ * existing record, the write replaces the tombstone with a live record, and the
+ * result reports `created: true`. That is deliberate and it is also what this
+ * function already did when deletion was a hard delete — the user gets the same
+ * behaviour from the same action, and the tombstone's only job was to stop a
+ * *replica* from resurrecting the record behind their back, not to stop them
+ * saving the posting again. `createdAt` still survives from the tombstone, so a
+ * revived job keeps the date it was first saved.
  */
 export async function captureJob(input: unknown): Promise<JobCaptureResult> {
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
@@ -87,6 +104,7 @@ export async function captureJob(input: unknown): Promise<JobCaptureResult> {
   const proposed: Record<string, unknown> = { ...candidate, id: resolveCaptureId(candidate) };
   delete proposed.createdAt;
   delete proposed.updatedAt;
+  delete proposed.deletedAt;
 
   const validation = validateJobRecord(proposed);
   if (!validation.ok) return validation;

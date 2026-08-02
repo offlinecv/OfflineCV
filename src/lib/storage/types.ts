@@ -20,6 +20,78 @@ export interface StoredRecord {
   createdAt: number;
   /** Epoch ms of the most recent write. */
   updatedAt: number;
+  /**
+   * Epoch ms this record was deleted — a **tombstone** (#730). Absent on every
+   * live record, and absent is the only reading of "not deleted": a `0` would
+   * be a valid epoch-ms timestamp.
+   *
+   * A tombstone exists because a record that is simply *gone* replicates
+   * nothing. Any second holder of this library — another device, a backup file
+   * a user restores from, a producer that captured the same posting — cannot
+   * distinguish "deleted here" from "never existed here", so it re-adds the
+   * record and the deletion undoes itself. The row has to stay behind to say
+   * what happened.
+   *
+   * **It is declared on every record but only WRITTEN for `jobs` and
+   * `letters`.** Those two replicate; `resumes` and `boards` hard-delete
+   * through {@link deleteRecord} — a résumé's bytes are the bulk of the
+   * database and holding them after a delete is the opposite of what the user
+   * asked for, and `boards` is a pure cache whose miss path is already correct.
+   * Declaring it once anyway keeps the soft-delete machinery in `crud.ts`
+   * store-agnostic, which is where the rest of that layer already sits.
+   *
+   * Readers must filter. `getAllRecords` does it by default (opt out with
+   * `includeDeleted`) so a caller has to go out of its way to see one.
+   */
+  deletedAt?: number;
+}
+
+/**
+ * The stores that replicate, and therefore the ones that carry an `updatedAt`
+ * index and a sync cursor (#730).
+ *
+ * `boards` is excluded deliberately and is not an oversight: it is a cache of
+ * what a company's ATS board returned, re-fetched cheaply on a miss. Syncing it
+ * would replicate staleness between devices and resurrect boards the registry
+ * has since dropped — the same reason it is absent from the backup document.
+ */
+export type SyncableStoreName = "resumes" | "jobs" | "letters";
+
+/**
+ * Replication bookmarks for one object store — the `sync` store's record
+ * shape (#730), keyed on the store name it describes.
+ *
+ * Deliberately **not** a {@link StoredRecord}. It is a bookmark, not a record:
+ * it has no creation time worth keeping, nothing sorts it, it never
+ * replicates, and it must never be tombstoned. Giving it the record shape would
+ * mean `putRecord` stamping `updatedAt` on a cursor, which is a timestamp about
+ * the bookmark rather than about anything a user has.
+ *
+ * The two cursors read from **different clocks**, and conflating them is the
+ * bug this docblock exists to prevent:
+ *
+ *  - {@link lastPulledAt} is the REMOTE clock, held verbatim as whatever opaque
+ *    string the remote handed back. It is compared only against other values
+ *    from that same source. Parsing it into epoch ms would lose sub-millisecond
+ *    precision, and a cursor that rounds *up* silently skips every record
+ *    written inside the truncated interval.
+ *  - {@link lastPushedAt} is THIS device's `Date.now()`, compared against
+ *    `StoredRecord.updatedAt`, which is stamped from the same clock.
+ *
+ * Nothing in this build writes either one. The store lands here because the
+ * schema migration that creates it lands here (see `db.ts`) — the reader is the
+ * browser extension, which builds these modules from a pinned commit of this
+ * repo and cannot add an object store of its own.
+ */
+export interface SyncCursorRecord {
+  /** The object store these bookmarks describe — the keyPath. */
+  id: SyncableStoreName;
+  /** Opaque remote-clock bookmark: everything changed remotely at or before
+   *  this point has been written locally. Absent until the first pull. */
+  lastPulledAt?: string;
+  /** Local `Date.now()` bookmark: every local record with a strictly greater
+   *  `updatedAt` still needs pushing. Absent until the first push. */
+  lastPushedAt?: number;
 }
 
 /** A saved resume: raw PDF bytes as a `Blob` (no base64 inflation at rest) plus
@@ -261,7 +333,15 @@ export interface LetterRecord extends StoredRecord {
   producer?: LetterProvenance;
 }
 
-/** Object-store names. Adding a store is a schema-version bump (see db.ts). */
+/**
+ * Object-store names the generic CRUD in `crud.ts` operates over. Adding a
+ * store is a schema-version bump (see db.ts).
+ *
+ * `sync` is absent on purpose. Every name here holds a {@link StoredRecord} and
+ * `putRecord` stamps timestamps on the way in; {@link SyncCursorRecord} is
+ * neither, so it gets its own two-function accessor (`sync-cursor.ts`) rather
+ * than a cast that would let `putRecord` write a `createdAt` onto a bookmark.
+ */
 export type StoreName = "resumes" | "jobs" | "boards" | "letters";
 
 /** A resume as it appears in an export file: blob replaced by base64 + MIME so

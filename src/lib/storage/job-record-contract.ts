@@ -155,6 +155,12 @@ export const JOB_RECORD_RULES: {
   id: { required: true, check: isNonEmptyString, expected: "a non-empty string" },
   createdAt: { required: false, check: isFiniteNumber, expected: "a finite epoch-ms number" },
   updatedAt: { required: false, check: isFiniteNumber, expected: "a finite epoch-ms number" },
+  // A tombstone (#730). Accepted from a FILE, because the export document
+  // carries deletions and a restore that dropped them would resurrect every
+  // job the user had deleted. Not accepted from a CAPTURE: `captureJob` strips
+  // it, since a producer telling us a posting exists is not in a position to
+  // tell us the user deleted it. See §5 of the contract doc.
+  deletedAt: { required: false, check: isFiniteNumber, expected: "a finite epoch-ms number" },
   title: { required: true, check: isString, expected: "a string" },
   company: { required: false, check: isString, expected: "a string" },
   url: {

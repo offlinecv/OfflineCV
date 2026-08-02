@@ -99,6 +99,10 @@ export const LETTER_RECORD_RULES: {
   id: { required: true, check: isNonEmptyString, expected: "a non-empty string" },
   createdAt: { required: false, check: isFiniteNumber, expected: "a finite epoch-ms number" },
   updatedAt: { required: false, check: isFiniteNumber, expected: "a finite epoch-ms number" },
+  // A tombstone (#730) — the same rule the job contract carries, for the same
+  // reason: the export document holds deletions so a restore does not resurrect
+  // them. See §5 of the contract doc.
+  deletedAt: { required: false, check: isFiniteNumber, expected: "a finite epoch-ms number" },
   jobId: { required: true, check: isNonEmptyString, expected: "a non-empty string" },
   resumeId: { required: false, check: isNonEmptyString, expected: "a non-empty string" },
   body: { required: true, check: isString, expected: "a string" },

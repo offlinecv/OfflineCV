@@ -12,12 +12,43 @@
  * `letters` key at all, must import forever — a backup on a user's disk does
  * not upgrade itself.
  *
+ * ## Tombstones ARE exported (#730)
+ *
+ * A deleted job or letter rides into the file carrying its `deletedAt`, and
+ * imports back as deleted. The decision is not obvious, so here is the whole
+ * of it.
+ *
+ * Omitting them looks tidier and is wrong in `merge` mode, which is the mode
+ * that exists precisely to combine two copies of a library. Device A deletes a
+ * job and exports; device B still has it live; B's file merged into A would
+ * hand the job straight back, because a record that is simply missing from a
+ * file is indistinguishable from one the file's author never had. The deletion
+ * silently undoes itself, and the user has no way to tell which of their two
+ * devices is right. Carrying the tombstone makes the file state a fact instead
+ * of an absence, so the merge converges.
+ *
+ * In `replace` mode the visible result is identical either way — the stores are
+ * wiped first, so an omitted record and a tombstoned one both end up
+ * unrendered. Exporting them costs a few bytes there and buys correctness in
+ * the other mode, which is why the tie breaks this way.
+ *
+ * It follows that the document is not a list of what the user has; it is the
+ * state of the store, deletions included. Two consequences worth stating: an
+ * export→import→export cycle is stable rather than quietly shedding rows, and
+ * {@link ImportCounts} therefore reports LIVE records, because "restored 40
+ * jobs" must mean forty the user can see.
+ *
+ * The `sync` store is the counter-example that shows where the line is: it is
+ * also part of the database and it is deliberately absent, because a cursor
+ * describes what one device has exchanged. Restoring it onto a second device
+ * would tell that device it had already pulled records it has never seen.
+ *
  * Base64 goes through `btoa`/`atob` over a binary string so it works the same in
  * the browser and the Node test env (no `Buffer` dependency). Blobs are read via
  * `arrayBuffer()`, so encode/import are async.
  */
 
-import { getAllRecords, putRecord, clearStore } from "./crud.ts";
+import { getAllRecords, putRecord, clearStore, isLive } from "./crud.ts";
 import { validateJobRecord } from "./job-record-contract.ts";
 import { validateLetterRecord } from "./letter-contract.ts";
 import type {
@@ -48,8 +79,16 @@ export interface SkippedLetter {
   reason: string;
 }
 
-/** What a restore did. `jobs` / `letters` count records actually WRITTEN, so
- *  each pairs with its `skipped…` list to account for every record in the file.
+/** What a restore did. `jobs` / `letters` count the records a user can now SEE:
+ *  written, and not tombstoned (#730). A file's tombstones are written too —
+ *  that is the point of exporting them — but counting them would tell the user
+ *  a restore brought back jobs that stay invisible, which reads as a bug in the
+ *  restore rather than as the deletions it faithfully reproduced.
+ *
+ *  So the three numbers no longer sum to the file's record count. The
+ *  `skipped…` lists still account for every record the contract REFUSED, which
+ *  is the thing a user can act on; a tombstone was accepted, it just isn't
+ *  something to celebrate having restored.
  *
  *  Nothing renders `skippedLetters` yet — #711 ships the store with no UI at
  *  all. It is reported from the first commit anyway because the alternative is
@@ -91,11 +130,17 @@ function base64ToBytes(base64: string): Uint8Array {
 /** Serialize every store to one JSON-ready document (blobs → base64). Always
  *  writes the current format; see {@link importAll} for what still reads. */
 export async function exportAll(): Promise<StorageExportV2> {
+  // `resumes` hard-deletes, so there is nothing tombstoned to ask for.
   const resumes = await getAllRecords<ResumeRecord>("resumes");
-  const jobs = await getAllRecords<JobRecord>("jobs");
+  // Jobs and letters carry their TOMBSTONES into the file (#730) — see the
+  // module docblock for why a backup records deletions rather than omitting
+  // them.
+  const jobs = await getAllRecords<JobRecord>("jobs", { includeDeleted: true });
   // Every `LetterRecord` field is JSON-safe by contract, so letters ride
   // through with no encode step — unlike resumes, which carry a `Blob`.
-  const letters = await getAllRecords<LetterRecord>("letters");
+  const letters = await getAllRecords<LetterRecord>("letters", {
+    includeDeleted: true,
+  });
 
   const exportedResumes: ExportedResume[] = await Promise.all(
     resumes.map(async ({ blob, ...rest }) => ({
@@ -177,22 +222,29 @@ export async function importAll(
     await clearStore("letters");
   }
 
+  // `touch: false` throughout (#730): a restored record keeps the `updatedAt`
+  // it had when the backup was taken. That timestamp describes the user's last
+  // edit, and a restore is not one — stamping `now` over it collapsed the whole
+  // library into a single instant, which silently reordered a tracker sorted
+  // most-recently-updated-first and, since v4, would tell a replicator that
+  // every record on the device had just changed. A record the file carries no
+  // timestamp for still gets `now` from `putRecord`.
   for (const { blobBase64, blobType, ...rest } of data.resumes) {
     const blob = new Blob([base64ToBytes(blobBase64)], { type: blobType });
-    await putRecord<ResumeRecord>("resumes", { ...rest, blob });
+    await putRecord<ResumeRecord>("resumes", { ...rest, blob }, { touch: false });
   }
   for (const job of jobs.accepted) {
-    await putRecord<JobRecord>("jobs", job);
+    await putRecord<JobRecord>("jobs", job, { touch: false });
   }
   for (const letter of letters.accepted) {
-    await putRecord<LetterRecord>("letters", letter);
+    await putRecord<LetterRecord>("letters", letter, { touch: false });
   }
 
   return {
     resumes: data.resumes.length,
-    jobs: jobs.accepted.length,
+    jobs: jobs.accepted.filter(isLive).length,
     skippedJobs: jobs.skipped,
-    letters: letters.accepted.length,
+    letters: letters.accepted.filter(isLive).length,
     skippedLetters: letters.skipped,
   };
 }

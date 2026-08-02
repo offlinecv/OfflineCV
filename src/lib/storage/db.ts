@@ -4,8 +4,8 @@
 /**
  * IndexedDB handle for the local-first storage foundation (#321).
  *
- * One database, four object stores (`resumes`, `jobs`, `boards`, `letters`),
- * opened through the ~1KB
+ * One database, five object stores (`resumes`, `jobs`, `boards`, `letters` and
+ * the `sync` bookmarks that describe three of them), opened through the ~1KB
  * `idb` wrapper. Schema versioning lives here from day one: every future store
  * or index is a `DB_VERSION` bump with a matching branch in `upgrade()`, so an
  * existing user's data migrates forward instead of stranding. `upgrade()` runs
@@ -22,6 +22,7 @@ import type {
   JobRecord,
   BoardCacheRecord,
   LetterRecord,
+  SyncCursorRecord,
 } from "./types.ts";
 
 // Renamed from "resumelint" during the OfflineCV rename (#498). Safe to change
@@ -45,13 +46,18 @@ export const DB_NAME = "offlinecv";
  *  and gets a `VersionError`, breaking its captures. Bump the pin in lockstep
  *  and rebuild it; this repo's CI never compiles the extension, so nothing else
  *  will catch it. */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
+
+/** Index name shared by every syncable store — one string so a range query and
+ *  the three `createIndex` calls cannot drift apart. */
+export const UPDATED_AT_INDEX = "updatedAt";
 
 interface OfflineCvDB extends DBSchema {
-  resumes: { key: string; value: ResumeRecord };
-  jobs: { key: string; value: JobRecord };
+  resumes: { key: string; value: ResumeRecord; indexes: { updatedAt: number } };
+  jobs: { key: string; value: JobRecord; indexes: { updatedAt: number } };
   boards: { key: string; value: BoardCacheRecord };
-  letters: { key: string; value: LetterRecord };
+  letters: { key: string; value: LetterRecord; indexes: { updatedAt: number } };
+  sync: { key: string; value: SyncCursorRecord };
 }
 
 let dbPromise: Promise<IDBPDatabase<OfflineCvDB>> | null = null;
@@ -61,7 +67,7 @@ let dbPromise: Promise<IDBPDatabase<OfflineCvDB>> | null = null;
 export function getDB(): Promise<IDBPDatabase<OfflineCvDB>> {
   if (dbPromise === null) {
     dbPromise = openDB<OfflineCvDB>(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
+      upgrade(db, oldVersion, _newVersion, tx) {
         // v0 → v1: both stores keyed on `id`. Keep future migrations as
         // additional `if (oldVersion < N)` blocks below — never edit an
         // already-shipped block.
@@ -87,6 +93,37 @@ export function getDB(): Promise<IDBPDatabase<OfflineCvDB>> {
         // reads letters at all would be pinning a schema on a guess.
         if (oldVersion < 3) {
           db.createObjectStore("letters", { keyPath: "id" });
+        }
+        // v3 → v4 (#730): the three things replication needs from the local
+        // schema. Additive like every block above it — no record is rewritten,
+        // no field is required, and a profile that never replicates is
+        // indistinguishable from a v3 one.
+        //
+        //  1. An `updatedAt` index on each syncable store. Without it, "what
+        //     changed since the last push" is a full scan of every record on
+        //     every pass. Survivable at a few hundred jobs and wrong as a
+        //     design — and unlike the `letters.jobId` index deferred at v3,
+        //     this one has a caller by construction, since a cursor that
+        //     cannot be queried efficiently is not a cursor.
+        //
+        //     Created here rather than at `createObjectStore` time so the three
+        //     stores get identical treatment in one place; a fresh database
+        //     runs blocks 1 and 3 first, so all three exist by now. The
+        //     versionchange transaction is the only place an index can be
+        //     added at all, which is why `upgrade` takes `tx`.
+        //
+        //  2. The `sync` store: one bookmark record per syncable store, keyed
+        //     on the store name. See `SyncCursorRecord` for why the pull and
+        //     push cursors are different types reading different clocks.
+        //
+        // The third thing — `StoredRecord.deletedAt` — needs no migration at
+        // all. It is optional, and an existing record without it is already
+        // correctly readable as "not deleted".
+        if (oldVersion < 4) {
+          for (const store of ["resumes", "jobs", "letters"] as const) {
+            tx.objectStore(store).createIndex(UPDATED_AT_INDEX, "updatedAt");
+          }
+          db.createObjectStore("sync", { keyPath: "id" });
         }
       },
     });
