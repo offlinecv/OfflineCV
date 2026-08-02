@@ -23,7 +23,8 @@ import {
   putRecord,
   getRecord,
   getAllRecords,
-  deleteRecord,
+  isLive,
+  softDeleteRecord,
 } from "./crud.ts";
 import type { LetterRecord } from "./types.ts";
 
@@ -56,16 +57,22 @@ export async function saveLetter(
   );
 }
 
-export function getLetter(id: string): Promise<LetterRecord | undefined> {
-  return getRecord<LetterRecord>("letters", id);
+/** One live letter by id. Tombstoned letters read as gone here, exactly as
+ *  `getJob` treats a deleted job — see its note (#730). */
+export async function getLetter(id: string): Promise<LetterRecord | undefined> {
+  const record = await getRecord<LetterRecord>("letters", id);
+  return record !== undefined && isLive(record) ? record : undefined;
 }
 
+/** Every live letter. Tombstones are filtered by `getAllRecords`'s default. */
 export function getAllLetters(): Promise<LetterRecord[]> {
   return getAllRecords<LetterRecord>("letters");
 }
 
-export function deleteLetter(id: string): Promise<void> {
-  return deleteRecord("letters", id);
+/** Tombstone one letter (#730). Returns whether there was a live letter to
+ *  delete, so a double-click is a no-op rather than a second deletion. */
+export function deleteLetter(id: string): Promise<boolean> {
+  return softDeleteRecord("letters", id);
 }
 
 /** Every letter written for one job, most-recently-updated first — the order a
@@ -93,9 +100,12 @@ export async function lettersForJob(jobId: string): Promise<LetterRecord[]> {
  * `docs/cover-letter-contract.md`.
  */
 export async function deleteLettersForJob(jobId: string): Promise<number> {
+  // `lettersForJob` already filters tombstones, so a repeated cascade — a
+  // delete retried after a partial failure — finds nothing left to do and
+  // returns 0 rather than re-stamping letters with a newer `deletedAt`.
   const doomed = await lettersForJob(jobId);
   for (const letter of doomed) {
-    await deleteRecord("letters", letter.id);
+    await softDeleteRecord("letters", letter.id);
   }
   return doomed.length;
 }

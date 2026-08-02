@@ -60,7 +60,8 @@ document as-is with no encoding step.
 | `label` | string | User-facing name, so two drafts for one job are tellable apart (`"Warm open"`, `"Short version"`). |
 | `resumeId` | non-empty string | The `ResumeRecord.id` this letter was written from. **User-owned.** Cleared, not orphaned, if that résumé is deleted — see §5. |
 | `producer` | object | Provenance. See §6. |
-| `createdAt` / `updatedAt` | finite number (epoch ms) | Timestamps. The store owns them; a backup file carries them so a restore preserves `createdAt`. |
+| `createdAt` / `updatedAt` | finite number (epoch ms) | Timestamps. The store owns them; a backup file carries them so a restore preserves both. |
+| `deletedAt` | finite number (epoch ms) | A **tombstone**: the letter is deleted, and its presence says so. See §5. |
 
 `body` is required but **may be empty**, while `jobId` may not. The asymmetry is deliberate: an
 empty draft is something the user can see and fix, whereas a letter with no job is reachable from
@@ -143,6 +144,26 @@ precisely so this rule has no exceptions.
 The cascade lives in the store (`deleteJob` → `deleteLettersForJob`), not in a UI layer, so no
 caller can forget it. The job record is deleted first: if the letter sweep then fails, the delete
 the user actually asked for still happened.
+
+### Deletion is a TOMBSTONE, not a removal
+
+Both sides of that cascade write a `deletedAt` and leave the row in place. A record that is simply
+gone is indistinguishable from one that never existed, so a second holder of the library — another
+device, a backup file the user restores — has no way to tell a deletion from a gap and re-adds it.
+
+Every read above this layer filters tombstones, so a deleted letter is gone from `getAllLetters`,
+from `lettersForJob`, and from `getLetter` by id. The row itself stays reachable only through the
+raw storage layer.
+
+The cascade tombstones **each letter individually** rather than leaning on the job's tombstone to
+hide them. A letter is a record in its own right: it can travel on its own, and a holder that
+received the letters but not the job's tombstone would have no reason to stop showing them.
+
+Both the deletion and the cascade are **idempotent** — a repeated delete finds nothing live and
+returns without re-stamping a newer `deletedAt`.
+
+Tombstones ride into the **backup document** and restore as deleted. The reasoning is the same one
+§5 of `job-capture-contract.md` sets out at length, and it applies unchanged here.
 
 ### Deleting the résumé CLEARS the link
 

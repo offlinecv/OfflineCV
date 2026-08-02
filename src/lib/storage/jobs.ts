@@ -11,7 +11,8 @@ import {
   putRecord,
   getRecord,
   getAllRecords,
-  deleteRecord,
+  isLive,
+  softDeleteRecord,
 } from "./crud.ts";
 import { deleteLettersForJob } from "./letters.ts";
 import type { JobRecord } from "./types.ts";
@@ -36,16 +37,29 @@ export async function saveJob(
     Partial<Pick<JobRecord, "createdAt" | "updatedAt">>, options);
 }
 
-export function getJob(id: string): Promise<JobRecord | undefined> {
-  return getRecord<JobRecord>("jobs", id);
+/**
+ * One job by id, or undefined — **including when the job is tombstoned**
+ * (#730).
+ *
+ * A deleted job reads as gone at this layer, so nothing built on it can leak
+ * one: `getJobById` cannot render it, and `updateJob` throws rather than
+ * quietly resurrecting it by writing a patch over the tombstone. The raw row is
+ * still reachable through `crud.ts`'s `getRecord`, which is what replication
+ * needs and what the tracker must never have.
+ */
+export async function getJob(id: string): Promise<JobRecord | undefined> {
+  const record = await getRecord<JobRecord>("jobs", id);
+  return record !== undefined && isLive(record) ? record : undefined;
 }
 
+/** Every live job. Tombstones are filtered by `getAllRecords`'s default. */
 export function getAllJobs(): Promise<JobRecord[]> {
   return getAllRecords<JobRecord>("jobs");
 }
 
 /**
- * Delete a job and CASCADE to its cover letters (#711).
+ * Delete a job and CASCADE to its cover letters (#711). Both sides are
+ * TOMBSTONED rather than removed (#730) — see `StoredRecord.deletedAt`.
  *
  * The cascade lives here, at the store, rather than a layer up in
  * `job-tracker.ts`: `LetterRecord.jobId` is a required parent link, so "no
@@ -59,8 +73,13 @@ export function getAllJobs(): Promise<JobRecord[]> {
  * intent — the job is gone — still happened; the reverse order would let a
  * failure delete the letters of a job that survives, which is data loss the
  * user did not ask for and cannot see coming.
+ *
+ * The cascade tombstones each letter individually rather than relying on the
+ * job's own tombstone to hide them. A letter is a record in its own right: it
+ * replicates on its own, and a second holder that received the letters but not
+ * the job's tombstone would have no reason to stop showing them.
  */
 export async function deleteJob(id: string): Promise<void> {
-  await deleteRecord("jobs", id);
+  await softDeleteRecord("jobs", id);
   await deleteLettersForJob(id);
 }

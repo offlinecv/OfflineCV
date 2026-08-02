@@ -193,7 +193,33 @@
       // starts importing rather than letting the suppression rot.
       "saveLetter", "getLetter", "getAllLetters", "lettersForJob", "deleteLetter",
       "validateLetterRecord", "LETTER_CONTRACT_VERSION", "LetterRecordValidation",
-      "LetterRecord", "LetterProvenance", "SkippedLetter"
+      "LetterRecord", "LetterProvenance", "SkippedLetter",
+
+      // The replication surface (#730) — the schema half of cloud sync. Same
+      // "no consumer anywhere yet" exception `captureJob` above is, and for a
+      // stronger reason: the reader is the browser extension, which builds
+      // these modules from a PINNED commit of this repo and therefore cannot
+      // define an object store, an index, or a record shape of its own. The
+      // migration that creates the `updatedAt` index and the `sync` store lands
+      // here because it has to, so the query that reads the index and the
+      // accessor that reads the store belong here beside it — the alternative
+      // is that consumer re-deriving this repo's schema against a store it does
+      // not own, which is the second-definition failure the contract modules
+      // above exist to prevent.
+      //
+      // `isLive` is the one name here with a real in-tree consumer, and it is
+      // listed anyway only for its BARREL re-export: `crud.ts` exports it for
+      // `jobs.ts` / `letters.ts` / `backup.ts`, which deep-import it, so the
+      // barrel copy is the dead one. If the barrel copy is still unread when
+      // sync lands, take it back off the barrel rather than off this list.
+      //
+      // Time-bounded like `captureJob`'s entry: once something in-tree imports
+      // these, they come back OUT. If sync is abandoned, delete
+      // `sync-cursor.ts` and `listRecordsUpdatedSince` rather than leaving the
+      // suppression to rot — but note the SCHEMA cannot be rolled back the same
+      // way, since a shipped `DB_VERSION` is in users' browsers for good.
+      "isLive", "listRecordsUpdatedSince", "getSyncCursor", "setSyncCursor",
+      "SyncableStoreName", "SyncCursorRecord"
     ] },
 
     // A contract constant that no in-tree caller reads at all — not even the

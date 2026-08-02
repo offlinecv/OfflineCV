@@ -4,11 +4,12 @@
 /**
  * Local-first storage foundation (#321) — public surface.
  *
- * Typed CRUD over an IndexedDB database with four stores (`resumes`, `jobs`,
- * `boards`, `letters`), durability control, and a JSON export/import backup
- * path. Infrastructure only: the resume-library and job-tracker UIs build on
- * this. Product code imports from `../lib/storage` (the barrel), not the
- * internal files — tests may reach past it to exercise a layer directly.
+ * Typed CRUD over an IndexedDB database with four record stores (`resumes`,
+ * `jobs`, `boards`, `letters`) plus the `sync` bookmarks that describe three of
+ * them, durability control, and a JSON export/import backup path.
+ * Infrastructure only: the resume-library and job-tracker UIs build on this.
+ * Product code imports from `../lib/storage` (the barrel), not the internal
+ * files — tests may reach past it to exercise a layer directly.
  *
  * Two admission rules, and they are what keep that first sentence true:
  *
@@ -89,6 +90,20 @@ export {
   JOB_URL_TRACKING_PARAM_PREFIXES,
 } from "./job-url.ts";
 export { captureJob, type JobCaptureResult } from "./capture.ts";
+/**
+ * The replication surface (#730). No consumer inside this repo — the reader is
+ * the browser extension, which builds these modules from a pinned commit and
+ * therefore cannot define an object store, an index, or a record shape of its
+ * own. Every name here exists because the alternative is that consumer
+ * re-deriving this repo's schema against a store it does not own, which is the
+ * second-definition failure `job-record-contract.ts` documents at length.
+ *
+ * `softDeleteRecord` is deliberately NOT exported: deleting a job is
+ * {@link deleteJob}'s job, cascade and all, and a second door onto the same
+ * action is how a caller ends up tombstoning a job and orphaning its letters.
+ */
+export { isLive, listRecordsUpdatedSince } from "./crud.ts";
+export { getSyncCursor, setSyncCursor } from "./sync-cursor.ts";
 export { JOB_STATUS_ORDER } from "./types.ts";
 export type {
   JobRecord,
@@ -96,4 +111,6 @@ export type {
   JobCaptureProvenance,
   LetterRecord,
   LetterProvenance,
+  SyncableStoreName,
+  SyncCursorRecord,
 } from "./types.ts";

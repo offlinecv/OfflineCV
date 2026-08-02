@@ -195,13 +195,19 @@ describe("storage: letters schema migration v2 → v3 (#711)", () => {
     legacy.close();
   }
 
-  it("opens an existing v2 profile at v3 with resumes and jobs intact and letters empty", async () => {
+  it("opens an existing v2 profile with resumes and jobs intact and letters empty", async () => {
     await seedV2Profile();
 
     const db = await getDB();
     // Read the OPEN database's version, not the module constant — a test that
     // compared `DB_VERSION` to itself would pass even if `upgrade()` never ran.
-    expect(db.version).toBe(3);
+    //
+    // The literal moves with every schema bump (4 since #730) because a v2
+    // profile migrates ALL the way forward, not one step: `upgrade()` runs for
+    // the whole range `(oldVersion, DB_VERSION]`. What this case is actually
+    // about is the `letters` store below — that a profile written before it
+    // existed comes back with it present and its resumes and jobs untouched.
+    expect(db.version).toBe(4);
     expect(db.objectStoreNames.contains("letters")).toBe(true);
 
     expect((await getAllResumes()).map((r) => r.filename)).toEqual(["cv.pdf"]);
@@ -217,7 +223,9 @@ describe("storage: letters schema migration v2 → v3 (#711)", () => {
     expect((await getAllLetters()).map((l) => l.id)).toEqual([letter.id]);
   });
 
-  it("creates all four stores on a fresh v0 database", async () => {
+  // The four RECORD stores. `sync` (v4, #730) holds bookmarks rather than
+  // records and is covered by `sync-schema.test.ts`.
+  it("creates all four record stores on a fresh v0 database", async () => {
     const db = await getDB();
     for (const store of ["resumes", "jobs", "boards", "letters"] as const) {
       expect(db.objectStoreNames.contains(store)).toBe(true);
