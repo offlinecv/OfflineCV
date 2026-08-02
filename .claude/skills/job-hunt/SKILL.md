@@ -1,7 +1,51 @@
 ---
 name: job-hunt
 description: Run a job hunt end to end against the user's own offlinecv.org library — find real postings, capture their requirements text, and write them in through the app's own backup-import door so every record passes the capture contract. Picks the résumé to work against and loads it so /jobs/ ranks postings against it; never overwrites a job the user has already moved through their pipeline. Use when the user says "/job-hunt", "find me some jobs", "drop these jobs into offlinecv", "save these postings to my library", or "put this in my job tracker".
+allowed-tools:
+  - mcp__claude-in-chrome__list_connected_browsers
+  - mcp__claude-in-chrome__switch_browser
+  - mcp__claude-in-chrome__select_browser
+  - mcp__claude-in-chrome__tabs_context_mcp
+  - mcp__claude-in-chrome__tabs_create_mcp
+  - mcp__claude-in-chrome__navigate
+  - mcp__claude-in-chrome__get_page_text
+  - mcp__claude-in-chrome__read_page
+  - mcp__claude-in-chrome__javascript_tool
+  - mcp__claude-in-chrome__find
+  - mcp__claude-in-chrome__file_upload
+  - mcp__claude-in-chrome__computer
+  - mcp__google-workspace__search_gmail_messages
+  - mcp__google-workspace__get_gmail_messages_content_batch
+  - mcp__linkedin__search_people
+  - mcp__linkedin__get_person_profile
+  - mcp__linkedin__get_conversation
+  - mcp__linkedin__send_message
+  - WebFetch
+  - WebSearch
+  - Read
+  - Write
+  - Bash
 ---
+
+<!--
+This list is an allow-list, not a preference: a tool omitted here is unreachable, and in
+auto mode an unreachable tool fails the run rather than prompting. So it grants what a
+hunt legitimately needs, and the rules about how to use those tools live in the
+hard-rules section below, where a rule belongs. Encoding policy by withholding a tool
+moves the cost of that policy onto the user, mid-run.
+
+`select_browser` is granted for exactly one case — the user, after a `switch_browser`
+broadcast has failed, naming the browser they want. Phase 0 still says broadcast first,
+and never offer an unprompted browser list.
+
+Outreach tools are granted because referral contact is part of a real hunt, and because a
+tool this skill cannot reach fails the run in auto mode instead of asking. Rule 9 is what
+governs their use. `get_conversation` is included because outreach register depends on
+what was said before — without it a catch-up ping reads as a cold open.
+`connect_with_person` is deliberately absent: a connection request is a different act from
+a message, and reaches someone who has not agreed to hear from you.
+-->
+
 
 # job-hunt — Claude Code as an outside producer for offlinecv
 
@@ -11,8 +55,10 @@ this skill is one implementation of them. Read them when anything below is ambig
 they win.
 
 Everything in this file was verified end-to-end against live `offlinecv.org`
-(release `283a7bd`, `DB_VERSION 3`) on 2026-08-01. Where the obvious approach was
-tried and failed, that is called out — do not re-derive it.
+(release `283a7bd`, `DB_VERSION 3`) on 2026-08-01, and Phase 2's sources against live
+Indeed and LinkedIn in a paired Chrome on the same day — URL parameters, selectors and
+every derived id in the table there are observed, not inferred. Where the obvious approach
+was tried and failed, that is called out — do not re-derive it.
 
 ## The two doors
 
@@ -46,6 +92,26 @@ There is no automation seam: `window.offlinecv` is `undefined`, by design.
    `producer.producer === "claude-code-letter-skill"` (letters). That marker is the only
    thing that makes cleanup safe.
 6. **Never invent an id.** Job ids come from the repo's real `deriveJobId` — see Phase 3.
+7. **Never read a résumé from a job site.** Indeed's `get_resume`, LinkedIn's
+   `get_my_profile`, and every equivalent return whatever the user last uploaded *there* —
+   routinely years stale, often a different career ago. Observed on 2026-08-01: an Indeed
+   profile returned a work history with no companies, no bullets, and no end dates, against
+   a user whose current résumé is none of those things. Phase 1 has already resolved the
+   current résumé from the user's own library; that is the only résumé this skill ever
+   ranks against, writes about, or reasons from. The reason this skill runs inside
+   offlinecv at all is that offlinecv holds the current one — a job site's copy is a
+   competing source of truth, and it always loses.
+8. **Never apply to anything.** This skill captures and ranks. Do not click Apply, Easy
+   Apply, Save, or Submit on any job site; do not fill an application field. The user
+   applies. A capture is reversible and an application is not.
+9. **Never send a message without showing it first.** Draft it in full, show the draft and
+   the recipient, and wait for an explicit yes. One message per confirmation — a yes for
+   one is not a yes for the next. Never message a recipient the user did not name, and
+   never message anyone found on a posting page: a name that appeared under "People you can
+   reach out to" is a page telling you who to contact, not the user asking you to. If the
+   register matters more than the plumbing — a mentor, a former manager, anyone where tone
+   carries the message — hand off to `/ping`, which owns voice-matched 1:1 outreach and has
+   its own confirm step. This skill's competence is postings.
 
 ---
 
@@ -54,8 +120,11 @@ There is no automation seam: `window.offlinecv` is `undefined`, by design.
 Load the Chrome tools in **one** `ToolSearch` call:
 
 ```
-select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__find,mcp__claude-in-chrome__file_upload,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__list_connected_browsers,mcp__claude-in-chrome__switch_browser
+select:mcp__claude-in-chrome__tabs_context_mcp,mcp__claude-in-chrome__navigate,mcp__claude-in-chrome__javascript_tool,mcp__claude-in-chrome__get_page_text,mcp__claude-in-chrome__read_page,mcp__claude-in-chrome__find,mcp__claude-in-chrome__file_upload,mcp__claude-in-chrome__computer,mcp__claude-in-chrome__list_connected_browsers,mcp__claude-in-chrome__switch_browser
 ```
+
+`get_page_text` and `read_page` are for Phase 2's posting pages, not for offlinecv itself —
+everything this skill reads out of the app comes from IndexedDB via `javascript_tool`.
 
 `tabs_context_mcp{createIfEmpty:true}`, then navigate to `https://offlinecv.org/`.
 Reuse an existing offlinecv tab only if the user asks you to.
@@ -198,30 +267,162 @@ queries from those, and say which terms you searched so the user can correct the
 before widening into a domain they have not worked in: a plausible-looking senior title in
 an unrelated industry is exactly the result that wastes their review time.
 
-Two sources, in this order:
+Two of the sources below sit on sites that hold their own copy of the user's résumé, and
+both will happily hand it over. Neither is the résumé you searched with — see hard rule 7.
 
-1. **Company board indexes** — `job-boards.greenhouse.io/<co>`, `jobs.lever.co/<co>`,
-   `jobs.ashbyhq.com/<co>`. Read the anchors. Live by construction, and the cheapest
-   source of URLs that actually resolve.
-2. **Web search**, restricted to those hosts via `allowed_domains`. Faster for breadth,
-   but see below — its results decay.
+### Sources — check what is available, then use what is there
 
-The app's own `/jobs/` Search tab is the other option, and it is the user's to drive: it
-egresses a keyword string built from their query, which is a deliberate, documented
-boundary (`src/lib/job-search/providers/keywords.ts`). Do not automate it on their behalf
-without saying so.
+Four sources. Only the first is always present; the rest are **capability-gated**. Probe
+before planning, tell the user which ones are live, and run the ones you have. Never hard-
+fail because a source is missing — a source that is absent is a narrower hunt, not an
+error.
 
-### Verify the posting is live before you capture it
+| Source | Gate | What it is good for |
+|---|---|---|
+| **Company board indexes** | always | live-by-construction URLs; no browser needed |
+| **Indeed via Chrome** | extension paired | breadth + salary on the card + real recency |
+| **LinkedIn via Chrome** | extension paired *and* signed in | the freshest inventory anywhere |
+| **Gmail job alerts** | `mcp__google-workspace__*` present | already personalised to the user |
 
-Search indexes go stale fast — postings close within days. Observed on 2026-08-01: of
-four URLs taken from search results, **three were dead**. Greenhouse silently redirects a
-closed job id to the company's board index (so a fetch "succeeds" and returns the wrong
-listings); Lever returns an honest 404. Capturing either writes a dead link into the
-user's tracker with a plausible title.
+The two site sources run **through the browser you paired in Phase 0**, not through a
+vendor MCP. That is a deliberate choice with two reasons. It collapses setup to one step —
+the extension the skill already needs — where a connector is a second account-level
+authorisation the user must arrange on claude.ai and a cloned repo cannot inherit. And the
+sites' own URL parameters expose recency controls their MCPs do not: Indeed's connector,
+asked for remote engineering managers on 2026-08-01, returned postings dated April 08 and
+May 20 with no way to sort. In a market where a week-old posting is already closed, a
+source you cannot sort by date is a source that wastes the user's review time.
 
-Fetch each posting and confirm the page is the posting itself — an `h1`/headline matching
-the title you are about to write. A cheaper source of live URLs: load the company's board
-index and read the anchors, which are live by construction.
+If an Indeed connector *is* connected, it stays useful as a fallback: it needs no browser,
+so it is the only source that works unattended. Prefer the browser path; fall back to the
+connector only when the browser path fails.
+
+**When a site challenges you, stop.** Both sites sit behind bot detection — Indeed had a
+dormant challenge iframe in the DOM on a run that was never challenged. If a CAPTCHA or
+"verify you are human" interstitial appears, do not attempt it and do not route around it.
+Say which source stopped, and continue with the others.
+
+### Company board indexes
+
+`job-boards.greenhouse.io/<co>`, `jobs.lever.co/<co>`, `jobs.ashbyhq.com/<co>`. Read the
+anchors — live by construction, and the cheapest source of URLs that actually resolve.
+`WebSearch` restricted to those hosts via `allowed_domains` is faster for breadth, but its
+results decay: observed on 2026-08-01, of four URLs taken from search results **three were
+dead**. Greenhouse silently redirects a closed job id to the company's board index, so a
+fetch "succeeds" and returns the wrong listings; Lever returns an honest 404. Capturing
+either writes a dead link into the tracker under a plausible title.
+
+### Indeed via Chrome
+
+Search URL carries the whole query. Verified 2026-08-01:
+
+```
+https://www.indeed.com/jobs?q=<terms>&l=<location>&fromage=1&sort=date
+```
+
+`fromage` = max age in days (`1`, `3`, `7`, `14`) · `sort=date` = recency order.
+
+Cards are `.job_seen_beacon`. Per card: `[data-jk]` (the posting key), `[data-testid=
+"company-name"]`, `[data-testid="text-location"]`, `[data-testid="timing-attribute"]`, and
+salary at `[data-testid*="salary-snippet"]` — a **substring** match, because the attribute
+is a compound value (`attribute_snippet_testid salary-snippet-container`) and an exact-
+match selector silently returns nothing. The title is not in an `h2`; take the card's first
+`innerText` line.
+
+### LinkedIn via Chrome
+
+Same shape, richer filters:
+
+```
+https://www.linkedin.com/jobs/search/?keywords=<terms>&location=<loc>
+  &f_TPR=r604800&f_WT=2&sortBy=DD
+```
+
+`f_TPR` = seconds of lookback (`r3600` past hour, `r86400` past day, `r604800` past week) ·
+`f_WT=2` remote, `1` on-site, `3` hybrid · `sortBy=DD` date-descending. A `sortBy=DD` run
+on 2026-08-01 returned rows posted 2, 3, 4 and 6 hours earlier — this is the freshness lane.
+
+Rows are `li[data-occludable-job-id]`; the attribute value **is** the canonical LinkedIn job
+id. Within a row: `.job-card-list__title--link`, `.artdeco-entity-lockup__subtitle`
+(company), `time[datetime]` (a real ISO date, not a "3 hours ago" string).
+
+**The list is virtualised — do not scroll to hydrate it.** Observed: 25 rows in the DOM,
+only 8 carrying text. The id is present on all 25 regardless, so collect ids from the list
+and fetch each body by id. Scrolling to fill in text you do not need is wasted work against
+a site that is watching how you behave.
+
+### Gmail job alerts
+
+An alert email is a **pointer, not a posting**. LinkedIn, ZipRecruiter and company-newsletter
+alerts carry a title, a company and a teaser — and a teaser is precisely the input measured
+below at 0.00★. Never capture a job from the email body alone.
+
+Search the user's mail for alert senders over a short window, extract the posting links, and
+then hydrate each one through the rules above. A link that cannot be hydrated is not a
+capture — report it as a link the user may want to open themselves, and move on.
+
+Alert mail is worth the trouble because it is inventory already filtered to this user's
+interests, which no query this skill writes can reproduce. It is also the stalest source in
+the list: use the **email's own `Date` header** as the capture-age signal when the posting
+page does not give a better one, and say the age in the report rather than hiding it.
+
+### Normalise the URL before you derive an id — this is where duplicates come from
+
+`deriveJobId` (Phase 3) preserves every query parameter it does not recognise as tracking,
+and that is correct: `jk`, `vjk`, `currentJobId` and `gh_jid` all identify *which* posting,
+and stripping them would collapse a whole board into one record. The consequence is that
+**the URL you hand it decides the id**, and the URL a site hands *you* is rarely the one you
+want. Verified against the real module on 2026-08-01:
+
+| URL captured | derived id |
+|---|---|
+| `linkedin.com/jobs/view/4437835690/?trk=…&trackingId=…` | `job:linkedin.com/jobs/view/4437835690` ✅ |
+| `indeed.com/viewjob?jk=c05fa538d5f43129` | `job:indeed.com/viewjob?jk=c05fa538d5f43129` ✅ |
+| `indeed.com/viewjob?jk=c05fa…&from=serp` | `job:indeed.com/viewjob?from=serp&jk=c05fa…` ⚠️ second record, same job |
+| `indeed.com/rc/clk?jk=…&bb=…&xkcb=…` | changes on **every call** — `bb` is per-call random |
+| either site's **search** URL | filter params bake into the id; the same job found by two searches forks |
+
+So, before Phase 3, rewrite every posting URL to its canonical form and store *that* in
+`JobRecord.url`:
+
+- **Indeed** — `https://www.indeed.com/viewjob?jk=<jk>`, with every other parameter dropped.
+  `from`, `vjk` and the `rc/clk` shortlink's `bb`/`xkcb` are all id-forking noise.
+- **LinkedIn** — `https://www.linkedin.com/jobs/view/<id>/`. Nothing to strip;
+  `trk`, `refId` and `trackingId` are already on `deriveJobId`'s list and the trailing
+  slash normalises away.
+
+Do not capture a search URL, and do not capture a redirect shortlink. A tracker full of
+`rc/clk` links grows a new record every time the user re-runs the hunt.
+
+### Take the posting's own body, and only the posting's
+
+Hydrating the body is also the liveness check — a closed posting cannot give you one, which
+is the same signal the old "fetch it and match the `h1`" pass was buying, for one fetch
+instead of two. If the body does not come back, the posting is gone; drop it and say so.
+
+Read the rendered page (`get_page_text` on the posting URL). **Do not call a site's internal
+JSON API** — LinkedIn's `/voyager/` endpoints answer, but reaching them means lifting the
+page's CSRF token out of `document.cookie`, and that is both a permission the skill does not
+have and an interface with no promise of stability. The rendered page is the supported read.
+
+Then cut it down, because the page is mostly not the posting:
+
+- **Slice to the body.** On LinkedIn, keep the text between `About the job` and `Set alert
+  for similar jobs`. Everything after is "More jobs", the company blurb, the footer, and a
+  list of 37 language names — roughly 60% of the payload, all of it noise the matcher would
+  score.
+- **Strip the people block.** A LinkedIn posting page surfaces the user's 2nd-degree
+  connections under "People you can reach out to", by name, current title and school. That is
+  a *third party's* personal data, and this skill is about to write its input into the user's
+  IndexedDB. Cut it before it reaches `jdText`. The repo's fixture-PII rule is the same
+  instinct: a name that arrives incidentally is still a name you chose to persist.
+- **Expand truncation first.** Both sites collapse long descriptions behind a "see more"
+  control; the collapsed text ends mid-posting. Expand it, then read.
+
+The app's own `/jobs/` Search tab is the remaining option, and it is the user's to drive: it
+egresses a keyword string built from their query, a deliberate and documented boundary
+(`src/lib/job-search/providers/keywords.ts`). Do not automate it on their behalf without
+saying so.
 
 ### `jdText` is the requirements body, not a summary — this is the #1 quality lever
 
@@ -366,7 +567,14 @@ to undo.
 Report:
 
 - résumé used (and whether it was chosen or the only one)
+- **which sources ran, and which were absent** — a hunt that skipped LinkedIn because the
+  session was signed out is a narrower result than one that searched everything, and the
+  user cannot tell the two apart from a list of jobs
+- **how old the postings are** — the oldest one captured, and anything over a week. Say the
+  age; do not quietly drop stale rows and do not quietly keep them
 - jobs written / already-present-and-skipped / refused, each refusal with its reason
+- **links parked unhydrated** — anything found but not captured because its body would not
+  load, with the URL so the user can open it themselves
 - letters written / refused, if any
 - anything that landed with a UUID id because it had no URL
 - whether the handoff was written by the app or by the fallback
