@@ -63,19 +63,20 @@ import {
 } from "./record-contract.ts";
 
 /**
- * Contract version a producer targets, carried on `JobRecord.capture.contract`.
- * Independent of `StorageExport.version` (the backup DOCUMENT format): a record
- * can outlive the file it arrived in, and the two evolve for different reasons.
- * Absent provenance means "written by this app against version 1".
+ * Re-exported so this module — the one `docs/job-capture-contract.md` names as
+ * the contract's runtime half — still presents the whole surface in one place.
+ * It LIVES in `types.ts` because the version number is vocabulary, not
+ * validation: it is the value of a field declared there, and the validator
+ * deliberately never reads it.
  *
- * Exported as part of the contract SURFACE, not awaiting a caller: §7 of
- * `docs/job-capture-contract.md` is normative for reimplementers, and this is
- * the number it tells them to send. Nothing in this build reads it, by design —
- * the validator requires `capture.contract` to be a finite number and does not
- * compare it against this constant, because refusing a record from a future
- * version is exactly the forward-compatibility failure §7 exists to avoid.
+ * The split is also load-bearing. `src/lib/jd-extract/to-job-record.ts` imports
+ * this constant into a bundle injected into a live page, and importing it from
+ * here would drag the rules map, `KNOWN_FIELDS`'s `new Set` (a top-level side
+ * effect no bundler may assume away) and all of `record-contract.ts` along with
+ * it — 2.9 KB of validator, measured, against a 25 KB budget, to carry one
+ * integer.
  */
-export const JOB_CAPTURE_CONTRACT_VERSION = 1;
+export { JOB_CAPTURE_CONTRACT_VERSION } from "./types.ts";
 
 /** A reason a record was refused, or a repair that was applied. One sentence,
  *  addressed to whoever has to fix the producer or the file. */
@@ -128,6 +129,14 @@ const isUrlLike = (value: unknown): value is string =>
 const isJsonSafe = (value: unknown): value is unknown =>
   findJsonSafetyProblem(value, "value") === null;
 
+/**
+ * A leading `YYYY-MM-DD`. Deliberately a prefix match, not a full-date parse: a
+ * publisher that sends `2026-07-28T00:00:00Z` has stated an absolute date and is
+ * doing nothing wrong, and this is a warning's threshold rather than a
+ * refusal's.
+ */
+const ISO_DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/;
+
 const isCaptureProvenance = (value: unknown): value is JobCaptureProvenance =>
   isProvenanceLike(value, "capturedAt", "capture");
 
@@ -157,6 +166,20 @@ export const JOB_RECORD_RULES: {
   status: { required: false, check: isStatusLike, expected: "a string" },
   resumeId: { required: false, check: isNonEmptyString, expected: "a non-empty string" },
   jdText: { required: false, check: isString, expected: "a string" },
+
+  // The six posting facts (#719). Every one is `isString` on purpose. They are
+  // passed through verbatim — a validator that parsed `salaryRange` into numbers
+  // or coerced `employmentType` onto a closed enum would be the "repair" this
+  // contract refuses to do, and the vocabularies belong to the publisher. The
+  // two date fields are warned about rather than refused; see
+  // `collectAcceptedWarnings`.
+  location: { required: false, check: isString, expected: "a string" },
+  salaryRange: { required: false, check: isString, expected: "a string" },
+  datePosted: { required: false, check: isString, expected: "a string, ideally an ISO date" },
+  workModel: { required: false, check: isString, expected: "a string" },
+  employmentType: { required: false, check: isString, expected: "a string" },
+  validThrough: { required: false, check: isString, expected: "a string, ideally an ISO date" },
+
   matchResult: {
     required: false,
     check: isJsonSafe,
@@ -179,6 +202,14 @@ const KNOWN_FIELDS = new Set(Object.keys(JOB_RECORD_RULES));
  * Warnings, not refusals: these run only on values that already passed their
  * guard, so each names a record we ACCEPTED with something a caller should say
  * out loud. See the decision notes on `isStatusLike` and `isUrlLike`.
+ *
+ * `datePosted` and `validThrough` warn on anything not starting `YYYY-MM-DD`.
+ * The reason is the whole reason those fields exist: a posting's age is a fact
+ * about the moment it was captured, so `"3 days ago"` is not merely a
+ * lower-quality value — it silently becomes wrong the day after it is stored,
+ * and no reader can tell. Warned rather than refused because the string is still
+ * more than nothing, and the same asymmetry applies as everywhere else here:
+ * refusing costs the user the record, warning costs them one sentence.
  */
 function collectAcceptedWarnings(checked: Record<string, unknown>): JobRecordIssue[] {
   const warnings: JobRecordIssue[] = [];
@@ -189,6 +220,14 @@ function collectAcceptedWarnings(checked: Record<string, unknown>): JobRecordIss
   }
   if (typeof checked.url === "string" && !isAbsoluteUrl(checked.url)) {
     warnings.push(`URL "${checked.url}" is not an absolute URL; it was kept as-is.`);
+  }
+  for (const field of ["datePosted", "validThrough"] as const) {
+    const value = checked[field];
+    if (typeof value === "string" && value !== "" && !ISO_DATE_PREFIX.test(value)) {
+      warnings.push(
+        `\`${field}\` "${value}" is not an ISO date; it was kept as-is, but a relative date decays and cannot be rendered absolutely.`,
+      );
+    }
   }
   return warnings;
 }

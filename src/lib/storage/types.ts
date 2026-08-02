@@ -59,9 +59,37 @@ export type JobStatus =
  * Deliberately NOT `StorageExport.version`: that numbers the backup DOCUMENT
  * format, and a record outlives the file it arrived in.
  */
+/**
+ * Contract version a producer targets, carried on
+ * {@link JobCaptureProvenance.contract}. Independent of `StorageExport.version`
+ * (the backup DOCUMENT format): a record can outlive the file it arrived in, and
+ * the two evolve for different reasons. Absent provenance means "written by this
+ * app against version 1".
+ *
+ * Exported as part of the contract SURFACE, not awaiting a caller: §7 of
+ * `docs/job-capture-contract.md` is normative for reimplementers, and this is
+ * the number it tells them to send. Nothing in this build reads it, by design —
+ * the validator requires `capture.contract` to be a finite number and does not
+ * compare it against this constant, because refusing a record from a future
+ * version is exactly the forward-compatibility failure §7 exists to avoid.
+ *
+ * It lives here, beside the field it fills, rather than in
+ * `job-record-contract.ts` (which re-exports it): a version number is vocabulary
+ * rather than validation, and this module is the vocabulary — zero imports and
+ * nothing but declarations, which is what lets a producer-side consumer take the
+ * number without taking the validator.
+ *
+ * `2` since #719 added the six posting-fact fields. **No migration**, and none
+ * could be needed: every added field is optional, so a version-1 record is a
+ * valid version-2 record that happens to omit them. The bump tells producers
+ * there is more they MAY send, not that they must resend anything — a version-1
+ * producer keeps working untouched.
+ */
+export const JOB_CAPTURE_CONTRACT_VERSION = 2;
+
 export interface JobCaptureProvenance {
   /** The capture-contract version this producer targeted
-   *  (`JOB_CAPTURE_CONTRACT_VERSION`). */
+   *  ({@link JOB_CAPTURE_CONTRACT_VERSION}). */
   contract: number;
   /** Free-text producer id, e.g. `"offlinecv-extension"`. */
   producer?: string;
@@ -104,6 +132,42 @@ export interface JobRecord extends StoredRecord {
   resumeId?: string;
   /** Optional pasted job description, when the job came from / ran a JD match. */
   jdText?: string;
+
+  // ─── Posting facts, as the posting states them (#719) ─────────────────────
+  //
+  // All optional, all `string`, so the whole group stays JSON-safe for the
+  // export/import round trip and needs no migration — an existing record simply
+  // lacks them. Values are passed through VERBATIM: nothing here is parsed into
+  // numbers, normalised to an enum, or reconciled against `jdText`. A lossy
+  // parse at the boundary is unrecoverable downstream, and interpreting these is
+  // a consumer's job.
+  //
+  // These are display-only record-keeping and are **not** ranking inputs.
+  // `src/lib/job-search/rate-saved-jobs.ts` rates the saved library on fitness
+  // alone because there is no query behind it — no location preference, no comp
+  // floor. The missing input is the *query's*, not the posting's, so carrying
+  // the posting's own values here does not give that module anything to rank on.
+
+  /** Where the posting says the job is, free text: `"Austin, TX"`, `"Remote
+   *  (US)"`. Not geocoded and not split into city/region. */
+  location?: string;
+  /** Compensation as the posting states it: `"$180k – $220k"`. Free text, never
+   *  parsed into numbers — currency, period and range syntax vary per posting,
+   *  and a wrong parse is worse than an unparsed string. */
+  salaryRange?: string;
+  /** ISO date the posting was published. A snapshot of the posting's age **at
+   *  capture**, which only decays — so a renderer must show it absolute
+   *  (`2026-07-28`), never as "3 days ago" against today's clock. */
+  datePosted?: string;
+  /** The posting's own declared arrangement (`"remote"`, `"hybrid"`), taken from
+   *  structured data — never inferred by a regex over `jdText`. */
+  workModel?: string;
+  /** schema.org `employmentType` (`"FULL_TIME"`, `"CONTRACTOR"`), passed through
+   *  unvalidated: the vocabulary is the publisher's, not ours. */
+  employmentType?: string;
+  /** ISO date the posting declares it expires, where it declares one. */
+  validThrough?: string;
+
   /** Optional JD-match result carried over from the JD-fit flow. Opaque +
    *  JSON-safe by contract so it survives export/import — enforced at the
    *  external boundary by `findJsonSafetyProblem` (#693). */

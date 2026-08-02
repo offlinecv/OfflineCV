@@ -51,5 +51,16 @@ export { extractPostingFromDocument as extract } from "./detect";
 export { extractApplyLink, extractApplyLinkAsync } from "./apply-link";
 export type { ApplyLinkResult } from "./apply-link";
 
+/**
+ * The bridge to the job capture contract. It belongs on the injected surface
+ * because the injected caller is exactly who needs it: the skill extracts inside
+ * the page and hands offlinecv a capture payload, so mapping in the page means
+ * one JSON object crosses the tool boundary instead of an extraction result plus
+ * a second mapping step the skill would have to describe in prose — which is the
+ * failure mode this whole lane exists to end.
+ */
+export { toJobRecord, POSTING_FACT_FIELDS } from "./to-job-record";
+export type { CaptureProducer, JobCaptureInput } from "./to-job-record";
+
 export { EXTRACTION_ALGORITHM_VERSION } from "./types";
 export type { ATSExtractor, ExtractedPosting, ExtractionTier } from "./types";

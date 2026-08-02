@@ -19,6 +19,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  JOB_CAPTURE_CONTRACT_VERSION,
   JOB_RECORD_RULES,
   isKnownStatus,
   validateJobRecord,
@@ -40,7 +41,15 @@ function validRecord(): Record<string, unknown> {
     status: "applied",
     resumeId: "resume-1",
     jdText: "We are hiring.",
+    location: "Austin, TX",
+    salaryRange: "$180k – $220k",
+    datePosted: "2026-07-28",
+    workModel: "remote",
+    employmentType: "FULL_TIME",
+    validThrough: "2026-09-01",
     matchResult: { coverage: 0.8, missing: ["kubernetes"] },
+    // Deliberately still `1`: a producer targeting the previous contract version
+    // must keep validating unchanged. See the version-2 block below.
     capture: { contract: 1, producer: "offlinecv-extension", producerVersion: "0.1.0" },
   };
 }
@@ -145,13 +154,16 @@ describe("validateJobRecord: out-of-union status is PRESERVED, not dropped or co
 describe("validateJobRecord: unknown extra keys are PRESERVED", () => {
   // Dropping them makes export → import → export lossy for a user who moves a
   // backup from a newer build to an older one and back.
+  //
+  // The key here used to be `salaryRange`, chosen when it was hypothetical. #719
+  // made it a real field, at which point this case silently stopped testing
+  // anything — it passed for the wrong reason, through the rule map rather than
+  // the extras pass. Pick a key no contract version will plausibly claim.
   it("carries an unrecognised field onto the stored record", () => {
-    const result = validateJobRecord({ ...validRecord(), salaryRange: "180-220k" });
+    const result = validateJobRecord({ ...validRecord(), employerRating: 4.5 });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect((result.record as unknown as Record<string, unknown>).salaryRange).toBe(
-      "180-220k",
-    );
+    expect((result.record as unknown as Record<string, unknown>).employerRating).toBe(4.5);
   });
 
   it("still requires an extra key's value to be JSON-safe", () => {
@@ -175,6 +187,84 @@ describe("validateJobRecord: a url that is not absolute is kept, with a warning"
     if (!result.ok) return;
     expect(result.record.url).toBe("acme.com/jobs/1");
     expect(result.warnings).toContainEqual(expect.stringContaining("not an absolute URL"));
+  });
+});
+
+describe("contract v2: the six posting facts (#719)", () => {
+  const FACTS = [
+    "location",
+    "salaryRange",
+    "datePosted",
+    "workModel",
+    "employmentType",
+    "validThrough",
+  ] as const;
+
+  it("declares version 2", () => {
+    expect(JOB_CAPTURE_CONTRACT_VERSION).toBe(2);
+  });
+
+  // The "no migration" claim, stated as a test rather than only in prose: every
+  // added field is optional, so a version-1 record IS a valid version-2 record
+  // that happens to omit them. If this ever fails, the bump needed a migration.
+  it("accepts a version-1 record carrying none of them", () => {
+    const v1 = { id: "job-1", title: "SWE", capture: { contract: 1 } };
+    const result = validateJobRecord(v1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("does not refuse a record from a FUTURE contract version", () => {
+    const result = validateJobRecord({ id: "job-1", title: "SWE", capture: { contract: 99 } });
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(FACTS)("refuses a non-string `%s`", (field) => {
+    expect(reasons({ ...validRecord(), [field]: 42 })).toContainEqual(
+      expect.stringContaining(`\`${field}\``),
+    );
+  });
+
+  // Passed through verbatim — no parsing, no enum coercion. A validator that
+  // "helpfully" normalised these would be the repair this contract refuses.
+  it.each([
+    ["salaryRange", "£90,000-£110,000 per annum, DOE"],
+    ["employmentType", "not-a-schema-org-enum"],
+    ["workModel", "hybrid (3 days on-site, Tuesdays fixed)"],
+    ["location", "Multiple locations"],
+  ])("keeps an unusual `%s` exactly as sent", (field, value) => {
+    const result = validateJobRecord({ ...validRecord(), [field]: value });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect((result.record as unknown as Record<string, unknown>)[field]).toBe(value);
+  });
+});
+
+describe("contract v2: a non-ISO date is kept, with a warning", () => {
+  // The field exists because a posting's age is a fact about the capture moment.
+  // "3 days ago" is not merely lower quality — it becomes wrong the next day and
+  // nothing downstream can tell. Warned, not refused: the string is still more
+  // than nothing, and refusing costs the user the whole record.
+  it.each(["datePosted", "validThrough"] as const)("warns on a relative `%s`", (field) => {
+    const result = validateJobRecord({ ...validRecord(), [field]: "3 days ago" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect((result.record as unknown as Record<string, unknown>)[field]).toBe("3 days ago");
+    expect(result.warnings).toContainEqual(expect.stringContaining(field));
+  });
+
+  it.each(["2026-07-28", "2026-07-28T00:00:00Z", "2026-07-28T09:30:00+02:00"])(
+    "accepts %s silently",
+    (value) => {
+      const result = validateJobRecord({ ...validRecord(), datePosted: value });
+      expect(result.ok && result.warnings).toEqual([]);
+    },
+  );
+
+  it("says nothing about an empty string — that is a gap, not a relative date", () => {
+    const result = validateJobRecord({ ...validRecord(), datePosted: "" });
+    expect(result.ok && result.warnings).toEqual([]);
   });
 });
 

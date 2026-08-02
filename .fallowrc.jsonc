@@ -196,11 +196,17 @@
       "LetterRecord", "LetterProvenance", "SkippedLetter"
     ] },
 
-    // The two contract constants that no in-tree caller reads at all — not even
-    // the deep-importing `capture.ts`. A barrel re-export whose barrel is itself
+    // A contract constant that no in-tree caller reads at all — not even the
+    // deep-importing `capture.ts`. A barrel re-export whose barrel is itself
     // ignored doesn't register as a consumer edge (same reason `ParseMetadata`
     // is listed above), so the source export must be marked here too.
-    { "file": "src/lib/storage/job-record-contract.ts", "exports": ["JOB_CAPTURE_CONTRACT_VERSION"] },
+    //
+    // `JOB_CAPTURE_CONTRACT_VERSION` was listed here for the same reason until
+    // #719, and is deliberately no longer: `src/lib/jd-extract/to-job-record.ts`
+    // stamps it onto every captured record, which is a real consumer edge. This
+    // is the "once something in-tree imports them, take them back OUT" rule in
+    // the block above, applied — the suppression list only stays honest if
+    // entries leave it as well as join it.
     { "file": "src/lib/storage/job-url.ts", "exports": ["JOB_URL_ID_PREFIX"] },
 
     // Same rule for the letter contract's own two: `LETTER_CONTRACT_VERSION` is
