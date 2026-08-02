@@ -60,7 +60,7 @@ describe("the injected entry point", () => {
 });
 
 describe("the barrel's export surface", () => {
-  it.each(["extract", "extractApplyLink", "extractApplyLinkAsync"])(
+  it.each(["extract", "extractApplyLink", "extractApplyLinkAsync", "toJobRecord"])(
     "exports %s as a function",
     (name) => {
       expect(typeof (JD as unknown as Record<string, unknown>)[name]).toBe("function");
@@ -73,12 +73,14 @@ describe("the barrel's export surface", () => {
 
   // The surface is intentionally minimal — it is unchecked by any compiler for
   // the injected caller, so every extra name is unverified surface for no gain.
-  it("keeps the runtime surface to the documented four names", () => {
+  it("keeps the runtime surface to the documented names", () => {
     expect(Object.keys(JD).sort()).toEqual([
       "EXTRACTION_ALGORITHM_VERSION",
+      "POSTING_FACT_FIELDS",
       "extract",
       "extractApplyLink",
       "extractApplyLinkAsync",
+      "toJobRecord",
     ]);
   });
 

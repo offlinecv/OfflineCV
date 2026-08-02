@@ -1,12 +1,17 @@
-# Job capture contract (v1)
+# Job capture contract (v2)
 
 **Audience: anyone writing a job record into offlinecv from outside this repo** — a browser
 extension, a bookmarklet, a script that converts another tracker's export. You do not need to read
 the source to implement this. If a rule here and the code disagree, that is a bug; file it.
 
-**Status:** version 1, introduced in [#693](https://github.com/offlinecv/OfflineCV/issues/693).
+**Status:** version 2. Introduced in [#693](https://github.com/offlinecv/OfflineCV/issues/693);
+extended in [#719](https://github.com/offlinecv/OfflineCV/issues/719) with the six posting facts.
 Implemented by `src/lib/storage/job-record-contract.ts` (validation),
 `src/lib/storage/job-url.ts` (identity), and `src/lib/storage/capture.ts` (the write path).
+
+**Upgrading from v1 costs you nothing.** Every field v2 added is optional, so a producer written
+against v1 is already a valid v2 producer — send `"contract": 2` when you start sending the new
+fields, and not before.
 
 Records that violate this contract are **refused**, not repaired. offlinecv would rather tell you
 your record was wrong than store a mangled version of it and report success.
@@ -57,12 +62,32 @@ A record is a **plain JSON object**. Not an array, not `null`, not a class insta
 | `capture` | object | Provenance. See §7. |
 | `createdAt` / `updatedAt` | finite number (epoch ms) | Timestamps. **`captureJob` ignores yours** and lets the store own them; a backup file carries them so a restore preserves `createdAt`. |
 
+### Optional — the posting facts (added in v2)
+
+Six more optional strings, all describing what the **posting itself says**. Send them when the posting states them and omit them when it does not — an absent field means "not stated", and an empty string means "stated as nothing", which is rarely what you mean.
+
+| Field | Type | Example | Meaning |
+|---|---|---|---|
+| `location` | string | `"Austin, TX"` | Where the posting says the job is. Free text — not geocoded, not split into city/region. |
+| `salaryRange` | string | `"$180k – $220k"` | Compensation as stated. Free text; **do not parse it into numbers.** |
+| `datePosted` | string | `"2026-07-28"` | ISO date the posting was published. See the warning below. |
+| `workModel` | string | `"remote"` | The posting's own declared arrangement. Take it from structured data — **do not infer it with a regex over the description.** |
+| `employmentType` | string | `"FULL_TIME"` | schema.org `employmentType`, passed through unvalidated. Any string is accepted; the vocabulary is the publisher's. |
+| `validThrough` | string | `"2026-09-01"` | ISO date the posting declares it expires, where it declares one. |
+
+**All six are passed through verbatim.** Nothing is parsed, normalised, or reconciled against the description. A lossy parse at this boundary is unrecoverable downstream, and offlinecv would rather hold the string you sent.
+
+**`datePosted` and `validThrough` should be absolute dates.** A value that does not start `YYYY-MM-DD` is still accepted, but it comes back as a **warning**, because a posting's age is a fact about the moment you captured it: `"3 days ago"` is not merely a lower-quality value — it becomes wrong the following day, and nothing downstream can tell. If the page only gives you a relative date, resolve it against your own clock before sending it.
+
+These six are **display-only record-keeping.** They are not ranking inputs, and offlinecv does not rank the saved library on them (`src/lib/job-search/rate-saved-jobs.ts` rates on fitness alone, because there is no query behind the library — no location preference, no comp floor).
+
 ### Unknown fields are PRESERVED
 
 Any key not listed above rides through onto the stored record untouched. This is deliberate: if a
-newer producer adds `salaryRange` and the user restores that backup on an older offlinecv, dropping
-the field would make an export → import → export cycle silently lossy. Older readers ignore what
-they cannot render.
+newer producer adds `employerRating` and the user restores that backup on an older offlinecv,
+dropping the field would make an export → import → export cycle silently lossy. Older readers
+ignore what they cannot render. (`salaryRange` was this section's example under v1, and is a real
+field as of v2 — which is exactly the path an unknown field is expected to take.)
 
 Their **values must be JSON-safe** (§6) — preserving a key whose value could not survive the next
 export would be preservation in name only, so a `Date` under an unknown key refuses the record just
@@ -205,7 +230,7 @@ value — a single click in the status picker fixes it.
 
 | Producer-owned — your value wins | User-owned — the stored value wins |
 |---|---|
-| `title`, `company`, `url`, `jdText`, `matchResult`, `capture` | `status`, `notes`, `resumeId` |
+| `title`, `company`, `url`, `jdText`, `matchResult`, `capture`, and the six posting facts | `status`, `notes`, `resumeId` |
 
 You are authoritative about the posting; the user is authoritative about their application. A
 re-capture that reset an `interviewing` job to `interested` would be worse than the duplicate it
@@ -263,12 +288,21 @@ Two version numbers exist and they are not the same thing.
 
 ```jsonc
 "capture": {
-  "contract": 1,                      // required within the object: which version you targeted
+  "contract": 2,                      // required within the object: which version you targeted
   "producer": "offlinecv-extension",  // optional, free text
   "producerVersion": "0.3.1",         // optional
   "capturedAt": 1753900000000         // optional epoch ms — when YOU captured it
 }
 ```
+
+### Version history
+
+| Version | Change | Migration |
+|---|---|---|
+| 1 | The contract as #693 introduced it. | — |
+| 2 | Added the six posting facts in §1: `location`, `salaryRange`, `datePosted`, `workModel`, `employmentType`, `validThrough`. | **None.** All six are optional, so a v1 record is already a valid v2 record that omits them. Existing stored records keep loading untouched. |
+
+**offlinecv never refuses a record for its version number.** The validator requires `capture.contract` to be a finite number and does not compare it against its own — so a record from a version this build has never heard of is accepted, and a v1 producer keeps working after a v2 build ships. Refusing a future version is precisely the forward-compatibility failure this section exists to avoid.
 
 `capture` is **optional**, and its absence means "written by offlinecv itself, contract 1". It
 exists now rather than later because a producer version cannot be retrofitted: once third-party
@@ -302,3 +336,8 @@ over `keyof Required<JobRecord>` and its guards are typed against each field's o
 the mechanism keeping the validator from quietly ceasing to cover a field. Update this document in
 the same change, and treat a change to §2's strip list as a contract version bump — every producer
 must apply exactly the same list or the id space forks.
+
+If the new field is something the extractor can read off a posting page, it also belongs in
+`src/lib/jd-extract/to-job-record.ts` — the single mapper from an extraction result to a capture
+payload. That file is deliberately the only crossing between the two, so the extraction result can
+change without touching this contract, and this contract cannot grow a field by accident.
