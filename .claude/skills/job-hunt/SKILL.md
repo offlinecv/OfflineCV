@@ -14,6 +14,7 @@ allowed-tools:
   - mcp__claude-in-chrome__find
   - mcp__claude-in-chrome__file_upload
   - mcp__claude-in-chrome__computer
+  - mcp__claude-in-chrome__browser_batch
   - mcp__google-workspace__search_gmail_messages
   - mcp__google-workspace__get_gmail_messages_content_batch
   - mcp__linkedin__search_people
@@ -38,6 +39,13 @@ moves the cost of that policy onto the user, mid-run.
 broadcast has failed, naming the browser they want. Phase 0 still says broadcast first,
 and never offer an unprompted browser list.
 
+`browser_batch` is granted because a hunt is mostly predictable multi-step sequences —
+navigate, wait, read the cards — and batching them is one round trip instead of five. It
+was missing from this list until 2026-08-01, and the failure mode is worth remembering: a
+run that batches happily for twenty calls and then hits a *standalone* `javascript_tool`
+gets that one call refused in auto mode, which reads like a page or a domain problem and
+is neither.
+
 Outreach tools are granted because referral contact is part of a real hunt, and because a
 tool this skill cannot reach fails the run in auto mode instead of asking. Rule 9 is what
 governs their use. `get_conversation` is included because outreach register depends on
@@ -60,13 +68,38 @@ Indeed and LinkedIn in a paired Chrome on the same day — URL parameters, selec
 every derived id in the table there are observed, not inferred. Where the obvious approach
 was tried and failed, that is called out — do not re-derive it.
 
-**One exception, stated so it is not mistaken for the rest.** Phase 2's extraction step
-(`jd-extract`, Appendix E) replaced hand-written page slicing in #719. The bundle, the call
-shape and the resulting record were verified against the real module in jsdom, and the
-module's own suite covers the adapters — but the inject-and-call round trip has **not** been
-run against live LinkedIn or Indeed. Treat the selectors it depends on as this repo's best
-current reading of those pages, not as observations from a paired run, and if something
-comes back empty on a real page, that is worth reporting rather than working around.
+Phase 2's extraction step (`jd-extract`, Appendix E) replaced hand-written page slicing in
+#719, and the inject-and-call round trip **was** run against live Indeed and LinkedIn on
+2026-08-01. The result splits by site, and the split is the important part:
+
+- **Indeed works, and is the best lane in this skill.** `indeed.com/viewjob?jk=…` ships a
+  JSON-LD `JobPosting`, so extraction lands on tier 1 `schema_org` with a real `datePosted`,
+  `salaryRange` and `employmentType`, and it does **not** depend on the SPA having rendered.
+  Fifteen captures on one run: bodies 2.9–10.2 KB, every one rated (2.4★–4.6★), none weak.
+- **LinkedIn does not work, and Phase 2's LinkedIn section below is retained for its search
+  and id-collection value only — do not expect to capture a body from it.** See the box
+  below before spending a run on it.
+
+**LinkedIn: the adapter matches the page that has no description.** Verified on two
+different postings, waiting 25 s+ each:
+
+| Path | Result |
+|---|---|
+| `/jobs/view/<id>/` — the only URL `M.matches()` accepts | LinkedIn renders a **stub**. No `h1`, no JSON-LD, no description, `main` ≈ 1.4 KB. Body came back **812 chars** of page chrome |
+| `/jobs/search/?currentJobId=<id>` — where the description actually renders (6.3 KB, ~15 s to arrive) | Adapter does **not** match. Forcing it with a synthetic view URL makes it read all of `main`: **14.8 KB polluted** with the results list at the head and a "Trending employee content" rail at the tail, `company: "Unknown"` |
+
+Two component defects fall out of this, both worth fixing before the lane is usable:
+
+1. `v()` (the `document.title` fallback) splits on `-`, so
+   `"Head of Engineering ($225k-$325k + Equity)… | Jack & Jill | LinkedIn"` yields the title
+   **`"Head of Engineering ($225k"`**. It only runs when `h1` is missing — which on LinkedIn
+   is always.
+2. `prune.ts` does not drop the SERP results list: it is neither `nav`/`aside` nor under a
+   heading matching `ht`, so the "read the pane" workaround cannot be made safe by pruning
+   alone.
+
+A 14.8 KB body of search chrome is exactly the input measured at 0.00★ further down. Report
+it; do not ship it.
 
 ## The two doors
 
@@ -331,6 +364,18 @@ https://www.indeed.com/jobs?q=<terms>&l=<location>&fromage=1&sort=date
 ```
 
 `fromage` = max age in days (`1`, `3`, `7`, `14`) · `sort=date` = recency order.
+
+**`fromage` is not an age guarantee — filter again on the extracted `datePosted`.** It
+bounds Indeed's *index* date, not the posting's own declared date. Observed 2026-08-01: a
+`fromage=14` search returned a posting whose schema.org `datePosted` was **2026-06-05, 57
+days old**. The extractor gives you the publisher's own date, so check it before you capture
+and say the real age in the report.
+
+Indeed's relevance is also weak, and quoting does not fix it: a quoted boolean query for
+engineering-leadership titles returned dog-walking, tennis-coaching and port-engineer
+listings alongside the real ones. Expect to discard most of a result page by hand. A few
+cards also carry placeholder-looking `jk` values (`a1b2c3d4e5f67890`,
+`456789abcdef0123`) that duplicate a neighbouring real card — do not capture those.
 
 Cards are `.job_seen_beacon`. Per card: `[data-jk]` (the posting key), `[data-testid=
 "company-name"]`, `[data-testid="text-location"]`, `[data-testid="timing-attribute"]`, and
