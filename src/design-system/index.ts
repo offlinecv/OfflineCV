@@ -18,6 +18,8 @@ export * from "./icons/TrustIcons.tsx";
 export * from "./primitives/Button.tsx";
 export * from "./primitives/Checkbox.tsx";
 export * from "./primitives/Chip.tsx";
+export * from "./primitives/CopyButton.tsx";
+export * from "./primitives/useCopyToClipboard.ts";
 export * from "./primitives/Dialog.tsx";
 export * from "./primitives/EditableField.tsx";
 export * from "./primitives/StarRating.tsx";

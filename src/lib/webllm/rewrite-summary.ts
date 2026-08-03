@@ -3,6 +3,14 @@
 
 import { cleanRewriteLine } from "./post-process.ts";
 import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import {
+  composeRulesPrompt,
+  DROP_FILLER_RULE,
+  keepIfAlreadyStrongRule,
+  PRESERVE_NUMBERS_RULE,
+  rewriteTaskLine,
+  SUMMARY_LEAD_RULE,
+} from "./rewrite-guardrails.ts";
 import { buildSteeringSuffix, type RewriteSteering } from "./steering.ts";
 import type { WebLlmEngine } from "./types.ts";
 import { acquireInference, releaseInference } from "./web-llm.ts";
@@ -36,13 +44,24 @@ import { acquireInference, releaseInference } from "./web-llm.ts";
  * one-shot flag (`webllm_first_resume_rewrite`). The per-section /
  * per-bullet one-shots stay distinct so the funnels don't cross-pollute.
  */
-export const SUMMARY_REWRITE_SYSTEM_PROMPT = `You are rewriting a resume summary to be more specific and outcome-oriented.
-Rules:
-- Output a single paragraph of 2–3 sentences. No bullet points. No numbering. No quotes. No preamble.
-- Lead with the strongest concrete claim (years of experience, primary domain, or signature outcome).
-- Preserve every concrete number from the input EXACTLY. Do not invent new numbers or metrics.
-- Drop generic filler ("hard-working", "team player", "passionate"). Keep specifics.
-- If the summary is already strong, keep it unchanged.`;
+/**
+ * The single-paragraph output contract. Local for the same reason
+ * `SECTION_OUTPUT_CONTRACT` is (#609): the shape of the output is what the two
+ * on-device prompts do NOT share with each other or with the exported prompt.
+ */
+const SUMMARY_OUTPUT_CONTRACT =
+  "Output a single paragraph of 2–3 sentences. No bullet points. No numbering. No quotes. No preamble.";
+
+export const SUMMARY_REWRITE_SYSTEM_PROMPT = composeRulesPrompt(
+  rewriteTaskLine("a resume summary"),
+  [
+    SUMMARY_OUTPUT_CONTRACT,
+    SUMMARY_LEAD_RULE,
+    PRESERVE_NUMBERS_RULE,
+    DROP_FILLER_RULE,
+    keepIfAlreadyStrongRule("the summary"),
+  ],
+);
 
 const SUMMARY_MAX_TOKENS = 256;
 

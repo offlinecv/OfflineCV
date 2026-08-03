@@ -22,10 +22,12 @@
  * demos — and `writeText` rejects outright when the permission is denied. A
  * caught-and-dropped failure leaves the button reading "Copy to clipboard"
  * with nothing on the clipboard, so the user pastes whatever was there before
- * and never learns why. `WebGpuUnavailableNotice`'s `CopyablePath` is this
- * repo's precedent for the same degrade; the difference here is that the body
- * is a selectable text region, so the fallback ("select it yourself") is a real
- * instruction rather than a shrug.
+ * and never learns why. That branch is no longer this file's to get right — it
+ * moved into `useCopyToClipboard` (#609), which every clipboard call site in
+ * the tree now shares. What stays here is the shape of the telling: the body is
+ * a selectable text region, so the fallback ("select it yourself") is a real
+ * instruction rather than a shrug, and it needs its own line beside the button
+ * rather than a truncated label inside it.
  *
  * Reuse analysis: `Dialog` + `Button` from `@design-system`, no hand-rolled
  * modal. No `Card` — the dialog is already the surface. The copy-failure line
@@ -36,7 +38,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Button, Dialog } from "@design-system";
+import { Button, Dialog, useCopyToClipboard } from "@design-system";
 import type { LetterRecord } from "../../lib/storage/index.ts";
 
 interface LetterRevealDialogProps {
@@ -47,11 +49,6 @@ interface LetterRevealDialogProps {
    *  the caller (`JobLetterIndicator`) renders nothing when there are none. */
   letters: readonly LetterRecord[];
 }
-
-/** Idle, or the outcome of the last copy attempt. A boolean cannot hold
- *  "tried and failed" apart from "not tried", which is what made the failure
- *  invisible — the button simply kept offering to copy. */
-type CopyState = "idle" | "copied" | "failed";
 
 function formatDate(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, {
@@ -69,7 +66,12 @@ export function LetterRevealDialog({
   const [selectedId, setSelectedId] = useState<string | undefined>(
     letters[0]?.id,
   );
-  const [copyState, setCopyState] = useState<CopyState>("idle");
+  // The clipboard write itself comes from the shared `useCopyToClipboard`
+  // (#609) — this file was the precedent for the absent-`navigator.clipboard`
+  // branch that hook now enforces for every caller. The MARKUP stays here: the
+  // failure is a full instruction sentence sitting beside the button, not a
+  // label swap inside it, so `CopyButton` is the wrong half of the pair.
+  const { state: copyState, copy, reset: resetCopy } = useCopyToClipboard();
 
   // Re-pick the most-recent draft and clear any stale copy result every time
   // the dialog opens — without this, reopening after picking an older draft
@@ -82,30 +84,11 @@ export function LetterRevealDialog({
   useEffect(() => {
     if (open) {
       setSelectedId(letters[0]?.id);
-      setCopyState("idle");
+      resetCopy();
     }
-  }, [open, letters]);
+  }, [open, letters, resetCopy]);
 
   const selected = letters.find((letter) => letter.id === selectedId) ?? letters[0];
-
-  async function onCopy() {
-    if (!selected) return;
-    // Read the API off `navigator` explicitly rather than optional-chaining the
-    // call: `navigator.clipboard?.writeText(…)` yields `undefined` on an
-    // insecure origin, which awaits cleanly and would report a copy that never
-    // happened. The absence has to be its own branch.
-    const clipboard = navigator.clipboard;
-    if (!clipboard) {
-      setCopyState("failed");
-      return;
-    }
-    try {
-      await clipboard.writeText(selected.body);
-      setCopyState("copied");
-    } catch {
-      setCopyState("failed");
-    }
-  }
 
   if (!selected) return null;
 
@@ -130,7 +113,7 @@ export function LetterRevealDialog({
                 size="sm"
                 onClick={() => {
                   setSelectedId(letter.id);
-                  setCopyState("idle");
+                  resetCopy();
                 }}
               >
                 {letter.label || "Untitled draft"}
@@ -166,7 +149,11 @@ export function LetterRevealDialog({
               Couldn&rsquo;t copy — select the text above and copy it yourself.
             </span>
           )}
-          <Button variant="primary" size="sm" onClick={() => void onCopy()}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => copy(selected.body)}
+          >
             {copyState === "copied" ? "Copied" : "Copy to clipboard"}
           </Button>
         </div>

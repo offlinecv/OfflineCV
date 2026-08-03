@@ -151,6 +151,19 @@ export interface ResumeRewriteController {
   useFindings: boolean;
   /** Toggle the findings channel (persists to localStorage). */
   setUseFindings: (value: boolean) => void;
+  /**
+   * The steering `start()` would run with, right now — the SAME object, not a
+   * reconstruction (#609).
+   *
+   * The copyable-prompt disclosure has to show a prompt carrying the user's
+   * current intent, and the intent is not simply `{userInstructions,
+   * pageTarget}`: `/jd-fit` folds a JD context in front of the user's own text,
+   * and the findings channel rides the same object. Exposing the assembled
+   * value means the copied prompt cannot disagree with the button beside it —
+   * a second assembly in the UI layer would drift the first time either input
+   * changed. `undefined` when nothing is set, exactly as `start()` sees it.
+   */
+  steering: RewriteSteering | undefined;
 }
 
 export function labelForResumeRewrite(
@@ -273,6 +286,34 @@ export function useResumeRewrite(
     );
   }, [findings, rewriteableSections]);
 
+  // The one assembly of "what this rewrite is being asked to do" (#609). Built
+  // here rather than inside `start` so the copyable-prompt disclosure can show
+  // the very object the run would use — see `ResumeRewriteController.steering`.
+  const steering = useMemo<RewriteSteering | undefined>(() => {
+    // Combine the user's freeform instructions with the optional JD-driven
+    // steering (#226) into ONE userInstructions string. The JD context leads
+    // (it sets the tailoring intent); the user's own text follows so it stays
+    // the most-salient, last instruction. Both empty → no userInstructions.
+    const jd = jdContext?.trim();
+    const userText = userInstructions.trim();
+    const combinedInstructions = [jd, userText]
+      .filter((s): s is string => !!s)
+      .join("\n\n");
+    // The app's own findings (#608) ride the SAME steering channel rather than
+    // a fourth parameter on `rewriteResumeWithLlm` — one intent channel, per
+    // #608's reuse analysis. Gated on the user's toggle, so opting out restores
+    // the pre-#608 prompt exactly.
+    const activeFindings = useFindings ? findings : undefined;
+    if (!combinedInstructions && pageTarget === null && !activeFindings) {
+      return undefined;
+    }
+    return {
+      ...(combinedInstructions ? { userInstructions: combinedInstructions } : {}),
+      ...(pageTarget !== null ? { pageTarget } : {}),
+      ...(activeFindings ? { findings: activeFindings } : {}),
+    };
+  }, [jdContext, userInstructions, pageTarget, useFindings, findings]);
+
   useEffect(() => {
     let cancelled = false;
     void detectWebGpu().then((c) => {
@@ -312,30 +353,6 @@ export function useResumeRewrite(
       const engine = await loadEngine(modelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
-      // Combine the user's freeform instructions with the optional JD-driven
-      // steering (#226) into ONE userInstructions string. The JD context leads
-      // (it sets the tailoring intent); the user's own text follows so it stays
-      // the most-salient, last instruction. Both empty → no userInstructions.
-      const jd = jdContext?.trim();
-      const userText = userInstructions.trim();
-      const combinedInstructions = [jd, userText]
-        .filter((s): s is string => !!s)
-        .join("\n\n");
-      // The app's own findings (#608) ride the SAME steering channel rather
-      // than a fourth parameter on `rewriteResumeWithLlm` — one intent channel,
-      // per the issue's reuse analysis. Gated on the user's toggle, so opting
-      // out restores the pre-#608 prompt exactly.
-      const activeFindings = useFindings ? findings : undefined;
-      const steering: RewriteSteering | undefined =
-        combinedInstructions || pageTarget !== null || activeFindings
-          ? {
-              ...(combinedInstructions
-                ? { userInstructions: combinedInstructions }
-                : {}),
-              ...(pageTarget !== null ? { pageTarget } : {}),
-              ...(activeFindings ? { findings: activeFindings } : {}),
-            }
-          : undefined;
       const result = await rewriteResumeWithLlm(
         rewriteableSections,
         engine,
@@ -367,22 +384,13 @@ export function useResumeRewrite(
       releaseInference(modelId);
       release();
     }
-    // `findings` + `useFindings` are read inside, so both are deps — the lint
-    // plugin is not registered in this repo (CLAUDE.md → Data & hooks), so a
-    // stale closure here would lint green and silently ignore the toggle until
-    // some unrelated dep changed. `findings` is a `useMemo` over
-    // `[critique, rewriteableSections]`, both already stable across renders
-    // that don't change them, so this adds no re-creation of its own.
-  }, [
-    acquire,
-    rewriteableSections,
-    selectedModelId,
-    userInstructions,
-    pageTarget,
-    jdContext,
-    findings,
-    useFindings,
-  ]);
+    // `steering` replaces the five inputs this callback used to assemble
+    // inline (#609). The lint plugin is not registered in this repo (CLAUDE.md
+    // → Data & hooks), so a stale closure here would lint green and silently
+    // run with last render's intent — reading ONE memoized value instead of
+    // five raw ones is one dep to get wrong instead of five, and it is the same
+    // value the disclosure shows the user.
+  }, [acquire, rewriteableSections, selectedModelId, steering]);
 
   const dismiss = useCallback(() => {
     setStatus({ kind: "idle" });
@@ -434,6 +442,7 @@ export function useResumeRewrite(
     hasFindings,
     useFindings,
     setUseFindings,
+    steering,
   };
 }
 

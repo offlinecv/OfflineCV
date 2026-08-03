@@ -14,7 +14,9 @@
  * Owns the raw <textarea> so feature code never hand-rolls one (the textarea is
  * a UI primitive concern; CLAUDE.md's 3-tier rule keeps it here, not in
  * src/components/). Auto-grows to fit content like EditableField's multiline
- * variant.
+ * variant — opt out with `autoGrow={false}` when the value is generated rather
+ * than typed and can be arbitrarily long (#609's exported prompt), where
+ * growing to fit would push the surrounding dialog's own controls off-screen.
  *
  * Design rules (CLAUDE.md): semantic tokens only; no hardcoded hex or raw
  * palette classes.
@@ -33,8 +35,21 @@ interface TextAreaFieldProps {
   placeholder?: string;
   /** Minimum visible rows before auto-grow kicks in. Defaults to 2. */
   rows?: number;
-  /** When true, the textarea is read-only and dimmed. */
+  /** When true, the textarea is non-interactive and dimmed. */
   disabled?: boolean;
+  /**
+   * When true, the value cannot be edited but stays focusable, scrollable and
+   * SELECTABLE. Distinct from `disabled`, which dims the field and takes it out
+   * of the tab order — a disabled textarea's text cannot be selected with the
+   * mouse in Chromium, which makes it useless as a manual-copy fallback for a
+   * generated artifact the user is meant to take elsewhere (#609).
+   */
+  readOnly?: boolean;
+  /**
+   * Sync the height to the content on every change. Defaults to true. False
+   * pins the box at `rows` and scrolls the overflow instead.
+   */
+  autoGrow?: boolean;
   /** Extra classes on the root wrapper (layout stays with the caller). */
   className?: string;
 }
@@ -46,6 +61,8 @@ export function TextAreaField({
   placeholder,
   rows = 2,
   disabled = false,
+  readOnly = false,
+  autoGrow = true,
   className,
 }: TextAreaFieldProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -55,11 +72,12 @@ export function TextAreaField({
   // inside a closed <dialog> — so it doesn't collapse to 0px; the natural
   // `rows` height then shows once the field becomes visible.
   useEffect(() => {
+    if (!autoGrow) return;
     const ta = ref.current;
     if (!ta) return;
     ta.style.height = "auto";
     if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
-  }, [value]);
+  }, [value, autoGrow]);
 
   return (
     <textarea
@@ -69,9 +87,11 @@ export function TextAreaField({
       rows={rows}
       placeholder={placeholder}
       disabled={disabled}
+      readOnly={readOnly}
       onChange={(e) => onChange(e.target.value)}
       className={[
-        "w-full resize-none overflow-hidden rounded border border-border",
+        "w-full resize-none rounded border border-border",
+        autoGrow ? "overflow-hidden" : "overflow-y-auto",
         "bg-surface-card px-2 py-1.5 text-sm leading-snug",
         "text-content-primary placeholder:text-content-muted",
         "outline-hidden focus:ring-1 focus:ring-accent-primary",

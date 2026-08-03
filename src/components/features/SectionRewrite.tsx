@@ -48,7 +48,13 @@ import type {
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 import { useSectionRewriteLock } from "../../hooks/useSectionRewriteLock.ts";
 import { useModelSelection } from "../../hooks/useModelSelection.ts";
-import { Button, ModelLoadProgress, InlineResult, InlineDiff } from "@design-system";
+import {
+  Button,
+  CopyButton,
+  ModelLoadProgress,
+  InlineResult,
+  InlineDiff,
+} from "@design-system";
 import { computeTextDiff } from "../../lib/diff/text-diff.ts";
 import {
   alignBullets,
@@ -207,7 +213,6 @@ export function useSectionRewrite(
 ): SectionRewriteParts {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [copied, setCopied] = useState(false);
   const { isLocked, acquire } = useSectionRewriteLock();
   const { selectedModelId } = useModelSelection();
 
@@ -266,12 +271,10 @@ export function useSectionRewrite(
     if (status.kind !== "proposed") return;
     if (!bulletsEqual(status.snapshot, trimmedBullets)) {
       setStatus({ kind: "idle" });
-      setCopied(false);
     }
   }, [trimmedBullets, status]);
 
   const onClick = useCallback(async () => {
-    setCopied(false);
     // Atomic acquire — null means another instance already holds the lock and
     // we must bail. This is the real "no concurrent generate()" guard; the
     // disabled flag on the button is only the UI surface of the same check
@@ -322,7 +325,6 @@ export function useSectionRewrite(
 
   const onReject = useCallback(() => {
     setStatus({ kind: "idle" });
-    setCopied(false);
   }, []);
 
   // `ApplyConfirmation` re-arms its EXIT_MS collapse timer whenever `onCollapse`
@@ -352,7 +354,6 @@ export function useSectionRewrite(
     // path's zero-write dismiss.
     if (writes.length === 0) {
       setStatus({ kind: "idle" });
-      setCopied(false);
       return;
     }
     // Snapshot BEFORE the loop — once a write lands the prior value is gone
@@ -370,7 +371,6 @@ export function useSectionRewrite(
       sections: [sectionLabel],
       undo,
     });
-    setCopied(false);
   }, [
     apply,
     pairs,
@@ -379,16 +379,6 @@ export function useSectionRewrite(
     keptObsIds,
     sectionLabel,
   ]);
-
-  const onCopyAll = useCallback(async () => {
-    if (status.kind !== "proposed") return;
-    try {
-      await navigator.clipboard.writeText(status.result.bullets.join("\n"));
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  }, [status]);
 
   if (capability !== "available" || trimmedBullets.length === 0) {
     return { trigger: null, panel: null };
@@ -453,8 +443,6 @@ export function useSectionRewrite(
             <ProposedSection
               original={trimmedBullets}
               result={status.result}
-              copied={copied}
-              onCopyAll={onCopyAll}
               onReject={onReject}
             />
           ))}
@@ -529,17 +517,23 @@ export function labelFor(status: Status, lockedByOther: boolean): string {
   }
 }
 
+/**
+ * The no-edit-model fallback panel: a before/after diff whose only exit is
+ * "copy the bullets and paste them yourself".
+ *
+ * Copy state used to live in `useSectionRewrite` as a `copied` boolean that
+ * five separate transitions had to remember to clear. It now belongs to the
+ * shared `CopyButton` (#609), which is mounted only while this panel is — every
+ * one of those transitions unmounts it, so the reset is structural rather than
+ * five call sites agreeing.
+ */
 export function ProposedSection({
   original,
   result,
-  copied,
-  onCopyAll,
   onReject,
 }: {
   original: readonly string[];
   result: SectionRewriteResult;
-  copied: boolean;
-  onCopyAll: () => void;
   onReject: () => void;
 }) {
   return (
@@ -562,14 +556,15 @@ export function ProposedSection({
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button
+        <CopyButton
+          value={result.bullets.join("\n")}
           variant="ghost"
           size="sm"
-          onClick={onCopyAll}
           className="rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-2xs text-content-primary hover:border-border hover:bg-surface-hover"
+          failedLabel="Couldn’t copy — select the bullets above"
         >
-          {copied ? "Copied" : "Use this — copy all bullets"}
-        </Button>
+          Use this — copy all bullets
+        </CopyButton>
         <Button
           variant="link"
           size="sm"
