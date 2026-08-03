@@ -13,6 +13,28 @@
  * `SkillTermGuidance`) — the label change alone reaches a sighted user and
  * nobody else — and meaning is carried by the WORD, never by colour.
  *
+ * ── The live region duplicates the label, knowingly (#732 review) ──
+ *
+ * When the button carries no `aria-label`, its visible text IS its accessible
+ * name, so a screen reader focused on it may announce the change itself — and
+ * then again from the live region. That redundancy is the deliberate choice
+ * over both alternatives:
+ *
+ *   - **Drop the region.** Accessible-name-change announcement is inconsistent
+ *     across screen readers, so this trades a possible double-announcement for
+ *     a possible SILENT one — worse for an action whose whole feedback is the
+ *     confirmation. It also breaks the one call site that is not redundant at
+ *     all: `WebGpuUnavailableNotice`'s `CopyablePath` passes a fixed
+ *     `aria-label` ("Copy chrome://flags"), so its name never changes and the
+ *     region is the ONLY channel it has.
+ *   - **Keep the name fixed and swap only the visible text.** Then the visible
+ *     label reads "Copied" while the accessible name still says "Copy prompt",
+ *     which is what WCAG 2.5.3 Label in Name exists to prevent — a speech-input
+ *     user saying "click Copied" would hit nothing.
+ *
+ * Announcing twice is the least-bad of the three. If this is ever revisited, it
+ * needs profiling against real screen readers, not a re-reading of the spec.
+ *
  * Renders a fragment, not a wrapper: every call site puts this inside a flex
  * row it already sizes, and the live region is `sr-only` (absolutely
  * positioned), so it contributes no box. Layout stays with the caller, matching

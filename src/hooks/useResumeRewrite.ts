@@ -258,9 +258,8 @@ export function useResumeRewrite(
     [setPageTargetRaw],
   );
 
-  const rewriteableSections = useMemo(
-    () => sections.filter(isNonEmptyForUi),
-    [sections],
+  const rewriteableSections = useStableSections(
+    useMemo(() => sections.filter(isNonEmptyForUi), [sections]),
   );
 
   // The critique's findings, keyed by the line they describe (#608). Built off
@@ -444,6 +443,55 @@ export function useResumeRewrite(
     setUseFindings,
     steering,
   };
+}
+
+/**
+ * Hold the previous section array whenever the new one says the same thing.
+ *
+ * `ReconstructedResume` calls `buildResumeSections(…)` in its render body — a
+ * plain call, not a `useMemo` — so `sections` is a fresh array on EVERY render,
+ * and filtering it produced a fresh `rewriteableSections` on every render too.
+ * That identity churn propagated to `findings`, `steering`, `start` and (since
+ * #609) the copyable prompt's `useMemo`, which therefore memoized nothing: it
+ * rebuilt the prompt string on every render of the disclosure. Nothing broke —
+ * every consumer is derived, so recomputing yields the same value, and `start`
+ * is called on click rather than watched — but a `useMemo` whose deps change
+ * every render is a claim the code does not keep, and the next consumer to
+ * watch `steering` in an effect would get a re-fire per render (#732 review).
+ *
+ * STRICTER THAN `sectionsEqual`, DELIBERATELY. That comparator ignores `label`,
+ * which is right where it is used: the stale-proposal guard should not throw
+ * away a live proposal because the user retyped an employer name. Here the
+ * identity being gated feeds what the user SEES — the progress line ("Rewriting
+ * 2 of 5: Engineer — Acme") and every heading in the proposal panel read
+ * `label` off these very objects — so holding an array whose labels went stale
+ * would show the old employer against the new bullets.
+ *
+ * Adjusts state during render rather than writing a ref, which is React's
+ * documented shape for "a value derived from props that has to stay stable":
+ * the `setHeld` call makes React discard this render pass and immediately redo
+ * it with the new array, so no effect ever observes the stale value. It costs
+ * one extra pass on a real edit and nothing at all on the churn it exists to
+ * absorb.
+ */
+function useStableSections(
+  sections: readonly SectionInput[],
+): readonly SectionInput[] {
+  const [held, setHeld] = useState(sections);
+  if (held !== sections && !sameSectionsForDisplay(held, sections)) {
+    setHeld(sections);
+    return sections;
+  }
+  return held;
+}
+
+/** `sectionsEqual` plus the display labels — see {@link useStableSections}. */
+function sameSectionsForDisplay(
+  a: readonly SectionInput[],
+  b: readonly SectionInput[],
+): boolean {
+  // `sectionsEqual` checks length first, so the index into `b` is in range.
+  return sectionsEqual(a, b) && a.every((s, i) => s.label === b[i]!.label);
 }
 
 function isNonEmptyForUi(section: SectionInput): boolean {

@@ -183,6 +183,83 @@ describe("RewritePromptDisclosure — the prompt tracks live steering", () => {
   });
 });
 
+describe("the controller absorbs parent render churn (#732 review)", () => {
+  // `ReconstructedResume` calls `buildResumeSections(…)` in its render body —
+  // a plain call, not a memo — so `sections` arrives as a NEW array on every
+  // render. That churn used to reach `rewriteableSections` and `steering`,
+  // which made the disclosure's prompt `useMemo` inert: deps that change every
+  // render memoize nothing.
+  //
+  // Asserted on the controller rather than on the rendered prompt, because the
+  // prompt is derived — it comes out identical either way, which is exactly why
+  // the churn was invisible until someone looked at the dep list.
+  const ROLE = "Staff Engineer · Northwind Logistics";
+
+  function freshSections(label: string, second: string): SectionInput[] {
+    return [
+      { kind: "summary", id: "s", label: "Summary", text: SUMMARY },
+      { kind: "experience", id: "e1", label, bullets: [BULLET_A, second] },
+    ];
+  }
+
+  let churn: ResumeRewriteController;
+
+  function ChurnProbe({ label, second }: { label: string; second: string }) {
+    churn = useResumeRewrite(freshSections(label, second));
+    return null;
+  }
+
+  async function render(label = ROLE, second = BULLET_B) {
+    await act(async () => {
+      root.render(<ChurnProbe label={label} second={second} />);
+      await Promise.resolve();
+    });
+  }
+
+  it("holds section and steering identity across a content-identical re-render", async () => {
+    await render();
+    // A page target makes `steering` a real object — with no steering at all it
+    // is `undefined`, and `undefined === undefined` would pass vacuously.
+    act(() => churn.setPageTarget(1));
+
+    const sections = churn.rewriteableSections;
+    const steering = churn.steering;
+    expect(steering).toBeDefined();
+
+    await render();
+
+    expect(churn.rewriteableSections).toBe(sections);
+    expect(churn.steering).toBe(steering);
+  });
+
+  it("still adopts a new array when a display LABEL changes", async () => {
+    // The stabilizer is stricter than `sectionsEqual`, which ignores `label`.
+    // These objects are what the progress line and the proposal panel's
+    // headings read, so holding a stale one would show the old employer.
+    await render();
+    const sections = churn.rewriteableSections;
+
+    await render("Staff Engineer · Contoso Freight");
+
+    expect(churn.rewriteableSections).not.toBe(sections);
+    expect(churn.rewriteableSections.map((s) => s.label)).toContain(
+      "Staff Engineer · Contoso Freight",
+    );
+  });
+
+  it("still adopts a new array when a BULLET changes", async () => {
+    await render();
+    const sections = churn.rewriteableSections;
+
+    await render(ROLE, "Rebuilt the pricing service end to end.");
+
+    expect(churn.rewriteableSections).not.toBe(sections);
+    expect(JSON.stringify(churn.rewriteableSections)).toContain(
+      "Rebuilt the pricing service end to end.",
+    );
+  });
+});
+
 describe("RewritePromptDisclosure — copying", () => {
   it("puts the shown prompt on the clipboard and confirms in place", async () => {
     const writeText = vi.fn(() => Promise.resolve());
