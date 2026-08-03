@@ -13,9 +13,9 @@
  * while keeping the adapter small enough to audit.
  *
  * Pre-cleaning pass (real-world DOCX artifacts):
- *   - Strip base64 data URIs in `![...](data:...)` — mammoth+turndown emits
- *     embedded images this way and they can bloat markdown 3× with zero
- *     signal for parsing.
+ *   - Strip inline images `![alt](url)`, including the base64 data URIs
+ *     mammoth+turndown emits for embedded images — they can bloat markdown 3×
+ *     with zero signal for parsing. Shared with `mdToPlainText` since #613.
  *   - Flatten inline links `[label](url)` and autolinks `<url>` to `label url`
  *     (#610). Without this the bracket-paren syntax reaches every extractor
  *     verbatim, so a `.md` renders literal markdown in the exported PDF and
@@ -52,6 +52,7 @@ import {
   extractLinkDefinitions,
   flattenAutolinks,
   resolveReferenceLinks,
+  stripInlineImages,
   stripReferenceImages,
 } from "../markdown-link-refs.ts";
 import type { PdfLine, PdfSection } from "./line-model.ts";
@@ -88,17 +89,15 @@ const INLINE_BOLD_RE = /\*\*(.+?)\*\*/g;
 const INLINE_ITALIC_UNDERSCORE_RE = /(^|[^\w\\])_([^\s_][^_]*?[^\s_]|[^\s_])_(?=[^\w]|$)/g;
 const INLINE_ITALIC_STAR_RE = /(^|[^\w\\*])\*([^\s*][^*]*?[^\s*]|[^\s*])\*(?=[^\w*]|$)/g;
 
-// Base64 data-URI images in markdown: ![alt](data:image/...;base64,....)
-// Multi-line friendly because turndown occasionally wraps.
-const DATA_URI_IMAGE_RE = /!\[[^\]]*\]\(data:[^)]*\)/g;
-
-// Non-data markdown images: `![alt](https://...)` and `![](path.png)`. Alt
-// text alone isn't useful for resume parsing — drop the whole image ref so
-// it doesn't pollute the line text.
-const ANY_IMAGE_RE = /!\[[^\]]*\]\([^)]*\)/g;
+// Inline images — `![alt](https://…)`, `![](path.png)` and the base64
+// data-URI form — are stripped by the shared `stripInlineImages` in
+// `../markdown-link-refs.ts` (see the import above). The rule lives there so
+// `mdToPlainText` applies the identical one to `rawText`: before #613 it had no
+// image rule at all, and the image's `[alt](url)` tail matched its generic LINK
+// rule and flattened to `!alt url` in the text the Evidence panel prints.
 
 // Reference-style images (`![alt][ref]`, `![alt][]`, `![alt]`) cannot be
-// stripped here: unlike the two shapes above they are not self-identifying —
+// stripped there: unlike the inline shapes above they are not self-identifying —
 // whether `![great]` is an image or literal prose depends on the document's
 // `[ref]: url` definition table, which does not exist yet at this point in the
 // pipeline. They are handled inside `flattenLinks` via the shared
@@ -123,13 +122,6 @@ const INLINE_LINK_RE = /\[([^\]\n]*)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
 // escapes that appear in contact data / prose. We keep `\n` as-is.
 const BACKSLASH_ESCAPE_RE = /\\([_*[\]()!`#>.+-])/g;
 
-/** Strip base64 image blobs and non-data image refs from markdown. */
-function stripImages(markdown: string): string {
-  return markdown
-    .replace(DATA_URI_IMAGE_RE, "")
-    .replace(ANY_IMAGE_RE, "");
-}
-
 /**
  * Flatten every markdown link shape to its plain-text reading — inline links
  * and autolinks (#610), then reference-style links (#611).
@@ -138,14 +130,13 @@ function stripImages(markdown: string): string {
  * first point that has the definition table `stripReferenceImages` needs to
  * tell an image (`![badge][ci]`, with `[ci]` defined) from prose that merely
  * puts a `!` beside a bracket (`Grew revenue 40%![details][cat]`, with nothing
- * defining `[cat]`). Deciding it a step earlier, in `stripImages`, is not
- * possible without the table and deleted the prose.
+ * defining `[cat]`). Deciding it a step earlier, alongside the INLINE strip in
+ * `stripInlineImages`, is not possible without the table and deleted the prose.
  *
  * An image that the table does NOT resolve therefore survives into
- * `resolveReferenceLinks` — as does every image on `mdToPlainText`'s path,
- * which has no strip pass at all. Both are safe: the image alternative in that
- * scan consumes the whole usage and returns it untouched, so no image can
- * start flattening to `alt url` on either path.
+ * `resolveReferenceLinks`, on both readings' paths. That is safe: the image
+ * alternative in that scan consumes the whole usage and returns it untouched,
+ * so no image can start flattening to `alt url` on either path.
  *
  * `label url` (not bare `label`) is deliberate: it mirrors the `$1 $2` rewrite
  * `mdToPlainText` (`src/lib/ingest/markdown.ts`) already applies to the
@@ -241,7 +232,7 @@ function normalizeSplitLetterHeaders(markdown: string): string {
  */
 function preprocessMarkdown(markdown: string): string {
   let out = markdown;
-  out = stripImages(out);
+  out = stripInlineImages(out);
   out = flattenLinks(out);
   out = unescapeBackslashes(out);
   out = normalizeSplitLetterHeaders(out);

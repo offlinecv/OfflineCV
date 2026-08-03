@@ -1,5 +1,7 @@
 # Riley Nakamura
 
+![Headshot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)
+
 riley.nakamura@example.com · (312) 555-0123 · Chicago, IL
 
 <https://linkedin.com/in/rileynakamura> · github.com/rileynakamura
@@ -21,7 +23,7 @@ Platform engineer who ships checkout and catalog systems. Earlier, sold sidebiz.
 
 ## Projects
 
-**Ledger Toolkit** — [ledger-toolkit](https://example.org/ledger-toolkit)
+**Ledger Toolkit** — [ledger-toolkit](https://example.org/ledger-toolkit) ![build status](https://example.org/badges/ledger-toolkit.svg)
 
 - Double-entry bookkeeping library used by three internal teams.
 

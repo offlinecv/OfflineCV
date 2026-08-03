@@ -19,6 +19,14 @@
  * `rawText`. This compares the two readings against each other, line for line,
  * over both markdown fixtures.
  *
+ * #613 closed the last shape the two readings disagreed on: an INLINE image.
+ * `markdown-lines.ts` stripped it; `mdToPlainText` had no image rule at all, so
+ * the image's `[alt](url)` tail matched its generic LINK rule and flattened to
+ * `!alt url` — an image URL (or a base64 payload) printed to the user by
+ * `EvidencePanel` and scanned by the scorer. Neither fixture contained an image
+ * at the time, which is why the line-for-line comparison above saw nothing;
+ * `inline-links.md` now carries both forms.
+ *
  * THE ONE DELIBERATE DIFFERENCE. `markdown-lines.ts` keeps a bullet's leading
  * `- ` so the shared `isBulletLine` extractor matches; `mdToPlainText` strips it
  * because the scorer wants prose. Normalizing that marker away is therefore
@@ -76,6 +84,102 @@ describe.each(["inline-links", "reference-links"])(
     });
   },
 );
+
+describe("inline-links.md — an inline image contributes nothing to either reading", () => {
+  // #613. The fixture carries both shapes: a base64 data-URI headshot in the
+  // profile band (mammoth+turndown's output for an embedded image) and an
+  // https badge sitting immediately after a real link in Projects.
+  //
+  // The badge's placement is the load-bearing part. `mdToPlainText` had no
+  // image rule, so the image's `[alt](url)` tail matched its generic LINK rule
+  // and flattened to `!alt url` — putting an image URL in the text
+  // `EvidencePanel` prints back. Next to a genuine link, a fix that
+  // over-claims would take the link with it.
+  let markdown: string;
+
+  beforeAll(async () => {
+    markdown = await fsp.readFile(join(FIXTURE_DIR, "inline-links.md"), "utf8");
+  });
+
+  it("leaks neither image URL, nor its alt text, nor a stray `!`", () => {
+    const { mdLines, rawText } = readings(markdown);
+    for (const line of [...mdLines, ...rawText]) {
+      expect(line).not.toContain("data:image/png;base64");
+      expect(line).not.toContain("badges/ledger-toolkit.svg");
+      expect(line).not.toContain("build status");
+      expect(line).not.toContain("Headshot");
+      expect(line).not.toMatch(/!\[|!\w/); // `![alt](…)` residue, and `!alt url`
+    }
+  });
+
+  it("still flattens the link the badge sits next to", () => {
+    const { mdLines, rawText } = readings(markdown);
+    for (const lines of [mdLines, rawText]) {
+      expect(lines.join("\n")).toContain(
+        "ledger-toolkit https://example.org/ledger-toolkit",
+      );
+    }
+  });
+});
+
+describe("an INLINE image is inert in both readings", () => {
+  // #613. `markdown-lines.ts` had stripped these since #552; `mdToPlainText`
+  // never had the rule, so one file read two ways disagreed about images —
+  // the last shape left over after #610/#611 aligned every LINK shape.
+  //
+  // Both readings are asserted for every case: the defect was invisible on the
+  // `PdfLine` side, so a one-sided test would have passed against the bug.
+  it.each([
+    ["https image", "Shipped ![Company logo](https://example.org/logo.png) fast."],
+    ["data-URI image", "Shipped ![logo](data:image/png;base64,iVBORw0KGgo=) fast."],
+    ["empty alt text", "Shipped ![](https://example.org/logo.png) fast."],
+    ["title-bearing image", 'Shipped ![logo](https://example.org/l.png "Logo") fast.'],
+  ])("%s leaves only the surrounding prose", (_label, markdown) => {
+    for (const reading of [
+      mdToPlainText(markdown),
+      sectionizeMarkdown(markdown).lines.map((l) => l.text).join("\n"),
+    ]) {
+      expect(reading).not.toContain("example.org");
+      expect(reading).not.toContain("data:image");
+      expect(reading).not.toContain("!");
+      expect(reading).toContain("Shipped");
+      expect(reading).toContain("fast.");
+    }
+  });
+
+  it("strips a data URI that turndown wrapped across a line break", () => {
+    // The reason both readings apply the strip to the WHOLE document rather
+    // than per line. A per-line strip leaves the two halves of the payload
+    // behind, and `rawText` is the reading where that lands in front of a user.
+    const markdown =
+      "Badge ![b](data:image/png;base64,\niVBORw0KGgo=) here.";
+    expect(mdToPlainText(markdown)).not.toContain("base64");
+    expect(
+      sectionizeMarkdown(markdown).lines.map((l) => l.text).join("\n"),
+    ).not.toContain("base64");
+  });
+
+  it("does not claim a LINK whose label merely ends in `!`", () => {
+    // The `!` has to be immediately before the `[`. `[Ship it!](url)` is a
+    // link; over-claiming here would delete résumé content outright.
+    const markdown = "[Ship it!](https://example.org/ship)";
+    expect(mdToPlainText(markdown)).toBe("Ship it! https://example.org/ship");
+    expect(sectionizeMarkdown(markdown).lines.map((l) => l.text)).toEqual([
+      "Ship it! https://example.org/ship",
+    ]);
+  });
+
+  it("keeps the text an image runs straight into", () => {
+    // CommonMark reads `Fast![label](url)` as the text "Fast" followed by an
+    // image, so the text survives and the image goes — where the pre-#613
+    // `rawText` reading emitted `Fast!label https://…`.
+    const markdown = "Fast![label](https://example.org/x.png)";
+    expect(mdToPlainText(markdown)).toBe("Fast");
+    expect(sectionizeMarkdown(markdown).lines.map((l) => l.text)).toEqual([
+      "Fast",
+    ]);
+  });
+});
 
 describe("a DEFINED reference-style image never leaks its URL in EITHER reading", () => {
   // #610's criterion "images still strip entirely" holds for the inline shape
