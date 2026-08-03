@@ -18,5 +18,5 @@ manual — read the fixture before you add or change one.
 
 | Fixture | Guards |
 |---|---|
-| `inline-links.md` | `#610` — inline `[label](url)` / autolink flattening, and that a body-section URL never reaches the contact card |
+| `inline-links.md` | `#610` — inline `[label](url)` / autolink flattening, and that a body-section URL never reaches the contact card. `#613` — inline images (`![alt](url)` and the base64 data-URI form) contribute nothing to *either* reading; the badge sits beside a real link so the link must still flatten next to it |
 | `reference-links.md` | `#611` — reference-style `[label][ref]` / `[label][]` / `[label]` resolution, that `[ref]: url` definition lines never become content (including from the profile band, where they otherwise become `website_url`), and that an *undefined* reference stays literal |

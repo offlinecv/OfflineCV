@@ -93,6 +93,27 @@ const AUTOLINK_URI_RE = /<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^<>\s]*)>/g;
 const AUTOLINK_EMAIL_RE = /<([^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)>/g;
 
 /**
+ * INLINE images — `![alt](https://…/logo.png)`, `![](path.png)` — and the
+ * base64 data-URI form mammoth+turndown emits for an embedded image.
+ *
+ * Two regexes rather than one because the data-URI target routinely contains
+ * characters the general target class would have to admit anyway; keeping it
+ * first and explicit is also what makes the intent readable at the call site
+ * (that payload is the damaging half — a base64 blob can bloat the document
+ * several-fold and is scored as text).
+ *
+ * Neither class excludes newlines, deliberately: turndown occasionally wraps a
+ * long data URI, so the strip has to be able to span a line break. That is why
+ * both consumers apply this to the WHOLE document before splitting into lines
+ * rather than per line (#613).
+ *
+ * Alt text alone carries no résumé signal — there is no `label url` reading to
+ * preserve the way there is for a link — so the whole usage goes.
+ */
+const DATA_URI_IMAGE_RE = /!\[[^\]]*\]\(data:[^)]*\)/g;
+const ANY_IMAGE_RE = /!\[[^\]]*\]\([^)]*\)/g;
+
+/**
  * A reference-style IMAGE usage: `![alt][ref]`, `![alt][]`, `![alt]`.
  *
  * The alt class admits ONE level of nested brackets — `[^[\]\n]` for ordinary
@@ -191,6 +212,38 @@ export function resolveReferenceLinks(
       return label.trim() ? `${label} ${url}` : url;
     },
   );
+}
+
+/**
+ * Drop INLINE markdown images — the self-identifying shape, `![alt](target)`,
+ * in both its ordinary and base64 data-URI forms (#613).
+ *
+ * Shared for the same reason `flattenAutolinks` is: it used to live inside
+ * `markdown-lines.ts` as a private `stripImages`, so only ONE of the two
+ * readings of a dropped `.md` applied it. The other reading —
+ * `mdToPlainText` — had no image rule at all, so the image's `[alt](url)` tail
+ * matched its generic LINK rule and flattened to `!alt url`: a stray `!`, the
+ * alt text, and an image URL, printed back to the user verbatim by
+ * `EvidencePanel` and scanned by the scorer. `PdfLine` reading: image gone.
+ * `rawText` reading: image URL in the résumé. One definition, both readings.
+ *
+ * NO DEFINITION TABLE, unlike {@link stripReferenceImages}. That asymmetry is
+ * the whole reason these are two functions: `![alt](url)` carries its own
+ * target, so it is an image on sight and can be stripped anywhere in the
+ * pipeline. `![great]` is an image only if something defines `[great]` — strip
+ * it unconditionally and ordinary prose that puts a `!` beside a bracket
+ * ("Wow![great] news") silently loses characters.
+ *
+ * The `!` must be immediately before the `[`, so a LINK whose label merely ends
+ * in one — `[Ship it!](https://…)` — is untouched and still flattens to
+ * `label url`. Text that runs into an image (`Fast![label](url)`) is read as
+ * text plus an image, which is CommonMark's own reading, and the text survives.
+ *
+ * Apply to the whole document BEFORE splitting into lines: a wrapped data URI
+ * spans a line break (see the regexes' docblock).
+ */
+export function stripInlineImages(text: string): string {
+  return text.replace(DATA_URI_IMAGE_RE, "").replace(ANY_IMAGE_RE, "");
 }
 
 /**

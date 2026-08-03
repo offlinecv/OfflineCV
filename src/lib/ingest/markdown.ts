@@ -17,6 +17,7 @@ import {
   extractLinkDefinitions,
   flattenAutolinks,
   resolveReferenceLinks,
+  stripInlineImages,
 } from "../markdown-link-refs.ts";
 
 export interface MarkdownParseResult {
@@ -54,10 +55,22 @@ export interface MarkdownParseResult {
  *     `INLINE_LINK_RE`. Without that, `[writeup](url "Pricing rebuild")`
  *     swallowed the CommonMark title into the target and printed
  *     `writeup url "Pricing rebuild"`.
+ *   - Inline IMAGES are stripped through the shared `stripInlineImages` (#613).
+ *     There was no image rule here at all, so an image's `[alt](url)` tail
+ *     matched the link rule above and the leading `!` was simply left behind:
+ *     `![Company logo](https://…/logo.png)` became `!Company logo https://…`,
+ *     an image URL printed to the user as if it were résumé prose. The data-URI
+ *     form was the damaging half — a base64 blob flattened into `rawText` and
+ *     scored as text.
+ *
+ * The image strip runs over the WHOLE document, before the per-line map, for
+ * two reasons: a wrapped data URI spans a line break, and `markdown-lines.ts`
+ * strips at document level too, so anything else would put the two readings
+ * back out of step on exactly the shape this is fixing.
  */
 export function mdToPlainText(text: string): string {
   const { definitions, body } = extractLinkDefinitions(text);
-  return body
+  return stripInlineImages(body)
     .split("\n")
     .map((line) =>
       // Reference resolution runs with the link rules, before emphasis: it
