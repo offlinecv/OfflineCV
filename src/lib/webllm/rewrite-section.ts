@@ -8,6 +8,15 @@ import {
 } from "../analytics.ts";
 import { cleanRewriteLine } from "./post-process.ts";
 import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import {
+  composeRulesPrompt,
+  keepIfAlreadyStrongRule,
+  MERGE_AND_PRUNE_RULE,
+  PRESERVE_NUMBERS_RULE,
+  rewriteTaskLine,
+  STRONG_VERB_RULE,
+  VARY_VERBS_RULE,
+} from "./rewrite-guardrails.ts";
 import { buildSteeringSuffix, type RewriteSteering } from "./steering.ts";
 import type { WebLlmEngine } from "./types.ts";
 import { acquireInference, releaseInference } from "./web-llm.ts";
@@ -24,15 +33,34 @@ import { acquireInference, releaseInference } from "./web-llm.ts";
  * Tuned for Qwen2.5-1.5B-Instruct: small models need the rules stated
  * emphatically. "One bullet per line, no preamble, no numbering, no quotes"
  * has to be repeated because each rule is broken often enough on its own.
+ *
+ * Composed from `rewrite-guardrails.ts` since #609, which added a third prompt
+ * (the one the user copies out to an external model) stating the same rules.
+ * Only `SECTION_OUTPUT_CONTRACT` is this file's own — it is the small-model I/O
+ * contract, which is precisely what the exported prompt must NOT inherit.
+ * `rewrite-guardrails.test.ts` pins the assembled string byte-for-byte against
+ * its pre-extraction value.
  */
-export const SECTION_REWRITE_SYSTEM_PROMPT = `You are rewriting a list of resume bullets to be more specific and outcome-oriented.
-Rules:
-- Output one bullet per line. No numbering. No bullet markers. No quotes. No preamble.
-- Lead every bullet with a strong action verb.
-- Preserve every concrete number from the input EXACTLY. Do not invent new numbers or metrics.
-- You may merge two weak bullets into one strong bullet, drop pure filler, or reorder for emphasis.
-- Vary the action verbs across bullets — don't start every line the same way.
-- If a bullet is already strong, keep it unchanged.`;
+
+/**
+ * The line-per-bullet output contract. Local, not shared: a frontier model
+ * handed a whole résumé is hobbled by it, and every clause here exists because
+ * a 1.5B model broke it in evaluation.
+ */
+const SECTION_OUTPUT_CONTRACT =
+  "Output one bullet per line. No numbering. No bullet markers. No quotes. No preamble.";
+
+export const SECTION_REWRITE_SYSTEM_PROMPT = composeRulesPrompt(
+  rewriteTaskLine("a list of resume bullets"),
+  [
+    SECTION_OUTPUT_CONTRACT,
+    STRONG_VERB_RULE,
+    PRESERVE_NUMBERS_RULE,
+    MERGE_AND_PRUNE_RULE,
+    VARY_VERBS_RULE,
+    keepIfAlreadyStrongRule("a bullet"),
+  ],
+);
 
 const SECTION_MAX_TOKENS_PER_BULLET = 60;
 const SECTION_MAX_TOKENS_CEILING = 768;

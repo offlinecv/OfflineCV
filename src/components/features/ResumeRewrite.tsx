@@ -8,7 +8,9 @@
  *   - The single primary CTA (mounted next to the model picker at the
  *     top of the Experience section), which opens a steering dialog
  *   - The steering dialog (#210 page-length chips + instructions), shown
- *     before the run; "Run rewrite" starts it and closes the dialog
+ *     before the run; "Run rewrite" starts it and closes the dialog. Its
+ *     collapsed "copy the prompt instead" disclosure (#609) lives in the
+ *     sibling `RewritePromptDisclosure.tsx`
  *   - The status-to-UI routing (loading → running → proposed → error)
  *   - The in-flight `StepIndicator` + `CompletedList`
  *
@@ -50,6 +52,7 @@ import {
   ProposedPanel,
   type ResumeRewriteApply,
 } from "./ResumeRewriteProposed.tsx";
+import { RewritePromptDisclosure } from "./RewritePromptDisclosure.tsx";
 
 export interface ResumeRewriteParts {
   /** The CTA button; opens the steering dialog (#210 steering box now lives
@@ -158,6 +161,12 @@ function RewriteLauncher({
               Run rewrite
             </Button>
           </div>
+          {/* #609 — the secondary path, BELOW the primary CTA and collapsed.
+              The on-device pass stays the one-click answer; this only reveals
+              the prompt behind it for a user who would rather run it somewhere
+              stronger. It reads the same `controller`, so what it shows is the
+              steering this dialog is currently expressing. */}
+          <RewritePromptDisclosure controller={controller} />
         </div>
       </Dialog>
     </>

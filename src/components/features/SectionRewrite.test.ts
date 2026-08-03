@@ -119,16 +119,11 @@ describe("NumberPreservationWarning", () => {
 // ── ProposedSection ─────────────────────────────────────────────────────────
 
 describe("ProposedSection", () => {
-  function render(
-    result: SectionRewriteResult,
-    extras: { copied?: boolean } = {},
-  ): string {
+  function render(result: SectionRewriteResult): string {
     return renderToStaticMarkup(
       createElement(ProposedSection, {
         original: ["Original bullet 1.", "Original bullet 2."],
         result,
-        copied: extras.copied ?? false,
-        onCopyAll: () => {},
         onReject: () => {},
       }),
     );
@@ -179,16 +174,19 @@ describe("ProposedSection", () => {
     expect(html).toContain("two");
   });
 
-  it("flips the copy button label after a successful copy-all", () => {
-    const result: SectionRewriteResult = {
+  // The label swap after a successful copy moved into the shared `CopyButton`
+  // with #609 — it is covered against a real stubbed clipboard in
+  // `design-system/primitives/CopyButton.test.tsx`, which this static-markup
+  // suite cannot do (no click, no promise). What stays this file's job is that
+  // the panel still OFFERS the copy in its idle state.
+  it("offers the copy-all affordance in its idle state", () => {
+    const html = render({
       bullets: ["one"],
       numbersPreserved: true,
       droppedNumbers: [],
       addedNumbers: [],
-    };
-    expect(render(result, { copied: false })).toContain(
-      "Use this — copy all bullets",
-    );
-    expect(render(result, { copied: true })).toContain("Copied");
+    });
+    expect(html).toContain("Use this — copy all bullets");
+    expect(html).not.toContain("Copied");
   });
 });

@@ -18,13 +18,14 @@
  * browsers block web navigation to those schemes.
  *
  * Reuse (CLAUDE.md 3-tier rule): `InlineResult` (warning) for the compact strip
- * and `Dialog` for the how-to; `Button` for every control. External help is a
- * raw `<a>` (a link, not an interactive-button primitive concern). No new
- * banner/modal chrome is introduced.
+ * and `Dialog` for the how-to; `Button` for every control, and `CopyButton` for
+ * the copy-path rows (#609). External help is a raw `<a>` (a link, not an
+ * interactive-button primitive concern). No new banner/modal chrome is
+ * introduced.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Dialog, InlineResult } from "@design-system";
+import { useEffect, useMemo, useState } from "react";
+import { Button, CopyButton, Dialog, InlineResult } from "@design-system";
 import type { WebGpuCapability } from "../../lib/webllm/types.ts";
 import {
   detectBrowserPlatform,
@@ -168,28 +169,14 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
 /**
  * A copy-to-clipboard row for an internal URL the user must paste into their
  * own address bar (browsers block web navigation to `chrome://` / `about:`).
- * Shows a transient "Copied" confirmation; degrades to a no-op label if the
- * Clipboard API is unavailable or denied.
+ *
+ * Migrated onto the shared `CopyButton` (#609) — this file was one of the three
+ * hand-rolled clipboard implementations that primitive replaced. One behaviour
+ * change came with it, deliberately: a denied or unavailable clipboard now says
+ * so instead of leaving the button reading "Copy". The path stays on screen and
+ * selectable either way, which is why the failure label points back at it.
  */
 function CopyablePath({ path }: { path: CopyPath }) {
-  const [copied, setCopied] = useState(false);
-
-  const onCopy = useCallback(() => {
-    void navigator.clipboard
-      ?.writeText(path.value)
-      .then(() => setCopied(true))
-      .catch(() => {
-        // Clipboard denied — leave the value visible for manual selection.
-      });
-  }, [path.value]);
-
-  // Clear the confirmation after a moment so a second copy re-confirms.
-  useEffect(() => {
-    if (!copied) return;
-    const id = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(id);
-  }, [copied]);
-
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-2xs text-content-tertiary">{path.label}</span>
@@ -197,15 +184,18 @@ function CopyablePath({ path }: { path: CopyPath }) {
         <code className="flex-1 overflow-x-auto text-2xs text-content-primary">
           {path.value}
         </code>
-        <Button
+        <CopyButton
+          value={path.value}
           variant="link"
           size="sm"
-          onClick={onCopy}
           aria-label={`Copy ${path.value}`}
           className="shrink-0 text-2xs text-accent-primary"
+          copiedLabel="Copied ✓"
+          failedLabel="Select it above"
+          resetAfterMs={1500}
         >
-          {copied ? "Copied ✓" : "Copy"}
-        </Button>
+          Copy
+        </CopyButton>
       </div>
     </div>
   );

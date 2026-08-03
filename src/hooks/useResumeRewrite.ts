@@ -151,6 +151,19 @@ export interface ResumeRewriteController {
   useFindings: boolean;
   /** Toggle the findings channel (persists to localStorage). */
   setUseFindings: (value: boolean) => void;
+  /**
+   * The steering `start()` would run with, right now — the SAME object, not a
+   * reconstruction (#609).
+   *
+   * The copyable-prompt disclosure has to show a prompt carrying the user's
+   * current intent, and the intent is not simply `{userInstructions,
+   * pageTarget}`: `/jd-fit` folds a JD context in front of the user's own text,
+   * and the findings channel rides the same object. Exposing the assembled
+   * value means the copied prompt cannot disagree with the button beside it —
+   * a second assembly in the UI layer would drift the first time either input
+   * changed. `undefined` when nothing is set, exactly as `start()` sees it.
+   */
+  steering: RewriteSteering | undefined;
 }
 
 export function labelForResumeRewrite(
@@ -245,9 +258,8 @@ export function useResumeRewrite(
     [setPageTargetRaw],
   );
 
-  const rewriteableSections = useMemo(
-    () => sections.filter(isNonEmptyForUi),
-    [sections],
+  const rewriteableSections = useStableSections(
+    useMemo(() => sections.filter(isNonEmptyForUi), [sections]),
   );
 
   // The critique's findings, keyed by the line they describe (#608). Built off
@@ -272,6 +284,34 @@ export function useResumeRewrite(
         : section.bullets.some((b) => findings.has(findingsKey(b))),
     );
   }, [findings, rewriteableSections]);
+
+  // The one assembly of "what this rewrite is being asked to do" (#609). Built
+  // here rather than inside `start` so the copyable-prompt disclosure can show
+  // the very object the run would use — see `ResumeRewriteController.steering`.
+  const steering = useMemo<RewriteSteering | undefined>(() => {
+    // Combine the user's freeform instructions with the optional JD-driven
+    // steering (#226) into ONE userInstructions string. The JD context leads
+    // (it sets the tailoring intent); the user's own text follows so it stays
+    // the most-salient, last instruction. Both empty → no userInstructions.
+    const jd = jdContext?.trim();
+    const userText = userInstructions.trim();
+    const combinedInstructions = [jd, userText]
+      .filter((s): s is string => !!s)
+      .join("\n\n");
+    // The app's own findings (#608) ride the SAME steering channel rather than
+    // a fourth parameter on `rewriteResumeWithLlm` — one intent channel, per
+    // #608's reuse analysis. Gated on the user's toggle, so opting out restores
+    // the pre-#608 prompt exactly.
+    const activeFindings = useFindings ? findings : undefined;
+    if (!combinedInstructions && pageTarget === null && !activeFindings) {
+      return undefined;
+    }
+    return {
+      ...(combinedInstructions ? { userInstructions: combinedInstructions } : {}),
+      ...(pageTarget !== null ? { pageTarget } : {}),
+      ...(activeFindings ? { findings: activeFindings } : {}),
+    };
+  }, [jdContext, userInstructions, pageTarget, useFindings, findings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -312,30 +352,6 @@ export function useResumeRewrite(
       const engine = await loadEngine(modelId, (progress) => {
         setStatus({ kind: "loading", progress });
       });
-      // Combine the user's freeform instructions with the optional JD-driven
-      // steering (#226) into ONE userInstructions string. The JD context leads
-      // (it sets the tailoring intent); the user's own text follows so it stays
-      // the most-salient, last instruction. Both empty → no userInstructions.
-      const jd = jdContext?.trim();
-      const userText = userInstructions.trim();
-      const combinedInstructions = [jd, userText]
-        .filter((s): s is string => !!s)
-        .join("\n\n");
-      // The app's own findings (#608) ride the SAME steering channel rather
-      // than a fourth parameter on `rewriteResumeWithLlm` — one intent channel,
-      // per the issue's reuse analysis. Gated on the user's toggle, so opting
-      // out restores the pre-#608 prompt exactly.
-      const activeFindings = useFindings ? findings : undefined;
-      const steering: RewriteSteering | undefined =
-        combinedInstructions || pageTarget !== null || activeFindings
-          ? {
-              ...(combinedInstructions
-                ? { userInstructions: combinedInstructions }
-                : {}),
-              ...(pageTarget !== null ? { pageTarget } : {}),
-              ...(activeFindings ? { findings: activeFindings } : {}),
-            }
-          : undefined;
       const result = await rewriteResumeWithLlm(
         rewriteableSections,
         engine,
@@ -367,22 +383,13 @@ export function useResumeRewrite(
       releaseInference(modelId);
       release();
     }
-    // `findings` + `useFindings` are read inside, so both are deps — the lint
-    // plugin is not registered in this repo (CLAUDE.md → Data & hooks), so a
-    // stale closure here would lint green and silently ignore the toggle until
-    // some unrelated dep changed. `findings` is a `useMemo` over
-    // `[critique, rewriteableSections]`, both already stable across renders
-    // that don't change them, so this adds no re-creation of its own.
-  }, [
-    acquire,
-    rewriteableSections,
-    selectedModelId,
-    userInstructions,
-    pageTarget,
-    jdContext,
-    findings,
-    useFindings,
-  ]);
+    // `steering` replaces the five inputs this callback used to assemble
+    // inline (#609). The lint plugin is not registered in this repo (CLAUDE.md
+    // → Data & hooks), so a stale closure here would lint green and silently
+    // run with last render's intent — reading ONE memoized value instead of
+    // five raw ones is one dep to get wrong instead of five, and it is the same
+    // value the disclosure shows the user.
+  }, [acquire, rewriteableSections, selectedModelId, steering]);
 
   const dismiss = useCallback(() => {
     setStatus({ kind: "idle" });
@@ -434,7 +441,57 @@ export function useResumeRewrite(
     hasFindings,
     useFindings,
     setUseFindings,
+    steering,
   };
+}
+
+/**
+ * Hold the previous section array whenever the new one says the same thing.
+ *
+ * `ReconstructedResume` calls `buildResumeSections(…)` in its render body — a
+ * plain call, not a `useMemo` — so `sections` is a fresh array on EVERY render,
+ * and filtering it produced a fresh `rewriteableSections` on every render too.
+ * That identity churn propagated to `findings`, `steering`, `start` and (since
+ * #609) the copyable prompt's `useMemo`, which therefore memoized nothing: it
+ * rebuilt the prompt string on every render of the disclosure. Nothing broke —
+ * every consumer is derived, so recomputing yields the same value, and `start`
+ * is called on click rather than watched — but a `useMemo` whose deps change
+ * every render is a claim the code does not keep, and the next consumer to
+ * watch `steering` in an effect would get a re-fire per render (#732 review).
+ *
+ * STRICTER THAN `sectionsEqual`, DELIBERATELY. That comparator ignores `label`,
+ * which is right where it is used: the stale-proposal guard should not throw
+ * away a live proposal because the user retyped an employer name. Here the
+ * identity being gated feeds what the user SEES — the progress line ("Rewriting
+ * 2 of 5: Engineer — Acme") and every heading in the proposal panel read
+ * `label` off these very objects — so holding an array whose labels went stale
+ * would show the old employer against the new bullets.
+ *
+ * Adjusts state during render rather than writing a ref, which is React's
+ * documented shape for "a value derived from props that has to stay stable":
+ * the `setHeld` call makes React discard this render pass and immediately redo
+ * it with the new array, so no effect ever observes the stale value. It costs
+ * one extra pass on a real edit and nothing at all on the churn it exists to
+ * absorb.
+ */
+function useStableSections(
+  sections: readonly SectionInput[],
+): readonly SectionInput[] {
+  const [held, setHeld] = useState(sections);
+  if (held !== sections && !sameSectionsForDisplay(held, sections)) {
+    setHeld(sections);
+    return sections;
+  }
+  return held;
+}
+
+/** `sectionsEqual` plus the display labels — see {@link useStableSections}. */
+function sameSectionsForDisplay(
+  a: readonly SectionInput[],
+  b: readonly SectionInput[],
+): boolean {
+  // `sectionsEqual` checks length first, so the index into `b` is in range.
+  return sectionsEqual(a, b) && a.every((s, i) => s.label === b[i]!.label);
 }
 
 function isNonEmptyForUi(section: SectionInput): boolean {
