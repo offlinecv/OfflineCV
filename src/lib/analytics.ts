@@ -11,10 +11,86 @@ type PostHog = {
   capture: (event: string, props?: Record<string, unknown>) => void;
   isFeatureEnabled?: (key: string) => boolean | undefined;
   onFeatureFlags?: (cb: () => void) => void;
+  register: (props: Record<string, unknown>) => void;
 };
 
 const KEY = import.meta.env.VITE_POSTHOG_KEY ?? "";
 const HOST = import.meta.env.VITE_POSTHOG_HOST ?? "https://us.i.posthog.com";
+
+/**
+ * Which build produced this event: `development` under `npm run dev`,
+ * `staging` from the GitHub Pages deploy (dev.offlinecv.org), `production`
+ * as the fallback for every other build. Registered as a PostHog
+ * super-property (#739) so it lands on EVERY event — that's what makes it
+ * usable as a clause in PostHog's "Filter out internal and test users"
+ * project setting, which is configured in the PostHog project, not here. It
+ * describes the build, not the person: no person property is ever set (see
+ * the Telemetry section in README.md). `||`, not `??`: an unset CI variable
+ * expands to `""`, not `undefined`, and `""` would land on every event and
+ * silently match nothing in that filter.
+ */
+const ENVIRONMENT =
+  import.meta.env.VITE_POSTHOG_ENV ||
+  (import.meta.env.DEV ? "development" : "production");
+
+const INTERNAL_KEY = "ocv_internal";
+
+/**
+ * The precedence rule both readers below obey: an explicit `?ocv_internal=1`
+ * or `=0` overrides whatever is stored, and anything else — an unrecognised
+ * value, or no param at all — defers to storage. Split out so the rule is
+ * stated once rather than duplicated between the pure resolver and the
+ * wrapper that performs the write.
+ */
+function internalFlagWrite(search: string): "set" | "clear" | null {
+  const value = new URLSearchParams(search).get(INTERNAL_KEY);
+  if (value === "1") return "set";
+  if (value === "0") return "clear";
+  return null;
+}
+
+/**
+ * Pure resolution of the internal-traffic marker: query param wins when
+ * present, otherwise falls back to what's already stored. Exported and
+ * DOM-free (takes `search`/`stored` as plain strings) so every resolution
+ * case is testable without a browser. See
+ * `readInternalFlag` for the impure wrapper that supplies the real
+ * `location.search` / `localStorage` values and performs the write.
+ */
+export function resolveInternalFlag(
+  search: string,
+  stored: string | null,
+): boolean {
+  const write = internalFlagWrite(search);
+  if (write === "set") return true;
+  if (write === "clear") return false;
+  return stored === "1";
+}
+
+/**
+ * A teammate visits `?ocv_internal=1` once per browser; every later event
+ * from that browser carries `is_internal: true` so the project's test-account
+ * filter can drop it. A boolean UX flag persisted via `localStorage` — no id,
+ * no email, nothing identifying a person — matching the other first-party
+ * `ocv_*` keys in README.md's "Browser storage" table. `localStorage` (not
+ * PostHog's own `opt_out_capturing()`) is deliberate: PostHog's opt-out state
+ * is written through the configured `persistence`, which is `"memory"` here
+ * (see `initAnalytics`), so it would evaporate on tab close and each teammate
+ * would have to re-opt-out constantly. Must never throw: private mode (where
+ * `localStorage` access itself throws) and any environment without a
+ * `location` global both fall through to `false`.
+ */
+export function readInternalFlag(): boolean {
+  try {
+    const search = location.search;
+    const write = internalFlagWrite(search);
+    if (write === "set") localStorage.setItem(INTERNAL_KEY, "1");
+    else if (write === "clear") localStorage.removeItem(INTERNAL_KEY);
+    return resolveInternalFlag(search, localStorage.getItem(INTERNAL_KEY));
+  } catch {
+    return false;
+  }
+}
 
 /** True when analytics are enabled (VITE_POSTHOG_KEY is set at build time). */
 export const ANALYTICS_ENABLED = !!KEY;
@@ -54,6 +130,10 @@ export async function initAnalytics(): Promise<void> {
     capture_pageleave: false,
   });
   ph = mod.default as unknown as PostHog;
+  // Register the environment/internal super-properties BEFORE flushing the
+  // pre-init queue (#739), so events queued before `initAnalytics` resolved
+  // also carry them — not just events emitted after this point.
+  ph.register({ environment: ENVIRONMENT, is_internal: readInternalFlag() });
   for (const [evt, props] of queue) ph.capture(evt, props);
   queue.length = 0;
   // Fan PostHog's flag-refresh callback out to flag subscribers (see flags.ts).

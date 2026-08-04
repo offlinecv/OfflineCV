@@ -29,6 +29,7 @@ jobs:
         env:
           VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
+          VITE_POSTHOG_ENV: staging
       # v3 → v5 because v4 predates the Node 24 push; v5 (Apr 2026) is the first post-deprecation release.
       - uses: actions/upload-pages-artifact@v5
         with:

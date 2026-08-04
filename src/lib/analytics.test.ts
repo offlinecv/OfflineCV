@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   buildFeedbackProps,
   buildCascadeParseCompletedEvent,
   buildLlmParseRanEvent,
   buildLlmFallbackRanEvent,
+  resolveInternalFlag,
+  readInternalFlag,
 } from "./analytics.ts";
 import { CASCADE_VERSION } from "./heuristics/types.ts";
 import type { ParseEvent } from "./heuristics/types.ts";
@@ -150,5 +152,113 @@ describe("buildFeedbackProps — feedback_submitted payload shaping (#51)", () =
     expect(
       buildFeedbackProps({ rating: 4, wantsContact: true }).wants_contact,
     ).toBe(true);
+  });
+});
+
+describe("resolveInternalFlag — five acceptance-criteria cases (#739)", () => {
+  it("?ocv_internal=1 with nothing stored resolves true", () => {
+    expect(resolveInternalFlag("?ocv_internal=1", null)).toBe(true);
+  });
+
+  it("?ocv_internal=0 with '1' stored resolves false — param wins over storage", () => {
+    expect(resolveInternalFlag("?ocv_internal=0", "1")).toBe(false);
+  });
+
+  it("no param with '1' stored resolves true", () => {
+    expect(resolveInternalFlag("", "1")).toBe(true);
+  });
+
+  it("no param with nothing stored resolves false", () => {
+    expect(resolveInternalFlag("", null)).toBe(false);
+  });
+
+  it("no param with an unrecognized stored value resolves false", () => {
+    expect(resolveInternalFlag("", "yes")).toBe(false);
+  });
+});
+
+describe("readInternalFlag — never throws, even without a DOM (#739)", () => {
+  it("resolves false in the Node test env, where there is no `location`", () => {
+    // `location` is the sole throw source here: vitest runs against a Node
+    // environment (see vite.config.ts) that defines no `location` global.
+    // `localStorage` is NOT absent — `src/test-setup.ts` installs a working
+    // in-memory shim before every test (#398). The catch in `readInternalFlag`
+    // must swallow the `location` ReferenceError rather than propagate it.
+    expect(readInternalFlag()).toBe(false);
+  });
+
+  it("resolves false when localStorage is present but throws (e.g. private mode)", () => {
+    const originalLocation = (globalThis as { location?: unknown }).location;
+    const originalLocalStorage = (globalThis as { localStorage?: unknown })
+      .localStorage;
+    Object.defineProperty(globalThis, "location", {
+      value: { search: "?ocv_internal=1" },
+      configurable: true,
+    });
+    Object.defineProperty(globalThis, "localStorage", {
+      value: {
+        getItem() {
+          throw new Error("SecurityError: storage disabled");
+        },
+        setItem() {
+          throw new Error("SecurityError: storage disabled");
+        },
+        removeItem() {
+          throw new Error("SecurityError: storage disabled");
+        },
+      },
+      configurable: true,
+    });
+    try {
+      expect(readInternalFlag()).toBe(false);
+    } finally {
+      if (originalLocation === undefined) {
+        delete (globalThis as { location?: unknown }).location;
+      } else {
+        Object.defineProperty(globalThis, "location", {
+          value: originalLocation,
+          configurable: true,
+        });
+      }
+      if (originalLocalStorage === undefined) {
+        delete (globalThis as { localStorage?: unknown }).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", {
+          value: originalLocalStorage,
+          configurable: true,
+        });
+      }
+    }
+  });
+});
+
+describe("readInternalFlag — real localStorage round trip (#739)", () => {
+  // Only `location` is stubbed: `src/test-setup.ts` already gives every test a
+  // fresh in-memory `localStorage`, so this exercises the real write path and
+  // pins the literal key name — `resolveInternalFlag`'s cases take `stored` as
+  // a parameter and so can't see which key (or whether) anything was written.
+  const setSearch = (search: string): void => {
+    Object.defineProperty(globalThis, "location", {
+      value: { search },
+      configurable: true,
+    });
+  };
+
+  afterEach(() => {
+    delete (globalThis as { location?: unknown }).location;
+  });
+
+  it("persists on ?ocv_internal=1, survives a reload, and clears on =0", () => {
+    setSearch("?ocv_internal=1");
+    expect(readInternalFlag()).toBe(true);
+    expect(localStorage.getItem("ocv_internal")).toBe("1");
+
+    // Reload with no param: the stored marker alone must keep it true.
+    setSearch("");
+    expect(readInternalFlag()).toBe(true);
+
+    setSearch("?ocv_internal=0");
+    expect(readInternalFlag()).toBe(false);
+    expect(localStorage.getItem("ocv_internal")).toBeNull();
   });
 });
