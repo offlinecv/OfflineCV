@@ -14,7 +14,15 @@
  * `src/lib/storage`, and neither imports the parser graph.
  */
 
-import { saveJob, getJob, getAllJobs, deleteJob } from "./storage/index.ts";
+import {
+  saveJob,
+  getJob,
+  getAllJobs,
+  deleteJob,
+  lettersForJob,
+  saveLetter,
+} from "./storage/index.ts";
+import { mergeJobRecords } from "./job-merge.ts";
 import type { JobRecord, JobStatus } from "./storage/index.ts";
 
 /** Fields a caller supplies when creating a tracked job. `status` defaults to
@@ -102,6 +110,60 @@ export function unlinkResume(id: string): Promise<JobRecord> {
 
 export function removeJob(id: string): Promise<void> {
   return deleteJob(id);
+}
+
+/**
+ * Fold one tracked job into another (#746) — the write half of the merge whose
+ * field rules live in `job-merge.ts`. Returns the surviving record.
+ *
+ * **Only ever called from an explicit user click.** Nothing infers a merge:
+ * `job-duplicates.ts` reports evidence and stops there, because under-merging
+ * leaves a duplicate the user can delete while over-merging destroys a record,
+ * and this build has no evidence source strong enough to overrule that.
+ *
+ * ## The order of the three writes is the recovery story
+ *
+ * 1. **The survivor is written first**, so the merged fields and both URLs are
+ *    durable before anything is destroyed. Every failure after this point
+ *    leaves an under-merge — two records, one of which already carries
+ *    everything — which the user can see and redo. The reverse order can lose
+ *    the absorbed record's fields outright.
+ * 2. **Its letters are reparented next**, before the delete rather than after,
+ *    because `deleteJob` CASCADES to a job's cover letters (`storage/jobs.ts`)
+ *    and a merge that silently destroyed the letters the user wrote for this
+ *    posting would be exactly the over-merge this feature is built to avoid.
+ *    `touch: false`: the user merged two jobs, they did not edit a letter, and
+ *    stamping `updatedAt` would reorder a drafts list sorted by it.
+ * 3. **The absorbed record is deleted through the normal path**, so it
+ *    TOMBSTONES (#730). A hard delete would be indistinguishable from "never
+ *    existed" to any second holder of this library, which would hand the
+ *    duplicate straight back on the next restore or sync.
+ */
+export async function mergeJobs(
+  survivorId: string,
+  absorbedId: string,
+): Promise<JobRecord> {
+  if (survivorId === absorbedId) {
+    throw new Error(`job-tracker: cannot merge job ${survivorId} into itself`);
+  }
+  const [survivor, absorbed] = await Promise.all([
+    getJob(survivorId),
+    getJob(absorbedId),
+  ]);
+  if (!survivor) throw new Error(`job-tracker: no job with id ${survivorId}`);
+  if (!absorbed) throw new Error(`job-tracker: no job with id ${absorbedId}`);
+
+  const merged = await saveJob({
+    ...mergeJobRecords(survivor, absorbed),
+    id: survivorId,
+  });
+
+  for (const letter of await lettersForJob(absorbedId)) {
+    await saveLetter({ ...letter, jobId: survivorId }, { touch: false });
+  }
+  await removeJob(absorbedId);
+
+  return merged;
 }
 
 /**

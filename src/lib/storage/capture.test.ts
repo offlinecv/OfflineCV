@@ -25,7 +25,7 @@ import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
 import { beforeEach, describe, expect, it } from "vitest";
 import { DB_NAME, closeDB } from "./db.ts";
-import { getAllJobs, getJob } from "./jobs.ts";
+import { getAllJobs, getJob, saveJob } from "./jobs.ts";
 import { captureJob } from "./capture.ts";
 import { setJobStatus, updateJob } from "../job-tracker.ts";
 
@@ -206,6 +206,54 @@ describe("captureJob: refusals write nothing", () => {
     const stored = await getJob(first.record.id);
     expect(stored?.title).toBe("Staff Engineer");
     expect(stored?.status).toBe("applied");
+    expect(await getAllJobs()).toHaveLength(1);
+  });
+});
+
+describe("captureJob: `aliasUrls` is UNIONED, not overwritten (#746)", () => {
+  const ATS = "https://boards.greenhouse.io/acme/jobs/4012345";
+  const AGGREGATOR = "https://jobs.example.com/listing/4012345";
+
+  it("keeps an alias the user's merge put there when the producer sends none", async () => {
+    // The loss this guards: the stored aliases are usually a merge the USER
+    // performed, and a plain producer-wins would silently undo it.
+    await captureJob({ title: "SWE", url: ATS });
+    const [saved] = await getAllJobs();
+    await saveJob({ ...saved, aliasUrls: [AGGREGATOR] });
+
+    const result = await captureJob({ title: "SWE", url: ATS });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.aliasUrls).toEqual([AGGREGATOR]);
+  });
+
+  it("adds an alias the producer discovered, keeping the one already there", async () => {
+    await captureJob({ title: "SWE", url: ATS, aliasUrls: [AGGREGATOR] });
+    const result = await captureJob({
+      title: "SWE",
+      url: ATS,
+      aliasUrls: ["https://acme.com/careers/7"],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.aliasUrls).toEqual([AGGREGATOR, "https://acme.com/careers/7"]);
+  });
+
+  it("does not accumulate two spellings of one alias across re-captures", async () => {
+    await captureJob({ title: "SWE", url: ATS, aliasUrls: [AGGREGATOR] });
+    const result = await captureJob({
+      title: "SWE",
+      url: ATS,
+      aliasUrls: [`${AGGREGATOR}?utm_source=li`],
+    });
+    expect(result.ok && result.record.aliasUrls).toEqual([AGGREGATOR]);
+  });
+
+  it("never lets an alias change the derived id", async () => {
+    const first = await captureJob({ title: "SWE", url: ATS });
+    const second = await captureJob({ title: "SWE", url: ATS, aliasUrls: [AGGREGATOR] });
+    expect(first.ok && second.ok && first.record.id).toBe(second.ok ? second.record.id : "");
+    expect(second.ok && second.created).toBe(false);
     expect(await getAllJobs()).toHaveLength(1);
   });
 });

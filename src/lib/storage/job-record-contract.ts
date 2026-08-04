@@ -44,9 +44,9 @@
  * `unknown`; its real check is `findJsonSafetyProblem`, wired explicitly.
  */
 
-import type { JobRecord, JobStatus, JobCaptureProvenance } from "./types.ts";
-import { JOB_STATUS_ORDER } from "./types.ts";
-import { isAbsoluteUrl, isCapturableJobUrl } from "./job-url.ts";
+import type { JobRecord, JobStatus, JobOrigin, JobCaptureProvenance } from "./types.ts";
+import { JOB_STATUS_ORDER, JOB_ORIGINS } from "./types.ts";
+import { isAbsoluteUrl, isCapturableJobUrl, dedupeCanonicalUrls } from "./job-url.ts";
 import {
   checkDeclaredFields,
   collectJsonSafeExtras,
@@ -119,6 +119,49 @@ export type JobRecordValidation =
  */
 const isStatusLike = (value: unknown): value is JobStatus => typeof value === "string";
 
+/**
+ * Widens like `isStatusLike` above, for the same reason: a malformed `origin`
+ * must never refuse the whole record. It diverges from `isStatusLike` after
+ * that — `collectAcceptedWarnings` and `validateJobRecord` below strip an
+ * out-of-vocabulary value rather than keeping it, because `origin` is
+ * display-only glossary text and a value this build doesn't recognise cannot
+ * be phrased. See §8 of `docs/job-capture-contract.md`.
+ */
+const isOriginLike = (value: unknown): value is JobOrigin => typeof value === "string";
+
+/**
+ * Widens to `string[]` from nothing more than "it is an array" (#746), so the
+ * per-ENTRY verdict can be a drop rather than a refusal: `collectAcceptedWarnings`
+ * warns about each entry that is not an absolute http(s) URL and
+ * `validateJobRecord` filters them out before the record is stored. See §9 of
+ * `docs/job-capture-contract.md`.
+ *
+ * The array-ness itself IS a refusal, and that is not a contradiction of the
+ * "never refuses" rule the issue states: that rule is about entries. A field
+ * whose declared type is wrong end-to-end — `aliasUrls: "https://…"`, a single
+ * string where a list belongs — is a broken producer, and every other field
+ * here refuses one (`status: 3`, `origin: 3`). Telling them beats storing a
+ * value no reader can iterate.
+ */
+const isAliasUrlsLike = (value: unknown): value is string[] => Array.isArray(value);
+
+/** One rejected `aliasUrls` entry, phrased for a warning without ever
+ *  stringifying an untrusted value: a non-string entry is described by its
+ *  type, so a function or a 10 MB object cannot become the warning text. */
+function describeAliasEntry(value: unknown): string {
+  return typeof value === "string" ? `"${value}"` : `a value of type ${typeof value}`;
+}
+
+/** The entries of an already-guarded `aliasUrls` that clear the `href` bar —
+ *  the value actually stored. Absolute http(s) only: unlike `url`, there is no
+ *  legacy corpus of half-typed values to protect here and nothing renders an
+ *  alias as the row's link, so an entry that cannot be canonicalised is an
+ *  entry that can never match anything. */
+function keptAliasUrls(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => isString(entry) && isCapturableJobUrl(entry));
+}
+
 /** `url` refuses only what an `href` must never receive. An absolute URL whose
  *  scheme is not http(s) — `javascript:`, `data:`, `file:` — is refused;
  *  a string that is not absolute at all (`acme.com`) is accepted and warned,
@@ -168,6 +211,11 @@ export const JOB_RECORD_RULES: {
     check: isUrlLike,
     expected: "an http or https URL (an absolute URL with any other scheme is refused)",
   },
+  aliasUrls: {
+    required: false,
+    check: isAliasUrlsLike,
+    expected: "an array of absolute http or https URLs",
+  },
   notes: { required: false, check: isString, expected: "a string" },
   status: { required: false, check: isStatusLike, expected: "a string" },
   resumeId: { required: false, check: isNonEmptyString, expected: "a non-empty string" },
@@ -198,6 +246,7 @@ export const JOB_RECORD_RULES: {
     expected: "an object with a finite `contract` number",
     explain: (value) => explainJsonSafety(value, "capture"),
   },
+  origin: { required: false, check: isOriginLike, expected: "a string" },
 };
 
 /** Field names the rules cover — everything else on an incoming record is an
@@ -235,7 +284,30 @@ function collectAcceptedWarnings(checked: Record<string, unknown>): JobRecordIss
       );
     }
   }
+  // Unlike `status`, an out-of-vocabulary `origin` is DROPPED — see
+  // `isOriginLike`'s docblock — so this warns about a removal, not a keep.
+  if (typeof checked.origin === "string" && !isKnownOrigin(checked.origin)) {
+    warnings.push(`Origin "${checked.origin}" is not one this build recognises; it was dropped.`);
+  }
+  warnings.push(...collectAliasUrlWarnings(checked.aliasUrls));
   return warnings;
+}
+
+/**
+ * One warning per dropped `aliasUrls` entry (#746) — per ENTRY, never a
+ * refusal, because an alias is an extra way to reach a posting and losing one
+ * costs the user a duplicate they can still merge by hand. Losing the whole
+ * record over it would cost them the application.
+ */
+function collectAliasUrlWarnings(value: unknown): JobRecordIssue[] {
+  if (!Array.isArray(value)) return [];
+  const kept = new Set(keptAliasUrls(value));
+  return value
+    .filter((entry) => !(isString(entry) && kept.has(entry)))
+    .map(
+      (entry) =>
+        `\`aliasUrls\` entry ${describeAliasEntry(entry)} is not an absolute http or https URL; it was dropped.`,
+    );
 }
 
 /**
@@ -259,7 +331,10 @@ function collectAcceptedWarnings(checked: Record<string, unknown>): JobRecordIss
  *
  * An absent `status` becomes `"interested"`, matching `createJob`'s documented
  * default, so a producer that omits a lifecycle it has no opinion about is not
- * punished for it. Nothing else is rewritten.
+ * punished for it. An out-of-vocabulary `origin` is dropped — see
+ * `isOriginLike`'s docblock. An `aliasUrls` entry that is not an absolute
+ * http(s) URL is dropped one entry at a time, and an `aliasUrls` left empty by
+ * that is removed entirely. Nothing else is rewritten.
  */
 export function validateJobRecord(value: unknown): JobRecordValidation {
   if (!isPlainObject(value)) {
@@ -273,6 +348,24 @@ export function validateJobRecord(value: unknown): JobRecordValidation {
   const warnings = collectAcceptedWarnings(checked);
 
   if (reasons.length > 0) return { ok: false, reasons };
+
+  // Strip a dropped origin AFTER warning about it above, and before the
+  // `...checked` spread below — otherwise the unrecognised value would ride
+  // straight through onto the stored record.
+  if (typeof checked.origin === "string" && !isKnownOrigin(checked.origin)) {
+    delete checked.origin;
+  }
+
+  // Same shape, per entry (#746): warned about above, removed here. An
+  // `aliasUrls` left with nothing in it is deleted rather than stored as `[]` —
+  // "no aliases" has one representation, and an empty array on the record would
+  // say nothing a missing key does not.
+  if (checked.aliasUrls !== undefined) {
+    const aliases = keptAliasUrls(checked.aliasUrls);
+    const deduped = dedupeCanonicalUrls(aliases, typeof checked.url === "string" ? [checked.url] : []);
+    if (deduped.length > 0) checked.aliasUrls = deduped;
+    else delete checked.aliasUrls;
+  }
 
   // Extras are gathered only after the record is otherwise accepted — a refused
   // record has nothing to preserve. They are held to the same JSON-safety bar
@@ -298,4 +391,13 @@ export function validateJobRecord(value: unknown): JobRecordValidation {
  *  `JOB_STATUS_ORDER` so the vocabulary has exactly one definition. */
 export function isKnownStatus(status: string): status is JobStatus {
   return (JOB_STATUS_ORDER as readonly string[]).includes(status);
+}
+
+/** True when `origin` is one of {@link JOB_ORIGINS}. Reads that constant so
+ *  the vocabulary has exactly one definition, the same reason
+ *  {@link isKnownStatus} reads `JOB_STATUS_ORDER`. Module-private: nothing
+ *  outside this file needs to ask, since an unrecognised value never survives
+ *  {@link validateJobRecord}. */
+function isKnownOrigin(origin: string): origin is JobOrigin {
+  return (JOB_ORIGINS as readonly string[]).includes(origin);
 }

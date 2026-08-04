@@ -25,18 +25,36 @@
  * POLICY; `JobTrackerStatusGroup` owns one bucket's open/closed and page state,
  * which the parent cannot hold because the bucket count is data, not a fixed
  * set of `useState`s.
+ *
+ * Duplicates (#746): `JobTrackerSection` owns `useJobDuplicates` the same way it
+ * owns the two hooks above — one sweep for the whole library, grouped by job id
+ * and handed down. Computed on VIEW and never stored, for the reason ratings
+ * are: a stored "these two are the same posting" verdict goes stale the moment
+ * a title is edited. Nothing here merges anything; the row's notice offers, and
+ * `tracker.merge` only ever runs from a click on it.
+ *
+ * Buckets, not raw statuses (#744): sections key on `jobStatusBucket(status)`,
+ * so a synced record's `saved` / `scouted` / `shared` share the one Interested
+ * section instead of splitting one pipeline stage into four. That mapping is
+ * strictly a VIEW concern — this surface never writes a normalised status back
+ * over what a producer stored.
  */
 
 import { useMemo } from "react";
 import { Card, Button, StatusBadge } from "@design-system";
 import { formatBytes } from "../../lib/format-bytes.ts";
-import { EVICTION_NOTICE, JOB_STATUS_ORDER } from "../../lib/storage/index.ts";
-import type { JobRecord, JobStatus, LetterRecord } from "../../lib/storage/index.ts";
+import { EVICTION_NOTICE, JOB_STATUS_ORDER, isKnownStatus } from "../../lib/storage/index.ts";
+import type { JobRecord, LetterRecord } from "../../lib/storage/index.ts";
+import { jobStatusBucket } from "../../lib/job-status-bucket.ts";
 import { JobTrackerEntry, type LinkableResume } from "./JobTrackerEntry.tsx";
 import { JobTrackerStatusGroup, isCollapsedByDefault } from "./JobTrackerStatusGroup.tsx";
 import { useJobTracker, type JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import { useSavedJobRatings } from "../../hooks/useSavedJobRatings.ts";
 import { useJobLetters } from "../../hooks/useJobLetters.ts";
+import {
+  useJobDuplicates,
+  type JobDuplicateSuggestion,
+} from "../../hooks/useJobDuplicates.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
 
@@ -60,6 +78,14 @@ interface JobTrackerProps {
   /** Every letter, grouped by job id (#715) — `useJobLetters`' shape. A job id
    *  absent from the map has no letters, so its row renders no indicator. */
   lettersById?: ReadonlyMap<string, readonly LetterRecord[]>;
+  /** Other saved jobs that look like the same posting, per job id (#746) —
+   *  `useJobDuplicates`' shape, already filtered to `probable`-or-better and to
+   *  pairings the user has not dismissed. Omitted renders no notice anywhere,
+   *  which is what a caller that has not run the sweep should get. */
+  duplicatesByJobId?: ReadonlyMap<string, readonly JobDuplicateSuggestion[]>;
+  /** "Not the same" — suppress one pairing durably. Required alongside
+   *  `duplicatesByJobId` for either to reach a row. */
+  onDismissDuplicate?: (a: string, b: string) => void;
 }
 
 /**
@@ -71,7 +97,15 @@ interface JobTrackerProps {
 export function JobTrackerSection({
   parsed,
   ...props
-}: Omit<JobTrackerProps, "tracker" | "ratings" | "hasResume" | "lettersById"> & {
+}: Omit<
+  JobTrackerProps,
+  | "tracker"
+  | "ratings"
+  | "hasResume"
+  | "lettersById"
+  | "duplicatesByJobId"
+  | "onDismissDuplicate"
+> & {
   /** The résumé saved jobs are rated against — the `/` handoff `JobsApp` holds.
    *  Must be referentially stable; `useSavedJobRatings` deps on it directly. */
   parsed?: HeuristicParsedResume;
@@ -79,12 +113,15 @@ export function JobTrackerSection({
   const tracker = useJobTracker();
   const ratings = useSavedJobRatings(tracker.jobs, parsed);
   const letters = useJobLetters();
+  const duplicates = useJobDuplicates(tracker.jobs);
   return (
     <JobTracker
       tracker={tracker}
       ratings={ratings}
       hasResume={parsed !== undefined}
       lettersById={letters.byJobId}
+      duplicatesByJobId={duplicates.byJobId}
+      onDismissDuplicate={duplicates.dismiss}
       {...props}
     />
   );
@@ -97,29 +134,36 @@ export function JobTracker({
   resumeName,
   resumeOptions,
   lettersById,
+  duplicatesByJobId,
+  onDismissDuplicate,
 }: JobTrackerProps) {
-  const { jobs, ready, persisted, usageBytes, update, setStatus, link, unlink, remove, create, exportBackup } =
+  const { jobs, ready, persisted, usageBytes, update, setStatus, link, unlink, remove, merge, create, exportBackup } =
     tracker;
 
-  // One pass, bucketed by each job's ACTUAL status string — canonical lifecycle
-  // statuses in order first, then any status not in JOB_STATUS_ORDER (a corrupt
-  // or future-version imported record). Keying the render on JOB_STATUS_ORDER
-  // alone would silently drop such a job: it'd still count toward the header
-  // total but appear in no section, so the count would exceed the visible rows.
+  // One pass, bucketed by each job's DISPLAY bucket rather than its literal
+  // status string (#744): a synced record's `saved` / `scouted` / `shared` are
+  // one stage of a job search, not three, and this surface renders stages. The
+  // record itself is untouched — `jobStatusBucket` maps at VIEW time only, and
+  // the row badge still prints the stored status verbatim.
+  //
+  // Canonical lifecycle buckets in order first, then any bucket `jobStatusBucket`
+  // could not map (a corrupt or future-version imported record), sorted. Keying
+  // the render on JOB_STATUS_ORDER alone would silently drop such a job: it'd
+  // still count toward the header total but appear in no section, so the count
+  // would exceed the visible rows.
   const groups = useMemo(() => {
     const buckets = new Map<string, JobRecord[]>();
     for (const job of jobs) {
-      const bucket = buckets.get(job.status);
+      const key = jobStatusBucket(job.status);
+      const bucket = buckets.get(key);
       if (bucket) bucket.push(job);
-      else buckets.set(job.status, [job]);
+      else buckets.set(key, [job]);
     }
     const known = JOB_STATUS_ORDER.filter((status) => buckets.has(status));
-    const unknown = [...buckets.keys()]
-      .filter((status) => !JOB_STATUS_ORDER.includes(status as JobStatus))
-      .sort();
-    return [...known, ...unknown].map((status) => ({
-      status,
-      jobs: buckets.get(status) ?? [],
+    const unknown = [...buckets.keys()].filter((key) => !isKnownStatus(key)).sort();
+    return [...known, ...unknown].map((bucket) => ({
+      bucket,
+      jobs: buckets.get(bucket) ?? [],
     }));
   }, [jobs]);
 
@@ -128,7 +172,7 @@ export function JobTracker({
   // which would otherwise render as a page of headers over no rows, the very
   // failure collapse-by-default exists to avoid. Then every section opens; the
   // "only non-empty bucket is rejected" case is the single-bucket case of it.
-  const anyOpenByDefault = groups.some(({ status }) => !isCollapsedByDefault(status));
+  const anyOpenByDefault = groups.some(({ bucket }) => !isCollapsedByDefault(bucket));
 
   if (!ready) return null;
 
@@ -178,12 +222,12 @@ export function JobTracker({
         </p>
       ) : (
         <div className="flex flex-col gap-4">
-          {groups.map(({ status, jobs: group }) => (
+          {groups.map(({ bucket, jobs: group }) => (
             <JobTrackerStatusGroup
-              key={status}
-              status={status}
+              key={bucket}
+              bucket={bucket}
               jobs={group}
-              defaultExpanded={!anyOpenByDefault || !isCollapsedByDefault(status)}
+              defaultExpanded={!anyOpenByDefault || !isCollapsedByDefault(bucket)}
               renderRow={(job) => (
                 <JobTrackerEntry
                   job={job}
@@ -196,6 +240,11 @@ export function JobTracker({
                   rated={ratings !== null}
                   rating={ratings?.get(job.id)}
                   letters={lettersById?.get(job.id)}
+                  duplicates={duplicatesByJobId?.get(job.id)}
+                  onMerge={(survivorId, absorbedId) =>
+                    void merge(survivorId, absorbedId)
+                  }
+                  onDismissDuplicate={onDismissDuplicate}
                   onUpdate={(id, patch) => void update(id, patch)}
                   onStatusChange={(id, next) => void setStatus(id, next)}
                   onLinkResume={(id, resumeId) => void link(id, resumeId)}

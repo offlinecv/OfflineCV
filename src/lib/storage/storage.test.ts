@@ -154,6 +154,33 @@ describe("storage: export / import", () => {
     expect(await blobBytes(restored.blob)).toEqual([...bytes()]);
   });
 
+  it("carries `origin` through an export → import round-trip (#745)", async () => {
+    await saveJob({ title: "Referred", origin: "shared" });
+    const dump = await exportAll();
+    expect(dump.jobs[0].origin).toBe("shared");
+
+    await closeDB();
+    await deleteDB(DB_NAME);
+    await importAll(dump);
+
+    const [restored] = await getAllJobs();
+    expect(restored.origin).toBe("shared");
+  });
+
+  it("carries `aliasUrls` through an export → import round-trip (#746)", async () => {
+    const aliasUrls = ["https://jobs.example.com/listing/4012345"];
+    await saveJob({ title: "Frontend Engineer", url: "https://boards.greenhouse.io/acme/jobs/1", aliasUrls });
+    const dump = await exportAll();
+    expect(dump.jobs[0].aliasUrls).toEqual(aliasUrls);
+
+    await closeDB();
+    await deleteDB(DB_NAME);
+    await importAll(dump);
+
+    const [restored] = await getAllJobs();
+    expect(restored.aliasUrls).toEqual(aliasUrls);
+  });
+
   it("rejects an unknown export version", async () => {
     await expect(
       // @ts-expect-error — deliberately wrong version for the guard

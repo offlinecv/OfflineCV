@@ -24,6 +24,7 @@ import {
   isKnownStatus,
   validateJobRecord,
 } from "./job-record-contract.ts";
+import { JOB_ORIGINS } from "./types.ts";
 // Moved to `record-contract.ts` with the rest of the machinery the job and
 // letter contracts share (#711); the behaviour asserted below is unchanged.
 import { findJsonSafetyProblem } from "./record-contract.ts";
@@ -51,6 +52,8 @@ function validRecord(): Record<string, unknown> {
     // Deliberately still `1`: a producer targeting the previous contract version
     // must keep validating unchanged. See the version-2 block below.
     capture: { contract: 1, producer: "offlinecv-extension", producerVersion: "0.1.0" },
+    origin: "shared",
+    aliasUrls: ["https://boards.greenhouse.io/acme/jobs/1"],
   };
 }
 
@@ -148,6 +151,133 @@ describe("validateJobRecord: out-of-union status is PRESERVED, not dropped or co
   it("isKnownStatus reads the one lifecycle vocabulary", () => {
     expect(isKnownStatus("interviewing")).toBe(true);
     expect(isKnownStatus("screening")).toBe(false);
+  });
+});
+
+describe("validateJobRecord: an out-of-vocabulary `origin` is DROPPED, not refused (#745)", () => {
+  // The opposite choice from `status` above, and deliberately so: nothing
+  // renders an unrecognised origin (there is no picker, no bucket, no badge
+  // for it), so keeping it would carry a value nothing ever surfaces.
+  it.each(JOB_ORIGINS)("keeps a recognised origin %s as-is, with no warning", (origin) => {
+    const result = validateJobRecord({ ...validRecord(), origin });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.origin).toBe(origin);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("drops an unrecognised origin and warns, but still accepts the record", () => {
+    const result = validateJobRecord({ ...validRecord(), origin: "linkedin" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.origin).toBeUndefined();
+    expect(result.warnings).toContainEqual(expect.stringContaining("linkedin"));
+  });
+
+  it("defaults an ABSENT origin to nothing, silently", () => {
+    const result = validateJobRecord({ id: "job-1", title: "SWE" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.origin).toBeUndefined();
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("refuses an origin that is not a string at all", () => {
+    expect(reasons({ ...validRecord(), origin: 3 })).toContainEqual(
+      expect.stringContaining("`origin`"),
+    );
+  });
+});
+
+describe("validateJobRecord: `aliasUrls` drops bad ENTRIES, never the record (#746)", () => {
+  // The asymmetry, again: an alias is an extra way to reach a posting, so
+  // losing one costs the user a duplicate they can still merge by hand —
+  // losing the record costs them the application.
+  it("keeps a list of absolute http(s) URLs as sent, with no warning", () => {
+    const aliasUrls = ["https://acme.com/careers/7", "http://jobs.example.com/listing/1"];
+    const result = validateJobRecord({ ...validRecord(), aliasUrls });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.aliasUrls).toEqual(aliasUrls);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it.each([
+    ["a non-absolute URL", "acme.com/jobs/1"],
+    ["a javascript: URL", "javascript:alert(1)"],
+    ["an empty string", ""],
+    ["a number", 42],
+    ["an object", { url: "https://acme.com" }],
+  ])("drops %s and warns, keeping the good entries and the record", (_label, bad) => {
+    const good = "https://acme.com/careers/7";
+    const result = validateJobRecord({ ...validRecord(), aliasUrls: [good, bad] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.aliasUrls).toEqual([good]);
+    expect(result.warnings).toContainEqual(expect.stringContaining("aliasUrls"));
+  });
+
+  it("never puts an untrusted value into the warning text", () => {
+    const result = validateJobRecord({ ...validRecord(), aliasUrls: [{ huge: "x".repeat(50) }] });
+    expect(result.ok && result.warnings.join(" ")).toContain("a value of type object");
+  });
+
+  it("removes an `aliasUrls` every entry of which was dropped", () => {
+    const result = validateJobRecord({ ...validRecord(), aliasUrls: ["acme.com"] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect("aliasUrls" in result.record).toBe(false);
+  });
+
+  it("normalises an empty list to an absent field, silently", () => {
+    const result = validateJobRecord({ ...validRecord(), aliasUrls: [] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect("aliasUrls" in result.record).toBe(false);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("deduplicates aliasUrls silently", () => {
+    const result = validateJobRecord({
+      ...validRecord(),
+      aliasUrls: ["https://acme.com/jobs/2", "https://acme.com/jobs/2"],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.aliasUrls).toEqual(["https://acme.com/jobs/2"]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("removes an aliasUrl that matches the canonical url, silently", () => {
+    const result = validateJobRecord({
+      ...validRecord(),
+      url: "https://acme.com/jobs/1",
+      aliasUrls: ["https://acme.com/jobs/1", "https://acme.com/jobs/2"],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record.aliasUrls).toEqual(["https://acme.com/jobs/2"]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("REFUSES a value that is not a list at all — that is a broken producer", () => {
+    // The opposite of the per-entry rule, deliberately: `aliasUrls` given a
+    // bare string is a field whose declared type is wrong end to end, which
+    // every other field here refuses too.
+    expect(reasons({ ...validRecord(), aliasUrls: "https://acme.com" })).toContainEqual(
+      expect.stringContaining("`aliasUrls`"),
+    );
+  });
+
+  it("does not let an alias change the record's id", () => {
+    const withAliases = validateJobRecord({
+      ...validRecord(),
+      aliasUrls: ["https://jobs.example.com/listing/999"],
+    });
+    const without = validateJobRecord({ ...validRecord(), aliasUrls: undefined });
+    expect(withAliases.ok && without.ok && withAliases.record.id).toBe(
+      without.ok ? without.record.id : "",
+    );
   });
 });
 

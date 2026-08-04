@@ -5,7 +5,10 @@ extension, a bookmarklet, a script that converts another tracker's export. You d
 the source to implement this. If a rule here and the code disagree, that is a bug; file it.
 
 **Status:** version 2. Introduced in [#693](https://github.com/offlinecv/OfflineCV/issues/693);
-extended in [#719](https://github.com/offlinecv/OfflineCV/issues/719) with the six posting facts.
+extended in [#719](https://github.com/offlinecv/OfflineCV/issues/719) with the six posting facts,
+and in [#745](https://github.com/offlinecv/OfflineCV/issues/745) with `origin` and
+[#746](https://github.com/offlinecv/OfflineCV/issues/746) with `aliasUrls` — no version bump for
+either; see §8 and §9.
 Implemented by `src/lib/storage/job-record-contract.ts` (validation),
 `src/lib/storage/job-url.ts` (identity), and `src/lib/storage/capture.ts` (the write path).
 
@@ -60,6 +63,8 @@ A record is a **plain JSON object**. Not an array, not `null`, not a class insta
 | `jdText` | string | The job description, verbatim. |
 | `matchResult` | JSON-safe value | An opaque match payload. See §6. |
 | `capture` | object | Provenance. See §7. |
+| `origin` | string (closed vocabulary) | Where this record came from, **display only**. See §8. |
+| `aliasUrls` | array of strings | Other URLs the same posting is reachable at. **Never affects `id`.** See §9. |
 | `createdAt` / `updatedAt` | finite number (epoch ms) | Timestamps. **`captureJob` ignores yours** and lets the store own them; a backup file carries them so a restore preserves both. |
 | `deletedAt` | finite number (epoch ms) | A **tombstone**: the record is deleted, and its presence says so. **`captureJob` ignores yours** — see §5. A backup file carries it. |
 
@@ -180,6 +185,13 @@ keeping:
 - **Path case.** Most servers are case-sensitive; `/Jobs/AB` and `/jobs/ab` may be different pages.
 - **A non-default port.** That is a genuinely different origin.
 
+### An alias is not an identity
+
+`aliasUrls` (§9) records that a posting is *also* reachable at some other URL. It does **not**
+take part in the derivation above: `id` comes from `url` and only from `url`. Two records that
+list each other's URLs as aliases still have two different ids, and that is correct — merging
+them is a decision the user makes, not one a producer or a URL rule may make for them.
+
 ### If you have no URL
 
 Then you have no identity, and `captureJob` gives the record a fresh `crypto.randomUUID()`. Two
@@ -231,11 +243,18 @@ value — a single click in the status picker fixes it.
 
 | Producer-owned — your value wins | User-owned — the stored value wins |
 |---|---|
-| `title`, `company`, `url`, `jdText`, `matchResult`, `capture`, and the six posting facts | `status`, `notes`, `resumeId` |
+| `title`, `company`, `url`, `jdText`, `matchResult`, `capture`, `origin`, and the six posting facts | `status`, `notes`, `resumeId` |
 
 You are authoritative about the posting; the user is authoritative about their application. A
 re-capture that reset an `interviewing` job to `interested` would be worse than the duplicate it
 was meant to prevent.
+
+`aliasUrls` (§9) is in **neither** column: it is **unioned**, and it is the only field that is. An
+alias is additive by definition, so the two sides cannot conflict — and the direction that matters
+is what producer-wins would do instead. The aliases on a stored record are usually the ones the
+*user* put there by merging two rows, and a re-capture that simply omitted the field would undo
+that merge silently, which is the same loss as resetting an `interviewing` job to `interested`.
+Two spellings of one URL collapse (§2 canonical form), so re-capturing does not grow the list.
 
 A re-capture does **not** stamp `updatedAt`, so it will not float the job to the top of a list
 sorted most-recently-updated-first. `created: false` in the result tells you the record was already
@@ -351,6 +370,11 @@ Two version numbers exist and they are not the same thing.
 | 1 | The contract as #693 introduced it. | — |
 | 2 | Added the six posting facts in §1: `location`, `salaryRange`, `datePosted`, `workModel`, `employmentType`, `validThrough`. | **None.** All six are optional, so a v1 record is already a valid v2 record that omits them. Existing stored records keep loading untouched. |
 
+`origin` (§8, #745) and `aliasUrls` (§9, #746) are **not** in this table: both are additive and
+optional like the six posting facts, but neither was judged to need a version bump even as a
+courtesy entry — a build that predates them treats them as unknown extra keys (§1) and preserves
+them, with no migration to write down.
+
 **offlinecv never refuses a record for its version number.** The validator requires `capture.contract` to be a finite number and does not compare it against its own — so a record from a version this build has never heard of is accepted, and a v1 producer keeps working after a v2 build ships. Refusing a future version is precisely the forward-compatibility failure this section exists to avoid.
 
 `capture` is **optional**, and its absence means "written by offlinecv itself, contract 1". It
@@ -363,7 +387,85 @@ apart from its own and apply a migration to just yours.
 
 ---
 
-## 8. Failure handling
+## 8. `origin`
+
+Where the record says it came from — **display only**. It is never a lifecycle, and it never
+feeds merge, dedupe, or sync ordering; the only thing it changes is a short phrase on the tracker
+row. The closed vocabulary:
+
+```
+capture · alert · shared · import · manual
+```
+
+- **Omit it** when you have no better answer than "the user made it here". Every record this
+  build's own UI writes omits it, and most producers with no opinion about provenance should too.
+- **Send one of the five** and it is stored as-is. The tracker renders a short phrase for it
+  ("shared with you", "from a job alert") next to the status badge — never a second badge, and
+  never a sentence.
+- **Send anything else that is a string** — a term from another system's vocabulary, a value a
+  future offlinecv defines — and it is **dropped, with a warning**. This is the opposite choice
+  from `status` (§4): an unrecognised status is preserved because the tracker renders it under its
+  literal string, giving the user a surface to see and fix it. Nothing renders an unrecognised
+  origin, so there is no surface for keeping it to serve, and dropping it costs the user one
+  warning line rather than a value that would otherwise sit on the record unexplained forever.
+- **Send a non-string** and the record is refused, the same as any other field whose type is
+  wrong.
+
+**No `JOB_CAPTURE_CONTRACT_VERSION` bump for this field.** It is additive and optional, so a
+producer that sends nothing keeps validating unchanged, and one that sends it needs no version
+bump to be understood by a build that predates this field: that build has never heard of `origin`
+and preserves it as an unknown extra key (§1), which is exactly the forward-compatibility path
+`salaryRange` took under v1 before it became a real field.
+
+---
+
+## 9. `aliasUrls`
+
+Other URLs the same posting is reachable at: the employer's own ATS link found on an aggregator
+page, or the `url` of a record the user merged into this one.
+
+```jsonc
+"url": "https://boards.greenhouse.io/acme/jobs/4012345",
+"aliasUrls": ["https://jobs.example.com/listing/4012345"]
+```
+
+The problem it exists for: one posting, reached two ways, becomes two records. A user saves a job
+from an aggregator, follows "Apply" to the employer's Workday/Greenhouse/Lever page, and saves it
+again. Those two URLs share no host, no path and no parameter, so no canonicalisation rule in §2
+can ever relate them, and none should try — the rule that governs §2 is that over-merging destroys
+a record. An alias is the missing thing: a link between two URLs, recorded by somebody with more
+context than a URL parser.
+
+- **`url` stays canonical, and `id` never moves.** No value of `aliasUrls` may change a record's
+  identity; see §2, "An alias is not an identity". Sending an alias to *make* two records converge
+  does not work and is not what the field is for — supply the same `id`, or let the user merge.
+- **Each entry must be an absolute `http` or `https` URL** — the same bar `url` clears in §3.
+- **An entry that is not is DROPPED, with a warning. The record is never refused for it.** Losing
+  one alias costs the user a duplicate they can still merge by hand; losing the record costs them
+  the application. This is stricter than `url`, which keeps a non-absolute string (§3): `url` has a
+  corpus of half-typed values in existing backups to protect and is what the row renders, whereas
+  an alias is machine-recorded, is never rendered as the row's link, and — not being
+  canonicalisable — could never match anything anyway.
+- **An `aliasUrls` that is left empty by that, or that you send empty, is removed.** "No aliases"
+  has one representation: an absent key.
+- **Send anything that is not an array** — a bare string, an object — **and the record is
+  refused**, like any other field whose declared type is wrong.
+- **Order and spelling are yours.** Entries are stored verbatim. offlinecv compares them by their
+  §2 canonical form when it looks for duplicates, so `www.` and a `utm_` parameter do not make two
+  entries out of one, but it does not rewrite what you sent.
+
+The field is additive: recording an alias never rewrites the record it points at. That is also why
+it is the one field a re-capture **unions** rather than overwriting — see §5. What offlinecv
+does with it locally — surface a "looks like the same posting" prompt, and merge only when the
+user clicks — is this build's business, not the contract's. A producer's obligation ends at
+sending true URLs.
+
+**No `JOB_CAPTURE_CONTRACT_VERSION` bump for this field**, for the reason given in §8: it is
+additive and optional, and a build that predates it preserves it as an unknown extra key (§1).
+
+---
+
+## 10. Failure handling
 
 `captureJob` returns `{ ok: false, reasons: string[] }`. Each reason names the field and what it
 should have been. Nothing is written.
@@ -377,7 +479,7 @@ written — must never abort the restore partway.
 
 ---
 
-## 9. Changing this contract
+## 11. Changing this contract
 
 Adding a field to `JobRecord` (`src/lib/storage/types.ts`) will not compile until you add a matching
 rule to `JOB_RECORD_RULES` (`src/lib/storage/job-record-contract.ts`), because that map is typed

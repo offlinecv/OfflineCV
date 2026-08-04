@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  dedupeCanonicalUrls,
   canonicalJobUrl,
   deriveJobId,
   isAbsoluteUrl,
@@ -219,5 +220,35 @@ describe("url shape predicates", () => {
 
     expect(isAbsoluteUrl("https://acme.com/j")).toBe(true);
     expect(isCapturableJobUrl("https://acme.com/j")).toBe(true);
+  });
+});
+
+describe("dedupeCanonicalUrls (#746)", () => {
+  it("collapses two spellings of one posting to the first seen, verbatim", () => {
+    expect(
+      dedupeCanonicalUrls([
+        "https://www.jobs.example.com/listing/1?utm_source=li",
+        "https://jobs.example.com/listing/1",
+      ]),
+    ).toEqual(["https://www.jobs.example.com/listing/1?utm_source=li"]);
+  });
+
+  it("drops anything that is not an absolute http(s) URL", () => {
+    expect(
+      dedupeCanonicalUrls(["acme.com/jobs/1", "javascript:alert(1)", "", "https://acme.com/j/1"]),
+    ).toEqual(["https://acme.com/j/1"]);
+  });
+
+  it("excludes a URL the caller already holds, whatever its spelling", () => {
+    expect(
+      dedupeCanonicalUrls(["https://www.acme.com/j/1", "https://other.example/j/2"], [
+        "https://acme.com/j/1",
+      ]),
+    ).toEqual(["https://other.example/j/2"]);
+  });
+
+  it("keeps two genuinely different postings apart", () => {
+    const urls = ["https://acme.com/j/1", "https://acme.com/j/2"];
+    expect(dedupeCanonicalUrls(urls)).toEqual(urls);
   });
 });

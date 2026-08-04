@@ -179,6 +179,41 @@ export function canonicalJobUrl(raw: string): string | undefined {
   return `${url.protocol}//${host}${port}${path}${query === "" ? "" : `?${query}`}`;
 }
 
+/**
+ * `urls` with everything that is not an absolute http(s) URL removed, and with
+ * two spellings of one posting collapsed to the first seen — the operation
+ * `JobRecord.aliasUrls` needs wherever two lists of aliases meet (a merge, a
+ * re-capture over a record that already has some).
+ *
+ * Compares by {@link canonicalJobUrl} and stores the ORIGINAL spelling: a
+ * `www.` prefix or a `utm_` parameter must not make two aliases out of one, and
+ * there is equally no reason to hand the user back a rewritten form of a URL
+ * they may recognise. `exclude` seeds the comparison — a caller passes the
+ * record's own `url` so it never appears as an alias of itself.
+ *
+ * It lives here, beside the canonicalisation it is defined in terms of, because
+ * both callers would otherwise reimplement "the same posting" — the second
+ * definition this module exists to prevent.
+ */
+export function dedupeCanonicalUrls(
+  urls: readonly string[],
+  exclude: readonly string[] = [],
+): string[] {
+  const seen = new Set<string>();
+  for (const url of exclude) {
+    const canonical = canonicalJobUrl(url);
+    if (canonical !== undefined) seen.add(canonical);
+  }
+  const kept: string[] = [];
+  for (const url of urls) {
+    const canonical = canonicalJobUrl(url);
+    if (canonical === undefined || seen.has(canonical)) continue;
+    seen.add(canonical);
+    kept.push(url);
+  }
+  return kept;
+}
+
 /** Prefix marking an id as URL-derived rather than a `crypto.randomUUID()`.
  *  Both shapes coexist in the `jobs` store; the prefix is what tells a reader
  *  which rule produced a given id. Exported as part of the contract surface —
