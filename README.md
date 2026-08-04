@@ -124,17 +124,38 @@ and error name — never PDF bytes, never extracted text, never names or URLs.
 Session recording and autocapture are disabled; the distinct ID is in-memory
 and reset on tab close.
 
+Every event also carries two PostHog super-properties, registered once at
+init. `environment` is build-level: `development` under `npm run dev`,
+`staging` from the `main` → GitHub Pages build at dev.offlinecv.org, and
+`production` as the fallback for any other keyed build that doesn't set
+`VITE_POSTHOG_ENV` — the Cloudflare release build, but equally a local
+`npm run build` + `npm run preview` with a key in `.env`. `is_internal` is
+not build-level: it is read per browser at runtime from the `ocv_internal`
+`localStorage` key below, and is present as a boolean on *every* event —
+`false` until that browser visits `?ocv_internal=1` once, `true` after.
+Those are the two dimensions to point PostHog's "Filter out internal and
+test users" project setting at (`is_internal is not true`, `environment =
+production`) so maintainer/staging/teammate traffic can be excluded from
+user-facing metrics; this app supplies the properties, the filter itself is
+configured in the PostHog project rather than here.
+
 The one exception is the optional feedback panel (`feedback_submitted`): it
 carries a 1–5 `rating` plus, **only when the user chooses to fill them**, a
 `category`, free-text `feedback_text`, and an `email`. That email is the single
 piece of user-supplied PII any event can carry — it is opt-in (the field is
 blank by default and is never sent as an empty string; see `buildFeedbackProps`),
-and the whole panel is hidden in builds where `VITE_POSTHOG_KEY` is unset.
+attached only as a property on that single event, and the whole panel is
+hidden in builds where `VITE_POSTHOG_KEY` is unset. It is never promoted to a
+PostHog person profile: this app never calls `identify()` or
+`setPersonProperties` anywhere. (`register()` is used, but only for the
+`environment`/`is_internal` super-properties above — PostHog
+super-properties ride on every *event*, not on a person profile.)
 
 `.env` and `.env.example` are gitignored, so the only documented surface
 for the env vars is this section. To enable telemetry in a local build,
 set `VITE_POSTHOG_KEY` (and optionally `VITE_POSTHOG_HOST`, defaulting to
-`https://us.i.posthog.com`) in the environment at build time.
+`https://us.i.posthog.com`, and `VITE_POSTHOG_ENV` to override the inferred
+`environment` super-property above) in the environment at build time.
 
 ### Browser storage
 
@@ -150,6 +171,7 @@ scoped to your browser:
 | `ocv_feedback_submitted` | set after a successful feedback submit so the panel never re-asks in that browser |
 | `ocv_star_cta_seen` | one-time flag so the post-feedback GitHub-star prompt shows only once per browser |
 | `ocv_gh_stars_cache` | caches the fetched star count (~1h TTL) to avoid re-hitting the GitHub API on every parse |
+| `ocv_internal` | marks this browser as internal so team traffic can be filtered out of analytics; set via `?ocv_internal=1`, cleared via `?ocv_internal=0` — only written in builds where `VITE_POSTHOG_KEY` is set |
 
 #### IndexedDB (local-first storage)
 
