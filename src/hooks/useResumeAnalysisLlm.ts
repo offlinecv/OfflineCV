@@ -16,11 +16,12 @@
  * The escape hatch (#243) stays a separate, degenerate-case pass (different
  * trigger + provenance) — see `useLlmEscapeHatch`.
  *
- * Telemetry is preserved: the controller still emits the existing
- * `cascade_parse_completed{llm_ran:true}`, `disagreements_found`, and
- * `llm_critique_ran` events so the funnel reads the same as before. The
- * three events still fire in a single user action because they describe
- * distinct facts (LLM ran, gaps detected, critique completed).
+ * Telemetry: the controller emits `llm_parse_ran`, `disagreements_found`, and
+ * `llm_critique_ran`. The three still fire in a single user action because they
+ * describe distinct facts (LLM ran, gaps detected, critique completed). The
+ * first was once a `cascade_parse_completed` re-emit; it now has its own name so
+ * counting completed parses does not also count LLM passes — see the docblock on
+ * `trackLlmParseRan` in `lib/analytics.ts`.
  *
  * Pure React/engine glue. The combined LLM logic lives in
  * `lib/webllm/analyze-resume.ts`; the diff lives in

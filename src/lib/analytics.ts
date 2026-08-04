@@ -213,54 +213,112 @@ export function trackCascadeEvent(event: ParseEvent): void {
         elapsed_ms_since_start: event.elapsed_ms_since_start,
       });
       break;
-    case "parse_completed":
-      // Named "cascade_parse_completed" (not "parse_completed") to avoid
-      // collision with the manual trackParseCompleted event that adds
-      // score-dimension data unavailable inside the cascade.
-      track("cascade_parse_completed", {
-        cascade_version: event.cascade_version,
-        user_type: event.user_type,
-        final_source: event.final_source,
-        total_duration_ms: event.total_duration_ms,
-        confidence: event.confidence,
-        triggers: [...event.triggers],
-        tier_mask: event.tier_mask,
-        llm_ran: event.llm_ran,
-      });
+    case "parse_completed": {
+      const { event: name, props } = buildCascadeParseCompletedEvent(event);
+      track(name, props);
       break;
+    }
   }
 }
 
+/** An event name paired with its payload, before `track()` stamps the surface. */
+export type TrackedEvent = {
+  event: string;
+  props: Record<string, unknown>;
+};
+
 /**
- * The opt-in WebLLM parse pass ran (#242). The cascade's
- * `cascade_parse_completed` event always carries `llm_ran: false` because the
- * LLM pass runs AFTER the cascade returns — by the time the user opts in, that
- * event has already fired. So re-emit the completion signal with `llm_ran: true`
- * (same event name, so PostHog correlates the two on the same person/session)
- * to satisfy the "set `llm_ran: true` on parse_completed when the LLM pass runs"
- * contract. Carries only the model id + the flag — no field values, no PII.
+ * Payload for `cascade_parse_completed` — one emit per finished cascade.
+ *
+ * Named "cascade_parse_completed" (not "parse_completed") to avoid collision
+ * with the manual `trackParseCompleted` event that adds score-dimension data
+ * unavailable inside the cascade.
+ *
+ * `total_duration_ms` is load-bearing beyond its own value: it is the only
+ * property that separates this emit from the LLM events, which carry a model id
+ * instead. The saved parse-volume insights filter on it being set, so dropping
+ * it here silently zeroes those charts rather than failing loudly.
+ *
+ * Pure and exported so the name and shape are testable without a PostHog key —
+ * `track()` short-circuits when `VITE_POSTHOG_KEY` is unset, which is every test
+ * run. Same pattern as `buildFeedbackProps`.
  */
-export function trackLlmParseRan(args: { model: string }): void {
-  track("cascade_parse_completed", {
-    cascade_version: CASCADE_VERSION,
-    llm_ran: true,
-    model: args.model,
-  });
+export function buildCascadeParseCompletedEvent(
+  event: Extract<ParseEvent, { type: "parse_completed" }>,
+): TrackedEvent {
+  return {
+    event: "cascade_parse_completed",
+    props: {
+      cascade_version: event.cascade_version,
+      user_type: event.user_type,
+      final_source: event.final_source,
+      total_duration_ms: event.total_duration_ms,
+      confidence: event.confidence,
+      triggers: [...event.triggers],
+      tier_mask: event.tier_mask,
+      llm_ran: event.llm_ran,
+    },
+  };
+}
+
+/** Payload for `llm_parse_ran` (#242). See `trackLlmParseRan`. */
+export function buildLlmParseRanEvent(args: { model: string }): TrackedEvent {
+  return {
+    event: "llm_parse_ran",
+    props: {
+      cascade_version: CASCADE_VERSION,
+      llm_ran: true,
+      model: args.model,
+    },
+  };
+}
+
+/** Payload for `llm_fallback_ran` (#243). See `trackLlmFallbackRan`. */
+export function buildLlmFallbackRanEvent(args: { model: string }): TrackedEvent {
+  return {
+    event: "llm_fallback_ran",
+    props: {
+      cascade_version: CASCADE_VERSION,
+      llm_ran: true,
+      final_source: "llm_fallback",
+      model: args.model,
+    },
+  };
 }
 
 /**
- * The degenerate-case LLM escape hatch ran (#243). Re-emits `cascade_parse_completed`
- * with `llm_ran: true` AND `final_source: "llm_fallback"` to distinguish the
- * recovery-pass from the comparison-pass (#242, which uses `trackLlmParseRan`).
- * Carries only the model id — no field values, no PII.
+ * The opt-in WebLLM parse pass ran (#242). The LLM pass runs AFTER the cascade
+ * returns, so by the time the user opts in, `cascade_parse_completed` has
+ * already fired carrying `llm_ran: false`.
+ *
+ * This used to re-emit `cascade_parse_completed` to restate the flag. That made
+ * the event name mean two different things — "a parse finished" and "the LLM
+ * pass ran on a parse that already finished" — so every count of it read high:
+ * parse success rate (completions / files accepted) sat above 100%, and the
+ * `triggers` / `final_source` breakdowns gained a null bucket, because a
+ * re-emit carries none of the cascade's measurements. The stated reason for
+ * sharing the name was to let PostHog "correlate the two on the same
+ * person/session", which a distinct name does not prevent — correlation is by
+ * `distinct_id` / `$session_id`, never by event name.
+ *
+ * So this is its own event. Anything that wants both reads them as two series.
+ * Carries only the model id + the flag — no field values, no PII.
+ */
+export function trackLlmParseRan(args: { model: string }): void {
+  const { event, props } = buildLlmParseRanEvent(args);
+  track(event, props);
+}
+
+/**
+ * The degenerate-case LLM escape hatch ran (#243). Distinct from the
+ * comparison-pass (#242, `trackLlmParseRan`) because this one is a recovery:
+ * the cascade produced too little to use and the LLM re-parsed from scratch.
+ * Same reasoning as above for why it is not a `cascade_parse_completed`
+ * re-emit. Carries only the model id — no field values, no PII.
  */
 export function trackLlmFallbackRan(args: { model: string }): void {
-  track("cascade_parse_completed", {
-    cascade_version: CASCADE_VERSION,
-    llm_ran: true,
-    final_source: "llm_fallback",
-    model: args.model,
-  });
+  const { event, props } = buildLlmFallbackRanEvent(args);
+  track(event, props);
 }
 
 export function trackRenderError(args: { errorName: string }): void {
