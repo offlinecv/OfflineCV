@@ -17,6 +17,8 @@
  *    `resumeId` are the user's; `title`, `company`, `url`, `jdText`,
  *    `matchResult` and `capture` are the producer's. A re-capture that reset an
  *    "applied" job to "interested" would be worse than the duplicate it fixed.
+ *    `aliasUrls` is neither: it is unioned, because an alias is additive and
+ *    the stored ones are usually a merge the user performed (#746).
  *
  * Lib-only and browser-agnostic: no `fetch`, no extension API, no UI. The
  * transport that carries a record here (an extension message port, a paste, a
@@ -37,7 +39,7 @@
 
 import { getJob, saveJob } from "./jobs.ts";
 import { validateJobRecord, type JobRecordIssue } from "./job-record-contract.ts";
-import { deriveJobId } from "./job-url.ts";
+import { dedupeCanonicalUrls, deriveJobId } from "./job-url.ts";
 import type { JobRecord } from "./types.ts";
 
 export type JobCaptureResult =
@@ -50,6 +52,12 @@ export type JobCaptureResult =
       warnings: JobRecordIssue[];
     }
   | { ok: false; reasons: JobRecordIssue[] };
+
+/** One record's `aliasUrls` as strings, defensively — see the call site. */
+function aliasList(job: JobRecord): string[] {
+  const entries = Array.isArray(job.aliasUrls) ? job.aliasUrls : [];
+  return entries.filter((entry): entry is string => typeof entry === "string");
+}
 
 /**
  * Resolve the id for a candidate capture.
@@ -118,6 +126,24 @@ export async function captureJob(input: unknown): Promise<JobCaptureResult> {
     merged.status = existing.status;
     merged.notes = existing.notes ?? merged.notes;
     merged.resumeId = existing.resumeId ?? merged.resumeId;
+
+    // `aliasUrls` is neither producer-owned nor user-owned: it is UNIONED, and
+    // it is the only field here that is (#746). An alias is additive by
+    // definition — recording one never rewrites anything — so the two sides
+    // cannot conflict. The direction that matters is what a plain
+    // producer-wins would do: the aliases on the stored record are usually the
+    // ones the USER put there by merging two rows, and a re-capture that
+    // omitted the field would silently undo that merge, which is the same
+    // family of loss as resetting an `interviewing` job to `interested`.
+    // `Array.isArray`, not `?? []`: the store's write path is permissive, so
+    // the stored value is only as typed as whatever wrote it, and spreading a
+    // non-iterable throws.
+    const aliasUrls = dedupeCanonicalUrls(
+      [...aliasList(existing), ...aliasList(merged)],
+      merged.url === undefined ? [] : [merged.url],
+    );
+    if (aliasUrls.length > 0) merged.aliasUrls = aliasUrls;
+    else delete merged.aliasUrls;
   }
 
   const record = await saveJob(merged, { touch: false });

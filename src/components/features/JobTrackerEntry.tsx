@@ -24,15 +24,44 @@
  * owns the click/acknowledge/reveal state machine and renders nothing when
  * the array is empty. Kept as a whole sibling component rather than inlined
  * here, both to reuse the "letters" concern and to avoid growing this file.
+ *
+ * Duplicate notice (#746): `duplicates` is other saved jobs that look like the
+ * same posting, handed straight to `JobDuplicateNotice`, which owns the
+ * offer → confirm → merge state machine and renders nothing when the list is
+ * empty. Kept as a whole sibling component for the reason `JobLetterIndicator`
+ * is: this file is already past the size guideline, and a merge is the one
+ * action here that destroys a record, so it gets its own place to say so.
+ *
+ * Origin phrase (#745): `job.origin` is display-only provenance — "how did
+ * this row get here" — and this is the one place in the app allowed to read
+ * it (see `JobRecord.origin`'s docblock and the structural test that
+ * enforces it). Deliberately a plain muted caption, not a second
+ * `StatusBadge`: the badge above already answers "what stage is this at" via
+ * `jobStatusLabel`, and a second chip repeating that would be noise. Renders
+ * nothing when the field is absent, which is the common case — every job
+ * this build's own UI creates has no origin.
  */
 
 import { useState } from "react";
 import { Button, EditableField, RatingStars, StatusBadge } from "@design-system";
 import { JobStatusPicker, jobStatusTone, jobStatusLabel } from "./JobStatusPicker.tsx";
 import { JobLetterIndicator } from "./JobLetterIndicator.tsx";
-import type { JobRecord, JobStatus, LetterRecord } from "../../lib/storage/index.ts";
+import { JobDuplicateNotice } from "./JobDuplicateNotice.tsx";
+import type { JobDuplicateSuggestion } from "../../hooks/useJobDuplicates.ts";
+import type { JobOrigin, JobRecord, JobStatus, LetterRecord } from "../../lib/storage/index.ts";
 import type { JobPatch } from "../../lib/job-tracker.ts";
 import { describeRating, type JobRating } from "../../lib/job-search/rating.ts";
+
+/** One short phrase per {@link JobOrigin}, never a sentence — see the
+ *  docblock above. A `Record`, not a lookup function, so a `JobOrigin` added
+ *  without a phrase here is a compile error rather than a blank caption. */
+const ORIGIN_PHRASE: Record<JobOrigin, string> = {
+  capture: "captured from a posting",
+  alert: "from a job alert",
+  shared: "shared with you",
+  import: "imported from a backup",
+  manual: "added manually",
+};
 
 /** A saved resume the user can link this job to — the light shape the picker
  *  renders, structurally satisfied by `ResumeLibraryEntry`. */
@@ -58,6 +87,14 @@ interface JobTrackerEntryProps {
   /** This job's letters, most-recently-updated first (#715). Empty/omitted
    *  renders no indicator — see `JobLetterIndicator`. */
   letters?: readonly LetterRecord[];
+  /** Other saved jobs that look like the same posting (#746). Rendered by the
+   *  sibling `JobDuplicateNotice`, and only when both handlers below come with
+   *  it — a merge offer with nowhere to send the click would be a button that
+   *  lies. Omitted by any caller that has not run the sweep. */
+  duplicates?: readonly JobDuplicateSuggestion[];
+  /** `(survivorId, absorbedId)`, with THIS row as the survivor. */
+  onMerge?: (survivorId: string, absorbedId: string) => void;
+  onDismissDuplicate?: (a: string, b: string) => void;
   onUpdate: (id: string, patch: JobPatch) => void;
   onStatusChange: (id: string, status: JobStatus) => void;
   onLinkResume: (id: string, resumeId: string) => void;
@@ -80,6 +117,9 @@ export function JobTrackerEntry({
   rated = false,
   rating,
   letters,
+  duplicates,
+  onMerge,
+  onDismissDuplicate,
   onUpdate,
   onStatusChange,
   onLinkResume,
@@ -113,6 +153,9 @@ export function JobTrackerEntry({
             </StatusBadge>
             <JobLetterIndicator letters={letters} />
           </div>
+          {job.origin && (
+            <span className="text-xs text-content-muted">{ORIGIN_PHRASE[job.origin]}</span>
+          )}
           {rated && !rating && (
             <span className="text-xs text-content-muted">
               Not rated · no job description saved
@@ -135,6 +178,15 @@ export function JobTrackerEntry({
           )}
         </div>
       </div>
+
+      {duplicates && onMerge && onDismissDuplicate && (
+        <JobDuplicateNotice
+          jobId={job.id}
+          duplicates={duplicates}
+          onMerge={onMerge}
+          onDismiss={onDismissDuplicate}
+        />
+      )}
 
       <JobStatusPicker
         value={job.status}

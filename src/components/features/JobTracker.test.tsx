@@ -19,6 +19,7 @@ import { SECTION_PAGE_SIZE } from "./JobTrackerStatusGroup.tsx";
 import type { JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import type { JobRecord, LetterRecord } from "../../lib/storage/index.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
+import type { JobDuplicateSuggestion } from "../../hooks/useJobDuplicates.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -61,6 +62,7 @@ function makeTracker(jobs: JobRecord[]): Tracker {
     link: vi.fn(async () => {}),
     unlink: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
+    merge: vi.fn(async () => {}),
     saveFromMatch: vi.fn(async () => "new-id"),
     exportBackup: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),
@@ -265,6 +267,40 @@ describe("JobTracker: letter indicator (#715)", () => {
     expect(
       container.querySelector('button[aria-label="View cover letter"]'),
     ).toBeNull();
+  });
+});
+
+describe("JobTracker: origin phrase on the tracker row (#745)", () => {
+  it("shows a short phrase for a recognised origin", () => {
+    const tracker = makeTracker([job({ id: "j1", title: "Shared job", origin: "shared" })]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    expect(container.textContent).toContain("shared with you");
+  });
+
+  it("renders nothing when origin is absent — the common case", () => {
+    const tracker = makeTracker([job({ id: "j1", title: "Plain job" })]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    for (const phrase of [
+      "captured from a posting",
+      "from a job alert",
+      "shared with you",
+      "imported from a backup",
+      "added manually",
+    ]) {
+      expect(container.textContent).not.toContain(phrase);
+    }
+  });
+
+  it("never repeats the status badge's own text as the origin phrase", () => {
+    // The row's badge already prints the literal status via jobStatusLabel;
+    // the origin phrase exists to answer a different question ("how did this
+    // get here"), not to echo it as a second chip.
+    const tracker = makeTracker([
+      job({ id: "j1", title: "Applied via alert", status: "applied", origin: "alert" }),
+    ]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    expect(container.textContent).toContain("Applied");
+    expect(container.textContent).toContain("from a job alert");
   });
 });
 
@@ -513,5 +549,288 @@ describe("JobTracker: collapsible status sections (#740)", () => {
     // Three of the five rows sit behind a collapsed header, and the total still
     // matches — the counts are the bucket length, never the rendered slice.
     expect(rows()).toHaveLength(2);
+  });
+});
+
+describe("JobTracker: lifecycle buckets over raw statuses (#744)", () => {
+  /** A record carrying a status outside this build's lifecycle, the way a synced
+   *  one does. The cast is the same deliberate lie `JobRecord.status` makes: the
+   *  record contract accepts and preserves any string. FROZEN, so a view-time
+   *  normalisation would throw here rather than pass quietly. */
+  function synced(
+    over: Omit<Partial<JobRecord>, "status"> & { status: string },
+  ): JobRecord {
+    return Object.freeze(
+      job({ ...over, status: over.status as JobRecord["status"] }),
+    );
+  }
+
+  function sectionHeadings(): string[] {
+    return [...container.querySelectorAll("h3")].map((h) => h.textContent ?? "");
+  }
+
+  function rowFor(title: string): HTMLLIElement {
+    const row = [...container.querySelectorAll("li")].find((li) =>
+      li.textContent?.includes(title),
+    );
+    if (!row) throw new Error(`no row for "${title}"`);
+    return row;
+  }
+
+  /** That row's status picker specifically — scoped by the group's own label so
+   *  the assertions can't be satisfied by some other pressed control. */
+  function pickerFor(title: string): HTMLElement {
+    const picker = rowFor(title).querySelector<HTMLElement>(
+      '[role="group"][aria-label="Application status"]',
+    );
+    if (!picker) throw new Error(`no status picker in the row for "${title}"`);
+    return picker;
+  }
+
+  function buttonIn(scope: ParentNode, label: string): HTMLButtonElement {
+    const button = [...scope.querySelectorAll("button")].find(
+      (b) => b.textContent === label,
+    );
+    if (!button) throw new Error(`no "${label}" button in scope`);
+    return button;
+  }
+
+  function click(button: Element) {
+    act(() => button.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  }
+
+  /** The four pre-application statuses a Recruidea sync produces — one stage of
+   *  a job search, spelled four ways. */
+  const PRE_APPLICATION = [
+    synced({ id: "a", title: "Ours", status: "interested" }),
+    synced({ id: "b", title: "Manually saved", status: "saved" }),
+    synced({ id: "c", title: "From an alert", status: "scouted" }),
+    synced({ id: "d", title: "Sponsor share", status: "shared" }),
+  ];
+
+  it("renders one Interested section holding every pre-application status", () => {
+    act(() => root.render(<JobTracker tracker={makeTracker(PRE_APPLICATION)} />));
+
+    expect(sectionHeadings()).toHaveLength(1);
+    expect(sectionHeadings()[0]).toContain("Interested · 4");
+    // No parallel Saved / Scouted / Shared sections beside it.
+    const headings = sectionHeadings().join(" ");
+    for (const gone of ["Saved ·", "Scouted ·", "Shared ·"]) {
+      expect(headings).not.toContain(gone);
+    }
+    // And the section is open, so all four rows are actually on screen.
+    expect(container.querySelectorAll("li")).toHaveLength(4);
+    for (const { title } of PRE_APPLICATION) {
+      expect(container.textContent).toContain(title);
+    }
+  });
+
+  it("leaves the stored status byte-identical through a render", () => {
+    // Asserted on the RECORD, not the DOM: grouping is a view concern and must
+    // not normalise what a producer wrote. The fixtures are frozen, so a write
+    // would throw here rather than pass quietly.
+    const jobs = PRE_APPLICATION;
+    act(() => root.render(<JobTracker tracker={makeTracker(jobs)} />));
+    expect(jobs.map((j) => j.status)).toEqual([
+      "interested",
+      "saved",
+      "scouted",
+      "shared",
+    ]);
+  });
+
+  it("shows Interested as the selected button on a shared row", () => {
+    act(() => root.render(<JobTracker tracker={makeTracker(PRE_APPLICATION)} />));
+    const picker = pickerFor("Sponsor share");
+    expect(buttonIn(picker, "Interested").getAttribute("aria-pressed")).toBe("true");
+    // …and exactly one button is selected, not zero (the pre-#744 bug) and not
+    // several.
+    expect(picker.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1);
+  });
+
+  it("writes nothing when the user clicks the bucket a shared row is already in", () => {
+    const tracker = makeTracker([...PRE_APPLICATION]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+
+    click(buttonIn(pickerFor("Sponsor share"), "Interested"));
+
+    expect(tracker.setStatus).not.toHaveBeenCalled();
+    // The record still says what its producer said — no idempotent-looking
+    // write of `interested` over `shared`.
+    expect(tracker.jobs.find((j) => j.id === "d")?.status).toBe("shared");
+  });
+
+  it("writes the canonical status when a shared row moves to a different bucket", () => {
+    const tracker = makeTracker([...PRE_APPLICATION]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+
+    click(buttonIn(pickerFor("Sponsor share"), "Applied"));
+
+    // The ordinary transition, and it writes the lifecycle's own vocabulary —
+    // never an echo of the foreign status.
+    expect(tracker.setStatus).toHaveBeenCalledWith("d", "applied");
+  });
+
+  it("folds withdrawn into the rejected bucket", () => {
+    const tracker = makeTracker([
+      synced({ id: "w", title: "Pulled out", status: "withdrawn" }),
+      synced({ id: "r", title: "Turned down", status: "rejected" }),
+    ]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    expect(sectionHeadings()).toHaveLength(1);
+    expect(sectionHeadings()[0]).toContain("Rejected · 2");
+  });
+
+  it("still gives a status outside both vocabularies its own expanded section", () => {
+    // The escape hatch #744 narrows but does not remove. `ghosted` maps to
+    // nothing, so it heads its own section under its literal string, expanded.
+    const tracker = makeTracker([
+      synced({ id: "s", title: "Sponsor share", status: "shared" }),
+      synced({ id: "g", title: "Weird one", status: "ghosted" }),
+    ]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+
+    const headings = sectionHeadings();
+    expect(headings).toHaveLength(2);
+    expect(headings.join(" ")).toContain("ghosted · 1");
+    expect(container.textContent).toContain("Weird one");
+    // No selection on a row the picker genuinely cannot place — the honest
+    // state, and the one a click can repair.
+    expect(
+      pickerFor("Weird one").querySelectorAll('button[aria-pressed="true"]'),
+    ).toHaveLength(0);
+  });
+
+  it("keeps the header total equal to the sum of section counts across buckets", () => {
+    const tracker = makeTracker([
+      ...PRE_APPLICATION,
+      synced({ id: "w", title: "Pulled out", status: "withdrawn" }),
+      synced({ id: "g", title: "Weird one", status: "ghosted" }),
+    ]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+
+    const sum = sectionHeadings()
+      .map((text) => Number(text.split("·").pop()))
+      .reduce((a, b) => a + b, 0);
+    expect(sum).toBe(6);
+    expect(container.textContent).toContain("Tracked jobs");
+    expect(container.querySelector("header")?.textContent).toContain("6");
+  });
+});
+
+describe("JobTracker: the duplicate affordance never merges on its own (#746)", () => {
+  const ATS = "https://boards.greenhouse.io/acme/jobs/1";
+  const AGGREGATOR = "https://jobs.example.com/listing/1";
+
+  function click(label: string) {
+    const button = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === label,
+    );
+    expect(button, `no button labelled "${label}"`).toBeDefined();
+    act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  }
+
+  function pairedTracker() {
+    const a = job({ id: "a", title: "Senior Frontend Engineer", url: ATS });
+    const b = job({ id: "b", title: "Senior Frontend Engineer", url: AGGREGATOR });
+    const suggestion = (other: JobRecord): JobDuplicateSuggestion[] => [
+      { job: other, confidence: "probable" },
+    ];
+    return {
+      tracker: makeTracker([a, b]),
+      duplicatesByJobId: new Map<string, readonly JobDuplicateSuggestion[]>([
+        ["a", suggestion(b)],
+        ["b", suggestion(a)],
+      ]),
+    };
+  }
+
+  it("shows the affordance for a probable match, and merges nothing by rendering it", () => {
+    const { tracker, duplicatesByJobId } = pairedTracker();
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          duplicatesByJobId={duplicatesByJobId}
+          onDismissDuplicate={vi.fn()}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain("Looks like the same posting");
+    expect(container.textContent).toContain(AGGREGATOR);
+    expect(tracker.merge).not.toHaveBeenCalled();
+  });
+
+  it("does not merge on the first click — the offer only opens a confirm", () => {
+    const { tracker, duplicatesByJobId } = pairedTracker();
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          duplicatesByJobId={duplicatesByJobId}
+          onDismissDuplicate={vi.fn()}
+        />,
+      ),
+    );
+    click("Merge into this one");
+    expect(tracker.merge).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("fold the other one into it");
+  });
+
+  it("merges only on the explicit confirm, with the clicked row as the survivor", () => {
+    const { tracker, duplicatesByJobId } = pairedTracker();
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          duplicatesByJobId={duplicatesByJobId}
+          onDismissDuplicate={vi.fn()}
+        />,
+      ),
+    );
+    click("Merge into this one");
+    click("Confirm merge");
+    // The FIRST row's offer was clicked, so the first row survives.
+    expect(tracker.merge).toHaveBeenCalledWith("a", "b");
+  });
+
+  it("cancels back to the offer without merging", () => {
+    const { tracker, duplicatesByJobId } = pairedTracker();
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          duplicatesByJobId={duplicatesByJobId}
+          onDismissDuplicate={vi.fn()}
+        />,
+      ),
+    );
+    click("Merge into this one");
+    click("Cancel");
+    expect(tracker.merge).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Looks like the same posting");
+  });
+
+  it("'Not the same' suppresses the pairing and merges nothing", () => {
+    const { tracker, duplicatesByJobId } = pairedTracker();
+    const onDismissDuplicate = vi.fn();
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          duplicatesByJobId={duplicatesByJobId}
+          onDismissDuplicate={onDismissDuplicate}
+        />,
+      ),
+    );
+    click("Not the same");
+    expect(onDismissDuplicate).toHaveBeenCalledWith("a", "b");
+    expect(tracker.merge).not.toHaveBeenCalled();
+  });
+
+  it("renders no notice at all for a caller that supplied no matches", () => {
+    const { tracker } = pairedTracker();
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    expect(container.textContent).not.toContain("Looks like the same posting");
   });
 });

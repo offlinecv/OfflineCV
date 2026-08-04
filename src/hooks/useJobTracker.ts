@@ -20,6 +20,7 @@ import {
   linkResume,
   unlinkResume,
   removeJob,
+  mergeJobs,
   createTrackedJobFromMatch,
   type NewJobInput,
   type JobPatch,
@@ -47,6 +48,11 @@ export interface JobTracker {
   link: (id: string, resumeId: string) => Promise<void>;
   unlink: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /** Fold `absorbedId` into `survivorId` (#746): the survivor keeps its own
+   *  fields and gains the other's, including its URL as an alias, and the
+   *  absorbed record is tombstoned. Never called except from an explicit user
+   *  click — see `mergeJobs`. */
+  merge: (survivorId: string, absorbedId: string) => Promise<void>;
   /** "Save this job" from the JD-match flow — carries JD text + match result. */
   saveFromMatch: (
     input: Parameters<typeof createTrackedJobFromMatch>[0],
@@ -134,6 +140,14 @@ export function useJobTracker(): JobTracker {
     [refresh],
   );
 
+  const merge = useCallback(
+    async (survivorId: string, absorbedId: string) => {
+      await mergeJobs(survivorId, absorbedId);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const saveFromMatch = useCallback(
     async (input: Parameters<typeof createTrackedJobFromMatch>[0]) => {
       await ensurePersistence();
@@ -157,6 +171,7 @@ export function useJobTracker(): JobTracker {
     link,
     unlink,
     remove,
+    merge,
     saveFromMatch,
     exportBackup,
     refresh,

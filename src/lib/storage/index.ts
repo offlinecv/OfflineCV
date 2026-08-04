@@ -82,6 +82,7 @@ export {
 } from "./letter-contract.ts";
 export {
   canonicalJobUrl,
+  dedupeCanonicalUrls,
   deriveJobId,
   isAbsoluteUrl,
   isCapturableJobUrl,
@@ -108,6 +109,7 @@ export { JOB_STATUS_ORDER } from "./types.ts";
 export type {
   JobRecord,
   JobStatus,
+  JobOrigin,
   JobCaptureProvenance,
   LetterRecord,
   LetterProvenance,

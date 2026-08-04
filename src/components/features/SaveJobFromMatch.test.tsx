@@ -58,6 +58,7 @@ function makeTracker(): Tracker {
     link: vi.fn(async () => {}),
     unlink: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
+    merge: vi.fn(async () => {}),
     saveFromMatch: vi.fn(async () => "new-id"),
     exportBackup: vi.fn(async () => {}),
     refresh: vi.fn(async () => {}),

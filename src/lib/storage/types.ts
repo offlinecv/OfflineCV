@@ -120,6 +120,14 @@ export type JobStatus =
   | "archived";
 
 /**
+ * Where a job RECORD says it arrived from — display only (#745). A closed
+ * vocabulary, unlike `JobStatus`: nothing renders an out-of-vocabulary origin
+ * (see `JobRecord`'s own `origin` field below), so there is no case for
+ * preserving one the way an unrecognised status is preserved.
+ */
+export type JobOrigin = "capture" | "alert" | "shared" | "import" | "manual";
+
+/**
  * Where a job record came from, when it came from outside this app (#693).
  *
  * Absent on every record this app writes itself — an absent value means
@@ -195,6 +203,28 @@ export interface JobRecord extends StoredRecord {
    *  to id derivation, so two captures of one posting converge — see
    *  `job-url.ts`. */
   url?: string;
+  /**
+   * Other URLs the same posting is reachable at (#746) — an employer ATS link
+   * found on an aggregator page, or the `url` of a record the user merged into
+   * this one.
+   *
+   * **Additive, and display/dedupe-only.** `url` stays the canonical one and
+   * `id` is derived from `url` and ONLY from `url`: no value here may change a
+   * record's identity, because that would fork the id space, which is the exact
+   * failure `job-url.ts` exists to prevent. Nothing in `deriveJobId` or
+   * `canonicalJobUrl` reads this field, and nothing may start.
+   *
+   * An alias is a link between two URLs discovered by something with more
+   * context than a URL parser — a user clicking Merge, a producer that followed
+   * an "Apply" link. It is never inferred from the URLs themselves: an
+   * aggregator URL and an employer ATS URL share no host, path or parameter, so
+   * no canonicalisation rule can ever relate them, and none should try.
+   *
+   * Every entry is an absolute http(s) URL, the same bar `url` clears for an
+   * `href` — but unlike `url`, a non-absolute entry is DROPPED rather than kept
+   * (see §9 of `docs/job-capture-contract.md`).
+   */
+  aliasUrls?: string[];
   /** Free-text notes. */
   notes?: string;
   /** Where this job sits in the application lifecycle. */
@@ -247,6 +277,19 @@ export interface JobRecord extends StoredRecord {
   /** Provenance for a record written by a producer outside this build (#693).
    *  Absent for every record this app creates. */
   capture?: JobCaptureProvenance;
+
+  /** Where this record says it came from, for DISPLAY ONLY (#745) — the
+   *  tracker row renders a short phrase for it and nothing else may read it
+   *  (see `job-origin-reach.test.ts`'s structural guard and
+   *  `docs/job-capture-contract.md` §8). Never an input to merge, dedupe, or
+   *  sync ordering.
+   *
+   *  Absent on any record with no better answer than "the user made it
+   *  here" — every record this build's own UI writes, and a producer that
+   *  simply has no opinion. An out-of-vocabulary value is dropped rather
+   *  than kept, unlike `status`: there is no row that renders it, so keeping
+   *  it would carry a value nothing ever surfaces. */
+  origin?: JobOrigin;
 }
 
 /** The lifecycle order for display grouping and the "advance status" affordance
@@ -259,6 +302,18 @@ export const JOB_STATUS_ORDER: readonly JobStatus[] = [
   "offer",
   "rejected",
   "archived",
+];
+
+/** The closed vocabulary {@link JobOrigin} draws from — exported so
+ *  `job-record-contract.ts`'s `isKnownOrigin` and this module share exactly
+ *  one definition, the same reason {@link JOB_STATUS_ORDER} exists. No
+ *  "order" to it; `origin` has no lifecycle. */
+export const JOB_ORIGINS: readonly JobOrigin[] = [
+  "capture",
+  "alert",
+  "shared",
+  "import",
+  "manual",
 ];
 
 /** A cached company ATS board: the light-index postings one board returned,

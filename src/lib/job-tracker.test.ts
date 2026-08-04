@@ -27,7 +27,11 @@ import {
   reconcileResumeLinks,
   createTrackedJobFromMatch,
   deriveJobTitleFromJd,
+  mergeJobs,
 } from "./job-tracker.ts";
+import { getRecord } from "./storage/crud.ts";
+import { saveLetter, lettersForJob } from "./storage/letters.ts";
+import type { JobRecord } from "./storage/types.ts";
 
 beforeEach(async () => {
   await closeDB();
@@ -190,5 +194,89 @@ describe("job-tracker: link cleanup is housekeeping, not a user edit", () => {
     await new Promise((r) => setTimeout(r, 2));
     const edited = await updateJob(job.id, { notes: "referred by Dana" });
     expect(edited.updatedAt).toBeGreaterThan(before);
+  });
+});
+
+describe("job-tracker: merge is a user action, lossy in one direction only (#746)", () => {
+  const AGGREGATOR = "https://jobs.example.com/listing/4012345";
+  const ATS = "https://boards.greenhouse.io/acme/jobs/4012345";
+
+  async function twoRowsForOnePosting() {
+    const survivor = await createJob({
+      title: "Senior Frontend Engineer",
+      company: "Acme",
+      url: ATS,
+      notes: "Referred by Dana.",
+      status: "applied",
+    });
+    const absorbed = await createJob({
+      title: "Senior Frontend Engineer",
+      company: "Acme",
+      url: AGGREGATOR,
+      notes: "Recruiter called 12 Aug.",
+      jdText: "We are hiring.",
+    });
+    return { survivor, absorbed };
+  }
+
+  it("leaves one record carrying both URLs, with no note text lost", async () => {
+    const { survivor, absorbed } = await twoRowsForOnePosting();
+
+    const merged = await mergeJobs(survivor.id, absorbed.id);
+
+    expect(await listJobs()).toHaveLength(1);
+    expect(merged.id).toBe(survivor.id);
+    expect(merged.url).toBe(ATS);
+    expect(merged.aliasUrls).toEqual([AGGREGATOR]);
+    expect(merged.notes).toContain("Referred by Dana.");
+    expect(merged.notes).toContain("Recruiter called 12 Aug.");
+    // A gap on the survivor is filled; a value it already had is kept.
+    expect(merged.jdText).toBe("We are hiring.");
+    expect(merged.status).toBe("applied");
+  });
+
+  it("TOMBSTONES the absorbed record rather than removing the row", async () => {
+    // A hard delete is indistinguishable from "never existed" to any second
+    // holder of this library, which would hand the duplicate straight back.
+    const { survivor, absorbed } = await twoRowsForOnePosting();
+    await mergeJobs(survivor.id, absorbed.id);
+
+    expect(await getJobById(absorbed.id)).toBeUndefined();
+    const row = await getRecord<JobRecord>("jobs", absorbed.id);
+    expect(row?.deletedAt).toBeGreaterThan(0);
+  });
+
+  it("does not change the surviving record's id", async () => {
+    const { survivor, absorbed } = await twoRowsForOnePosting();
+    await mergeJobs(survivor.id, absorbed.id);
+    expect((await getJobById(survivor.id))?.id).toBe(survivor.id);
+  });
+
+  it("reparents the absorbed job's cover letters instead of cascading them away", async () => {
+    // `deleteJob` cascades to letters (#711). A merge that destroyed the letter
+    // the user wrote for this posting would be the over-merge this feature
+    // exists to avoid.
+    const { survivor, absorbed } = await twoRowsForOnePosting();
+    await saveLetter({ jobId: absorbed.id, body: "Dear hiring team," });
+
+    await mergeJobs(survivor.id, absorbed.id);
+
+    expect(await lettersForJob(absorbed.id)).toHaveLength(0);
+    const kept = await lettersForJob(survivor.id);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].body).toBe("Dear hiring team,");
+  });
+
+  it("refuses to merge a job into itself", async () => {
+    const job = await createJob({ title: "SWE" });
+    await expect(mergeJobs(job.id, job.id)).rejects.toThrow(/into itself/);
+  });
+
+  it("throws rather than half-merging when either record is gone", async () => {
+    const job = await createJob({ title: "SWE" });
+    await expect(mergeJobs(job.id, "missing")).rejects.toThrow(/no job with id missing/);
+    await expect(mergeJobs("missing", job.id)).rejects.toThrow(/no job with id missing/);
+    // The survivor was not written in either failed attempt.
+    expect(await listJobs()).toHaveLength(1);
   });
 });

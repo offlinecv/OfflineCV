@@ -58,26 +58,32 @@ export const SECTION_PAGE_SIZE = 25;
  * useful open. `offer` is deliberately NOT here — `JOB_STATUS_ORDER`'s docblock
  * calls it terminal, but it is terminal in the way a user wants to look at.
  *
- * Every other status opens expanded, INCLUDING one this build does not know
- * (a corrupt or future-version imported record): a bucket the app cannot
- * explain is the one the user most needs to see.
+ * Every other bucket opens expanded, INCLUDING one this build does not know
+ * (a corrupt or future-version imported record `jobStatusBucket` could not
+ * map): a bucket the app cannot explain is the one the user most needs to see.
  */
 const COLLAPSED_BY_DEFAULT: readonly string[] = ["rejected", "archived"];
 
-/** Whether this status's bucket opens closed. Takes the raw status string, not
- *  `JobStatus`, because the tracker groups on whatever the record carries. */
-export function isCollapsedByDefault(status: string): boolean {
-  return COLLAPSED_BY_DEFAULT.includes(status);
+/** Whether this bucket opens closed. Takes the DISPLAY bucket key, not a stored
+ *  status, so a status that maps into a terminal bucket (`withdrawn` →
+ *  `rejected`, #744) collapses with it rather than opening on its own. Typed
+ *  `string` rather than `JobStatus` because an unmapped status buckets as
+ *  itself. */
+export function isCollapsedByDefault(bucket: string): boolean {
+  return COLLAPSED_BY_DEFAULT.includes(bucket);
 }
 
 export function JobTrackerStatusGroup({
-  status,
+  bucket,
   jobs,
   defaultExpanded,
   renderRow,
 }: {
-  /** The raw status string this bucket holds — may be outside `JobStatus`. */
-  status: string;
+  /** The DISPLAY bucket this section holds (#744) — a `JobStatus` for anything
+   *  `jobStatusBucket` could map, otherwise the literal stored status. Never a
+   *  value to write back: the rows inside may each carry a different stored
+   *  status, and the header speaks for the bucket, not for any one of them. */
+  bucket: string;
   /** Every job in the bucket, in the parent's order. Not sliced by the caller:
    *  the header count and the page arithmetic both need the full length. */
   jobs: readonly JobRecord[];
@@ -151,7 +157,9 @@ export function JobTrackerStatusGroup({
   const current = Math.min(page, pageCount);
   const start = (current - 1) * SECTION_PAGE_SIZE;
   const shown = jobs.slice(start, start + SECTION_PAGE_SIZE);
-  const label = jobStatusLabel(status);
+  // `jobStatusLabel` still takes the raw string and falls back to it, so an
+  // unmapped bucket heads its section with its literal status.
+  const label = jobStatusLabel(bucket);
 
   return (
     <section className="flex flex-col gap-2">
