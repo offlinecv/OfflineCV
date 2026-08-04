@@ -20,16 +20,20 @@
  * owns `useSavedJobRatings` — one read for the whole library, grouped by job
  * id and handed down as `lettersById`. A job id absent from the map renders
  * no indicator (`JobTrackerEntry` → `JobLetterIndicator`).
+ *
+ * Collapse + paging (#740): this file keeps the grouping and the open-by-default
+ * POLICY; `JobTrackerStatusGroup` owns one bucket's open/closed and page state,
+ * which the parent cannot hold because the bucket count is data, not a fixed
+ * set of `useState`s.
  */
 
 import { useMemo } from "react";
 import { Card, Button, StatusBadge } from "@design-system";
 import { formatBytes } from "../../lib/format-bytes.ts";
-import { EVICTION_NOTICE } from "../../lib/storage/index.ts";
-import { JOB_STATUS_ORDER } from "../../lib/storage/index.ts";
+import { EVICTION_NOTICE, JOB_STATUS_ORDER } from "../../lib/storage/index.ts";
 import type { JobRecord, JobStatus, LetterRecord } from "../../lib/storage/index.ts";
-import { jobStatusLabel } from "./JobStatusPicker.tsx";
 import { JobTrackerEntry, type LinkableResume } from "./JobTrackerEntry.tsx";
+import { JobTrackerStatusGroup, isCollapsedByDefault } from "./JobTrackerStatusGroup.tsx";
 import { useJobTracker, type JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import { useSavedJobRatings } from "../../hooks/useSavedJobRatings.ts";
 import { useJobLetters } from "../../hooks/useJobLetters.ts";
@@ -119,6 +123,13 @@ export function JobTracker({
     }));
   }, [jobs]);
 
+  // Would ANY section open on mount? `groups` holds only non-empty buckets, so
+  // this is false just for a library that is nothing but rejected/archived —
+  // which would otherwise render as a page of headers over no rows, the very
+  // failure collapse-by-default exists to avoid. Then every section opens; the
+  // "only non-empty bucket is rejected" case is the single-bucket case of it.
+  const anyOpenByDefault = groups.some(({ status }) => !isCollapsedByDefault(status));
+
   if (!ready) return null;
 
   return (
@@ -168,33 +179,31 @@ export function JobTracker({
       ) : (
         <div className="flex flex-col gap-4">
           {groups.map(({ status, jobs: group }) => (
-              <section key={status} className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-                  {jobStatusLabel(status)} · {group.length}
-                </h3>
-                <ul className="flex flex-col gap-2">
-                  {group.map((job) => (
-                    <JobTrackerEntry
-                      key={job.id}
-                      job={job}
-                      linkedResumeName={
-                        job.resumeId !== undefined
-                          ? resumeName?.(job.resumeId)
-                          : undefined
-                      }
-                      resumeOptions={resumeOptions}
-                      rated={ratings !== null}
-                      rating={ratings?.get(job.id)}
-                      letters={lettersById?.get(job.id)}
-                      onUpdate={(id, patch) => void update(id, patch)}
-                      onStatusChange={(id, next) => void setStatus(id, next)}
-                      onLinkResume={(id, resumeId) => void link(id, resumeId)}
-                      onUnlinkResume={(id) => void unlink(id)}
-                      onRemove={(id) => void remove(id)}
-                    />
-                  ))}
-                </ul>
-              </section>
+            <JobTrackerStatusGroup
+              key={status}
+              status={status}
+              jobs={group}
+              defaultExpanded={!anyOpenByDefault || !isCollapsedByDefault(status)}
+              renderRow={(job) => (
+                <JobTrackerEntry
+                  job={job}
+                  linkedResumeName={
+                    job.resumeId !== undefined
+                      ? resumeName?.(job.resumeId)
+                      : undefined
+                  }
+                  resumeOptions={resumeOptions}
+                  rated={ratings !== null}
+                  rating={ratings?.get(job.id)}
+                  letters={lettersById?.get(job.id)}
+                  onUpdate={(id, patch) => void update(id, patch)}
+                  onStatusChange={(id, next) => void setStatus(id, next)}
+                  onLinkResume={(id, resumeId) => void link(id, resumeId)}
+                  onUnlinkResume={(id) => void unlink(id)}
+                  onRemove={(id) => void remove(id)}
+                />
+              )}
+            />
           ))}
         </div>
       )}
