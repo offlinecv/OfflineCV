@@ -245,79 +245,35 @@ export default function App() {
           )}
 
           {(state.phase === "idle" || state.phase === "error") && (
-            // What this is, plainly — plus the three claims displaced from the
-            // old trust-chip row (#517: speed, no-signup, determinism) and the
-            // citation. Quiet block below the drop zone: context, never
+            // The one guarantee a visitor needs before dropping a file, and
+            // nothing else. Quiet block below the drop zone: reassurance, never
             // competing with the primary action.
             //
-            // Rewritten Jul 2026 (user testing: "too long and not clear of its
-            // value"). The old copy opened on the *trend* — "recruiters are
-            // starting to run AI agents over resumes" — so the first thing a
-            // visitor read was someone else's behaviour, and what they
-            // personally get arrived in clause four, as a metaphor ("the
-            // candidate-side mirror"). It now opens on the three things the
-            // product does, in the order a user does them: parse, edit,
-            // download. 85 words → 27.
+            // Cut to a single line Aug 2026. Two paragraphs went with it and
+            // neither should come back here:
             //
-            // The recruiter-trend sentence was cut outright, not demoted, on a
-            // second pass: an unhedged "recruiters increasingly screen with AI"
-            // is a claim about an industry we would have to defend, and the
-            // Greenhouse report below measures AI *trust* among hiring
-            // managers, not screening prevalence — it never sourced that
-            // sentence as tightly as the old comment here asserted. The
-            // citation now stands on its own weaker, supportable claim
-            // ("a hiring process job seekers say they can't see into").
+            //   1. A product pitch ("OfflineCV parses your resume, shows you
+            //      what a machine read back, …"). Accurate, but this is an open
+            //      source project — it does not need to sell itself on its own
+            //      landing page, and a visitor who wants the description can
+            //      read /how-it-works/ (public/how-it-works/index.html), which
+            //      is where that sentence now lives in longer form.
+            //   2. The Greenhouse "2025 AI in Hiring Report" citation. It
+            //      sourced a claim about the hiring industry that this app
+            //      never needed to make in order to be useful. People can look
+            //      up the state of AI in hiring themselves.
             //
-            // ⚠️ Cut with it: "the score rates how readable your file is, not
-            // how good you are." That framing is now nowhere in the app — the
-            // header subtitle that used to carry it ("not a judge") is deleted
-            // in this PR too, and `AtsScoreReadout` never stated it. If it
-            // comes back, it belongs next to the score, not on the landing.
-            //
-            // Both export formats are real, so the remaining claim round-trips:
-            // PDF via `useDownloadPdf.ts` → `render-ats-pdf.ts`, Markdown via
-            // `useDownloadMarkdown.ts` (#552). If either is removed, this
-            // sentence moves in the same PR. "A machine", never "the ATS" — we
-            // run one generic text extractor (pdfjs), so a definite article
-            // would claim a fidelity we have not measured. Determinism stays
-            // scoped to the score, not to the parse.
+            // What survives is the part that is a *guarantee* rather than a
+            // pitch: there is no signup wall, and the score is deterministic.
+            // Both round-trip to code — no auth exists anywhere in the tree,
+            // and `computeAnonymousAtsScore` in `src/lib/score/score.ts` is a
+            // pure function of the extracted text. Determinism stays scoped to
+            // the score, never claimed for the parse.
             <div className="rounded-lg border border-border-light bg-surface-subtle px-4 py-3">
-              {/* One shared `mx-auto max-w-3xl` wrapper, not three. Applied
-                  per-paragraph, `mx-auto` centres each block independently, so
-                  a paragraph long enough to wrap reads as left-aligned while a
-                  short one visibly centres itself — the three lines rendered
-                  with three different left edges. Centring the group once
-                  gives them one. */}
-              <div className="mx-auto flex max-w-3xl flex-col gap-2">
-                <p className="text-pretty text-sm font-medium text-content-primary">
-                  OfflineCV parses your resume, shows you what a machine read
-                  back, and lets you edit it and download a cleanly formatted
-                  PDF or Markdown file.
-                </p>
-                {/* The three claims displaced from the trust-chip row (#517).
-                    Muted and on their own line: they are reassurance a visitor
-                    scans for, not part of the argument above. */}
-                <p className="text-sm text-content-secondary">
-                  No account, no email, results in seconds — and the same file
-                  always gets the same score.
-                </p>
-                {/* The trust stat, relocated from the hero. It sources the
-                    "recruiters increasingly screen with AI" claim above it,
-                    which is what it was always evidence for — in the hero it
-                    was a third competing message ahead of the primary action. */}
-                <p className="text-sm text-content-muted">
-                  Built in response to a hiring process job seekers say they
-                  can&apos;t see into — source:{" "}
-                  <a
-                    href="https://www.greenhouse.com/newsroom/an-ai-trust-crisis-70-of-hiring-managers-trust-ai-to-make-faster-and-better-hiring-decisions-only-8-of-job-seekers-call-it-fair"
-                    target="_blank"
-                    rel="nofollow noopener noreferrer"
-                    className="hover:underline"
-                  >
-                    Greenhouse, 2025 AI in Hiring Report (4,100+ job seekers and hiring managers)
-                  </a>
-                </p>
-              </div>
+              <p className="mx-auto max-w-3xl text-pretty text-sm text-content-secondary">
+                No account, no email, results in seconds — and the same file
+                always gets the same score.
+              </p>
             </div>
           )}
         </section>

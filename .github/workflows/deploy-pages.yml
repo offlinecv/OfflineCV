@@ -30,6 +30,12 @@ jobs:
           VITE_POSTHOG_KEY: ${{ secrets.VITE_POSTHOG_KEY }}
           VITE_POSTHOG_HOST: ${{ secrets.VITE_POSTHOG_HOST }}
           VITE_POSTHOG_ENV: staging
+          # dev.offlinecv.org serves a byte-identical copy of production from a
+          # subdomain of the same registrable domain. Left indexable, the two
+          # compete and a search engine drops one of them. This marks the build
+          # non-canonical: noindex on every HTML entry, no sitemap. See
+          # SEO_NOINDEX in vite.config.ts for why robots.txt still allows crawling.
+          OFFLINECV_SEO_NOINDEX: "1"
       # v3 → v5 because v4 predates the Node 24 push; v5 (Apr 2026) is the first post-deprecation release.
       - uses: actions/upload-pages-artifact@v5
         with:

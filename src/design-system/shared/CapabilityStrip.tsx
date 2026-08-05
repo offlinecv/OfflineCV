@@ -45,8 +45,11 @@
  * reads all three at once. "Device" also understates the guarantee — another
  * app on the same device cannot read the resume either. If you change the
  * noun here, change it in `App.tsx`'s hero in the same commit. `PageShell`'s
- * footer states a narrower, hedged claim about a different object ("your PDF
- * stays in this browser tab by default") — same noun, not the same sentence.
+ * footer used to restate a narrower, hedged version of this ("your PDF stays
+ * in this browser tab by default"); that sentence is gone — the footer now
+ * links to `/privacy/`, which itemises the egress instead of compressing it
+ * into a clause. This rail is therefore the only place the claim is *made*
+ * rather than linked to, so it is the one that has to stay defensible.
  */
 
 import { Chip } from "../primitives/Chip.tsx";

@@ -156,8 +156,32 @@ export function PageShell({
       {children}
 
       <footer className="mt-auto flex flex-col items-center gap-2 border-t border-border-light pt-6 text-center text-sm text-content-tertiary">
-        <p>Your PDF stays in this browser tab by default and is never used to train AI. AI analysis is optional.</p>
+        {/* No prose line here. The privacy sentence that used to sit above
+            these links ("Your PDF stays in this browser tab by default…") was
+            a claim compressed to the point where it could not carry its own
+            caveats — the honest version needs the itemised egress list, so it
+            lives on /privacy/, one link away, instead of being asserted in
+            passing on every screen. */}
         <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
+          {/* Same-tab, base-aware links to the static content pages under
+              public/. They are the only pages on this site a crawler can read
+              without executing the bundle (every app entry renders into an
+              empty #root), so this footer is also what keeps them from being
+              orphaned — a page nothing links to is a page nothing finds.
+              "Privacy & data" now lands on /privacy/, which summarises the
+              README's telemetry section and links onward to it. */}
+          <a href={`${import.meta.env.BASE_URL}how-it-works/`} className="hover:underline">
+            How it works
+          </a>
+          <a href={`${import.meta.env.BASE_URL}faq/`} className="hover:underline">
+            FAQ
+          </a>
+          <a href={`${import.meta.env.BASE_URL}privacy/`} className="hover:underline">
+            Privacy &amp; data
+          </a>
+          <a href={`${import.meta.env.BASE_URL}open-source/`} className="hover:underline">
+            Open source
+          </a>
           <a
             href="https://github.com/offlinecv/OfflineCV/blob/main/LICENSE"
             target="_blank"
@@ -165,22 +189,6 @@ export function PageShell({
             className="hover:underline"
           >
             License
-          </a>
-          <a
-            href="https://www.hbs.edu/managing-the-future-of-work/research/Pages/hidden-workers-untapped-talent.aspx"
-            target="_blank"
-            rel="noreferrer noopener"
-            className="hover:underline"
-          >
-            Further reading: HBS Hidden Workers
-          </a>
-          <a
-            href="https://github.com/offlinecv/OfflineCV/blob/main/README.md#telemetry"
-            target="_blank"
-            rel="noreferrer noopener"
-            className="hover:underline"
-          >
-            Privacy &amp; data
           </a>
         </div>
       </footer>

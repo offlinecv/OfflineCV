@@ -1,0 +1,125 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The offlinecv Authors
+
+  Served for any unknown path by both deploy targets: Cloudflare Workers via
+  `"not_found_handling": "404-page"` (wrangler.jsonc) and GitHub Pages, which
+  picks up /404.html natively. Before that config change, an unknown path
+  answered 200 with the root parser page — an unbounded set of URLs all serving
+  identical content.
+
+  Deliberately self-contained: no /content.css link, no bundle. This page is
+  served AT the URL that was not found, so a relative asset path would resolve
+  against an arbitrary directory depth, and a root-absolute one is one more
+  request to fail on a page whose whole job is to fail gracefully.
+
+  The same reason makes the links below root-absolute (`/jd-fit/`) where the
+  content pages under public/ use relative ones (`../jd-fit/`) — the difference
+  is deliberate, not an oversight, so do not "fix" it to match. The trade taken
+  knowingly: root-absolute breaks under a non-`/` base, which is the case the
+  content pages' relative links survive. Both deploy targets serve from the root
+  today, and Vite never base-rewrites public/ in any case.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Page not found — OfflineCV</title>
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="light dark" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f8fafc;
+        --fg: #0f172a;
+        --muted: #475569;
+        --accent: #1a56db;
+        --accent-hover: #1d4ed8;
+        --on-accent: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f172a;
+          --fg: #f1f5f9;
+          --muted: #a8b6c8;
+          --accent: #7bb0fa;
+          --accent-hover: #93c5fd;
+          --on-accent: #0f172a;
+        }
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1.25rem;
+        background: var(--bg);
+        color: var(--muted);
+        font-family:
+          ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+          sans-serif;
+        line-height: 1.65;
+      }
+      main {
+        max-width: 30rem;
+        text-align: center;
+      }
+      h1 {
+        color: var(--fg);
+        font-size: clamp(1.5rem, 1.2rem + 1.5vw, 2rem);
+        line-height: 1.25;
+        margin: 0 0 0.75rem;
+      }
+      p {
+        margin: 0 0 1.5rem;
+      }
+      a.cta {
+        display: inline-block;
+        background: var(--accent);
+        color: var(--on-accent);
+        font-weight: 600;
+        text-decoration: none;
+        border-radius: 0.5rem;
+        padding: 0.7rem 1.4rem;
+      }
+      a.cta:hover,
+      a.cta:focus-visible {
+        background: var(--accent-hover);
+      }
+      ul {
+        list-style: none;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.25rem;
+        justify-content: center;
+        padding: 0;
+        margin: 1.75rem 0 0;
+        font-size: 0.9375rem;
+      }
+      a {
+        color: var(--accent);
+        text-underline-offset: 0.15em;
+      }
+      a:hover,
+      a:focus-visible {
+        color: var(--accent-hover);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>That page isn&rsquo;t here</h1>
+      <p>The link may be old, or the address may have a typo in it.</p>
+      <a class="cta" href="/">Go to the resume parser</a>
+      <ul>
+        <li><a href="/jd-fit/">Match a job description</a></li>
+        <li><a href="/jobs/">Find jobs</a></li>
+        <li><a href="/how-it-works/">How it works</a></li>
+        <li><a href="/faq/">FAQ</a></li>
+        <li><a href="/privacy/">Privacy &amp; data</a></li>
+      </ul>
+    </main>
+  </body>
+</html>

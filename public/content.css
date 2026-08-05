@@ -1,0 +1,248 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 The offlinecv Authors
+ *
+ * Styling for the static content pages under public/ (/how-it-works/, /faq/,
+ * /privacy/, /open-source/).
+ *
+ * These pages are deliberately plain HTML, outside the React app and outside
+ * the Tailwind build: they exist to be readable with no JavaScript executed,
+ * because the three app entries render into an empty `<div id="root">` and give
+ * a crawler nothing but a <title> until it runs the bundle. That constraint is
+ * also why this file cannot import `@design-tokens` — it is copied verbatim out
+ * of public/, never processed by Vite.
+ *
+ * The custom properties below therefore MIRROR the light/dark values in
+ * src/design-system/styles/tokens.css rather than deriving from them. That
+ * duplication is the cost of the no-JS requirement; if the palette there moves,
+ * these move by hand. Only the handful of tokens these pages actually use are
+ * copied — not the whole file.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --color-bg-base: #f8fafc;
+  --color-bg-card: #ffffff;
+  --color-bg-subtle: #f1f5f9;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #334155;
+  --color-text-tertiary: #475569;
+  --color-border-light: #e2e8f0;
+  --color-border-default: #cbd5e1;
+  --color-accent-primary: #1a56db;
+  --color-accent-primary-hover: #1d4ed8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg-base: #0f172a;
+    --color-bg-card: #1e293b;
+    --color-bg-subtle: #334155;
+    --color-text-primary: #f1f5f9;
+    --color-text-secondary: #cbd5e1;
+    --color-text-tertiary: #a8b6c8;
+    --color-border-light: #334155;
+    --color-border-default: #475569;
+    --color-accent-primary: #7bb0fa;
+    --color-accent-primary-hover: #93c5fd;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 2.5rem 1.25rem 4rem;
+  background: var(--color-bg-base);
+  color: var(--color-text-secondary);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.wrap {
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+/* Skip link — visible only on keyboard focus. */
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  position: static;
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--color-text-primary);
+  line-height: 1.25;
+  margin: 2.25rem 0 0.75rem;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.5rem);
+  margin-top: 0;
+}
+
+h2 {
+  font-size: 1.35rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-border-light);
+}
+
+h3 {
+  font-size: 1.075rem;
+}
+
+p,
+ul,
+ol,
+table {
+  margin: 0 0 1rem;
+}
+
+ul,
+ol {
+  padding-left: 1.25rem;
+}
+
+li {
+  margin-bottom: 0.4rem;
+}
+
+a {
+  color: var(--color-accent-primary);
+  text-underline-offset: 0.15em;
+}
+
+a:hover,
+a:focus-visible {
+  color: var(--color-accent-primary-hover);
+}
+
+strong {
+  color: var(--color-text-primary);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.875em;
+  background: var(--color-bg-subtle);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+  overflow-wrap: anywhere;
+}
+
+.lede {
+  font-size: 1.125rem;
+  color: var(--color-text-tertiary);
+  margin-bottom: 2rem;
+}
+
+/* Nav rows: the site header and footer on every content page. Content pages are
+ * the only internally-linked surface a crawler can follow without running JS,
+ * so every one of them links to every other one and back into the app. */
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.9375rem;
+}
+
+.nav--top {
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.nav--bottom {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-border-light);
+  color: var(--color-text-tertiary);
+}
+
+.nav strong {
+  font-weight: 600;
+}
+
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  margin: 0 0 1.5rem;
+}
+
+/* A card supplies its own padding and rule, so the first and last children drop
+ * the margins (and, for an h2, the section rule) they carry in flowing text. */
+.card > :first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.card > :last-child {
+  margin-bottom: 0;
+}
+
+.cta {
+  display: inline-block;
+  background: var(--color-accent-primary);
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 0.5rem;
+  padding: 0.7rem 1.4rem;
+  margin: 0.5rem 0 1.5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .cta {
+    color: #0f172a;
+  }
+}
+
+.cta:hover,
+.cta:focus-visible {
+  background: var(--color-accent-primary-hover);
+}
+
+/* Tables scroll inside their own box rather than widening the page. */
+.table-scroll {
+  overflow-x: auto;
+  margin-bottom: 1.25rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9375rem;
+}
+
+th,
+td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+th {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--color-border-default);
+  white-space: nowrap;
+}
