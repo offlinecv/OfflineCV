@@ -22,11 +22,14 @@
 
 import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { DB_NAME, closeDB } from "../lib/storage/index.ts";
 import { createJob } from "../lib/job-tracker.ts";
+import { saveResumeToLibrary } from "../lib/resume-library.ts";
+import type { CascadeResult } from "../lib/heuristics/types.ts";
+import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import JobsApp from "./JobsApp.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -34,6 +37,13 @@ import JobsApp from "./JobsApp.tsx";
 
 let container: HTMLElement;
 let root: Root;
+
+beforeAll(async () => {
+  // Warm the module `useSavedJobRatings` dynamic-imports — see that hook's own
+  // test for why: cold, the first import pulls the whole rating graph and can
+  // outlast a fixed poll budget under a loaded runner.
+  await import("../lib/job-search/rate-saved-jobs.ts");
+});
 
 beforeEach(async () => {
   await closeDB();
@@ -198,5 +208,69 @@ describe("JobsApp: landing tab from the URL (#707)", () => {
     expect(
       container.querySelector<HTMLElement>("#jobs-panel-library")?.hidden,
     ).toBe(false);
+  });
+});
+
+describe("JobsApp: Saved jobs fit rating falls back to the library résumé (#724)", () => {
+  /** Minimal stand-in for `runCascade`'s output — `saveResumeToLibrary` stores
+   *  this opaquely and hands it back unchanged (its stamped shapeVersion
+   *  matches on read), so only the one field `useFallbackResume` actually
+   *  reads (`canonical.fields`) needs to be real. */
+  function fakeResult(skills: string[]): CascadeResult {
+    return {
+      canonical: { fields: { skills, experience: [], education: [] } },
+    } as unknown as CascadeResult;
+  }
+  const FAKE_SCORE = { overall: 80 } as unknown as AnonymousAtsScore;
+
+  const JD =
+    "We need a React and TypeScript engineer for our frontend web application.";
+
+  it("rates a saved job against the most recently saved résumé, and names it, with no handoff present", async () => {
+    // No `writeJobsHandoff` call — this is exactly the direct-visit case the
+    // issue describes: a bookmark, a pasted link, or a fresh tab.
+    await saveResumeToLibrary({
+      filename: "my-resume.pdf",
+      sourceKind: "pdf",
+      result: fakeResult(["React", "TypeScript"]),
+      score: FAKE_SCORE,
+    });
+    await createJob({ title: "Frontend Engineer", company: "Acme", jdText: JD });
+
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb(50);
+
+    clickTab("Saved jobs");
+    const libraryPanel = container.querySelector<HTMLElement>(
+      "#jobs-panel-library",
+    );
+    expect(libraryPanel?.textContent).toContain("Fit vs.");
+    expect(libraryPanel?.textContent).toContain("my-resume.pdf");
+    // The shared `RatingStars` widget, not just the attribution text — the
+    // row is actually rated, not merely labeled.
+    expect(libraryPanel?.querySelector('[role="img"]')).not.toBeNull();
+  });
+
+  it("shows neither stars nor an attribution with no saved résumé and no handoff", async () => {
+    await createJob({ title: "Frontend Engineer", company: "Acme", jdText: JD });
+
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb(20);
+
+    clickTab("Saved jobs");
+    const libraryPanel = container.querySelector<HTMLElement>(
+      "#jobs-panel-library",
+    );
+    expect(libraryPanel?.textContent).not.toContain("Fit vs.");
+    expect(libraryPanel?.querySelector('[role="img"]')).toBeNull();
+    // Unchanged empty-resume copy (#700) — the fallback must not paper over a
+    // genuinely resume-less library with a misleading message.
+    expect(libraryPanel?.textContent).toContain(
+      "Open this workbench from your resume",
+    );
   });
 });

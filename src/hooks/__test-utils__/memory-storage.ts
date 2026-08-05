@@ -43,9 +43,25 @@ class MemoryStorage {
 /**
  * Replace the global `localStorage` with a fresh in-memory shim and return it.
  * Call in `beforeEach` so each test starts from clean persisted state.
+ *
+ * Defines the property rather than assigning it, because assignment is only
+ * valid when the *current* descriptor happens to permit it, and this runs after
+ * arbitrary other suites in the same worker. A test that swaps `localStorage`
+ * via `Object.defineProperty` — to fake private-mode throws, or a hostile
+ * getter — can leave behind either a non-writable data property or a
+ * getter-only accessor, and a plain assignment throws on both ("Cannot assign
+ * to read only property" / "which has only a getter"). That surfaces as a
+ * failure in the *next* file to run in that worker, which is why it presents as
+ * a rare flake in an unrelated suite. `defineProperty` with an explicit
+ * `writable`/`configurable` overwrites either shape unconditionally.
  */
 export function installMemoryLocalStorage(): Storage {
   const storage = new MemoryStorage() as unknown as Storage;
-  (globalThis as { localStorage?: Storage }).localStorage = storage;
+  Object.defineProperty(globalThis, "localStorage", {
+    value: storage,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
   return storage;
 }

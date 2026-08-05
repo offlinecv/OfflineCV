@@ -88,15 +88,23 @@ different postings, waiting 25 s+ each:
 | `/jobs/view/<id>/` — the only URL `M.matches()` accepts | LinkedIn renders a **stub**. No `h1`, no JSON-LD, no description, `main` ≈ 1.4 KB. Body came back **812 chars** of page chrome |
 | `/jobs/search/?currentJobId=<id>` — where the description actually renders (6.3 KB, ~15 s to arrive) | Adapter does **not** match. Forcing it with a synthetic view URL makes it read all of `main`: **14.8 KB polluted** with the results list at the head and a "Trending employee content" rail at the tail, `company: "Unknown"` |
 
-Two component defects fall out of this, both worth fixing before the lane is usable:
+Three component defects fell out of this. **#725 fixed the first two; the third stands, so
+the lane is still search-only — do not capture from LinkedIn.**
 
-1. `v()` (the `document.title` fallback) splits on `-`, so
-   `"Head of Engineering ($225k-$325k + Equity)… | Jack & Jill | LinkedIn"` yields the title
-   **`"Head of Engineering ($225k"`**. It only runs when `h1` is missing — which on LinkedIn
-   is always.
-2. `prune.ts` does not drop the SERP results list: it is neither `nav`/`aside` nor under a
-   heading matching `ht`, so the "read the pane" workaround cannot be made safe by pruning
-   alone.
+1. ~~`parseLinkedInTitle` split the title on the first `-`, so
+   `"Head of Engineering ($225k - $275k) | Clera | LinkedIn"` yielded
+   **`"Head of Engineering ($225k"`**.~~ Fixed: a dash separates the team segment only when
+   it sits at bracket depth zero *and* has whitespace on both sides.
+2. ~~`prune.ts` did not drop the SERP results list — neither `nav`/`aside` nor under a
+   matching heading.~~ Fixed: a list whose every direct item links to a job permalink is
+   dropped, as is a `Trending employee content` rail.
+3. **The adapter still matches only `/jobs/view/<id>/`, which is the URL that renders a
+   stub.** Reading the detail pane on the search URL was considered and declined: the pane's
+   `h1` and the first `[aria-label^="Company,"]` on that page may belong to a *results card*
+   rather than the pane, which writes another posting's company into the record, and the
+   record URL would have to be rewritten to the `/jobs/view/` form by hand because
+   `deriveJobId` does not collapse the two shapes on its own. None of that is verifiable
+   from a fixture, and a capture that is right four times in five is worse than none.
 
 A 14.8 KB body of search chrome is exactly the input measured at 0.00★ further down. Report
 it; do not ship it.

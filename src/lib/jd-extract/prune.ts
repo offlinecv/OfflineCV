@@ -65,7 +65,52 @@ const NON_POSTING_HEADINGS: readonly RegExp[] = [
   /\b(similar|related|recommended|suggested|more)\s+jobs\b/i,
   /\bjobs\s+(you\s+may|that\s+may)\b/i,
   /people\s+also\s+viewed/i,
+  // A feed rail LinkedIn hangs off the tail of a job page — other people's posts,
+  // matched on its literal caption because that is all it has in common with a
+  // posting. Observed live on 2026-08-01 at the end of a 14.8 KB `main`.
+  /trending\s+employee\s+content/i,
 ];
+
+/**
+ * Href shapes that are some job posting's own permalink.
+ *
+ * A permalink shape, not a class name and not a host: a board keeps its permalink
+ * stable across redesigns precisely because links to it are shared — that is the
+ * same property `src/lib/storage/job-url.ts` derives record ids from — while the
+ * markup wrapped around it rots on the next deploy. Both entries are narrow enough
+ * that no ordinary link in a posting body can match: a benefits page, a handbook,
+ * an engineering blog and a team page all fail them.
+ *
+ * The two shapes are the two ways LinkedIn addresses a posting, and the second is
+ * why the first is not enough — its search SPA links cards by query parameter.
+ */
+const JOB_PERMALINK_HREF: readonly RegExp[] = [
+  /\/jobs?\/view\/\d/i,
+  /[?&]currentJobId=\d/i,
+];
+
+/**
+ * Fewest items a list needs before it reads as a rail of other postings rather
+ * than a description bullet that happens to link somewhere.
+ *
+ * Two, not one: a single link to another opening inside a paragraph-shaped list is
+ * a sentence, and deleting it would take real posting text with it.
+ */
+const MIN_POSTING_LINK_LIST_ITEMS = 2;
+
+/**
+ * Longest run of non-link text an item may carry and still read as a job card.
+ *
+ * A card is a link plus label-shaped metadata — `Nimbus Data · Remote`,
+ * `Promoted`, `Actively hiring` — so what is left once its own links are
+ * subtracted is short. A paragraph hanging off a link is not. Generous on
+ * purpose, in the direction the asymmetry at the top of this file demands: it
+ * admits a verbose card rather than risking a terse piece of description.
+ */
+const MAX_NON_LINK_CHARS = 120;
+
+/** `Node.TEXT_NODE`, spelled out so this module needs no DOM global. */
+const TEXT_NODE = 3;
 
 const HEADING_SELECTOR = "h1, h2, h3, h4, h5, h6";
 
@@ -116,6 +161,127 @@ function removeCaptionedRun(heading: Element): void {
   heading.remove();
 }
 
+/** Length of `text` with whitespace runs collapsed, so indentation in the source
+ *  markup does not count against {@link MAX_NON_LINK_CHARS}. */
+function textLength(text: string | null): number {
+  return (text ?? "").replace(/\s+/g, " ").trim().length;
+}
+
+/**
+ * Is `anchor` sitting inside a run of prose rather than standing on its own?
+ *
+ * True when it has a non-whitespace text sibling — `You will pair with our
+ * <a>Staff Engineer</a> on the payments core` — which is a sentence that
+ * mentions another opening, not a card advertising one. A card's link has only
+ * elements and whitespace beside it.
+ */
+function isInlineInProse(anchor: Element): boolean {
+  const li = anchor.closest("li");
+  if (!li) return false;
+  let current: Element | null = anchor;
+  while (current && current !== li) {
+    const parentEl: Element | null = current.parentElement;
+    if (!parentEl) break;
+    for (const node of parentEl.childNodes) {
+      if (node === current) continue;
+      if (node.nodeType === TEXT_NODE && (node.textContent ?? "").trim() !== "") {
+        return true;
+      }
+    }
+    current = parentEl;
+  }
+  return false;
+}
+
+
+/**
+ * The anchors that are `item`'s OWN, in the sense that a card's link is its own.
+ *
+ * Two filters, each closing a way a link that is not a card's link would
+ * otherwise vote:
+ *   - the anchor's nearest enclosing `li` must be `item`, so a nested bullet
+ *     cannot vote on its grandparent. Deliberately not a direct-child test: a
+ *     real card wraps its link in a `div` or three, so requiring the anchor to
+ *     be `item`'s own child would stop matching the very shape this rule exists
+ *     for.
+ *   - the anchor must not be inline in prose ({@link isInlineInProse}).
+ */
+function ownCardAnchors(item: Element): Element[] {
+  return Array.from(item.querySelectorAll("a[href]")).filter(
+    (anchor) => anchor.closest("li") === item && !isInlineInProse(anchor),
+  );
+}
+
+/**
+ * Is `item` a job card — an item whose text is DOMINATED by a link to some
+ * posting's permalink, rather than one that merely contains such a link?
+ *
+ * Containment alone was not enough: a full sentence of description counted as a
+ * card because a permalink appeared somewhere inside it, and two such sentences
+ * deleted the entire list — the exact false positive this module's opening
+ * asymmetry forbids. Both halves are load-bearing. {@link ownCardAnchors}
+ * rejects the link that belongs to a nested bullet or sits mid-sentence, and the
+ * length test below rejects an item that pairs a standalone link with a
+ * paragraph of real posting text.
+ *
+ * Only the item's own links are subtracted from its length, never a nested
+ * bullet's, so a nested rail can only ever make its ancestor look MORE like
+ * prose — under-pruning, which is the safe direction.
+ */
+function isPostingCard(item: Element): boolean {
+  const anchors = ownCardAnchors(item);
+  const linksToPosting = anchors.some((anchor) =>
+    JOB_PERMALINK_HREF.some((pattern) =>
+      pattern.test(anchor.getAttribute("href") ?? ""),
+    ),
+  );
+  if (!linksToPosting) return false;
+
+  const linkChars = anchors.reduce(
+    (total, anchor) => total + textLength(anchor.textContent),
+    0,
+  );
+  return textLength(item.textContent) - linkChars <= MAX_NON_LINK_CHARS;
+}
+
+/**
+ * Is this list a rail of OTHER postings rather than part of this description?
+ *
+ * The structural half of the answer to a block the heading rules cannot reach: a
+ * search-results page carries its result list under no caption at all — it is a
+ * plain `ul` of job cards — so nothing above matches it, and on
+ * `/jobs/search/?currentJobId=` it lands at the head of `body` and every other
+ * posting's title is scored as this posting's requirements.
+ *
+ * The test is deliberately the strictest one that still catches it. EVERY direct
+ * `li` child must BE a job card by {@link isPostingCard} — link-DOMINATED, not
+ * merely link-containing — and every one, not a majority and not the first: a
+ * qualifications list with one item that happens to link to a related opening
+ * fails this and survives whole, which is the intended direction.
+ *
+ * Two things scope the vote, and both are checked in `isPostingCard` rather than
+ * asserted here. Only direct `li` children are items, and an item's vote comes
+ * only from anchors whose nearest enclosing `li` is that item — so neither a
+ * nested bullet nor an anchor buried in an ancestor's prose can decide a list's
+ * fate.
+ *
+ * What survives is a narrow false-positive class: a description whose own
+ * bulleted list is entirely bare links to other job postings, with no prose
+ * around them. Text of that shape is other postings' titles, which is the thing
+ * this module removes on purpose.
+ *
+ * The root itself is never reachable here: `querySelectorAll` excludes the node
+ * it is called on, so `pruneNonPosting` cannot delete what it was asked to prune.
+ */
+function isOtherPostingsList(list: Element): boolean {
+  const items = Array.from(list.children).filter(
+    (child) => child.tagName === "LI",
+  );
+  return (
+    items.length >= MIN_POSTING_LINK_LIST_ITEMS && items.every(isPostingCard)
+  );
+}
+
 /**
  * Return a pruned copy of `element`, with non-posting subtrees removed.
  *
@@ -142,6 +308,15 @@ export function pruneNonPosting(element: Element): Element {
     const container = captionedContainer(heading, clone);
     if (container === heading) removeCaptionedRun(heading);
     else container.remove();
+  }
+
+  // Last, and collected the same way for the same reason: an outer list is
+  // visited before the lists nested inside it, so removing one can detach others
+  // still in the array.
+  const lists = Array.from(clone.querySelectorAll("ul, ol"));
+  for (const list of lists) {
+    if (!clone.contains(list)) continue;
+    if (isOtherPostingsList(list)) list.remove();
   }
 
   return clone;

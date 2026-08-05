@@ -20,6 +20,54 @@ export interface ParsedAtsUrl {
 }
 
 // ─── URL parsers ──────────────────────────────────────────────────────────────
+//
+// Every parser below anchors on `URL.hostname`, never on a substring match of
+// the raw string. A substring match (the pre-#726 shape) accepts any host that
+// merely *contains* the target host as a substring — e.g.
+// `evil-boards.greenhouse.io.attacker.test` — and any path prefix, e.g.
+// `example.test/redirect?to=boards.greenhouse.io/...`. Both parse to a
+// same-shaped `ParsedAtsUrl` that `extractPostingFromAtsApi` (jd-extract/ats-api.ts)
+// turns into an outbound fetch built from attacker-influenced path segments.
+
+// A malformed/relative/non-URL string is "not an ATS URL", not a throw.
+//
+// The scheme-less retry is what keeps #726's move to `URL.hostname` from also
+// rejecting valid input. `JdInput` hands this the raw trimmed string the user
+// typed into a bare `<input type="url">` — nothing normalises it — and people
+// paste `boards.greenhouse.io/acme/jobs/123` without a scheme. `new URL` throws
+// on that, so without the retry the user is told Greenhouse URLs are supported
+// about a Greenhouse URL. The pre-#726 substring matcher accepted these.
+//
+// Prefixing cannot widen what the host checks accept, because those checks read
+// the PARSED `hostname` rather than the string: `boards.greenhouse.io@evil.test/…`
+// prefixes to a URL whose hostname is `evil.test`, and
+// `evil.test/x/acme.recruitee.com/o/slug` to one whose hostname is `evil.test` —
+// both still fail every host below. What the retry can do is turn "unparseable"
+// into "parseable but not ours", which is the same `null`.
+//
+// The `://` guard keeps the retry off a string that already declared a scheme,
+// so a scheme that merely failed to parse is never silently re-homed under
+// `https` — a malformed `http://…` stays malformed instead of becoming a host.
+function tryParseUrl(url: string): URL | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed;
+    }
+    return null;
+  } catch {
+    // The scheme-less check prevents prepending a scheme to a string that already declared one.
+    // We check for a scheme at the start of the string (e.g. `https://` or `ftp://`) rather than
+    // a simple substring match (`url.includes("://")`), so a URL that contains `://` in its
+    // query or path (e.g. `boards.greenhouse.io/acme?dest=https://linkedin.com`) can still be retried.
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) return null;
+    try {
+      return new URL(`https://${url}`);
+    } catch {
+      return null;
+    }
+  }
+}
 
 export function parseAtsUrl(url: string): ParsedAtsUrl | null {
   return (
@@ -31,31 +79,57 @@ export function parseAtsUrl(url: string): ParsedAtsUrl | null {
   );
 }
 
+// `job-boards.greenhouse.io` is Greenhouse's current public board host;
+// `boards.greenhouse.io` is the legacy host, still live in old bookmarks and
+// in saved `JobRecord.url` values — dropping it would silently break existing
+// records.
+const GREENHOUSE_HOSTS = new Set([
+  "job-boards.greenhouse.io",
+  "boards.greenhouse.io",
+]);
+
 function parseGreenhouseUrl(url: string): ParsedAtsUrl | null {
-  const match = url.match(/boards\.greenhouse\.io\/(\w[\w-]*)\/jobs\/(\d+)/);
+  const parsed = tryParseUrl(url);
+  if (!parsed || !GREENHOUSE_HOSTS.has(parsed.hostname)) return null;
+  const match = parsed.pathname.match(/^\/(\w[\w-]*)\/jobs\/(\d+)/);
   return match
     ? { platform: "greenhouse", company: match[1], jobId: match[2] }
     : null;
 }
 
 function parseLeverUrl(url: string): ParsedAtsUrl | null {
-  const match = url.match(/jobs\.lever\.co\/([\w-]+)\/([\da-f-]+)/);
+  const parsed = tryParseUrl(url);
+  if (!parsed || parsed.hostname !== "jobs.lever.co") return null;
+  const match = parsed.pathname.match(/^\/([\w-]+)\/([\da-f-]+)/);
   return match
     ? { platform: "lever", company: match[1], jobId: match[2] }
     : null;
 }
 
 function parseWorkableUrl(url: string): ParsedAtsUrl | null {
-  const match = url.match(/apply\.workable\.com\/([\w-]+)\/j\/([A-Z0-9]+)/i);
+  const parsed = tryParseUrl(url);
+  if (!parsed || parsed.hostname !== "apply.workable.com") return null;
+  const match = parsed.pathname.match(/^\/([\w-]+)\/j\/([A-Z0-9]+)/i);
   return match
     ? { platform: "workable", company: match[1], jobId: match[2] }
     : null;
 }
 
+// Recruitee boards live on a wildcard subdomain (`{company}.recruitee.com`),
+// so this is a suffix match on the hostname rather than a fixed host —
+// but the suffix must be preceded by exactly one non-empty label, not a
+// substring anywhere in the string, and not the bare apex domain.
 function parseRecruiteeUrl(url: string): ParsedAtsUrl | null {
-  const match = url.match(/([\w-]+)\.recruitee\.com\/o\/([\w-]+)/);
+  const parsed = tryParseUrl(url);
+  if (!parsed) return null;
+  const suffix = ".recruitee.com";
+  const host = parsed.hostname;
+  if (!host.endsWith(suffix)) return null;
+  const company = host.slice(0, -suffix.length);
+  if (!company || company.includes(".")) return null;
+  const match = parsed.pathname.match(/^\/o\/([\w-]+)/);
   return match
-    ? { platform: "recruitee", company: match[1], jobId: match[2] }
+    ? { platform: "recruitee", company, jobId: match[1] }
     : null;
 }
 
@@ -64,8 +138,10 @@ function parseRecruiteeUrl(url: string): ParsedAtsUrl | null {
 // UUID-strict on the tail so a non-UUID path falls through to "unsupported"
 // instead of producing a 404 on the API.
 function parseAshbyUrl(url: string): ParsedAtsUrl | null {
-  const match = url.match(
-    /jobs\.ashbyhq\.com\/([\w-]+)\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})/i,
+  const parsed = tryParseUrl(url);
+  if (!parsed || parsed.hostname !== "jobs.ashbyhq.com") return null;
+  const match = parsed.pathname.match(
+    /^\/([\w-]+)\/([\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12})/i,
   );
   return match
     ? { platform: "ashby", company: match[1], jobId: match[2] }
