@@ -89,6 +89,10 @@ interface JobTrackerProps {
   /** Every letter, grouped by job id (#715) — `useJobLetters`' shape. A job id
    *  absent from the map has no letters, so its row renders no indicator. */
   lettersById?: ReadonlyMap<string, readonly LetterRecord[]>;
+  /** Re-read the letter store after a row writes one. Optional so a caller
+   *  that only displays letters need not supply one; without it a saved letter
+   *  will not appear until this view remounts. */
+  onLettersChanged?: () => Promise<void> | void;
   /** Other saved jobs that look like the same posting, per job id (#746) —
    *  `useJobDuplicates`' shape, already filtered to `probable`-or-better and to
    *  pairings the user has not dismissed. Omitted renders no notice anywhere,
@@ -114,6 +118,7 @@ export function JobTrackerSection({
   | "ratings"
   | "hasResume"
   | "lettersById"
+  | "onLettersChanged"
   | "duplicatesByJobId"
   | "onDismissDuplicate"
 > & {
@@ -131,6 +136,7 @@ export function JobTrackerSection({
       ratings={ratings}
       hasResume={parsed !== undefined}
       lettersById={letters.byJobId}
+      onLettersChanged={letters.refresh}
       duplicatesByJobId={duplicates.byJobId}
       onDismissDuplicate={duplicates.dismiss}
       {...props}
@@ -146,6 +152,7 @@ export function JobTracker({
   resumeName,
   resumeOptions,
   lettersById,
+  onLettersChanged,
   duplicatesByJobId,
   onDismissDuplicate,
 }: JobTrackerProps) {
@@ -263,6 +270,7 @@ export function JobTracker({
                   rated={ratings !== null}
                   rating={ratings?.get(job.id)}
                   letters={lettersById?.get(job.id)}
+                  onLettersChanged={onLettersChanged}
                   duplicates={duplicatesByJobId?.get(job.id)}
                   onMerge={(survivorId, absorbedId) =>
                     void merge(survivorId, absorbedId)

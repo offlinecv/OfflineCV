@@ -4,11 +4,18 @@
 // @vitest-environment jsdom
 
 /**
- * JobLetterIndicator (#715). What matters: no affordance for a job with no
- * letters, the one-time egress acknowledgement gates the FIRST reveal and
- * never the second (persisted via `letter-egress-ack.ts`, not per-component
- * state — see that module's docblock for why), and the acknowledgement is
- * global across rows rather than per-job.
+ * JobLetterIndicator (#715). What matters: BOTH states are reachable — a job
+ * with no letters offers to write one rather than rendering nothing, and a job
+ * with letters opens the reveal — and the egress acknowledgement gates exactly
+ * the letters it is about.
+ *
+ * That last one is the assertion with teeth. The warning says the résumé and
+ * the job details were sent to a model's API; that is true of a letter an
+ * outside producer wrote and false of one the user typed into
+ * `LetterEditorDialog`, which carries no `producer` block
+ * (`docs/cover-letter-contract.md` §6). A regression here does not throw or
+ * render wrong — it tells the user something untrue about their own typing —
+ * so both directions are covered explicitly.
  *
  * jsdom has no `HTMLDialogElement.showModal`/`close` — `Dialog`'s effect
  * calls both. The polyfill, the per-test root, and the "scope assertions to
@@ -26,6 +33,8 @@ import type { LetterRecord } from "../../lib/storage/index.ts";
 installDialogPolyfill();
 const dom = setupDomRoot();
 
+/** A letter written by an OUTSIDE producer — the case the egress warning is
+ *  about. `producer` is set unless a test overrides it away. */
 function letter(over: Partial<LetterRecord>): LetterRecord {
   return {
     id: over.id ?? crypto.randomUUID(),
@@ -33,8 +42,16 @@ function letter(over: Partial<LetterRecord>): LetterRecord {
     createdAt: 1,
     updatedAt: 1,
     body: "Dear hiring team,\n\nI am applying for the Staff Engineer role.",
+    producer: { contract: 1, producer: "some-outside-producer" },
     ...over,
   };
+}
+
+/** A letter this app wrote — no `producer` block, so nothing egressed. */
+function ownLetter(over: Partial<LetterRecord> = {}): LetterRecord {
+  const { producer: _drop, ...rest } = letter(over);
+  void _drop;
+  return rest;
 }
 
 function clickButton(name: string | RegExp) {
@@ -50,25 +67,59 @@ function clickButton(name: string | RegExp) {
 const openDialogText = () => dom.openDialogText();
 
 describe("JobLetterIndicator", () => {
-  it("renders nothing for a job with no letters", () => {
-    dom.render(<JobLetterIndicator letters={[]} />);
-    expect(dom.container.querySelector("button")).toBeNull();
+  it("offers to write one for a job with no letters", () => {
+    dom.render(<JobLetterIndicator jobId="job-1" letters={[]} />);
+    expect(
+      dom.container.querySelector('button[aria-label="Write a cover letter"]'),
+    ).not.toBeNull();
+  });
+
+  it("opens the editor — not the reveal — from the empty state", () => {
+    dom.render(<JobLetterIndicator jobId="job-1" letters={[]} />);
+    clickButton("Write a cover letter");
+    expect(openDialogText()).toContain("Write a cover letter");
+    // The empty state must never route through the egress warning: there is no
+    // letter yet, so nothing has been sent anywhere to warn about.
+    expect(openDialogText()).not.toContain("Before you view this letter");
   });
 
   it("names the count in the accessible label once there is more than one draft", () => {
-    dom.render(<JobLetterIndicator letters={[letter({}), letter({ id: "l2" })]} />);
+    dom.render(
+      <JobLetterIndicator jobId="job-1" letters={[letter({}), letter({ id: "l2" })]} />,
+    );
     expect(dom.container.querySelector('button[aria-label*="(2)"]')).not.toBeNull();
   });
 
   it("shows the acknowledgement before the first reveal, not the letter body", () => {
-    dom.render(<JobLetterIndicator letters={[letter({})]} />);
+    dom.render(<JobLetterIndicator jobId="job-1" letters={[letter({})]} />);
     clickButton("View cover letter");
     expect(openDialogText()).toContain("Before you view this letter");
     expect(openDialogText()).not.toContain("Staff Engineer");
   });
 
+  it("does NOT warn about egress for a letter this app wrote", () => {
+    // No `recordLetterEgressAcknowledged()` here: the acknowledgement has never
+    // been given, so a gate keyed on it alone would fire. What must suppress it
+    // is the absent `producer` block.
+    dom.render(<JobLetterIndicator jobId="job-1" letters={[ownLetter()]} />);
+    clickButton("View cover letter");
+    expect(openDialogText()).toContain("Staff Engineer");
+    expect(openDialogText()).not.toContain("Before you view this letter");
+  });
+
+  it("still warns when ONE of several drafts came from an outside producer", () => {
+    dom.render(
+      <JobLetterIndicator
+        jobId="job-1"
+        letters={[ownLetter({ id: "mine" }), letter({ id: "theirs" })]}
+      />,
+    );
+    clickButton(/^View cover letters/);
+    expect(openDialogText()).toContain("Before you view this letter");
+  });
+
   it("reveals the letter after 'Got it', and persists the acknowledgement", () => {
-    dom.render(<JobLetterIndicator letters={[letter({})]} />);
+    dom.render(<JobLetterIndicator jobId="job-1" letters={[letter({})]} />);
     clickButton("View cover letter");
     clickButton("Got it");
     expect(openDialogText()).toContain("Staff Engineer");
@@ -77,7 +128,7 @@ describe("JobLetterIndicator", () => {
 
   it("skips the acknowledgement on a fresh mount once it was already recorded", () => {
     recordLetterEgressAcknowledged();
-    dom.render(<JobLetterIndicator letters={[letter({})]} />);
+    dom.render(<JobLetterIndicator jobId="job-1" letters={[letter({})]} />);
     clickButton("View cover letter");
     expect(openDialogText()).toContain("Staff Engineer");
     expect(openDialogText()).not.toContain("Before you view this letter");
@@ -90,8 +141,11 @@ describe("JobLetterIndicator", () => {
     // `letter-egress-ack.ts`'s docblock explains).
     dom.render(
       <>
-        <JobLetterIndicator letters={[letter({ jobId: "job-1" })]} />
-        <JobLetterIndicator letters={[letter({ jobId: "job-2", id: "l2" })]} />
+        <JobLetterIndicator jobId="job-1" letters={[letter({ jobId: "job-1" })]} />
+        <JobLetterIndicator
+          jobId="job-2"
+          letters={[letter({ jobId: "job-2", id: "l2" })]}
+        />
       </>,
     );
     // Dialog always renders its children into the DOM (it toggles the native

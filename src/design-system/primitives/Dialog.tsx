@@ -42,18 +42,29 @@ interface DialogProps {
   ariaLabel?: string;
   /**
    * Optional classes appended to the `<dialog>` element itself — caller-side
-   * positioning/sizing (e.g. `fixed left-1/2 -translate-x-1/2`, max-width).
-   * Use positioning/layout utilities only: the chrome (radius/border/bg/
-   * padding) and the UA `dialog:not([open]){display:none}` rule that hides a
-   * closed dialog stay owned by the primitive, so don't pass `display`/`hidden`
-   * utilities here — they'd break the closed-state hide.
+   * SIZING (`max-w-md`, `w-[min(24rem,90vw)]`). Do **not** pass positioning:
+   * centering is the primitive's (see `CHROME`), and a caller that sets
+   * `left`/`top`/`translate` fights the `m-auto` that does it. The chrome
+   * (radius/border/bg/padding) and the UA `dialog:not([open]){display:none}`
+   * rule that hides a closed dialog stay owned by the primitive too, so don't
+   * pass `display`/`hidden` utilities here — they'd break the closed-state
+   * hide.
    */
   className?: string;
   children: ReactNode;
 }
 
+// `m-auto` is CENTERING, and it is load-bearing — do not drop it as cosmetic.
+// The UA sheet centres a modal `<dialog>` with `inset: 0` + `margin: auto`
+// over a `width: fit-content` box. Tailwind's preflight opens with
+// `*, ::before, ::after, ::backdrop { margin: 0 }`, which wins on specificity
+// over the UA rule and collapses every dialog in the tree into the top-left
+// corner. Restoring the margin here fixes it once, for every caller. Four
+// callers had each papered over it locally with
+// `fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2`; those are gone
+// now, because that workaround and this rule fight over the same box.
 const CHROME =
-  "rounded-xl border border-border-light bg-surface-card p-5 text-content-primary backdrop:bg-content-primary/40 backdrop:backdrop-blur-sm";
+  "m-auto rounded-xl border border-border-light bg-surface-card p-5 text-content-primary backdrop:bg-content-primary/40 backdrop:backdrop-blur-sm";
 
 export function Dialog({
   open,

@@ -86,7 +86,7 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
         open={open}
         onClose={() => setOpen(false)}
         title="Enable on-device AI rewrite"
-        className="fixed left-1/2 top-1/2 max-w-md -translate-x-1/2 -translate-y-1/2"
+        className="max-w-md"
       >
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2">

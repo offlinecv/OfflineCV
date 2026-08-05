@@ -52,7 +52,7 @@ export function ReplaceResumeDropOverlay({
         open={pendingFile !== null}
         onClose={onCancel}
         title="Analyze a different resume?"
-        className="fixed left-1/2 top-1/2 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2"
+        className="w-[min(24rem,calc(100vw-2rem))]"
       >
         <p className="text-sm text-content-secondary">
           We&apos;ll run a fresh analysis on{" "}

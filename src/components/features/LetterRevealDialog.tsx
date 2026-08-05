@@ -10,8 +10,8 @@
  *
  * Plain text, deliberately not markdown: `LetterRecord.body` is typed
  * markdown, but every letter this app holds is plain prose meant to be pasted
- * into an application form or email (`docs/cover-letter-contract.md` §1,
- * `.claude/skills/cover-letter/SKILL.md` Phase 4). Rendering it through a
+ * into an application form or email (`docs/cover-letter-contract.md` §1).
+ * Rendering it through a
  * markdown renderer would show an employer literal `**bold**` asterisks the
  * moment a producer's prose happens to contain them — the exact failure this
  * issue exists to avoid. `whitespace-pre-wrap` preserves the `\n\n` paragraph
@@ -46,8 +46,13 @@ interface LetterRevealDialogProps {
   onClose: () => void;
   /** Every letter for one job, most-recently-updated first — the order
    *  `useJobLetters` already sorts into. Never empty while `open` is true;
-   *  the caller (`JobLetterIndicator`) renders nothing when there are none. */
+   *  the caller (`JobLetterIndicator`) opens the editor instead when there are
+   *  none, so this dialog is never opened empty. */
   letters: readonly LetterRecord[];
+  /** Revise the draft currently on screen. */
+  onEdit: (letter: LetterRecord) => void;
+  /** Start an additional draft for the same job. */
+  onCompose: () => void;
 }
 
 function formatDate(ms: number): string {
@@ -62,6 +67,8 @@ export function LetterRevealDialog({
   open,
   onClose,
   letters,
+  onEdit,
+  onCompose,
 }: LetterRevealDialogProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(
     letters[0]?.id,
@@ -143,12 +150,21 @@ export function LetterRevealDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2">
+        {/* `flex-wrap` + `justify-end`, not a fixed row: the copy-failure
+            sentence is a full instruction, and on a narrow viewport it must
+            take its own line rather than squeeze the three buttons. */}
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {copyState === "failed" && (
             <span role="status" className="text-2xs text-feedback-warning-text">
               Couldn&rsquo;t copy — select the text above and copy it yourself.
             </span>
           )}
+          <Button variant="ghost" size="sm" onClick={onCompose}>
+            New draft
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onEdit(selected)}>
+            Edit
+          </Button>
           <Button
             variant="primary"
             size="sm"
