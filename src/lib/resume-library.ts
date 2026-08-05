@@ -156,27 +156,56 @@ export async function listLibrary(): Promise<ResumeLibraryEntry[]> {
     .sort((a, b) => b.savedAt - a.savedAt);
 }
 
+/** The kind a record's stored bytes actually are, for a record whose snapshot
+ *  cannot say. Reverse of {@link MIME}; unknown/blank types read as `pdf`,
+ *  which is what every producer that writes bytes writes today. */
+function sourceKindOfBlob(blob: Blob): SourceKind {
+  for (const [kind, mime] of Object.entries(MIME) as [SourceKind, string][]) {
+    if (blob.type === mime) return kind;
+  }
+  return "pdf";
+}
+
 /** Load a saved resume for hydration into the results view. Returns `undefined`
- *  when the record is gone or its cached parse is unreadable. */
+ *  when the record is gone, or when its parse can neither be read nor rebuilt
+ *  from the stored bytes. */
 export async function loadResumeFromLibrary(
   id: string,
 ): Promise<LoadedResume | undefined> {
   const record = await getResume(id);
   if (record === undefined) return undefined;
   const snap = readSnapshot(record.parse);
-  if (snap === null) return undefined;
   const bytes =
     record.blob.size > 0 ? await record.blob.arrayBuffer() : undefined;
 
-  // Stale-shape guard (#445 / #321). A record written at a different parser-shape
-  // or score-algo version must NOT be deserialized as the current canonical
-  // shape (a pre-cutover record has a `parsed`/`sections` façade and no
-  // `canonical` member — reading it as canonical would crash downstream). Re-parse
-  // from the stored PDF blob instead. If there is no blob to re-parse from (e.g. a
-  // DOCX record, whose source bytes are not kept at rest), the record can't be
-  // safely restored — drop it rather than hand back a stale shape.
-  if (snap.shapeVersion !== CACHE_SHAPE_VERSION) {
+  // Rebuild from the stored bytes whenever the cached parse cannot be used as
+  // it stands. Two ways that happens, and they take the same recovery:
+  //
+  //  - **No cached parse at all** (`snap === null`). Reachable since #693 put a
+  //    public write door on this store: a producer outside this build imports a
+  //    `ResumeRecord` carrying the PDF and no `parse`, because it cannot run the
+  //    cascade. Such a record lists fine (`listLibrary` keeps it at score 0) and
+  //    used to load as `undefined`, which made `/jobs/`'s #724 fallback rate
+  //    NOTHING — no stars on any row, no console line, and `hasResume === false`
+  //    so the tracker showed the "open this from your resume" prompt against a
+  //    résumé that was sitting right there. The bytes are present; refusing them
+  //    was the bug.
+  //  - **Stale shape** (#445 / #321). A record written at a different
+  //    parser-shape or score-algo version must NOT be deserialized as the
+  //    current canonical shape (a pre-cutover record has a `parsed`/`sections`
+  //    façade and no `canonical` member — reading it as canonical would crash
+  //    downstream).
+  //
+  // Either way: no blob to rebuild from (a DOCX record, whose source bytes are
+  // not kept at rest) means the record can't be safely restored — drop it rather
+  // than hand back a stale or absent shape.
+  if (snap === null || snap.shapeVersion !== CACHE_SHAPE_VERSION) {
     if (bytes === undefined) return undefined;
+    const sourceKind = snap?.sourceKind ?? sourceKindOfBlob(record.blob);
+    // `runCascade` reads PDF bytes. A non-PDF record with no usable snapshot has
+    // nothing this module can rebuild from, so it degrades to "not loadable"
+    // rather than throwing inside the cascade.
+    if (sourceKind !== "pdf") return undefined;
     const result = await runCascade(bytes);
     const score = scoreForResult(result);
     // Re-stamp the record at the current shape version so this migration is a
@@ -187,7 +216,7 @@ export async function loadResumeFromLibrary(
     const migrated: SavedResumeSnapshot = {
       result,
       score,
-      sourceKind: snap.sourceKind,
+      sourceKind,
       shapeVersion: CACHE_SHAPE_VERSION,
     };
     try {
@@ -205,7 +234,7 @@ export async function loadResumeFromLibrary(
       filename: record.filename,
       fileSize: record.blob.size,
       bytes,
-      sourceKind: snap.sourceKind,
+      sourceKind,
       result,
       score,
     };
