@@ -1,0 +1,277 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The offlinecv Authors
+
+  Static content page — plain HTML, no bundle, readable with JavaScript off.
+
+  Carries FAQPage structured data. The JSON-LD at the bottom MUST stay a
+  faithful copy of the visible questions and answers above it — structured data
+  that does not match the rendered page is a spam signal, not an optimisation.
+  Edit both halves together or neither.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FAQ — OfflineCV resume parser</title>
+    <meta
+      name="description"
+      content="Common questions about OfflineCV: whether it is really free, whether your resume is uploaded, why a field came back empty, what the score means, and whether it predicts a specific applicant tracking system."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="canonical" href="https://offlinecv.org/faq/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="OfflineCV" />
+    <meta property="og:url" content="https://offlinecv.org/faq/" />
+    <meta property="og:title" content="FAQ — OfflineCV resume parser" />
+    <meta
+      property="og:description"
+      content="Whether it is really free, whether your resume is uploaded, why a field came back empty, and what the score does and does not mean."
+    />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="../content.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <a class="skip" href="#main">Skip to content</a>
+
+      <nav class="nav nav--top" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <a href="../how-it-works/">How it works</a>
+        <strong aria-current="page">FAQ</strong>
+        <a href="../privacy/">Privacy &amp; data</a>
+        <a href="../open-source/">Open source</a>
+      </nav>
+
+      <main id="main">
+        <h1>Frequently asked questions</h1>
+
+        <p class="lede">
+          Short answers, with links to the longer ones. If something here contradicts what the app
+          actually does, the app is right and this page is a bug.
+        </p>
+
+        <h2>Is it free? Do I need an account?</h2>
+        <p>
+          Free, and there is no account. There is no sign-up, no login, no email wall and no paid
+          tier gating the parse, the score, the editor or the PDF export. The project is open source
+          under the Apache 2.0 licence.
+        </p>
+
+        <h2>Is my resume uploaded anywhere?</h2>
+        <p>
+          No. The PDF is read by JavaScript in your browser tab; there is no upload step and no
+          application server behind the site. Neither the PDF bytes nor the text extracted from them
+          are carried by any request the app makes. Some other things do go over the network &mdash;
+          job-search keywords, a GitHub star count, analytics on this hosted build &mdash; and they
+          are itemised on the <a href="../privacy/">privacy page</a> rather than glossed over.
+        </p>
+
+        <h2>Does this tell me what an applicant tracking system will see?</h2>
+        <p>
+          It does not, and any tool claiming otherwise is guessing. Applicant tracking systems are
+          closed, they differ from each other, and their parsers change. What OfflineCV shows you is
+          one generic text extractor&rsquo;s reading of your file. That is genuinely useful &mdash;
+          if a generic parser cannot find your job titles, that is a fragility worth fixing &mdash;
+          but it is a signal, not a prediction about a named employer&rsquo;s software.
+        </p>
+
+        <h2>Why is a field empty or wrong?</h2>
+        <p>
+          Usually the layout. Text in a two-column grid, inside a header or footer, drawn within a
+          graphic, or set in a font with no usable character mapping can all come out reordered or
+          missing. A resume exported as a scanned image contains no text at all, so nothing can be
+          extracted from it. Compare the extracted text against your PDF: where they diverge is
+          where a real parser is likely to diverge too.
+        </p>
+
+        <h2>What does the score actually measure?</h2>
+        <p>
+          Three things, weighted: how specific your bullets are (0.4), how well-structured the
+          entries and bullets are (0.3), and how much of the expected content the parser recovered
+          (0.3). That total is then multiplied down where the layout probes fired &mdash; to 0.85
+          for one trigger, 0.7 for two or more, and to zero for a scanned file. It is deterministic
+          and anonymous: the same text always yields the same number.
+          <a href="../how-it-works/">The full breakdown is here.</a>
+        </p>
+
+        <h2>Is a low score bad news?</h2>
+        <p>
+          It is information about the file, not a judgement of your career. A strong candidate with
+          a heavily designed template can score poorly because the design defeats extraction. That
+          is exactly the case the tool is built to surface, and it is usually fixable by exporting a
+          plainer version for applications while keeping the designed one for humans.
+        </p>
+
+        <h2>Can I fix the resume here, or only see the problems?</h2>
+        <p>
+          You can fix it. Every extracted field is editable in place, and your edits are stored as
+          overrides on top of the parse rather than overwriting it, so the original reading stays
+          visible. You can then download a plain single-column PDF built from the corrected fields.
+          That export is tested to re-parse to the same fields it was built from.
+        </p>
+
+        <h2>What is the AI part, and does it send my resume to a model provider?</h2>
+        <p>
+          The AI features run a small language model inside your browser using WebGPU, and they are
+          optional. The model weights are downloaded once from a public CDN and cached; the prompts
+          built from your resume are evaluated locally rather than sent to a provider. If your
+          browser or device does not support WebGPU, those features are unavailable and everything
+          else still works.
+        </p>
+
+        <h2>What can it do besides parse a PDF?</h2>
+        <p>
+          Two more lanes. <a href="../jd-fit/">JD fit</a> takes a job description &mdash; pasted, or
+          fetched from a Greenhouse, Lever, Workable, Recruitee or Ashby posting URL, which contacts
+          that job board &mdash; and shows which of its requirements your resume gives evidence for,
+          then helps rewrite toward the gaps. <a href="../jobs/">Find jobs</a> searches public job
+          feeds using a query built from your resume &mdash; editable before you search &mdash;
+          ranks results by fit, and keeps the ones you care about in a local tracker.
+        </p>
+
+        <h2>Are the job results every job that exists?</h2>
+        <p>
+          No, and the app labels them as a sample. They come from a few free, public, keyless feeds
+          that skew remote and technical. They are a starting point, not a complete view of the
+          market.
+        </p>
+
+        <h2>Where is my data if I close the tab?</h2>
+        <p>
+          Saved resumes and tracked jobs live in your browser&rsquo;s IndexedDB storage on your own
+          disk. Browsers can clear that &mdash; Safari does so after seven days without a visit, and
+          any browser may evict under disk pressure &mdash; so the resume library includes a JSON
+          export for taking your own backup. Clearing site data removes everything.
+        </p>
+
+        <h2>Can I run or modify it myself?</h2>
+        <p>
+          Yes. The source is public under Apache 2.0 and the app is static files, so a local build
+          serves the whole thing from your own machine, without the analytics this hosted site
+          carries. See the <a href="../open-source/">open source page</a>.
+        </p>
+
+        <a class="cta" href="../">Try it on your own resume</a>
+      </main>
+
+      <nav class="nav nav--bottom" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <a href="../how-it-works/">How it works</a>
+        <a href="../privacy/">Privacy &amp; data</a>
+        <a href="../open-source/">Open source</a>
+        <a href="https://github.com/offlinecv/OfflineCV" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is it free? Do I need an account?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Free, and there is no account. There is no sign-up, no login, no email wall and no paid tier gating the parse, the score, the editor or the PDF export. The project is open source under the Apache 2.0 licence."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is my resume uploaded anywhere?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. The PDF is read by JavaScript in your browser tab; there is no upload step and no application server behind the site. Neither the PDF bytes nor the text extracted from them are carried by any request the app makes. Some other things do go over the network — job-search keywords, a GitHub star count, analytics on this hosted build — and they are itemised on the privacy page rather than glossed over."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does this tell me what an applicant tracking system will see?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "It does not, and any tool claiming otherwise is guessing. Applicant tracking systems are closed, they differ from each other, and their parsers change. What OfflineCV shows you is one generic text extractor's reading of your file. That is genuinely useful — if a generic parser cannot find your job titles, that is a fragility worth fixing — but it is a signal, not a prediction about a named employer's software."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Why is a field empty or wrong?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Usually the layout. Text in a two-column grid, inside a header or footer, drawn within a graphic, or set in a font with no usable character mapping can all come out reordered or missing. A resume exported as a scanned image contains no text at all, so nothing can be extracted from it. Compare the extracted text against your PDF: where they diverge is where a real parser is likely to diverge too."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What does the score actually measure?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Three things, weighted: how specific your bullets are (0.4), how well-structured the entries and bullets are (0.3), and how much of the expected content the parser recovered (0.3). That total is then multiplied down where the layout probes fired — to 0.85 for one trigger, 0.7 for two or more, and to zero for a scanned file. It is deterministic and anonymous: the same text always yields the same number."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is a low score bad news?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "It is information about the file, not a judgement of your career. A strong candidate with a heavily designed template can score poorly because the design defeats extraction. That is exactly the case the tool is built to surface, and it is usually fixable by exporting a plainer version for applications while keeping the designed one for humans."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I fix the resume here, or only see the problems?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "You can fix it. Every extracted field is editable in place, and your edits are stored as overrides on top of the parse rather than overwriting it, so the original reading stays visible. You can then download a plain single-column PDF built from the corrected fields. That export is tested to re-parse to the same fields it was built from."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is the AI part, and does it send my resume to a model provider?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The AI features run a small language model inside your browser using WebGPU, and they are optional. The model weights are downloaded once from a public CDN and cached; the prompts built from your resume are evaluated locally rather than sent to a provider. If your browser or device does not support WebGPU, those features are unavailable and everything else still works."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What can it do besides parse a PDF?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Two more lanes. JD fit takes a job description — pasted, or fetched from a Greenhouse, Lever, Workable, Recruitee or Ashby posting URL, which contacts that job board — and shows which of its requirements your resume gives evidence for, then helps rewrite toward the gaps. Find jobs searches public job feeds using a query built from your resume — editable before you search — ranks results by fit, and keeps the ones you care about in a local tracker."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Are the job results every job that exists?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No, and the app labels them as a sample. They come from a few free, public, keyless feeds that skew remote and technical. They are a starting point, not a complete view of the market."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Where is my data if I close the tab?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Saved resumes and tracked jobs live in your browser's IndexedDB storage on your own disk. Browsers can clear that — Safari does so after seven days without a visit, and any browser may evict under disk pressure — so the resume library includes a JSON export for taking your own backup. Clearing site data removes everything."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I run or modify it myself?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. The source is public under Apache 2.0 and the app is static files, so a local build serves the whole thing from your own machine, without the analytics this hosted site carries."
+            }
+          }
+        ]
+      }
+    </script>
+  </body>
+</html>

@@ -18,12 +18,14 @@
  * `jobs/index.html`, and this app deliberately does not have that: Vite's
  * `appType: "mpa"` (see `vite.config.ts`) 404s an unmatched path honestly
  * instead of falling back to the wrong page, and the production Workers-
- * assets deploy's `single-page-application` `not_found_handling` serves the
- * ROOT `/index.html` for any unmatched request — the parser-audit page, not
- * this one (verified against Cloudflare's docs, which describe serving "the
- * `/index.html` file", not the nearest ancestor one). A hash is never sent to
- * the server, so `/jobs/#saved` resolves identically in dev, GitHub Pages,
- * and Workers assets with no routing change anywhere.
+ * assets deploy's `not_found_handling` now serves `404.html` with a real 404
+ * status for any unmatched request. (It previously said
+ * `single-page-application`, which served the ROOT `/index.html` — the
+ * parser-audit page, not this one. Either way the unmatched path does not
+ * reach this surface; the newer setting just fails honestly instead of
+ * silently rendering the wrong page.) A hash is never sent to the server, so
+ * `/jobs/#saved` resolves identically in dev, GitHub Pages, and Workers
+ * assets with no routing change anywhere.
  *
  * The decision (which tab a given URL lands on) is factored out from the
  * `window.location` IO so it is unit-testable with plain strings — same

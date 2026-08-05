@@ -3,11 +3,22 @@
 
 /// <reference types="vitest" />
 import { execSync } from "node:child_process";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import basicSsl from "@vitejs/plugin-basic-ssl";
+
+import {
+  buildRobotsTxt,
+  buildSitemapXml,
+  HTML_ENTRIES,
+  seoHeadTags,
+  SITEMAP_PATHS,
+  withNoindexMeta,
+} from "./scripts/seo-artifacts.ts";
 
 // Dev-server TLS opt-out. `basicSsl()` below makes `npm run dev` serve HTTPS,
 // which is what a LAN client needs for WebGPU (see the plugin's comment) — but
@@ -73,6 +84,80 @@ const APP_VERSION = resolveAppVersion();
 // VITE_BASE_PATH to override. Default "/" is the custom-domain production
 // target and local dev.
 const BASE_PATH = process.env.VITE_BASE_PATH ?? "/";
+
+// Non-canonical build marker. The `main` → GitHub Pages deploy at
+// dev.offlinecv.org (.github/workflows/deploy-pages.yml) is a byte-identical
+// copy of production on a subdomain of the same registrable domain, so a search
+// engine sees two complete sites and picks one — which is how production ends
+// up dropped. That workflow sets OFFLINECV_SEO_NOINDEX=1; this build then adds
+// `<meta name="robots" content="noindex, nofollow">` to every page — bundled
+// entries and static pages alike — and ships no sitemap.
+//
+// Its robots.txt still ALLOWS crawling, deliberately — see buildRobotsTxt in
+// scripts/seo-artifacts.ts for why a blocked staging copy is the worse trade.
+const SEO_NOINDEX = process.env.OFFLINECV_SEO_NOINDEX === "1";
+
+// Recursively list every .html file under a directory.
+function htmlFilesUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return htmlFilesUnder(path);
+    return entry.name.endsWith(".html") ? [path] : [];
+  });
+}
+
+// Search-engine directives, generated at build time so the two deploy targets
+// differ without a second copy of the URL list checked into public/. Emitting
+// rather than shipping public/robots.txt is what makes SEO_NOINDEX possible at
+// all: a file in public/ is copied identically into both builds.
+//
+// Note that `sitemap.xml` and `robots.txt` MUST exist as real assets. The
+// Cloudflare Workers assets config used to serve unknown paths as the root
+// SPA page, so both URLs answered 200 with HTML — a sitemap that cannot parse
+// and a robots.txt with no valid directives in it.
+//
+// The decisions all three hooks below make live in scripts/seo-artifacts.ts as
+// pure functions, because a plugin hook is not reachable from a unit test and
+// an inverted flag is silent in both directions.
+function emitSeoFiles(): Plugin {
+  let outDir = "dist";
+  return {
+    name: "offlinecv:seo",
+    apply: "build",
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
+    transformIndexHtml() {
+      return seoHeadTags(SEO_NOINDEX);
+    },
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "robots.txt",
+        source: buildRobotsTxt(SEO_NOINDEX),
+      });
+      if (SEO_NOINDEX) return;
+      this.emitFile({
+        type: "asset",
+        fileName: "sitemap.xml",
+        source: buildSitemapXml(SITEMAP_PATHS),
+      });
+    },
+    // `transformIndexHtml` only ever sees the bundled entries, so the static
+    // pages under public/ would otherwise ship a canonical and nothing else —
+    // a hint a crawler may decline, on exactly the staging URLs that carry
+    // crawlable prose and can therefore rank against production. By closeBundle
+    // the public dir has been copied and outDir is on disk, so one pass over
+    // it makes the flag mean one thing across every page.
+    closeBundle() {
+      if (!SEO_NOINDEX) return;
+      for (const file of htmlFilesUnder(outDir)) {
+        const tagged = withNoindexMeta(readFileSync(file, "utf8"));
+        if (tagged !== null) writeFileSync(file, tagged);
+      }
+    },
+  };
+}
 
 // Emit dist/version.json at build time only. Unhashed + at the site root so the
 // proactive update checker can poll a stable URL. GitHub Pages forces its own
@@ -162,6 +247,7 @@ export default defineConfig({
     tailwindcss(),
     react(),
     emitVersionJson(APP_VERSION),
+    emitSeoFiles(),
     jdFitTrailingSlash(),
   ],
   build: {
@@ -175,12 +261,17 @@ export default defineConfig({
     // pages — the dev-only `jd-spike.html` / `eval-rewrite.html`
     // harnesses (which Vite's default auto-discovery would otherwise bundle) are
     // no longer emitted into dist/, which is the intended production surface.
+    //
+    // Derived from HTML_ENTRIES rather than spelled out here so the entry set
+    // and the sitemap cannot drift: a fourth entry is advertised for indexing
+    // by construction instead of by someone remembering a second list.
     rollupOptions: {
-      input: {
-        main: fileURLToPath(new URL("./index.html", import.meta.url)),
-        jdFit: fileURLToPath(new URL("./jd-fit/index.html", import.meta.url)),
-        jobs: fileURLToPath(new URL("./jobs/index.html", import.meta.url)),
-      },
+      input: Object.fromEntries(
+        Object.entries(HTML_ENTRIES).map(([name, { file }]) => [
+          name,
+          fileURLToPath(new URL(`./${file}`, import.meta.url)),
+        ]),
+      ),
     },
   },
   resolve: {
@@ -233,6 +324,7 @@ export default defineConfig({
         "src/**/*.{ts,tsx}",
         "scripts/check-fixture-pii.mjs",
         "scripts/check-known-failures.mjs",
+        "scripts/seo-artifacts.ts",
       ],
       exclude: [
         "src/**/*.test.ts",

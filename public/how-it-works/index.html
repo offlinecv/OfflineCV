@@ -1,0 +1,269 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The offlinecv Authors
+
+  Static content page — plain HTML, no bundle, readable with JavaScript off.
+  See public/content.css for why these exist outside the React app.
+
+  Every number on this page is quoted from code and must move when the code
+  does: the dimension weights and the layout multipliers from
+  src/lib/score/score.ts (WEIGHTS, and the `multiplier` ladder near the end of
+  computeAnonymousAtsScore), the verdict bands from getScoreTier/getScoreLabel
+  in the same file, and the tier names from src/lib/heuristics/cascade.ts.
+  Links are relative so the page resolves under any base path.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How OfflineCV reads your resume — parse cascade and scoring</title>
+    <meta
+      name="description"
+      content="What happens to a resume PDF inside OfflineCV: the four-tier text extraction cascade, the three scored dimensions and their weights, and the layout penalty that a two-column or scanned PDF earns."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="canonical" href="https://offlinecv.org/how-it-works/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="OfflineCV" />
+    <meta property="og:url" content="https://offlinecv.org/how-it-works/" />
+    <meta property="og:title" content="How OfflineCV reads your resume" />
+    <meta
+      property="og:description"
+      content="The four-tier text extraction cascade, the three scored dimensions and their weights, and the layout penalty a two-column or scanned PDF earns."
+    />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="../content.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <a class="skip" href="#main">Skip to content</a>
+
+      <nav class="nav nav--top" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <strong aria-current="page">How it works</strong>
+        <a href="../faq/">FAQ</a>
+        <a href="../privacy/">Privacy &amp; data</a>
+        <a href="../open-source/">Open source</a>
+      </nav>
+
+      <main id="main">
+        <h1>How OfflineCV reads your resume</h1>
+
+        <p class="lede">
+          You drop in a PDF and get back two things: the text a generic extractor pulled out of it,
+          and a score built from that text. This page describes what happens in between, including
+          where it goes wrong.
+        </p>
+
+        <h2>The point is the gap, not the score</h2>
+
+        <p>
+          A resume PDF looks like a document to you. To a parser it is a bag of positioned glyphs
+          with no reliable notion of &ldquo;this line is a job title&rdquo; or &ldquo;these bullets
+          belong to that role&rdquo;. Section headers, two-column layouts, text drawn inside a
+          graphic, and dates rendered as an image all have to be inferred, and the inference is
+          sometimes wrong.
+        </p>
+
+        <p>
+          What OfflineCV shows you is one generic parser&rsquo;s reading of your file. It is
+          <strong>not</strong> a simulation of any particular applicant tracking system &mdash; those
+          are closed, they differ from one another, and we have not measured them. Treat a field
+          that comes back empty or garbled as a signal that the information is fragile in this file,
+          not as a verdict from a specific employer&rsquo;s software.
+        </p>
+
+        <h2>Step 1 &mdash; the extraction cascade</h2>
+
+        <p>
+          Text extraction runs as a cascade of tiers. Each tier only handles what the one before it
+          left behind, so a clean single-column PDF is finished early and a difficult one keeps
+          falling through.
+        </p>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Tier</th>
+                <th scope="col">What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Tier&nbsp;0</th>
+                <td>
+                  Pull raw text items and page geometry out of the PDF with pdf.js, plus the
+                  link annotations &mdash; a <code>mailto:</code> or <code>tel:</code> href often
+                  survives when the drawn text of the same email or phone number does not. Layout
+                  probes run here too and flag a scanned or two-column file.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Tier&nbsp;1</th>
+                <td>
+                  A heuristic parser turns those items into lines, finds section headers, and
+                  segments the experience and education regions into entries with titles, employers,
+                  dates and bullets.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Tier&nbsp;1.5</th>
+                <td>
+                  A regex pass fills in individual fields the heuristic parser missed &mdash; most
+                  often contact details that sit outside any recognised section.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">On&nbsp;device&nbsp;AI</th>
+                <td>
+                  Optional, and only where your browser supports WebGPU. A small language model runs
+                  locally to critique the result and propose rewrites. Where its reading disagrees
+                  with the heuristic parser, the disagreement is shown rather than silently resolved.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          The cascade reports a per-field confidence alongside the values, so a field it guessed at
+          is distinguishable from one it read cleanly.
+        </p>
+
+        <h2>Step 2 &mdash; the score</h2>
+
+        <p>
+          The score is deterministic and anonymous: the same text always produces the same number,
+          and nothing about it is personalised or sent anywhere. It combines three dimensions.
+        </p>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Dimension</th>
+                <th scope="col">Weight</th>
+                <th scope="col">What it looks for</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Specificity</th>
+                <td>0.4</td>
+                <td>
+                  Bullets carrying a concrete quantity &mdash; a number, a percentage, a currency
+                  amount, a duration &mdash; rather than a description of responsibilities.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Structure</th>
+                <td>0.3</td>
+                <td>
+                  Bullets that are actually bullet-shaped and in a workable length band, under
+                  entries that have a title, an employer and a date range.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Completeness</th>
+                <td>0.3</td>
+                <td>
+                  Whether the fields a reader expects came through at all: name, contact details, a
+                  summary, a skills list, education, experience.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>
+          Note what the weights imply. Completeness is scored on what the
+          <em>parser recovered</em>, so a resume that contains everything but hides it in a layout
+          the parser cannot follow loses points it would keep in a plainer file. That is the
+          intended behaviour, and it is the whole reason to look at the extracted text next to the
+          number.
+        </p>
+
+        <h2>Step 3 &mdash; the layout penalty</h2>
+
+        <p>
+          Layout is applied as a multiplier over the combined dimensions rather than as a fourth
+          additive dimension, because a layout problem degrades every other signal at once instead
+          of costing a fixed slice.
+        </p>
+
+        <ul>
+          <li><strong>No layout triggers</strong> &mdash; multiplier 1.0, no penalty.</li>
+          <li><strong>One trigger</strong> &mdash; multiplier 0.85.</li>
+          <li><strong>Two or more triggers</strong> &mdash; multiplier 0.7.</li>
+          <li>
+            <strong>Scanned</strong> &mdash; multiplier 0. A page of images carries no extractable
+            text, so there is nothing underneath the score to defend.
+          </li>
+        </ul>
+
+        <p>The rounded result lands in one of three bands:</p>
+
+        <ul>
+          <li><strong>80 and above</strong> &mdash; Strong</li>
+          <li><strong>60 to 79</strong> &mdash; Getting There</li>
+          <li><strong>Below 60</strong> &mdash; Needs Work</li>
+        </ul>
+
+        <p>
+          The scoring algorithm is versioned, so a score you recorded under an earlier version is
+          not silently comparable to a new one.
+        </p>
+
+        <h2>Step 4 &mdash; fix it and export</h2>
+
+        <p>
+          Every extracted field is editable in place. Your edits are stored as overrides on top of
+          the parse rather than written back over it, so the original reading stays visible. From
+          there you can download a plain, single-column PDF built from the corrected fields.
+        </p>
+
+        <p>
+          That export is tested against the parser that produced it: the exported PDF has to
+          re-parse to the same fields it was built from. It is the one round trip we can actually
+          verify, and we verify it in CI.
+        </p>
+
+        <h2>Two more lanes</h2>
+
+        <ul>
+          <li>
+            <a href="../jd-fit/">JD fit</a> &mdash; paste a job description and see which of its
+            requirements your resume gives evidence for, then rewrite sections toward the ones it
+            does not.
+          </li>
+          <li>
+            <a href="../jobs/">Find jobs</a> &mdash; search open job feeds using a query built from
+            your resume (which you can edit before searching), rank the results by fit, and keep the
+            ones worth applying to in a local tracker.
+          </li>
+        </ul>
+
+        <p>
+          Both work from the parsed resume, never from the PDF bytes. What leaves your browser, and
+          when, is itemised on the <a href="../privacy/">privacy page</a>.
+        </p>
+
+        <a class="cta" href="../">Try it on your own resume</a>
+      </main>
+
+      <nav class="nav nav--bottom" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <a href="../faq/">FAQ</a>
+        <a href="../privacy/">Privacy &amp; data</a>
+        <a href="../open-source/">Open source</a>
+        <a href="https://github.com/offlinecv/OfflineCV" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </body>
+</html>

@@ -9,6 +9,19 @@
       content="Drop a resume PDF and see what a generic parser pulls out of it. Free, private, open-source — your PDF never leaves your browser."
     />
     <meta name="color-scheme" content="light dark" />
+    <!-- Absolute, not base-relative: the staging build at dev.offlinecv.org
+         serves this same HTML, and this tag is what folds that copy onto
+         production instead of letting the two compete. -->
+    <link rel="canonical" href="https://offlinecv.org/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OfflineCV" />
+    <meta property="og:url" content="https://offlinecv.org/" />
+    <meta property="og:title" content="OfflineCV — see what a resume parser reads from your PDF" />
+    <meta
+      property="og:description"
+      content="Drop a resume PDF and see what a generic parser pulls out of it. Free, private, open-source — your PDF never leaves your browser."
+    />
+    <meta name="twitter:card" content="summary" />
   </head>
   <body>
     <div id="root"></div>

@@ -1,0 +1,159 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The offlinecv Authors
+
+  Static content page — plain HTML, no bundle, readable with JavaScript off.
+
+  The commands quoted here are the real ones from package.json. If a script is
+  renamed there, rename it here too — a build page whose commands do not run is
+  worse than no build page.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Open source — run your own OfflineCV | Apache 2.0</title>
+    <meta
+      name="description"
+      content="OfflineCV is Apache 2.0 licensed and its source is public. How to run it locally, why a local build carries no analytics, and where to file a parser bug."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="canonical" href="https://offlinecv.org/open-source/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="OfflineCV" />
+    <meta property="og:url" content="https://offlinecv.org/open-source/" />
+    <meta property="og:title" content="Open source — run your own OfflineCV" />
+    <meta
+      property="og:description"
+      content="Apache 2.0, public source. How to run it locally, and why a local build carries no analytics."
+    />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="../content.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <a class="skip" href="#main">Skip to content</a>
+
+      <nav class="nav nav--top" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <a href="../how-it-works/">How it works</a>
+        <a href="../faq/">FAQ</a>
+        <a href="../privacy/">Privacy &amp; data</a>
+        <strong aria-current="page">Open source</strong>
+      </nav>
+
+      <main id="main">
+        <h1>Open source</h1>
+
+        <p class="lede">
+          OfflineCV is licensed under Apache 2.0 and developed in the open at
+          <a href="https://github.com/offlinecv/OfflineCV" rel="noopener"
+            >github.com/offlinecv/OfflineCV</a
+          >. You can read it, run it, fork it, and reskin it.
+        </p>
+
+        <h2>Why that matters here specifically</h2>
+
+        <p>
+          This is a tool you hand your resume to. Every privacy claim on the
+          <a href="../privacy/">privacy page</a> is the kind of claim you should not have to take on
+          trust, and public source is what makes it checkable: open the network tab, then open the
+          code, and confirm the two agree. A closed tool making the same claim is asking for
+          something quite different from you.
+        </p>
+
+        <h2>Run it yourself</h2>
+
+        <p>
+          The app is static files &mdash; no server, no database, no environment to provision. A
+          local build runs the whole product from your own machine.
+        </p>
+
+        <div class="card">
+          <p><strong>Requirements:</strong> Node.js and npm.</p>
+          <ul>
+            <li><code>git clone https://github.com/offlinecv/OfflineCV.git</code></li>
+            <li><code>cd OfflineCV &amp;&amp; npm install</code></li>
+            <li><code>npm run dev</code> &mdash; development server</li>
+            <li><code>npm run build</code> &mdash; production build into <code>dist/</code></li>
+          </ul>
+          <p>
+            The dev server runs over HTTPS with a self-signed certificate. That is deliberate: WebGPU
+            is gated behind a secure context, so the on-device AI features need it. Accept the
+            browser warning once.
+          </p>
+        </div>
+
+        <p>
+          A build made without a PostHog key contains no analytics at all &mdash; the dependency is
+          dynamically imported and is eliminated from the bundle entirely, so it is absent rather
+          than merely disabled. The hosted site at offlinecv.org is built <em>with</em> a key; that
+          difference is described on the <a href="../privacy/">privacy page</a>.
+        </p>
+
+        <h2>Reskin it without forking</h2>
+
+        <p>
+          Colours are plain CSS custom properties in two layers: a stable semantic vocabulary
+          (<code>--color-surface-card</code>, <code>--color-content-primary</code>, and so on) and a
+          swappable file of raw values behind it. The default palette is a generic accessible one,
+          not a brand. You can override the values from your own stylesheet in the cascade, or point
+          the build&rsquo;s token alias at your own file. The component layer has an equivalent
+          swap seam. The README covers both.
+        </p>
+
+        <h2>Contributing</h2>
+
+        <p>
+          Bug reports about parsing are the most valuable contribution, and the most useful ones
+          name a specific PDF shape rather than a general complaint &mdash; a two-column template
+          whose dates vanish, a header whose email survives only as a link annotation, an employer
+          line that merges into the title above it.
+        </p>
+
+        <p>
+          Please do not attach your real resume to an issue. The repository ships a local
+          command-line probe that reads a PDF path you give it and prints only to your terminal
+          &mdash; it writes nothing and hardcodes no path &mdash; so you can characterise a bug
+          against your own private file and then report the <em>shape</em> of it. Run it with
+          <code>npm run fidelity path/to/resume.pdf</code>. Regression tests use synthetic, PII-free
+          fixtures, and a CI gate enforces that.
+        </p>
+
+        <ul>
+          <li>
+            <a href="https://github.com/offlinecv/OfflineCV/issues" rel="noopener">Issues</a>
+          </li>
+          <li>
+            <a href="https://github.com/offlinecv/OfflineCV/blob/main/README.md" rel="noopener"
+              >README</a
+            >
+            &mdash; architecture, telemetry, theming
+          </li>
+          <li>
+            <a href="https://github.com/offlinecv/OfflineCV/blob/main/LICENSE" rel="noopener"
+              >Apache 2.0 licence</a
+            >
+          </li>
+        </ul>
+
+        <a class="cta" href="https://github.com/offlinecv/OfflineCV" rel="noopener"
+          >View the source on GitHub</a
+        >
+      </main>
+
+      <nav class="nav nav--bottom" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <a href="../how-it-works/">How it works</a>
+        <a href="../faq/">FAQ</a>
+        <a href="../privacy/">Privacy &amp; data</a>
+        <a href="https://github.com/offlinecv/OfflineCV" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </body>
+</html>

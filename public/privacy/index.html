@@ -1,0 +1,247 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  Copyright 2026 The offlinecv Authors
+
+  Static content page — plain HTML, no bundle, readable with JavaScript off.
+
+  This page makes falsifiable claims about network egress, so every one of them
+  has to point at code: src/lib/analytics.ts (PostHog, env-gated),
+  src/lib/job-search/providers/keywords.ts (the ONLY resume-derived egress
+  helper) and its sibling adapters, src/hooks/useGitHubStars.ts, and
+  src/lib/storage/ for what is written locally. The README's "Telemetry"
+  section is the long form; this page is the short form and must not exceed it.
+
+  Do not add a claim here without grepping the actual fetch() calls first. In
+  particular there is no BYOK / hosted LLM provider in the tree — do not imply
+  one either way.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy &amp; data — what leaves your browser | OfflineCV</title>
+    <meta
+      name="description"
+      content="An itemised list of every network request OfflineCV makes, what each one carries, and what is stored in your browser. Your resume PDF and its text are not among them."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="canonical" href="https://offlinecv.org/privacy/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="OfflineCV" />
+    <meta property="og:url" content="https://offlinecv.org/privacy/" />
+    <meta property="og:title" content="Privacy &amp; data — what leaves your browser" />
+    <meta
+      property="og:description"
+      content="An itemised list of every network request OfflineCV makes, what each one carries, and what is stored in your browser."
+    />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="../content.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <a class="skip" href="#main">Skip to content</a>
+
+      <nav class="nav nav--top" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <a href="../how-it-works/">How it works</a>
+        <a href="../faq/">FAQ</a>
+        <strong aria-current="page">Privacy &amp; data</strong>
+        <a href="../open-source/">Open source</a>
+      </nav>
+
+      <main id="main">
+        <h1>Privacy &amp; data</h1>
+
+        <p class="lede">
+          The claim worth making is about custody, not about runtime: your resume PDF and the text
+          extracted from it stay in your browser. Some other things do go over the network, and this
+          page lists them.
+        </p>
+
+        <div class="card">
+          <h2>The short version</h2>
+          <p>
+            There is no account, no login, and no upload step. The PDF is read by JavaScript in the
+            tab you dropped it into; parsing, scoring, editing and PDF export all happen there. No
+            request this app makes carries the PDF bytes or the extracted resume text.
+          </p>
+          <p>
+            What does go out: the page and its assets, a job-search keyword string when you press
+            search, a public company name when you check a company&rsquo;s own board, a job posting
+            URL when you ask the app to fetch one for you, a GitHub star count, optional AI model
+            weights, and &mdash; on this hosted site &mdash; anonymous product analytics.
+          </p>
+        </div>
+
+        <h2>What never leaves</h2>
+
+        <ul>
+          <li>The PDF file itself, in whole or in part.</li>
+          <li>
+            The text extracted from it &mdash; your name, contact details, employers, titles, dates,
+            bullets, skills, education.
+          </li>
+          <li>Any edit you make to those fields, and the PDF you export from them.</li>
+          <li>
+            The job description you <strong>paste</strong> into JD fit. Asking the app to
+            <em>fetch</em> one from a posting URL is an outbound request, and it is itemised below.
+          </li>
+        </ul>
+
+        <p>
+          One helper &mdash; <code>src/lib/job-search/providers/keywords.ts</code> &mdash; is the
+          single place in the codebase where anything derived from your resume is turned into
+          outbound data, and it is deliberately kept to one file so it can be audited in one place.
+          Its output is described below.
+        </p>
+
+        <h2>Every request, itemised</h2>
+
+        <h3>1. Loading the site</h3>
+        <p>
+          Serving you the page means our host sees your IP address and user agent, the same as any
+          website. The app is static files; there is no application server to send anything to.
+        </p>
+
+        <h3>2. Job search feeds</h3>
+        <p>
+          The <a href="../jobs/">Find jobs</a> tab can query free, keyless, public job feeds. These
+          requests fire <strong>only when you click &ldquo;Search jobs&rdquo;</strong> &mdash; not
+          when you drop a resume, not when you open the tab, not while you edit the query. What is
+          sent is the short keyword string built from the query&rsquo;s title and skills fields,
+          which are shown to you and editable before you search. The feeds shipped today are
+          Remotive, Arbeitnow and Jobicy. Each is contacted directly from your browser, so
+          <strong>each sees your IP address</strong>.
+        </p>
+        <p>
+          Within Find jobs, where you ask about a specific company&rsquo;s own job board
+          (Greenhouse, Lever, Ashby), the request carries that company&rsquo;s public board name and
+          nothing else. Fetching one specific posting by its URL is a different request, described
+          next.
+        </p>
+
+        <h3>3. Fetching a job posting from its URL</h3>
+        <p>
+          Where the app offers to fetch a posting for you rather than have you paste it &mdash; the
+          URL field on <a href="../jd-fit/">JD fit</a> today &mdash; pressing
+          <strong>Fetch</strong> calls that applicant tracking system&rsquo;s own public API
+          directly from your browser. Five are supported: Greenhouse, Lever, Workable, Recruitee and
+          Ashby. The request fires <strong>only on that click</strong>, and nothing derived from
+          your resume is part of it.
+        </p>
+        <p>
+          What it carries is the company&rsquo;s public board name &mdash; which for Recruitee is
+          the hostname itself &mdash; and, for Greenhouse and Lever, the identifier of the one
+          posting you asked for. The other three return the whole board and the match happens in
+          your browser. Because the call comes from your browser,
+          <strong>that ATS sees your IP address</strong>, and for Greenhouse and Lever it also sees
+          which specific posting you are reading. That is a sharper disclosure than anything else on
+          this page, which is why it is worth pasting the description instead if you would rather
+          the ATS not see you.
+        </p>
+
+        <h3>4. GitHub star count</h3>
+        <p>
+          The footer shows the repository&rsquo;s star count via an unauthenticated call to the
+          GitHub API, cached for about an hour. It carries no data about you beyond the request
+          itself, and it fails silently. Because it originates in your browser,
+          <strong>GitHub sees your IP address</strong>.
+        </p>
+
+        <h3>5. On-device AI model weights</h3>
+        <p>
+          The optional AI features run a language model inside your browser via WebGPU. Running it
+          locally still means <em>downloading</em> it first: the weights are fetched from the public
+          CDN that the <code>@mlc-ai/web-llm</code> library points at, on the first use of an AI
+          feature, and cached by your browser afterwards. Your resume is not part of that download,
+          and once the model is loaded the prompts built from your resume are evaluated locally.
+        </p>
+
+        <h3>6. Analytics on this hosted site</h3>
+        <p>
+          This site is built with a PostHog key set, so it emits anonymous product analytics &mdash;
+          events like a file being accepted, a parse completing, or a parse failing. The payloads
+          carry file size, page count, parse duration, the score breakdown, layout triggers and
+          error names. They do not carry PDF bytes, extracted text, names or URLs. Session recording
+          and autocapture are off, and the identifier is held in memory and reset when the tab
+          closes.
+        </p>
+        <p>
+          This is a property of <em>this deployment</em>, not of the software. A build made without
+          that key removes the analytics code entirely &mdash; the dependency is dynamically
+          imported and is eliminated from the bundle. If you would rather not be counted, you can
+          <a href="../open-source/">run your own build</a>, or block the request.
+        </p>
+
+        <h3>7. Feedback, if you send it</h3>
+        <p>
+          The optional feedback panel sends a 1&ndash;5 rating, plus a category, free text and an
+          email address <strong>only where you choose to fill them in</strong>. The email field is
+          blank by default. It is attached as a property on that one event and is never turned into
+          a stored profile.
+        </p>
+
+        <h2>What is stored in your browser</h2>
+
+        <p>
+          The app writes to your browser&rsquo;s own storage so that state survives a reload. This
+          is first-party and local; none of it is transmitted, and it introduces no network requests
+          of its own. HTTP cookies are not used at all.
+        </p>
+
+        <ul>
+          <li>
+            <strong>A handful of small flags</strong> &mdash; whether the feedback prompt has been
+            shown, whether the star prompt has been dismissed, a cached star count. Booleans and
+            counters, no identifiers.
+          </li>
+          <li>
+            <strong>An IndexedDB database</strong> for the resume library and the job tracker: saved
+            resume PDFs with their cached parse, and the job records you track. This is the only
+            place your PDF is persisted, and it is on your disk.
+          </li>
+        </ul>
+
+        <p>
+          Browsers can clear this. Safari in particular clears script-writable storage after seven
+          days without a visit, and any browser may evict under disk pressure. The app asks for
+          persistent storage on first write, but that grant is best-effort, so there is a JSON
+          export in the resume library for taking your own backup. Clearing site data removes
+          everything above.
+        </p>
+
+        <h2>How to verify any of this</h2>
+
+        <p>
+          Do not take the claim on the strength of the sentence. Open your browser&rsquo;s developer
+          tools, switch to the Network tab, and use the app &mdash; drop a resume, edit it, export
+          it. The requests you see are the requests there are. The
+          <a href="https://github.com/offlinecv/OfflineCV" rel="noopener">source is public</a>, and
+          the README&rsquo;s telemetry section documents the same ground in more detail than this
+          page does.
+        </p>
+
+        <p>
+          If you find an egress path this page does not name, that is a bug in the page or the code,
+          and it is worth
+          <a href="https://github.com/offlinecv/OfflineCV/issues" rel="noopener">filing an issue</a>.
+        </p>
+
+        <a class="cta" href="../">Open the resume parser</a>
+      </main>
+
+      <nav class="nav nav--bottom" aria-label="Site">
+        <a href="../">Resume parser</a>
+        <a href="../jd-fit/">JD fit</a>
+        <a href="../jobs/">Find jobs</a>
+        <a href="../how-it-works/">How it works</a>
+        <a href="../faq/">FAQ</a>
+        <a href="../open-source/">Open source</a>
+        <a href="https://github.com/offlinecv/OfflineCV" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </body>
+</html>
