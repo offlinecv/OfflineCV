@@ -74,8 +74,9 @@ export default function JobsApp() {
   // pasting `/jobs/#saved` while ALREADY on `/jobs/` changes only the fragment —
   // same document, no navigation, no re-render — so without this listener the
   // tab would not switch and nothing visible would happen. That is the exact
-  // link `.claude/skills/cover-letter/SKILL.md` (Phase 7) hands a user, and a
-  // user who already has the workbench open is its likeliest reader. The query
+  // link an outside letter producer hands a user when it reports what it wrote
+  // (`docs/cover-letter-contract.md`), and a user who already has the workbench
+  // open is its likeliest reader. The query
   // param needs no equivalent: changing it IS a document navigation, which
   // remounts this component and re-runs the initializer above.
   useEffect(() => {

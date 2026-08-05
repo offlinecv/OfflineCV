@@ -142,7 +142,7 @@ function RewriteLauncher({
         open={open}
         onClose={() => setOpen(false)}
         title="Rewrite full résumé"
-        className="fixed left-1/2 top-1/2 w-[min(28rem,90vw)] -translate-x-1/2 -translate-y-1/2"
+        className="w-[min(28rem,90vw)]"
       >
         <div className="flex flex-col gap-4">
           <RewriteSteeringBox controller={controller} />

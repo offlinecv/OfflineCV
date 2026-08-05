@@ -61,6 +61,24 @@ function clickButton(text: string) {
   return button;
 }
 
+/** Render the dialog open, with the two authoring callbacks stubbed. Every
+ *  test here is about DISPLAY — the plain-text body, the draft picker, the
+ *  copy result — so `onEdit`/`onCompose` are noise at each call site, and
+ *  spelling them out inline made two tests identical enough to register as a
+ *  clone. `JobLetterIndicator.test.tsx` owns what those callbacks actually
+ *  do. */
+function renderDialog(letters: readonly LetterRecord[]) {
+  dom.render(
+    <LetterRevealDialog
+      open
+      onClose={() => {}}
+      onEdit={() => {}}
+      onCompose={() => {}}
+      letters={letters}
+    />,
+  );
+}
+
 describe("LetterRevealDialog", () => {
   it("renders the body as plain text — literal markdown syntax survives unrendered", () => {
     // A producer's prose could contain characters that LOOK like markdown by
@@ -68,18 +86,14 @@ describe("LetterRevealDialog", () => {
     const withAsterisks = letter({
       body: "Dear hiring team,\n\nI led the **checkout** rewrite.",
     });
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[withAsterisks]} />,
-    );
+    renderDialog([withAsterisks]);
     expect(dom.container.textContent).toContain("I led the **checkout** rewrite.");
     expect(dom.container.querySelector("strong, b, em, i")).toBeNull();
   });
 
   it("preserves the paragraph break between the salutation and the body", () => {
     const body = "Dear hiring team,\n\nI am applying for the Staff Engineer role.";
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[letter({ body })]} />,
-    );
+    renderDialog([letter({ body })]);
     // `whitespace-pre-wrap` is what preserves this — assert the literal `\n\n`
     // survives into the rendered text node rather than collapsing to a space.
     const box = dom.container.querySelector(".whitespace-pre-wrap");
@@ -87,9 +101,7 @@ describe("LetterRevealDialog", () => {
   });
 
   it("shows only one draft picker entry — none — when there is a single letter", () => {
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[letter({})]} />,
-    );
+    renderDialog([letter({})]);
     expect(dom.container.querySelector('[role="group"]')).toBeNull();
   });
 
@@ -108,9 +120,7 @@ describe("LetterRevealDialog", () => {
     });
     // Caller (`useJobLetters`) hands these in most-recently-updated-first
     // order already — this component trusts that order for its default pick.
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[short, warm]} />,
-    );
+    renderDialog([short, warm]);
     expect(dom.container.querySelector(".whitespace-pre-wrap")?.textContent).toBe(
       "Short draft body.",
     );
@@ -127,9 +137,7 @@ describe("LetterRevealDialog", () => {
 
     const warm = letter({ id: "l1", label: "Warm open", updatedAt: 1, body: "Warm body" });
     const short = letter({ id: "l2", label: "Short version", updatedAt: 2, body: "Short body" });
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[short, warm]} />,
-    );
+    renderDialog([short, warm]);
 
     clickButton("Warm open");
     await act(async () => {
@@ -146,9 +154,7 @@ describe("LetterRevealDialog", () => {
     // `navigator.clipboard`, and optional-chaining the call would have awaited
     // `undefined` and reported a copy that never happened.
     stubClipboard(undefined);
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[letter({})]} />,
-    );
+    renderDialog([letter({})]);
 
     await act(async () => {
       clickButton("Copy to clipboard");
@@ -165,9 +171,7 @@ describe("LetterRevealDialog", () => {
 
   it("says the copy FAILED when writeText rejects", async () => {
     stubClipboard({ writeText: vi.fn(() => Promise.reject(new Error("denied"))) });
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[letter({})]} />,
-    );
+    renderDialog([letter({})]);
 
     await act(async () => {
       clickButton("Copy to clipboard");
@@ -182,9 +186,7 @@ describe("LetterRevealDialog", () => {
     stubClipboard(undefined);
     const warm = letter({ id: "l1", label: "Warm open", updatedAt: 1 });
     const short = letter({ id: "l2", label: "Short version", updatedAt: 2 });
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[short, warm]} />,
-    );
+    renderDialog([short, warm]);
 
     await act(async () => {
       clickButton("Copy to clipboard");
@@ -200,9 +202,7 @@ describe("LetterRevealDialog", () => {
     // `max-h-96` scrolls on any letter of normal length, and the only other
     // focusables in this modal are the draft chips and Copy — so the region
     // has to take focus itself or a keyboard user cannot scroll it.
-    dom.render(
-      <LetterRevealDialog open onClose={() => {}} letters={[letter({})]} />,
-    );
+    renderDialog([letter({})]);
     const body = dom.container.querySelector(".overflow-y-auto");
     expect(body?.getAttribute("tabindex")).toBe("0");
     expect(body?.getAttribute("role")).toBe("region");
@@ -210,17 +210,9 @@ describe("LetterRevealDialog", () => {
   });
 
   it("names the producer when the letter carries one", () => {
-    dom.render(
-      <LetterRevealDialog
-        open
-        onClose={() => {}}
-        letters={[
-          letter({
-            producer: { contract: 1, producer: "claude-code-letter-skill" },
-          }),
-        ]}
-      />,
-    );
+    renderDialog([
+      letter({ producer: { contract: 1, producer: "claude-code-letter-skill" } }),
+    ]);
     expect(dom.container.textContent).toContain("claude-code-letter-skill");
   });
 });

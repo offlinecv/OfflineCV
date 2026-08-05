@@ -85,8 +85,11 @@ interface JobTrackerEntryProps {
    *  description → "Not rated", which is not the same state as 0 stars. */
   rating?: JobRating;
   /** This job's letters, most-recently-updated first (#715). Empty/omitted
-   *  renders no indicator — see `JobLetterIndicator`. */
+   *  renders the "write one" state rather than nothing — see
+   *  `JobLetterIndicator`. */
   letters?: readonly LetterRecord[];
+  /** Re-read the letter store after this row writes one. */
+  onLettersChanged?: () => Promise<void> | void;
   /** Other saved jobs that look like the same posting (#746). Rendered by the
    *  sibling `JobDuplicateNotice`, and only when both handlers below come with
    *  it — a merge offer with nowhere to send the click would be a button that
@@ -117,6 +120,7 @@ export function JobTrackerEntry({
   rated = false,
   rating,
   letters,
+  onLettersChanged,
   duplicates,
   onMerge,
   onDismissDuplicate,
@@ -151,7 +155,11 @@ export function JobTrackerEntry({
             <StatusBadge tone={jobStatusTone(job.status)}>
               {jobStatusLabel(job.status)}
             </StatusBadge>
-            <JobLetterIndicator letters={letters} />
+            <JobLetterIndicator
+              jobId={job.id}
+              letters={letters}
+              onSaved={onLettersChanged}
+            />
           </div>
           {job.origin && (
             <span className="text-xs text-content-muted">{ORIGIN_PHRASE[job.origin]}</span>

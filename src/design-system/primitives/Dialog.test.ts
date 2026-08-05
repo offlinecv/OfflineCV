@@ -79,6 +79,24 @@ describe("Dialog", () => {
     expect(html).toContain("bg-surface-card");
   });
 
+  it("carries the auto margin that centers it, on every dialog", () => {
+    // A layout assertion this env cannot make directly — `renderToStaticMarkup`
+    // computes no boxes — so it asserts the MECHANISM instead. Tailwind's
+    // preflight opens `*, ::before, ::after, ::backdrop { margin: 0 }`, which
+    // beats the UA sheet's `dialog { margin: auto }` and pins every dialog to
+    // the top-left corner. `m-auto` in the owned chrome is what puts it back;
+    // four callers had each worked around its absence locally before it was
+    // fixed here. Losing it again is silent — nothing throws, every test still
+    // passes, and the whole app's modals move to the corner.
+    const html = render({
+      open: true,
+      onClose: () => {},
+      ariaLabel: "x",
+      children: createElement("p", null, "body"),
+    });
+    expect(html).toMatch(/class="[^"]*\bm-auto\b/);
+  });
+
   it("includes a backdrop-styling class so the overlay theme follows tokens, not raw palette", () => {
     const html = render({
       open: true,

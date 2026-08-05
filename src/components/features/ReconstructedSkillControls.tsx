@@ -382,7 +382,7 @@ export function DeleteCategoryButton({
         open={open}
         onClose={() => setOpen(false)}
         title={`Delete "${label}"?`}
-        className="fixed left-1/2 top-1/2 w-[min(24rem,90vw)] -translate-x-1/2 -translate-y-1/2"
+        className="w-[min(24rem,90vw)]"
       >
         <p className="text-sm text-content-secondary">
           This removes the category and all the skills in it. To keep the skills,
