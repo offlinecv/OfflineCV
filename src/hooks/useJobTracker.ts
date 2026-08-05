@@ -22,6 +22,7 @@ import {
   removeJob,
   mergeJobs,
   createTrackedJobFromMatch,
+  archiveInterestedOlderThan,
   type NewJobInput,
   type JobPatch,
 } from "../lib/job-tracker.ts";
@@ -32,6 +33,7 @@ import {
 } from "../lib/storage/index.ts";
 import { estimateStorageUsage } from "../lib/resume-library.ts";
 import type { JobRecord, JobStatus } from "../lib/storage/index.ts";
+import { useLibraryChanges } from "./useLibraryChanges.ts";
 
 export interface JobTracker {
   jobs: JobRecord[];
@@ -59,6 +61,12 @@ export interface JobTracker {
   ) => Promise<string>;
   /** Download the full storage export as a JSON backup file. */
   exportBackup: () => Promise<void>;
+  /** Bulk-archive sweep (#759): archives every Interested job in the CURRENT
+   *  `jobs` list whose `createdAt` is more than `cutoffDays` days old, and
+   *  returns the count archived. Reads the same `jobs` array a caller's own
+   *  `jobsToArchive` preview would see, so the confirmed count and the
+   *  archived count can never disagree. */
+  archiveOlderThan: (cutoffDays: number) => Promise<number>;
   refresh: () => Promise<void>;
 }
 
@@ -82,6 +90,12 @@ export function useJobTracker(): JobTracker {
     void refresh();
     void isStoragePersisted().then(setPersisted);
   }, [refresh]);
+
+  // Re-read on a `jobs` write this hook did not itself make (#760) — another
+  // tab, a restored backup, an out-of-tree producer writing through
+  // `putRecord`. Own mutations below already call `refresh()` directly and
+  // never trigger this (`onLibraryChange` never delivers a tab's own post).
+  useLibraryChanges("jobs", refresh);
 
   /** Ask for durable storage on the first write and reflect the grant, so the
    *  UI can drop the eviction warning — mirrors `useResumeLibrary.save`. */
@@ -160,6 +174,15 @@ export function useJobTracker(): JobTracker {
 
   const exportBackup = useCallback(() => downloadStorageBackup(), []);
 
+  const archiveOlderThan = useCallback(
+    async (cutoffDays: number) => {
+      const count = await archiveInterestedOlderThan(jobs, cutoffDays);
+      await refresh();
+      return count;
+    },
+    [jobs, refresh],
+  );
+
   return {
     jobs,
     ready,
@@ -174,6 +197,7 @@ export function useJobTracker(): JobTracker {
     merge,
     saveFromMatch,
     exportBackup,
+    archiveOlderThan,
     refresh,
   };
 }

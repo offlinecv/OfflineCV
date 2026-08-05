@@ -29,7 +29,14 @@ function parsedFor(name: string): HeuristicParsedResume {
 }
 
 function entry(id: string, savedAt: number): ResumeLibraryEntry {
-  return { id, filename: `${id}.pdf`, savedAt, scoreOverall: 80, sourceKind: "pdf" };
+  return {
+    id,
+    filename: `${id}.pdf`,
+    savedAt,
+    scoreOverall: 80,
+    sourceKind: "pdf",
+    hasCachedParse: true,
+  };
 }
 
 /** Just enough of `CascadeResult`/`LoadedResume` for the hook's one read

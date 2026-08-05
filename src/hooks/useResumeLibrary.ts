@@ -31,6 +31,7 @@ import {
 import { clearResumeLink, reconcileResumeLinks } from "../lib/job-tracker.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import { useLibraryChanges } from "./useLibraryChanges.ts";
 
 export interface SaveResumeParams {
   id?: string;
@@ -52,6 +53,13 @@ export interface ResumeLibrary {
   usageBytes: number | null;
   save: (params: SaveResumeParams) => Promise<string>;
   load: (id: string) => Promise<LoadedResume | undefined>;
+  /** Message from the most recent failed `load()`, or null. A fresh `load()`
+   *  call clears it before attempting, so a stale error never outlives the
+   *  failure that produced it — see {@link load}. The caller (`App.tsx`) is
+   *  responsible for setting it when `load()` resolves `undefined`; this hook
+   *  only owns the channel and its clearing. */
+  loadError: string | null;
+  setLoadError: (message: string | null) => void;
   rename: (id: string, filename: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   /** Download the full storage export as a JSON backup file. */
@@ -70,6 +78,7 @@ export function useResumeLibrary(): ResumeLibrary {
   const [ready, setReady] = useState(false);
   const [persisted, setPersisted] = useState(false);
   const [usageBytes, setUsageBytes] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [list, usage] = await Promise.all([
@@ -86,6 +95,12 @@ export function useResumeLibrary(): ResumeLibrary {
     void isStoragePersisted().then(setPersisted);
   }, [refresh]);
 
+  // Re-read on a `resumes` write this hook did not itself make (#760) —
+  // another tab, a restored backup, an out-of-tree producer writing through
+  // `putRecord`. Own mutations below already call `refresh()` directly and
+  // never trigger this (`onLibraryChange` never delivers a tab's own post).
+  useLibraryChanges("resumes", refresh);
+
   const save = useCallback(
     async (params: SaveResumeParams) => {
       // Ask for durable storage on first save; reflect the grant so the UI can
@@ -99,7 +114,14 @@ export function useResumeLibrary(): ResumeLibrary {
     [refresh],
   );
 
-  const load = useCallback((id: string) => loadResumeFromLibrary(id), []);
+  const load = useCallback((id: string) => {
+    // A fresh attempt supersedes whatever the last one left behind — clearing
+    // here (rather than only on success) covers both "a new attempt" and "a
+    // successful load" in one place: on success nothing re-sets it, so it
+    // stays cleared; on failure `App.tsx` sets it after this resolves.
+    setLoadError(null);
+    return loadResumeFromLibrary(id);
+  }, []);
 
   const rename = useCallback(
     async (id: string, filename: string) => {
@@ -178,6 +200,8 @@ export function useResumeLibrary(): ResumeLibrary {
     usageBytes,
     save,
     load,
+    loadError,
+    setLoadError,
     rename,
     remove,
     exportBackup,

@@ -89,7 +89,7 @@ describe("resume-library: save + list", () => {
     const list = await listLibrary();
     expect(list).toHaveLength(2);
     expect(list.map((e) => e.filename)).toEqual(["tailored.pdf", "general.pdf"]);
-    expect(list[0]).toMatchObject({ scoreOverall: 84, sourceKind: "pdf" });
+    expect(list[0]).toMatchObject({ scoreOverall: 84, sourceKind: "pdf", hasCachedParse: true });
   });
 });
 
@@ -236,6 +236,15 @@ describe("resume-library: record with no cached parse (#693 producer write)", ()
     );
     expect(await loadResumeFromLibrary(rec.id)).toBeUndefined();
     expect(runCascade).not.toHaveBeenCalled();
+  });
+
+  it("listLibrary reports hasCachedParse: false and does not claim a score for it (#757)", async () => {
+    await producerWritten(new Blob([bytes().buffer], { type: "application/pdf" }));
+    const [entry] = await listLibrary();
+    expect(entry.hasCachedParse).toBe(false);
+    // `scoreOverall` is a placeholder here, not a genuine zero — the UI must
+    // read `hasCachedParse` rather than trust this number on its own.
+    expect(entry.scoreOverall).toBe(0);
   });
 });
 

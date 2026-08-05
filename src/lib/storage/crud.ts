@@ -10,7 +10,100 @@
 
 import type { IDBPDatabase } from "idb";
 import { getDB, UPDATED_AT_INDEX } from "./db.ts";
+import { postLibraryChange } from "./library-channel.ts";
 import type { StoreName, StoredRecord, SyncableStoreName } from "./types.ts";
+
+/**
+ * Emit-side coalescing scope for a bulk write (#760). While at least one scope
+ * is open, a write records which store it touched instead of posting a change
+ * signal immediately; one message per touched store goes out when the LAST
+ * open scope closes, regardless of how many writes happened inside.
+ *
+ * This exists for `importAll` in `backup.ts` and `archiveJobs` in `jobs.ts`
+ * (#759) — both per-record write loops that would otherwise post one message
+ * per record and drive one full re-read per message in every other open tab;
+ * the acceptance bar is a bounded message count for a bulk write, not a
+ * debounce on the receiving side (see `backup.ts` for the reasoning).
+ *
+ * Deliberately not exported past this directory (not part of the barrel in
+ * `index.ts`): an outside producer — the browser extension — writes through
+ * `putRecord` directly and gets the unbatched, per-call behaviour, which is
+ * correct for it too. It isn't running a bulk loop like the two callers
+ * above, so there is nothing here for it to opt into. A future bulk write
+ * from OUTSIDE `src/lib/storage/` belongs beside these two — as a named
+ * primitive in its own store module — rather than as a barrel export of this
+ * seam itself.
+ */
+const batchedStores = new Set<StoreName>();
+
+/**
+ * How many `runBatchedWrites` scopes are open right now.
+ *
+ * A COUNT rather than a nullable "am I the outermost call" flag, and the
+ * difference is the whole correctness of this seam. A flag only distinguishes
+ * genuine call-stack nesting; two independent calls whose lifetimes merely
+ * OVERLAP — each `await`ing its own row loop, interleaved by the event loop —
+ * both look outermost to a flag, so whichever finished first would close the
+ * scope and every subsequent write of the still-running call would fall
+ * through to the unbatched branch and post one message per record again. That
+ * is the exact defect #760's bounded-message-count bar exists to prevent,
+ * reached by two concurrent bulk writers instead of one looping caller.
+ */
+let openScopes = 0;
+
+/**
+ * Run `write` with change signals coalesced — see the module note above.
+ *
+ * Safe under BOTH shapes a second call can take:
+ *
+ *  - **Nested** (a batched caller calling another batched function) — the
+ *    inner scope's close leaves the count above zero, so it posts nothing and
+ *    the outer close carries its stores out.
+ *  - **Concurrent** (two independent calls overlapping in time) — the same
+ *    arithmetic covers it, because the count does not care which call is
+ *    which. Both calls' touched stores accumulate into one set and flush
+ *    together when the LATER one closes.
+ *
+ * That second case defers the earlier call's signal until the later call
+ * finishes, which is more coalescing than a per-call scope would do, and is
+ * sound because of what the message is: `library-channel.ts` carries only a
+ * store name and means "re-read this store" — never "here is what changed",
+ * and never an ordering token. Delivering one signal after both writers are
+ * done therefore makes every subscriber read the state that includes both,
+ * which is strictly fresher than what an earlier flush could have shown. The
+ * delay is bounded by the longer of the two operations, which the subscriber
+ * would have waited out anyway; and the tab that made the writes does not
+ * depend on the message at all (it refreshes directly, and the channel
+ * self-excludes — see `library-channel.ts`).
+ *
+ * The decrement is in a `finally` and precedes the flush, so a write that
+ * THROWS cannot leave the count above zero and wedge every later emit into a
+ * scope that never closes. The stores accumulated before the throw are still
+ * flushed on the way out, which is correct: writes that did land are changes
+ * other tabs must be told about, whether or not the caller finished.
+ */
+export async function runBatchedWrites<T>(write: () => Promise<T>): Promise<T> {
+  openScopes += 1;
+  try {
+    return await write();
+  } finally {
+    openScopes -= 1;
+    if (openScopes === 0) {
+      // Snapshot and clear BEFORE posting: `postLibraryChange` is synchronous
+      // and re-entrant in principle, and a listener that wrote back into the
+      // set being iterated would otherwise lose or re-post a store.
+      const touched = [...batchedStores];
+      batchedStores.clear();
+      for (const store of touched) postLibraryChange(store);
+    }
+  }
+}
+
+/** Post now, or record for the open `runBatchedWrites` scopes to flush. */
+function emitChange(store: StoreName): void {
+  if (openScopes > 0) batchedStores.add(store);
+  else postLibraryChange(store);
+}
 
 /**
  * The store-typed `getDB()` keys `get`/`put` to a specific store's value type,
@@ -64,6 +157,7 @@ export async function putRecord<T extends StoredRecord>(
         : now,
   } as T;
   await db.put(store, written);
+  emitChange(store);
   return written;
 }
 
@@ -149,6 +243,12 @@ export async function listRecordsUpdatedSince<T extends StoredRecord>(
  * This is also why it does not take `putRecord`'s `touch: false`: a deletion is
  * a user action, and floating it to the top of a most-recently-updated-first
  * list is correct — the row is about to stop being rendered anyway.
+ *
+ * Emits a change signal (#760) on the same footing as `putRecord` — a
+ * tombstone is a write through this same funnel, and skipping it would leave
+ * a deleted job or letter visible in every other open tab. Only when the
+ * tombstone is actually written; the early `return false` above is a no-op
+ * and posts nothing, matching "a read posts none".
  */
 export async function softDeleteRecord(
   store: StoreName,
@@ -159,6 +259,7 @@ export async function softDeleteRecord(
   if (existing === undefined || !isLive(existing)) return false;
   const now = Date.now();
   await db.put(store, { ...existing, deletedAt: now, updatedAt: now });
+  emitChange(store);
   return true;
 }
 
@@ -176,10 +277,12 @@ export async function deleteRecord(
 ): Promise<void> {
   const db = await looseDB();
   await db.delete(store, id);
+  emitChange(store);
 }
 
 /** Wipe every record from a store. Used by import (replace mode) and tests. */
 export async function clearStore(store: StoreName): Promise<void> {
   const db = await looseDB();
   await db.clear(store);
+  emitChange(store);
 }

@@ -20,6 +20,7 @@ import type { JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import type { JobRecord, LetterRecord } from "../../lib/storage/index.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
 import type { JobDuplicateSuggestion } from "../../hooks/useJobDuplicates.ts";
+import { findRepostClusters } from "../../lib/job-repost-clusters.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -65,6 +66,7 @@ function makeTracker(jobs: JobRecord[]): Tracker {
     merge: vi.fn(async () => {}),
     saveFromMatch: vi.fn(async () => "new-id"),
     exportBackup: vi.fn(async () => {}),
+    archiveOlderThan: vi.fn(async () => 0),
     refresh: vi.fn(async () => {}),
   };
 }
@@ -112,6 +114,18 @@ describe("JobTracker", () => {
     );
     act(() => add?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     expect(tracker.create).toHaveBeenCalledWith({ title: "New job" });
+  });
+
+  it("renders the bulk-archive control in the header (#759)", () => {
+    // Deep interaction — cutoff input, preview count, confirm — lives in
+    // JobArchiveSweepDialog.test.tsx; this only checks JobTracker wires
+    // `tracker.jobs` / `tracker.archiveOlderThan` through to it at all.
+    const tracker = makeTracker([job({ title: "SWE" })]);
+    act(() => root.render(<JobTracker tracker={tracker} />));
+    const trigger = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Archive old jobs",
+    );
+    expect(trigger).toBeDefined();
   });
 
   it("degrades a stale resume link to 'not linked' instead of a dangling id", () => {
@@ -880,5 +894,87 @@ describe("JobTracker: the duplicate affordance never merges on its own (#746)", 
     const { tracker } = pairedTracker();
     act(() => root.render(<JobTracker tracker={tracker} />));
     expect(container.textContent).not.toContain("Looks like the same posting");
+  });
+});
+
+describe("JobTracker: a repost cluster states the churn instead of offering merges (#754)", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const JUN_15 = Date.UTC(2026, 5, 15);
+
+  /** Six records of one role at one company, first and last 49 days apart, in
+   *  two different status buckets — the shape the issue measured. Every name is
+   *  invented. */
+  function relisted(): JobRecord[] {
+    return Array.from({ length: 6 }, (_unused, i) =>
+      job({
+        id: `r${i}`,
+        title: "Head of Engineering",
+        company: "Bellhaven Talent",
+        status: i === 5 ? "archived" : "interested",
+        createdAt: JUN_15 + Math.round((49 * DAY * i) / 5),
+        updatedAt: JUN_15 + Math.round((49 * DAY * i) / 5),
+      }),
+    );
+  }
+
+  function mount(jobs: JobRecord[]) {
+    const tracker = makeTracker(jobs);
+    const clusters = findRepostClusters(jobs);
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          repostClusters={clusters}
+          // The sweep the tracker's own hook runs, done here because this
+          // component is tracker-injected: with the clusters in hand every
+          // pairing in the group is suppressed, so the map is empty.
+          duplicatesByJobId={new Map()}
+          onDismissDuplicate={vi.fn()}
+        />,
+      ),
+    );
+    return tracker;
+  }
+
+  it("renders ONE repost row for the group, stating the count and the span", () => {
+    mount(relisted());
+    const rows = [...container.querySelectorAll("li")].filter((li) =>
+      li.textContent?.includes("Reposted"),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("Reposted 6×");
+    expect(rows[0].textContent).toContain("Head of Engineering");
+    expect(rows[0].textContent).toContain("Bellhaven Talent");
+    expect(rows[0].textContent).toContain("49 days apart");
+  });
+
+  it("offers no merge anywhere in the group, and merges nothing by rendering", () => {
+    const tracker = mount(relisted());
+    const merge = [...container.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Merge into this one",
+    );
+    expect(merge).toEqual([]);
+    expect(tracker.merge).not.toHaveBeenCalled();
+  });
+
+  it("still lists all six records in their own status sections", () => {
+    // The statement collapses the OFFER, not the library: a cluster spans
+    // status buckets, so collapsing the rows would strand records out of the
+    // section they were filed in and make the header counts lie.
+    mount(relisted());
+    const header = container.querySelector("header")?.textContent;
+    expect(header).toContain("6");
+    expect(container.textContent).toContain("Interested · 5");
+    expect(container.textContent).toContain("Archived · 1");
+  });
+
+  it("renders nothing for a library with no re-listed role", () => {
+    const jobs = [
+      job({ id: "a", title: "Head of Engineering", createdAt: JUN_15 }),
+      job({ id: "b", title: "Head of Engineering", createdAt: JUN_15 + 3 * DAY }),
+    ];
+    expect(findRepostClusters(jobs)).toEqual([]);
+    mount(jobs);
+    expect(container.textContent).not.toContain("Reposted");
   });
 });

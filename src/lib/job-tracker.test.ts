@@ -28,8 +28,11 @@ import {
   createTrackedJobFromMatch,
   deriveJobTitleFromJd,
   mergeJobs,
+  archiveInterestedOlderThan,
 } from "./job-tracker.ts";
-import { getRecord } from "./storage/crud.ts";
+import { isSweepableBucket, jobsToArchive } from "./job-archive-sweep.ts";
+import { archiveJobs } from "./storage/jobs.ts";
+import { getRecord, putRecord } from "./storage/crud.ts";
 import { saveLetter, lettersForJob } from "./storage/letters.ts";
 import type { JobRecord } from "./storage/types.ts";
 
@@ -194,6 +197,176 @@ describe("job-tracker: link cleanup is housekeeping, not a user edit", () => {
     await new Promise((r) => setTimeout(r, 2));
     const edited = await updateJob(job.id, { notes: "referred by Dana" });
     expect(edited.updatedAt).toBeGreaterThan(before);
+  });
+});
+
+describe("job-tracker: bulk-archive sweep (#759)", () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const NOW = Date.now();
+
+  /** Writes a job straight through `putRecord` with an explicit `createdAt`
+   *  — `createJob`/`updateJob` can't backdate one (an update always keeps the
+   *  EXISTING row's `createdAt`, by `putRecord`'s own contract), and this
+   *  sweep is dated entirely off that field. */
+  function plantJob(over: Partial<JobRecord> & { createdAt: number }): Promise<JobRecord> {
+    return putRecord<JobRecord>("jobs", {
+      id: crypto.randomUUID(),
+      title: "SWE",
+      company: "Acme",
+      status: "interested",
+      ...over,
+    });
+  }
+
+  it("archives an Interested job past the cutoff and returns the swept count", async () => {
+    const old = await plantJob({ title: "Old", createdAt: NOW - 60 * DAY_MS });
+    const fresh = await plantJob({ title: "Fresh", createdAt: NOW - 5 * DAY_MS });
+
+    const count = await archiveInterestedOlderThan(await listJobs(), 30, NOW);
+
+    expect(count).toBe(1);
+    expect((await getJobById(old.id))?.status).toBe("archived");
+    expect((await getJobById(fresh.id))?.status).toBe("interested");
+  });
+
+  it("never touches an Applied job, however old — the criterion #759 leads with", async () => {
+    const applied = await plantJob({
+      title: "Already applied",
+      status: "applied",
+      createdAt: NOW - 400 * DAY_MS,
+    });
+
+    const count = await archiveInterestedOlderThan(await listJobs(), 30, NOW);
+
+    expect(count).toBe(0);
+    expect((await getJobById(applied.id))?.status).toBe("applied");
+  });
+
+  it("SPARES a row that stopped being Interested after the preview was computed", async () => {
+    // The confirm dialog promises "Applied, Interviewing, Offer, and Rejected
+    // jobs are never touched." Selecting the ids and writing them are two
+    // different moments, and the sweep is a sequential awaited loop over as
+    // many as ~290 rows — so another tab, the browser extension writing
+    // through `putRecord`, or a sync can move a row out of Interested while
+    // the sweep is still working through the list. Before the write re-checked
+    // the bucket, that row was archived anyway and the hand-built pipeline
+    // state was gone.
+    //
+    // The change is planted between the preview and the call, which is
+    // exactly the window: `jobs` is the array the user was counting, and the
+    // store no longer agrees with it.
+    const sweptAway = await plantJob({ title: "Genuinely old", createdAt: NOW - 60 * DAY_MS });
+    const movedOn = await plantJob({ title: "Applied elsewhere", createdAt: NOW - 60 * DAY_MS });
+
+    const jobs = await listJobs();
+    expect(jobsToArchive(jobs, 30, NOW)).toHaveLength(2);
+
+    await setJobStatus(movedOn.id, "applied");
+    const beforeSweep = await getJobById(movedOn.id);
+
+    const count = await archiveInterestedOlderThan(jobs, 30, NOW);
+
+    // Untouched — not archived, and not even re-stamped.
+    const after = await getJobById(movedOn.id);
+    expect(after?.status).toBe("applied");
+    expect(after?.updatedAt).toBe(beforeSweep?.updatedAt);
+    // The other row was still eligible and still swept: the guard skips a row,
+    // it does not abandon the sweep.
+    expect((await getJobById(sweptAway.id))?.status).toBe("archived");
+    // And the count reports writes that happened, not rows that were listed —
+    // so the dialog's "Archived N jobs." stays true. This is the one case
+    // where it may sit below the preview count.
+    expect(count).toBe(1);
+  });
+
+  it("spares a row moved out of Interested WHILE the loop is running, not just before it", async () => {
+    // The same defect one step further in: the flip lands after the sweep has
+    // already written an earlier row, so it cannot be explained away as
+    // "stale input". `archiveJobs` re-reads and re-judges each row
+    // immediately before that row's own write, so the loop sees it.
+    //
+    // The flip is issued from `archiveInterestedOlderThan`'s own predicate
+    // call for the FIRST row and left un-awaited, so it is queued behind that
+    // row's write and settles before the second row is re-read. If that
+    // ordering ever changed, the assertions below fail loudly rather than
+    // passing for the wrong reason.
+    const first = await plantJob({ title: "First", createdAt: NOW - 60 * DAY_MS });
+    const second = await plantJob({ title: "Second", createdAt: NOW - 60 * DAY_MS });
+
+    const jobs = await listJobs();
+    expect(jobsToArchive(jobs, 30, NOW)).toHaveLength(2);
+
+    let flip: Promise<unknown> | undefined;
+    const archived = await archiveJobs(
+      [first.id, second.id],
+      {
+        stillEligible: (job) => {
+          if (job.id === first.id && flip === undefined) {
+            flip = setJobStatus(second.id, "interviewing");
+          }
+          return isSweepableBucket(job);
+        },
+      },
+    );
+    await flip;
+
+    expect(archived.map((job) => job.id)).toEqual([first.id]);
+    expect((await getJobById(first.id))?.status).toBe("archived");
+    expect((await getJobById(second.id))?.status).toBe("interviewing");
+  });
+
+  it("the swept count matches jobsToArchive's preview count when nothing else writes", async () => {
+    // The #759 agreement, stated precisely rather than loosely. It is about
+    // POLICY: preview and write run one predicate over one array, so the
+    // sweep can never select a row on a rule the preview did not apply, and
+    // no cutoff is re-derived at write time.
+    //
+    // It was never a promise that the two numbers are equal come what may,
+    // and since the write re-checks each row's bucket they can legitimately
+    // differ — downward, and only when another writer moves a row out of
+    // Interested mid-sweep (see the two tests above). This case is the
+    // undisturbed one, which is why nothing else touches the store here.
+    await plantJob({ title: "Sweep me", createdAt: NOW - 90 * DAY_MS });
+    await plantJob({ title: "Keep me", createdAt: NOW - 1 * DAY_MS });
+    await plantJob({
+      title: "Pipeline",
+      status: "interviewing",
+      createdAt: NOW - 900 * DAY_MS,
+    });
+
+    const jobs = await listJobs();
+    const preview = jobsToArchive(jobs, 30, NOW);
+    const count = await archiveInterestedOlderThan(jobs, 30, NOW);
+
+    expect(count).toBe(preview.length);
+    expect(count).toBe(1);
+  });
+
+  it("a cutoff nothing matches archives and writes nothing", async () => {
+    const fresh = await plantJob({ title: "Fresh", createdAt: NOW - 1 * DAY_MS });
+    const before = await getJobById(fresh.id);
+
+    const count = await archiveInterestedOlderThan(await listJobs(), 30, NOW);
+
+    expect(count).toBe(0);
+    const after = await getJobById(fresh.id);
+    expect(after?.status).toBe("interested");
+    expect(after?.updatedAt).toBe(before?.updatedAt);
+  });
+
+  it("overwrites a synced saved/scouted status to the literal archived — one-way (#744)", async () => {
+    const scouted = await plantJob({
+      title: "From a job alert",
+      status: "scouted" as JobRecord["status"],
+      createdAt: NOW - 60 * DAY_MS,
+    });
+
+    const count = await archiveInterestedOlderThan(await listJobs(), 30, NOW);
+
+    expect(count).toBe(1);
+    // The producer's own vocabulary ("scouted") is gone — this is the
+    // documented one-way write, not a bug.
+    expect((await getJobById(scouted.id))?.status).toBe("archived");
   });
 });
 

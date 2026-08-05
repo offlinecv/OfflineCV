@@ -36,11 +36,26 @@
  * a title is edited. Nothing here merges anything; the row's notice offers, and
  * `tracker.merge` only ever runs from a click on it.
  *
+ * Repost clusters (#754): a third derived-on-view sweep, `useJobRepostClusters`,
+ * over the same `tracker.jobs`. It feeds two things — the `JobRepostClusterList`
+ * statement above the sections, and `useJobDuplicates`, which withholds the
+ * merge offer for pairings inside a cluster. The ORDER of those two hook calls
+ * is load-bearing: the clusters must exist before the duplicate sweep can
+ * suppress against them. One role a company has re-listed six times is not five
+ * redundant records, and offering thirty merges on it would have destroyed the
+ * churn signal a click at a time.
+ *
  * Buckets, not raw statuses (#744): sections key on `jobStatusBucket(status)`,
  * so a synced record's `saved` / `scouted` / `shared` share the one Interested
  * section instead of splitting one pipeline stage into four. That mapping is
  * strictly a VIEW concern — this surface never writes a normalised status back
  * over what a producer stored.
+ *
+ * Bulk-archive sweep (#759): `JobArchiveSweepDialog` owns the whole feature —
+ * trigger, cutoff input, live preview count, confirm, and the done state — as
+ * its own sibling file, so this header only wires it to `tracker.jobs` and
+ * `tracker.archiveOlderThan`. Unlike the three sweeps above, this ONE writes:
+ * the dialog's own docblock covers why that write is safe.
  */
 
 import { useMemo } from "react";
@@ -51,6 +66,8 @@ import type { JobRecord, LetterRecord } from "../../lib/storage/index.ts";
 import { jobStatusBucket } from "../../lib/job-status-bucket.ts";
 import { JobTrackerEntry, type LinkableResume } from "./JobTrackerEntry.tsx";
 import { JobTrackerStatusGroup, isCollapsedByDefault } from "./JobTrackerStatusGroup.tsx";
+import { JobRepostClusterList } from "./JobRepostClusterList.tsx";
+import { JobArchiveSweepDialog } from "./JobArchiveSweepDialog.tsx";
 import { useJobTracker, type JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import { useSavedJobRatings } from "../../hooks/useSavedJobRatings.ts";
 import { useJobLetters } from "../../hooks/useJobLetters.ts";
@@ -58,6 +75,8 @@ import {
   useJobDuplicates,
   type JobDuplicateSuggestion,
 } from "../../hooks/useJobDuplicates.ts";
+import { useJobRepostClusters } from "../../hooks/useJobRepostClusters.ts";
+import type { JobRepostCluster } from "../../lib/job-repost-clusters.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
 
@@ -97,6 +116,12 @@ interface JobTrackerProps {
   /** "Not the same" — suppress one pairing durably. Required alongside
    *  `duplicatesByJobId` for either to reach a row. */
   onDismissDuplicate?: (a: string, b: string) => void;
+  /** Roles this library holds more than one record of, spread over more than
+   *  `REPOST_SPAN_DAYS` (#754) — `useJobRepostClusters`' shape. Stated once each
+   *  above the sections; the member records still render in their own status
+   *  sections. Omitted renders no statement, which is what a caller that has not
+   *  run the sweep should get. */
+  repostClusters?: readonly JobRepostCluster[];
 }
 
 /**
@@ -116,6 +141,7 @@ export function JobTrackerSection({
   | "lettersById"
   | "duplicatesByJobId"
   | "onDismissDuplicate"
+  | "repostClusters"
 > & {
   /** The résumé saved jobs are rated against — the `/` handoff `JobsApp` holds.
    *  Must be referentially stable; `useSavedJobRatings` deps on it directly. */
@@ -124,7 +150,9 @@ export function JobTrackerSection({
   const tracker = useJobTracker();
   const ratings = useSavedJobRatings(tracker.jobs, parsed);
   const letters = useJobLetters();
-  const duplicates = useJobDuplicates(tracker.jobs);
+  // Before `useJobDuplicates`, which suppresses against it — see the docblock.
+  const reposts = useJobRepostClusters(tracker.jobs);
+  const duplicates = useJobDuplicates(tracker.jobs, reposts.byJobId);
   return (
     <JobTracker
       tracker={tracker}
@@ -133,6 +161,7 @@ export function JobTrackerSection({
       lettersById={letters.byJobId}
       duplicatesByJobId={duplicates.byJobId}
       onDismissDuplicate={duplicates.dismiss}
+      repostClusters={reposts.clusters}
       {...props}
     />
   );
@@ -148,9 +177,23 @@ export function JobTracker({
   lettersById,
   duplicatesByJobId,
   onDismissDuplicate,
+  repostClusters,
 }: JobTrackerProps) {
-  const { jobs, ready, persisted, usageBytes, update, setStatus, link, unlink, remove, merge, create, exportBackup } =
-    tracker;
+  const {
+    jobs,
+    ready,
+    persisted,
+    usageBytes,
+    update,
+    setStatus,
+    link,
+    unlink,
+    remove,
+    merge,
+    create,
+    exportBackup,
+    archiveOlderThan,
+  } = tracker;
 
   // One pass, bucketed by each job's DISPLAY bucket rather than its literal
   // status string (#744): a synced record's `saved` / `scouted` / `shared` are
@@ -214,6 +257,7 @@ export function JobTracker({
           <Button variant="ghost" size="sm" onClick={() => void exportBackup()}>
             Export backup
           </Button>
+          <JobArchiveSweepDialog jobs={jobs} archiveOlderThan={archiveOlderThan} />
         </div>
       </header>
 
@@ -245,6 +289,9 @@ export function JobTracker({
         </p>
       ) : (
         <div className="flex flex-col gap-4">
+          {/* Above the pipeline, not inside it: a cluster's members are spread
+              across status buckets, so no section owns the statement. */}
+          <JobRepostClusterList clusters={repostClusters} />
           {groups.map(({ bucket, jobs: group }) => (
             <JobTrackerStatusGroup
               key={bucket}
