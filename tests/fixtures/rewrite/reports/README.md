@@ -33,7 +33,29 @@ git add tests/fixtures/rewrite/reports/
 git commit -m "eval(rewrite): snapshot YYYY-MM-DD run"
 ```
 
-A baked-in baseline report will land here in a follow-up PR once the
-first WebGPU run is captured on a maintainer machine; this directory is
-intentionally empty in the PR that introduces the harness so the
-artifact reflects a real run, not a synthetic placeholder.
+## ⚠️ The committed reports predate the Steering column (#608)
+
+The three reports here are from **2026-06-23** — the first WebGPU runs
+captured on a maintainer machine, which is why the directory shipped
+empty with the harness rather than carrying a synthetic placeholder.
+Their aggregate table carries these eight criteria columns after `Model`
+and `Variant`:
+`Numbers | One-line | Verb | Length | No-preamble | Dedup | Judge | Aggregate`.
+The **Steering** column and the `steering-forbidden-word` fixture arrived
+later with #608's adherence criterion, so those runs measured nothing
+about steering adherence — the question #608 half 2 exists to answer.
+
+**They are not evidence about half 2, in either direction.** Their absence
+of a Steering column is an artifact of when they were run, not a finding.
+Half 2 stays open until a fresh run of the full registry produces one.
+
+When you take that run, the reading is on the model × variant axes — a
+low rate on one model only is a default-model question, not a prompt one.
+`src/lib/webllm/eval/README.md` has the full table.
+
+The reporting path itself is covered by
+`src/lib/webllm/eval/adherence-reporting.test.ts`, so a `—` in a Steering
+cell of a *new* report means the model was not probed, never that the
+harness dropped the number on the floor. That test exists so an
+expensive manual run cannot be invalidated by a wiring break discovered
+afterwards.
