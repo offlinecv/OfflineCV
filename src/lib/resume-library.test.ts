@@ -47,6 +47,31 @@ const result = () =>
   }) as unknown as CascadeResult;
 const score = (overall: number) => ({ overall }) as AnonymousAtsScore;
 
+/** What the mocked cascade hands back on a re-parse, tagged "Reparsed Persona"
+ *  so a test can prove the loaded result came from the blob rather than from a
+ *  snapshot. Shared by every re-parse path — the stale-shape guard and the
+ *  no-cached-parse recovery both land on the same recovery code. */
+const reparsedResult = () =>
+  ({
+    canonical: toCanonicalResume(
+      { full_name: "Reparsed Persona", skills: [], experience: [], education: [] },
+      {
+        byName: new Map(),
+        accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
+        source: "regex",
+      },
+      {},
+    ),
+    confidence: 0,
+    triggers: [],
+    suggestedEscalation: "none",
+    tiers: ["t0_layout", "t1_openresume"],
+    rawText: "",
+    linkAnnotations: [],
+    diagnostics: { rawCharCount: 0, extractedCharCount: 0, pages: 1, elapsedMs: 0 },
+    timings: { t0_layout_ms: 0, t1_openresume_ms: 0 },
+  }) as unknown as CascadeResult;
+
 async function save(filename: string, overall = 72) {
   return saveResumeToLibrary({
     filename,
@@ -111,27 +136,7 @@ describe("resume-library: rename + delete", () => {
 
 describe("resume-library: cache-version mismatch (#445 / #321)", () => {
   it("re-parses from the stored blob instead of deserializing a stale-shape record", async () => {
-    // A re-parsed canonical result the mocked cascade returns, tagged so we can
-    // prove the loaded result came from the re-parse, not the stale snapshot.
-    const reparsed = {
-      canonical: toCanonicalResume(
-        { full_name: "Reparsed Persona", skills: [], experience: [], education: [] },
-        {
-          byName: new Map(),
-          accomplishmentSections: ACCOMPLISHMENT_SECTION_NAMES,
-          source: "regex",
-        },
-        {},
-      ),
-      confidence: 0,
-      triggers: [],
-      suggestedEscalation: "none",
-      tiers: ["t0_layout", "t1_openresume"],
-      rawText: "",
-      linkAnnotations: [],
-      diagnostics: { rawCharCount: 0, extractedCharCount: 0, pages: 1, elapsedMs: 0 },
-      timings: { t0_layout_ms: 0, t1_openresume_ms: 0 },
-    } as unknown as CascadeResult;
+    const reparsed = reparsedResult();
     vi.mocked(runCascade).mockResolvedValue(reparsed);
 
     // Write a pre-cutover record DIRECTLY through the storage layer: a stale
@@ -173,6 +178,62 @@ describe("resume-library: cache-version mismatch (#445 / #321)", () => {
         sourceKind: "docx",
       },
     });
+    expect(await loadResumeFromLibrary(rec.id)).toBeUndefined();
+    expect(runCascade).not.toHaveBeenCalled();
+  });
+});
+
+describe("resume-library: record with no cached parse (#693 producer write)", () => {
+  /** A record an outside producer writes through the backup-import door: the
+   *  PDF bytes and nothing else, because a producer cannot run the cascade. */
+  async function producerWritten(blob: Blob) {
+    return saveResume({ filename: "from-producer.pdf", blob });
+    // `parse` deliberately absent.
+  }
+
+  it("re-parses from the stored blob instead of refusing the record", async () => {
+    const reparsed = reparsedResult();
+    vi.mocked(runCascade).mockResolvedValue(reparsed);
+
+    const rec = await producerWritten(
+      new Blob([bytes().buffer], { type: "application/pdf" }),
+    );
+
+    const loaded = await loadResumeFromLibrary(rec.id);
+
+    // Before this fix the missing snapshot short-circuited to `undefined`, which
+    // is what left `/jobs/`'s #724 fallback rating nothing at all.
+    expect(runCascade).toHaveBeenCalledTimes(1);
+    expect(loaded).toBeDefined();
+    expect(loaded!.result).toBe(reparsed);
+    expect(loaded!.sourceKind).toBe("pdf");
+    expect(loaded!.score).toBeDefined();
+  });
+
+  it("re-stamps the record so the next load does not re-parse", async () => {
+    vi.mocked(runCascade).mockResolvedValue(reparsedResult());
+
+    const rec = await producerWritten(
+      new Blob([bytes().buffer], { type: "application/pdf" }),
+    );
+    await loadResumeFromLibrary(rec.id);
+    await loadResumeFromLibrary(rec.id);
+
+    expect(runCascade).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a parse-less record with no bytes to re-parse from", async () => {
+    const rec = await producerWritten(new Blob([], { type: "application/pdf" }));
+    expect(await loadResumeFromLibrary(rec.id)).toBeUndefined();
+    expect(runCascade).not.toHaveBeenCalled();
+  });
+
+  it("drops a parse-less record whose bytes are not a PDF", async () => {
+    const rec = await producerWritten(
+      new Blob([bytes().buffer], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      }),
+    );
     expect(await loadResumeFromLibrary(rec.id)).toBeUndefined();
     expect(runCascade).not.toHaveBeenCalled();
   });
