@@ -179,6 +179,54 @@ describe("JobTracker: fitness ratings (#700)", () => {
   });
 });
 
+describe("JobTracker: fallback résumé attribution (#724)", () => {
+  it("names the résumé when the ratings came from the fallback, not the handoff", () => {
+    const tracker = makeTracker([job({ id: "j1", jdText: "React" })]);
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={tracker}
+          ratings={new Map()}
+          hasResume
+          fallbackResumeName="resume-v1.pdf"
+        />,
+      ),
+    );
+    expect(container.textContent).toContain("Fit vs.");
+    expect(container.textContent).toContain("resume-v1.pdf");
+  });
+
+  it("says nothing about a résumé source for a real handoff (no fallback name given)", () => {
+    const rating: JobRating = {
+      overall: 4.2,
+      fitness: 4.2,
+      compensation: null,
+      location: null,
+      seniority: null,
+    };
+    const tracker = makeTracker([job({ id: "j1", jdText: "React" })]);
+    act(() =>
+      root.render(
+        <JobTracker tracker={tracker} ratings={new Map([["j1", rating]])} hasResume />,
+      ),
+    );
+    expect(container.textContent).not.toContain("Fit vs.");
+  });
+
+  it("omits the attribution on an empty library, matching the other explanation lines", () => {
+    act(() =>
+      root.render(
+        <JobTracker
+          tracker={makeTracker([])}
+          hasResume
+          fallbackResumeName="resume-v1.pdf"
+        />,
+      ),
+    );
+    expect(container.textContent).not.toContain("Fit vs.");
+  });
+});
+
 describe("JobTracker: resume link picker", () => {
   const RESUMES = [
     { id: "r1", filename: "resume-v1.pdf" },

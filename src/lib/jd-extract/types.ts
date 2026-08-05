@@ -44,8 +44,15 @@ export type ExtractionTier =
  *
  * Carried over from the upstream implementation at its then-current value, so
  * results already stamped by that code remain correctly comparable.
+ *
+ * `10` (#725): both halves of a result moved. `parseLinkedInTitle` stopped
+ * splitting a title at a dash inside brackets or inside a hyphenated token, so a
+ * title carrying a comp band extracts whole where it was previously truncated;
+ * and `pruneNonPosting` began dropping a list whose every item links to another
+ * posting, so `body` loses a search-results rail it used to carry. A version 9
+ * extraction of either page shape is not comparable to a version 10 one.
  */
-export const EXTRACTION_ALGORITHM_VERSION = 9;
+export const EXTRACTION_ALGORITHM_VERSION = 10;
 
 /**
  * What a job-posting page yields. Everything except `title` and `company` is

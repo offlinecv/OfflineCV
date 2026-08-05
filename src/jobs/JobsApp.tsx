@@ -14,7 +14,11 @@
  * own — the job-search lane consumes a parsed résumé, and the parse pipeline
  * (with its cascade, score, and edit layer) is `/`'s job. Adding a second parse
  * entry point here would be the parallel surface CLAUDE.md's Reuse Gate exists
- * to prevent. With no handoff, this renders a pointer back to `/`.
+ * to prevent. With no handoff, the Search tab still renders a pointer back to
+ * `/` — but the Saved jobs tab is a passive view of records that already exist,
+ * so #724 gives it a fallback: the most recently saved library résumé
+ * (`useFallbackResume`), used ONLY to rate the tracker's rows, never fed to
+ * `FindJobsPanel` and never overriding a real handoff.
  *
  * Because the handoff is read but not consumed, a reload of `/jobs` keeps
  * working — see the handoff module for why that differs from `/jd-fit`.
@@ -42,6 +46,7 @@ import { returnToResumeRoot } from "../lib/nav-return.ts";
 import { resolveInitialJobsTab, type JobsTabId } from "../lib/jobs-landing.ts";
 import { useArrivedFromRoot } from "../hooks/useArrivedFromRoot.ts";
 import { useResumeLibrary } from "../hooks/useResumeLibrary.ts";
+import { useFallbackResume } from "../hooks/useFallbackResume.ts";
 
 // #706: goes to `/` directly, never via history.back() — the empty state only
 // shows when there is no in-progress parse to preserve, so this is a forward
@@ -96,6 +101,17 @@ export default function JobsApp() {
   const library = useResumeLibrary();
   const resumeName = (resumeId: string) =>
     library.entries.find((entry) => entry.id === resumeId)?.filename;
+
+  // #724: a direct visit to `/jobs/` (bookmark, pasted link, reload) never
+  // received the handoff, so the tracker would otherwise rate against nothing.
+  // `active` gates the whole hook on `handoff === null` — a real handoff always
+  // wins outright, the fallback never even loads. Scoped to the tracker only
+  // (see the docblock); `FindJobsPanel` below still reads `handoff` directly.
+  const fallback = useFallbackResume(handoff === null, library);
+  const fallbackResumeName = fallback
+    ? library.entries.find((entry) => entry.id === fallback.resumeId)?.filename
+    : undefined;
+  const trackerParsed = handoff?.parsed ?? fallback?.parsed;
 
   return (
     <PageShell
@@ -153,7 +169,8 @@ export default function JobsApp() {
           </TabPanel>
           <TabPanel id="library">
             <JobTrackerSection
-              parsed={handoff?.parsed}
+              parsed={trackerParsed}
+              fallbackResumeName={fallbackResumeName}
               resumeName={resumeName}
               resumeOptions={library.entries}
             />

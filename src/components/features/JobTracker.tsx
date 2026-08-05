@@ -13,8 +13,11 @@
  * Fitness ratings (#700) are computed on VIEW by `useSavedJobRatings` and never
  * stored on a record — a stored score would go stale the moment the résumé is
  * edited, with nothing to invalidate it. Rating needs a parsed résumé, which
- * this surface only has via the `/` handoff, so the library also stands alone
- * with none: `ratings === null` simply drops the fitness block from every row.
+ * this surface has either via the `/` handoff or, absent one, the #724 fallback
+ * (`JobsApp` → `useFallbackResume`, the most recently saved library résumé) —
+ * with neither, `ratings === null` simply drops the fitness block from every
+ * row. `fallbackResumeName` is set only in the fallback case, so a row's stars
+ * always name which résumé they were computed against.
  *
  * Letters (#715): `JobTrackerSection` owns `useJobLetters` the same way it
  * owns `useSavedJobRatings` — one read for the whole library, grouped by job
@@ -69,6 +72,14 @@ interface JobTrackerProps {
    *  "nothing to rate against" and "rated". Drives the one-line explanation, so
    *  an unrated library is never silently unexplained. */
   hasResume?: boolean;
+  /** Filename of the résumé backing `ratings`, set ONLY when it came from the
+   *  #724 fallback (the most recently saved library résumé) rather than the
+   *  `/` handoff. A star with an unstated referent is the failure mode
+   *  `rate-saved-jobs.ts` property 1 already guards against in the other
+   *  direction — this names it. Undefined for the handoff case (the user just
+   *  came from their résumé, so naming it would be redundant) and whenever
+   *  there is nothing to rate against. */
+  fallbackResumeName?: string;
   /** Resolve a linked resume id to its display name; returns undefined when the
    *  resume no longer exists, so the row degrades to "not linked". */
   resumeName?: (resumeId: string) => string | undefined;
@@ -131,6 +142,7 @@ export function JobTracker({
   tracker,
   ratings = null,
   hasResume = false,
+  fallbackResumeName,
   resumeName,
   resumeOptions,
   lettersById,
@@ -213,6 +225,17 @@ export function JobTracker({
       {!hasResume && jobs.length > 0 && (
         <p className="text-sm text-content-muted">
           Open this workbench from your resume to see how each saved job fits it.
+        </p>
+      )}
+
+      {/* #724: only set when `ratings` came from the fallback most-recently-
+          saved résumé rather than a real `/` handoff — names the referent so a
+          fit star is never shown against an unstated resume. */}
+      {hasResume && fallbackResumeName && jobs.length > 0 && (
+        <p className="text-sm text-content-muted">
+          Fit vs.{" "}
+          <span className="text-content-secondary">{fallbackResumeName}</span>{" "}
+          — your most recently saved resume.
         </p>
       )}
 

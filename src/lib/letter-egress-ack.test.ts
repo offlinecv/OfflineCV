@@ -37,7 +37,13 @@ function useStorage(get: () => Storage | undefined) {
 }
 
 afterEach(() => {
+  // `real` is captured at module-eval time, before any `beforeEach` has run, so
+  // it is `undefined` whenever this file is the first in its worker to touch
+  // `localStorage`. Deleting rather than leaving the getter in place matters:
+  // the accessor `useStorage` installs has no setter, so anything that survives
+  // this hook breaks the next assignment to the global.
   if (real) Object.defineProperty(globalThis, "localStorage", real);
+  else delete (globalThis as { localStorage?: unknown }).localStorage;
   globalThis.localStorage?.clear();
 });
 
