@@ -23,5 +23,5 @@
     "noUncheckedSideEffectImports": true,
     "types": ["vite/client", "vitest/globals"]
   },
-  "include": ["src"]
+  "include": ["src", "packages/*/src"]
 }

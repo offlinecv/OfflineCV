@@ -1,0 +1,15 @@
+{
+  "name": "@offlinecv/core",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "The headless, browser-only core of offlinecv: job capture, local library storage, JD term extraction and fit rating. Re-exported from src/lib — see src/index.ts.",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}
