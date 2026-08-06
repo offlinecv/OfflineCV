@@ -43,6 +43,7 @@ export function ResumeLibrary({ library, onLoad }: ResumeLibraryProps) {
     ready,
     persisted,
     usageBytes,
+    loadError,
     rename,
     remove,
     exportBackup,
@@ -56,6 +57,18 @@ export function ResumeLibrary({ library, onLoad }: ResumeLibraryProps) {
 
   // Nothing to show until the initial load resolves.
   if (!ready) return null;
+
+  // A record whose parse can neither be read nor rebuilt from its stored
+  // bytes (#756) — the entry stays in the list (so it can still be deleted),
+  // but Load has nothing to hydrate. Reuses the same `ErrorState` +
+  // `aria-live` pattern as `importStatusRegion` below rather than a new
+  // banner. Can only be non-null once an entry exists, so it has no place in
+  // the empty-library branch.
+  const loadErrorRegion = loadError && (
+    <div aria-live="polite">
+      <ErrorState>{loadError}</ErrorState>
+    </div>
+  );
 
   const importStatusRegion = importStatus && (
     <div aria-live="polite">
@@ -149,6 +162,7 @@ export function ResumeLibrary({ library, onLoad }: ResumeLibraryProps) {
         {!persisted && EVICTION_NOTICE}
       </p>
 
+      {loadErrorRegion}
       {importStatusRegion}
 
       <ul className="flex flex-col gap-2">

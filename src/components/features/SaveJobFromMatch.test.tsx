@@ -61,6 +61,7 @@ function makeTracker(): Tracker {
     merge: vi.fn(async () => {}),
     saveFromMatch: vi.fn(async () => "new-id"),
     exportBackup: vi.fn(async () => {}),
+    archiveOlderThan: vi.fn(async () => 0),
     refresh: vi.fn(async () => {}),
   };
 }

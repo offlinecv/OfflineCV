@@ -45,7 +45,16 @@ export default function App() {
   const library = useResumeLibrary();
   const onLoadSavedResume = async (id: string) => {
     const loaded = await library.load(id);
-    if (loaded === undefined) return;
+    if (loaded === undefined) {
+      // The one case this reaches: no cached parse AND no stored bytes to
+      // rebuild it from (or bytes the PDF cascade can't read) — see
+      // `loadResumeFromLibrary`. Say so; the Saved-resumes card otherwise
+      // looks like a dead Load button.
+      library.setLoadError(
+        "Couldn't restore this resume — its saved parse is missing and there's no usable file kept to rebuild it from. Drop the file in again to load it fresh.",
+      );
+      return;
+    }
     loadSavedResume({
       fileName: loaded.filename,
       fileSize: loaded.fileSize,

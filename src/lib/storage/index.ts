@@ -18,14 +18,34 @@
  *    capture contract and the cover-letter contract below, both normative for
  *    third-party producers per `docs/job-capture-contract.md` and
  *    `docs/cover-letter-contract.md`). The vocabulary the module only talks to
- *    itself in — `StoredRecord`, `StoreName`, `ResumeRecord`, `SaveResumeInput`,
- *    `ExportedResume`, `StorageExport`, `LETTER_RECORD_RULES`, and the
+ *    itself in — `StoredRecord`, `ResumeRecord`, `SaveResumeInput`,
+ *    `ExportedResume`, `StorageExport`, `LETTER_RECORD_RULES`,
+ *    `RESUME_RECORD_RULES`/`validateResumeRecord` (#757 — unlike the job and
+ *    letter contracts, there is no third-party résumé producer doc to be
+ *    normative for; only `backup.ts` calls it), and the
  *    `exportAll`/`exportToJson`/`importAll` primitives under
  *    {@link downloadStorageBackup} and {@link importFromJson} — is deliberately
- *    absent.
+ *    absent. `postLibraryChange` and its batching seam (`runBatchedWrites`)
+ *    are absent for the same reason: `crud.ts` is the only poster, and
+ *    `backup.ts` and `jobs.ts` (#759) are the only batchers — both live
+ *    inside this directory and reach `runBatchedWrites` directly, so nothing
+ *    outside it needs the seam itself.
+ *
+ *    `SkippedResume` (#757) and `LibraryChangeMessage` (#760) are the two most
+ *    recent applications of that rule, and both are worth naming because their
+ *    siblings DID earn slots: `SkippedJob` has a consumer
+ *    (`ResumeLibraryImportDialog`) and `SkippedLetter` is registered in
+ *    `.fallowrc.jsonc` against `docs/cover-letter-contract.md`. `SkippedResume`
+ *    has neither — no surface renders a refused résumé yet — so it stays on
+ *    `backup.ts`, where {@link ImportCounts} needs it. `LibraryChangeMessage`
+ *    never had a caller in a position to name it, since {@link onLibraryChange}
+ *    hands its subscriber a bare `StoreName` and never the message; it is
+ *    module-local in `library-channel.ts` rather than re-exported here.
  *  - Conversely, a name a consumer needs belongs here. Withholding one is what
  *    produced the deep imports of `./types.ts` this barrel exists to prevent:
  *    `JobStatus` and `JOB_STATUS_ORDER` were reachable no other way.
+ *    `StoreName` joined for the same reason (#760): `useLibraryChanges`
+ *    (`src/hooks/`) has to name the store it's subscribing to.
  *
  * The one standing exception is `src/lib/job-search/board-cache.ts`, which
  * reaches `./crud.ts` for the generic `getRecord`/`putRecord` accessors. There
@@ -42,7 +62,7 @@ export {
   listResumeChoices,
   type ResumeChoice,
 } from "./resumes.ts";
-export { saveJob, getJob, getAllJobs, deleteJob } from "./jobs.ts";
+export { saveJob, getJob, getAllJobs, deleteJob, archiveJobs } from "./jobs.ts";
 export {
   saveLetter,
   getLetter,
@@ -115,4 +135,14 @@ export type {
   LetterProvenance,
   SyncableStoreName,
   SyncCursorRecord,
+  StoreName,
 } from "./types.ts";
+/**
+ * Same-origin change signal (#760) — `useJobTracker`/`useResumeLibrary`
+ * subscribe through `useLibraryChanges` (`src/hooks/`) so an open tab
+ * re-reads after a write made anywhere else: another tab, a restored backup,
+ * an out-of-tree producer writing through `putRecord`. `postLibraryChange`
+ * and the batching seam it rides on stay internal to this directory —
+ * `crud.ts` is the only poster; see `library-channel.ts`.
+ */
+export { onLibraryChange } from "./library-channel.ts";

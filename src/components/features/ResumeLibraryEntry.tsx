@@ -10,7 +10,7 @@
  */
 
 import { useState } from "react";
-import { Button, EditableField, Dialog } from "@design-system";
+import { Button, EditableField, Dialog, StatusBadge } from "@design-system";
 import { timeAgo } from "../../lib/date-utils.ts";
 import type { ResumeLibraryEntry as Entry } from "../../lib/resume-library.ts";
 
@@ -45,7 +45,14 @@ export function ResumeLibraryEntry({
         <p className="mt-0.5 flex items-center gap-2 text-xs text-content-muted">
           <span className="uppercase tracking-wider">{entry.sourceKind}</span>
           <span aria-hidden>·</span>
-          <span>score {entry.scoreOverall}</span>
+          {entry.hasCachedParse ? (
+            <span>score {entry.scoreOverall}</span>
+          ) : (
+            // No cached parse yet (#757) — never render `score 0` here, since
+            // that reads as a genuine zero rather than "not parsed yet".
+            // Still fully loadable: `Load` re-parses it from the stored bytes.
+            <StatusBadge tone="info">Not parsed yet</StatusBadge>
+          )}
           <span aria-hidden>·</span>
           <span>saved {timeAgo(new Date(entry.savedAt).toISOString())}</span>
         </p>

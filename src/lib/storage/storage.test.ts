@@ -24,7 +24,7 @@ import { exportAll, exportToJson, importAll, importFromJson } from "./backup.ts"
 import { captureJob } from "./capture.ts";
 import { requestStoragePersistence, isStoragePersisted } from "./persist.ts";
 import { tick } from "./__test-utils__/clock.ts";
-import type { JobRecord, StorageExport } from "./types.ts";
+import type { ExportedResume, JobRecord, StorageExport } from "./types.ts";
 
 beforeEach(async () => {
   await closeDB();
@@ -141,6 +141,8 @@ describe("storage: export / import", () => {
     const counts = await importAll(dump);
     expect(counts).toEqual({
       resumes: 1,
+      skippedResumes: [],
+      resumesWithoutParse: 0,
       jobs: 1,
       skippedJobs: [],
       letters: 0,
@@ -199,6 +201,8 @@ describe("storage: export / import", () => {
     const counts = await importAll(dump, "merge");
     expect(counts).toEqual({
       resumes: 1,
+      skippedResumes: [],
+      resumesWithoutParse: 1,
       jobs: 0,
       skippedJobs: [],
       letters: 0,
@@ -252,6 +256,8 @@ describe("storage: export / import", () => {
       const counts = await importFromJson(json, "merge");
       expect(counts).toEqual({
         resumes: 1,
+        skippedResumes: [],
+        resumesWithoutParse: 0,
         jobs: 1,
         skippedJobs: [],
         letters: 0,
@@ -284,6 +290,76 @@ function validJob(overrides: Record<string, unknown> = {}): Record<string, unkno
     ...overrides,
   };
 }
+
+/** A backup document carrying exactly the résumés given, with no jobs — the
+ *  shape the résumé-contract import-validation cases perturb one résumé of. */
+function backupWithResumes(resumes: unknown[]): StorageExport {
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    resumes: resumes as ExportedResume[],
+    jobs: [],
+  };
+}
+
+function validResumeCandidate(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "resume-1",
+    filename: "cv.pdf",
+    blobBase64: btoa("hello"),
+    blobType: "application/pdf",
+    ...overrides,
+  };
+}
+
+describe("storage: import routes every résumé through the résumé contract (#757)", () => {
+  it("imports a good résumé, refuses a malformed one, and reports it in skippedResumes without touching the good record", async () => {
+    const counts = await importAll(
+      backupWithResumes([
+        validResumeCandidate(),
+        validResumeCandidate({ id: "resume-2", filename: "" }),
+      ]),
+    );
+
+    expect(counts.resumes).toBe(1);
+    expect(counts.skippedResumes).toHaveLength(1);
+    expect(counts.skippedResumes[0].id).toBe("resume-2");
+    expect(counts.skippedResumes[0].reason).toContain("`filename`");
+
+    const stored = await getAllResumes();
+    expect(stored.map((r) => r.id)).toEqual(["resume-1"]);
+  });
+
+  it("refuses a résumé missing blobBase64/blobType, reporting it distinctly", async () => {
+    const counts = await importAll(
+      backupWithResumes([{ id: "resume-1", filename: "cv.pdf" }]),
+    );
+    expect(counts.resumes).toBe(0);
+    expect(counts.skippedResumes).toHaveLength(1);
+    expect(counts.skippedResumes[0].reason).toContain("blobBase64");
+  });
+
+  it("counts an accepted résumé with no parse snapshot distinctly from a refusal (not a skip)", async () => {
+    const counts = await importAll(backupWithResumes([validResumeCandidate()]));
+    expect(counts.resumes).toBe(1);
+    expect(counts.resumesWithoutParse).toBe(1);
+    expect(counts.skippedResumes).toEqual([]);
+  });
+
+  it("still round-trips a résumé this app produced itself, unaffected by the new gate", async () => {
+    await saveResume({ filename: "cv.pdf", blob: pdf(), parse: { score: 72 } });
+    const dump = await exportAll();
+
+    await closeDB();
+    await deleteDB(DB_NAME);
+
+    const counts = await importAll(dump);
+    expect(counts.resumes).toBe(1);
+    expect(counts.skippedResumes).toEqual([]);
+    const [restored] = await getAllResumes();
+    expect(restored.parse).toEqual({ score: 72 });
+  });
+});
 
 describe("storage: import routes every job through the capture contract (#693)", () => {
   it("skips a malformed job, imports the rest, and names what it skipped", async () => {
@@ -353,6 +429,8 @@ describe("storage: import routes every job through the capture contract (#693)",
     const counts = await importFromJson(json, "replace");
     expect(counts).toEqual({
       resumes: 0,
+      skippedResumes: [],
+      resumesWithoutParse: 0,
       jobs: 2,
       skippedJobs: [],
       letters: 0,

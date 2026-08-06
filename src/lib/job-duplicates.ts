@@ -30,12 +30,24 @@
  *
  * ## Totality
  *
- * Every field is read through {@link text} / an `Array.isArray` guard rather
- * than trusted from the type. Records reach the `jobs` store through a
- * deliberately permissive write (`saveJob`) and from a backup file that may
- * predate any field here, so a record whose `title` is not a string is
- * reachable — and this function runs on every tracker render. It degrades to
- * "no evidence", never to a throw.
+ * Every field is read through {@link text} / {@link epochMs} / an
+ * `Array.isArray` guard rather than trusted from the type. Records reach the
+ * `jobs` store through a deliberately permissive write (`saveJob`) and from a
+ * backup file that may predate any field here, so a record whose `title` is not
+ * a string is reachable — and this function runs on every tracker render. It
+ * degrades to "no evidence", never to a throw.
+ *
+ * ## Company + title alone is not evidence (#754)
+ *
+ * Measured against a real 541-record library: 523 records carry no `jdText` at
+ * all, so the `possible` tier — the only one that reads a description — can
+ * never fire, and every merge the tracker offered came from title string
+ * equality inside one company bucket. That is not a threshold to tune; it is a
+ * destructive affordance resting on an inference. So an identical title now
+ * needs one CORROBORATING fact ({@link corroborates}) before it reaches
+ * `probable`, and resolves to {@link JobDuplicateConfidence} `title-only`
+ * otherwise — below {@link isActionableDuplicate}, so nothing offers a merge on
+ * it. `job-repost-clusters.ts` is what then speaks for those pairings.
  */
 
 import { canonicalJobUrl } from "./storage/index.ts";
@@ -48,25 +60,35 @@ import type { JobRecord } from "./storage/index.ts";
  *   appears in the other's `aliasUrls`. Somebody with more context than a URL
  *   parser (a user who merged, a producer that followed an "Apply" link) said
  *   these are the same page.
- * - `probable` — same normalised company AND same normalised title. Strong, but
- *   inference: a company really can post two identically-titled roles.
+ * - `probable` — same normalised company AND same normalised title, AND one
+ *   corroborating fact ({@link corroborates}). Still inference — a company
+ *   really can post two identically-titled roles — but no longer inference from
+ *   a single string.
  * - `possible` — same company, similar title, overlapping description. Weak by
  *   construction, and deliberately below the bar {@link isActionableDuplicate}
  *   sets, so no merge affordance is ever offered on it.
+ * - `title-only` — same company and same normalised title, and nothing else
+ *   (#754). The tier that separates a double-capture from an employer reposting
+ *   one role for four months: both used to read as `probable` and both got the
+ *   same **Merge** button, and merging the second kind destroys the record of
+ *   the churn. Weakest of the four and below the actionable bar, so it renders
+ *   no offer; `job-repost-clusters.ts` is what speaks for these pairings.
  */
-export type JobDuplicateConfidence = "certain" | "probable" | "possible";
+export type JobDuplicateConfidence = "certain" | "probable" | "possible" | "title-only";
 
 const CONFIDENCE_RANK: Record<JobDuplicateConfidence, number> = {
-  possible: 1,
-  probable: 2,
-  certain: 3,
+  "title-only": 1,
+  possible: 2,
+  probable: 3,
+  certain: 4,
 };
 
 /**
  * Whether a confidence is strong enough to put a *merge* in front of the user.
- * `probable` and up. A `possible` match is computed, and is worth having as a
- * distinct answer, but offering a destructive action on "same company, similar
- * title" would invert the asymmetry this whole module is written around.
+ * `probable` and up. `possible` and `title-only` are computed, and are worth
+ * having as distinct answers, but offering a destructive action on "same
+ * company, similar title" — or on a bare title string — would invert the
+ * asymmetry this whole module is written around.
  */
 export function isActionableDuplicate(confidence: JobDuplicateConfidence): boolean {
   return CONFIDENCE_RANK[confidence] >= CONFIDENCE_RANK.probable;
@@ -96,6 +118,53 @@ const SIMILAR_TITLE = 0.6;
  *  as overlapping. Same bounded blast radius as {@link SIMILAR_TITLE}. */
 const OVERLAPPING_DESCRIPTION = 0.5;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How far apart in time two captures of one company+title may sit and still be
+ * read as two captures of ONE posting rather than a repost of it.
+ *
+ * **One constant, two uses**, and that is the point of it living here: it is
+ * both the last corroborating signal in {@link corroborates} and the boundary
+ * `job-repost-clusters.ts` forms a cluster on. A pair is therefore *either*
+ * mergeable *or* clustered and never neither — two separately-tuned numbers
+ * would open a band where a pairing gets no merge offer and no explanation.
+ * That module imports this value and {@link withinRepostSpan} rather than
+ * restating either, for the same reason it imports {@link jobCompanyTitleKey}:
+ * the grouping and the boundary must be one definition or the two surfaces
+ * disagree about the same pair.
+ *
+ * **21 days.** Measured separation between the two records of each pairing that
+ * company+title alone used to call `probable`, over 98 pairs in a real library:
+ * min 0d, p25 3d, median 13d, p75 40d, max 124d — 13 pairs same-day, 29 more
+ * than 30 days apart. Those ends are different phenomena. A same-day pair is a
+ * double-capture (the capture ran twice, or an aggregator and the employer's own
+ * board were both saved) and merging it is right; a 124-day pair is an employer
+ * re-listing a role that never filled, and merging it destroys the only trace of
+ * that. Proximity has to be a signal precisely BECAUSE the common captured
+ * record carries title + company + url and nothing else: drop it and those 13
+ * real duplicates lose their merge button too, and the feature stops working for
+ * the case it exists for.
+ *
+ * A guess in the same sense {@link SIMILAR_TITLE} is — but not with the same
+ * bounded blast radius, because this one gates a destructive offer. Raising it
+ * offers more merges; lowering it offers fewer. The asymmetry says which
+ * direction is the cheap one.
+ */
+export const REPOST_SPAN_DAYS = 21;
+
+const REPOST_SPAN_MS = REPOST_SPAN_DAYS * DAY_MS;
+
+/**
+ * Were these two records captured close enough together for proximity to
+ * corroborate? Takes `unknown` and is total: a capture time that is not a finite
+ * number is missing evidence, so the answer is `false` — never a throw, and
+ * never a silent "yes" off a `NaN` comparison.
+ */
+export function withinRepostSpan(a: unknown, b: unknown): boolean {
+  return Math.abs(epochMs(a) - epochMs(b)) <= REPOST_SPAN_MS;
+}
+
 /** Description tokens shorter than this are dropped before comparing: "a",
  *  "of", "to" appear in every posting ever written and would float the
  *  containment of two unrelated descriptions. Titles are NOT filtered this way —
@@ -111,6 +180,15 @@ const NON_WORD = /[^\p{L}\p{N}]+/gu;
  *  the totality note in the module docblock. */
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/** A timestamp field's value if it is really a finite number, otherwise `NaN` —
+ *  which every comparison below answers `false` to, which is the "no evidence"
+ *  reading. `Number.isFinite` and not `typeof`, so an `Infinity` or a `NaN` that
+ *  survived a JSON round-trip is missing evidence rather than a span of
+ *  infinity. */
+function epochMs(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number.NaN;
 }
 
 /** Lowercased, punctuation-flattened, whitespace-collapsed. The one place
@@ -188,11 +266,83 @@ interface Fingerprint {
    *  the one expensive step here and only the `possible` tier ever needs it, so
    *  a library where no pair has a similar title never pays for it. */
   jdTokens?: Set<string>;
+  /** Filled by {@link jdNormalisedOf} on first use, for the same reason
+   *  {@link jdTokens} is: only a pair that already agrees on company and title
+   *  ever asks. */
+  jdNormalised?: string;
+
+  // ─── Corroborating facts (#754) ───────────────────────────────────────────
+  // Read through the same guards as everything above: a record can arrive from a
+  // backup that predates any of these fields, or from a producer that wrote the
+  // wrong type into one. A field that is not a string reads as absent, which is
+  // "no evidence" and therefore no merge offer — the safe direction.
+
+  /** Normalised {@link JobRecord.datePosted} — the date the POSTING declares,
+   *  not when we saw it. */
+  datePosted: string;
+  /** Normalised {@link JobRecord.location}. */
+  location: string;
+  /** Normalised {@link JobRecord.salaryRange}. */
+  salaryRange: string;
+  /** Epoch ms this record was first written, or `NaN` when it carries no usable
+   *  one. NOT `updatedAt`: editing a note bumps that, and "when did this arrive"
+   *  is the question proximity answers. */
+  createdAt: number;
 }
 
 function jdTokensOf(print: Fingerprint): Set<string> {
   print.jdTokens ??= tokenSet(print.jdText, DESCRIPTION_TOKEN_MIN_LENGTH);
   return print.jdTokens;
+}
+
+function jdNormalisedOf(print: Fingerprint): string {
+  print.jdNormalised ??= normalise(print.jdText);
+  return print.jdNormalised;
+}
+
+/**
+ * Is there any fact BESIDES the title backing "these two are one posting"?
+ *
+ * Only ever asked of a pair that already agrees on the normalised company and
+ * has byte-identical normalised titles, and the answer is what lifts that pair
+ * from `title-only` to `probable` — i.e. what puts a **Merge** in front of the
+ * user. So every signal here is an equality on a fact a repost would plausibly
+ * CHANGE, and each one is required non-empty: two records that both lack a
+ * field agree about nothing.
+ *
+ * In rough order of strength:
+ *
+ *  1. **Identical description.** The strongest thing short of a shared URL —
+ *     the six-record cluster that motivated #754 turned out to have byte-
+ *     identical descriptions, which simply were never captured. Identity, not
+ *     {@link OVERLAPPING_DESCRIPTION} containment: that threshold's docblock
+ *     justifies itself by only ever gating a tier no affordance acts on, and
+ *     promoting it to gate a destructive one would unbind exactly that.
+ *  2. **The same declared `datePosted`.** A repost is a new posting with a new
+ *     publication date; two captures of one posting quote the same one.
+ *  3. **The same `location` AND the same `salaryRange`.** Conjunction, because
+ *     either alone is nearly free — every role at a company shares "Remote (US)"
+ *     and the bands repeat across a level.
+ *  4. **Captured within {@link REPOST_SPAN_DAYS} of each other.** Weakest, and
+ *     the only one that reaches the common captured record at all: a LinkedIn
+ *     capture is title + company + url and nothing else, so without this the
+ *     genuine same-day double-capture loses its merge offer along with the
+ *     reposts. See {@link REPOST_SPAN_DAYS} for the measured distribution this
+ *     is cut from.
+ */
+function corroborates(a: Fingerprint, b: Fingerprint): boolean {
+  const jd = jdNormalisedOf(a);
+  if (jd !== "" && jd === jdNormalisedOf(b)) return true;
+  if (a.datePosted !== "" && a.datePosted === b.datePosted) return true;
+  if (
+    a.location !== "" &&
+    a.location === b.location &&
+    a.salaryRange !== "" &&
+    a.salaryRange === b.salaryRange
+  ) {
+    return true;
+  }
+  return withinRepostSpan(a.createdAt, b.createdAt);
 }
 
 function fingerprint(job: JobRecord): Fingerprint {
@@ -213,7 +363,35 @@ function fingerprint(job: JobRecord): Fingerprint {
     title: normalise(job.title),
     titleTokens: tokenSet(job.title, 1),
     jdText: text(job.jdText),
+    datePosted: normalise(job.datePosted),
+    location: normalise(job.location),
+    salaryRange: normalise(job.salaryRange),
+    createdAt: epochMs(job.createdAt),
   };
+}
+
+/**
+ * The one key two records must share before company+title evidence is even
+ * considered: normalised company, then normalised title, NUL-joined for the
+ * reason {@link jobPairKey} is. `null` when either side is empty — a blank
+ * company or a blank title is missing evidence, not evidence of sameness, and
+ * without the guard every half-filled row would group with every other one.
+ *
+ * Exported because `job-repost-clusters.ts` groups on exactly this. Two
+ * definitions of "the same role at the same company" would let a pairing be
+ * `title-only` here and belong to no cluster there — the one gap the design
+ * forbids, since such a pair would then get neither a merge offer nor an
+ * explanation of why not.
+ */
+export function jobCompanyTitleKey(job: JobRecord): string | null {
+  const company = normaliseCompany(job.company);
+  const title = normalise(job.title);
+  if (company === "" || title === "") return null;
+  // NUL rather than a printable separator, because normalisation has already
+  // collapsed punctuation to spaces: ("Acme", "Corp Dev") and ("Acme Corp",
+  // "Dev") would otherwise share one key, and grouping two different roles is
+  // how a merge gets offered on nothing.
+  return `${company}\u0000${title}`;
 }
 
 /**
@@ -246,7 +424,15 @@ function compare(a: Fingerprint, b: Fingerprint): JobDuplicateConfidence | null 
   // An empty company is the common case for a half-filled record, not a match:
   // without this, every blank-company job would pair with every other one.
   if (a.company === "" || a.company !== b.company) return null;
-  if (a.title !== "" && a.title === b.title) return "probable";
+  // An identical title is where the destructive offer used to come from with
+  // nothing behind it (#754), so it resolves here and does NOT fall through to
+  // the `possible` tier below: an identical title trivially clears
+  // SIMILAR_TITLE, and letting it land on a tier gated by a threshold
+  // documented as "a guess" would put the decision back where this change took
+  // it from.
+  if (a.title !== "" && a.title === b.title) {
+    return corroborates(a, b) ? "probable" : "title-only";
+  }
   if (containment(a.titleTokens, b.titleTokens) < SIMILAR_TITLE) return null;
   if (containment(jdTokensOf(a), jdTokensOf(b)) < OVERLAPPING_DESCRIPTION) return null;
   return "possible";

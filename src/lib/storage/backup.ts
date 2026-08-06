@@ -48,9 +48,17 @@
  * `arrayBuffer()`, so encode/import are async.
  */
 
-import { getAllRecords, putRecord, clearStore, isLive } from "./crud.ts";
+import {
+  getAllRecords,
+  putRecord,
+  clearStore,
+  isLive,
+  runBatchedWrites,
+} from "./crud.ts";
 import { validateJobRecord } from "./job-record-contract.ts";
 import { validateLetterRecord } from "./letter-contract.ts";
+import { validateResumeRecord } from "./resume-record-contract.ts";
+import { isPlainObject } from "./record-contract.ts";
 import type {
   ResumeRecord,
   JobRecord,
@@ -59,6 +67,16 @@ import type {
   StorageExport,
   StorageExportV2,
 } from "./types.ts";
+
+/** One résumé a restore refused. Sibling of {@link SkippedJob}; `filename`
+ *  rather than `title`/`label` because that is the résumé's own user-facing
+ *  name. */
+export interface SkippedResume {
+  id?: string;
+  filename?: string;
+  /** Every reason the record failed, joined into one sentence. */
+  reason: string;
+}
 
 /** One job a restore refused, named well enough for the user to find it in the
  *  file. `id` / `title` are best-effort: the record failed validation, so they
@@ -83,19 +101,46 @@ export interface SkippedLetter {
  *  written, and not tombstoned (#730). A file's tombstones are written too —
  *  that is the point of exporting them — but counting them would tell the user
  *  a restore brought back jobs that stay invisible, which reads as a bug in the
- *  restore rather than as the deletions it faithfully reproduced.
+ *  restore rather than as the deletions it faithfully reproduced. `resumes`
+ *  counts the same way for a different reason: `resumes` hard-deletes, so
+ *  there are no tombstones to exclude, but since #757 it counts records the
+ *  résumé contract ACCEPTED rather than every record the file carried.
  *
  *  So the three numbers no longer sum to the file's record count. The
  *  `skipped…` lists still account for every record the contract REFUSED, which
  *  is the thing a user can act on; a tombstone was accepted, it just isn't
  *  something to celebrate having restored.
  *
- *  Nothing renders `skippedLetters` yet — #711 ships the store with no UI at
- *  all. It is reported from the first commit anyway because the alternative is
- *  a restore that drops a letter and says nothing, and a counter added later
- *  cannot recover the ones already dropped. */
+ *  Nothing renders `skippedLetters` or `skippedResumes` yet — #711 and #757
+ *  ship their stores with no dedicated UI for a skip list. Both are reported
+ *  from the first commit anyway because the alternative is a restore that
+ *  drops a record and says nothing, and a counter added later cannot recover
+ *  the ones already dropped.
+ *
+ *  `resumesWithoutParse` is not a skip — it counts records ACCEPTED (#757)
+ *  that carry no `parse` payload AT ALL. That is a legal shape (every résumé
+ *  #693's capture door writes has one), and the record is loadable — it just
+ *  has to be re-parsed from its stored bytes on the next `Load` (#758). Kept
+ *  distinct from `skippedResumes` so "this record needs a moment to re-parse"
+ *  never reads as "this record was dropped".
+ *
+ *  **It counts absence, not unreadability, and the two are not the same
+ *  set.** `resume-library.ts#listLibrary`'s `hasCachedParse` asks the stronger
+ *  question — can `readSnapshot` actually get a `result` and a `score` out of
+ *  it — so a record whose `parse` is present but not readable as a snapshot
+ *  is unparsed to the library and NOT counted here. That gap is deliberate
+ *  rather than an oversight: the `SavedResumeSnapshot` shape belongs to
+ *  `resume-library.ts` one layer up, and `resume-record-contract.ts`'s own
+ *  docblock states in terms that this layer does not assert it. Closing the
+ *  gap means moving that judgement down here, which contradicts that
+ *  boundary, or injecting the predicate into `importAll`, which is a channel
+ *  for a number nothing currently renders. Both are worse than naming the
+ *  limit. Anything that starts SHOWING this count should read it off the
+ *  library's predicate instead of this one. */
 export interface ImportCounts {
   resumes: number;
+  skippedResumes: SkippedResume[];
+  resumesWithoutParse: number;
   jobs: number;
   skippedJobs: SkippedJob[];
   letters: number;
@@ -173,10 +218,11 @@ export async function exportToJson(): Promise<string> {
  * back-compat is not a courtesy — an exported backup lives on the user's disk
  * and never learns about a format bump.
  *
- * Every job is put through the capture contract (#693), and every letter
- * through the letter contract (#711), BEFORE any store is touched — the file is
- * the boundary at which `JobRecord` / `LetterRecord` stop being types
- * TypeScript can vouch for. Three things follow from where that check sits:
+ * Every job is put through the capture contract (#693), every letter through
+ * the letter contract (#711), and every résumé through the résumé contract
+ * (#757), BEFORE any store is touched — the file is the boundary at which
+ * `JobRecord` / `LetterRecord` / `ResumeRecord` stop being types TypeScript can
+ * vouch for. Three things follow from where that check sits:
  *
  *  - **Skip the record, not the document.** One malformed job must not cost the
  *    user the other forty, and it must not cost them their resumes.
@@ -186,10 +232,20 @@ export async function exportToJson(): Promise<string> {
  *    unreachable.
  *  - **Report it.** A silently-dropped record is the real failure mode here, so
  *    the skips ride back on {@link ImportCounts} and `ResumeLibrary` announces
- *    them in its `aria-live` region. Skipped LETTERS ride back too but are not
- *    announced yet — there is no letters surface to announce them next to. The
- *    counter still lands now, because one added later cannot recover the
- *    records already dropped in silence.
+ *    skipped JOBS in its `aria-live` region. Skipped LETTERS and RESUMES ride
+ *    back too but are not announced yet — neither has a skip-list surface to
+ *    announce next to. The counters still land now, because one added later
+ *    cannot recover the records already dropped in silence.
+ *
+ * Every write below runs inside `runBatchedWrites` (#760): a restore can be
+ * hundreds of records, and without coalescing each `putRecord`/`clearStore`
+ * call would post its own change signal, driving one full re-read per
+ * message in every other open tab. Emit-side coalescing — one signal per
+ * store touched, posted once the whole restore finishes — was chosen over a
+ * debounce on the receiving hooks because the latter only reduces re-reads;
+ * it cannot make the message count itself bounded, which is what a bulk
+ * import has to prove (see `library-changes.test.ts`'s message-count
+ * assertion).
  */
 export async function importAll(
   data: StorageExport,
@@ -209,44 +265,114 @@ export async function importAll(
   // every backup a user already has on disk still restorable.
   const incomingLetters: unknown[] = data.version === 2 ? data.letters : [];
 
+  const resumes = partitionResumes(data.resumes);
   const jobs = partitionJobs(data.jobs);
   const letters = partitionLetters(incomingLetters);
 
-  if (mode === "replace") {
-    await clearStore("resumes");
-    await clearStore("jobs");
-    // Cleared even when the document is v1 and therefore contributes no
-    // letters. Replace means "make storage match this file", and skipping the
-    // wipe would leave letters whose jobs were just deleted — orphans the
-    // `deleteJob` cascade exists to make impossible.
-    await clearStore("letters");
-  }
+  // The whole restore — the replace-mode wipe and every put below — runs in
+  // one `runBatchedWrites` scope (#760), so a store that gets both cleared
+  // and repopulated here still posts only the one coalesced signal, not one
+  // for the clear and another for the puts.
+  await runBatchedWrites(async () => {
+    if (mode === "replace") {
+      await clearStore("resumes");
+      await clearStore("jobs");
+      // Cleared even when the document is v1 and therefore contributes no
+      // letters. Replace means "make storage match this file", and skipping
+      // the wipe would leave letters whose jobs were just deleted — orphans
+      // the `deleteJob` cascade exists to make impossible.
+      await clearStore("letters");
+    }
 
-  // `touch: false` throughout (#730): a restored record keeps the `updatedAt`
-  // it had when the backup was taken. That timestamp describes the user's last
-  // edit, and a restore is not one — stamping `now` over it collapsed the whole
-  // library into a single instant, which silently reordered a tracker sorted
-  // most-recently-updated-first and, since v4, would tell a replicator that
-  // every record on the device had just changed. A record the file carries no
-  // timestamp for still gets `now` from `putRecord`.
-  for (const { blobBase64, blobType, ...rest } of data.resumes) {
-    const blob = new Blob([base64ToBytes(blobBase64)], { type: blobType });
-    await putRecord<ResumeRecord>("resumes", { ...rest, blob }, { touch: false });
-  }
-  for (const job of jobs.accepted) {
-    await putRecord<JobRecord>("jobs", job, { touch: false });
-  }
-  for (const letter of letters.accepted) {
-    await putRecord<LetterRecord>("letters", letter, { touch: false });
-  }
+    // `touch: false` throughout (#730): a restored record keeps the
+    // `updatedAt` it had when the backup was taken. That timestamp describes
+    // the user's last edit, and a restore is not one — stamping `now` over it
+    // collapsed the whole library into a single instant, which silently
+    // reordered a tracker sorted most-recently-updated-first and, since v4,
+    // would tell a replicator that every record on the device had just
+    // changed. A record the file carries no timestamp for still gets `now`
+    // from `putRecord`.
+    for (const resume of resumes.accepted) {
+      await putRecord<ResumeRecord>("resumes", resume, { touch: false });
+    }
+    for (const job of jobs.accepted) {
+      await putRecord<JobRecord>("jobs", job, { touch: false });
+    }
+    for (const letter of letters.accepted) {
+      await putRecord<LetterRecord>("letters", letter, { touch: false });
+    }
+  });
 
   return {
-    resumes: data.resumes.length,
+    resumes: resumes.accepted.length,
+    skippedResumes: resumes.skipped,
+    resumesWithoutParse: resumes.accepted.filter((r) => r.parse === undefined).length,
     jobs: jobs.accepted.filter(isLive).length,
     skippedJobs: jobs.skipped,
     letters: letters.accepted.filter(isLive).length,
     skippedLetters: letters.skipped,
   };
+}
+
+/**
+ * Split a file's résumés into the ones the résumé contract accepts and the
+ * ones it refused. `blobBase64`/`blobType` are not part of that contract (see
+ * `resume-record-contract.ts`'s module docblock) — checked here, at the one
+ * call site that decodes them, before the rest of the candidate reaches
+ * {@link validateResumeRecord}. Runs before any store is touched — see
+ * {@link importAll}.
+ */
+function partitionResumes(candidates: unknown[]): {
+  accepted: ResumeRecord[];
+  skipped: SkippedResume[];
+} {
+  const accepted: ResumeRecord[] = [];
+  const skipped: SkippedResume[] = [];
+  for (const candidate of candidates) {
+    const blobIssue = resumeBlobFieldsIssue(candidate);
+    if (blobIssue !== undefined) {
+      skipped.push({
+        id: readStringField(candidate, "id"),
+        filename: readStringField(candidate, "filename"),
+        reason: blobIssue,
+      });
+      continue;
+    }
+    // `resumeBlobFieldsIssue` above already proved `candidate` is a plain
+    // object with string `blobBase64`/`blobType`.
+    const { blobBase64, blobType, ...rest } = candidate as Record<string, unknown> & {
+      blobBase64: string;
+      blobType: string;
+    };
+    const validation = validateResumeRecord(rest);
+    if (!validation.ok) {
+      skipped.push({
+        id: readStringField(candidate, "id"),
+        filename: readStringField(candidate, "filename"),
+        reason: validation.reasons.join(" "),
+      });
+      continue;
+    }
+    const blob = new Blob([base64ToBytes(blobBase64)], { type: blobType });
+    accepted.push({ ...validation.record, blob });
+  }
+  return { accepted, skipped };
+}
+
+/** `blobBase64`/`blobType` are the two fields `resume-record-contract.ts`
+ *  deliberately does not check (see its module docblock) — this is where they
+ *  actually are. A candidate that fails this never reaches
+ *  {@link validateResumeRecord} at all, since there would be no bytes to
+ *  rebuild a `Blob` from even if the rest of it were valid. */
+function resumeBlobFieldsIssue(value: unknown): string | undefined {
+  if (!isPlainObject(value)) return "A resume record must be a plain JSON object.";
+  if (typeof value.blobBase64 !== "string") {
+    return "`blobBase64` is required and must be a string.";
+  }
+  if (typeof value.blobType !== "string") {
+    return "`blobType` is required and must be a string.";
+  }
+  return undefined;
 }
 
 /** Split a file's jobs into the ones the capture contract accepts and the ones

@@ -36,12 +36,16 @@ import type { JobDuplicateSuggestion } from "../../hooks/useJobDuplicates.ts";
 
 /** How the notice opens, per confidence. `certain` states the evidence because
  *  it HAS evidence — somebody recorded these two URLs as one posting — while
- *  `probable` is an inference and says so. A `possible` match never reaches
- *  this component; see `isActionableDuplicate`. */
+ *  `probable` is an inference and says so. Neither `possible` nor `title-only`
+ *  reaches this component; see `isActionableDuplicate`. They are spelled out
+ *  anyway because the `Record` is exhaustive, which is the point: a tier added
+ *  to `JobDuplicateConfidence` fails the build here rather than rendering a
+ *  blank lead-in above a merge button. */
 const LEAD_IN: Record<JobDuplicateSuggestion["confidence"], string> = {
   certain: "Same posting as another saved job — they share a URL:",
   probable: "Looks like the same posting as another saved job:",
   possible: "May be the same posting as another saved job:",
+  "title-only": "Shares a title with another saved job, and nothing else:",
 };
 
 interface JobDuplicateNoticeProps {

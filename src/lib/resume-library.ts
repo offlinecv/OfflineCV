@@ -68,9 +68,19 @@ export interface ResumeLibraryEntry {
   filename: string;
   /** Epoch ms of the last save (record `updatedAt`). */
   savedAt: number;
-  /** Overall ATS score captured at save time. */
+  /** Overall ATS score captured at save time. `0` when `hasCachedParse` is
+   *  false — a placeholder, not a genuine zero score; see {@link hasCachedParse}. */
   scoreOverall: number;
   sourceKind: SourceKind;
+  /** Whether this record has a snapshot `readSnapshot` can use (#757). False
+   *  for a record an outside producer wrote through the backup-import door
+   *  with no cached parse — legal, and still loadable: `loadResumeFromLibrary`
+   *  rebuilds it by re-parsing the stored blob (#758). It is NOT a broken
+   *  record, and the UI must not read it as one; it just hasn't been parsed by
+   *  this build yet. `scoreOverall` is meaningless when this is false, which is
+   *  the whole reason it exists — before it, a record with no snapshot and a
+   *  résumé that genuinely scored 0 rendered identically. */
+  hasCachedParse: boolean;
 }
 
 /** Everything App needs to hydrate the "done" state from a saved resume. */
@@ -138,8 +148,10 @@ export async function saveResumeToLibrary(input: {
   return record.id;
 }
 
-/** List saved resumes, newest first. Records with a malformed snapshot are kept
- *  in the list (score 0) rather than hidden — the user can still delete them. */
+/** List saved resumes, newest first. Records with no readable snapshot are kept
+ *  in the list rather than hidden — the user can still delete them — but are
+ *  reported with `hasCachedParse: false` (#757) rather than a `scoreOverall`
+ *  that reads as a genuine zero. */
 export async function listLibrary(): Promise<ResumeLibraryEntry[]> {
   const records = await getAllResumes();
   return records
@@ -151,6 +163,7 @@ export async function listLibrary(): Promise<ResumeLibraryEntry[]> {
         savedAt: r.updatedAt,
         scoreOverall: snap?.score.overall ?? 0,
         sourceKind: snap?.sourceKind ?? "pdf",
+        hasCachedParse: snap !== null,
       };
     })
     .sort((a, b) => b.savedAt - a.savedAt);

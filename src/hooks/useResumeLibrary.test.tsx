@@ -148,6 +148,48 @@ describe("useResumeLibrary: delete clears tracked-job links", () => {
   });
 });
 
+describe("useResumeLibrary: load failure has a voice (#756)", () => {
+  it("load() resolves undefined for a record with no snapshot and no stored bytes", async () => {
+    // No `parse` (no cached snapshot) and an empty blob (nothing to re-parse
+    // from, e.g. a DOCX record with no source bytes kept at rest) — the one
+    // genuinely unrecoverable case `loadResumeFromLibrary` still returns
+    // `undefined` for after #755's re-parse fallback.
+    const unrecoverable = await saveResume({
+      filename: "no-bytes.pdf",
+      blob: new Blob([], { type: "application/pdf" }),
+    });
+    const library = await mountLibrary();
+
+    let loaded: unknown;
+    await act(async () => {
+      loaded = await library().load(unrecoverable.id);
+    });
+    expect(loaded).toBeUndefined();
+  });
+
+  it("load() clears a loadError left by a previous failed attempt", async () => {
+    const unrecoverable = await saveResume({
+      filename: "no-bytes.pdf",
+      blob: new Blob([], { type: "application/pdf" }),
+    });
+    const library = await mountLibrary();
+
+    // Simulate App.tsx having set an error after a prior failed load.
+    await act(async () => {
+      library().setLoadError("stale error from a previous attempt");
+    });
+    expect(library().loadError).toBe("stale error from a previous attempt");
+
+    // A new attempt — even one that itself fails — clears the stale error
+    // before it resolves, so App.tsx's fresh `setLoadError` (or lack of one,
+    // on success) is never racing a leftover message.
+    await act(async () => {
+      await library().load(unrecoverable.id);
+    });
+    expect(library().loadError).toBeNull();
+  });
+});
+
 describe("useResumeLibrary: merge-mode import reconciles dangling resume links (#547)", () => {
   it("clears the link on an incoming job whose resumeId nothing in the merge carries", async () => {
     const survivor = await saveResume({

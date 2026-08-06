@@ -40,6 +40,7 @@ function entry(overrides: Partial<Entry> = {}): Entry {
     savedAt: Date.now(),
     scoreOverall: 80,
     sourceKind: "pdf",
+    hasCachedParse: true,
     ...overrides,
   };
 }
@@ -52,6 +53,8 @@ function makeLibrary(overrides: Partial<Library> = {}): Library {
     usageBytes: null,
     save: vi.fn(),
     load: vi.fn(),
+    loadError: null,
+    setLoadError: vi.fn(),
     rename: vi.fn(),
     remove: vi.fn(),
     exportBackup: vi.fn(),
@@ -119,6 +122,29 @@ describe("ResumeLibrary: empty-library placement (#573)", () => {
         (b) => b.textContent === "Export backup",
       ),
     ).toBe(false);
+  });
+});
+
+describe("ResumeLibrary: unrecoverable load failure (#756)", () => {
+  it("renders library.loadError through ErrorState in the aria-live region", async () => {
+    const el = await mount(
+      makeLibrary({
+        entries: [entry()],
+        loadError: "Couldn't restore this resume — its saved parse is missing.",
+      }),
+    );
+
+    const live = el.querySelector('[aria-live="polite"]')!;
+    expect(live.textContent).toContain(
+      "Couldn't restore this resume — its saved parse is missing.",
+    );
+    // The entry itself is untouched — a load failure doesn't remove the row.
+    expect(el.textContent).toContain("cv.pdf");
+  });
+
+  it("renders nothing extra when there is no load error", async () => {
+    const el = await mount(makeLibrary({ entries: [entry()], loadError: null }));
+    expect(el.querySelector('[aria-live="polite"]')).toBeNull();
   });
 });
 

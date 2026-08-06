@@ -19,10 +19,12 @@ import {
   getJob,
   getAllJobs,
   deleteJob,
+  archiveJobs,
   lettersForJob,
   saveLetter,
 } from "./storage/index.ts";
 import { mergeJobRecords } from "./job-merge.ts";
+import { isSweepableBucket, jobsToArchive } from "./job-archive-sweep.ts";
 import type { JobRecord, JobStatus } from "./storage/index.ts";
 
 /** Fields a caller supplies when creating a tracked job. `status` defaults to
@@ -248,4 +250,50 @@ export function createTrackedJobFromMatch(input: {
   resumeId?: string;
 }): Promise<JobRecord> {
   return createJob({ ...input, status: "interested" });
+}
+
+/**
+ * Bulk-archive sweep (#759): every job in `jobs` whose bucket is Interested
+ * and whose `createdAt` is more than `cutoffDays` days old becomes
+ * `"archived"`. Returns the count actually archived.
+ *
+ * `jobs` is a PARAMETER, not a fresh `getAllJobs()` read, and that is the
+ * point: the caller (`useJobTracker.archiveOlderThan`) computes its live
+ * preview count with `jobsToArchive` over this exact same in-memory array,
+ * and threading it through here — rather than re-listing from storage —
+ * means the set this call SELECTS is exactly the set the user was counting.
+ * No difference in policy, no re-derived cutoff, no second clock read.
+ *
+ * The count this returns can still come out BELOW that preview, and only for
+ * one reason: `archiveJobs` re-checks each row's bucket against storage
+ * immediately before writing it, and skips one that stopped being Interested
+ * while the sweep was running (see that function's docblock). Selection and
+ * preview agree by construction; a row someone else moved to Applied
+ * mid-sweep is deliberately not written, and the returned count says so
+ * rather than counting a write that did not happen. `isSweepableBucket` —
+ * the same predicate `jobsToArchive` filtered on — is what performs that
+ * re-check, so the two can never disagree about what Interested means.
+ *
+ * One-way: every swept row's status becomes the literal string `"archived"`,
+ * which overwrites whatever vocabulary (`saved` / `scouted`) a syncing
+ * producer stored it with — `job-status-bucket.ts`'s whole reason for
+ * existing is that such a rewrite destroys meaning a sync would carry back.
+ * The confirm dialog states this; this function does not re-litigate it.
+ *
+ * The actual writes are `archiveJobs` (`storage/jobs.ts`), which coalesces
+ * the cross-tab change signal to one message regardless of how many rows
+ * this call touches (#760) — see that function's docblock.
+ */
+export async function archiveInterestedOlderThan(
+  jobs: readonly JobRecord[],
+  cutoffDays: number,
+  now: number = Date.now(),
+): Promise<number> {
+  const toArchive = jobsToArchive(jobs, cutoffDays, now);
+  if (toArchive.length === 0) return 0;
+  const archived = await archiveJobs(
+    toArchive.map((job) => job.id),
+    { stillEligible: isSweepableBucket },
+  );
+  return archived.length;
 }

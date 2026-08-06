@@ -25,6 +25,17 @@
  * A pairing the user dismissed is filtered on the same pass — reading the
  * dismissals fresh into state at mount, so a reload does not re-offer a merge
  * the user already declined.
+ *
+ * ## And neither do pairings inside a repost cluster (#754)
+ *
+ * Third filter on the same pass, from the same principle. `isRepostSuppressed`
+ * owns the precedence rule and states why in full; the short form is that
+ * cluster membership outranks an inferred tier and is outranked by URL
+ * identity, so a genuine shared-URL double-capture inside a cluster keeps its
+ * offer while the repost pairings lose theirs. The clusters are the caller's to
+ * pass — `useJobRepostClusters` derives them from the same `jobs` array — so
+ * this hook stays usable on its own and a caller that has not swept simply gets
+ * the pre-#754 behaviour.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -38,6 +49,10 @@ import {
   dismissJobPair,
   readDismissedJobPairs,
 } from "../lib/job-duplicate-dismissals.ts";
+import {
+  isRepostSuppressed,
+  type JobRepostCluster,
+} from "../lib/job-repost-clusters.ts";
 import type { JobRecord } from "../lib/storage/index.ts";
 
 /** One "this row may be the same posting as that one" suggestion, resolved to
@@ -56,7 +71,13 @@ export interface JobDuplicates {
   dismiss: (a: string, b: string) => void;
 }
 
-export function useJobDuplicates(jobs: readonly JobRecord[]): JobDuplicates {
+export function useJobDuplicates(
+  jobs: readonly JobRecord[],
+  /** Repost clusters over the SAME `jobs` array (`useJobRepostClusters`).
+   *  Omitted suppresses nothing, which is what a caller that has not run that
+   *  sweep should get. */
+  repostsByJobId?: ReadonlyMap<string, JobRepostCluster>,
+): JobDuplicates {
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() =>
     readDismissedJobPairs(),
   );
@@ -67,6 +88,7 @@ export function useJobDuplicates(jobs: readonly JobRecord[]): JobDuplicates {
     for (const pair of findDuplicatePairs(jobs)) {
       if (!isActionableDuplicate(pair.confidence)) continue;
       if (dismissed.has(jobPairKey(pair.a, pair.b))) continue;
+      if (repostsByJobId !== undefined && isRepostSuppressed(pair, repostsByJobId)) continue;
       const a = byId.get(pair.a);
       const b = byId.get(pair.b);
       if (a === undefined || b === undefined) continue;
@@ -76,7 +98,12 @@ export function useJobDuplicates(jobs: readonly JobRecord[]): JobDuplicates {
       push(suggestions, b.id, { job: a, confidence: pair.confidence });
     }
     return suggestions;
-  }, [jobs, dismissed]);
+    // `repostsByJobId` is derived from `jobs` by a sibling memo, so it can only
+    // change when `jobs` already has — listing it costs no extra re-fire and
+    // stops a caller that passes a differently-derived map from reading a stale
+    // suppression. (`exhaustive-deps` is not enforced in this repo; this array
+    // is hand-audited both directions.)
+  }, [jobs, dismissed, repostsByJobId]);
 
   const dismiss = useCallback((a: string, b: string) => {
     dismissJobPair(a, b);
