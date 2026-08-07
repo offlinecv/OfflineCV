@@ -40,7 +40,9 @@
  * the one export it used. Routing `computeCoverageFromCorpus` through the barrel
  * would drag a network primitive onto that graph for nothing. Measured: the
  * value-edge closure of the specifiers below is 27 modules and reaches no
- * `fetch`/`WebSocket`/`XMLHttpRequest`/`EventSource` at all.
+ * `fetch`/`WebSocket`/`XMLHttpRequest`/`EventSource` at all. That is a statement
+ * about the value-edge closure and not about the tarball's file list, which is
+ * larger — see "The tarball ships more files than the graph reaches" below.
  *
  * **2. Types are re-exported with `export type`.** Not a style preference. A
  * type-only edge erases at build time, so `export type { JobRecord } from …`
@@ -54,23 +56,81 @@
  * `lib/job-search`, `lib/jd-match`, `lib/heuristics`, `lib/score` and `webllm`,
  * with exactly one external runtime dependency: `idb`. The `heuristics`, `score`
  * and `webllm` modules are reached only through `import type` edges, so they
- * erase at build time and matter to `tsc` alone.
+ * erase from the runtime graph — but not from the tarball.
  *
- * That `idb` is deliberately **not** in this package's `dependencies`, and the
- * omission is not an oversight: nothing in `packages/core/` imports it. It is
- * reached from `src/lib/storage/db.ts`, which belongs to the root package, so
- * the root is where it is declared and where it resolves from. Listing it here
- * would be a dependency this package does not have — it becomes true, and
- * necessary, on the day these files physically move.
+ * ## The tarball ships more files than the graph reaches
+ *
+ * `tsc` emits a `.js` for every file in the program, the ones reached only by
+ * `import type` included, and `files` ships all of them. So `npm pack` produces
+ * 49 modules of which 27 are reachable from this barrel — and three of the
+ * unreachable 22 read exactly like the thing this file says is absent:
+ *
+ *   - `dist/src/lib/jd-match/fetch-jd.js` — a live `fetch(url, …)`
+ *   - `dist/src/lib/analytics.js` — `import.meta.env`, `await import("posthog-js")`
+ *   - `dist/src/lib/webllm/web-llm.js` — `await import("@mlc-ai/web-llm")`
+ *
+ * Neither dynamic import is in `dependencies`, and nothing can load either file:
+ * `exports` declares no subpath, so a consumer reaching for one gets
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` (verified), and no reachable module imports
+ * them. Unreachable dead JS a reader can open — not an egress path.
+ *
+ * The network-free claim above is therefore about the RUNTIME GRAPH rather than
+ * the file list, and on the graph it holds exactly: 27 modules, no network
+ * primitive, one bare import (`idb`). Which means grepping the tarball for
+ * `fetch(` is the wrong audit — it finds `fetch-jd.js` plus two prose mentions
+ * in comments. Walk the value edges out of `dist/packages/core/src/index.js`
+ * instead; that is the graph a consumer actually loads, and what `check:core`'s
+ * probe exercises when it imports the package by specifier.
+ *
+ * `idb` **is** in this package's `dependencies`, and #772 is the reason it now
+ * is. While this was a bare re-export barrel the omission was right: nothing
+ * under `packages/core/` imported `idb`, it was reached from
+ * `src/lib/storage/db.ts` which belongs to the root package, and declaring it
+ * would have claimed a dependency this package did not have. Building the
+ * package changed the fact rather than the reasoning — the tarball now carries
+ * its own emitted copy of that closure, so `dist/…/storage/db.js` holds the
+ * `import … from "idb"` with nothing above it to resolve from. It became a real
+ * dependency at BUILD time, not on the day these files physically move.
+ * `check:core` is what keeps that honest: it imports the packed tarball with
+ * only the declared dependencies symlinked in, so dropping `idb` fails with
+ * `ERR_MODULE_NOT_FOUND` naming `storage/db.js`.
  *
  * ## Status
  *
- * `private: true` and unpublished, on purpose. The storage layer is the youngest
- * part of this surface and publishing a version number is a promise not to
- * change it; that promise gets made once the layer has been quiet for a while.
- * Until then this package exists so the surface is *written down and
- * typechecked* — the specifier can be adopted, and the registry step is a
- * separate, later decision.
+ * `private: true` and unpublished, on purpose, and #772 did not change that.
+ * The storage layer is the youngest part of this surface and publishing a
+ * version number is a promise not to change it; that promise gets made once the
+ * layer has been quiet for a while.
+ *
+ * What #772 did change is that the package is now BUILDABLE, which it was not.
+ * `exports` used to point at this very file — correct for a bundler resolving a
+ * workspace link, and unpublishable in a second sense: `private: true` was all
+ * that stood between that `exports` map and a publish, and dropping that one
+ * line would have handed every Node consumer a file full of type annotations
+ * and `.ts` specifiers. `npm run build -w @offlinecv/core` now emits JS and
+ * declarations (`tsconfig.build.json`), `exports` points at the emitted entry,
+ * and `prepare` runs the build — which is what keeps a workspace/`file:` link
+ * consumer working now that `exports` no longer names `src/`.
+ *
+ * The build has two steps and the second is not decoration.
+ * `rewriteRelativeImportExtensions` turns this repo's explicit `./foo.ts`
+ * specifiers into `./foo.js` in the JavaScript — but **not** in the `.d.ts`
+ * output (verified on TypeScript 5.8.3, under both `bundler` and `nodenext`).
+ * The tarball ships no `.ts`, so a per-file declaration tree would dangle on
+ * every internal import and a consumer would silently get `any`.
+ * `rollup.dts.config.mjs` bundles the declarations into one specifier-free
+ * `dist/index.d.ts`, and `files` ships that instead of the tree.
+ *
+ * `npm run check:core` (`scripts/check-core-package.mjs`, wired into `verify`)
+ * is what makes any of this checkable from in here. Everything else in this
+ * repo is a bundler, so a broken tarball stayed invisible until the registry,
+ * where the fix costs a version bump rather than a commit. It packs the
+ * package, imports it under plain Node with ONLY its declared dependencies
+ * present, and typechecks a generated consumer against it under `nodenext`
+ * with `skipLibCheck: false`.
+ *
+ * So what is left before the registry is the decision about the version
+ * promise — no longer an unbuilt prerequisite underneath it.
  */
 
 /**

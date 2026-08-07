@@ -1,5 +1,9 @@
 COMMIT_EDITMSG
 node_modules/
+# Build output. Unanchored on purpose, so it covers BOTH `vite build`'s root
+# `dist/` and `packages/core/dist/` — the emitted JS + bundled declaration that
+# `@offlinecv/core` publishes (#772). That one is rebuilt by the package's
+# `prepare`, so a committed copy would only ever be a stale one.
 dist/
 .env.local
 .env.*.local
