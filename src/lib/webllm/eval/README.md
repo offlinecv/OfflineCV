@@ -38,8 +38,13 @@ Real models run only in a browser. The entry point is the dev-only
 
 ```sh
 npm run eval:rewrite
-# opens http://localhost:5173/offlinecv/eval-rewrite.html
+# opens https://localhost:5173/eval-rewrite.html
 ```
+
+HTTPS, and no `/offlinecv/` prefix. The dev server is TLS by default
+(`basicSsl`, self-signed — accept the warning once; WebGPU needs a
+secure context), and `BASE_PATH` is `/` unless `VITE_BASE_PATH` says
+otherwise. Both halves of the old URL were stale and 404ed.
 
 **One model per tab.** The page asks you to pick a model from the
 dropdown, then click **Run eval** — it loads that model only, runs every

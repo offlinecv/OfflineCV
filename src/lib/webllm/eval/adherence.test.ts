@@ -44,6 +44,23 @@ describe("scoreAdherence — forbidden-word", () => {
     expect(scoreAdherence(FORBIDDEN, ["SPEARHEADED the rollout"])).toBe(false);
   });
 
+  it("FAILS at 3-of-4 compliant — adherence is all-or-nothing, not an average", () => {
+    // The committed `steering-forbidden-word` fixture is four bullets, so this
+    // is the shape the 100% Steering column in
+    // tests/fixtures/rewrite/reports/README.md actually rests on: a model that
+    // obeyed on three bullets and slipped on the fourth scores `false`, not
+    // 75%. Without this case the README's mutation-check claim has no
+    // assertion behind it at the fixture's own bullet count.
+    expect(
+      scoreAdherence(FORBIDDEN, [
+        "Led the billing migration across 12 markets",
+        "Cut scope churn 30% with a quarterly planning process",
+        "Rolled out the design system to four product teams",
+        "Spearheaded the vendor consolidation review",
+      ]),
+    ).toBe(false);
+  });
+
   it("matches on a word boundary, not a substring", () => {
     // "spearheadedness" is not the word the instruction forbade. A substring
     // check would fail a compliant output and understate adherence.

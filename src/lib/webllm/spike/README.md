@@ -16,7 +16,7 @@ design commitment:
 ## How to run
 
 1. Start the dev server: `npm run dev`
-2. Open: `http://localhost:5173/offlinecv/jd-spike.html`
+2. Open: `https://localhost:5173/jd-spike.html`
 3. Select **Qwen 2.5 (1.5B)** (default) in the model picker.
 4. Set **Repeats** (default 3 — higher values give better failure-rate estimates).
 5. Click **Run spike** — the model downloads on first run (~1.6 GB); subsequent runs use the cached IndexedDB copy.

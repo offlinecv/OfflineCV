@@ -5,7 +5,7 @@
  * Browser entry for the rewrite-quality eval harness.
  *
  * Reached via `npm run eval:rewrite` → opens
- * `/offlinecv/eval-rewrite.html` in the dev server. Loads the model
+ * `/eval-rewrite.html` in the dev server. Loads the model
  * the user picked, runs every prompt variant against every fixture,
  * scores with the deterministic rubric, and renders a downloadable
  * JSON + Markdown report.
