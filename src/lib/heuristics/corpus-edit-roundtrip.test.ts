@@ -68,6 +68,11 @@
  *      Claim 2 alone cannot be trusted without this: under a wrong-ROLE write the
  *      marker-carrying role IS the wrongly-edited one, which legitimately no
  *      longer holds the replaced value, so both other halves pass.
+ *   4. SLOT (#672) — the override clears `start_date` and writes `NEW_END_DATE`
+ *      into `end_date`, the one shape the export/parse pair cannot represent; the
+ *      value must come back in `start_date`, and `end_date` must be gone. Both
+ *      halves are needed: presence alone passes when the value is left in BOTH
+ *      slots, absence alone passes when the collapse dropped it entirely.
  *
  * What it still cannot see: a pure `title`↔`company` SWAP inside role 0. The
  * exporter renders the pair into one header line and the parser re-classifies it
@@ -124,6 +129,21 @@ const NEW_COMPANY = "Vantreon Systems";
 const NEW_BULLET =
   "Vantreon: cut p99 checkout latency 43% by resharding the session store.";
 const NEW_SKILL = "VantreonScript";
+// A DATE edit (#672), typed into the END cell of a role whose START the same
+// override clears — the exact unrepresentable shape, built corpus-wide. It is
+// deliberately a token no fixture carries, so the presence check cannot pass on a
+// value that was already there.
+//
+// Supplying the end date rather than reusing the fixture's own is what makes this
+// deterministic across 59 fixtures: a real end token can be "Present", "current",
+// or a form `parseDateRange` renormalises, and the gate would then be asserting
+// against whatever each fixture happened to hold. The collapse is the same either
+// way — an end date with no start date is the shape — and the value is ours.
+//
+// The edit-leg gate had never touched a date field, which is exactly why the
+// lone-end-date corruption could ship: `applyExperienceHeaderOverrides` wrote both
+// date keys verbatim, empty string included, and no gate could see it.
+const NEW_END_DATE = "Feb 1987";
 const ADDED_DEGREE = "B.S. in Vantreon Systems Engineering";
 const ADDED_INSTITUTION = "Vantreon Institute of Technology";
 
@@ -222,7 +242,13 @@ interface SyntheticEdits {
   exercised: Set<Exclude<EditCategory, "render">>;
   /** Original values the overrides replaced — for the "replaced value absent"
    *  assertion (read at runtime, never persisted). */
-  replaced: { email?: string; title?: string; company?: string; bullet?: string };
+  replaced: {
+    email?: string;
+    title?: string;
+    company?: string;
+    bullet?: string;
+    start_date?: string;
+  };
 }
 
 /**
@@ -248,7 +274,15 @@ function synthesizeOverrides(
     exercised.add("experience");
     replaced.title = fields.experience[0].title;
     replaced.company = fields.experience[0].company;
-    experience[0] = { title: NEW_TITLE, company: NEW_COMPANY };
+    replaced.start_date = fields.experience[0].start_date;
+    experience[0] = {
+      title: NEW_TITLE,
+      company: NEW_COMPANY,
+      // The #672 shape: START cleared, END supplied. `applyOverrides` must collapse
+      // it to `{start_date: NEW_END_DATE}` before the exporter ever sees it.
+      start_date: "",
+      end_date: NEW_END_DATE,
+    };
   }
 
   // bullets — only when a bullet observation exists.
@@ -344,7 +378,9 @@ function editedRoleText(experience: readonly unknown[], fallback: string): strin
 
 /** One string field off a re-parsed experience entry, or `undefined` when the
  *  key is absent or non-string. */
-function stringField(entry: unknown, key: "title" | "company"): string | undefined {
+type EditedRoleField = "title" | "company" | "start_date" | "end_date";
+
+function stringField(entry: unknown, key: EditedRoleField): string | undefined {
   const v = (entry as Record<string, unknown> | null)?.[key];
   return typeof v === "string" ? v : undefined;
 }
@@ -362,7 +398,7 @@ function stringField(entry: unknown, key: "title" | "company"): string | undefin
  */
 function experienceFieldCheck(
   experience: readonly unknown[],
-  key: "title" | "company",
+  key: EditedRoleField,
   present: string,
   replaced: string | undefined,
   absenceText: string,
@@ -418,6 +454,30 @@ function computeEditFailures(
       f3.experience, "company", NEW_COMPANY, edits.replaced.company, roleText,
       fails.experience,
     );
+    // The date half (#672), and it is the SLOT that is under test, not merely
+    // "a date field round-trips". The override cleared `start_date` and wrote
+    // `NEW_END_DATE` into `end_date`; asserting the value comes back in
+    // `start_date` is asserting that `applyOverrides` collapsed the pair to the one
+    // shape the export/parse round trip can represent.
+    //
+    // Measured against an injected regression, not argued — an earlier revision of
+    // this comment claimed date coverage the assertion did not have. With the
+    // `applyNormalizedExperienceDates` call removed from `applyOverrides`:
+    //   • this shape (START cleared, END supplied)  → 45 of 60 FAIL
+    //   • the earlier shape (a new `start_date`)    → 60/60 GREEN
+    // The presence of a date field was never the thing under test; the SLOT is.
+    experienceFieldCheck(
+      f3.experience, "start_date", NEW_END_DATE, edits.replaced.start_date,
+      roleText, fails.experience,
+    );
+    // …and it landed in ONE slot. Presence in `start_date` alone would still pass
+    // if the value were ALSO left in `end_date` (drawing "Feb 1987 – Feb 1987"),
+    // which is the other way a half-applied collapse can look.
+    const marked = f3.experience.find(
+      (e) => stringField(e, "title") === NEW_TITLE,
+    );
+    if (marked !== undefined && stringField(marked, "end_date") !== undefined)
+      fails.experience.push("end_date survived the lone-end-date collapse");
     // …and it landed where it was AIMED. Narrowing the absence half to the role
     // carrying the marker is correct, but on its own it makes a wrong-ROLE write
     // undetectable: that role legitimately no longer holds the replaced value,

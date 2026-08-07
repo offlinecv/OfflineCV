@@ -55,6 +55,10 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import {
+  normalizeExperienceDates,
+  type ExperienceDateFields,
+} from "../lib/edit/experience-dates.ts";
+import {
   captureBulletUndoSnapshot,
   restoreBulletUndoSnapshot,
   type BulletUndoTargets,
@@ -109,6 +113,7 @@ export interface ExperienceFieldOverrides {
   team?: string;
   start_date?: string;
   end_date?: string;
+  is_current?: boolean;
 }
 
 // ── Bullet overrides ──────────────────────────────────────────────────────────
@@ -477,7 +482,8 @@ export interface EditableParse {
   setExperienceField: (
     index: number,
     field: keyof ExperienceFieldOverrides,
-    value: string | undefined,
+    value: any,
+    baseEntry?: ExperienceDateFields,
   ) => void;
   /** Override map for bullet text, keyed by {@link BulletObservation.id}. */
   bulletOverrides: BulletOverrides;
@@ -778,7 +784,8 @@ export function useEditableParse(): EditableParse {
     (
       index: number,
       field: keyof ExperienceFieldOverrides,
-      value: string | undefined,
+      value: any,
+      baseEntry?: ExperienceDateFields,
     ) => {
       setExperienceOverrides((prev) => {
         const entry = { ...prev[index] };
@@ -787,6 +794,37 @@ export function useEditableParse(): EditableParse {
         } else {
           entry[field] = value;
         }
+
+        if (baseEntry && (field === "start_date" || field === "end_date")) {
+          const start = entry.start_date !== undefined ? entry.start_date : baseEntry.start_date;
+          const end = entry.end_date !== undefined ? entry.end_date : baseEntry.end_date;
+          const is_current = entry.is_current !== undefined ? entry.is_current : baseEntry.is_current;
+
+          const norm = normalizeExperienceDates({
+            start_date: start,
+            end_date: end,
+            is_current,
+          });
+
+          if (norm.start_date !== baseEntry.start_date) {
+            entry.start_date = norm.start_date ?? "";
+          } else {
+            delete entry.start_date;
+          }
+
+          if (norm.end_date !== baseEntry.end_date) {
+            entry.end_date = norm.end_date ?? "";
+          } else {
+            delete entry.end_date;
+          }
+
+          if (norm.is_current !== baseEntry.is_current) {
+            entry.is_current = norm.is_current ?? false;
+          } else {
+            delete entry.is_current;
+          }
+        }
+
         return { ...prev, [index]: entry };
       });
     },
@@ -1061,7 +1099,19 @@ export function useEditableParse(): EditableParse {
   const setEntryField = useCallback(
     (id: string, field: AddedEntryField, value: string) => {
       setAddedEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)),
+        prev.map((e) => {
+          if (e.id !== id) return e;
+          const nextEntry = { ...e, [field]: value };
+          if (e.section === "experience" && (field === "start_date" || field === "end_date")) {
+            const norm = normalizeExperienceDates({
+              start_date: nextEntry.start_date,
+              end_date: nextEntry.end_date,
+            });
+            nextEntry.start_date = norm.start_date ?? "";
+            nextEntry.end_date = norm.end_date ?? "";
+          }
+          return nextEntry;
+        }),
       );
     },
     [],
