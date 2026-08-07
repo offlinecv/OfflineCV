@@ -17,16 +17,28 @@
  *    the row must then drop the date line rather than print `NaN days`. The
  *    tracker's own fixtures all have timestamps, so nothing above this reaches
  *    that branch.
- *  - **The absence of an affordance.** #754's whole decision was to replace 30
- *    destructive **Merge into this one** buttons with one sentence, so "there
- *    is no button here" is the requirement, not an implementation detail. A
- *    later change that helpfully re-adds one should fail a test.
+ *  - **The absence of a MERGE affordance.** #754's whole decision was to replace
+ *    30 destructive **Merge into this one** buttons with one sentence, and that
+ *    decision survives the bulk-archive follow-up: archiving is a status move
+ *    the cluster outlives, merging is not. A later change that helpfully
+ *    re-adds a merge should fail a test.
+ *  - **Collapsed by default.** The section sits above the pipeline, so an open
+ *    28-cluster list is a page of scroll in front of the rows that are the
+ *    work. Closed-on-mount is the requirement; the count in the header is what
+ *    keeps that from being hiding.
+ *  - **The action is reachable without opening the list.** Most users come to
+ *    this section to sweep it, and burying the trigger behind the disclosure
+ *    would put the scroll back in front of them.
  */
 
 import { describe, it, expect } from "vitest";
-import { setupDomRoot } from "./__test-utils__/dialog-dom.ts";
+import { act } from "react";
+import { installDialogPolyfill, setupDomRoot } from "./__test-utils__/dialog-dom.ts";
 import { JobRepostClusterList } from "./JobRepostClusterList.tsx";
 import type { JobRepostCluster } from "../../lib/job-repost-clusters.ts";
+import type { JobRecord } from "../../lib/storage/index.ts";
+
+installDialogPolyfill();
 
 const dom = setupDomRoot();
 
@@ -47,6 +59,29 @@ function cluster(over: Partial<JobRepostCluster> = {}): JobRepostCluster {
   };
 }
 
+function job(over: Partial<JobRecord>): JobRecord {
+  return {
+    id: over.id ?? crypto.randomUUID(),
+    createdAt: JAN_1,
+    updatedAt: JAN_1,
+    title: "Staff Engineer",
+    company: "Acme",
+    status: "interested",
+    ...over,
+  };
+}
+
+/** The disclosure toggle — the only button in the header when no sweep is
+ *  wired, and identified by `aria-expanded` rather than its label so the tests
+ *  below assert on the label rather than depending on it. */
+function toggle(): HTMLButtonElement {
+  return dom.container.querySelector("button[aria-expanded]") as HTMLButtonElement;
+}
+
+function expand() {
+  act(() => toggle().dispatchEvent(new MouseEvent("click", { bubbles: true })));
+}
+
 describe("JobRepostClusterList", () => {
   it("renders nothing at all when no role has been re-listed", () => {
     dom.render(<JobRepostClusterList clusters={[]} />);
@@ -56,8 +91,20 @@ describe("JobRepostClusterList", () => {
     expect(dom.container.querySelector("section")).toBeNull();
   });
 
-  it("states the count, the role and the span once per cluster", () => {
+  it("opens COLLAPSED, mounting no cluster rows, and states the count anyway", () => {
+    dom.render(<JobRepostClusterList clusters={[cluster(), cluster({ key: "b" })]} />);
+
+    // The motivating defect: 28 clusters standing between the user and the
+    // pipeline. Closed is a real render saving, not a CSS hide.
+    expect(dom.container.querySelectorAll("li")).toHaveLength(0);
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    // …and nothing is hidden without saying how much.
+    expect(dom.container.textContent).toContain("Reposted roles · 2");
+  });
+
+  it("states the count, the role and the span once per cluster when opened", () => {
     dom.render(<JobRepostClusterList clusters={[cluster()]} />);
+    expand();
 
     const text = dom.container.textContent ?? "";
     expect(text).toContain("Reposted 3×");
@@ -76,6 +123,7 @@ describe("JobRepostClusterList", () => {
         ]}
       />,
     );
+    expand();
 
     const text = dom.container.textContent ?? "";
     // The count is still true and still stated…
@@ -88,13 +136,51 @@ describe("JobRepostClusterList", () => {
     expect(text).not.toContain("Invalid Date");
   });
 
-  it("offers no action — no button, and the copy says why", () => {
-    dom.render(<JobRepostClusterList clusters={[cluster(), cluster({ key: "b" })]} />);
+  it("still offers no merge, and the copy still says why", () => {
+    dom.render(
+      <JobRepostClusterList
+        clusters={[cluster(), cluster({ key: "b" })]}
+        jobs={[job({ id: "a" })]}
+        archiveReposted={async () => 0}
+      />,
+    );
+    expand();
 
-    // #754 replaced a grid of destructive merge buttons with a statement.
-    // Nothing here is for the user to accept, decline, or dismiss.
-    expect(dom.container.querySelectorAll("button")).toHaveLength(0);
+    // #754 replaced a grid of destructive merge buttons with a statement, and
+    // the bulk-archive follow-up did not walk that back: nothing here folds one
+    // record into another.
+    const labels = [...dom.container.querySelectorAll("button")].map(
+      (b) => b.textContent ?? "",
+    );
+    expect(labels.some((label) => /merge/i.test(label))).toBe(false);
     expect(dom.container.textContent).toContain("no merge is offered");
+  });
+
+  it("shows the archive trigger in the header, without opening the list", () => {
+    dom.render(
+      <JobRepostClusterList
+        clusters={[cluster({ ids: ["a", "b"], count: 2 })]}
+        jobs={[job({ id: "a" }), job({ id: "b" })]}
+        archiveReposted={async () => 2}
+      />,
+    );
+
+    // Collapsed, and the sweep is still one click away — the reason most users
+    // open this section at all.
+    expect(dom.container.querySelectorAll("li")).toHaveLength(0);
+    const labels = [...dom.container.querySelectorAll("button")].map(
+      (b) => b.textContent ?? "",
+    );
+    expect(labels).toContain("Archive all reposted roles");
+  });
+
+  it("renders no action at all for a caller that supplied no sweep", () => {
+    dom.render(<JobRepostClusterList clusters={[cluster()]} />);
+
+    // The display-only contract: a caller that only states clusters gets only
+    // the disclosure.
+    expect(dom.container.querySelectorAll("button")).toHaveLength(1);
+    expect(toggle()).not.toBeNull();
   });
 
   it("counts the clusters in its heading, not the records inside them", () => {

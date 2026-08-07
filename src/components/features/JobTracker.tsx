@@ -56,6 +56,13 @@
  * its own sibling file, so this header only wires it to `tracker.jobs` and
  * `tracker.archiveOlderThan`. Unlike the three sweeps above, this ONE writes:
  * the dialog's own docblock covers why that write is safe.
+ *
+ * Repost sweep: the second bulk write, and it lives in the repost section's own
+ * header rather than this one, because it is scoped to what that section lists
+ * and vanishes when nothing in it is still sweepable. Same wiring shape —
+ * `tracker.jobs` plus `tracker.archiveReposted`, passed through
+ * `JobRepostClusterList` to `JobRepostArchiveDialog`, which owns the whole
+ * feature.
  */
 
 import { useMemo } from "react";
@@ -200,6 +207,7 @@ export function JobTracker({
     create,
     exportBackup,
     archiveOlderThan,
+    archiveReposted,
   } = tracker;
 
   // One pass, bucketed by each job's DISPLAY bucket rather than its literal
@@ -298,7 +306,11 @@ export function JobTracker({
         <div className="flex flex-col gap-4">
           {/* Above the pipeline, not inside it: a cluster's members are spread
               across status buckets, so no section owns the statement. */}
-          <JobRepostClusterList clusters={repostClusters} />
+          <JobRepostClusterList
+            clusters={repostClusters}
+            jobs={jobs}
+            archiveReposted={archiveReposted}
+          />
           {groups.map(({ bucket, jobs: group }) => (
             <JobTrackerStatusGroup
               key={bucket}

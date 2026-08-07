@@ -21,9 +21,15 @@ import type { JobRecord, LetterRecord } from "../../lib/storage/index.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
 import type { JobDuplicateSuggestion } from "../../hooks/useJobDuplicates.ts";
 import { findRepostClusters } from "../../lib/job-repost-clusters.ts";
+import { installDialogPolyfill } from "./__test-utils__/dialog-dom.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
+
+// The repost section's bulk-archive confirm is a `Dialog`, which jsdom cannot
+// open on its own. Only the polyfill is borrowed — this suite drives its own
+// `createRoot`, so `setupDomRoot` is deliberately not used.
+installDialogPolyfill();
 
 let container: HTMLElement;
 let root: Root;
@@ -67,6 +73,7 @@ function makeTracker(jobs: JobRecord[]): Tracker {
     saveFromMatch: vi.fn(async () => "new-id"),
     exportBackup: vi.fn(async () => {}),
     archiveOlderThan: vi.fn(async () => 0),
+    archiveReposted: vi.fn(async () => 0),
     refresh: vi.fn(async () => {}),
   };
 }
@@ -936,8 +943,19 @@ describe("JobTracker: a repost cluster states the churn instead of offering merg
     return tracker;
   }
 
+  /** The repost section opens COLLAPSED, so a test about its rows has to open
+   *  it. Identified by `aria-expanded` on a button whose label names the
+   *  section, since the status sections use the same disclosure idiom. */
+  function expandReposts() {
+    const button = [...container.querySelectorAll("button[aria-expanded]")].find(
+      (b) => b.textContent?.includes("Reposted roles"),
+    );
+    act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  }
+
   it("renders ONE repost row for the group, stating the count and the span", () => {
     mount(relisted());
+    expandReposts();
     const rows = [...container.querySelectorAll("li")].filter((li) =>
       li.textContent?.includes("Reposted"),
     );
@@ -950,11 +968,47 @@ describe("JobTracker: a repost cluster states the churn instead of offering merg
 
   it("offers no merge anywhere in the group, and merges nothing by rendering", () => {
     const tracker = mount(relisted());
+    expandReposts();
     const merge = [...container.querySelectorAll("button")].filter(
       (b) => b.textContent === "Merge into this one",
     );
     expect(merge).toEqual([]);
     expect(tracker.merge).not.toHaveBeenCalled();
+  });
+
+  it("keeps the repost section closed on mount, above an open pipeline", () => {
+    // The section is a heads-up, the sections below it are the work. Rendering
+    // 28 clusters open put a page of scroll between the two.
+    mount(relisted());
+    const reposts = [...container.querySelectorAll("button[aria-expanded]")].find(
+      (b) => b.textContent?.includes("Reposted roles"),
+    );
+    expect(reposts?.getAttribute("aria-expanded")).toBe("false");
+    // …while the Interested rows it sits above are still right there.
+    expect(container.textContent).toContain("Interested · 5");
+  });
+
+  it("sweeps the clustered rows through the tracker, and only on confirm", async () => {
+    const tracker = mount(relisted());
+    // Rendering the trigger writes nothing.
+    expect(tracker.archiveReposted).not.toHaveBeenCalled();
+
+    const trigger = [...container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Archive all reposted roles",
+    );
+    act(() => trigger?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    // Opening the confirm writes nothing either.
+    expect(tracker.archiveReposted).not.toHaveBeenCalled();
+
+    const dialog = container.querySelector("dialog[open]") as HTMLElement;
+    const confirm = [...dialog.querySelectorAll("button")].find(
+      (b) => b.textContent === "Archive",
+    );
+    await act(async () => {
+      confirm?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(tracker.archiveReposted).toHaveBeenCalledWith(findRepostClusters(relisted()));
   });
 
   it("still lists all six records in their own status sections", () => {

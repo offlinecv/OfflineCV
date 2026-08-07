@@ -23,9 +23,11 @@ import {
   mergeJobs,
   createTrackedJobFromMatch,
   archiveInterestedOlderThan,
+  archiveRepostedRoles,
   type NewJobInput,
   type JobPatch,
 } from "../lib/job-tracker.ts";
+import type { JobRepostCluster } from "../lib/job-repost-clusters.ts";
 import {
   requestStoragePersistence,
   isStoragePersisted,
@@ -67,6 +69,11 @@ export interface JobTracker {
    *  `jobsToArchive` preview would see, so the confirmed count and the
    *  archived count can never disagree. */
   archiveOlderThan: (cutoffDays: number) => Promise<number>;
+  /** Repost sweep: archives every Interested job belonging to one of
+   *  `clusters` — `useJobRepostClusters`' derived-on-view output — and returns
+   *  the count archived. Takes the clusters rather than re-deriving them, so
+   *  the set swept is the set the user was shown a count for. */
+  archiveReposted: (clusters: readonly JobRepostCluster[]) => Promise<number>;
   refresh: () => Promise<void>;
 }
 
@@ -183,6 +190,15 @@ export function useJobTracker(): JobTracker {
     [jobs, refresh],
   );
 
+  const archiveReposted = useCallback(
+    async (clusters: readonly JobRepostCluster[]) => {
+      const count = await archiveRepostedRoles(jobs, clusters);
+      await refresh();
+      return count;
+    },
+    [jobs, refresh],
+  );
+
   return {
     jobs,
     ready,
@@ -198,6 +214,7 @@ export function useJobTracker(): JobTracker {
     saveFromMatch,
     exportBackup,
     archiveOlderThan,
+    archiveReposted,
     refresh,
   };
 }

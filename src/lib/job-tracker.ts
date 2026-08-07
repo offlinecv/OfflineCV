@@ -25,6 +25,8 @@ import {
 } from "./storage/index.ts";
 import { mergeJobRecords } from "./job-merge.ts";
 import { isSweepableBucket, jobsToArchive } from "./job-archive-sweep.ts";
+import { repostedJobsToArchive } from "./job-repost-sweep.ts";
+import type { JobRepostCluster } from "./job-repost-clusters.ts";
 import type { JobRecord, JobStatus } from "./storage/index.ts";
 
 /** Fields a caller supplies when creating a tracked job. `status` defaults to
@@ -290,6 +292,37 @@ export async function archiveInterestedOlderThan(
   now: number = Date.now(),
 ): Promise<number> {
   const toArchive = jobsToArchive(jobs, cutoffDays, now);
+  if (toArchive.length === 0) return 0;
+  const archived = await archiveJobs(
+    toArchive.map((job) => job.id),
+    { stillEligible: isSweepableBucket },
+  );
+  return archived.length;
+}
+
+/**
+ * Repost sweep: every Interested job that belongs to one of `clusters` becomes
+ * `"archived"`. Returns the count actually archived.
+ *
+ * Every paragraph of {@link archiveInterestedOlderThan}'s docblock applies
+ * verbatim — `jobs` is a parameter so selection and preview agree by
+ * construction, the returned count can come out below the preview only because
+ * `archiveJobs` re-judges each row against storage immediately before writing
+ * it, the status rewrite is one-way over a synced row's own vocabulary, and the
+ * cross-tab change signal is coalesced to one message. The two functions differ
+ * in exactly one line: which pure selector chooses the rows.
+ *
+ * `clusters` is a parameter for the same reason `jobs` is. The caller's list is
+ * `useJobRepostClusters`' derived-on-view sweep, which the user has been shown
+ * a count against; re-deriving it here would be a second grouping pass over a
+ * possibly-different library and a second chance to disagree with the number on
+ * the confirm button.
+ */
+export async function archiveRepostedRoles(
+  jobs: readonly JobRecord[],
+  clusters: readonly JobRepostCluster[],
+): Promise<number> {
+  const toArchive = repostedJobsToArchive(jobs, clusters);
   if (toArchive.length === 0) return 0;
   const archived = await archiveJobs(
     toArchive.map((job) => job.id),
