@@ -5,7 +5,7 @@
  * Browser entry for the JD-extraction + evidence-judging spike (issue #198).
  *
  * Reached via `npm run eval:jd-spike` or by opening
- * `http://localhost:5173/offlinecv/jd-spike.html` while the dev server
+ * `https://localhost:5173/jd-spike.html` while the dev server
  * is running. Loads the selected model via WebLLM, runs the spike
  * measurement over the 3 inline fixtures (see fixtures.ts), and offers
  * downloadable JSON + Markdown reports.
