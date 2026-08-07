@@ -29,7 +29,9 @@ import {
   deriveJobTitleFromJd,
   mergeJobs,
   archiveInterestedOlderThan,
+  archiveRepostedRoles,
 } from "./job-tracker.ts";
+import { findRepostClusters } from "./job-repost-clusters.ts";
 import { isSweepableBucket, jobsToArchive } from "./job-archive-sweep.ts";
 import { archiveJobs } from "./storage/jobs.ts";
 import { getRecord, putRecord } from "./storage/crud.ts";
@@ -367,6 +369,116 @@ describe("job-tracker: bulk-archive sweep (#759)", () => {
     // The producer's own vocabulary ("scouted") is gone — this is the
     // documented one-way write, not a bug.
     expect((await getJobById(scouted.id))?.status).toBe("archived");
+  });
+});
+
+describe("job-tracker: archiveRepostedRoles", () => {
+  const NOW = Date.parse("2026-08-05T00:00:00Z");
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  function plantJob(over: Partial<JobRecord> & { createdAt: number }): Promise<JobRecord> {
+    return putRecord<JobRecord>("jobs", {
+      id: crypto.randomUUID(),
+      title: "SWE",
+      company: "Acme",
+      status: "interested",
+      ...over,
+    });
+  }
+
+  /** Three captures of one Acme role spread over 100 days — a repost cluster by
+   *  `findRepostClusters`' own rule, so the clusters this suite sweeps are the
+   *  ones the UI would have derived rather than hand-built literals. */
+  async function threeRepostsOfOneRole() {
+    return [
+      await plantJob({ createdAt: NOW - 100 * DAY_MS }),
+      await plantJob({ createdAt: NOW - 50 * DAY_MS }),
+      await plantJob({ createdAt: NOW - 1 * DAY_MS }),
+    ];
+  }
+
+  it("archives every Interested member of a cluster, newest included", async () => {
+    const planted = await threeRepostsOfOneRole();
+    const jobs = await listJobs();
+    const clusters = findRepostClusters(jobs);
+    expect(clusters).toHaveLength(1);
+
+    const count = await archiveRepostedRoles(jobs, clusters);
+
+    expect(count).toBe(3);
+    for (const job of planted) {
+      expect((await getJobById(job.id))?.status).toBe("archived");
+    }
+  });
+
+  it("leaves the cluster itself standing — the churn evidence outlives the sweep", async () => {
+    await threeRepostsOfOneRole();
+    const clusters = findRepostClusters(await listJobs());
+
+    await archiveRepostedRoles(await listJobs(), clusters);
+
+    // Clusters are derived over the WHOLE library, archived rows included, so
+    // the list still says "reposted 3×" afterwards. This is the property that
+    // makes archiving offerable here where a merge was not (#754).
+    const after = findRepostClusters(await listJobs());
+    expect(after).toHaveLength(1);
+    expect(after[0].count).toBe(3);
+  });
+
+  it("never touches a pipeline row inside a cluster", async () => {
+    await plantJob({ createdAt: NOW - 100 * DAY_MS });
+    const applied = await plantJob({ createdAt: NOW - 1 * DAY_MS, status: "applied" });
+    const jobs = await listJobs();
+
+    const count = await archiveRepostedRoles(jobs, findRepostClusters(jobs));
+
+    expect(count).toBe(1);
+    expect((await getJobById(applied.id))?.status).toBe("applied");
+  });
+
+  it("SPARES a row that stopped being Interested after the preview was computed", async () => {
+    // Same window `archiveInterestedOlderThan` guards, and the same shared
+    // `isSweepableBucket` re-check inside `archiveJobs` closes it: `jobs` is
+    // the array the user was counting, and the store no longer agrees with it.
+    const planted = await threeRepostsOfOneRole();
+    const jobs = await listJobs();
+    const clusters = findRepostClusters(jobs);
+
+    await setJobStatus(planted[1].id, "interviewing");
+    const beforeSweep = await getJobById(planted[1].id);
+
+    const count = await archiveRepostedRoles(jobs, clusters);
+
+    const after = await getJobById(planted[1].id);
+    expect(after?.status).toBe("interviewing");
+    expect(after?.updatedAt).toBe(beforeSweep?.updatedAt);
+    // The count reports writes that happened, not rows that were listed.
+    expect(count).toBe(2);
+  });
+
+  it("is a no-op the second time, writing nothing", async () => {
+    await threeRepostsOfOneRole();
+    const clusters = findRepostClusters(await listJobs());
+    await archiveRepostedRoles(await listJobs(), clusters);
+
+    const stamps = (await listJobs()).map((job) => job.updatedAt);
+    const count = await archiveRepostedRoles(await listJobs(), clusters);
+
+    expect(count).toBe(0);
+    expect((await listJobs()).map((job) => job.updatedAt)).toEqual(stamps);
+  });
+
+  it("archives nothing when the library holds no cluster", async () => {
+    const lone = await plantJob({ createdAt: NOW - 100 * DAY_MS });
+    const before = await getJobById(lone.id);
+    const jobs = await listJobs();
+
+    const count = await archiveRepostedRoles(jobs, findRepostClusters(jobs));
+
+    expect(count).toBe(0);
+    const after = await getJobById(lone.id);
+    expect(after?.status).toBe("interested");
+    expect(after?.updatedAt).toBe(before?.updatedAt);
   });
 });
 
