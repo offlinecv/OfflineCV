@@ -106,7 +106,11 @@ export default [
   // ── Global ignores ──────────────────────────────────────────────────────
   {
     ignores: [
-      "dist/**",
+      // Build output, wherever it lands. Anchored `dist/**` only matched
+      // `vite build`'s root output, so `eslint .` walked the 49 emitted files
+      // under `packages/core/dist/` (#772) — generated JS, linted against rules
+      // written for hand-authored source. Unanchored, both are covered.
+      "**/dist/**",
       "node_modules/**",
       "*.config.js",
       "*.config.ts",

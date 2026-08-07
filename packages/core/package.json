@@ -5,11 +5,27 @@
   "license": "Apache-2.0",
   "description": "The headless, browser-only core of offlinecv: job capture, local library storage, JD term extraction and fit rating. Re-exported from src/lib — see src/index.ts.",
   "type": "module",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/packages/core/src/index.js"
     }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.json",
+    "dist/index.d.ts"
+  ],
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && rollup -c rollup.dts.config.mjs",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "idb": "^8.0.3"
+  },
+  "devDependencies": {
+    "rollup": "^4.60.4",
+    "rollup-plugin-dts": "^6.5.1"
   }
 }

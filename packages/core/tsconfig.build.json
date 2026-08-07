@@ -1,0 +1,61 @@
+{
+  // The emit config for `@offlinecv/core` (#772). It cannot extend
+  // `tsconfig.app.json` or `tsconfig.node.json`: both are `noEmit`, because in
+  // this repo `tsc` only ever typechecks and `vite build` produces the bundles.
+  // This package is the one artifact that has to leave the repo as JavaScript,
+  // so it owns the only emitting config in the tree.
+  "compilerOptions": {
+    "target": "ES2022",
+    // `DOM` is not optional. The storage layer this package re-exports is built
+    // on IndexedDB and BroadcastChannel, so the closure does not typecheck at
+    // all without the browser lib — the package is browser-only by design and
+    // the config says so.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    // The repo writes relative imports with an explicit `.ts` extension, which
+    // no runtime resolves. These two options are what turn that convention into
+    // shippable JS: `tsc` accepts the `.ts` specifier on input and rewrites it
+    // to `.js` in the emitted JavaScript. It does NOT rewrite the `.d.ts` output
+    // (verified on TS 5.8.3) — that gap is what `rollup.dts.config.mjs` exists
+    // to close, and why the tarball ships a single bundled declaration.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+
+    // Load-bearing for the privacy property the barrel's docblock claims. The
+    // surface is 27 value modules plus 22 reached only through `import type`
+    // edges. What `verbatimModuleSyntax` guarantees is narrower than "those 22
+    // erase": it guarantees the EMIT MATCHES THE SOURCE SYNTAX — an
+    // `import type`/`export type` erases, a plain `import`/`export` is
+    // preserved, and no elision heuristic decides either way behind our backs.
+    // The erasing is done by the barrel's disciplined `export type` statements;
+    // this flag is what makes that value/type split auditable by reading
+    // `src/index.ts`. Turn one of those 22 into a plain `export` and the flag
+    // will faithfully preserve it — growing the runtime graph past the 27 that
+    // were audited to reach no `fetch`/`WebSocket`.
+    "verbatimModuleSyntax": true,
+
+    // `src/lib/analytics.ts` reads `import.meta.env`. It is on the closure
+    // through a type edge only, so it erases at runtime, but `tsc` still has to
+    // typecheck it — and outside `tsconfig.app.json` that is four
+    // `TS2339: Property 'env' does not exist on type 'ImportMeta'`.
+    "types": ["vite/client"],
+
+    "declaration": true,
+    // No `declarationMap`, no `sourceMap`: `files` in package.json ships no
+    // sources, so either map would resolve to nothing in a consumer's tarball.
+
+    "strict": true,
+    "skipLibCheck": true,
+
+    // The barrel re-exports through `../../../src/lib/…`, so the emit closure
+    // reaches outside this package and `rootDir` has to cover the repo root.
+    // The consequence is the nesting in `dist/packages/core/src/index.js` —
+    // expected, and what `exports` points at.
+    "rootDir": "../..",
+    "outDir": "dist",
+    "noEmit": false
+  },
+  "include": ["src/index.ts"]
+}

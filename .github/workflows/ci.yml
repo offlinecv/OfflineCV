@@ -57,6 +57,17 @@ jobs:
       - run: npm run check:baselines
         env:
           GH_TOKEN: ${{ github.token }}
+      # Publishable-tarball gate (#772). Mirrored here rather than left inside
+      # `npm run verify` because branch protection requires THIS job, and every
+      # other step above is a bundler or a typechecker: none of them loads
+      # `@offlinecv/core` the way a published consumer does, so the whole class
+      # of "the tarball is wrong" — `exports` pointing at a path that does not
+      # ship, a dependency reached from the emit but absent from
+      # `dependencies` — is invisible to them. Without this line a push that
+      # skips the pre-push hook merges green and only the daily
+      # `promote-release.yml` (which does run `npm run verify`) goes red, after
+      # the fact.
+      - run: npm run check:core
       # Run the suite with coverage so the fallow step below can compute
       # accurate per-function CRAP scores (coverage/coverage-final.json).
       - run: npm run test:coverage

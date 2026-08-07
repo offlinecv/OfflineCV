@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { CASCADE_VERSION } from "./heuristics/types";
-import type { LayoutTrigger, ParseEvent } from "./heuristics/types";
-import type { WebGpuCapability } from "./webllm/types";
-import type { Browser, Os } from "./webllm/platform";
-import type { AtsPlatform } from "./jd-match/fetch-jd";
+import { CASCADE_VERSION } from "./heuristics/types.ts";
+import type { LayoutTrigger, ParseEvent } from "./heuristics/types.ts";
+import type { WebGpuCapability } from "./webllm/types.ts";
+import type { Browser, Os } from "./webllm/platform.ts";
+import type { AtsPlatform } from "./jd-match/fetch-jd.ts";
 
 type PostHog = {
   capture: (event: string, props?: Record<string, unknown>) => void;

@@ -37,8 +37,38 @@
   // not an npm package — it's `@import`ed from src/styles.css. Fallow's dependency
   // scanner has no view of the Vite alias, so it reports an "unlisted dependency".
   // Teach it the specifier is intentional.
+  // `idb` (#772) is the second entry and a different kind of false positive from
+  // the alias above. `@offlinecv/core` declares it, and no file under
+  // `packages/core/` imports it. Both halves are true and neither is a defect:
+  // that package is a BARREL — `packages/core/src/index.ts` re-exports from
+  // `../../../src/lib/**`, its build emits that whole closure into
+  // `packages/core/dist/`, and `idb` is reached from `src/lib/storage/db.ts`
+  // INSIDE the emitted copy the tarball ships. Drop the dependency and the
+  // published package throws `ERR_MODULE_NOT_FOUND` on first import. fallow
+  // scopes dependency analysis to the workspace DIRECTORY, so it cannot reach a
+  // verdict about this one that is right.
+  //
+  // This entry is GLOBAL, and that is a real cost, not a preference — unlike the
+  // `ignoreExports` blocks below, which are all file-scoped. It was tried both
+  // scoped ways first: an `overrides` entry with `unused-dependencies: "off"`
+  // (matching `packages/core/package.json` and `packages/core/**`) and a nested
+  // `packages/core/.fallowrc.jsonc`. fallow 2.96 honours neither for a
+  // dependency finding — the finding attaches to a manifest, and per-file
+  // overrides apply to rules that attach to source files. So the root manifest's
+  // own `idb` goes unchecked as collateral. What that gives up: if
+  // `src/lib/storage/db.ts` ever stopped importing `idb`, fallow would no longer
+  // report the root dependency as dead. Narrow this the day fallow can scope it.
+  //
+  // For the package this is actually about, the check is not lost but relocated
+  // and strengthened. `npm run check:core` (scripts/check-core-package.mjs,
+  // assertion 5) packs the tarball, walks the module graph reachable from the
+  // entry `exports` points at, and fails on a declared dependency nothing in it
+  // imports — over the emitted closure fallow can't see, in both directions, and
+  // on reachability rather than the file list. Verified to fail: adding a surplus
+  // dependency to that manifest reports it by name.
   "ignoreDependencies": [
-    "@design-tokens"
+    "@design-tokens",
+    "idb"
   ],
 
   // Complexity/CRAP thresholds only apply to shipped product code. The dev-only

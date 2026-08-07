@@ -26,8 +26,9 @@
     "lint": "eslint .",
     "check:fixtures": "node scripts/check-fixture-pii.mjs",
     "check:baselines": "node scripts/check-known-failures.mjs",
+    "check:core": "node scripts/check-core-package.mjs",
     "test:coverage": "vitest run --coverage",
-    "verify": "tsc -b --noEmit && eslint . && npm run check:fixtures && npm run check:baselines && vitest run --coverage && vite build && (fallow audit --base origin/main --coverage coverage/coverage-final.json || echo 'fallow audit exited non-zero (report-only, ignored)')"
+    "verify": "tsc -b --noEmit && eslint . && npm run check:fixtures && npm run check:baselines && npm run check:core && vitest run --coverage && vite build && (fallow audit --base origin/main --coverage coverage/coverage-final.json || echo 'fallow audit exited non-zero (report-only, ignored)')"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
@@ -60,6 +61,8 @@
     "globals": "^16.2.0",
     "jsdom": "^26.1.0",
     "postcss": "^8.5.6",
+    "rollup": "^4.60.4",
+    "rollup-plugin-dts": "^6.5.1",
     "tailwindcss": "^4.3.1",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.34.0",
