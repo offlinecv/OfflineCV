@@ -58,14 +58,39 @@ const ALLOWED = new Set([
  */
 const ORIGIN_READ = /\.origin\b/;
 
+/**
+ * Reads of an `origin` that is a WEB origin, not a `JobRecord` field — the
+ * false positives {@link FALSE_POSITIVE_HINT} predicted, stripped out before
+ * the scan rather than excused file by file.
+ *
+ * They arrived with the résumé-profile sender (#620): `lib/extension-profile.ts`
+ * has to name the page's own origin as a `postMessage` target and compare an
+ * incoming `event.origin` against it, and both of those are the thing the
+ * extension's bridge REQUIRES — a sender that dodged them to keep this gate
+ * quiet would be the actual defect. Narrowing here is what the hint asks for
+ * and is strictly safer than the alternative it warns against: adding that file
+ * to {@link ALLOWED} would exempt it from a genuine `job.origin` read too.
+ *
+ * Deliberately a closed list of receivers rather than a general "any origin
+ * that looks web-ish". A new spelling (`self.origin`, `frame.origin`) is a line
+ * somebody has to add here, on a diff a reviewer reads.
+ */
+const WEB_ORIGIN_READ = /\b(?:window\.location|location|event|new URL\([^)]*\))\.origin\b/g;
+
+/** True when `source` reads `origin` off something that is not a web origin —
+ *  i.e. what #745 is actually about. */
+function readsRecordOrigin(source: string): boolean {
+  return ORIGIN_READ.test(source.replace(WEB_ORIGIN_READ, ""));
+}
+
 /** Named on the offender assertion, because `\.origin\b` matches a property
  *  called `origin` on ANY object and the tree is only clean of the others by
  *  luck of what has been written so far. */
 const FALSE_POSITIVE_HINT =
   "A `new URL(u).origin`, `location.origin` or `event.origin` (the standard " +
   "postMessage sender check) is NOT a `JobRecord.origin` read and NOT a #745 " +
-  "violation — narrow this regex to exclude it rather than adding the file to " +
-  "ALLOWED, which would let a real read in through the same door.";
+  "violation — narrow WEB_ORIGIN_READ to exclude it rather than adding the file " +
+  "to ALLOWED, which would let a real read in through the same door.";
 
 /** Source with comments removed, for the drift assertion only — see the "two
  *  halves" section of the module docblock. Crude on purpose: a `//` inside a
@@ -102,7 +127,7 @@ describe("JobRecord.origin: read only by the validator and the tracker row (#745
     for (const file of collectSourceFiles(SRC_ROOT)) {
       const relPath = relative(SRC_ROOT, file).split("\\").join("/");
       if (ALLOWED.has(relPath)) continue;
-      if (ORIGIN_READ.test(readFileSync(file, "utf8"))) offenders.push(relPath);
+      if (readsRecordOrigin(readFileSync(file, "utf8"))) offenders.push(relPath);
     }
     expect(offenders, FALSE_POSITIVE_HINT).toEqual([]);
   });
@@ -115,7 +140,7 @@ describe("JobRecord.origin: read only by the validator and the tracker row (#745
     // that DESCRIBES the read cannot stand in for the read.
     for (const relPath of ALLOWED) {
       const code = stripComments(readFileSync(join(SRC_ROOT, relPath), "utf8"));
-      expect(ORIGIN_READ.test(code), `${relPath} no longer reads \`origin\` in code`).toBe(true);
+      expect(readsRecordOrigin(code), `${relPath} no longer reads \`origin\` in code`).toBe(true);
     }
   });
 });
