@@ -6,8 +6,8 @@
  * harness as the storage foundation), so the real IndexedDB path is exercised
  * offline. Covers the two headline acceptance criteria: CRUD + status
  * transitions end-to-end, and graceful degrade when a linked resume is deleted
- * (link cleared, job kept), plus the JD-match seam the `/jd-fit/` "save this
- * job" button sits on.
+ * (link cleared, job kept), plus the JD-match seam a save-from-match button
+ * would sit on (see #401 for the tracker's own save-from-search re-scoping).
  */
 
 import "fake-indexeddb/auto";

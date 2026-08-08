@@ -13,12 +13,13 @@
  * matching the other feature render tests.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ResultDetailTabs } from "./ResultDetailTabs.tsx";
 import { useEditableParse } from "../../hooks/useEditableParse.ts";
+import { writeTailorHandoff, TAILOR_HANDOFF_KEY } from "../../lib/tailor-handoff.ts";
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
@@ -120,6 +121,10 @@ function render(opts: ControllerOpts, summary?: string) {
   });
   return container;
 }
+
+beforeEach(() => {
+  sessionStorage.clear();
+});
 
 afterEach(() => {
   act(() => root?.unmount());
@@ -251,5 +256,78 @@ describe("ResultDetailTabs", () => {
     expect(qualityTab?.textContent).toContain("setup needed");
     // The panel explains the unavailability in place instead of vanishing.
     expect(el.textContent).toContain("On-device AI isn't available");
+  });
+
+  it("consumes a tailor handoff on mount and lands on the Reconstructed tab (#576)", () => {
+    // The round-trip claim: `/jobs/`'s tailor button stashes an instruction in
+    // sessionStorage and navigates here; `ResultDetailTabs` must (1) pick that
+    // instruction up on mount, (2) switch to the Reconstructed tab so the
+    // rewrite affordance is on screen, and (3) clear the key so a manual
+    // reload of `/` falls back to a generic rewrite prompt.
+    writeTailorHandoff({ jdContext: "prefer wording that surfaces Kubernetes" });
+    const el = render({ isAvailable: false });
+    // Consumed: the read cleared the key.
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
+    // Landed on Reconstructed — the tab strip announces the selection via
+    // `aria-selected`, so the assertion is on that rather than on textContent
+    // (which lists every tab label regardless of which panel is showing).
+    const selected = el.querySelector('[role="tab"][aria-selected="true"]');
+    expect(selected?.textContent).toContain("Your resume");
+  });
+
+  it("does not consume the tailor handoff again after an activeResult swap (#576)", () => {
+    // The reset effect on `activeResult` identity change must NOT stomp the
+    // handoff value the mount effect just set — the `mountedRef` guard is
+    // what makes that safe. The behavioral proxy: after a legitimate
+    // handoff+mount, a subsequent swap of `activeResult` must not resurrect
+    // the handoff key (both would be nulls; a re-read would be a no-op). The
+    // stronger assertion here is that mounting once consumed the key, and
+    // no later effect wrote it back.
+    writeTailorHandoff({ jdContext: "surface Kubernetes" });
+    const heuristic = result(undefined, "Heuristic Engineer");
+    const recovered = result(undefined, "Recovered Architect");
+    const opts: ControllerOpts = { isAvailable: false };
+
+    function SwapHost({ recover }: { recover: boolean }) {
+      const edit = useEditableParse();
+      return createElement(ResultDetailTabs, {
+        activeResult: recover ? recovered : heuristic,
+        activeScore: score,
+        result: heuristic,
+        sourceKind: "pdf",
+        edit,
+        analysis: controller(opts),
+        escapeHatch: escapeHatchController(opts),
+        onRecovered: () => {},
+        triggerCount: heuristic.triggers.length,
+      });
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(createElement(SwapHost, { recover: false }));
+    });
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
+
+    // Swap activeResult identity — mirrors what the LLM escape hatch does.
+    // The reset effect fires; the handoff key stays null (nothing re-writes).
+    act(() => {
+      root.render(createElement(SwapHost, { recover: true }));
+    });
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
+    expect(container.textContent).toContain("Recovered Architect");
+  });
+
+  it("stays on the default tab and jdContext-free when no tailor handoff was written", () => {
+    // Pre-existing behaviour must survive the handoff addition: an ordinary
+    // mount lands on Reconstructed with a null jdContext (generic rewrite).
+    const el = render({ isAvailable: false });
+    const selected = el.querySelector('[role="tab"][aria-selected="true"]');
+    expect(selected?.textContent).toContain("Your resume");
+    // No side-effect on storage either — the read is one-shot but must not
+    // write anything of its own.
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
   });
 });

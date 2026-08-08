@@ -48,6 +48,7 @@ import { useState } from "react";
 import { Button, Chip, RatingStars, StatusBadge } from "@design-system";
 import { JdMatch } from "./JdMatch.tsx";
 import type { RankedJob } from "../../lib/job-search/rank.ts";
+import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
 import { formatCompensationRange } from "../../lib/job-search/compensation.ts";
 import { describeRating } from "../../lib/job-search/rating.ts";
 
@@ -79,7 +80,17 @@ function distinctSource(company: string, source: string): string | null {
   return s && s !== c ? source : null;
 }
 
-export function JobResultCard({ job }: { job: RankedJob }) {
+export function JobResultCard({
+  job,
+  onTailor,
+}: {
+  job: RankedJob;
+  /** Steer the résumé rewrite on `/` toward this posting's missing terms
+   *  (#576). Feeds the SAME `jdMatch.coverage` object the card's fit number
+   *  and expanded detail read, so the rewrite can never be steered by a
+   *  different computation than the one displayed. Absent → no button. */
+  onTailor?: (coverage: CoverageResult) => void;
+}) {
   const [open, setOpen] = useState(false);
   const { posting, jdMatch, rating, belowFloor, compFloorSet } = job;
   const matched = jdMatch.coverage.covered.slice(0, CHIP_CAP);
@@ -146,6 +157,15 @@ export function JobResultCard({ job }: { job: RankedJob }) {
         >
           {open ? "Hide match detail" : "View match detail"}
         </Button>
+        {onTailor && (
+          <Button
+            variant="link"
+            size="sm"
+            onClick={() => onTailor(jdMatch.coverage)}
+          >
+            Tailor résumé to this job
+          </Button>
+        )}
         <a
           href={posting.url}
           target="_blank"

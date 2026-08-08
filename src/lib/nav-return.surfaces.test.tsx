@@ -5,20 +5,19 @@
 
 /**
  * The departure marker's lifetime, exercised through the REAL surfaces that
- * write and answer it — `App` (`/`), `JdFitApp` (`/jd-fit/`), `JobsApp`
- * (`/jobs/`).
+ * write and answer it — `App` (`/`) and `JobsApp` (`/jobs/`).
  *
  * `nav-return.test.ts` covers the module in isolation and
  * `PageShell.test.tsx` covers the shell's contract with a hand-written
  * callback, but neither is evidence about the WIRING: reverting
- * `onSavedJobsNavigate={goToSavedJobs}` out of `App.tsx`, or adding a marking
- * callback to `JdFitApp`, left the whole suite green. So the two invariants the
- * fix exists for — only `/` marks a departure, and every non-root surface
- * retires the marker at mount — are pinned here, at the surfaces themselves.
+ * `onSavedJobsNavigate={goToSavedJobs}` out of `App.tsx` left the whole
+ * suite green. So the invariant the fix exists for — only `/` marks a
+ * departure — is pinned here, at the surfaces themselves.
  *
- * The headline case is the two-hop sequence a marker consumed at CLICK time
- * gets wrong: `/` → `/jd-fit/` → (header "Saved jobs") → `/jobs/` → Back. Each
- * step below is a real mount and a real click on visible chrome.
+ * The old two-hop test (root → second surface → Saved jobs → /jobs/) that
+ * pinned the "marker consumed at CLICK time survives past its leg" bug is
+ * gone with the second surface itself (#576). The single-hop invariants
+ * below cover what remains: the app root marks, the workbench absorbs.
  *
  * jsdom implements no navigation, so the fallback branch assigning
  * `location.href` logs a "Not implemented: navigation" notice from the virtual
@@ -31,7 +30,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createElement, act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import App from "../App.tsx";
-import JdFitApp from "../jd-fit/JdFitApp.tsx";
 import JobsApp from "../jobs/JobsApp.tsx";
 import { DB_NAME, closeDB } from "./storage/index.ts";
 import { markDeparture, readDepartureMarker } from "./nav-return.ts";
@@ -105,41 +103,9 @@ afterEach(async () => {
 });
 
 describe("the marker belongs to ONE visit, not to the next click", () => {
-  it("/ → /jd-fit/ → Saved jobs → /jobs/: the Back control falls back, it does not land on /jd-fit/", async () => {
-    // 1. On `/`, "Check fit against a job" marks the departure (App.tsx).
-    markDeparture();
-
-    // 2. `/jd-fit/` loads and absorbs the marker at mount — even though its own
-    //    back control is never clicked here.
-    await mount(createElement(JdFitApp));
-    expect(sessionStorage.getItem("ocv_nav_from_root")).toBeNull();
-
-    // 2b. Its header "Saved jobs" link writes nothing: this surface is not the
-    //     app root, so it supplies no `onSavedJobsNavigate`.
-    clickChrome("Saved jobs");
-    expect(readDepartureMarker()).toBe(false);
-    unmount();
-
-    // 3. `/jobs/` loads with no marker of its own, so "Back to your resume"
-    //    must NOT fire history.back() — that would land on `/jd-fit/`, a real
-    //    page but not the one the label names.
-    await mount(createElement(JobsApp));
-    clickChrome("Back to your resume");
-    expect(back).not.toHaveBeenCalled();
-  });
-
-  it("…and /jd-fit/'s own Back control still gets its real history.back()", async () => {
-    // The other half of the same defect: with the marker swallowed by `/jobs/`,
-    // this control fell back and pushed a fresh blank `/`, losing the parse and
-    // every inline edit — the very bug #706 exists to fix.
-    markDeparture();
-    await mount(createElement(JdFitApp));
-    clickChrome("← Parser audit");
-    expect(back).toHaveBeenCalledTimes(1);
-  });
-
   it("a legitimate / → /jobs/ trip still goes back through history", async () => {
-    // The feature itself: fixing the two-hop bug must not cost the one-hop one.
+    // The feature itself: `/` marked the trip, `/jobs/`'s back control uses
+    // history.back() so the parse + inline edits survive via bfcache.
     markDeparture();
     await mount(createElement(JobsApp));
     clickChrome("Back to your resume");
@@ -160,14 +126,6 @@ describe("only `/` marks a departure", () => {
     await mount(createElement(App));
     clickChrome("Saved jobs");
     expect(readDepartureMarker()).toBe(true);
-  });
-
-  it("`/jd-fit/` supplies none, so its identical-looking link marks nothing", async () => {
-    // Same click, same shared chrome, opposite obligation — and re-introducing
-    // a marking callback on JdFitApp also stayed green (633 passed) before.
-    await mount(createElement(JdFitApp));
-    clickChrome("Saved jobs");
-    expect(sessionStorage.getItem("ocv_nav_from_root")).toBeNull();
   });
 
   it("`/jobs/` does not render the link at all", async () => {

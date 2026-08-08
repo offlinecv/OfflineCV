@@ -11,10 +11,10 @@ import "@fontsource/poppins/600.css";
 import "@fontsource/poppins/700.css";
 import "../styles.css";
 
-// No pdfjs worker configuration here (unlike src/main.tsx and jd-fit/main.tsx):
-// this surface never parses a PDF — it receives an already-parsed résumé through
-// the sessionStorage handoff — so importing pdfjs would pull a large chunk into
-// the entry for nothing.
+// No pdfjs worker configuration here (unlike src/main.tsx): this surface never
+// parses a PDF — it receives an already-parsed résumé through the sessionStorage
+// handoff — so importing pdfjs would pull a large chunk into the entry for
+// nothing.
 setAnalyticsSurface("jobs");
 void initAnalytics();
 

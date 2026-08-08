@@ -11,7 +11,7 @@
  * matching the other feature render tests (no @testing-library in this repo).
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -19,6 +19,7 @@ import { JobResultCard } from "./JobResultCard.tsx";
 import { rankPostings, type RankedJob } from "../../lib/job-search/rank.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { JobPosting } from "../../lib/job-search/types.ts";
+import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -50,12 +51,15 @@ function render() {
   return renderJob(job);
 }
 
-function renderJob(job: RankedJob) {
+function renderJob(
+  job: RankedJob,
+  onTailor?: (coverage: CoverageResult) => void,
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root.render(createElement(JobResultCard, { job }));
+    root.render(createElement(JobResultCard, { job, onTailor }));
   });
   return container;
 }
@@ -186,6 +190,33 @@ describe("JobResultCard", () => {
     expect(el.textContent).not.toContain("/yr");
     expect(el.textContent).not.toContain("/hr");
     expect(el.textContent).not.toContain("Below your floor");
+  });
+
+  it("omits the Tailor button when no onTailor is provided (issue 576)", () => {
+    // Threading the affordance in makes it opt-in — a JobResultCard rendered
+    // outside `/jobs/`'s handoff-back-to-`/` context must not offer a button
+    // that has nowhere to steer the rewrite from.
+    const el = render();
+    const tailor = [...el.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Tailor résumé to this job"),
+    );
+    expect(tailor).toBeUndefined();
+  });
+
+  it("fires onTailor with the SAME coverage the card's fit number reads (issue 576)", () => {
+    // The load-bearing invariant: the tailor callback receives `jdMatch.coverage`,
+    // not a re-run of `computeCoverage` — otherwise the displayed match and the
+    // rewrite steering could disagree.
+    const [job] = rankPostings(parsed, [posting]);
+    const onTailor = vi.fn();
+    const el = renderJob(job, onTailor);
+    const tailor = [...el.querySelectorAll("button")].find((b) =>
+      b.textContent?.includes("Tailor résumé to this job"),
+    ) as HTMLButtonElement;
+    expect(tailor).toBeTruthy();
+    act(() => tailor.click());
+    expect(onTailor).toHaveBeenCalledTimes(1);
+    expect(onTailor).toHaveBeenCalledWith(job.jdMatch.coverage);
   });
 
   it("badges a below-floor posting without hiding it (issue 564)", () => {

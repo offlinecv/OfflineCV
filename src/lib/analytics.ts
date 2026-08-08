@@ -100,14 +100,16 @@ const queue: Array<[string, Record<string, unknown>]> = [];
 
 /**
  * Which root surface emitted an event (#226 / #52). `/` (main.tsx) is the
- * parser audit; `/jd-fit` (jd-fit/main.tsx) is the JD-match + JD-driven rewrite
- * surface; `/jobs` (jobs/main.tsx) is the job-search workbench. Each entry calls
- * `setAnalyticsSurface` once at boot; every `track()` stamps the value so the
- * surfaces are distinguishable in PostHog without a whole event-category system. Defaults to "parser" so an un-tagged caller (or
- * a test) attributes to the original surface. Dead-code-safe: when
- * VITE_POSTHOG_KEY is unset, `track()` short-circuits before reading this.
+ * parser audit; `/jobs` (jobs/main.tsx) is the job-search workbench (which
+ * now also owns the paste-a-JD affordance a deprecated second surface used
+ * to carry). Each entry calls `setAnalyticsSurface` once at boot; every
+ * `track()` stamps the value so the surfaces are distinguishable in PostHog
+ * without a whole event-category system. Defaults to "parser" so an
+ * un-tagged caller (or a test) attributes to the original surface.
+ * Dead-code-safe: when VITE_POSTHOG_KEY is unset, `track()` short-circuits
+ * before reading this.
  */
-export type AnalyticsSurface = "parser" | "jd-fit" | "jobs";
+export type AnalyticsSurface = "parser" | "jobs";
 let surface: AnalyticsSurface = "parser";
 
 /** Tag every subsequent event with the emitting surface. Call once at boot. */
@@ -170,8 +172,8 @@ export function subscribeFeatureFlags(cb: () => void): () => void {
 function track(event: string, props: Record<string, unknown>): void {
   if (!KEY) return;
   // Stamp the emitting surface (#226) on every event so PostHog can split the
-  // parser-audit (`/`) and JD-fit (`/jd-fit`) products. Read at emit time, after
-  // the entry has called setAnalyticsSurface.
+  // parser-audit (`/`) and job-search (`/jobs`) surfaces. Read at emit time,
+  // after the entry has called setAnalyticsSurface.
   const stamped = { ...props, surface };
   if (!ph) {
     queue.push([event, stamped]);

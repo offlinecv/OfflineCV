@@ -90,8 +90,8 @@ function summarize(
 
 /**
  * The deterministic keyword path — the exact `extractJdTerms` +
- * `computeCoverage` composition the JD-fit surface runs today
- * (`JdFitApp.tsx`), wrapped in the keyword arm.
+ * `computeCoverage` composition the JD-match callers run today (see
+ * `PasteJdPanel` and `rank.ts`), wrapped in the keyword arm.
  */
 function keywordMatch(
   jdText: string,

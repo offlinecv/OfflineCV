@@ -2,12 +2,12 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * "Back to your resume" / "Parser audit" controls on `/jobs/` and `/jd-fit/`
- * (#706): make a real back navigation when one is available, so a completed
- * parse and its inline edits — which live only in React state, restored by
- * bfcache on a genuine back navigation (measured on #706) — survive the trip.
- * A plain `window.location.href = BASE_URL` always PUSHES a fresh `/`, which
- * boots to its idle state and loses both.
+ * "Back to your resume" control on `/jobs/` (#706): make a real back
+ * navigation when one is available, so a completed parse and its inline
+ * edits — which live only in React state, restored by bfcache on a genuine
+ * back navigation (measured on #706) — survive the trip. A plain
+ * `window.location.href = BASE_URL` always PUSHES a fresh `/`, which boots
+ * to its idle state and loses both.
  *
  * There is no API to read the previous history entry's URL from JavaScript,
  * by design, so "is the previous entry the app root?" cannot be answered by
@@ -17,28 +17,28 @@
  * and wrong the moment a user has other same-tab navigations queued up). Both
  * infer the trip happened; neither proves it.
  *
- * Instead the OUTBOUND leg leaves a marker: `App.tsx` (the `/` → `/jd-fit/`
- * link) and `jobs-departure.ts` (both `/` → `/jobs/` routes) call
- * `markDeparture()` right before they navigate. A back control here then
- * knows a round trip through an instrumented launch point actually happened,
- * rather than guessing from ambient state. The known gap: it only covers
- * navigations that went through those call sites. A bookmarked `/jobs/`
- * URL, a link opened in a new tab, or a manual reload of `/jobs/` never sets
- * the marker — and correctly falls back to a fresh `/` rather than firing
- * `history.back()` into someone else's history stack.
+ * Instead the OUTBOUND leg leaves a marker: `jobs-departure.ts` (both
+ * `/` → `/jobs/` routes) calls `markDeparture()` right before it navigates.
+ * A back control here then knows a round trip through an instrumented launch
+ * point actually happened, rather than guessing from ambient state. The
+ * known gap: it only covers navigations that went through those call sites.
+ * A bookmarked `/jobs/` URL, a link opened in a new tab, or a manual reload
+ * of `/jobs/` never sets the marker — and correctly falls back to a fresh
+ * `/` rather than firing `history.back()` into someone else's history stack.
  *
  * The marker stores the path it was written FROM, not a bare `"1"`, and
  * `readDepartureMarker()` answers true only for the app root. That is what
  * makes the fallback the safe failure mode rather than merely the usual one:
- * a marker written from `/jd-fit/` (the shared `PageShell` header renders a
- * "Saved jobs" link on every surface) would otherwise send `/jobs/`'s "Back to
- * your resume" control back to `/jd-fit/` — a real page, but not the one the
- * label names — and would consume the marker `/`'s own leg wrote, re-arming
- * the very lost-parse bug this module exists to fix. Encoding the origin makes
- * "only `/` marks a departure" an invariant this module enforces instead of a
- * convention every future caller has to remember. With it, the failure mode is
- * one-directional again: a marker that fails to read as root costs a lost
- * parse (today's status quo), never a dead end or a foreign page.
+ * a marker written from a non-root surface (the shared `PageShell` header
+ * renders a "Saved jobs" link on every surface) would otherwise send
+ * `/jobs/`'s "Back to your resume" control to that surface — a real page,
+ * but not the one the label names — and would consume the marker `/`'s own
+ * leg wrote, re-arming the very lost-parse bug this module exists to fix.
+ * Encoding the origin makes "only `/` marks a departure" an invariant this
+ * module enforces instead of a convention every future caller has to
+ * remember. With it, the failure mode is one-directional again: a marker
+ * that fails to read as root costs a lost parse (today's status quo), never
+ * a dead end or a foreign page.
  *
  * The other half of that guarantee lives at the call sites: a marker must only
  * be written when THIS document is actually leaving. `PageShell`'s link is an
@@ -55,18 +55,13 @@
  *
  * "Visit", specifically — not "click". This module deliberately does NOT
  * export a combined read-and-clear that a click handler can call, because a
- * marker consumed at click time outlives the leg it was written for: `/` →
- * `/jd-fit/` writes a root marker, and if `/jd-fit/` never touches it, the
- * user's next hop (the shared header's "Saved jobs" link) lands on `/jobs/`
- * with `/`'s marker still live — so `/jobs/`'s "Back to your resume" fires
- * `history.back()` into `/jd-fit/`, a real page but not the one the label
- * names, AND swallows the marker, so `/jd-fit/`'s own back control then
- * pushes a fresh blank `/` and loses the parse. Both halves of the bug above,
- * through two clicks on visible chrome. So the read and the clear are
- * separate exports and the pairing lives in `useArrivedFromRoot`, which each
- * non-root surface calls once at mount: whichever surface the marker's leg
- * actually landed on absorbs it, and every later surface correctly finds
- * nothing.
+ * marker consumed at click time outlives the leg it was written for — the
+ * two-hop bug a retired second surface historically triggered, where
+ * the marker for one leg answered the next surface's back control and re-
+ * armed the same lost-parse defect. So the read and the clear are separate
+ * exports and the pairing lives in `useArrivedFromRoot`, which each non-root
+ * surface calls once at mount: whichever surface the marker's leg actually
+ * landed on absorbs it, and every later surface correctly finds nothing.
  */
 
 const NAV_RETURN_KEY = "ocv_nav_from_root";
@@ -77,7 +72,7 @@ const NAV_RETURN_KEY = "ocv_nav_from_root";
  * Base-aware (`import.meta.env.BASE_URL` is `/` on the custom domain and
  * `/OfflineCV/` on the Pages fallback), and accepts the explicit
  * `index.html` spelling of the same page, which a direct file-ish link or a
- * static host can produce. `/jobs/` and `/jd-fit/` are neither.
+ * static host can produce. `/jobs/` is neither.
  */
 export function isAppRoot(path: string): boolean {
   const base = import.meta.env.BASE_URL;
@@ -85,16 +80,16 @@ export function isAppRoot(path: string): boolean {
 }
 
 /**
- * Call immediately before navigating away from `/` toward `/jobs/` or
- * `/jd-fit/` — records WHERE the trip started, so a back control can tell a
- * genuine round trip from `/` apart from one that started somewhere else.
+ * Call immediately before navigating away from `/` toward `/jobs/` — records
+ * WHERE the trip started, so a back control can tell a genuine round trip
+ * from `/` apart from one that started somewhere else.
  *
  * The origin is read off an injected `Location`, defaulting to this document's,
  * rather than taken as a bare `string`: a string parameter is an escape hatch a
  * future production caller can use to forge `markDeparture("/")` from a
  * non-root surface, which silently defeats `isAppRoot` and re-arms exactly the
  * defect the encoded origin exists to prevent. A test still writes the losing
- * case by passing `{ pathname: "/jd-fit/" }`, the same injection shape
+ * case by passing `{ pathname: "/jobs/" }`, the same injection shape
  * `returnToResumeRoot` takes for `history`/`location`.
  */
 export function markDeparture(
@@ -166,8 +161,9 @@ export interface ReturnNavigable {
 /**
  * The composed control: `history.back()` when this visit's departure marker
  * said the tab actually came from `/`, else a fresh navigation to the app
- * root. Used by both `/jobs/`'s and `/jd-fit/`'s "back to resume" controls —
- * the target root is the same for both.
+ * root. Used by `/jobs/`'s "back to resume" control today; also invoked by
+ * `/jobs/`'s Tailor-résumé-to-this-job handler (#576) after it stashes a JD
+ * steering payload for `ResultDetailTabs` to consume on arrival.
  *
  * `arrivedFromRoot` is a parameter rather than a storage read here because the
  * marker is consumed once at mount (`useArrivedFromRoot`), not per click — see

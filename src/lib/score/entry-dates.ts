@@ -76,8 +76,8 @@ export const ACHIEVEMENT_TYPE_MAX_LEN = 28;
  * re-derive the label by re-splitting a composed string: the split is lossy in
  * the direction that matters (a label over the length cap, or a title carrying
  * its own `" · "`, re-splits into a DIFFERENT pair), so a consumer that re-split
- * emphasized the wrong run in the PDF and showed the wrong halves on `/jd-fit`.
- * The edit surface, the export projection, and the canonical model all read the
+ * emphasized the wrong run in the PDF and showed the wrong halves in the
+ * JD-match view. The edit surface, the export projection, and the canonical model all read the
  * stored field.
  */
 export function splitAchievementType(

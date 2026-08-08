@@ -27,10 +27,6 @@ const envOn = (v: unknown): boolean => v === "true" || v === "1";
  * Build-time defaults, keyed by PostHog flag name (kebab-case to match the
  * PostHog flag key). Default OFF unless its env var is explicitly set.
  *
- * - `jd-fit-banner` (`VITE_ENABLE_JD_FIT`) — the "Check fit against a job"
- *   cross-sell to the `/jd-fit/` surface. Off by default: `/jd-fit/` is alpha
- *   and not ready to promote from the parser result.
- *
  * - `llm` (`VITE_ENABLE_LLM`) — two-layer gate for all WebLLM-backed
  *   features: the disagreement detector (#242), escape hatch (#243), and
  *   gap-report (#245).
@@ -53,7 +49,6 @@ const envOn = (v: unknown): boolean => v === "true" || v === "1";
 // `keyof typeof` works on a private const, so keeping it unexported avoids a
 // dead public export (fallow dead-code gate).
 const FLAG_DEFAULTS = {
-  "jd-fit-banner": envOn(import.meta.env.VITE_ENABLE_JD_FIT),
   "llm": envOn(import.meta.env.VITE_ENABLE_LLM),
 } as const;
 

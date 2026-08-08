@@ -383,9 +383,9 @@ is the custom domain **<https://offlinecv.org>**; the project-Pages URL
 <https://offlinecv.github.io/OfflineCV/> remains as a fallback (built
 with `VITE_BASE_PATH=/OfflineCV/`).
 
-The build emits three root pages — `/` (the parser audit), `/jd-fit`
-(JD-match + JD-driven rewrite), and `/jobs` (the job-search workbench) — as a
-multi-entry Vite build, so all of them ship in the same self-contained `dist/`.
+The build emits two root pages — `/` (the parser audit) and `/jobs` (the
+job-search workbench, which also hosts the paste-a-JD view) — as a
+multi-entry Vite build, so both ship in the same self-contained `dist/`.
 
 To bake telemetry into a deployed build, set `VITE_POSTHOG_KEY` (and
 optionally `VITE_POSTHOG_HOST`) in the build environment — see the

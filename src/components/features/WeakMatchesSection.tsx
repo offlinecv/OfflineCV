@@ -21,14 +21,18 @@ import { useState } from "react";
 import { Button } from "@design-system";
 import { JobResultCard } from "./JobResultCard.tsx";
 import type { RankedJob } from "../../lib/job-search/rank.ts";
+import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
 import { WEAK_MATCH_LABEL } from "./weakMatchThreshold.ts";
 
 export function WeakMatchesSection({
   jobs,
   defaultOpen = false,
+  onTailor,
 }: {
   jobs: RankedJob[];
   defaultOpen?: boolean;
+  /** Passes through to each card's tailor affordance (#576). */
+  onTailor?: (coverage: CoverageResult) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -48,7 +52,7 @@ export function WeakMatchesSection({
       {open && (
         <div className="flex flex-col gap-2">
           {jobs.map((job) => (
-            <JobResultCard key={job.posting.id} job={job} />
+            <JobResultCard key={job.posting.id} job={job} onTailor={onTailor} />
           ))}
         </div>
       )}

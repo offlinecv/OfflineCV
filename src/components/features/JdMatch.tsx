@@ -20,7 +20,7 @@ interface JdMatchProps {
 
 export function JdMatch({ result }: JdMatchProps) {
   // Only the keyword path has a UI today; the semantic path (M6) renders nothing
-  // yet. Narrowing on `path` here keeps the consumer (JdFitApp) path-agnostic.
+  // yet. Narrowing on `path` here keeps every consumer path-agnostic.
   if (result.path !== "keyword") return null;
   const { coverage, terms, nounsDropped } = result;
   const total = terms.length;

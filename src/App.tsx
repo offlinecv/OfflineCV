@@ -19,11 +19,8 @@ import { SaveResumeBar } from "./components/features/SaveResumeBar.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
-import { writeJdFitHandoff } from "./lib/jd-fit-handoff.ts";
 import { departToJobs } from "./lib/jobs-departure.ts";
-import { markDeparture } from "./lib/nav-return.ts";
 import { isScoreRevealed } from "./lib/contact.ts";
-import { useFlag } from "./lib/flags.ts";
 
 export default function App() {
   const {
@@ -74,32 +71,6 @@ export default function App() {
     onFile: handleFile,
   });
 
-  // Cross-sell to the `/jd-fit/` surface is gated (default off) — `/jd-fit/` is
-  // alpha and not ready to promote from the parser result. See lib/flags.ts.
-  const jdFitEnabled = useFlag("jd-fit-banner");
-
-  // Cross-link to /jd-fit (#226). On click we stash the edited parse in
-  // sessionStorage (one-shot handoff) so JD-fit rehydrates it without
-  // re-parsing, then navigate to the base-aware /jd-fit URL — works under both
-  // the custom-domain "/" base and the "/OfflineCV/" Pages-fallback base.
-  const goToJdFit = () => {
-    if (state.phase === "done") {
-      // The PRISTINE parse + score and the edit state as SEPARATE payloads —
-      // /jd-fit re-applies the overrides through its own edit layer (#456).
-      // Handing it `edited.parsed` instead baked the edits in irreversibly:
-      // added entries arrived indistinguishable from parsed ones.
-      writeJdFitHandoff({
-        result: state.result,
-        score: state.score,
-        edit: edit.snapshot,
-      });
-    }
-    // #706: mark the departure so /jd-fit/'s "Parser audit" back control can
-    // use a real history.back() instead of pushing a fresh, blank `/`.
-    markDeparture();
-    window.location.href = `${import.meta.env.BASE_URL}jd-fit/`;
-  };
-
   // The header's "Saved jobs" link (#707) is the second route from `/` into
   // `/jobs/`, and only this surface knows there is a parse to hand over — so
   // `PageShell` asks and `/` answers, with exactly what `FindJobsLauncher`'s
@@ -131,9 +102,9 @@ export default function App() {
     // headline. The one idea worth keeping — the score rates the file, not the
     // person — now lives as a plain sentence in the block below the drop zone,
     // next to the score it qualifies. Dropping it also leaves the star CTA
-    // alone on the header-right instead of sharing it. `/jd-fit` and `/jobs`
-    // still pass one: they open straight into a form with no headline of their
-    // own, so there the header line is the only orientation.
+    // alone on the header-right instead of sharing it. `/jobs` still passes
+    // one: it opens straight into a form with no headline of its own, so
+    // there the header line is the only orientation.
     <PageShell badge="alpha" onSavedJobsNavigate={goToSavedJobs}>
       {(state.phase === "idle" ||
         state.phase === "parsing" ||
@@ -321,20 +292,6 @@ export default function App() {
               result={displayResult}
               score={edited.score}
             />
-            {jdFitEnabled && (
-              // Cross-sell sits *below* the result as a quiet follow-on, not a
-              // primary-CTA banner above the score: the page's one primary
-              // action is the user's parse/score, not navigation to another
-              // product. Demoted to a `link` so it doesn't out-shout the result.
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-light bg-surface-subtle px-4 py-3">
-                <p className="text-sm text-content-secondary">
-                  Tailoring this resume to a specific role?
-                </p>
-                <Button variant="link" size="sm" onClick={goToJdFit}>
-                  Check fit against a job →
-                </Button>
-              </div>
-            )}
           </>
         )}
 
