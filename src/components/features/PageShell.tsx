@@ -2,15 +2,14 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * PageShell — the chrome all three root surfaces share (issue #226, #707).
+ * PageShell — the chrome all root surfaces share (issue #226, #707).
  *
- * `/` (parser audit, App.tsx), `/jd-fit` (JdFitApp.tsx), and `/jobs`
- * (JobsApp.tsx) are three products under one brand, so the header (logo +
- * "Saved jobs" link + GitHub-star CTA + update banner) and the footer
- * (privacy line + links) are identical between them. This shell owns that
- * chrome once; each surface passes its own `subtitle`, `badge`, optional
- * `chips`, and an optional `headerExtra` slot (e.g. a "back" cross-link CTA),
- * then renders its body as `children`.
+ * `/` (parser audit, App.tsx) and `/jobs` (JobsApp.tsx) are two products
+ * under one brand, so the header (logo + "Saved jobs" link + GitHub-star
+ * CTA + update banner) and the footer (privacy line + links) are identical
+ * between them. This shell owns that chrome once; each surface passes its
+ * own `subtitle`, `badge`, optional `chips`, and an optional `headerExtra`
+ * slot (e.g. a "back" cross-link CTA), then renders its body as `children`.
  *
  * The "Saved jobs" link (#707) is the one entry point into `/jobs/` that
  * doesn't depend on a parse — `FindJobsLauncher` only renders once a résumé
@@ -21,11 +20,12 @@
  * would point at the page already open.
  *
  * What the link must do BEFORE it navigates differs per surface — `/` has a
- * parse to hand over and a departure to mark (#706), `/jd-fit/` has neither —
- * and this shell cannot know which surface it is rendering on. So it owns none
- * of that: it invokes an optional `onSavedJobsNavigate` and the surface decides.
- * Calling `markDeparture()` from here instead was a real bug — the marker means
- * "this trip started at the app root", and shared chrome renders everywhere.
+ * parse to hand over and a departure to mark (#706), any non-root surface
+ * has neither — and this shell cannot know which surface it is rendering on.
+ * So it owns none of that: it invokes an optional `onSavedJobsNavigate` and
+ * the surface decides. Calling `markDeparture()` from here instead was a real
+ * bug — the marker means "this trip started at the app root", and shared
+ * chrome renders everywhere.
  *
  * Reuse: consumes only `@design-system` primitives/shared components + the
  * useGitHubStars / useUpdateChecker hooks. No raw <button> / hardcoded palette.
@@ -42,11 +42,11 @@ export interface PageShellProps {
    * Optional subtitle shown beside the GitHub-star CTA on wide viewports.
    *
    * Optional because a surface that already states what it is in its own body
-   * should not restate it here. `/jd-fit` and `/jobs` open straight into a
-   * form, so the header line is their only orientation and they pass one; `/`
-   * opens with a headline two inches below the header and omits it, which also
-   * lets the star CTA sit alone on the header-right instead of sharing it with
-   * a competing tagline.
+   * should not restate it here. `/jobs` opens straight into a form, so the
+   * header line is its only orientation and it passes one; `/` opens with a
+   * headline two inches below the header and omits it, which also lets the
+   * star CTA sit alone on the header-right instead of sharing it with a
+   * competing tagline.
    */
   subtitle?: string;
   /** Small uppercase badge after the wordmark (e.g. "alpha", "JD Fit"). */
@@ -63,9 +63,9 @@ export interface PageShellProps {
   /**
    * Ran just before the browser follows the "Saved jobs" link, for whatever
    * this surface must do on its way out (`/` writes the jobs handoff and marks
-   * the departure — see `jobs-departure.ts`; `/jd-fit/` passes nothing). Fires
-   * only on an unmodified primary click, i.e. only when THIS document is the
-   * one navigating.
+   * the departure — see `jobs-departure.ts`; a non-root surface passes
+   * nothing). Fires only on an unmodified primary click, i.e. only when THIS
+   * document is the one navigating.
    */
   onSavedJobsNavigate?: () => void;
   children: ReactNode;

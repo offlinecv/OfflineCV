@@ -2,11 +2,13 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * useAnalyzedResume — the full parse → edit → re-grade orchestration that both
- * root surfaces share.
+ * useAnalyzedResume — the full parse → edit → re-grade orchestration on `/`.
  *
- * Extracted from App.tsx (issue #226) so the parser-audit surface (`/`) and the
- * JD-fit surface (`/jd-fit`) drive the SAME pipeline rather than forking it:
+ * Originally extracted from App.tsx (issue #226) to let a second surface
+ * drive the SAME pipeline rather than forking it. The second surface has
+ * since been retired (#576), so today `/` is the sole consumer — the
+ * extraction remains because a future cross-surface use may want the same
+ * seam.
  *
  *   useResumeAnalysis (parse state machine)  +
  *   useEditableParse  (inline-edit overrides) +
@@ -21,9 +23,9 @@
  * Issue #313 (from-scratch authoring) generalizes this: the "authoring" phase
  * runs the EXACT same applyOverrides → re-grade pipeline, just seeded from
  * `buildBlankResult()` (or a restored draft's overrides) instead of a parsed
- * upload. `displayResult` is the one CascadeResult either root surface hands
- * to `Result` / `ReconstructedResume`, so App.tsx never has to know which
- * base it came from.
+ * upload. `displayResult` is the one CascadeResult the root surface hands to
+ * `Result` / `ReconstructedResume`, so App.tsx never has to know which base
+ * it came from.
  */
 
 import { useCallback, useEffect, useMemo } from "react";

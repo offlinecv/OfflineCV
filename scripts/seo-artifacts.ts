@@ -43,7 +43,6 @@ export const SITE_ORIGIN = "https://offlinecv.org";
  */
 export const HTML_ENTRIES = {
   main: { file: "index.html", url: "/" },
-  jdFit: { file: "jd-fit/index.html", url: "/jd-fit/" },
   jobs: { file: "jobs/index.html", url: "/jobs/" },
 } as const;
 

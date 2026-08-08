@@ -269,7 +269,7 @@ export interface HeuristicAchievement {
    *  leading `" · "` segment of a composed `title` (#454, design model (a)),
    *  but `decompose ∘ join` is not the identity — every consumer holding only
    *  the composed title re-split it differently from what the user typed (the
-   *  PDF bolded the wrong run; `/jd-fit` showed the wrong halves). Storing the
+   *  PDF bolded the wrong run; the JD-match view showed the wrong halves). Storing the
    *  label makes the split happen exactly once, at parse. */
   type?: string;
   /** Item title, WITHOUT the leading {@link type} label. Empty string only when

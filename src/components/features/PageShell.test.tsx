@@ -7,15 +7,17 @@
  * The "Saved jobs" header link (#707) and what it is allowed to do on the way
  * out (#706).
  *
- * `PageShell` is chrome shared by all three surfaces, so it cannot know which
- * one it is rendering on — and the departure marker means "this trip started at
- * the app root". When the shell marked the departure itself, `/jd-fit/` got a
- * link that wrote a root marker it had no right to write, which sent `/jobs/`'s
- * "Back to your resume" control to `/jd-fit/` and consumed the marker `/` had
- * written, re-arming the lost-parse bug #706 exists to fix. The shell now asks
- * (`onSavedJobsNavigate`) and the surface answers, so these tests pin BOTH
- * directions: the surface that passes nothing writes nothing, and the surface
- * that passes the real `/` callback writes the handoff `/jobs/` needs.
+ * `PageShell` is chrome shared by all shipped surfaces (now `/` and `/jobs/`
+ * only, since a non-root surface was retired in #576), so it cannot know which one it
+ * is rendering on — and the departure marker means "this trip started at the
+ * app root". When the shell marked the departure itself, any non-root surface
+ * got a link that wrote a root marker it had no right to write — historically
+ * that was the two-hop bug that sent `/jobs/`'s "Back to your resume" control
+ * to a non-root surface, re-arming the lost-parse defect #706 exists to fix. The shell
+ * now asks (`onSavedJobsNavigate`) and the surface answers, so these tests
+ * pin BOTH directions: the surface that passes nothing writes nothing, and
+ * the surface that passes the real `/` callback writes the handoff `/jobs/`
+ * needs.
  *
  * The modified-click case is the second half of the same invariant: a
  * ⌘/ctrl/shift/alt-click on an `<a>` fires an ordinary `click` (unlike
@@ -112,9 +114,9 @@ describe("PageShell — the Saved jobs link", () => {
   });
 
   it("writes NO departure marker when the surface supplies no callback", () => {
-    // This is the /jd-fit/ case, and the whole reason the shell no longer marks
-    // departures itself. A marker from here would make /jobs/'s "Back to your
-    // resume" control land on /jd-fit/ — and swallow the marker `/` wrote.
+    // The shell's contract: no callback → no marker, so any non-root surface
+    // reusing this chrome stays on the safe side (marker never lands on a
+    // page the label doesn't name).
     const link = savedJobsLink(render());
     click(link!);
     expect(sessionStorage.getItem("ocv_nav_from_root")).toBeNull();

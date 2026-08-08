@@ -84,9 +84,11 @@ import {
   seedExcludeTermsForFamilies,
 } from "../../lib/job-search/role-keywords.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
+import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
 import { JobSearchResults } from "./JobSearchResults.tsx";
 import { JobQueryEditor } from "./JobQueryEditor.tsx";
 import { JobQuerySummary } from "./JobQuerySummary.tsx";
+import { PasteJdPanel } from "./PasteJdPanel.tsx";
 import { PendingCompaniesNotice } from "./PendingCompaniesNotice.tsx";
 import { useCompanyTargets } from "../../hooks/useCompanyTargets.ts";
 import { useJobSearch } from "../../hooks/useJobSearch.ts";
@@ -97,9 +99,10 @@ interface FindJobsPanelProps {
    *  education) for accurate coverage, so we take the whole `HeuristicParsedResume`
    *  rather than the narrow query-only Pick. */
   parsed: HeuristicParsedResume;
+  onTailor?: (coverage: CoverageResult) => void;
 }
 
-export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
+export function FindJobsPanel({ parsed, onTailor }: FindJobsPanelProps) {
   // Seed local query state from the parse once (lazy initializer — runs only
   // on mount); the user edits it from here. Exclude-term chips (#563) AND
   // role-family chips (#568) are seeded from the SAME role-family
@@ -228,7 +231,8 @@ export function FindJobsPanel({ parsed }: FindJobsPanelProps) {
         />
       )}
 
-      <JobSearchResults phase={phase} onRetry={runSearch} />
+      <JobSearchResults phase={phase} onRetry={runSearch} onTailor={onTailor} />
+      <PasteJdPanel parsed={parsed} onTailor={onTailor} />
     </div>
   );
 }

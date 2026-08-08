@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { ReconstructedResume } from "./ReconstructedResume.tsx";
 import { FindJobsLauncher } from "./FindJobsLauncher.tsx";
@@ -15,6 +15,7 @@ import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
 import type { EscapeHatchController } from "../../hooks/useLlmEscapeHatch.ts";
 import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
+import { consumeTailorHandoff } from "../../lib/tailor-handoff.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
 
@@ -26,7 +27,6 @@ interface ResultDetailTabsProps {
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   edit: EditableParse;
-  jdContext?: string;
   analysis: AnalysisController;
   /**
    * Degenerate-parse recovery pass (#243), owned by `ParsedCard` because its
@@ -46,7 +46,6 @@ export function ResultDetailTabs({
   bytes,
   sourceKind,
   edit,
-  jdContext,
   analysis,
   escapeHatch,
   onRecovered,
@@ -54,6 +53,48 @@ export function ResultDetailTabs({
 }: ResultDetailTabsProps) {
   // `tab` state lives here — only used within this component, not in ParsedCard.
   const [tab, setTab] = useState("reconstructed");
+
+  // JD-driven rewrite steering (#576). Set by a
+  // tailor-back handoff from `/jobs/` (a `JobResultCard`'s "Tailor résumé to
+  // this job" button, or the paste-a-JD panel below the results) and
+  // consumed by the whole-résumé rewrite hook in the Reconstructed tab.
+  // Null → generic rewrite prompt (byte-identical pre-#576).
+  const [jdContext, setJdContext] = useState<string | null>(null);
+
+  // Consume the one-shot handoff on mount. When present, also switch to the
+  // Reconstructed tab — the rewrite affordance lives there, and landing on
+  // any other tab would hide the change the user just asked for. The read
+  // clears the key, so a manual reload of `/` falls back to a generic
+  // rewrite prompt rather than silently keep steering toward a stale JD.
+  useEffect(() => {
+    const handoff = consumeTailorHandoff();
+    if (handoff === null) return;
+    setJdContext(handoff.jdContext);
+    setTab("reconstructed");
+  }, []);
+
+  // Reset when the parse identity changes (LLM escape hatch recovers, a new
+  // file). A tailoring instruction derived from one parse must not survive
+  // into another — the missing-terms list is grounded in the coverage
+  // computed against a specific résumé, and re-using it against a different
+  // parse would steer the rewrite toward gaps that may no longer exist.
+  //
+  // The `mountedRef` guard is what makes the mount-time handoff win against
+  // this effect: both effects fire on the first commit, in declaration order,
+  // so without the skip the reset would immediately null out the jdContext
+  // the handoff just set. After the first firing the guard flips and every
+  // real identity change (LLM override applied here, a fresh file remounts
+  // the whole tree so nothing to reset) is honoured. Dep is hand-audited
+  // (`exhaustive-deps` is NOT enforced in this repo — see CLAUDE.md → Data
+  // & hooks): only `activeResult` identity matters here.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    setJdContext(null);
+  }, [activeResult]);
 
   // The on-device-AI tab (id `quality`) is the canonical on-device-AI surface
   // (#276). It shows whenever there's résumé text to analyze — either running the live
@@ -171,7 +212,7 @@ export function ResultDetailTabs({
               result={activeResult}
               score={activeScore}
               edit={edit}
-              jdContext={jdContext}
+              jdContext={jdContext ?? undefined}
               // #608: the critique the on-device-AI tab is already showing
               // feeds the rewrite, so clicking Rewrite acts on the findings the
               // user just read instead of discarding them. Only available once

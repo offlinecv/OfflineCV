@@ -157,11 +157,12 @@ export interface ResumeRewriteController {
    *
    * The copyable-prompt disclosure has to show a prompt carrying the user's
    * current intent, and the intent is not simply `{userInstructions,
-   * pageTarget}`: `/jd-fit` folds a JD context in front of the user's own text,
-   * and the findings channel rides the same object. Exposing the assembled
-   * value means the copied prompt cannot disagree with the button beside it —
-   * a second assembly in the UI layer would drift the first time either input
-   * changed. `undefined` when nothing is set, exactly as `start()` sees it.
+   * pageTarget}`: the JD-driven tailor path (#576, from `/jobs/`) folds a JD
+   * context in front of the user's own text, and the findings channel rides
+   * the same object. Exposing the assembled value means the copied prompt
+   * cannot disagree with the button beside it — a second assembly in the UI
+   * layer would drift the first time either input changed. `undefined` when
+   * nothing is set, exactly as `start()` sees it.
    */
   steering: RewriteSteering | undefined;
 }
@@ -210,11 +211,13 @@ export function sectionsEqual(
 export function useResumeRewrite(
   sections: readonly SectionInput[],
   /**
-   * Optional JD-driven steering text (#226). On `/jd-fit` this names the JD's
-   * missing terms so the rewrite prioritizes them; it is folded INTO the
-   * steering's `userInstructions` (alongside the user's own freeform text), so
-   * the engine stays single. On `/` it's undefined → byte-identical generic
-   * rewrite prompt.
+   * Optional JD-driven steering text (#226, #576). Set only when the JD
+   * tailor handoff (`tailor-handoff.ts`, written by `/jobs/`) landed for this
+   * visit — `ResultDetailTabs` consumes the handoff on mount and threads the
+   * instruction here. It names the JD's missing terms so the rewrite
+   * prioritizes them; it is folded INTO the steering's `userInstructions`
+   * (alongside the user's own freeform text), so the engine stays single.
+   * Undefined → byte-identical generic rewrite prompt.
    */
   jdContext?: string,
   /**

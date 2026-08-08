@@ -2,17 +2,21 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * JD-driven rewrite steering (issue #226).
+ * JD-driven rewrite steering (issue #226; caller migrated to `/jobs/` in
+ * #576).
  *
- * `/jd-fit` reuses the SAME rewrite engine as `/` — it does not fork it. The
+ * The JD-tailor path on `/jobs/` (either a `JobResultCard`'s "Tailor résumé
+ * to this job" button or the paste-a-JD disclosure below the results) reuses
+ * the SAME rewrite engine as the plain `/` case — it does not fork it. The
  * only difference is an extra steering instruction naming the JD terms the
  * résumé is currently missing, so the model is nudged to surface genuine,
  * already-present evidence of those skills rather than fabricate them.
  *
  * The output is plain text folded into `RewriteSteering.userInstructions` via
  * `buildSteeringSuffix` (steering.ts), so it inherits the same guardrails
- * (number preservation, no fabrication) and never bypasses them. On `/` no JD
- * context is passed → the prompt is byte-identical to today's generic rewrite.
+ * (number preservation, no fabrication) and never bypasses them. When no JD
+ * tailor handoff was consumed for this visit, no JD context is passed → the
+ * prompt is byte-identical to today's generic rewrite.
  */
 
 import type { CoverageResult } from "./coverage.ts";

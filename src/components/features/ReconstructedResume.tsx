@@ -1046,7 +1046,8 @@ export function ReconstructedResume({
   score: AnonymousAtsScore;
   /** Lifted edit state (#82) — owned by App so overrides feed scoring/JD. */
   edit: EditableParse;
-  /** Optional JD-driven rewrite steering (#226). Set only on `/jd-fit`. */
+  /** Optional JD-driven rewrite steering (#226, #576). Set by
+   *  `ResultDetailTabs` when it consumed a tailor handoff on mount. */
   jdContext?: string;
   /** On-device critique of this résumé (#608), when the user has run one.
    *  Threaded to the whole-résumé rewrite so it acts on the findings already

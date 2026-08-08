@@ -4,21 +4,21 @@
 // @vitest-environment jsdom
 
 /**
- * Coverage for the #706 back-navigation decision: `/jobs/` and `/jd-fit/`'s
- * "back to resume" controls should use a real `history.back()` only when this
- * tab actually arrived via a `markDeparture()`-marked launch from `/` — never
- * on ambient inference. The case that must lose is the direct visit (no
- * marker): it has to take the fallback, not fire `history.back()` into
- * whatever history stack happens to exist.
+ * Coverage for the #706 back-navigation decision: `/jobs/`'s "back to resume"
+ * control should use a real `history.back()` only when this tab actually
+ * arrived via a `markDeparture()`-marked launch from `/` — never on ambient
+ * inference. The case that must lose is the direct visit (no marker): it has
+ * to take the fallback, not fire `history.back()` into whatever history stack
+ * happens to exist.
  *
- * Since the marker carries the path it was written from, the OTHER losing case
- * is a marker written somewhere that is not the app root — the shared
- * `PageShell` header puts a `/jobs/` link on every surface, so a caller can be
- * on `/jd-fit/` when it marks. That must read as "no marker".
+ * Since the marker carries the path it was written from, the OTHER losing
+ * case is a marker written somewhere that is not the app root — the shared
+ * `PageShell` header puts a `/jobs/` link on every surface, so a caller not
+ * on `/` could in principle mark. That must read as "no marker".
  *
  * The read is non-destructive and the clear is separate on purpose; the pairing
  * (once per VISIT, at mount) lives in `useArrivedFromRoot` and is tested there
- * and in the two surfaces' own suites.
+ * and in the surfaces' own suites.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -63,16 +63,16 @@ describe("markDeparture / readDepartureMarker / clearDepartureMarker", () => {
 
   it("a marker written from a NON-root surface does not satisfy the read", () => {
     // The losing case the bare-boolean marker got wrong: the shared PageShell
-    // header renders a "Saved jobs" link on /jd-fit/ too, so a marker can be
+    // header renders a "Saved jobs" link on every surface, so a marker can be
     // written from somewhere that is not the app root. Honouring it would send
-    // /jobs/'s "Back to your resume" control back to /jd-fit/ — a real page,
-    // but not the one the label names.
-    markDeparture({ pathname: "/jd-fit/" });
+    // a "Back to your resume" control to that other surface — a real page, but
+    // not the one the label names.
+    markDeparture({ pathname: "/jobs/" });
     expect(readDepartureMarker()).toBe(false);
   });
 
   it("clears a non-root marker anyway, so it cannot answer a later visit", () => {
-    markDeparture({ pathname: "/jd-fit/" });
+    markDeparture({ pathname: "/jobs/" });
     clearDepartureMarker();
     // A marker left behind would still be sitting there when the NEXT leg —
     // this time a real one from `/` — asked its question.

@@ -150,26 +150,24 @@ export default [
     rules: {},
   },
 
-  // ── Architecture guard: components + the three lane roots ───────────────
+  // ── Architecture guard: components + the two lane roots ────────────────
   // These rules encode the same checks style_guard.sh runs (non-blocking,
   // advisory). Here they are BLOCKING (error) and run in CI.
   //
   // The scope is every surface that WRITES markup: the component tiers, plus
-  // the ROOT of each of the three HTML entries the build ships (vite.config.ts
-  // `rollupOptions.input`). `src/App.tsx` was listed alone, which left its two
-  // peers — `JobsApp` (`/jobs/`) and `JdFitApp` (`/jd-fit/`) — writing JSX
-  // outside every token rule (#640 review). Listed as the three files rather
-  // than as `src/jobs/**`+`src/jd-fit/**` so the scope stays "the entry roots",
-  // matching how `src/App.tsx` is named; `main.tsx` and the lane hooks/tests
-  // hold no markup. `src/lib/**` and `src/hooks/**` stay out for the same
-  // reason.
+  // the ROOT of each of the two HTML entries the build ships (vite.config.ts
+  // `rollupOptions.input`). `src/App.tsx` was listed alone, which left its
+  // peer — `JobsApp` (`/jobs/`) — writing JSX outside every token rule
+  // (#640 review). Listed as the two files rather than as `src/jobs/**` so
+  // the scope stays "the entry roots", matching how `src/App.tsx` is named;
+  // `main.tsx` and the lane hooks/tests hold no markup. `src/lib/**` and
+  // `src/hooks/**` stay out for the same reason.
   {
     files: [
       "src/components/**/*.{ts,tsx}",
       "src/design-system/**/*.{ts,tsx}",
       "src/App.tsx",
       "src/jobs/JobsApp.tsx",
-      "src/jd-fit/JdFitApp.tsx",
     ],
     rules: {
       // Raw <button> outside the Button primitive is forbidden in feature code.

@@ -30,6 +30,7 @@ import { JobResultCard } from "./JobResultCard.tsx";
 import { WeakMatchesSection } from "./WeakMatchesSection.tsx";
 import { isWeakMatch } from "./weakMatchThreshold.ts";
 import type { JobSearchResult } from "../../lib/job-search/search.ts";
+import type { CoverageResult } from "../../lib/jd-match/coverage.ts";
 
 /** Cards per page. Matches the pre-paging render cap, so a first screenful of
  *  results is unchanged — what changed is that page 2 now exists. */
@@ -49,15 +50,20 @@ const SAMPLE_LABEL =
 export function JobSearchResults({
   phase,
   onRetry,
+  onTailor,
 }: {
   phase: SearchPhase;
   onRetry: () => void;
+  /** Optional per-posting "Tailor résumé to this job" affordance (#576). */
+  onTailor?: (coverage: CoverageResult) => void;
 }) {
   return (
     <div aria-live="polite" className="flex flex-col gap-3 empty:hidden">
       {phase.kind === "loading" && <LoadingState />}
       {phase.kind === "failed" && <HardError onRetry={onRetry} />}
-      {phase.kind === "loaded" && <Loaded result={phase.result} onRetry={onRetry} />}
+      {phase.kind === "loaded" && (
+        <Loaded result={phase.result} onRetry={onRetry} onTailor={onTailor} />
+      )}
     </div>
   );
 }
@@ -97,9 +103,11 @@ function HardError({ onRetry }: { onRetry: () => void }) {
 function Loaded({
   result,
   onRetry,
+  onTailor,
 }: {
   result: JobSearchResult;
   onRetry: () => void;
+  onTailor?: (coverage: CoverageResult) => void;
 }) {
   const { jobs, degradedProviders, providerCount, excludeSuppressed, roleSuppressed } = result;
   const [page, setPage] = useState(1);
@@ -198,12 +206,20 @@ function Loaded({
       {strong.length > 0 && (
         <div className="flex flex-col gap-2">
           {strong.map((job) => (
-            <JobResultCard key={job.posting.id} job={job} />
+            <JobResultCard
+              key={job.posting.id}
+              job={job}
+              onTailor={onTailor}
+            />
           ))}
         </div>
       )}
 
-      <WeakMatchesSection jobs={weak} defaultOpen={strong.length === 0} />
+      <WeakMatchesSection
+        jobs={weak}
+        defaultOpen={strong.length === 0}
+        onTailor={onTailor}
+      />
 
       {pageCount > 1 && (
         <div className="flex flex-col gap-2 border-t border-border-light pt-3">
