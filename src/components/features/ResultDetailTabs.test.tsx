@@ -13,12 +13,31 @@
  * matching the other feature render tests.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
-import { createElement } from "react";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { createElement, StrictMode } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+// The jdContext tests observe the value through a stubbed `ReconstructedResume`
+// that renders the prop. Asserting on sessionStorage instead would be vacuous:
+// nothing writes the key back after the mount consume, so those assertions hold
+// even with the reset guard deleted. The probe is what makes "the steering
+// actually reached the rewrite path" observable (#576).
+vi.mock("./ReconstructedResume.tsx", () => ({
+  ReconstructedResume: (props: { jdContext?: string }) =>
+    createElement(
+      "div",
+      { "data-testid": "reconstructed-probe" },
+      `jdContext=${props.jdContext ?? "NULL"}`,
+    ),
+}));
+
 import { ResultDetailTabs } from "./ResultDetailTabs.tsx";
 import { useEditableParse } from "../../hooks/useEditableParse.ts";
+import {
+  writeTailorHandoff,
+  fingerprintParse,
+  TAILOR_HANDOFF_KEY,
+} from "../../lib/tailor-handoff.ts";
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
@@ -56,6 +75,18 @@ function result(summary?: string, title?: string): CascadeResult {
 }
 
 const score = { overall: 60, verdict: "Getting There" } as unknown as AnonymousAtsScore;
+
+/** The stamp `/jobs/` would have written for a handoff aimed at this parse. */
+function fingerprintOf(res: CascadeResult): string {
+  return fingerprintParse(res.canonical.fields);
+}
+
+/** Stand-in for the `{ parseKey, llmOverride }` token `Result.tsx` builds. A
+ *  fresh object per call, so a test that wants "the parse was replaced" just
+ *  calls it again — and one that wants "the user edited" reuses the same one. */
+function parseIdentity(): object {
+  return {};
+}
 
 interface ControllerOpts {
   isAvailable: boolean;
@@ -95,11 +126,14 @@ function controller(opts: ControllerOpts): AnalysisController {
 let container: HTMLDivElement;
 let root: Root;
 
+const HOST_IDENTITY = parseIdentity();
+
 function Host({ opts, summary }: { opts: ControllerOpts; summary?: string }) {
   const edit = useEditableParse();
   const res = result(summary);
   return createElement(ResultDetailTabs, {
     activeResult: res,
+    parseIdentity: HOST_IDENTITY,
     activeScore: score,
     result: res,
     sourceKind: "pdf",
@@ -120,6 +154,10 @@ function render(opts: ControllerOpts, summary?: string) {
   });
   return container;
 }
+
+beforeEach(() => {
+  sessionStorage.clear();
+});
 
 afterEach(() => {
   act(() => root?.unmount());
@@ -207,10 +245,14 @@ describe("ResultDetailTabs", () => {
     const recovered = result(undefined, "Recovered Architect");
     const opts: ControllerOpts = { isAvailable: false };
 
+    const before = parseIdentity();
+    const after = parseIdentity();
+
     function RecoveryHost({ recover }: { recover: boolean }) {
       const edit = useEditableParse();
       return createElement(ResultDetailTabs, {
         activeResult: recover ? recovered : heuristic,
+        parseIdentity: recover ? after : before,
         activeScore: score,
         result: heuristic,
         sourceKind: "pdf",
@@ -251,5 +293,247 @@ describe("ResultDetailTabs", () => {
     expect(qualityTab?.textContent).toContain("setup needed");
     // The panel explains the unavailability in place instead of vanishing.
     expect(el.textContent).toContain("On-device AI isn't available");
+  });
+
+  it("consumes a tailor handoff on mount and lands on the Reconstructed tab (#576)", () => {
+    // The round-trip claim: `/jobs/`'s tailor button stashes an instruction in
+    // sessionStorage and navigates here; `ResultDetailTabs` must (1) pick that
+    // instruction up on mount, (2) forward the instruction to
+    // `ReconstructedResume` (where the rewrite hook consumes it), (3) switch
+    // to the Reconstructed tab so the rewrite affordance is on screen, and
+    // (4) clear the key so a manual reload of `/` falls back to a generic
+    // rewrite prompt.
+    writeTailorHandoff({
+      jdContext: "prefer wording that surfaces Kubernetes",
+      parseFingerprint: fingerprintOf(result()),
+    });
+    const el = render({ isAvailable: false });
+    // Consumed: the read cleared the key.
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
+    // Landed on Reconstructed — the tab strip announces the selection via
+    // `aria-selected`, so the assertion is on that rather than on textContent
+    // (which lists every tab label regardless of which panel is showing).
+    const selected = el.querySelector('[role="tab"][aria-selected="true"]');
+    expect(selected?.textContent).toContain("Your resume");
+    // The load-bearing observable: the value the handoff carried actually
+    // reaches `ReconstructedResume`'s `jdContext` prop, so the rewrite is
+    // steered — not just consumed off storage.
+    const probe = el.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe(
+      "jdContext=prefer wording that surfaces Kubernetes",
+    );
+  });
+
+  it("keeps jdContext on mount and nulls it when the parse identity changes (#576)", () => {
+    // Two invariants in one test, both observable through the mocked
+    // `ReconstructedResume` probe:
+    //
+    //  (a) On mount with a handoff waiting, jdContext reaches the probe. A
+    //      mounted-flag guard on the reset effect fails this under React
+    //      StrictMode — the reset effect's second setup runs with the ref
+    //      already `true` and nulls out the value the handoff effect just set.
+    //  (b) A subsequent change of `parseIdentity` (the LLM escape hatch
+    //      recovering, a résumé loaded from the library) MUST clear jdContext:
+    //      a tailoring instruction derived from one parse must not survive
+    //      into another.
+    const heuristic = result(undefined, "Heuristic Engineer");
+    const recovered = result(undefined, "Recovered Architect");
+    writeTailorHandoff({
+      jdContext: "surface Kubernetes",
+      parseFingerprint: fingerprintOf(heuristic),
+    });
+    const opts: ControllerOpts = { isAvailable: false };
+    const before = parseIdentity();
+    const after = parseIdentity();
+
+    function SwapHost({ recover }: { recover: boolean }) {
+      const edit = useEditableParse();
+      return createElement(ResultDetailTabs, {
+        activeResult: recover ? recovered : heuristic,
+        parseIdentity: recover ? after : before,
+        activeScore: score,
+        result: heuristic,
+        sourceKind: "pdf",
+        edit,
+        analysis: controller(opts),
+        escapeHatch: escapeHatchController(opts),
+        onRecovered: () => {},
+        triggerCount: heuristic.triggers.length,
+      });
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(createElement(SwapHost, { recover: false }));
+    });
+    // Invariant (a): mount consumed the handoff AND the value survived the
+    // reset effect's first fire (which is what would have gone red under
+    // the mounted-flag guard, since refs persist across StrictMode replay).
+    let probe = container.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=surface Kubernetes");
+
+    // Invariant (b): the parse is replaced — mirrors what the LLM escape
+    // hatch does. jdContext must reset to null.
+    act(() => {
+      root.render(createElement(SwapHost, { recover: true }));
+    });
+    probe = container.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=NULL");
+  });
+
+  it("keeps jdContext when an edit mints a new activeResult for the SAME parse (#576)", () => {
+    // The counterpart to the test above, and the reason the reset is keyed on
+    // `parseIdentity` rather than on `activeResult`. On `/`, `activeResult` is
+    // a memo over the edit override maps (`useAnalyzedResume`'s
+    // `displayResult`), so every keystroke in the inline editor produces a
+    // structurally-equal object with a fresh identity. Keyed on that, the
+    // reset fires on the first character the user types and the steering they
+    // came back from `/jobs/` to apply is silently gone — the whole feature
+    // dead the moment it is used as intended.
+    //
+    // Mirror what `displayResult` actually produces: a new result object AND a
+    // new `canonical`/`fields` underneath it, structurally equal because this
+    // edit changed nothing observable. A bare `{ ...base }` would not do — it
+    // shares `canonical` by reference, so it would pass even for an
+    // implementation keyed on the fields object.
+    const base = result(undefined, "Platform Engineer");
+    const editedCopy = {
+      ...base,
+      canonical: { ...base.canonical, fields: { ...base.canonical.fields } },
+    };
+    expect(editedCopy.canonical.fields).not.toBe(base.canonical.fields);
+    writeTailorHandoff({
+      jdContext: "surface Kubernetes",
+      parseFingerprint: fingerprintOf(base),
+    });
+    const opts: ControllerOpts = { isAvailable: false };
+    const sameParse = parseIdentity();
+
+    function EditHost({ edited }: { edited: boolean }) {
+      const edit = useEditableParse();
+      return createElement(ResultDetailTabs, {
+        // Same parse identity on both renders — only the memo output changed.
+        activeResult: edited ? editedCopy : base,
+        parseIdentity: sameParse,
+        activeScore: score,
+        result: base,
+        sourceKind: "pdf",
+        edit,
+        analysis: controller(opts),
+        escapeHatch: escapeHatchController(opts),
+        onRecovered: () => {},
+        triggerCount: base.triggers.length,
+      });
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(createElement(EditHost, { edited: false }));
+    });
+    let probe = container.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=surface Kubernetes");
+
+    act(() => {
+      root.render(createElement(EditHost, { edited: true }));
+    });
+    probe = container.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=surface Kubernetes");
+  });
+
+  it("ignores a handoff stamped for a different résumé (#576)", () => {
+    // One-shot bounds how many times a payload is read, not which résumé
+    // reads it. When `/` is not restored from bfcache — tab reloaded, résumé
+    // reset — the next `ResultDetailTabs` to mount is a DIFFERENT parse, and
+    // it would consume the key exactly once against the wrong résumé, steering
+    // the rewrite toward gaps computed from a file the user already replaced.
+    const other = result(undefined, "Somebody Else's Résumé");
+    writeTailorHandoff({
+      jdContext: "surface Kubernetes",
+      parseFingerprint: fingerprintOf(other),
+    });
+    const el = render({ isAvailable: false });
+    const probe = el.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=NULL");
+    // Dropped, not deferred — the payload does not linger for a later mount.
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
+  });
+
+  it("consumes a handoff written AFTER mount, on the next pageshow (#576, bfcache)", () => {
+    // The primary tailor flow returns to `/` via `history.back()`, which is a
+    // bfcache RESTORE on every modern browser — no remount, no useEffect
+    // re-fire, so a mount-only consume strands the handoff key in
+    // sessionStorage until a later unrelated visit picks it up against the
+    // wrong résumé (#576). `pageshow` fires on both the initial load and
+    // every bfcache restore, so the same handler covers cold mount and warm
+    // restore. Simulated here with a
+    // plain `Event("pageshow")` — jsdom emits no navigation, so this is
+    // the closest signal to the browser's real bfcache event without
+    // fabricating a `PageTransitionEvent` the runtime does not construct.
+    const el = render({ isAvailable: false });
+    // No handoff yet: mount consume ran and found nothing → NULL.
+    let probe = el.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=NULL");
+
+    // Now imagine the user clicked "Tailor résumé to this job" over on
+    // `/jobs/` — that surface writes the handoff and calls
+    // `history.back()`. Simulate the bfcache restore with a pageshow event
+    // dispatched on window.
+    writeTailorHandoff({
+      jdContext: "surface bfcache",
+      parseFingerprint: fingerprintOf(result()),
+    });
+    act(() => {
+      window.dispatchEvent(new Event("pageshow"));
+    });
+    probe = el.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=surface bfcache");
+    // One-shot: the key was consumed, so a spurious second pageshow does
+    // nothing.
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
+  });
+
+  it("survives StrictMode's simulated remount without nulling jdContext (#576)", () => {
+    // `main.tsx` wraps `App` in `<StrictMode>`, and StrictMode replays every
+    // effect setup → cleanup → setup within one commit to prove they are
+    // idempotent. A boolean mounted-flag guard on the reset effect misfires
+    // here: refs persist across the replay, so the second setup finds
+    // `mountedRef.current === true` and calls `setJdContext(null)` — the
+    // feature is silently dead under `npm run dev`, exactly the class
+    // `useArrivedFromRoot`'s docblock warns about. The identity-keyed shape
+    // returns early on the replay because the identity has not changed.
+    writeTailorHandoff({
+      jdContext: "surface Rust",
+      parseFingerprint: fingerprintOf(result()),
+    });
+    const opts: ControllerOpts = { isAvailable: false };
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root.render(
+        createElement(
+          StrictMode,
+          null,
+          createElement(Host, { opts }),
+        ),
+      );
+    });
+    const probe = container.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=surface Rust");
+  });
+
+  it("stays on the default tab and jdContext-free when no tailor handoff was written", () => {
+    // Pre-existing behaviour must survive the handoff addition: an ordinary
+    // mount lands on Reconstructed with a null jdContext (generic rewrite).
+    const el = render({ isAvailable: false });
+    const selected = el.querySelector('[role="tab"][aria-selected="true"]');
+    expect(selected?.textContent).toContain("Your resume");
+    // No side-effect on storage either — the read is one-shot but must not
+    // write anything of its own.
+    expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
   });
 });

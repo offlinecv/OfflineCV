@@ -44,10 +44,11 @@
  * out of the list.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button, Chip, RatingStars, StatusBadge } from "@design-system";
 import { JdMatch } from "./JdMatch.tsx";
 import type { RankedJob } from "../../lib/job-search/rank.ts";
+import { buildJdRewriteContext } from "../../lib/jd-match/rewrite-context.ts";
 import { formatCompensationRange } from "../../lib/job-search/compensation.ts";
 import { describeRating } from "../../lib/job-search/rating.ts";
 
@@ -79,9 +80,31 @@ function distinctSource(company: string, source: string): string | null {
   return s && s !== c ? source : null;
 }
 
-export function JobResultCard({ job }: { job: RankedJob }) {
+export function JobResultCard({
+  job,
+  onTailor,
+}: {
+  job: RankedJob;
+  /** Steer the résumé rewrite on `/` with this posting's JD instruction
+   *  (#576) — built from the SAME `jdMatch.coverage` object the card's fit
+   *  number and expanded detail read, so the rewrite can never be steered by
+   *  a different computation than the one displayed. Absent → no button. */
+  onTailor?: (jdContext: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const { posting, jdMatch, rating, belowFloor, compFloorSet } = job;
+
+  // One call, serving as both the gate and the payload. `buildJdRewriteContext`
+  // returns null when there is nothing to steer with, and that is a strictly
+  // narrower condition than "no missing terms": a missing term whose `display`
+  // trims to empty passes a `missing.length > 0` check and still yields null.
+  // Deriving the button's visibility from anything but the built value lets
+  // the two drift, which is how a primary affordance ends up rendering for a
+  // click that silently does nothing.
+  const jdContext = useMemo(
+    () => buildJdRewriteContext(jdMatch.coverage),
+    [jdMatch.coverage],
+  );
   const matched = jdMatch.coverage.covered.slice(0, CHIP_CAP);
   const coveredCount = jdMatch.coverage.covered.length;
   const termCount = coveredCount + jdMatch.coverage.missing.length;
@@ -146,6 +169,16 @@ export function JobResultCard({ job }: { job: RankedJob }) {
         >
           {open ? "Hide match detail" : "View match detail"}
         </Button>
+        {/* Hidden when there is nothing to steer with (#576): a posting the
+            résumé already covers would otherwise show a primary affordance
+            that silently no-ops on click. `View match detail` above already
+            tells the user the coverage is complete, so nothing is lost by
+            the button's absence. */}
+        {onTailor && jdContext !== null && (
+          <Button variant="link" size="sm" onClick={() => onTailor(jdContext)}>
+            Tailor résumé to this job
+          </Button>
+        )}
         <a
           href={posting.url}
           target="_blank"

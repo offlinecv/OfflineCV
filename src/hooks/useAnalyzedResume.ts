@@ -2,11 +2,13 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * useAnalyzedResume — the full parse → edit → re-grade orchestration that both
- * root surfaces share.
+ * useAnalyzedResume — the full parse → edit → re-grade orchestration on `/`.
  *
- * Extracted from App.tsx (issue #226) so the parser-audit surface (`/`) and the
- * JD-fit surface (`/jd-fit`) drive the SAME pipeline rather than forking it:
+ * Originally extracted from App.tsx (issue #226) to let a second surface
+ * drive the SAME pipeline rather than forking it. The second surface has
+ * since been retired (#576), so today `/` is the sole consumer — the
+ * extraction remains because a future cross-surface use may want the same
+ * seam.
  *
  *   useResumeAnalysis (parse state machine)  +
  *   useEditableParse  (inline-edit overrides) +
@@ -21,9 +23,9 @@
  * Issue #313 (from-scratch authoring) generalizes this: the "authoring" phase
  * runs the EXACT same applyOverrides → re-grade pipeline, just seeded from
  * `buildBlankResult()` (or a restored draft's overrides) instead of a parsed
- * upload. `displayResult` is the one CascadeResult either root surface hands
- * to `Result` / `ReconstructedResume`, so App.tsx never has to know which
- * base it came from.
+ * upload. `displayResult` is the one CascadeResult the root surface hands to
+ * `Result` / `ReconstructedResume`, so App.tsx never has to know which base
+ * it came from.
  */
 
 import { useCallback, useEffect, useMemo } from "react";
@@ -70,6 +72,18 @@ export interface AnalyzedResume {
    *  original parse (phase "done") or the blank base (phase "authoring"),
    *  with `edited.parsed` folded in. Null exactly when `edited` is null. */
   displayResult: CascadeResult | null;
+  /**
+   * Opaque identity token for the CURRENT parse — changes exactly when a
+   * genuinely new résumé lands (a fresh file, a résumé restored from the
+   * library, a new blank-authoring session) and NOT when the user edits one.
+   *
+   * `displayResult` cannot serve this role and the distinction matters: it is
+   * a memo over the override maps, so a single keystroke mints a fresh object
+   * with the same parse behind it. Anything downstream that must reset "when
+   * the résumé changed" has to key on this instead — see `ResultDetailTabs`'
+   * JD-steering reset (#576). Null while there is nothing parsed.
+   */
+  parseKey: unknown;
   handleFile: (file: File) => Promise<void>;
   reset: () => void;
   formatBytes: (n: number) => string;
@@ -313,7 +327,14 @@ export function useAnalyzedResume(): AnalyzedResume {
   // (before the prompt even renders) and stays fixed across `resolveDraftPrompt`.
   // Only a genuinely fresh session (no draft found, or explicit start-over)
   // mints a new `generation`, which is what actually changes this key.
-  const resetKey =
+  //
+  // Exported as `parseKey` as well (#576): "a genuinely new résumé is on
+  // screen" is the same question the JD-steering reset downstream has to
+  // answer, and the answer has exactly one correct definition. Two hand-rolled
+  // approximations of it would be free to drift — and the obvious
+  // approximation (`displayResult` identity) is already wrong, since it
+  // changes on every edit.
+  const parseKey =
     state.phase === "done"
       ? state.result
       : state.phase === "authoring"
@@ -321,7 +342,7 @@ export function useAnalyzedResume(): AnalyzedResume {
         : null;
   useEffect(() => {
     resetAll();
-  }, [resetKey, resetAll]);
+  }, [parseKey, resetAll]);
 
   // Autosave the in-progress blank draft (#313), debounced on edit. Only
   // while the authoring editor is actually mounted (no pending prompt) — a
@@ -355,6 +376,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     edit,
     edited,
     displayResult,
+    parseKey,
     handleFile,
     reset,
     formatBytes,

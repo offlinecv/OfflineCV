@@ -666,7 +666,7 @@ function removeBulletFromDescriptions(
  * point: the UI writes against the re-graded pool while `byIndex` is the frozen
  * base parse, and after a removal the two disagree about what index 1 means. A
  * legacy key is a bare base-pool index from a snapshot written before #648 (a
- * persisted draft, a saved-library résumé, a `/jd-fit` handoff) and still
+ * persisted draft, or a saved-library résumé) and still
  * resolves through `byIndex`, exactly as it did then. See `bullet-id.ts` for why
  * the two spaces cannot collide.
  */

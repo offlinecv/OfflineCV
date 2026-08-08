@@ -73,8 +73,8 @@
  * is what makes it bounded, but the two lines need not have looked identical.
  *
  * ── Legacy key space (the persisted-snapshot migration) ──
- * A snapshot written before #648 — a `/jd-fit` handoff, or a blank draft sitting
- * in localStorage or a saved-library IndexedDB record — holds bare base-pool
+ * A snapshot written before #648 — a blank draft sitting in localStorage or a
+ * saved-library IndexedDB record, or an old cross-surface handoff — holds bare base-pool
  * INDICES (`bulletOverrides: {"3": "…"}`, `removedBullets: [3]`). Those keys are
  * all-digits and an id always contains a `|`, so the two spaces are disjoint by
  * construction and one resolver can serve both: {@link isLegacyBulletKey} routes

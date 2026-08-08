@@ -19,12 +19,11 @@
  * `sessionStorage`, per the repo's `ocv_*` convention, so the parse dies with
  * the tab and cannot leak into a later, unrelated session.
  *
- * Deliberately NOT one-shot — this is where it diverges from
- * `jd-fit-handoff.ts`. `/jd-fit` clears on read because it owns a DropZone to
- * fall back to; `/jobs/` has none, so consuming the key would turn an ordinary
- * browser reload (or a Back into the results page) into a dead end with no way
- * to recover but returning to `/`. The key is overwritten on each launch, so a
- * newer parse always wins, and it dies with the tab either way.
+ * Deliberately NOT one-shot: `/jobs/` has no DropZone to fall back to, so
+ * consuming the key would turn an ordinary browser reload (or a Back into
+ * the results page) into a dead end with no way to recover but returning to
+ * `/`. The key is overwritten on each launch, so a newer parse always wins,
+ * and it dies with the tab either way.
  */
 
 import type { HeuristicParsedResume } from "./heuristics/types.ts";

@@ -7,13 +7,13 @@
  * `useArrivedFromRoot` — the marker's lifetime is ONE visit, not one click.
  *
  * The defect (#706 follow-up): the marker records only WHERE a trip started,
- * so consuming it at click time lets `/`'s marker outlive the `/` → `/jd-fit/`
- * leg it was written for and answer whichever back control the user reaches
- * next. These tests pin both halves of the fix at the hook boundary —
- * consumption happens at MOUNT even when no control is ever clicked, and the
- * answer is captured for the visit — and the StrictMode assertion is the one
- * that would go red if the read and the clear were ever folded back into a
- * single lazy initializer.
+ * so consuming it at click time let `/`'s marker outlive the leg it was
+ * written for and answer whichever back control the user reached next (the
+ * two-hop bug fixed with a second surface's removal in #576). These tests pin both
+ * halves of the fix at the hook boundary — consumption happens at MOUNT even
+ * when no control is ever clicked, and the answer is captured for the visit —
+ * and the StrictMode assertion is the one that would go red if the read and
+ * the clear were ever folded back into a single lazy initializer.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -67,7 +67,7 @@ describe("useArrivedFromRoot", () => {
   });
 
   it("retires a NON-root marker too, without claiming it", () => {
-    markDeparture({ pathname: "/jd-fit/" });
+    markDeparture({ pathname: "/jobs/" });
     const answer = mount();
     expect(answer()).toBe("false");
     expect(sessionStorage.getItem("ocv_nav_from_root")).toBeNull();

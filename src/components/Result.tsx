@@ -31,6 +31,10 @@ type SourceKind = "pdf" | "docx" | "markdown";
 
 interface ResultProps {
   result: CascadeResult;
+  /** Identity of the PRISTINE parse behind `result` (#576) — see
+   *  `useAnalyzedResume.parseKey`. `result` is edit-folded and so changes on
+   *  every keystroke; this changes only when the résumé itself does. */
+  parseKey: unknown;
   /** EDITED score — re-graded by App from the current overrides (#82). */
   score: AnonymousAtsScore;
   /** PDF bytes for the source preview pane. Absent for DOCX uploads. */
@@ -39,18 +43,16 @@ interface ResultProps {
   onReset: () => void;
   /** Lifted edit state (#82) — threaded to ReconstructedResume for inline edits. */
   edit: EditableParse;
-  /** Optional JD-driven rewrite steering (#226). Set only on `/jd-fit`. */
-  jdContext?: string;
 }
 
 export function Result({
   result,
+  parseKey,
   score,
   bytes,
   sourceKind,
   onReset,
   edit,
-  jdContext,
 }: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
   if (isFontsUnmappable) {
@@ -59,12 +61,12 @@ export function Result({
   return (
     <ParsedCard
       result={result}
+      parseKey={parseKey}
       score={score}
       bytes={bytes}
       sourceKind={sourceKind}
       onReset={onReset}
       edit={edit}
-      jdContext={jdContext}
     />
   );
 }
@@ -73,20 +75,20 @@ export function Result({
 
 function ParsedCard({
   result,
+  parseKey,
   score,
   bytes,
   sourceKind,
   onReset,
   edit,
-  jdContext,
 }: {
   result: CascadeResult;
+  parseKey: unknown;
   score: AnonymousAtsScore;
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   onReset: () => void;
   edit: EditableParse;
-  jdContext?: string;
 }) {
   const triggerCount = result.triggers.length;
 
@@ -132,6 +134,22 @@ function ParsedCard({
   const activeResult: CascadeResult = useMemo(
     () => (llmOverride === null ? result : mergeLlmParse(result, llmOverride)),
     [result, llmOverride],
+  );
+
+  // Identity of the parse this card is showing — the two, and only two, ways
+  // the résumé under a MOUNTED `ParsedCard` can be replaced: the pristine
+  // parse changing underneath it (`parseKey`: a résumé loaded from the
+  // library, which sets phase "done" straight from "done" without passing
+  // through "parsing", so nothing unmounts), and the escape hatch swapping in
+  // an LLM re-parse (`llmOverride`).
+  //
+  // Deliberately NOT `activeResult`: that is a memo over the override maps,
+  // so every keystroke in the inline editor mints a fresh object for the
+  // SAME parse. Anything keyed on it fires on edits — which is why the
+  // JD-steering reset downstream takes this token instead (#576).
+  const parseIdentity = useMemo(
+    () => ({ parseKey, llmOverride }),
+    [parseKey, llmOverride],
   );
 
   const activeScore: AnonymousAtsScore = useMemo(() => {
@@ -206,12 +224,12 @@ function ParsedCard({
 
       <ResultDetailTabs
         activeResult={activeResult}
+        parseIdentity={parseIdentity}
         activeScore={activeScore}
         result={result}
         bytes={bytes}
         sourceKind={sourceKind}
         edit={edit}
-        jdContext={jdContext}
         analysis={analysis}
         escapeHatch={escapeHatch}
         onRecovered={handleRecovered}

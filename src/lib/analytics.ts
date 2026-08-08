@@ -9,8 +9,6 @@ import type { AtsPlatform } from "./jd-match/fetch-jd.ts";
 
 type PostHog = {
   capture: (event: string, props?: Record<string, unknown>) => void;
-  isFeatureEnabled?: (key: string) => boolean | undefined;
-  onFeatureFlags?: (cb: () => void) => void;
   register: (props: Record<string, unknown>) => void;
 };
 
@@ -100,14 +98,16 @@ const queue: Array<[string, Record<string, unknown>]> = [];
 
 /**
  * Which root surface emitted an event (#226 / #52). `/` (main.tsx) is the
- * parser audit; `/jd-fit` (jd-fit/main.tsx) is the JD-match + JD-driven rewrite
- * surface; `/jobs` (jobs/main.tsx) is the job-search workbench. Each entry calls
- * `setAnalyticsSurface` once at boot; every `track()` stamps the value so the
- * surfaces are distinguishable in PostHog without a whole event-category system. Defaults to "parser" so an un-tagged caller (or
- * a test) attributes to the original surface. Dead-code-safe: when
- * VITE_POSTHOG_KEY is unset, `track()` short-circuits before reading this.
+ * parser audit; `/jobs` (jobs/main.tsx) is the job-search workbench (which
+ * now also owns the paste-a-JD affordance a deprecated second surface used
+ * to carry). Each entry calls `setAnalyticsSurface` once at boot; every
+ * `track()` stamps the value so the surfaces are distinguishable in PostHog
+ * without a whole event-category system. Defaults to "parser" so an
+ * un-tagged caller (or a test) attributes to the original surface.
+ * Dead-code-safe: when VITE_POSTHOG_KEY is unset, `track()` short-circuits
+ * before reading this.
  */
-export type AnalyticsSurface = "parser" | "jd-fit" | "jobs";
+export type AnalyticsSurface = "parser" | "jobs";
 let surface: AnalyticsSurface = "parser";
 
 /** Tag every subsequent event with the emitting surface. Call once at boot. */
@@ -136,42 +136,13 @@ export async function initAnalytics(): Promise<void> {
   ph.register({ environment: ENVIRONMENT, is_internal: readInternalFlag() });
   for (const [evt, props] of queue) ph.capture(evt, props);
   queue.length = 0;
-  // Fan PostHog's flag-refresh callback out to flag subscribers (see flags.ts).
-  // Fires once flags first resolve, and again on any later refresh, so a gated
-  // surface flips on/off without a reload. Also flush immediately in case flags
-  // were already cached before the first subscriber registered.
-  ph.onFeatureFlags?.(() => {
-    for (const cb of flagSubs) cb();
-  });
-  for (const cb of flagSubs) cb();
-}
-
-// --- Feature flags (consumed by src/lib/flags.ts) -------------------------
-// PostHog is the *rollout override* layer; the build-time env default in
-// flags.ts is the real gate. When VITE_POSTHOG_KEY is unset, `ph` stays null,
-// `getFeatureFlag` returns undefined, and the env default wins — so a keyless
-// OSS build never depends on PostHog (and the posthog-js chunk stays
-// tree-shaken).
-const flagSubs = new Set<() => void>();
-
-/** PostHog's verdict for a flag, or undefined when PostHog isn't loaded. */
-export function getFeatureFlag(key: string): boolean | undefined {
-  return ph?.isFeatureEnabled?.(key);
-}
-
-/** Subscribe to flag refreshes; returns an unsubscribe fn. */
-export function subscribeFeatureFlags(cb: () => void): () => void {
-  flagSubs.add(cb);
-  return () => {
-    flagSubs.delete(cb);
-  };
 }
 
 function track(event: string, props: Record<string, unknown>): void {
   if (!KEY) return;
   // Stamp the emitting surface (#226) on every event so PostHog can split the
-  // parser-audit (`/`) and JD-fit (`/jd-fit`) products. Read at emit time, after
-  // the entry has called setAnalyticsSurface.
+  // parser-audit (`/`) and job-search (`/jobs`) surfaces. Read at emit time,
+  // after the entry has called setAnalyticsSurface.
   const stamped = { ...props, surface };
   if (!ph) {
     queue.push([event, stamped]);

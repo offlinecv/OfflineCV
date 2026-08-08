@@ -176,50 +176,15 @@ function emitVersionJson(version: string): Plugin {
   };
 }
 
-// Redirect the bare `/jd-fit` to the canonical `/jd-fit/` in dev and preview.
-// The page is served as a directory index (`jd-fit/index.html` at `/jd-fit/`);
-// static hosts that auto-redirect no-slash directory paths (GitHub Pages) make
-// `/jd-fit` work in production, but Vite's dev/preview servers do not — without
-// this they 404 the slash-less form. This middleware mirrors the Pages behavior
-// so local and production accept both `/jd-fit` and `/jd-fit/`. Base-aware:
-// only the canonical leaf is redirected; everything else falls through.
-function jdFitTrailingSlash(): Plugin {
-  const bare = `${BASE_PATH}jd-fit`; // BASE_PATH always ends in "/", e.g. "/jd-fit"
-  const target = `${bare}/`;
-  const redirect = (
-    req: { url?: string },
-    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: () => void },
-    next: () => void,
-  ) => {
-    const [path, query] = (req.url ?? "").split("?");
-    if (path === bare) {
-      res.statusCode = 301;
-      res.setHeader("Location", query ? `${target}?${query}` : target);
-      res.end();
-      return;
-    }
-    next();
-  };
-  return {
-    name: "offlinecv:jd-fit-trailing-slash",
-    configureServer(server) {
-      server.middlewares.use(redirect);
-    },
-    configurePreviewServer(server) {
-      server.middlewares.use(redirect);
-    },
-  };
-}
-
 export default defineConfig({
   base: BASE_PATH,
   // Multi-page app, not SPA. The default 'spa' appType silently falls back to
   // serving the root index.html (the parser) for ANY unmatched path — so
-  // `/offlinecv`, or `/jd-fit` without its trailing slash, would render the
+  // `/offlinecv`, or `/jobs` without its trailing slash, would render the
   // parser instead of 404ing. 'mpa' disables that catch-all: `/` → parser,
-  // `/jd-fit/` → JD fit, and anything else 404s honestly. The two products are
-  // real, separate HTML entries — there is no client-side router to fall back
-  // for.
+  // `/jobs/` → job workbench, and anything else 404s honestly. The two entries
+  // are real, separate HTML entries — there is no client-side router to fall
+  // back for.
   appType: "mpa",
   server: {
     // Bind 0.0.0.0 so the dev server is reachable from other machines on the
@@ -248,22 +213,21 @@ export default defineConfig({
     react(),
     emitVersionJson(APP_VERSION),
     emitSeoFiles(),
-    jdFitTrailingSlash(),
   ],
   build: {
-    // Two HTML entries (#226): `/` (parser audit, index.html) and `/jd-fit/`
-    // (JD match + JD-driven rewrite, jd-fit/index.html). The JD-fit page uses
-    // directory-index form (`jd-fit/index.html`, served at `/jd-fit/`) rather
-    // than a flat `jd-fit.html` so the extensionless URL resolves identically
-    // on Vite dev, the GCS bucket, and GitHub Pages — a flat `jd-fit.html` only
-    // clean-URLs on Pages, 404ing the canonical `/jd-fit/` path elsewhere.
+    // Two HTML entries: `/` (parser audit, index.html) and `/jobs/` (the
+    // job-search workbench, jobs/index.html). The workbench page uses
+    // directory-index form (`jobs/index.html`, served at `/jobs/`) rather
+    // than a flat `jobs.html` so the extensionless URL resolves identically
+    // on Vite dev, the GCS bucket, and GitHub Pages — a flat `jobs.html` only
+    // clean-URLs on Pages, 404ing the canonical `/jobs/` path elsewhere.
     // Declaring `input` explicitly means the build ships exactly these two
     // pages — the dev-only `jd-spike.html` / `eval-rewrite.html`
     // harnesses (which Vite's default auto-discovery would otherwise bundle) are
     // no longer emitted into dist/, which is the intended production surface.
     //
     // Derived from HTML_ENTRIES rather than spelled out here so the entry set
-    // and the sitemap cannot drift: a fourth entry is advertised for indexing
+    // and the sitemap cannot drift: a third entry is advertised for indexing
     // by construction instead of by someone remembering a second list.
     rollupOptions: {
       input: Object.fromEntries(
@@ -330,7 +294,7 @@ export default defineConfig({
         "src/**/*.test.ts",
         "src/**/__test-utils__/**",
         "src/**/*.d.ts",
-        // App entry points (root + per-surface, e.g. src/jd-fit/main.tsx). These
+        // App entry points (root + per-surface, e.g. src/jobs/main.tsx). These
         // are untested boot shims, and v8 instrumentation has emitted bogus
         // source-map columns for them (negative `end.column`) that crash
         // `fallow audit`'s u32 coverage parser, silently zeroing the whole
