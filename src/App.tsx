@@ -16,6 +16,7 @@ import { PageShell } from "./components/features/PageShell.tsx";
 import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
 import { ResumeLibrary } from "./components/features/ResumeLibrary.tsx";
 import { SaveResumeBar } from "./components/features/SaveResumeBar.tsx";
+import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionBar.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
@@ -320,6 +321,15 @@ export default function App() {
               sourceKind={state.sourceKind}
               result={displayResult}
               score={edited.score}
+            />
+            {/* Hand the parse to the capture extension (#620) — self-hides when
+                no extension answers a probe, so it costs nothing on the visit
+                of everyone who runs none. `canonical.fields` is the same shape
+                `departToJobs` hands `/jobs/`; the file name becomes the label
+                the extension's panel shows beside its rating. */}
+            <ShareWithExtensionBar
+              parsed={displayResult.canonical.fields}
+              fileName={state.fileName}
             />
             {jdFitEnabled && (
               // Cross-sell sits *below* the result as a quiet follow-on, not a
