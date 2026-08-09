@@ -39,12 +39,30 @@
 
 import dts from "rollup-plugin-dts";
 
-export default {
-  // The per-file declaration tree `tsc -p tsconfig.build.json` emits. The path
-  // carries the `packages/core/src` nesting because `rootDir` has to cover the
-  // `../../../src/lib/…` closure the barrel re-exports through.
-  input: "dist/packages/core/src/index.d.ts",
-  output: { file: "dist/index.d.ts", format: "es" },
+/**
+ * One bundle per entry point in `package.json`'s `exports`, and the two are a
+ * set that has to be kept in step by hand: an entry with no bundle here ships a
+ * `types` path the tarball does not contain, which `check:core`'s assertion 1
+ * fails at pack time rather than a consumer discovering it as silent `any`.
+ *
+ * They are separate bundles rather than one with two outputs because they are
+ * two independent declaration graphs — `job-search` is the network-bearing
+ * subpath and shares only `JobPosting` with `.`. `rollup-plugin-dts` inlines
+ * that shared type into both, which is correct: a `.d.ts` describes a surface,
+ * and duplicating a structural type across two surfaces costs a consumer
+ * nothing at runtime and keeps either bundle readable on its own.
+ *
+ * The input paths carry the `packages/core/src` nesting because `rootDir` has
+ * to cover the `../../../src/lib/…` closure both entries re-export through.
+ */
+const entries = [
+  ["dist/packages/core/src/index.d.ts", "dist/index.d.ts"],
+  ["dist/packages/core/src/job-search.d.ts", "dist/job-search.d.ts"],
+];
+
+export default entries.map(([input, file]) => ({
+  input,
+  output: { file, format: "es" },
   external: ["idb"],
   plugins: [dts()],
-};
+}));

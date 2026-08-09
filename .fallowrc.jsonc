@@ -24,10 +24,29 @@
   // in fallow's excluded-inherited bucket and each newly added generator
   // resurfaced as a fresh "dead code" finding on whichever PR added it (#665).
   // They are entry points in the same sense the `.mjs` tests above are.
+  //
+  // `packages/core/src/job-search.ts` is `@offlinecv/core`'s SECOND published
+  // entry point (the `./job-search` subpath), and nothing in this repo imports
+  // it — its consumer is downstream, across a submodule pin. That is true of the
+  // `.` entry too, and fallow finds `packages/core/src/index.ts` on its own
+  // while reporting this one as an unreachable file. Measured rather than
+  // assumed: swapping which of the two `exports` names as `"."` changed nothing,
+  // so it is not following `exports` — the only difference between the two files
+  // is that one of them is called `index.ts`. Registering it here rather than
+  // renaming it into `job-search/index.ts`, because the emitted path is what
+  // `exports` and `files` point at and a directory would move it for a linter's
+  // benefit. A third entry point costs six edits across five files, and a line here
+  // is one of them — the others are `packages/core/package.json`'s `exports` and
+  // `files`, `tsconfig.build.json`'s `include`, `rollup.dts.config.mjs`, and
+  // `scripts/check-core-package.mjs`'s `EXPECTED_EXPORTS` + `ENTRY_CLOSURES` +
+  // `PROBE`. The same list is spelled out in `packages/core/src/index.ts`'s
+  // docblock and in that script's `THIRD_ENTRY_CHECKLIST`, which is the copy its
+  // failure message quotes.
   "entry": [
     "jd-spike.html",
     "eval-rewrite.html",
     "parse-eval.html",
+    "packages/core/src/job-search.ts",
     "scripts/**/*.test.mjs",
     "scripts/fixtures/gen-*.mjs",
     "scripts/check-contrast.mjs"

@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { makeLeverProvider, hydrateLever } from "./lever.ts";
+import { makeLeverProvider, hydrateLever, leverJobId } from "./lever.ts";
 import type { JobQuery } from "../query-builder.ts";
 
 const query: JobQuery = { titles: ["Backend Engineer"], skills: ["Go", "Python"] };
@@ -156,5 +156,19 @@ describe("hydrateLever", () => {
     await hydrateLever("acme", "job-1");
     const [url] = fetchMock.mock.calls[0];
     expect(url as string).toBe("https://api.lever.co/v0/postings/acme/job-1?mode=json");
+  });
+});
+
+describe("leverJobId", () => {
+  it("strips the known prefix", () => {
+    expect(leverJobId("palantir", "lever:palantir:abc-123")).toBe("abc-123");
+  });
+
+  it("returns '' for a posting from another provider", () => {
+    expect(leverJobId("palantir", "greenhouse:palantir:9")).toBe("");
+  });
+
+  it("is not fooled by a slug containing a colon-like segment", () => {
+    expect(leverJobId("a:b", "lever:a:b:9")).toBe("9");
   });
 });

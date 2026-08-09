@@ -104,6 +104,20 @@ export function makeLeverProvider(slug: string, companyName = slug): JobProvider
 }
 
 /**
+ * Recover the Lever job id from a posting id this adapter minted.
+ *
+ * `mapJob` above builds `id` as `lever:{slug}:{jobId}`, so the recovery belongs
+ * next to the mint: strip the known prefix, exactly as `greenhouseJobId` does.
+ * A last-":" search would break on a slug that itself contains one, and on the
+ * `url` fallback a board without an id produces. Returns "" when the shape
+ * doesn't match, read by the caller as "not hydratable".
+ */
+export function leverJobId(slug: string, postingId: string): string {
+  const prefix = `lever:${slug}:`;
+  return postingId.startsWith(prefix) ? postingId.slice(prefix.length) : "";
+}
+
+/**
  * Lazy per-job hydrate: fetches one Lever posting and returns its plaintext
  * description. Called only for survivors whose cached light-index row had its
  * description stripped — never for the whole board.

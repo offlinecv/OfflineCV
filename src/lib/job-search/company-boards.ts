@@ -70,8 +70,8 @@ import {
   type RoleFilter,
 } from "./role-keywords.ts";
 import { makeCompanyProvider } from "./providers/index.ts";
-import { hydrateGreenhouse } from "./providers/greenhouse.ts";
-import { hydrateLever } from "./providers/lever.ts";
+import { hydrateGreenhouse, greenhouseJobId } from "./providers/greenhouse.ts";
+import { hydrateLever, leverJobId } from "./providers/lever.ts";
 import { readCachedBoard, writeCachedBoard } from "./board-cache.ts";
 import { mapWithConcurrency } from "./concurrency.ts";
 
@@ -82,26 +82,6 @@ import { mapWithConcurrency } from "./concurrency.ts";
  * of requests to one origin.
  */
 const HYDRATE_CONCURRENCY = 4;
-
-/** `id` on a Greenhouse posting is `greenhouse:{slug}:{jobId}` (see
- *  `providers/greenhouse.ts`). Recover the job id by stripping the known
- *  prefix — a substring search for the last ":" would break on a slug that
- *  itself contains one. Returns "" when the shape doesn't match, which the
- *  caller reads as "not hydratable". */
-export function greenhouseJobId(slug: string, postingId: string): string {
-  const prefix = `greenhouse:${slug}:`;
-  return postingId.startsWith(prefix) ? postingId.slice(prefix.length) : "";
-}
-
-/** `id` on a Lever posting is `lever:{slug}:{jobId}` (see `providers/lever.ts`).
- *  Recover the job id by stripping the known prefix, exactly as
- *  `greenhouseJobId` does — a last-":" search would break on a slug that itself
- *  contains one. Returns "" when the shape doesn't match, read by the caller as
- *  "not hydratable". */
-export function leverJobId(slug: string, postingId: string): string {
-  const prefix = `lever:${slug}:`;
-  return postingId.startsWith(prefix) ? postingId.slice(prefix.length) : "";
-}
 
 /**
  * Fill in `description` for the postings that survived filtering + capping.

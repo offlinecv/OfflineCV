@@ -9,6 +9,13 @@
  * depend on, so that consumer can write `@offlinecv/core` instead of reaching
  * into this repo's source tree by relative path.
  *
+ * This file is the **`.` entry point**, and the distinction now matters: the
+ * package has a second one, `@offlinecv/core/job-search` (`src/job-search.ts`),
+ * carrying the job-board provider adapters. Every claim below is about THIS
+ * entry unless it says otherwise, and the network-free one is about this entry
+ * *because* the other entry is not — see "Two entry points, and only one of them
+ * is network-free" below before quoting either.
+ *
  * The surface is deliberately narrow: the job-capture contract, the local
  * library's CRUD and replication primitives, the JD term/coverage pair, and the
  * fit-rating chain. It is what a *producer* of `JobRecord`s and a *replica* of
@@ -41,8 +48,9 @@
  * would drag a network primitive onto that graph for nothing. Measured: the
  * value-edge closure of the specifiers below is 27 modules and reaches no
  * `fetch`/`WebSocket`/`XMLHttpRequest`/`EventSource` at all. That is a statement
- * about the value-edge closure and not about the tarball's file list, which is
- * larger — see "The tarball ships more files than the graph reaches" below.
+ * about **this entry's** value-edge closure, and not about the tarball's file
+ * list, which is larger — see "The tarball ships more files than the graph
+ * reaches" below.
  *
  * **2. Types are re-exported with `export type`.** Not a style preference. A
  * type-only edge erases at build time, so `export type { JobRecord } from …`
@@ -52,35 +60,65 @@
  * `src/lib/job-search/types.ts` are re-exported for their types only and must
  * stay `export type` statements.
  *
- * The full transitive closure is 49 modules / ~17.5k LOC across `lib/storage`,
- * `lib/job-search`, `lib/jd-match`, `lib/heuristics`, `lib/score` and `webllm`,
- * with exactly one external runtime dependency: `idb`. The `heuristics`, `score`
- * and `webllm` modules are reached only through `import type` edges, so they
- * erase from the runtime graph — but not from the tarball.
+ * This entry's full transitive closure, `import type` edges included, is 49
+ * modules / ~17.5k LOC across `lib/storage`, `lib/job-search`, `lib/jd-match`,
+ * `lib/heuristics`, `lib/score` and `webllm`, with exactly one external runtime
+ * dependency: `idb`. The `heuristics`, `score` and `webllm` modules are reached
+ * only through `import type` edges, so they erase from the runtime graph — but
+ * not from the tarball.
+ *
+ * ## Two entry points, and only one of them is network-free
+ *
+ * `@offlinecv/core/job-search` is the second, and it is the deliberately
+ * network-BEARING half: the provider adapters call public job feeds, so every
+ * one of them holds a `fetch(`. It is a separate subpath precisely so that fact
+ * cannot arrive here by accident. Read `src/job-search.ts`'s own docblock for
+ * the full argument; the two facts that belong on this side of the seam are:
+ *
+ *   - **The two runtime closures are disjoint.** Measured: 27 modules from this
+ *     entry, 11 from `./job-search`, zero modules in common. Importing one
+ *     cannot pull the other in, in either direction, which is what makes the
+ *     network-free claim above survive the subpath's existence rather than merely
+ *     coexist with it.
+ *   - **The separation is a consumer's gate, not a preference.** The extension
+ *     this package was cut for walks the import graph of each of its entry
+ *     points and asserts the network primitives it reaches are exactly an
+ *     allow-list of one. Four of its five surfaces must reach none. A consumer
+ *     doing that audit must keep `./job-search` off every graph that has to stay
+ *     network-free, and there is no safe subset of it to reach for instead.
  *
  * ## The tarball ships more files than the graph reaches
  *
  * `tsc` emits a `.js` for every file in the program, the ones reached only by
  * `import type` included, and `files` ships all of them. So `npm pack` produces
- * 49 modules of which 27 are reachable from this barrel — and three of the
- * unreachable 22 read exactly like the thing this file says is absent:
+ * 62 modules, of which 38 are reachable — 27 from this barrel and 11 from
+ * `./job-search` — and two of the unreachable 24 read exactly like the thing
+ * this file says is absent:
  *
- *   - `dist/src/lib/jd-match/fetch-jd.js` — a live `fetch(url, …)`
  *   - `dist/src/lib/analytics.js` — `import.meta.env`, `await import("posthog-js")`
  *   - `dist/src/lib/webllm/web-llm.js` — `await import("@mlc-ai/web-llm")`
  *
- * Neither dynamic import is in `dependencies`, and nothing can load either file:
- * `exports` declares no subpath, so a consumer reaching for one gets
- * `ERR_PACKAGE_PATH_NOT_EXPORTED` (verified), and no reachable module imports
- * them. Unreachable dead JS a reader can open — not an egress path.
+ * (`dist/src/lib/jd-match/fetch-jd.js` used to head that list. It is now
+ * genuinely loadable — the provider adapters take `htmlToPlaintext` from it — so
+ * it moved off the dead-JS list and onto `./job-search`'s closure, where its
+ * `fetch(` is neither a surprise nor a capability that closure lacked.)
  *
- * The network-free claim above is therefore about the RUNTIME GRAPH rather than
- * the file list, and on the graph it holds exactly: 27 modules, no network
- * primitive, one bare import (`idb`). Which means grepping the tarball for
- * `fetch(` is the wrong audit — it finds `fetch-jd.js` plus two prose mentions
- * in comments. Walk the value edges out of `dist/packages/core/src/index.js`
- * instead; that is the graph a consumer actually loads, and what `check:core`'s
- * probe exercises when it imports the package by specifier.
+ * Neither dynamic import is in `dependencies`, and nothing can load either file:
+ * `exports` declares two subpaths and no wildcard, so a consumer reaching for
+ * any other path — including a `dist/…` one — gets
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED` (verified, and asserted by `check:core`), and
+ * no reachable module imports them. Unreachable dead JS a reader can open — not
+ * an egress path.
+ *
+ * The network-free claim above is therefore about **this entry's** RUNTIME GRAPH
+ * rather than about the file list, and on that graph it holds exactly: 27
+ * modules, no network primitive, one bare import (`idb`). Which means grepping
+ * the tarball for `fetch(` is the wrong audit twice over — it finds the seven
+ * modules that legitimately fetch on the OTHER entry, plus prose mentions in
+ * comments, and says nothing about which entry a consumer imported. Walk the
+ * value edges out of `dist/packages/core/src/index.js` instead; that is the
+ * graph a consumer of `.` actually loads, and what `check:core`'s probe
+ * exercises when it imports the package by specifier.
  *
  * `idb` **is** in this package's `dependencies`, and #772 is the reason it now
  * is. While this was a bare re-export barrel the omission was right: nothing
@@ -119,7 +157,28 @@
  * The tarball ships no `.ts`, so a per-file declaration tree would dangle on
  * every internal import and a consumer would silently get `any`.
  * `rollup.dts.config.mjs` bundles the declarations into one specifier-free
- * `dist/index.d.ts`, and `files` ships that instead of the tree.
+ * file per entry point — `dist/index.d.ts` and `dist/job-search.d.ts` — and
+ * `files` ships those instead of the tree.
+ *
+ * ## What a third entry point costs
+ *
+ * Six edits, across five files, that no single tool checks together — the same list
+ * is written out in `tsconfig.build.json`, `.fallowrc.jsonc` and
+ * `check-core-package.mjs`'s `THIRD_ENTRY_CHECKLIST`, and they used to be three
+ * different, shorter lists:
+ *
+ *   1. `package.json` → `exports` (the subpath, with `types` + `default`)
+ *   2. `package.json` → `files` (its `dist/<name>.d.ts`)
+ *   3. `tsconfig.build.json` → `include`, or `tsc` emits no `.js` for it
+ *   4. `rollup.dts.config.mjs` → a declaration bundle
+ *   5. `scripts/check-core-package.mjs` → `EXPECTED_EXPORTS`, `ENTRY_CLOSURES`,
+ *      and a `PROBE` static import
+ *   6. `.fallowrc.jsonc` → `entry`, unless the new file is called `index.ts`
+ *
+ * `check:core` is what turns a missed one into a pack-time failure rather than a
+ * consumer's silent `any` — including a missed (5), which is the one that used
+ * to pass: it cross-checks the subpaths `exports` publishes against both
+ * hand-written tables, in both directions, and fails by subpath name.
  *
  * `npm run check:core` (`scripts/check-core-package.mjs`, wired into `verify`)
  * is what makes any of this checkable from in here. Everything else in this
@@ -287,4 +346,12 @@ export {
   type JobRating,
 } from "../../../src/lib/job-search/rating.ts";
 
+/**
+ * `JobPosting` is on `./job-search` as well, and deliberately on both. It is the
+ * shape a captured posting is *rated* in, which a consumer needs whether or not
+ * it ever searches — and it is what an adapter *returns*, which a consumer of the
+ * subpath cannot do without. A type-only re-export erases, so the duplication
+ * costs nothing at runtime; narrowing it to one entry would only force some
+ * importer to reach for the other.
+ */
 export type { JobPosting } from "../../../src/lib/job-search/types.ts";
