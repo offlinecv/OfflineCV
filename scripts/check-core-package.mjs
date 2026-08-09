@@ -29,12 +29,12 @@
  * missing dependency cannot be satisfied by walking up into the repo's own
  * `node_modules`, which would turn the check into theatre.
  *
- * FIVE THINGS ARE ASSERTED, and each one maps to a way the tarball can be wrong:
+ * SEVEN THINGS ARE ASSERTED, and each one maps to a way the tarball can be wrong:
  *
  *   1. Its SHAPE. No TypeScript source ships (that was the original defect), the
- *      per-file `.d.ts` tree does not ship either — `dist/index.d.ts` is the
- *      only declaration, because the per-file tree is unusable (see 4) — and
- *      every relative specifier in every shipped `.js` resolves to a file that
+ *      per-file `.d.ts` tree does not ship either — the only declarations are one
+ *      bundle per `exports` entry, because the per-file tree is unusable (see 4)
+ *      — and every relative specifier in every shipped `.js` resolves to a file that
  *      also ships. That last one covers what assertion 2 structurally cannot:
  *      the probe imports the entry, so it only ever exercises the REACHABLE
  *      graph, while `tsc` emits a `.js` for every file in the program and
@@ -48,33 +48,45 @@
  *      `./sections.config.json` with no `with { type: "json" }` and so cannot
  *      itself load under Node, but the JSON does ship and the specifier does
  *      resolve, which is all this asserts.
- *   2. Its RUNTIME. The entry imports under plain Node with only its declared
- *      dependencies present, exports exactly the 22 names the barrel promises,
- *      and two of them are exercised for BEHAVIOUR rather than existence —
- *      `deriveJobId` has to still strip tracking parameters, `MAX_STARS` has to
- *      still be 5. A shape-only assertion passes on a tarball that exports 22
- *      broken functions.
+ *   2. Its RUNTIME. Every entry `EXPECTED_EXPORTS` names imports under plain
+ *      Node with only the declared dependencies present, exporting exactly the
+ *      names its barrel promises — and assertion 7 is what makes "every entry
+ *      `EXPECTED_EXPORTS` names" the same set as "every entry `exports`
+ *      publishes", which it was not until that assertion existed. Three names
+ *      are exercised for BEHAVIOUR rather than
+ *      existence — `deriveJobId` has to still strip tracking parameters,
+ *      `MAX_STARS` has to still be 5, and `getProviders()` has to still answer
+ *      the three keyless feeds in display order. A shape-only assertion passes
+ *      on a tarball that exports twenty-nine broken functions.
+ *      The same assertion covers what `exports` REFUSES: three subpaths that
+ *      name real shipped files have to fail with `ERR_PACKAGE_PATH_NOT_EXPORTED`
+ *      (see `UNEXPORTED_SUBPATHS`). That is the only thing standing between a
+ *      consumer and the 24 unreachable emitted modules, two of which
+ *      dynamic-import packages this one does not depend on.
  *   3. Its TYPES, from a consumer's position: a generated project resolves
- *      `@offlinecv/core` under `moduleResolution: "nodenext"` with
+ *      `@offlinecv/core` and `@offlinecv/core/job-search` under
+ *      `moduleResolution: "nodenext"` with
  *      `skipLibCheck: false` — the strictest configuration a plain Node consumer
  *      can have, and the first one to break. It carries a `@ts-expect-error`
  *      that only holds if the declarations were really read; if they resolved to
  *      nothing the symbols would widen to `any`, the expected error would
  *      vanish, and TypeScript would fail the unused directive.
- *   4. That no relative specifier survives in `dist/index.d.ts`. This is the
- *      subtle one. `rewriteRelativeImportExtensions` rewrites this repo's
- *      explicit `./foo.ts` specifiers to `./foo.js` in the JS output but NOT in
- *      the `.d.ts` output (TypeScript 5.8.3, under both `bundler` and
+ *   4. That no relative specifier survives in any shipped declaration bundle.
+ *      This is the subtle one. `rewriteRelativeImportExtensions` rewrites this
+ *      repo's explicit `./foo.ts` specifiers to `./foo.js` in the JS output but
+ *      NOT in the `.d.ts` output (TypeScript 5.8.3, under both `bundler` and
  *      `nodenext`). Since no `.ts` ships, a per-file declaration tree would
  *      dangle — which is why `rollup.dts.config.mjs` bundles the declarations
- *      into one specifier-free file, and why this assertion is how we find out
- *      if that step is ever removed or regresses.
+ *      into one specifier-free file per entry, and why this assertion is how we
+ *      find out if that step is ever removed or regresses.
  *   5. That every declared dependency is REQUIRED, not merely sufficient. The
  *      `node_modules/` above proves the list is big enough; nothing in it
  *      notices a dependency the code never imports, because a surplus symlink
  *      breaks nothing. So `dependencies` is compared, in both directions,
- *      against the packages a breadth-first walk from the entry actually
- *      reaches. Reachability rather than the file list, because the shipped
+ *      against the packages a breadth-first walk from EVERY entry actually
+ *      reaches — the union, because `dependencies` is one list for the whole
+ *      package and a package imported only from `./job-search` is still
+ *      required. Reachability rather than the file list, because the shipped
  *      remainder is full of modules nothing loads — two of them import
  *      `posthog-js` and `@mlc-ai/web-llm`, neither of which this package
  *      depends on in any sense a consumer would recognise.
@@ -85,6 +97,21 @@
  *      verdict about this package that is right. Walking the emitted graph can,
  *      which is why the suppression buys a stronger assertion rather than
  *      losing one.
+ *   6. Each entry's value-edge CLOSURE: how many modules it reaches, how many of
+ *      those name a network primitive, and that no two entries share one. This
+ *      is the property the `./job-search` split exists to create, and nothing
+ *      else here can see it. Assertion 2 catches a provider SYMBOL moved onto
+ *      `.`; only a graph walk catches a value EDGE, and the edge is the cheaper
+ *      accident — a single `import "…/fetch-jd.ts";` side-effect line changes no
+ *      export name at all while putting a live `fetch(` on the entry whose
+ *      docblock says it reaches none. See `ENTRY_CLOSURES`.
+ *   7. That the manifest's `exports`, `EXPECTED_EXPORTS` and `ENTRY_CLOSURES`
+ *      describe the SAME set of subpaths. Assertions 1, 4, 5 and 6 read their
+ *      subpaths off the manifest and follow a new entry automatically; the two
+ *      tables above are hand-written and do not. Until this was asserted, a
+ *      subpath added to `exports` and nowhere else published an unreviewed
+ *      export surface with the gate green — counted in the success line,
+ *      typechecked for nothing, asserted about in no way.
  *
  * HERMETIC BY CONSTRUCTION: nothing here touches the network. The dependency
  * `node_modules` is symlinked from the repo's existing install rather than
@@ -108,36 +135,162 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PKG_NAME = "@offlinecv/core";
 
 /**
- * The package's whole runtime surface, spelled out rather than snapshotted.
+ * The package's whole runtime surface, spelled out rather than snapshotted, one
+ * list per entry point in `exports`.
  *
  * A published export list is an API promise, so a change to it should be a
- * deliberate edit to this array in the same commit — not a diff nobody reads.
- * The names are asserted as an exact SET, so an accidental ADDITION fails here
- * too: publishing a symbol is much easier than un-publishing one.
+ * deliberate edit to this object in the same commit — not a diff nobody reads.
+ * The names are asserted as an exact SET per subpath, so an accidental ADDITION
+ * fails here too: publishing a symbol is much easier than un-publishing one.
+ *
+ * Keyed by subpath rather than flattened into one list, because WHICH entry a
+ * symbol is on is the load-bearing part. `./job-search` is the network-bearing
+ * half of this package — every adapter it exports holds a `fetch(` — and the
+ * whole reason it is a second subpath is that `.`'s consumers audit their import
+ * graphs and must not reach one. A flat list would go green on a commit that
+ * moved a provider onto `.`, which is exactly the regression the split exists to
+ * prevent; this shape fails it by name.
  */
-const EXPECTED_EXPORTS = [
-  "JOB_CAPTURE_CONTRACT_VERSION",
-  "MAX_STARS",
-  "canonicalJobUrl",
-  "captureJob",
-  "computeCoverageFromCorpus",
-  "deleteRecord",
-  "deriveJobId",
-  "describeRating",
-  "extractCompensation",
-  "extractJdTerms",
-  "formatCompensationRange",
-  "getRecord",
-  "getSyncCursor",
-  "isBelowFloor",
-  "listRecordsUpdatedSince",
-  "listResumeChoices",
-  "putRecord",
-  "rateJobs",
-  "ratingInputFor",
-  "setSyncCursor",
-  "validateJobRecord",
-  "validateLetterRecord",
+const EXPECTED_EXPORTS = {
+  ".": [
+    "JOB_CAPTURE_CONTRACT_VERSION",
+    "MAX_STARS",
+    "canonicalJobUrl",
+    "captureJob",
+    "computeCoverageFromCorpus",
+    "deleteRecord",
+    "deriveJobId",
+    "describeRating",
+    "extractCompensation",
+    "extractJdTerms",
+    "formatCompensationRange",
+    "getRecord",
+    "getSyncCursor",
+    "isBelowFloor",
+    "listRecordsUpdatedSince",
+    "listResumeChoices",
+    "putRecord",
+    "rateJobs",
+    "ratingInputFor",
+    "setSyncCursor",
+    "validateJobRecord",
+    "validateLetterRecord",
+  ],
+  "./job-search": [
+    "KEYLESS_PROVIDERS",
+    "getProviders",
+    "greenhouseJobId",
+    "hydrateGreenhouse",
+    "hydrateLever",
+    "leverJobId",
+    "makeAshbyProvider",
+    "makeGreenhouseProvider",
+    "makeLeverProvider",
+  ],
+};
+
+/**
+ * The VALUE-EDGE CLOSURE of each entry, measured on the emitted `dist/` — the
+ * property the two-entry split exists to create, and the one thing no other
+ * assertion here can see.
+ *
+ * `EXPECTED_EXPORTS` above catches a provider SYMBOL moved onto `.`. It cannot
+ * catch a value EDGE, which is the cheaper mistake by far: one
+ * `import "…/fetch-jd.ts";` side-effect line in `src/index.ts` leaves the export
+ * set byte-identical while taking that closure from 27 modules to 29, putting a
+ * live `fetch(` on it, and making the two closures overlap. At that point every
+ * network-free claim in `src/index.ts`, `src/job-search.ts` and
+ * `tsconfig.build.json` is false — in a public repo — and the downstream
+ * extension's `no-network.test.ts` is the first thing that finds out.
+ *
+ * So the numbers are asserted, exactly, in both directions. They are named
+ * constants sitting next to the docblocks they defend precisely so a legitimate
+ * change has to come here and update them deliberately, rather than watching a
+ * threshold absorb it.
+ *
+ *   modules              — the count of shipped `.js` files the entry reaches by
+ *                          value edges, itself included.
+ *   networkBearingModules — how many of those name a network primitive. ZERO is
+ *                          `.`'s whole claim. SEVEN is `./job-search`'s product,
+ *                          asserted in the same breath so a closure that quietly
+ *                          became a stub fails too — the six adapters plus
+ *                          `jd-match/fetch-jd.js`, which they take
+ *                          `htmlToPlaintext` from.
+ *
+ * Every key here is cross-checked against `exports` and `EXPECTED_EXPORTS` (see
+ * `checkPublishedSubpaths`), so a third entry cannot skip this table and leave
+ * the assertion silently covering two of three surfaces.
+ */
+const ENTRY_CLOSURES = {
+  ".": { modules: 27, networkBearingModules: 0 },
+  "./job-search": { modules: 11, networkBearingModules: 7 },
+};
+
+/**
+ * The four primitives a network-free claim is about.
+ *
+ * Matched by PARSING the emitted JavaScript rather than sweeping it, for the
+ * same reason `importSpecifiers` does — and here the difference is not
+ * theoretical but load-bearing on the very first run. `tsc` preserves docblocks
+ * into the emit verbatim, and the emitted `.` entry contains the sentence "the
+ * value-edge closure of the specifiers below is 27 modules and reaches no
+ * `fetch`/`WebSocket`/…" — so the obvious `/\b(fetch|…)\s*\(/` sweep reports
+ * FOUR network primitives in the one file whose whole claim is that it has
+ * none. A comment is not a node; the parse simply does not see it.
+ *
+ * The parse is also strictly stronger than the sweep on real code: it reads
+ * `globalThis.fetch(url)` (a property-access NAME) and a bare alias
+ * `const f = fetch;` (no paren follows, so no `\s*\(` sweep can), while
+ * declining to flag a BINDING of the same name — `function fetch()`,
+ * `let fetch`, `{ fetch: myImpl }` — which introduces a local rather than
+ * reading the global.
+ *
+ * KNOWN LIMIT, shared with every static scanner: a computed access
+ * (`globalThis["fet" + "ch"]`) has no identifier to read. Anything determined
+ * enough to write that is past what a gate in this repo is defending against.
+ */
+const NETWORK_PRIMITIVES = new Set(["fetch", "WebSocket", "XMLHttpRequest", "EventSource"]);
+
+/**
+ * Every place a THIRD entry point has to be added. Written once, here, and
+ * quoted by the failure message below rather than paraphrased in each file —
+ * three separately-drifting copies of this list is what let the gap
+ * `checkPublishedSubpaths` now closes exist in the first place.
+ */
+const THIRD_ENTRY_CHECKLIST = [
+  "packages/core/package.json → `exports` (the subpath, with `types` + `default`)",
+  "packages/core/package.json → `files` (its `dist/<name>.d.ts`)",
+  "packages/core/tsconfig.build.json → `include` (or `tsc` emits no `.js` for it)",
+  "packages/core/rollup.dts.config.mjs → a declaration bundle",
+  "scripts/check-core-package.mjs → EXPECTED_EXPORTS, ENTRY_CLOSURES, and a PROBE static import",
+  ".fallowrc.jsonc → `entry` (unless the file is named `index.ts`)",
+];
+
+/**
+ * Subpaths a consumer might plausibly reach for and must NOT get.
+ *
+ * This is the assertion behind the barrels' claim that the unreachable dead JS
+ * in the tarball "is not an egress path". `analytics.js` and `web-llm.js` are
+ * shipped, are unreachable from either entry, and dynamic-import packages this
+ * one does not depend on; what stops a consumer loading them anyway is `exports`
+ * declaring two subpaths and no wildcard. Verified rather than asserted, because
+ * a single `"./*"` entry added for convenience would silently publish all 62
+ * emitted modules.
+ *
+ * The three are deliberately different shapes, and only the first two name a
+ * file the tarball really ships — for those, an absent path would prove nothing,
+ * since it would fail for the boring reason. The THIRD names no shipped file and
+ * is not meant to: it is a deep subpath under an already-exported prefix, the
+ * shape a `"./job-search/*"` pattern would publish, which the first two (both
+ * `dist/…` paths, covered by a bare `"./*"`) would not catch. There is no
+ * false-pass risk in that: Node resolves `exports` by pattern match and never
+ * touches the filesystem for a subpath the map does not name, so the refusal
+ * this asserts is `exports`' doing rather than the file's absence.
+ */
+const UNEXPORTED_SUBPATHS = [
+  "@offlinecv/core/dist/src/lib/analytics.js",
+  "@offlinecv/core/dist/packages/core/src/index.js",
+  "@offlinecv/core/job-search/providers",
 ];
 
 /**
@@ -149,12 +302,42 @@ const EXPECTED_EXPORTS = [
  * failure message in this gate is written in one place.
  */
 const PROBE = `import * as core from "@offlinecv/core";
+import * as jobSearch from "@offlinecv/core/job-search";
+
+// The subpath list is generated from EXPECTED_EXPORTS rather than written twice.
+// Spelled out, a third entry added there and forgotten here would report every
+// one of its names as missing — a correct failure with a misleading message. The
+// static imports above stay static because a namespace object is what the export
+// check needs and because a bare \`import()\` of a subpath nobody declared would
+// fail for the wrong reason; they are asserted against this list below.
+const exports = {};
+for (const subpath of ${JSON.stringify(Object.keys(EXPECTED_EXPORTS))}) {
+  const loaded = subpath === "." ? core : subpath === "./job-search" ? jobSearch : null;
+  if (loaded === null) throw new Error(\`PROBE has no static import for the "\${subpath}" entry — add one.\`);
+  exports[subpath] = Object.keys(loaded).sort();
+}
+
+const blocked = {};
+for (const specifier of ${JSON.stringify(UNEXPORTED_SUBPATHS)}) {
+  try {
+    await import(specifier);
+    blocked[specifier] = "RESOLVED";
+  } catch (err) {
+    blocked[specifier] = err?.code ?? String(err?.message ?? err);
+  }
+}
 
 process.stdout.write(
   JSON.stringify({
-    exports: Object.keys(core).sort(),
+    exports,
+    blocked,
     jobId: core.deriveJobId("https://ex.com/j/1?utm_source=x"),
     maxStars: core.MAX_STARS,
+    // Behaviour behind the subpath, for assertion 2's reason: a shape-only check
+    // passes on a tarball exporting seven broken adapters. \`getProviders()\` with
+    // no argument must still answer exactly the always-on keyless set, which is
+    // the call a poller with no company selection makes.
+    keylessIds: jobSearch.getProviders().map((provider) => provider.id),
   }),
 );
 `;
@@ -169,6 +352,8 @@ process.stdout.write(
  */
 const CONSUMER_TS = `import { deriveJobId, validateJobRecord, MAX_STARS, ratingInputFor } from "@offlinecv/core";
 import type { JobRecord, RankedJob, CoverageResult } from "@offlinecv/core";
+import { getProviders } from "@offlinecv/core/job-search";
+import type { JobPosting, JobQuery } from "@offlinecv/core/job-search";
 
 export const id: string | undefined = deriveJobId("https://ex.com/j/1");
 export const stars: number = MAX_STARS;
@@ -186,6 +371,18 @@ export function consume(record: JobRecord, ranked: RankedJob, coverage: Coverage
     ratingInputFor(ranked, undefined, undefined, undefined),
     coverage,
   ] as const;
+}
+
+// The subpath's declarations, exercised the way a poller uses them: build a
+// \`JobQuery\` literal (the extension consumer cannot call \`buildJobQuery\` — that
+// wants a whole parsed résumé, which it is built never to hold), fan out, and
+// get \`JobPosting[]\` back. If \`dist/job-search.d.ts\` failed to resolve, every
+// symbol here would widen to \`any\` and the annotations would stop meaning
+// anything — which is what the \`@ts-expect-error\` above catches for \`.\`.
+export async function search(signal: AbortSignal): Promise<JobPosting[]> {
+  const query: JobQuery = { titles: ["Staff Engineer"], skills: ["typescript"] };
+  const results = await Promise.all(getProviders().map((provider) => provider.search(query, signal)));
+  return results.flat();
 }
 `;
 
@@ -330,7 +527,7 @@ function packageNameOf(specifier) {
  *    graph — every shipped module's specifiers, keyed by path — so assertion 5
  *    can walk it without re-parsing.
  */
-function checkTarballShape(shipped, pkg, fail) {
+function checkTarballShape(shipped, pkg, declarationEntries, fail) {
   const graph = new Map();
   const sources = shipped.filter((p) => p.endsWith(".ts") && !p.endsWith(".d.ts"));
   if (sources.length > 0)
@@ -339,15 +536,26 @@ function checkTarballShape(shipped, pkg, fail) {
         `No runtime resolves a \`.ts\` specifier; \`files\` must ship the BUILD OUTPUT, not \`src/\`.`,
     );
 
+  // The expected set is READ OFF `exports[*].types` rather than hardcoded, so a
+  // new entry point moves what this asserts instead of failing here for the
+  // wrong reason — and so an entry whose bundle was never wired into
+  // `rollup.dts.config.mjs` fails as "the tarball has no …" rather than shipping
+  // a `types` path that resolves to nothing.
   const declarations = shipped.filter((p) => p.endsWith(".d.ts"));
-  if (!declarations.includes("dist/index.d.ts"))
-    fail("the tarball has no `dist/index.d.ts` — the bundled declaration `exports.types` points at.");
-  const extra = declarations.filter((p) => p !== "dist/index.d.ts");
+  for (const expected of declarationEntries) {
+    if (!declarations.includes(expected))
+      fail(
+        `the tarball has no \`${expected}\` — a bundled declaration an \`exports\` entry's ` +
+          `\`types\` points at. Add it to \`rollup.dts.config.mjs\` and to \`files\`.`,
+      );
+  }
+  const extra = declarations.filter((p) => !declarationEntries.includes(p));
   if (extra.length > 0)
     fail(
-      `the tarball ships ${extra.length} per-file declaration(s) alongside the bundle — ` +
-        `${extra.slice(0, 5).join(", ")}. They carry unresolvable \`.ts\` specifiers (see assertion 4); ` +
-        `narrow \`files\` so only \`dist/index.d.ts\` ships.`,
+      `the tarball ships ${extra.length} per-file declaration(s) alongside the ` +
+        `${declarationEntries.length} bundle(s) — ${extra.slice(0, 5).join(", ")}. They carry ` +
+        `unresolvable \`.ts\` specifiers (see assertion 4); narrow \`files\` so only ` +
+        `${declarationEntries.join(", ")} ship.`,
     );
 
   // Every internal edge lands on a file that shipped. Bare specifiers are
@@ -383,6 +591,175 @@ function checkTarballShape(shipped, pkg, fail) {
 }
 
 /**
+ * Every network primitive NAMED in one emitted JavaScript file.
+ *
+ * Parsed, not swept — see `NETWORK_PRIMITIVES` for why the obvious regex reports
+ * four `fetch(`s in the one file whose entire claim is that it has none.
+ */
+function networkPrimitivesIn(source) {
+  // `setParentNodes` is what lets the binding/reference distinction below be
+  // made at all; `importSpecifiers` does not need it and does not pay for it.
+  const parsed = ts.createSourceFile("emitted.js", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const found = new Set();
+
+  const visit = (node) => {
+    if (ts.isIdentifier(node) && NETWORK_PRIMITIVES.has(node.text)) {
+      const parent = node.parent;
+      // A BINDING of the name rather than a READ of the global: `function
+      // fetch()`, `let fetch`, `class fetch`, `{ fetch: myImpl }`. Introducing a
+      // local called `fetch` reaches no network. The one `name` position that is
+      // still a read is a property access — `globalThis.fetch` — so it is
+      // excluded from the exclusion.
+      const isBinding =
+        parent !== undefined &&
+        !ts.isPropertyAccessExpression(parent) &&
+        !ts.isShorthandPropertyAssignment(parent) &&
+        "name" in parent &&
+        parent.name === node;
+      if (!isBinding) found.add(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(parsed, visit);
+  return [...found].sort();
+}
+
+/**
+ * 6. The value-edge CLOSURE of each entry: its size, its network primitives, and
+ *    its disjointness from every other entry's.
+ *
+ * This is the assertion the two-entry split exists for, and until it was written
+ * nothing in the repo made the property it creates checkable. `EXPECTED_EXPORTS`
+ * sees a provider SYMBOL arriving on `.`; only a graph walk sees a value EDGE,
+ * and the edge is the cheaper accident — a bare `import "…/fetch-jd.ts";` moves
+ * no export name at all.
+ *
+ * Walked over `graph`, which assertion 1 already built by parsing every shipped
+ * `.js` and already proved lands only on files that ship. The three claims are
+ * asserted separately rather than rolled into one number because they fail for
+ * different reasons and a reader needs to know which: a count drift is a
+ * dependency someone added, a network primitive on `.` is a shipped privacy
+ * defect, and an overlap is the seam itself dissolving.
+ */
+function checkEntryClosures(graph, pkg, entryFor, fail) {
+  const closures = new Map();
+
+  for (const [subpath, entry] of entryFor) {
+    // A subpath with no row here is already failing by name in
+    // `checkPublishedSubpaths`; walking it would only add a second, vaguer
+    // message about a table it was never in.
+    const expected = ENTRY_CLOSURES[subpath];
+    if (!expected) continue;
+
+    const closure = new Set([entry]);
+    for (const queue = [entry]; queue.length > 0; ) {
+      const file = queue.shift();
+      for (const specifier of graph.get(file) ?? []) {
+        if (!specifier.startsWith(".")) continue;
+        const resolved = posix.normalize(posix.join(posix.dirname(file), specifier));
+        if (closure.has(resolved)) continue;
+        closure.add(resolved);
+        queue.push(resolved);
+      }
+    }
+    closures.set(subpath, closure);
+
+    if (closure.size !== expected.modules)
+      fail(
+        `the \`${subpath}\` entry's value-edge closure is ${closure.size} module(s), and ENTRY_CLOSURES ` +
+          `says ${expected.modules}. Either an edge was added that should not have been, or the change is ` +
+          `intended and this gate's constant has to move with it — in the same commit, alongside the ` +
+          `docblock in the entry file \`${entry}\` is emitted from and the one in ` +
+          `\`packages/core/tsconfig.build.json\`, both of which quote the same number.`,
+      );
+
+    const bearing = [...closure]
+      .filter((file) => graph.has(file))
+      .map((file) => [file, networkPrimitivesIn(readFileSync(join(pkg, file), "utf8"))])
+      .filter(([, primitives]) => primitives.length > 0);
+
+    if (bearing.length !== expected.networkBearingModules)
+      fail(
+        `the \`${subpath}\` entry's closure names a network primitive in ${bearing.length} module(s), and ` +
+          `ENTRY_CLOSURES says ${expected.networkBearingModules}` +
+          (bearing.length > 0 ? ` — ${bearing.map(([f, p]) => `${f} (${p.join(", ")})`).join(", ")}` : "") +
+          `. ${
+            expected.networkBearingModules === 0
+              ? `\`${subpath}\` is the entry whose docblock claims its value-edge closure reaches no ` +
+                `\`fetch\`/\`WebSocket\`/\`XMLHttpRequest\`/\`EventSource\` at all, and the downstream ` +
+                `extension asserts exactly that for four of its five entry points. A module here is that ` +
+                `claim going false. Put the code on \`./job-search\` instead.`
+              : `That entry is network-BEARING on purpose, so a DROP is the suspicious direction: it means ` +
+                `an adapter fell out of the closure, not that anything got safer.`
+          }`,
+      );
+  }
+
+  // Disjointness, pairwise. Two entries today, so this is one comparison — but
+  // written as a sweep because the failure a third entry would introduce is
+  // exactly the one nobody would think to look for.
+  const walked = [...closures.entries()];
+  for (let i = 0; i < walked.length; i += 1) {
+    for (let j = i + 1; j < walked.length; j += 1) {
+      const [leftPath, left] = walked[i];
+      const [rightPath, right] = walked[j];
+      const shared = [...left].filter((file) => right.has(file));
+      if (shared.length > 0)
+        fail(
+          `the \`${leftPath}\` and \`${rightPath}\` closures share ${shared.length} module(s) — ` +
+            `${shared.slice(0, 5).join(", ")}. They are asserted DISJOINT: that is what makes importing ` +
+            `one unable to pull the other in, and what lets \`.\`'s network-free claim survive the ` +
+            `existence of a fetching sibling rather than merely sit next to it.`,
+        );
+    }
+  }
+}
+
+/**
+ * 7. The three lists of published subpaths agree: `exports` in the manifest,
+ *    `EXPECTED_EXPORTS`, and `ENTRY_CLOSURES`.
+ *
+ * WITHOUT THIS THE GATE IS PARTLY VACUOUS, and that was live. Assertions 1, 4, 5
+ * and 6 read their subpaths OFF the manifest, so they follow a new entry
+ * automatically. Assertion 2 reads `EXPECTED_EXPORTS`, which is hand-written. So
+ * a subpath added to `exports` and to nothing else published an entirely
+ * unreviewed export surface with the gate green — reproduced by adding
+ * `"./sneaky"` and changing nothing else: `✓ … 29 export(s) across 3 entry
+ * point(s)`. It COUNTED the new entry, typechecked nothing for it, and asserted
+ * nothing about its published names.
+ *
+ * Set equality in every direction is the fix, and it has to be every direction:
+ * a stale row left in either hand-written table after an entry is withdrawn
+ * makes that table's assertion silently cover a surface that no longer exists.
+ */
+function checkPublishedSubpaths(published, fail) {
+  const tables = [
+    ["EXPECTED_EXPORTS", Object.keys(EXPECTED_EXPORTS)],
+    ["ENTRY_CLOSURES", Object.keys(ENTRY_CLOSURES)],
+  ];
+
+  for (const [name, gated] of tables) {
+    const ungated = published.filter((subpath) => !gated.includes(subpath));
+    if (ungated.length > 0)
+      fail(
+        `\`exports\` publishes ${ungated.map((s) => `"${s}"`).join(", ")}, which ${name} does not name. ` +
+          `Nothing else in this gate would notice: an entry point is a published API surface, and this ` +
+          `one would ship with no assertion about ` +
+          `${name === "EXPECTED_EXPORTS" ? "the names it exports" : "the modules and network primitives its closure reaches"}. ` +
+          `A third entry point needs all of:\n    ${THIRD_ENTRY_CHECKLIST.join("\n    ")}`,
+      );
+
+    const stale = gated.filter((subpath) => !published.includes(subpath));
+    if (stale.length > 0)
+      fail(
+        `${name} names ${stale.map((s) => `"${s}"`).join(", ")}, which \`exports\` does not publish. ` +
+          `That row asserts nothing — drop it, or restore the \`exports\` entry it was written for.`,
+      );
+  }
+}
+
+/**
  * 5. Necessity: `dependencies` and the packages the tarball actually loads agree.
  *
  * Judged over the REACHABLE graph — a breadth-first walk from the entry
@@ -401,18 +778,27 @@ function checkTarballShape(shipped, pkg, fail) {
  * missing direction is already fatal at import time, but it is asserted here too
  * so the failure names the specifier instead of an `ERR_MODULE_NOT_FOUND` stack.
  */
-function checkDeclaredDependencies(declared, graph, entry, fail) {
+function checkDeclaredDependencies(declared, graph, entries, fail) {
   // Without this the walk starts nowhere, reaches nothing, and reports every
   // declared dependency as surplus — a confident wrong answer rather than a
   // failure. `exports` moving is exactly the change that would cause it.
-  if (!graph.has(entry)) {
-    fail(`the entry \`exports\` points at (${entry}) is not among the shipped modules this gate parsed.`);
+  const missing = entries.filter((entry) => !graph.has(entry));
+  if (missing.length > 0) {
+    fail(
+      `${missing.length} entr${missing.length === 1 ? "y" : "ies"} \`exports\` points at ` +
+        `(${missing.join(", ")}) ${missing.length === 1 ? "is" : "are"} not among the shipped ` +
+        `modules this gate parsed.`,
+    );
     return;
   }
 
+  // The UNION across every entry point, because `dependencies` is one list for
+  // the whole package: a package imported only from `./job-search` is still
+  // required, and judging `.` alone would report it as surplus and tell the
+  // reader to delete it.
   const required = new Set();
-  const seen = new Set([entry]);
-  for (const queue = [entry]; queue.length > 0; ) {
+  const seen = new Set(entries);
+  for (const queue = [...entries]; queue.length > 0; ) {
     const file = queue.shift();
     for (const specifier of graph.get(file) ?? []) {
       if (!specifier.startsWith(".")) {
@@ -446,17 +832,24 @@ function checkDeclaredDependencies(declared, graph, entry, fail) {
     );
 }
 
-/** 2. Runtime: the exact export set, plus behaviour behind two of the names. */
+/**
+ * 2. Runtime: the exact export set PER SUBPATH, behaviour behind three of the
+ *    names, and the subpaths `exports` must refuse.
+ */
 function checkRuntimeSurface(probe, fail) {
-  const missing = EXPECTED_EXPORTS.filter((name) => !probe.exports.includes(name));
-  const unexpected = probe.exports.filter((name) => !EXPECTED_EXPORTS.includes(name));
-  if (missing.length > 0) fail(`the tarball is missing export(s): ${missing.join(", ")}`);
-  if (unexpected.length > 0)
-    fail(
-      `the tarball exports name(s) this gate does not know about: ${unexpected.join(", ")}. ` +
-        `If that is intended, add them to EXPECTED_EXPORTS in the same commit — a published ` +
-        `export is a promise.`,
-    );
+  for (const [subpath, expected] of Object.entries(EXPECTED_EXPORTS)) {
+    const actual = probe.exports[subpath] ?? [];
+    const missing = expected.filter((name) => !actual.includes(name));
+    const unexpected = actual.filter((name) => !expected.includes(name));
+    if (missing.length > 0) fail(`\`${subpath}\` is missing export(s): ${missing.join(", ")}`);
+    if (unexpected.length > 0)
+      fail(
+        `\`${subpath}\` exports name(s) this gate does not know about: ${unexpected.join(", ")}. ` +
+          `If that is intended, add them to EXPECTED_EXPORTS in the same commit — a published ` +
+          `export is a promise, and WHICH subpath carries it is part of it: \`./job-search\` is ` +
+          `the network-bearing entry and \`.\` is the one consumers audit for reaching no \`fetch\`.`,
+      );
+  }
 
   // Behaviour, not shape. `deriveJobId` canonicalising the URL is the whole
   // reason `docs/job-capture-contract.md` tells producers to use it rather than
@@ -465,14 +858,58 @@ function checkRuntimeSurface(probe, fail) {
   if (probe.jobId !== "job:ex.com/j/1")
     fail(`deriveJobId() returned ${JSON.stringify(probe.jobId)} through the tarball, expected "job:ex.com/j/1"`);
   if (probe.maxStars !== 5) fail(`MAX_STARS is ${JSON.stringify(probe.maxStars)} through the tarball, expected 5`);
+
+  // The keyless set, in display order — `search.ts`'s fan-out and every
+  // consumer's default poll are the same three feeds. An adapter silently
+  // dropping out of the registry is a search that quietly returns less.
+  const keyless = (probe.keylessIds ?? []).join(", ");
+  if (keyless !== "remotive, arbeitnow, jobicy")
+    fail(
+      `getProviders() answered [${keyless}] through the tarball, expected ` +
+        `[remotive, arbeitnow, jobicy] — the always-on keyless set, in display order.`,
+    );
+
+  // What `exports` REFUSES, which is the other half of what it publishes. See
+  // UNEXPORTED_SUBPATHS: the tarball's unreachable dead JS is only harmless
+  // because none of it can be loaded by name.
+  //
+  // The KEY SET is asserted before the loop, and that is not belt-and-braces.
+  // `Object.entries(probe.blocked ?? {})` iterates zero times and passes if
+  // `blocked` is ever absent from the probe's output — while the success line
+  // below still prints "3 unexported subpath(s) refused". This is the same
+  // vacuity class the probe already had once (it built `blocked` and never
+  // emitted it), moved one layer up, where the emit is guarded by nothing.
+  // `probe.exports` and `probe.keylessIds` are structurally protected — a
+  // missing export set fails as missing names, a missing id list as the wrong
+  // provider order — and `blocked` is the one field where ABSENT and PASS are
+  // the same outcome. A count alone would not do it either: three refusals for
+  // three specifiers nobody asked about would satisfy it.
+  const reported = Object.keys(probe.blocked ?? {}).sort();
+  const requested = [...UNEXPORTED_SUBPATHS].sort();
+  if (reported.join("\u0000") !== requested.join("\u0000"))
+    fail(
+      `the probe reported refusal outcomes for [${reported.join(", ")}], expected exactly the ` +
+        `${UNEXPORTED_SUBPATHS.length} subpath(s) in UNEXPORTED_SUBPATHS [${requested.join(", ")}]. ` +
+        `An absent or partial \`blocked\` makes the loop below iterate over nothing and pass, so the ` +
+        `refusals have to be counted by name before they are judged.`,
+    );
+
+  for (const [specifier, outcome] of Object.entries(probe.blocked ?? {})) {
+    if (outcome !== "ERR_PACKAGE_PATH_NOT_EXPORTED")
+      fail(
+        `importing "${specifier}" gave ${outcome}, expected ERR_PACKAGE_PATH_NOT_EXPORTED. ` +
+          `\`exports\` must name every published subpath explicitly and carry no wildcard — a ` +
+          `\`"./*"\` entry publishes every emitted module, the unreachable dead JS included.`,
+      );
+  }
 }
 
-/** 4. No relative specifier survives the declaration bundle. */
-function checkDeclarationBundle(dts, fail) {
+/** 4. No relative specifier survives any declaration bundle. */
+function checkDeclarationBundle(name, dts, fail) {
   const relative = [...dts.matchAll(/\bfrom\s*["'](\.[^"']*)["']/g)].map((m) => m[1]);
   if (relative.length > 0)
     fail(
-      `dist/index.d.ts still imports ${relative.length} relative specifier(s) — ${[...new Set(relative)].slice(0, 5).join(", ")}. ` +
+      `${name} still imports ${relative.length} relative specifier(s) — ${[...new Set(relative)].slice(0, 5).join(", ")}. ` +
         `The tarball ships no per-file declarations for them to resolve to, so a consumer would ` +
         `fall back to \`any\` or fail outright. \`rollup.dts.config.mjs\` exists to inline these.`,
     );
@@ -506,16 +943,42 @@ async function main() {
     run("tar", ["-xzf", join(tmp, tarball), "-C", extractRoot], ROOT);
     const pkg = join(extractRoot, "package");
 
-    const graph = checkTarballShape(shipped, pkg, fail);
-
     // The load-bearing step: ONLY the declared dependencies, and they come from
     // the repo's install rather than the registry so this stays offline.
     const manifest = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8"));
     const declared = Object.keys(manifest.dependencies ?? {});
-    // Read off `exports` rather than hardcoded, so repointing the entry moves
-    // what assertion 5 walks instead of silently leaving it behind.
-    const entry = posix.normalize(manifest.exports?.["."]?.default ?? "");
-    checkDeclaredDependencies(declared, graph, entry, fail);
+    // Read off `exports` rather than hardcoded, so repointing or adding an entry
+    // moves what assertions 1, 4 and 5 look at instead of silently leaving it
+    // behind. Every subpath is a published surface and each gets the same
+    // treatment; the map's shape is asserted here too, since an entry missing
+    // `default` or `types` would otherwise quietly drop out of all three.
+    const subpaths = Object.entries(manifest.exports ?? {});
+    if (subpaths.length === 0) fail("the tarball's `exports` map is empty — nothing is published.");
+    const entries = [];
+    const declarationEntries = [];
+    // Keyed by subpath as well as listed, because assertion 6 judges each
+    // closure against the row `ENTRY_CLOSURES` holds for THAT subpath — a
+    // positional list would silently pair the wrong numbers with the wrong entry
+    // the first time `exports` is reordered.
+    const entryFor = new Map();
+    for (const [subpath, target] of subpaths) {
+      if (typeof target?.default !== "string" || typeof target?.types !== "string") {
+        fail(`the \`exports\` entry for "${subpath}" is missing a string \`default\` or \`types\`.`);
+        continue;
+      }
+      entries.push(posix.normalize(target.default));
+      declarationEntries.push(posix.normalize(target.types));
+      entryFor.set(subpath, posix.normalize(target.default));
+    }
+
+    // Before anything reads the hand-written tables: they have to be about the
+    // same set of subpaths `exports` publishes, or the assertions that follow
+    // cover a subset of the surface while reporting on all of it.
+    checkPublishedSubpaths([...entryFor.keys()], fail);
+
+    const graph = checkTarballShape(shipped, pkg, declarationEntries, fail);
+    checkDeclaredDependencies(declared, graph, entries, fail);
+    checkEntryClosures(graph, pkg, entryFor, fail);
     mkdirSync(join(pkg, "node_modules"));
     for (const dep of declared) {
       const source = join(ROOT, "node_modules", dep);
@@ -544,14 +1007,25 @@ async function main() {
 
     checkRuntimeSurface(JSON.parse(run(process.execPath, ["probe.mjs"], consumer)), fail);
     run(join(ROOT, "node_modules", ".bin", "tsc"), ["-p", join(consumer, "tsconfig.json")], consumer);
-    checkDeclarationBundle(readFileSync(join(pkg, "dist", "index.d.ts"), "utf8"), fail);
+    for (const declaration of declarationEntries)
+      checkDeclarationBundle(declaration, readFileSync(join(pkg, declaration), "utf8"), fail);
 
     if (failures.length === 0) {
+      const exportCount = Object.values(EXPECTED_EXPORTS).reduce((n, names) => n + names.length, 0);
+      // Every number here is one an assertion above just proved. The closure
+      // line is spelled out per entry rather than summed because the whole point
+      // of the split is WHICH entry reaches a `fetch`, and a total would hide it.
+      const closureLine = Object.entries(ENTRY_CLOSURES)
+        .map(([subpath, { modules, networkBearingModules }]) => `${subpath} ${modules} modules/${networkBearingModules} fetching`)
+        .join(", ");
       console.log(
         `✓ ${PKG_NAME} is publishable: ${shipped.length} file(s) packed, ` +
-          `${EXPECTED_EXPORTS.length} export(s) imported under plain Node with only ` +
-          `${declared.length === 0 ? "no" : declared.join(", ")} dependenc${declared.length === 1 ? "y" : "ies"} ` +
-          `present, and a \`nodenext\` consumer typechecks against dist/index.d.ts with skipLibCheck off.`,
+          `${exportCount} export(s) across ${entries.length} entry point(s) imported under plain ` +
+          `Node with only ${declared.length === 0 ? "no" : declared.join(", ")} ` +
+          `dependenc${declared.length === 1 ? "y" : "ies"} present, ` +
+          `${UNEXPORTED_SUBPATHS.length} unexported subpath(s) refused, disjoint value-edge closures ` +
+          `(${closureLine}), and a \`nodenext\` consumer ` +
+          `typechecks against ${declarationEntries.join(" + ")} with skipLibCheck off.`,
       );
       return;
     }

@@ -3,19 +3,24 @@
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "The headless, browser-only core of offlinecv: job capture, local library storage, JD term extraction and fit rating. Re-exported from src/lib — see src/index.ts.",
+  "description": "The headless, browser-only core of offlinecv: job capture, local library storage, JD term extraction and fit rating, with the network-bearing job-board provider adapters on a separate ./job-search subpath. Re-exported from src/lib — see src/index.ts and src/job-search.ts.",
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/packages/core/src/index.js"
+    },
+    "./job-search": {
+      "types": "./dist/job-search.d.ts",
+      "default": "./dist/packages/core/src/job-search.js"
     }
   },
   "files": [
     "dist/**/*.js",
     "dist/**/*.json",
-    "dist/index.d.ts"
+    "dist/index.d.ts",
+    "dist/job-search.d.ts"
   ],
   "scripts": {
     "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && rollup -c rollup.dts.config.mjs",

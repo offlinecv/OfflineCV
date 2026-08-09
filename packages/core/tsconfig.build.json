@@ -23,17 +23,37 @@
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
 
-    // Load-bearing for the privacy property the barrel's docblock claims. The
-    // surface is 27 value modules plus 22 reached only through `import type`
-    // edges. What `verbatimModuleSyntax` guarantees is narrower than "those 22
-    // erase": it guarantees the EMIT MATCHES THE SOURCE SYNTAX — an
-    // `import type`/`export type` erases, a plain `import`/`export` is
-    // preserved, and no elision heuristic decides either way behind our backs.
-    // The erasing is done by the barrel's disciplined `export type` statements;
-    // this flag is what makes that value/type split auditable by reading
-    // `src/index.ts`. Turn one of those 22 into a plain `export` and the flag
-    // will faithfully preserve it — growing the runtime graph past the 27 that
-    // were audited to reach no `fetch`/`WebSocket`.
+    // Load-bearing for the privacy property the barrels' docblocks claim. The
+    // program is 62 modules: 38 are value-reachable (27 from `src/index.ts`, 11
+    // from `src/job-search.ts`, and those two sets are disjoint), and the other
+    // 24 are reachable from neither entry.
+    //
+    // `import type` edges are how those 24 get into the program, but NOT how all
+    // of them got there directly — 13 of the 24 have an ordinary value edge into
+    // them from another module that is itself only type-reachable, so they enter
+    // BEHIND a type edge rather than through one. `job-search/sector.ts` is the
+    // clearest case: nothing imports it for a value, but its own
+    // `await import()`s put `webllm/capability.ts`, `models.ts`, `web-llm.ts`
+    // and `json-repair.ts` in the program, and `webllm/capability.ts` in turn
+    // pulls `analytics.ts`. None of that reaches either entry's runtime graph,
+    // which is the property that matters here — but "reached only through
+    // `import type` edges" would be the wrong reason to believe it.
+    // What `verbatimModuleSyntax`
+    // guarantees is narrower than "those 24 erase": it guarantees the EMIT
+    // MATCHES THE SOURCE SYNTAX — an `import type`/`export type` erases, a plain
+    // `import`/`export` is preserved, and no elision heuristic decides either way
+    // behind our backs. The erasing is done by the barrels' disciplined
+    // `export type` statements; this flag is what makes that value/type split
+    // auditable by reading the two entry files. Turn one of those 24 into a plain
+    // `export` and the flag will faithfully preserve it — growing whichever
+    // runtime graph it lands on, and `src/index.ts`'s is the one that was audited
+    // to reach no `fetch`/`WebSocket`.
+    //
+    // The disjointness is what keeps that audit meaningful now that one entry
+    // fetches on purpose: a value edge from `src/index.ts` into the provider
+    // adapters would put a network primitive on the network-free entry's graph,
+    // and this flag is what makes such an edge visible in the emit rather than a
+    // question about the compiler's elision rules.
     "verbatimModuleSyntax": true,
 
     // `src/lib/analytics.ts` reads `import.meta.env`. It is on the closure
@@ -57,5 +77,17 @@
     "outDir": "dist",
     "noEmit": false
   },
-  "include": ["src/index.ts"]
+  // Both entry points. `src/job-search.ts` is the second, network-BEARING
+  // subpath (`@offlinecv/core/job-search`) and has to be listed here or `tsc`
+  // never sees it: an entry absent from the program emits no `.js`, `files`
+  // ships nothing for it, and the `exports` map points at a path the tarball
+  // does not contain — a failure that only appears at pack time.
+  //
+  // A third entry point costs six edits across five files, and this is one of them.
+  // The full list lives in `src/index.ts`'s docblock and in
+  // `check-core-package.mjs`'s `THIRD_ENTRY_CHECKLIST`; in short:
+  // `package.json`'s `exports` and `files`, this `include`,
+  // `rollup.dts.config.mjs`, `check-core-package.mjs`'s `EXPECTED_EXPORTS` +
+  // `ENTRY_CLOSURES` + `PROBE`, and `.fallowrc.jsonc`'s `entry`.
+  "include": ["src/index.ts", "src/job-search.ts"]
 }

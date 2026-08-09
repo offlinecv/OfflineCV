@@ -48,7 +48,14 @@ vi.mock("./providers/index.ts", () => ({
   }),
 }));
 
-vi.mock("./providers/greenhouse.ts", () => ({
+// Only the FETCHING half of each adapter is stubbed. `greenhouseJobId` /
+// `leverJobId` are pure prefix-strippers that live in these same modules, and
+// the pipeline calls them to turn a posting id back into a job id — stubbing
+// the module wholesale would hand it `undefined` and make every hydrate call
+// count meaningless. `importActual` keeps them real; their own unit tests live
+// beside them in `providers/{greenhouse,lever}.test.ts`.
+vi.mock("./providers/greenhouse.ts", async (importActual) => ({
+  ...(await importActual<typeof import("./providers/greenhouse.ts")>()),
   hydrateGreenhouse: async (_slug: string, jobId: string) => {
     hoisted.hydrateCalls.push(jobId);
     if (hoisted.hydrateFailIds.has(jobId)) throw new Error("404");
@@ -56,20 +63,15 @@ vi.mock("./providers/greenhouse.ts", () => ({
   },
 }));
 
-vi.mock("./providers/lever.ts", () => ({
+vi.mock("./providers/lever.ts", async (importActual) => ({
+  ...(await importActual<typeof import("./providers/lever.ts")>()),
   hydrateLever: async (_slug: string, jobId: string) => {
     hoisted.leverHydrateCalls.push(jobId);
     return `lever description for ${jobId}`;
   },
 }));
 
-import {
-  makeBoardProvider,
-  makeBoardProviders,
-  greenhouseJobId,
-  leverJobId,
-  hydrateDescriptions,
-} from "./company-boards.ts";
+import { makeBoardProvider, makeBoardProviders, hydrateDescriptions } from "./company-boards.ts";
 import { DEFAULT_PER_COMPANY_CAP } from "./role-keywords.ts";
 import { readCachedBoard } from "./board-cache.ts";
 
@@ -111,35 +113,6 @@ beforeEach(async () => {
   hoisted.leverHydrateCalls = [];
   hoisted.boardError = null;
   hoisted.hydrateFailIds = new Set();
-});
-
-describe("greenhouseJobId", () => {
-  it("strips the known prefix", () => {
-    expect(greenhouseJobId("stripe", "greenhouse:stripe:12345")).toBe("12345");
-  });
-
-  it("returns '' for a posting from another provider", () => {
-    expect(greenhouseJobId("stripe", "lever:stripe:abc")).toBe("");
-  });
-
-  it("is not fooled by a slug containing a colon-like segment", () => {
-    // A trailing-colon search would return "b:9" here; prefix-stripping is exact.
-    expect(greenhouseJobId("a:b", "greenhouse:a:b:9")).toBe("9");
-  });
-});
-
-describe("leverJobId", () => {
-  it("strips the known prefix", () => {
-    expect(leverJobId("palantir", "lever:palantir:abc-123")).toBe("abc-123");
-  });
-
-  it("returns '' for a posting from another provider", () => {
-    expect(leverJobId("palantir", "greenhouse:palantir:9")).toBe("");
-  });
-
-  it("is not fooled by a slug containing a colon-like segment", () => {
-    expect(leverJobId("a:b", "lever:a:b:9")).toBe("9");
-  });
 });
 
 describe("makeBoardProvider — filter and cap run BEFORE hydration", () => {

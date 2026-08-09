@@ -88,9 +88,28 @@ export function makeGreenhouseProvider(slug: string, companyName = slug): JobPro
 }
 
 /**
+ * Recover the Greenhouse job id from a posting id this adapter minted.
+ *
+ * `mapJob` above builds `id` as `greenhouse:{slug}:{jobId}`, so the recovery
+ * belongs next to the mint: strip the known prefix. A substring search for the
+ * last ":" would break on a slug that itself contains one, and `url` is a
+ * legitimate fallback for a board that omits the id — and it contains ":" too.
+ * Returns "" when the shape doesn't match, which the caller reads as "not
+ * hydratable".
+ */
+export function greenhouseJobId(slug: string, postingId: string): string {
+  const prefix = `greenhouse:${slug}:`;
+  return postingId.startsWith(prefix) ? postingId.slice(prefix.length) : "";
+}
+
+/**
  * Lazy per-job hydrate: fetches one Greenhouse posting and returns its
  * `content` as plaintext. Called only for postings that survive the #534
  * title filter and per-company cap — never for the whole board.
+ *
+ * REJECTS on a non-ok response, unlike its Lever counterpart, which resolves
+ * `""`. A caller batching a page of postings must settle per item —
+ * `Promise.all` loses the whole page to a single 404.
  */
 export async function hydrateGreenhouse(
   slug: string,

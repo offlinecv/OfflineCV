@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { makeGreenhouseProvider, hydrateGreenhouse } from "./greenhouse.ts";
+import { makeGreenhouseProvider, hydrateGreenhouse, greenhouseJobId } from "./greenhouse.ts";
 import type { JobQuery } from "../query-builder.ts";
 
 const query: JobQuery = { titles: ["Backend Engineer"], skills: ["Go", "Python"] };
@@ -169,5 +169,20 @@ describe("hydrateGreenhouse", () => {
   it("tolerates a missing content field", async () => {
     mockFetch({ id: 1, title: "Engineer" });
     await expect(hydrateGreenhouse("acme", "1", new AbortController().signal)).resolves.toBe("");
+  });
+});
+
+describe("greenhouseJobId", () => {
+  it("strips the known prefix", () => {
+    expect(greenhouseJobId("stripe", "greenhouse:stripe:12345")).toBe("12345");
+  });
+
+  it("returns '' for a posting from another provider", () => {
+    expect(greenhouseJobId("stripe", "lever:stripe:abc")).toBe("");
+  });
+
+  it("is not fooled by a slug containing a colon-like segment", () => {
+    // A trailing-colon search would return "b:9" here; prefix-stripping is exact.
+    expect(greenhouseJobId("a:b", "greenhouse:a:b:9")).toBe("9");
   });
 });
