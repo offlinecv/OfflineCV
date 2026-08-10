@@ -24,6 +24,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { ShareWithExtensionBar } from "./ShareWithExtensionBar.tsx";
 import {
   EXTENSION_CHANNEL,
+  EXTENSION_REPLY_GRACE_MS,
   EXTENSION_REPLY_TIMEOUT_MS,
 } from "../../lib/extension-profile.ts";
 import {
@@ -156,6 +157,14 @@ describe("ShareWithExtensionBar", () => {
       channel: EXTENSION_CHANNEL,
       type: "resume-profile-refused",
       reason: "`corpus` is empty; there is nothing to rate against.",
+    });
+    // A refusal is held for the grace window in case a preferred `stored` from
+    // another responder is still on its way — so the button stays busy after
+    // the extension has answered, and must not re-enable before the outcome is
+    // on screen to click against.
+    expect(buttons()[0].disabled).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(EXTENSION_REPLY_GRACE_MS);
     });
 
     expect(el.textContent).toContain("refused");
