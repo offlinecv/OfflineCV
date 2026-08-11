@@ -35,7 +35,11 @@
 
 import type { HeuristicParsedResume } from "../../heuristics/types.ts";
 import type { ProgressUpdate } from "../../webllm/types.ts";
-import { loadEngine } from "../../webllm/web-llm.ts";
+import {
+  acquireInference,
+  loadEngine,
+  releaseInference,
+} from "../../webllm/web-llm.ts";
 import { extractJdTerms } from "../extract-jd-terms.ts";
 import { computeCoverage } from "../coverage.ts";
 import type { JdMatchResult, SemanticMatchSummary } from "../types.ts";
@@ -47,15 +51,54 @@ import { judgeEvidence } from "./judge-evidence.ts";
  * Run the semantic JD-match, degrading to the keyword path on any failure.
  *
  * Never rejects: the promise always resolves to a usable `JdMatchResult`.
+ *
+ * `onInferenceStart` (optional) fires exactly once, after `loadEngine`
+ * resolves and BEFORE `extractRequirements` runs. It lets a state-machine
+ * consumer distinguish the "engine downloading/loading" phase from the
+ * "engine loaded, model is thinking" phase — the two show different UI
+ * (download progress vs. a running indicator). Never fires on the fallback
+ * branch (an engine-load failure): the caller stays in `loading` and then
+ * transitions straight to the fallback `ready`. Kept optional so existing
+ * callers that don't need the distinction are unchanged.
+ *
+ * ## Why the whole body is bracketed by `acquireInference` (#148)
+ *
+ * `web-llm.ts` requires inference callers to acquire BEFORE awaiting
+ * `loadEngine`, not after: `await` yields to the microtask queue even on the
+ * already-loaded fast path, and a concurrent cross-model load's
+ * `evictAllExcept` can see `inflightInferenceCount === 0` in that gap and
+ * `.unload()` the engine out from under us. `judgeEvidence` acquires per
+ * batch, but that is explicitly "defensive belt" — it does not cover
+ * `loadEngine` or `extractRequirements`, which this bracket is what guards.
+ *
+ * The live path this closes: `job-search/sector.ts` classifies on
+ * `DEFAULT_MODEL_ID` on the same `/jobs/` page. If the user's persisted
+ * `selectedModelId` differs, that classify reaches
+ * `evictAllExcept(DEFAULT_MODEL_ID)` and would tear down our engine mid
+ * `extractRequirements` — surfacing as a silent degrade to keyword. The
+ * counter is re-entrant, so `judgeEvidence`'s inner acquire still nests
+ * correctly underneath this one.
  */
 export async function runLlmMatch(
   jdText: string,
   parsed: HeuristicParsedResume,
   modelId: string,
   onProgress: (update: ProgressUpdate) => void,
+  onInferenceStart?: () => void,
 ): Promise<JdMatchResult> {
+  acquireInference(modelId);
   try {
     const engine = await loadEngine(modelId, onProgress);
+    // `onInferenceStart` is a notification, not orchestration — a throwing
+    // consumer callback must not be misattributed as an engine failure by
+    // the surrounding catch (which logs "semantic path failed" and degrades
+    // to keyword). Isolate it. The only in-repo consumer is a `setState`,
+    // so this is defensive belt, not a live scenario.
+    try {
+      onInferenceStart?.();
+    } catch (err) {
+      console.warn("[run-llm-match] onInferenceStart callback threw:", err);
+    }
     const requirements = await extractRequirements(jdText, engine);
     if (requirements.length === 0) {
       // Legitimate empty extraction (#200: not a failure) — but a semantic
@@ -70,6 +113,12 @@ export async function runLlmMatch(
       err,
     );
     return keywordMatch(jdText, parsed);
+  } finally {
+    // Paired with the `acquireInference` above on EVERY exit — the semantic
+    // return, the empty-extraction degrade, and the catch's keyword fallback.
+    // A missed release would pin `inflightInferenceCount` above zero for the
+    // page's lifetime and park every later cross-model `.unload()` forever.
+    releaseInference(modelId);
   }
 }
 

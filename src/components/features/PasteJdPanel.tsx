@@ -23,25 +23,13 @@
  * what turns a coverage handoff into a navigation back to `/`.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@design-system";
 import { JdInput } from "./JdInput.tsx";
 import { JdMatch } from "./JdMatch.tsx";
-import { extractJdTerms, computeCoverage } from "../../lib/jd-match";
 import { buildJdRewriteContext } from "../../lib/jd-match/rewrite-context.ts";
-// The keyword arm of the `JdMatchResult` union, from the module that already
-// names it. Narrowing to it means `jdMatch && …` narrows all the way to
-// `.coverage` without a tautological `.path === "keyword"` guard on every use;
-// taking the name from `rank.ts` rather than re-deriving it here keeps the
-// discover lane and the paste lane on one definition (#576).
-import type { KeywordJdMatch } from "../../lib/job-search/rank.ts";
+import { useJdMatch } from "../../hooks/useJdMatch.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
-
-/** Debounce the extract → coverage compute so a fast typist does not run
- *  the whole pipeline on every keystroke. 200ms is under the perceptual
- *  threshold for a "typed a character, saw the panel react" loop while still
- *  coalescing a 10-key burst into one compute. */
-const JD_DEBOUNCE_MS = 200;
 
 interface PasteJdPanelProps {
   /** The parsed résumé the coverage check runs against — same shape
@@ -57,34 +45,21 @@ export function PasteJdPanel({ parsed, onTailor }: PasteJdPanelProps) {
   const [open, setOpen] = useState(false);
   const [jdText, setJdText] = useState("");
 
-  // Debounced mirror of `jdText`. The user's keystrokes update `jdText`
-  // immediately (the textarea stays responsive); `debouncedJdText` catches
-  // up after `JD_DEBOUNCE_MS` of quiet, and the coverage memo keys off THAT
-  // — so a 10-key burst runs one compute instead of ten. See
-  // `JD_DEBOUNCE_MS` for the interval rationale.
-  const [debouncedJdText, setDebouncedJdText] = useState("");
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedJdText(jdText), JD_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [jdText]);
-
-  // The same three-line extract → coverage composition `rank.ts` runs per
-  // posting — the coverage computation has no second implementation. Narrowed
-  // return type kills the `.path === "keyword"` tautology at the call sites
-  // below (see KeywordJdMatch).
-  const jdMatch = useMemo<KeywordJdMatch | null>(() => {
-    const trimmed = debouncedJdText.trim();
-    if (trimmed.length === 0) return null;
-    const extracted = extractJdTerms(trimmed);
-    if (extracted.all.length === 0) return null;
-    const coverage = computeCoverage(parsed, extracted.all);
-    return {
-      path: "keyword",
-      coverage,
-      terms: extracted.all,
-      nounsDropped: extracted.nounsDropped,
-    };
-  }, [debouncedJdText, parsed]);
+  // Cross-cutting JD-match state (#203) lives in `useJdMatch`. The panel
+  // renders its result; the hook owns the debounce, the extract → coverage
+  // composition, and the (future) semantic path. `semanticOptIn` defaults
+  // to false today — behavior stays byte-identical to pre-#203, and a
+  // follow-up that ships an opt-in UI can flip it without touching the
+  // hook.
+  //
+  // Read the `keyword` floor rather than narrowing `status`: with
+  // `semanticOptIn` false the two are equivalent, but once #204 flips the
+  // flag `status` is occupied by `loading`/`running` for the whole engine
+  // load while keyword coverage is already available. Reading `keyword`
+  // means this panel keeps showing coverage through that window instead of
+  // blanking, and #204 only has to ADD the semantic view on top.
+  const { keyword } = useJdMatch({ parsed, jdText });
+  const jdMatch = keyword?.path === "keyword" ? keyword : null;
 
   // Same one-call gate-and-payload as `JobResultCard` — see its docblock for
   // why the button's visibility must be derived from the built instruction
