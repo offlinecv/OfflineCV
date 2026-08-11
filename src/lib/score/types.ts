@@ -312,6 +312,22 @@ export interface ResumeData {
    *  under the name instead of silently dropping it (#425 follow-up). */
   headline?: string;
   location?: string;
+  /** Work-authorization / right-to-work statement as the résumé states it,
+   *  VERBATIM: "US Citizen", "Green Card holder", "Authorized to work in the US
+   *  without sponsorship", "EU passport holder".
+   *
+   *  Free text, NEVER an enum (#792). Statuses are numerous, jurisdiction-
+   *  specific, and legally consequential; classifying a candidate's own
+   *  declaration into a fixed set would be lossy in exactly the cases that
+   *  matter and would put this product in the position of asserting someone's
+   *  legal status. Carry what they wrote.
+   *
+   *  Optional everywhere, and absence is NOT a gap: it is never added to
+   *  `completenessChecks` and never a required `CONTACT_ROWS` row, so a résumé
+   *  that declines to disclose immigration status scores identically to one
+   *  that discloses. It is also never derived into a job-search query — see
+   *  `job-search/providers/keywords.ts`, the sole résumé-derived egress helper. */
+  work_authorization?: string;
   linkedin_url?: string;
   portfolio_url?: string;
   github_url?: string;

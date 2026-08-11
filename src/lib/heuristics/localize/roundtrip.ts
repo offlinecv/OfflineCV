@@ -86,6 +86,11 @@ function contactFails(
     "phone",
     "location",
     "linkedin_url",
+    // #792 — the statement rides the exported contact line, so a renderer or
+    // matcher change that drops it (or that re-parses it into a different
+    // string, e.g. by keeping a trailing full stop on one pass only) is a
+    // round-trip regression like any other contact value.
+    "work_authorization",
   ] as const) {
     if (!same(c1[k], c3[k]))
       out.push(`${k}: ${JSON.stringify(c1[k])} → ${JSON.stringify(c3[k])}`);

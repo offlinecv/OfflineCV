@@ -207,6 +207,24 @@ function recordTruth(
 }
 
 
+/**
+ * The ONLY corpus fixtures whose page actually states a work-authorization line
+ * (#792), with the statement quoted so an entry can be checked against the PDF
+ * rather than trusted.
+ *
+ * This map is an over-match guard, and it is deliberately an allow-list rather
+ * than a snapshot key: `work_authorization` writes a legal claim onto someone's
+ * résumé and into the PDF they send to employers, so a false positive is far
+ * worse than a miss. Every fixture NOT listed here must come back with the key
+ * absent. If a matcher change makes a new fixture "detect" one, the assertion
+ * fails and the right response is to read the PDF — adding a line here without
+ * doing that defeats the guard.
+ */
+const STATES_WORK_AUTHORIZATION: ReadonlyMap<string, string> = new Map([
+  // Contact line: "973-555-0123 | jordan.bennett@example.com | LinkedIn | GitHub | US Citizen"
+  ["tests/fixtures/pdfs/latex/multi-degree-coursework.pdf", "US Citizen"],
+]);
+
 describe("corpus snapshots", () => {
   if (pdfs.length === 0) {
     // Empty corpus is a valid state — keeps CI green between adding the
@@ -226,6 +244,17 @@ describe("corpus snapshots", () => {
         async () => {
           const bytes = await fsp.readFile(pdfPath);
           const cascade = await runCascade(new Uint8Array(bytes));
+
+          // #792 over-match guard — see `STATES_WORK_AUTHORIZATION`. Asserted
+          // here rather than through the snapshot because the snapshot records
+          // only that a field is populated, never its value, and the value is
+          // the part that would be a fabricated legal claim.
+          expect(
+            cascade.canonical.fields.work_authorization,
+            `${rel}: work_authorization must stay absent unless the page states ` +
+              `one. Read the PDF before adding it to STATES_WORK_AUTHORIZATION.`,
+          ).toBe(STATES_WORK_AUTHORIZATION.get(rel));
+
           const score = computeAnonymousAtsScore({
             parsed: {
               full_name: cascade.canonical.fields.full_name,

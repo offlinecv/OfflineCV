@@ -254,4 +254,74 @@ describe("ContactCard", () => {
     );
     expect(el.textContent).not.toContain("fields detected");
   });
+
+  // ── Work authorization (#792) ─────────────────────────────────────────────
+  // The field is optional BY POLICY: absence must never read as a gap. That
+  // policy is what makes the add affordance load-bearing rather than decorative
+  // — an optional row is hidden when undetected, so without a dedicated entry
+  // point the field would be unreachable for the users who need it most.
+
+  describe("work authorization (#792)", () => {
+    it("renders no gap when absent — not even while editable", () => {
+      const el = render(
+        makeResult({ email: "jane@example.com" }, { email: 0.95 }),
+        { overrides: {}, onFieldChange: () => {} },
+      );
+      const text = el.textContent ?? "";
+      expect(text).not.toContain("Work authorization not detected");
+      // Contrast with a genuinely required field, which DOES read as a gap.
+      expect(text).toContain("+ phone");
+    });
+
+    it("offers a '+ Add work authorization' affordance on the editable card", () => {
+      const el = render(makeResult(), { overrides: {}, onFieldChange: () => {} });
+      const pill = el.querySelector('[aria-label="Add work authorization"]');
+      expect(pill).not.toBeNull();
+      expect(el.textContent).toContain("+ Add work authorization");
+    });
+
+    it("does not offer the affordance on a display-only card", () => {
+      const el = render(makeResult());
+      expect(el.querySelector('[aria-label="Add work authorization"]')).toBeNull();
+    });
+
+    it("commits a typed statement onto the work_authorization override", () => {
+      const commits: Array<[string, string]> = [];
+      const el = render(makeResult(), {
+        overrides: {},
+        onFieldChange: (key, value) => commits.push([key, value]),
+      });
+      const pill = el.querySelector<HTMLElement>(
+        '[aria-label="Add work authorization"]',
+      );
+      act(() => pill!.click());
+      const input = el.querySelector<HTMLInputElement>("input");
+      expect(input).not.toBeNull();
+      // React tracks the DOM value node, so set through the native setter.
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      act(() => {
+        setter.call(input, "US Citizen");
+        input!.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const add = [...el.querySelectorAll("button")].find(
+        (b) => b.textContent === "Add",
+      );
+      act(() => add!.click());
+      expect(commits).toEqual([["work_authorization", "US Citizen"]]);
+    });
+
+    it("renders a stated value on the contact line and stops offering the add", () => {
+      const el = render(
+        makeResult(
+          { work_authorization: "US Citizen", email: "jane@example.com" },
+          { work_authorization: 0.9, email: 0.95 },
+        ),
+      );
+      expect(el.textContent).toContain("US Citizen");
+      expect(el.querySelector('[aria-label="Add work authorization"]')).toBeNull();
+    });
+  });
 });

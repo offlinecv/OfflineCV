@@ -94,6 +94,10 @@ export interface ContactOverrides {
   phone?: string;
   location?: string;
   headline?: string;
+  /** Work-authorization statement (#792), verbatim free text. Rides this
+   *  existing per-key channel like `location` — `""` is an explicit clear, so
+   *  the same reset/replay plumbing applies with no new state. */
+  work_authorization?: string;
 }
 
 // ── Experience overrides ──────────────────────────────────────────────────────

@@ -45,6 +45,10 @@ import {
   extractAchievements,
 } from "./extract-fields.ts";
 import { tokenizeSkillLine } from "./extract/skills.ts";
+import {
+  harvestWorkAuthorization,
+  WORK_AUTHORIZATION_SECTION_CONFIDENCE,
+} from "./extract/work-authorization.ts";
 import { rejoinSplitLetters } from "./regex.ts";
 import type { ResumeExperience } from "../score/types.ts";
 
@@ -373,6 +377,20 @@ function buildHeuristicResult(
 
   const ownedSections = stripConsumedLines(sections, contact.consumedLines);
 
+  // Work authorization (#792). The header contact line wins — it is the tighter
+  // read (a delimiter-bounded segment) and it is the shape our own exported PDF
+  // writes, so preferring it is what keeps parse → export → re-parse stable.
+  // Only when the header is silent do we fall back to a trailing unrouted
+  // ("ADDITIONAL") block, the other place résumés put the statement. That line
+  // is deliberately LEFT in its section: it already sat there before #792, so
+  // reading it here adds a field without moving a single score.
+  const headerWorkAuthorization = contact.work_authorization;
+  const workAuthorization =
+    headerWorkAuthorization ?? harvestWorkAuthorization(ownedSections);
+  const workAuthorizationConfidence = headerWorkAuthorization
+    ? contact.confidence.work_authorization
+    : WORK_AUTHORIZATION_SECTION_CONFIDENCE;
+
   const summarySection = findSection(ownedSections, "summary");
   const experienceSection = findSection(ownedSections, "experience");
   const educationSection = findSection(ownedSections, "education");
@@ -423,6 +441,11 @@ function buildHeuristicResult(
       ? { phoneIsValid: contact.phoneIsValid }
       : {}),
     ...(contact.location ? { location: contact.location } : {}),
+    // Work authorization (#792) — see `workAuthorization` above for how the
+    // header read and the trailing-block recovery are ordered. Spread
+    // conditionally, like every other optional contact key, so a résumé that
+    // states nothing produces a byte-identical parse to before.
+    ...(workAuthorization ? { work_authorization: workAuthorization } : {}),
     ...(contact.linkedin_url ? { linkedin_url: contact.linkedin_url } : {}),
     ...(contact.github_url ? { github_url: contact.github_url } : {}),
     ...(contact.portfolio_url ? { portfolio_url: contact.portfolio_url } : {}),
@@ -458,6 +481,9 @@ function buildHeuristicResult(
     email: contact.confidence.email,
     phone: contact.confidence.phone,
     location: contact.confidence.location,
+    ...(workAuthorization
+      ? { work_authorization: workAuthorizationConfidence }
+      : {}),
     linkedin_url: contact.confidence.linkedin_url,
     github_url: contact.confidence.github_url,
     portfolio_url: contact.confidence.portfolio_url,
