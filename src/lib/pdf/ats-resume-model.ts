@@ -813,34 +813,49 @@ export function buildAtsResumeModel(
   // as before (byte-identical). Both read as regular-weight body text (#425) and
   // keep segments atomic so a multi-word skill never wraps mid-name (#301).
   // Drop empty categories (an editor "empty-but-present" state, #476) so the PDF
-  // never renders a dangling "Label:" with nothing after it; the flat list is
-  // already the flatten of the non-empty ones, so this stays invariant-safe.
+  // never renders a dangling "Label:" with nothing after it.
+  //
+  // #791: `skillCategories` may now cover only a SUBSET of the flat `skills`
+  // list — creating the first category on an uncategorised résumé leaves the
+  // rest ungrouped rather than sweeping them in (see `skills-categories.ts`).
+  // The flat list is no longer guaranteed to be the flatten of the non-empty
+  // categories, so the remainder is computed the same way the editor's trailing
+  // chip row does (`partitionSkillCategories` in `ReconstructedSkills.tsx`) and
+  // appended as one more entry, with no `skillCategory` field — the same shape
+  // the fully-uncategorised branch already produces below, so it reads (and
+  // re-parses) as a plain flat skills line. A fully categorised parse still has
+  // no remainder (invariant #1 in `types.ts` still holds AT PARSE TIME), so this
+  // is a no-op there — byte-identical to before.
   const skillCategories = parsed.skillCategories?.filter(
     (c) => c.skills.length > 0,
   );
-  const skillsEntries: AtsEntry[] =
-    skillCategories && skillCategories.length > 0
-      ? skillCategories.map((c) => ({
-          headerLine: `${c.label}: ${c.skills.join(" · ")}`,
-          bullets: [],
-          atomicSegments: true,
-          headerBold: false,
-          fields: { skills: [...c.skills], skillCategory: c.label },
-        }))
-      : skills.length > 0
-        ? [
-            {
-              headerLine: skills.join(" · "),
-              bullets: [],
-              atomicSegments: true,
-              // Skills read as regular-weight body text, not a bold header (#425).
-              headerBold: false,
-              // The flat skill list, carried structurally so the JSON export
-              // (#334) maps `skills[] ← { name }` without re-splitting the header.
-              fields: { skills: [...skills] },
-            },
-          ]
-        : [];
+  const flatSkillsEntry = (members: string[]): AtsEntry => ({
+    headerLine: members.join(" · "),
+    bullets: [],
+    atomicSegments: true,
+    // Skills read as regular-weight body text, not a bold header (#425).
+    headerBold: false,
+    // The flat skill list, carried structurally so the JSON export (#334) maps
+    // `skills[] ← { name }` without re-splitting the header.
+    fields: { skills: [...members] },
+  });
+  let skillsEntries: AtsEntry[];
+  if (skillCategories && skillCategories.length > 0) {
+    skillsEntries = skillCategories.map((c) => ({
+      headerLine: `${c.label}: ${c.skills.join(" · ")}`,
+      bullets: [],
+      atomicSegments: true,
+      headerBold: false,
+      fields: { skills: [...c.skills], skillCategory: c.label },
+    }));
+    const grouped = new Set(
+      skillCategories.flatMap((c) => c.skills.map((s) => s.toLowerCase())),
+    );
+    const ungrouped = skills.filter((s) => !grouped.has(s.toLowerCase()));
+    if (ungrouped.length > 0) skillsEntries.push(flatSkillsEntry(ungrouped));
+  } else {
+    skillsEntries = skills.length > 0 ? [flatSkillsEntry(skills)] : [];
+  }
 
   const achievementsAbove =
     parsed.achievements_placement === "above_experience";
