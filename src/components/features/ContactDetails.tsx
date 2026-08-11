@@ -12,10 +12,15 @@
  *   location · email · phone   ← contact line (pipe-joined, present-only)
  *   in/slug   ·   gh/slug      ← links line (glyph-free clickable slugs)
  *
- * When `editable` is set, the editable fields (email/phone/location on the
- * contact line, LinkedIn on the links line) render via the shared
- * `EditableField` primitive; LinkedIn edits the full URL but displays the
+ * When `editable` is set, the editable fields (email/phone/location/work
+ * authorization on the contact line, LinkedIn on the links line) render via the
+ * shared `EditableField` primitive; LinkedIn edits the full URL but displays the
  * derived slug. Otherwise everything is display-only (#146 behavior).
+ *
+ * Work authorization (#792) is the one contact-line row that is OPTIONAL, so it
+ * neither renders a "not detected" pill nor counts as a gap. Its add path is
+ * the `ContactWorkAuthorization` affordance below the line, which exists
+ * because a hidden optional row is otherwise unreachable.
  */
 
 import { formatLinkDisplay, type ContactDisplayField } from "../../lib/contact.ts";
@@ -33,6 +38,7 @@ import type {
 } from "../../hooks/useEditableParse.ts";
 import type { LegacyLinkKey } from "../../lib/score/types.ts";
 import { ContactExtraLinks } from "./ContactExtraLinks.tsx";
+import { ContactWorkAuthorization } from "./ContactWorkAuthorization.tsx";
 import { ProfileLinkAdd } from "./ProfileLinkAdd.tsx";
 
 /** The inline-editable non-link contact fields, mapped 1:1 to their
@@ -44,7 +50,13 @@ const EDITABLE_KEYS: Record<string, keyof ContactOverrides> = {
   email: "email",
   phone: "phone",
   location: "location",
+  work_authorization: "work_authorization",
 };
+
+/** The optional work-authorization contact row (#792). Named once here because
+ *  two places need it: the contact-line filter that suppresses its "not
+ *  detected" pill, and the add affordance that replaces it. */
+const WORK_AUTHORIZATION_KEY = "work_authorization";
 
 type Commit = (key: keyof ContactOverrides, v: string) => void;
 
@@ -103,18 +115,39 @@ export function ContactDetails({
   // The parsed location, threaded into the phone validator's region default so a
   // non-US local-form number isn't falsely flagged (see `validatorFor`).
   const location = contactLine.find((f) => f.key === "location")?.value;
+  // Work authorization (#792) is the one contact-line row whose absence is not
+  // a gap, so it must never draw the "not detected" warning pill the required
+  // rows draw. An absent value is dropped from the line and replaced by the
+  // "+ Add work authorization" affordance below (editable card only); a
+  // low-confidence value still renders, like its siblings, so it can be
+  // confirmed or corrected in place.
+  const segments = contactLine.filter(
+    (f) => f.key !== WORK_AUTHORIZATION_KEY || f.reason !== "absent",
+  );
+  const workAuthorizationAbsent = !segments.some(
+    (f) => f.key === WORK_AUTHORIZATION_KEY,
+  );
   return (
     <>
       {/* Contact line: location / email / phone, pipe-joined, present-only. */}
-      {contactLine.length > 0 && (
+      {segments.length > 0 && (
         <p className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
-          {contactLine.map((field, i) => (
+          {segments.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">|</span>}
               {renderContactValue(field, editable, commit, location)}
             </span>
           ))}
         </p>
+      )}
+
+      {/* Reachability for the hidden optional row (#792): without this, a
+          résumé that never stated work authorization offers no way to state
+          it. Editable card only — a display-only card has nothing to add to. */}
+      {editable && workAuthorizationAbsent && (
+        <ContactWorkAuthorization
+          onAdd={(value) => commit(WORK_AUTHORIZATION_KEY, value)}
+        />
       )}
 
       {/* Links line: clickable slugs, middot-separated, license-safe (no logos). */}

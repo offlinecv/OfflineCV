@@ -74,6 +74,11 @@ export interface AtsContact {
   email?: string;
   phone?: string;
   location?: string;
+  /** Work-authorization statement (#792), verbatim free text as the résumé
+   *  states it. The renderer draws it on the contact line after `location` and
+   *  before `links`, adding no new header row. It is NOT a link: it gets no
+   *  `mailto:`/`https:` overlay and no scheme-stripping. */
+  workAuthorization?: string;
   /** LinkedIn / GitHub / portfolio / website / other links, scheme-stripped
    *  for display (`https://www.linkedin.com/in/jane` → `linkedin.com/in/jane`,
    *  #425). */
@@ -273,6 +278,9 @@ export function buildContact(result: CascadeResult): AtsContact {
   const email = valueFor("email");
   const phone = valueFor("phone");
   const location = valueFor("location");
+  // Work authorization (#792) — read through `valueFor` like its siblings, so
+  // the confidence gating and the user's inline edit apply to it identically.
+  const workAuthorization = valueFor("work_authorization");
 
   // Links: since #427 every link edit (including LinkedIn corrections) folds
   // into the parsed slots via `profileOverrides`, so `result.parsed` already
@@ -317,6 +325,7 @@ export function buildContact(result: CascadeResult): AtsContact {
     email: email || undefined,
     phone: phone || undefined,
     location: location || undefined,
+    workAuthorization: workAuthorization || undefined,
     links,
     linkHrefs,
     // `parsed.profiles` is already override-applied (applyOverrides re-derives it

@@ -161,6 +161,28 @@ describe("toJsonResume — basics", () => {
   it("picks basics.url from portfolio/website (the 'other' personal site)", () => {
     expect(basics.url).toBe("https://jane.dev");
   });
+
+  // #792 — work authorization has no home in JSON Resume v1.0.0, so it ships
+  // under the conventional `x_` extension prefix rather than being squeezed
+  // into a standard field that means something else.
+  it("emits basics.x_workAuthorization when the résumé states one", () => {
+    const { basics: stated } = toJsonResume({
+      ...FULL_MODEL,
+      contact: { ...FULL_MODEL.contact, workAuthorization: "US Citizen" },
+    });
+    expect(stated.x_workAuthorization).toBe("US Citizen");
+  });
+
+  it("omits the key entirely when absent, so existing exports are unchanged", () => {
+    // `FULL_MODEL` states nothing, so this is the pre-#792 export shape.
+    expect("x_workAuthorization" in JSON.parse(JSON.stringify(basics))).toBe(false);
+    // A whitespace-only value is treated as absent too — the key never ships empty.
+    const { basics: blank } = toJsonResume({
+      ...FULL_MODEL,
+      contact: { ...FULL_MODEL.contact, workAuthorization: "   " },
+    });
+    expect("x_workAuthorization" in JSON.parse(JSON.stringify(blank))).toBe(false);
+  });
 });
 
 describe("toJsonResume — work", () => {

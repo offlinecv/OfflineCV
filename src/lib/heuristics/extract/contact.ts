@@ -21,6 +21,10 @@ import {
 import { escapeRegex } from "../../jd-match/regex-utils.ts";
 import { findFirstPhone, regionFromLocation } from "../phone.ts";
 import { firstMatch, allMatches, isStandaloneUrl } from "./shared.ts";
+import {
+  extractWorkAuthorization,
+  WORK_AUTHORIZATION_CONTACT_CONFIDENCE,
+} from "./work-authorization.ts";
 
 // ── Contact (email, phone, urls, location) ──────────────────────────────────
 
@@ -35,6 +39,9 @@ export interface ContactExtractionResult {
   portfolio_url?: string;
   website_url?: string;
   location?: string;
+  /** Work-authorization statement (#792), verbatim, read off the header contact
+   *  line. Profile-band only — see the doc-comment on `extractContact`. */
+  work_authorization?: string;
   /**
    * Classified contact links (#335), additive. Built from the four legacy
    * `*_url` values above in their fixed precedence order
@@ -52,6 +59,7 @@ export interface ContactExtractionResult {
     portfolio_url: number;
     website_url: number;
     location: number;
+    work_authorization: number;
   };
   /**
    * Provenance / ownership signal (#134). The `PdfLine`s document-wide whose
@@ -357,7 +365,18 @@ function extractOtherUrls(joined: string): {
   return { portfolio, website: websiteCandidates[0] };
 }
 
-function scan(lines: PdfLine[], joined: string): ContactScanResult {
+function scan(
+  lines: PdfLine[],
+  joined: string,
+  /** Whether to read work authorization (#792). FALSE for the doc-wide fallback
+   *  scan. That pass exists to fill contact fields found outside the profile
+   *  band, but `work_authorization` deliberately has NO doc-wide fallback — it
+   *  is band-scoped like `location`, so a statement buried in a bullet cannot
+   *  claim the header — and `extractContact` reads it only from `primary`
+   *  (see the merge below). Computing it here walked every line in the document
+   *  to produce a value that was then discarded. */
+  readWorkAuthorization = true,
+): ContactScanResult {
   const email = firstMatch(EMAIL_RE, joined);
 
   // Extract location BEFORE phone so we can derive the parse region.
@@ -381,6 +400,13 @@ function scan(lines: PdfLine[], joined: string): ContactScanResult {
   // Other URLs that aren't linkedin/github → portfolio/website bucket.
   const { portfolio, website } = extractOtherUrls(joined);
 
+  // Work authorization (#792) reads per-LINE, not off `joined`: the statement is
+  // identified by being a WHOLE `·`/`•`/`|`-delimited segment, and joining the
+  // lines first would let a segment run across a line break.
+  const workAuthorization = readWorkAuthorization
+    ? extractWorkAuthorization(lines)
+    : undefined;
+
   return {
     email,
     phone,
@@ -390,6 +416,7 @@ function scan(lines: PdfLine[], joined: string): ContactScanResult {
     portfolio_url: normalizeUrl(portfolio),
     website_url: normalizeUrl(website),
     location,
+    work_authorization: workAuthorization,
     confidence: {
       email: email ? 0.98 : 0,
       phone: phone ? 0.85 : 0,
@@ -398,6 +425,9 @@ function scan(lines: PdfLine[], joined: string): ContactScanResult {
       portfolio_url: portfolio ? 0.6 : 0,
       website_url: website ? 0.55 : 0,
       location: location ? 0.75 : 0,
+      work_authorization: workAuthorization
+        ? WORK_AUTHORIZATION_CONTACT_CONFIDENCE
+        : 0,
     },
   };
 }
@@ -431,7 +461,7 @@ export function extractContact(
   // (e.g. footer). Fill any missing field from the full-document scan —
   // EXCEPT location, which is bug-prone outside the profile band.
   const fullText = allLines.map((l) => l.text).join(" ");
-  const fallback = scan(allLines, fullText);
+  const fallback = scan(allLines, fullText, /* readWorkAuthorization */ false);
 
   // Annotation fallback: URLs hyperlinked behind a visible word
   // ("LinkedIn", "GitHub") only show up here. GitHub, and LinkedIn on a KNOWN
@@ -620,8 +650,12 @@ export function extractContact(
     portfolio_url: normalizeUrl(portfolio.value),
     website_url: normalizeUrl(website.value),
     profiles,
-    // No fallback for location — see comment above.
+    // No fallback for location — see comment above. Work authorization is
+    // banded the same way and for the same reason (#792): a right-to-work
+    // sentence outside the header is far more likely to be a job requirement or
+    // someone else's paperwork than the candidate's own status.
     location: primary.location,
+    work_authorization: primary.work_authorization,
     confidence: {
       email: Math.max(primary.confidence.email, fallback.confidence.email * 0.8),
       phone: Math.max(primary.confidence.phone, fallback.confidence.phone * 0.8),
@@ -630,6 +664,7 @@ export function extractContact(
       portfolio_url: portfolio.confidence,
       website_url: website.confidence,
       location: primary.confidence.location,
+      work_authorization: primary.confidence.work_authorization,
     },
     consumedLines,
   };
