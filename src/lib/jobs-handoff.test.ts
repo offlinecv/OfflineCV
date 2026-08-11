@@ -6,10 +6,9 @@
 /**
  * Round-trip + rejection coverage for the `/` → `/jobs/` résumé handoff.
  *
- * The load-bearing assertion is the one that differs from `jd-fit-handoff`:
- * reading is NON-destructive, so a reload of `/jobs/` still finds the parse.
- * `/jobs/` has no DropZone to fall back to, so a one-shot read would strand the
- * user on a dead page.
+ * The load-bearing assertion: reading is NON-destructive, so a reload of
+ * `/jobs/` still finds the parse. `/jobs/` has no DropZone to fall back to,
+ * so a one-shot read would strand the user on a dead page.
  */
 
 import { describe, it, expect, beforeEach } from "vitest";

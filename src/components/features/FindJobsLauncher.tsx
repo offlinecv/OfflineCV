@@ -14,7 +14,7 @@
  * The button writes the parse to sessionStorage and then navigates — a full
  * document navigation, base-aware via `import.meta.env.BASE_URL` so it works
  * under both the custom-domain "/" base and the "/OfflineCV/" Pages-fallback
- * base (same pattern as `App.tsx`'s /jd-fit cross-link).
+ * base (same pattern the other same-origin cross-links use).
  *
  * The stash + the departure marker (#706, so `/jobs/`'s "Back to your resume"
  * control knows this trip actually started at `/` and can use a real

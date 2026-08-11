@@ -14,8 +14,8 @@
   against an arbitrary directory depth, and a root-absolute one is one more
   request to fail on a page whose whole job is to fail gracefully.
 
-  The same reason makes the links below root-absolute (`/jd-fit/`) where the
-  content pages under public/ use relative ones (`../jd-fit/`) — the difference
+  The same reason makes the links below root-absolute (`/jobs/`) where the
+  content pages under public/ use relative ones (`../jobs/`) — the difference
   is deliberate, not an oversight, so do not "fix" it to match. The trade taken
   knowingly: root-absolute breaks under a non-`/` base, which is the case the
   content pages' relative links survive. Both deploy targets serve from the root
@@ -114,7 +114,6 @@
       <p>The link may be old, or the address may have a typo in it.</p>
       <a class="cta" href="/">Go to the resume parser</a>
       <ul>
-        <li><a href="/jd-fit/">Match a job description</a></li>
         <li><a href="/jobs/">Find jobs</a></li>
         <li><a href="/how-it-works/">How it works</a></li>
         <li><a href="/faq/">FAQ</a></li>

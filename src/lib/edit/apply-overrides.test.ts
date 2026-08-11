@@ -1309,7 +1309,7 @@ describe("applyOverrides — achievements", () => {
 
   // ── The two shapes the old composed-title model (#454) got wrong ────────────
   // Both used to survive as a `title` STRING but re-split into a different pair,
-  // so the PDF bolded the wrong run and /jd-fit showed the wrong fields. With
+  // so the PDF bolded the wrong run and the JD-match view showed the wrong fields. With
   // `type` a real field there is nothing to re-split (#456).
 
   it("keeps an over-long type as the type — it is not folded into the title", () => {

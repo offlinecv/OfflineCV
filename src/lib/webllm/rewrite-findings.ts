@@ -25,8 +25,8 @@
  *     document, so there is no line to attach them to and no section that
  *     obviously owns them. Injected per-section they would either repeat on
  *     every section (the prompt-balloon failure mode) or land arbitrarily.
- *   - JD coverage gaps have the same shape, and `/jd-fit` already routes its
- *     JD through `userInstructions`.
+ *   - JD coverage gaps have the same shape, and the JD-tailor path (#576)
+ *     already routes its JD steering through `userInstructions`.
  * Both want a résumé-level injection point, which is a different design than
  * this one. Adding them here would mean pretending they are per-line.
  *

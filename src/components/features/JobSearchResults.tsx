@@ -49,15 +49,20 @@ const SAMPLE_LABEL =
 export function JobSearchResults({
   phase,
   onRetry,
+  onTailor,
 }: {
   phase: SearchPhase;
   onRetry: () => void;
+  /** Optional per-posting "Tailor résumé to this job" affordance (#576). */
+  onTailor?: (jdContext: string) => void;
 }) {
   return (
     <div aria-live="polite" className="flex flex-col gap-3 empty:hidden">
       {phase.kind === "loading" && <LoadingState />}
       {phase.kind === "failed" && <HardError onRetry={onRetry} />}
-      {phase.kind === "loaded" && <Loaded result={phase.result} onRetry={onRetry} />}
+      {phase.kind === "loaded" && (
+        <Loaded result={phase.result} onRetry={onRetry} onTailor={onTailor} />
+      )}
     </div>
   );
 }
@@ -97,9 +102,11 @@ function HardError({ onRetry }: { onRetry: () => void }) {
 function Loaded({
   result,
   onRetry,
+  onTailor,
 }: {
   result: JobSearchResult;
   onRetry: () => void;
+  onTailor?: (jdContext: string) => void;
 }) {
   const { jobs, degradedProviders, providerCount, excludeSuppressed, roleSuppressed } = result;
   const [page, setPage] = useState(1);
@@ -198,12 +205,20 @@ function Loaded({
       {strong.length > 0 && (
         <div className="flex flex-col gap-2">
           {strong.map((job) => (
-            <JobResultCard key={job.posting.id} job={job} />
+            <JobResultCard
+              key={job.posting.id}
+              job={job}
+              onTailor={onTailor}
+            />
           ))}
         </div>
       )}
 
-      <WeakMatchesSection jobs={weak} defaultOpen={strong.length === 0} />
+      <WeakMatchesSection
+        jobs={weak}
+        defaultOpen={strong.length === 0}
+        onTailor={onTailor}
+      />
 
       {pageCount > 1 && (
         <div className="flex flex-col gap-2 border-t border-border-light pt-3">

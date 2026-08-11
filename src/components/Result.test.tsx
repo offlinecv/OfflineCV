@@ -83,6 +83,9 @@ function Host({ result }: { result: CascadeResult }) {
   });
   return createElement(Result, {
     result,
+    // Stands in for `useAnalyzedResume`'s pristine-parse identity — this host
+    // renders one résumé and never replaces it, so a constant is faithful.
+    parseKey: result,
     score,
     sourceKind: "pdf" as const,
     onReset: () => {},

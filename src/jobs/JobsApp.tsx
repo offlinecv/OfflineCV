@@ -4,24 +4,23 @@
 /**
  * JobsApp — the `/jobs` root surface: the job-search workbench.
  *
- * Third entry beside `/` (parser audit) and `/jd-fit` (JD match). It exists so
- * a ranked posting list has a URL of its own, its own scroll, and the full page
- * width — rather than being the tail of the parser page, below the fold, capped
- * at a screenful.
+ * Second entry beside `/` (parser audit). It exists so a ranked posting list
+ * has a URL of its own, its own scroll, and the full page width — rather than
+ * being the tail of the parser page, below the fold, capped at a screenful.
  *
- * Résumé source: the sessionStorage handoff written by `FindJobsLauncher` on `/`
- * (`lib/jobs-handoff.ts`). Unlike `/jd-fit`, this surface has NO DropZone of its
- * own — the job-search lane consumes a parsed résumé, and the parse pipeline
- * (with its cascade, score, and edit layer) is `/`'s job. Adding a second parse
- * entry point here would be the parallel surface CLAUDE.md's Reuse Gate exists
- * to prevent. With no handoff, the Search tab still renders a pointer back to
- * `/` — but the Saved jobs tab is a passive view of records that already exist,
- * so #724 gives it a fallback: the most recently saved library résumé
+ * Résumé source: the sessionStorage handoff written by `FindJobsLauncher` on
+ * `/` (`lib/jobs-handoff.ts`). This surface has NO DropZone of its own — the
+ * job-search lane consumes a parsed résumé, and the parse pipeline (with its
+ * cascade, score, and edit layer) is `/`'s job. Adding a second parse entry
+ * point here would be the parallel surface CLAUDE.md's Reuse Gate exists to
+ * prevent. With no handoff, the Search tab still renders a pointer back to
+ * `/` — but the Saved jobs tab is a passive view of records that already
+ * exist, so #724 gives it a fallback: the most recently saved library résumé
  * (`useFallbackResume`), used ONLY to rate the tracker's rows, never fed to
  * `FindJobsPanel` and never overriding a real handoff.
  *
  * Because the handoff is read but not consumed, a reload of `/jobs` keeps
- * working — see the handoff module for why that differs from `/jd-fit`.
+ * working — see the handoff module for the design.
  *
  * Two peer views on `Tabs` (#690, replacing the `job-tracker` flag): Search
  * (`FindJobsPanel`) and Library (the tracked-jobs surface, formerly gated
@@ -47,6 +46,10 @@ import { resolveInitialJobsTab, type JobsTabId } from "../lib/jobs-landing.ts";
 import { useArrivedFromRoot } from "../hooks/useArrivedFromRoot.ts";
 import { useResumeLibrary } from "../hooks/useResumeLibrary.ts";
 import { useFallbackResume } from "../hooks/useFallbackResume.ts";
+import {
+  writeTailorHandoff,
+  fingerprintParse,
+} from "../lib/tailor-handoff.ts";
 
 // #706: goes to `/` directly, never via history.back() — the empty state only
 // shows when there is no in-progress parse to preserve, so this is a forward
@@ -58,7 +61,7 @@ function goToResume() {
 export default function JobsApp() {
   // Read once, on first render (lazy initializer): the payload is inert JSON and
   // the read is non-destructive, so there is no StrictMode double-invoke hazard
-  // of the kind `useJdFitResume` needs a ref for.
+  // of the kind a destructive consume would.
   const [handoff] = useState(() => readJobsHandoff());
   // #707/#715: `PageShell`'s "Saved jobs" link arrives with `?tab=library`,
   // and a direct `/jobs/#saved` link (handed out by a producer like the
@@ -96,6 +99,34 @@ export default function JobsApp() {
   // was written for some earlier hop. See `useArrivedFromRoot`.
   const arrivedFromRoot = useArrivedFromRoot();
 
+  // #576: a JD-driven tailor request from a `JobResultCard` (or the paste-a-JD
+  // disclosure below the results) stashes the rewrite steering in
+  // sessionStorage and navigates back to `/`, where `ResultDetailTabs`
+  // consumes the handoff, sets `jdContext`, and switches to the Reconstructed
+  // tab.
+  //
+  // The caller hands over the BUILT steering, not the raw coverage: the
+  // decision "is there anything to steer with" is `buildJdRewriteContext`
+  // returning non-null, and the surface that renders the button has to make
+  // that decision anyway to know whether the button leads anywhere. Taking
+  // the string here means the gate and the payload can never be two different
+  // predicates — the shape that let a button render for a coverage the
+  // builder would then reject.
+  //
+  // Stamped with the fingerprint of the résumé the coverage was computed
+  // against, so `/` can tell a handoff meant for the parse it still has from
+  // one left over for a parse it no longer does (see `tailor-handoff.ts`).
+  const handleTailor = (jdContext: string) => {
+    // Unreachable while `onTailor` is only wired below on the non-null branch;
+    // the guard is what keeps that a local fact rather than a load-bearing one.
+    if (handoff === null) return;
+    writeTailorHandoff({
+      jdContext,
+      parseFingerprint: fingerprintParse(handoff.parsed),
+    });
+    returnToResumeRoot(arrivedFromRoot);
+  };
+
   // The library the resume-link picker offers on tracked-job rows. Independent
   // of the handoff — a saved resume can exist here even when this tab has no
   // in-progress parse to search against.
@@ -127,10 +158,7 @@ export default function JobsApp() {
         // route off it marks the departure — see `jobs-departure.ts`), so the
         // in-progress parse and its inline edits there survive via bfcache.
         // Falls back to a fresh `/` for a deep link, a new tab, a reload of
-        // /jobs/, or an arrival from `/jd-fit/` — whose "Saved jobs" link marks
-        // nothing, and whose own mount already absorbed any marker `/` wrote
-        // for the earlier leg, so this control never lands on a page the label
-        // doesn't name.
+        // /jobs/.
         <Button
           variant="link"
           size="sm"
@@ -165,7 +193,7 @@ export default function JobsApp() {
                 </Button>
               </div>
             ) : (
-              <FindJobsPanel parsed={handoff.parsed} />
+              <FindJobsPanel parsed={handoff.parsed} onTailor={handleTailor} />
             )}
           </TabPanel>
           <TabPanel id="library">

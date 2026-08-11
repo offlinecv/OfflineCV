@@ -173,7 +173,7 @@ export interface EducationFieldOverrides {
  * which forced the edit surface to pin both halves on the first edit just to
  * avoid re-decomposing a title it had itself recomposed. Storing `type` on the
  * model deletes that whole mechanism, and with it the two surfaces (the PDF's
- * bold run, `/jd-fit`'s field halves) that re-split the title and got it wrong.
+ * bold run, an old JD-match field split) that re-split the title and got it wrong.
  *
  * An empty string clears the field (clearing `type` leaves the bare title;
  * clearing `year` drops it, mirroring `location`/`team` on experience).
@@ -197,9 +197,11 @@ export interface AchievementFieldOverrides {
  *
  *   - the from-scratch draft (#313), persisted to localStorage and replayed on
  *     reload (`BlankDraftSnapshot` is this type);
- *   - the `/` → `/jd-fit` handoff (#456), which hands over the PRISTINE parse
- *     plus this snapshot, so `/jd-fit` re-applies the edits itself rather than
- *     inheriting an already-applied result it can no longer take apart.
+ *   - historical cross-surface handoffs (#456) that carried the PRISTINE
+ *     parse plus this snapshot so the receiver could re-apply the edits
+ *     itself rather than inherit an already-applied result. The single
+ *     shipped handoff today (`jobs-handoff.ts`) does not need this, but the
+ *     shape is preserved so a future cross-surface hop can reuse it.
  *
  * Every override map must appear here. A silently-absent one is exactly how
  * `team` (#425) and `achievementType` (#455) got dropped on restore.
@@ -673,7 +675,7 @@ export interface EditableParse {
   removeCategorySkill: (cats: readonly SkillCategory[], skill: string) => void;
   /** The complete override state as a JSON-safe value (#456) — the one shape
    *  every consumer that must carry edits across a boundary uses (draft
-   *  persistence, the `/` → `/jd-fit` handoff). */
+   *  persistence today; a future cross-surface handoff tomorrow). */
   snapshot: EditSnapshot;
   /** Replay a snapshot through this hook's own public setters, rather than
    *  reaching into its internals. `addEntry` mints a fresh id per call, so added

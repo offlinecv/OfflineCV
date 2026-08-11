@@ -15,18 +15,25 @@ import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
 import type { EscapeHatchController } from "../../hooks/useLlmEscapeHatch.ts";
 import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
+import { useTailorHandoff } from "../../hooks/useTailorHandoff.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
 
 interface ResultDetailTabsProps {
   activeResult: CascadeResult;
+  /**
+   * Opaque identity of the parse behind `activeResult` — see
+   * `Result.tsx`'s `parseIdentity`. Changes when the résumé is genuinely
+   * replaced (a library load, an escape-hatch re-parse) and NOT when the user
+   * edits one, which `activeResult`'s own identity cannot distinguish.
+   */
+  parseIdentity: unknown;
   activeScore: AnonymousAtsScore;
   /** Original (pre-LLM-override) result — passed to SourceDiagnosticsPanel. */
   result: CascadeResult;
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   edit: EditableParse;
-  jdContext?: string;
   analysis: AnalysisController;
   /**
    * Degenerate-parse recovery pass (#243), owned by `ParsedCard` because its
@@ -41,12 +48,12 @@ interface ResultDetailTabsProps {
 
 export function ResultDetailTabs({
   activeResult,
+  parseIdentity,
   activeScore,
   result,
   bytes,
   sourceKind,
   edit,
-  jdContext,
   analysis,
   escapeHatch,
   onRecovered,
@@ -54,6 +61,23 @@ export function ResultDetailTabs({
 }: ResultDetailTabsProps) {
   // `tab` state lives here — only used within this component, not in ParsedCard.
   const [tab, setTab] = useState("reconstructed");
+
+  // JD-driven rewrite steering (#576): the instruction a tailor-back handoff
+  // from `/jobs/` (a `JobResultCard`'s "Tailor résumé to this job" button, or
+  // the paste-a-JD panel below the results) left for this page, forwarded to
+  // the whole-résumé rewrite hook in the Reconstructed tab. Null → generic
+  // rewrite prompt (byte-identical pre-#576).
+  //
+  // The lifecycle — a return leg that is a bfcache restore rather than a
+  // remount, a payload that must be matched to THIS parse, and a reset that
+  // must survive edits — lives in the hook, which is the only place all three
+  // are visible at once. Landing on the Reconstructed tab is this component's
+  // half: the steering is worthless if the rewrite affordance is off screen.
+  const jdContext = useTailorHandoff({
+    fields: activeResult.canonical.fields,
+    parseIdentity,
+    onConsumed: () => setTab("reconstructed"),
+  });
 
   // The on-device-AI tab (id `quality`) is the canonical on-device-AI surface
   // (#276). It shows whenever there's résumé text to analyze — either running the live
@@ -171,7 +195,7 @@ export function ResultDetailTabs({
               result={activeResult}
               score={activeScore}
               edit={edit}
-              jdContext={jdContext}
+              jdContext={jdContext ?? undefined}
               // #608: the critique the on-device-AI tab is already showing
               // feeds the rewrite, so clicking Rewrite acts on the findings the
               // user just read instead of discarding them. Only available once
