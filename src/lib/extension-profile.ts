@@ -71,6 +71,19 @@ export const EXTENSION_CHANNEL = "recruidea-extension" as const;
 export const EXTENSION_REPLY_TIMEOUT_MS = 2_000;
 
 /**
+ * How long a lower-priority reply is held before it is reported, in case the
+ * preferred one is still on its way.
+ *
+ * A `postMessage` is delivered to every listener on the page, so one request can
+ * draw two answers when a stale content script from a previous extension load is
+ * still listening beside a live one. The stale one loses its `chrome.*` bindings
+ * and therefore fails instantly, while the live one awaits a real storage write —
+ * so first-reply-wins reports a failure for a share that worked. Short enough
+ * that a genuine refusal still lands while the user is looking at the button.
+ */
+export const EXTENSION_REPLY_GRACE_MS = 300;
+
+/**
  * Everything that crosses. Six fields, and the wire shape is not ours to widen:
  * the extension reads an allow-list off whatever it is handed and drops the
  * rest, so an extra key here would be silently discarded rather than stored.
@@ -264,9 +277,19 @@ function readReply(value: unknown): ExtensionReply | null {
  * Post one message and wait for one of `accepts`, or for the timeout.
  *
  * The listener is attached before the post, so a reply cannot land in the gap.
- * There is no correlation id on this protocol — the reply vocabulary is
- * disjoint per request, and the one control that drives it is disabled while a
- * request is in flight — so the first accepted reply is this request's.
+ * There is no correlation id on this protocol. Two things together make an
+ * accepted reply this request's: the vocabulary is disjoint per request, and
+ * the one control that drives it is disabled while a request is in flight, so
+ * no second request is ever open to claim the reply. Both clauses are
+ * load-bearing — a second sharing control would break the matching, and the
+ * grace window below would let one request's held fallback be superseded by
+ * another's preferred reply.
+ *
+ * What is *not* bounded is the number of **responders** (see {@link
+ * EXTENSION_REPLY_GRACE_MS}), so `accepts` is read as a preference order rather
+ * than a plain set: `accepts[0]` settles the promise the moment it arrives,
+ * while anything later is held for the grace window in case the preferred reply
+ * is still on its way from another responder.
  */
 function sendToExtension<T extends ReplyType>(
   message: OutgoingMessage,
@@ -275,12 +298,16 @@ function sendToExtension<T extends ReplyType>(
   return new Promise((resolve) => {
     const appOrigin = window.location.origin;
     const wanted = new Set<string>(accepts);
+    const preferred = accepts[0];
     let settled = false;
+    let held: Extract<ExtensionReply, { type: T }> | null = null;
+    let grace: ReturnType<typeof setTimeout> | undefined;
 
     function finish(reply: Extract<ExtensionReply, { type: T }> | null): void {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(grace);
       window.removeEventListener("message", onMessage);
       resolve(reply);
     }
@@ -289,10 +316,21 @@ function sendToExtension<T extends ReplyType>(
       if (!isFromThisPage(event, appOrigin)) return;
       const reply = readReply(event.data);
       if (reply === null || !wanted.has(reply.type)) return;
-      finish(reply as Extract<ExtensionReply, { type: T }>);
+      const accepted = reply as Extract<ExtensionReply, { type: T }>;
+      // The best answer this request can get — nothing later can improve on it.
+      if (accepted.type === preferred) return finish(accepted);
+      // A fallback answer. Keep it, keep listening: a preferred reply from
+      // another responder within the grace window supersedes it.
+      if (held === null) {
+        held = accepted;
+        grace = setTimeout(() => finish(held), EXTENSION_REPLY_GRACE_MS);
+      }
     }
 
-    const timer = setTimeout(() => finish(null), EXTENSION_REPLY_TIMEOUT_MS);
+    // Out of time: report the held fallback if one arrived, else `no-reply`. A
+    // fallback landing inside the last grace window's worth of the timeout is
+    // settled by this timer rather than its own, and must not be downgraded.
+    const timer = setTimeout(() => finish(held), EXTENSION_REPLY_TIMEOUT_MS);
     window.addEventListener("message", onMessage);
     window.postMessage(message, appOrigin);
   });

@@ -15,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EXTENSION_CHANNEL,
+  EXTENSION_REPLY_GRACE_MS,
   EXTENSION_REPLY_TIMEOUT_MS,
   buildSharedResumeProfile,
   clearSharedResumeProfile,
@@ -137,6 +138,9 @@ describe("shareResumeProfile", () => {
       type: "resume-profile-refused",
       reason: "`corpus` is empty; there is nothing to rate against.",
     });
+    // A refusal is a fallback reply — held for the grace window in case a
+    // preferred `stored` from another responder is still on its way.
+    vi.advanceTimersByTime(EXTENSION_REPLY_GRACE_MS);
 
     expect(await settled).toEqual({
       kind: "refused",
@@ -147,10 +151,77 @@ describe("shareResumeProfile", () => {
   it("names a reason even when the refusal carries none", async () => {
     const settled = shareResumeProfile(buildSharedResumeProfile(parsed, "r.pdf"));
     reply({ channel: EXTENSION_CHANNEL, type: "resume-profile-refused" });
+    vi.advanceTimersByTime(EXTENSION_REPLY_GRACE_MS);
     const outcome = await settled;
 
     expect(outcome.kind).toBe("refused");
     expect(outcome.kind === "refused" && outcome.reason.length).toBeGreaterThan(0);
+  });
+
+  it("prefers a stored reply that arrives after a refusal, within the grace window", async () => {
+    // The actual reported bug (#788): an orphaned content script refuses
+    // instantly while the live one is still writing to storage.
+    const settled = shareResumeProfile(buildSharedResumeProfile(parsed, "r.pdf"));
+    reply({
+      channel: EXTENSION_CHANNEL,
+      type: "resume-profile-refused",
+      reason: "orphaned listener",
+    });
+    vi.advanceTimersByTime(EXTENSION_REPLY_GRACE_MS - 1);
+    reply({ channel: EXTENSION_CHANNEL, type: "resume-profile-stored" });
+
+    expect(await settled).toEqual({ kind: "stored" });
+  });
+
+  it("ignores a refusal that arrives after a stored reply already settled", async () => {
+    const settled = shareResumeProfile(buildSharedResumeProfile(parsed, "r.pdf"));
+    reply({ channel: EXTENSION_CHANNEL, type: "resume-profile-stored" });
+    reply({
+      channel: EXTENSION_CHANNEL,
+      type: "resume-profile-refused",
+      reason: "too late",
+    });
+
+    expect(await settled).toEqual({ kind: "stored" });
+  });
+
+  it("holds a lone refusal for the grace window before reporting it", async () => {
+    const settled = shareResumeProfile(buildSharedResumeProfile(parsed, "r.pdf"));
+    reply({
+      channel: EXTENSION_CHANNEL,
+      type: "resume-profile-refused",
+      reason: "genuine refusal",
+    });
+
+    let pending = true;
+    void settled.then(() => (pending = false));
+
+    // The async advance drains the microtask queue as it goes, so a premature
+    // settle has already flipped the flag by the assertion below. The plain
+    // `advanceTimersByTime` would not: `settled` is one `await` deep, so its
+    // `.then` is queued behind `shareResumeProfile`'s own continuation and the
+    // flag would still read `true` whether or not the promise had resolved.
+    await vi.advanceTimersByTimeAsync(EXTENSION_REPLY_GRACE_MS - 1);
+    expect(pending).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    expect(await settled).toEqual({ kind: "refused", reason: "genuine refusal" });
+  });
+
+  it("reports a fallback that lands inside the last grace window, not no-reply", async () => {
+    // Late enough that the request's own timeout fires before the refusal's
+    // grace timer does. The timeout must report what it holds — reporting
+    // `no-reply` would tell the user nothing answered when something did.
+    const settled = shareResumeProfile(buildSharedResumeProfile(parsed, "r.pdf"));
+    vi.advanceTimersByTime(EXTENSION_REPLY_TIMEOUT_MS - EXTENSION_REPLY_GRACE_MS + 1);
+    reply({
+      channel: EXTENSION_CHANNEL,
+      type: "resume-profile-refused",
+      reason: "late refusal",
+    });
+    vi.advanceTimersByTime(EXTENSION_REPLY_GRACE_MS);
+
+    expect(await settled).toEqual({ kind: "refused", reason: "late refusal" });
   });
 
   it("gives up rather than hanging when nothing is listening", async () => {
