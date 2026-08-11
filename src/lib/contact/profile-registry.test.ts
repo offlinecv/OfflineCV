@@ -81,6 +81,33 @@ describe("classifyProfile — unknown hosts are kept, never dropped", () => {
   });
 });
 
+describe("classifyProfile — a dotless bare word is not a host (#790)", () => {
+  it.each(["US Citizen", "Citizen", "US_Citizen", "UScitizen"])(
+    "rejects %s instead of inventing an https://<word> profile",
+    (input) => {
+      expect(classifyProfile(input)).toBeUndefined();
+    },
+  );
+
+  it("still keeps localhost as an unknown host", () => {
+    expect(classifyProfile("http://localhost:3000")).toEqual({
+      url: "http://localhost:3000",
+      network: "localhost",
+      kind: "other",
+    });
+  });
+
+  it("does not regress dotted hosts — recognized hosts keep their kind, a genuinely unknown dotted host stays 'other'", () => {
+    expect(classifyProfile("orcid.org/0000-0002-1825-0097")?.kind).toBe(
+      "academic",
+    );
+    expect(
+      classifyProfile("scholar.google.com/citations?user=x")?.kind,
+    ).toBe("academic");
+    expect(classifyProfile("example.com")?.kind).toBe("other");
+  });
+});
+
 describe("classifyProfile — LinkedIn non-profile exclusion", () => {
   it.each([
     "https://www.linkedin.com/company/acme",

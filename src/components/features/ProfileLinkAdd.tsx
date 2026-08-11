@@ -20,6 +20,12 @@
  * "Professional profile" links row and the extra-links "+ Add" — consume THIS
  * one component instead of each re-rolling a URL input. The quick-pick data is
  * derived from `PROFILE_HOSTS`, so the picker never drifts from what we accept.
+ *
+ * `onAdd` reports failure via its return value (`undefined` = rejected, e.g.
+ * "US Citizen" — not a URL). On rejection the draft is KEPT (not cleared), the
+ * panel stays open, and an inline `role="alert"` names what is accepted —
+ * fixing the silent-data-loss defect where a rejected value used to vanish
+ * with no trace (#790).
  */
 
 import { useRef, useState } from "react";
@@ -30,9 +36,14 @@ import {
 } from "../../lib/contact/profile-registry.ts";
 import { AddPill } from "./ReconstructedAdd.tsx";
 
+const REJECTED_HINT =
+  "That doesn't look like a link. Paste a profile URL (e.g. linkedin.com/in/yourname).";
+
 interface ProfileLinkAddProps {
-  /** Commit the entered URL (raw string; classified by the caller's sink). */
-  onAdd: (url: string) => void;
+  /** Commit the entered URL (raw string; classified by the caller's sink).
+   *  Returns the new profile's id on success, `undefined` if the value could
+   *  not be classified as a link — the caller never silently swallows that. */
+  onAdd: (url: string) => string | undefined;
   /** Collapsed-pill label, e.g. "Add a professional profile" / "Add a profile". */
   label?: string;
   /** Keep the input open after a commit so several links can be added in a row
@@ -51,13 +62,20 @@ export function ProfileLinkAdd({
 }: ProfileLinkAddProps) {
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const commit = () => {
     const trimmed = draft.trim();
     // Ignore an empty entry or a bare scheme left from a tapped chip.
     if (!trimmed || trimmed === "https://") return;
-    onAdd(trimmed);
+    if (onAdd(trimmed) === undefined) {
+      // Rejected: keep the draft and the panel open so the user's input isn't
+      // silently lost, and say what is accepted (#790).
+      setError(REJECTED_HINT);
+      return;
+    }
+    setError(null);
     setDraft("");
     if (!stayOpenAfterAdd) setExpanded(false);
   };
@@ -116,8 +134,12 @@ export function ProfileLinkAdd({
           value={draft}
           autoFocus
           aria-label={label}
+          aria-invalid={error !== null}
           placeholder="Tap a network above, or paste any profile URL"
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setError(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -125,6 +147,7 @@ export function ProfileLinkAdd({
             } else if (e.key === "Escape") {
               e.preventDefault();
               setDraft("");
+              setError(null);
               setExpanded(false);
             }
           }}
@@ -140,6 +163,12 @@ export function ProfileLinkAdd({
           Add
         </Button>
       </div>
+
+      {error && (
+        <span role="alert" className="text-sm text-feedback-error-text">
+          {error}
+        </span>
+      )}
 
       <span className="text-sm text-content-tertiary">
         {HELPER_EXAMPLES

@@ -49,7 +49,7 @@ afterEach(() => {
 
 describe("ProfileLinkAdd", () => {
   it("starts collapsed as a labelled add pill", () => {
-    const el = render({ onAdd: () => {}, label: "Add a professional profile" });
+    const el = render({ onAdd: () => undefined, label: "Add a professional profile" });
     const pill = el.querySelector('[aria-label="Add a professional profile"]');
     expect(pill).not.toBeNull();
     // No network chips until it is expanded.
@@ -57,7 +57,7 @@ describe("ProfileLinkAdd", () => {
   });
 
   it("expands to show a chip per quick-pick network", () => {
-    const el = render({ onAdd: () => {}, label: "Add a profile" });
+    const el = render({ onAdd: () => undefined, label: "Add a profile" });
     click(el.querySelector('[aria-label="Add a profile"]'));
     for (const pick of PROFILE_QUICK_PICKS) {
       expect(
@@ -67,7 +67,7 @@ describe("ProfileLinkAdd", () => {
   });
 
   it("tapping a network chip pre-fills its prefix into the input", () => {
-    const el = render({ onAdd: () => {}, label: "Add a profile" });
+    const el = render({ onAdd: () => undefined, label: "Add a profile" });
     click(el.querySelector('[aria-label="Add a profile"]'));
     click(el.querySelector('[aria-label="Add GitHub"]'));
     const input = el.querySelector("input");
@@ -75,7 +75,7 @@ describe("ProfileLinkAdd", () => {
   });
 
   it("commits the entered URL and collapses when stayOpenAfterAdd is unset", () => {
-    const onAdd = vi.fn();
+    const onAdd = vi.fn(() => "profile:0");
     const el = render({ onAdd, label: "Add a professional profile" });
     click(el.querySelector('[aria-label="Add a professional profile"]'));
     click(el.querySelector('[aria-label="Add LinkedIn"]'));
@@ -85,5 +85,60 @@ describe("ProfileLinkAdd", () => {
     expect(onAdd).toHaveBeenCalledWith("https://linkedin.com/in/");
     // Collapsed again → chips gone.
     expect(el.querySelector('[aria-label="Add GitHub"]')).toBeNull();
+  });
+
+  it("rejected input keeps the draft, stays expanded, and renders an alert (#790)", () => {
+    const onAdd = vi.fn(() => undefined);
+    const el = render({ onAdd, label: "Add a profile" });
+    click(el.querySelector('[aria-label="Add a profile"]'));
+    const input = el.querySelector("input") as HTMLInputElement;
+    act(() => {
+      input.dispatchEvent(new Event("focus"));
+    });
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      setter.call(input, "US Citizen");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const addBtn = el.querySelector('button[aria-label="Add a profile"]');
+    click(addBtn);
+
+    expect(onAdd).toHaveBeenCalledWith("US Citizen");
+    // Draft survives — not cleared on rejection.
+    expect(input.value).toBe("US Citizen");
+    // Still expanded — chips still present.
+    expect(el.querySelector('[aria-label="Add GitHub"]')).not.toBeNull();
+    // Visible, announced error.
+    const alert = el.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert?.textContent).toMatch(/doesn't look like a link/i);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("clears the error on the next keystroke", () => {
+    const onAdd = vi.fn(() => undefined);
+    const el = render({ onAdd, label: "Add a profile" });
+    click(el.querySelector('[aria-label="Add a profile"]'));
+    const input = el.querySelector("input") as HTMLInputElement;
+    const setValue = (v: string) => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!;
+      act(() => {
+        setter.call(input, v);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+    setValue("US Citizen");
+    click(el.querySelector('button[aria-label="Add a profile"]'));
+    expect(el.querySelector('[role="alert"]')).not.toBeNull();
+
+    setValue("US Citizen2");
+    expect(el.querySelector('[role="alert"]')).toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBe("false");
   });
 });
