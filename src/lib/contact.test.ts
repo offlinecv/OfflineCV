@@ -172,6 +172,76 @@ describe("buildContactFields", () => {
   });
 });
 
+// #792 — the row is optional BY POLICY, so "absent adds no gap" is the
+// behaviour under test, not an implementation detail. The five-required-rows
+// assertions above are its other half: they would have grown to six if the row
+// had been added as required.
+describe("buildContactFields — work authorization (#792)", () => {
+  it("renders no row at all when the résumé states nothing", () => {
+    const fields = buildContactFields(makeCascade());
+    expect(fields.map((f) => f.key)).not.toContain("work_authorization");
+  });
+
+  it("does not change the detected/total ratio by being absent", () => {
+    const { detected, total } = contactCompleteness(
+      buildContactFields(makeCascade({ email: "j@example.com" }, { email: 0.95 })),
+    );
+    expect(total).toBe(5);
+    expect(detected).toBe(1);
+  });
+
+  it("renders on the contact line, after location, when confidently stated", () => {
+    const fields = buildContactFields(
+      makeCascade(
+        { work_authorization: "US Citizen" },
+        { work_authorization: 0.9 },
+      ),
+    );
+    const row = fields.find((f) => f.key === "work_authorization");
+    expect(row).toMatchObject({
+      value: "US Citizen",
+      group: "contact",
+      gated: false,
+      label: "Work authorization",
+    });
+    // Last row overall — after location, which is the contact line's tail.
+    expect(fields.at(-1)!.key).toBe("work_authorization");
+  });
+
+  it("is restored by an override on a résumé the parser found none on", () => {
+    // The hidden-optional-row path: `buildContactFields` drops the row, and
+    // `applyContactOverrides` is what puts the user's typed value back on the
+    // card. Without this, the "+ Add work authorization" affordance would
+    // commit into a void.
+    const fields = applyContactOverrides(buildContactFields(makeCascade()), {
+      work_authorization: "Authorized to work in the US without sponsorship",
+    });
+    expect(fields.find((f) => f.key === "work_authorization")).toMatchObject({
+      value: "Authorized to work in the US without sponsorship",
+      gated: false,
+    });
+  });
+
+  it("reverts to absent — not to a gap row — on an explicit clear", () => {
+    const fields = applyContactOverrides(
+      buildContactFields(
+        makeCascade(
+          { work_authorization: "US Citizen" },
+          { work_authorization: 0.9 },
+        ),
+      ),
+      { work_authorization: "" },
+    );
+    const row = fields.find((f) => f.key === "work_authorization");
+    expect(row).toMatchObject({ value: "", gated: true, reason: "absent" });
+    // And a cleared optional row is not counted as a missing REQUIRED field by
+    // any consumer that reads the gate.
+    expect(criticalDownloadGate(fields, true).map((i) => i.key)).not.toContain(
+      "work_authorization",
+    );
+  });
+});
+
 describe("applyContactOverrides", () => {
   it("passes fields through untouched when no overrides given", () => {
     const fields = buildContactFields(makeCascade());

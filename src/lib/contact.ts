@@ -60,6 +60,16 @@ const CONTACT_ROWS: readonly {
   { key: "portfolio_url", label: "Portfolio", group: "link", optional: true },
   { key: "website_url", label: "Website", group: "link", optional: true },
   { key: "location", label: "Location", group: "contact" },
+  // Work authorization (#792) — OPTIONAL by policy, not by convenience. The
+  // disclosure is jurisdiction-specific and protected-class-adjacent, so an
+  // absent value must never render a "not detected" gap nor count against the
+  // detected/total ratio; a résumé that declines to state it must look and
+  // score exactly like one that has nothing to state. Because an undetected
+  // optional row is hidden entirely (see `buildContactFields`), the editable
+  // card carries its own "+ Add work authorization" entry point
+  // (`ContactWorkAuthorization`) — otherwise the field would be unreachable for
+  // exactly the users who need it.
+  { key: "work_authorization", label: "Work authorization", group: "contact", optional: true },
 ];
 
 // TypeScript trick: enumerate the valid keys for indexing `parsed`.
@@ -73,6 +83,7 @@ const FIELD_KEYS = {
   portfolio_url: true,
   website_url: true,
   location: true,
+  work_authorization: true,
 } as const;
 
 /**

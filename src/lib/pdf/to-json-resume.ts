@@ -69,6 +69,18 @@ export interface JsonResumeBasics {
   url?: string;
   location?: JsonResumeLocation;
   profiles?: JsonResumeProfile[];
+  /**
+   * DELIBERATE NON-STANDARD EXTENSION (#792). JSON Resume v1.0.0 `basics` has
+   * no work-authorization property and none of its standard fields means this,
+   * so repurposing one (`summary`, `label`) would misreport a legal attribute.
+   * The `x_` prefix is the conventional escape hatch: a consumer validating
+   * strict v1.0.0 ignores the key rather than failing on it.
+   *
+   * Emitted ONLY when the résumé actually states a work-authorization value —
+   * the key is omitted entirely otherwise, so every export from a résumé
+   * without one is byte-identical to what this module produced before #792.
+   */
+  x_workAuthorization?: string;
 }
 
 export interface JsonResumeWork {
@@ -305,6 +317,9 @@ export function basicsFromContact(c: AtsContact): JsonResumeBasics {
     url: pickPrimaryUrl(sourceProfiles),
     location: toJsonResumeLocation(c.location),
     profiles: profiles.length > 0 ? profiles : undefined,
+    // Non-standard `x_` extension — see the field docblock. A blank/whitespace
+    // value is treated as absent so the key never ships empty.
+    x_workAuthorization: c.workAuthorization?.trim() || undefined,
   };
 }
 

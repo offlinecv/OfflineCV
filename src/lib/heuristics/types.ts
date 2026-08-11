@@ -178,6 +178,7 @@ export type FieldConfidence = Partial<
     | "email"
     | "phone"
     | "location"
+    | "work_authorization"
     | "linkedin_url"
     | "github_url"
     | "portfolio_url"

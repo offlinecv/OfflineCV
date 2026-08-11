@@ -87,6 +87,37 @@ describe("applyOverrides", () => {
     expect(out.full_name).toBeUndefined();
   });
 
+  // #792 — work authorization rides this same per-key contact channel rather
+  // than a new one, so the create / edit / clear semantics (and the confidence
+  // fold below) are the ones already proven for `location`.
+  it("creates, edits and clears work_authorization through the contact channel (#792)", () => {
+    const created = applyOverrides(
+      baseParsed(),
+      "raw",
+      makeSections(),
+      { work_authorization: "US Citizen" },
+      {},
+      {},
+      [],
+    );
+    expect(created.fields.work_authorization).toBe("US Citizen");
+    // A user-affirmed contact edit earns full confidence, which is what lifts
+    // the display gate AND what carries the value into the exported PDF.
+    expect(created.fieldConfidence.work_authorization).toBe(1);
+
+    const cleared = applyOverrides(
+      { ...baseParsed(), work_authorization: "US Citizen" },
+      "raw",
+      makeSections(),
+      { work_authorization: "" },
+      {},
+      {},
+      [],
+    );
+    expect(cleared.fields.work_authorization).toBeUndefined();
+    expect(cleared.fieldConfidence.work_authorization).toBe(0);
+  });
+
   it("clears a stale phoneIsValid flag when the phone is overridden (#70 review)", () => {
     const parsed: HeuristicParsedResume = {
       ...baseParsed(),

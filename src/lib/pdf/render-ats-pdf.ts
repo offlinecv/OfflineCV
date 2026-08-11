@@ -508,6 +508,7 @@ export async function findExportGlyphLosses(
   check("Email", contact.email);
   check("Phone", contact.phone);
   check("Location", contact.location);
+  check("Work authorization", contact.workAuthorization);
   for (const link of contact.links) check("Links", link);
   check(model.summaryHeading || "Summary", model.summary);
 
@@ -1493,10 +1494,15 @@ export async function renderAtsResumePdf(
       color: muted,
     });
   }
+  // Work authorization (#792) sits after location and before the links, so the
+  // statement rides the existing contact line and costs the header no extra
+  // row. It is deliberately absent from `linkSpans` below: it is a sentence,
+  // not a URL, so it receives no clickable overlay and no scheme-stripping.
   const contactParts = [
     model.contact.email,
     model.contact.phone,
     model.contact.location,
+    model.contact.workAuthorization,
     ...model.contact.links,
   ].filter((p): p is string => Boolean(p));
   if (contactParts.length > 0) {
