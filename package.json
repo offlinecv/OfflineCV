@@ -1,6 +1,9 @@
 {
   "name": "@offlinecv/web",
   "private": true,
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "version": "0.1.0-alpha.1",
   "license": "Apache-2.0",
   "type": "module",
