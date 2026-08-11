@@ -13,11 +13,13 @@ import { describe, it, expect } from "vitest";
 import {
   addCategory,
   addSkillToCategory,
+  addUngroupedSkill,
   computeEditedSkills,
   deleteCategory,
   isEmptySkillsOverride,
   moveSkillBetweenCategories,
   removeSkillFromCategories,
+  removeUngroupedSkill,
   renameCategory,
 } from "./skills-categories.ts";
 import type { SkillCategory } from "../heuristics/types.ts";
@@ -165,6 +167,47 @@ describe("delete a single skill (categorised)", () => {
   });
 });
 
+describe("ungrouped-remainder transforms — what makes the flat setters safe (#791)", () => {
+  const pool = ["Excel", "Figma"];
+
+  it("appends a canonicalized skill to the remainder", () => {
+    expect(addUngroupedSkill(cats(), pool, "js")).toEqual([
+      "Excel",
+      "Figma",
+      "JavaScript",
+    ]);
+    // Pure — the input array is not mutated.
+    expect(pool).toEqual(["Excel", "Figma"]);
+  });
+
+  it("no-ops on blank input", () => {
+    expect(addUngroupedSkill(cats(), pool, "   ")).toEqual(pool);
+    expect(addUngroupedSkill(cats(), pool, "")).toEqual(pool);
+  });
+
+  it("no-ops on a dupe of an already-ungrouped skill (case-insensitive)", () => {
+    expect(addUngroupedSkill(cats(), pool, "excel")).toEqual(pool);
+  });
+
+  it("no-ops on a skill a CATEGORY already holds — never a doubled chip", () => {
+    // Same uniqueness rule as addSkillToCategory, so the flat and the
+    // categorised add-input agree about what a duplicate is.
+    expect(addUngroupedSkill(cats(), pool, "redis")).toEqual(pool);
+    expect(addSkillToCategory(cats(), 1, "redis")).toEqual(cats());
+  });
+
+  it("removes case-insensitively, tolerating whitespace and a missing pool", () => {
+    expect(removeUngroupedSkill(pool, " excel ")).toEqual(["Figma"]);
+    expect(removeUngroupedSkill(pool, "Rust")).toEqual(pool);
+    expect(removeUngroupedSkill(undefined, "Excel")).toEqual([]);
+  });
+
+  it("a flat add + remove pair round-trips the remainder", () => {
+    const added = addUngroupedSkill(cats(), pool, "Rust");
+    expect(removeUngroupedSkill(added, "rust")).toEqual(pool);
+  });
+});
+
 describe("all-deleted snapshot composes flat edits on an EMPTY base (#415)", () => {
   // Pristine categorised résumé (the flat list is the flattening of the groups).
   const pristine = {
@@ -268,5 +311,66 @@ describe("non-empty snapshot + flat edits (unreachable-by-design guard)", () => 
     });
     expect(result.skills).toEqual(["Rust"]);
     expect(result.skillCategories).toBeUndefined();
+  });
+});
+
+describe("ungrouped remainder (#791)", () => {
+  const parsed = { skills: [] as string[] }; // categorised branch ignores `parsed`.
+  const leadership = (): SkillCategory[] => [{ label: "Leadership", skills: [] }];
+
+  it("a non-empty category snapshot is unioned with `ungrouped`, not replaced by it", () => {
+    const result = computeEditedSkills(parsed, {
+      removed: [],
+      added: [],
+      categories: leadership(),
+      ungrouped: ["Excel", "PowerPoint"],
+    });
+    expect(result.skillCategories).toEqual(leadership());
+    expect(result.skills).toEqual(["Excel", "PowerPoint"]);
+  });
+
+  it("grouped members and the ungrouped remainder both appear, grouped first", () => {
+    const grouped = [{ label: "Backend", skills: ["Java", "Python"] }];
+    const result = computeEditedSkills(parsed, {
+      removed: [],
+      added: [],
+      categories: grouped,
+      ungrouped: ["Excel"],
+    });
+    expect(result.skills).toEqual(["Java", "Python", "Excel"]);
+  });
+
+  it("an absent `ungrouped` behaves exactly like an empty one (pre-#791 callers unaffected)", () => {
+    const result = computeEditedSkills(parsed, {
+      removed: [],
+      added: [],
+      categories: cats(),
+    });
+    expect(result.skills).toEqual(cats().flatMap((c) => c.skills));
+  });
+
+  it("degrading to uncategorised (last category deleted) keeps the ungrouped remainder, not just flat edits", () => {
+    const result = computeEditedSkills(parsed, {
+      removed: [],
+      added: [],
+      categories: [],
+      ungrouped: ["Excel", "PowerPoint"],
+    });
+    expect(result.skills).toEqual(["Excel", "PowerPoint"]);
+    expect(result.skillCategories).toBeUndefined();
+  });
+});
+
+describe("moveSkillBetweenCategories — a skill not yet in any category (#791)", () => {
+  it("claims it into the destination instead of no-op'ing", () => {
+    const result = moveSkillBetweenCategories(cats(), "Excel", 1);
+    expect(result[1].skills).toContain("Excel");
+    // The categories the skill WASN'T already in are untouched.
+    expect(result[0].skills).toEqual(cats()[0].skills);
+  });
+
+  it("still respects an out-of-range destination (existing contract)", () => {
+    const result = moveSkillBetweenCategories(cats(), "Excel", 99);
+    expect(result).toEqual(cats());
   });
 });

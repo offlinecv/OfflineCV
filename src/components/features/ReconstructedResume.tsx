@@ -1419,7 +1419,7 @@ export function ReconstructedResume({
           deleteSkillCategory(parsed.skillCategories ?? [], i)
         }
         onAddCategory={(label) =>
-          addSkillCategory(parsed.skillCategories ?? [], label)
+          addSkillCategory(parsed.skillCategories ?? [], parsed.skills, label)
         }
         onAddSkillToCategory={(i, skill) =>
           addSkillToCategory(parsed.skillCategories ?? [], i, skill)

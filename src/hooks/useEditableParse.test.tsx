@@ -158,7 +158,7 @@ describe("useEditableParse — Skills category edits (#476)", () => {
   });
 
   it("resetAll clears the category snapshot back to pristine", () => {
-    act(() => api.addSkillCategory(cats, "Data"));
+    act(() => api.addSkillCategory(cats, cats.flatMap((c) => c.skills), "Data"));
     expect(api.skillsOverride.categories).toBeDefined();
     act(() => api.resetAll());
     expect(api.skillsOverride.categories).toBeUndefined();
@@ -175,6 +175,32 @@ describe("useEditableParse — Skills category edits (#476)", () => {
     expect(api.skillsOverride.categories).toBeUndefined();
     act(() => api.replay(saved));
     expect(api.skillsOverride.categories?.map((c) => c.label)).toEqual(["UI"]);
+  });
+
+  it("replay restores the ungrouped remainder, not just the categories (#791)", () => {
+    // Seeding the remainder needs a grouping that does NOT already cover every
+    // skill — the flat-résumé case the "+ Add category" affordance unlocks.
+    const flat = {
+      skills: ["React", "TypeScript", "Figma"],
+      skillCategories: undefined,
+    };
+    act(() => api.addSkillCategory([], flat.skills, "UI"));
+    act(() => api.moveSkillToCategory(api.skillsOverride.categories!, "React", 0));
+    expect(api.skillsOverride.ungrouped).toEqual(["TypeScript", "Figma"]);
+
+    const saved = api.snapshot;
+    act(() => api.resetAll());
+    act(() => api.replay(saved));
+
+    // Restoring `categories` alone would strand these two: `computeEditedSkills`
+    // reads a missing `ungrouped` as "no remainder" and the flat list collapses
+    // to the grouped member only — the #791 data loss, on the restore path.
+    expect(api.skillsOverride.ungrouped).toEqual(["TypeScript", "Figma"]);
+    expect(computeEditedSkills(flat, api.skillsOverride).skills).toEqual([
+      "React",
+      "TypeScript",
+      "Figma",
+    ]);
   });
 
   it("delete-all-categories then flat addSkill does NOT resurrect deleted skills (#415)", () => {
@@ -231,6 +257,202 @@ describe("useEditableParse — Skills category edits (#476)", () => {
   });
 });
 
+describe("useEditableParse — ungrouped remainder on the first category (#791)", () => {
+  const flat = ["Python", "SQL", "Excel"];
+
+  it("creating the first category leaves every existing skill ungrouped, not swept in", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    expect(api.skillsOverride.categories).toEqual([
+      { label: "Leadership", skills: [] },
+    ]);
+
+    const parsed = { skills: flat, skillCategories: undefined };
+    const result = computeEditedSkills(parsed, api.skillsOverride);
+    // Nothing was swept into the new category…
+    expect(result.skillCategories![0].skills).toEqual([]);
+    // …but the flat union still has every original skill.
+    expect(new Set(result.skills)).toEqual(new Set(flat));
+  });
+
+  it("a second addSkillCategory call leaves the pool alone (the recompute is idempotent)", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() =>
+      api.addSkillCategory(api.skillsOverride.categories!, flat, "Backend"),
+    );
+    expect(api.skillsOverride.ungrouped).toEqual(flat);
+  });
+
+  // Both sequences below reach a state the old once-only seed left inconsistent:
+  // a non-empty `categories` snapshot alongside populated flat `removed`/`added`.
+  // `computeEditedSkills` treats that as unreachable — it throws in DEV and
+  // ignores the flat edits in prod, i.e. the skill vanishes from the UI and the
+  // exported PDF. Both are reachable because the flat chip row and
+  // "+ Add category" now render together (#791).
+
+  it("a flat remove made before the first category survives creating it", () => {
+    const parsed = { skills: flat, skillCategories: undefined };
+    act(() => api.removeSkill("Excel"));
+    const rendered = computeEditedSkills(parsed, api.skillsOverride).skills;
+    expect(rendered).toEqual(["Python", "SQL"]);
+
+    act(() => api.addSkillCategory([], rendered, "Leadership"));
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([
+      "Python",
+      "SQL",
+    ]);
+    // Folded into the snapshot, not left dangling beside it.
+    expect(api.skillsOverride.removed).toEqual([]);
+  });
+
+  it("a flat add made while degraded survives creating a category again", () => {
+    const parsed = { skills: flat, skillCategories: undefined };
+    // First category → delete it: the section degrades to uncategorised, so the
+    // flat AddSkillInput is live again while `ungrouped` is already seeded.
+    act(() => api.addSkillCategory([], flat, "Product"));
+    act(() => api.deleteSkillCategory(api.skillsOverride.categories!, 0));
+    act(() => api.addSkill("Rust"));
+    const rendered = computeEditedSkills(parsed, api.skillsOverride).skills;
+    expect(rendered).toContain("Rust");
+
+    // "+ Add category" again. The seed must recompute from the rendered list, or
+    // the categorised branch (which ignores `added`) drops "Rust" silently.
+    act(() =>
+      api.addSkillCategory(api.skillsOverride.categories!, rendered, "Product"),
+    );
+    const result = computeEditedSkills(parsed, api.skillsOverride);
+    expect(new Set(result.skills)).toEqual(new Set([...flat, "Rust"]));
+    expect(api.skillsOverride.added).toEqual([]);
+  });
+
+  it("moving an ungrouped skill into a category claims it (Move menu / DnD path)", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() =>
+      api.moveSkillToCategory(api.skillsOverride.categories!, "SQL", 0),
+    );
+    const parsed = { skills: flat, skillCategories: undefined };
+    const result = computeEditedSkills(parsed, api.skillsOverride);
+    expect(result.skillCategories![0].skills).toEqual(["SQL"]);
+    // The flat SET is unchanged — SQL moved, nothing was lost or duplicated.
+    expect(new Set(result.skills)).toEqual(new Set(flat));
+  });
+
+  it("removing an ungrouped skill deletes it — the trailing row's Remove button", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() =>
+      api.removeCategorySkill(api.skillsOverride.categories!, "Excel"),
+    );
+    const parsed = { skills: flat, skillCategories: undefined };
+    const result = computeEditedSkills(parsed, api.skillsOverride);
+    expect(result.skills).not.toContain("Excel");
+    expect(new Set(result.skills)).toEqual(new Set(["Python", "SQL"]));
+  });
+
+  it("deleting a category destroys a skill moved into it — it does not fall back to ungrouped", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() =>
+      api.moveSkillToCategory(api.skillsOverride.categories!, "SQL", 0),
+    );
+    act(() => api.deleteSkillCategory(api.skillsOverride.categories!, 0));
+    const parsed = { skills: flat, skillCategories: undefined };
+    const result = computeEditedSkills(parsed, api.skillsOverride);
+    // SQL was inside the deleted category — the confirm dialog's promise
+    // ("removes the category and all the skills in it") must hold: SQL is
+    // gone, not resurrected as ungrouped.
+    expect(result.skills).toEqual(["Python", "Excel"]);
+    expect(result.skillCategories).toBeUndefined();
+  });
+
+  // The flat setters are categorisation-aware (#791): `SkillTermGuidance` — and
+  // any future flat writer — is wired to `addSkill`, which is reachable on a
+  // categorised résumé now that "+ Add category" renders on a flat one. Routing
+  // a flat write into `added`/`removed` while a non-empty snapshot exists is the
+  // one state `computeEditedSkills` rejects: it throws in DEV (an ErrorBoundary
+  // crash, since it runs in a render-phase memo) and drops the skill silently in
+  // prod. The door is closed in the setter, not by convention at each call site.
+
+  it("addSkill on a categorised résumé lands in ungrouped, not the flat `added`", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() => api.addSkill("Kubernetes"));
+
+    // Before the setters became categorisation-aware this threw here — and this
+    // runs in a render-phase memo (`useAnalyzedResume`), so the throw was an
+    // ErrorBoundary crash of the whole editor, two clicks from a fresh parse.
+    const parsed = { skills: flat, skillCategories: undefined };
+    const result = computeEditedSkills(parsed, api.skillsOverride);
+    expect(result.skills).toContain("Kubernetes");
+    expect(new Set(result.skills)).toEqual(new Set([...flat, "Kubernetes"]));
+
+    expect(api.skillsOverride.added).toEqual([]);
+    expect(api.skillsOverride.ungrouped).toEqual([...flat, "Kubernetes"]);
+    expect(api.hasEdits).toBe(true);
+  });
+
+  it("addSkill while categorised canonicalizes and no-ops on blanks/dupes", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() => api.addSkillToCategory(api.skillsOverride.categories!, 0, "SQL"));
+    // Canonicalized, like the uncategorised path ("js" → "JavaScript").
+    act(() => api.addSkill("js"));
+    expect(api.skillsOverride.ungrouped).toContain("JavaScript");
+
+    const before = api.skillsOverride.ungrouped;
+    act(() => api.addSkill("   "));
+    act(() => api.addSkill("javascript")); // already ungrouped (case-insensitive)
+    act(() => api.addSkill("sql")); // already GROUPED — not a second copy
+    expect(api.skillsOverride.ungrouped).toEqual(before);
+    expect(api.skillsOverride.added).toEqual([]);
+  });
+
+  it("a categorised flat add survives snapshot → replay", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() => api.addSkill("Kubernetes"));
+    const saved = api.snapshot;
+    // It rides in `ungrouped`, which replay restores WITH `categories` — the
+    // `so.added.forEach(addSkill)` leg has nothing to replay.
+    expect(saved.skillsOverride.added).toEqual([]);
+
+    act(() => api.resetAll());
+    act(() => api.replay(saved));
+
+    const parsed = { skills: flat, skillCategories: undefined };
+    expect(new Set(computeEditedSkills(parsed, api.skillsOverride).skills)).toEqual(
+      new Set([...flat, "Kubernetes"]),
+    );
+  });
+
+  it("removeSkill while categorised deletes from ungrouped AND from a category", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() => api.moveSkillToCategory(api.skillsOverride.categories!, "SQL", 0));
+
+    // An ungrouped skill…
+    act(() => api.removeSkill("Excel"));
+    // …and a grouped one. A flat remove must reach both, or the chip stays.
+    act(() => api.removeSkill("SQL"));
+
+    expect(api.skillsOverride.removed).toEqual([]);
+    expect(api.skillsOverride.ungrouped).toEqual(["Python"]);
+    expect(api.skillsOverride.categories).toEqual([
+      { label: "Leadership", skills: [] },
+    ]);
+
+    const parsed = { skills: flat, skillCategories: undefined };
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([
+      "Python",
+    ]);
+  });
+
+  it("typing an ungrouped skill's name into a category's add-input also claims it (no stale duplicate)", () => {
+    act(() => api.addSkillCategory([], flat, "Leadership"));
+    act(() =>
+      api.addSkillToCategory(api.skillsOverride.categories!, 0, "SQL"),
+    );
+    // A later delete of that category must not resurrect SQL via a stale
+    // ungrouped entry.
+    act(() => api.deleteSkillCategory(api.skillsOverride.categories!, 0));
+    const parsed = { skills: flat, skillCategories: undefined };
+    const result = computeEditedSkills(parsed, api.skillsOverride);
+    expect(result.skills).toEqual(["Python", "Excel"]);
+  });
+});
 
 // ── Summary override (#625) ───────────────────────────────────────────────────
 

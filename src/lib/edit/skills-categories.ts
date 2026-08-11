@@ -18,11 +18,21 @@
  * {@link moveSkillBetweenCategories} on the current snapshot, so there is one
  * mutation code path with two ways to invoke it.
  *
- * The load-bearing invariant (from #473, and the whole point of doing this in one
- * place): the flat `skills` array ALWAYS deep-equals
- * `skillCategories.flatMap((c) => c.skills)` — because {@link computeEditedSkills}
- * DERIVES the flat list from the snapshot by flattening, never maintaining the two
- * independently.
+ * The load-bearing invariant through #790 was that the flat `skills` array
+ * ALWAYS deep-equals `skillCategories.flatMap((c) => c.skills)`. #791 breaks
+ * that on purpose: creating the FIRST category on an uncategorised résumé must
+ * not sweep the existing skills into it or invent a synthetic bucket for them
+ * (the #791 stated decision), so the grouping can legitimately cover only a
+ * SUBSET of the flat list. The invariant becomes `skills ⊇ flatMap(categories)`;
+ * {@link SkillsOverride.ungrouped} carries the remainder — whatever `categories`
+ * doesn't (yet) claim — as its own tracked set, seeded once (by the caller, when
+ * the first category is created) and updated in lockstep by every op that moves
+ * a skill in or out of the grouping — including the FLAT add/remove setters,
+ * which route through `addUngroupedSkill`/`removeUngroupedSkill` rather than
+ * emit `removed`/`added` while a category exists. It can't be re-derived by diffing the
+ * pristine parse against the current `categories` on every call: that can't tell
+ * "never grouped" (stays ungrouped) apart from "grouped, then its category was
+ * deleted" (gone for good) — see {@link computeEditedSkills}.
  *
  * Empty-category policy (the #476 stated decision): emptying a category (deleting
  * its last chip, or moving its last member out) leaves an EMPTY-BUT-PRESENT
@@ -52,8 +62,12 @@ export function isEmptySkillsOverride(o: SkillsOverride): boolean {
   );
 }
 
-/** True when any category in `cats` already holds `skill` (case-insensitive). */
-function presentAnywhere(cats: readonly SkillCategory[], skill: string): boolean {
+/** True when any category in `cats` already holds `skill` (case-insensitive).
+ *  Exported for {@link useEditableParse}'s one-time ungrouped seed (#791). */
+export function presentAnywhere(
+  cats: readonly SkillCategory[],
+  skill: string,
+): boolean {
   const lc = skill.toLowerCase();
   return cats.some((c) => c.skills.some((s) => s.toLowerCase() === lc));
 }
@@ -116,8 +130,15 @@ export function addSkillToCategory(
  * Move `skill` (matched case-insensitively) into the category at `destIndex` —
  * one atomic op. It leaves whatever category currently holds it (which may empty
  * that category — empty-but-present) and joins the destination; a no-op when it
- * is already in the destination or when either endpoint can't be resolved. The
+ * is already in the destination or when the destination can't be resolved. The
  * flat SET is unchanged; only the grouping (and possibly the flat order) moves.
+ *
+ * `skill` not being found in ANY category is not an error (#791): it means the
+ * skill is currently in the UNGROUPED remainder rather than another category —
+ * the trailing chip row's "Move to" also calls this. There is nowhere to splice
+ * it out of, so it's simply added at the destination; the caller (`useEditableParse`)
+ * is responsible for dropping it from {@link SkillsOverride.ungrouped} so it isn't
+ * carried in both places.
  */
 export function moveSkillBetweenCategories(
   cats: readonly SkillCategory[],
@@ -136,7 +157,7 @@ export function moveSkillBetweenCategories(
     next[i].skills.splice(at, 1);
     break;
   }
-  if (display === undefined) return next;
+  display ??= skill; // not in any category — an ungrouped skill moving in.
   const dest = next[destIndex];
   if (!dest.skills.some((s) => s.toLowerCase() === lc)) dest.skills.push(display);
   return next;
@@ -154,6 +175,45 @@ export function removeSkillFromCategories(
     ...c,
     skills: c.skills.filter((s) => s.toLowerCase() !== lc),
   }));
+}
+
+// ── Ungrouped-remainder transforms (#791) ─────────────────────────────────────
+//
+// The remainder is the OTHER half of the grouping, so it gets the same treatment
+// as `categories`: pure array→array transforms here, not set logic inlined in the
+// hook. These two are what make the FLAT setters (`addSkill`/`removeSkill`)
+// categorisation-aware — with a non-empty snapshot the flat `removed`/`added`
+// are unusable (`computeEditedSkills` rejects them), so a flat write has to land
+// in the grouping instead.
+
+/** Add a (canonicalized) skill to the ungrouped remainder — the flat "add skill"
+ *  path on a résumé that already has a category. No-op for blank input, for a
+ *  dupe of an already-ungrouped skill, or for one a category already holds, all
+ *  case-insensitively: the same uniqueness {@link addSkillToCategory} enforces,
+ *  so the two entry points can't produce a doubled chip between them. */
+export function addUngroupedSkill(
+  cats: readonly SkillCategory[],
+  ungrouped: readonly string[],
+  skill: string,
+): string[] {
+  const next = [...ungrouped];
+  const canonical = canonicalizeSkill(skill);
+  if (!canonical || presentAnywhere(cats, canonical)) return next;
+  const lc = canonical.toLowerCase();
+  if (next.some((s) => s.toLowerCase() === lc)) return next;
+  next.push(canonical);
+  return next;
+}
+
+/** Drop `skill` (case-insensitive) from the ungrouped remainder — the sibling of
+ *  {@link removeSkillFromCategories}. A delete runs BOTH: a skill is in
+ *  `categories` XOR `ungrouped`, and no caller knows which without looking. */
+export function removeUngroupedSkill(
+  ungrouped: readonly string[] | undefined,
+  skill: string,
+): string[] {
+  const lc = skill.trim().toLowerCase();
+  return (ungrouped ?? []).filter((s) => s.toLowerCase() !== lc);
 }
 
 // ── Reducer (override → edited skills) ────────────────────────────────────────
@@ -199,17 +259,28 @@ function applyFlatEdits(
  * Apply a {@link SkillsOverride} to a parsed résumé's skills.
  *
  * When a category SNAPSHOT is present, it IS the edited grouping: the flat list
- * is its flattening, so the #473 invariant holds by construction.
+ * is `categories` flattened, UNION {@link SkillsOverride.ungrouped} — the skills
+ * that exist but aren't (yet) claimed by any category (#791). `ungrouped` is
+ * trusted as given rather than re-derived from the pristine parse on every call:
+ * `parsed.skills` minus `flatMap(categories)` is AMBIGUOUS on its own — it can't
+ * tell a skill that was never grouped (must stay visible) apart from one whose
+ * category was just deleted (must stay gone, per the delete confirmation's own
+ * promise). Only the caller (`useEditableParse`), which sees each op as it
+ * happens, can keep that distinction; this function just trusts the set it's
+ * handed.
  *
  * An all-deleted snapshot (`categories: []`) degrades the section to
- * uncategorised — `SkillsSection` then renders the flat `AddSkillInput` wired to
- * the flat `addSkill`/`removeSkill` setters. Those flat edits are composed ON TOP
- * of the emptied snapshot (an EMPTY base), NOT re-derived from the pristine parse:
- * re-deriving from `parsed.skills` would resurrect every skill the user just
- * deleted (#415). `categories: []` (present, empty — distinct from absent) is what
- * keeps this branch selected over the pristine flat branch below; the flat setters
- * therefore MUST preserve the `[]` snapshot through subsequent adds/removes so the
- * override never falls back into the pristine branch.
+ * uncategorised — `SkillsSection` then renders the flat `AddSkillInput`, and the
+ * flat `addSkill`/`removeSkill` setters emit `added`/`removed` again (they route
+ * into the grouping only while a NON-EMPTY snapshot exists, and `[]` is empty by
+ * definition — the distinction is load-bearing). Those flat edits are composed ON TOP
+ * of `ungrouped` (whatever survived the degrade), NOT re-derived from the
+ * pristine parse: re-deriving from `parsed.skills` would resurrect every skill a
+ * deleted category took with it (#415/#791). `categories: []` (present, empty —
+ * distinct from absent) is what keeps this branch selected over the pristine flat
+ * branch below; the flat setters therefore MUST preserve the `[]` snapshot (and
+ * `ungrouped`) through subsequent adds/removes so the override never falls back
+ * into the pristine branch.
  *
  * With no snapshot (`categories` ABSENT), the résumé is either uncategorised or
  * categorised-untouched: apply the flat `removed` / `added` to the pristine parse
@@ -226,25 +297,40 @@ export function computeEditedSkills(
 ): SkillsResult {
   if (override.categories) {
     const cats = override.categories;
-    // Degraded-to-uncategorised: flat edits accumulate on the emptied snapshot.
-    if (cats.length === 0) return { skills: applyFlatEdits([], override) };
-    // A non-empty snapshot is authoritative: the flat list is DERIVED from it, so
-    // honouring `removed`/`added` here would break the load-bearing invariant
-    // `skills === flatMap(categories)`. The editor never emits flat edits while a
-    // category survives (every categorised edit is snapshotted; the flat
-    // AddSkillInput renders only once the section has degraded to uncategorised),
-    // so those fields are structurally empty on this branch. Assert it in dev
-    // rather than silently drop a flat edit a future caller might wrongly attach.
+    const ungrouped = override.ungrouped ?? [];
+    // Degraded-to-uncategorised: flat edits accumulate on the ungrouped
+    // remainder, never the pristine parse (#415/#791).
+    if (cats.length === 0) return { skills: applyFlatEdits(ungrouped, override) };
+    // A non-empty snapshot's grouped members plus the tracked ungrouped
+    // remainder are authoritative. Honouring `removed`/`added` here too would
+    // let a flat edit drift the flat list out from under BOTH of those, so they
+    // stay structurally empty on this branch: every categorised edit (including
+    // one on an ungrouped skill) instead goes through `categories`/`ungrouped`.
+    // That is enforced in the SETTERS — `useEditableParse`'s flat
+    // `addSkill`/`removeSkill` route into `ungrouped`/`categories` whenever a
+    // non-empty snapshot exists — not by the flat AddSkillInput being unrendered,
+    // which never covered non-UI writers (`SkillTermGuidance` writes through the
+    // flat `addSkill`). Assert it in dev rather than silently drop a flat edit a
+    // future caller might wrongly attach.
     if (
       import.meta.env?.DEV &&
       (override.removed.length > 0 || override.added.length > 0)
     ) {
       throw new Error(
         "computeEditedSkills: flat removed/added with a non-empty category " +
-          "snapshot — unreachable by design (would violate skills === flatMap(categories))",
+          "snapshot — unreachable by design (would violate skills ⊇ flatMap(categories))",
       );
     }
-    return { skills: cats.flatMap((c) => c.skills), skillCategories: cats };
+    // Reuse applyFlatEdits as a dedup'ing union: `ungrouped` never overlaps a
+    // grouped member by construction (every op that grants one to a category
+    // also drops it from `ungrouped`), so this is a plain concat in practice.
+    return {
+      skills: applyFlatEdits(cats.flatMap((c) => c.skills), {
+        removed: [],
+        added: ungrouped,
+      }),
+      skillCategories: cats,
+    };
   }
 
   const kept = applyFlatEdits(parsed.skills, override);
