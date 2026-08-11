@@ -128,14 +128,15 @@ export function otherRecognizedNetworks(): string[] {
  * parser's `normalizeUrl`, so a scheme-less `github.com/x` gets `https://`),
  * then matches its hostname against {@link PROFILE_HOSTS}.
  *
- * - An UNKNOWN host is kept, never dropped: `{ network: <hostname>, kind:
- *   "other" }`.
+ * - An unknown *host* is kept, never dropped: `{ network: <hostname>, kind:
+ *   "other" }`. A dotless bare word (e.g. "Citizen") is not a host and is
+ *   rejected — see the dotted-hostname guard below (#790).
  * - A NON-PROFILE LinkedIn URL (feed / company / jobs / … — see
  *   `LINKEDIN_NONPROFILE_RE`) must NOT become a `social` profile; it is kept as
  *   an `other` link on the `linkedin.com` host.
  *
- * Returns `undefined` only when the input is empty / cannot be parsed into a
- * host — callers filter those out.
+ * Returns `undefined` when the input is empty / cannot be parsed into a host,
+ * or is a bare word with no dot in it — callers filter those out.
  */
 export function classifyProfile(rawUrl: string): ProfileLink | undefined {
   const url = normalizeUrl(rawUrl);
@@ -148,6 +149,9 @@ export function classifyProfile(rawUrl: string): ProfileLink | undefined {
     return undefined;
   }
   if (hostname.length === 0) return undefined;
+  // A bare word is not a host. Every real public host is dotted; a dotless
+  // hostname here means the user typed prose ("Citizen"), not a URL (#790).
+  if (!hostname.includes(".") && hostname !== "localhost") return undefined;
 
   for (const rule of PROFILE_HOSTS) {
     if (!rule.match.test(hostname)) continue;

@@ -30,7 +30,7 @@ import { ProfileLinkAdd } from "./ProfileLinkAdd.tsx";
 
 interface ContactExtraLinksProps {
   profiles: readonly ProfileOverride[];
-  onAdd: (url: string) => void;
+  onAdd: (url: string) => string | undefined;
   onEdit: (id: string, url: string) => void;
   onRemove: (id: string) => void;
 }

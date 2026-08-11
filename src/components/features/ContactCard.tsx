@@ -55,7 +55,7 @@ interface ContactCardProps {
    *  together with the add/edit/remove handlers to enable the variable-length
    *  links affordance in the editable card. */
   extraProfiles?: readonly ProfileOverride[];
-  onAddProfile?: (url: string) => void;
+  onAddProfile?: (url: string) => string | undefined;
   onEditProfile?: (id: string, url: string) => void;
   onRemoveProfile?: (id: string) => void;
 }

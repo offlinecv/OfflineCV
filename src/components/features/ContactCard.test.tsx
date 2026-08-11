@@ -140,7 +140,7 @@ describe("ContactCard", () => {
           kind: "other",
         },
       ],
-      onAddProfile: () => {},
+      onAddProfile: () => undefined,
       onEditProfile: () => {},
       onRemoveProfile: () => {},
     });

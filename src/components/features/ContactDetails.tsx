@@ -20,6 +20,7 @@
 
 import { formatLinkDisplay, type ContactDisplayField } from "../../lib/contact.ts";
 import { EditableField } from "@design-system";
+import { classifyProfile } from "../../lib/contact/profile-registry.ts";
 import {
   validateEmail,
   validatePhone,
@@ -83,7 +84,7 @@ interface ContactDetailsProps {
    *  `onAddProfile` is provided (editable card), the variable-length add/edit/
    *  delete affordance renders below the legacy links line. */
   extraProfiles?: readonly ProfileOverride[];
-  onAddProfile?: (url: string) => void;
+  onAddProfile?: (url: string) => string | undefined;
   onEditProfile?: (id: string, url: string) => void;
   onRemoveProfile?: (id: string) => void;
 }
@@ -288,10 +289,21 @@ function renderLink(
     // the guided network picker instead of a bare URL field, so a naive user
     // learns what counts and which networks are accepted (#335-followup).
     if (field.reason === "absent") {
+      // `onLegacyLinkChange` also serves the low-confidence CORRECTION path
+      // below, where an unparseable edit is intentionally kept (raw value,
+      // `kind: "other"`) so the correction isn't lost. That fallback is wrong
+      // for a first-time ADD: classify here so an unclassifiable value (e.g.
+      // "US Citizen") is rejected the same way `addProfile` rejects it,
+      // instead of being written into the slot as a bogus link (#790).
+      const addLink = (v: string): string | undefined => {
+        if (classifyProfile(v) === undefined) return undefined;
+        commitLink(v);
+        return v;
+      };
       return (
         <ProfileLinkAdd
           label={`Add a ${field.label.toLowerCase()}`}
-          onAdd={commitLink}
+          onAdd={addLink}
         />
       );
     }
