@@ -137,13 +137,29 @@ export type HeuristicParsedResume = Partial<ParsedResume> & {
   skills: string[];
   /**
    * Structured view of a CATEGORISED Skills section (#473) — additive over the
-   * flat `skills`. Two invariants hold whenever this is present:
+   * flat `skills`. Two invariants hold whenever this is present AT PARSE TIME:
    *   1. `skills` deep-equals `skillCategories.flatMap((c) => c.skills)` — the
    *      flat list is the union of the categories' members, in document order.
    *   2. Present ONLY when the section was actually categorised. A plain comma
    *      list has no categories: the field is ABSENT (undefined), never `[]`,
    *      never a synthetic `{ label: "", skills: [...] }` bucket. Absent means
    *      "the résumé did not say", not "there are no categories".
+   *
+   * Invariant 1 is a PARSE-TIME guarantee only (#791) — the EDIT lane may
+   * legitimately violate it. Creating the first category on a résumé that
+   * wasn't already categorised must not sweep the existing skills into it (nor
+   * invent a synthetic "Other" bucket for them), so `skills` can exceed
+   * `skillCategories.flatMap(...)` once a user has edited the grouping; the
+   * remainder is "ungrouped" — present in the flat list but claimed by no
+   * category. `partitionSkillCategories` (`ReconstructedSkills.tsx`) and the
+   * exported-PDF skills projection (`ats-resume-model.ts`) are the two
+   * consumers that compute and render/emit that remainder. Both subtract the
+   * categories' members from the flat list, but they match differently — the
+   * editor by exact string, the projection case-insensitively. That cannot
+   * diverge today because the edit lane only ever puts a string INTO a category
+   * that it took from the flat list (or added to both), so the two sides are
+   * the same string and agree under either match. See `skills-categories.ts`
+   * for how the edit lane tracks it.
    */
   skillCategories?: SkillCategory[];
   experience: ResumeExperience[];

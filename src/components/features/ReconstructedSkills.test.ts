@@ -92,12 +92,36 @@ describe("SkillsSection rendering", () => {
     expect(html).toContain("empty");
   });
 
-  it("renders a flat list with no category chrome when uncategorised", () => {
+  it("renders a flat list with no PER-CATEGORY chrome when uncategorised", () => {
     const html = render(["React", "TypeScript"]);
     expect(html).not.toContain("Rename");
-    expect(html).not.toContain("Add category");
     expect(html).toContain("React");
     expect(html).toContain("TypeScript");
+  });
+
+  // ── "+ Add category" reachability (#791) ────────────────────────────────────
+  // #476 shipped full category editing but left the control reachable only
+  // once a category already existed — a flat comma list (the common case) had
+  // no way to create the first one. These pin down the reachability fix and
+  // the #791 stated decision on the zero-skills edge case.
+
+  it("offers Add category on an uncategorised résumé that HAS skills — the reachability fix", () => {
+    const html = render(["React", "TypeScript"]);
+    expect(html).toContain("Add category");
+    // Both ways to start are visible together — grouping is optional, adding a
+    // skill still works even before any category exists.
+    expect(html).toContain("Add skill");
+  });
+
+  it("does NOT offer Add category on a résumé with NO skills at all (#791 stated decision)", () => {
+    const html = render([]);
+    expect(html).not.toContain("Add category");
+    expect(html).toContain("No skills detected");
+  });
+
+  it("still offers Add category (for a further category) once one already exists", () => {
+    const html = render(["React", "TypeScript", "Java", "Go"], cats);
+    expect(html).toContain("Add category");
   });
 
   it("gives an ungrouped chip a Move menu so it can be regrouped (issue 476 nit)", () => {

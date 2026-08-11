@@ -123,6 +123,56 @@ describe("#301 — multi-word skill does not split at the line-wrap boundary", (
 });
 
 /**
+ * Round-trip regression for #791 — a category that covers only a SUBSET of the
+ * flat skills list (the ungrouped remainder created by the first-category
+ * reachability fix) must not drop the remainder on export. Reuses the same
+ * fixture-read + override technique as the #301 block above: no new PDF.
+ */
+describe("#791 — a categorised-plus-ungrouped skills list survives export and re-parse", () => {
+  const CATEGORIES = [
+    { label: "Data Stores", skills: ["PostgreSQL", "Redis"] },
+    { label: "Backend", skills: ["Java", "Golang"] },
+  ];
+  const UNGROUPED = ["Excel", "PowerPoint", "Tableau"];
+  const ALL_SKILLS = [...CATEGORIES.flatMap((c) => c.skills), ...UNGROUPED];
+
+  let reparsedSkills: string[];
+
+  beforeAll(async () => {
+    const original = await runCascade(new Uint8Array(readFileSync(FIXTURE)));
+    const withMixedSkills: CascadeResult = {
+      ...original,
+      canonical: {
+        ...original.canonical,
+        fields: {
+          ...original.canonical.fields,
+          skills: ALL_SKILLS,
+          skillCategories: CATEGORIES,
+        },
+      },
+    };
+    const model = buildAtsResumeModel(
+      withMixedSkills,
+      scoreFor(withMixedSkills),
+    );
+    const bytes = await renderAtsResumePdf(model);
+    const reparsed = await runCascade(bytes);
+    reparsedSkills = reparsed.canonical.fields.skills ?? [];
+  }, 20000);
+
+  it("round-trips every skill — categorised AND ungrouped alike", () => {
+    const reparsedSet = new Set(reparsedSkills);
+    for (const skill of ALL_SKILLS) {
+      expect(reparsedSet.has(skill)).toBe(true);
+    }
+  });
+
+  it("loses none to the categorised branch's grouping logic (exact count)", () => {
+    expect(reparsedSkills.length).toBe(ALL_SKILLS.length);
+  });
+});
+
+/**
  * Regression for the `wrapSegmentsToLines` first-segment bug: `segments[0]`
  * used to be assigned to `current` before the loop and never measured, so an
  * overlong FIRST segment (a "Company · Location" org line whose company name

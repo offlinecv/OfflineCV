@@ -21,9 +21,17 @@
  * already met by the keyboard menu, so DnD is a pure pointer nicety where a
  * dependency in this bundle-conscious codebase isn't justified.
  *
+ * #476 left "+ Add category" reachable only once a category already existed —
+ * a flat comma-separated Skills section (the common case) had no way to create
+ * the first one. #791 makes it reachable whenever the section has any skill at
+ * all, and creating that first category leaves the existing skills UNGROUPED
+ * (a trailing chip row, via `partitionSkillCategories` below) rather than
+ * sweeping them in or inventing a synthetic "Other" bucket.
+ *
  * Display-only otherwise: it renders the edited grouping (`skillCategories`,
- * which for a categorised résumé the override snapshot keeps in lockstep with the
- * flat `skills` list) and routes every edit up to the lifted override model.
+ * which for a categorised résumé may cover only a SUBSET of the flat `skills`
+ * list once ungrouped skills exist — see `skills-categories.ts`) and routes
+ * every edit up to the lifted override model.
  */
 
 import { useState } from "react";
@@ -202,10 +210,20 @@ export function SkillsSection({
     setDragging(null);
   };
 
+  // #791 stated decision: on a résumé with NO skills at all, show only the
+  // NotDetected empty state (+ AddSkillInput below) — not "+ Add category" too.
+  // A category with nothing to put in it isn't useful, and the empty state
+  // shouldn't offer two competing ways to start. Any résumé with at least one
+  // skill gets the category control, whether or not it's grouped yet — that's
+  // the reachability #791 fixes: a flat comma list is the common case, and
+  // grouping it required a category to exist before "+ Add category" ever
+  // rendered.
+  const showEmptyState = skills.length === 0 && !categorised;
+
   return (
     <section className="flex flex-col gap-2">
       <SectionHeading>{heading ?? "Skills"}</SectionHeading>
-      {skills.length === 0 && !categorised ? (
+      {showEmptyState ? (
         <NotDetected what="skills" />
       ) : categorised ? (
         <div className="flex flex-col gap-1.5">
@@ -239,11 +257,14 @@ export function SkillsSection({
               onDragStartSkill={setDragging}
             />
           )}
-          <AddCategoryInput onAdd={onAddCategory} />
         </div>
       ) : (
         <SkillChipRow skills={skills} onRemoveSkill={onRemoveSkill} />
       )}
+      {/* Reachable whenever there's at least one skill (#791) — both alongside
+       *  the flat chip row (creating the FIRST category) and inside the
+       *  categorised view (adding another one). */}
+      {!showEmptyState && <AddCategoryInput onAdd={onAddCategory} />}
       {!categorised && <AddSkillInput skills={skills} onAdd={onAddSkill} />}
       <div className="sr-only" aria-live="polite" role="status">
         {announcement}

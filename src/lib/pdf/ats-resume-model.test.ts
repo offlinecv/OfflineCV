@@ -608,4 +608,51 @@ describe("buildAtsResumeModel", () => {
     const skills = model.sections.find((s) => s.heading === "Skills")!;
     expect(skills.entries.map((e) => e.fields?.skillCategory)).toEqual(["Backend"]);
   });
+
+  // ── Ungrouped remainder (#791) ───────────────────────────────────────────────
+  // `skillCategories` may cover only a SUBSET of the flat `skills` list once a
+  // user has created the first category on a résumé that wasn't already fully
+  // grouped — see the `types.ts` docblock and `skills-categories.ts`.
+
+  it("appends the remainder as one trailing, uncategorised entry after the categories", () => {
+    const result = makeResult({
+      skills: ["PostgreSQL", "Redis", "Excel", "PowerPoint"],
+      skillCategories: [{ label: "Data Stores", skills: ["PostgreSQL", "Redis"] }],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const skills = model.sections.find((s) => s.heading === "Skills")!;
+    expect(skills.entries).toHaveLength(2); // 1 category + 1 trailing remainder.
+    expect(skills.entries[0].fields?.skillCategory).toBe("Data Stores");
+    expect(skills.entries[1].fields?.skillCategory).toBeUndefined();
+    expect(skills.entries[1].headerLine).toBe("Excel · PowerPoint");
+    // The union across every entry equals the flat list — nothing lost or
+    // duplicated.
+    const exported = skills.entries.flatMap((e) => e.fields?.skills ?? []);
+    expect(new Set(exported)).toEqual(new Set(result.canonical.fields.skills));
+  });
+
+  it("a category snapshot with no remainder is unchanged — no trailing entry (byte-identical, #791 AC)", () => {
+    const result = makeResult({
+      skills: ["PostgreSQL", "Redis", "Java"],
+      skillCategories: [
+        { label: "Data Stores", skills: ["PostgreSQL", "Redis"] },
+        { label: "Backend", skills: ["Java"] },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const skills = model.sections.find((s) => s.heading === "Skills")!;
+    expect(skills.entries).toHaveLength(2);
+    expect(skills.entries.every((e) => e.fields?.skillCategory !== undefined)).toBe(
+      true,
+    );
+  });
+
+  it("a fully uncategorised résumé still exports the single flat entry (byte-identical, #791 AC)", () => {
+    const result = makeResult({ skills: ["React", "TypeScript", "Node.js"] });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const skills = model.sections.find((s) => s.heading === "Skills")!;
+    expect(skills.entries).toHaveLength(1);
+    expect(skills.entries[0].headerLine).toBe("React · TypeScript · Node.js");
+    expect(skills.entries[0].fields?.skillCategory).toBeUndefined();
+  });
 });
