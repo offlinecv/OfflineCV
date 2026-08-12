@@ -168,4 +168,106 @@ describe("cleanRewriteLine", () => {
       ).toBe("Led migration of the **order-processing** pipeline.");
     });
   });
+
+  // ── A list marker must not shield the leading bold (#781) ──────────────────
+  //
+  // `LEADING_BOLD_WORD_PATTERN` is anchored at `^`, and the marker strip used
+  // to run after it, so anything the model put in front of the bold hid it.
+  // This shipped: 19 of 24 Gemma `terse` bullets in the 2026-08-07 eval reports
+  // carry literal `**` at `perBullet[].text` — post-`cleanRewriteLine` output,
+  // i.e. what a downloaded ATS PDF renders as asterisks. That renderer draws
+  // real bold from its own type scale and never interprets markdown, so a
+  // surviving `**` is always garbage.
+  //
+  // Every case below returns the marker-shielded input unchanged against the
+  // pre-fix implementation.
+  describe("list marker in front of a leading bold (#781)", () => {
+    it.each([
+      ["- **Led** the migration of billing.", "dash"],
+      ["* **Led** the migration of billing.", "asterisk"],
+      ["• **Led** the migration of billing.", "bullet glyph"],
+      ["1. **Led** the migration of billing.", "numbered"],
+      ["1) **Led** the migration of billing.", "paren-numbered"],
+      ["-**Led** the migration of billing.", "tight dash, no space"],
+    ])("strips both, leaving no markdown: %s (%s)", (input) => {
+      expect(cleanRewriteLine(input)).toBe("Led the migration of billing.");
+    });
+
+    it("leaves no literal asterisks for any marker shape", () => {
+      // The property the ATS PDF actually depends on, asserted directly rather
+      // than inferred from the equality cases above.
+      for (const marker of ["-", "*", "•", "1.", "1)"]) {
+        expect(cleanRewriteLine(`${marker} **Shipped** the thing.`)).not.toContain(
+          "*",
+        );
+      }
+    });
+
+    it("still reads `*Foo.*` as italics, not as a bullet glyph", () => {
+      // The ordering constraint that made this a loop rather than a swap: the
+      // emphasis strip has to keep beating the marker strip for this shape, or
+      // the leading `*` is eaten as a marker and the trailing one survives.
+      expect(cleanRewriteLine("*Foo.*")).toBe("Foo.");
+      expect(cleanRewriteLine("* Foo.*")).toBe("Foo.");
+    });
+
+    // ── The complementary hazard: a strip OVER-firing on what it uncovered ──
+    //
+    // Every case above shares one body, so they only prove a marker no longer
+    // *shields* the bold. They are blind to a strip mis-firing on the text the
+    // previous pass exposed — which is exactly how the loop first shipped
+    // `- 3.5x revenue growth` → `5x revenue growth`: pass 1 removed `- `, and
+    // pass 2 read the uncovered `3.` as a numbered marker because that branch
+    // allowed zero-or-more trailing space. Silent numeric corruption, on the
+    // path that renders the ATS PDF (#781 review).
+    it.each([
+      ["- 3.5x revenue growth in Q3.", "3.5x revenue growth in Q3."],
+      ["- 2.5M users onboarded.", "2.5M users onboarded."],
+      ["* 1.5x faster builds.", "1.5x faster builds."],
+      ["- 10.5 million records migrated.", "10.5 million records migrated."],
+      ["• 4.2% conversion lift.", "4.2% conversion lift."],
+      // Not marker-prefixed at all — the same branch mangled this on its own.
+      ["3.5x revenue growth.", "3.5x revenue growth."],
+    ])("does not eat a decimal a marker strip uncovers: %s", (input, want) => {
+      expect(cleanRewriteLine(input)).toBe(want);
+    });
+
+    it("preserves every digit of a leading decimal, for any marker", () => {
+      // The number-preservation counterpart to the `not.toContain("*")`
+      // property above. Asserted as a property so a new marker branch has to
+      // satisfy it too, not just the six literals enumerated here.
+      for (const marker of ["-", "*", "•", "1.", "1)"]) {
+        expect(cleanRewriteLine(`${marker} 3.5x revenue growth.`)).toContain(
+          "3.5",
+        );
+      }
+    });
+
+    it("still strips a genuine numbered marker", () => {
+      // The `\s+` requirement must not cost the case the marker strip exists
+      // for. Nothing in the corpus writes a tight `1.Foo`.
+      expect(cleanRewriteLine("1. Shipped the thing.")).toBe(
+        "Shipped the thing.",
+      );
+      expect(cleanRewriteLine("1) Shipped the thing.")).toBe(
+        "Shipped the thing.",
+      );
+    });
+
+    it("converges on stacked markers instead of truncating", () => {
+      // The loop runs to a fixed point rather than a fixed pass count. An
+      // earlier revision capped it at 4 and gave up here, leaving the literal
+      // `**` this function exists to remove.
+      expect(cleanRewriteLine("1. - • - **Led** stuff.")).toBe("Led stuff.");
+    });
+
+    it("leaves mid-line bold alone even when a marker is stripped", () => {
+      // Deliberate, and the one shape this fix does not clear — see the
+      // fixed-point comment in post-process.ts. 18 of the 19 affected eval
+      // bullets carried a leading bold only, so this is the rare tail.
+      expect(
+        cleanRewriteLine("- **Developed** and **implemented** a design system."),
+      ).toBe("Developed and **implemented** a design system.");
+    });
+  });
 });
