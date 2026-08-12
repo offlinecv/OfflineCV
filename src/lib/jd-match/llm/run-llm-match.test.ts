@@ -38,7 +38,11 @@ vi.mock("./judge-evidence.ts", async (importOriginal) => {
 });
 
 import { runLlmMatch } from "./run-llm-match.ts";
-import { loadEngine } from "../../webllm/web-llm.ts";
+import {
+  acquireInference,
+  loadEngine,
+  releaseInference,
+} from "../../webllm/web-llm.ts";
 import {
   extractRequirements,
   RequirementExtractionError,
@@ -53,6 +57,8 @@ import type { HeuristicParsedResume } from "../../heuristics/types.ts";
 const loadEngineMock = vi.mocked(loadEngine);
 const extractMock = vi.mocked(extractRequirements);
 const judgeMock = vi.mocked(judgeEvidence);
+const acquireMock = vi.mocked(acquireInference);
+const releaseMock = vi.mocked(releaseInference);
 
 const MODEL = "test-model";
 const JD_TEXT =
@@ -150,6 +156,147 @@ describe("runLlmMatch — happy path", () => {
       engine,
       MODEL,
     );
+  });
+
+  it("fires onInferenceStart exactly once, AFTER loadEngine RESOLVES, BEFORE extractRequirements (#203)", async () => {
+    // The load→infer transition is what lets a state-machine consumer
+    // distinguish `loading` from `running` without duplicating the
+    // orchestrator. The trace has to record the RESOLUTION of loadEngine's
+    // promise (not its call time), otherwise a regression to
+    //
+    //   const p = loadEngine(modelId, onProgress);
+    //   onInferenceStart?.();
+    //   const engine = await p;
+    //
+    // would still produce the "correct" ordering in the trace and pass. A
+    // deferred promise + a `.then` marker gives us the actual resolution
+    // event; the deferred is resolved AFTER the runLlmMatch call so an
+    // early `onInferenceStart` would land before "loadEngine.resolve" in
+    // the trace and fail the assertion.
+    const trace: string[] = [];
+    let resolveEngine!: (e: WebLlmEngine) => void;
+    const enginePromise = new Promise<WebLlmEngine>((res) => {
+      resolveEngine = res;
+    });
+    // Marker fires on the ACTUAL resolution of the promise. Chained here
+    // rather than inside `mockImplementation`'s body — that body executes
+    // synchronously on call and would record call time.
+    void enginePromise.then(() => trace.push("loadEngine.resolve"));
+    loadEngineMock.mockReturnValue(enginePromise);
+
+    extractMock.mockImplementation(async () => {
+      trace.push("extractRequirements.call");
+      return [req("req-1", "TypeScript")];
+    });
+    judgeMock.mockResolvedValue([verdict("req-1", "met")]);
+
+    const onInferenceStart = vi.fn(() => trace.push("onInferenceStart"));
+    const runPromise = runLlmMatch(
+      JD_TEXT,
+      parsed(),
+      MODEL,
+      vi.fn(),
+      onInferenceStart,
+    );
+    // Resolve the engine AFTER runLlmMatch is under way. A regression that
+    // fires `onInferenceStart` before awaiting the engine promise would
+    // land it in the trace here (before "loadEngine.resolve").
+    resolveEngine(engine);
+    await runPromise;
+
+    expect(onInferenceStart).toHaveBeenCalledOnce();
+    expect(trace).toEqual([
+      "loadEngine.resolve",
+      "onInferenceStart",
+      "extractRequirements.call",
+    ]);
+  });
+
+  it("does NOT fire onInferenceStart on the fallback branch (engine load failed)", async () => {
+    // The caller stays in `loading` all the way to the fallback keyword
+    // `ready`; a spurious `running` transition would leave the UI briefly
+    // in an inference state that never actually started.
+    loadEngineMock.mockRejectedValue(new Error("WebGPU unavailable"));
+
+    const onInferenceStart = vi.fn();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      parsed(),
+      MODEL,
+      vi.fn(),
+      onInferenceStart,
+    );
+
+    expect(result.path).toBe("keyword");
+    expect(onInferenceStart).not.toHaveBeenCalled();
+  });
+});
+
+describe("runLlmMatch — #148 inference guard brackets the WHOLE load-and-use sequence", () => {
+  it("acquires BEFORE awaiting loadEngine, and releases exactly once", async () => {
+    // `web-llm.ts` is explicit that acquiring AFTER the await is too late:
+    // `await` yields even on the already-loaded fast path, and a concurrent
+    // cross-model load's `evictAllExcept` can see `inflightInferenceCount`
+    // at 0 in that gap and `.unload()` the engine mid-use. So the ordering
+    // — not merely the presence of the call — is the contract. A trace is
+    // what pins ordering; a `toHaveBeenCalled` pair would pass for the
+    // broken "load first, acquire second" shape too.
+    const trace: string[] = [];
+    acquireMock.mockImplementation(() => {
+      trace.push("acquire");
+    });
+    releaseMock.mockImplementation(() => {
+      trace.push("release");
+    });
+    loadEngineMock.mockImplementation(() => {
+      trace.push("loadEngine");
+      return Promise.resolve(engine);
+    });
+    extractMock.mockImplementation(async () => {
+      trace.push("extractRequirements");
+      return [req("req-1", "TypeScript")];
+    });
+    judgeMock.mockImplementation(async () => {
+      trace.push("judgeEvidence");
+      return [verdict("req-1", "met")];
+    });
+
+    await runLlmMatch(JD_TEXT, parsed(), MODEL, vi.fn());
+
+    expect(trace).toEqual([
+      "acquire",
+      "loadEngine",
+      "extractRequirements",
+      "judgeEvidence",
+      "release",
+    ]);
+    expect(acquireMock).toHaveBeenCalledWith(MODEL);
+    expect(releaseMock).toHaveBeenCalledWith(MODEL);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases on the engine-load failure path (the keyword fallback)", async () => {
+    // A leaked acquire would pin `inflightInferenceCount` above zero for the
+    // page's lifetime, parking every later cross-model `.unload()` forever —
+    // so the release has to survive the branch that degrades to keyword.
+    loadEngineMock.mockRejectedValue(new Error("WebGPU unavailable"));
+
+    const result = await runLlmMatch(JD_TEXT, parsed(), MODEL, vi.fn());
+
+    expect(result.path).toBe("keyword");
+    expect(acquireMock).toHaveBeenCalledTimes(1);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases on the empty-extraction degrade path", async () => {
+    // The third exit from the try block — an early `return` rather than a
+    // throw, which is exactly the shape a `finally` is needed to cover.
+    extractMock.mockResolvedValue([]);
+
+    const result = await runLlmMatch(JD_TEXT, parsed(), MODEL, vi.fn());
+
+    expect(result.path).toBe("keyword");
+    expect(releaseMock).toHaveBeenCalledTimes(1);
   });
 });
 
