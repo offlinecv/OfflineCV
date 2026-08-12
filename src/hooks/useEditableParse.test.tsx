@@ -133,6 +133,110 @@ describe("useEditableParse — pruneEmptyAddedEntries (#379)", () => {
   });
 });
 
+describe("useEditableParse — added-role date slots (#672)", () => {
+  it("re-anchors an end date typed into a role that has no start date", () => {
+    // An added entry never reaches the override map, so `setEntryField` carries
+    // the one-anchor rule itself. This is the path a user hits FIRST: "+ Add
+    // role", then only the End cell — the role exported with its year in
+    // `start_date` and re-parsed as a start date.
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "end_date", "2022"));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2022",
+      end_date: "",
+    });
+  });
+
+  it("leaves a two-sided pair alone", () => {
+    // The control: normalising on every date write must not disturb the pair a
+    // user fills in the usual order.
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "start_date", "2019"));
+    act(() => api.setEntryField(id, "end_date", "2022"));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2019",
+      end_date: "2022",
+    });
+  });
+
+  it("keeps the end date when the start date is typed second (#814)", () => {
+    // The same End-before-Start ordering as the parsed-role path, on the surface
+    // that has no override map behind it. The re-anchored 2022 has to move back
+    // into the End cell when the real start date lands, or the value the user
+    // typed first is destroyed by the value they type second.
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "end_date", "2022"));
+    act(() => api.setEntryField(id, "start_date", "2019"));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2019",
+      end_date: "2022",
+    });
+  });
+
+  it("survives an untouched blur on the Start cell (#814)", () => {
+    // `EditableField` commits on blur whether or not the draft changed, so the
+    // Start cell re-commits the re-anchored value. That must not become a
+    // two-sided `2022 – 2022`, and it must not disarm the restore either.
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "end_date", "2022"));
+    act(() => api.setEntryField(id, "start_date", "2022"));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2022",
+      end_date: "",
+    });
+
+    act(() => api.setEntryField(id, "start_date", "2019"));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2019",
+      end_date: "2022",
+    });
+  });
+
+  it("does not invent an end date from a corrected start date (#814)", () => {
+    // Control: nothing was relocated, so the second Start commit is an overwrite.
+    let id = "";
+    act(() => {
+      id = api.addEntry("experience");
+    });
+
+    act(() => api.setEntryField(id, "start_date", "2022"));
+    act(() => api.setEntryField(id, "start_date", "2019"));
+    expect(api.addedEntries[0]).toMatchObject({
+      start_date: "2019",
+      end_date: "",
+    });
+  });
+
+  it("does not normalise a section that has no date pair", () => {
+    // Education's lone date is a GRADUATION date and belongs in `end_date`
+    // (#97) — the rule is experience-only, and `setEntryField` gates on section.
+    let id = "";
+    act(() => {
+      id = api.addEntry("education");
+    });
+
+    act(() => api.setEntryField(id, "end_date", "2022"));
+    expect(api.addedEntries[0]).toMatchObject({ end_date: "2022" });
+    expect(api.addedEntries[0].start_date).toBeUndefined();
+  });
+});
+
 describe("useEditableParse — Skills category edits (#476)", () => {
   const cats: SkillCategory[] = [
     { label: "Frontend", skills: ["React", "TypeScript"] },

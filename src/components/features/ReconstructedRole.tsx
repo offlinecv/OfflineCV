@@ -29,6 +29,10 @@ import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { roleLabel } from "../../lib/score/group-bullets.ts";
 import { EditableField } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
+import {
+  normalizeExperienceDates,
+  formatExperienceDateRange,
+} from "../../lib/edit/experience-dates.ts";
 import type {
   AddedBulletRef,
   ExperienceFieldOverrides,
@@ -55,8 +59,10 @@ interface RoleHeaderProps {
   group: BulletGroup;
   /** Present only when the role is editable (experience has a parsed index). */
   overrides?: ExperienceFieldOverrides;
+  /** `is_current` is excluded by type: it is derived from the date pair by
+   *  `edit/experience-dates.ts`, so no cell may commit it directly (#672). */
   onFieldChange?: (
-    field: keyof ExperienceFieldOverrides,
+    field: Exclude<keyof ExperienceFieldOverrides, "is_current">,
     value: string,
   ) => void;
 }
@@ -101,15 +107,10 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
     const location = exp.location || undefined;
     const team = exp.team || undefined;
 
-    // Build date segment.
-    let dates: string | undefined;
-    const start = exp.start_date || undefined;
-    const end = exp.is_current
-      ? "Present"
-      : (exp.end_date || undefined);
-    if (start && end) dates = `${start} – ${end}`;
-    else if (start) dates = start;
-    else if (end) dates = end;
+    // Build date segment. Through the #672 rule, so a role whose only date is an
+    // end date reads the same here, in the edit card, and in the exported PDF.
+    const dateFields = normalizeExperienceDates(exp);
+    const dates = formatExperienceDateRange(dateFields) || undefined;
 
     // Location rides inline with the company, comma-joined ("Company, City, ST");
     // the team/department (when present) trails after a "·", mirroring the
@@ -150,13 +151,16 @@ function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
     ov.location !== undefined ? ov.location : exp.location,
   );
   const team = toDisplay(ov.team !== undefined ? ov.team : exp.team);
-  const startDate = toDisplay(
-    ov.start_date !== undefined ? ov.start_date : exp.start_date,
-  );
-  const endDate =
-    exp.is_current && ov.end_date === undefined
-      ? "Present"
-      : toDisplay(ov.end_date !== undefined ? ov.end_date : exp.end_date);
+  // Dates read directly from the overrides or parsed fields. The normalization
+  // is performed on commit (in useEditableParse / setExperienceField) rather than
+  // on render, so the card always displays the normalized state and subsequent
+  // edits resolve from it. Undo and snapshots restore the normalized dates rather
+  // than raw keystrokes, ensuring consistency across all edit phases.
+  const startVal = ov.start_date !== undefined ? ov.start_date : exp.start_date;
+  const endVal = ov.end_date !== undefined ? ov.end_date : exp.end_date;
+  const isCurrent = ov.is_current !== undefined ? ov.is_current : exp.is_current;
+  const startDate = toDisplay(startVal);
+  const endDate = isCurrent ? "Present" : toDisplay(endVal);
 
   return (
     <div className="flex min-w-0 grow flex-col gap-0.5">
@@ -246,9 +250,10 @@ interface RoleEntryProps {
   experienceIndex: number | null;
   /** Editable overrides for this role's header fields (from useEditableParse). */
   overrides?: ExperienceFieldOverrides;
-  /** Called when the user commits a field edit. */
+  /** Called when the user commits a field edit. `is_current` is excluded by
+   *  type — see `RoleHeaderProps`. */
   onFieldChange?: (
-    field: keyof ExperienceFieldOverrides,
+    field: Exclude<keyof ExperienceFieldOverrides, "is_current">,
     value: string,
   ) => void;
   /** Commit a bullet edit, keyed by BulletObservation.id (#82, #648). The
