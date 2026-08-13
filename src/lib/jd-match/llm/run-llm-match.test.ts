@@ -149,12 +149,21 @@ describe("runLlmMatch — happy path", () => {
     await runLlmMatch(JD_TEXT, resume, MODEL, onProgress);
 
     expect(loadEngineMock).toHaveBeenCalledExactlyOnceWith(MODEL, onProgress);
-    expect(extractMock).toHaveBeenCalledExactlyOnceWith(JD_TEXT, engine);
+    // Trailing `undefined` signal argument (#803): the orchestrator always
+    // passes its own `signal` parameter through even when the caller didn't
+    // supply one, so the collaborator's arg tuple carries a positional
+    // `undefined` we have to match here.
+    expect(extractMock).toHaveBeenCalledExactlyOnceWith(
+      JD_TEXT,
+      engine,
+      undefined,
+    );
     expect(judgeMock).toHaveBeenCalledExactlyOnceWith(
       requirements,
       resume,
       engine,
       MODEL,
+      undefined,
     );
   });
 
@@ -359,5 +368,306 @@ describe("runLlmMatch — fallback discipline (every failure → keyword, never 
     expect(result.terms.length).toBeGreaterThan(0);
     expect(result.terms).toEqual(fresh.terms);
     expect(result.nounsDropped).toBe(fresh.nounsDropped);
+  });
+});
+
+/**
+ * Cancellation tests (#803). Each test targets ONE boundary from the map in
+ * `run-llm-match.ts`'s docblock and would go RED if that specific abort check
+ * is removed — pinning them separately, rather than one all-or-nothing test,
+ * is what makes a regression at any single boundary a red bar.
+ */
+describe("runLlmMatch — cancellation (#803)", () => {
+  it("legacy 4-arg call still works (backward compatibility)", async () => {
+    // Existing callers that pre-date #803 pass no `signal`. The orchestrator
+    // must not require one and must behave exactly as before when absent.
+    extractMock.mockResolvedValue([req("req-1", "TypeScript")]);
+    judgeMock.mockResolvedValue([verdict("req-1", "met")]);
+
+    const result = await runLlmMatch(JD_TEXT, parsed(), MODEL, vi.fn());
+
+    expect(result.path).toBe("semantic");
+    expect(loadEngineMock).toHaveBeenCalledOnce();
+    expect(extractMock).toHaveBeenCalledOnce();
+    expect(judgeMock).toHaveBeenCalledOnce();
+  });
+
+  it("legacy 5-arg call (onInferenceStart, no signal) still works", async () => {
+    // The other back-compat shape: consumers that took the #203 onInferenceStart
+    // upgrade but haven't wired an AbortController yet.
+    extractMock.mockResolvedValue([req("req-1", "TypeScript")]);
+    judgeMock.mockResolvedValue([verdict("req-1", "met")]);
+    const onInferenceStart = vi.fn();
+
+    const result = await runLlmMatch(
+      JD_TEXT,
+      parsed(),
+      MODEL,
+      vi.fn(),
+      onInferenceStart,
+    );
+
+    expect(result.path).toBe("semantic");
+    expect(onInferenceStart).toHaveBeenCalledOnce();
+  });
+
+  it("boundary 1: an already-aborted signal skips the pipeline entirely — no acquire, no load, no extract, no judge", async () => {
+    // The pre-acquire short-circuit is the ONLY branch that must also skip
+    // the release, because it didn't acquire. Testing acquire === 0 AND
+    // release === 0 together is what pins the paired exit. A regression that
+    // moved the abort check inside the try block would leak an unbalanced
+    // release call.
+    const controller = new AbortController();
+    controller.abort();
+
+    const resume = parsed();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      resume,
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    expect(result).toEqual(freshKeywordResult(resume));
+    expect(acquireMock).not.toHaveBeenCalled();
+    expect(releaseMock).not.toHaveBeenCalled();
+    expect(loadEngineMock).not.toHaveBeenCalled();
+    expect(extractMock).not.toHaveBeenCalled();
+    expect(judgeMock).not.toHaveBeenCalled();
+    // Not logged as a failure — cancellation is expected control flow.
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("boundary 2: abort while loadEngine is in flight → no onInferenceStart, no extract, no judge", async () => {
+    // loadEngine has no signal parameter (we can't safely cancel it — it's
+    // cross-consumer shared) so the abort must be detected on RESUMPTION
+    // after the await. onInferenceStart NOT firing is the observable that
+    // proves the check is post-await, not post-callback.
+    const controller = new AbortController();
+    let resolveEngine!: (e: WebLlmEngine) => void;
+    loadEngineMock.mockReturnValue(
+      new Promise<WebLlmEngine>((res) => {
+        resolveEngine = res;
+      }),
+    );
+    const onInferenceStart = vi.fn();
+
+    const runPromise = runLlmMatch(
+      JD_TEXT,
+      parsed(),
+      MODEL,
+      vi.fn(),
+      onInferenceStart,
+      controller.signal,
+    );
+    // Abort DURING the loadEngine await, then let the engine resolve.
+    controller.abort();
+    resolveEngine({ chat: { completions: { create: vi.fn() } } });
+    const result = await runPromise;
+
+    expect(result.path).toBe("keyword");
+    expect(onInferenceStart).not.toHaveBeenCalled();
+    expect(extractMock).not.toHaveBeenCalled();
+    expect(judgeMock).not.toHaveBeenCalled();
+    // Acquire/release still balanced — the abort landed INSIDE the try block.
+    expect(acquireMock).toHaveBeenCalledOnce();
+    expect(releaseMock).toHaveBeenCalledOnce();
+  });
+
+  it("boundary 5: abort between extract and judge → judge is never called", async () => {
+    // The check between the two LLM calls guards the empty gap where an
+    // orchestrator without a signal would proceed straight to judgeEvidence.
+    const controller = new AbortController();
+    extractMock.mockImplementation(async () => {
+      controller.abort();
+      return [req("req-1", "TypeScript")];
+    });
+
+    const resume = parsed();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      resume,
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    expect(result).toEqual(freshKeywordResult(resume));
+    expect(judgeMock).not.toHaveBeenCalled();
+    expect(releaseMock).toHaveBeenCalledOnce();
+  });
+
+  it("boundary 7: abort mid-judge → judge's partial result is DISCARDED in favor of keyword", async () => {
+    // `judgeEvidence` never throws (contract): on abort it returns a partial
+    // reconciled result with abandoned reqs defaulted to `missing`. That
+    // shape must NEVER reach the caller — showing a semantic verdict list
+    // for a superseded run is exactly the failure mode #803 is closing.
+    const controller = new AbortController();
+    const requirements = [req("req-1", "TS"), req("req-2", "Go")];
+    extractMock.mockResolvedValue(requirements);
+    judgeMock.mockImplementation(async () => {
+      // Simulate the internal per-batch-loop bailing on abort.
+      controller.abort();
+      return [
+        {
+          requirement: requirements[0]!,
+          status: "missing",
+          reason: "No matching evidence found in the résumé.",
+        },
+        {
+          requirement: requirements[1]!,
+          status: "missing",
+          reason: "No matching evidence found in the résumé.",
+        },
+      ];
+    });
+
+    const resume = parsed();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      resume,
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    // Must be keyword, NOT the partial-all-missing semantic result.
+    expect(result).toEqual(freshKeywordResult(resume));
+  });
+
+  it("abort thrown from a signal-aware extractRequirements → keyword fallback, no warn", async () => {
+    // Even in the future where `extractRequirements` could throw an AbortError
+    // in-band (or a signal-aware `chat.completions.create` does), the
+    // orchestrator's catch must map AbortError → keyword WITHOUT logging.
+    //
+    // The signal fires DURING extract, not before: an already-aborted signal
+    // is short-circuited by boundary 1 before `acquireInference`, so the catch
+    // under test is never entered and the assertions pass vacuously.
+    const controller = new AbortController();
+    loadEngineMock.mockResolvedValue(engine);
+    extractMock.mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(
+        new DOMException("Semantic run aborted.", "AbortError"),
+      );
+    });
+
+    const resume = parsed();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      resume,
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    expect(extractMock).toHaveBeenCalledOnce();
+    expect(result).toEqual(freshKeywordResult(resume));
+    // Distinguishes cancellation from a real semantic failure — the
+    // RequirementExtractionError test in the fallback-discipline block
+    // asserts warn IS called; here it must NOT.
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("an AbortError-shaped engine error on an UNFIRED signal still warns and degrades", async () => {
+    // The `signal?.aborted` half of the catch's cancellation branch.
+    // `isAbortError` is a pure shape check, so without it any error the engine
+    // happens to name "AbortError" — a future per-request timeout, a
+    // device-lost surfaced this way — becomes indistinguishable from a user
+    // supersession: degraded to keyword with the warn deliberately skipped and
+    // zero diagnostic trail for a failure we did not cause.
+    const controller = new AbortController(); // never fired
+    loadEngineMock.mockResolvedValue(engine);
+    extractMock.mockRejectedValue(
+      new DOMException("engine request timed out", "AbortError"),
+    );
+
+    const resume = parsed();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      resume,
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    // Still degrades — the never-rejects contract is unconditional.
+    expect(result).toEqual(freshKeywordResult(resume));
+    // But it is a FAILURE, so the diagnostic must survive.
+    expect(console.warn).toHaveBeenCalledWith(
+      "[run-llm-match] semantic path failed; falling back to keyword:",
+      expect.objectContaining({ name: "AbortError" }),
+    );
+  });
+
+  it("aborted runLlmMatch RESOLVES; never rejects, never leaks the AbortError", async () => {
+    // The never-rejects contract MUST hold for cancellation too — a rejection
+    // here would bypass the useJdMatch hook's `.then(result => setSlot(ready))`
+    // and land in `.catch`, where the code would log "semantic path failed
+    // unexpectedly" over a cancellation that was our own initiative.
+    const controller = new AbortController();
+    controller.abort();
+
+    // Deliberately no unhandled-rejection oracle — vitest already fails a
+    // test on unhandled promise rejection in the same tick. This is the
+    // await that would surface it.
+    await expect(
+      runLlmMatch(
+        JD_TEXT,
+        parsed(),
+        MODEL,
+        vi.fn(),
+        undefined,
+        controller.signal,
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  it("cancellation is NOT logged as a semantic failure", async () => {
+    // The distinguishing test for logging discipline — a real failure logs a
+    // console.warn (see the "extraction hard-fails" test above), a
+    // cancellation must not. Same abort as boundary-1 test but the assertion
+    // focus is the log oracle.
+    const controller = new AbortController();
+    controller.abort();
+
+    await runLlmMatch(
+      JD_TEXT,
+      parsed(),
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("real (non-abort) semantic failure with an unfired signal still degrades to keyword AND still warns", async () => {
+    // Belt-and-suspenders: verify the abort-vs-failure branching didn't
+    // accidentally silence a genuine RequirementExtractionError.
+    const controller = new AbortController(); // NOT aborted
+    extractMock.mockRejectedValue(
+      new RequirementExtractionError("no parseable JSON array"),
+    );
+
+    const resume = parsed();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      resume,
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    expect(result).toEqual(freshKeywordResult(resume));
+    expect(console.warn).toHaveBeenCalledOnce();
   });
 });
