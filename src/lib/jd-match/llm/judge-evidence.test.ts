@@ -177,3 +177,117 @@ describe("judgeEvidence", () => {
     expect(msg.temperature).toBe(0);
   });
 });
+
+describe("judgeEvidence — cancellation (#803)", () => {
+  it("bounded batches: 24 reqs (3 batches of 8) → 1 batch runs then abort halts scheduling", async () => {
+    // The load-bearing #803 assertion. Without the per-batch signal check,
+    // an abandoned run continues through EVERY remaining batch on the shared
+    // engine — that is the exact runaway behavior #803 exists to close. 24
+    // reqs = 3 batches; abort in the first batch's create() must cap the
+    // total at 1 call, not 3.
+    const reqs = Array.from({ length: 24 }, (_, i) => req(`req-${i + 1}`));
+    const controller = new AbortController();
+    const create = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return {
+        choices: [
+          {
+            message: {
+              content: JSON.stringify(
+                reqs.slice(0, 8).map((r) => ({
+                  id: r.id,
+                  status: "met",
+                  reason: "ok",
+                })),
+              ),
+            },
+          },
+        ],
+      };
+    });
+    const engine: WebLlmEngine = { chat: { completions: { create } } };
+
+    const verdicts = await judgeEvidence(
+      reqs,
+      parsed(),
+      engine,
+      MODEL,
+      controller.signal,
+    );
+
+    // Batches after the first must NOT have been scheduled.
+    expect(create).toHaveBeenCalledOnce();
+    // Guard balanced for exactly the one batch that ran.
+    expect(acquireInference).toHaveBeenCalledOnce();
+    expect(releaseInference).toHaveBeenCalledOnce();
+    // Reconciliation still runs — abandoned reqs default to `missing` — but
+    // the orchestrator discards this shape via its own post-call
+    // signal.aborted check. Never-throws contract is preserved.
+    expect(verdicts).toHaveLength(24);
+    expect(verdicts.slice(0, 8).every((v) => v.status === "met")).toBe(true);
+    expect(verdicts.slice(8).every((v) => v.status === "missing")).toBe(true);
+  });
+
+  it("pre-loop check: already-aborted signal → zero batches, zero acquires", async () => {
+    // The pre-check is what prevents even the first batch on a
+    // caught-in-time abort.
+    const reqs = Array.from({ length: 3 }, (_, i) => req(`req-${i + 1}`));
+    const create = vi.fn();
+    const engine: WebLlmEngine = { chat: { completions: { create } } };
+    const controller = new AbortController();
+    controller.abort();
+
+    const verdicts = await judgeEvidence(
+      reqs,
+      parsed(),
+      engine,
+      MODEL,
+      controller.signal,
+    );
+
+    expect(create).not.toHaveBeenCalled();
+    expect(acquireInference).not.toHaveBeenCalled();
+    expect(releaseInference).not.toHaveBeenCalled();
+    // Still returns one verdict per input requirement — every abandoned req
+    // defaults to `missing`. The never-throws contract holds even on abort.
+    expect(verdicts).toHaveLength(3);
+    expect(verdicts.every((v) => v.status === "missing")).toBe(true);
+  });
+
+  it("acquire/release stay balanced when abort fires mid-batch (never a leak)", async () => {
+    // Cancellation must not corrupt the #148 reference count. A leaked
+    // acquire here would pin `inflightInferenceCount` above zero for the
+    // page's lifetime and park every later cross-model `.unload()` forever.
+    const reqs = Array.from({ length: 16 }, (_, i) => req(`req-${i + 1}`));
+    const controller = new AbortController();
+    let callCount = 0;
+    const create = vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) controller.abort();
+      return { choices: [{ message: { content: "[]" } }] };
+    });
+    const engine: WebLlmEngine = { chat: { completions: { create } } };
+
+    await judgeEvidence(reqs, parsed(), engine, MODEL, controller.signal);
+
+    // The abort fired inside batch 1; batch 2 is not scheduled.
+    expect(create).toHaveBeenCalledOnce();
+    expect(acquireInference).toHaveBeenCalledOnce();
+    expect(releaseInference).toHaveBeenCalledOnce();
+  });
+
+  it("legacy 4-arg call (no signal) still works", async () => {
+    // Back-compat: pre-#803 callers pass no signal. Behavior unchanged.
+    const reqs = [req("req-1"), req("req-2")];
+    const engine = makeMockEngine([
+      JSON.stringify([
+        { id: "req-1", status: "met", reason: "ok" },
+        { id: "req-2", status: "met", reason: "ok" },
+      ]),
+    ]);
+    const verdicts = await judgeEvidence(reqs, parsed(), engine, MODEL);
+
+    expect(verdicts).toHaveLength(2);
+    expect(verdicts.every((v) => v.status === "met")).toBe(true);
+  });
+});

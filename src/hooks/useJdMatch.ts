@@ -66,8 +66,8 @@
  *       reach this branch; keeping it here means the surface for that is
  *       already public.
  *
- * Stale-request protection has two layers, both load-bearing on DIFFERENT
- * scenarios:
+ * Stale-request protection has TWO layers plus a THIRD one for the WORK, not
+ * the writes. All three are load-bearing on DIFFERENT scenarios:
  *   1. `requestIdRef` — a monotonic counter bumped on every semantic run
  *      start AND on every exit from the semantic path (opt-out, JD cleared,
  *      capability change). The exit ALSO clears the slot unless it holds a
@@ -88,6 +88,26 @@
  *      whose stored `parsed` reference no longer matches, is invisible to
  *      the render. This is what stops a stale slot from flashing over a
  *      newer render even if a late write slipped past layer 1.
+ *   3. `controllerRef` — an `AbortController` per semantic run (#803).
+ *      Aborted whenever the id would be bumped: run supersession, opt-out,
+ *      JD change to a new value or empty, model change, capability going
+ *      false, unmount. The id guard prevents stale WRITES from becoming
+ *      visible; the abort controller stops the WORK — extract's coercion
+ *      pass, and every judge batch after the currently in-flight one. The
+ *      residual bound is one loadEngine await plus one currently-in-flight
+ *      completion (extract OR one judge batch); every downstream stage is
+ *      cancelled. See `runLlmMatch`'s docblock for the boundary map.
+ *
+ *      Unmount abort is deferred by ONE microtask, guarded by `mountedRef`.
+ *      Under React 19 StrictMode the mount effect's cleanup runs BETWEEN two
+ *      effect-body invocations on the same hook instance; a naive abort in
+ *      that cleanup would kill the in-flight run and the second effect body
+ *      would early-return (slot inputs still match), stranding a spinner
+ *      that never ends. The microtask hop lets StrictMode's synchronous
+ *      re-mount body re-set `mountedRef.current = true` first; on a REAL
+ *      unmount no re-mount runs, `mountedRef` stays false, and the abort
+ *      fires. Same synchronous-commit-then-microtask ordering that makes
+ *      #203's own `mountedRef.current = true` re-set pattern work.
  *
  * `parsed` identity contract: the hook treats `parsed` by REFERENCE, and the
  * failure mode is worse than a wasted recompute. A caller that builds `parsed`
@@ -340,6 +360,11 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
 
   const requestIdRef = useRef(0);
   const mountedRef = useRef(true);
+  /** Per-run AbortController (#803). Non-null between run-start and its resolve
+   *  or its supersession/opt-out abort. Nulled on abort so a stray follow-up
+   *  abort call is a no-op rather than aborting a fresh run that has since
+   *  reused the ref slot. */
+  const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => {
     // Re-set on every mount, not just at hook creation: under React
     // StrictMode the first effect-cleanup fires between the two effect
@@ -349,6 +374,15 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // Unmount abort (#803, requirement §5). Deferred by one microtask,
+      // gated on `mountedRef.current` still being false — see the
+      // Layer-3 rationale in the module docblock for why a synchronous
+      // abort here breaks StrictMode's simulated remount.
+      queueMicrotask(() => {
+        if (mountedRef.current) return;
+        controllerRef.current?.abort();
+        controllerRef.current = null;
+      });
     };
   }, []);
 
@@ -399,6 +433,14 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     if (!takingSemanticPath) {
       if (semanticSlot !== null) {
         requestIdRef.current += 1;
+        // Layer-3 (#803): stop the WORK, not just the writes. Aborting here
+        // prevents the abandoned run's `extractRequirements` coercion pass
+        // and every subsequent judge batch from executing on the shared
+        // engine. The id bump above still handles late writes independently
+        // — the two guards protect different things. Null the ref after so
+        // a later duplicate exit isn't misread as an in-flight controller.
+        controllerRef.current?.abort();
+        controllerRef.current = null;
         if (semanticSlot.state.kind !== "ready") setSemanticSlot(null);
       }
       return;
@@ -425,6 +467,15 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     // inputs so the derived status stops rendering LOADING_START (which
     // was the render-time placeholder while slot was stale/null).
     const myId = ++requestIdRef.current;
+    // Layer-3 abort (#803): install a fresh controller and abort the
+    // previous run's, so its `extractRequirements` and every subsequent
+    // judge batch stop scheduling. Store BEFORE aborting so `controllerRef`
+    // always points at the current run for any concurrent read; a stale
+    // reader will see the new controller, never a null gap.
+    const previousController = controllerRef.current;
+    const myController = new AbortController();
+    controllerRef.current = myController;
+    previousController?.abort();
     const myInputs: SemanticInputs = {
       jdText: trimmedJdText,
       parsed,
@@ -455,6 +506,7 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
           (progress) =>
             setSlotIfCurrent(myId, myInputs, { kind: "loading", progress }),
           () => setSlotIfCurrent(myId, myInputs, { kind: "running" }),
+          myController.signal,
         ),
       )
       .then((result) => {
