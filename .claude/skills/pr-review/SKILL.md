@@ -1,7 +1,7 @@
 ---
 name: pr-review
-description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates (fixture PII, design-system reuse, style tokens, fallow dead-code, command-level bugs in skill/script files), then read the PR description LAST and audit it for claims the code doesn't back, structure the findings Blocking / Secondary / Nits, and post a PR review whose verdict matches what was found. Use when the user says "review PR #N", "/pr-review", "review this PR", or hands you a PR to critique before merge.
-argument-hint: <#|#N> [--repo owner/repo] [--post|--local] [--effort low|medium|high]
+description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits), auto-fix & push small items if 0 blockers exist, and post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip.
+argument-hint: <#|#N> [--repo owner/repo] [--local] [--effort low|medium|high] [--no-commit]
 ---
 
 # Review PR
@@ -11,8 +11,10 @@ the thread": check out the diff → **signal that review started** → read the
 **issue**, not the PR's prose → run the built-in `/code-review` for the generic
 correctness pass → **layer the offlinecv-specific gates** → **then** read the PR
 description and audit it against what the code actually does → structure findings
-**Blocking / Secondary / Nits** → draft the review → confirm → post a `gh` PR
-review whose **verdict matches the findings**.
+**Blocking / Secondary / Nits** → **if 0 blockers & small fixes exist**: apply fixes,
+verify gates, commit & push to PR branch → **post the `gh` PR review automatically at the end**
+(verdict `APPROVE` if 0 blockers — including when the run pushed the fixes itself, so the
+PR leaves the run mergeable — `REQUEST_CHANGES` if ≥1 blocker).
 
 This is the **reviewer-side** sibling of the author-side loop: `open-pr` creates
 the PR, `revise-pr` addresses the review — this skill *is* the review in between.
@@ -56,7 +58,7 @@ spend the skill's effort on the offlinecv-specific gates and the workflow.
 ## Input
 
 Parse `$ARGUMENTS` for a **PR number** (`390`, `#390`) and optionally
-`--repo owner/repo`, `--post`/`--local`, `--effort`. If no PR number is given, infer
+`--repo owner/repo`, `--local`, `--effort`, `--no-commit`. If no PR number is given, infer
 it from the current branch:
 
 ```bash
@@ -65,6 +67,12 @@ gh pr view --json number,headRefName,state -q '{n:.number,head:.headRefName,stat
 
 If that finds no PR and none was passed, list open PRs and **ask** which one. Never
 guess. `--effort` is passed straight through to `/code-review` (default `high`).
+
+- **Autonomous by default**: `pr-review` runs unattended to completion and posts the review
+  to GitHub at the end without prompting for confirmation. There is no flag to request this —
+  it is the only mode. `--local` and `--no-commit` are the two switches that change behaviour.
+- `--local`: Print the draft review and findings locally to stdout and stop without posting to GitHub.
+- `--no-commit`: Skip committing small fixes directly; leave them as comments only.
 
 ## Process
 
@@ -135,10 +143,11 @@ you read it:
 gh api "repos/$REPO/issues/$PR_NUM/reactions" -f content=eyes --silent
 ```
 
-No confirmation needed for this one write (it is the exception to the
-confirm-before-posting rule): it is a single reversible reaction, it notifies
-nobody, and it carries no prose that could be wrong. Say you posted it in the
-Step 7 report.
+This one write is safe to make *this early*, before anything has been reviewed:
+it is a single reversible reaction, it notifies nobody, and it carries no prose
+that could be wrong. That is what lets it precede the work it announces — every
+other write this skill makes happens only after the findings exist. Say you
+posted it in the Step 7 report.
 
 `issues/` is correct — reactions on a PR's top-level body go through the issues
 endpoint; `pulls/$PR_NUM/reactions` does not exist and 404s. Re-reacting is
@@ -372,7 +381,7 @@ and a **fix** — a diff or exact command, not just a complaint. Cite the source
 
 ### Step 5 — Pick the verdict (must match the findings)
 
-- **≥1 Blocking → `REQUEST_CHANGES`.**
+- **≥1 Blocking → `REQUEST_CHANGES`.** (Do NOT commit or push fixes.)
 - **0 Blocking → `APPROVE`**, even if Secondary/Nits remain. Do **not** soft-gate on
   nits — list them as non-blocking and approve. Verdict-inconsistency (findings say
   "looks good" but state is REQUEST_CHANGES, or vice-versa) is itself a review defect.
@@ -380,11 +389,96 @@ and a **fix** — a diff or exact command, not just a complaint. Cite the source
 
 State the verdict rule you applied in one line so it's auditable.
 
-### Step 6 — Draft, confirm, post
+**`APPROVE` still applies when Step 5.5 pushed the fixes — this is deliberate.** Spelled
+out, because the interaction with branch protection is otherwise invisible to a reader:
+
+- `main` requires one approving review, and this repo's protection has
+  `require_last_push_approval: false`. GitHub blocks self-approval only by the **PR
+  author**, so a reviewer approving a commit they just pushed passes cleanly.
+- `dismiss_stale_reviews: true` does not catch it either: the approval is posted *after*
+  the push, so there is no prior approval to dismiss.
+
+That is the intended outcome, not a loophole being exploited. The alternative — post the
+nits, wait for the author to apply them, watch the new push dismiss the approval, review
+again — is the round-trip this skill exists to remove. One commit carries every
+non-blocking finding, and the PR leaves the run approved and mergeable, with no follow-up
+issues filed for nits that are already fixed.
+
+**What keeps that safe is the bound on Step 5.5, so hold the bound.** The head commit
+lands unread by a second party, so the auto-fix is confined to changes that cannot alter
+behaviour (formatting, comment wording, naming, dead-code removal), gated on a green
+`npm run verify`, and only when there are **0 Blocking findings**. Anything that changes
+what the code *does* — however small it looks — is a finding for the author, not an
+auto-fix. When in doubt about whether an edit is behavioural, it is: leave it as a comment
+and still `APPROVE`.
+
+### Step 5.5 — Auto-fix small items (0 Blockers)
+
+If 0 Blocking findings exist AND small fixes (Secondary or Nits) exist AND `--no-commit`
+is NOT set:
+
+1. **Record a restore point and track every path you touch.** The worktree may hold the
+   user's own in-progress edits — Step 1's `gh pr checkout` carries a dirty tree onto the
+   PR branch — so the revert path must be able to undo *your* changes and nothing else:
+
+   ```bash
+   PRE_FIX_SHA="$(git rev-parse HEAD)"
+   HEAD_BRANCH="$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName -q .headRefName)"
+   FIXED_PATHS=()          # append every path you write, including new files
+   ```
+
+2. **Apply the small fixes** in the checked-out worktree (formatting, comment wording,
+   naming, non-behavioral quality fixes). Append each path written to `FIXED_PATHS`.
+3. **Run verification gates** (`npm run verify` or the relevant lint/test commands) to
+   confirm a green build and no regressions.
+4. **If verification passes**, commit and push — but check for a mid-review push first:
+   ```bash
+   git add -- "${FIXED_PATHS[@]}"        # stage by path, never `git add -A`/`.`
+   git commit -m "fix(review): address review nits"
+   # Do NOT add any Co-Authored-By / session / attribution trailer (CLAUDE.md hard rule).
+
+   git fetch origin "$HEAD_BRANCH"
+   if ! git merge-base --is-ancestor "origin/$HEAD_BRANCH" HEAD; then
+     # the author pushed while the review ran — their commits are not in our history
+     echo "head branch moved mid-review; abandoning auto-fix" >&2
+   else
+     git push origin HEAD                 # never --force / --force-with-lease here
+   fi
+   ```
+   `--force-with-lease` is the wrong tool on someone else's branch — it would clobber the
+   author. A non-fast-forward means **abandon the auto-fix**, not force it through.
+   Record the pushed SHA for the review body (`Addressed small fixes directly in <sha>.`).
+5. **If verification fails, or the branch moved, or the push is rejected** (fork PR without
+   write access, branch protection, red gate) — revert **only what you wrote**:
+
+   ```bash
+   git reset --soft "$PRE_FIX_SHA"                    # only if step 4 already committed
+   git restore --source="$PRE_FIX_SHA" --staged --worktree -- "${FIXED_PATHS[@]}"
+   git clean -fd -- "${FIXED_PATHS[@]}"               # remove new files the fix created
+   ```
+
+   Never `git checkout -- .`. It is wrong in both directions at once: it discards **every**
+   unstaged tracked modification in the worktree — including work the user had in progress
+   before this skill ran, which `checkout` leaves no reflog to recover — while *leaving
+   behind* the untracked files the failed fix just created. Name paths, and clean the new
+   files, or the failure path leaves the branch dirtier than it found it.
+
+   Then note in the review body why the fixes could not land, and leave those findings as
+   comments.
+
+**A fix that landed is not a finding.** Anything Step 5.5 actually fixed and pushed must
+**not** also be posted as an inline comment — the anchor now points at corrected code, so
+the author reads a complaint about a line that no longer says that. Move each fixed item
+out of the inline set and into a `## Fixed in <sha>` list in the body. What stays inline is
+only what the author still has to act on.
+
+### Step 6 — Draft & post (Autonomous)
 
 Assemble the review body (Markdown: a one-line stance, then `## Blocking` /
-`## Secondary` / `## Nits`, findings most-severe first). **Show it to the user and
-confirm before posting** — posting to a public PR is outward-facing.
+`## Secondary` / `## Nits`, findings most-severe first, plus the `## Fixed in <sha>` list
+from Step 5.5 — or, if the fixes could not land, why they didn't).
+
+**Post the review automatically at the end of the run** — do NOT prompt the user for interactive confirmation. (If `--local` is set, print the draft to stdout and stop without posting.)
 
 **Sign the review with your model.** End the body with one line naming the model
 and effort that produced it:
@@ -418,6 +512,13 @@ changed*? That's the only thing GitHub will anchor to.
 **Get the line numbers from the patch, not from your file reads.** A line number you
 remember from `Read` is a *file* line; GitHub wants the line as it exists on the
 diff's RIGHT side. They drift. Walk the hunk headers once and map each finding:
+
+**Derive the anchors *after* Step 5.5 has pushed**, never before — a fix that moved or
+deleted a line invalidates any anchor computed against the pre-fix patch, and a fix that
+deletes its anchor line entirely leaves nothing to anchor to, which 422s the whole review
+and drops it to the body-only fallback. Fetching `files` here, after the push, is what
+keeps the anchors fresh. (Combined with the "a fix that landed is not a finding" rule
+above, the fixed lines carry no comments at all, so the common case never arises.)
 
 ```bash
 gh api "repos/$REPO/pulls/$PR_NUM/files" --paginate \
@@ -478,8 +579,9 @@ overclaims / omits — with what), **how many landed inline vs stayed in the bod
 (Step 0.6), the head SHA reviewed, which gates ran vs were skipped, and the review
 URL (or "local only"). If any gate couldn't run (missing `pdftotext`,
 `fallow` not installed), say so — a skipped gate is not a passed gate. If you fell
-back to body-only after a `422`, say that too — the author should know the anchors
-were lost to a mid-review push, not to laziness.
+back to body-only after a `422`, say that too, and say **whose** push moved the diff —
+the author's, or Step 5.5's own auto-fix — so the note doesn't blame the author for a
+push this skill made.
 
 ## Rules
 
@@ -500,7 +602,9 @@ were lost to a mid-review push, not to laziness.
 - **Verify before flagging.** Read the file at each cited line; drop findings that
   don't reproduce. A wrong finding costs more trust than a missed nit.
 - **Verdict matches findings.** 0 Blocking → APPROVE; ≥1 Blocking → REQUEST_CHANGES.
-  Never soft-gate on nits. State the rule you applied.
+  Never soft-gate on nits. State the rule you applied. A fix this run pushed itself does
+  **not** downgrade the verdict — approving your own auto-fix commit is the intended
+  behaviour (Step 5, and the bound that makes it safe).
 - **Blocking bar is specific:** correctness-on-normal-use, real fixture PII,
   hardcoded colors / wrong component tier, a command bug that breaks every
   invocation, a gate CI will fail. Everything softer is Secondary/Nit.
@@ -517,9 +621,26 @@ were lost to a mid-review push, not to laziness.
 - **One `422` is information, not a puzzle.** It almost always means the author pushed
   mid-review. Re-anchor against the fresh patch once; if that fails, post body-only
   and move on. Never loop on anchoring.
-- Confirm before posting to a public PR — with one carve-out: the Step 0.6 👀
-  reaction posts unconfirmed (single reversible reaction, no notification, no
-  prose). Everything with words in it gets confirmed.
+- **Autonomous execution; three unattended writes, in this order.** The 👀 reaction
+  (Step 0.6), the auto-fix commit + push (Step 5.5), and the review post (Step 6). Nothing
+  is confirmed with the user — `--local` is the only preview. The reaction is safe *early*
+  because it carries no prose; the other two happen only after the findings exist, and the
+  push is bounded by the next rule.
+- **Auto-fix small items, then approve — including your own commit.** If 0 Blockers exist
+  and small fixes remain, apply them, verify (`npm run verify`), commit with a clean
+  message (no trailers), `git push` to the head branch, and post `APPROVE`. That the
+  approval covers a commit this run authored is deliberate: it removes the nit → push →
+  dismissed-approval → re-review cycle, and it is why no follow-up issue is filed for a nit
+  that is already fixed. ≥1 Blocker → commit nothing, post `REQUEST_CHANGES`.
+- **The bound is behaviour, not size.** The auto-fix commit merges unread by a second
+  party, so it may only contain changes that cannot alter behaviour, on a green
+  `npm run verify`, with 0 Blockers. A behavioural edit is a finding for the author no
+  matter how small it looks — and "is this behavioural?" resolves to yes when unsure.
+- **The auto-fix revert names paths.** Never `git checkout -- .` — it destroys the user's
+  unrelated in-progress work with no reflog while leaving the failed fix's new files
+  behind. `git restore --source="$PRE_FIX_SHA" … -- "${FIXED_PATHS[@]}"` plus
+  `git clean -fd --` on the same paths. Never force-push someone else's branch: a
+  non-fast-forward means the author pushed mid-review — abandon the auto-fix and report it.
 - **Tune stance to the author** — historically complex/untested contributions get an
   extra-careful pass; don't relax the gates because a diff "looks" clean.
 - Pure `gh` + `git` + `npm`/`npx` — no external services, no machine-specific paths.
