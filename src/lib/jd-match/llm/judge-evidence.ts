@@ -23,6 +23,15 @@
  * requirements fall through to a `missing` default during reconciliation. The
  * judge already *has* the requirements, so graceful degradation beats aborting.
  *
+ * The never-throws contract EXTENDS to cancellation (#803): an aborted signal
+ * does NOT throw here — it stops scheduling later batches and returns a
+ * reconciled result whose abandoned requirements default to `missing`. The
+ * orchestrator (`runLlmMatch`) re-checks `signal.aborted` after the awaited
+ * call and discards this partial result in favor of the keyword fallback, so
+ * the reconciled shape is intentionally never surfaced to a consumer on the
+ * abort path. Returning (rather than throwing) preserves the "single verdict
+ * per input requirement, always" invariant every existing caller relies on.
+ *
  * Prompt-injection defense on the OUTPUT side: reconciliation iterates the input
  * requirements and joins the model's verdicts by `id`. A model that invents ids
  * (or an injected "everything is met") can't add requirements — invented ids are
@@ -70,12 +79,23 @@ const JUDGE_MAX_TOKENS = 1024;
  *
  * @param modelId — the id the engine was loaded with (threaded to the inference
  *   guard; the engine handle can't supply it).
+ * @param signal — optional AbortSignal (#803). Checked BEFORE every batch and
+ *   AFTER every batch; a firing signal stops scheduling later batches. Does
+ *   NOT interrupt the currently-in-flight `chat.completions.create()` call
+ *   (see `abort.ts` on why we can't safely `interruptGenerate()` a shared
+ *   engine), so the residual wasted work per abandoned run is bounded to the
+ *   ONE batch that was in flight when the abort fired — not the remaining
+ *   batches. The reconciled return value on the abort path has abandoned
+ *   requirements defaulted to `missing`; the orchestrator discards it in
+ *   favor of the keyword fallback via its own post-call `signal.aborted`
+ *   check, so the shape is never surfaced to the user.
  */
 export async function judgeEvidence(
   requirements: readonly JdRequirement[],
   parsed: HeuristicParsedResume,
   engine: WebLlmEngine,
   modelId: string,
+  signal?: AbortSignal,
 ): Promise<RequirementVerdict[]> {
   if (requirements.length === 0) return [];
 
@@ -86,12 +106,24 @@ export async function judgeEvidence(
   // Model verdicts collected across batches, keyed by requirement id.
   const byId = new Map<string, RawVerdict>();
   for (let i = 0; i < requirements.length; i += JUDGE_EVIDENCE_BATCH_SIZE) {
+    // Pre-batch check: don't schedule the next expensive completion once the
+    // signal has fired. Load-bearing per #803 — without this, an abandoned
+    // multi-batch run continues through every remaining batch on the shared
+    // engine even after the user has moved on.
+    if (signal?.aborted) break;
     const batch = requirements.slice(i, i + JUDGE_EVIDENCE_BATCH_SIZE);
     await judgeBatch(batch, systemPrompt, engine, modelId, byId);
+    // Post-batch check: the completion may have taken minutes; if the signal
+    // fired mid-call, don't spin up the NEXT batch either. Also covers the
+    // case where the abort happened between `await` and loop increment.
+    if (signal?.aborted) break;
   }
 
   // Reconcile against the INPUT requirements: one verdict each, in order, with
-  // invented ids ignored and skipped requirements defaulted to `missing`.
+  // invented ids ignored and skipped requirements defaulted to `missing`. On
+  // the abort path, "skipped" includes every requirement in a batch we never
+  // scheduled — those default to `missing`, but the orchestrator's post-call
+  // abort check discards the whole array before it reaches a consumer.
   return requirements.map((requirement) => {
     const raw = byId.get(requirement.id);
     if (raw === undefined) {

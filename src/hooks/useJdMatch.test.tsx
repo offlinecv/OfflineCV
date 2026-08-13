@@ -398,13 +398,18 @@ describe("useJdMatch — semantic path (opt-in + WebGPU available)", () => {
     await flushMicrotasks();
 
     expect(runLlmMatchMock).toHaveBeenCalledTimes(1);
-    const [jd, parsed, modelId, onProgress, onInferenceStart] =
+    const [jd, parsed, modelId, onProgress, onInferenceStart, signal] =
       runLlmMatchMock.mock.calls[0]!;
     expect(jd).toBe(JD_TEXT);
     expect(parsed).toBe(SPARSE_RESUME);
     expect(modelId).toBe("test-model");
     expect(typeof onProgress).toBe("function");
     expect(typeof onInferenceStart).toBe("function");
+    // #803: the hook owns an AbortController per run and threads its signal
+    // through as the 6th argument so `runLlmMatch` can bail at the next
+    // safe boundary once the run is superseded / opted-out / unmounted.
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect((signal as AbortSignal).aborted).toBe(false);
   });
 });
 
@@ -816,4 +821,278 @@ describe("useJdMatch — transitions & stale-request protection", () => {
   // it would misrepresent the coverage, so there isn't one. The `mountedRef`
   // RE-SET in the mount effect is a different matter: it IS load-bearing and
   // IS covered — the StrictMode test above fails if it is dropped.
+});
+
+/**
+ * Cancellation tests (#803). Focus is Layer-3 — the AbortController per run
+ * that stops the WORK, not just the writes. Every test captures the signal
+ * passed to `runLlmMatch` and asserts on `signal.aborted`, which is the
+ * observable a UI-layer or timing-based test can't fake.
+ */
+describe("useJdMatch — Layer-3 abort controller (#803)", () => {
+  beforeEach(() => {
+    webgpu = "available";
+  });
+
+  /** Capture every signal `runLlmMatch` is called with; deferred-resolve
+   *  promises so the test controls when (or if) each run finishes. */
+  function trackSignals() {
+    const signals: AbortSignal[] = [];
+    runLlmMatchMock.mockImplementation(
+      (
+        _jd: string,
+        _parsed: HeuristicParsedResume,
+        _model: string,
+        _onProgress: (u: ProgressUpdate) => void,
+        _onInferenceStart: () => void,
+        signal: AbortSignal,
+      ) => {
+        signals.push(signal);
+        return new Promise<JdMatchResult>(() => {}); // never resolves
+      },
+    );
+    return signals;
+  }
+
+  it("threads a non-null AbortSignal to runLlmMatch on every run start", async () => {
+    // The API-shape assertion — if #803 shipped without threading the signal,
+    // every other test in this block would still pass on stale state, so
+    // pinning the argument shape first is what catches an unwired signal.
+    const signals = trackSignals();
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0]!.aborted).toBe(false);
+  });
+
+  it("supersession aborts the previous run's signal BEFORE the new run's is passed", async () => {
+    // The A → B → C requirement's smallest case (A → B). The ordering matters:
+    // if the new signal is created BEFORE the old one is aborted, a stale
+    // reader momentarily sees the wrong controller. This test only pins the
+    // OUTCOME — old-aborted, new-not — because pinning the intermediate
+    // ordering across React commits is fragile.
+    const signals = trackSignals();
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    expect(signals).toHaveLength(1);
+    expect(signals[0]!.aborted).toBe(false);
+
+    // JD change → run B kicks off; run A is superseded.
+    update({
+      parsed: SPARSE_RESUME,
+      jdText: JD_TEXT + " Additional: Rust.",
+      semanticOptIn: true,
+    });
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(signals).toHaveLength(2);
+    expect(signals[0]!.aborted).toBe(true); // A aborted
+    expect(signals[1]!.aborted).toBe(false); // B still live
+  });
+
+  it("A → B → C rapid changes: each supersession aborts the prior; only the last is live", async () => {
+    // The full #803 A → B → C scenario from the ticket body. Without the
+    // Layer-3 abort, three runs stack on the shared engine; with it, exactly
+    // one is live and two are aborted.
+    const signals = trackSignals();
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+
+    update({
+      parsed: SPARSE_RESUME,
+      jdText: JD_TEXT + " Edit 1",
+      semanticOptIn: true,
+    });
+    flushDebounce();
+    await flushMicrotasks();
+
+    update({
+      parsed: SPARSE_RESUME,
+      jdText: JD_TEXT + " Edit 1 Edit 2",
+      semanticOptIn: true,
+    });
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(signals).toHaveLength(3);
+    expect(signals[0]!.aborted).toBe(true);
+    expect(signals[1]!.aborted).toBe(true);
+    expect(signals[2]!.aborted).toBe(false);
+  });
+
+  it("opting out aborts the current run's signal", async () => {
+    const signals = trackSignals();
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    expect(signals[0]!.aborted).toBe(false);
+
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: false });
+    await flushMicrotasks();
+
+    expect(signals[0]!.aborted).toBe(true);
+    // No new run started.
+    expect(signals).toHaveLength(1);
+  });
+
+  it("clearing the JD aborts the current run's signal", async () => {
+    // JD → empty flips `takingSemanticPath` false (keywordResult becomes null),
+    // so the exit branch fires and aborts.
+    const signals = trackSignals();
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    expect(signals[0]!.aborted).toBe(false);
+
+    update({ parsed: SPARSE_RESUME, jdText: "", semanticOptIn: true });
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(signals[0]!.aborted).toBe(true);
+    expect(signals).toHaveLength(1);
+  });
+
+  it("model change aborts the previous run's signal and starts a fresh one", async () => {
+    // Same shape as the JD-change test but the input that changed is the
+    // model id. The layered-inputs equality check (`semanticInputsMatch`)
+    // includes modelId, so a change re-enters the "new run" branch.
+    const signals = trackSignals();
+
+    modelId = "model-A";
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    expect(signals).toHaveLength(1);
+
+    modelId = "model-B";
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+
+    expect(signals).toHaveLength(2);
+    expect(signals[0]!.aborted).toBe(true);
+    expect(signals[1]!.aborted).toBe(false);
+  });
+
+  it("unmount aborts the current run's signal (after the microtask hop)", async () => {
+    // Deferred abort past one microtask; a naive synchronous abort in the
+    // mount-cleanup would kill runs mid-StrictMode-remount (see the docblock).
+    const signals = trackSignals();
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    expect(signals[0]!.aborted).toBe(false);
+
+    act(() => root.unmount());
+    // The abort is scheduled as a microtask; flush.
+    await flushMicrotasks();
+
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it("StrictMode remount does NOT abort the in-flight run (microtask guard defers past the re-mount)", async () => {
+    // Direct pin of the StrictMode-safety claim in the mount effect's
+    // cleanup. Without the microtask defer + mountedRef re-check, StrictMode's
+    // simulated unmount would abort the run, the semantic effect body #2
+    // would see the slot still fresh and early-return, and the user would be
+    // stuck on a spinner that never ends.
+    const signals: AbortSignal[] = [];
+    runLlmMatchMock.mockImplementation(
+      (
+        _jd: string,
+        _parsed: HeuristicParsedResume,
+        _model: string,
+        _onProgress: (u: ProgressUpdate) => void,
+        _onInferenceStart: () => void,
+        signal: AbortSignal,
+      ) => {
+        signals.push(signal);
+        return new Promise<JdMatchResult>(() => {});
+      },
+    );
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <Probe parsed={SPARSE_RESUME} jdText={JD_TEXT} semanticOptIn={true} />
+        </StrictMode>,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    flushDebounce();
+    await flushMicrotasks();
+    // Microtask queue flushed — if the cleanup's abort weren't deferred + guarded,
+    // this is where the still-in-flight run would already be aborted.
+    await flushMicrotasks();
+
+    // At least one signal was created; the LAST one (the live run) must NOT be aborted.
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals[signals.length - 1]!.aborted).toBe(false);
+  });
+
+  it("A late-arriving semantic result from an aborted run does NOT overwrite a fresh run's state", async () => {
+    // Belt AND suspenders together: even if a network layer somewhere let a
+    // partially-completed run resolve after abort, the id guard drops the
+    // late write. The abort tests above prove the WORK stops; this test
+    // proves the WRITES also stay hidden — the two layers protect different
+    // things, and #803's implementation must not accidentally couple them.
+    let resolveFirst!: (r: JdMatchResult) => void;
+    const firstRun = new Promise<JdMatchResult>((res) => {
+      resolveFirst = res;
+    });
+    const secondRun = new Promise<JdMatchResult>(() => {});
+    runLlmMatchMock
+      .mockReturnValueOnce(firstRun)
+      .mockReturnValueOnce(secondRun);
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+
+    // JD change → run B starts, run A is aborted but its promise still exists.
+    update({
+      parsed: SPARSE_RESUME,
+      jdText: JD_TEXT + " Additional: Rust.",
+      semanticOptIn: true,
+    });
+    flushDebounce();
+    await flushMicrotasks();
+    expect(latestStatus.kind).toBe("loading");
+
+    // Late resolve of run A — must be dropped by the id guard.
+    const staleResult: JdMatchResult = {
+      path: "semantic",
+      verdicts: [],
+      summary: { met: 99, partial: 0, missing: 0, total: 99 },
+    };
+    await act(async () => {
+      resolveFirst(staleResult);
+      await firstRun;
+    });
+
+    expect(latestStatus.kind).toBe("loading"); // run B still loading, not overwritten
+  });
 });

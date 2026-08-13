@@ -15,10 +15,23 @@
  * array — the model legitimately found no requirements — is NOT a failure; it
  * returns `[]`. That distinction is the whole reason this throws rather than
  * returning `[]` on error.
+ *
+ * Cancellation (#803): accepts an optional `AbortSignal`. Checked BEFORE the
+ * engine call (already-aborted → don't start the LLM at all) and AFTER it
+ * resolves (aborted during the call → don't run the coercion pass or hand
+ * results back to the orchestrator). An aborted call throws a fetch-shaped
+ * `AbortError` DOMException that the orchestrator distinguishes from a
+ * `RequirementExtractionError`: abort is expected control flow that resolves
+ * to the keyword fallback silently; RequirementExtractionError is a real
+ * failure that logs a warning. The engine's own call is NOT interrupted —
+ * see `abort.ts` for why we can't safely `interruptGenerate()` a shared
+ * engine — so the residual wasted work is bounded to the currently in-flight
+ * completion.
  */
 
 import type { WebLlmEngine } from "../../webllm/types.ts";
 import { tryParseJsonArray } from "../../webllm/json-repair.ts";
+import { abortError, isAbortError } from "./abort.ts";
 import {
   EXTRACT_SYSTEM_PROMPT,
   buildExtractUserPrompt,
@@ -62,12 +75,23 @@ const MAX_TOKENS = 1024;
 /**
  * Extract structured requirements from a job description.
  *
+ * @param signal — optional AbortSignal. Checked pre-call (skips the engine
+ *   entirely) and post-call (skips the coercion pass and propagates the
+ *   abort back to the orchestrator). Aborts throw an AbortError DOMException
+ *   distinct from `RequirementExtractionError`.
  * @throws {RequirementExtractionError} on engine failure or unparseable output.
+ * @throws {DOMException} with `name === "AbortError"` when `signal` fires.
  */
 export async function extractRequirements(
   jdText: string,
   engine: WebLlmEngine,
+  signal?: AbortSignal,
 ): Promise<JdRequirement[]> {
+  // Pre-check: an already-aborted signal must never trigger the expensive
+  // LLM call. This is the boundary #803's "check before starting the
+  // expensive LLM call" acceptance criterion targets.
+  if (signal?.aborted) throw abortError();
+
   let content: string;
   try {
     const response = await engine.chat.completions.create({
@@ -80,12 +104,21 @@ export async function extractRequirements(
     });
     content = response.choices[0]?.message?.content ?? "";
   } catch (err) {
+    // If the completion itself was rejected by an AbortError (e.g. a future
+    // signal-aware engine), propagate the abort AS-IS rather than wrapping it
+    // as a RequirementExtractionError — the orchestrator distinguishes them.
+    if (isAbortError(err)) throw err;
     throw new RequirementExtractionError(
       `Requirement extraction engine call failed: ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
   }
+
+  // Post-check: abort fired DURING the completion. The engine call already
+  // ran (we can't interrupt a shared engine — see abort.ts), but the coercion
+  // pass and any downstream consumer that would act on this result must not.
+  if (signal?.aborted) throw abortError();
 
   const parsed = tryParseJsonArray(content);
   if (!parsed.ok || !Array.isArray(parsed.value)) {

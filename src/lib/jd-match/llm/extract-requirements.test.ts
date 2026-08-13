@@ -131,3 +131,86 @@ describe("extractRequirements", () => {
     expect(req.temperature).toBe(0);
   });
 });
+
+describe("extractRequirements — cancellation (#803)", () => {
+  it("pre-call check: an already-aborted signal skips the engine entirely", async () => {
+    // The whole point of the pre-check: avoid starting the expensive
+    // completion at all if the run has already been superseded. If this
+    // check is removed, the engine.chat.completions.create call still fires,
+    // and the wasted work bound is broken.
+    const create = vi.fn();
+    const engine: WebLlmEngine = { chat: { completions: { create } } };
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      extractRequirements("jd", engine, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("post-call check: abort during the completion skips coercion and throws AbortError", async () => {
+    // The completion itself finishes (we can't safely interrupt a shared
+    // engine), but nothing downstream — coercion, and by extension the
+    // orchestrator's judge call — runs. AbortError is distinct from
+    // RequirementExtractionError so the orchestrator can suppress the
+    // console.warn on cancellation.
+    const controller = new AbortController();
+    const create = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return {
+        choices: [
+          {
+            message: {
+              content: JSON.stringify([
+                { id: "req-1", kind: "skill", text: "TypeScript" },
+              ]),
+            },
+          },
+        ],
+      };
+    });
+    const engine: WebLlmEngine = { chat: { completions: { create } } };
+
+    await expect(
+      extractRequirements("jd", engine, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    // Engine WAS called — that's the bounded work per #803's residual bound.
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it("does NOT wrap an AbortError from the engine call as RequirementExtractionError", async () => {
+    // Preserves the orchestrator's ability to distinguish cancellation from
+    // a real extraction failure via `err.name === "AbortError"`. If wrapping
+    // happens, the orchestrator would log "semantic path failed" over a
+    // cancellation we initiated — the exact behavior #803 forbids.
+    const abortErr = new DOMException("aborted", "AbortError");
+    const engine: WebLlmEngine = {
+      chat: {
+        completions: { create: vi.fn().mockRejectedValue(abortErr) },
+      },
+    };
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      extractRequirements("jd", engine, controller.signal),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    // Not a RequirementExtractionError — that would break the orchestrator's
+    // catch-branch distinction.
+    await expect(
+      extractRequirements("jd", engine, controller.signal),
+    ).rejects.not.toBeInstanceOf(RequirementExtractionError);
+  });
+
+  it("no signal (legacy 2-arg call): behavior unchanged, no aborts anywhere", async () => {
+    // Every pre-#803 caller passes just (jdText, engine). The `signal?`
+    // optionality has to leave that path byte-identical to pre-#803.
+    const engine = makeMockEngine([
+      JSON.stringify([{ id: "req-1", kind: "skill", text: "TypeScript" }]),
+    ]);
+    await expect(extractRequirements("jd", engine)).resolves.toEqual([
+      { id: "req-1", kind: "skill", text: "TypeScript" },
+    ]);
+  });
+});
