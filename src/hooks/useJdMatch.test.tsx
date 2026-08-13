@@ -1009,11 +1009,18 @@ describe("useJdMatch — Layer-3 abort controller (#803)", () => {
   });
 
   it("StrictMode remount does NOT abort the in-flight run (microtask guard defers past the re-mount)", async () => {
-    // Direct pin of the StrictMode-safety claim in the mount effect's
-    // cleanup. Without the microtask defer + mountedRef re-check, StrictMode's
-    // simulated unmount would abort the run, the semantic effect body #2
-    // would see the slot still fresh and early-return, and the user would be
-    // stuck on a spinner that never ends.
+    // Pins what the microtask defer + `mountedRef` re-check actually buy:
+    // a cleanup queued by StrictMode's simulated unmount must not later kill
+    // the REAL run that the re-mount started.
+    //
+    // Scoped deliberately. It does NOT prove the defer prevents a live abort
+    // at the double-invoke, because no run exists to abort there: the mount
+    // effect's cleanup fires while `debouncedJdText` is still `""` and
+    // `capability` is still `null`, so `takingSemanticPath` is false and
+    // `controllerRef.current` is null through the whole synchronous
+    // double-invoke. A synchronous abort in that cleanup passes this test too.
+    // The guard is a belt against a future ordering — see the Layer-3 note in
+    // the hook's module docblock — and this test pins the part that is real.
     const signals: AbortSignal[] = [];
     runLlmMatchMock.mockImplementation(
       (

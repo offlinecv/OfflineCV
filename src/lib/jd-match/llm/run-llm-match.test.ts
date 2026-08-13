@@ -543,10 +543,48 @@ describe("runLlmMatch — cancellation (#803)", () => {
     // Even in the future where `extractRequirements` could throw an AbortError
     // in-band (or a signal-aware `chat.completions.create` does), the
     // orchestrator's catch must map AbortError → keyword WITHOUT logging.
+    //
+    // The signal fires DURING extract, not before: an already-aborted signal
+    // is short-circuited by boundary 1 before `acquireInference`, so the catch
+    // under test is never entered and the assertions pass vacuously.
     const controller = new AbortController();
-    controller.abort();
+    loadEngineMock.mockResolvedValue(engine);
+    extractMock.mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(
+        new DOMException("Semantic run aborted.", "AbortError"),
+      );
+    });
+
+    const resume = parsed();
+    const result = await runLlmMatch(
+      JD_TEXT,
+      resume,
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    expect(extractMock).toHaveBeenCalledOnce();
+    expect(result).toEqual(freshKeywordResult(resume));
+    // Distinguishes cancellation from a real semantic failure — the
+    // RequirementExtractionError test in the fallback-discipline block
+    // asserts warn IS called; here it must NOT.
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("an AbortError-shaped engine error on an UNFIRED signal still warns and degrades", async () => {
+    // The `signal?.aborted` half of the catch's cancellation branch.
+    // `isAbortError` is a pure shape check, so without it any error the engine
+    // happens to name "AbortError" — a future per-request timeout, a
+    // device-lost surfaced this way — becomes indistinguishable from a user
+    // supersession: degraded to keyword with the warn deliberately skipped and
+    // zero diagnostic trail for a failure we did not cause.
+    const controller = new AbortController(); // never fired
+    loadEngineMock.mockResolvedValue(engine);
     extractMock.mockRejectedValue(
-      new DOMException("Semantic run aborted.", "AbortError"),
+      new DOMException("engine request timed out", "AbortError"),
     );
 
     const resume = parsed();
@@ -559,11 +597,13 @@ describe("runLlmMatch — cancellation (#803)", () => {
       controller.signal,
     );
 
+    // Still degrades — the never-rejects contract is unconditional.
     expect(result).toEqual(freshKeywordResult(resume));
-    // Distinguishes cancellation from a real semantic failure — the
-    // RequirementExtractionError test in the fallback-discipline block
-    // asserts warn IS called; here it must NOT.
-    expect(console.warn).not.toHaveBeenCalled();
+    // But it is a FAILURE, so the diagnostic must survive.
+    expect(console.warn).toHaveBeenCalledWith(
+      "[run-llm-match] semantic path failed; falling back to keyword:",
+      expect.objectContaining({ name: "AbortError" }),
+    );
   });
 
   it("aborted runLlmMatch RESOLVES; never rejects, never leaks the AbortError", async () => {

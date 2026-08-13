@@ -90,7 +90,9 @@ export async function extractRequirements(
   // Pre-check: an already-aborted signal must never trigger the expensive
   // LLM call. This is the boundary #803's "check before starting the
   // expensive LLM call" acceptance criterion targets.
-  if (signal?.aborted) throw abortError();
+  if (signal?.aborted) {
+    throw abortError("Semantic run aborted before requirement extraction.");
+  }
 
   let content: string;
   try {
@@ -105,9 +107,13 @@ export async function extractRequirements(
     content = response.choices[0]?.message?.content ?? "";
   } catch (err) {
     // If the completion itself was rejected by an AbortError (e.g. a future
-    // signal-aware engine), propagate the abort AS-IS rather than wrapping it
-    // as a RequirementExtractionError — the orchestrator distinguishes them.
-    if (isAbortError(err)) throw err;
+    // signal-aware engine) AND our signal is what fired, propagate the abort
+    // AS-IS rather than wrapping it as a RequirementExtractionError — the
+    // orchestrator distinguishes them. The `signal?.aborted` half is
+    // load-bearing: without it an engine-originated `AbortError` on an unfired
+    // signal is re-thrown into the orchestrator's silent cancellation branch
+    // and the real failure leaves no diagnostic trail (see `abort.ts`).
+    if (isAbortError(err) && signal?.aborted) throw err;
     throw new RequirementExtractionError(
       `Requirement extraction engine call failed: ${
         err instanceof Error ? err.message : String(err)
@@ -118,7 +124,9 @@ export async function extractRequirements(
   // Post-check: abort fired DURING the completion. The engine call already
   // ran (we can't interrupt a shared engine — see abort.ts), but the coercion
   // pass and any downstream consumer that would act on this result must not.
-  if (signal?.aborted) throw abortError();
+  if (signal?.aborted) {
+    throw abortError("Semantic run aborted during requirement extraction.");
+  }
 
   const parsed = tryParseJsonArray(content);
   if (!parsed.ok || !Array.isArray(parsed.value)) {

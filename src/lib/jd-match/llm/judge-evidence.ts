@@ -79,8 +79,8 @@ const JUDGE_MAX_TOKENS = 1024;
  *
  * @param modelId — the id the engine was loaded with (threaded to the inference
  *   guard; the engine handle can't supply it).
- * @param signal — optional AbortSignal (#803). Checked BEFORE every batch and
- *   AFTER every batch; a firing signal stops scheduling later batches. Does
+ * @param signal — optional AbortSignal (#803). Checked BEFORE every batch;
+ *   a firing signal stops scheduling later batches. Does
  *   NOT interrupt the currently-in-flight `chat.completions.create()` call
  *   (see `abort.ts` on why we can't safely `interruptGenerate()` a shared
  *   engine), so the residual wasted work per abandoned run is bounded to the
@@ -113,10 +113,11 @@ export async function judgeEvidence(
     if (signal?.aborted) break;
     const batch = requirements.slice(i, i + JUDGE_EVIDENCE_BATCH_SIZE);
     await judgeBatch(batch, systemPrompt, engine, modelId, byId);
-    // Post-batch check: the completion may have taken minutes; if the signal
-    // fired mid-call, don't spin up the NEXT batch either. Also covers the
-    // case where the abort happened between `await` and loop increment.
-    if (signal?.aborted) break;
+    // No post-batch check: only the loop increment separates the `await`
+    // above from the pre-batch check on the next iteration, and `aborted`
+    // cannot flip across synchronous code — so a post check could only ever
+    // catch what the pre check catches one line later. An abort that fires
+    // mid-completion is therefore handled by the pre check, one batch later.
   }
 
   // Reconcile against the INPUT requirements: one verdict each, in order, with

@@ -184,23 +184,52 @@ describe("extractRequirements — cancellation (#803)", () => {
     // a real extraction failure via `err.name === "AbortError"`. If wrapping
     // happens, the orchestrator would log "semantic path failed" over a
     // cancellation we initiated — the exact behavior #803 forbids.
+    //
+    // The signal must fire DURING the call, not before it: an already-aborted
+    // signal is caught by the pre-call check, which throws its own AbortError
+    // and never enters the try — so both assertions would pass without the
+    // re-throw under test even existing.
     const abortErr = new DOMException("aborted", "AbortError");
+    const controller = new AbortController();
+    const create = vi.fn().mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(abortErr);
+    });
+    const engine: WebLlmEngine = { chat: { completions: { create } } };
+
+    // Identity, not shape: the engine's OWN error must come back untouched.
+    // `toMatchObject({name:"AbortError"})` would also pass on the AbortError
+    // the pre-call check throws, which is what made the earlier version of
+    // this test vacuous.
+    await expect(
+      extractRequirements("jd", engine, controller.signal),
+    ).rejects.toBe(abortErr);
+    expect(create).toHaveBeenCalledOnce();
+    // Not a RequirementExtractionError — that would break the orchestrator's
+    // catch-branch distinction.
+    expect(abortErr).not.toBeInstanceOf(RequirementExtractionError);
+  });
+
+  it("WRAPS an engine AbortError when our signal never fired", async () => {
+    // The `signal?.aborted` half of the re-throw guard. `isAbortError` is a
+    // pure shape check, so an engine-originated error merely NAMED
+    // "AbortError" — a future per-request timeout, a device-lost surfaced
+    // this way — would otherwise be re-thrown into the orchestrator's SILENT
+    // cancellation branch: degraded to keyword with the `[run-llm-match]
+    // semantic path failed` warn deliberately skipped, leaving no diagnostic
+    // trail for a failure we did not cause.
+    const abortErr = new DOMException("engine timeout", "AbortError");
     const engine: WebLlmEngine = {
       chat: {
         completions: { create: vi.fn().mockRejectedValue(abortErr) },
       },
     };
+    // Live, never-fired signal — the run was not cancelled by us.
     const controller = new AbortController();
-    controller.abort();
 
     await expect(
       extractRequirements("jd", engine, controller.signal),
-    ).rejects.toMatchObject({ name: "AbortError" });
-    // Not a RequirementExtractionError — that would break the orchestrator's
-    // catch-branch distinction.
-    await expect(
-      extractRequirements("jd", engine, controller.signal),
-    ).rejects.not.toBeInstanceOf(RequirementExtractionError);
+    ).rejects.toBeInstanceOf(RequirementExtractionError);
   });
 
   it("no signal (legacy 2-arg call): behavior unchanged, no aborts anywhere", async () => {
