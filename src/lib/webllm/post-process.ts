@@ -74,6 +74,33 @@ const CHAT_OPENER_PATTERN = /^here (?:are|is) (?:the )?rewritten\b/i;
  */
 const LEADING_BOLD_WORD_PATTERN = /^\*\*([A-Za-z][\w-]*)\*\*\s+/;
 
+/**
+ * A leading list marker: `1.` / `1)`, `•`, `-`, or `*`.
+ *
+ * The whitespace rules differ per branch, and each one is load-bearing:
+ *
+ *   - **Numbered requires `\s+`.** With `\s*` the alternative matches a bare
+ *     decimal — `3.` in `3.5x revenue growth` — because zero-or-more trailing
+ *     space is satisfied by the `5`. That is harmless while this runs once on
+ *     raw model output (a decimal is rarely line-initial there), but
+ *     `cleanRewriteLine` re-applies it to lines it has already stripped, so
+ *     `- 3.5x revenue growth` became `5x revenue growth`. Silent numeric
+ *     corruption on the product path, in a bullet the rewrite prompt actively
+ *     asks the model to quantify. Nothing needs a tight `1.Foo`.
+ *   - **`-` and `•` allow `\s*`**, so a tight `-Shipped X` still normalizes.
+ *   - **`*` requires `\s+`**, because `*X*` is italics and is handled by the
+ *     paired-emphasis strip instead.
+ */
+const LIST_MARKER_PATTERN = /^(?:\d+[.)]\s+|[•\-]\s*|\*\s+)/;
+
+/**
+ * Runaway guard for the markdown-prefix loop in `cleanRewriteLine` — not a
+ * budget for expected nesting. The loop terminates on its own (every strip
+ * only removes characters); this only bounds a hypothetical future strip that
+ * grows the line. Set well above any real prefix stack so it never truncates.
+ */
+const MAX_PREFIX_PASSES = 32;
+
 export function cleanRewriteLine(line: string): string {
   const trimmed = line.trim();
   if (!trimmed) return "";
@@ -87,30 +114,73 @@ export function cleanRewriteLine(line: string): string {
   // any trailing content the model attached to it.
   const withoutPrefix = trimmed.replace(/^rewritten:\s*/i, "");
 
-  // Strip a leading `**Verb**` markdown bold (single-word capture). This
-  // runs BEFORE the whole-line emphasis strip because that one requires
-  // closing `**` at end-of-line and so doesn't match the inline shape.
-  const withoutLeadingBold = withoutPrefix.replace(
-    LEADING_BOLD_WORD_PATTERN,
-    "$1 ",
-  );
+  // Markdown-prefix stripping, run to a fixed point.
+  //
+  // The three strips below shield each other in BOTH directions, which is why
+  // no single ordering works (#781):
+  //
+  //   - The emphasis strip must precede the marker strip, or the leading `*`
+  //     of an italicized line (`*Foo.*`) is read as a bullet glyph and the
+  //     trailing `*` survives.
+  //   - The marker strip must precede the leading-bold strip, or a marker in
+  //     front of the bold (`- **Led** the migration`) hides it from
+  //     LEADING_BOLD_WORD_PATTERN, which is anchored at `^`. That shipped:
+  //     19 of 24 Gemma `terse` bullets in the 2026-08-07 eval reports carried
+  //     literal `**` through to `perBullet[].text`, i.e. through to what a
+  //     downloaded ATS PDF would render as asterisks. That renderer draws real
+  //     bold from its own type scale and never interprets markdown, so a
+  //     surviving `**` is always garbage, never formatting.
+  //
+  // Looping resolves it without having to pick: each pass peels whatever is
+  // now outermost, and a marker uncovered on one pass is consumed on the next.
+  //
+  // ⚠️ The property each strip must hold is IDEMPOTENCE, not termination.
+  // Termination is trivially guaranteed — every branch only removes characters,
+  // so the line strictly shrinks — and it was never the risk. The real hazard is
+  // that a strip safe to apply once to MODEL OUTPUT may not be safe to re-apply
+  // to its OWN output, because the loop feeds it a line it has already
+  // transformed. LIST_MARKER_PATTERN is where that bit: with `\s*` after the
+  // numbered alternative, pass 1 stripped `- ` from `- 3.5x revenue growth` and
+  // pass 2 read the uncovered `3.` as a numbered marker, yielding
+  // `5x revenue growth`. Requiring `\s+` there is what makes it re-appliable.
+  // Any strip added to this loop must be checked the same way.
+  //
+  // Mid-line bold (`Developed and **implemented** …`) is deliberately NOT
+  // handled here. Two tests pin that as intentional — "does NOT strip emphasis
+  // mid-line" and "does NOT strip mid-bullet bold emphasis" — on the reasoning
+  // that a bold inside a sentence is authored emphasis rather than a model tic.
+  // It is also rare in practice: of the 19 affected eval bullets, 18 carried a
+  // leading bold only. Reversing that contract is a separate decision from
+  // fixing the marker interaction, so it is left to #781's follow-up.
+  let body = withoutPrefix;
+  let before = "";
+  let passes = 0;
+  while (body !== before) {
+    before = body;
 
-  // Strip paired bold/italic markdown delimiters BEFORE list-marker stripping
-  // — otherwise the leading `*` of an italicized line (`*Foo.*`) is misread
-  // as a bullet glyph and the trailing `*` survives. The pattern is paired
-  // (start AND end) so genuine mid-line emphasis is preserved.
-  const withoutEmphasis = withoutLeadingBold
-    .replace(/^\*\*(.+)\*\*$/s, "$1")
-    .replace(/^\*(.+)\*$/s, "$1")
-    .replace(/^_(.+)_$/s, "$1");
+    // Leading `**Verb**` bold (single-word capture) — see the pattern's own
+    // docblock for why multi-word bolds are left alone.
+    body = body.replace(LEADING_BOLD_WORD_PATTERN, "$1 ");
 
-  // Strip a leading list marker. `-` and `•` allow zero-or-more spaces (a
-  // tight `-Shipped X` should still normalize), but `*` requires at least
-  // one trailing space — `*X*` is italics and was already handled above.
-  const withoutBullet = withoutEmphasis.replace(
-    /^(?:\d+[.)]\s*|[•\-]\s*|\*\s+)/,
-    "",
-  );
+    // Paired bold/italic wrapping the WHOLE line. Paired (start AND end) so
+    // genuine mid-line emphasis is preserved.
+    body = body
+      .replace(/^\*\*(.+)\*\*$/s, "$1")
+      .replace(/^\*(.+)\*$/s, "$1")
+      .replace(/^_(.+)_$/s, "$1");
+
+    body = body.replace(LIST_MARKER_PATTERN, "");
+
+    // Runaway guard only. The loop exits on its own the moment a pass changes
+    // nothing, and the strictly-shrinking invariant means that always happens;
+    // this exists so a future strip that somehow grows the line cannot hang the
+    // worker. It is NOT a truncation point tuned to expected input — an earlier
+    // revision capped this at 4, which silently gave up on
+    // `1. - • - **Led** stuff.` and left the literal `**` this function exists
+    // to remove.
+    if (++passes >= MAX_PREFIX_PASSES) break;
+  }
+  const withoutBullet = body;
 
   // Strip surrounding quotes: straight (" ' `) plus smart double (“ ”) and
   // smart single (‘ ’).
