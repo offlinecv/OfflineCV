@@ -99,14 +99,23 @@
  *      cancelled. See `runLlmMatch`'s docblock for the boundary map.
  *
  *      Unmount abort is deferred by ONE microtask, guarded by `mountedRef`.
- *      Under React 19 StrictMode the mount effect's cleanup runs BETWEEN two
- *      effect-body invocations on the same hook instance; a naive abort in
- *      that cleanup would kill the in-flight run and the second effect body
- *      would early-return (slot inputs still match), stranding a spinner
- *      that never ends. The microtask hop lets StrictMode's synchronous
- *      re-mount body re-set `mountedRef.current = true` first; on a REAL
- *      unmount no re-mount runs, `mountedRef` stays false, and the abort
- *      fires. Same synchronous-commit-then-microtask ordering that makes
+ *      This is a BELT, not a fix for a reachable bug, and the distinction is
+ *      worth stating because the shape looks like one. The mount effect has
+ *      `[]` deps, so its cleanup fires exactly twice: at StrictMode's
+ *      simulated unmount on the initial mount, and at real unmount. At the
+ *      initial one, `debouncedJdText` is still `""` (a 200 ms timeout away)
+ *      and `capability` is still `null` (a promise away), so
+ *      `takingSemanticPath` is false through the whole synchronous
+ *      double-invoke and `controllerRef.current` is null — there is no run
+ *      to kill. A synchronous abort here would be a no-op TODAY.
+ *
+ *      What the hop buys: if a future change ever lets a run start before
+ *      the first commit settles, StrictMode's synchronous re-mount body
+ *      re-sets `mountedRef.current = true` before the queued microtask runs,
+ *      so the live run survives; on a REAL unmount no re-mount runs,
+ *      `mountedRef` stays false, and the abort fires. It also keeps a stale
+ *      microtask queued by the double-invoke from later killing the real
+ *      run. Same synchronous-commit-then-microtask ordering that makes
  *      #203's own `mountedRef.current = true` re-set pattern work.
  *
  * `parsed` identity contract: the hook treats `parsed` by REFERENCE, and the
@@ -360,10 +369,13 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
 
   const requestIdRef = useRef(0);
   const mountedRef = useRef(true);
-  /** Per-run AbortController (#803). Non-null between run-start and its resolve
-   *  or its supersession/opt-out abort. Nulled on abort so a stray follow-up
-   *  abort call is a no-op rather than aborting a fresh run that has since
-   *  reused the ref slot. */
+  /** Per-run AbortController (#803). Non-null from run-start until the run is
+   *  superseded or aborted — a COMPLETED run's controller is deliberately left
+   *  in place (nothing in the `.then`/`.catch` nulls it) and is harmlessly
+   *  re-aborted later, since `abort()` on a settled controller is a spec no-op.
+   *  That no-op is exactly what makes the opt-out branch safe against a `ready`
+   *  slot. Nulled on abort so a stray follow-up abort call can't hit a fresh
+   *  run that has since reused the ref slot. */
   const controllerRef = useRef<AbortController | null>(null);
   useEffect(() => {
     // Re-set on every mount, not just at hook creation: under React
@@ -376,8 +388,8 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
       mountedRef.current = false;
       // Unmount abort (#803, requirement §5). Deferred by one microtask,
       // gated on `mountedRef.current` still being false — see the
-      // Layer-3 rationale in the module docblock for why a synchronous
-      // abort here breaks StrictMode's simulated remount.
+      // Layer-3 rationale in the module docblock for why the defer is a
+      // belt against a future ordering rather than a live bug fix.
       queueMicrotask(() => {
         if (mountedRef.current) return;
         controllerRef.current?.abort();
@@ -431,7 +443,18 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     // The id bump happens either way — orphaning late writes is what stops
     // the download-progress re-renders, and it is independent of the slot.
     if (!takingSemanticPath) {
-      if (semanticSlot !== null) {
+      // Gated on the CONTROLLER as well as the slot, not the slot alone. The
+      // controller is installed synchronously at run-start while the matching
+      // `setSemanticSlot` is only scheduled, so "slot non-null" is a proxy for
+      // "a run exists" that holds only because `semanticSlot` is itself a dep
+      // of this effect — React therefore applies the run-start state update
+      // before any commit can observe `takingSemanticPath === false` against
+      // the pre-run slot. That is true under React 18/19 automatic batching
+      // and has no reachable counterexample today, but a refactor that moved
+      // the kickoff behind a promise would silently strand a live, un-aborted
+      // controller. Reading the ref directly makes the branch not depend on
+      // the ordering at all.
+      if (semanticSlot !== null || controllerRef.current !== null) {
         requestIdRef.current += 1;
         // Layer-3 (#803): stop the WORK, not just the writes. Aborting here
         // prevents the abandoned run's `extractRequirements` coercion pass
@@ -441,7 +464,9 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
         // a later duplicate exit isn't misread as an in-flight controller.
         controllerRef.current?.abort();
         controllerRef.current = null;
-        if (semanticSlot.state.kind !== "ready") setSemanticSlot(null);
+        if (semanticSlot !== null && semanticSlot.state.kind !== "ready") {
+          setSemanticSlot(null);
+        }
       }
       return;
     }

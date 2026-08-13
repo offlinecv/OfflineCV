@@ -165,11 +165,18 @@ export async function runLlmMatch(
     if (signal?.aborted) return keywordMatch(jdText, parsed);
     return { path: "semantic", verdicts, summary: summarize(verdicts) };
   } catch (err) {
-    if (isAbortError(err)) {
-      // Cancellation is expected control flow, not a failure. Do NOT log —
+    if (isAbortError(err) && signal?.aborted) {
+      // OUR cancellation — expected control flow, not a failure. Do NOT log —
       // #803's "cancellation is not logged as semantic failure" acceptance
       // criterion. The keyword fallback still runs so the caller's promise
       // resolves (per the never-rejects contract) with something renderable.
+      //
+      // `signal?.aborted` is the half that keeps this branch honest:
+      // `isAbortError` is a pure shape check (see `abort.ts`), so an
+      // engine-originated error merely NAMED "AbortError" would otherwise
+      // land here and degrade to keyword with the warn deliberately skipped —
+      // a silent failure with no diagnostic trail. Unfired signal → it falls
+      // through to the normal warn-and-degrade path below.
       return keywordMatch(jdText, parsed);
     }
     console.warn(
