@@ -2,8 +2,55 @@
 @import "./design-system/styles/theme.css"; /* semantic vocabulary → var() — stable contract */
 @import "@design-tokens"; /* default raw values — swappable via the Vite @design-tokens alias */
 
+/* `PageShell`'s header is `sticky top-0` (#812), so every scroll target on
+   both entries would otherwise come to rest UNDERNEATH the pinned band: the
+   native `#contact` / `#reconstructed-resume` hash anchors the score tiles
+   link to (`lib/anchors.ts`), and the `scrollIntoView({ block: "start" })`
+   calls in `ReconstructedResume` (Fix now) and `JobSearchResults` (page
+   change). `scroll-padding-top` on the scrolling root is what covers BOTH in
+   one declaration — a per-target `scroll-mt-*` only reaches the hash-anchor
+   half, because `scrollIntoView` honours scroll-padding on the scrollport but
+   is not affected by any margin the caller did not put there.
+
+   Two values, split at `lg`. The rail itself no longer changes layout at any
+   breakpoint — it takes a full-width row of its own everywhere — so the split
+   is now purely about how many rows the BRAND ROW wraps into: below `lg` the
+   brand and the CTA cluster can end up stacked, above it they never do. Height
+   here is otherwise CONTENT-driven, not breakpoint-driven: it depends on the
+   star count's width, on whether the surface passes a `subtitle` and a
+   `headerExtra`, and on the `max-w-5xl` cap that stops the header ever getting
+   wider than ~976px. So each band is sized to the MEASURED MAXIMUM across both
+   entries rather than to a formula, and no third media query is invented for a
+   wrap point that would drift the first time the CTA row changes.
+
+   Measured (Chromium, both entries, 15 widths from 320 to 1920):
+
+     below lg   both entries 147 at 320–414 (brand row and CTA row stack, then
+                the rail's own row below them). `/jobs/` hits 147 again at 640,
+                where its extra `headerExtra` button re-wraps the brand row that
+                `/` keeps on one line — which is why this band is NOT sized from
+                `/` alone                                         → band max 147
+     lg and up  both entries 119 at every width ≥ 1024 — brand row on one line,
+                rail on its own below it. `max-w-5xl` caps the content width, so
+                nothing collapses further no matter how wide the viewport gets
+                                                                  → band max 119
+
+   `/jobs/` is not the incidental case here: it is where `JobSearchResults`
+   fires `scrollIntoView({ block: "start" })` on every results page change.
+   Over-padding costs whitespace above the target; under-padding hides the
+   target, which is the defect. */
 html {
   font-size: 16px;
+  /* 160px: the 147px band, plus 13px so the target is visibly clear of the
+     border rather than flush against it. */
+  scroll-padding-top: 10rem;
+}
+
+@media (min-width: 1024px) {
+  html {
+    /* 128px: the 119px band, plus 9px of the same clearance. */
+    scroll-padding-top: 8rem;
+  }
 }
 
 body {

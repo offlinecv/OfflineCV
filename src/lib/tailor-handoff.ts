@@ -95,6 +95,39 @@ export function writeTailorHandoff(payload: TailorHandoff): void {
 }
 
 /**
+ * Is a handoff payload waiting, without consuming it?
+ *
+ * Deliberately separate from {@link consumeTailorHandoff}, and pure, for the
+ * same reason `nav-return.ts` keeps `readDepartureMarker` apart from
+ * `clearDepartureMarker`: the clear belongs to the surface that actually
+ * absorbs the payload, never to whoever merely asks whether one exists.
+ *
+ * The caller this exists for is `/`'s cold-mount auto-restore
+ * (`useAutoRestoreResume`, #812). A pending payload means a SPECIFIC parse is
+ * expected back on this page — the one whose fingerprint it carries — so
+ * hydrating a different résumé from the library would hand it to the wrong
+ * consumer, and `consumeTailorHandoff` clears unconditionally, including on the
+ * mismatch, so that consumer would destroy the payload rather than pass on it.
+ * Answering the question with a consuming read would have exactly the same
+ * effect, which is why this one does not.
+ *
+ * Answers only "is the key present and non-empty", not "is it valid for me":
+ * validity is a fingerprint comparison the real consumer makes with its own
+ * parse in hand, and this caller has no parse at all yet.
+ *
+ * Non-throwing: inaccessible storage reads as "nothing pending", which resolves
+ * to the pre-#812 behaviour of restoring normally.
+ */
+export function hasPendingTailorHandoff(): boolean {
+  try {
+    const raw = sessionStorage.getItem(TAILOR_HANDOFF_KEY);
+    return raw !== null && raw.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Read AND clear the handoff payload (one-shot), returning it only when it
  * was written for the caller's own parse.
  *

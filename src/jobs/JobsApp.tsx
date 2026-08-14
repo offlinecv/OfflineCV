@@ -35,7 +35,7 @@
  * explicit Search — see `lib/job-search/providers/keywords.ts`).
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, ErrorState, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { PageShell } from "../components/features/PageShell.tsx";
 import { FindJobsPanel } from "../components/features/FindJobsPanel.tsx";
@@ -50,6 +50,7 @@ import {
   writeTailorHandoff,
   fingerprintParse,
 } from "../lib/tailor-handoff.ts";
+import { deriveJourney, type JourneyStageId } from "../lib/journey.ts";
 
 // #706: goes to `/` directly, never via history.back() — the empty state only
 // shows when there is no in-progress parse to preserve, so this is a forward
@@ -145,10 +146,62 @@ export default function JobsApp() {
     : undefined;
   const trackerParsed = handoff?.parsed ?? fallback?.parsed;
 
+  // ── The L1 journey rail (#812) ────────────────────────────────────────────
+  //
+  // "Is there a résumé" is answered by EITHER source, not just the handoff.
+  // The rail is an orientation device about the user's journey, not a readout
+  // of what this tab can search with: a saved résumé the Saved-jobs tab is
+  // already rating against is a résumé this browser has, and marking Fix it
+  // "not ready yet" next to it would be false.
+  //
+  // The rail's promise round-trips WHEN the mark came from the library:
+  // `/`'s cold-mount auto-restore (#812) rehydrates that same newest record, so
+  // Fix it lands on it. It does not round-trip when the mark came from a
+  // handoff written by an UNSAVED parse and the return leg misses bfcache —
+  // `/` then reloads with nothing in the library to restore and Fix it lands on
+  // an empty drop zone. That is the pre-#812 outcome for an unsaved parse, not
+  // a regression, and the honest read of this signal is "this browser has a
+  // résumé somewhere", not "Fix it is guaranteed to find one".
+  //
+  // `jdSteering` is flatly false here, and that is not a stub: steering is
+  // WRITTEN on the way out of this surface (`handleTailor` above) and consumed
+  // on `/`, so it can never be active while this page is on screen. The Tailor
+  // stage therefore always shows its empty state here, pointing back at the
+  // Search tab — which is exactly where the "Tailor résumé to this job"
+  // buttons live.
+  const journeyState = useMemo(
+    () =>
+      deriveJourney({
+        entry: "jobs",
+        hasResume: handoff !== null || fallback !== undefined,
+        jdSteering: false,
+      }),
+    [handoff, fallback],
+  );
+
+  const onJourneySelect = useCallback(
+    (id: JourneyStageId) => {
+      // Match jobs IS this surface — the Search tab, which the user may have
+      // switched away from.
+      if (id === "match") {
+        setTab("search");
+        return;
+      }
+      // Every other stage lives on `/`. Through `returnToResumeRoot`, never a
+      // hand-rolled `history.back()`: a real back navigation is what restores
+      // `/`'s in-progress parse and inline edits from bfcache, and it is only
+      // correct when this tab's own departure marker says the trip started
+      // there (#706).
+      returnToResumeRoot(arrivedFromRoot);
+    },
+    [arrivedFromRoot],
+  );
+
   return (
     <PageShell
       subtitle="Find jobs that fit your resume"
       badge="Jobs"
+      journey={{ state: journeyState, onSelect: onJourneySelect }}
       // #707: PageShell's "Saved jobs" link exists to get a user here from one
       // of the other two surfaces — rendered on `/jobs/` itself it would point
       // at the page already open, which is confusing rather than useful.

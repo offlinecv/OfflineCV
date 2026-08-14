@@ -38,6 +38,7 @@ import { departToJobs } from "../../lib/jobs-departure.ts";
 import { readJobsHandoff } from "../../lib/jobs-handoff.ts";
 import { readDepartureMarker } from "../../lib/nav-return.ts";
 import { savedJobsHref } from "../../lib/jobs-landing.ts";
+import { deriveJourney, type JourneySignals } from "../../lib/journey.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -159,5 +160,193 @@ describe("PageShell — the Saved jobs link", () => {
     const event = click(link!);
     expect(onSavedJobsNavigate).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+// ── The journey rail slot (#812) ──────────────────────────────────────────────
+
+/**
+ * The shell PLACES the rail and owns exactly one thing about it: which stage
+ * the user asked for that has nothing behind it yet, so the guidance card can
+ * render as the first content block under the sticky header. What a stage
+ * MEANS stays in `lib/journey.ts`; what a click DOES stays with the surface.
+ * Both directions of that split are pinned here, because a shell that decided
+ * either one is the bug `PageShell`'s own docblock records.
+ */
+
+function withJourney(
+  signals: Partial<JourneySignals> = {},
+  onSelect = vi.fn(),
+): {
+  el: HTMLElement;
+  onSelect: ReturnType<typeof vi.fn>;
+  /** Re-render the SAME tree with different signals — not a remount, which is
+   *  the whole point for the staleness test below. */
+  resignal: (next: Partial<JourneySignals>) => void;
+} {
+  const build = (over: Partial<JourneySignals>) =>
+    deriveJourney({
+      entry: "root",
+      hasResume: false,
+      jdSteering: false,
+      ...signals,
+      ...over,
+    });
+  const el = render({ journey: { state: build({}), onSelect } });
+  const liveRoot = root;
+  return {
+    el,
+    onSelect,
+    resignal: (next) => {
+      act(() => {
+        liveRoot.render(
+          createElement(PageShell, {
+            badge: "alpha",
+            children: null,
+            journey: { state: build(next), onSelect },
+          }),
+        );
+      });
+    },
+  };
+}
+
+function railTrigger(el: HTMLElement, label: string): HTMLButtonElement {
+  const found = [...el.querySelectorAll("nav button")].find((b) =>
+    b.textContent?.includes(`: ${label}.`),
+  );
+  if (!found) throw new Error(`no rail trigger for ${label}`);
+  return found as HTMLButtonElement;
+}
+
+describe("PageShell — the journey rail", () => {
+  it("renders no rail at all when the surface supplies no journey", () => {
+    const el = render();
+    expect(el.querySelector("nav")).toBeNull();
+  });
+
+  it("renders one rail — not one per breakpoint — when a journey is supplied", () => {
+    // Two rails toggled by `hidden`/`lg:block` would put a second
+    // `aria-current="step"` in the accessibility tree; the layout switch is
+    // done with `flex-wrap` + `order-*` on a single node instead.
+    const { el } = withJourney({ hasResume: true });
+    expect(el.querySelectorAll("nav")).toHaveLength(1);
+    expect(el.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+  });
+
+  it("gives the rail a full-width row of its own at EVERY width", () => {
+    // Never folded into the header row, even where the space exists: sharing
+    // the row makes the arc read as one more header control beside "Saved
+    // jobs" and the star CTA, which is the L1-vs-L2 confusion #812 removes.
+    const { el } = withJourney({ hasResume: true });
+    const row = el.querySelector("nav")!.parentElement!;
+    expect(row.className).toContain("w-full");
+    // No breakpoint may hand the row back its auto width.
+    expect(row.className).not.toMatch(/\b(sm|md|lg|xl):w-auto\b/);
+    expect(row.className).not.toMatch(/\b(sm|md|lg|xl):w-/);
+  });
+
+  it("pins the header to the top of the viewport", () => {
+    const { el } = withJourney();
+    const header = el.querySelector("header")!;
+    expect(header.className).toContain("sticky");
+    expect(header.className).toContain("top-0");
+    expect(header.className).toContain("z-20");
+    expect(header.className).toContain("bg-surface-base");
+    // The backdrop must bleed over `main`'s own gutters, or content shows
+    // through beside the pinned band.
+    expect(header.className).toContain("-mx-6");
+    expect(header.className).toContain("px-6");
+  });
+
+  it("drops `main`'s top padding so nothing scrolls past above the pinned bar", () => {
+    const { el } = withJourney();
+    const main = el.querySelector("main")!;
+    expect(main.className).toContain("pb-10");
+    expect(main.className).not.toContain("py-10");
+  });
+
+  it("hands a populated stage straight to the surface", () => {
+    const { el, onSelect } = withJourney({ hasResume: true });
+    act(() => railTrigger(el, "Match jobs").click());
+    expect(onSelect).toHaveBeenCalledWith("match");
+    expect(el.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("answers an unpopulated stage with guidance instead of the surface", () => {
+    // Ungated navigation: the click is never swallowed and never locked — it
+    // opens the stage's empty state, and the surface is not told to go
+    // anywhere.
+    // `jdSteering` with no résumé is what puts `Tailor` on a `/` rail while
+    // leaving it unpopulated — the one combination that renders the stage and
+    // still has nothing behind it. (It is also the state `deriveJourney`
+    // normalizes away from `availability`, which is why the ✓ stays off.)
+    const { el, onSelect } = withJourney({ jdSteering: true });
+    act(() => railTrigger(el, "Tailor").click());
+    expect(onSelect).not.toHaveBeenCalled();
+    const card = el.querySelector('[role="status"]');
+    expect(card?.textContent).toContain("Pick a job first");
+    expect(card?.textContent).toContain("Go to Match jobs");
+  });
+
+  it("resolves a chained prerequisite one step at a time", () => {
+    // Tailor's CTA points at Match jobs, which is ALSO unmet on a first visit.
+    // Routing the card's CTA back through the same decision is what keeps it
+    // from dead-ending there.
+    const { el, onSelect } = withJourney({ jdSteering: true });
+    act(() => railTrigger(el, "Tailor").click());
+    const cta = [...el.querySelectorAll('[role="status"] button')].find((b) =>
+      b.textContent?.startsWith("Go to"),
+    ) as HTMLButtonElement;
+    act(() => cta.click());
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(el.querySelector('[role="status"]')?.textContent).toContain(
+      "ranked by how well they fit",
+    );
+  });
+
+  it("lets the first stage through even before anything is populated", () => {
+    // It has no earlier step to send the user back to — a guidance card there
+    // would point at itself.
+    const { el, onSelect } = withJourney();
+    act(() => railTrigger(el, "Add résumé").click());
+    expect(onSelect).toHaveBeenCalledWith("add");
+  });
+
+  it("renders the guidance card outside the pinned header", () => {
+    // A card pinned to the top of the viewport would eat the screen it is
+    // trying to send the user back across.
+    const { el } = withJourney();
+    act(() => railTrigger(el, "Download").click());
+    const card = el.querySelector('[role="status"]')!;
+    expect(el.querySelector("header")!.contains(card)).toBe(false);
+  });
+
+  it("drops the guidance the moment the prerequisite it names lands", () => {
+    // `blockedStage` is RE-DERIVED during render, never cleared from an effect.
+    // Swap the derivation for `askedFor !== null ? journeyStage(askedFor) : null`
+    // — the shape a reader reaches for — and the card outlives what it was
+    // explaining: for a frame in the ordinary case, and forever on the
+    // `/jobs/` → `/` bfcache return leg, where the tree is restored without any
+    // effect re-running at all. Re-render, never remount, so nothing but the
+    // render-time derivation can be doing the clearing here.
+    const { el, resignal } = withJourney({ jdSteering: true });
+    act(() => railTrigger(el, "Tailor").click());
+    expect(el.querySelector('[role="status"]')).not.toBeNull();
+
+    resignal({ hasResume: true, jdSteering: true });
+    expect(el.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("can be dismissed, and comes back on the next ask", () => {
+    const { el } = withJourney();
+    act(() => railTrigger(el, "Download").click());
+    const dismiss = [...el.querySelectorAll('[role="status"] button')].find(
+      (b) => b.textContent === "Dismiss",
+    ) as HTMLButtonElement;
+    act(() => dismiss.click());
+    expect(el.querySelector('[role="status"]')).toBeNull();
+    act(() => railTrigger(el, "Download").click());
+    expect(el.querySelector('[role="status"]')).not.toBeNull();
   });
 });
