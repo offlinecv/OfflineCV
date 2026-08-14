@@ -17,8 +17,9 @@ Checks:
    ``src/lib/analytics.ts``. The build-time ``VITE_POSTHOG_KEY`` gate
    only dead-code-eliminates the SDK when every touchpoint funnels
    through that single file. Memory: pattern_env_gated_oss_telemetry.
-4. Tier discipline — only ``src/lib/heuristics/cascade.ts`` (and
-   ``*.test.ts`` files) may import the tier modules ``pdf-extract``,
+4. Tier discipline — only ``src/lib/heuristics/cascade.ts`` (plus
+   ``*.test.ts`` files and anything under a ``__test-utils__/``
+   directory) may import the tier modules ``pdf-extract``,
    ``openresume``, or ``regex-fallback``. Production code goes through
    ``runCascade()``. CLAUDE.md "Pipeline shape".
 5. No raw ``console.log`` in ``src/lib/``. Easy to slip in during
@@ -78,6 +79,14 @@ def main() -> None:
 
     rel_str = str(rel)
     is_test = ".test." in fp.name
+    # Test-only, but not a test *file*: helpers under `__test-utils__/`. The
+    # repo already treats that directory as non-production (vite.config.ts
+    # drops `src/**/__test-utils__/**` from coverage), and #829 put a real
+    # consumer there — the aliased stand-in for `pdf-extract.ts`, which has to
+    # name the tier module it wraps. Rule 4 below exempts it for that reason;
+    # the SPDX rule deliberately does not, since these files still ship in the
+    # OSS tree.
+    is_test_only = is_test or "__test-utils__" in rel.parts
 
     # 1: SPDX header on non-test source files. (Test files inherit
     # licensing from the package; the 3-line block is for distributed
@@ -115,9 +124,9 @@ def main() -> None:
                 f"Memory: pattern_env_gated_oss_telemetry.",
             )
 
-    # 4: tier discipline. Only cascade.ts (and *.test.ts files) may name
+    # 4: tier discipline. Only cascade.ts (and test-only code) may name
     # the tier modules in an import. Production code calls runCascade.
-    if rel_str != CASCADE_REL and not is_test:
+    if rel_str != CASCADE_REL and not is_test_only:
         for mod in TIER_MODULES:
             # Match the bare module token in any import shape:
             #   import … from "./pdf-extract"

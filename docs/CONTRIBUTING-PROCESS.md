@@ -11,9 +11,9 @@ the binding one-liners sit in `CLAUDE.md` → **Hard rules** (always in an agent
 fixture-PII check is a directory-scoped `CLAUDE.md` in `tests/fixtures/pdfs/`, and each shipping
 skill (`/open-pr`, `/pr-review`, `/revise-pr`, `/implement-batch`, `/pr-ready`) carries its own
 operational copy. Nothing here is load-bearing on its own — if you change a rule, change it in
-those places too, not only here. The exception is **AI attribution**, which has no `CLAUDE.md`
-counterpart on purpose: it is enforced by a setting in `.claude/settings.json`, and a prose rule
-restating a setting is context an agent has to spend reconciling.
+those places too, not only here. **AI attribution** is the partial exception: it is enforced by a
+setting in `.claude/settings.json`, so its `CLAUDE.md` counterpart is deliberately thin — a
+one-liner for the harnesses that setting does not reach, rather than prose restating it.
 
 ## Test fixtures — PII policy (non-negotiable)
 

@@ -63,20 +63,38 @@ Release planning runs on GitHub Milestones (P1 Friends & Family → P4 Post-Publ
 Vite 7 + React 19 + TypeScript 5.8 + Tailwind 3.4. Vitest runs against `vite.config.ts` (Node env, globals on). pdfjs-dist 4.x; the worker is configured once at app boot in `src/main.tsx` via Vite's `?url` import. No router (single-page app), no SSR/prerender. Analytics are env-gated (`VITE_POSTHOG_KEY`) and dead-code-eliminated when unset — see `src/lib/analytics.ts`.
 
 ```bash
-npm run dev        # vite dev server (https://localhost:5173 — TLS, self-signed)
-npm run dev:http   # plain http, for LAN demos; costs WebGPU (see README)
-npm run build      # tsc -b && vite build → dist/
-npm run test       # vitest run
-npm run typecheck  # tsc -b --noEmit
-npm run lint       # eslint .
-npm run verify     # full local CI mirror: typecheck → lint → coverage → build → fallow
+npm run dev          # vite dev server (https://localhost:5173 — TLS, self-signed)
+npm run dev:http     # plain http, for LAN demos; costs WebGPU (see README)
+npm run build        # tsc -b && vite build → dist/
+npm run test         # vitest run
+npm run typecheck    # tsc -b --noEmit
+npm run lint         # eslint .
+npm run verify:quick # inner-loop gate: typecheck → lint → change-scoped tests
+npm run verify       # local pre-push gate: typecheck → lint → gates → tests → build → fallow
 ```
 
-`npm run verify` is the canonical pre-push gate — the exact CI sequence. A git `pre-push` hook runs it automatically (installed by `npm install`); bypass with `OFFLINECV_SKIP_HOOKS=1`.
+**Three layers, cheapest first** (#828). `verify:quick` runs on every Claude Code Stop that followed a `src/**.ts{,x}` edit (`scripts/hooks/lint_and_test.sh`) — many times an hour, so it carries only what a bad edit actually breaks. `npm run verify` is the canonical pre-push gate, run automatically by a git `pre-push` hook (installed by `npm install`). CI runs everything with coverage.
+
+Nothing `verify:quick` skips is skipped for good — the build, `check:core`, `check:fixtures`, `check:baselines` and fallow all re-run at pre-push — and each is also inapplicable at Stop by construction, since the sentinel only fires for `.ts`/`.tsx` under `src/`: `tsc -b --noEmit` already types the sources `vite build` would bundle; `check:core` packs the `@offlinecv/core` tarball, which is not under `src/`; `check:fixtures` and `check:baselines` read PDFs and JSON sidecars, which a `.ts` edit cannot change; and fallow is report-only anyway. Bypass every local layer with `OFFLINECV_SKIP_HOOKS=1`.
+
+**`verify` is no longer the exact CI sequence, on purpose** (#828). CI runs the whole suite with coverage every time; `verify` runs `npm run test:changed`, which scopes the run to `vitest --changed` when *every* changed path is an added-or-modified `.ts`/`.tsx` under `src/`, and runs everything otherwise — a fixture, a JSON baseline, a lockfile, a config, anything under `scripts/`, or any deletion or rename all fall back to the full suite, because vitest's module graph cannot see those. `OFFLINECV_FULL_TESTS=1` forces the full run. Branch protection requires the CI job, so a local under-selection costs a red check, never a bad merge — do not treat a green `verify` as CI having passed.
 
 **fallow is report-only inside `verify`.** The step ends `|| echo '…report-only, ignored'`, so a `fallow audit` exit 1 (complexity / CRAP / duplication) does **not** fail `verify` — branch protection requires only the `verify` job. A fallow complexity/CRAP finding on a PR is a **Nit / Secondary**, never Blocking on its own.
 
-**While iterating, prefer the narrow gate** — `npx vitest run <path>` on the files you touched, plus `npm run typecheck`. Save the full `verify` for when you think you're done. It runs coverage + build + fallow and is slow enough to cost you iterations.
+**While iterating, prefer the narrow gate** — `npx vitest run <path>` on the files you touched, plus `npm run typecheck`; `npm run verify:quick` is the same idea with the selection made for you, and is what the Stop hook runs. Save `verify` for when you think you're done: it still runs the build, the packaging and fixture gates, and fallow, and on any change it cannot scope it still runs all 348 test files.
+
+**Killing a test run does not kill its workers.** vitest runs files in a `tinypool` fork pool, and the forks are not in the parent's wait chain — Ctrl-C, an agent tool timeout, or a killed background task reaps the parent and leaves the pool spinning at ~100% CPU per worker. Nine survived one interrupted run here and pushed load average to 110. They own no port and no lockfile, so nothing complains; they just make every later timing wrong. **After any interrupted or timed-out run, reap explicitly** — do not assume the tool that killed it did:
+
+```bash
+pkill -f vitest || true    # matches the pool workers, which retitle to "vitest N"
+uptime                     # 1-minute average should fall back toward idle
+```
+
+**Do not measure anything on a loaded machine.** Check `uptime` first; if the 1-minute load average is above the core count (`sysctl -n hw.ncpu`), a timing is noise, not signal. This is not hypothetical — the same probe measured 43s and 126s; the first root-cause diagnosis in #828 was wrong because of it, and so was its follow-up claim that `poolOptions.forks.isolate=false` "never finished inside 600s" — and so was the 78s that replaced *that*, since it finishes in ~25s on a genuinely idle machine. Note also that most cores here are efficiency cores (`hw.perflevel1.logicalcpu`), so identical work lands on very different clocks run to run. Quote a comparison, not an absolute, and say what else was running.
+
+**Tier 0 extraction is cached on disk during tests** (#829). Six suites re-parse the same 58 fixtures in separate forks, and pdfjs extraction is ~82% of a parse and a pure function of the bytes, so `test.alias` in `vite.config.ts` redirects the one specifier `cascade.ts` dynamic-imports to `src/lib/heuristics/__test-utils__/extract-cache.ts`. Nothing in the production bundle is involved and no suite changed — they all still call `runCascade(bytes)`. Worth ~40% of the wall on those six suites, ~4% on a full run.
+
+The cache key is the bytes plus a fingerprint of every source file the extraction transitively reaches (walked, not hand-listed), plus `vite.config.ts` and the `pdfjs-dist` version — so editing a Tier 1 file leaves it warm while editing `line-assembly.ts` cools it. **It must fail closed**: a stale entry turns the corpus green against work it never did, which is worse than the slowness. `UPDATE_FIXTURES=1` (so `npm run bake-fixtures`) bypasses it in both directions. To rule it out while debugging a parse, `OFFLINECV_NO_EXTRACT_CACHE=1 npx vitest run …`, or `rm -rf node_modules/.cache/offlinecv-extract`. One caveat it is worth knowing about: `PdfTextItem.fontName` is labelled per loaded document by pdfjs, so a cached result carries labels a fresh extraction would not — safe because the field is opaque and `dropDecorativeGlyphs` has already consumed it, and pinned to that one field by `extract-cache.test.ts`.
 
 ## Pipeline shape
 
