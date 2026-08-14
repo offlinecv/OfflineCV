@@ -3,9 +3,11 @@
 Guidance for Claude Code (claude.ai/code) working in this repository.
 
 **This file is about writing code.** The *why* behind the process — merge-queue mechanics, the
-provenance rationale, the full PII policy, deploy, license — lives in
+AI-attribution setting, the full PII policy, deploy, license — lives in
 `docs/CONTRIBUTING-PROCESS.md`. You do not need it to write a change. The three rules below are
 the exception: they stay here because breaking them is silent, and for two of them, permanent.
+Everything else that used to sit here is enforced by config or by a gate, and prose that restates
+a setting only gives you something to reconcile.
 
 ## Hard rules (no exceptions)
 
@@ -28,10 +30,9 @@ the exception: they stay here because breaking them is silent, and for two of th
   `pdftotext <file>.pdf - | head -40` — the two cover different surfaces. `pdftotext` prints only
   the drawn page, so it cannot see a `tel:`/`mailto:` **link annotation** or the Info dict, and
   both have leaked here. Never trust the PR prose over the binary.
-- **Never in git.** No `Co-Authored-By:` trailer naming a model, no `Claude-Session:` trailer, no
-  `https://claude.ai/code/session_…` URL, no `🤖 Generated with …` badge — not in a commit
-  message, not in a PR body. The Bash tool's default commit template suggests them; ignore it.
-  Model provenance is useful and belongs in the **PR body only**, as a `## Provenance` block.
+- **No AI attribution in git.** Claude Code has this off by config (`attribution` in
+  `.claude/settings.json`); on any other harness it is on you. Never commit attribution
+  trailers (like `Co-Authored-By:` or `Claude-Session:`) or PR badges.
 - **One commit per PR.** `main` merges through a merge queue that derives the squash message from
   the branch, so a multi-commit PR lands `wip` and `fix lint` in `main` forever. Collapse the
   branch to a single commit before it reaches the queue.

@@ -238,12 +238,9 @@ Match the commit-type prefix conventions from `CONTRIBUTING.md`
 (`feat`/`fix`/`chore`/`refactor`/`docs`/`test`). The `block_commit` hook allows
 commits on a feature branch; this is never `main`.
 
-**No AI trailers in the commit** — no `Co-Authored-By: Claude …`, no
-`Claude-Session:` trailer, no `https://claude.ai/code/session_…` URL, no
-`🤖 Generated with …` badge. The Bash tool's default commit template suggests
-them; ignore it. This repo is public — a session URL is an account-scoped
-identifier with zero value to any reader of the diff. Model provenance goes in
-the **PR body only** (Step 5.5).
+Write the message and nothing else — AI attribution is off by config
+(`attribution` in `.claude/settings.json`), so there is no trailer to strip and
+none to add back.
 
 > **Note:** this push dismisses any existing approval (dismiss-stale-reviews-on-push).
 > That's expected — Step 7 re-requests review.
@@ -300,30 +297,11 @@ Two things this costs, stated plainly:
   Do Step 6 (reply + resolve) **after** this push, using the thread IDs captured
   in Step 2 — replying via `in_reply_to` works regardless of outdated state.
 
-### Step 5.5: Update `## Provenance` if a different model did the revision
-
-If the PR body has a `## Provenance` block and **you are not** the model already
-credited there, add a row for the work you just did — you know your own model
-first-hand:
-
-| Stage | Model | Effort |
-|---|---|---|
-| Review revisions | Claude Opus 4.8 | medium |
-
-**Update the existing block in place — never append a second one.** Read the
-body, edit the block, write it back:
-
-```bash
-body="$(gh pr view "$PR_NUM" --repo "$REPO" --json body -q .body)"
-# You must write the text-replacement logic (e.g. awk/python) to define updated_body.
-# If it contains '## Provenance', append the new row to that block.
-# If it does NOT, append a fresh block.
-updated_body="..."
-gh pr edit "$PR_NUM" --repo "$REPO" --body-file -   <<<"$updated_body"
-```
-
-If the body has no `## Provenance` block (an older PR), leave it alone — don't
-retrofit provenance you can't establish for work you didn't do.
+**No provenance step here.** Model attribution is retired
+(`docs/CONTRIBUTING-PROCESS.md` → **AI attribution**), so a revision round no
+longer reads the PR body back, edits a `## Provenance` block, and writes it — the
+step this skill used to spend two `gh` calls on every round. If an older PR still
+carries a block, leave it exactly as it is; do not update it and do not delete it.
 
 ### Step 6: Reply to each thread, then resolve what you fixed
 
@@ -438,10 +416,10 @@ on a source PR. Link the target PR.
   clear comments.
 - **Never commit/push to `main`.** Always the PR's head branch (you're on it after
   `gh pr checkout`).
-- **No AI trailers in git; `## Provenance` is updated in place, never stacked.** If
-  a different model revised the PR, add its row — naming your own model, which you
-  know first-hand. Never infer a version string from a `model:` alias, never
-  invent a row (omit it instead), and never stack a second `## Provenance` block.
+- **Nothing is appended to a commit message or a PR body for attribution.** The
+  harness's trailers are off by config; the `## Provenance` block is retired, so a
+  revision round no longer reads and rewrites the body. An older PR that still has
+  one keeps it, untouched.
 - **Fixtures: synthetic personas only.** Any added/changed fixture binary runs the
   `open-pr` Step 3.5 PII preflight before pushing — fake name, `@example.com`, a
   **real area code + `555` exchange + `0100`–`0199`** phone (e.g. `(312) 555-0123`;

@@ -435,7 +435,6 @@ is NOT set:
    ```bash
    git add -- "${FIXED_PATHS[@]}"        # stage by path, never `git add -A`/`.`
    git commit -m "fix(review): address review nits"
-   # Do NOT add any Co-Authored-By / session / attribution trailer (CLAUDE.md hard rule).
 
    git fetch origin "$HEAD_BRANCH"
    if ! git merge-base --is-ancestor "origin/$HEAD_BRANCH" HEAD; then
@@ -490,9 +489,11 @@ Reviewed by: Claude Opus 4.8 (high)
 
 Name **your own** model (you know it first-hand) — never a guess, and never an
 alias like `opus`. This is what makes a cross-model review legible: the value of a
-second model's read is lost if the PR doesn't say which model read it. No
-`Co-Authored-By`, no session URL, no `🤖` badge — none of those belong in git or a
-PR body on a public repo (`CLAUDE.md` → **Hard rules**).
+second model's read is lost if the PR doesn't say which model read it. It is also
+the *only* model attribution this repo still writes — the `## Provenance` block
+that used to accompany it is retired, because unlike this line it needed a
+round-trip to every subagent and still couldn't be trusted
+(`docs/CONTRIBUTING-PROCESS.md` → **AI attribution**).
 
 **Anchor findings to the code by default.** A finding sitting in the body makes the
 author scroll and hunt for `regex.ts:512`; the same finding inline lands on the line
