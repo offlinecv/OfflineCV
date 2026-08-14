@@ -22,6 +22,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { HeuristicParsedResume } from "../lib/heuristics/types.ts";
+import { newestLibraryEntryId } from "../lib/resume-library.ts";
 import type { ResumeLibrary } from "./useResumeLibrary.ts";
 
 export interface FallbackResume {
@@ -38,15 +39,14 @@ export function useFallbackResume(
   library: FallbackResumeLibrary,
 ): FallbackResume | undefined {
   // Recomputed only from `entries` — NOT `library.ready`, which flips once and
-  // never again, so including it would be a no-op dep. Reduces to the entry
-  // with the largest `savedAt`; `listLibrary` already returns newest-first, but
-  // this does not lean on that ordering staying true.
-  const newestId = useMemo<string | undefined>(() => {
-    if (!active || library.entries.length === 0) return undefined;
-    return library.entries.reduce((newest, entry) =>
-      entry.savedAt > newest.savedAt ? entry : newest,
-    ).id;
-  }, [active, library.entries]);
+  // never again, so including it would be a no-op dep. The "which entry is
+  // newest" rule itself lives in `resume-library.ts` (#812), shared with `/`'s
+  // cold-mount auto-restore, so the two surfaces can never fall back to
+  // different résumés.
+  const newestId = useMemo<string | undefined>(
+    () => (active ? newestLibraryEntryId(library.entries) : undefined),
+    [active, library.entries],
+  );
 
   const [fallback, setFallback] = useState<FallbackResume | undefined>(undefined);
 

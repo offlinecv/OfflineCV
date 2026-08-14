@@ -27,15 +27,32 @@
  * bug — the marker means "this trip started at the app root", and shared
  * chrome renders everywhere.
  *
- * Reuse: consumes only `@design-system` primitives/shared components + the
- * useGitHubStars / useUpdateChecker hooks. No raw <button> / hardcoded palette.
+ * The journey rail (#812) arrives the same way: the shell PLACES it — on its
+ * own full-width row at every width, and its guidance card as the first content
+ * block under the header — and owns nothing else about it. The surface derives
+ * the stages (`deriveJourney`) and decides what a click does; the ask-and-route
+ * state in between is `useJourneyGuidance`, which is where the render-time
+ * derivation of the blocked stage is documented.
+ *
+ * Reuse: consumes only `@design-system` primitives/shared components, the
+ * `JourneyRail` sibling, and the useGitHubStars / useUpdateChecker /
+ * useJourneyGuidance hooks. No raw <button> / hardcoded palette.
  */
 
 import { useState, type MouseEvent, type ReactNode } from "react";
 import { UpdateBanner, GitHubStarCta } from "@design-system";
 import { useGitHubStars } from "../../hooks/useGitHubStars.ts";
 import { useUpdateChecker } from "../../hooks/useUpdateChecker.ts";
+import {
+  useJourneyGuidance,
+  type JourneyNavigation,
+} from "../../hooks/useJourneyGuidance.ts";
 import { savedJobsHref } from "../../lib/jobs-landing.ts";
+import { JourneyRail, JourneyGuidance } from "./JourneyRail.tsx";
+
+/** The rail contract, owned by `useJourneyGuidance` — aliased here because it
+ *  is also this component's prop shape. */
+export type PageShellJourney = JourneyNavigation;
 
 export interface PageShellProps {
   /**
@@ -68,6 +85,12 @@ export interface PageShellProps {
    * document is the one navigating.
    */
   onSavedJobsNavigate?: () => void;
+  /**
+   * The top-level journey rail (#812). Omitted → no rail, and the header keeps
+   * its pre-#812 single-row shape. Supplied → the rail renders on its own
+   * full-width row below the brand row at every width.
+   */
+  journey?: PageShellJourney;
   children: ReactNode;
 }
 
@@ -78,6 +101,7 @@ export function PageShell({
   headerExtra,
   hideSavedJobsLink,
   onSavedJobsNavigate,
+  journey,
   children,
 }: PageShellProps) {
   const { count: starCount } = useGitHubStars();
@@ -88,8 +112,12 @@ export function PageShell({
   const { updateAvailable, reload } = useUpdateChecker();
   const [updateDismissed, setUpdateDismissed] = useState(false);
 
+  // Which stage the user asked for that has nothing behind it yet, and where a
+  // click goes. Derived during render inside the hook — see its docblock.
+  const { blockedStage, onStageClick, dismiss } = useJourneyGuidance(journey);
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 pb-10">
       {updateAvailable && !updateDismissed && (
         <UpdateBanner
           onReload={reload}
@@ -97,8 +125,33 @@ export function PageShell({
         />
       )}
 
-      <header className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
+      {/* Sticky so the rail is a permanent orientation signal rather than
+          something you scroll away from. `-mx-6 px-6` bleeds the backdrop over
+          `main`'s own gutters (without it the blurred band stops short of the
+          page edge and content shows through beside it), and `main` dropped its
+          top padding so the bar sits flush from the first paint — a sticky
+          element keeps its space in flow, so there is no layout shift when it
+          pins, but a gap above it would show unstyled content sliding past.
+          One rail node, not one per breakpoint, and it is a SIBLING of the
+          brand row rather than a wrap-item inside it: now that it always takes
+          a row of its own, living in the wrap row bought nothing and cost it
+          the row's tight `gap-y-2`, which left the track visually welded to the
+          brand. As a sibling it gets the header column's own gap instead.
+
+          THIS BAND'S HEIGHT IS A DEPENDENCY. `styles.css` sets a
+          `scroll-padding-top` on the scrolling root sized to the measured
+          maximum of this header, so that every in-page scroll target — the
+          score tiles' `#contact` / `#reconstructed-resume` hash anchors, and
+          the `scrollIntoView({ block: "start" })` calls in
+          `ReconstructedResume` and `JobSearchResults` — lands below it rather
+          than underneath it. Anything that adds a row here (a `headerExtra`,
+          a longer CTA, a taller rail) has to be re-measured there. */}
+      <header className="sticky top-0 z-20 -mx-6 flex flex-col gap-4 border-b border-border-light bg-surface-base/95 px-6 py-2 backdrop-blur">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {/* No `shrink-0` on either of the two header-row blocks: the row is
+              `flex-wrap`, and a block that cannot shrink wraps instead — which
+              at 320px turned the brand and the CTAs into two rows of their own.
+              They keep the pre-#812 behaviour of compressing to fit. */}
           <div className="flex items-center gap-2">
             <a
               href={import.meta.env.BASE_URL}
@@ -112,7 +165,7 @@ export function PageShell({
               {badge}
             </span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="ml-auto flex items-center gap-4">
             {!hideSavedJobsLink && (
               <a
                 href={savedJobsHref()}
@@ -150,8 +203,32 @@ export function PageShell({
             <GitHubStarCta variant="inline" count={starCount} />
           </div>
         </div>
+        {journey && (
+          // Its OWN full-width row at every width — never folded into the brand
+          // row, even where the horizontal space exists. Sharing that row made
+          // the rail read as one more header control sitting beside "Saved
+          // jobs" and the star CTA, which is precisely the L1-vs-L2 confusion
+          // #812 exists to remove; and it forced a third content-sized
+          // breakpoint band whose chips were sized by the narrowest share left
+          // after the brand and the CTAs took theirs. A dedicated row costs one
+          // line of vertical space and gives the arc a register of its own.
+          <div className="w-full min-w-0">
+            <JourneyRail journey={journey.state} onStageClick={onStageClick} />
+          </div>
+        )}
         {chips && <div className="w-full">{chips}</div>}
       </header>
+
+      {blockedStage && (
+        // First content block, OUTSIDE the sticky header: a card pinned to the
+        // top of the viewport would eat the screen it is trying to send the
+        // user back across.
+        <JourneyGuidance
+          stage={blockedStage}
+          onGoToPrerequisite={onStageClick}
+          onDismiss={dismiss}
+        />
+      )}
 
       {children}
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, Tabs, TabList, Tab, TabPanel } from "@design-system";
 import { ReconstructedResume } from "./ReconstructedResume.tsx";
 import { FindJobsLauncher } from "./FindJobsLauncher.tsx";
@@ -44,6 +44,31 @@ interface ResultDetailTabsProps {
   /** Forwarded to the recovery banner; `ParsedCard` swaps in the LLM parse. */
   onRecovered: (llmParsed: LlmParsedResume) => void;
   triggerCount: number;
+  /**
+   * A tab this surface's journey rail (#812) wants opened. Three of the five
+   * L1 stages — Fix it, Tailor, Download — all live behind the `reconstructed`
+   * tab, so picking one has to land there even when the user is on another.
+   *
+   * Carries a `nonce` because the ID alone is not an event: asking for the tab
+   * you are already on is a legitimate, repeatable click (it also scrolls the
+   * page back to the top), and an id-keyed effect would fire once and then go
+   * quiet.
+   */
+  requestedTab?: { id: string; nonce: number };
+  /**
+   * Reports the JD steering this component consumed, so `/` can mark the
+   * Tailor stage on the rail.
+   *
+   * Deliberately a callback UP rather than a lift of `useTailorHandoff` into
+   * `App`: `consumeTailorHandoff` clears the sessionStorage key
+   * unconditionally, INCLUDING on a fingerprint mismatch, so a copy of that
+   * hook mounted at `App` — where the résumé is absent in `idle`/`parsing` and
+   * only arrives later, via auto-restore or a drop — would drain the payload
+   * against the wrong parse before the real consumer ever sees it. Keeping the
+   * hook here preserves all three invariants its docblock documents; only the
+   * resulting value travels.
+   */
+  onJdContextChange?: (jdContext: string | null) => void;
 }
 
 export function ResultDetailTabs({
@@ -58,6 +83,8 @@ export function ResultDetailTabs({
   escapeHatch,
   onRecovered,
   triggerCount,
+  requestedTab,
+  onJdContextChange,
 }: ResultDetailTabsProps) {
   // `tab` state lives here — only used within this component, not in ParsedCard.
   const [tab, setTab] = useState("reconstructed");
@@ -78,6 +105,36 @@ export function ResultDetailTabs({
     parseIdentity,
     onConsumed: () => setTab("reconstructed"),
   });
+
+  // Latest-value ref so the report effect below can depend on `jdContext`
+  // ALONE. Depending on the callback too would re-fire on every render of a
+  // caller that passes an inline closure, which is every caller.
+  const onJdContextChangeRef = useRef(onJdContextChange);
+  useEffect(() => {
+    onJdContextChangeRef.current = onJdContextChange;
+  });
+  useEffect(() => {
+    onJdContextChangeRef.current?.(jdContext);
+    // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
+    // CLAUDE.md): `jdContext` is the whole payload and the only thing whose
+    // change the parent cares about; the callback is read through the ref
+    // above precisely so it cannot add a re-fire of its own. The initial run
+    // (reporting `null`) is wanted — it is what clears a stale mark when this
+    // component remounts onto a résumé with no steering.
+  }, [jdContext]);
+
+  // The rail's landing request (#812). Keyed on the NONCE, with `id` listed
+  // because the body reads it — the two always move together, so `id` adds no
+  // fire of its own. Cannot fight `onConsumed` above: that fires when a tailor
+  // handoff is absorbed (an arrival from `/jobs/`), this fires on a rail click
+  // in THIS document, and neither can happen inside the other's commit. Both
+  // would in any case be asking for the same tab.
+  const requestedNonce = requestedTab?.nonce;
+  const requestedId = requestedTab?.id;
+  useEffect(() => {
+    if (requestedId === undefined) return;
+    setTab(requestedId);
+  }, [requestedNonce, requestedId]);
 
   // The on-device-AI tab (id `quality`) is the canonical on-device-AI surface
   // (#276). It shows whenever there's résumé text to analyze — either running the live

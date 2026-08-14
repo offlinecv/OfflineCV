@@ -169,6 +169,26 @@ export async function listLibrary(): Promise<ResumeLibraryEntry[]> {
     .sort((a, b) => b.savedAt - a.savedAt);
 }
 
+/**
+ * The id of the most recently saved entry, or `undefined` for an empty list.
+ *
+ * Two consumers now ask the same question — `/jobs/`'s tracker fallback
+ * (`useFallbackResume`, #724) and `/`'s cold-mount auto-restore
+ * (`useAutoRestoreResume`, #812) — so the answer has one definition. Reduces to
+ * the largest `savedAt` rather than taking `listLibrary`'s first element: that
+ * function does sort newest-first today, and this deliberately does not lean on
+ * that staying true, since a caller holding a list from anywhere else would get
+ * a silently wrong résumé rather than a type error.
+ */
+export function newestLibraryEntryId(
+  entries: readonly ResumeLibraryEntry[],
+): string | undefined {
+  if (entries.length === 0) return undefined;
+  return entries.reduce((newest, entry) =>
+    entry.savedAt > newest.savedAt ? entry : newest,
+  ).id;
+}
+
 /** The kind a record's stored bytes actually are, for a record whose snapshot
  *  cannot say. Reverse of {@link MIME}; unknown/blank types read as `pdf`,
  *  which is what every producer that writes bytes writes today. */

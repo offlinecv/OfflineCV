@@ -537,3 +537,115 @@ describe("ResultDetailTabs", () => {
     expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
   });
 });
+
+// ── The journey rail's two wires (#812) ──────────────────────────────────────
+
+/**
+ * `requestedTab` (down) and `onJdContextChange` (up) are the whole of this
+ * component's contract with `/`'s L1 rail, and neither is exercised by anything
+ * above. Both fail silently: a landing request that stops working leaves the
+ * rail's Fix it / Tailor / Download stages as dead clicks, and a steering report
+ * that stops arriving leaves the rail marking — or failing to mark — Tailor
+ * over a résumé that has no steering.
+ */
+describe("ResultDetailTabs — the journey rail wires (#812)", () => {
+  /** Click the tab whose label contains `label`. */
+  function selectTab(el: HTMLElement, label: string) {
+    const tab = [...el.querySelectorAll('[role="tab"]')].find((t) =>
+      (t.textContent ?? "").includes(label),
+    ) as HTMLElement;
+    if (!tab) throw new Error(`no tab labelled ${label}`);
+    act(() => tab.click());
+  }
+
+  function selectedLabel(el: HTMLElement): string {
+    return (
+      el.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? ""
+    );
+  }
+
+  /** A host whose `requestedTab` this test drives, exactly as `App` does. */
+  function railHost(
+    onJdContextChange?: (jdContext: string | null) => void,
+  ): (requestedTab?: { id: string; nonce: number }) => void {
+    const opts: ControllerOpts = { isAvailable: false };
+    const res = result();
+    const identity = parseIdentity();
+    function RailHost({
+      requestedTab,
+    }: {
+      requestedTab?: { id: string; nonce: number };
+    }) {
+      const edit = useEditableParse();
+      return createElement(ResultDetailTabs, {
+        activeResult: res,
+        parseIdentity: identity,
+        activeScore: score,
+        result: res,
+        sourceKind: "pdf",
+        edit,
+        analysis: controller(opts),
+        escapeHatch: escapeHatchController(opts),
+        onRecovered: () => {},
+        triggerCount: res.triggers.length,
+        requestedTab,
+        onJdContextChange,
+      });
+    }
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const paint = (requestedTab?: { id: string; nonce: number }) => {
+      act(() => {
+        root.render(createElement(RailHost, { requestedTab }));
+      });
+    };
+    paint();
+    return paint;
+  }
+
+  it("honours a REPEAT request for the tab the user is already on", () => {
+    // The nonce is the whole point, and this is the assertion that proves it.
+    // Key the effect on `[requestedTab?.id]` — the shape a reader reaches for —
+    // and the first request below still works, so a test that asked once would
+    // pass either way. The second one is where it dies: the id has not changed,
+    // the effect does not re-fire, and the rail's Fix it / Tailor / Download
+    // stages become dead clicks for the rest of the page's life for any user
+    // who ever navigated away from Reconstructed by hand.
+    const paint = railHost();
+    const el = container;
+
+    selectTab(el, "Raw text & flags");
+    expect(selectedLabel(el)).toContain("Raw text & flags");
+
+    paint({ id: "reconstructed", nonce: 1 });
+    expect(selectedLabel(el)).toContain("Your resume");
+
+    // Same id, next nonce — a second, identical rail click.
+    selectTab(el, "Raw text & flags");
+    expect(selectedLabel(el)).toContain("Raw text & flags");
+    paint({ id: "reconstructed", nonce: 2 });
+    expect(selectedLabel(el)).toContain("Your resume");
+  });
+
+  it("reports null on mount, so a stale Tailor mark cannot outlive its résumé", () => {
+    const reports = vi.fn();
+    railHost(reports);
+    expect(reports).toHaveBeenCalledWith(null);
+  });
+
+  it("reports the steering it consumed, so the rail can mark Tailor", () => {
+    writeTailorHandoff({
+      jdContext: "surface Kubernetes",
+      parseFingerprint: fingerprintOf(result()),
+    });
+    const reports = vi.fn();
+    railHost(reports);
+    // The initial null still goes up first — that ordering is what lets `App`
+    // clear a mark from a previous résumé before this one reports its own.
+    expect(reports.mock.calls.map((c) => c[0])).toEqual([
+      null,
+      "surface Kubernetes",
+    ]);
+  });
+});

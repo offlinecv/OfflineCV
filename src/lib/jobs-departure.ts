@@ -47,3 +47,19 @@ export function departToJobs(parsed?: HeuristicParsedResume): void {
   else clearJobsHandoff();
   markDeparture();
 }
+
+/**
+ * Depart AND navigate, for the routes that move the document themselves.
+ *
+ * Two of the three routes off `/` are buttons rather than links — the Find Jobs
+ * tab's launcher and the journey rail's Match-jobs stage (#812) — and both must
+ * assign a BASE-aware URL or the `/OfflineCV/` Pages-fallback deploy 404s. That
+ * is a second thing a new route can forget, so it joins the first here. The
+ * header's "Saved jobs" entry stays a real `<a href>` (open-in-new-tab must
+ * work) and calls {@link departToJobs} alone — which is why the navigation is
+ * not folded into that function itself.
+ */
+export function departToJobsAndNavigate(parsed?: HeuristicParsedResume): void {
+  departToJobs(parsed);
+  window.location.href = `${import.meta.env.BASE_URL}jobs/`;
+}

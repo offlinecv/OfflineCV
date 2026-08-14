@@ -16,11 +16,24 @@
  * under both the custom-domain "/" base and the "/OfflineCV/" Pages-fallback
  * base (same pattern the other same-origin cross-links use).
  *
- * The stash + the departure marker (#706, so `/jobs/`'s "Back to your resume"
+ * The stash, the departure marker (#706, so `/jobs/`'s "Back to your resume"
  * control knows this trip actually started at `/` and can use a real
- * `history.back()` instead of pushing a fresh, blank `/`) both come from
- * `departToJobs` — the same helper the header's parse-independent "Saved jobs"
- * link (#707) calls, so the two routes off `/` cannot drift apart.
+ * `history.back()` instead of pushing a fresh, blank `/`) and that base-aware
+ * navigation all come from `departToJobsAndNavigate` — shared with the journey
+ * rail's Match-jobs stage (#812), and a sibling of the `departToJobs` the
+ * header's parse-independent "Saved jobs" link (#707) calls. What that unifies
+ * is the MECHANICS of leaving: the marker and the URL, the two things a new
+ * route forgets.
+ *
+ * It does not unify the PAYLOAD, and that axis is still open. This launcher is
+ * handed `activeResult.canonical.fields` — the LLM-escape-hatch-merged parse —
+ * because it renders inside `ParsedCard`, where `llmOverride` is local
+ * `useState` (`Result.tsx`). The rail's Match-jobs stage and the header link
+ * both run in `App`, which cannot see that state and passes
+ * `displayResult.canonical.fields` instead, so a user who recovered a
+ * degenerate parse and then left via the rail ships the PRE-recovery fields.
+ * Closing it means lifting `llmOverride` out of `ParsedCard`; #812 did not,
+ * and the pre-existing `goToSavedJobs` has the same gap.
  *
  * Nothing here fetches, and the navigation is same-origin, so no résumé data
  * leaves the browser at this step.
@@ -30,7 +43,7 @@ import { useMemo } from "react";
 import { Button, Chip } from "@design-system";
 import { buildJobQuery } from "../../lib/job-search/query-builder.ts";
 import { roleFilterForResume, seedExcludeTermsForFamilies } from "../../lib/job-search/role-keywords.ts";
-import { departToJobs } from "../../lib/jobs-departure.ts";
+import { departToJobsAndNavigate } from "../../lib/jobs-departure.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import { JobQuerySummary } from "./JobQuerySummary.tsx";
 
@@ -48,10 +61,7 @@ export function FindJobsLauncher({ parsed }: { parsed: HeuristicParsedResume }) 
 
   const isDegenerate = query.titles.length === 0 && query.skills.length === 0;
 
-  const go = () => {
-    departToJobs(parsed);
-    window.location.href = `${import.meta.env.BASE_URL}jobs/`;
-  };
+  const go = () => departToJobsAndNavigate(parsed);
 
   return (
     <div className="flex flex-col gap-4">

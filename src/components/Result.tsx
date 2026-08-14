@@ -43,6 +43,12 @@ interface ResultProps {
   onReset: () => void;
   /** Lifted edit state (#82) — threaded to ReconstructedResume for inline edits. */
   edit: EditableParse;
+  /** A tab the journey rail asked for (#812) — forwarded untouched to
+   *  `ResultDetailTabs`, which owns the tab state. */
+  requestedTab?: { id: string; nonce: number };
+  /** JD steering reported back up so `/`'s rail can mark the Tailor stage
+   *  (#812) — see `ResultDetailTabs` for why it travels this way. */
+  onJdContextChange?: (jdContext: string | null) => void;
 }
 
 export function Result({
@@ -53,9 +59,14 @@ export function Result({
   sourceKind,
   onReset,
   edit,
+  requestedTab,
+  onJdContextChange,
 }: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
   if (isFontsUnmappable) {
+    // No tabs on this branch — the rail's stages still resolve to `/`, they
+    // just have no L2 tab to land on, which is correct: there is nothing
+    // parsed to show behind them.
     return <LimitedParsingCard result={result} onReset={onReset} />;
   }
   return (
@@ -67,6 +78,8 @@ export function Result({
       sourceKind={sourceKind}
       onReset={onReset}
       edit={edit}
+      requestedTab={requestedTab}
+      onJdContextChange={onJdContextChange}
     />
   );
 }
@@ -81,6 +94,8 @@ function ParsedCard({
   sourceKind,
   onReset,
   edit,
+  requestedTab,
+  onJdContextChange,
 }: {
   result: CascadeResult;
   parseKey: unknown;
@@ -89,6 +104,8 @@ function ParsedCard({
   sourceKind: SourceKind;
   onReset: () => void;
   edit: EditableParse;
+  requestedTab?: { id: string; nonce: number };
+  onJdContextChange?: (jdContext: string | null) => void;
 }) {
   const triggerCount = result.triggers.length;
 
@@ -234,6 +251,8 @@ function ParsedCard({
         escapeHatch={escapeHatch}
         onRecovered={handleRecovered}
         triggerCount={triggerCount}
+        requestedTab={requestedTab}
+        onJdContextChange={onJdContextChange}
       />
     </div>
   );

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Card,
   CapabilityStrip,
@@ -20,7 +21,13 @@ import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionB
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
-import { departToJobs } from "./lib/jobs-departure.ts";
+import { useAutoRestoreResume } from "./hooks/useAutoRestoreResume.ts";
+import {
+  departToJobs,
+  departToJobsAndNavigate,
+} from "./lib/jobs-departure.ts";
+import { deriveJourney, type JourneyStageId } from "./lib/journey.ts";
+import type { LoadedResume } from "./lib/resume-library.ts";
 import { isScoreRevealed } from "./lib/contact.ts";
 
 export default function App() {
@@ -42,6 +49,23 @@ export default function App() {
   // Local-first resume library (#322) — save/reload parsed resumes without
   // re-uploading. Loading hydrates the "done" state from the cached parse.
   const library = useResumeLibrary();
+  // The one mapping from a stored record to the "done" state, shared by the
+  // explicit Load button below and the cold-mount auto-restore (#812) — two
+  // callers of the same hydration must not be able to drift into hydrating
+  // different fields.
+  const hydrateFromLibrary = useCallback(
+    (loaded: LoadedResume) => {
+      loadSavedResume({
+        fileName: loaded.filename,
+        fileSize: loaded.fileSize,
+        bytes: loaded.bytes,
+        sourceKind: loaded.sourceKind,
+        result: loaded.result,
+        score: loaded.score,
+      });
+    },
+    [loadSavedResume],
+  );
   const onLoadSavedResume = async (id: string) => {
     const loaded = await library.load(id);
     if (loaded === undefined) {
@@ -54,15 +78,19 @@ export default function App() {
       );
       return;
     }
-    loadSavedResume({
-      fileName: loaded.filename,
-      fileSize: loaded.fileSize,
-      bytes: loaded.bytes,
-      sourceKind: loaded.sourceKind,
-      result: loaded.result,
-      score: loaded.score,
-    });
+    hydrateFromLibrary(loaded);
   };
+
+  // #812 — bring the most recently saved résumé back on a cold visit, so the
+  // journey rail's first stage reads as satisfied instead of claiming progress
+  // over an app that silently forgot the user's work. Spent once per page
+  // lifetime and only ever from `idle`, so it never fights a drop, a library
+  // Load, or a `reset()` — see the hook.
+  useAutoRestoreResume({
+    phase: state.phase,
+    library,
+    onRestore: hydrateFromLibrary,
+  });
 
   // Once a parse is done the inline DropZone is gone; this restores drag-and-
   // drop so a new resume can replace the current one (confirm-gated, since it
@@ -90,6 +118,93 @@ export default function App() {
   const showingDraftPrompt =
     state.phase === "authoring" && state.pendingDraft !== null;
 
+  // ── The L1 journey rail (#812) ────────────────────────────────────────────
+  //
+  // Every input is derived during render from state this component already
+  // holds. Nothing here may move into a mount-only `useEffect(…, [])`: the
+  // `/jobs/` → `/` return leg is a bfcache restore that never remounts the
+  // tree, so a rail computed at mount would be frozen at whatever it said
+  // before the trip (the #783 defect, and the reason `useTailorHandoff`
+  // listens on `pageshow`).
+
+  // A tab the rail asked `ResultDetailTabs` to open. The nonce is what makes
+  // it an event rather than a value — asking for the tab you are already on is
+  // a repeatable click (see `ResultDetailTabs`).
+  const [tabRequest, setTabRequest] = useState<
+    { id: string; nonce: number } | undefined
+  >(undefined);
+  const requestTab = useCallback((id: string) => {
+    setTabRequest((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
+  // JD steering, reported up from `ResultDetailTabs` (which owns
+  // `useTailorHandoff` — see the prop's docblock for why it is not lifted).
+  const [jdContext, setJdContext] = useState<string | null>(null);
+
+  // The mark is cleared HERE, on the canonical "the résumé genuinely changed"
+  // token, rather than by waiting for the reporter to say so. The reporter is
+  // not always mounted: `Result` short-circuits to `LimitedParsingCard` on a
+  // `fonts_unmappable` parse, and `phase: "authoring"` renders
+  // `ReconstructedResume` directly with no `Result` at all — in both cases
+  // `displayResult` is non-null, so a `hasResume` re-guard cannot see the
+  // staleness either, and the rail would keep claiming Tailor with a ✓ over a
+  // different (or blank) résumé for the rest of the page's life. `parseKey` is
+  // null in idle/parsing, the pristine `state.result` in done, and
+  // `authoring:<generation>` while authoring, so one dep covers reset, replace,
+  // blank authoring and the fonts-unmappable branch.
+  //
+  // It cannot clobber valid steering on the ordinary path. The bfcache return
+  // leg from `/jobs/` does not change `parseKey` at all, so this never fires
+  // there; and on a cold reload, `useTailorHandoff` reports via a state update
+  // scheduled from an effect, which lands in a LATER commit than the one this
+  // runs in — so the report always follows the clear rather than being erased
+  // by it. Deps hand-audited both directions (`exhaustive-deps` is NOT enforced
+  // — CLAUDE.md): `parseKey` is the only input, and `setJdContext` is a
+  // React-guaranteed-stable setter that a dep list must not list.
+  useEffect(() => {
+    setJdContext(null);
+  }, [parseKey]);
+
+  // A blank-authoring session counts: a résumé the user is writing from
+  // scratch is still a résumé, and `displayResult` is exactly "there is
+  // something on screen to fix, match, tailor and download".
+  const hasResume = displayResult !== null;
+  // No `hasResume &&` guard on the steering: "steering implies a résumé" is
+  // normalized inside `deriveJourney` itself now (#812), so it holds for every
+  // caller rather than for the two that remembered.
+  const journeyState = useMemo(
+    () =>
+      deriveJourney({
+        entry: "root",
+        hasResume,
+        jdSteering: jdContext !== null,
+      }),
+    [hasResume, jdContext],
+  );
+
+  const onJourneySelect = useCallback(
+    (id: JourneyStageId) => {
+      // The one route off `/` that leaves the document. Through the shared
+      // helper, never hand-rolled: a second definition of "hand the parse over
+      // and mark the departure" is exactly what shipped #700.
+      if (id === "match") {
+        departToJobsAndNavigate(displayResult?.canonical.fields);
+        return;
+      }
+      // `add` is the top of this page — the drop zone when idle, the parse
+      // header (with its Start over control) once a résumé is loaded. The
+      // shell has already scrolled there, so there is nothing else to do; in
+      // particular this must not reset, which would discard the user's work on
+      // a navigation control.
+      if (id === "add") return;
+      // Fix it / Tailor / Download all live behind the reconstructed tab —
+      // the editor, the rewrite affordance and the Download PDF button are all
+      // in it — so all three land there even from another tab.
+      requestTab("reconstructed");
+    },
+    [displayResult, requestTab],
+  );
+
   return (
     // `chips` is deliberately NOT passed: PageShell renders that slot in the
     // header on every phase, so the capability strip stayed pinned above the
@@ -107,7 +222,11 @@ export default function App() {
     // alone on the header-right instead of sharing it. `/jobs` still passes
     // one: it opens straight into a form with no headline of its own, so
     // there the header line is the only orientation.
-    <PageShell badge="alpha" onSavedJobsNavigate={goToSavedJobs}>
+    <PageShell
+      badge="alpha"
+      onSavedJobsNavigate={goToSavedJobs}
+      journey={{ state: journeyState, onSelect: onJourneySelect }}
+    >
       {(state.phase === "idle" ||
         state.phase === "parsing" ||
         state.phase === "error") && (
@@ -288,6 +407,8 @@ export default function App() {
               sourceKind={state.sourceKind}
               onReset={reset}
               edit={edit}
+              requestedTab={tabRequest}
+              onJdContextChange={setJdContext}
             />
             {/* Save-to-library affordance (#322) — saves the edited parse +
                 source bytes so this resume can be reloaded without re-uploading. */}
