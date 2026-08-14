@@ -79,6 +79,11 @@ export function glyphLossMessage(losses: readonly ExportGlyphLoss[]): string {
 export function useDownloadPdf(
   result: CascadeResult,
   score: AnonymousAtsScore,
+  /** Fired once the bytes have actually reached the user, so the caller can
+   *  record the journey's `Download` stage (#826). The success point is the
+   *  same one `trackDownloadCompleted` sits on — a refused export (#664) or a
+   *  render failure must not earn the mark. */
+  onDownloaded?: () => void,
 ): UseDownloadPdf {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +122,7 @@ export function useDownloadPdf(
       const source: DownloadSource =
         result.tiers.length === 0 ? "blank" : "upload";
       trackDownloadCompleted({ source, format: "pdf" });
+      onDownloaded?.();
       // A successful blank-authored export is one of the explicit
       // draft-clearing triggers (#313) — the user has what they came for.
       if (source === "blank") clearBlankDraft();
@@ -125,7 +131,11 @@ export function useDownloadPdf(
     } finally {
       setIsGenerating(false);
     }
-  }, [result, score]);
+    // `onDownloaded` joins the deps rather than riding a ref: `download` is
+    // called from a click, never watched by an effect, so a re-minted identity
+    // costs nothing — and omitting it would run last render's callback, which
+    // is keyed to the résumé that was on screen then.
+  }, [result, score, onDownloaded]);
 
   return { download, isGenerating, error };
 }

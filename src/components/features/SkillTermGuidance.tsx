@@ -71,6 +71,35 @@ import { buildJobQuery, type ResumeQueryInput } from "../../lib/job-search/query
 import { missingTermLabel } from "./TermQualityAdvisory.tsx";
 import { AddPill } from "./ReconstructedAdd.tsx";
 
+/**
+ * Read the parse through the term-quality classifier: what it recognized, what
+ * it could not match, and what the resolved role expects that is absent.
+ *
+ * Exported because `TargetingSection` needs the count of open suggestions for
+ * its collapsed summary (#825), and a second `buildJobQuery` +
+ * `assessQueryTerms` call over there would be a second definition of "what
+ * counts as a suggestion" — one refactor away from the badge and the panel
+ * disagreeing about how many there are. Return type is inferred on purpose: the
+ * verdict objects carry `reason`, and the missing terms carry what
+ * `missingTermLabel` reads, so narrowing them to a hand-written interface here
+ * would only mean widening it again the next time either is rendered.
+ *
+ * Pure and cheap; both callers run it per render, as this component always has.
+ */
+export function assessResumeSkills(parsed: ResumeQueryInput) {
+  const assessment = assessQueryTerms(buildJobQuery(parsed));
+  const skillVerdicts = assessment.verdicts.filter((v) => v.kind === "skill");
+  return {
+    /** Recognized — nothing to do, rendered as reassurance. */
+    recognized: skillVerdicts.filter((v) => v.quality === "strong"),
+    /** Not matched to a known skill. NOT struck as worthless (see
+     *  `term-quality.ts`'s central rule) — explained, never removed. */
+    unrecognized: skillVerdicts.filter((v) => v.quality === "weak"),
+    /** The one ACTIONABLE half, and therefore the only half worth counting. */
+    missing: assessment.missing.filter((m) => m.kind === "skill"),
+  };
+}
+
 export function SkillTermGuidance({
   parsed,
   onAddSkill,
@@ -87,13 +116,8 @@ export function SkillTermGuidance({
   // change, and this is the acknowledgement that the vanish alone can't give.
   const [added, setAdded] = useState<string[]>([]);
 
-  const query = buildJobQuery(parsed);
-  const assessment = assessQueryTerms(query);
-
-  const skillVerdicts = assessment.verdicts.filter((v) => v.kind === "skill");
-  const recognized = skillVerdicts.filter((v) => v.quality === "strong");
-  const unrecognized = skillVerdicts.filter((v) => v.quality === "weak");
-  const missingSkills = assessment.missing.filter((m) => m.kind === "skill");
+  const { recognized, unrecognized, missing: missingSkills } =
+    assessResumeSkills(parsed);
 
   if (recognized.length === 0 && unrecognized.length === 0 && missingSkills.length === 0) {
     return null;

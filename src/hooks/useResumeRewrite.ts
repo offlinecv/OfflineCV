@@ -213,7 +213,7 @@ export function useResumeRewrite(
   /**
    * Optional JD-driven steering text (#226, #576). Set only when the JD
    * tailor handoff (`tailor-handoff.ts`, written by `/jobs/`) landed for this
-   * visit — `ResultDetailTabs` consumes the handoff on mount and threads the
+   * visit — `ResultDetail` consumes the handoff on mount and threads the
    * instruction here. It names the JD's missing terms so the rewrite
    * prioritizes them; it is folded INTO the steering's `userInstructions`
    * (alongside the user's own freeform text), so the engine stays single.
@@ -227,6 +227,17 @@ export function useResumeRewrite(
    * run, or WebGPU unavailable) → byte-identical pre-#608 prompt.
    */
   critique?: ResumeCritique,
+  /**
+   * A whole-résumé rewrite was APPLIED — the `proposed` → `applied` transition
+   * below, and the only moment this flow changes the user's résumé (#826).
+   *
+   * Deliberately not gated on `jdContext` here even though its one consumer
+   * only cares about the JD-steered case: this hook's job is to report what
+   * happened, and "did a JD steer it" is a fact the consumer holds too (it is
+   * the same value it passed in above). Keeping the gate at the consumer means
+   * the two can never be two different predicates.
+   */
+  onRewriteApplied?: () => void,
 ): ResumeRewriteController {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<ResumeRewriteStatus>({ kind: "idle" });
@@ -401,8 +412,14 @@ export function useResumeRewrite(
   const confirmApplied = useCallback(
     (count: number, sections: readonly string[], undo?: () => void) => {
       setStatus({ kind: "applied", count, sections, undo });
+      onRewriteApplied?.();
     },
-    [],
+    // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
+    // CLAUDE.md): the callback is the only new input, and it must be here or
+    // an Apply would run whichever closure existed when this hook first ran.
+    // Nothing watches `confirmApplied`'s identity — it is handed to a panel
+    // that is not memoized — so a re-mint costs no render.
+    [onRewriteApplied],
   );
 
   // Read the live status through a ref rather than a `setStatus` updater: the

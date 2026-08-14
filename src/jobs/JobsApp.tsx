@@ -8,9 +8,10 @@
  * has a URL of its own, its own scroll, and the full page width — rather than
  * being the tail of the parser page, below the fold, capped at a screenful.
  *
- * Résumé source: the sessionStorage handoff written by `FindJobsLauncher` on
- * `/` (`lib/jobs-handoff.ts`). This surface has NO DropZone of its own — the
- * job-search lane consumes a parsed résumé, and the parse pipeline (with its
+ * Résumé source: the sessionStorage handoff `/` writes on its way out
+ * (`lib/jobs-departure.ts` → `lib/jobs-handoff.ts`). This surface has NO
+ * DropZone of its own — the job-search lane consumes a parsed résumé, and the
+ * parse pipeline (with its
  * cascade, score, and edit layer) is `/`'s job. Adding a second parse entry
  * point here would be the parallel surface CLAUDE.md's Reuse Gate exists to
  * prevent. With no handoff, the Search tab still renders a pointer back to
@@ -51,6 +52,7 @@ import {
   fingerprintParse,
 } from "../lib/tailor-handoff.ts";
 import { deriveJourney, type JourneyStageId } from "../lib/journey.ts";
+import { useJourneyProgress } from "../hooks/useJourneyProgress.ts";
 
 // #706: goes to `/` directly, never via history.back() — the empty state only
 // shows when there is no in-progress parse to preserve, so this is a forward
@@ -102,9 +104,9 @@ export default function JobsApp() {
 
   // #576: a JD-driven tailor request from a `JobResultCard` (or the paste-a-JD
   // disclosure below the results) stashes the rewrite steering in
-  // sessionStorage and navigates back to `/`, where `ResultDetailTabs`
-  // consumes the handoff, sets `jdContext`, and switches to the Reconstructed
-  // tab.
+  // sessionStorage and navigates back to `/`, where `ResultDetail` consumes
+  // the handoff, sets `jdContext`, and scrolls the résumé into view (it was a
+  // tab switch until #823 took `/`'s tab rail off).
   //
   // The caller hands over the BUILT steering, not the raw coverage: the
   // decision "is there anything to steer with" is `buildJdRewriteContext`
@@ -169,14 +171,28 @@ export default function JobsApp() {
   // stage therefore always shows its empty state here, pointing back at the
   // Search tab — which is exactly where the "Tailor résumé to this job"
   // buttons live.
+  //
+  // The completion ledger (#826) is read under the key the handoff carried:
+  // `/jobs/` cannot re-derive it, because what arrives here is the APPLIED
+  // parse and the key is the pristine one. A session with no handoff (the
+  // library fallback above) has no key and therefore no marks — fewer ✓ than
+  // the truth, never a wrong one. See `JobsHandoff.journeyKey`.
+  const progress = useJourneyProgress(handoff?.journeyKey ?? null);
+  // One expression for both résumé signals, so this surface's rail is
+  // byte-identical to its pre-#826 self: `/jobs/` has answered "is there a
+  // résumé" from the library as well as the handoff since #724, which is
+  // exactly what `hasStoredResume` widened `/` to do.
+  const hasResume = handoff !== null || fallback !== undefined;
   const journeyState = useMemo(
     () =>
       deriveJourney({
         entry: "jobs",
-        hasResume: handoff !== null || fallback !== undefined,
+        hasResume,
+        hasStoredResume: hasResume,
         jdSteering: false,
+        completed: progress.completed,
       }),
-    [handoff, fallback],
+    [hasResume, progress.completed],
   );
 
   const onJourneySelect = useCallback(
@@ -246,7 +262,15 @@ export default function JobsApp() {
                 </Button>
               </div>
             ) : (
-              <FindJobsPanel parsed={handoff.parsed} onTailor={handleTailor} />
+              <FindJobsPanel
+                parsed={handoff.parsed}
+                onTailor={handleTailor}
+                // #826: a search that came back IS the Match-jobs stage
+                // completed. Recorded here rather than inside the panel so the
+                // ledger key — which arrived on the handoff — stays owned by
+                // the surface that read it.
+                onSearchLoaded={() => progress.mark("match")}
+              />
             )}
           </TabPanel>
           <TabPanel id="library">

@@ -51,20 +51,18 @@ import {
   toBulletExperience,
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
-import { RolesPanel } from "./RolesPanel.tsx";
+import { TargetingSection } from "./TargetingSection.tsx";
 import { deriveTitles } from "../../lib/job-search/query-builder.ts";
 import {
   applyContactOverrides,
   buildContactFields,
   contactCompleteness,
-  criticalDownloadGate,
   type ContactDisplayField,
 } from "../../lib/contact.ts";
-import { DownloadGateDialog } from "./DownloadGateDialog.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
 import { ResumeBulletRow, BulletFlagLegend } from "./ResumeBulletRow.tsx";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo } from "react";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
 import type { SectionRewriteApply } from "./SectionRewrite.tsx";
@@ -113,17 +111,8 @@ import {
   SUMMARY_SECTION_ID,
 } from "./ReconstructedSummary.tsx";
 import { SkillsSection } from "./ReconstructedSkills.tsx";
-import { SkillTermGuidance } from "./SkillTermGuidance.tsx";
-import {
-  Button,
-  EditableField,
-  ErrorState,
-  SectionHeading,
-} from "@design-system";
+import { EditableField, SectionHeading } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
-import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
-import { useDownloadMarkdown } from "../../hooks/useDownloadMarkdown.ts";
-import { ReportDownloadControl } from "./DownloadReportDialog.tsx";
 
 // ── Attention strip ────────────────────────────────────────────────────────────
 
@@ -408,6 +397,7 @@ export function ExperienceSection({
   resumeSections,
   jdContext,
   critique,
+  onRewriteApplied,
   hasBullets,
   experienceOverrides,
   onExperienceFieldChange,
@@ -440,6 +430,9 @@ export function ExperienceSection({
   /** On-device critique of this résumé (#608). Steers the whole-résumé rewrite
    *  with the per-bullet findings the user was already shown. */
   critique?: ResumeCritique;
+  /** A whole-résumé rewrite was applied (#826) — reported straight back up to
+   *  `ResultDetail`, which pairs it with the JD steering it also owns. */
+  onRewriteApplied?: () => void;
   hasBullets: boolean;
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
   onExperienceFieldChange: (
@@ -575,6 +568,7 @@ export function ExperienceSection({
     rewriteApplyBySection,
     jdContext,
     critique,
+    onRewriteApplied,
   );
   return (
     <section
@@ -1040,6 +1034,7 @@ export function ReconstructedResume({
   edit,
   jdContext,
   critique,
+  onRewriteApplied,
 }: {
   result: CascadeResult;
   /** EDITED score — re-graded by App from the current overrides. Its
@@ -1049,12 +1044,16 @@ export function ReconstructedResume({
   /** Lifted edit state (#82) — owned by App so overrides feed scoring/JD. */
   edit: EditableParse;
   /** Optional JD-driven rewrite steering (#226, #576). Set by
-   *  `ResultDetailTabs` when it consumed a tailor handoff on mount. */
+   *  `ResultDetail` when it consumed a tailor handoff on mount. */
   jdContext?: string;
   /** On-device critique of this résumé (#608), when the user has run one.
    *  Threaded to the whole-résumé rewrite so it acts on the findings already
    *  on screen. Undefined → byte-identical pre-#608 rewrite prompt. */
   critique?: ResumeCritique;
+  /** A whole-résumé rewrite completed and was applied (#826). Passed through
+   *  to the rewrite controller; `ResultDetail` decides what it means, since it
+   *  is the one that knows whether a JD is steering. */
+  onRewriteApplied?: () => void;
 }) {
   // Display projection (#443, Stage B) — parsed field core + the user's own
   // section headings, read off the canonical model rather than `result` directly.
@@ -1151,71 +1150,6 @@ export function ReconstructedResume({
     ? [...experienceGroups, other]
     : experienceGroups;
 
-  // Download the reconstructed (possibly edited) résumé as an ATS-safe,
-  // text-only PDF — built fully client-side from the already-parsed fields,
-  // so no PDF bytes ever leave the browser (#171).
-  const { download, isGenerating, error: downloadError } = useDownloadPdf(
-    result,
-    score,
-  );
-
-  // Download the same reconstructed résumé as a career-ops-shaped `cv.md`
-  // (#552) — a plain-text sibling artifact, not a competing "primary" export.
-  const { download: downloadMarkdown, isGenerating: isGeneratingMarkdown } =
-    useDownloadMarkdown(result, score);
-
-  // Pre-download checklist popover (#312) — a soft guardrail, not a hard
-  // block. Download click re-derives the gate from the CURRENT (override-
-  // applied) fields every time, so an edit made via "Fix now" clears the item
-  // on the next click without any extra plumbing.
-  const [downloadGateOpen, setDownloadGateOpen] = useState(false);
-  const criticalMissing = criticalDownloadGate(
-    contactDisplayFields,
-    parsed.experience.length > 0,
-  );
-
-  function handleDownloadClick() {
-    if (criticalMissing.length > 0) {
-      setDownloadGateOpen(true);
-      return;
-    }
-    void download();
-  }
-
-  function handleDownloadAnyway() {
-    setDownloadGateOpen(false);
-    void download();
-  }
-
-  // Scroll to + enter edit mode on the first gated field the checklist named.
-  // Name/Contact both surface via `EditableField` inside ContactCard, whose
-  // accessible name is `Edit <label>` (see ContactDetails.tsx) — reused here
-  // rather than threading new refs through the contact-card tree. Experience
-  // has no single inline field to target (it's the "+ Add experience" pill),
-  // so a missing-experience-only gate just scrolls to the resume section.
-  function handleFixNow() {
-    setDownloadGateOpen(false);
-    const first = criticalMissing[0];
-    if (!first) return;
-    const targetLabel =
-      first.key === "full_name" ? "Name" : first.key === "contact" ? "Email" : null;
-    // Defer past the dialog's own close so focus isn't immediately stolen back.
-    requestAnimationFrame(() => {
-      if (!targetLabel) {
-        document
-          .getElementById(SECTION_IDS.reconstructed)
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      const target = document.querySelector<HTMLElement>(
-        `[aria-label="Edit ${targetLabel}"]`,
-      );
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
-      target?.focus();
-      target?.click();
-    });
-  }
-
   // Build the chain-of-sections input for the whole-résumé rewrite CTA (#67).
   // Summary first (when present), then every real role in display order — the
   // "Other" bullets group is excluded because it has no parsed role to anchor
@@ -1260,40 +1194,16 @@ export function ReconstructedResume({
       className="scroll-mt-6 flex flex-col gap-6"
     >
       <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-          {/* Deliberately NOT the tab label ("Your resume"). A heading that
-              repeats its own tab label is noise, and it makes every
-              `toContain("Your resume")` assertion ambiguous about which
-              element it matched. This states what the section IS; the tab
-              states where you are. */}
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-            What the parser read
-          </h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <ReportDownloadControl result={result} score={score} />
-            {/* No pre-download checklist gate here (unlike the PDF button):
-                cv.md is a plain-text interchange file, not an ATS-submitted
-                artifact, so the "missing name/contact/experience" nudge that
-                protects the PDF doesn't apply. */}
-            <Button
-              variant="ghost"
-              onClick={() => void downloadMarkdown()}
-              disabled={isGeneratingMarkdown}
-              aria-label="Download the reconstructed resume as a markdown file"
-            >
-              {isGeneratingMarkdown ? "Generating…" : "Download as Markdown"}
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleDownloadClick}
-              disabled={isGenerating}
-              aria-label="Download the reconstructed resume as an ATS-friendly PDF"
-            >
-              {isGenerating ? "Generating…" : "Download resume"}
-            </Button>
-          </div>
-        </div>
-        {downloadError && <ErrorState>{downloadError}</ErrorState>}
+        {/* Heading only. The three download buttons that sat opposite it —
+            "Download report", "Download as Markdown" and "Download resume",
+            one of which opened a dialog containing a fourth Download — moved
+            into the single `ExportDialog` the journey rail's Download stage
+            opens (#823). A row of three exports above a résumé, none of them
+            saying which artifact it produced, was the affordance #680 items 5
+            and 7 both describe. */}
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
+          What the parser read
+        </h2>
         <p className="max-w-prose text-sm text-content-tertiary">
           What the parser recognized, in resume shape. Each bullet is checked
           against three rules — an action verb, the 8–30-word length window, and
@@ -1305,13 +1215,6 @@ export function ReconstructedResume({
         {(bullets.length > 0 || contactMissing.length > 0) && (
           <AttentionStrip bullets={bullets} contactMissing={contactMissing} />
         )}
-        <DownloadGateDialog
-          open={downloadGateOpen}
-          missing={criticalMissing}
-          onFixNow={handleFixNow}
-          onDownloadAnyway={handleDownloadAnyway}
-          onClose={() => setDownloadGateOpen(false)}
-        />
       </div>
 
       <ContactCard
@@ -1329,17 +1232,25 @@ export function ReconstructedResume({
        *  aiming at (RolesPanel) → what that target expects (SkillTermGuidance).
        *  The last two are adjacent on purpose: the guidance is derived from the
        *  starred title, via buildJobQuery → deriveTitles → titles[0]. Below
-       *  this line the page is the résumé document itself. */}
-      <RolesPanel
+       *  this line the page is the résumé document itself.
+       *
+       *  Those last two are COLLAPSED since #825 — two full Cards of advice
+       *  stood between the contact block and the first line of the résumé, so
+       *  the document the user dropped a file to see started below the fold.
+       *  `TargetingSection` owns the fold, keeps the pair adjacent (the
+       *  dependency above is the reason), and puts both panels' headlines on
+       *  the summary row as a count and a warn mark so nothing they had to say
+       *  needs the section opened to be seen. */}
+      <TargetingSection
         titles={titles}
         primary={contactOverrides.headline ?? result.canonical.fields.headline}
         onPrimaryChange={(value) => setContactField("headline", value)}
+        // Term-quality guidance (#586): same classifier as `/jobs/`'s
+        // `TermQualityAdvisory`, résumé-framed copy, writes only through the
+        // existing `addSkill` inline-edit path.
+        parsed={parsed}
+        onAddSkill={addSkill}
       />
-      {/* Term-quality guidance (#586): same classifier as `/jobs/`'s
-       *  `TermQualityAdvisory`, résumé-framed copy, writes only through the
-       *  existing `addSkill` inline-edit path. Renders nothing when there's
-       *  no suggestion, including the unresolved-role case. */}
-      <SkillTermGuidance parsed={parsed} onAddSkill={addSkill} />
       {/* Summary leads the document body, matching the exported model's own
        *  order (`ats-resume-model.ts`: Summary → Experience → …) so the preview
        *  reads in the same sequence as the artifact (#625). */}
@@ -1356,6 +1267,7 @@ export function ReconstructedResume({
         resumeSections={resumeSections}
         jdContext={jdContext}
         critique={critique}
+        onRewriteApplied={onRewriteApplied}
         hasBullets={bullets.length > 0}
         experienceOverrides={experienceOverrides}
         // The 4th argument is the RESOLVED entry, not the pristine parse:

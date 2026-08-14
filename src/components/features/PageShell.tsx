@@ -12,8 +12,9 @@
  * slot (e.g. a "back" cross-link CTA), then renders its body as `children`.
  *
  * The "Saved jobs" link (#707) is the one entry point into `/jobs/` that
- * doesn't depend on a parse — `FindJobsLauncher` only renders once a résumé
- * is parsed. It's a plain `<a href>`, not a `Button`, matching the wordmark
+ * doesn't depend on a parse — the rail's Match-jobs stage, the only other
+ * route since #823, needs one. It's a plain `<a href>`, not a `Button`,
+ * matching the wordmark
  * link and the footer links above/below it: this is real navigation (right-
  * click / open-in-new-tab should work), not an imperative action. `JobsApp`
  * passes `hideSavedJobsLink`: a link to `/jobs/` rendered on `/jobs/` itself
@@ -117,7 +118,15 @@ export function PageShell({
   const { blockedStage, onStageClick, dismiss } = useJourneyGuidance(journey);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 pb-10">
+    // `gap-6` (24px), not the `gap-8` this carried before: it is the SAME
+    // 24px the header now puts between the rail and the rule below it, and the
+    // pair is the point — the band's boundary reads as a boundary rather than
+    // as something welded to the rail above it and floating over the content
+    // below. Every top-level section on both entries is separated by this one
+    // value; the pre-drop hero opts up to 48px on its own (see `App.tsx`),
+    // which is what keeps the extra breathing room a differentiator instead of
+    // the page's default.
+    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 pb-10">
       {updateAvailable && !updateDismissed && (
         <UpdateBanner
           onReload={reload}
@@ -145,8 +154,19 @@ export function PageShell({
           the `scrollIntoView({ block: "start" })` calls in
           `ReconstructedResume` and `JobSearchResults` — lands below it rather
           than underneath it. Anything that adds a row here (a `headerExtra`,
-          a longer CTA, a taller rail) has to be re-measured there. */}
-      <header className="sticky top-0 z-20 -mx-6 flex flex-col gap-4 border-b border-border-light bg-surface-base/95 px-6 py-2 backdrop-blur">
+          a longer CTA, a taller rail) has to be re-measured there — INCLUDING
+          the `pb-6` below, which is 16px more than the `py-2` this shipped
+          with and is already accounted for in that file's bands.
+
+          `pt-2 pb-6`, not a symmetric `py-2`: the rule under this band had 8px
+          above it and 32px below (`main`'s old `gap-8`), a 1:4 split that read
+          as the rail leaning on its own boundary. The rule now sits 24px from
+          the rail and 24px from the first content block (`main`'s `gap-6`),
+          so the band is a band. The top stays at 8px on purpose — the brand
+          row is flush against the viewport edge and the rail is 16px below it
+          (`gap-4`), which keeps the two grouped as one header against the
+          wider gutter that separates them from everything else. */}
+      <header className="sticky top-0 z-20 -mx-6 flex flex-col gap-4 border-b border-border-light bg-surface-base/95 px-6 pb-6 pt-2 backdrop-blur">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {/* No `shrink-0` on either of the two header-row blocks: the row is
               `flex-wrap`, and a block that cannot shrink wraps instead — which

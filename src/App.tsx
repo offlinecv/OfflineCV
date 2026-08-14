@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Card,
   CapabilityStrip,
+  Dialog,
   ErrorState,
   ErrorBoundary,
   Button,
@@ -16,19 +17,29 @@ import { AtsScoreReadout } from "./components/features/AtsScoreReadout.tsx";
 import { PageShell } from "./components/features/PageShell.tsx";
 import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
 import { ResumeLibrary } from "./components/features/ResumeLibrary.tsx";
-import { SaveResumeBar } from "./components/features/SaveResumeBar.tsx";
 import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionBar.tsx";
+import { ExportDialog } from "./components/features/ExportDialog.tsx";
+import { ResumeChooserDialog } from "./components/features/ResumeChooserDialog.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { useAutoRestoreResume } from "./hooks/useAutoRestoreResume.ts";
+import { useAutosaveResume } from "./hooks/useAutosaveResume.ts";
+import { useLlmRecovery } from "./hooks/useLlmRecovery.ts";
 import {
   departToJobs,
   departToJobsAndNavigate,
 } from "./lib/jobs-departure.ts";
-import { deriveJourney, type JourneyStageId } from "./lib/journey.ts";
+import {
+  deriveJourney,
+  journeyStage,
+  type JourneyStageId,
+} from "./lib/journey.ts";
+import { useJourneyProgress } from "./hooks/useJourneyProgress.ts";
+import { fingerprintParse } from "./lib/tailor-handoff.ts";
 import type { LoadedResume } from "./lib/resume-library.ts";
 import { isScoreRevealed } from "./lib/contact.ts";
+import { SECTION_IDS, scrollToSection } from "./lib/anchors.ts";
 
 export default function App() {
   const {
@@ -46,9 +57,100 @@ export default function App() {
     loadSavedResume,
   } = useAnalyzedResume();
 
+  // What a degenerate-parse recovery pass produced (#243), owned HERE since
+  // #823 rather than inside `ParsedCard`. Everything that hands the résumé
+  // somewhere else runs at this level — the rail's Match-jobs stage, the
+  // header's "Saved jobs" link, the export dialog — and while this state lived
+  // one level down, none of them could see it: a user who repaired a broken
+  // parse with the on-device pass then searched jobs against the fields the
+  // parser got wrong. `recovery.activeResult` is the parse the page shows, and
+  // it is now the parse every one of those routes uses.
+  const recovery = useLlmRecovery(
+    displayResult,
+    edited?.score ?? null,
+    parseKey,
+  );
+  // The résumé to hand over / export. Null exactly when there is nothing
+  // parsed; identical to `displayResult` until a recovery pass lands.
+  const activeFields = recovery?.activeResult.canonical.fields;
+
+  // ── The journey completion ledger (#826) ──────────────────────────────────
+  //
+  // The key is `fingerprintParse` of the PRISTINE parse — `state.result`,
+  // before the edit layer and before LLM recovery — and getting that wrong is
+  // the one trap in this feature. `fingerprintParse` is used over the
+  // EDIT-FOLDED fields everywhere else on purpose (the tailor handoff wants a
+  // payload to go stale the moment the résumé changes); a ledger keyed the same
+  // way would show `Download ✓` and then lose the mark on the next keystroke.
+  // The pristine parse is stable across edits, across a recovery pass, and
+  // across a library reload, which is exactly what a completion has to be.
+  // While authoring from scratch there is no parse at all, so the key is
+  // `parseKey`'s own `authoring:<generation>` string.
+  //
+  // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
+  // CLAUDE.md): `state` is read but `parseKey` is derived from precisely the
+  // two members read here (`state.result` and `state.generation`) and is the
+  // canonical "a genuinely new résumé is on screen" token, so it covers reset,
+  // replace, a library load and a fresh authoring session in one dep.
+  const journeyKey = useMemo<string | null>(() => {
+    if (state.phase === "done") {
+      return fingerprintParse(state.result.canonical.fields);
+    }
+    if (state.phase === "authoring") return `authoring:${state.generation}`;
+    return null;
+  }, [parseKey]);
+  const progress = useJourneyProgress(journeyKey);
+
+  // `Fix it` means "you edited something", so a clean parse may never complete
+  // this stage — which is correct: the user is STANDING on it, so it renders
+  // `current` rather than unchecked and nagging. Fires once per résumé, on the
+  // first flip to true; `mark` is a no-op for a milestone already recorded.
+  // Deps hand-audited: `progress.mark` is memoized on the ledger key alone, so
+  // this re-fires exactly when the résumé changes and never on a re-read.
+  useEffect(() => {
+    if (!edit.hasEdits) return;
+    progress.mark("fix");
+  }, [edit.hasEdits, progress.mark]);
+
+  // Which artifacts the user can leave with (#823) — one dialog, opened by the
+  // rail's Download stage. Owned here, next to the rail that opens it.
+  const [exportOpen, setExportOpen] = useState(false);
+  // An export dialog cannot outlive the résumé it exports. A replace-drop
+  // landing while it is open takes the page through `parsing`, which unmounts
+  // the dialog — a flag left set would then re-open it, unasked, over the NEXT
+  // résumé. Corrected during render rather than from an effect so there is no
+  // committed frame in between for that to be visible in.
+  if (recovery === null && exportOpen) setExportOpen(false);
+
   // Local-first resume library (#322) — save/reload parsed resumes without
   // re-uploading. Loading hydrates the "done" state from the cached parse.
   const library = useResumeLibrary();
+
+  // Keep the user's work (#824). Nothing is written until an edit exists —
+  // dropping a PDF and reading the score leaves no résumé at rest — and from
+  // then on the record is kept current without the user remembering to act,
+  // exactly as the blank-authoring lane has done since #313. Fed the RECOVERED
+  // parse, never `displayResult`: a user who repaired a degenerate parse with
+  // the on-device pass must not find the broken version saved over their work.
+  const autosave = useAutosaveResume({
+    library,
+    parseKey,
+    hasEdits: edit.hasEdits,
+    resume:
+      state.phase === "done" && recovery !== null
+        ? {
+            filename: state.fileName,
+            bytes: state.bytes,
+            sourceKind: state.sourceKind,
+            result: recovery.activeResult,
+            score: recovery.activeScore,
+          }
+        : // Only the parsed lane autosaves to the library. A blank-authoring
+          // session is a résumé too, but it already persists through its own
+          // localStorage draft (#313) and has no file behind it to store.
+          null,
+  });
+
   // The one mapping from a stored record to the "done" state, shared by the
   // explicit Load button below and the cold-mount auto-restore (#812) — two
   // callers of the same hydration must not be able to drift into hydrating
@@ -63,23 +165,70 @@ export default function App() {
         result: loaded.result,
         score: loaded.score,
       });
+      // The loaded record's id was dropped here until #824, because nothing
+      // downstream wanted it. With autosave on, dropping it mints a SECOND
+      // record on the first edit after every restore — one new record per visit,
+      // forever. Adopted in the same event as the hydration and keyed by the
+      // parse it arrived with, which is the `parseKey` the line above is about
+      // to make current. Both restore callers share this function precisely so
+      // neither can forget.
+      autosave.adopt(loaded.result, loaded.id);
     },
-    [loadSavedResume],
+    // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
+    // CLAUDE.md): `autosave.adopt`, not `autosave`, whose wrapper object is a
+    // fresh literal every render — depending on it would re-mint this callback
+    // (and everything keyed on it) on every keystroke, for a function that is a
+    // setter with an empty dep array.
+    [loadSavedResume, autosave.adopt],
   );
-  const onLoadSavedResume = async (id: string) => {
-    const loaded = await library.load(id);
-    if (loaded === undefined) {
-      // The one case this reaches: no cached parse AND no stored bytes to
-      // rebuild it from (or bytes the PDF cascade can't read) — see
-      // `loadResumeFromLibrary`. Say so; the Saved-resumes card otherwise
-      // looks like a dead Load button.
-      library.setLoadError(
-        "Couldn't restore this resume — its saved parse is missing and there's no usable file kept to rebuild it from. Drop the file in again to load it fresh.",
-      );
-      return;
-    }
-    hydrateFromLibrary(loaded);
-  };
+  /**
+   * Load a saved résumé and then FINISH the click that asked for it (#826).
+   *
+   * `stage` is null for the Saved-resumes card's own Load button, which is not
+   * resuming anything — it IS the request. For a rail stage it is the whole
+   * point of the chooser existing: a user who clicked `Download` with nothing
+   * on the page asked to export, not to be shown a list, so the pick lands the
+   * résumé AND reopens the intent.
+   *
+   * Deps hand-audited both directions: `library.load` / `library.setLoadError`
+   * rather than `library`, whose wrapper object is a fresh literal every render
+   * and would re-mint this (and `onJourneySelect` with it) on every keystroke.
+   */
+  const loadAndResume = useCallback(
+    async (id: string, stage: JourneyStageId | null) => {
+      const loaded = await library.load(id);
+      if (loaded === undefined) {
+        // The one case this reaches: no cached parse AND no stored bytes to
+        // rebuild it from (or bytes the PDF cascade can't read) — see
+        // `loadResumeFromLibrary`. Say so; the Saved-resumes card otherwise
+        // looks like a dead Load button.
+        library.setLoadError(
+          "Couldn't restore this resume — its saved parse is missing and there's no usable file kept to rebuild it from. Drop the file in again to load it fresh.",
+        );
+        return;
+      }
+      hydrateFromLibrary(loaded);
+      if (stage === null || stage === "add") return;
+      // The freshly loaded fields, not `activeFields` — that is last render's
+      // value, and this runs in the continuation of an await, before the
+      // hydration above has committed anything.
+      const fields = loaded.result.canonical.fields;
+      if (stage === "match") {
+        departToJobsAndNavigate(fields, fingerprintParse(fields));
+        return;
+      }
+      if (stage === "download") {
+        // Safe in the same batch as the hydration: `recovery` is non-null in
+        // any render where `displayResult` is, so the render-time guard that
+        // closes an orphaned export dialog never sees this half-applied.
+        setExportOpen(true);
+        return;
+      }
+      scrollToSection(SECTION_IDS.reconstructed);
+    },
+    [library.load, library.setLoadError, hydrateFromLibrary],
+  );
+  const onLoadSavedResume = (id: string) => void loadAndResume(id, null);
 
   // #812 — bring the most recently saved résumé back on a cold visit, so the
   // journey rail's first stage reads as satisfied instead of claiming progress
@@ -103,13 +252,13 @@ export default function App() {
 
   // The header's "Saved jobs" link (#707) is the second route from `/` into
   // `/jobs/`, and only this surface knows there is a parse to hand over — so
-  // `PageShell` asks and `/` answers, with exactly what `FindJobsLauncher`'s
-  // button does (`departToJobs`). Without the handoff the library would rate
-  // nothing (#700) and tell a user who had just parsed a résumé to "open this
-  // workbench from your resume". `PageShell` fires this only on an unmodified
-  // primary click, so the marker always accompanies a real navigation.
+  // `PageShell` asks and `/` answers, through the same shared helper the rail's
+  // Match-jobs stage calls. Without the handoff the library would rate nothing
+  // (#700) and tell a user who had just parsed a résumé to "open this workbench
+  // from your resume". `PageShell` fires this only on an unmodified primary
+  // click, so the marker always accompanies a real navigation.
   const goToSavedJobs = () => {
-    departToJobs(displayResult?.canonical.fields);
+    departToJobs(activeFields, journeyKey ?? undefined);
   };
 
   // #313 — an unresolved draft prompt (from-scratch authoring, reload with a
@@ -127,17 +276,7 @@ export default function App() {
   // before the trip (the #783 defect, and the reason `useTailorHandoff`
   // listens on `pageshow`).
 
-  // A tab the rail asked `ResultDetailTabs` to open. The nonce is what makes
-  // it an event rather than a value — asking for the tab you are already on is
-  // a repeatable click (see `ResultDetailTabs`).
-  const [tabRequest, setTabRequest] = useState<
-    { id: string; nonce: number } | undefined
-  >(undefined);
-  const requestTab = useCallback((id: string) => {
-    setTabRequest((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }));
-  }, []);
-
-  // JD steering, reported up from `ResultDetailTabs` (which owns
+  // JD steering, reported up from `ResultDetail` (which owns
   // `useTailorHandoff` — see the prop's docblock for why it is not lifted).
   const [jdContext, setJdContext] = useState<string | null>(null);
 
@@ -169,6 +308,15 @@ export default function App() {
   // scratch is still a résumé, and `displayResult` is exactly "there is
   // something on screen to fix, match, tailor and download".
   const hasResume = displayResult !== null;
+  // #826 — the second, deliberately separate résumé signal. `/jobs/` has
+  // answered "does this browser have a résumé" from the library as well as the
+  // handoff since #724; `/` answered from memory alone, so after a `Start over`
+  // (or on any visit where the cold-mount auto-restore is already spent) the
+  // rail read "not ready yet" next to a Saved-resumes card listing three of
+  // them. It widens AVAILABILITY only — merging it into `hasResume` would put
+  // `current: "fix"` on a page whose body is the drop zone, which is the same
+  // unearned claim #826 exists to remove. See `deriveJourney`.
+  const hasStoredResume = library.entries.length > 0;
   // No `hasResume &&` guard on the steering: "steering implies a résumé" is
   // normalized inside `deriveJourney` itself now (#812), so it holds for every
   // caller rather than for the two that remembered.
@@ -177,32 +325,113 @@ export default function App() {
       deriveJourney({
         entry: "root",
         hasResume,
+        hasStoredResume,
         jdSteering: jdContext !== null,
+        completed: progress.completed,
       }),
-    [hasResume, jdContext],
+    [hasResume, hasStoredResume, jdContext, progress.completed],
   );
+
+  // The stage a click asked for while nothing was on the page, held until the
+  // chooser answers it. Cleared when the dialog closes unpicked — a stashed
+  // intent that outlived its dialog would fire on the NEXT pick.
+  const [pendingStage, setPendingStage] = useState<JourneyStageId | null>(null);
+
+  // #825 — the `Add résumé` stage asked to clear a page whose autosave had not
+  // caught up. Held as its own flag rather than folded into `pendingStage`:
+  // that one is a stage waiting for a résumé to be CHOSEN, this is a stage
+  // waiting for a discard to be AGREED, and the two resolve through different
+  // dialogs with opposite consequences.
+  const [confirmAddResume, setConfirmAddResume] = useState(false);
 
   const onJourneySelect = useCallback(
     (id: JourneyStageId) => {
       // The one route off `/` that leaves the document. Through the shared
       // helper, never hand-rolled: a second definition of "hand the parse over
-      // and mark the departure" is exactly what shipped #700.
-      if (id === "match") {
-        departToJobsAndNavigate(displayResult?.canonical.fields);
+      // and mark the departure" is exactly what shipped #700. `activeFields`,
+      // not `displayResult`'s — a recovered parse must not be silently
+      // downgraded on the way out (#823).
+      if (id === "match" && hasResume) {
+        departToJobsAndNavigate(activeFields, journeyKey ?? undefined);
         return;
       }
-      // `add` is the top of this page — the drop zone when idle, the parse
-      // header (with its Start over control) once a résumé is loaded. The
-      // shell has already scrolled there, so there is nothing else to do; in
-      // particular this must not reset, which would discard the user's work on
-      // a navigation control.
-      if (id === "add") return;
-      // Fix it / Tailor / Download all live behind the reconstructed tab —
-      // the editor, the rewrite affordance and the Download PDF button are all
-      // in it — so all three land there even from another tab.
-      requestTab("reconstructed");
+      // `add` means "put a résumé on this page", and with one already loaded
+      // the only thing that satisfies it is the drop zone — which is a
+      // `reset()` away, not a scroll (#825). This stage was inert until then:
+      // it fell through to the shell's scroll-to-top, so a user standing on
+      // `Fix it` and clicking `Add résumé` got a page that had not moved and
+      // no way in. The reset it refused to do is the same one `ParsedHeader`'s
+      // "Try another file" has always run.
+      //
+      // What made it look unsafe was written before #824. The autosave has
+      // already written every settled edit to the library, so the only work a
+      // reset can actually destroy is a write still owed — which is exactly
+      // the state the confirm below covers, and exactly the state the header
+      // badge is already reporting as "Unsaved changes" / "Saving…". Every
+      // other case discards a parse the user can restore from the Saved
+      // resumes card, so making them confirm it would be a click tax on the
+      // ordinary path.
+      if (id === "add") {
+        // Nothing loaded: the page already IS the drop zone and the shell has
+        // scrolled to it. A `reset()` here would additionally clear an `error`
+        // phase's message before the user had read why their file failed.
+        if (!hasResume) return;
+        if (autosave.state === "unsaved" || autosave.state === "saving") {
+          setConfirmAddResume(true);
+          return;
+        }
+        reset();
+        return;
+      }
+      // #826 — every stage below this line needs a résumé to act on, and since
+      // the rail reads the saved library too, the click can arrive with none on
+      // the page. Resolve by what is actually saved: zero is unreachable (the
+      // stage has no availability, so `useJourneyGuidance` shows the guidance
+      // card instead of calling this at all), one loads without asking (a
+      // picker with a single row is a click tax), and two or more is the one
+      // case that genuinely needs the user.
+      if (!hasResume) {
+        const saved = library.entries;
+        if (saved.length === 0) return;
+        if (saved.length === 1) {
+          void loadAndResume(saved[0]!.id, id);
+          return;
+        }
+        setPendingStage(id);
+        return;
+      }
+      // Download is an ACTION, not a place — it opens the one export dialog
+      // rather than moving the page, which is exactly why `journey.ts` refuses
+      // to ever mark it `current`.
+      if (id === "download") {
+        setExportOpen(true);
+        return;
+      }
+      // Fix it and Tailor are the same place: the reconstructed résumé, which
+      // holds the editor and the rewrite affordance and is the page body now
+      // that #823 took the tab rail off. A plain scroll — the shell scrolled to
+      // the top of the page first, and this supersedes it (a new smooth scroll
+      // on the same box aborts the one in flight). The landing offset comes
+      // from `styles.css`'s `scroll-padding-top`, sized to the sticky header;
+      // do not compensate again here.
+      scrollToSection(SECTION_IDS.reconstructed);
     },
-    [displayResult, requestTab],
+    // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
+    // CLAUDE.md): `library.entries`, not `library`, whose wrapper object is a
+    // fresh literal every render; `autosave.state`, not `autosave`, for the
+    // same reason — the state string is the only member the `add` branch
+    // reads, and depending on the wrapper would re-mint this on every
+    // keystroke. `setExportOpen` / `setPendingStage` / `setConfirmAddResume`
+    // are React-guaranteed-stable setters a dep list must not list.
+    [
+      activeFields,
+      journeyKey,
+      hasResume,
+      library.entries,
+      loadAndResume,
+      autosave.state,
+      reset,
+    ],
   );
 
   return (
@@ -283,7 +512,16 @@ export default function App() {
             // below, enumerates exactly those lanes with descriptions. The
             // Greenhouse citation moved down to the recruiter-agent block,
             // which is the claim it actually sources.
-            <div className="mx-auto flex max-w-2xl flex-col gap-2 text-center">
+            //
+            // `mt-6` is the ONE place on either entry that opts out of the
+            // shell's uniform 24px section rhythm, doubling it to 48px. The
+            // extra air is what makes the header band read as chrome and this
+            // as the start of the page, and it is deliberately not spent on
+            // any other section: a page where everything is emphasised
+            // emphasises nothing. It rides the headline block rather than the
+            // `<section>` around it because the section also renders during
+            // `parsing`, when the headline does not.
+            <div className="mx-auto mt-6 flex max-w-2xl flex-col gap-2 text-center">
               <h2 className="text-balance text-2xl font-semibold leading-snug tracking-tight text-content-primary sm:text-3xl">
                 Your whole job search — in your browser.
               </h2>
@@ -385,7 +623,7 @@ export default function App() {
       )}
 
       <ErrorBoundary onReset={reset}>
-        {state.phase === "done" && edited && displayResult && (
+        {state.phase === "done" && edited && displayResult && recovery && (
           <>
             <Result
               // `parsed` carries the edited experience descriptions so
@@ -396,37 +634,34 @@ export default function App() {
               // matches the edited bullet text. `rawText` stays original on
               // purpose — EvidencePanel shows "what the PDF extracted", not
               // "what the user typed."
+              //
+              // This is the pre-LLM-override parse; the one the surface renders
+              // (plus its score and its identity token) travels in `recovery`.
               result={displayResult}
-              // The pristine-parse identity behind `displayResult` (#576).
-              // `result` above changes on every keystroke — this does not, so
-              // it is what downstream "the résumé itself changed" resets key
-              // on. See `useAnalyzedResume`.
-              parseKey={parseKey}
-              score={edited.score}
               bytes={state.bytes}
               sourceKind={state.sourceKind}
               onReset={reset}
               edit={edit}
-              requestedTab={tabRequest}
+              recovery={recovery}
+              parseKey={parseKey}
+              autosave={autosave}
               onJdContextChange={setJdContext}
-            />
-            {/* Save-to-library affordance (#322) — saves the edited parse +
-                source bytes so this resume can be reloaded without re-uploading. */}
-            <SaveResumeBar
-              library={library}
-              fileName={state.fileName}
-              bytes={state.bytes}
-              sourceKind={state.sourceKind}
-              result={displayResult}
-              score={edited.score}
+              // #826 — a whole-résumé rewrite applied while a JD was steering
+              // it IS the Tailor stage, done. `ResultDetail` owns the pairing;
+              // the key it is recorded under is only knowable here.
+              onTailorApplied={() => progress.mark("tailor")}
             />
             {/* Hand the parse to the capture extension (#620) — self-hides when
                 no extension answers a probe, so it costs nothing on the visit
-                of everyone who runs none. `canonical.fields` is the same shape
-                `departToJobs` hands `/jobs/`; the file name becomes the label
-                the extension's panel shows beside its rating. */}
+                of everyone who runs none. `recovery.activeResult`, on the same
+                terms as every other consumer: this ships the résumé OUT of the
+                page, so a pre-recovery parse here would have the extension rate
+                every captured posting against the fields the parser got wrong,
+                with nothing on screen to reveal it. Same shape `departToJobs`
+                hands `/jobs/`, and now the same value; the file name becomes
+                the label the extension's panel shows beside its rating. */}
             <ShareWithExtensionBar
-              parsed={displayResult.canonical.fields}
+              parsed={recovery.activeResult.canonical.fields}
               fileName={state.fileName}
             />
           </>
@@ -476,6 +711,74 @@ export default function App() {
             </div>
           )}
       </ErrorBoundary>
+
+      {recovery && (
+        // The one export surface (#823) — PDF, Markdown and the audit report,
+        // each row naming its artifact. Mounted at page level rather than
+        // inside the result tree because the rail that opens it is up here too,
+        // and because the authoring lane (which renders no `Result` at all)
+        // needs the same three exports. Exports the RECOVERED parse, so the
+        // artifact matches what the page shows.
+        <ExportDialog
+          open={exportOpen}
+          onClose={() => setExportOpen(false)}
+          result={recovery.activeResult}
+          score={recovery.activeScore}
+          contactOverrides={edit.contactOverrides}
+          // #826 — any of the three artifacts reaching the user completes the
+          // Download stage, the audit report included: the ledger records that
+          // the user went through here, and the report is downloaded from it.
+          onExported={() => progress.mark("download")}
+        />
+      )}
+
+      {/* #826 — which saved résumé did you mean? Opened only by a rail click
+          that arrived with nothing on the page and two or more saved, and it
+          FINISHES that click rather than merely loading (see the file). Page
+          level, beside the export dialog it may itself open. */}
+      <ResumeChooserDialog
+        stage={pendingStage === null ? null : journeyStage(pendingStage)}
+        entries={library.entries}
+        onPick={(id) => {
+          const stage = pendingStage;
+          setPendingStage(null);
+          if (stage !== null) void loadAndResume(id, stage);
+        }}
+        onClose={() => setPendingStage(null)}
+      />
+
+      {/* #825 — the one case where `Add résumé` is destructive: a write the
+          autosave still owes. Same shape and same verb pairing as the
+          drag-to-replace confirm below (keep / go ahead), because it is the
+          same decision arriving from a different control; it is a separate
+          Dialog only because that one is about a specific dropped FILE and
+          names it, while this one has no file yet. */}
+      <Dialog
+        open={confirmAddResume}
+        onClose={() => setConfirmAddResume(false)}
+        title="Add a different résumé?"
+        className="w-[min(24rem,calc(100vw-2rem))]"
+      >
+        <p className="text-sm text-content-secondary">
+          Your latest changes haven&apos;t finished saving to this browser yet.
+          Adding another résumé clears this page, and those changes go with it.
+          Everything saved before them stays in Saved resumes.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmAddResume(false)}>
+            Keep this one
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => {
+              setConfirmAddResume(false);
+              reset();
+            }}
+          >
+            Add another résumé
+          </Button>
+        </div>
+      </Dialog>
 
       <ReplaceResumeDropOverlay
         isDragging={replaceDrop.isDragging}

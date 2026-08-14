@@ -30,6 +30,9 @@ import { createJob } from "../lib/job-tracker.ts";
 import { saveResumeToLibrary } from "../lib/resume-library.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import type { HeuristicParsedResume } from "../lib/heuristics/types.ts";
+import { writeJobsHandoff } from "../lib/jobs-handoff.ts";
+import { markJourneyMilestone } from "../lib/journey-progress.ts";
 import JobsApp from "./JobsApp.tsx";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -272,5 +275,53 @@ describe("JobsApp: Saved jobs fit rating falls back to the library résumé (#72
     expect(libraryPanel?.textContent).toContain(
       "Open this workbench from your resume",
     );
+  });
+});
+
+describe("JobsApp: the rail reads the ledger the handoff pointed at (#826)", () => {
+  const parsed: HeuristicParsedResume = {
+    full_name: "Dana Fixture",
+    skills: ["React"],
+    experience: [],
+    education: [],
+  };
+
+  /** The rail trigger whose accessible sentence names this stage. */
+  function railStage(label: string): HTMLElement {
+    const found = [...container.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes(`: ${label}.`),
+    );
+    if (!found) throw new Error(`no rail trigger for ${label}`);
+    return found;
+  }
+
+  it("marks a stage this résumé already completed on `/`", async () => {
+    // `/jobs/` cannot derive the ledger key — it receives the APPLIED parse and
+    // the key is the pristine one — so the key riding the handoff is the ONLY
+    // thing that makes the arc continuous across the two entries.
+    writeJobsHandoff({ parsed, journeyKey: "a1b2c3d4" });
+    markJourneyMilestone("a1b2c3d4", "download");
+
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb(20);
+
+    expect(railStage("Download").textContent).toContain("Download. Done.");
+    expect(railStage("Download").textContent).toContain("\u2713");
+  });
+
+  it("shows fewer marks, never a wrong one, when the handoff carried no key", async () => {
+    // The accepted gap: a direct visit whose résumé came from the library
+    // fallback has no `/` page behind it to have minted a key.
+    writeJobsHandoff({ parsed });
+    markJourneyMilestone("a1b2c3d4", "download");
+
+    await act(async () => {
+      root.render(<JobsApp />);
+    });
+    await flushIndexedDb(20);
+
+    expect(railStage("Download").textContent).toContain("Download. Ready.");
   });
 });

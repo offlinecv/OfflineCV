@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { useCallback, useMemo, useState } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
-import { projectScoreSections } from "../lib/heuristics/projections.ts";
-import { computeAnonymousAtsScore, type AnonymousAtsScore } from "../lib/score/score.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, ErrorState } from "@design-system";
 import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
@@ -12,10 +9,10 @@ import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
 import { isScoreRevealed } from "../lib/contact.ts";
 import { useResumeAnalysisLlm } from "../hooks/useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
-import type { LlmParsedResume } from "../lib/webllm/parse-resume.ts";
-import { mergeLlmParse } from "../lib/webllm/merge-override.ts";
+import type { LlmRecovery } from "../hooks/useLlmRecovery.ts";
+import type { AutosaveResume } from "../hooks/useAutosaveResume.ts";
 import { ParsedHeader } from "./features/ParsedHeader.tsx";
-import { ResultDetailTabs } from "./features/ResultDetailTabs.tsx";
+import { ResultDetail } from "./features/ResultDetail.tsx";
 
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
@@ -30,56 +27,69 @@ const TWO_COLUMN_BLURB =
 type SourceKind = "pdf" | "docx" | "markdown";
 
 interface ResultProps {
+  /** The edit-folded HEURISTIC parse — pre-LLM-override. `recovery` carries the
+   *  parse everything downstream actually renders. */
   result: CascadeResult;
-  /** Identity of the PRISTINE parse behind `result` (#576) — see
-   *  `useAnalyzedResume.parseKey`. `result` is edit-folded and so changes on
-   *  every keystroke; this changes only when the résumé itself does. */
-  parseKey: unknown;
-  /** EDITED score — re-graded by App from the current overrides (#82). */
-  score: AnonymousAtsScore;
   /** PDF bytes for the source preview pane. Absent for DOCX uploads. */
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   onReset: () => void;
   /** Lifted edit state (#82) — threaded to ReconstructedResume for inline edits. */
   edit: EditableParse;
-  /** A tab the journey rail asked for (#812) — forwarded untouched to
-   *  `ResultDetailTabs`, which owns the tab state. */
-  requestedTab?: { id: string; nonce: number };
+  /** The degenerate-parse recovery result, owned by `App` since #823 so the two
+   *  routes into `/jobs/` hand over the RECOVERED fields — see
+   *  `useLlmRecovery`. Carries the active parse, its score, its identity token
+   *  and the callback the recovery panel reports through. */
+  recovery: LlmRecovery;
+  /** The PRISTINE-parse identity behind `result` (`useAnalyzedResume.parseKey`).
+   *  `result` is edit-folded and re-memoized on every keystroke, so anything
+   *  that must reset "when the résumé changed" — here, the recovery pass's own
+   *  status — has to key on this instead. */
+  parseKey: unknown;
+  /** Library persistence for this parse, owned by `App` (#824) and stated by
+   *  `ParsedHeader`. Travels whole, like `recovery`, rather than as two props.
+   *  Deliberately unused on the `fonts_unmappable` branch below: that parse has
+   *  no header and no editor, so it can never accrue an edit to save. */
+  autosave: AutosaveResume;
   /** JD steering reported back up so `/`'s rail can mark the Tailor stage
-   *  (#812) — see `ResultDetailTabs` for why it travels this way. */
+   *  (#812) — see `ResultDetail` for why it travels this way. */
   onJdContextChange?: (jdContext: string | null) => void;
+  /** A JD-steered whole-résumé rewrite was applied (#826) — see `ResultDetail`,
+   *  which pairs the rewrite event with the steering it owns. */
+  onTailorApplied?: () => void;
 }
 
 export function Result({
   result,
-  parseKey,
-  score,
   bytes,
   sourceKind,
   onReset,
   edit,
-  requestedTab,
+  recovery,
+  parseKey,
+  autosave,
   onJdContextChange,
+  onTailorApplied,
 }: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
   if (isFontsUnmappable) {
-    // No tabs on this branch — the rail's stages still resolve to `/`, they
-    // just have no L2 tab to land on, which is correct: there is nothing
+    // No résumé body on this branch — the rail's stages still resolve to `/`,
+    // they just have nothing to scroll to, which is correct: there is nothing
     // parsed to show behind them.
     return <LimitedParsingCard result={result} onReset={onReset} />;
   }
   return (
     <ParsedCard
       result={result}
-      parseKey={parseKey}
-      score={score}
       bytes={bytes}
       sourceKind={sourceKind}
       onReset={onReset}
       edit={edit}
-      requestedTab={requestedTab}
+      recovery={recovery}
+      parseKey={parseKey}
+      autosave={autosave}
       onJdContextChange={onJdContextChange}
+      onTailorApplied={onTailorApplied}
     />
   );
 }
@@ -88,101 +98,54 @@ export function Result({
 
 function ParsedCard({
   result,
-  parseKey,
-  score,
   bytes,
   sourceKind,
   onReset,
   edit,
-  requestedTab,
+  recovery,
+  parseKey,
+  autosave,
   onJdContextChange,
+  onTailorApplied,
 }: {
   result: CascadeResult;
-  parseKey: unknown;
-  score: AnonymousAtsScore;
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   onReset: () => void;
   edit: EditableParse;
-  requestedTab?: { id: string; nonce: number };
+  recovery: LlmRecovery;
+  parseKey: unknown;
+  autosave: AutosaveResume;
   onJdContextChange?: (jdContext: string | null) => void;
+  onTailorApplied?: () => void;
 }) {
   const triggerCount = result.triggers.length;
+  const { activeResult, activeScore, parseIdentity, isLlmRecovered } = recovery;
 
   // Opt-in combined WebLLM analysis (#262, #273). One controller feeds the
-  // single on-device-AI tab (the LLM critique plus "What an ATS misses" as
-  // a bottom section) from one inference. Lifted here so the tab is only
+  // single on-device-AI surface (the LLM critique plus "What an ATS misses" as
+  // a bottom section) from one inference. Lifted here so the section is only
   // advertised on WebGPU-capable browsers with extractable text; on everything
-  // else the tab (and panel) is silently absent. The panel's single CTA triggers
-  // the combined run; status (loading/running/done/error) is owned by the panel.
+  // else it is silently absent. The panel's single CTA triggers the combined
+  // run; status (loading/running/done/error) is owned by the panel.
   const analysis = useResumeAnalysisLlm(result);
 
   // Degenerate-case LLM escape hatch (#243). Only available when
   // `result.suggestedEscalation === "llm"` AND WebGPU is available AND there is
-  // text. When the user opts in and the pass completes, `llmOverride` is set and
-  // the entire result surface re-renders from the LLM-parsed fields.
+  // text. Running the pass produces an LLM parse that replaces the heuristic
+  // fields across the whole surface.
   //
-  // The controller is created here (it must outlive a tab switch and it feeds
-  // `llmOverride`, which re-grades the score card below) but its BANNER now
-  // renders inside `ResultDetailTabs`' on-device-AI tab, not above this card.
-  // It used to be the first thing on the post-drop screen — a full-width
-  // primary-button banner sitting above the user's own score, so the page
-  // opened on our suggestion instead of their result (user testing, Jul 2026:
-  // "we should not have 'Try a local AI pass' so prominently at the top").
-  // The tab strip already reserves permanent space for the on-device-AI
-  // surface, so the offer moves into space the layout was paying for anyway
-  // and the tab's own label carries the signal. See ResultDetailTabs.
-  const escapeHatch = useLlmEscapeHatch(result);
-  // `llmOverride` is NOT keyed/reset on `result` change. Safe today because a new
-  // file passes through the `parsing` phase, which unmounts `Result` and discards
-  // this state — so an override never leaks onto a different resume. A future
-  // keyed/persistent `Result` refactor that keeps this mounted across files must
-  // reset `llmOverride` on `result` change, or a stale override will bleed through.
-  const [llmOverride, setLlmOverride] = useState<LlmParsedResume | null>(null);
-  const handleRecovered = useCallback((llmParsed: LlmParsedResume) => {
-    setLlmOverride(llmParsed);
-  }, []);
-
-  // When `llmOverride` is set, build a synthetic CascadeResult that merges the
-  // LLM-parsed fields into the original result. `rawText` / `markdown` / layout
-  // fields stay original — the override is parse-field only. `suggestedEscalation`
-  // is cleared to "none" since we've recovered. Score is re-derived from the
-  // overridden parse so the readout reflects the LLM result.
-  const activeResult: CascadeResult = useMemo(
-    () => (llmOverride === null ? result : mergeLlmParse(result, llmOverride)),
-    [result, llmOverride],
-  );
-
-  // Identity of the parse this card is showing — the two, and only two, ways
-  // the résumé under a MOUNTED `ParsedCard` can be replaced: the pristine
-  // parse changing underneath it (`parseKey`: a résumé loaded from the
-  // library, which sets phase "done" straight from "done" without passing
-  // through "parsing", so nothing unmounts), and the escape hatch swapping in
-  // an LLM re-parse (`llmOverride`).
-  //
-  // Deliberately NOT `activeResult`: that is a memo over the override maps,
-  // so every keystroke in the inline editor mints a fresh object for the
-  // SAME parse. Anything keyed on it fires on edits — which is why the
-  // JD-steering reset downstream takes this token instead (#576).
-  const parseIdentity = useMemo(
-    () => ({ parseKey, llmOverride }),
-    [parseKey, llmOverride],
-  );
-
-  const activeScore: AnonymousAtsScore = useMemo(() => {
-    if (llmOverride === null) return score;
-    return computeAnonymousAtsScore({
-      parsed: activeResult.canonical.fields,
-      fieldConfidence: activeResult.canonical.fieldConfidence,
-      triggers: activeResult.triggers,
-      rawText: activeResult.rawText,
-      // Score projection — section pools read off the canonical model, the sole
-      // parse shape (#445).
-      sections: projectScoreSections(activeResult.canonical),
-    });
-  }, [activeResult, llmOverride, score]);
-
-  const isLlmRecovered = llmOverride !== null;
+  // The CONTROLLER is created here — it belongs to the surface showing the
+  // offer — while what the pass produces is owned by `App` (`useLlmRecovery`,
+  // reaching this component as `recovery`), because two routes into `/jobs/`
+  // that `App` owns have to hand over the recovered fields (#823). The panel
+  // itself renders inside `ResultDetail`, as its own card between this score
+  // card and the résumé: it used to be a full-width banner above the score, so
+  // the page opened on our suggestion instead of the user's own result (user
+  // testing, Jul 2026: "we should not have 'Try a local AI pass' so prominently
+  // at the top"), and between #243 and #823 it lived in the on-device-AI tab —
+  // a slot that stopped existing when the tab rail went.
+  const escapeHatch = useLlmEscapeHatch(result, parseKey);
 
   // Score ring/verdict reveal (#313) — the threshold gate is BLANK-AUTHORING
   // ONLY. `ParsedCard` is also the primary "drop a PDF → see your score" view
@@ -204,9 +167,10 @@ function ParsedCard({
   const isTwoColumn = result.triggers.includes("two_column");
 
   return (
-    // Two stacked surfaces: the score "summary" card on top, the tabbed detail
-    // card below. The gap + each card's own border draws the separator the
-    // single-card layout lacked (the tab strip reads as its own section).
+    // One scrolling column of stacked surfaces: the score "summary" card, then
+    // whatever `ResultDetail` puts under it (the recovery offer when there is
+    // one, the résumé, and the two collapsed sections). The gap + each
+    // surface's own border draws the separators; nothing here is a tab.
     <div className="flex flex-col gap-4">
       <Card className="flex flex-col gap-6 shadow-xs">
         <ParsedHeader
@@ -216,6 +180,8 @@ function ParsedCard({
           elapsedMs={result.diagnostics.elapsedMs}
           onResetAll={edit.resetAll}
           onReset={onReset}
+          saveState={autosave.state}
+          onSave={autosave.save}
         />
 
         {isTwoColumn && (
@@ -234,12 +200,13 @@ function ParsedCard({
           </p>
         )}
         {/* Star-rating feedback (#51). The "Report a parsing gap" affordance
-            lives in the "What an ATS misses" bottom section of the "AI feedback"
-            tab (#273), next to the disagreements it characterizes. */}
+            lives in the "What an ATS misses" bottom section of the "Local AI
+            feedback" disclosure (#273), next to the disagreements it
+            characterizes. */}
         <FeedbackPanel />
       </Card>
 
-      <ResultDetailTabs
+      <ResultDetail
         activeResult={activeResult}
         parseIdentity={parseIdentity}
         activeScore={activeScore}
@@ -249,10 +216,10 @@ function ParsedCard({
         edit={edit}
         analysis={analysis}
         escapeHatch={escapeHatch}
-        onRecovered={handleRecovered}
+        onRecovered={recovery.onRecovered}
         triggerCount={triggerCount}
-        requestedTab={requestedTab}
         onJdContextChange={onJdContextChange}
+        onTailorApplied={onTailorApplied}
       />
     </div>
   );

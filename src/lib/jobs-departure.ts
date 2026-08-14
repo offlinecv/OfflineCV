@@ -4,18 +4,25 @@
 /**
  * The one definition of "leave `/` for `/jobs/`".
  *
- * There are two routes off the parser-audit surface into the job workbench:
- * `FindJobsLauncher`'s button (rendered only once a résumé is parsed) and the
- * "Saved jobs" link `PageShell` puts in the header on every surface (#707).
- * Both must do exactly the same two things before the browser navigates, and
- * when they diverged the second one shipped a route that defeated the first:
- * the library on `/jobs/` reads its résumé from the sessionStorage handoff, so
- * a user who parsed on `/` and arrived via the header link got no fitness
- * ratings at all, plus a "open this workbench from your resume" hint — shown to
- * someone who had just done that. Composing the two writes here means a third
- * route cannot re-introduce that split by forgetting one of them.
+ * There are two routes off the parser-audit surface into the job workbench: the
+ * journey rail's Match-jobs stage (#812) and the "Saved jobs" link `PageShell`
+ * puts in the header on every surface (#707). A third — the Find Jobs tab's
+ * `FindJobsLauncher` — was a second door onto the same corridor and went with
+ * the tab rail in #823. Both survivors must do exactly the same two things
+ * before the browser navigates, and when they diverged the header link shipped
+ * a route that defeated the other: the library on `/jobs/` reads its résumé
+ * from the sessionStorage handoff, so a user who parsed on `/` and arrived via
+ * the header link got no fitness ratings at all, plus a "open this workbench
+ * from your resume" hint — shown to someone who had just done that. Composing
+ * the two writes here means a fourth route cannot re-introduce that split by
+ * forgetting one of them.
  *
- * It is deliberately NOT the navigation itself: the launcher assigns
+ * What this unifies is the MECHANICS of leaving. The PAYLOAD is unified
+ * elsewhere and separately: both callers now read `App`'s `useLlmRecovery`, so
+ * a user who repaired a degenerate parse with the on-device pass departs with
+ * the RECOVERED fields rather than the ones the parser got wrong (#823).
+ *
+ * It is deliberately NOT the navigation itself: the rail's stage assigns
  * `location.href` while the header link is a real `<a href>` the browser
  * follows (so open-in-new-tab works), and folding the navigation in would
  * force one of them to fake the other.
@@ -42,8 +49,14 @@ import { markDeparture } from "./nav-return.ts";
  * navigating; safe to call from `/` only — `markDeparture` reads the current
  * path, and only a marker written at the root reads back as one.
  */
-export function departToJobs(parsed?: HeuristicParsedResume): void {
-  if (parsed !== undefined) writeJobsHandoff({ parsed });
+export function departToJobs(
+  parsed?: HeuristicParsedResume,
+  /** The journey-ledger key of the résumé being handed over (#826) — see
+   *  `JobsHandoff.journeyKey` for why it travels rather than being re-derived
+   *  on arrival. Omitted when there is no parse to carry it. */
+  journeyKey?: string,
+): void {
+  if (parsed !== undefined) writeJobsHandoff({ parsed, journeyKey });
   else clearJobsHandoff();
   markDeparture();
 }
@@ -51,15 +64,19 @@ export function departToJobs(parsed?: HeuristicParsedResume): void {
 /**
  * Depart AND navigate, for the routes that move the document themselves.
  *
- * Two of the three routes off `/` are buttons rather than links — the Find Jobs
- * tab's launcher and the journey rail's Match-jobs stage (#812) — and both must
- * assign a BASE-aware URL or the `/OfflineCV/` Pages-fallback deploy 404s. That
- * is a second thing a new route can forget, so it joins the first here. The
- * header's "Saved jobs" entry stays a real `<a href>` (open-in-new-tab must
- * work) and calls {@link departToJobs} alone — which is why the navigation is
- * not folded into that function itself.
+ * One of the two routes off `/` is a button rather than a link — the journey
+ * rail's Match-jobs stage (#812) — and it must assign a BASE-aware URL or the
+ * `/OfflineCV/` Pages-fallback deploy 404s. That is a second thing a new route
+ * can forget, so it joins the first here; the function stays even at one caller
+ * because "leave, and leave base-aware" is the pair a future button will
+ * otherwise re-derive. The header's "Saved jobs" entry stays a real `<a href>`
+ * (open-in-new-tab must work) and calls {@link departToJobs} alone — which is
+ * why the navigation is not folded into that function itself.
  */
-export function departToJobsAndNavigate(parsed?: HeuristicParsedResume): void {
-  departToJobs(parsed);
+export function departToJobsAndNavigate(
+  parsed?: HeuristicParsedResume,
+  journeyKey?: string,
+): void {
+  departToJobs(parsed, journeyKey);
   window.location.href = `${import.meta.env.BASE_URL}jobs/`;
 }

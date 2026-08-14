@@ -39,6 +39,30 @@ describe("jobs handoff", () => {
     expect(read?.parsed.experience[0]?.title).toBe("Staff Engineer");
   });
 
+  it("carries the journey-ledger key across (#826)", () => {
+    // `/jobs/` cannot re-derive it: the key is `fingerprintParse` of the
+    // PRISTINE parse and what arrives here is the edit-folded one, which
+    // hashes differently by design. So it travels or it does not exist.
+    writeJobsHandoff({ parsed, journeyKey: "a1b2c3d4" });
+    expect(readJobsHandoff()?.journeyKey).toBe("a1b2c3d4");
+  });
+
+  it("keeps the résumé when the journey key is absent or malformed", () => {
+    // A session with no key records no completions — fewer ✓ than the truth,
+    // never a wrong one — but the résumé is the thing `/jobs/` cannot work
+    // without, so a bad key must never cost it.
+    writeJobsHandoff({ parsed });
+    expect(readJobsHandoff()?.parsed.full_name).toBe("Dana Fixture");
+    expect(readJobsHandoff()?.journeyKey).toBeUndefined();
+
+    sessionStorage.setItem(
+      JOBS_HANDOFF_KEY,
+      JSON.stringify({ parsed, journeyKey: 42 }),
+    );
+    expect(readJobsHandoff()?.parsed.full_name).toBe("Dana Fixture");
+    expect(readJobsHandoff()?.journeyKey).toBeUndefined();
+  });
+
   it("is NOT consumed on read — a reload of /jobs/ still finds the parse", () => {
     writeJobsHandoff({ parsed });
     expect(readJobsHandoff()).not.toBeNull();

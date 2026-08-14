@@ -4,13 +4,20 @@
 // @vitest-environment jsdom
 
 /**
- * Render coverage for ResultDetailTabs (#275, consolidated in #273) — the
- * tabbed detail card extracted out of ParsedCard. Renders both visibility
- * regimes so every conditional tab / panel branch executes: (1) analysis
- * unavailable → only reconstructed + diagnostics tabs; (2) analysis available →
- * the single "Resume Quality" insight tab mounts (2nd position). A tiny host
- * component supplies a real EditableParse via useEditableParse. Raw createRoot,
- * matching the other feature render tests.
+ * Render coverage for ResultDetail (#275, consolidated in #273, un-tabbed in
+ * #823) — everything on `/` below the score card.
+ *
+ * Both visibility regimes are rendered so every conditional branch executes:
+ * (1) analysis unavailable → the résumé plus the "Raw text & flags" disclosure
+ * alone; (2) analysis available → the "Local AI feedback" disclosure as well.
+ * A tiny host component supplies a real EditableParse via useEditableParse. Raw
+ * createRoot, matching the other feature render tests.
+ *
+ * What the #823 tests below are actually pinning, beyond "it renders": the
+ * disclosures must not unmount their children, and the degenerate-parse
+ * recovery offer must be reachable without opening anything. Both are silent
+ * failures — a collapsed section that discards its panel state, and a repair
+ * affordance invisible on exactly the parses that need it.
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
@@ -22,16 +29,40 @@ import { createRoot, type Root } from "react-dom/client";
 // nothing writes the key back after the mount consume, so those assertions hold
 // even with the reset guard deleted. The probe is what makes "the steering
 // actually reached the rewrite path" observable (#576).
-vi.mock("./ReconstructedResume.tsx", () => ({
-  ReconstructedResume: (props: { jdContext?: string }) =>
-    createElement(
-      "div",
-      { "data-testid": "reconstructed-probe" },
-      `jdContext=${props.jdContext ?? "NULL"}`,
-    ),
-}));
+// The `apply rewrite` trigger is a SIBLING of the probe, not a child: several
+// assertions below read the probe's whole `textContent`, so a button inside it
+// would append its label to every one of them.
+vi.mock("./ReconstructedResume.tsx", async () => {
+  // The `Button` primitive, not a raw `<button>`: `src/components/**` is inside
+  // the forbid-elements scope, tests included.
+  const { Button } = await import("@design-system");
+  return {
+    ReconstructedResume: (props: {
+      jdContext?: string;
+      onRewriteApplied?: () => void;
+    }) =>
+      createElement(
+        "div",
+        null,
+        createElement(
+          "div",
+          { key: "probe", "data-testid": "reconstructed-probe" },
+          `jdContext=${props.jdContext ?? "NULL"}`,
+        ),
+        createElement(
+          "div",
+          { key: "apply", "data-testid": "apply-rewrite" },
+          createElement(
+            Button,
+            { onClick: () => props.onRewriteApplied?.() },
+            "apply rewrite",
+          ),
+        ),
+      ),
+  };
+});
 
-import { ResultDetailTabs } from "./ResultDetailTabs.tsx";
+import { ResultDetail } from "./ResultDetail.tsx";
 import { useEditableParse } from "../../hooks/useEditableParse.ts";
 import {
   writeTailorHandoff,
@@ -81,8 +112,8 @@ function fingerprintOf(res: CascadeResult): string {
   return fingerprintParse(res.canonical.fields);
 }
 
-/** Stand-in for the `{ parseKey, llmOverride }` token `Result.tsx` builds. A
- *  fresh object per call, so a test that wants "the parse was replaced" just
+/** Stand-in for the `{ parseKey, llmOverride }` token `useLlmRecovery` builds.
+ *  A fresh object per call, so a test that wants "the parse was replaced" just
  *  calls it again — and one that wants "the user edited" reuses the same one. */
 function parseIdentity(): object {
   return {};
@@ -92,7 +123,7 @@ interface ControllerOpts {
   isAvailable: boolean;
   capability?: WebGpuCapability | null;
   hasText?: boolean;
-  /** Degenerate-parse recovery offer (#243) — folded into this tab. */
+  /** Degenerate-parse recovery offer (#243) — its own card since #823. */
   escapeHatch?: "offered" | "recovered";
 }
 
@@ -131,7 +162,7 @@ const HOST_IDENTITY = parseIdentity();
 function Host({ opts, summary }: { opts: ControllerOpts; summary?: string }) {
   const edit = useEditableParse();
   const res = result(summary);
-  return createElement(ResultDetailTabs, {
+  return createElement(ResultDetail, {
     activeResult: res,
     parseIdentity: HOST_IDENTITY,
     activeScore: score,
@@ -155,6 +186,20 @@ function render(opts: ControllerOpts, summary?: string) {
   return container;
 }
 
+/** Every disclosure summary row, in document order. */
+function summaries(el: HTMLElement): string[] {
+  return [...el.querySelectorAll("summary")].map((s) => s.textContent ?? "");
+}
+
+/** The `<details>` whose summary contains `label`. */
+function disclosure(el: HTMLElement, label: string): HTMLDetailsElement {
+  const found = [...el.querySelectorAll("details")].find((d) =>
+    (d.querySelector("summary")?.textContent ?? "").includes(label),
+  );
+  if (!found) throw new Error(`no disclosure labelled ${label}`);
+  return found;
+}
+
 beforeEach(() => {
   sessionStorage.clear();
 });
@@ -164,103 +209,152 @@ afterEach(() => {
   container.remove();
 });
 
-describe("ResultDetailTabs", () => {
-  it("hides the on-device-AI tab while capability is still detecting / no text", () => {
+describe("ResultDetail", () => {
+  it("omits the on-device-AI section while capability is still detecting / no text", () => {
     const el = render({ isAvailable: false });
-    expect(el.textContent).toContain("Your resume");
-    expect(el.textContent).toContain("Find jobs");
-    expect(el.textContent).toContain("Raw text & flags");
+    expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
     expect(el.textContent).not.toContain("Local AI feedback");
   });
 
-  it("mounts the single on-device-AI tab (3rd position) when analysis is available", () => {
-    const el = render(
-      { isAvailable: true },
-      "Senior engineer with a track record of shipping.",
-    );
-    const labels = Array.from(el.querySelectorAll('[role="tab"]')).map(
-      (t) => t.textContent ?? "",
-    );
-    // Exactly four tabs: reconstructed, Find jobs (#318, always present),
-    // "Local AI feedback", diagnostics last.
-    expect(labels).toHaveLength(4);
-    expect(labels[0]).toContain("Your resume");
-    expect(labels[1]).toContain("Find jobs");
-    expect(labels[2]).toContain("Local AI feedback");
-    expect(labels[3]).toContain("Raw text & flags");
-    // No recovery offer, so no warn mark on this tab.
-    expect(labels[2]).not.toContain("parse needs attention");
+  it("has no tab rail and no second route to /jobs/ (#823)", () => {
+    // The whole point of the change: L1 owns navigation now. A `Find jobs` tab
+    // here would be a second door onto the corridor the rail's Match-jobs stage
+    // already opens, running the identical `departToJobsAndNavigate`.
+    const el = render({ isAvailable: true }, "Senior engineer.");
+    expect(el.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(el.querySelectorAll('[role="tablist"]')).toHaveLength(0);
+    expect(el.textContent).not.toContain("Find jobs");
+    expect(el.textContent).not.toContain("Open job workbench");
   });
 
-  it("turns the on-device-AI tab into the recovery offer when the escape hatch is available", () => {
-    // The banner used to render above the score card; the tab label is now the
-    // whole pre-click signal, so it has to carry both the offer and the warning
-    // (and the warning has to say what it means, not "setup needed").
+  it("renders the résumé unconditionally, with both sections collapsed under it", () => {
+    const el = render({ isAvailable: true }, "Senior engineer.");
+    // The résumé needs no click to reach — it is the page body.
+    expect(el.querySelector('[data-testid="reconstructed-probe"]')).not.toBeNull();
+    // Insight before evidence (#263, #273), and both start shut.
+    const labels = summaries(el);
+    // Exact, not `toContain`: "byte-identical to the tab labels they replace"
+    // is the claim, so the assertion has to be able to catch a rename. The
+    // leading glyph is the chevron the summary draws itself.
+    expect(labels).toEqual(["▸Local AI feedback", "▸Raw text & flags1"]);
+    for (const d of el.querySelectorAll("details")) expect(d.open).toBe(false);
+    // No recovery offer, so no warn mark anywhere.
+    expect(el.textContent).not.toContain("setup needed");
+  });
+
+  it("carries the layout-flag count on the collapsed evidence summary", () => {
+    // `triggerCount` used to ride the tab's `count` prop. The number has to
+    // survive the move, or a two-column warning is invisible until the user
+    // opens a section they have no reason to open.
+    const el = render({ isAvailable: false });
+    const summary = disclosure(el, "Raw text & flags").querySelector("summary");
+    expect(summary?.textContent).toContain("1");
+    expect(result().triggers).toHaveLength(1);
+  });
+
+  it("keeps a disclosure's children MOUNTED across a close/open cycle (#243 guard)", () => {
+    // The regression this exists to catch: swap `Disclosure` for anything that
+    // renders its body on demand and the panels below the résumé are unmounted
+    // whenever they are shut — which discards their state and, for the escape
+    // hatch's neighbours, kills effects that report upward. Node IDENTITY, not
+    // presence: a remount would produce a different element for the same panel.
+    const el = render({ isAvailable: false });
+    const details = disclosure(el, "Raw text & flags");
+    const before = details.querySelector('[role="group"]');
+    expect(before).not.toBeNull();
+
+    // Driven through the summary, not by assigning `details.open`: the
+    // property assignment does not notify React, so an `onToggle`-gated rewrite
+    // of this component would never re-render and the `act` blocks would be
+    // inert — the test would pass against exactly the change it exists to catch.
+    const summary = details.querySelector("summary");
+    if (!summary) throw new Error("disclosure has no summary row");
+    act(() => summary.click());
+    expect(details.open).toBe(true);
+    act(() => summary.click());
+    expect(details.open).toBe(false);
+
+    expect(details.querySelector('[role="group"]')).toBe(before);
+  });
+
+  it("shows the degenerate-parse recovery offer inline, without opening anything (#243)", () => {
+    // #243 gave the offer the on-device-AI tab's LABEL so it had a permanent
+    // slot. Behind a collapsed section that slot stops existing, so the offer
+    // is its own card now — above the résumé, always visible.
     const el = render(
       { isAvailable: true, escapeHatch: "offered" },
       "Senior engineer with a track record of shipping.",
     );
-    const qualityTab = Array.from(el.querySelectorAll('[role="tab"]')).find((t) =>
-      (t.textContent ?? "").includes("local AI pass"),
-    );
-    expect(qualityTab).toBeDefined();
-    expect(qualityTab?.textContent).toContain("didn't parse cleanly");
-    expect(qualityTab?.textContent).toContain("parse needs attention");
-    expect(qualityTab?.textContent).not.toContain("setup needed");
-    // The offer owns the tab body alone — the quality panel's own CTA must not
-    // sit under it, or the tab carries two model-loading CTAs at once.
     expect(el.textContent).toContain("Not everything parsed cleanly");
+    // Not behind a disclosure: only the evidence section is present at all…
+    expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
+    // …and the offer is not inside the one that IS there.
+    expect(
+      disclosure(el, "Raw text & flags").textContent,
+    ).not.toContain("Not everything parsed cleanly");
+    // One offer at a time — the quality panel's own CTA must not sit beside a
+    // second model-loading CTA.
     expect(el.textContent).not.toContain("Analyze with on-device model");
+    expect(el.textContent).not.toContain("What the model checks");
+    // ABOVE the résumé, not merely present: the offer's permanent slot is what
+    // #243 bought by giving it the tab's label, and a card below a 1000-line
+    // résumé is as good as behind a collapsed section.
+    const offer = [...el.querySelectorAll("h2")].find((n) =>
+      (n.textContent ?? "").includes("Not everything parsed cleanly"),
+    );
+    const resume = el.querySelector('[data-testid="reconstructed-probe"]');
+    expect(offer).toBeDefined();
+    expect(resume).not.toBeNull();
+    expect(
+      offer!.compareDocumentPosition(resume!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("drops the recovery label once the pass has run, keeping the banner", () => {
+  it("keeps the recovery panel mounted through `done` and hands the section back", () => {
     // The hatch stays `isAvailable` after a successful pass (it is keyed on the
-    // ORIGINAL result so it can be re-run), so without the status gate the tab
-    // would keep inviting a pass the user already took.
+    // ORIGINAL result so it can be re-run). The card must therefore be gated on
+    // `isAvailable` ALONE: gating it on the offer standing would unmount the
+    // panel in the very render that fires `onRecovered`.
     const el = render(
       { isAvailable: true, escapeHatch: "recovered" },
       "Senior engineer with a track record of shipping.",
     );
-    const labels = Array.from(el.querySelectorAll('[role="tab"]')).map(
-      (t) => t.textContent ?? "",
-    );
-    expect(labels[2]).toContain("Local AI feedback");
-    expect(labels[2]).not.toContain("local AI pass");
-    expect(labels[2]).not.toContain("parse needs attention");
-    // Collapsed confirmation + the quality panel it handed the tab back to.
-    // Assert the PANEL's own heading, not the tab label: those were the same
-    // string until the heading was renamed, so this line passed off `labels[2]`
-    // above and never proved the panel had mounted at all.
+    // Collapsed to its one-line confirmation, still on screen.
     expect(el.textContent).toContain("Recovered with on-device AI");
-    expect(el.textContent).toContain("What the model checks");
+    expect(el.textContent).not.toContain("Not everything parsed cleanly");
+    // …and the quality section it was withholding is back. Assert the PANEL's
+    // own heading, not the summary label — those were the same string until the
+    // heading was renamed, so a label assertion never proved the panel mounted.
+    const quality = disclosure(el, "Local AI feedback");
+    expect(quality.textContent).toContain("What the model checks");
   });
 
-  it("reseeds the Find jobs query when the LLM escape hatch swaps activeResult (keyed remount)", () => {
-    // Original heuristic parse and a distinct recovered parse — same `result`
-    // (the pre-LLM cascade), different `activeResult` once recovery lands. The
-    // Find jobs panel seeds its query once from the parse; without the parse-
-    // identity key it would keep the heuristic title while runSearch ranks the
-    // recovered parse (PR #337 review). Keyed remount reseeds it.
-    const heuristic = result(undefined, "Heuristic Engineer");
-    const recovered = result(undefined, "Recovered Architect");
-    const opts: ControllerOpts = { isAvailable: false };
-
-    const before = parseIdentity();
-    const after = parseIdentity();
-
-    function RecoveryHost({ recover }: { recover: boolean }) {
+  it("does not REMOUNT the recovery card as the pass completes", () => {
+    // The test above mounts fresh at `recovered`, so it can only see the end
+    // state — wrap the card as `<Card key={escapeHatch.status.kind}>` and it
+    // stays green while `onRecovered` fires from a brand-new panel instance on
+    // every pass. This runs the transition AS a transition, within one mount,
+    // and asserts NODE IDENTITY: a remount is a different element.
+    const opts = (escapeHatch: "offered" | "recovered"): ControllerOpts => ({
+      isAvailable: true,
+      escapeHatch,
+    });
+    function TransitionHost({ done }: { done: boolean }) {
       const edit = useEditableParse();
-      return createElement(ResultDetailTabs, {
-        activeResult: recover ? recovered : heuristic,
-        parseIdentity: recover ? after : before,
+      const res = result("Senior engineer with a track record of shipping.");
+      const o = opts(done ? "recovered" : "offered");
+      return createElement(ResultDetail, {
+        activeResult: res,
+        parseIdentity: HOST_IDENTITY,
         activeScore: score,
-        result: heuristic,
+        result: res,
         sourceKind: "pdf",
         edit,
-        analysis: controller(opts),
-        escapeHatch: escapeHatchController(opts),
+        analysis: controller(o),
+        escapeHatch: escapeHatchController(o),
         onRecovered: () => {},
-        triggerCount: heuristic.triggers.length,
+        triggerCount: res.triggers.length,
       });
     }
 
@@ -268,41 +362,40 @@ describe("ResultDetailTabs", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     act(() => {
-      root.render(createElement(RecoveryHost, { recover: false }));
+      root.render(createElement(TransitionHost, { done: false }));
     });
-    expect(container.textContent).toContain("Heuristic Engineer");
+    // The recovery card is the first child — above the résumé, by design.
+    const cardBefore = container.firstElementChild;
+    expect(cardBefore?.textContent).toContain("Not everything parsed cleanly");
 
-    // Escape hatch recovers a better parse: activeResult now !== result.
     act(() => {
-      root.render(createElement(RecoveryHost, { recover: true }));
+      root.render(createElement(TransitionHost, { done: true }));
     });
-    expect(container.textContent).toContain("Recovered Architect");
-    expect(container.textContent).not.toContain("Heuristic Engineer");
+    expect(container.firstElementChild).toBe(cardBefore);
+    expect(cardBefore?.textContent).toContain("Recovered with on-device AI");
   });
 
-  it("keeps the on-device-AI tab (warn-marked) with the notice when WebGPU is unavailable", () => {
+  it("warn-marks the on-device-AI summary and explains in place when WebGPU is unavailable", () => {
     const el = render(
       { isAvailable: false, capability: "no-webgpu", hasText: true },
       "Senior engineer with a track record of shipping.",
     );
-    const qualityTab = Array.from(el.querySelectorAll('[role="tab"]')).find((t) =>
-      (t.textContent ?? "").includes("Local AI feedback"),
-    );
-    expect(qualityTab).toBeDefined();
+    const summary = disclosure(el, "Local AI feedback").querySelector("summary");
     // Warn marker is announced, not colour-only.
-    expect(qualityTab?.textContent).toContain("setup needed");
+    expect(summary?.textContent).toContain("setup needed");
     // The panel explains the unavailability in place instead of vanishing.
     expect(el.textContent).toContain("On-device AI isn't available");
   });
 
-  it("consumes a tailor handoff on mount and lands on the Reconstructed tab (#576)", () => {
+  it("consumes a tailor handoff on mount and steers the rewrite (#576)", () => {
     // The round-trip claim: `/jobs/`'s tailor button stashes an instruction in
-    // sessionStorage and navigates here; `ResultDetailTabs` must (1) pick that
+    // sessionStorage and navigates here; `ResultDetail` must (1) pick that
     // instruction up on mount, (2) forward the instruction to
-    // `ReconstructedResume` (where the rewrite hook consumes it), (3) switch
-    // to the Reconstructed tab so the rewrite affordance is on screen, and
-    // (4) clear the key so a manual reload of `/` falls back to a generic
-    // rewrite prompt.
+    // `ReconstructedResume` (where the rewrite hook consumes it), and (3) clear
+    // the key so a manual reload of `/` falls back to a generic rewrite prompt.
+    // The third half of the old contract — landing on the Reconstructed TAB —
+    // is now a scroll to `#reconstructed-resume`, which the mocked résumé does
+    // not render, so there is no tab selection left to assert.
     writeTailorHandoff({
       jdContext: "prefer wording that surfaces Kubernetes",
       parseFingerprint: fingerprintOf(result()),
@@ -310,11 +403,6 @@ describe("ResultDetailTabs", () => {
     const el = render({ isAvailable: false });
     // Consumed: the read cleared the key.
     expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
-    // Landed on Reconstructed — the tab strip announces the selection via
-    // `aria-selected`, so the assertion is on that rather than on textContent
-    // (which lists every tab label regardless of which panel is showing).
-    const selected = el.querySelector('[role="tab"][aria-selected="true"]');
-    expect(selected?.textContent).toContain("Your resume");
     // The load-bearing observable: the value the handoff carried actually
     // reaches `ReconstructedResume`'s `jdContext` prop, so the rewrite is
     // steered — not just consumed off storage.
@@ -348,7 +436,7 @@ describe("ResultDetailTabs", () => {
 
     function SwapHost({ recover }: { recover: boolean }) {
       const edit = useEditableParse();
-      return createElement(ResultDetailTabs, {
+      return createElement(ResultDetail, {
         activeResult: recover ? recovered : heuristic,
         parseIdentity: recover ? after : before,
         activeScore: score,
@@ -413,7 +501,7 @@ describe("ResultDetailTabs", () => {
 
     function EditHost({ edited }: { edited: boolean }) {
       const edit = useEditableParse();
-      return createElement(ResultDetailTabs, {
+      return createElement(ResultDetail, {
         // Same parse identity on both renders — only the memo output changed.
         activeResult: edited ? editedCopy : base,
         parseIdentity: sameParse,
@@ -447,7 +535,7 @@ describe("ResultDetailTabs", () => {
   it("ignores a handoff stamped for a different résumé (#576)", () => {
     // One-shot bounds how many times a payload is read, not which résumé
     // reads it. When `/` is not restored from bfcache — tab reloaded, résumé
-    // reset — the next `ResultDetailTabs` to mount is a DIFFERENT parse, and
+    // reset — the next `ResultDetail` to mount is a DIFFERENT parse, and
     // it would consume the key exactly once against the wrong résumé, steering
     // the rewrite toward gaps computed from a file the user already replaced.
     const other = result(undefined, "Somebody Else's Résumé");
@@ -526,58 +614,38 @@ describe("ResultDetailTabs", () => {
     expect(probe?.textContent).toBe("jdContext=surface Rust");
   });
 
-  it("stays on the default tab and jdContext-free when no tailor handoff was written", () => {
+  it("reports jdContext-free on mount when no tailor handoff was written", () => {
     // Pre-existing behaviour must survive the handoff addition: an ordinary
-    // mount lands on Reconstructed with a null jdContext (generic rewrite).
+    // mount renders with a null jdContext (generic rewrite).
     const el = render({ isAvailable: false });
-    const selected = el.querySelector('[role="tab"][aria-selected="true"]');
-    expect(selected?.textContent).toContain("Your resume");
+    const probe = el.querySelector('[data-testid="reconstructed-probe"]');
+    expect(probe?.textContent).toBe("jdContext=NULL");
     // No side-effect on storage either — the read is one-shot but must not
     // write anything of its own.
     expect(sessionStorage.getItem(TAILOR_HANDOFF_KEY)).toBeNull();
   });
 });
 
-// ── The journey rail's two wires (#812) ──────────────────────────────────────
+// ── The journey rail's one remaining wire (#812) ─────────────────────────────
 
 /**
- * `requestedTab` (down) and `onJdContextChange` (up) are the whole of this
- * component's contract with `/`'s L1 rail, and neither is exercised by anything
- * above. Both fail silently: a landing request that stops working leaves the
- * rail's Fix it / Tailor / Download stages as dead clicks, and a steering report
- * that stops arriving leaves the rail marking — or failing to mark — Tailor
- * over a résumé that has no steering.
+ * `requestedTab` (down) went with the tab rail in #823 — Fix it and Tailor are
+ * plain anchor scrolls now, owned by `App`. `onJdContextChange` (up) survives,
+ * and it still fails silently: a steering report that stops arriving leaves the
+ * rail marking — or failing to mark — Tailor over a résumé that has no steering.
  */
-describe("ResultDetailTabs — the journey rail wires (#812)", () => {
-  /** Click the tab whose label contains `label`. */
-  function selectTab(el: HTMLElement, label: string) {
-    const tab = [...el.querySelectorAll('[role="tab"]')].find((t) =>
-      (t.textContent ?? "").includes(label),
-    ) as HTMLElement;
-    if (!tab) throw new Error(`no tab labelled ${label}`);
-    act(() => tab.click());
-  }
-
-  function selectedLabel(el: HTMLElement): string {
-    return (
-      el.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? ""
-    );
-  }
-
-  /** A host whose `requestedTab` this test drives, exactly as `App` does. */
-  function railHost(
-    onJdContextChange?: (jdContext: string | null) => void,
-  ): (requestedTab?: { id: string; nonce: number }) => void {
+describe("ResultDetail — the journey rail's steering report (#812)", () => {
+  /** A host that reports steering upward, exactly as `App` receives it. */
+  function reportingHost(
+    onJdContextChange: (jdContext: string | null) => void,
+    onTailorApplied?: () => void,
+  ) {
     const opts: ControllerOpts = { isAvailable: false };
     const res = result();
     const identity = parseIdentity();
-    function RailHost({
-      requestedTab,
-    }: {
-      requestedTab?: { id: string; nonce: number };
-    }) {
+    function RailHost() {
       const edit = useEditableParse();
-      return createElement(ResultDetailTabs, {
+      return createElement(ResultDetail, {
         activeResult: res,
         parseIdentity: identity,
         activeScore: score,
@@ -588,49 +656,21 @@ describe("ResultDetailTabs — the journey rail wires (#812)", () => {
         escapeHatch: escapeHatchController(opts),
         onRecovered: () => {},
         triggerCount: res.triggers.length,
-        requestedTab,
         onJdContextChange,
+        onTailorApplied,
       });
     }
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
-    const paint = (requestedTab?: { id: string; nonce: number }) => {
-      act(() => {
-        root.render(createElement(RailHost, { requestedTab }));
-      });
-    };
-    paint();
-    return paint;
+    act(() => {
+      root.render(createElement(RailHost));
+    });
   }
-
-  it("honours a REPEAT request for the tab the user is already on", () => {
-    // The nonce is the whole point, and this is the assertion that proves it.
-    // Key the effect on `[requestedTab?.id]` — the shape a reader reaches for —
-    // and the first request below still works, so a test that asked once would
-    // pass either way. The second one is where it dies: the id has not changed,
-    // the effect does not re-fire, and the rail's Fix it / Tailor / Download
-    // stages become dead clicks for the rest of the page's life for any user
-    // who ever navigated away from Reconstructed by hand.
-    const paint = railHost();
-    const el = container;
-
-    selectTab(el, "Raw text & flags");
-    expect(selectedLabel(el)).toContain("Raw text & flags");
-
-    paint({ id: "reconstructed", nonce: 1 });
-    expect(selectedLabel(el)).toContain("Your resume");
-
-    // Same id, next nonce — a second, identical rail click.
-    selectTab(el, "Raw text & flags");
-    expect(selectedLabel(el)).toContain("Raw text & flags");
-    paint({ id: "reconstructed", nonce: 2 });
-    expect(selectedLabel(el)).toContain("Your resume");
-  });
 
   it("reports null on mount, so a stale Tailor mark cannot outlive its résumé", () => {
     const reports = vi.fn();
-    railHost(reports);
+    reportingHost(reports);
     expect(reports).toHaveBeenCalledWith(null);
   });
 
@@ -640,12 +680,44 @@ describe("ResultDetailTabs — the journey rail wires (#812)", () => {
       parseFingerprint: fingerprintOf(result()),
     });
     const reports = vi.fn();
-    railHost(reports);
+    reportingHost(reports);
     // The initial null still goes up first — that ordering is what lets `App`
     // clear a mark from a previous résumé before this one reports its own.
     expect(reports.mock.calls.map((c) => c[0])).toEqual([
       null,
       "surface Kubernetes",
     ]);
+  });
+
+  it("reports the Tailor stage DONE only when a JD was steering (#826)", () => {
+    // The stage is "a whole-résumé rewrite completed while a JD steered it",
+    // and its two halves live in two different places: the applied transition
+    // is four levels down in `useResumeRewrite`, the steering is here. This is
+    // where they meet, so this is where the gate has to hold.
+    writeTailorHandoff({
+      jdContext: "surface Kubernetes",
+      parseFingerprint: fingerprintOf(result()),
+    });
+    const applied = vi.fn();
+    reportingHost(() => {}, applied);
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="apply-rewrite"] button')
+        ?.click(),
+    );
+    expect(applied).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports nothing for a rewrite the user ran with no JD behind it", () => {
+    // An ordinary rewrite is the `Fix it` stage, not `Tailor` — marking it
+    // would claim the user tailored to a posting they never opened.
+    const applied = vi.fn();
+    reportingHost(() => {}, applied);
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="apply-rewrite"] button')
+        ?.click(),
+    );
+    expect(applied).not.toHaveBeenCalled();
   });
 });

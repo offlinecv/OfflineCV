@@ -34,6 +34,10 @@ function filenameFromName(name: string | undefined): string {
 export function useDownloadMarkdown(
   result: CascadeResult,
   score: AnonymousAtsScore,
+  /** Fired once the file has actually reached the user, so the caller can
+   *  record the journey's `Download` stage (#826) — same success point as
+   *  `trackDownloadCompleted`. */
+  onDownloaded?: () => void,
 ): UseDownloadMarkdown {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +60,7 @@ export function useDownloadMarkdown(
       const source: DownloadSource =
         result.tiers.length === 0 ? "blank" : "upload";
       trackDownloadCompleted({ source, format: "markdown" });
+      onDownloaded?.();
       // Deliberately does NOT clear the blank draft (unlike `useDownloadPdf.ts`):
       // markdown is a plain-text interchange artifact, not the final ATS export,
       // so a user may download it mid-authoring and keep editing — wiping the
@@ -65,7 +70,10 @@ export function useDownloadMarkdown(
     } finally {
       setIsGenerating(false);
     }
-  }, [result, score]);
+    // `onDownloaded` in the deps for the same reason as `useDownloadPdf.ts`:
+    // this callback is clicked, never watched, so a fresh identity is free —
+    // and a stale one would mark the résumé that was on screen last render.
+  }, [result, score, onDownloaded]);
 
   return { download, isGenerating, error };
 }

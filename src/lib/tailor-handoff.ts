@@ -60,7 +60,7 @@ export interface TailorHandoff {
  * entries.
  *
  * What it is keyed on is the APPLIED (edit-folded) fields — the exact object
- * `FindJobsLauncher` hands to `/jobs/` — so:
+ * `departToJobs` hands to `/jobs/` — so:
  *   - a new file, or an LLM escape-hatch re-parse, changes the fields and
  *     therefore the fingerprint → a stale handoff is rejected;
  *   - the round trip itself doesn't change them (`/` is frozen in bfcache

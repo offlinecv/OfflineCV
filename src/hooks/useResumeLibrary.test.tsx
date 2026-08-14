@@ -18,7 +18,7 @@
 
 import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -29,7 +29,13 @@ import {
   getLetter,
 } from "../lib/storage/index.ts";
 import { createJob, listJobs } from "../lib/job-tracker.ts";
-import { useResumeLibrary, type ResumeLibrary } from "./useResumeLibrary.ts";
+import {
+  useResumeLibrary,
+  saveChangesNothingListed,
+  type ResumeLibrary,
+  type SaveResumeParams,
+} from "./useResumeLibrary.ts";
+import type { ResumeLibraryEntry } from "../lib/resume-library.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -261,5 +267,133 @@ describe("useResumeLibrary: merge-mode import reconciles dangling resume links (
 
     const jobs = await listJobs();
     expect(jobs.find((j) => j.id === "linked-job")?.resumeId).toBe(resume.id);
+  });
+});
+
+describe("useResumeLibrary: a save that changes nothing skips the refresh (#824)", () => {
+  // `save()` refreshed the whole list after every write — `listLibrary()` plus
+  // `estimateStorageUsage()`, both round-tripping IndexedDB. Fine for a button
+  // click; wrong for the autosave firing behind every edit. `navigator.storage
+  // .estimate` is the probe because only `refresh()` reaches it.
+  let estimate: ReturnType<typeof vi.fn>;
+  let persist: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    estimate = vi.fn(async () => ({ usage: 1024, quota: 1_000_000 }));
+    persist = vi.fn(async () => false);
+    Object.defineProperty(navigator, "storage", {
+      value: {
+        estimate,
+        persist,
+        persisted: async () => false,
+      },
+      configurable: true,
+    });
+  });
+
+  const params = (id: string | undefined, overall: number) => ({
+    id,
+    filename: "cv.pdf",
+    bytes: new ArrayBuffer(4),
+    sourceKind: "pdf" as const,
+    result: {} as never,
+    score: { overall } as never,
+  });
+
+  it("re-reads on a new record and on a changed score, and not in between", async () => {
+    const library = await mountLibrary();
+    const afterMount = estimate.mock.calls.length;
+
+    let id = "";
+    await act(async () => {
+      id = await library().save(params(undefined, 70));
+    });
+    // A new row: the picker has never seen it, so the list must be re-read.
+    expect(estimate.mock.calls.length).toBe(afterMount + 1);
+
+    await act(async () => {
+      await library().save(params(id, 70));
+    });
+    // Same filename, same score, same kind — nothing `ResumeLibraryEntry`
+    // carries has moved, so the write stands alone.
+    expect(estimate.mock.calls.length).toBe(afterMount + 1);
+
+    await act(async () => {
+      await library().save(params(id, 84));
+    });
+    // The score is listed, so a score change is not skippable.
+    expect(estimate.mock.calls.length).toBe(afterMount + 2);
+    expect(library().entries[0].scoreOverall).toBe(84);
+  });
+
+  it("asks for durable storage once per mount, not once per write", async () => {
+    // `navigator.storage.persist()` raises a user-visible permission doorhanger
+    // in Firefox. It used to open `save()`, which was fine behind a button and
+    // wrong behind the debounced autosave: the user would be prompted on the
+    // first inline edit and again every quiet period, having clicked nothing.
+    const library = await mountLibrary();
+    let id = "";
+    await act(async () => {
+      id = await library().save(params(undefined, 70));
+    });
+    expect(persist).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await library().save(params(id, 84));
+    });
+    await act(async () => {
+      await library().save(params(id, 91));
+    });
+    expect(persist).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("saveChangesNothingListed — which saves are skippable (#824)", () => {
+  const entry = (over: Partial<ResumeLibraryEntry> = {}): ResumeLibraryEntry => ({
+    id: "r1",
+    filename: "cv.pdf",
+    savedAt: 1,
+    scoreOverall: 70,
+    sourceKind: "pdf",
+    hasCachedParse: true,
+    ...over,
+  });
+  const save = (over: Partial<SaveResumeParams> = {}): SaveResumeParams => ({
+    id: "r1",
+    filename: "cv.pdf",
+    sourceKind: "pdf",
+    result: {} as never,
+    score: { overall: 70 } as never,
+    ...over,
+  });
+
+  it("skips a save that moves no listed field", () => {
+    expect(saveChangesNothingListed([entry()], save())).toBe(true);
+  });
+
+  it("never skips a NEW record — the picker has never seen the row", () => {
+    expect(saveChangesNothingListed([entry()], save({ id: undefined }))).toBe(false);
+  });
+
+  it("never skips an id this list does not hold", () => {
+    // Saved in another tab, or listed before this record existed. The row has
+    // to appear, so the list must be re-read.
+    expect(saveChangesNothingListed([entry()], save({ id: "elsewhere" }))).toBe(false);
+  });
+
+  it.each([
+    ["filename", save({ filename: "tailored.pdf" })],
+    ["score", save({ score: { overall: 84 } as never })],
+    ["sourceKind", save({ sourceKind: "docx" })],
+  ])("never skips a changed %s", (_field, params) => {
+    expect(saveChangesNothingListed([entry()], params)).toBe(false);
+  });
+
+  it("never skips a record that is gaining its first cached parse", () => {
+    // #757: a record an outside producer wrote with no snapshot lists at score
+    // 0 and `hasCachedParse: false`. This save gives it one — visibly.
+    expect(saveChangesNothingListed([entry({ hasCachedParse: false })], save())).toBe(
+      false,
+    );
   });
 });

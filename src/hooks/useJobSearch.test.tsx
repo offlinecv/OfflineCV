@@ -74,8 +74,11 @@ const query: JobQuery = { titles: ["Platform Engineer"], skills: ["go"] };
 type Hook = ReturnType<typeof useJobSearch>;
 let latest: Hook;
 
+/** The journey's Match-stage mark site (#826), spied on per test. */
+let onSearchLoaded = vi.fn();
+
 function Harness({ companies }: { companies: readonly CompanyEntry[] }) {
-  latest = useJobSearch(query, parsed, companies);
+  latest = useJobSearch(query, parsed, companies, onSearchLoaded);
   return null;
 }
 
@@ -123,6 +126,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  onSearchLoaded = vi.fn();
   searchJobs.mockReset();
   searchCompanyBoards.mockReset();
   searchJobs.mockResolvedValue({
@@ -158,6 +162,29 @@ describe("useJobSearch — company selection", () => {
     await flush();
     expect(loadedCompanies()).toEqual(expect.arrayContaining(["Globex", "Acme"]));
     expect(latest.pendingCompanies).toEqual([]);
+  });
+
+  it("reports a SEARCH, not every landing on `loaded` (#826)", async () => {
+    // The journey milestone is "you searched", once. The company merge and
+    // both local re-ranks also set `loaded`, and counting them would re-mark
+    // the stage on every chip toggle for a search the user ran minutes ago.
+    await render([ACME]);
+    await act(async () => latest.runSearch());
+    await flush();
+    expect(onSearchLoaded).toHaveBeenCalledTimes(1);
+
+    await rerender([]);
+    await flush();
+    expect(onSearchLoaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports nothing when the search itself fails", async () => {
+    searchJobs.mockRejectedValueOnce(new Error("every provider down"));
+    await render([ACME]);
+    await act(async () => latest.runSearch());
+    await flush();
+    expect(latest.phase.kind).toBe("failed");
+    expect(onSearchLoaded).not.toHaveBeenCalled();
   });
 
   it("drops a deselected company's postings WITHOUT refetching", async () => {

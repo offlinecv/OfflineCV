@@ -32,6 +32,7 @@ import {
   type JourneyStage,
   type JourneyStageId,
 } from "../lib/journey.ts";
+import { prefersReducedMotion } from "../lib/anchors.ts";
 
 /** What a surface hands the rail: the derived arc, and what it does about a
  *  stage the user can actually be sent to. */
@@ -58,12 +59,13 @@ export interface JourneyGuidanceState {
  * three screens above the user is a click that did nothing.
  *
  * `prefers-reduced-motion` has to be consulted in JS: the CSS `scroll-behavior`
- * cascade does not reach a `behavior: "smooth"` passed here.
+ * cascade does not reach a `behavior: "smooth"` passed here. Shared with
+ * `scrollToSection`, which a rail click runs immediately after this one — see
+ * `prefersReducedMotion`'s docblock for why the two must not each carry their
+ * own copy of the query.
  */
 function scrollToJourney(): void {
-  const reduced =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = prefersReducedMotion();
   try {
     window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
   } catch {

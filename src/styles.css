@@ -35,21 +35,29 @@
                 nothing collapses further no matter how wide the viewport gets
                                                                   → band max 119
 
+   Both bands then gained a FLAT 16px when the header's bottom padding went
+   from `py-2` (8px) to `pb-6` (24px), so the rule under the rail sits the same
+   24px from the rail as from the first content block — see `PageShell.tsx`.
+   The addition is flat because it is padding on a block that already spans the
+   full width: it shifts every measured height by the same amount and changes
+   no wrap point, which is why the two bands below are the measurements above
+   plus 16 rather than a fresh sweep.
+
    `/jobs/` is not the incidental case here: it is where `JobSearchResults`
    fires `scrollIntoView({ block: "start" })` on every results page change.
    Over-padding costs whitespace above the target; under-padding hides the
    target, which is the defect. */
 html {
   font-size: 16px;
-  /* 160px: the 147px band, plus 13px so the target is visibly clear of the
-     border rather than flush against it. */
-  scroll-padding-top: 10rem;
+  /* 176px: the 147 + 16 = 163px band, plus 13px so the target is visibly clear
+     of the border rather than flush against it. */
+  scroll-padding-top: 11rem;
 }
 
 @media (min-width: 1024px) {
   html {
-    /* 128px: the 119px band, plus 9px of the same clearance. */
-    scroll-padding-top: 8rem;
+    /* 144px: the 119 + 16 = 135px band, plus 9px of the same clearance. */
+    scroll-padding-top: 9rem;
   }
 }
 

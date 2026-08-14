@@ -196,6 +196,15 @@ The **resume library** (save a parsed resume, reload it later without re-uploadi
 rename/delete) is the first surface built on this store; it shows the persistence
 state and the eviction note inline, with the export backup reachable from there.
 
+A parsed resume is written to that store **automatically only once you have edited
+it**. Dropping a PDF in, reading the score and leaving writes nothing at all — the
+bytes stay in the tab and no record is created. From your first inline edit onward
+the record is kept up to date automatically (debounced,
+`src/hooks/useAutosaveResume.ts`), so closing the tab does not lose the fixes you
+made; the parse header states which of those two you are in, and offers an explicit
+save before the first edit if you want the unedited parse kept anyway. Deleting the
+record from the saved-resumes card is what removes the data.
+
 ### GitHub star count
 
 The footer shows the live repo star count via an unauthenticated call to

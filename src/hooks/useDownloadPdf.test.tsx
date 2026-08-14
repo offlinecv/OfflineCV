@@ -79,9 +79,12 @@ function Probe({ result }: { result: CascadeResult }) {
     rawText: result.rawText,
     sections: result.canonical.sections,
   });
-  api = useDownloadPdf(result, score);
+  api = useDownloadPdf(result, score, onDownloaded);
   return null;
 }
+
+/** The journey's Download-stage mark site (#826), spied on per test. */
+let onDownloaded = vi.fn();
 
 function mount(result: CascadeResult): void {
   container = document.createElement("div");
@@ -92,6 +95,7 @@ function mount(result: CascadeResult): void {
 
 beforeEach(() => {
   tracked.length = 0;
+  onDownloaded = vi.fn();
 
   globalThis.URL.createObjectURL = vi.fn(
     () => "blob:mock",
@@ -187,7 +191,7 @@ describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
     expect(api.isGenerating).toBe(false);
   });
 
-  it("fires no download and no analytics event when it refuses", async () => {
+  it("fires no download, no analytics event and no journey mark when it refuses", async () => {
     mount(namedResult("ANNA WIŚNIEWSKA"));
 
     await act(async () => {
@@ -195,8 +199,10 @@ describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
     });
 
     // A refused export is not a completed one — counting it would inflate the
-    // download metric with PDFs that were never produced.
+    // download metric with PDFs that were never produced, and (#826) would put
+    // a ✓ on the Download stage for a file the user never received.
     expect(tracked).toEqual([]);
+    expect(onDownloaded).not.toHaveBeenCalled();
     expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
   });
 
@@ -211,6 +217,8 @@ describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
 
     expect(api.error).toBeNull();
     expect(tracked).toEqual([{ source: "upload", format: "pdf" }]);
+    // #826 — the bytes reached the user, so the Download stage is done.
+    expect(onDownloaded).toHaveBeenCalledTimes(1);
   });
 });
 

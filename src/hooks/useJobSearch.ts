@@ -65,6 +65,14 @@ export function useJobSearch(
   query: JobQuery,
   parsed: HeuristicParsedResume,
   selectedCompanies: readonly CompanyEntry[],
+  /**
+   * A SEARCH came back (#826). Fired from `runSearch`'s success alone — not
+   * from the company merge or either local re-rank, which also land on
+   * `loaded` but are refinements of a search the user already ran. The one
+   * consumer records the journey's `Match jobs` stage, and "you searched"
+   * happens once per search, not once per re-rank.
+   */
+  onSearchLoaded?: () => void,
 ) {
   const [phase, setPhase] = useState<SearchPhase>({ kind: "idle" });
   const [isUpdating, setIsUpdating] = useState(false);
@@ -110,6 +118,9 @@ export function useJobSearch(
         };
         setFetchedCompanyKeys(companyKeys);
         setPhase({ kind: "loaded", result });
+        // `runSearch` is re-created every render, so this closure always holds
+        // the current callback — no ref needed, unlike the listener-based hooks.
+        onSearchLoaded?.();
       } catch {
         if (ctrl.signal.aborted) return;
         setPhase({ kind: "failed" });

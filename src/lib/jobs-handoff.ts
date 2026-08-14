@@ -36,6 +36,21 @@ export interface JobsHandoff {
    *  and skills, and the fit ranking reads its fuller shape (summary,
    *  education). */
   parsed: HeuristicParsedResume;
+  /**
+   * The journey-ledger key of the résumé this handoff carries (#826), so
+   * `/jobs/` can record that the `Match jobs` stage was completed for it.
+   *
+   * It has to travel because `/jobs/` cannot re-derive it: the key is
+   * `fingerprintParse` of the PRISTINE parse, and what arrives here is the
+   * APPLIED (edit-folded) one, which hashes differently by design.
+   *
+   * Optional, and a `/jobs/` session that arrived without it simply records
+   * nothing — the case is a direct visit whose résumé came from the library
+   * fallback (#724), which has no `/` page behind it to have minted a key. That
+   * shows FEWER ✓ marks, never a wrong one, which is the right direction to
+   * fail in.
+   */
+  journeyKey?: string;
 }
 
 /** Write the handoff payload before navigating to /jobs/. */
@@ -96,7 +111,12 @@ export function readJobsHandoff(): JobsHandoff | null {
     ) {
       return null;
     }
-    return payload;
+    // A malformed `journeyKey` is dropped rather than rejecting the payload:
+    // the résumé is the thing `/jobs/` cannot work without, and a missing key
+    // is already a supported state (see the field's docblock).
+    return typeof payload.journeyKey === "string" && payload.journeyKey.length > 0
+      ? payload
+      : { parsed };
   } catch {
     return null;
   }

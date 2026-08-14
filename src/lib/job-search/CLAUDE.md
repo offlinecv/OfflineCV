@@ -4,8 +4,9 @@ Query builder → provider search → rank by resume fit → deep links. Owns it
 entry, `/jobs/` (`jobs/index.html` → `src/jobs/JobsApp.tsx`). Since #690, `JobsApp` is a
 `Tabs` host with two peer views — Search (`FindJobsPanel`, this lane) and Saved jobs (the
 job-tracker library) — not "`FindJobsPanel` is the whole page" as it was pre-#690; both
-panels stay mounted across the switch. `/` keeps only `FindJobsLauncher`, which hands the
-parse over through `src/lib/jobs-handoff.ts`. Consumes the parsed resume, never the raw
+panels stay mounted across the switch. `/` keeps no search surface at all since #823 — the
+journey rail's Match-jobs stage hands the parse over through `src/lib/jobs-departure.ts`
+(which writes `src/lib/jobs-handoff.ts`) and navigates. Consumes the parsed resume, never the raw
 PDF — this surface cannot parse a PDF at all. Read the root `CLAUDE.md` first; this file
 adds only the lane-specific rules that are silent to break.
 

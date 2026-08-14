@@ -211,7 +211,7 @@ describe("useLlmEscapeHatch", () => {
     const sink: { current: ReturnType<typeof useLlmEscapeHatch> | null } = {
       current: null,
     };
-    await mount(() => useLlmEscapeHatch(r), sink);
+    await mount(() => useLlmEscapeHatch(r, r), sink);
     expect(sink.current!.isAvailable).toBe(true);
     await act(async () => {
       await sink.current!.run();
@@ -229,10 +229,62 @@ describe("useLlmEscapeHatch", () => {
     const sink: { current: ReturnType<typeof useLlmEscapeHatch> | null } = {
       current: null,
     };
-    await mount(() => useLlmEscapeHatch(r), sink);
+    await mount(() => useLlmEscapeHatch(r, r), sink);
     await act(async () => {
       await sink.current!.run();
     });
     expect(sink.current!.status.kind).toBe("error");
+  });
+
+  it("keeps a completed pass across an edit and drops it when the parse changes", async () => {
+    // #823 made this distinction load-bearing. The `result` a caller passes is
+    // `displayResult` — a memo over the edit override maps — so a keystroke
+    // mints a fresh object for the SAME parse. Keyed on that, a settled
+    // "Recovered with on-device AI" confirmation reverts to the "Try a local AI
+    // pass" CTA on the first character the user types, and `ResultDetail`
+    // withholds the whole "Local AI feedback" section while an offer stands, so
+    // a visible section goes with it — while `ParsedHeader` above still reads
+    // "Recovered", because that IS keyed on `parseKey`. One keystroke, and the
+    // page contradicts itself.
+    const parseA = result();
+    const sink: { current: ReturnType<typeof useLlmEscapeHatch> | null } = {
+      current: null,
+    };
+    function Probe({ res, pk }: { res: CascadeResult; pk: unknown }) {
+      sink.current = useLlmEscapeHatch(res, pk);
+      return null;
+    }
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<Probe res={parseA} pk={parseA} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await sink.current!.run();
+    });
+    expect(sink.current!.status.kind).toBe("done");
+
+    // One keystroke. Mirrors what `displayResult` actually produces: a new
+    // result AND a new `canonical`/`fields` underneath it, structurally equal.
+    const edited = {
+      ...parseA,
+      canonical: { ...parseA.canonical, fields: { ...parseA.canonical.fields } },
+    };
+    await act(async () => {
+      root.render(<Probe res={edited} pk={parseA} />);
+    });
+    expect(sink.current!.status.kind).toBe("done");
+
+    // A genuinely different résumé — a drop, a replace, a library load. The
+    // pass belonged to the one before it.
+    const parseB = result();
+    await act(async () => {
+      root.render(<Probe res={parseB} pk={parseB} />);
+    });
+    expect(sink.current!.status.kind).toBe("idle");
   });
 });

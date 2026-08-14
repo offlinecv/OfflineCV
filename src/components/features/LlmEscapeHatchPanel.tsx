@@ -6,21 +6,27 @@
  *
  * Was `LlmEscapeHatchBanner`: a tinted, bordered banner rendered ABOVE the
  * score card, so the first thing on the post-drop screen was our suggestion
- * rather than the user's own result. It now renders as the body of the
- * on-device-AI tab (`ResultDetailTabs`), and while the offer stands it is the
- * ONLY thing in that tab — `ResumeQualityPanel` is withheld until the pass has
- * run. Showing both put two model-loading CTAs on one screen, one of them
- * still wrapped in banner chrome that belonged to the old placement (user
- * testing, Jul 2026).
+ * rather than the user's own result. #243 moved it into the on-device-AI tab,
+ * whose label carried the offer; #823 took that tab rail away, so it renders
+ * as its own card BELOW the score card and above the résumé (`ResultDetail`).
+ * Still not first, and still not behind anything — a collapsed section would
+ * hide the one affordance that repairs a degenerate parse from exactly the
+ * parses that need it.
+ *
+ * While the offer stands it is alone: `ResumeQualityPanel` is withheld until
+ * the pass has run. Showing both put two model-loading CTAs on one screen, one
+ * of them still wrapped in banner chrome that belonged to the old placement
+ * (user testing, Jul 2026).
  *
  * So the shape here is deliberately `ResumeQualityPanel`'s, not a banner's:
  * same `section` + heading + `max-w-prose` explainer + right-aligned primary
  * Button. A user switching between the two states should see one surface
  * change its offer, not two differently-dressed widgets.
  *
- * When the LLM pass completes, calls `onRecovered(llmParsed)` so the parent
- * (`ParsedCard` in `Result.tsx`) can substitute the LLM-parsed fields into the
- * result surface and show the "recovered with on-device AI" provenance badge.
+ * When the LLM pass completes, calls `onRecovered(llmParsed)` so the owner
+ * (`App`, via `useLlmRecovery`) can substitute the LLM-parsed fields into the
+ * result surface, show the "recovered with on-device AI" provenance badge, and
+ * hand the recovered parse — not the broken one — to `/jobs/` and the export.
  * The panel stays mounted through `done` — that transition is what fires the
  * callback, so a `status.kind !== "done"` mount gate in the parent would swap
  * the panel out in the same render that produces the result and the callback
@@ -69,7 +75,10 @@ export function LlmEscapeHatchPanel({
   // Notify parent once per done-transition. The ref guard makes this one-shot:
   // it fires the moment status enters `done` and resets when status leaves
   // `done`, so a future inlined (non-memoized) `onRecovered` can't re-fire it on
-  // every render. Behavior is identical for the current useCallback([]) caller.
+  // every render. The current caller is `useLlmRecovery`'s
+  // `useCallback(…, [parseKey])` — stable for the life of a parse, so the guard
+  // changes nothing today; it is what keeps a less stable callback from
+  // re-reporting the same recovered parse on every render.
   const notifiedDone = useRef(false);
   useEffect(() => {
     if (status.kind === "done") {

@@ -188,7 +188,9 @@ function withJourney(
     deriveJourney({
       entry: "root",
       hasResume: false,
+      hasStoredResume: false,
       jdSteering: false,
+      completed: {},
       ...signals,
       ...over,
     });
@@ -266,6 +268,19 @@ describe("PageShell — the journey rail", () => {
     expect(main.className).not.toContain("py-10");
   });
 
+  it("spaces the rail's rule evenly on both sides (#825)", () => {
+    // The rule under the rail had 8px above it (`py-2`) and 32px below
+    // (`main`'s old `gap-8`) — a 1:4 split that read as the rail leaning on
+    // its own boundary. These two classes are ONE decision and have to be read
+    // together: `pb-6` is the space above the border, `gap-6` the space below
+    // it. Changing either alone reintroduces the asymmetry, and changing the
+    // header's padding at all also moves the sticky band that `styles.css`'s
+    // `scroll-padding-top` is measured against.
+    const { el } = withJourney();
+    expect(el.querySelector("header")!.className).toContain("pb-6");
+    expect(el.querySelector("main")!.className).toContain("gap-6");
+  });
+
   it("hands a populated stage straight to the surface", () => {
     const { el, onSelect } = withJourney({ hasResume: true });
     act(() => railTrigger(el, "Match jobs").click());
@@ -280,7 +295,7 @@ describe("PageShell — the journey rail", () => {
     // `jdSteering` with no résumé is what puts `Tailor` on a `/` rail while
     // leaving it unpopulated — the one combination that renders the stage and
     // still has nothing behind it. (It is also the state `deriveJourney`
-    // normalizes away from `availability`, which is why the ✓ stays off.)
+    // normalizes away from `availability`.)
     const { el, onSelect } = withJourney({ jdSteering: true });
     act(() => railTrigger(el, "Tailor").click());
     expect(onSelect).not.toHaveBeenCalled();
