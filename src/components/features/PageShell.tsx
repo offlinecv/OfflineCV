@@ -27,13 +27,12 @@
  * bug — the marker means "this trip started at the app root", and shared
  * chrome renders everywhere.
  *
- * The journey rail (#812) arrives the same way: the shell PLACES it — in the
- * header row from `lg` up, on its own full-width row below that, and its
- * guidance card as the first content block under the header — and owns nothing
- * else about it. The surface derives the stages (`deriveJourney`) and decides
- * what a click does; the ask-and-route state in between is
- * `useJourneyGuidance`, which is where the render-time derivation of the
- * blocked stage is documented.
+ * The journey rail (#812) arrives the same way: the shell PLACES it — on its
+ * own full-width row at every width, and its guidance card as the first content
+ * block under the header — and owns nothing else about it. The surface derives
+ * the stages (`deriveJourney`) and decides what a click does; the ask-and-route
+ * state in between is `useJourneyGuidance`, which is where the render-time
+ * derivation of the blocked stage is documented.
  *
  * Reuse: consumes only `@design-system` primitives/shared components, the
  * `JourneyRail` sibling, and the useGitHubStars / useUpdateChecker /
@@ -88,8 +87,8 @@ export interface PageShellProps {
   onSavedJobsNavigate?: () => void;
   /**
    * The top-level journey rail (#812). Omitted → no rail, and the header keeps
-   * its pre-#812 single-row shape. Supplied → the rail renders in the header
-   * row from `lg` up and on its own full-width row below that.
+   * its pre-#812 single-row shape. Supplied → the rail renders on its own
+   * full-width row below the brand row at every width.
    */
   journey?: PageShellJourney;
   children: ReactNode;
