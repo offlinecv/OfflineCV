@@ -55,6 +55,12 @@
 
 import { useState, useCallback, useMemo, useRef } from "react";
 import {
+  applyNormalizedDateOverrides,
+  normalizeExperienceDates,
+  relocatedEndAnchor,
+  type ExperienceDateFields,
+} from "../lib/edit/experience-dates.ts";
+import {
   captureBulletUndoSnapshot,
   restoreBulletUndoSnapshot,
   type BulletUndoTargets,
@@ -116,6 +122,7 @@ export interface ExperienceFieldOverrides {
   team?: string;
   start_date?: string;
   end_date?: string;
+  is_current?: boolean;
 }
 
 // ── Bullet overrides ──────────────────────────────────────────────────────────
@@ -306,6 +313,17 @@ export interface AddedEntry {
  * {@link AddedEntryField} FROM the tuple is what keeps the two in lockstep: a
  * new field can only join the union by joining the replay. Not exported — replay
  * lives in this module now, so nothing outside it needs the tuple.
+ *
+ * ORDER is load-bearing for the date pair, unlike the rest of this list:
+ * `setEntryField` normalises on every date write (#672), so replaying
+ * `{start_date: "2019", end_date: "2022"}` end-first would collapse the lone end
+ * date to `{start_date: "2022"}` and then overwrite it, restoring the entry as
+ * `{start_date: "2019", end_date: ""}`. Keep `start_date` ahead of `end_date`.
+ *
+ * #814's parking does NOT rescue that ordering, deliberately: replay writes every
+ * field of a fresh entry in ONE synchronous burst, so `addedEntriesRef` has not
+ * re-rendered and `setEntryField` sees no entry to park against. Replay stays
+ * verbatim — the same reason it passes no `resolvedEntry` on the override path.
  */
 const ADDED_ENTRY_FIELDS = [
   "title",
@@ -497,11 +515,25 @@ export interface EditableParse {
   ) => void;
   /** Override map for experience entries, keyed by experience array index. */
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
-  /** Update one field on a specific experience entry by its array index. */
-  setExperienceField: (
+  /**
+   * Update one field on a specific experience entry by its array index.
+   *
+   * `resolvedEntry` is the entry as the map currently resolves it — the
+   * overrides-APPLIED experience entry the caller is rendering, NOT the pristine
+   * parse. Passing it opts this commit into the #672 date rule
+   * ({@link applyNormalizedDateOverrides}); omitting it writes the raw value, which
+   * is what `replay` wants — a snapshot's keys are already normalised, and
+   * re-resolving them one at a time would mix a half-applied pair.
+   *
+   * Passing it also opts into #814's restore: a date this rule relocated out of
+   * the End cell earlier in the session is written back to `end_date` when a real
+   * start date arrives, instead of being overwritten by it.
+   */
+  setExperienceField: <K extends keyof ExperienceFieldOverrides>(
     index: number,
-    field: keyof ExperienceFieldOverrides,
-    value: string | undefined,
+    field: K,
+    value: ExperienceFieldOverrides[K],
+    resolvedEntry?: ExperienceDateFields,
   ) => void;
   /** Override map for bullet text, keyed by {@link BulletObservation.id}. */
   bulletOverrides: BulletOverrides;
@@ -728,6 +760,84 @@ export interface EditableParse {
   resetAll: () => void;
 }
 
+/** Parking key for a parsed role (its override-map index). */
+function roleAnchorKey(index: number): string {
+  return `role:${index}`;
+}
+
+/** Parking key for an added entry (its stable id). */
+function addedAnchorKey(id: string): string {
+  return `added:${id}`;
+}
+
+/** What one date-cell commit owes the relocation memory. */
+interface DateCommitRelocation {
+  /** End value to write back alongside this commit — the parked value, when a
+   *  real start date has arrived to displace it. */
+  restoredEnd?: string;
+  /** The value parked AFTER this commit; absent clears the entry's parking. */
+  parked?: string;
+}
+
+/**
+ * Decide the #814 restore and the new parking for one date-cell commit, from the
+ * pair the card is currently showing (`current`) and the value parked for this
+ * entry.
+ *
+ * Module scope and pure, so both writers — the override map
+ * (`setExperienceField`) and the added-entry list (`setEntryField`) — apply the
+ * same rule, and so neither has to run it inside a state updater.
+ *
+ * `current` is the pair as RESOLVED for display: `applyOverrides` output for a
+ * parsed role, the `AddedEntry` itself for an added one. Both have already been
+ * through {@link normalizeExperienceDates}, which is what makes
+ * `current.start_date === parked` a sound test for "the parked value is still
+ * the anchor on screen" — if the user has since replaced it, nothing is owed.
+ */
+function resolveDateCommit(
+  field: "start_date" | "end_date",
+  value: string | undefined,
+  current: ExperienceDateFields,
+  parked: string | undefined,
+): DateCommitRelocation {
+  // `undefined` clears the override rather than writing a blank, so the pair
+  // falls back to what the card is showing for that cell.
+  const committed = (value ?? current[field] ?? "").trim();
+
+  // A commit that re-writes what the cell is already showing displaces nothing,
+  // and BOTH halves of that matter. `EditableField.commit`
+  // (design-system/primitives/EditableField.tsx) fires from `onBlur` with the
+  // untouched draft — there is no dirty check — so clicking into a date cell and
+  // clicking away commits its own value back. Restoring on such a commit would
+  // write the anchor into both slots: one typed date becomes "2022 – 2022",
+  // which the exporter draws and the parser reads back as a genuine two-sided
+  // range — a tenure nobody entered, and exactly the shape
+  // `normalizeExperienceDates` refuses to produce. Consuming the parking on it
+  // is the opposite failure: one stray blur would disarm the restore and the
+  // next real Start commit would lose the end date just as it did before #814.
+  // The Start cell is where this bites (it is the cell holding the relocated
+  // value, so it is the natural next click), but the End cell blurs the same
+  // way, so the guard is on the commit rather than on the field.
+  if (committed === (current[field] ?? "").trim()) return { parked };
+
+  const restoredEnd =
+    field === "start_date" &&
+    parked !== undefined &&
+    Boolean(committed) &&
+    current.start_date === parked
+      ? parked
+      : undefined;
+
+  return {
+    restoredEnd,
+    parked: relocatedEndAnchor({
+      start_date: field === "start_date" ? committed : current.start_date,
+      end_date:
+        field === "end_date" ? committed : (restoredEnd ?? current.end_date),
+    }),
+  };
+}
+
 export function useEditableParse(): EditableParse {
   const [contactOverrides, setContactOverrides] = useState<ContactOverrides>(
     {},
@@ -754,6 +864,13 @@ export function useEditableParse(): EditableParse {
     undefined,
   );
   const [addedEntries, setAddedEntries] = useState<AddedEntry[]>([]);
+  // The committed added entries, readable synchronously by `setEntryField` so it
+  // can decide the #814 restore OUTSIDE its state updater — see
+  // {@link relocatedEndsRef}. Date cells commit one at a time (change/blur on a
+  // single input), so the render-phase assignment is current by the next commit;
+  // unlike `addedBulletsRef` this is a mirror, not a pending-truth channel.
+  const addedEntriesRef = useRef(addedEntries);
+  addedEntriesRef.current = addedEntries;
   const [addedBullets, setAddedBullets] = useState<AddedBullets>({});
   // Latest bullets, readable synchronously by every writer and by
   // `pruneEmptyAddedEntries` — which is called deferred (a tick after a blur,
@@ -780,6 +897,41 @@ export function useEditableParse(): EditableParse {
   bulletOverridesRef.current = bulletOverrides;
   const removedBulletsRef = useRef(removedBullets);
   removedBulletsRef.current = removedBullets;
+
+  /**
+   * Date values the one-anchor rule MOVED out of an End cell and into a Start
+   * cell, keyed by the entry the move happened on (#814).
+   *
+   * WHY THIS EXISTS. `normalizeExperienceDates` re-anchors a lone end date into
+   * `start_date` because that is the only shape the export/parse pair can
+   * represent (#672). The card then shows the value in the Start cell, so a user
+   * filling the pair End-first types the real start date straight over it and the
+   * end date they typed FIRST is destroyed. Before #672 the two commits
+   * accumulated into a two-sided range, which makes that a regression, not a gap
+   * — so the relocated value is parked here and put back into `end_date` the
+   * moment a real start date arrives.
+   *
+   * WHY IT IS A REF AND NOT PART OF THE OVERRIDE MAP. This is provenance about
+   * the edit SEQUENCE, not a field value: `{start_date: "2022"}` typed into the
+   * Start cell and the same pair relocated out of the End cell are identical
+   * objects, and only the second is owed a restore (the "does not invent an end
+   * date" cases in the repro tests are the ones that fall to the difference). It
+   * is therefore not derivable from `prior` or the resolved entry. Keeping it out
+   * of `ExperienceFieldOverrides` also keeps it out of `EditSnapshot`, which
+   * crosses to `/jobs/` through `jd-fit-handoff.ts` — a session-local editing
+   * affordance has no business widening a persisted payload. The cost is that a
+   * replayed snapshot forgets the parking (`resetAll`/`replay` clear it), which
+   * degrades to the pre-#814 behaviour for that one entry rather than to
+   * anything worse.
+   *
+   * Read and written OUTSIDE the state updaters, never inside: an updater that
+   * both reads and clears this would not be idempotent, and React invokes
+   * updaters twice under StrictMode.
+   *
+   * Keys are `roleAnchorKey(index)` for a parsed role's override map and
+   * `addedAnchorKey(id)` for an added entry, which cannot collide.
+   */
+  const relocatedEndsRef = useRef<Record<string, string>>({});
 
   // The ONE writer of `addedBullets`. The ref — not React state — is the source
   // of pending truth: it is assigned synchronously here, before the setState, so
@@ -817,18 +969,55 @@ export function useEditableParse(): EditableParse {
   );
 
   const setExperienceField = useCallback(
-    (
+    <K extends keyof ExperienceFieldOverrides>(
       index: number,
-      field: keyof ExperienceFieldOverrides,
-      value: string | undefined,
+      field: K,
+      value: ExperienceFieldOverrides[K],
+      resolvedEntry?: ExperienceDateFields,
     ) => {
+      const isDateField = field === "start_date" || field === "end_date";
+
+      // #814, decided BEFORE the updater so the read-then-clear of the parking
+      // memory happens exactly once. `restoredEnd` is the end date this rule
+      // relocated into the Start cell earlier in the session, now displaced by a
+      // real start date and owed its slot back.
+      let restoredEnd: string | undefined;
+      if (resolvedEntry && isDateField) {
+        const key = roleAnchorKey(index);
+        const next = resolveDateCommit(
+          field,
+          // A runtime check on `field` cannot narrow `K`, so the value's type
+          // has to be stated. `isDateField` is what makes it true — the only
+          // non-string member of the union is `is_current`.
+          value as string | undefined,
+          resolvedEntry,
+          relocatedEndsRef.current[key],
+        );
+        restoredEnd = next.restoredEnd;
+        if (next.parked === undefined) delete relocatedEndsRef.current[key];
+        else relocatedEndsRef.current[key] = next.parked;
+      }
+
       setExperienceOverrides((prev) => {
-        const entry = { ...prev[index] };
+        const prior = prev[index] ?? {};
+        const entry = { ...prior };
         if (value === undefined) {
           delete entry[field];
         } else {
           entry[field] = value;
         }
+        if (restoredEnd !== undefined) entry.end_date = restoredEnd;
+
+        // Normalise on COMMIT, not at render: the #672 rule runs where the
+        // override is WRITTEN, so the map and the card can never hold different
+        // pairs. `prior` — the map BEFORE this write — is what keeps the sparse
+        // write-back honest: `resolvedEntry` already carries every earlier edit,
+        // so a key that has one may not be compared against it. See
+        // `applyNormalizedDateOverrides`.
+        if (resolvedEntry && isDateField) {
+          applyNormalizedDateOverrides(entry, resolvedEntry, prior);
+        }
+
         return { ...prev, [index]: entry };
       });
     },
@@ -1188,10 +1377,60 @@ export function useEditableParse(): EditableParse {
     [],
   );
 
+  /**
+   * Commit one header field of an added entry.
+   *
+   * An added entry has no override map behind it, so the one-anchor rule (#672)
+   * runs HERE for the same reason `applyNormalizedDateOverrides` runs at the
+   * override seam: without it, filling only the End cell of a freshly added role
+   * shows an end date the exported file would draw as a start date. It carries
+   * #814's other half too — the relocated value is parked in
+   * {@link relocatedEndsRef} and handed back to `end_date` when a real start date
+   * displaces it, so filling the pair End-first no longer destroys the End value.
+   *
+   * A cleared slot is spelled `""`, not a deleted key — the opposite of
+   * {@link applyNormalizedExperienceDates}, which deletes precisely because
+   * `"end_date" in entry` is load-bearing on the parsed-resume shape.
+   * `AddedEntry`'s fields are plain strings and `pushAddedEntry` re-normalises
+   * downstream, so the two conventions are each right for their own container.
+   */
   const setEntryField = useCallback(
     (id: string, field: AddedEntryField, value: string) => {
+      const isDateField = field === "start_date" || field === "end_date";
+      const current = addedEntriesRef.current.find((e) => e.id === id);
+
+      // #814, the same parking the override map does — see `relocatedEndsRef`.
+      // Decided out here for the same reason: reading and clearing the memory
+      // inside the updater would break under a double-invoked updater.
+      let restoredEnd: string | undefined;
+      if (current?.section === "experience" && isDateField) {
+        const key = addedAnchorKey(id);
+        const next = resolveDateCommit(
+          field,
+          value,
+          current,
+          relocatedEndsRef.current[key],
+        );
+        restoredEnd = next.restoredEnd;
+        if (next.parked === undefined) delete relocatedEndsRef.current[key];
+        else relocatedEndsRef.current[key] = next.parked;
+      }
+
       setAddedEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)),
+        prev.map((e) => {
+          if (e.id !== id) return e;
+          const nextEntry = { ...e, [field]: value };
+          if (restoredEnd !== undefined) nextEntry.end_date = restoredEnd;
+          if (e.section === "experience" && isDateField) {
+            const norm = normalizeExperienceDates({
+              start_date: nextEntry.start_date,
+              end_date: nextEntry.end_date,
+            });
+            nextEntry.start_date = norm.start_date ?? "";
+            nextEntry.end_date = norm.end_date ?? "";
+          }
+          return nextEntry;
+        }),
       );
     },
     [],
@@ -1336,6 +1575,8 @@ export function useEditableParse(): EditableParse {
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
     setSummaryOverride(undefined);
     setAddedEntries([]);
+    // The relocation memory is about entries that no longer exist (#814).
+    relocatedEndsRef.current = {};
     // Through the writer, so the ref is cleared too — otherwise a reset leaves
     // the pending-truth ref holding the pre-reset buckets, and the next
     // `addBullet`/`removeBullet` in that same tick would resurrect them.
@@ -1376,6 +1617,13 @@ export function useEditableParse(): EditableParse {
 
   const replay = useCallback(
     (snap: EditSnapshot) => {
+      // A snapshot restores a whole edit state, so any value parked from the
+      // state being replaced is provenance about commits this one never made
+      // (#814). Dropping it costs the restore for that entry until its next date
+      // commit re-parks; keeping it would offer a value the snapshot's own pair
+      // never contained.
+      relocatedEndsRef.current = {};
+
       (
         Object.entries(snap.contactOverrides) as [
           keyof ContactOverrides,
@@ -1383,11 +1631,25 @@ export function useEditableParse(): EditableParse {
         ][]
       ).forEach(([key, value]) => setContactField(key, value));
 
+      // No `resolvedEntry`, deliberately: a snapshot's date keys were normalised
+      // when they were written, and replaying them one at a time against a
+      // half-applied pair would re-resolve each against the other and can produce
+      // "2022 – 2022". Replay is verbatim; the rule runs at commit time only.
+      // The value type is `string | boolean` since #672 widened
+      // `ExperienceFieldOverrides` with `is_current` — a snapshot is JSON, so the
+      // boolean round-trips, but the cast has to say so.
       Object.entries(snap.experienceOverrides).forEach(([index, fields]) => {
         (
-          Object.entries(fields) as [keyof ExperienceFieldOverrides, string][]
+          Object.entries(fields) as [
+            keyof ExperienceFieldOverrides,
+            string | boolean,
+          ][]
         ).forEach(([field, value]) =>
-          setExperienceField(Number(index), field, value),
+          setExperienceField(
+            Number(index),
+            field,
+            value as ExperienceFieldOverrides[typeof field],
+          ),
         );
       });
 

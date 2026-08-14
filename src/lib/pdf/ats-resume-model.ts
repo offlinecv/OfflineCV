@@ -48,6 +48,7 @@ import {
   buildProjectDates,
 } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
+import { formatExperienceDateRange } from "../edit/experience-dates.ts";
 import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import { buildContactFields, formatLinkDisplay } from "../contact.ts";
@@ -366,12 +367,7 @@ function experienceDateRange(exp: {
   end_date?: string;
   is_current?: boolean;
 }): string {
-  const start = exp.start_date || undefined;
-  const end = exp.is_current ? "Present" : exp.end_date || undefined;
-  if (start && end) return `${start} – ${end}`;
-  if (start) return start;
-  if (end) return end;
-  return "";
+  return formatExperienceDateRange(exp);
 }
 
 function joinHeader(parts: Array<string | undefined>, sep: string): string {

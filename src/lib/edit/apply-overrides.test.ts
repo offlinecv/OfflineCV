@@ -206,6 +206,99 @@ describe("applyOverrides", () => {
     expect(parsed.experience[0].location).toBe("Springfield, IL");
   });
 
+  it("re-anchors a role whose start date the user cleared (#672)", () => {
+    // The reproduction: a correction ("I don't know when I joined") left
+    // `start_date: ""` beside a live `end_date`, which Download-PDF exported as a
+    // bare "2022" and the re-parse read back as a START date — silently, and in a
+    // direction that IMPROVES the score, since the date-completeness check reads
+    // `start_date` alone.
+    const parsed = baseParsed();
+    const { fields: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { start_date: "" } },
+      {},
+      [],
+    );
+    expect(out.experience[0].start_date).toBe("2022");
+    expect("end_date" in out.experience[0]).toBe(false);
+    // Original untouched.
+    expect(parsed.experience[0].start_date).toBe("2020");
+    expect(parsed.experience[0].end_date).toBe("2022");
+  });
+
+  it("drops is_current when the start date that anchored it is cleared (#672)", () => {
+    const parsed = baseParsed();
+    parsed.experience[0] = {
+      ...parsed.experience[0],
+      start_date: "2020",
+      end_date: undefined,
+      is_current: true,
+    };
+    const { fields: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { start_date: "" } },
+      {},
+      [],
+    );
+    // A bare "Present" draws into the header and re-parses to nothing at all, so
+    // the flag cannot survive the round trip either way — it goes here, where the
+    // card shows the change, rather than inside the downloaded file.
+    expect("start_date" in out.experience[0]).toBe(false);
+    expect("is_current" in out.experience[0]).toBe(false);
+  });
+
+  it("drops is_current when the user types an end date onto a current role (#672)", () => {
+    // The opposite direction from the case above, and it fails the opposite way:
+    // `experienceDateRange` and the `AtsEntryFields` builder both let `is_current`
+    // WIN, so a surviving flag draws "2020 – Present" and the end date the user
+    // just typed never reaches the file.
+    const parsed = baseParsed();
+    parsed.experience[0] = {
+      ...parsed.experience[0],
+      start_date: "2020",
+      end_date: undefined,
+      is_current: true,
+    };
+    const { fields: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { end_date: "2022" } },
+      {},
+      [],
+    );
+    expect(out.experience[0].start_date).toBe("2020");
+    expect(out.experience[0].end_date).toBe("2022");
+    expect("is_current" in out.experience[0]).toBe(false);
+  });
+
+  it("leaves the date pair alone when the override touches no date field (#672)", () => {
+    // Normalisation answers a date EDIT. A role the parser produced is not
+    // something the user asked us to change, so re-titling it must not rewrite
+    // its dates.
+    const parsed = baseParsed();
+    parsed.experience[0] = { ...parsed.experience[0], is_current: true };
+    const { fields: out } = applyOverrides(
+      parsed,
+      "raw",
+      makeSections(),
+      {},
+      { 0: { title: "Staff Engineer" } },
+      {},
+      [],
+    );
+    expect(out.experience[0].start_date).toBe("2020");
+    expect(out.experience[0].end_date).toBe("2022");
+    expect(out.experience[0].is_current).toBe(true);
+  });
+
   it("applies an experience team override and clears it on empty string", () => {
     const parsed = baseParsed();
     parsed.experience[0].team = "Payments Platform";

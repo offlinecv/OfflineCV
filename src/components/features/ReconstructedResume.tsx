@@ -348,7 +348,7 @@ function buildEntryGroups(
 
 /** Map a RoleHeader field name to the flat AddedEntry field it edits. */
 const EXPERIENCE_FIELD_MAP: Record<
-  keyof ExperienceFieldOverrides,
+  Exclude<keyof ExperienceFieldOverrides, "is_current">,
   AddedEntryField
 > = {
   title: "title",
@@ -641,11 +641,13 @@ export function ExperienceSection({
                 group={group}
                 experienceIndex={idx}
                 overrides={added ? undefined : experienceOverrides[idx]}
-                onFieldChange={(field, value) =>
-                  added
-                    ? onEntryField(added.id, EXPERIENCE_FIELD_MAP[field], value)
-                    : onExperienceFieldChange(idx, field, value)
-                }
+                onFieldChange={(field, value) => {
+                  if (added) {
+                    onEntryField(added.id, EXPERIENCE_FIELD_MAP[field], value);
+                  } else {
+                    onExperienceFieldChange(idx, field, value);
+                  }
+                }}
                 onBulletChange={onBulletChange}
                 onRemoveBullet={onRemoveBullet}
                 onAddBullet={(text) => onAddBullet(roleEntryKey, text)}
@@ -1356,8 +1358,14 @@ export function ReconstructedResume({
         critique={critique}
         hasBullets={bullets.length > 0}
         experienceOverrides={experienceOverrides}
+        // The 4th argument is the RESOLVED entry, not the pristine parse:
+        // `parsed` is `display.parsed`, i.e. `applyOverrides` output, so it
+        // already carries every earlier edit — which is exactly what the #672
+        // rule has to resolve `??` against. `setExperienceField` pairs it with
+        // the pre-write override map so the sparse write-back does not compare a
+        // previously-overridden key against a base that contains it.
         onExperienceFieldChange={(index, field, value) =>
-          setExperienceField(index, field, value)
+          setExperienceField(index, field, value, parsed.experience[index])
         }
         onBulletChange={(index, value, original) =>
           setBulletField(index, value, original)
