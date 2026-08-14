@@ -18,10 +18,6 @@ branch name (`feat/...-issue-5`, `gh-5`) or a `Closes #N` / `Refs #N` trailer in
 an existing commit. If still unknown, open the PR without an issue link and note
 that in the output — don't block on it.
 
-A calling skill may also hand over **provenance records** (`{stage, model,
-effort}`, e.g. from `/implement-batch`). If present, render them verbatim into
-the `## Provenance` block (Step 5.5) rather than re-deriving them.
-
 ## Why this skill exists
 
 `main` is protected: every change merges through a PR that needs **1 approving
@@ -72,14 +68,9 @@ Use a `COMMIT_EDITMSG` file if one is already prepared (`git commit -F COMMIT_ED
 If the tree is already clean and there are commits ahead of `origin/$BASE`, skip
 to push.
 
-**No AI trailers in the commit message.** No `Co-Authored-By: Claude …`, no
-`Claude-Session:` trailer, no `https://claude.ai/code/session_…` URL, no
-`🤖 Generated with …` badge — the Bash tool's default template suggests them;
-ignore it. `Co-Authored-By` is semantic authorship attribution under git/GitHub
-convention: the model is the facilitator, the human who ran it is the author. A
-session URL is an account-scoped identifier with zero value to any reader of a
-public diff. Model provenance *is* useful — it goes in the **PR body only**
-(Step 5.5), never in git history.
+Write the message and nothing else — AI attribution is off by config
+(`attribution` in `.claude/settings.json`), so there is no trailer to strip and
+none to add back.
 
 ### Step 3: Confirm there's something to propose
 
@@ -154,8 +145,8 @@ Those settings are `squash_merge_commit_title: COMMIT_OR_PR_TITLE` and
 `squash_merge_commit_message: COMMIT_MESSAGES`. The lever that gives is:
 
 > **A PR with exactly one commit merges with that commit's subject and body
-> verbatim** — PR title/body ignored, no `* `-bulleted commit soup, no
-> `## Provenance` block leaking into `git log`.
+> verbatim** — PR title/body ignored, no `* `-bulleted commit soup, nothing from
+> the PR body leaking into `git log`.
 
 So the branch must arrive at the queue holding **one commit whose message is the
 message you want in `main`**. Doing it here — before the PR exists — costs
@@ -230,11 +221,6 @@ Closes #<N>   <!-- omit if not fully resolving an issue; use "Refs #<N>" if part
 - [ ] `npm run typecheck` clean
 - [ ] `npm run test` green
 - [ ] Manually verified in `npm run dev` / `npm run preview`
-
-## Provenance
-
-Code implementation via: <Model> (<effort>)
-Verification: `npm run verify` — green in CI
 BODY
 )"
 ```
@@ -264,56 +250,15 @@ It is explicitly **not** a scope bound. `pr-review` treats it as the author's
 hypothesis — a lead to check and then audit for accuracy — and reviews the whole
 diff regardless. Do not use it to steer attention away from anything.
 
-`gh pr create --fill` derives title/body from the commits — fine for small PRs,
-but it won't produce a `## Provenance` block — append one (Step 5.5) if you use it.
+`gh pr create --fill` derives title/body from the commits — fine for small PRs.
 
-### Step 5.5: The `## Provenance` block
-
-Declare **which model did which stage, at what effort**. This is method
-disclosure, not authorship — it makes cross-model review legible and lets a
-reader calibrate the diff. Rationale: `docs/CONTRIBUTING-PROCESS.md` → **AI
-provenance** — but the rules you need are all below.
-
-A caller may hand this skill a set of provenance records (`/implement-batch`
-does — one per issue, plus review/orchestration). **If records were passed,
-render them verbatim; do not re-derive them.** For a multi-issue batch, use the
-table form, one `Implementation — #<N>` row per issue:
-
-```markdown
-## Provenance
-
-| Stage | Model | Effort |
-|---|---|---|
-| Implementation — #415 | Claude Sonnet 4.6 | medium |
-| Implementation — #417 | Claude Opus 4.8 | high |
-| Adversarial review | Gemini 3.1 Pro | high |
-| Review fixes | Claude Opus 4.8 | medium |
-| Orchestration + PR | Claude Opus 4.8 | medium |
-| Verification | `npm run verify` — green in CI | — |
-```
-
-For a single-issue PR you implemented yourself, the prose form in the Step 5
-template is enough — name **your own** model and effort, which you know
-first-hand.
-
-**Never guess a model name.** You know your own; you do **not** know what a
-subagent's `model: opus` alias resolved to — only that subagent does, and the
-only thing it reports back is the one-line name. If a stage's model can't be
-resolved (an externally-run reviewer, a hand-edit), state what's true
-(`Gemini 3.1 Pro (high) — run manually`) or omit the row. A missing row is
-honest; a fabricated one is worse than none.
-
-If the body already contains a `## Provenance` marker (a re-run, a resumed
-batch), **update it in place (if present) or append a new block (if missing) — never append a second block**:
-
-```bash
-body="$(gh pr view "$PR_NUM" --repo "$REPO" --json body -q .body)"
-# You must write text-replacement logic (e.g. awk/python) to define updated_body.
-# If it contains '## Provenance', update the block in place.
-# If it does NOT, append the new block to the body.
-updated_body="..."
-gh pr edit "$PR_NUM" --repo "$REPO" --body-file - <<<"$updated_body"
-```
+The body above is the whole body. There is no provenance step: a `## Provenance`
+block used to be required here and is **retired** — it cost a round-trip per
+subagent to collect self-reported model names plus a read-modify-write of the PR
+body, and wasn't reliably true anyway (a spawn requests a model *alias* and never
+learns what it resolved to). `docs/CONTRIBUTING-PROCESS.md` → **AI attribution**
+has the full account. `/pr-review`'s one-line `Reviewed by:` sign-off is the
+surviving, first-hand form.
 
 ### Step 6: Report
 
@@ -327,18 +272,12 @@ merge their own PR via admin bypass.)
 - **Never commit or push to `main`** — always a feature branch + PR. (The local
   hook enforces the no-commit-on-`main` half; server-side protection enforces
   the rest.)
-- **No AI trailers in git; a `## Provenance` block in the PR body instead.** No
-  `Co-Authored-By: Claude …` (authorship — the human is the author), no
-  `Claude-Session:` URL or `🤖 Generated with …` badge anywhere (this repo is
-  public; a session URL is an account-scoped identifier with no reader value).
-  Declare the models in the PR body instead (Step 5.5).
+- **Nothing is appended to a commit message or a PR body for attribution.** The
+  harness's trailers are off by config; the `## Provenance` block is retired.
 - **Review pointers go in the body, never in a chat ping.** `## Review focus` is
   optional and phrased as questions; omit the heading when the risk is obvious.
   It is a lead for the reviewer, never a scope bound — `pr-review` audits it for
   accuracy and reviews the whole diff either way.
-- **Every provenance row is self-reported or first-hand.** Name your own model
-  from your system prompt; take a subagent's from what it reported. Never infer a
-  version string from a `model:` alias, and never invent a row — omit it instead.
 - **One commit per PR, message hand-written (Step 3.6).** `main`'s merge queue
   can't be handed a squash message — it derives one, and with
   `COMMIT_OR_PR_TITLE` a single-commit PR merges with that commit's message

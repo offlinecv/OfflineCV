@@ -7,7 +7,7 @@ parser audit and job-search workbench. Code lives under `src/`, license is
 see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout; and see
 [`docs/CONTRIBUTING-PROCESS.md`](./docs/CONTRIBUTING-PROCESS.md) for the shipping
 process this file summarizes — the **test-fixture PII policy** (mandatory before
-you add any PDF), AI provenance, squash messages, and deploy.
+you add any PDF), AI attribution, squash messages, and deploy.
 
 ## Setup
 

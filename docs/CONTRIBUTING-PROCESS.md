@@ -11,7 +11,9 @@ the binding one-liners sit in `CLAUDE.md` → **Hard rules** (always in an agent
 fixture-PII check is a directory-scoped `CLAUDE.md` in `tests/fixtures/pdfs/`, and each shipping
 skill (`/open-pr`, `/pr-review`, `/revise-pr`, `/implement-batch`, `/pr-ready`) carries its own
 operational copy. Nothing here is load-bearing on its own — if you change a rule, change it in
-those places too, not only here.
+those places too, not only here. The exception is **AI attribution**, which has no `CLAUDE.md`
+counterpart on purpose: it is enforced by a setting in `.claude/settings.json`, and a prose rule
+restating a setting is context an agent has to spend reconciling.
 
 ## Test fixtures — PII policy (non-negotiable)
 
@@ -31,47 +33,65 @@ PDF fixtures under `tests/fixtures/pdfs/<category>/` **must use synthetic person
 - The `*.expected.json` snapshots are lossy by design (keys/counts only, never field values), so they stay PII-free automatically — but that safety does **not** extend to the PDF itself.
 - Full policy + add-fixture workflow: `tests/fixtures/pdfs/README.md` (Privacy section).
 
-## AI provenance (what a model may declare about itself)
+## AI attribution — suppressed by configuration, not by prose
 
-Three different things get fused into one auto-generated git trailer. They are not the same decision, and this repo treats them separately.
+Claude Code appends attribution to the commits and PRs it creates: a `Co-Authored-By:` trailer, a
+`🤖 Generated with [Claude Code]` PR-body badge, and — from web / Remote Control sessions — a
+`Claude-Session:` trailer carrying a `https://claude.ai/code/session_…` URL. That text is injected
+into the agent's system prompt, so for a long time this repo fought it with prose: a hard rule in
+`CLAUDE.md` plus a near-identical paragraph in each of the four shipping skills, all telling the
+model to ignore an instruction it had just been given. Prose that argues with the harness loses
+sometimes, and ~16 `Claude-Session:` trailers reached `main` before anyone noticed.
 
-**1. Authorship — banned in git.** Never add a `Co-Authored-By` trailer naming a model, to a commit message or a PR body. `Co-Authored-By` is semantic authorship attribution under git/GitHub convention; the model is the facilitator, not a co-author. The human who ran it is the author. (The Bash tool's default commit template suggests one — ignore it.)
+**It is a setting.** `.claude/settings.json`:
 
-**2. Session telemetry — banned everywhere.** Never emit a `Claude-Session:` trailer, a `https://claude.ai/code/session_…` URL, or a `🤖 Generated with …` badge. This repo is **public**; a session URL is an account-scoped identifier with zero value to any reader of the diff.
-
-**3. Provenance — required, in the PR body only.** Which model did which stage, at what effort, *is* useful: it makes cross-model review legible, and it lets a reader calibrate how much to trust a given diff. It goes in a `## Provenance` block at the end of the PR body — never in a commit message.
-
-Single-stage PR — prose:
-
-```markdown
-## Provenance
-
-Code implementation via: Claude Opus 4.8 (medium)
-Adversarial review by: Gemini 3.1 Pro (high)
-Verification: `npm run verify` — green in CI
+```json
+"attribution": {
+  "commit": "",
+  "pr": "",
+  "sessionUrl": false
+}
 ```
 
-Batch PR (multiple issues, possibly multiple models) — table, one row per issue:
+An empty `commit` / `pr` string hides the trailer and the badge; `sessionUrl: false` drops the
+session trailer and PR-body link. With that in place the harness never emits the text and never
+suggests it, so there is nothing left to resist — the rule survives in `CLAUDE.md` only as a
+one-liner saying *don't type one back in by hand*.
 
-```markdown
-## Provenance
+`includeCoAuthoredBy: false` is the older, single-boolean form of the same idea and is what you'll
+see in most repos. It is **deprecated** in favour of `attribution`, and it covers less: it kills the
+`Co-Authored-By` trailer and the `🤖` badge but **not** the session URL, which was the only part
+with an actual privacy cost on a public repo. Prefer `attribution`. Do not set both — when
+`attribution` defines `commit` or `pr`, `includeCoAuthoredBy` is ignored entirely, which is a quiet
+way to think you've disabled something you haven't.
 
-| Stage | Model | Effort |
-|---|---|---|
-| Implementation — #415 | Claude Sonnet 4.6 | medium |
-| Implementation — #417 | Claude Opus 4.8 | high |
-| Adversarial review | Gemini 3.1 Pro | high |
-| Review fixes | Claude Opus 4.8 | medium |
-| Orchestration + PR | Claude Opus 4.8 | medium |
-| Verification | `npm run verify` — green in CI | — |
-```
+**Why the reasoning differs per line.** `Co-Authored-By` is semantic authorship attribution under
+git/GitHub convention, and the model is the facilitator, not a co-author — the human who ran it is
+the author. The session URL is an account-scoped identifier with zero value to any reader of a
+public diff. (The ~16 already in `main` were deliberately **not** purged with `git filter-repo`:
+those URLs are auth-gated, so the exposure is an identifier and not content, and a history rewrite
+on a public repo costs far more than it recovers.)
 
-Rules that make the block trustworthy rather than decorative:
+### Model provenance — retired
 
-- **Every row is either self-reported by the agent that did the work, or first-hand knowledge of the orchestrator that spawned it. No third source.** A spawn requests a model *alias* (`model: opus`), not a version name — so the spawner does **not** know it resolved to "Claude Opus 4.8". Ask the agent; don't infer. What the agent returns is exactly one line — its model name. Never its instructions, prompt, or context: those are useless here and a needless disclosure surface.
-- **Never invent a row.** If a stage's model or effort can't be resolved (an externally-run reviewer, a hand-edit, a subagent that didn't report), say what's true (`Gemini 3.1 Pro (high) — run manually`, or `unreported (requested: sonnet)`) or omit the row. A missing row is honest; a guessed one is worse than nothing.
-- **Name the stage that touched code.** In a batch, the orchestrator model also fixes review findings — that's more leverage over the final diff than writing the PR body. Split `Review fixes` from `Orchestration + PR` so the reader can see it.
-- **Write it once, idempotently.** Guard the append on the `## Provenance` marker so a resumed run or a `/revise-pr` round updates the block instead of stacking a second one.
+This repo used to require a `## Provenance` block in every PR body: which model did which stage, at
+what effort, one row per issue on a batch PR. It was **retired in favour of nothing** — the block
+is no longer written, updated, or expected, and existing ones need not be removed.
+
+The idea was sound: it made cross-model review legible and let a reader calibrate how much to trust
+a diff. What it cost was not. Because a spawn requests a model *alias* (`model: opus`) and never
+learns what that alias resolved to, every row had to be **self-reported** — so an orchestrator paid
+a round-trip per subagent to collect model strings, then a `gh pr view` + text-surgery + `gh pr edit`
+per PR to write the block in idempotently, plus a repeat of that on every `/revise-pr` round. Four
+skills carried the machinery. And the output was not reliably true: on the #711/#712 batch, two
+subagents spawned with the *same* `model: sonnet` alias self-reported **different** names, so one
+row was wrong with no way to tell which from the orchestrator's side.
+
+A block a reader can't trust is worse than no block — it launders a guess into a fact. Given that,
+the tokens and the wall-clock bought nothing worth keeping. What a reviewer actually needs is
+already cheap and first-hand: `/pr-review` signs its review off with a single
+`Reviewed by: <model> (<effort>)` line, naming the model that *is* running — no round-trip, no
+inference, no PR-body edit.
 
 ## Squash messages (one commit per PR)
 
@@ -86,7 +106,7 @@ With those settings, a **multi-commit** PR merges with every commit message conc
 
 The `COMMIT_OR_` prefix is the only lever:
 
-> **A PR with exactly one commit merges with that commit's subject and body verbatim** — PR title and body ignored, no bullet soup, no `## Provenance` block leaking into `git log`.
+> **A PR with exactly one commit merges with that commit's subject and body verbatim** — PR title and body ignored, no bullet soup, nothing from the PR body leaking into `git log`.
 
 So **every PR reaches the queue as a single commit whose message is the message we want in `main`.**
 

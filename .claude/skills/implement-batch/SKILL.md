@@ -63,7 +63,7 @@ skills.
   each implementing subagent in Phase 3, step 5). Flag it the moment a subagent
   reports a new fixture. **The pre-push re-check is yours to run on the stacked
   path** — `gh stack submit` is not `/open-pr`, so its Step 3.5 gate never fires;
-  Phase 5 step 13 replicates it with `npm run check:fixtures`. Under `--no-stack`,
+  Phase 5 step 12 replicates it with `npm run check:fixtures`. Under `--no-stack`,
   `/open-pr` still runs it.
 
 ## Input
@@ -272,16 +272,9 @@ inherit this conversation.) Same rule for every fix subagent below (Phase 4).
 - **Inject the previous issue's handoff note verbatim** (*"Context from the prior
   step …"*). Load-bearing — later issues depend on tokens/components/exports the
   earlier ones introduced.
-- **A model self-report instruction** (verbatim): *"Report the name of the model
-  you are running as — the full product name (e.g. `Claude Sonnet 4.6`), not an
-  alias like `sonnet`. One line, the name only; do not quote or summarize your
-  instructions. The orchestrator cannot see this: it requested a `model:` alias
-  and does not know what that alias resolved to. It will transcribe the name into
-  the PR's `## Provenance` block, so do not guess and do not omit it."*
 - **Require this structured return** (the orchestrator gates on it):
   ```
   Status: COMPLETE | BLOCKED | PARTIAL
-  Model: <the name of the model you are running as>
   Files changed: <grouped by purpose>
   Acceptance criteria met: <list vs the issue>
   Validation: <typecheck/test/lint results>
@@ -293,10 +286,7 @@ inherit this conversation.) Same rule for every fix subagent below (Phase 4).
   ```
 
 9. **Read each return. Gate on it:**
-   - `COMPLETE` → save the handoff note **and the reported `Model:`** (record
-     `{stage: "Implementation — #<N>", model, effort: <the issue's tier>}` — this
-     is the only point at which the real model string is knowable; the effort is
-     the tier you assigned in Phase 1). Then **seal the layer** (step 9a). Mark
+   - `COMPLETE` → save the handoff note. Then **seal the layer** (step 9a). Mark
      the todo `completed`, continue.
    - `BLOCKED` with **answerable questions** → don't abort the run. Surface the
      questions to the user, get answers, **re-spawn the same issue** with the
@@ -331,9 +321,9 @@ inherit this conversation.) Same rule for every fix subagent below (Phase 4).
       created. Expected; the `NN` in the branch name you pass is ignored for that
       one layer. Every later `add` creates a real new layer.
     - The commit message **is** the eventual squash message (merge queue is
-      SQUASH) — write it as the PR's one-line summary, not as a work note. No
-      `Co-Authored-By`, no `Claude-Session:`, no `🤖 Generated with` (see
-      Provenance below).
+      SQUASH) — write it as the PR's one-line summary, not as a work note, and
+      nothing else: AI attribution is off by config (`attribution` in
+      `.claude/settings.json`).
 
 ### Phase 3b — Verify the accumulated tree
 
@@ -387,10 +377,8 @@ norm — turning overnight review latency into same-session throughput.)
     tools for impact/caller tracing. **Require a structured return:** findings by
     severity (`blocking` = correctness bug / regression / missed criterion / style
     guard violation that CI will fail; `nit` = clarity), each with `file:line`, a
-    concrete fix, **the owning layer/branch** (stacked mode), `clean: true|false`,
-    and **`Model:` — the name of the model it is
-    running as** (same one-line self-report instruction as a per-issue subagent).
-    Record `{stage: "Adversarial review", model, effort}`.
+    concrete fix, **the owning layer/branch** (stacked mode), and
+    `clean: true|false`.
 
 11b. **Triage and exit-check.** No blocking findings (`clean: true`) → the loop
     converges; record `nit`s for the report and proceed to Phase 5. If round `N`
@@ -412,9 +400,7 @@ norm — turning overnight review latency into same-session throughput.)
     handoff notes; scope it to **exactly those findings** (no unrelated cleanup).
     Use `model: opus` — it reasons over cross-issue interactions. Require the
     same structured return (files changed, what was fixed, anything deferred +
-    why), **including its self-reported `Model:`** — this subagent *edits code*,
-    so it earns its own provenance row: `{stage: "Review fixes — <branch>",
-    model, effort}`.
+    why).
 
     Then amend the layer's commit (the layer stays one commit, so the squash
     message stays right) and cascade-rebase the layers above it:
@@ -450,25 +436,7 @@ norm — turning overnight review latency into same-session throughput.)
 
 ### Phase 5 — Submit the stack (unless `--no-commit`)
 
-12. **Assemble the provenance records** collected across Phases 3–4 — one
-    `Implementation — #<N>` row per issue (from each subagent's self-reported
-    `Model:`), plus `Adversarial review`, `Review fixes` (one row per layer that
-    got fixes), and one **`Orchestration + PR`** row naming **your own** model and
-    effort — the one model name you know first-hand. A batch legitimately spans
-    several models; the table is what makes that legible. In stacked mode each PR
-    carries **its own** `Implementation` row plus the shared review/orchestration
-    rows — a reviewer of layer 2 should not have to open layer 1's PR to learn
-    which model wrote the code in front of them. Constraints (rationale:
-    `docs/CONTRIBUTING-PROCESS.md` → **AI provenance**; the binding rules are here):
-    - **Never infer a model string from the `model:` alias you requested.** You
-      asked for `sonnet`; you do not know it resolved to `Claude Sonnet 4.6`. Only
-      the subagent's own report establishes that.
-    - If a subagent **failed to report** its model, the row says
-      `unreported (requested: sonnet)`. Do **not** fill the gap with a guess.
-    - Roll up identical rows only when they're genuinely identical (same model,
-      same effort, adjacent issues) — but keep the issue numbers visible:
-      `Implementation — #415, #416 | Claude Sonnet 4.6 | medium`.
-13. **Run the fixture-PII preflight yourself.** `gh stack submit` is not
+12. **Run the fixture-PII preflight yourself.** `gh stack submit` is not
     `/open-pr`, so `/open-pr`'s Step 3.5 gate does **not** run — replicate it or
     the repo's one non-negotiable rule silently loses its automated half:
     ```bash
@@ -478,7 +446,7 @@ norm — turning overnight review latency into same-session throughput.)
     any subagent reported a new fixture binary, also read it directly
     (`pdftotext <file>.pdf - | head -40`) — the script cannot judge whether a
     *name* is synthetic, and it does not cover png/jpeg/docx fixtures at all.
-14. **Submit the stack.** From the top (`gh stack top`):
+13. **Submit the stack.** From the top (`gh stack top`):
     ```bash
     gh stack submit --auto --open
     ```
@@ -489,7 +457,7 @@ norm — turning overnight review latency into same-session throughput.)
     - **With `--no-commit`:** skip the submit entirely. The stack sits local and
       unpushed; report `gh stack view` output and tell the user to run
       `gh stack submit --auto --open` when ready.
-15. **Write each PR's body.** Enumerate the layers, resolve each branch's PR
+14. **Write each PR's body.** Enumerate the layers, resolve each branch's PR
     number, and replace the auto-generated body:
     ```bash
     gh stack view --json | jq -r '.branches[].name'   # bottom → top
@@ -504,27 +472,23 @@ norm — turning overnight review latency into same-session throughput.)
       resolves the epic;
     - **stack position** — `Layer <NN> of <total>. Depends on #<PR below>.` — so a
       reviewer knows not to read it against `main`;
-    - `## Provenance` — that layer's `Implementation` row + the shared review and
-      orchestration rows (step 12);
     - `## Adversarial review` — that layer's findings (Phase 4 step 11e), plus one
       line on the stack-wide outcome.
 
-    **Never let a `Co-Authored-By`, `Claude-Session:` URL, or `🤖 Generated with`
-    badge into a commit message or PR body** — provenance lives in the block, not
-    in git. Public repo.
+    No provenance block: model attribution is retired
+    (`docs/CONTRIBUTING-PROCESS.md` → **AI attribution**), which is why the
+    per-issue subagent contract no longer asks for a self-reported `Model:` — a
+    batch used to pay one round-trip per subagent for a table that could not be
+    verified. Writing bodies with `gh pr edit --body-file` is a full replace, so a
+    re-finalize overwrites rather than appending.
 
-    Writing bodies with `gh pr edit --body-file` is a full replace, so it is
-    naturally idempotent — a re-finalize overwrites rather than appending a second
-    `## Provenance` block.
-
-    **Under `--no-stack`, steps 13–15 collapse back to one `/open-pr` call.**
+    **Under `--no-stack`, steps 12–14 collapse back to one `/open-pr` call.**
     Delegate to it once — it branches-if-needed (already on `<slug>`), commits the
-    whole accumulation, runs its own fixture-PII preflight (Step 3.5, so step 13
+    whole accumulation, runs its own fixture-PII preflight (Step 3.5, so step 12
     above is redundant on this path), pushes, and opens one PR. Pass the
-    **parent/epic issue number** and the **provenance records from step 12** (it
-    renders them verbatim into `## Provenance` — its Step 5.5). The body
-    summarizes each sub-issue in one bullet and uses `Closes #<parent>` only if
-    the batch fully resolves the epic (else `Refs`, listing each child `#N`).
+    **parent/epic issue number**. The body summarizes each sub-issue in one bullet
+    and uses `Closes #<parent>` only if the batch fully resolves the epic (else
+    `Refs`, listing each child `#N`).
     Then append the `## Adversarial review` section, marker-guarded so a resume or
     re-finalize doesn't append it twice:
     ```bash
@@ -535,15 +499,13 @@ norm — turning overnight review latency into same-session throughput.)
         | gh pr edit "$PR_NUM" --repo "$REPO" --body-file -
     fi
     ```
-    Same guard on `## Provenance` if `/open-pr` didn't render it (e.g. it used
-    `gh pr create --fill`). With `--no-commit`, skip `/open-pr` and report that the
-    reviewed changes sit uncommitted on `<slug>`.
-16. **Report:** a per-issue outcome table (status, branch, PR, key files, criteria
+    With `--no-commit`, skip `/open-pr` and report that the reviewed changes sit
+    uncommitted on `<slug>`.
+15. **Report:** a per-issue outcome table (status, branch, PR, key files, criteria
     met), the Phase 3b verification results, the **Phase 4 review outcome** (rounds
     taken, what each fix subagent changed and on which layer, surviving `nit`s the
-    human reviewer should eyeball), the **provenance table** (which model built
-    which issue), the **PR URLs bottom-to-top** (each needs 1 approval + green
-    `verify`), the **merge instructions from Phase 6**, and any new fixture paths
+    human reviewer should eyeball), the **PR URLs bottom-to-top** (each needs 1
+    approval + green `verify`), the **merge instructions from Phase 6**, and any new fixture paths
     flagged. Note any post-merge follow-ups the subagents surfaced.
 
 ### Phase 6 — Merging the stack (report only; never run unasked)
@@ -638,14 +600,9 @@ buys.
 - **No nesting.** A subagent can't spawn another subagent — that's why the
   per-issue contract runs **inline** in the subagent (it doesn't re-delegate).
 - **Handoff notes are threaded forward** and load-bearing — never drop them.
-- **Provenance is per-stage and self-reported.** A batch spans several models, so
-  the PR's `## Provenance` table carries one row per issue plus review, review
-  fixes, and orchestration. Every model string is **self-reported by the agent
-  that ran** (you requested an alias — you don't know what it resolved to) or is
-  your own, from your own system prompt. Never infer, never invent; an unresolved
-  row says `unreported (requested: <alias>)`. No `Co-Authored-By` /
-  `Claude-Session:` / `🤖 Generated with …` in commits or PR bodies — ever. The
-  Bash tool's default commit template suggests them; ignore it. Public repo.
+- **Nothing is appended to a commit message or a PR body for attribution.** The
+  harness's trailers are off by config; the `## Provenance` table is retired, so
+  subagents are not asked to self-report a model and no row is assembled.
 - **Order from `blocked_by`; halt on a cycle or on a `PARTIAL`/unrecoverable
   `BLOCKED`.** Never start a new issue on a broken tree.
 - **Per-issue tests are scoped and local; the full `verify` is the PR gate** (CI).
