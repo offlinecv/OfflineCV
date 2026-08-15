@@ -260,6 +260,53 @@ export default defineConfig({
       "scripts/**/*.test.mjs",
     ],
     globals: true,
+    // Raised off vitest's 5000 ms default (#762), because 5s is below what these
+    // tests HONESTLY COST — not because something is hanging.
+    //
+    // Measured on the 24 heaviest files: 453s of test CPU, 78s wall. One
+    // `extractFromPdfBytes` over a fixture is 212ms and one `runCascade` is
+    // 257ms (so ~82% of a parse is pdfjs), and a render is ~500ms. A round-trip
+    // `it` in `corpus-roundtrip` / `corpus-edit-roundtrip` does parse → render →
+    // re-parse on a REAL fixture, several times over, which lands at 6–8s of
+    // genuine work before any load. Under 5s, three of them failed at 7282ms and
+    // 6661ms; at 20s all 24 files pass. Nothing was rescued from a hang — the
+    // ceiling was simply under the floor.
+    //
+    // And the floor moves. These timings were taken on a developer laptop that
+    // was also running a video call and several other node processes; the same
+    // probe came back 43s and 126s on different attempts, and a single warm
+    // extraction loop varies ~19% run to run. A local gate has to survive the
+    // machine it actually runs on, which is never idle — so the ceiling is set
+    // well above the worst observed run, not just above the median one.
+    //
+    // Do not "fix" this by tuning the worker count or the pool kind. Both were
+    // measured and are WORSE: `--maxWorkers=4` takes 155s against 78s (identical
+    // test CPU — the default fork pool is already at ~5.8x parallelism, so it is
+    // not oversubscribed), and `--pool=threads` takes 347s against 99s on the
+    // rest of the suite while failing 8 files.
+    //
+    // `poolOptions.forks.isolate=false` is much faster and is still not used.
+    // The full suite finishes in ~25s under it against ~95s isolated. An earlier
+    // note in this file recorded it as "never finished inside 600s"; that reading
+    // was taken while nine orphaned vitest workers pinned the machine at load
+    // average 110, and it was wrong — as was the 78s/98s pair that replaced it.
+    //
+    // The reason it stays off is not speed. vitest resets the module-mock
+    // registry and the module cache once per file, and BOTH resets are gated on
+    // `isolate` (`runBaseTests`: `if (isolate) { executor.mocker.reset();
+    // resetModules(...) }`). So `vi.mock` is file-scoped *because of* that reset,
+    // not on its own — turning the flag off does not expose leaked state, it
+    // deletes the mechanism that makes file-scoped module mocks work. The
+    // failures it produces are all in the 21 of 346 files that call `vi.mock`,
+    // are all "the mock did not apply", and vary run to run with fork
+    // scheduling. See #830 (closed, not planned) for the full trace.
+    //
+    // The per-fixture half of the cost is handled rather than tracked: Tier 0
+    // extraction is now served from a disk cache shared across forks (#829, see
+    // the `alias` block below), which is worth ~40% of the wall on the six
+    // corpus suites and ~4% on a full run.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     // Install the in-memory localStorage shim before every test, workload-wide,
     // so no suite has to remember to import it (#398). See src/test-setup.ts.
     setupFiles: ["src/test-setup.ts"],
@@ -288,6 +335,7 @@ export default defineConfig({
         "src/**/*.{ts,tsx}",
         "scripts/check-fixture-pii.mjs",
         "scripts/check-known-failures.mjs",
+        "scripts/select-tests.mjs",
         "scripts/seo-artifacts.ts",
       ],
       exclude: [
@@ -302,10 +350,28 @@ export default defineConfig({
         "src/**/main.tsx",
       ],
     },
-    // Force pdfjs-dist to its legacy build during tests so the Node 20+
-    // env doesn't trip on `Promise.withResolvers()` (Node 22+) in the
-    // browser entry. The production bundle still ships the browser build.
+    // Test-only module redirects.
     alias: {
+      // Redirect the ONE specifier `cascade.ts` dynamic-imports for Tier 0 to a
+      // caching stand-in (#829). Six suites re-parse the same 58 fixtures in
+      // separate forks, and extraction — ~82% of a parse — is a pure function
+      // of the bytes, so it is shareable through a disk cache. Doing it at
+      // resolve time keeps the wrapper out of the production bundle entirely
+      // and leaves all six suites calling `runCascade(bytes)` unchanged.
+      //
+      // Vite matches a string `find` as a prefix of the raw specifier, so this
+      // hits `cascade.ts`'s `"./pdf-extract.ts"` and NOT the stand-in's own
+      // `"../pdf-extract.ts"` — that difference is what stops the redirect
+      // looping back on itself. Keep the two specifiers distinct.
+      "./pdf-extract.ts": fileURLToPath(
+        new URL(
+          "./src/lib/heuristics/__test-utils__/extract-cache.ts",
+          import.meta.url,
+        ),
+      ),
+      // Force pdfjs-dist to its legacy build during tests so the Node 20+
+      // env doesn't trip on `Promise.withResolvers()` (Node 22+) in the
+      // browser entry. The production bundle still ships the browser build.
       "pdfjs-dist": "pdfjs-dist/legacy/build/pdf.mjs",
       "@design-system": DESIGN_SYSTEM_DEFAULT,
     },

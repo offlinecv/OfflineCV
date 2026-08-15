@@ -18,6 +18,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:changed": "node scripts/select-tests.mjs",
     "bake-fixtures": "UPDATE_FIXTURES=1 vitest run src/lib/heuristics/corpus.test.ts",
     "fidelity": "vite-node scripts/fidelity.ts --",
     "fixture-derive": "vite-node scripts/fixture-derive.ts --",
@@ -31,7 +32,8 @@
     "check:baselines": "node scripts/check-known-failures.mjs",
     "check:core": "node scripts/check-core-package.mjs",
     "test:coverage": "vitest run --coverage",
-    "verify": "tsc -b --noEmit && eslint . && npm run check:fixtures && npm run check:baselines && npm run check:core && vitest run --coverage && vite build && (fallow audit --base origin/main --coverage coverage/coverage-final.json || echo 'fallow audit exited non-zero (report-only, ignored)')"
+    "verify:quick": "tsc -b --noEmit && eslint . && npm run test:changed",
+    "verify": "tsc -b --noEmit && eslint . && npm run check:fixtures && npm run check:baselines && npm run check:core && npm run test:changed && vite build && (fallow audit --base origin/main || echo 'fallow audit exited non-zero (report-only, ignored)')"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
