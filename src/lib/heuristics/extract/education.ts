@@ -533,7 +533,12 @@ function parseDegreeAndField(line: string): {
   }
   const fieldRaw = line
     .slice(fieldStart)
-    // Drop a leading "in "/"of " connective or a "-"/"—"/":"/","/"·"/"•" separator.
+    // Drop a leading "in "/"of " connective or a "-"/"–"/"—"/","/":"/"·"/"•"
+    // separator. The middot/bullet live here, not only in `cleanField`, because
+    // this strip runs FIRST — `cleanField`'s edge strip accepted them already but
+    // runs after the connective strips, too late to rescue a "· in <field>"
+    // header (#839). The two classes still differ (`cleanField` also takes ";");
+    // unifying the separator vocabulary repo-wide is #653.
     .replace(/^\s*(?:in|of)\s+/i, "")
     .replace(/^\s*[-–—,:·•]\s*/, "")
     .replace(/^\s*(?:in|of)\s+/i, "");
