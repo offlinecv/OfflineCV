@@ -499,8 +499,14 @@ function importSpecifiers(source) {
  * WHICH export is missing or WHICH type stopped resolving — is discarded.
  */
 function run(file, args, cwd) {
+  const needsShell = process.platform === "win32" && (file === "npm" || file.includes(".bin"));
   try {
-    return execFileSync(file, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return execFileSync(file, args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: needsShell,
+    });
   } catch (err) {
     const detail = [err?.stdout, err?.stderr].map((s) => String(s ?? "").trim()).filter(Boolean).join("\n");
     throw new Error(`\`${file} ${args.join(" ")}\` failed:\n${detail || String(err?.message ?? err)}`);

@@ -187,7 +187,7 @@ const UNFILED_TRUTH_CEILING = 10;
 
 /** Generator category = the fixture root's immediate subdirectory. */
 function categoryOf(repoRelPdfPath: string): string {
-  return relative(FIXTURE_ROOT, join(REPO_ROOT, repoRelPdfPath)).split("/")[0];
+  return relative(FIXTURE_ROOT, join(REPO_ROOT, repoRelPdfPath)).replace(/\\/g, "/").split("/")[0];
 }
 
 const truthTotals = new Map<string, TruthTotals>();
@@ -235,7 +235,7 @@ describe("corpus snapshots", () => {
   }
 
   for (const pdfPath of pdfs) {
-    const rel = relative(REPO_ROOT, pdfPath);
+    const rel = relative(REPO_ROOT, pdfPath).replace(/\\/g, "/");
     const expectedPath = pdfPath.replace(/\.pdf$/i, ".expected.json");
 
     describe(rel, () => {
