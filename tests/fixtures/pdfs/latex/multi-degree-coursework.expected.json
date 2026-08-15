@@ -25,7 +25,7 @@
       "website_url",
       "work_authorization"
     ],
-    "skillsCount": 17,
+    "skillsCount": 18,
     "experienceCount": 4,
     "educationCount": 2,
     "projectsCount": 3,
@@ -77,7 +77,7 @@
     "sectionSource": "markdown",
     "pageCount": 1,
     "rawCharCount": 3428,
-    "extractedCharCount": 2625,
+    "extractedCharCount": 2626,
     "sections": [
       {
         "name": "profile",
@@ -108,7 +108,7 @@
       "hasSummary": false,
       "experienceCount": 4,
       "educationCount": 2,
-      "skillsCount": 17
+      "skillsCount": 18
     },
     "linkAnnotationCount": 6,
     "disagreements": []

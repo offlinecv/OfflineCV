@@ -138,7 +138,14 @@ function looksLikeContactLink(tok: string): boolean {
   return PROFILE_LABEL_RE.test(t) || PROFILE_HOST_RE.test(t) || URLISH_RE.test(t);
 }
 
+/** One-character tokens that are real, commonly-listed languages. The
+ *  `tok.length < 2` floor in `isSkillToken` is a noise guard against stray
+ *  glyphs left by column splitting; these are the only single characters that
+ *  are not noise, so they are allowlisted rather than lowering the floor. */
+const SINGLE_LETTER_SKILLS = new Set(["c", "r", "d"]);
+
 function isSkillToken(tok: string): boolean {
+  if (tok.length === 1 && SINGLE_LETTER_SKILLS.has(tok.toLowerCase())) return true;
   if (tok.length < 2 || tok.length > 40) return false;
   if (/^\d+$/.test(tok)) return false;
   // A professional-profile link (or its bare "GitHub" / "LinkedIn" heading) is
