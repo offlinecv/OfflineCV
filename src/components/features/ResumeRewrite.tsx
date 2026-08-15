@@ -90,8 +90,16 @@ export function useResumeRewriteUi(
    * already showed the user. Undefined → byte-identical pre-#608 prompt.
    */
   critique?: ResumeCritique,
+  /** A whole-résumé rewrite was applied (#826) — forwarded to the controller,
+   *  whose `confirmApplied` is the transition. See `useResumeRewrite`. */
+  onRewriteApplied?: () => void,
 ): ResumeRewriteParts {
-  const controller = useResumeRewrite(sections, jdContext, critique);
+  const controller = useResumeRewrite(
+    sections,
+    jdContext,
+    critique,
+    onRewriteApplied,
+  );
 
   if (!controller.isAvailable) {
     return { trigger: null, panel: null };

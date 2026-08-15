@@ -642,6 +642,26 @@ export function trackDownloadCompleted(args: {
   track("download_completed", { source: args.source, format: args.format ?? "pdf" });
 }
 
+/** What put a résumé into the local library (#824) — `"header"` for the explicit
+ *  "Save to library" action in the parse header, `"autosave"` for the debounced
+ *  write the first inline edit triggers. */
+export type ResumeSaveSource = "header" | "autosave";
+
+/**
+ * A résumé was written to the local library (#824). The library has existed
+ * since #322 with no event at all, so "does anyone keep a résumé?" was
+ * unanswerable — and autosave changes the answer's shape, since most records
+ * are now created by editing rather than by clicking. `source` is what
+ * separates the two, and it is the whole point of the event.
+ *
+ * Carries the source and nothing else: no filename, no id, no score, no field
+ * values. The record itself never leaves IndexedDB. Env-gated like every other
+ * tracker — no-op, and dead-code-eliminated, when VITE_POSTHOG_KEY is unset.
+ */
+export function trackResumeSaved(args: { source: ResumeSaveSource }): void {
+  track("resume_saved", { source: args.source });
+}
+
 /** Which format the shareable audit report (#343) was exported in. */
 export type ReportFormat = "pdf" | "json";
 

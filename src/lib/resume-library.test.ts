@@ -116,6 +116,81 @@ describe("resume-library: load", () => {
   });
 });
 
+describe("resume-library: bytes on an update (#824)", () => {
+  // The autosave writes on every quiet period behind an edit, and the parse is
+  // the only thing that can have moved: `saveResumeToLibrary` rebuilding the
+  // Blob would re-copy and re-write a multi-MB PDF per debounce window. These
+  // two pin BOTH halves — the fast path carries the stored bytes forward, and
+  // it is opt-in, so a caller that really does mean to replace them still can.
+  const otherBytes = () => new Uint8Array([0x00, 0x11, 0x22]).buffer;
+
+  it("carries the stored bytes forward when the caller asserts they are unchanged", async () => {
+    const id = await save("cv.pdf", 61);
+    // Different bytes, plus the assertion that they are not. A rebuild would
+    // land them; carrying the stored Blob forward cannot.
+    await saveResumeToLibrary({
+      id,
+      filename: "cv.pdf",
+      bytes: otherBytes(),
+      sourceKind: "pdf",
+      result: result(),
+      score: score(77),
+      bytesUnchanged: true,
+    });
+    const loaded = await loadResumeFromLibrary(id);
+    expect([...new Uint8Array(loaded!.bytes!)]).toEqual([...bytes()]);
+    // The parse and score DO advance — that is the entire content of the write.
+    expect(loaded!.score.overall).toBe(77);
+    // …and it UPDATED, it did not add. "The library never grows past one entry
+    // for one parse" is the whole point of keying the autosave's record id to
+    // `parseKey`, and read back off the store it is a fact rather than a claim
+    // about what a mock was called with.
+    const list = await listLibrary();
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(id);
+    expect(list[0].scoreOverall).toBe(77);
+  });
+
+  it("rewrites the bytes by default, so the fast path is never inherited", async () => {
+    const id = await save("cv.pdf", 61);
+    await saveResumeToLibrary({
+      id,
+      filename: "cv.pdf",
+      bytes: otherBytes(),
+      sourceKind: "pdf",
+      result: result(),
+      score: score(61),
+    });
+    const loaded = await loadResumeFromLibrary(id);
+    expect([...new Uint8Array(loaded!.bytes!)]).toEqual([0x00, 0x11, 0x22]);
+    // Still one row, on this path too.
+    expect(await listLibrary()).toHaveLength(1);
+  });
+
+  it("falls back to a rebuild when the asserted record has gone", async () => {
+    // Deleted in another tab between the assertion and this write: a stale id
+    // must degrade to a fresh record with real bytes, never to one with none.
+    const id = await saveResumeToLibrary({
+      id: "vanished",
+      filename: "cv.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: result(),
+      score: score(50),
+      bytesUnchanged: true,
+    });
+    expect([...new Uint8Array((await loadResumeFromLibrary(id))!.bytes!)]).toEqual([
+      ...bytes(),
+    ]);
+    // Exactly one row, re-created under the id the caller was already holding —
+    // so the autosave keeps writing to the same record rather than minting a
+    // new one per debounce window for the rest of the session.
+    const list = await listLibrary();
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(id);
+  });
+});
+
 describe("resume-library: rename + delete", () => {
   it("renames in place, preserving bytes and score", async () => {
     const id = await save("draft.pdf", 55);

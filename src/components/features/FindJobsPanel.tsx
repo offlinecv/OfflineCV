@@ -10,8 +10,9 @@
  * the bottom of a long parser-audit page. Results moved to their own entry
  * (`jobs/index.html`) because a ranked list of dozens of postings is a
  * destination, not a footnote: it needs a URL you can reload, its own scroll,
- * and the full page width. `/` keeps `FindJobsLauncher`, which hands the parse
- * over via `lib/jobs-handoff.ts`.
+ * and the full page width. `/` keeps no search surface of its own — its journey
+ * rail's Match-jobs stage hands the parse over via `lib/jobs-departure.ts` and
+ * navigates here (#823).
  *
  * LAYOUT: full-width bands stacked down the page, never a sidebar.
  *
@@ -99,9 +100,17 @@ interface FindJobsPanelProps {
    *  rather than the narrow query-only Pick. */
   parsed: HeuristicParsedResume;
   onTailor?: (jdContext: string) => void;
+  /** A search came back with results (#826) — `JobsApp` records the journey's
+   *  `Match jobs` stage from it. Not fired for the incremental company merge or
+   *  the local re-ranks: the milestone is "you searched", once. */
+  onSearchLoaded?: () => void;
 }
 
-export function FindJobsPanel({ parsed, onTailor }: FindJobsPanelProps) {
+export function FindJobsPanel({
+  parsed,
+  onTailor,
+  onSearchLoaded,
+}: FindJobsPanelProps) {
   // Seed local query state from the parse once (lazy initializer — runs only
   // on mount); the user edits it from here. Exclude-term chips (#563) AND
   // role-family chips (#568) are seeded from the SAME role-family
@@ -152,7 +161,7 @@ export function FindJobsPanel({ parsed, onTailor }: FindJobsPanelProps) {
     pendingCompanies,
     searchPendingCompanies,
     isUpdating,
-  } = useJobSearch(query, parsed, selectedCompanies);
+  } = useJobSearch(query, parsed, selectedCompanies, onSearchLoaded);
   const hasSearched = phase.kind !== "idle";
 
   const submit = () => {

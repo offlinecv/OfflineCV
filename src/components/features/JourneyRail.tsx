@@ -38,11 +38,18 @@
  * rail on a cold `/`, and "Step 4 of 5" announced over a four-entry list is a
  * miscount the listener cannot correct.
  *
- * State is never carried by colour. Each of the three states has its own disc
- * SHAPE and its own GLYPH — filled + numeral (current), ringed + ✓ (ready),
- * hairline + numeral (upcoming) — layered on the surface/weight step #516 asks
- * for, so the rail resolves in a greyscale render and for a user who cannot
- * separate the accent hue from the track. Upcoming text stays
+ * State is never carried by colour. Four states since #826, over two
+ * independent axes so both survive a greyscale render: the disc's WEIGHT says
+ * reachable (filled = current, `border-2` ring = ready or done, hairline = not
+ * ready yet) and its GLYPH says done (`✓︎` = done, numeral otherwise). Nothing
+ * is a hue, per #516, and the screen-reader sentence names all four in words.
+ *
+ * The ✓ was on `ready` until #826 and had no business there: availability means
+ * the stage has what it needs, not that the user has been. A résumé that had
+ * just parsed showed `Download ✓` over a PDF nobody had exported. The glyph now
+ * reads `Journey.completed`, which comes from a real ledger
+ * (`lib/journey-progress.ts`), and the ring it used to ride stays behind to
+ * carry "ready" on its own. Upcoming text stays
  * `content-secondary`; `content-tertiary` and `content-muted` land at 4.04:1
  * against the recessed track in dark mode, under WCAG 1.4.3's 4.5:1 (see
  * `Stepper.tsx`). A READY stage is `content-primary` rather than
@@ -92,6 +99,7 @@ export function JourneyRail({ journey, onStageClick }: JourneyRailProps) {
             total={journey.stages.length}
             isCurrent={stage.id === journey.current}
             hasData={journey.availability[stage.id]}
+            isDone={journey.completed[stage.id]}
             onClick={() => onStageClick(stage.id)}
           />
         ))}
@@ -106,6 +114,7 @@ function JourneyRailStage({
   total,
   isCurrent,
   hasData,
+  isDone,
   onClick,
 }: {
   stage: JourneyStage;
@@ -113,23 +122,35 @@ function JourneyRailStage({
   total: number;
   isCurrent: boolean;
   hasData: boolean;
+  isDone: boolean;
   onClick: () => void;
 }) {
-  // Three states, three words. "Ready" rather than "Done": availability means
-  // the stage has what it needs, which is not the same as the user having been
-  // there — this rail keeps no completion ledger, on purpose.
-  const state = isCurrent ? "Current step" : hasData ? "Ready" : "Not ready yet";
+  // "Done" outranks the other two only while the user is not standing here:
+  // a stage they are ON is announced as the current step whether or not they
+  // have already completed it once (`Fix it` after an edit is the ordinary
+  // case), because "where am I" is the more useful of the two facts.
+  const done = isDone && !isCurrent;
+  // Four states, four words. "Ready" is availability — the stage has what it
+  // needs — and is emphatically NOT "Done", which is the ledger's claim that
+  // the user has actually been here (#826).
+  const state = isCurrent
+    ? "Current step"
+    : done
+      ? "Done"
+      : hasData
+        ? "Ready"
+        : "Not ready yet";
 
   // The state marker, and the reason this reads as a journey rather than as a
-  // second tab bar. Each state gets a distinct SHAPE and a distinct GLYPH, not
-  // a colour: filled disc + numeral (current), ringed disc + ✓ (ready), hairline
-  // disc + numeral (upcoming). Greyscale-safe by construction, which is what
-  // #516 asks for — and it survives the two failure modes a flat numeral had,
-  // where the rail was indistinguishable from `Tabs` and the inactive entries
-  // were grey text on a grey track.
+  // second tab bar. Two independent, greyscale-safe axes rather than a colour
+  // (#516): the disc's WEIGHT carries reachability and its GLYPH carries
+  // completion, so `ready` and `done` share a ring and differ by ✓ alone while
+  // `not ready yet` drops to a hairline. A done stage keeps the ring even when
+  // its availability has since lapsed — having been somewhere is at least as
+  // strong a claim as being able to go there.
   const marker = isCurrent
     ? "bg-accent-primary text-content-inverse"
-    : hasData
+    : hasData || done
       ? "border-2 border-accent-primary text-accent-primary"
       : "border border-border-strong text-content-secondary";
 
@@ -161,10 +182,11 @@ function JourneyRailStage({
           "min-h-11 w-full min-w-11 gap-2 px-2 sm:px-3",
           isCurrent
             ? "bg-surface-card font-semibold text-content-primary shadow-xs ring-1 ring-inset ring-border-light"
-            : hasData
+            : hasData || done
               ? // A ready stage earns `content-primary`: it has data behind it,
                 // it is the likeliest next click, and at `content-secondary` it
-                // was visually identical to a stage the user cannot use yet.
+                // was visually identical to a stage the user cannot use yet. A
+                // done one shares the weight — same reason the ring is shared.
                 "bg-transparent font-medium text-content-primary hover:bg-surface-hover"
               : "bg-transparent font-normal text-content-secondary hover:bg-surface-hover hover:text-content-primary",
         ].join(" ")}
@@ -179,7 +201,7 @@ function JourneyRailStage({
           {/* U+2713 + U+FE0E (VS-15) forces TEXT presentation, so the mark
               renders monochrome in `currentColor` rather than as a colour
               pictograph from the OS emoji font (design-system/CLAUDE.md). */}
-          {!isCurrent && hasData ? "✓︎" : index + 1}
+          {done ? "✓︎" : index + 1}
         </span>
         <span
           aria-hidden="true"

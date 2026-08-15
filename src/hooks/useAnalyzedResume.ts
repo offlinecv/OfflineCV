@@ -80,7 +80,7 @@ export interface AnalyzedResume {
    * `displayResult` cannot serve this role and the distinction matters: it is
    * a memo over the override maps, so a single keystroke mints a fresh object
    * with the same parse behind it. Anything downstream that must reset "when
-   * the résumé changed" has to key on this instead — see `ResultDetailTabs`'
+   * the résumé changed" has to key on this instead — see `ResultDetail`'
    * JD-steering reset (#576). Null while there is nothing parsed.
    */
   parseKey: unknown;

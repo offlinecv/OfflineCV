@@ -8,13 +8,15 @@
  * code never hand-rolls one. Extracted for #608's "use the quality findings"
  * opt-out, which would otherwise have been the THIRD verbatim copy of the same
  * six lines — `DownloadReportDialog` ("Include my name and contact details")
- * and `FeedbackPanel` already carry it, both with the identical
+ * and `FeedbackPanel` already carried it, both with the identical
  * `h-4 w-4 accent-accent-primary` input inside a `flex … gap-2` label.
  *
- * Those two are deliberately NOT migrated here: they are unrelated surfaces and
- * their own tests query the raw markup, so a sweep belongs in its own change.
- * This primitive renders the same real `<input type="checkbox">` they do, so
- * that migration is a mechanical swap when someone takes it.
+ * The first of those two took the swap in #823, when `DownloadReportDialog`
+ * was folded into `ExportDialog` and the markup-querying tests that had made a
+ * migration awkward went with it. `FeedbackPanel` is still unmigrated: an
+ * unrelated surface whose own tests query the raw markup, so it belongs in its
+ * own change. This primitive renders the same real `<input type="checkbox">`
+ * it does, so that migration stays a mechanical swap.
  *
  * Not a switch: this is a checkbox by role and by semantics (a setting that
  * takes effect on the next action, not an immediately-applied mode). A `Switch`

@@ -11,7 +11,7 @@
  * `onChange` alone, since `replace` mode is destructive. Merge is the
  * default; replace must be chosen explicitly, and its label states how many
  * saved resumes it will delete (see the parent's `entryCount`). The dialog
- * stays open on failure (mirrors ReportDownloadControl) so the error stays
+ * stays open on failure (mirrors `ExportDialog`'s report row) so the error stays
  * visible next to the retry affordance; it closes only on success, and the
  * outcome — success or error — is reported to the parent via `onResult` so it
  * can render the confirmation in place (no toast primitive in this repo).

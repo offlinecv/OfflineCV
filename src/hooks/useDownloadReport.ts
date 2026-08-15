@@ -52,6 +52,17 @@ export interface UseDownloadReport {
 export function useDownloadReport(
   result: CascadeResult,
   score: AnonymousAtsScore,
+  /**
+   * Fired once the report has actually reached the user, so the caller can
+   * record the journey's `Download` stage (#826).
+   *
+   * The audit report counts as a download even though it is not a résumé: the
+   * ledger records that the user went THROUGH that stage, and the report is
+   * downloaded from it. Unlike its two siblings this hook fires no
+   * `trackDownloadCompleted`, so the success point is the `return true` below —
+   * the same value the dialog gates on.
+   */
+  onDownloaded?: () => void,
 ): UseDownloadReport {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +112,7 @@ export function useDownloadReport(
         }
 
         trackReportDownloaded({ format, includeIdentity });
+        onDownloaded?.();
         return true;
       } catch (err) {
         setError(
@@ -111,7 +123,10 @@ export function useDownloadReport(
         setIsGenerating(false);
       }
     },
-    [result, score],
+    // `onDownloaded` in the deps for the same reason as `useDownloadPdf.ts`:
+    // this callback is clicked, never watched, so a fresh identity is free —
+    // and a stale one would mark the résumé that was on screen last render.
+    [result, score, onDownloaded],
   );
 
   return { download, isGenerating, error };

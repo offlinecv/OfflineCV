@@ -70,8 +70,8 @@ export function resolveInitialJobsTab(search: string, hash: string = ""): JobsTa
 }
 
 /** Base-aware URL to `/jobs/`, landing directly on Saved jobs — same
- *  `import.meta.env.BASE_URL` pattern as `FindJobsLauncher`'s navigation, so
- *  it resolves correctly under both the custom-domain `/` base and the
+ *  `import.meta.env.BASE_URL` pattern as `departToJobsAndNavigate`, so it
+ *  resolves correctly under both the custom-domain `/` base and the
  *  `/OfflineCV/` Pages-fallback base. */
 export function savedJobsHref(): string {
   return `${import.meta.env.BASE_URL}jobs/?${TAB_PARAM}=${LIBRARY_VALUE}`;

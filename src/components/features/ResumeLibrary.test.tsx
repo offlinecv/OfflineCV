@@ -277,7 +277,7 @@ describe("ResumeLibrary: import confirm flow", () => {
     const live = el.querySelector('[aria-live="polite"]')!;
     expect(live.textContent).toContain("Not an offlinecv backup file.");
     expect(el.textContent).toContain("keep-me.pdf");
-    // Stays open on failure — mirrors ReportDownloadControl — so the user can retry.
+    // Stays open on failure — mirrors ExportDialog's report row — so the user can retry.
     expect(el.querySelector("dialog")!.hasAttribute("open")).toBe(true);
   });
 });

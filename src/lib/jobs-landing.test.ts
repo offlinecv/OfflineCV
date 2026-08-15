@@ -4,7 +4,7 @@
 /**
  * #707: the losing case matters as much as the winning one — a plain
  * `/jobs/` visit (no param) must still land on Search, or every existing
- * deep link and the FindJobsLauncher navigation would silently start
+ * deep link and the journey rail's Match-jobs navigation would silently start
  * defaulting to the wrong tab.
  */
 

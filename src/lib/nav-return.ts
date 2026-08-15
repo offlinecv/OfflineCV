@@ -163,7 +163,7 @@ export interface ReturnNavigable {
  * said the tab actually came from `/`, else a fresh navigation to the app
  * root. Used by `/jobs/`'s "back to resume" control today; also invoked by
  * `/jobs/`'s Tailor-résumé-to-this-job handler (#576) after it stashes a JD
- * steering payload for `ResultDetailTabs` to consume on arrival.
+ * steering payload for `ResultDetail` to consume on arrival.
  *
  * `arrivedFromRoot` is a parameter rather than a storage read here because the
  * marker is consumed once at mount (`useArrivedFromRoot`), not per click — see

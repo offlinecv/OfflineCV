@@ -6,7 +6,17 @@
  *
  * Variants:
  *   primary — filled accent CTA (bg-accent-primary, text-content-inverse)
- *   ghost   — minimal surface, used for secondary / icon-only actions
+ *   secondary — the middle rung of the action ladder: a real resting surface
+ *             (bg-surface-subtle + border-border-light) that is quieter than
+ *             `primary` and louder than `ghost`. It exists because `ghost` has
+ *             NO resting background at all, so a dialog offering two or three
+ *             exports rendered its non-default choices as bare text and lost
+ *             the "this is also a button" affordance entirely (#823 review).
+ *             Shares `primary`'s padding so a row of the two aligns on both
+ *             axes. Reach for it when a secondary action must still read as a
+ *             button; keep `ghost` for the tertiary rung (Close, Cancel, an
+ *             icon-adjacent action) so the three stay distinguishable.
+ *   ghost   — minimal surface, used for tertiary / icon-only actions
  *             (text-content-secondary, hover:bg-surface-subtle)
  *   link    — looks like an inline anchor (text-content-tertiary, hover:underline)
  *   icon    — compact icon-only affordance (same hover as ghost, no padding
@@ -61,7 +71,13 @@
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
-export type ButtonVariant = "primary" | "ghost" | "link" | "icon" | "tab";
+export type ButtonVariant =
+  | "primary"
+  | "secondary"
+  | "ghost"
+  | "link"
+  | "icon"
+  | "tab";
 export type ButtonSize = "sm" | "md";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -76,6 +92,8 @@ const BASE =
 const VARIANT: Record<ButtonVariant, string> = {
   primary:
     "bg-accent-primary text-content-inverse hover:bg-accent-primary-hover px-3 py-1.5",
+  secondary:
+    "border border-border-light bg-surface-subtle text-content-primary hover:bg-surface-hover px-3 py-1.5",
   ghost:
     "text-content-secondary hover:bg-surface-subtle px-2 py-0.5",
   link: "text-content-tertiary hover:underline underline-offset-2 p-0",

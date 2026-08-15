@@ -37,6 +37,13 @@ describe("departToJobs", () => {
     expect(readDepartureMarker()).toBe(true);
   });
 
+  it("hands the journey-ledger key over with the parse (#826)", () => {
+    // `match` completes on `/jobs/`, which has no way to derive the key it
+    // must record the completion under — see `JobsHandoff.journeyKey`.
+    departToJobs(parsed, "a1b2c3d4");
+    expect(readJobsHandoff()?.journeyKey).toBe("a1b2c3d4");
+  });
+
   it("still marks the departure when there is no parse to hand over", () => {
     // The header link renders before any parse — that is its point — and the
     // trip still started at the root, so the back control is right to go there.

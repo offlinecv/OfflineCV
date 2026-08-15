@@ -4,14 +4,21 @@
 // @vitest-environment jsdom
 
 /**
- * JourneyRail (#812) — what a user, including one who cannot see colour or the
- * screen at all, can tell about the arc without clicking anything.
+ * JourneyRail (#812, #826) — what a user, including one who cannot see colour or
+ * the screen at all, can tell about the arc without clicking anything.
  *
  * The click ROUTING (reachable → the surface's callback, unpopulated → the
  * guidance card) lives in `PageShell`, which owns the blocked-stage state, and
  * is pinned in `PageShell.test.tsx`. What is pinned here is the rail's own
  * contract: one current stage, position stated in words, and state carried by
  * surface + weight + a monochrome mark rather than by colour.
+ *
+ * Four states since #826, and the pair that matters most is `ready` vs `done`.
+ * They are the two the rail conflated — it drew a ✓ from availability, so a
+ * freshly parsed résumé claimed Download and Match jobs were finished — and
+ * they are told apart on the GLYPH axis alone, the ring being shared. Every
+ * assertion about the ✓ here is therefore an assertion about the ledger, never
+ * about availability.
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -47,7 +54,9 @@ function rail(signals: Partial<JourneySignals> = {}, onStageClick = vi.fn()) {
   const journey = deriveJourney({
     entry: "root",
     hasResume: false,
+    hasStoredResume: false,
     jdSteering: false,
+    completed: {},
     ...signals,
   });
   const el = render(
@@ -129,6 +138,25 @@ describe("JourneyRail — the arc", () => {
     );
   });
 
+  it("announces a completed stage as Done, never as Ready", () => {
+    // The sighted user's ✓ and the announced word have to be the same claim.
+    // Before #826 the glyph said done and the sentence said ready; the sentence
+    // was the honest one, and this pins them together at the new state.
+    const { el } = rail({ hasResume: true, completed: { download: true } });
+    expect(trigger(el, "Download").textContent).toContain(
+      "Step 3 of 4: Download. Done.",
+    );
+    expect(trigger(el, "Match jobs").textContent).toContain("Match jobs. Ready.");
+  });
+
+  it("keeps announcing the stage the user is on as the current step", () => {
+    // `Fix it` completes on the first edit, and the user is still standing on
+    // it — "where am I" is the more useful of the two facts.
+    const { el } = rail({ hasResume: true, completed: { fix: true } });
+    expect(trigger(el, "Fix it").textContent).toContain("Fix it. Current step.");
+    expect(trigger(el, "Fix it").textContent).not.toContain("Done.");
+  });
+
   it("counts the announced position over the RENDERED stages, not all five", () => {
     // "Step 4 of 5" spoken over a four-entry rail is a miscount the listener
     // has no way to correct, so the count has to follow what is on screen.
@@ -156,36 +184,79 @@ describe("JourneyRail — the arc", () => {
 
   it("does not carry state on colour alone", () => {
     // Current = a real surface + weight step (survives a greyscale render);
-    // "has data behind it" = a monochrome text-presentation mark, never a hue.
-    const { el } = rail({ entry: "jobs", hasResume: true });
+    // "the user has BEEN here" = a monochrome text-presentation mark, never a
+    // hue.
+    const { el } = rail({
+      entry: "jobs",
+      hasResume: true,
+      completed: { fix: true },
+    });
     const current = trigger(el, "Match jobs");
     expect(current.className).toContain("bg-surface-card");
     expect(current.className).toContain("font-semibold");
 
-    const ready = trigger(el, "Fix it");
-    expect(ready.className).not.toContain("bg-surface-card");
-    expect(ready.textContent).toContain("✓");
+    const done = trigger(el, "Fix it");
+    expect(done.className).not.toContain("bg-surface-card");
+    expect(done.textContent).toContain("✓");
 
     const upcoming = trigger(el, "Tailor");
     expect(upcoming.textContent).not.toContain("✓");
   });
 
-  it("gives each of the three states its own marker SHAPE, not just a hue", () => {
-    // The redesign's load-bearing claim. Strip every colour and the three are
-    // still told apart: filled disc, ringed disc, hairline disc.
-    const { el } = rail({ entry: "jobs", hasResume: true });
+  it("gives each of the four states its own marker, on two greyscale axes", () => {
+    // The redesign's load-bearing claim. Strip every colour and all four are
+    // still told apart: the disc WEIGHT says reachable (filled / ring /
+    // hairline) and the GLYPH says done (✓ / numeral).
+    const { el } = rail({
+      entry: "jobs",
+      hasResume: true,
+      completed: { download: true },
+    });
     const disc = (label: string) =>
       trigger(el, label).querySelector('[aria-hidden="true"]')?.className ?? "";
+    const glyph = (label: string) =>
+      trigger(el, label).querySelector('[aria-hidden="true"]')?.textContent ?? "";
 
-    // All three are discs of the same size — only the treatment differs.
-    for (const label of ["Match jobs", "Fix it", "Tailor"]) {
+    // Every marker is a disc of the same size — only the treatment differs.
+    for (const label of ["Match jobs", "Download", "Fix it", "Tailor"]) {
       expect(disc(label)).toContain("rounded-full");
       expect(disc(label)).toContain("h-6");
     }
     expect(disc("Match jobs")).toContain("bg-accent-primary"); // current: filled
-    expect(disc("Fix it")).toContain("border-2"); // ready: thick ring
+    expect(glyph("Match jobs")).not.toContain("✓");
+    expect(disc("Download")).toContain("border-2"); // done: thick ring…
+    expect(glyph("Download")).toContain("✓"); // …plus the mark
+    expect(disc("Fix it")).toContain("border-2"); // ready: the same ring…
+    expect(glyph("Fix it")).not.toContain("✓"); // …and no mark
     expect(disc("Tailor")).toContain("border-border-strong"); // upcoming: hairline
     expect(disc("Tailor")).not.toContain("border-2");
+  });
+
+  it("keeps the ✓ off a stage that is merely READY (#826)", () => {
+    // The defect, stated directly: a résumé had just parsed, so Download and
+    // Match jobs had what they needed — and nothing else. Neither may claim
+    // the user has exported a PDF or searched a board.
+    const { el } = rail({ hasResume: true });
+    expect(trigger(el, "Download").textContent).not.toContain("✓");
+    expect(trigger(el, "Match jobs").textContent).not.toContain("✓");
+    // …and the ring that used to carry the ✓ is still there, because they ARE
+    // ready.
+    const disc = (label: string) =>
+      trigger(el, label).querySelector('[aria-hidden="true"]')?.className ?? "";
+    expect(disc("Download")).toContain("border-2");
+  });
+
+  it("keeps the ✓ on a stage completed for a résumé that is no longer available", () => {
+    // Tailor completes on `/` while a JD steers and reads back on `/jobs/`,
+    // where steering is false by construction — so its availability is too.
+    // "You have been here" stays true, and the ring goes with it.
+    const { el } = rail({
+      entry: "jobs",
+      hasResume: true,
+      completed: { tailor: true },
+    });
+    expect(trigger(el, "Tailor").textContent).toContain("✓");
+    expect(trigger(el, "Tailor").textContent).toContain("Tailor. Done.");
   });
 
   it("keeps 8px between adjacent 44px touch targets", () => {
@@ -195,8 +266,8 @@ describe("JourneyRail — the arc", () => {
     expect(el.querySelector("ol")?.className).toContain("gap-2");
   });
 
-  it("keeps the ready mark off a stage with nothing behind it", () => {
-    // A first visit: nothing is populated, so nothing may claim it is.
+  it("keeps every mark off a first visit", () => {
+    // Nothing is populated and nothing has happened, so nothing may claim it.
     const { el } = rail();
     expect(el.textContent).not.toContain("✓");
   });
@@ -210,6 +281,18 @@ describe("JourneyRail — the arc", () => {
       expect(button.className).not.toContain("text-content-tertiary");
       expect(button.className).not.toContain("text-content-muted");
     }
+  });
+
+  it("gives a saved-but-unopened résumé's stages the ready treatment, not a ✓", () => {
+    // #826 defect 2: `/`'s rail was blind to the library, so Fix it read "not
+    // ready yet" next to a Saved-resumes card holding three résumés. The
+    // widening is availability only — a saved résumé is not one the user has
+    // downloaded.
+    const { el } = rail({ hasStoredResume: true });
+    expect(trigger(el, "Fix it").textContent).toContain("Fix it. Ready.");
+    expect(el.textContent).not.toContain("✓");
+    // And the user is still standing at the drop zone, not on Fix it.
+    expect(trigger(el, "Add résumé").getAttribute("aria-current")).toBe("step");
   });
 
   it("separates a READY stage from an upcoming one by weight and text token", () => {

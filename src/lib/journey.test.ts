@@ -5,11 +5,18 @@
  * The L1 journey derivation (#812).
  *
  * What is pinned here is the BEHAVIOUR a user reads off the rail — which stage
- * says "you are here", and which stages claim to have something behind them —
- * for each of the five states the two entries can be in. The shape of
- * `JOURNEY_STAGES` is not asserted beyond the two rules a future edit is most
- * likely to break silently: `download` is never current, and the first stage
- * has no empty state to fall back to.
+ * says "you are here", which stages claim to have something behind them, and
+ * (since #826) which claim the user has actually BEEN there — for each of the
+ * states the two entries can be in. The shape of `JOURNEY_STAGES` is not
+ * asserted beyond the two rules a future edit is most likely to break
+ * silently: `download` is never current, and the first stage has no empty
+ * state to fall back to.
+ *
+ * The three-way split between availability, completion and `current` is the
+ * load-bearing thing here. Availability answers "can you go", completion
+ * answers "did you go" (and is what the ✓ states), and `current` answers
+ * "where are you standing" — which is why the library signal widens the first
+ * and deliberately not the third.
  */
 
 import { describe, it, expect } from "vitest";
@@ -24,7 +31,9 @@ import {
 const signals = (over: Partial<JourneySignals> = {}): JourneySignals => ({
   entry: "root",
   hasResume: false,
+  hasStoredResume: false,
   jdSteering: false,
+  completed: {},
   ...over,
 });
 
@@ -33,6 +42,13 @@ describe("deriveJourney — where the user is", () => {
     const journey = deriveJourney(signals());
     expect(journey.current).toBe("add");
     expect(journey.availability).toEqual({
+      add: false,
+      fix: false,
+      match: false,
+      tailor: false,
+      download: false,
+    });
+    expect(journey.completed).toEqual({
       add: false,
       fix: false,
       match: false,
@@ -48,6 +64,64 @@ describe("deriveJourney — where the user is", () => {
     expect(journey.availability.match).toBe(true);
     expect(journey.availability.download).toBe(true);
     // Tailoring needs a JD, not a résumé — a résumé alone never opens it.
+    expect(journey.availability.tailor).toBe(false);
+  });
+
+  it("claims no completion for a résumé that just parsed (#826)", () => {
+    // The whole defect: availability opened Download and Match jobs the
+    // instant a file parsed, and the rail drew a ✓ from it — over a PDF nobody
+    // had exported and a board nobody had searched.
+    const journey = deriveJourney(signals({ hasResume: true }));
+    expect(journey.completed.download).toBe(false);
+    expect(journey.completed.match).toBe(false);
+    expect(journey.completed.fix).toBe(false);
+    // `add` is the one stage with no ledger: the résumé IS on the page, which
+    // is the whole of what that stage asks for.
+    expect(journey.completed.add).toBe(true);
+  });
+
+  it("reports exactly the milestones the ledger recorded", () => {
+    const journey = deriveJourney(
+      signals({ hasResume: true, completed: { download: true } }),
+    );
+    expect(journey.completed.download).toBe(true);
+    expect(journey.completed.match).toBe(false);
+    // …and completion never moves the user: exporting does not relocate them.
+    expect(journey.current).toBe("fix");
+  });
+
+  it("refuses a completion that arrives with no résumé to have completed it", () => {
+    // The ledger is keyed PER RÉSUMÉ, so a completion read without one in hand
+    // belongs to some other parse — the same class of visible lie the ✓ mark
+    // was showing before #826.
+    const journey = deriveJourney(
+      signals({ completed: { download: true, match: true } }),
+    );
+    expect(journey.completed.download).toBe(false);
+    expect(journey.completed.match).toBe(false);
+  });
+
+  it("opens the arc for a saved résumé without claiming the user is on it", () => {
+    // #826 defect 2: a cold `/` whose library holds résumés read "not ready
+    // yet" next to a Saved-resumes card listing three of them. Availability
+    // widens; `current` deliberately does not, or the rail would say the user
+    // is standing on Fix it while the page under it shows the drop zone.
+    const journey = deriveJourney(signals({ hasStoredResume: true }));
+    expect(journey.availability.fix).toBe(true);
+    expect(journey.availability.match).toBe(true);
+    expect(journey.availability.download).toBe(true);
+    expect(journey.current).toBe("add");
+    // And a saved résumé is not one the user has tailored, downloaded or even
+    // opened — nothing may claim completion off it.
+    expect(journey.completed.add).toBe(false);
+    expect(journey.completed.download).toBe(false);
+  });
+
+  it("keeps Tailor's availability on the résumé in memory, not the saved one", () => {
+    // Steering acts on the résumé ON THE PAGE, so a saved one cannot stand in.
+    const journey = deriveJourney(
+      signals({ hasStoredResume: true, jdSteering: true }),
+    );
     expect(journey.availability.tailor).toBe(false);
   });
 
@@ -67,7 +141,13 @@ describe("deriveJourney — where the user is", () => {
     // inputs are related. Called directly, on purpose: this is the shape a
     // third caller would produce.
     for (const entry of ["root", "jobs"] as const) {
-      const journey = deriveJourney({ entry, hasResume: false, jdSteering: true });
+      const journey = deriveJourney({
+        entry,
+        hasResume: false,
+        hasStoredResume: false,
+        jdSteering: true,
+        completed: {},
+      });
       expect(journey.availability.tailor).toBe(false);
       expect(journey.current).not.toBe("tailor");
     }
@@ -96,7 +176,13 @@ describe("deriveJourney — where the user is", () => {
       for (const hasResume of [false, true]) {
         for (const jdSteering of [false, true]) {
           expect(
-            deriveJourney({ entry, hasResume, jdSteering }).current,
+            deriveJourney({
+              entry,
+              hasResume,
+              hasStoredResume: hasResume,
+              jdSteering,
+              completed: { download: true },
+            }).current,
           ).not.toBe("download");
         }
       }
@@ -184,7 +270,9 @@ describe("JOURNEY_STAGES", () => {
       deriveJourney({
         entry: "root",
         hasResume: false,
+        hasStoredResume: false,
         jdSteering: false,
+        completed: {},
         ...s,
       }).stages.map((x) => x.id);
 
@@ -202,25 +290,36 @@ describe("JOURNEY_STAGES", () => {
     for (const entry of ["root", "jobs"] as const) {
       for (const hasResume of [false, true]) {
         for (const jdSteering of [false, true]) {
-          const j = deriveJourney({ entry, hasResume, jdSteering });
+          const j = deriveJourney({
+            entry,
+            hasResume,
+            hasStoredResume: hasResume,
+            jdSteering,
+            completed: {},
+          });
           expect(j.stages.map((s) => s.id)).toContain(j.current);
         }
       }
     }
   });
 
-  it("keeps availability keyed by every stage, visible or not", () => {
-    // Availability is a fact about the DATA; hiding a rail entry must not
-    // silently drop the answer for it.
+  it("keeps availability and completion keyed by every stage, visible or not", () => {
+    // Both are facts about the DATA; hiding a rail entry must not silently
+    // drop the answer for it.
     const j = deriveJourney({
       entry: "root",
       hasResume: true,
+      hasStoredResume: false,
       jdSteering: false,
+      completed: { tailor: true },
     });
     expect(j.stages.map((s) => s.id)).not.toContain("tailor");
     expect(j.availability.tailor).toBe(false);
-    expect(Object.keys(j.availability).sort()).toEqual(
-      JOURNEY_STAGES.map((s) => s.id).sort(),
-    );
+    // A completed stage stays completed even where it is neither shown nor
+    // available — "you have been here" is a historical fact.
+    expect(j.completed.tailor).toBe(true);
+    const ids = JOURNEY_STAGES.map((s) => s.id).sort();
+    expect(Object.keys(j.availability).sort()).toEqual(ids);
+    expect(Object.keys(j.completed).sort()).toEqual(ids);
   });
 });

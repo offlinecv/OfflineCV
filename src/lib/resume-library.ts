@@ -119,20 +119,63 @@ function scoreForResult(result: CascadeResult): AnonymousAtsScore {
   });
 }
 
-/** Save (or overwrite, when `id` is given) a resume. Bytes are stored as a Blob
- *  at rest; for DOCX (no source bytes kept in the done state) the blob is empty
- *  and reload restores from the cached parse alone. Returns the record id. */
-export async function saveResumeToLibrary(input: {
+/** What a save is asked to persist. `bytesUnchanged` is the caller's assertion
+ *  about the SOURCE FILE, not about the parse — see {@link blobForSave}. */
+export interface SaveResumeToLibraryInput {
   id?: string;
   filename: string;
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   result: CascadeResult;
   score: AnonymousAtsScore;
-}): Promise<string> {
-  const blob = new Blob(input.bytes ? [input.bytes] : [], {
+  /**
+   * The caller asserts that the record at `id` already holds exactly the bytes
+   * this save would otherwise write, so the stored Blob may be carried forward
+   * untouched. Ignored without an `id` (a new record has nothing to carry).
+   *
+   * Opt-in rather than inferred, and that is the point. The assertion is true
+   * for the autosave path (#824) BY CONSTRUCTION — the record id is keyed to
+   * the parse identity `useAnalyzedResume` mints, and a new source file always
+   * mints a new one, so an id and the bytes under it can never be re-paired —
+   * but it is not true of "an update" in general, and a future caller that
+   * legitimately re-writes a record's bytes (a re-upload against an existing
+   * record, an import) must not silently inherit a fast path that would drop
+   * its write. Defaults to rebuilding the Blob, which is always correct.
+   */
+  bytesUnchanged?: boolean;
+}
+
+/**
+ * The Blob to store for this save.
+ *
+ * Rebuilding it from `input.bytes` copies the whole source file on every call,
+ * which was fine when a save was a button click and is not when it is a
+ * debounced write behind every edit (#824) — a multi-MB PDF re-copied and
+ * re-written per debounce window. When the caller can assert the bytes are the
+ * ones already at rest, the stored Blob is carried forward instead and only the
+ * snapshot advances — the same move `loadResumeFromLibrary`'s re-stamp makes.
+ *
+ * Falls back to rebuilding when the record has gone (deleted in another tab
+ * between the assertion and this read), so a stale id degrades to a fresh
+ * write rather than to a record with no bytes.
+ */
+async function blobForSave(input: SaveResumeToLibraryInput): Promise<Blob> {
+  if (input.id !== undefined && input.bytesUnchanged === true) {
+    const existing = await getResume(input.id);
+    if (existing !== undefined) return existing.blob;
+  }
+  return new Blob(input.bytes ? [input.bytes] : [], {
     type: MIME[input.sourceKind],
   });
+}
+
+/** Save (or overwrite, when `id` is given) a resume. Bytes are stored as a Blob
+ *  at rest; for DOCX (no source bytes kept in the done state) the blob is empty
+ *  and reload restores from the cached parse alone. Returns the record id. */
+export async function saveResumeToLibrary(
+  input: SaveResumeToLibraryInput,
+): Promise<string> {
+  const blob = await blobForSave(input);
   const snapshot: SavedResumeSnapshot = {
     result: input.result,
     score: input.score,

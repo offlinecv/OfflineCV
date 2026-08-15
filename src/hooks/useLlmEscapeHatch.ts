@@ -52,7 +52,17 @@ export interface EscapeHatchController {
   run: () => Promise<void>;
 }
 
-export function useLlmEscapeHatch(result: CascadeResult): EscapeHatchController {
+/**
+ * @param result   the résumé to re-parse, edit-folded (`displayResult`).
+ * @param parseKey the PRISTINE-parse identity behind `result` — see
+ *                 `useAnalyzedResume.parseKey`. The reset below keys on this,
+ *                 never on `result`: `result` is a memo over the edit override
+ *                 maps, so it is a fresh object on every keystroke.
+ */
+export function useLlmEscapeHatch(
+  result: CascadeResult,
+  parseKey: unknown,
+): EscapeHatchController {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<EscapeHatchStatus>({ kind: "idle" });
   const { selectedModelId } = useModelSelection();
@@ -67,10 +77,21 @@ export function useLlmEscapeHatch(result: CascadeResult): EscapeHatchController 
     };
   }, []);
 
-  // A fresh parse (new file) resets the panel — keyed on the result identity.
+  // A fresh parse (new file, a library load) resets the panel — keyed on the
+  // PRISTINE parse, not on `result`.
+  //
+  // This was `[result]`, which was harmless while the panel lived behind a tab:
+  // a reset only changed a tab label. Under #823's inline layout `result` is the
+  // edit-folded `displayResult`, re-memoized on every keystroke, and a reset is
+  // a settled "Recovered with on-device AI" confirmation reverting to a "Try a
+  // local AI pass" CTA — taking the whole "Local AI feedback" section with it
+  // (`ResultDetail` withholds the quality panel while an offer stands) while the
+  // header above still reads "Recovered", because THAT is keyed on `parseKey`.
+  // One keystroke, and the page contradicts itself. Same distinction
+  // `useLlmRecovery` and `useAnalyzedResume`'s `parseKey` docblock already make.
   useEffect(() => {
     setStatus({ kind: "idle" });
-  }, [result]);
+  }, [parseKey]);
 
   // Whether there is any text for the LLM to parse. A scanned/empty PDF has
   // none, so the recovery pass would be vacuous — treat as unavailable.

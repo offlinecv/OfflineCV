@@ -14,8 +14,10 @@
  *   2. "What an ATS misses" bottom section (only when gaps > 0):
  *      heading + intro + DisagreementResults + ReportGapSection.
  *
- * Tab order in ResultDetailTabs.tsx (by id): reconstructed → find-jobs →
- * quality → diagnostics.
+ * Placement (`ResultDetail.tsx`, #823): the body of the collapsed "Local AI
+ * feedback" disclosure below the reconstructed résumé — no longer a tab. It is
+ * withheld entirely while the degenerate-parse recovery offer stands, which is
+ * why that disclosure can be absent even on a WebGPU-capable browser.
  *
  * Design rules (CLAUDE.md):
  *   - Semantic tokens only; no hardcoded hex or raw palette classes.
@@ -51,11 +53,12 @@ export function ResumeQualityPanel({
     <section className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          {/* Deliberately NOT the tab label ("Local AI feedback"), same rule
-              ReconstructedResume follows: a heading that repeats its own tab
-              label is noise, and it makes every `toContain("Local AI feedback")`
-              assertion ambiguous about which element it matched. This states
-              what the section DOES; the tab states where you are. */}
+          {/* Deliberately NOT the disclosure's own summary ("Local AI
+              feedback"): a heading that repeats the row you just clicked to
+              open it is noise, and it makes every
+              `toContain("Local AI feedback")` assertion ambiguous about which
+              element it matched. This states what the section DOES; the summary
+              names it. */}
           <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
             What the model checks
           </h2>

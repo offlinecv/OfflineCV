@@ -5,9 +5,12 @@
  * ShareWithExtensionBar — hand this résumé to the browser extension, so the
  * postings it captures on job boards can be rated against it.
  *
- * Sits under the parsed result beside `SaveResumeBar`, and is the same shape of
- * affordance: a quiet secondary bar for a follow-on action, never a banner
- * competing with the user's own score. It lives on `/` rather than on `/jobs/`
+ * Sits under the parsed result as a quiet secondary bar for a follow-on action,
+ * never a banner competing with the user's own score. It is the last of that
+ * shape on this surface: `SaveResumeBar`, which used to sit beside it, moved
+ * into `ParsedHeader` in #824 — persistence state belongs above the fold, and
+ * this does not (nothing is lost by a user who never scrolls to it).
+ * It lives on `/` rather than on `/jobs/`
  * for two reasons that both point the same way — this is the only surface that
  * knows the résumé's **file name**, which is the label the extension's panel
  * shows when it names what it rated against, and it is where a user sent here
@@ -52,7 +55,16 @@ import {
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 
 interface ShareWithExtensionBarProps {
-  /** The EDITED parse — the user's corrections are what they want rated. */
+  /**
+   * The parse the page is showing: edited AND recovered. The user's corrections
+   * are what they want rated, and so is a degenerate parse repaired by the
+   * on-device pass — `App` passes `recovery.activeResult.canonical.fields`, the
+   * same value the score card, the export dialog, the autosave and both
+   * `/jobs/` routes read (see `useLlmRecovery`). This surface hands the résumé
+   * to something OUTSIDE the page, where a divergence has nothing on screen to
+   * reveal it, so it must not be the one consumer left on the pre-recovery
+   * fields.
+   */
   parsed: HeuristicParsedResume;
   /** Becomes the profile's label, so the extension's panel can name the résumé
    *  it is rating against instead of implying it knows which one this is. */

@@ -173,7 +173,7 @@ export interface JobQuery {
 
 /**
  * Structural subset of `ParsedResume` this module actually reads. The live
- * caller (`ResultDetailTabs`) holds a `HeuristicParsedResume`
+ * caller (`ResultDetail`) holds a `HeuristicParsedResume`
  * (`Partial<ParsedResume> & { skills, experience, education }` —
  * src/lib/heuristics/types.ts), which lacks `ParsedResume`'s other required
  * fields (`full_name`, `skills_explicit`, `skills_inferred`). Picking just the

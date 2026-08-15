@@ -66,9 +66,9 @@ const NOTHING_TO_SEND = "Nothing to search for yet";
  * title filters locally in `search.ts`'s `matchesQuery`. And the star does
  * survive the handoff: `useAnalyzedResume` folds the `headline` override into
  * `canonical.fields` (it is in `applyOverrides`' `CONTACT_KEYS`), that becomes
- * `displayResult`, and `ResultDetailTabs` hands exactly those fields to
- * `FindJobsLauncher` — so re-launching from `/` does re-seed from the role
- * marked there, replacing a title edited only here.
+ * `displayResult`, and the rail's Match-jobs stage hands exactly those fields
+ * to `departToJobsAndNavigate` — so re-launching from `/` does re-seed from the
+ * role marked there, replacing a title edited only here.
  */
 export const ROLE_HINT =
   "Only the starred title is sent to the job feeds. Every other title narrows and ranks the results right here on your device. The star starts from the role you marked on the résumé page, so going back and launching again will replace a title you changed here.";
