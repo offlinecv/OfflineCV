@@ -947,3 +947,59 @@ describe("extractEducation — cleanField strips leftover edge middot and bullet
     expect(value[0].field).toBeUndefined();
   });
 });
+
+describe("extractEducation — parseDegreeAndField strips middot/bullet before in/of connective (#839)", () => {
+  it("strips middot then in connective from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. · in Computer Science",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("strips bullet then of connective from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. • of Computer Science",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("still strips hyphen and em dash before in connective", () => {
+    const { value: hyphen } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. - in Computer Science",
+      ]),
+    );
+    expect(hyphen[0].field).toBe("Computer Science");
+
+    const { value: emDash } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. — in Computer Science",
+      ]),
+    );
+    expect(emDash[0].field).toBe("Computer Science");
+  });
+
+  it("preserves interior middot in a two-part field name", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Mathematics · Statistics",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Mathematics · Statistics");
+  });
+});
