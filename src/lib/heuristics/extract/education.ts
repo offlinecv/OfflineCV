@@ -533,9 +533,9 @@ function parseDegreeAndField(line: string): {
   }
   const fieldRaw = line
     .slice(fieldStart)
-    // Drop a leading "in "/"of " connective or a "-"/"—"/":"/"," separator.
+    // Drop a leading "in "/"of " connective or a "-"/"—"/":"/","/"·"/"•" separator.
     .replace(/^\s*(?:in|of)\s+/i, "")
-    .replace(/^\s*[-–—,:]\s*/, "")
+    .replace(/^\s*[-–—,:·•]\s*/, "")
     .replace(/^\s*(?:in|of)\s+/i, "");
   return { degree, field: cleanField(fieldRaw) };
 }
