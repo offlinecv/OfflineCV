@@ -32,12 +32,5 @@
     "SQL",
     "Linux",
     "AWS"
-  ],
-  "knownWrong": {
-    "education.degree": {
-      "issue": null,
-      "status": "unfiled",
-      "note": "The degree's FIELD comes back carrying the header line's own separator: field = “Computer Science ·”, so the degree reads “B.S. Computer Science ·”. The middot is punctuation from the line, not part of the field of study."
-    }
-  }
+  ]
 }

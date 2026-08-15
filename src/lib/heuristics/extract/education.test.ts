@@ -857,3 +857,93 @@ describe("extractEducation — one-line 'Degree Field, Institution' + en-dash da
     expect(value[0].location).toBe("Boston, MA");
   });
 });
+
+describe("extractEducation — cleanField strips leftover edge middot and bullet separators (#835)", () => {
+  it("strips trailing middot separator from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Computer Science ·",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("strips trailing bullet separator from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "Bachelor of Science in Mathematics •",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("Bachelor of Science");
+    expect(value[0].field).toBe("Mathematics");
+  });
+
+  it("strips leading middot or bullet from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. · Computer Science",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("strips the separator orphaned by the trailing-date cut", () => {
+    // The fixture shape the issue was filed from: the date strip removes "2020"
+    // and leaves the "·" that divided it from the field.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Computer Science · 2020",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("preserves an INTERIOR middot joining a genuine two-part field", () => {
+    // The strip is anchored at both ends, so a separator that is real content
+    // survives. This is what stops a future widening from de-anchoring it.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Mathematics · Statistics",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Mathematics · Statistics");
+  });
+
+  it("preserves an internal ampersand inside a compound field name", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. in Computer Science & Engineering ·",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science & Engineering");
+  });
+
+  it("returns undefined field when only separators survive", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. · • -",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBeUndefined();
+  });
+});

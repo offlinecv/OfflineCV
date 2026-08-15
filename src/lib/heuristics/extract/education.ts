@@ -455,8 +455,14 @@ function cleanField(raw: string): string | undefined {
   // Cut a trailing "… , Minor in Economics" / "… , GPA: 3.8" note — a sub-field,
   // not part of the subject.
   f = f.replace(/[,;]\s*(?:minor|major|gpa|concentration)\b.*$/i, "");
-  // Strip leftover edge punctuation.
-  f = f.replace(/^[\s,;:–\-—]+|[\s,;:–\-—]+$/g, "").trim();
+  // Strip leftover edge punctuation and separators — the middot/bullet a
+  // template used to divide the header from a field this parse did not keep
+  // ("Computer Science · 2020" loses the year above, leaving the "·", #835).
+  // Anchored at BOTH ends, so an interior separator in a genuine two-part field
+  // ("Mathematics · Statistics") is untouched. This glyph class is a known
+  // duplicate of the ones in `regex.ts` / `line-primitives.ts`, not an
+  // oversight — unifying the separator vocabulary is tracked as #653.
+  f = f.replace(/^[\s,;:·•–\-—]+|[\s,;:·•–\-—]+$/g, "").trim();
   return f.length > 0 ? f : undefined;
 }
 
