@@ -857,3 +857,66 @@ describe("extractEducation — one-line 'Degree Field, Institution' + en-dash da
     expect(value[0].location).toBe("Boston, MA");
   });
 });
+
+describe("extractEducation — cleanField strips leftover edge middot and bullet separators (#835)", () => {
+  it("strips trailing middot separator from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. Computer Science ·",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("strips trailing bullet separator from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "Bachelor of Science in Mathematics •",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("Bachelor of Science");
+    expect(value[0].field).toBe("Mathematics");
+  });
+
+  it("strips leading middot or bullet from degree field", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. · Computer Science",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science");
+  });
+
+  it("preserves internal middot or ampersand inside compound field names", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. in Computer Science & Engineering ·",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBe("Computer Science & Engineering");
+  });
+
+  it("returns undefined field when only separators survive", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Springfield State University",
+        "B.S. · • -",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].degree).toBe("B.S.");
+    expect(value[0].field).toBeUndefined();
+  });
+});
+

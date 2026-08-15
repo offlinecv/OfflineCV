@@ -455,8 +455,8 @@ function cleanField(raw: string): string | undefined {
   // Cut a trailing "… , Minor in Economics" / "… , GPA: 3.8" note — a sub-field,
   // not part of the subject.
   f = f.replace(/[,;]\s*(?:minor|major|gpa|concentration)\b.*$/i, "");
-  // Strip leftover edge punctuation.
-  f = f.replace(/^[\s,;:–\-—]+|[\s,;:–\-—]+$/g, "").trim();
+  // Strip leftover edge punctuation and separators (#835).
+  f = f.replace(/^[\s,;:·•–\-—]+|[\s,;:·•–\-—]+$/g, "").trim();
   return f.length > 0 ? f : undefined;
 }
 
