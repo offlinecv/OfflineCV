@@ -158,7 +158,7 @@ describe("buildJobQuery", () => {
     const parsed = baseParsed({ skills: ["Python", "SQL"] });
     const query = buildJobQuery(parsed);
     expect(query.titles).toEqual([]);
-    expect(query.skills).toEqual(["python", "sql"]);
+    expect(query.skills).toEqual(["Python", "SQL"]);
     expect(query.seniority).toBeUndefined();
   });
 
@@ -300,7 +300,7 @@ describe("buildJobQuery", () => {
     const parsed = baseParsed({ skills: ["JS", "Javascript", "React.js", "python3"] });
     const query = buildJobQuery(parsed);
     // "JS" and "Javascript" both canonicalize to the same skill id and collapse.
-    expect(query.skills).toEqual(["javascript", "react", "python"]);
+    expect(query.skills).toEqual(["JavaScript", "React", "Python"]);
   });
 
   it("annotates which of the emitted skills are canonical names, and only those", () => {
@@ -312,12 +312,12 @@ describe("buildJobQuery", () => {
     });
     const query = buildJobQuery(parsed);
     expect(query.skills).toEqual([
-      "javascript",
-      "python",
+      "JavaScript",
+      "Python",
       "Team Building & Mentorship",
       "Competitive Juggling",
     ]);
-    expect(query.canonicalSkills).toEqual(["javascript", "python"]);
+    expect(query.canonicalSkills).toEqual(["JavaScript", "Python"]);
   });
 
   it("leaves canonicalSkills absent when no skill is a canonical name", () => {
@@ -360,7 +360,7 @@ describe("buildJobQuery", () => {
   it("ignores blank/whitespace-only skill entries", () => {
     const parsed = baseParsed({ skills: ["  ", "", "python"] });
     const query = buildJobQuery(parsed);
-    expect(query.skills).toEqual(["python"]);
+    expect(query.skills).toEqual(["Python"]);
   });
 
   it("ranks canonical (taxonomy-recognized) skills ahead of unrecognized ones, past the old cap of 5 (#541)", () => {
@@ -394,7 +394,7 @@ describe("buildJobQuery", () => {
     // so a recognized skill no longer renders lowercase beside a title-cased
     // free-text one.
     expect(query.skills[0]).toBe("Stakeholder Management");
-    const aiClusterIndex = query.skills.indexOf("python");
+    const aiClusterIndex = query.skills.indexOf("Python");
     const incidentalIndex = query.skills.indexOf("Team Leadership");
     expect(aiClusterIndex).toBeGreaterThanOrEqual(0);
     expect(incidentalIndex).toBeGreaterThanOrEqual(0);
@@ -402,22 +402,22 @@ describe("buildJobQuery", () => {
     // All 5 canonical AI/ML skills survive the cap.
     expect(query.skills).toEqual(
       expect.arrayContaining([
-        "python",
+        "Python",
         "Machine Learning",
-        "pytorch",
-        "tensorflow",
-        "nlp",
+        "PyTorch",
+        "TensorFlow",
+        "NLP",
       ]),
     );
   });
 
   it("preserves résumé order within the canonical and unrecognized tiers (stable sort)", () => {
     const parsed = baseParsed({
-      skills: ["go", "rust", "underwater basket weaving", "competitive juggling"],
+      skills: ["golang", "rust", "underwater basket weaving", "competitive juggling"],
     });
     const query = buildJobQuery(parsed);
-    // Canonical tier keeps its own relative order (go before rust)...
-    expect(query.skills.indexOf("go")).toBeLessThan(query.skills.indexOf("rust"));
+    // Canonical tier keeps its own relative order (Go before Rust)...
+    expect(query.skills.indexOf("Go")).toBeLessThan(query.skills.indexOf("Rust"));
     // ...and the unrecognized tier keeps its own relative order too.
     expect(query.skills.indexOf("Underwater Basket Weaving")).toBeLessThan(
       query.skills.indexOf("Competitive Juggling"),

@@ -42,15 +42,20 @@ describe("skills dictionary", () => {
   });
 
   it("starts every authored label with a capital or a digit (#607)", () => {
-    // A `label` is rendered verbatim beside chips `deriveSkills` title-cased
-    // itself, so a lowercase one puts two casings in one sentence — and the
-    // recognized skill is the one that looks unpolished. Checked on the first
-    // character only: inside the label the entry's own house casing rules
-    // ("iOS", "P&L Ownership", "A/B Testing"), which no rule can derive.
-    const offenders = SKILLS.filter((s) => s.label && !/^[A-Z0-9]/.test(s.label)).map(
-      (s) => `${s.id}: "${s.label}"`,
-    );
+    // These brands intentionally start lowercase; every other label must make
+    // its display casing explicit rather than inheriting a stable ID.
+    const LOWERCASE_BRAND_LABELS = new Set(["iOS", "dbt", "jQuery", "gRPC"]);
+    const offenders = SKILLS.filter(
+      (s) =>
+        s.label &&
+        !LOWERCASE_BRAND_LABELS.has(s.label) &&
+        !/^[A-Z0-9]/.test(s.label),
+    ).map((s) => `${s.id}: "${s.label}"`);
     expect(offenders).toEqual([]);
+  });
+
+  it("gives every entry an authored display label", () => {
+    expect(SKILLS.filter((s) => !s.label).map((s) => s.id)).toEqual([]);
   });
 
   it("keeps every alias lowercase — aliases are matched, never shown", () => {
@@ -65,7 +70,7 @@ describe("skills dictionary", () => {
 
   it("pins the dictionary data version so an alias edit is a conscious bump", () => {
     // Upstream of `term-quality.ts`'s answer, which no other version covers.
-    expect(SKILLS_DICTIONARY_VERSION).toBe("1.1");
+    expect(SKILLS_DICTIONARY_VERSION).toBe("1.2");
   });
 
   it("matches aliases case-insensitively at word boundaries", () => {
