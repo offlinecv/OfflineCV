@@ -79,6 +79,12 @@ describe("tokenizeSkillLine", () => {
     expect(tokenizeSkillLine(",,,;;;")).toEqual([]);
   });
 
+  it("keeps the defensible single-letter languages and rejects stray glyphs (#832)", () => {
+    const result = tokenizeSkillLine("C, R, D, X");
+    expect(result).toEqual(expect.arrayContaining(["C", "R", "D"]));
+    expect(result).not.toContain("X");
+  });
+
   it("drops the whole cell when a URL is present in a comma-separated list", () => {
     // tokenizeCell's looksLikeContactLink check fires on the ENTIRE cleaned
     // cell before the split.  "github.com/janesmith" matches the path-slash

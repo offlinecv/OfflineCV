@@ -130,6 +130,12 @@ const PROFILE_HOST_RE =
  *  "Socket.io", "ASP.NET") that has no slash. */
 const URLISH_RE = /(https?:\/\/|www\.|\b[a-z0-9-]+\.[a-z]{2,}\/\S)/i;
 
+/** One-character tokens that are real, commonly-listed languages. The length
+ * floor in `isSkillToken` is a noise guard against stray glyphs left by column
+ * splitting; these are the only single characters that are not noise, so they
+ * are allowlisted rather than lowering the floor. */
+const SINGLE_LETTER_SKILLS = new Set(["c", "r", "d"]);
+
 /** True when a candidate skill token is really a professional-profile link
  *  (GitHub / LinkedIn / portfolio, etc.) or its bare heading word. Such links
  *  belong only in the contact/profile section, never in Skills. */
@@ -139,6 +145,7 @@ function looksLikeContactLink(tok: string): boolean {
 }
 
 function isSkillToken(tok: string): boolean {
+  if (tok.length === 1 && SINGLE_LETTER_SKILLS.has(tok.toLowerCase())) return true;
   if (tok.length < 2 || tok.length > 40) return false;
   if (/^\d+$/.test(tok)) return false;
   // A professional-profile link (or its bare "GitHub" / "LinkedIn" heading) is

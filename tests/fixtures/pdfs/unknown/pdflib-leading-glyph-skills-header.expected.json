@@ -22,7 +22,7 @@
       "phoneIsValid",
       "skills"
     ],
-    "skillsCount": 8,
+    "skillsCount": 9,
     "experienceCount": 1,
     "educationCount": 1,
     "projectsCount": 0,
@@ -74,7 +74,7 @@
     "sectionSource": "markdown",
     "pageCount": 1,
     "rawCharCount": 462,
-    "extractedCharCount": 289,
+    "extractedCharCount": 290,
     "sections": [
       {
         "name": "profile",
@@ -101,7 +101,7 @@
       "hasSummary": false,
       "experienceCount": 1,
       "educationCount": 1,
-      "skillsCount": 8
+      "skillsCount": 9
     },
     "linkAnnotationCount": 0,
     "disagreements": []
