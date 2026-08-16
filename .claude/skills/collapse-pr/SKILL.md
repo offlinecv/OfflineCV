@@ -61,9 +61,16 @@ still print; `--yes` only changes whether a soft gate stops the run.
 
 ## Why this skill exists
 
-**This section is the single source of truth for the merge-queue rationale.** If
-you are reading `open-pr`, `revise-pr`, or `pr-review` and want to know *why* the
-branch must arrive as one commit, it is here and nowhere else.
+**This section is the single source of truth for the merge-queue rationale among
+the skills.** If you are reading `open-pr`, `revise-pr`, or `pr-review` and want
+to know *why* the branch must arrive as one commit, it is here — those three carry
+only their own decision about *whether* to collapse.
+
+`docs/CONTRIBUTING-PROCESS.md` → **Squash messages** states the same derivation for
+a human contributor who is not reading skill files at all. That is a deliberate
+second copy, not drift: it is the doc's job to explain the repo's rules to people.
+Keep the two in step, and put anything about *mechanics* — gates, flags, modes —
+only here.
 
 `main` merges through a **merge queue**, and the queue's enqueue API carries **no
 commit-message fields** — `EnqueuePullRequestInput` accepts `pullRequestId` /
@@ -108,7 +115,22 @@ whichever mode we are in.
 
 ```bash
 REPO="${REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"   # offlinecv/OfflineCV
-PR_NUM="${PR_NUM:-$(gh pr view --json number -q .number 2>/dev/null || true)}"
+
+# Never `2>/dev/null || true` here. An empty PR_NUM selects `inplace` below — the
+# mode that rewrites the user's OWN checkout — so "no PR exists" and "the call
+# failed" must not collapse to the same answer. An auth expiry, a rate limit, or a
+# dropped connection would otherwise silently redirect the rewrite at local work.
+if [ -z "${PR_NUM:-}" ]; then
+  PR_ERR="$(mktemp -t collapse-pr-err)"
+  PR_NUM="$(gh pr view --json number -q .number 2>"$PR_ERR" || true)"
+  if [ -z "$PR_NUM" ] && ! grep -qi 'no pull requests found' "$PR_ERR"; then
+    echo "could not determine whether a PR exists for this branch:" >&2
+    cat "$PR_ERR" >&2
+    echo "refusing — an empty result here would select in-place mode and rewrite this checkout." >&2
+    rm -f "$PR_ERR"; exit 1
+  fi
+  rm -f "$PR_ERR"
+fi
 
 if [ -n "$IN_PLACE" ] || [ -z "$PR_NUM" ]; then
   # ---- in-place mode: this checkout is the source of truth ----
@@ -189,9 +211,10 @@ object must be byte-identical to the pre-collapse head's:
 
 Step 5 runs it between the commit and the push. It is cheap, and it is the
 strongest correctness check available here — it proves content preservation
-directly instead of inferring it from a diff. Verified on #842: two commits
-collapsed to one, tree `56a742c98fb9d6afe1370ab5f9432c82abc6c5d3` on both sides,
-zero diff.
+directly instead of inferring it from a diff. Verified end to end on PR #842,
+which this skill collapsed for real: two commits (`3aeae1b`, `72358ab`) to one
+(`c5eeec8`), tree `56a742c98fb9d6afe1370ab5f9432c82abc6c5d3` on both sides, zero
+diff against the pre-collapse head, lease pinned to `72358ab` and accepted.
 
 **What it licenses: skipping the pre-push hook — in `worktree` mode only.**
 `offlinecv` installs a managed `.git/hooks/pre-push` that runs the full `npm run
@@ -567,22 +590,47 @@ fills from its `$FIXED_PATHS`. Any dirty path *not* on the list — or any dirty
 path at all in a worktree that is not `--authored-worktree` — is unknown
 provenance and drops that whole tree to row 2. The list is a whitelist, not a hint.
 
+**The row is opt-in, and the opt-in is a condition in code.** The table's *"changes
+this run authored"* is a **precondition**, not a description of the common case —
+and the iterate block runs these rows for *every* match, so without the guard below
+row 1 executes on checkouts it has no business writing to. `ROW1=skip` is what the
+commit / ancestry / push blocks below test; when it is set they are no-ops and the
+tree falls through to rows 3 and 4 like any other.
+
 ```bash
 [ "$MODE" = worktree ] || exit 1        # 3e never runs in inplace mode (above)
+ROW1=run
+
+DIRTY_COUNT="$(git -C "$WT" status --porcelain --untracked-files=no -z \
+               | tr -dc '\0' | wc -c | tr -d ' ')"
 
 if [ "$WT" != "${AUTHORED_WORKTREE:-}" ]; then   # :- — the flag is optional
-  # Not the caller's checkout: nothing here is ours by construction.
-  # Any dirty path at all -> row 2.
-  DIRTY_COUNT="$(git -C "$WT" status --porcelain --untracked-files=no -z \
-                 | tr -dc '\0' | wc -c | tr -d ' ')"
-  # Row 2. Run Step 5b before stopping, like every refusal in this skill.
-  [ "$DIRTY_COUNT" = 0 ] || { echo "row 2: $WT is dirty and is not --authored-worktree" >&2; exit 1; }
+  # Not the caller's checkout: nothing here is ours by construction, so there is
+  # nothing to fold in. Dirty -> row 2 refuses; clean -> skip to rows 3/4.
+  if [ "$DIRTY_COUNT" != 0 ]; then
+    # Row 2. Teardown is CODE here, not a comment: this fires in worktree mode,
+    # the one mode where Step 5b is not a no-op, so an exit that skips it orphans
+    # the linked worktree and $WORKDIR_PARENT under /tmp.
+    echo "row 2: $WT is dirty and is not --authored-worktree" >&2
+    git worktree remove --force "$WORKDIR"; rm -rf "$WORKDIR_PARENT"
+    exit 1
+  fi
+  echo "row 1: $WT is not --authored-worktree and is clean — nothing to fold in"
+  ROW1=skip
+elif [ "$DIRTY_COUNT" = 0 ]; then
+  # The authored checkout, but nothing dirty: the documented happy path, where
+  # `pr-review` step 4 already committed $FIXED_PATHS. Running on regardless would
+  # reach `git commit` on a clean tree and fail — on the skill's MAIN path, in an
+  # execution model with no `set -e`, where that nonzero exit is silently discarded.
+  echo "row 1: $WT is clean — fixes were already committed upstream of this gate"
+  ROW1=skip
 fi
 
 # Null-delimited, and `-uno`. Never `cut -c4-`: it mangles rename entries
-# (`R  old -> new`) and git quotes paths containing spaces, so neither form can
-# ever match the whitelist — the tree would silently drop to row 2 with a
-# refusal naming a path the user cannot find.
+# (`R  old -> new`), so it can never match the whitelist — the tree would silently
+# drop to row 2 with a refusal naming a path the user cannot find. (Quoting is not
+# part of the argument: in `-z` mode git never quotes. The rename case alone is
+# enough, and it is the case that actually fires.)
 git -C "$WT" status --porcelain --untracked-files=no -z \
   | while IFS= read -r -d '' ENTRY; do
       XY="${ENTRY:0:2}"; P="${ENTRY:3}"       # `XY PATH`: one space at index 2
@@ -595,9 +643,11 @@ git -C "$WT" status --porcelain --untracked-files=no -z \
 # every path emitted above must appear in $AUTHORED_PATHS, or this is row 2.
 # A rename emits BOTH ends, because committing it touches both.
 
-WT_PRE_FIX_SHA="$(git -C "$WT" rev-parse HEAD)"   # BEFORE the commit — see the push below
-git -C "$WT" add -- ${AUTHORED_PATHS[@]+"${AUTHORED_PATHS[@]}"}   # by path, never `git add -A`/`.`
-git -C "$WT" commit -m "${AUTHORED_MESSAGE:-chore: fold in run-authored changes (collapse-pr gate 3e)}"
+if [ "$ROW1" = run ]; then
+  WT_PRE_FIX_SHA="$(git -C "$WT" rev-parse HEAD)"   # BEFORE the commit — see the push below
+  git -C "$WT" add -- ${AUTHORED_PATHS[@]+"${AUTHORED_PATHS[@]}"}   # by path, never `git add -A`/`.`
+  git -C "$WT" commit -m "${AUTHORED_MESSAGE:-chore: fold in run-authored changes (collapse-pr gate 3e)}"
+fi
 ```
 
 **The commit message is supplied, never invented.** `--authored-message` sets it
@@ -635,60 +685,117 @@ undecidable. Test ancestry first and take the branch that fits:
 ```bash
 [ "$MODE" = worktree ] || exit 1        # 3e never runs in inplace mode (above)
 
-if git -C "$WT" merge-base --is-ancestor "$WT_PRE_FIX_SHA" "origin/$HEAD_REF"; then
-  # $WT held nothing origin lacks: our new commit is the only delta.
-  git -C "$WT" push origin "HEAD:$HEAD_REF"       # plain, fast-forward only
-else
+if [ "$ROW1" = run ] && git -C "$WT" merge-base --is-ancestor "$WT_PRE_FIX_SHA" "origin/$HEAD_REF"; then
+  ROW1_PUBLISH=push
+  # $WT held nothing origin lacks: our new commit is the only delta, and $WT is a
+  # real checkout with node_modules, so the managed pre-push hook can and should run.
+  git -C "$WT" push origin "HEAD:$HEAD_REF" || ROW1_PUSH_FAILED=1   # plain, ff-only
+
+  # Same rule as Step 5's push: no `set -e`, so the status has to be chained or it
+  # is discarded. Consult the three-cause table below before deciding what it means.
+  [ -z "${ROW1_PUSH_FAILED:-}" ] || echo "row 1 push rejected — see the table below" >&2
+
+elif [ "$ROW1" = run ]; then
+  ROW1_PUBLISH=cherry-pick
   # $WT has local-only commits. Publish OURS and only ours: back the whole tip up
-  # per row 3 first (so nothing is lost), then replay just the fix onto the
-  # remote head inside $WORKDIR, which is already detached at origin/$HEAD_REF.
+  # first (so nothing is lost), then replay just the fix onto the remote head
+  # inside $WORKDIR, which is already detached at origin/$HEAD_REF.
   FIX_SHA="$(git -C "$WT" rev-parse HEAD)"
-  # ... row 3's backup of $FIX_SHA runs here, with its own `||` refusal ...
-  git -C "$WORKDIR" cherry-pick "$FIX_SHA"
-  git -C "$WORKDIR" push origin "HEAD:$HEAD_REF"
+
+  # Row 3's backup, INLINE — not a comment. This is the only thing between the
+  # `reset --hard` row 3 will run on this tree and unrecoverable loss, and a
+  # placeholder here is exactly the prose-instead-of-code defect this gate keeps
+  # relearning. $BACKUP is exported to row 3, which short-circuits on it.
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+  BACKUP="collapse-pr-backup/$HEAD_REF-$STAMP"
+  i=0
+  while git -C "$WT" show-ref --verify --quiet "refs/heads/$BACKUP"; do
+    i=$((i + 1)); BACKUP="collapse-pr-backup/$HEAD_REF-$STAMP-$i"
+  done
+  git -C "$WT" branch "$BACKUP" "$FIX_SHA" || {
+    echo "backup ref '$BACKUP' could not be created; refusing to continue." >&2
+    exit 1
+  }
+  [ "$(git -C "$WT" rev-parse "$BACKUP")" = "$FIX_SHA" ] || {
+    echo "backup ref '$BACKUP' does not point at $FIX_SHA — refusing to continue." >&2
+    exit 1
+  }
+
+  # Chained: an unchained conflict would fall through with $WORKDIR's head
+  # unchanged, silently dropping the fix while the run reports success.
+  git -C "$WORKDIR" cherry-pick "$FIX_SHA" || {
+    git -C "$WORKDIR" cherry-pick --abort
+    echo "cherry-pick of $FIX_SHA onto origin/$HEAD_REF conflicted." >&2
+    echo "Nothing was lost — the work is at $BACKUP. Run Step 5b." >&2
+    exit 1
+  }
+  # NO push here. See below: Step 5 publishes this.
 fi
 ```
+
+**The cherry-pick branch does not push, and that is deliberate.** The obvious
+symmetry — push here too, like the `if` branch — is wrong for a reason the `if`
+branch does not share: this push would come from `$WORKDIR`, a `mktemp -d`
+worktree that has a `package.json` and **no `node_modules`**. Worktrees share
+`.git/hooks`, so the managed `pre-push` fires and `npm run verify` fails for want
+of dependencies, on **every** run — and Step 0b's licence to bypass it does *not*
+extend here, because the cherry-picked content is new relative to `origin` and no
+tree-identity assertion covers it. Bypassing anyway would publish an unverified
+tree; bootstrapping `node_modules` in a throwaway worktree to verify a tree Step 5
+is about to re-push seconds later is minutes of work for nothing.
+
+So the fix simply *stays* in `$WORKDIR`, where Step 5's `reset --soft` + commit
+folds it into the collapsed commit and Step 5's own push publishes it — under the
+lease pinned in gate 3d, which is still valid precisely because nothing pushed in
+between. One push instead of two, and the unverified-tree question never arises.
+
+**Which is why the re-pin below is scoped to the `push` branch.** Re-pinning runs
+`git -C "$WORKDIR" reset --hard "origin/$HEAD_REF"` — on the cherry-pick branch
+that would discard the cherry-pick it just made, which is the whole delta.
 
 `$WT_PRE_FIX_SHA` is `$WT`'s `HEAD` read **before** the `git commit` above.
 Deciding on the post-commit `HEAD` would always answer "not an ancestor" and never
 take the cheap path.
 
-Two consequences of the `else` branch, both worth stating so they are not
-rediscovered later:
+One consequence of the `cherry-pick` branch, worth stating so it is not
+rediscovered later: **row 3 is already half-done for this `$WT`.** The backup
+above covered the local-only commits *and* the fix commit on top of them, so
+row 3 must not mint a second ref for this checkout — only the `reset --hard`
+remains. Row 3 short-circuits on `$BACKUP` being set, in code, and the report
+names the one ref.
 
-- **Row 3 is already half-done for this `$WT`.** The backup above covered the
-  local-only commits *and* the fix commit on top of them, so when row 3 reaches
-  this checkout it must not mint a second ref — only the `reset --hard` remains.
-  Report the one ref.
-- **The cherry-pick can conflict**, because `$WORKDIR` is at `origin/$HEAD_REF`
-  and the fix was written against a different base. On conflict, `git -C
-  "$WORKDIR" cherry-pick --abort`, run Step 5b, and refuse: replaying it by hand
-  would be composing changes nobody reviewed. The backup ref already holds the
-  work, so nothing is lost — name it.
-
-Because the push moves the target, re-pin everything Step 0 and gate 3d read from
-it before continuing:
+Only the `push` branch moved the target, so re-pin what Step 0 and gate 3d read
+from it — and **only** on that branch:
 
 ```bash
 [ "$MODE" = worktree ] || exit 1
-git fetch origin "$HEAD_REF"
-REMOTE_SHA="$(git ls-remote origin "refs/heads/$HEAD_REF" | cut -f1)"
-git -C "$WORKDIR" fetch origin "$HEAD_REF"
-git -C "$WORKDIR" reset --hard "origin/$HEAD_REF"
-BASE_SHA="$(git -C "$WORKDIR" merge-base HEAD "origin/$BASE_REF")"
+
+if [ "${ROW1_PUBLISH:-}" = push ]; then
+  git fetch origin "$HEAD_REF"
+  REMOTE_SHA="$(git ls-remote origin "refs/heads/$HEAD_REF" | cut -f1)"
+  git -C "$WORKDIR" fetch origin "$HEAD_REF"
+  git -C "$WORKDIR" reset --hard "origin/$HEAD_REF"
+  BASE_SHA="$(git -C "$WORKDIR" merge-base HEAD "origin/$BASE_REF")"
+fi
+# cherry-pick branch: nothing was pushed, so REMOTE_SHA and the lease still hold.
+# BASE_SHA is recomputed by Step 2's formula in Step 5 against the same merge base,
+# and the `reset --hard` above would have discarded the cherry-pick.
 ```
 
-**If that push is rejected, find out why before blaming anyone.** Three causes
-reach the same rejection message and only one of them is gate 3d's:
+**If the `push` branch's push is rejected, find out why before blaming anyone.**
+Three causes reach the same rejection message and only one of them is gate 3d's:
 
 | Test | Cause | Answer |
 |---|---|---|
 | `git merge-base --is-ancestor "$REMOTE_SHA" HEAD` **fails** | someone genuinely pushed while we worked — 3d's condition | refuse at 3d, run Step 5b, stop |
-| it **passes**, and this is the `$WT` path | `$WT` was simply *behind* `origin` (row 4's state) and row 1 committed on a stale head. Nobody pushed; 3d already passed against this same `REMOTE_SHA` | fetch, `reset --hard origin/$HEAD_REF` on `$WT`, re-apply the authored paths, retry once — do **not** refuse |
-| the rejection came from `.git/hooks/pre-push` | row 1's push is a plain push from a **real checkout**, so the managed hook fires and runs `npm run verify`. It is *supposed* to: these are new changes, and Step 0b's licence covers only a tree the assertion proved unchanged | fix the failing gate. Never set `OFFLINECV_SKIP_HOOKS=1` here |
+| it **passes** | `$WT` was simply *behind* `origin` (row 4's state) and row 1 committed on a stale head. Nobody pushed; 3d already passed against this same `REMOTE_SHA` | fetch, `reset --hard origin/$HEAD_REF` on `$WT`, re-apply the authored paths, retry once — do **not** refuse |
+| the rejection came from `.git/hooks/pre-push` | this push is a plain push from a **real checkout** with dependencies installed, so the managed hook fires and runs `npm run verify`. It is *supposed* to: these are new changes, and Step 0b's licence covers only a tree the assertion proved unchanged | fix the failing gate. Never set `OFFLINECV_SKIP_HOOKS=1` here |
 
 Refusing on the second or third row would be wrong: in neither case did anyone
 push, and in the third the tree is unverified rather than contested.
+
+All three rows are about the `push` branch by construction — the `cherry-pick`
+branch does not push, so it cannot reach any of them.
 
 ##### Row 2 — uncommitted, unknown provenance (refuse)
 
@@ -720,33 +827,48 @@ reset, and only on a tree rows 1 and 2 have already cleaned:
 ```bash
 [ "$MODE" = worktree ] || exit 1        # 3e never runs in inplace mode (above)
 
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-BACKUP="collapse-pr-backup/$HEAD_REF-$STAMP"
-
-# The stamp has second resolution, so two runs in the same second collide. Find
-# a free name rather than failing on one — a retry loop would otherwise hit the
-# refusal below every single time.
-i=0
-while git -C "$WT" show-ref --verify --quiet "refs/heads/$BACKUP"; do
-  i=$((i + 1)); BACKUP="collapse-pr-backup/$HEAD_REF-$STAMP-$i"
-done
-
 SAVED="$(git -C "$WT" rev-parse HEAD)"
 
-# The backup is a HARD PRECONDITION, not a courtesy — never let the reset run
-# without it. Chained, so a failed branch creation cannot fall through.
-git -C "$WT" branch "$BACKUP" "$SAVED" || {
-  echo "backup ref '$BACKUP' could not be created; refusing to reset." >&2
-  echo "Nothing was discarded. Fix the ref store and re-run." >&2
-  exit 1
-}
+# Row 1's cherry-pick branch already backed this checkout up, covering the
+# local-only commits AND the fix on top. Minting a second ref would contradict
+# the one-ref report contract; skipping the backup entirely would be worse.
+if [ -n "${BACKUP:-}" ]; then
+  echo "row 3: $WT already preserved at $BACKUP by row 1 — reset only"
+else
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+  BACKUP="collapse-pr-backup/$HEAD_REF-$STAMP"
 
-# Creating the ref is not the same as the ref pointing where we meant. Verify.
-[ "$(git -C "$WT" rev-parse "$BACKUP")" = "$SAVED" ] || {
-  echo "backup ref '$BACKUP' does not point at $SAVED — refusing to reset." >&2
-  echo "Nothing was discarded." >&2
-  exit 1
-}
+  # The stamp has second resolution, so two runs in the same second collide. Find
+  # a free name rather than failing on one — a retry loop would otherwise hit the
+  # refusal below every single time.
+  i=0
+  while git -C "$WT" show-ref --verify --quiet "refs/heads/$BACKUP"; do
+    i=$((i + 1)); BACKUP="collapse-pr-backup/$HEAD_REF-$STAMP-$i"
+  done
+
+  # The backup is a HARD PRECONDITION, not a courtesy — never let the reset run
+  # without it. Chained, so a failed branch creation cannot fall through.
+  git -C "$WT" branch "$BACKUP" "$SAVED" || {
+    # The search above is TOCTOU: a concurrent run can take the same free name
+    # between the check and the create. Say so, rather than sending the user to
+    # inspect a ref store that is fine.
+    if git -C "$WT" show-ref --verify --quiet "refs/heads/$BACKUP"; then
+      echo "backup ref '$BACKUP' was taken by a concurrent run; refusing to reset." >&2
+      echo "Nothing was discarded. Re-run — the name search will pick the next free one." >&2
+    else
+      echo "backup ref '$BACKUP' could not be created; refusing to reset." >&2
+      echo "Nothing was discarded. Fix the ref store and re-run." >&2
+    fi
+    exit 1
+  }
+
+  # Creating the ref is not the same as the ref pointing where we meant. Verify.
+  [ "$(git -C "$WT" rev-parse "$BACKUP")" = "$SAVED" ] || {
+    echo "backup ref '$BACKUP' does not point at $SAVED — refusing to reset." >&2
+    echo "Nothing was discarded." >&2
+    exit 1
+  }
+fi
 
 git -C "$WT" reset --hard "origin/$HEAD_REF"
 ```
@@ -886,7 +1008,10 @@ revert). Restore and stop rather than minting an empty commit:
 if git -C "$WORKDIR" diff --cached --quiet; then
   git -C "$WORKDIR" reset --soft "$PRE_COLLAPSE_SHA"
   echo "branch has no net change against $BASE_REF — nothing to collapse" >&2
-  exit 1
+  # Exit 2, not 1: this is a no-op finding, not a refused gate. `pr-review` step 5
+  # reads any 1 as "a hard gate refused" and reports it that way, which would be a
+  # false alarm — nothing is wrong here beyond a branch that nets to zero.
+  exit 2
 fi
 git -C "$WORKDIR" commit -F "$MSG_FILE"
 ```
@@ -919,12 +1044,26 @@ if [ "$MODE" = worktree ]; then SKIP=(env OFFLINECV_SKIP_HOOKS=1); else SKIP=();
 # the inplace branch would abort the push instead of running it hook-and-all.
 if [ -n "$REMOTE_SHA" ]; then
   ${SKIP[@]+"${SKIP[@]}"} git -C "$WORKDIR" \
-    push --force-with-lease="$HEAD_REF:$REMOTE_SHA" origin "HEAD:$HEAD_REF"
+    push --force-with-lease="$HEAD_REF:$REMOTE_SHA" origin "HEAD:$HEAD_REF" || PUSH_FAILED=1
 else
   ${SKIP[@]+"${SKIP[@]}"} git -C "$WORKDIR" \
-    push -u origin "HEAD:$HEAD_REF"          # first push; nothing to lease against
+    push -u origin "HEAD:$HEAD_REF" || PUSH_FAILED=1   # first push; nothing to lease against
 fi
 ```
+
+**Capture the push's status in code, chained — the recovery below is not prose.**
+There is no `set -e` here (Step 0), so an unchained `git push` failure is silently
+discarded and Step 6 goes on to report a collapse that never landed. `|| PUSH_FAILED=1`
+on each arm is what makes the failure survive to the next block.
+
+**Never pipe the push through `tail`/`head` to trim its output.** Doing so puts
+git's exit status behind the pipe, where `$?` belongs to the filter and reports
+success no matter what git did. `$PIPESTATUS` is not the fix: it is a **bash**
+array, and under `zsh` — which is the login shell on this machine, and what an
+agent harness may well execute these blocks in — `${PIPESTATUS[0]}` expands to
+the empty string (zsh spells it `$pipestatus`, and indexes from 1). An empty
+status then fails an `!= 0` test and fires the rollback on a push that *succeeded*.
+Let the push write to the terminal unfiltered.
 
 The bypass is set **inline on the push**, not exported. An `export` earlier in the
 run would silence the repo's managed hooks for every later command too — including
@@ -958,12 +1097,21 @@ collapsed commit and `PRE_COLLAPSE_SHA` have byte-identical trees (Step 0b just
 proved it), so moving `HEAD` back leaves the index and worktree clean:
 
 ```bash
-git -C "$WORKDIR" reset --soft "$PRE_COLLAPSE_SHA"
+[ -z "${PUSH_FAILED:-}" ] || {
+  git -C "$WORKDIR" reset --soft "$PRE_COLLAPSE_SHA"
+  echo "push rejected — HEAD restored. Run Step 5b, then report." >&2
+  exit 1
+}
 ```
 
 In `worktree` mode this matters little — the worktree is about to be deleted — but
 in `inplace` mode it is what leaves the user's branch exactly as it was found, so
 the caller can fall back to a plain push of its own commits.
+
+**Do not invert the guard.** `[ -n "$PUSH_FAILED" ] && { … }` is the same trap
+gate 3a's `if` blocks avoid, and worse here: it makes the *success* path return
+non-zero, so a caller that chains on this step reads a clean collapse as a
+failure.
 
 ### Step 5b — Tear down the worktree
 
@@ -988,6 +1136,12 @@ if [ "$MODE" = worktree ]; then
   git worktree prune
   rm -rf "$WORKDIR_PARENT"      # `worktree remove` deletes only the child dir
 fi
+
+# The gate's own scratch files, in BOTH modes — 3e's match list always, and the
+# message file only when this run minted it. A caller-supplied --message-file is
+# the user's, and deleting it would destroy hand-written text on a failure path.
+rm -f "${MATCHES_FILE:-}"
+[ -n "${MESSAGE_FILE:-}" ] || rm -f "${MSG_FILE:-}"
 ```
 
 **Run this step on every exit path** — success, no-op, and refusal alike. There is
