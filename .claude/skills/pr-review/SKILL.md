@@ -559,10 +559,19 @@ reason, the fix is *already pushed*, so "fall back to the plain push" needs no e
 
    **Pass `--authored-worktree` and one `--authored-path` per surviving entry of
    `$FIXED_PATHS`.** In the normal flow they change nothing — step 4 already committed
-   those paths, so gate 3e sees them clean — but they are what makes a **re-run after a
-   partial failure** work: if step 4 committed nothing, or committed and failed to push,
-   the fixes are sitting uncommitted and 3e can only fold them in if it knows they are
-   ours.
+   those paths, so gate 3e sees them clean and skips row 1 outright. They earn their
+   keep on a **re-run after step 4 failed to commit**: the fixes are then sitting
+   uncommitted, and row 1 can only fold them in if it knows they are ours.
+
+   **Two adjacent states this does *not* cover, so nobody looks for a guarantee that
+   is not there.** If step 4 committed and the *push* failed, the fixes are committed,
+   not uncommitted — row 1 never sees them; row 3 backs the commit up and resets it
+   out of the checkout, and the collapse proceeds from `origin` without it. That state
+   cannot arise inside a single run (step 5 opens with "Only if step 4 pushed"), but it
+   can be inherited from a previous one — and then both skills report success while the
+   earlier fix has quietly relocated to a `collapse-pr-backup/…` ref. If step 1 finds a
+   local-only commit on the branch, say so and stop; do not treat a clean tree as proof
+   the last run finished.
 
    `--authored-worktree` scopes the whitelist to **this** checkout. Without it, 3e would
    apply one path list to every worktree on the head branch, and a path the user is
@@ -577,15 +586,31 @@ reason, the fix is *already pushed*, so "fall back to the plain push" needs no e
    what was clean when you arrived:
 
    ```bash
-   # Drop from FIXED_PATHS anything that appears in PRE_DIRTY_FILE.
+   # Drop from FIXED_PATHS anything that appears in PRE_DIRTY_FILE. Parse the
+   # porcelain records properly — the same shape `/collapse-pr` gate 3e row 1 uses.
+   pre_dirty_paths() {
+     while IFS= read -r -d '' ENTRY; do
+       XY="${ENTRY:0:2}"; printf '%s\n' "${ENTRY:3}"   # `XY PATH`: space at index 2
+       case "$XY" in
+         R*|C*) IFS= read -r -d '' ORIG                # the ORIGINAL path follows as
+                printf '%s\n' "$ORIG" ;;               # a second, BARE NUL field
+       esac
+     done < "$PRE_DIRTY_FILE"
+   }
    comm -23 <(printf '%s\n' ${FIXED_PATHS[@]+"${FIXED_PATHS[@]}"} | sort -u) \
-            <(tr '\0' '\n' < "$PRE_DIRTY_FILE" | cut -c4- | sort -u)
+            <(pre_dirty_paths | sort -u)
    ```
 
-   The `cut -c4-` on the right-hand side is coarse — it mangles a rename entry — but
-   it errs by over-subtracting, which drops a path to row 2 and refuses. That is the
-   safe direction; the left-hand side, where a mistake would *widen* the whitelist, is
-   your own literal path list and is exact.
+   **`cut -c4-` is wrong here, and it fails in the *unsafe* direction** — worth
+   stating because the opposite is the intuitive guess. `git status --porcelain -z`
+   emits a rename as two records: `R  <new>`, then a **bare** `<orig>` carrying no
+   `XY ` prefix. `cut -c4-` chops three characters off that bare field, turning
+   `src/foo.ts` into `/foo.ts`, so it **fails to subtract** the original path. The
+   path stays whitelisted, reaches 3e as `--authored-path`, and the user's
+   in-progress rename can be committed into the PR — the exact outcome this
+   subtraction exists to prevent. It under-subtracts; it does not over-subtract.
+   The left-hand side, where a mistake would also widen the whitelist, is your own
+   literal path list and is exact.
 
    An overlapping path therefore reaches 3e as unknown provenance and **3e refuses** —
    which is correct, and is the outcome to report rather than route around. **Do not work
