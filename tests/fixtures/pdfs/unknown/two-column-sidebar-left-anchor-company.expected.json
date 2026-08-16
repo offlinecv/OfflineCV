@@ -1,13 +1,15 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0.9,
-    "triggers": [],
+    "confidence": 0.64,
+    "triggers": [
+      "two_column"
+    ],
     "tiers": [
       "t0_layout",
       "t1_openresume"
     ],
-    "suggestedEscalation": "none",
+    "suggestedEscalation": "ner",
     "fieldsPopulated": [
       "current_company",
       "current_title",
@@ -22,33 +24,33 @@
       "phoneIsValid",
       "skills"
     ],
-    "skillsCount": 8,
-    "experienceCount": 1,
+    "skillsCount": 7,
+    "experienceCount": 3,
     "educationCount": 1,
     "projectsCount": 0,
     "achievementsCount": 0,
-    "rawTextCharCount": 476,
+    "rawTextCharCount": 702,
     "pageCount": 1,
     "linkAnnotationCount": 0,
     "hasMarkdown": true,
-    "sectionSource": "markdown"
+    "sectionSource": "regex"
   },
   "score": {
-    "overall": 24,
-    "preLayoutOverall": 24,
+    "overall": 66,
+    "preLayoutOverall": 78,
     "specificity": {
-      "score": 0,
+      "score": 27,
       "max": 40,
-      "gradable": false,
-      "metricBullets": 1,
-      "totalBullets": 2
+      "gradable": true,
+      "metricBullets": 2,
+      "totalBullets": 5
     },
     "structure": {
-      "score": 0,
+      "score": 27,
       "max": 30,
-      "gradable": false,
-      "goodBullets": 2,
-      "totalBullets": 2
+      "gradable": true,
+      "goodBullets": 5,
+      "totalBullets": 5
     },
     "completeness": {
       "score": 24,
@@ -60,37 +62,41 @@
       ]
     },
     "layout": {
-      "triggers": [],
-      "multiplier": 1,
+      "triggers": [
+        "two_column"
+      ],
+      "multiplier": 0.85,
       "scanned": false
     },
-    "bulletCount": 2,
+    "bulletCount": 5,
     "algoVersion": "1.8"
   },
   "reproArtifact": {
     "artifactVersion": "v1",
     "cascadeVersion": "v1",
-    "triggers": [],
-    "sectionSource": "markdown",
+    "triggers": [
+      "two_column"
+    ],
+    "sectionSource": "regex",
     "pageCount": 1,
-    "rawCharCount": 462,
-    "extractedCharCount": 289,
+    "rawCharCount": 673,
+    "extractedCharCount": 517,
     "sections": [
       {
         "name": "profile",
-        "lineCount": 2
+        "lineCount": 4
+      },
+      {
+        "name": "skills",
+        "lineCount": 7
       },
       {
         "name": "experience",
-        "lineCount": 4
+        "lineCount": 14
       },
       {
         "name": "education",
         "lineCount": 2
-      },
-      {
-        "name": "skills",
-        "lineCount": 4
       }
     ],
     "parsedCounts": {
@@ -99,9 +105,9 @@
       "hasPhone": true,
       "hasLocation": true,
       "hasSummary": false,
-      "experienceCount": 1,
+      "experienceCount": 3,
       "educationCount": 1,
-      "skillsCount": 8
+      "skillsCount": 7
     },
     "linkAnnotationCount": 0,
     "disagreements": []

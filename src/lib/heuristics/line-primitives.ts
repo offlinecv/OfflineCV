@@ -8,10 +8,12 @@
  * These live in their own module to break the import cycle that arises when
  * `entry-blocks.ts` (the shared windowing primitive) and `extract-fields.ts`
  * (its caller) both need the same low-level helpers. This module depends only
- * on `regex.ts` constants and the `PdfLine` type — nothing in the heuristics
- * layer imports back into it — so it sits cleanly below both.
+ * on `regex.ts` constants, the zero-dependency `lexicon/action-verbs.ts` set,
+ * and the `PdfLine` type — nothing in the heuristics layer imports back into
+ * it — so it sits cleanly below both.
  */
 
+import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
 import type { PdfLine } from "./line-model.ts";
 import {
   DATE_RANGE_RE,
@@ -100,14 +102,27 @@ export function isProseLine(text: string): boolean {
  * AND ≥8 words); this predicate is targeted at the specific below-anchor
  * signals no legitimate header field carries.
  *
- * Two signals qualify — either is sufficient, both are strict enough that no
- * real title / company / team / location line trips them:
+ * FOUR signals qualify — any one is sufficient, and each is strict enough
+ * that no real title / company / team / location line trips it. They are
+ * tested in the order listed, and the order is load-bearing only between 3
+ * and 4 (see 3):
  *
  * 1. A semicolon (`;`) anywhere in the line. Titles, teams, companies and
  *    locations never use `;` as a delimiter, so its presence is a strong
  *    prose signal that costs nothing on legitimate headers.
  *
- * 2. A sentence-terminator ending (`.!?`), EXCEPT when the terminating token
+ * 2. A grade-code-led middot line — see {@link looksLikeMiddotMetadata},
+ *    which owns that shape and its own narrowness argument.
+ *
+ * 3. An action-verb lead followed by a lowercase CONTENT word (#708) — see
+ *    {@link looksLikeVerbLedScope}. This is the only signal keyed on GRAMMAR
+ *    rather than punctuation, which is why #708's two shapes need it: one
+ *    carries no `;`, no grade code and no terminator at all, and the other
+ *    ends on a legal-entity suffix, so signal 4 actively REJECTS it. It must
+ *    be tested BEFORE 4 for that second shape — 4 returns `false` on a
+ *    legal-suffix ending, and a `return` cannot be reconsidered.
+ *
+ * 4. A sentence-terminator ending (`.!?`), EXCEPT when the terminating token
  *    is a legal-entity suffix from a closed Anglo-American list. "Google,
  *    Inc." and "Acme Corp." are legitimate company names on their own line
  *    — the {@link LEGAL_TERMINAL_SUFFIX_RE} guard keeps them out. The list
@@ -119,11 +134,12 @@ export function isProseLine(text: string): boolean {
  *    LEGAL_TERMINAL_SUFFIX_RE} is companies-that-round-trip-cleanly, not an
  *    exhaustive international vocab.
  *
- * Deliberately NARROW: a middot-metadata line like `"L7 · 18 engineers, 2
- * TLMs reporting"` matches neither signal and falls through to the header
- * path. If disambiguation leaves any of its tokens unclaimed by fields, the
+ * Still deliberately NARROW. A middot line that does NOT lead with a grade
+ * code, and a scope line that is Title-Cased throughout ("Grew ARR From $2M
+ * To $8M"), match nothing here and fall through to the header path. If
+ * disambiguation leaves any of their tokens unclaimed by fields, the
  * second-chance {@link recoverLeadingBodyProse} in `experience.ts` catches
- * it via token coverage; if disambiguation misroutes it (a separate defect
+ * them via token coverage; if disambiguation misroutes one (a separate defect
  * class from #615), a broader predicate would need its own repro + tests.
  */
 // `\b` at the start is load-bearing (PR #688 review B1): without it,
@@ -141,8 +157,100 @@ export function looksLikeBelowAnchorProse(text: string): boolean {
   if (!trimmed) return false;
   if (trimmed.includes(";")) return true;
   if (looksLikeMiddotMetadata(trimmed)) return true;
+  if (looksLikeVerbLedScope(trimmed)) return true;
   if (!/[.!?]$/.test(trimmed)) return false;
   return !LEGAL_TERMINAL_SUFFIX_RE.test(trimmed);
+}
+
+/**
+ * True when a below-anchor line reads as a **role-scope sentence** by grammar
+ * alone: it leads with an action verb AND carries a lowercase **content** word
+ * after that lead — a word that is neither Title-Cased nor a closed-class
+ * connector.
+ *
+ * This is #708's signal, and it exists because both of that issue's shapes are
+ * invisible to the punctuation-keyed signals:
+ *
+ *   - `"Owned the build system roadmap and tooling budget"` — no `;`, no grade
+ *     code, no terminator at all; and
+ *   - `"Led the observability migration off Northwind Systems Inc."` — ends on
+ *     a real legal-entity suffix, which {@link LEGAL_TERMINAL_SUFFIX_RE}
+ *     cannot tell apart from `"Contoso, Inc."` by the terminal token alone.
+ *
+ * Both filled an empty `team` slot, which the exported org header line and
+ * `ReconstructedRole` then render as a team name.
+ *
+ * The verb set is the shared {@link ACTION_VERBS} lexicon, reached through
+ * {@link startsWithActionVerb} — the same question, and the same answer,
+ * `looksLikeRoleHeaderTitle` already asks in `experience.ts` when it rejects a
+ * title-shaped candidate that is really accomplishment prose (#662). Sharing
+ * the lexicon is what keeps the two layers from drifting on what "verb-led"
+ * means.
+ *
+ * **The lowercase-word requirement carries the precision, and dropping it
+ * breaks real résumés.** Several lexicon verbs are also participial adjectives
+ * that lead genuine header lines — "Managed Services Consultant", "Integrated
+ * Systems Engineer", "Automated Logic Corporation", "Unified Communications
+ * Lead". A verb lead ALONE preempts all four, turning a real title or company
+ * into a bullet. What separates them from a sentence is that a header line is
+ * Title Case throughout while a sentence needs function words ("the", "and",
+ * "off") — the same Title-Case-tail reasoning {@link isProseLine} uses to keep
+ * a "Company. City, State" header out of the prose class (#341).
+ *
+ * **A lowercase-initial word is not enough on its own, though (#708).**
+ * Title-Cased org names routinely carry a lowercase CONNECTOR — "Planned
+ * Parenthood of Greater Ohio", "Managed Services for Healthcare", "Integrated
+ * Systems of America", "Secured Lending of the Midwest" — and every one of
+ * those leads with a lexicon verb, so a bare lowercase-initial test preempts
+ * the employer line out of the header run entirely: `company` comes back
+ * empty, the name is emitted as a description bullet, and (because the line is
+ * usually "Company, City, ST") the `location` goes with it. What a name never
+ * carries is a lowercase **content** word: an ordinary noun/verb/adjective
+ * like "build", "roadmap", "observability", "migration". So the test is a
+ * lowercase word MINUS the closed {@link HEADER_CONNECTOR_WORDS} class, which
+ * is what {@link isLowercaseContentWord} decides.
+ *
+ * Requiring ≥2 lowercase-initial words instead would clear the first three
+ * shapes but not "Secured Lending of the Midwest" (two connectors), and it
+ * would still miss any two-connector name ("Bank of the West"); requiring a
+ * connector to be PRESENT is inverted — "of" is exactly what those names
+ * carry. Keying on the content word is the discriminator that holds in both
+ * directions.
+ *
+ * The check runs over the words AFTER the verb, so the verb's own casing is
+ * irrelevant. A token that is not a bare lowercase word ("3", "P&L,",
+ * "Northwind", "eBay") is neither evidence for nor against, so `some` simply
+ * keeps looking.
+ *
+ * The residue is one-sided and fails CLOSED — a scope line whose only
+ * lowercase words are connectors ("Led the Payments Platform for the Americas")
+ * is NOT caught and falls through to the header path, exactly as it did before
+ * #708. Widening to reach it would want its own repro, per this module's rule
+ * that each widening is pinned by the shape that motivated it.
+ */
+/** Closed-class connectors that appear INSIDE genuine Title-Cased org and role
+ *  names, and so carry no prose evidence. Articles, the two coordinating
+ *  conjunctions, and the prepositions English company names actually use.
+ *  Deliberately a REJECT list: adding a word here only makes
+ *  {@link looksLikeVerbLedScope} more conservative (fewer preempts), which is
+ *  the safe direction — a missed scope line lands in `team` as it did before
+ *  #708, while a preempted employer line loses `company` outright. */
+const HEADER_CONNECTOR_WORDS = new Set([
+  "a", "an", "the", "and", "or", "of", "for", "to", "with",
+  "at", "by", "in", "on", "from", "off", "across",
+]);
+/** A bare all-lowercase word — letters only, apostrophes/hyphens allowed
+ *  inside. Excludes mixed-case brand tokens ("eBay", "iRobot"), which lead
+ *  lowercase but are names, not prose. */
+const LOWERCASE_WORD_RE = /^\p{Ll}[\p{Ll}\p{M}'’-]*$/u;
+function isLowercaseContentWord(word: string): boolean {
+  const bare = word.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+  return LOWERCASE_WORD_RE.test(bare) && !HEADER_CONNECTOR_WORDS.has(bare);
+}
+function looksLikeVerbLedScope(text: string): boolean {
+  if (!startsWithActionVerb(text)) return false;
+  const [, ...rest] = text.trim().split(/\s+/);
+  return rest.some(isLowercaseContentWord);
 }
 
 /**

@@ -153,3 +153,42 @@ describe("step-3b team→location rescue: closed-vocab, not shape-only", () => {
     expect(roles[0].team ?? "").not.toMatch(/Bangalore/);
   });
 });
+
+describe("a delimiter header whose leading cell hides a 'Title, Company' comma (#543)", () => {
+  it("splits the pre-pipe cell so the title is not swallowed by the company", () => {
+    // `splitHeaderSegments` took the delimiter branch and stopped, so the whole
+    // pre-pipe cell became `company` and `title` came back empty. On export the
+    // same role re-renders WITHOUT the pipe — the undelimited shape the comma
+    // split already handled — so parse3 disagreed with parse1 and the
+    // round-trip invariant broke (`unknown/pdflib-leading-glyph-skills-header`
+    // carried a known-failure exemption for exactly this).
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Data Analyst, Northwind Retail Co. | Austin, TX", fontSize: 11 },
+      { text: "March 2021 - Present", fontSize: 11 },
+      { text: "• Built the retail demand model.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Data Analyst");
+    expect(roles[0].company).toBe("Northwind Retail Co.");
+    expect(roles[0].location).toBe("Austin, TX");
+  });
+
+  it("leaves a THREE-segment delimiter header alone", () => {
+    // The narrowing that makes the split above safe. Re-splitting every
+    // delimiter segment cleaves "Site Lead, Payments Platform" here and the
+    // title is lost — so the comma split only runs on segment 0 of a
+    // two-segment line, where the rest of the line is a single trailing cell.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      {
+        text: "Sr. Engineering Manager · Site Lead, Payments Platform · Globex, Toronto",
+        fontSize: 11,
+      },
+      { text: "March 2021 - Present", fontSize: 11 },
+      { text: "• Built the ingestion pipeline.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    expect(roles[0].title).toBe("Sr. Engineering Manager");
+  });
+});

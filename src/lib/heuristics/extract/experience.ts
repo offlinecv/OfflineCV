@@ -324,8 +324,8 @@ function recoverLeadingBodyProse(
  *    substantive tokens are not fully covered by
  *    {title, company, team, location} is body content disambiguation missed —
  *    the shapes {@link looksLikeBelowAnchorProse} deliberately doesn't
- *    catch (e.g. middot metadata like `"L7 · 18 engineers, 2 TLMs
- *    reporting"`).
+ *    catch (e.g. a middot line that does not lead with a grade code, or a
+ *    Title-Cased scope line with no function word).
  *
  * The promoted-role-header path (a date-only block whose title/company come
  * from the FIRST body bullet) owns its own body slice —
@@ -346,8 +346,9 @@ function recoverLeadingBodyProse(
  * promoted path uses fields from a bullet that got promoted, not from
  * disambiguation of `belowAnchorLines`, so a token match there wouldn't
  * mean what it means on the normal path. The preempt-only prepend is
- * enough: the shapes `looksLikeBelowAnchorProse` catches (`;`, terminator,
- * middot-metadata) are the same shapes that survive on this path.
+ * enough: the shapes `looksLikeBelowAnchorProse` catches (`;`, grade-code
+ * middot, action-verb lead, terminator) are the same shapes that survive on
+ * this path.
  *
  * `preemptedIsHeader` marks the third path (PR #688 review B4): the preempted
  * run was read back as the entry's header because nothing else could supply

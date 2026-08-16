@@ -489,13 +489,32 @@ function matchAnchorFallback(
  * two-column flatten glued a sidebar artifact onto (`"20% Projects"` → the
  * `20%` is a sidebar value, `Projects` is the header). The guards that
  * `matchAnchorFallback` uses to tell a heading from prose are replaced here by
- * the CALLER'S column-membership signal: only `classifyLine`'s column-gated
- * branch may call this, and only for a header-shaped line that sits in the
- * SECONDARY column of a detected two-column layout (`line.x >= columnSplitX`).
- * The digit-lead / prose forms it would otherwise admit (`"5 Years Experience"`,
- * `"20% Experience"`) live in the MAIN column of those same documents — and in
- * single-column documents the gate is absent entirely — so the column signal
- * keeps them out.
+ * the CALLER'S SIDEBAR-membership signal: only `classifyLine`'s band-gated
+ * branch may call this, and only for a header-shaped, un-dated line that sits in
+ * the narrow SIDEBAR rail of a detected two-column layout (`columnBand ===
+ * "sidebar"`, resolved by `detectSidebarSides` in `sections.ts`). In
+ * single-column documents the gate is absent entirely, so the prose forms #115
+ * closed never reach here at all.
+ *
+ * **The sidebar gate does NOT close the digit-lead class, and saying it does
+ * would be a lie about the trade** (#574): a stat badge — `"8 Years
+ * Experience"`, `"20% Projects"` — is a *sidebar* element on exactly the
+ * templates this path exists for, and with no numeric-lead guard the matcher
+ * admits it (`matchSectionAnchorToken("8 Years Experience") === "experience"`).
+ * On a sidebar-left page that opens an EXTRA `experience` section at the badge,
+ * splitting the rail alongside the document's real one. The trade is still the
+ * right way round —
+ * one spurious badge-opened section against #574's failure, where the
+ * pre-fix x-order gate ran this guardless matcher over the entire résumé BODY
+ * and one anchor-ending company name swallowed the document — but it is a
+ * trade, not an absence of cost, and a future numeric-lead guard on THIS path
+ * would narrow it without touching the sidebar signal.
+ *
+ * The signal must be a SIDEBAR test, not an x-order one: `line.x >=
+ * columnSplitX` (the pre-#574 gate) identifies the right-hand band, which is the
+ * sidebar only on a sidebar-RIGHT layout. On a sidebar-LEFT résumé it selects the
+ * whole résumé BODY, and this matcher's missing guards then let one anchor-ending
+ * company name open a section that swallows the document (#574).
  *
  * MUST NEVER be called on the text-only path (`matchSectionHeader`), which has
  * no column signal to lean on — doing so would reopen the prose FP class that

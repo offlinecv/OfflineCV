@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #492. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here.",
+  "contact": {
+    "full_name": "JORDAN AVERY",
+    "email": "jordan.avery@example.com",
+    "phone": "(503) 555-0148",
+    "location": "Portland, OR"
+  },
+  "experience": [
+    {
+      "title": "Senior QA Engineer",
+      "company": "Northwind Systems",
+      "dates": "Mar 2021 - Present"
+    },
+    {
+      "title": "QA Engineer",
+      "company": "Contoso Labs",
+      "dates": "Jun 2018 - Feb 2021"
+    },
+    {
+      "title": "Automation Analyst",
+      "company": "Fabrikam Retail",
+      "dates": "Aug 2016 - May 2018"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "Ridgemont State University"
+    }
+  ],
+  "skills": []
+}

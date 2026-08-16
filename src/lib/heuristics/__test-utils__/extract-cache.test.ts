@@ -157,8 +157,9 @@ describe("extract-cache serialization", () => {
 
 describe("extract-cache source fingerprint", () => {
   it("descends into what extraction actually reaches, not just the entry module", () => {
+    const normalizedRoot = REPO_ROOT.replaceAll("\\", "/");
     const named = sourceFingerprint().files.map((f) =>
-      f.replace(`${REPO_ROOT}/`, ""),
+      f.replaceAll("\\", "/").replace(`${normalizedRoot}/`, ""),
     );
 
     // `pdf-extract` imports the first two directly; `line-assembly` pulls in

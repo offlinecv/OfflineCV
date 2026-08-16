@@ -11,6 +11,7 @@
     ],
     "suggestedEscalation": "ner",
     "fieldsPopulated": [
+      "current_company",
       "current_title",
       "education",
       "email",
@@ -79,7 +80,7 @@
     "sectionSource": "regex",
     "pageCount": 1,
     "rawCharCount": 2915,
-    "extractedCharCount": 2410,
+    "extractedCharCount": 2406,
     "sections": [
       {
         "name": "profile",

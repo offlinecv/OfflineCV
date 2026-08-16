@@ -1,7 +1,7 @@
 {
   "schemaVersion": 5,
   "cascade": {
-    "confidence": 0.91,
+    "confidence": 0.87,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -19,9 +19,10 @@
       "given_name",
       "location",
       "phone",
-      "phoneIsValid"
+      "phoneIsValid",
+      "skills"
     ],
-    "skillsCount": 0,
+    "skillsCount": 3,
     "experienceCount": 2,
     "educationCount": 1,
     "projectsCount": 0,
@@ -33,8 +34,8 @@
     "sectionSource": "markdown"
   },
   "score": {
-    "overall": 91,
-    "preLayoutOverall": 91,
+    "overall": 94,
+    "preLayoutOverall": 94,
     "specificity": {
       "score": 40,
       "max": 40,
@@ -50,12 +51,11 @@
       "totalBullets": 3
     },
     "completeness": {
-      "score": 21,
+      "score": 24,
       "max": 30,
       "gradable": true,
       "missing": [
         "LinkedIn",
-        "skills",
         "summary"
       ]
     },
@@ -74,11 +74,15 @@
     "sectionSource": "markdown",
     "pageCount": 1,
     "rawCharCount": 506,
-    "extractedCharCount": 320,
+    "extractedCharCount": 358,
     "sections": [
       {
         "name": "profile",
-        "lineCount": 6
+        "lineCount": 2
+      },
+      {
+        "name": "skills",
+        "lineCount": 3
       },
       {
         "name": "experience",
@@ -97,7 +101,7 @@
       "hasSummary": false,
       "experienceCount": 2,
       "educationCount": 1,
-      "skillsCount": 0
+      "skillsCount": 3
     },
     "linkAnnotationCount": 0,
     "disagreements": []
@@ -106,7 +110,7 @@
     "emailInRawTextButNotParsed": false,
     "phoneInRawTextButNotParsed": false,
     "locationInRawTextButNotParsed": false,
-    "skillsHeaderCandidateRejected": true,
+    "skillsHeaderCandidateRejected": false,
     "educationHeaderCandidateRejected": false,
     "educationEntriesFewerThanDegreeTokens": false,
     "experienceRegionHasDateRangeLines": true,

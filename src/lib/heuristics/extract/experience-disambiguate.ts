@@ -400,10 +400,20 @@ function stripLocationSuffix(s: string): {
  * Split a single "Role, Company" header line into [title, company]. Guarded so
  * it only fires when the part before the comma reads like a job title
  * (`looksLikeTitle`), the part after is not a bare legal suffix, and the part
- * after does not read like a location — so "Office manager, The Phone Company"
+ * after is not ENTIRELY a location — so "Office manager, The Phone Company"
  * splits, but "Acme, Inc", "Acme Analytics (…) New York, NY" (no title keyword
- * before the comma), and "Marketing Manager, San Francisco" (location tail) do
- * not. Returns null when no guarded split applies.
+ * before the comma), and "Marketing Manager, San Francisco" (the whole tail IS
+ * the location) do not. Returns null when no guarded split applies.
+ *
+ * Uses {@link isBareLocationString} — a WHOLE-STRING check — rather than the
+ * substring-matching `looksLikeLocationTail` (#543). On a three-way header
+ * "Title, Company, City, ST" the tail still carries a trailing city/state, so
+ * the substring check flagged the whole "Company, City, ST" remainder as a
+ * location tail and left the line unsplit even though only its SUFFIX is a
+ * location — collapsing "Senior QA Engineer, Northwind Systems, Portland, OR"
+ * into one field instead of splitting the title off and letting
+ * {@link recoverLocation}'s `stripLocationSuffix` peel the trailing city off
+ * the company remainder, as it already does for the two-segment case.
  */
 function splitRoleComma(h: string): [string, string] | null {
   const comma = h.indexOf(",");
@@ -413,7 +423,7 @@ function splitRoleComma(h: string): [string, string] | null {
   if (!before || !after) return null;
   if (!looksLikeTitle(before)) return null;
   if (LEGAL_SUFFIX_RE.test(after)) return null;
-  if (looksLikeLocationTail(after)) return null;
+  if (isBareLocationString(after)) return null;
   return [before, after];
 }
 
@@ -579,6 +589,21 @@ function stripLeadingSectionHeaders(
  * (em-dash), "Title – Company" (en-dash, via {@link splitEnDashTitleCompany}),
  * "Title | Company", "Title · Company" (mid-dot, #217), or guarded
  * "Title, Company" pattern.
+ *
+ * The delimiter branch runs the guarded comma split ONE level deeper, on its
+ * LEADING segment only and only when the line cleaved into exactly two (#543).
+ * "Data Analyst, Northwind Retail Co. | Austin, TX" is a real corpus shape
+ * whose employer is comma-joined to its title INSIDE the pre-pipe cell; taking
+ * the delimiter branch and stopping there left the whole cell as `company`
+ * with `title` empty. The narrowing is what makes it safe: on export the same
+ * role re-renders WITHOUT the pipe, so parse3 saw the undelimited shape, split
+ * it, and disagreed with parse1 — the round-trip invariant broke and #543 took
+ * a known-failure exemption for it. Splitting every delimiter
+ * segment instead does have blast radius ("Sr. Engineering Manager · Site
+ * Lead, Payments Platform · Globex, Toronto" loses its title); restricting to
+ * segment 0 of a two-segment line means a "Title, Team"/"Title, Company" cell
+ * is only ever re-split when the rest of the line is a single trailing cell,
+ * which is the shape `splitRoleComma`'s own guards were written for.
  */
 function splitHeaderSegments(filtered: string[]): Split[] {
   const splits: Split[] = [];
@@ -595,9 +620,25 @@ function splitHeaderSegments(filtered: string[]): Split[] {
       // shape (#436). Excludes a line that also carries `@`/`—`/`|`, which follow
       // other ordering conventions.
       const middot = /\s+·\s+/.test(h) && !/\s+[@—|]\s+/.test(h);
-      atSplit.forEach((s) =>
-        splits.push({ text: s.trim(), source: idx, via: "delim", middot }),
-      );
+      atSplit.forEach((s, si) => {
+        const text = s.trim();
+        // Only segment 0, and only on a two-segment line — see the docblock.
+        const roleComma =
+          si === 0 && atSplit.length === 2 ? splitRoleComma(text) : null;
+        if (roleComma) {
+          // `via` stays "delim": the `via: "comma"` consumers (`mapTitleFirst`
+          // cases 1–3) all assume the comma cleaved the WHOLE header line into
+          // exactly two segments, so the post-comma piece is a team. That does
+          // not hold here — a trailing delimiter cell follows — and claiming it
+          // would route this shape into the shared-banner mirror instead of
+          // reading the post-comma piece as the employer it is.
+          roleComma.forEach((part) =>
+            splits.push({ text: part, source: idx, via: "delim", middot }),
+          );
+          return;
+        }
+        splits.push({ text, source: idx, via: "delim", middot });
+      });
       return;
     }
     const enDash = splitEnDashTitleCompany(h);
@@ -1071,17 +1112,37 @@ function mapWithoutCompanyMatch(
  *      reached via `team` instead of `title`).
  *
  * Caller only invokes this when there is no location yet and `team` is set.
+ *
+ * `title` is passed ONLY to recognize a MIRRORED company (#543).
+ * Case 3 of {@link mapTitleFirst} (#382) mirrors `title` into `company` on a
+ * bare "Title, Team" anchor so `isBannerContinuation` can inherit a shared
+ * banner, and relies on the end-of-pipeline `company === title` backstop to
+ * clear it when no banner is active. The rotate below breaks that contract:
+ * it moves the mirror OUT of `company` and into `team`, where `company ===
+ * title` no longer holds, so the backstop never fires and the title ships a
+ * second time as a team name — in `ReconstructedRole` and in the Download
+ * PDF's org header line. Every "Title, Company, City, ST" header whose company
+ * segment carries no recognized org tell hit this ("Automation Analyst,
+ * Fabrikam Retail, Boise, ID" → `team: "Automation Analyst"`). Drop the mirror
+ * instead of rotating it: the rotate has just recovered the REAL company from
+ * the team slot, so there is nothing left for `team` to hold.
  */
 function rescueTeamLocation(
   company: string | undefined,
   team: string | undefined,
+  title?: string,
 ): { company?: string; team?: string; location?: string } {
   if (!team) return { company, team };
   const teamStrip = stripLocationSuffix(team);
   const teamIsBareLocation = isBareLocationString(team);
   if (teamStrip.location && !teamIsBareLocation) {
-    // Rotate: real-company (strip remainder) → company, old company → team.
-    return { company: teamStrip.text, team: company, location: teamStrip.location };
+    // Rotate: real-company (strip remainder) → company, old company → team —
+    // unless the old company is the #382 title mirror, which is not a team.
+    return {
+      company: teamStrip.text,
+      team: company === title ? undefined : company,
+      location: teamStrip.location,
+    };
   }
   if (teamIsBareLocation) {
     return { company, team: undefined, location: team };
@@ -1130,7 +1191,7 @@ function recoverLocation(
   //     looksLikeLocationTail was fixed, or a "City, ST" segment from a ·-split),
   //     rescue it as location and clear team.  Only fire when we have no location yet.
   if (!location && team) {
-    const rescued = rescueTeamLocation(company, team);
+    const rescued = rescueTeamLocation(company, team, title);
     company = rescued.company;
     team = rescued.team;
     location = rescued.location;
