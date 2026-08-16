@@ -57,12 +57,5 @@
     "Docker",
     "Raspberry Pi",
     "iOS"
-  ],
-  "knownWrong": {
-    "skills": {
-      "issue": null,
-      "status": "unfiled",
-      "note": "The single-letter token “C” is DROPPED from the Languages row while “C++” survives. Second independent measurement of the same drop (see google-docs/google-docs-skia-proxy-role-first-experience)."
-    }
-  }
+  ]
 }

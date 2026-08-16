@@ -44,9 +44,9 @@
       "note": "Role 2's employer line reads “Multicultural Engineering Program – State Polytechnic University”; `company` comes back as just the university — the program half is not lost, the parser puts it on `team`, but `experience.company` scores the `company` field alone. The identical shape is measured on unknown/single-column-title-below-anchor. Possibly a defensible org/team split rather than a defect — recorded rather than assumed, because ground truth's job is to state what the page says and let a human adjudicate."
     },
     "skills": {
-      "issue": null,
-      "status": "unfiled",
-      "note": "Two independent disagreements on one field: the single-letter token “C” is DROPPED from the Programming Languages row (the identical drop is measured on latex/multi-degree-coursework, so it is not fixture-specific), and “Fluent in Spanish” is admitted as a skill from the “Language:” row."
+      "issue": 833,
+      "status": "open",
+      "note": "“Fluent in Spanish” is admitted as a skill from the “Language:” row; the Programming Languages row is now correct after #832."
     }
   }
 }

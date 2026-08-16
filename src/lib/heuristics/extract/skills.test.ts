@@ -402,8 +402,8 @@ describe("tokenizeSkillLine — issue #221 non-skill sub-labels", () => {
   });
 
   it("keeps skill sub-labels (Languages/Technologies/Tools/Frameworks)", () => {
-    expect(tokenizeSkillLine("Languages: Python, Go, C++, Java")).toEqual(
-      expect.arrayContaining(["Python", "Go", "C++", "Java"]),
+    expect(tokenizeSkillLine("Languages: Python, Go, C++, Java, C")).toEqual(
+      expect.arrayContaining(["Python", "Go", "C++", "Java", "C"]),
     );
     expect(tokenizeSkillLine("Technologies: Linux, AWS, Docker, iOS")).toEqual(
       expect.arrayContaining(["Linux", "AWS", "Docker", "iOS"]),
@@ -423,6 +423,23 @@ describe("tokenizeSkillLine — issue #221 non-skill sub-labels", () => {
     expect(result).toEqual(
       expect.arrayContaining(["Interest Rate Modeling", "Risk Analysis"]),
     );
+  });
+});
+
+describe("tokenizeSkillLine — issue #832 single-letter languages", () => {
+  it("keeps C, R, and D as real programming languages", () => {
+    expect(tokenizeSkillLine("Languages: C, R, D")).toEqual(
+      expect.arrayContaining(["C", "R", "D"]),
+    );
+  });
+
+  it("still rejects other single-character noise tokens", () => {
+    expect(tokenizeSkillLine("Skills: x, J, •, (")).toEqual([]);
+  });
+
+  it("allows allowlisted single letters alongside real skills on the same line", () => {
+    // Positive control: distinguishes rejecting noise from rejecting everything.
+    expect(tokenizeSkillLine("Skills: Python, x, J, C")).toEqual(["Python", "C"]);
   });
 });
 
