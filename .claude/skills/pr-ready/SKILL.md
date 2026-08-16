@@ -236,7 +236,7 @@ is no ask, and the abort message is every PR's reason, not just the first.
 | Conflicting | `.mergeable == "CONFLICTING"` | "PR #N has merge conflicts — resolve them before asking for review." |
 | Mergeability unknown after retries | `.mergeable == "UNKNOWN"` on every attempt (see below) | "GitHub hasn't computed mergeability for PR #N yet (`UNKNOWN` after `<n>` tries) — re-run in a minute." |
 | A check is not green | any `.statusCheckRollup[]` whose `(.conclusion // .state)` is not in `SUCCESS` / `NEUTRAL` / `SKIPPED` | "PR #N has a check that isn't green: `<check name>` is `<conclusion or "still running">` — wait for it or fix it; a red or half-finished PR trains reviewers to skip the ask." |
-| More than one commit | `.commits \| length > 1` | "PR #N has `<n>` commits — collapse to one before asking for review (see `open-pr` Step 3.6)." |
+| More than one commit | `.commits \| length > 1` | "PR #N has `<n>` commits — collapse to one before asking for review: `/collapse-pr <N>`." |
 
 **`UNKNOWN` is not a conflict.** GitHub computes mergeability asynchronously,
 so a freshly-pushed PR — exactly the state `/pr-ready` runs in, right after

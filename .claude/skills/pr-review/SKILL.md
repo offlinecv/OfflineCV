@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits), auto-fix & push small items if 0 blockers exist, and post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip.
+description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits), auto-fix & push small items if 0 blockers exist, collapse the branch back to one commit via /collapse-pr before the review lands, emit suggestion blocks for what it does not push, and post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip.
 argument-hint: <#|#N> [--repo owner/repo] [--local] [--effort low|medium|high] [--no-commit]
 ---
 
@@ -12,12 +12,15 @@ the thread": check out the diff → **signal that review started** → read the
 correctness pass → **layer the offlinecv-specific gates** → **then** read the PR
 description and audit it against what the code actually does → structure findings
 **Blocking / Secondary / Nits** → **if 0 blockers & small fixes exist**: apply fixes,
-verify gates, commit & push to PR branch → **post the `gh` PR review automatically at the end**
-(verdict `APPROVE` if 0 blockers — including when the run pushed the fixes itself, so the
-PR leaves the run mergeable — `REQUEST_CHANGES` if ≥1 blocker).
+verify gates, commit, collapse the branch back to one commit, push → **post the `gh` PR
+review automatically at the end** (verdict `APPROVE` if 0 blockers — including when the run
+pushed the fixes itself, so the PR leaves the run mergeable — `REQUEST_CHANGES` if ≥1
+blocker). Findings it does *not* push land as ```` ```suggestion ```` blocks the author can
+apply in one click.
 
 This is the **reviewer-side** sibling of the author-side loop: `open-pr` creates
 the PR, `revise-pr` addresses the review — this skill *is* the review in between.
+All three delegate the one-commit collapse to `/collapse-pr`.
 
 ## The review is adversarial — read the description LAST
 
@@ -396,7 +399,9 @@ out, because the interaction with branch protection is otherwise invisible to a 
   `require_last_push_approval: false`. GitHub blocks self-approval only by the **PR
   author**, so a reviewer approving a commit they just pushed passes cleanly.
 - `dismiss_stale_reviews: true` does not catch it either: the approval is posted *after*
-  the push, so there is no prior approval to dismiss.
+  the push, so there is no prior approval to dismiss. This holds for the collapse's
+  force-push too — same slot, same ordering, and it is precisely why Step 5.5 collapses
+  before the review goes up rather than after.
 
 That is the intended outcome, not a loophole being exploited. The alternative — post the
 nits, wait for the author to apply them, watch the new push dismiss the approval, review
@@ -412,10 +417,33 @@ what the code *does* — however small it looks — is a finding for the author,
 auto-fix. When in doubt about whether an edit is behavioural, it is: leave it as a comment
 and still `APPROVE`.
 
-### Step 5.5 — Auto-fix small items (0 Blockers)
+### Step 5.5 — Auto-fix small items, then collapse (0 Blockers)
 
 If 0 Blocking findings exist AND small fixes (Secondary or Nits) exist AND `--no-commit`
 is NOT set:
+
+**The order is the whole of this step**, and it is not rearrangeable:
+
+```
+fix nits → commit → plain push (fast-forward) → collapse to one commit
+        → derive inline anchors (Step 6)      → post APPROVE on the collapsed head
+```
+
+Three constraints pin it:
+
+- **The plain push comes before the collapse**, because `/collapse-pr` resolves the target
+  from `origin` and rewrites it in a throwaway worktree — it never reads this checkout. A
+  fix commit that is still local at that moment simply would not be in the collapse. Push
+  it first and the collapse operates on a remote head that already contains it.
+- **The collapse comes before the anchors.** It rewrites every SHA on the branch, so
+  anchors derived beforehand belong to commits that no longer exist and `422` the whole
+  review — which is why Step 6 already requires deriving them after the push.
+- **The collapse comes before the approval.** `main` has `dismiss_stale_reviews: true`; do
+  it after and you dismiss the approval you just made, and the PR deadlocks with nothing
+  left to enqueue it.
+
+The first constraint also gives the fallback for free: if the collapse is skipped for any
+reason, the fix is *already pushed*, so "fall back to the plain push" needs no extra step.
 
 1. **Record a restore point and track every path you touch.** The worktree may hold the
    user's own in-progress edits — Step 1's `gh pr checkout` carries a dirty tree onto the
@@ -425,29 +453,176 @@ is NOT set:
    PRE_FIX_SHA="$(git rev-parse HEAD)"
    HEAD_BRANCH="$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName -q .headRefName)"
    FIXED_PATHS=()          # append every path you write, including new files
+
+   # Capture what was ALREADY dirty, before you write anything. These paths are
+   # the user's, not yours, and a path can be on both lists — see step 5.
+   PRE_DIRTY_FILE="$(mktemp -t pr-review-predirty)"
+   git status --porcelain --untracked-files=no -z > "$PRE_DIRTY_FILE"
    ```
+
+   `--untracked-files=no`: this repo's `.git/info/exclude` un-ignores
+   `node_modules`, so `??` entries are noise here, not provenance.
 
 2. **Apply the small fixes** in the checked-out worktree (formatting, comment wording,
    naming, non-behavioral quality fixes). Append each path written to `FIXED_PATHS`.
 3. **Run verification gates** (`npm run verify` or the relevant lint/test commands) to
    confirm a green build and no regressions.
-4. **If verification passes**, commit and push — but check for a mid-review push first:
+4. **If verification passes**, commit — then check for a mid-review push, and push:
    ```bash
    git add -- "${FIXED_PATHS[@]}"        # stage by path, never `git add -A`/`.`
    git commit -m "fix(review): address review nits"
+   # A path that was ALREADY in $PRE_DIRTY_FILE commits the UNION of your fix and
+   # the user's in-progress edit — `git add <file>` cannot stage only your hunks.
+   # Do not fix a nit in a file the user is mid-edit on; leave it as a suggestion
+   # block (Step 5.6) instead.
 
    git fetch origin "$HEAD_BRANCH"
    if ! git merge-base --is-ancestor "origin/$HEAD_BRANCH" HEAD; then
      # the author pushed while the review ran — their commits are not in our history
      echo "head branch moved mid-review; abandoning auto-fix" >&2
    else
-     git push origin HEAD                 # never --force / --force-with-lease here
+     git push origin HEAD                # fast-forward; never --force here
    fi
    ```
-   `--force-with-lease` is the wrong tool on someone else's branch — it would clobber the
-   author. A non-fast-forward means **abandon the auto-fix**, not force it through.
-   Record the pushed SHA for the review body (`Addressed small fixes directly in <sha>.`).
-5. **If verification fails, or the branch moved, or the push is rejected** (fork PR without
+   A non-fast-forward here means **abandon the auto-fix** (step 6 below), not force it
+   through. That is a different condition from a lost lease and it has a different answer:
+   the author's commits are missing from our history, so *any* push of ours would drop
+   them. This push is plain and fast-forward-only — the only force-push in this step is
+   the one `/collapse-pr` makes in step 5, under its own gates.
+
+5. **Only if step 4 pushed.** If verification failed, or the branch moved mid-review, skip
+   straight to step 6 — nothing was pushed, so there is nothing to restore and **no licence
+   to force-push**. Those paths abandon the auto-fix; a collapse there would rewrite a
+   branch on a run that deliberately decided not to touch it, dismissing whatever approval
+   the PR already had, for no gain.
+
+   Otherwise **decide whether to collapse.** The branch on `origin` now holds two commits
+   (or more), and a multi-commit PR merges as `* `-bulleted soup — the invariant `open-pr`
+   established is exactly what step 4 just broke. Restore it, gated on **who owns the
+   branch**:
+
+   | PR head | Auto-fix push | Collapse (force-push) |
+   |---|---|---|
+   | Maintainer's or agent-authored, in-repo branch | yes | **yes** |
+   | Named contributor, in-repo branch | yes, and say so in the body | **no** — a force-push destroys their local branch and rewrites their authorship |
+   | Outside contributor (fork) | usually blocked by permissions | n/a |
+
+   Determine the class from the PR, not from a guess — `isCrossRepository` is the fork
+   test, and the branch's commit authors are the contributor test:
+
+   ```bash
+   gh pr view "$PR_NUM" --repo "$REPO" --json author,isCrossRepository \
+     --jq '{author: .author.login, fork: .isCrossRepository}'
+   git log --format='%ae' "origin/$BASE..HEAD" | sort -u   # all ours? then it is ours
+   ```
+
+   **Collapsing:** delegate to `/collapse-pr`, which resolves the head from `origin`,
+   runs its own gates, and pushes the collapsed branch.
+
+   **Hand it the author's message — do not let it compose one.** The common case is a PR
+   that `open-pr` already left at one hand-authored commit, on top of which step 4 added
+   `fix(review): address review nits`. The correct collapsed message is the author's,
+   unchanged: the added commit is *process, not change*, and a reviewer composing a fresh
+   description of someone else's work — which then lands in `main` verbatim — is not the
+   reviewer's call to make.
+
+   ```bash
+   git log -1 --format=%B "$PRE_FIX_SHA" > /tmp/collapse-msg.txt
+   ```
+
+   > Invoke `/collapse-pr "$PR_NUM" --yes --message-file /tmp/collapse-msg.txt
+   > --authored-worktree "$(git rev-parse --show-toplevel)"`, adding one
+   > `--authored-path <p>` per entry in `$FIXED_PATHS` **that was not already dirty
+   > at step 1** (see below). It exits
+   > **0 having touched nothing** when the branch already holds one commit or this repo
+   > does not need the invariant, and exits **non-zero** when a hard gate refuses. Both
+   > mean the same thing here: *leave the branch as step 4 pushed it*. Neither is a
+   > failure of the review, and neither changes the verdict — but both go in the Step 7
+   > report.
+
+   `$PRE_FIX_SHA` is the head as the author left it (step 1), so `-1` is their commit. The
+   one case where composing is right is a **pre-fix branch that was already multi-commit**
+   — there is no single authored message to preserve, so drop `--message-file` and let
+   `/collapse-pr` write one from the whole change.
+
+   It builds the new commit in a throwaway worktree at `origin/$HEAD_BRANCH`, so **nothing
+   local leaks into what lands**. It reads the head from the remote, which is why step 4's
+   push had to happen first. Its gate 3e may still touch this checkout — resetting it to
+   `origin` after preserving any local-only commit at a `collapse-pr-backup/…` ref — so
+   carry whatever refs it reports into Step 7 verbatim.
+
+   `--yes` covers only the soft gates: a prior third-party approval is about to be
+   dismissed by this push either way, and this run replaces it with its own `APPROVE` a
+   moment later, so the PR still enters the queue with one approval. The gates it cannot
+   override — branch ownership, the push lease, and 3e's stray-edit refusal — are the ones
+   that matter here, and `/collapse-pr` enforces them regardless of the flag.
+
+   **Pass `--authored-worktree` and one `--authored-path` per surviving entry of
+   `$FIXED_PATHS`.** In the normal flow they change nothing — step 4 already committed
+   those paths, so gate 3e sees them clean — but they are what makes a **re-run after a
+   partial failure** work: if step 4 committed nothing, or committed and failed to push,
+   the fixes are sitting uncommitted and 3e can only fold them in if it knows they are
+   ours.
+
+   `--authored-worktree` scopes the whitelist to **this** checkout. Without it, 3e would
+   apply one path list to every worktree on the head branch, and a path the user is
+   editing in their main clone would be staged, committed and pushed into the PR. Path
+   names are not provenance; content in a specific checkout is.
+
+   **Subtract the pre-existing dirty set.** A path can be on both lists at once — Step 1
+   warned that `gh pr checkout` carries a dirty tree onto the PR branch, and the fix you
+   just wrote may land in a file the user was already editing. There is no way to hand 3e
+   "only my hunks" — the flag names *files* — so committing such a file commits the union,
+   publishing the user's in-progress edits into someone else's PR commit. Whitelist only
+   what was clean when you arrived:
+
+   ```bash
+   # Drop from FIXED_PATHS anything that appears in PRE_DIRTY_FILE.
+   comm -23 <(printf '%s\n' ${FIXED_PATHS[@]+"${FIXED_PATHS[@]}"} | sort -u) \
+            <(tr '\0' '\n' < "$PRE_DIRTY_FILE" | cut -c4- | sort -u)
+   ```
+
+   The `cut -c4-` on the right-hand side is coarse — it mangles a rename entry — but
+   it errs by over-subtracting, which drops a path to row 2 and refuses. That is the
+   safe direction; the left-hand side, where a mistake would *widen* the whitelist, is
+   your own literal path list and is exact.
+
+   An overlapping path therefore reaches 3e as unknown provenance and **3e refuses** —
+   which is correct, and is the outcome to report rather than route around. **Do not work
+   around it** by widening the path list to whatever is dirty. A reviewer absorbing a
+   stranger's uncommitted edits into someone else's PR commit is precisely the failure the
+   whole `$FIXED_PATHS` discipline exists to prevent.
+
+   **Not collapsing** (contributor branch, fork, or `/collapse-pr` declined): nothing more
+   to do. Step 4's plain push already landed the fix, which is the fallback.
+
+   Record the head SHA for the review body (`Addressed small fixes directly in <sha>.`).
+   After a collapse that is the **collapsed** head, and the separate `fix(review):` commit
+   no longer exists — re-read it rather than reusing what `git commit` printed in step 4:
+
+   ```bash
+   gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid -q .headRefOid
+   ```
+
+   Your local checkout is now behind the rewritten remote. That is expected and harmless —
+   this skill makes no further pushes — but do not `git pull` it; say so in the report so
+   the user knows their PR-branch checkout needs `git reset --hard origin/$HEAD_BRANCH`.
+
+   **On the force-push, precisely.** This step used to forbid `--force` and
+   `--force-with-lease` outright. The prohibition was aimed at the right hazard — the
+   author pushing mid-review — but `--force-with-lease` **is** the mechanism that detects
+   that hazard, so forbidding it cost the capability and bought no safety. The rule now:
+
+   > Use `--force-with-lease`, pinned to the SHA we inspected. If the lease fails, the
+   > author pushed while the review ran: **skip the collapse**, fall back to the plain
+   > push, and say so in the review body. **Never bare `--force`** — not here, not as a
+   > retry, not ever.
+
+   Same protection, strictly more capability. `/collapse-pr` gate 3d and its Step 5 hold
+   the lease mechanics, including why the lease must name an explicit SHA rather than rely
+   on a remote-tracking ref this run's own `git fetch` has already moved.
+
+6. **If verification fails, or the branch moved, or the push is rejected** (fork PR without
    write access, branch protection, red gate) — revert **only what you wrote**:
 
    ```bash
@@ -463,13 +638,50 @@ is NOT set:
    files, or the failure path leaves the branch dirtier than it found it.
 
    Then note in the review body why the fixes could not land, and leave those findings as
-   comments.
+   comments — as **suggestion blocks** where they qualify (Step 5.6).
 
 **A fix that landed is not a finding.** Anything Step 5.5 actually fixed and pushed must
 **not** also be posted as an inline comment — the anchor now points at corrected code, so
 the author reads a complaint about a line that no longer says that. Move each fixed item
 out of the inline set and into a `## Fixed in <sha>` list in the body. What stays inline is
 only what the author still has to act on.
+
+### Step 5.6 — Suggestion blocks for what you did not push
+
+Every path through Step 5.5 that ends without a pushed fix — `--no-commit`, a fork, a
+contributor branch, a red gate, ≥1 Blocking finding — leaves findings the author has to
+apply by hand. For a whole class of them that hand-application is unnecessary work:
+
+**Emit a ```` ```suggestion ```` block for every Secondary or Nit finding that is a
+localized textual replacement of lines the diff already touches.** GitHub renders it with
+an *Apply suggestion* button; the author commits it in one click, the commit is **theirs**,
+and no branch of theirs is touched. On a fork PR that is strictly better than the prose
+comment it replaces — it is the only form of "let me fix this for you" that needs neither
+write access nor consent negotiated in advance.
+
+````markdown
+```suggestion
+const MAX_BULLET_LEN = 240;   // was: magic number at three call sites
+```
+````
+
+Four mechanics, each of which silently breaks the button if you get it wrong:
+
+- **The block replaces the anchored line range in full** — not a patch, not a fragment.
+  Reproduce the untouched parts of the line, and reproduce the **leading indentation
+  literally**; a suggestion that drops it applies and de-indents the code.
+- **It anchors like any other inline comment** — a `+` line on the RIGHT side of the patch,
+  per Step 6. A finding about unchanged code has no suggestion form; leave it as prose.
+- **Multi-line replacements need `start_line` + `line`** (both `"side": "RIGHT"`), and the
+  block must contain the full replacement for that whole range.
+- **A blocking finding is not a suggestion.** These carry Secondary and Nit findings only.
+
+**What never becomes a suggestion is anything behavioural.** The bound is the same one that
+governs Step 5.5's auto-fix, for the same reason: an *Apply suggestion* click is a one-line
+review, and a behavioural change presented as a one-click fix is a behavioural change
+nobody reviewed. Rename a variable, tighten a comment, hoist a constant, drop a dead
+export — yes. Change a condition, reorder an await, adjust a regex — no; that is a finding
+written in prose, with the failing input spelled out, for the author to decide on.
 
 ### Step 6 — Draft & post (Autonomous)
 
@@ -520,6 +732,11 @@ deletes its anchor line entirely leaves nothing to anchor to, which 422s the who
 and drops it to the body-only fallback. Fetching `files` here, after the push, is what
 keeps the anchors fresh. (Combined with the "a fix that landed is not a finding" rule
 above, the fixed lines carry no comments at all, so the common case never arises.)
+
+**A collapse makes that ordering non-negotiable.** When Step 5.5 collapsed, every SHA on
+the branch was rewritten and the PR's patch is regenerated against a different head, so an
+anchor derived beforehand is not merely drifted — it belongs to commits that no longer
+exist. Any Step 5.6 suggestion blocks anchor off this same post-push `files` call.
 
 ```bash
 gh api "repos/$REPO/pulls/$PR_NUM/files" --paginate \
@@ -584,6 +801,24 @@ back to body-only after a `422`, say that too, and say **whose** push moved the 
 the author's, or Step 5.5's own auto-fix — so the note doesn't blame the author for a
 push this skill made.
 
+Also report **the Step 5.5 push outcome in one line**, because it is the only part of the
+run that rewrote someone's branch: whether the branch was collapsed or left multi-commit
+and **which reason** (author class, lease lost, a `/collapse-pr` gate, `--no-commit`, ≥1
+Blocker), the pre-push head SHA alongside the new one, and how many findings went out as
+Step 5.6 suggestion blocks. A PR that leaves this run multi-commit is a live one-commit
+invariant violation — name it so, so whoever merges knows to collapse before enqueueing.
+
+If the collapse ran, add one line naming **every local checkout of the head branch that is
+now stale** and the `git reset --hard origin/<branch>` each needs — including this run's
+own `gh pr checkout`. The rewrite is on `origin`; nothing local followed it, and a user who
+is not told will hit a non-fast-forward later with no idea why.
+
+**Reproduce any `collapse-pr-backup/…` ref `/collapse-pr` reported, verbatim and in full.**
+Gate 3e creates one when a local checkout held commits `origin` did not, and that ref is
+the only thing keeping those commits reachable — a truncated or paraphrased name is not
+recoverable. Carry its classification across too (*already upstream* / *merely behind* /
+*possibly unique*) as the hint it is, and never as a claim the work was disposable.
+
 ## Rules
 
 - **Issue first, code second, description last.** The issue is the spec, the code
@@ -623,16 +858,49 @@ push this skill made.
   mid-review. Re-anchor against the fresh patch once; if that fails, post body-only
   and move on. Never loop on anchoring.
 - **Autonomous execution; three unattended writes, in this order.** The 👀 reaction
-  (Step 0.6), the auto-fix commit + push (Step 5.5), and the review post (Step 6). Nothing
-  is confirmed with the user — `--local` is the only preview. The reaction is safe *early*
-  because it carries no prose; the other two happen only after the findings exist, and the
-  push is bounded by the next rule.
+  (Step 0.6), the auto-fix commit + push (Step 5.5 — a force-push when it collapses), and
+  the review post (Step 6). Nothing is confirmed with the user — `--local` is the only
+  preview. The reaction is safe *early* because it carries no prose; the other two happen
+  only after the findings exist, and the push is bounded by the next rules.
 - **Auto-fix small items, then approve — including your own commit.** If 0 Blockers exist
   and small fixes remain, apply them, verify (`npm run verify`), commit with a clean
-  message (no trailers), `git push` to the head branch, and post `APPROVE`. That the
-  approval covers a commit this run authored is deliberate: it removes the nit → push →
+  message (no trailers), push to the head branch, and post `APPROVE`. That the approval
+  covers a commit this run authored is deliberate: it removes the nit → push →
   dismissed-approval → re-review cycle, and it is why no follow-up issue is filed for a nit
   that is already fixed. ≥1 Blocker → commit nothing, post `REQUEST_CHANGES`.
+- **Restore the one-commit invariant before the review lands (Step 5.5).** The auto-fix
+  commit is what breaks it, so the collapse rides in the same slot: fix → commit → plain
+  push → `/collapse-pr` → derive anchors → post. The plain push comes first because
+  `/collapse-pr` reads the head from `origin`, not from this checkout. Collapsing *after*
+  the approval would dismiss the approval it just made (`dismiss_stale_reviews: true`) and
+  deadlock the PR, and anchors derived before the collapse belong to commits that no
+  longer exist. **Collapse only on a run that actually pushed** — a run that abandoned the
+  auto-fix has nothing to restore and no reason to rewrite anyone's branch.
+- **The collapsed message is the author's, not the reviewer's.** Pass
+  `--message-file` holding `git log -1 --format=%B "$PRE_FIX_SHA"`. The `fix(review):`
+  commit is process, not change, so the author's message survives untouched — a reviewer
+  does not get to rewrite the description of someone else's work on its way into `main`.
+  Compose one only when the pre-fix branch was itself multi-commit.
+- **The collapse never rewrites this checkout's *history*, but gate 3e may move it.**
+  `/collapse-pr` builds the new commit in a throwaway worktree at `origin/$HEAD_BRANCH`,
+  so nothing local leaks into what lands. Separately, 3e resolves a diverged local
+  checkout losslessly: local-only commits are preserved at a `collapse-pr-backup/…`
+  branch ref and the checkout is reset to `origin`. Surface any such ref in the Step 7
+  report verbatim — it is the only reference to that commit. It refuses only on
+  uncommitted changes this run did not author. Afterwards the local PR-branch checkout is
+  stale by construction — report that it needs `git reset --hard`, and never `git pull` it.
+- **`--force-with-lease`, never bare `--force`.** The lease is not a relaxation of the old
+  never-force-push rule — it is that rule implemented properly: a lost lease *is* the
+  detection of an author who pushed mid-review, and the answer is to skip the collapse,
+  fall back to the plain push, and say so in the review body. Never retry, never escalate.
+- **Never rewrite a branch that is not ours.** Collapse only a maintainer's or
+  agent-authored in-repo branch. A named contributor's branch or a fork gets the plain
+  push at most — a force-push there destroys their local work and republishes it under our
+  name. `/collapse-pr`'s ownership gate has no override flag, by design.
+- **When you don't push, suggest (Step 5.6).** Every Secondary/Nit that is a localized
+  textual replacement of a `+` line becomes a ```` ```suggestion ```` block, so the author
+  applies it in one click and owns the commit. Behavioural findings never do — same bound
+  as the auto-fix.
 - **The bound is behaviour, not size.** The auto-fix commit merges unread by a second
   party, so it may only contain changes that cannot alter behaviour, on a green
   `npm run verify`, with 0 Blockers. A behavioural edit is a finding for the author no
@@ -640,8 +908,9 @@ push this skill made.
 - **The auto-fix revert names paths.** Never `git checkout -- .` — it destroys the user's
   unrelated in-progress work with no reflog while leaving the failed fix's new files
   behind. `git restore --source="$PRE_FIX_SHA" … -- "${FIXED_PATHS[@]}"` plus
-  `git clean -fd --` on the same paths. Never force-push someone else's branch: a
-  non-fast-forward means the author pushed mid-review — abandon the auto-fix and report it.
+  `git clean -fd --` on the same paths. A non-fast-forward before the push is a different
+  condition from a lost lease: the author's commits are missing from our history, so
+  abandon the auto-fix entirely and report it.
 - **Tune stance to the author** — historically complex/untested contributions get an
   extra-careful pass; don't relax the gates because a diff "looks" clean.
 - Pure `gh` + `git` + `npm`/`npx` — no external services, no machine-specific paths.

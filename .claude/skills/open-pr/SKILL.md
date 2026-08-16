@@ -136,53 +136,45 @@ area-code-`555` one. The gate scans annotations and metadata as well as text. Wh
 
 ### Step 3.6: Collapse the branch to a single commit
 
-`main` merges through a **merge queue**, and the queue's enqueue API carries **no
-commit-message fields** (`EnqueuePullRequestInput` is `pullRequestId` / `jump` /
-`expectedHeadOid` — nothing else). So the squash message can't be supplied at
-merge time; GitHub *derives* it from repo settings when the queue merges.
+The branch must reach the merge queue holding **one commit whose message is the
+message you want in `main`** — `/collapse-pr`'s *Why this skill exists* has the
+full rationale, and it is the only copy of it. **Delegate the mechanics:**
 
-Those settings are `squash_merge_commit_title: COMMIT_OR_PR_TITLE` and
-`squash_merge_commit_message: COMMIT_MESSAGES`. The lever that gives is:
+> Invoke `/collapse-pr --in-place` (add `--base "$BASE"` when Step 0 overrode the
+> base, so a stacked PR collapses against its parent layer and not `main`). It
+> counts the commits itself and exits 0 on a branch that already holds one, so run
+> it unconditionally.
 
-> **A PR with exactly one commit merges with that commit's subject and body
-> verbatim** — PR title/body ignored, no `* `-bulleted commit soup, nothing from
-> the PR body leaking into `git log`.
+**`--in-place` is mandatory here, not a default worth omitting.** Without it
+`/collapse-pr` infers its mode from whether `gh pr view` finds a PR — and on a
+**re-run** of this skill against a branch whose PR already exists, it does. It
+would then flip to worktree mode, collapse `origin`'s head, and never look at the
+commits you just made locally; Step 4 below would skip its push because "3.6
+collapsed"; and `/collapse-pr` gate 3e row 3 would `reset --hard` the local commits
+away as divergence. The work would be destroyed and both skills would report
+success. `--in-place` is what tells it that this checkout, not `origin`, is the
+target. Step 6's report names the mode it actually ran in — check it.
 
-So the branch must arrive at the queue holding **one commit whose message is the
-message you want in `main`**. Doing it here — before the PR exists — costs
-nothing (there's no approval to dismiss yet).
+**Here is the cheapest moment in the PR's life to do this**, and that is why the
+step sits where it does. In **in-place** mode this checkout *is* the target, so
+there is no throwaway worktree and no remote-vs-local question to settle, and the
+divergence gate (3e) does not apply at all. On a *first* run three of the five
+gates cannot fire: there is no approval to dismiss, no review thread to strand, and
+no 3e. The other two are satisfied by construction on a branch you just created: it
+is yours, and on a first push there is no lease to lose.
 
-```bash
-git log --oneline "origin/$BASE..HEAD" | wc -l    # >1 → collapse
-```
+On a **re-run** the branch may already have a PR, and `--in-place` deliberately does
+not hide that: `/collapse-pr` still reads it, so the stale-approval and open-thread
+gates fire on their own merits, and the lease gate becomes live again — all correct,
+because someone else may have approved, commented, or pushed since. `--in-place`
+fixes *where the rewrite happens*, not *which gates apply*.
 
-If more than one commit, write the combined message and collapse:
-
-```bash
-git reset --soft "$(git merge-base HEAD "origin/$BASE")"
-git commit -F .git/COMMIT_EDITMSG      # the combined message you authored
-```
-
-The combined message is **written, not concatenated** — it describes the change
-as a whole, not the sequence of steps that produced it. Branch commits are
-scratch; this message is the artifact:
-
-```
-feat(score): weight specificity by bullet density (#453)
-
-Bullets with quantified outcomes now dominate the specificity dimension
-instead of raw keyword count, which over-rewarded skill-stuffed resumes.
-
-- add BulletDensity probe in score/specificity.ts
-- bump ATS_SCORE_ALGO_VERSION to 4
-- regenerate corpus goldens
-
-Closes #453
-```
-
-Drop the `wip` / `fix lint` / `address review` commits — they are process, not
-change. Keep the same no-AI-trailer rule as Step 2 (this message lands in `main`,
-so it matters more, not less).
+You still write the message — `/collapse-pr` composes one, but if you already
+prepared a `COMMIT_EDITMSG`, hand it over with `--message-file`. Either way it is
+**written, not concatenated**: it describes the change as a whole, drops the `wip`
+/ `fix lint` / `address review` commits as process rather than change, and carries
+the same no-AI-trailer rule as Step 2 — this message lands in `main` verbatim, so
+it matters more there, not less.
 
 ### Step 4: Push the branch
 
@@ -190,8 +182,21 @@ so it matters more, not less).
 git push -u origin "$BRANCH"
 ```
 
-If the branch already existed on `origin` and Step 3.6 rewrote its history, this
-needs `git push --force-with-lease -u origin "$BRANCH"` (never bare `--force`).
+**Skip this only if Step 3.6 collapsed *and* reported `mode: inplace`** —
+`/collapse-pr` then pushed this checkout itself (with an explicit
+`--force-with-lease` when the branch already existed on `origin`), so pushing again
+here is redundant at best. Push here when it reported a no-op, declined, **or ran
+in `worktree` mode** — that last case means it collapsed `origin`'s head and your
+local commits are still unpublished, so skipping would silently drop them. It
+should never happen given Step 3.6 passes `--in-place`; if the report says
+otherwise, push here and say so.
+
+**Either way the managed `pre-push` hook runs `npm run verify`, and that is this
+skill's only local verification** — so a red gate stops the branch here rather than
+on `origin`. `/collapse-pr` skips that hook **only** in its throwaway-worktree mode,
+where the tree it is pushing already went through it; the in-place mode this step
+uses never skips it. If the push is rejected by the hook, fix the failure — do not
+set `OFFLINECV_SKIP_HOOKS=1` to get past it.
 
 ### Step 5: Create the PR
 
@@ -278,13 +283,11 @@ merge their own PR via admin bypass.)
   optional and phrased as questions; omit the heading when the risk is obvious.
   It is a lead for the reviewer, never a scope bound — `pr-review` audits it for
   accuracy and reviews the whole diff either way.
-- **One commit per PR, message hand-written (Step 3.6).** `main`'s merge queue
-  can't be handed a squash message — it derives one, and with
-  `COMMIT_OR_PR_TITLE` a single-commit PR merges with that commit's message
-  verbatim. So the branch's one commit *is* the message that lands in `main`.
-  Branch commits are scratch; the merge message is the artifact. Collapse before
-  the PR exists (no approval to lose) and never bypass the queue with `--admin`
-  just to hand-write a message.
+- **One commit per PR, message hand-written (Step 3.6).** Delegate the collapse to
+  `/collapse-pr`, which owns both the mechanics and the reason the invariant
+  exists. Collapse *here*, before the PR exists — it is the one moment when the
+  operation has no cost, because there is no approval to dismiss and no reviewer
+  mid-diff. Never bypass the queue with `--admin` just to hand-write a message.
 - **One PR per issue/topic.** Keep the diff focused so a single reviewer can
   approve it quickly.
 - Use a closing keyword (`Closes #N`) only when the PR fully resolves the issue;
