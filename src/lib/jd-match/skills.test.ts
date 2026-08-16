@@ -41,16 +41,28 @@ describe("skills dictionary", () => {
     expect(captured).not.toContain("ruby");
   });
 
-  it("starts every authored label with a capital or a digit (#607)", () => {
-    // A `label` is rendered verbatim beside chips `deriveSkills` title-cased
-    // itself, so a lowercase one puts two casings in one sentence — and the
-    // recognized skill is the one that looks unpolished. Checked on the first
-    // character only: inside the label the entry's own house casing rules
-    // ("iOS", "P&L Ownership", "A/B Testing"), which no rule can derive.
-    const offenders = SKILLS.filter((s) => s.label && !/^[A-Z0-9]/.test(s.label)).map(
-      (s) => `${s.id}: "${s.label}"`,
-    );
+  it("starts every authored label with a capital or a digit, except documented lowercase brands (#607, #681)", () => {
+    /** Brands whose own casing starts lowercase. Every other label must not. */
+    const LOWERCASE_BRAND_LABELS = new Set([
+      "iOS",
+      "dbt",
+      "jQuery",
+      "gRPC",
+      "scikit-learn",
+      "pandas",
+      "pytest",
+    ]);
+    const offenders = SKILLS.filter(
+      (s) =>
+        s.label &&
+        !LOWERCASE_BRAND_LABELS.has(s.label) &&
+        !/^[A-Z0-9]/.test(s.label),
+    ).map((s) => `${s.id}: "${s.label}"`);
     expect(offenders).toEqual([]);
+  });
+
+  it("gives every entry an authored display label, so nothing renders its kebab id (#681)", () => {
+    expect(SKILLS.filter((s) => !s.label).map((s) => s.id)).toEqual([]);
   });
 
   it("keeps every alias lowercase — aliases are matched, never shown", () => {
@@ -65,7 +77,7 @@ describe("skills dictionary", () => {
 
   it("pins the dictionary data version so an alias edit is a conscious bump", () => {
     // Upstream of `term-quality.ts`'s answer, which no other version covers.
-    expect(SKILLS_DICTIONARY_VERSION).toBe("1.1");
+    expect(SKILLS_DICTIONARY_VERSION).toBe("1.2");
   });
 
   it("matches aliases case-insensitively at word boundaries", () => {

@@ -65,11 +65,11 @@ describe("SkillTermGuidance", () => {
     expect(el.textContent).toContain("Based on the first role title above");
     // `query.skills` canonicalizes through the jd-match skill index
     // (`buildJobQuery` → `getSkillIndex`), so the rendered term is the
-    // canonical id/label ("postgresql", "csharp"), not the résumé's raw
+    // canonical id/label ("PostgreSQL", "C#"), not the résumé's raw
     // casing — same behaviour `/jobs/` renders.
-    expect(el.textContent).toContain("Already in your résumé: postgresql");
+    expect(el.textContent).toContain("Already in your résumé: PostgreSQL");
     expect(el.textContent).toContain(
-      "We could not match these to a known skill: csharp",
+      "We could not match these to a known skill: C#",
     );
     // The old wording blamed the user's term rather than our index; assert it
     // is gone, not merely that the new sentence is present.
