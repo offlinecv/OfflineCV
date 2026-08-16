@@ -142,10 +142,10 @@ Kubernetes is a core piece of the platform.
     expect(cicd?.display).toBe("CI/CD");
   });
 
-  it("falls back to the id as display when a skill has no explicit label", () => {
+  it("uses the authored label for every recognized skill (#681)", () => {
     const { skills } = extractJdTerms("We use React and Kubernetes.");
-    expect(skills.find((s) => s.id === "react")?.display).toBe("react");
-    expect(skills.find((s) => s.id === "kubernetes")?.display).toBe("kubernetes");
+    expect(skills.find((s) => s.id === "react")?.display).toBe("React");
+    expect(skills.find((s) => s.id === "kubernetes")?.display).toBe("Kubernetes");
   });
 
   it("returns an empty result for an empty JD", () => {
