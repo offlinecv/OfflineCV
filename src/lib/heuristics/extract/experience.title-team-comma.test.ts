@@ -138,6 +138,31 @@ describe("'Title, Team [dates]' over 'Company | Location' below-anchor employer 
     expect(role.team).toBeUndefined();
   });
 
+  it("does NOT rotate the title mirror into team when the rescue recovers the company (#543)", () => {
+    // `Title, Company, City, ST` on the anchor line, with a company segment
+    // carrying no recognized org tell. Case 3 mirrors `title` into `company`
+    // and puts "Fabrikam Retail, Boise, ID" in `team`; the step-3 location
+    // rescue then strips the city, rotates the REAL employer into `company`
+    // and — pre-fix — rotated the MIRROR into `team`, where the
+    // `company === title` backstop could no longer see it. The title shipped a
+    // second time as a team name, in `ReconstructedRole` and in the Download
+    // PDF's org header line. Once the rescue has recovered the employer there
+    // is nothing left for `team` to hold, so the mirror is dropped.
+    const roles = roleFromSection([
+      { text: "Experience", fontSize: 13 },
+      {
+        text: "Automation Analyst, Fabrikam Retail, Boise, ID  Aug 2016 - May 2018",
+        fontSize: 11,
+      },
+      { text: "• Built the regression suite for the checkout flow.", fontSize: 11 },
+    ]);
+    const role = roles[0];
+    expect(role.title).toBe("Automation Analyst");
+    expect(role.company).toBe("Fabrikam Retail");
+    expect(role.location).toBe("Boise, ID");
+    expect(role.team).toBeUndefined();
+  });
+
   it("case 3a does NOT fire on team-shape post-comma like 'Growth Analytics' (PR #483 review)", () => {
     // The pre-narrowing broad vocab promoted `Growth Analytics` to company
     // and dropped `team`, which then blocked the #382 shared-employer banner

@@ -254,16 +254,28 @@ export interface EntryBlock {
   bulletCount: number;
   /**
    * Below-anchor lines that {@link looksLikeBelowAnchorProse} pre-classifies as
-   * body prose (contains `;`, or ends in `.!?` and not on a legal-entity
-   * suffix). Wrap-continuations are already folded, so a wrapped role-scope
-   * paragraph is ONE entry, not N fragment lines — the caller can prepend
-   * them straight to `description` and the exporter emits one bullet per
-   * paragraph rather than one per visual line.
+   * body prose (contains `;`, leads with a grade-code middot segment, leads
+   * with an action verb over a lowercase-initial word, or ends in `.!?` and
+   * not on a legal-entity suffix). Wrap-continuations are already folded, so
+   * a wrapped role-scope paragraph is ONE entry, not N fragment lines — the
+   * caller can prepend them straight to `description` and the exporter emits
+   * one bullet per paragraph rather than one per visual line.
    *
    * Preempted from `headerLines` BEFORE `disambiguateCompanyTitle` runs (#615
    * PR #688 Thread 1): left in the header run, a sentence like "Founding site
    * leader; owned charter and headcount." fills the still-empty `team` slot
    * on a header line that carries no team segment, violating #615 AC #3.
+   *
+   * **`experience.ts` is the only reader.** A line lifted here is out of
+   * `headerLines` and only `resolveDescription` puts it back, so widening
+   * {@link looksLikeBelowAnchorProse} is only safe for the other callers
+   * (`projects.ts`, `achievements.ts`) because neither reads below-anchor
+   * header lines for content: both take `description` from `block.body` and
+   * their `liftHeaderLabel` reads the label off `headerLines[0]`, which is
+   * the anchor line and can never be preempted. The one thing they DO read
+   * across the whole header run is the URL scan in `liftHeaderLabel` — so a
+   * preempted line's URL stops being liftable. `education.ts` does not use
+   * this primitive at all.
    */
   belowAnchorBodyProse?: string[];
   /**
@@ -1327,6 +1339,63 @@ function foldBelowAnchorLines(
 }
 
 /**
+ * Separator run that can sit between a role header's date range and a scope
+ * sentence glued onto the same line — the closing bracket of a parenthesised
+ * date, plus the ordinary segment separators. Kept off the peel: `.`/`!`/`?`,
+ * which would mean the date ENDED a sentence, and any letter or digit, which
+ * would mean the "tail" is really still part of the date region.
+ */
+const ANCHOR_TAIL_LEAD_RE = /^[\s)\]}·•‣|,:;—–-]*/;
+
+/**
+ * Split a `date_range` anchor line that carries its role-scope sentence GLUED
+ * on after the date ("Senior QA Engineer, Northwind Systems, Portland, OR
+ * (Mar 2021 - Present) Leads the automation guild.", #492).
+ *
+ * Without this the whole line survives `stripDateRange` as one header string,
+ * `disambiguateCompanyTitle` maps the sentence and the employer into a single
+ * field, and the role comes back with the scope sentence inside `company`.
+ *
+ * The guard is {@link looksLikeBelowAnchorProse} — the same predicate that
+ * already decides whether a line BELOW the anchor is body prose or a header
+ * candidate. Reusing it is what keeps this narrow, and what keeps the two
+ * halves of "what is body prose on an entry" from drifting: the far commoner
+ * post-date tails are a location ("… Jan 2020 - Present  San Francisco, CA")
+ * and a separator-led location ("… Jan 2022 – Present · Springfield, IL"),
+ * and neither is prose by that predicate, so neither is touched.
+ *
+ * A date-LED line ("Mar 2021 - Present  Senior QA Engineer") is deliberately
+ * left alone: its whole payload sits after the date, so peeling it would EMPTY
+ * the header run rather than clean it — and an empty header run is exactly the
+ * gate `promoteBulletedRoleHeader` (experience.ts) opens on, which would then
+ * consume the block's first BULLET as the role header. A cleanup must not
+ * change which extraction path a block takes; whether a date-led prose block
+ * should promote is #145's question, not this function's.
+ *
+ * Returns the head to feed the normal date-stripping path (the date region is
+ * left ON it, so `stripDateRange` still sees and removes a parenthesised date
+ * whole) and, when it fired, the prose tail — which the caller routes into
+ * {@link EntryBlock.belowAnchorBodyProse}, whose sole reader `experience.ts`
+ * prepends to `description`. That routing is why the caller gates this to the
+ * `date_range` anchor: `projects.ts` / `achievements.ts` never read that bucket,
+ * so lifting a tail on their `first_line` anchor would silently drop it.
+ */
+function splitAnchorProseTail(text: string): {
+  head: string;
+  proseTail?: string;
+} {
+  const match = DATE_RANGE_RE.exec(text);
+  DATE_RANGE_RE.lastIndex = 0;
+  if (!match) return { head: text };
+  if (!text.slice(0, match.index).trim()) return { head: text };
+  const afterIdx = match.index + match[0].length;
+  const lead = text.slice(afterIdx).match(ANCHOR_TAIL_LEAD_RE)?.[0] ?? "";
+  const tail = text.slice(afterIdx + lead.length).trim();
+  if (!tail || !looksLikeBelowAnchorProse(tail)) return { head: text };
+  return { head: text.slice(0, afterIdx + lead.length), proseTail: tail };
+}
+
+/**
  * Build the single `EntryBlock` anchored at `anchors[a]`. The entry spans from
  * just after the previous anchor to just before the next: header lines are the
  * (lookback) non-bullet lines above the anchor, the anchor line with its dates
@@ -1408,11 +1477,20 @@ function buildEntryBlock(
 
   const anchorLine = lines[anchorIdx];
   const parseAnchorDate = shouldParseAnchorDate(anchorLine, cfg);
+  // #492 — peel a role-scope sentence glued onto the anchor line after its date
+  // range, so the header the disambiguator sees is just the header. Scoped to
+  // the `date_range` anchor because the tail is routed into
+  // `belowAnchorBodyProse`, which only `experience.ts` reads (see
+  // {@link splitAnchorProseTail}).
+  const { head: anchorHeadText, proseTail: anchorProseTail } =
+    cfg.anchor === "date_range" && parseAnchorDate
+      ? splitAnchorProseTail(anchorLine.text)
+      : { head: anchorLine.text, proseTail: undefined };
   const dates: EntryBlock["dates"] = parseAnchorDate
-    ? parseDateRange(anchorLine.text)
+    ? parseDateRange(anchorHeadText)
     : {};
   const anchorTextWithoutDates = parseAnchorDate
-    ? stripDateRange(anchorLine.text)
+    ? stripDateRange(anchorHeadText)
     : anchorLine.text;
 
   // Header candidates below the anchor (e.g. "Company <dates>\nTitle"):
@@ -1465,7 +1543,10 @@ function buildEntryBlock(
   // by `looksLikeBelowAnchorProse`: obvious body prose is preempted from
   // `headerLines` so `disambiguateCompanyTitle` can't absorb it into an empty
   // `team` slot; the rest stays a header candidate.
-  const belowAnchorBodyProse: string[] = [];
+  // #492 — the anchor line's own glued scope sentence LEADS the run: it sits on
+  // the anchor line, above every below-anchor line, and `resolveDescription`
+  // emits this bucket in array order.
+  const belowAnchorBodyProse: string[] = anchorProseTail ? [anchorProseTail] : [];
   const belowHeaderCandidates: string[] = [];
   for (const text of foldedBelow) {
     if (looksLikeBelowAnchorProse(text)) {

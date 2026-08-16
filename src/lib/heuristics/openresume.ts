@@ -26,6 +26,7 @@ import type {
 import {
   findSection,
   groupIntoLines,
+  recoverHeaderlessExperience,
   splitIntoSections,
   splitIntoSectionsWithMarkdown,
   toSectionedResume,
@@ -343,12 +344,23 @@ function mergedConfidence(
 
 function buildHeuristicResult(
   lines: PdfLine[],
-  sections: PdfSection[],
+  rawSections: PdfSection[],
   sectionSource: "markdown" | "regex",
   annotations: PdfLinkAnnotation[] = [],
   singleColumn = true,
   nameFallbackProfile?: PdfSection,
 ): HeuristicResult {
+  // #492 — a résumé that wrote NO header over its work history routes no
+  // `experience` section at all, so every role line sits in `profile` / a
+  // `summary` blurb / an `other` sink and the whole employment history is
+  // dropped. `recoverHeaderlessExperience` opens one on entry shape instead.
+  // It runs HERE rather than inside a splitter because all three Tier 1 entry
+  // points (`parseHeuristic`'s markdown-anchored and regex splitters, and the
+  // DOCX-native `parseHeuristicFromMarkdown`) converge on this function — the
+  // reproducing fixture routes `markdown`, so a fix inside `splitIntoSections`
+  // alone would never fire on it. It is a no-op unless it actually recovers a
+  // cluster, so no already-routed résumé is perturbed.
+  const sections = recoverHeaderlessExperience(rawSections, singleColumn);
 
   const profile = findSection(sections, "profile") ?? {
     name: "profile" as const,

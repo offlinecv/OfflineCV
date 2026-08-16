@@ -22,6 +22,7 @@ import {
   collapseLetterSpacing,
   groupIntoLines,
   mergeItemText,
+  recoverHeaderlessExperience,
   splitIntoSections,
   splitIntoSectionsWithMarkdown,
   toSectionedResume,
@@ -244,32 +245,44 @@ describe("splitIntoSections — visual-primary boundary path (#112)", () => {
     ]);
   });
 
-  describe("column-gated sidebar-header recovery (#117)", () => {
+  describe("band-gated sidebar-header recovery (#117 / #574)", () => {
     // A two-column flatten glues a sidebar value ("20%") onto the "Projects"
     // header, producing a body-size, text-identical-to-prose line. The ONLY
-    // signal that separates "20% Projects" (a real header in the secondary
-    // column) from main-column prose like "20% Experience" is column
-    // membership: line.x >= the page's column split-x. The maxFontSize is kept
-    // at body size in every case so these pin the COLUMN gate, not the L3 font
-    // path.
-    const TWO_COLUMN: Map<number, number> = new Map([[1, 384]]);
+    // signal that separates "20% Projects" (a real header in the sidebar rail)
+    // from body-column prose like "20% Experience" is SIDEBAR membership — and
+    // the sidebar is the NARROW band, not simply the right-hand one (#574).
+    // maxFontSize is kept at body size in every case so these pin the BAND gate,
+    // not the L3 font path.
+    //
+    // Geometry is load-bearing here, because the band classifier measures it:
+    // `mkItem` gives each line a width of `text.length × fontSize / 2`, so the
+    // sidebar's lines must be SHORT enough to keep their band narrower than the
+    // body's (≤ 0.7×). Before #574 these cases used a 60-char "sidebar" line —
+    // 300pt wide, wider than the main column and past the page edge — which
+    // described no sidebar at all; the assertions passed only because the gate
+    // read x-order rather than width.
 
-    it("(a) recovers `projects` for a sidebar line in the secondary column", () => {
+    // Sidebar-RIGHT page: body at x=72 inks to ~362, sidebar at x=405.
+    const SIDEBAR_RIGHT: Map<number, number> = new Map([[1, 384]]);
+    // Sidebar-LEFT page: sidebar at x=40 inks to ~165, body at x=224.
+    const SIDEBAR_LEFT: Map<number, number> = new Map([[1, 195]]);
+
+    it("(a) recovers `projects` for a line in a RIGHT sidebar", () => {
       const sections = build(
         [
           { text: "Drew Hayes", fontSize: 20 }, // name
           { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10 }, // contact
           { text: "EXPERIENCE", fontSize: 13 }, // real keyword section — past the name block
           { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10 },
-          // Body-size (NOT font-distinct), secondary column (x=405 >= 384).
+          // Body-size (NOT font-distinct), narrow right sidebar (x=405 >= 384).
           { text: "20% Projects", fontSize: 10, x: 405 },
-          { text: "Launched 10 new web fonts with external non-profit partners.", fontSize: 10, x: 405 },
+          { text: "Ported the design system", fontSize: 10, x: 405 },
         ],
-        TWO_COLUMN,
+        SIDEBAR_RIGHT,
       );
 
       // The sidebar-prefixed line opened a `projects` section, not `other`.
-      const projects = sectionContaining(sections, "Launched 10 new web fonts");
+      const projects = sectionContaining(sections, "Ported the design system");
       expect(projects).toBeDefined();
       expect(projects!.name).toBe("projects");
       expect(names(sections)).toContain("projects");
@@ -277,21 +290,21 @@ describe("splitIntoSections — visual-primary boundary path (#112)", () => {
       expect(names(sections).filter((n) => n === "other")).toHaveLength(0);
     });
 
-    it("(b) does NOT recover the same line in the MAIN column (x < split)", () => {
+    it("(b) does NOT recover the same line in the BODY column of that page", () => {
       const sections = build(
         [
           { text: "Drew Hayes", fontSize: 20 },
           { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10 },
           { text: "EXPERIENCE", fontSize: 13 },
           { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10 },
-          // Same text, body-size, MAIN column (x=50 < 384) — must NOT recover.
+          // Same text, body-size, BODY column (x=50 < 384) — must NOT recover.
           { text: "20% Projects", fontSize: 10, x: 50 },
-          { text: "Launched 10 new web fonts with external non-profit partners.", fontSize: 10, x: 50 },
+          { text: "Ported the design system", fontSize: 10, x: 405 },
         ],
-        TWO_COLUMN,
+        SIDEBAR_RIGHT,
       );
 
-      // No `projects` section: the main-column line is treated as prose and
+      // No `projects` section: the body-column line is treated as prose and
       // stays appended to the open experience section.
       expect(names(sections)).not.toContain("projects");
     });
@@ -308,6 +321,103 @@ describe("splitIntoSections — visual-primary boundary path (#112)", () => {
       ]);
 
       expect(names(sections)).not.toContain("projects");
+    });
+
+    it("(d) #574: an anchor-ending company line in a sidebar-LEFT BODY stays content", () => {
+      // The polarity the pre-#574 `line.x >= columnSplitX` gate got backwards:
+      // with the sidebar on the LEFT, the whole résumé body sits ABOVE the
+      // split, so every body line met the old gate. "NGP Professional
+      // Education" is a company name the GUARDED text-only matcher already
+      // rejects (regex.ts Guard 8, the #258 fix) — but that guard is not on this
+      // path, so the unguarded lookup used to promote it to an `education`
+      // header and swallow role 2 and everything after it.
+      const sections = build(
+        [
+          { text: "CONTACT", fontSize: 10, x: 40 },
+          { text: "Portland, OR", fontSize: 10, x: 40 },
+          { text: "Drew Hayes", fontSize: 20, x: 224 },
+          { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10, x: 224 },
+          { text: "EXPERIENCE", fontSize: 13, x: 224 },
+          { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10, x: 224 },
+          { text: "• Ran the overnight logistics desk for three regions", fontSize: 10, x: 224 },
+          { text: "NGP Professional Education", fontSize: 10, x: 224 },
+          { text: "Staff Engineer  06/2015 - 01/2019", fontSize: 10, x: 224 },
+          { text: "• Built the reporting pipeline that the finance team runs on", fontSize: 10, x: 224 },
+        ],
+        SIDEBAR_LEFT,
+      );
+
+      expect(names(sections)).not.toContain("education");
+      // The company line and the role beneath it are still experience content.
+      expect(sectionContaining(sections, "NGP Professional Education")!.name)
+        .toBe("experience");
+      expect(sectionContaining(sections, "Built the reporting pipeline")!.name)
+        .toBe("experience");
+    });
+
+    it("(e) #574: the #117 recovery still fires when the sidebar is on the LEFT", () => {
+      // Same page geometry as (d), with the glued artifact in the LEFT rail —
+      // the polarity the old gate could never reach.
+      const sections = build(
+        [
+          { text: "20% Projects", fontSize: 10, x: 40 },
+          { text: "Payments rewrite", fontSize: 10, x: 40 },
+          { text: "Drew Hayes", fontSize: 20, x: 224 },
+          { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10, x: 224 },
+          { text: "EXPERIENCE", fontSize: 13, x: 224 },
+          { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10, x: 224 },
+          { text: "• Built the reporting pipeline that the finance team runs on", fontSize: 10, x: 224 },
+        ],
+        SIDEBAR_LEFT,
+      );
+
+      const projects = sectionContaining(sections, "Payments rewrite");
+      expect(projects).toBeDefined();
+      expect(projects!.name).toBe("projects");
+    });
+
+    it("(f) #574: no recovery on a page whose two columns are peers", () => {
+      // Bands of comparable width carry no sidebar, so the guard-free lookup has
+      // no membership signal to stand in for its missing prose guards — it must
+      // stay off on BOTH sides.
+      const PEER_COLUMNS: Map<number, number> = new Map([[1, 300]]);
+      const sections = build(
+        [
+          { text: "Drew Hayes", fontSize: 20, x: 60 },
+          { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10, x: 60 },
+          { text: "EXPERIENCE", fontSize: 13, x: 60 },
+          { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10, x: 60 },
+          { text: "20% Projects", fontSize: 10, x: 320 },
+          { text: "Ported the design system to tokens", fontSize: 10, x: 320 },
+        ],
+        PEER_COLUMNS,
+      );
+
+      expect(names(sections)).not.toContain("projects");
+    });
+
+    it("(g) #574: a DATED sidebar entry line does not open a section", () => {
+      // An institution/employer line whose date sits directly below it reads as
+      // an ENTRY, not a header — the contextual tell #258/#354 established on
+      // the text-only path, which this branch bypasses.
+      const sections = build(
+        [
+          { text: "Drew Hayes", fontSize: 20 },
+          { text: "drew.hayes@example.com | (312) 555-0133", fontSize: 10 },
+          { text: "EXPERIENCE", fontSize: 13 },
+          { text: "Lead Engineer, Acme  02/2019 - Present", fontSize: 10 },
+          { text: "EDUCATION", fontSize: 13, x: 405 },
+          { text: "3M Professional Education", fontSize: 10, x: 405 },
+          { text: "2011 - 2015", fontSize: 10, x: 405 },
+        ],
+        SIDEBAR_RIGHT,
+      );
+
+      // One education section (the real header), not a second one minted at the
+      // institution line — which would have consumed the institution name.
+      expect(names(sections).filter((n) => n === "education")).toHaveLength(1);
+      expect(sectionContaining(sections, "3M Professional Education")!.name)
+        .toBe("education");
     });
   });
 });
@@ -999,6 +1109,27 @@ describe("splitIntoSections — institution name ending in a section anchor (#25
   });
 });
 
+describe("splitIntoSections — \"Top Skills\" heading opens the skills section (#575)", () => {
+  // A résumé exported from a major professional network labels its skills
+  // block "Top Skills", not "Skills". That form was absent from the skills
+  // alias list, so the header fell through to the `other` sink and the
+  // values below it never reached `parsed.skills`.
+  it("routes a 'Top Skills' heading to skills, not the 'other' sink", () => {
+    const sections = build([
+      { text: "Dana Lopez", fontSize: 18 },
+      { text: "dana.lopez@example.com | (312) 555-0123", fontSize: 11 },
+      { text: "Top Skills", fontSize: 13 },
+      { text: "Distributed Systems", fontSize: 11 },
+      { text: "Kubernetes", fontSize: 11 },
+      { text: "Terraform", fontSize: 11 },
+    ]);
+    const skills = sectionContaining(sections, "Kubernetes");
+    expect(skills).toBeDefined();
+    expect(skills!.name).toBe("skills");
+    expect(names(sections)).not.toContain("other");
+  });
+});
+
 describe("PdfSection.rawHeading — verbatim source heading capture (#285)", () => {
   it("captures the original heading text for a synonym mapped to a canonical section", () => {
     // "Work History" is an alias for the canonical "experience" section —
@@ -1391,5 +1522,172 @@ describe("qualified experience headers each open a boundary (#467)", () => {
     expect(
       sectionContaining(sections, "Student Composers Association")?.name,
     ).toBe("experience");
+  });
+});
+
+describe("recoverHeaderlessExperience — opening on entry shape (#492)", () => {
+  /** `build` + the post-pass, the way `buildHeuristicResult` composes them. */
+  function recover(
+    specs: Array<{ text: string; fontSize?: number; x?: number }>,
+    singleColumn = true,
+  ): PdfSection[] {
+    return recoverHeaderlessExperience(build(specs), singleColumn);
+  }
+
+  const CONTACT = [
+    { text: "Jordan Avery", fontSize: 18 },
+    { text: "jordan.avery@example.com | (503) 555-0148", fontSize: 10 },
+  ];
+  const ROLE_1 = {
+    text: "Senior QA Engineer, Northwind Systems, Portland, OR (Mar 2021 - Present)",
+    fontSize: 10,
+  };
+  const ROLE_2 = {
+    text: "QA Engineer, Contoso Labs, Seattle, WA (Jun 2018 - Feb 2021)",
+    fontSize: 10,
+  };
+
+  // ── Must OPEN ─────────────────────────────────────────────────────────────
+
+  it("opens experience at the first role of a cluster sitting in the profile", () => {
+    const sections = recover([...CONTACT, ROLE_1, ROLE_2]);
+    expect(names(sections)).toEqual(["profile", "experience"]);
+    expect(sectionContaining(sections, "Northwind Systems")?.name).toBe(
+      "experience",
+    );
+    // The name/contact block is NOT dragged into the recovered section.
+    expect(sectionContaining(sections, "Jordan Avery")?.name).toBe("profile");
+  });
+
+  it("splits an `other` sink rather than relabelling it — prose above stays put", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "HIGHLIGHTS", fontSize: 13 },
+      { text: "Eight years of test engineering across web and mobile.", fontSize: 10 },
+      ROLE_1,
+      ROLE_2,
+    ]);
+    expect(names(sections)).toEqual(["profile", "other", "experience"]);
+    expect(sectionContaining(sections, "Eight years")?.name).toBe("other");
+  });
+
+  it("opens out of a summary blurb", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "SUMMARY", fontSize: 13 },
+      { text: "Quality engineer focused on release automation.", fontSize: 10 },
+      ROLE_1,
+      ROLE_2,
+    ]);
+    expect(names(sections)).toEqual(["profile", "summary", "experience"]);
+    expect(sectionContaining(sections, "release automation")?.name).toBe(
+      "summary",
+    );
+  });
+
+  it("records no rawHeading — the résumé never wrote one", () => {
+    const sections = recover([...CONTACT, ROLE_1, ROLE_2]);
+    const recovered = sections.find((s) => s.name === "experience")!;
+    expect(recovered.rawHeading).toBeUndefined();
+    // …so nothing invented reaches the #285 verbatim-heading map.
+    expect(
+      toSectionedResume(sections, "regex").sectionHeadings?.get("experience"),
+    ).toBeUndefined();
+  });
+
+  // ── Must NOT open ─────────────────────────────────────────────────────────
+
+  it("does not open on a SINGLE dated line — one is not a work history", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "HIGHLIGHTS", fontSize: 13 },
+      { text: "Speaker, QCon London, Mar 2019 - Mar 2019", fontSize: 10 },
+      { text: "Reviewer for the platform engineering track", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("does not open on bare YYYY - YYYY spans — the prose/award/membership shape", () => {
+    // Both lines clear every OTHER gate (capital-led, entry-shaped, no degree,
+    // no institution), so the bare year span is the only thing holding them —
+    // deleting the STRONG_DATE_TOKEN_RE check makes this test fail.
+    const sections = recover([
+      ...CONTACT,
+      { text: "HIGHLIGHTS", fontSize: 13 },
+      { text: "Marathon Running Club, Chicago, IL 2018 - 2022", fontSize: 10 },
+      { text: "Neighbourhood Tree Board, Portland, OR 2016 - 2019", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("opens on a role header ending in a state code DEGREE_RE also matches", () => {
+    // `MA` / `MD` / `MS` / `ME` are US state codes AND `DEGREE_RE` abbreviation
+    // alternatives. Tested anywhere in the header, the education guard would
+    // reject every Massachusetts role; it is lead-anchored so it does not.
+    const sections = recover([
+      ...CONTACT,
+      { text: "Senior QA Engineer, Northwind Systems, Boston, MA (Mar 2021 - Present)", fontSize: 10 },
+      { text: "QA Engineer, Contoso Labs, Baltimore, MD (Jun 2018 - Feb 2021)", fontSize: 10 },
+    ]);
+    expect(names(sections)).toEqual(["profile", "experience"]);
+  });
+
+  it("does not open on a headerless EDUCATION cluster, even a month-dated one", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "M.S. in Computer Science, Ridgemont State University (Sep 2016 - May 2018)", fontSize: 10 },
+      { text: "B.S. in Computer Science, Lakeside College (Sep 2012 - May 2016)", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("does not open when the router already found an experience section", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "HIGHLIGHTS", fontSize: 13 },
+      { text: "Advisor, Northwind Systems, Portland, OR (Mar 2021 - Present)", fontSize: 10 },
+      { text: "Mentor, Contoso Labs, Seattle, WA (Jun 2018 - Feb 2021)", fontSize: 10 },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Staff Engineer, Globex (Jan 2015 - May 2018)", fontSize: 10 },
+    ]);
+    expect(names(sections).filter((n) => n === "experience")).toHaveLength(1);
+    expect(sectionContaining(sections, "Advisor, Northwind")?.name).toBe("other");
+  });
+
+  it("does not open on a two-column document", () => {
+    expect(names(recover([...CONTACT, ROLE_1, ROLE_2], false))).not.toContain(
+      "experience",
+    );
+  });
+
+  it("does not open on bullet lines that happen to carry a date range", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "HIGHLIGHTS", fontSize: 13 },
+      { text: "• Owned the Jan 2021 - Present replatform of the billing stack", fontSize: 10 },
+      { text: "• Ran the Jun 2018 - Feb 2021 migration off the legacy queue", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("does not open on date-LED lines — an empty head identifies no role", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "HIGHLIGHTS", fontSize: 13 },
+      { text: "Mar 2021 - Present, on the automation guild", fontSize: 10 },
+      { text: "Jun 2018 - Feb 2021, on the checkout platform", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+  });
+
+  it("does not steal a cluster out of a section that legitimately owns dated entries", () => {
+    const sections = recover([
+      ...CONTACT,
+      { text: "CERTIFICATIONS", fontSize: 13 },
+      { text: "Certified Tester, ISTQB Foundation (Mar 2021 - Mar 2024)", fontSize: 10 },
+      { text: "Certified Scrum Master, Scrum Alliance (Jun 2018 - Jun 2021)", fontSize: 10 },
+    ]);
+    expect(names(sections)).not.toContain("experience");
+    expect(sectionContaining(sections, "ISTQB")?.name).toBe("certifications");
   });
 });

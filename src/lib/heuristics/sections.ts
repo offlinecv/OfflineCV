@@ -34,7 +34,8 @@ import {
   SECTION_KEYWORDS,
   type SectionName,
 } from "./regex.ts";
-import { mergeWrappedContinuations } from "./entry-blocks.ts";
+import { isEntryHeaderShape, mergeWrappedContinuations } from "./entry-blocks.ts";
+import { isBulletLine } from "./line-primitives.ts";
 import { LINE_Y_EPS, mergeItemText } from "./line-assembly.ts";
 import type { PdfLine, PdfSection, SectionedResume } from "./line-model.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "./line-model.ts";
@@ -403,6 +404,102 @@ function hasContactShape(text: string): boolean {
   );
 }
 
+// ── Two-column band model (#117 / #574) ─────────────────────────────────────
+
+/**
+ * Which band of a detected two-column page a line sits in.
+ *
+ *   - `"sidebar"` — the NARROW rail (contact / languages / skill bars). The only
+ *     band the unguarded trailing-anchor recovery (#117) may run on.
+ *   - `"body"`    — the WIDE column carrying the résumé's entry content.
+ *   - `"unknown"` — the page splits into two columns of comparable width, so
+ *     neither is a sidebar. Fails closed: no band-gated recovery runs.
+ *
+ * `undefined` (not a `ColumnBand`) means the line's page carries no split at all
+ * — a single-column page, where the single-column-only recoveries apply instead.
+ */
+type ColumnBand = "sidebar" | "body" | "unknown";
+
+/** Which side of a split page's gutter the narrow sidebar rail sits on. */
+type SidebarSide = "left" | "right";
+
+/**
+ * Fraction of the WIDER column's width that the narrower one must not exceed for
+ * a split page to read as sidebar + body rather than two peer columns. Across
+ * the labeled two-column corpus every page's narrow band measures 0.37–0.55 of
+ * its wide band, so 0.7 clears all of them while leaving a balanced 50/50
+ * two-column layout (ratio ≈ 1.0) classified `"unknown"` — where the unguarded
+ * recovery, which trades its prose guards for a sidebar-membership signal, has
+ * no sidebar to lean on and must not fire.
+ */
+const SIDEBAR_MAX_WIDTH_RATIO = 0.7;
+
+/**
+ * Per-page sidebar SIDE for every page carrying a column split — the signal that
+ * replaces the side-blind `line.x >= columnSplitX` gate (#574).
+ *
+ * `detectColumnBoundaries` reports only WHERE the gutter is, not which side of it
+ * holds the sidebar. Reading `x >= split` as "sidebar" silently assumes a
+ * sidebar-RIGHT layout; on a sidebar-LEFT résumé the polarity inverts and the
+ * whole résumé BODY lands above the split, handing every body line — role
+ * headers, company names, wrapped bullet fragments — to a matcher that carries no
+ * prose guards at all. One anchor-ending line then opens a spurious section that
+ * swallows the rest of the document.
+ *
+ * The side-independent tell is width: a sidebar is the NARROW rail, whichever
+ * side it sits on. Both widths are measured against the page's own ink box — the
+ * leftmost line start and the rightmost item edge on that page — so a full-width
+ * banner spanning the gutter shifts the box, never the verdict. A page whose two
+ * bands are of comparable width has no sidebar and is left out of the map.
+ */
+function detectSidebarSides(
+  lines: PdfLine[],
+  columnBoundaries: Map<number, number>,
+): Map<number, SidebarSide> {
+  const inkBox = new Map<number, { minX: number; maxX: number }>();
+  for (const line of lines) {
+    if (!columnBoundaries.has(line.page)) continue;
+    const right = Math.max(...line.items.map((it) => it.x + it.width));
+    const box = inkBox.get(line.page);
+    if (box) {
+      box.minX = Math.min(box.minX, line.x);
+      box.maxX = Math.max(box.maxX, right);
+    } else {
+      inkBox.set(line.page, { minX: line.x, maxX: right });
+    }
+  }
+
+  const sides = new Map<number, SidebarSide>();
+  for (const [page, box] of inkBox) {
+    const split = columnBoundaries.get(page)!;
+    const leftWidth = split - box.minX;
+    const rightWidth = box.maxX - split;
+    if (leftWidth <= 0 || rightWidth <= 0) continue;
+    if (leftWidth <= rightWidth * SIDEBAR_MAX_WIDTH_RATIO) sides.set(page, "left");
+    else if (rightWidth <= leftWidth * SIDEBAR_MAX_WIDTH_RATIO)
+      sides.set(page, "right");
+  }
+  return sides;
+}
+
+/**
+ * The band a single line sits in: `undefined` when its page carries no split,
+ * `"unknown"` when the page splits into two peer columns (no sidebar), else
+ * `"sidebar"`/`"body"` by which side of the split the line starts on.
+ */
+function columnBandOf(
+  line: PdfLine,
+  columnBoundaries: Map<number, number> | undefined,
+  sidebarSides: Map<number, SidebarSide>,
+): ColumnBand | undefined {
+  const splitX = columnBoundaries?.get(line.page);
+  if (splitX === undefined) return undefined;
+  const side = sidebarSides.get(line.page);
+  if (side === undefined) return "unknown";
+  const inLeftBand = line.x < splitX;
+  return (side === "left") === inLeftBand ? "sidebar" : "body";
+}
+
 // ── Section splitting ───────────────────────────────────────────────────────
 
 /**
@@ -419,14 +516,14 @@ function hasContactShape(text: string): boolean {
  *     always `other` — the boundary-only sink that terminates the prior section
  *     without rendering (`regex.ts` keeps `other` out of the anchor path and out
  *     of every `findSection` lookup in `openresume.ts`); or
- *   - column-gated sidebar recovery (#117): a body-size, header-shaped line in
- *     the SECONDARY column of a detected two-column layout (`columnBoundaries`)
- *     whose trailing token is a fallback-enabled section anchor → label = that
- *     section. This recovers a real header that a two-column flatten glued a
- *     sidebar bar-value onto ("20% Projects"). The column signal stands in for
- *     the prose guards the unguarded `matchSectionAnchorToken` lookup drops, so
- *     it never fires on main-column prose ("5 Years Experience") or single-
- *     column docs.
+ *   - column-gated sidebar recovery (#117 / #574): a body-size, header-shaped,
+ *     un-dated line in the SIDEBAR band of a detected two-column layout
+ *     (`columnBoundaries` + `detectSidebarSides`) whose trailing token is a
+ *     fallback-enabled section anchor → label = that section. This recovers a
+ *     real header that a two-column flatten glued a sidebar bar-value onto
+ *     ("20% Projects"). The sidebar signal stands in for the prose guards the
+ *     unguarded `matchSectionAnchorToken` lookup drops, so it never fires on
+ *     body-column prose ("5 Years Experience") or single-column docs.
  *
  * Name/contact disambiguation: the leading profile region opens with a cluster
  * of large-font name / title / tagline lines (a résumé header), then the
@@ -441,11 +538,12 @@ function hasContactShape(text: string): boolean {
  * applies (a visual header is then unconditionally a real boundary).
  *
  * `columnBoundaries` is the per-page split-x map from `detectColumnBoundaries`
- * (present only for detected two-column pages; undefined/empty otherwise). It
+ * (present only for detected two-column pages; undefined/empty otherwise). Paired
+ * with `detectSidebarSides` it resolves each line to a {@link ColumnBand}, which
  * feeds the sidebar-header recovery branch in `classifyLine` (#117): a glued
- * sidebar artifact like `"20% Projects"` in the secondary column recovers its
- * real section name. For single-column docs the map is absent and that branch
- * never fires — output stays byte-identical to the pre-#117 behavior.
+ * sidebar artifact like `"20% Projects"` in the sidebar rail recovers its real
+ * section name. For single-column docs the map is absent and that branch never
+ * fires — output stays byte-identical to the pre-#117 behavior.
  */
 export function splitIntoSections(
   lines: PdfLine[],
@@ -456,6 +554,12 @@ export function splitIntoSections(
   // stricter #258 suppression: a sidebar flatten interleaves recovered anchors
   // mid-column, where a relaxed boundary would mint spurious sections.
   const singleColumn = !columnBoundaries || columnBoundaries.size === 0;
+  // Which side of each split page holds the narrow sidebar rail (#574). Computed
+  // once here — it is a page-level property, not a per-line one.
+  const sidebarSides =
+    columnBoundaries && columnBoundaries.size > 0
+      ? detectSidebarSides(lines, columnBoundaries)
+      : new Map<number, SidebarSide>();
 
   // Single-column LABEL-RAIL layout (#355): the section keywords live in a
   // narrow left rail (x ≈ rail margin) while ALL body content — role headers,
@@ -523,8 +627,8 @@ export function splitIntoSections(
       }
     }
 
-    // Per-line column split-x (undefined for single-column pages / docs).
-    const columnSplitX = columnBoundaries?.get(line.page);
+    // Per-line two-column band (undefined for single-column pages / docs).
+    const columnBand = columnBandOf(line, columnBoundaries, sidebarSides);
     const action = classifyLine(
       line,
       bodyBaseline,
@@ -532,7 +636,7 @@ export function splitIntoSections(
       openedRealSection,
       seenContactInProfile,
       prevLineOpenedBoundary,
-      columnSplitX,
+      columnBand,
       sections[sections.length - 1].name,
       singleColumn,
       lines[i + 1],
@@ -684,7 +788,7 @@ function hasDateRange(line: PdfLine | undefined): boolean {
 //      ("Technical" over "Skills"), each the lead cell of a skills grid, so
 //      neither single row's lead token equals the `technical skills` alias.
 //
-// Both recoveries are gated to SINGLE-COLUMN only (`columnSplitX === undefined`
+// Both recoveries are gated to SINGLE-COLUMN only (`columnBand === undefined`
 // / `singleColumn`): the unguarded trailing-anchor path (`matchSectionAnchorToken`)
 // is the two-column analogue, and loosening recognition on the labeled two-column
 // corpus regresses it. Neither path here calls that forbidden text-only-unsafe
@@ -705,6 +809,13 @@ const LEADING_TOKEN_SECTIONS: readonly SectionName[] = ["experience", "education
 // remainder is what separates a real role date tail ("Aug 2024 - Present",
 // "06/2021 - 09/2023") from a coincidental bare year span buried in prose
 // ("Marathon running club, 2018 - 2022").
+//
+// Two consumers, for the same reason: `remainderLooksLikeEntry` (#355, the
+// leading-token rail header) and `looksLikeHeaderlessRoleHeader` (#492, the
+// headerless-cluster recovery). Both are recognising an experience entry with
+// no header to check themselves against, so both need the bare-year span held
+// out; sharing the token is what keeps them from drifting on what a "real role
+// date" is.
 //
 // The month and season anchors REQUIRE an adjacent year: this rejects a bare
 // year span with no month/season token ("2018 - 2022") — the coincidental-prose
@@ -769,6 +880,212 @@ function remainderLooksLikeEntry(section: SectionName, remainder: string): boole
   // education: degree/institution, anchored in the leading portion.
   const lead = trimmed.slice(0, EDU_LEAD_WINDOW);
   return DEGREE_RE.test(lead) || INSTITUTION_HINTS.test(lead);
+}
+
+// ── Headerless experience recovery (#492) ───────────────────────────────────
+//
+// Every path above recognises the experience section from a HEADER — a keyword
+// alias, a trailing anchor word, a font/gap cue, a leading rail token. A résumé
+// that writes no header at all over its work history therefore has no path to
+// `experience`: the role lines land in whatever bucket is open (the leading
+// `profile`, a `summary` blurb, or an `other` sink an unrelated header opened)
+// and `extractExperience` — which only ever reads a routed `experience` region
+// — parses zero entries. The whole employment history is dropped silently.
+//
+// The signal that has to stand in for the missing header is the ENTRY SHAPE
+// itself, which is why this runs as a POST-pass over the finished section list
+// rather than as another branch in `classifyLine`:
+//
+//   - it needs to know that NO experience section exists anywhere in the
+//     document, which a top-to-bottom per-line classifier cannot know yet;
+//   - a cluster is a property of several lines together, not of one line; and
+//   - leaving the per-line loop untouched means the recovery cannot perturb the
+//     routing of any résumé it does not actually fire on.
+//
+// It is also the reason it lives on the SECTION list and not on `PdfLine[]`:
+// `splitIntoSectionsWithMarkdown` is the path a real résumé usually takes (the
+// #492 reproducer routes `markdown`), and both splitters converge here through
+// `buildHeuristicResult` in `openresume.ts` — the single call site.
+
+/**
+ * The buckets a headerless work-history cluster can legitimately be sitting in.
+ *
+ * All three are sections that own NO entry content in the canonical model:
+ * `profile` is everything above the first header, `summary` is a prose blurb,
+ * and `other` is the boundary-only sink (`regex.ts` keeps it out of the anchor
+ * path and out of every `findSection` lookup in `openresume.ts`). Nothing
+ * downstream extracts dated entries from any of them, so re-labelling a run of
+ * their lines `experience` can only add information.
+ *
+ * Every OTHER section is deliberately excluded, and `education` / `projects` /
+ * `certifications` / `achievements` are the reason: each of those legitimately
+ * owns a cluster of dated entries, so a shape-only rule let loose on them would
+ * not recover a dropped work history — it would steal a correctly-routed one.
+ */
+const HEADERLESS_EXPERIENCE_HOSTS: readonly (SectionName | "profile")[] = [
+  "profile",
+  "summary",
+  "other",
+];
+
+/**
+ * How many dated role headers must appear in one host bucket before it reads as
+ * a work history rather than a coincidence.
+ *
+ * Two is the whole structural half of the rule. A single dated, title-cased,
+ * non-prose line is an ordinary thing to find in a highlights or summary block
+ * ("Speaker, QCon London, Mar 2019"); a *run* of them, each naming a different
+ * employer, is a work history and nothing else. Raising this to 3 would drop
+ * the very common two-job résumé; lowering it to 1 deletes the only signal that
+ * separates the cluster from its neighbours.
+ */
+const HEADERLESS_ROLE_CLUSTER_MIN = 2;
+
+/**
+ * True when a line reads as an employment-entry header STRONGLY ENOUGH to open
+ * a section on its own — i.e. with no header above it vouching for it.
+ *
+ * This is a deliberately higher bar than `isAnchorLine`'s `date_range` test in
+ * `entry-blocks.ts`, which only has to segment entries INSIDE a region the
+ * router already vouched for. Here the line is the only evidence there is, so
+ * every gate below is a false-positive guard first and a recogniser second:
+ *
+ *   1. Not a bullet — a bullet is body text, and bullet prose routinely carries
+ *      a date range ("Owned the 2021 - 2023 replatform").
+ *   2. A date range on the line, and it must be a STRONG one
+ *      ({@link STRONG_DATE_TOKEN_RE}: month-year, season-year, slash-date, or a
+ *      Present-family token). This single gate does most of the work. A bare
+ *      `YYYY - YYYY` span is what prose, award lists, membership lines and
+ *      degree entries carry ("Marathon running club, 2018 - 2022"), and
+ *      admitting it is how a shape rule turns into a section-stealing rule.
+ *   3. A non-empty HEAD before the date that leads with an uppercase letter.
+ *      The head is the part that would be the title/company, so an empty head
+ *      (a date-led or date-only line) has nothing to identify a role with.
+ *   4. That head reads as an entry header, not prose — {@link isEntryHeaderShape},
+ *      the same shared shape test the entry segmenter uses.
+ *   5. That head is not an EDUCATION entry. Guard 2 already rejects the common
+ *      bare-year degree line, but a month-dated one ("B.S. in Computer Science,
+ *      Ridgemont State University (Aug 2012 - May 2016)") clears it, and an
+ *      education cluster with no `EDUCATION` header is exactly as plausible as
+ *      a work history with no `EXPERIENCE` header. Reading a degree list as
+ *      employment is worse than leaving it where it was.
+ *
+ * Guard 5's degree half is ANCHORED TO THE LEAD, and that is not a stylistic
+ * choice: `DEGREE_RE`'s abbreviation alternatives are two-letter tokens, and
+ * four of them are also US state codes — `MA`, `MD`, `MS`, `ME`. Tested anywhere
+ * in the head, "Marathon Running Club, Boston, MA" reads as a master's degree
+ * and every Massachusetts / Maryland / Mississippi / Maine role header is
+ * rejected out of hand. A real education entry LEADS with its degree, so the
+ * anchor costs nothing and closes the whole class. The institution half is
+ * NOT anchored, and that half does have a cost: `University` / `College` /
+ * `Institute` / `School` / `Academy` / `Polytechnic` are all real EMPLOYERS
+ * too, so "Research Engineer, Stanford University (Sep 2018 - Jun 2021)" is
+ * rejected as a degree line. A whole headerless cluster of such roles recovers
+ * ZERO of them. The trade is deliberate and one-directional: this predicate is
+ * the only thing standing between a headerless bucket and a section relabel,
+ * it has no header to check itself against, and a degree list read as
+ * employment is worse than a school-employed role left where it was — so it
+ * fails CLOSED. Anchoring the institution half the way the degree half is
+ * anchored (a real education entry leads with its DEGREE, not its school) is a
+ * plausible follow-up, but it widens what the rule will relabel and so needs
+ * its own repro and corpus measurement rather than riding this guard.
+ *
+ * The residue the anchor leaves is a title that LEADS with one of `DEGREE_RE`'s
+ * full words ("Associate Product Manager", "Master Data Engineer"): that line is
+ * rejected. It costs a role only when it is the FIRST of the cluster, since the
+ * others still match and the split simply starts at one of them — and erring
+ * toward leaving content where it was is the correct direction for a rule with
+ * no header to check itself against.
+ *
+ * The head is taken BEFORE the date rather than testing the whole line because
+ * a role header may carry its scope sentence glued on after the date range
+ * ("… (Mar 2021 - Present) Leads the automation guild."). Testing the whole
+ * line would reject that on the terminal `.` — which is why this predicate is
+ * a sibling of {@link remainderLooksLikeEntry} (#355) rather than a caller of
+ * it: that one tests a whole remainder and must reject a sentence outright.
+ */
+function looksLikeHeaderlessRoleHeader(line: PdfLine): boolean {
+  if (isBulletLine(line)) return false;
+  const text = line.text.trim();
+  const match = DATE_RANGE_RE.exec(text);
+  DATE_RANGE_RE.lastIndex = 0;
+  if (!match) return false;
+  if (!STRONG_DATE_TOKEN_RE.test(text)) return false;
+  const head = text.slice(0, match.index).trim();
+  if (!/^\p{Lu}/u.test(head)) return false;
+  if (!isEntryHeaderShape(head)) return false;
+  if (INSTITUTION_HINTS.test(head)) return false;
+  const degree = DEGREE_RE.exec(head);
+  return degree === null || degree.index !== 0;
+}
+
+/**
+ * Open an `experience` section on ENTRY SHAPE when the résumé wrote no header
+ * over its work history (#492).
+ *
+ * The rule, stated whole:
+ *
+ *   On a single-column document that routed NO experience section at all, the
+ *   FIRST bucket among `profile` / `summary` / `other` that contains at least
+ *   {@link HEADERLESS_ROLE_CLUSTER_MIN} lines passing
+ *   {@link looksLikeHeaderlessRoleHeader} is split at the FIRST of those lines:
+ *   everything from there to the end of the bucket becomes a new `experience`
+ *   section, and everything above it stays where it was.
+ *
+ * Four scoping decisions carry the risk, and each is a "must not fire" case:
+ *
+ *   - **Single-column only.** On a two-column page the band model (#574) is what
+ *     tells a sidebar rail from the résumé body, and an unguarded shape rule
+ *     running across a flattened two-column body is the false-positive class
+ *     #574 spent its whole diff closing. A headerless two-column work history
+ *     stays dropped; that is the conservative side of the trade.
+ *   - **Only when no `experience` section exists.** If the router already found
+ *     one, a later dated cluster is a continuation, a second experience group
+ *     (#311), or a projects/volunteer block — never a missing section.
+ *   - **Only the three content-free hosts** — see {@link HEADERLESS_EXPERIENCE_HOSTS}.
+ *   - **Split, never relabel.** The reproducing shape puts the cluster BELOW two
+ *     lines of prose inside the same `other` bucket; renaming the whole bucket
+ *     `experience` would feed that prose to the entry segmenter as a role.
+ *
+ * Known residue, stated rather than guessed at: a headerless role whose header
+ * is STACKED across two lines ("Senior QA Engineer" / "Northwind Systems  Mar
+ * 2021 - Present") opens at the dated line, so the first role's title line is
+ * left in the host bucket. Reaching back for it would mean admitting the line
+ * directly above the cluster, which on the reproducing fixture is a sentence of
+ * highlights prose — a false positive traded for a residue, on a shape no repro
+ * pins. Roles 2..N in the same cluster are unaffected: they sit inside the
+ * recovered region, where the segmenter's own `headerLookback` already claims
+ * their title line.
+ */
+export function recoverHeaderlessExperience(
+  sections: PdfSection[],
+  singleColumn: boolean,
+): PdfSection[] {
+  if (!singleColumn) return sections;
+  if (sections.some((s) => s.name === "experience")) return sections;
+
+  for (let i = 0; i < sections.length; i++) {
+    const host = sections[i];
+    if (!HEADERLESS_EXPERIENCE_HOSTS.includes(host.name)) continue;
+    const roleAt: number[] = [];
+    host.lines.forEach((l, at) => {
+      if (looksLikeHeaderlessRoleHeader(l)) roleAt.push(at);
+    });
+    if (roleAt.length < HEADERLESS_ROLE_CLUSTER_MIN) continue;
+    const start = roleAt[0];
+    const recovered: PdfSection = {
+      name: "experience",
+      // No `rawHeading`: the résumé wrote none, and inventing one would put a
+      // label the document never carried into `sectionHeadings` (#285) and from
+      // there into the reconstructed export.
+      lines: host.lines.slice(start),
+    };
+    const next = [...sections];
+    next[i] = { ...host, lines: host.lines.slice(0, start) };
+    next.splice(i + 1, 0, recovered);
+    return next;
+  }
+  return sections;
 }
 
 /** Build a `PdfLine` from a contiguous subset of another line's items (the row
@@ -1377,11 +1694,24 @@ function classifyLine(
   openedRealSection: boolean,
   seenContactInProfile: boolean,
   prevLineOpenedBoundary: boolean,
-  columnSplitX: number | undefined,
+  columnBand: ColumnBand | undefined,
   currentSection: SectionName | "profile",
   singleColumn: boolean,
   nextLine: PdfLine | undefined,
 ): LineAction {
+  // A line carrying a date range on itself or directly below it reads as an
+  // ENTRY (a company/role/institution line), never as a bare section header.
+  // Consumed by the #258/#310-311 institution-repeat gate below and by the
+  // sidebar-header recovery further down. Memoized rather than computed up
+  // front: both consumers sit behind gates far narrower than this function
+  // (a keyword-header match; a sidebar band on a two-column page), so an
+  // eager hoist would run `hasDateRange` twice on EVERY line of the document
+  // to serve two rare branches. Sharing the value is still the point — the
+  // thunk just keeps it lazy.
+  let datedEntry: boolean | undefined;
+  const lineLooksLikeDatedEntry = () =>
+    (datedEntry ??= hasDateRange(line) || hasDateRange(nextLine));
+
   const header = matchSectionHeaderDetailed(line.text);
   if (header) {
     // #258 Layer B / #310-311: a head-noun-anchor (L2) line re-matching the
@@ -1392,15 +1722,13 @@ function classifyLine(
     // lives in `isInstitutionRepeat`. A dated entry line is one carrying a date
     // range on itself or the line immediately below it (a company whose role's
     // date follows) — the tell of a company/role entry vs. a bare category header.
-    const lineLooksLikeDatedEntry =
-      hasDateRange(line) || hasDateRange(nextLine);
     if (
       !isInstitutionRepeat(
         header,
         currentSection,
         singleColumn,
         prevLineOpenedBoundary,
-        lineLooksLikeDatedEntry,
+        lineLooksLikeDatedEntry(),
       )
     ) {
       return { kind: "open", name: header.section };
@@ -1438,16 +1766,24 @@ function classifyLine(
   }
 
   // Two-column sidebar artifact: a flatten can glue a sidebar bar-value onto a
-  // real header in the secondary column ("20% Projects"). The line is body-size
-  // (no visual signal, so the branch above did not fire) and a single glued run
-  // (no x-gap), so the only signal that separates it from main-column prose like
-  // "5 Years Experience" is that it sits in the secondary column of a detected
-  // two-column layout. Gate the unguarded trailing-anchor lookup on that column
-  // signal + a header-short shape. Skipped entirely for single-column docs
-  // (columnSplitX undefined) and main-column lines (line.x < split).
+  // real header in the sidebar rail ("20% Projects"). The line is body-size (no
+  // visual signal, so the branch above did not fire) and a single glued run (no
+  // x-gap), so the only signal that separates it from body-column prose like
+  // "5 Years Experience" is that it sits in the SIDEBAR band of a detected
+  // two-column layout. Gate the unguarded trailing-anchor lookup on that band
+  // signal + a header-short shape, and hold out a dated ENTRY line (a sidebar
+  // institution/employer whose date sits on or under it) — the contextual guard
+  // #258/#354 already apply on the text-only path, which this branch bypasses.
+  //
+  // `columnBand` is `"sidebar"` ONLY for the narrow rail, whichever side of the
+  // gutter it occupies (#574). On a sidebar-LEFT layout the résumé body sits
+  // above the split, so the earlier `line.x >= columnSplitX` reading handed the
+  // entire body to this guard-free matcher and one anchor-ending company name
+  // swallowed the document. Single-column pages (`undefined`) and balanced
+  // two-column pages (`"unknown"`) skip the branch entirely.
   if (
-    columnSplitX !== undefined &&
-    line.x >= columnSplitX &&
+    columnBand === "sidebar" &&
+    !lineLooksLikeDatedEntry() &&
     isHeaderShort(line.text)
   ) {
     const recovered = matchSectionAnchorToken(line.text);
@@ -1460,13 +1796,13 @@ function classifyLine(
   }
 
   // Single-column INLINE leading-token header (#355 gap 1): the keyword leads a
-  // merged content row carrying the section's first entry. Gated to single
-  // column (`columnSplitX === undefined`) and to past the leading name/contact
-  // block (mirrors the visual-header suppression) so a keyword-led tagline in
-  // the header cluster can't open a section. The item-boundary + remainder-entry
-  // guards live in `matchLeadingTokenHeader`.
+  // merged content row carrying the section's first entry. Gated to a page with
+  // no column split (`columnBand === undefined`) and to past the leading
+  // name/contact block (mirrors the visual-header suppression) so a keyword-led
+  // tagline in the header cluster can't open a section. The item-boundary +
+  // remainder-entry guards live in `matchLeadingTokenHeader`.
   if (
-    columnSplitX === undefined &&
+    columnBand === undefined &&
     (openedRealSection || seenContactInProfile)
   ) {
     const inline = matchLeadingTokenHeader(line);

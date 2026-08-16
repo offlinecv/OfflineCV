@@ -7,7 +7,8 @@
  *
  * Two layers cooperate on the fix. `buildEntryBlock` PRE-CLASSIFIES each
  * below-anchor line via `looksLikeBelowAnchorProse` (contains `;`, leads with
- * a grade-code middot segment, or ends in `.!?` and not on a legal-entity
+ * a grade-code middot segment, leads with an action verb over a
+ * lowercase-initial word, or ends in `.!?` and not on a legal-entity
  * suffix), lifting obvious body prose into
  * `belowAnchorBodyProse` BEFORE `disambiguateCompanyTitle` runs — without
  * that ordering, a sentence like "Founding site leader; owned charter and
@@ -24,6 +25,11 @@
  *     the pre-classification exists to protect
  *   - fully-covered negative — a below-anchor location line that repeats what
  *     `location` already carries is deliberately NOT double-recorded
+ *   - #708's two residual shapes — a bare scope phrase with no terminator at
+ *     all, and a scope sentence ending on a legal-entity suffix — both
+ *     preempted by the action-verb-lead signal, plus the two negatives that
+ *     signal must not swallow (a lone `Contoso, Inc.` company line, and a
+ *     participial-adjective title whose lead word is in the verb lexicon)
  *
  * The italic and blank-separated variants from the issue live in
  * `cascade-markdown.test.ts` instead — they only differ at the markdown-input
@@ -33,16 +39,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { groupIntoLines, splitIntoSections, findSection } from "../sections.ts";
-import { extractExperience } from "../extract-fields.ts";
-import { mkItems } from "../__test-utils__/mkItem.ts";
-
-function roleFromSection(specs: Array<{ text: string; fontSize?: number }>) {
-  const sections = splitIntoSections(groupIntoLines(mkItems(specs)));
-  const experience = findSection(sections, "experience");
-  expect(experience).toBeDefined();
-  return extractExperience(experience).value;
-}
+import { roleFromSection } from "../__test-utils__/roleFromSection.ts";
 
 // Baseline: the shared header for every variant. Every field lands on line 1
 // via the middot split, so any surviving below-anchor line is pure body.
@@ -306,6 +303,104 @@ describe("leading body prose between date sub-line and bullets (#615)", () => {
       "Built an 18-engineer org in under 6 months.",
       "Won new AI/ML platform charters for the site.",
     ]);
+  });
+
+  // #708 — the two below-anchor shapes PR #688 left behind. Both use the
+  // no-team-segment header, because a pre-filled `team` slot cannot fail:
+  // disambiguation only absorbs a scope line when there is an empty slot for
+  // it to land in. The control (scope line removed) parses title / company /
+  // location and NO team, so `team === undefined` below is the assertion that
+  // the line's mere presence changed nothing in the header — #615 AC #3.
+  const SHAPES_708 = [
+    // Shape 1 — no `;`, no grade code, no terminal `.!?` at all. Every
+    // punctuation-keyed signal misses it; the action-verb lead is the only
+    // thing that catches it.
+    "Owned the build system roadmap and tooling budget",
+    // Shape 2 — ends on a real legal-entity suffix, so the
+    // `LEGAL_TERMINAL_SUFFIX_RE` guard actively REJECTS it: the guard exists
+    // so "Contoso, Inc." on its own line is not preempted, and a sentence
+    // ending on a company name is indistinguishable from it by the terminal
+    // token alone. Only the verb-lead signal, tested before the terminator
+    // branch, separates the two.
+    "Led the observability migration off Northwind Systems Inc.",
+  ];
+
+  it.each(SHAPES_708)(
+    "#708 — `%s` lands on description, not `team`",
+    (scope) => {
+      const roles = roleFromSection([
+        { text: "EXPERIENCE", fontSize: 13 },
+        // NOTE: no `· Enterprise Platforms` segment — the empty `team` slot
+        // is the whole repro.
+        { text: "Sr. Engineering Manager · Globex, Toronto, Canada", fontSize: 11 },
+        DATE_LINE,
+        { text: scope, fontSize: 11 },
+        ...BULLETS,
+      ]);
+      expect(roles).toHaveLength(1);
+      const role = roles[0];
+      // AC #1 / AC #2 — the header is byte-identical to the control.
+      expect(role.team).toBeUndefined();
+      expect(role.title).toBe("Sr. Engineering Manager");
+      expect(role.company).toBe("Globex");
+      expect(role.location).toBe("Toronto, Canada");
+      expect(role.start_date).toBe("01/2024");
+      expect(role.end_date).toBe("12/2024");
+      // AC #3 — the line is RETAINED (leads `description`) rather than being
+      // dropped, so the non-retention trigger case never arises for it. Both
+      // bullets still follow, and the line is recorded exactly once.
+      const lines = role.description!.split("\n");
+      expect(lines).toEqual([
+        scope,
+        "Built an 18-engineer org in under 6 months.",
+        "Won new AI/ML platform charters for the site.",
+      ]);
+    },
+  );
+
+  it("#708 AC #2 — a lone `Contoso, Inc.` below-anchor line still resolves as the company", () => {
+    // The other side of the boundary the verb-lead signal had to clear. This
+    // header run has NO company on it — the title sits above the date anchor
+    // and the company sits below it — so preempting the legal-suffix line
+    // would not merely mis-slot it, it would strip `company` off the role
+    // entirely and re-emit it as a bullet.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Staff Platform Engineer", fontSize: 11 },
+      DATE_LINE,
+      { text: "Contoso, Inc.", fontSize: 11 },
+      ...BULLETS,
+    ]);
+    expect(roles).toHaveLength(1);
+    const role = roles[0];
+    expect(role.title).toBe("Staff Platform Engineer");
+    expect(role.company).toBe("Contoso, Inc.");
+    // …and it is NOT double-recorded as body.
+    const lines = role.description!.split("\n");
+    expect(lines).not.toContain("Contoso, Inc.");
+  });
+
+  it("#708 — a participial-adjective title (`Managed Services Consultant`) stays a header", () => {
+    // `managed` IS in the shared `ACTION_VERBS` lexicon, so a verb-lead-only
+    // widening would preempt this real title out of the header run and emit
+    // it as a bullet. The lowercase-initial-word requirement is what holds
+    // it: the line is Title Case throughout, so no function word follows the
+    // lead. Same family: "Integrated Systems Engineer", "Automated Logic
+    // Corporation", "Unified Communications Lead".
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Globex, Toronto, Canada", fontSize: 11 },
+      DATE_LINE,
+      { text: "Managed Services Consultant", fontSize: 11 },
+      ...BULLETS,
+    ]);
+    expect(roles).toHaveLength(1);
+    const role = roles[0];
+    expect(role.title).toBe("Managed Services Consultant");
+    expect(role.company).toBe("Globex");
+    expect(role.location).toBe("Toronto, Canada");
+    const lines = role.description!.split("\n");
+    expect(lines).not.toContain("Managed Services Consultant");
   });
 
   it("does NOT recover a below-anchor line that is fully covered by the fields (no double-record)", () => {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. Authored from the generator's own drawn content (scripts/fixtures/gen-top-skills-header.mjs) and confirmed against pdftotext. This fixture exists to exhibit skills-header-unrecognized (#575).",
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #654. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. Authored from the generator's own drawn content (scripts/fixtures/gen-top-skills-header.mjs) and confirmed against pdftotext. This fixture exercised skills-header-unrecognized (#575) until the fix added \"top skills\" to the skills section aliases; kept as the corpus's reproducer for that alias.",
   "contact": {
     "full_name": "PRIYA IYER",
     "email": "priya.iyer@example.com",
@@ -29,12 +29,5 @@
     "Distributed Systems",
     "Kubernetes",
     "Terraform"
-  ],
-  "knownWrong": {
-    "skills": {
-      "issue": 575,
-      "status": "open",
-      "note": "skills comes back EMPTY although three skills are drawn under a “Top Skills” heading — the defect this fixture exists to exhibit (skills-header-unrecognized)."
-    }
-  }
+  ]
 }
