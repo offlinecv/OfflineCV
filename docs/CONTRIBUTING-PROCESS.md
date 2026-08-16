@@ -9,8 +9,9 @@ walkthrough (setup, branch workflow, tests, code style) lives in
 This file is the **rationale**. The rules it explains are enforced closer to where they bite:
 the binding one-liners sit in `CLAUDE.md` → **Hard rules** (always in an agent's context), the
 fixture-PII check is a directory-scoped `CLAUDE.md` in `tests/fixtures/pdfs/`, and each shipping
-skill (`/open-pr`, `/pr-review`, `/revise-pr`, `/implement-batch`, `/pr-ready`) carries its own
-operational copy. Nothing here is load-bearing on its own — if you change a rule, change it in
+skill (`/open-pr`, `/pr-review`, `/revise-pr`, `/collapse-pr`, `/implement-batch`, `/pr-ready`)
+carries its own operational copy — `/collapse-pr` holds the canonical one for the one-commit
+invariant, which the other shipping skills link to rather than restate. Nothing here is load-bearing on its own — if you change a rule, change it in
 those places too, not only here. **AI attribution** is the partial exception: it is enforced by a
 setting in `.claude/settings.json`, so its `CLAUDE.md` counterpart is deliberately thin — a
 one-liner for the harnesses that setting does not reach, rather than prose restating it.
@@ -110,13 +111,22 @@ The `COMMIT_OR_` prefix is the only lever:
 
 So **every PR reaches the queue as a single commit whose message is the message we want in `main`.**
 
-- **`/open-pr` (Step 3.6)** collapses the branch *before* the PR exists — free, since there is no approval to dismiss yet.
-- **`/revise-pr` (Step 5.1)** collapses **only on the final review round**, when no thread is left open. A mid-review force-push costs the reviewer the delta diff they came back for.
+**`/collapse-pr` is the one guarded operation that does it.** Its skill file (`.claude/skills/collapse-pr/SKILL.md`) carries the mechanics and the safety gates — regime detection, stale-approval, open-thread, branch-ownership, push-lease, and local-divergence — plus the tree-identity assertion, and it is a no-op on a branch that already holds one commit. The three callers each decide *whether* to collapse on their own terms and delegate the *how*:
+
+- **`/open-pr` (Step 3.6)** collapses *before* the PR exists — free, since there is no approval to dismiss and no reviewer mid-diff. This is the one shape that runs **in place** on your checkout, and it says so explicitly with `--in-place`: re-running `/open-pr` on a branch whose PR already exists would otherwise be mistaken for the existing-PR shape below, and would collapse `origin`'s head while your new local commits sat unpublished.
+- **`/revise-pr` (Step 5.1)** collapses **only on the final review round**, when no thread is left open on the target. A mid-review force-push costs the reviewer the delta diff they came back for.
+- **`/pr-review` (Step 5.5)** pushes its auto-fix commit, then collapses, then posts the approval — that commit is what breaks the invariant, and collapsing after the approval would dismiss the approval it just made.
+
+**For an existing PR the target is resolved from `origin`, not from your checkout**, and the rewrite happens in a throwaway worktree detached at `origin/<head>`. This is not fussiness: a live dry-run against PR #842 found the main checkout sitting on that PR's branch holding a *superseded copy* of one of origin's commits — same subject line, different tree — and one commit fewer. Collapsing from that checkout would have force-pushed the stale tree and destroyed a fix that existed only on origin. Compare SHAs and trees; subject lines and commit counts do not catch it.
+
+By hand, the operation is:
 
 ```bash
 git reset --soft "$(git merge-base HEAD origin/main)"
 git commit -F .git/COMMIT_EDITMSG     # the combined message, hand-written
-git push --force-with-lease           # never bare --force
+# a collapse must not change the tree — prove it before pushing:
+[ "$(git rev-parse '<pre-collapse-sha>^{tree}')" = "$(git rev-parse 'HEAD^{tree}')" ] || exit 1
+git push --force-with-lease="<branch>:<the-sha-you-inspected>"   # never bare --force
 ```
 
 Rules:
@@ -124,7 +134,9 @@ Rules:
 - **Branch commits are scratch; the merge message is the artifact.** Write the combined message to describe the change *as a whole* — not the sequence of steps that produced it. Drop the review round-trip; it is process, not change.
 - **Don't `rebase -i` a branch clean before merge.** Pointless when it is getting squashed — collapse instead.
 - **Never bypass the queue with `--admin`** just to hand-write a merge message. The collapse achieves the same thing without skipping required checks.
-- **Nothing is lost that squash-merge wasn't already going to discard.** `main` only ever receives one commit per PR; collapsing early changes *when* the intermediate commits are dropped, not *whether*. The collapsed commit's tree is byte-identical to the branch tip's.
+- **Assert tree identity, and let that license the `pre-push` skip — in the throwaway worktree only.** The managed `.git/hooks/pre-push` runs `npm run verify`, worktrees share it, and it cannot run in a throwaway worktree with no `node_modules`. There the skip is sound because the tree came from `origin` and has already been through the hook, and the assertion proves the collapse did not change it: assert byte-identity first, only then push with `OFFLINECV_SKIP_HOOKS=1`. Collapsing **in place** on your own checkout (the `/open-pr` shape) is the opposite case — nothing has verified that tree yet, so **let the hook run**. If the assertion fails the collapse aborts either way — never skip the hook unconditionally.
+- **After a collapse, every local copy of that branch is stale.** Do not `git pull` it; `git reset --hard origin/<branch>`. When `/collapse-pr` runs that reset for you and the checkout held commits `origin` did not, it first preserves them at a `collapse-pr-backup/<branch>-<utc-stamp>` branch ref (with a `-1`, `-2`, … suffix if two runs land in the same second), verifies the ref points where it meant to, and names it in its report — and it refuses to reset at all if either step fails. A real ref, not the reflog, because the reflog expires and cannot be pushed. It does *not* try to decide whether the preserved work was superseded — that is semantic, and `git cherry` and a reverse-apply both report "unique" over an amended better copy on `origin`. Check the ref yourself, then delete it; nothing prunes them for you.
+- **Nothing is lost that squash-merge wasn't already going to discard.** `main` only ever receives one commit per PR; collapsing early changes *when* the intermediate commits are dropped, not *whether*. The collapsed commit's tree is byte-identical to the branch tip's — which is exactly what the assertion above checks.
 - **Recovery, if a collapse goes wrong:** the pre-push SHA is permanently recorded on the PR timeline (`HeadRefForcePushedEvent`, `before`/`after`), the orphaned commit stays viewable at `github.com/<org>/<repo>/commit/<sha>` and downloadable via `gh api repos/<org>/<repo>/commits/<sha> -H "Accept: application/vnd.github.patch"`, and the pusher's local `git reflog` holds it for 90 days. Note that `git fetch origin <sha>` will **not** retrieve it — the server rejects unreachable objects — so restore from the reflog, or apply the patch.
 
 ## Soliciting review (`/pr-ready`)

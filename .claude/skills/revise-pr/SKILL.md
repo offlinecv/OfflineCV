@@ -247,16 +247,13 @@ none to add back.
 
 ### Step 5.1: Collapse to a single commit — **final round only**
 
-`main` merges through a **merge queue** whose enqueue API carries no
-commit-message fields, so the squash message is *derived* from repo settings
-(`squash_merge_commit_title: COMMIT_OR_PR_TITLE`). A **one-commit PR merges with
-that commit's message verbatim**; a multi-commit PR merges with every commit
-message concatenated as `* ` bullets — which is how `fix lint` and
-`address review comments on PR #458` end up in `main`'s history forever. See
-`open-pr` Step 3.6 for the full rationale.
+The PR should reach the queue as one commit, or `fix lint` and `address review
+comments on PR #458` land in `main`'s history forever — `/collapse-pr`'s *Why this
+skill exists* has the full rationale and is the only copy of it.
 
-So the PR should reach the queue as one commit. But **do not collapse on every
-round.** Gate it:
+**The mechanics belong to `/collapse-pr`; the decision below belongs here.** That
+split is the point of this step: `/collapse-pr` cannot know whether this is the
+last round, and this skill does. So **do not collapse on every round.** Gate it:
 
 - **Leaving any thread open *on the target*** (you pushed back, or deferred to a
   follow-up issue) → the reviewer is coming back for another round. **Keep the
@@ -274,28 +271,46 @@ different PR that nobody is going to close.
 
 When the gate passes:
 
-```bash
-BASE="$(gh pr view "$PR_NUM" --repo "$REPO" --json baseRefName -q .baseRefName)"
-git fetch origin "$BASE"
-git reset --soft "$(git merge-base HEAD "origin/$BASE")"
-git commit -F .git/COMMIT_EDITMSG      # the combined message for the whole PR
-git push --force-with-lease origin HEAD
-```
+> Invoke `/collapse-pr "$PR_NUM" --yes`. It pushes the collapsed branch itself, so
+> the Step 5 push is the last one this skill makes directly.
 
-Rewrite the message to describe **the change as a whole** — the original intent
-plus whatever review actually changed about it. Not "implement X" + "address
-review": one coherent story of what lands. Drop the review round-trip entirely;
-it's process, not change. `--force-with-lease`, never bare `--force`.
+**Step 5's push must already have happened** — and it has, which is exactly why
+this step sits after it rather than replacing it. `/collapse-pr` resolves the head
+from `origin` and rewrites it in a throwaway worktree; it never reads this
+checkout, so a fix commit still sitting local would simply not be in the collapse.
 
-Two things this costs, stated plainly:
+**If you skipped the push, the collapse ships without your fix — it will not stop
+you.** `/collapse-pr` gate 3e no longer refuses on a diverged checkout; it preserves
+the local-only commit at a `collapse-pr-backup/…` branch ref, resets the checkout to
+`origin`, and names the ref in its report. Nothing is lost, but the PR does not get
+the revision. So: confirm Step 5 pushed before invoking, and if the report names a
+backup ref for this branch, push that commit and re-run rather than assuming the
+round landed.
 
-- **Reviewers lose per-commit history on the branch.** GitHub still posts a
-  `force-pushed … Compare` link, so the old→new diff stays reachable — but it's a
-  worse experience than a clean fixup commit, which is exactly why this is gated
-  to the final round.
-- **Existing review threads may go `isOutdated`** once their anchor lines move.
-  Do Step 6 (reply + resolve) **after** this push, using the thread IDs captured
-  in Step 2 — replying via `in_reply_to` works regardless of outdated state.
+**`--yes` is required here, and the reason is an ordering fact, not impatience.**
+`/collapse-pr`'s soft gates refuse on unresolved threads — and at this moment
+every thread you just addressed is still `isResolved == false` on GitHub, because
+Step 6 resolves them *after* this push (their anchors move when the branch is
+rewritten). So the gate would fire on exactly the run that is supposed to
+collapse. The judgement it guards is the one you made three paragraphs up; `--yes`
+says so, and `/collapse-pr` still prints every gate that fired.
+
+Hand it the message you wrote with `--message-file`, or let it compose one. Either
+way the message describes **the change as a whole** — the original intent plus whatever review
+actually changed about it. Not "implement X" + "address review": one coherent
+story of what lands. Drop the review round-trip entirely; it's process, not
+change.
+
+Two costs specific to this caller, on top of the ones `/collapse-pr` lists:
+
+- **Existing review threads may go `isOutdated`** once their anchor lines move. Do
+  Step 6 (reply + resolve) **after** this push, using the thread IDs captured in
+  Step 2 — replying via `in_reply_to` works regardless of outdated state, so no
+  checkout is needed for it.
+- **This checkout is now stale**, because the branch on `origin` was rewritten and
+  nothing local followed it. Do **not** `git pull` — that would merge the old
+  history back in. Note in the Step 7 report that the branch needs
+  `git reset --hard origin/<branch>`.
 
 **No provenance step here.** Model attribution is retired
 (`docs/CONTRIBUTING-PROCESS.md` → **AI attribution**), so a revision round no
@@ -392,11 +407,11 @@ on a source PR. Link the target PR.
 
 - **Address, push once, then reply.** Don't push commit-by-commit per comment —
   each push dismisses approval. One pass, one push, then close the threads.
-- **Collapse to one commit on the final round only (Step 5.1).** The merge queue
-  derives the squash message and can't be handed one, so a one-commit PR is the
-  only way to control what lands in `main`. But collapse *only* when no thread is
-  left open — a mid-review force-push costs the reviewer the delta diff they came
-  back for.
+- **Collapse to one commit on the final round only (Step 5.1).** `/collapse-pr`
+  owns the mechanics and the rationale; this skill owns the *when*. Collapse
+  *only* when no thread on the target is left open — a mid-review force-push costs
+  the reviewer the delta diff they came back for. Pass `--yes`, because the
+  threads you just addressed are still unresolved on GitHub until Step 6.
 - **Reply to every unresolved thread**, even deferred ones. Resolve only the ones
   you actually fixed (or that are outdated); leave pushback/deferred threads open.
 - **Feedback can come from elsewhere; the code always lands on the target.**
