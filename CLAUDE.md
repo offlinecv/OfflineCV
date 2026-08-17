@@ -161,7 +161,7 @@ Strict 3-tier architecture. Primitives + shared-composed live in `src/design-sys
 
 **The Reuse Gate (soft).** Before adding a new *workflow surface*, search for an existing surface that already owns that capability and extend it. A parallel surface is allowed only with a written "Reuse analysis" justifying why (genuinely different interaction model, or isolation requirement). A hook (`scripts/hooks/reuse_surface_reminder.sh`) warns on new files under `src/components/`.
 
-**Size.** Keep feature components under ~200 LOC; decompose past that. ⚠️ **Known debt — do not imitate:** `ReconstructedResume.tsx` (1338), `SectionRewrite.tsx` (607), `ModelSelector.tsx` (556), `ReconstructedRole.tsx` (483) all violate this. If you are editing one, prefer extracting your change into a new sibling over growing the file further.
+**Size.** Keep feature components under ~200 LOC; decompose past that. ⚠️ **Known debt — do not imitate:** `ReconstructedResume.tsx` (1489), `SectionRewrite.tsx` (607), `ModelSelector.tsx` (556), `ReconstructedRole.tsx` (490) all violate this. If you are editing one, prefer extracting your change into a new sibling over growing the file further.
 
 ## Styling & tokens
 

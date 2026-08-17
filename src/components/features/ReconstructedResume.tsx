@@ -83,7 +83,11 @@ import type {
   AddedBulletRef,
   AddedBullets,
 } from "../../hooks/useEditableParse.ts";
-import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
+import {
+  parsedEntryKey,
+  survivingParsedIndices,
+} from "../../hooks/useEditableParse.ts";
+import { removeEntryWithBullets } from "../../lib/edit/entry-remove.ts";
 import { useAddedEntryPruneHold } from "../../hooks/useAddedEntryPruneHold.ts";
 import {
   batchUndoTargets,
@@ -406,6 +410,7 @@ export function ExperienceSection({
   addedBullets,
   addedExperience,
   originalCount,
+  parsedIndices,
   onAddEntry,
   onRemoveEntry,
   onEntryField,
@@ -435,6 +440,9 @@ export function ExperienceSection({
   onRewriteApplied?: () => void;
   hasBullets: boolean;
   experienceOverrides: Record<number, ExperienceFieldOverrides>;
+  /** `index` is the role's PARSED index — the key space `experienceOverrides`
+   *  uses — NOT its render position. The two diverge once a parsed role is
+   *  deleted (#856); {@link parsedIndices} is the map between them. */
   onExperienceFieldChange: (
     index: number,
     field: keyof ExperienceFieldOverrides,
@@ -456,10 +464,14 @@ export function ExperienceSection({
   addedBullets: AddedBullets;
   /** User-added experience entries, append-aligned to indices ≥ originalCount. */
   addedExperience: AddedEntry[];
-  /** Count of PARSED experience roles; indices at/above this are user-added. */
+  /** Count of PARSED experience roles still rendered; indices at/above this are
+   *  user-added. */
   originalCount: number;
+  /** Render position → PARSED index for the surviving parsed roles (#856), from
+   *  {@link survivingParsedIndices}. Identity until a parsed role is deleted. */
+  parsedIndices: readonly number[];
   onAddEntry: () => void;
-  onRemoveEntry: (id: string) => void;
+  onRemoveEntry: (key: string) => void;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
   onAddBullet: (entryKey: string, text: string) => void;
   /** Snapshot the slots a rewrite batch will write, for a one-action undo of
@@ -478,6 +490,15 @@ export function ExperienceSection({
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
+
+  // A rendered role's PARSED index — the key space `experienceOverrides` and
+  // every `addedBullets` bucket use. `applyOverrides` filters deleted parsed
+  // roles out of the array the groups were built over (#856), so the render
+  // position stops being the parsed index after the first deletion. An index at
+  // or above `originalCount` is a user-ADDED role, appended after every
+  // survivor, and never reaches an index-keyed map at all.
+  const parsedIndexOf = (idx: number): number =>
+    idx < originalCount ? (parsedIndices[idx] ?? idx) : idx;
 
   // Per-entry prune hold (#637 half 2). Created HERE — the ids it holds are
   // only meaningful to this section's `pruneEmptyAddedEntries` call, and the
@@ -526,11 +547,19 @@ export function ExperienceSection({
       if (idx === null) continue;
       const added =
         idx >= originalCount ? addedExperience[idx - originalCount] : undefined;
-      const entryKey = added ? added.id : parsedEntryKey("experience", idx);
+      const entryKey = added
+        ? added.id
+        : parsedEntryKey("experience", parsedIndexOf(idx));
       const bucketRef = (obsId: string): AddedBulletRef | undefined => {
         const text = group.bullets.find((b) => b.id === obsId)?.text;
         return text === undefined ? undefined : { entryKey, text };
       };
+      // NOTE the two `experience:<n>` strings here are in DIFFERENT index
+      // spaces and only look alike. This map's key is the rewrite-chain section
+      // id `buildResumeSections` mints from the RENDER position, and both ends
+      // are built in the same render, so it stays internally consistent.
+      // `entryKey` above is the persisted `addedBullets` bucket key and must be
+      // the PARSED index. They coincide until a parsed role is deleted (#856).
       map.set(`experience:${idx}`, {
         obsIds: group.bullets.map((b) => b.id),
         // Entry-aware like the per-role path (#637, #657): a rewrite accepted on
@@ -549,6 +578,7 @@ export function ExperienceSection({
   }, [
     groups,
     originalCount,
+    parsedIndices,
     addedExperience,
     onBulletChange,
     onRemoveBullet,
@@ -623,23 +653,27 @@ export function ExperienceSection({
               idx >= originalCount
                 ? addedExperience[idx - originalCount]
                 : undefined;
+            const parsedIdx = parsedIndexOf(idx);
             // The one bucket this role owns — its added id, or its parsed-entry
             // key. Adds append to it, a rewrite batch's undo snapshots it, and
             // (since #637) a remove of a user-added bullet splices it.
             const roleEntryKey = added
               ? added.id
-              : parsedEntryKey("experience", idx);
+              : parsedEntryKey("experience", parsedIdx);
             const entry = (
               <RoleEntry
-                key={added ? added.id : idx}
+                // The ENTRY key, not the render position (#856): a deletion
+                // shifts every later row up one, and a position key would hand
+                // the deleted row's in-flight edit state to its successor.
+                key={roleEntryKey}
                 group={group}
                 experienceIndex={idx}
-                overrides={added ? undefined : experienceOverrides[idx]}
+                overrides={added ? undefined : experienceOverrides[parsedIdx]}
                 onFieldChange={(field, value) => {
                   if (added) {
                     onEntryField(added.id, EXPERIENCE_FIELD_MAP[field], value);
                   } else {
-                    onExperienceFieldChange(idx, field, value);
+                    onExperienceFieldChange(parsedIdx, field, value);
                   }
                 }}
                 onBulletChange={onBulletChange}
@@ -648,13 +682,21 @@ export function ExperienceSection({
                 captureUndo={(writes) =>
                   captureBulletUndo(batchUndoTargets(writes, roleEntryKey))
                 }
-                onRemove={added ? () => onRemoveEntry(added.id) : undefined}
+                // Set for a PARSED role too since #856 — its own key tombstones
+                // the entry, and the bullets under it go through `removeBullet`
+                // (see `removeEntryWithBullets` for why they have to).
+                onRemove={() =>
+                  removeEntryWithBullets(roleEntryKey, group.bullets, {
+                    onRemoveEntry,
+                    onRemoveBullet,
+                  })
+                }
                 entryKey={roleEntryKey}
                 pruneHold={pruneHold}
               />
             );
             return subHeading ? (
-              <Fragment key={added ? added.id : idx}>
+              <Fragment key={roleEntryKey}>
                 <SectionHeading>{subHeading}</SectionHeading>
                 {entry}
               </Fragment>
@@ -675,10 +717,12 @@ export function ExperienceSection({
 
 /**
  * Projects render as their OWN section (#95) — a name-led header + the same
- * graded bullet rows used everywhere else (`ResumeBulletRow`). Parsed projects
- * stay read-only; user-ADDED projects expose an editable name, a "+ Add bullet"
- * affordance, and a remove control (#180-followup), so an added project's
- * bullets grade and export like any other.
+ * graded bullet rows used everywhere else (`ResumeBulletRow`). A parsed
+ * project's name stays read-only; user-ADDED projects expose an editable name
+ * and a "+ Add bullet" affordance (#180-followup), so an added project's
+ * bullets grade and export like any other. BOTH carry a remove control since
+ * #856 — a phantom project the parser stitched together was previously
+ * uncorrectable and shipped into the Download PDF.
  */
 function ProjectsSection({
   heading,
@@ -687,8 +731,10 @@ function ProjectsSection({
   descriptionOverrides,
   addedProjects,
   originalCount,
+  parsedIndices,
   onAddEntry,
   onRemoveEntry,
+  onRemoveBullet,
   onEntryField,
   onDescriptionField,
   onAddBullet,
@@ -703,9 +749,16 @@ function ProjectsSection({
    *  a CLEARED prose field mounted (so the clear is reversible in-session). */
   descriptionOverrides: DescriptionOverrides;
   addedProjects: AddedEntry[];
+  /** Count of PARSED projects still rendered; indices at/above are user-added. */
   originalCount: number;
+  /** Render position → PARSED index for the surviving parsed projects (#856),
+   *  from {@link survivingParsedIndices}. Identity until one is deleted. */
+  parsedIndices: readonly number[];
   onAddEntry: () => void;
-  onRemoveEntry: (id: string) => void;
+  onRemoveEntry: (key: string) => void;
+  /** Drop one bullet, so deleting an entry can take its bullets out of the
+   *  graded pool with it (#856) — see `removeEntryWithBullets`. */
+  onRemoveBullet: (id: string, added?: AddedBulletRef) => boolean;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
   /** Commit an edit to a parsed project's prose description (#489). */
   onDescriptionField: (key: string, value: string | undefined) => void;
@@ -724,7 +777,11 @@ function ProjectsSection({
           const group = groups[i];
           const added =
             i >= originalCount ? addedProjects[i - originalCount] : undefined;
-          const descKey = parsedEntryKey("projects", i);
+          // PARSED index, not the render position: `applyOverrides` filters
+          // deleted entries out, so the two diverge after the first delete
+          // (#856) and `descriptionOverrides` is keyed by the parsed one.
+          const descKey = parsedEntryKey("projects", parsedIndices[i] ?? i);
+          const entryKey = added ? added.id : descKey;
           // Keep the prose field mounted once the user has touched it, even after
           // an authoritative clear ("" override) drops `project.description` — so
           // the clear stays reversible in-session instead of collapsing to the
@@ -734,7 +791,9 @@ function ProjectsSection({
             .filter(Boolean)
             .join(" · ");
           return (
-            <div key={added ? added.id : i} className="flex flex-col gap-1.5">
+            // The ENTRY key, not the render position (#856) — see the same note
+            // in `ExperienceSection`.
+            <div key={entryKey} className="flex flex-col gap-1.5">
               <div className="flex items-start justify-between gap-2">
                 {added ? (
                   <EditableField
@@ -751,12 +810,15 @@ function ProjectsSection({
                     {header || "Untitled project"}
                   </h3>
                 )}
-                {added && (
-                  <RemoveButton
-                    label="Remove project"
-                    onClick={() => onRemoveEntry(added.id)}
-                  />
-                )}
+                <RemoveButton
+                  label="Remove project"
+                  onClick={() =>
+                    removeEntryWithBullets(entryKey, group?.bullets ?? [], {
+                      onRemoveEntry,
+                      onRemoveBullet,
+                    })
+                  }
+                />
               </div>
               {group && group.bullets.length > 0 ? (
                 <ul className="list-none">
@@ -891,16 +953,24 @@ function AchievementHeader({
  * Both branches are editable: a PARSED achievement's type / title / year through
  * `AchievementHeader` (#454, overrides keyed by parsed index and already folded
  * into `achievements` by `applyOverrides`), a user-ADDED one through the flat
- * `AddedEntry` fields (#455).
+ * `AddedEntry` fields (#455). Both are also removable since #856 — this is the
+ * section the report came from: a phantom achievement could be blanked field by
+ * field but never actually dropped, so it still shipped into the Download PDF.
  */
-function AchievementsSection({
+// Exported for `ReconstructedResume.remove-parsed-entry.test.tsx` only — the
+// render-position → parsed-index resolution (#856) is a property of THIS
+// component, so the regression test has to render it. Not part of the surface
+// any other module imports; same arrangement as `ExperienceSection` above.
+export function AchievementsSection({
   heading,
   achievements,
   groups,
   addedAchievements,
   originalCount,
+  parsedIndices,
   onAddEntry,
   onRemoveEntry,
+  onRemoveBullet,
   onEntryField,
   onAchievementField,
   onAddBullet,
@@ -912,9 +982,18 @@ function AchievementsSection({
   /** Pre-built achievement groups, index-aligned with `achievements`. */
   groups: BulletGroup[];
   addedAchievements: AddedEntry[];
+  /** Count of PARSED achievements still rendered; at/above this are user-added. */
   originalCount: number;
+  /** Render position → PARSED index for the surviving parsed achievements
+   *  (#856), from {@link survivingParsedIndices}. Identity until one is
+   *  deleted — after which `achievementOverrides`' keys would otherwise rebind
+   *  each survivor's edits to its neighbour's. */
+  parsedIndices: readonly number[];
   onAddEntry: () => void;
-  onRemoveEntry: (id: string) => void;
+  onRemoveEntry: (key: string) => void;
+  /** Drop one bullet, so deleting an entry can take its bullets out of the
+   *  graded pool with it (#856) — see `removeEntryWithBullets`. */
+  onRemoveBullet: (id: string, added?: AddedBulletRef) => boolean;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
   onAchievementField: (
     index: number,
@@ -938,8 +1017,15 @@ function AchievementsSection({
             i >= originalCount
               ? addedAchievements[i - originalCount]
               : undefined;
+          // PARSED index, not the render position — see `parsedIndices`.
+          const parsedIdx = parsedIndices[i] ?? i;
+          const entryKey = added
+            ? added.id
+            : parsedEntryKey("achievements", parsedIdx);
           return (
-            <div key={added ? added.id : i} className="flex flex-col gap-1.5">
+            // The ENTRY key, not the render position (#856) — see the same note
+            // in `ExperienceSection`.
+            <div key={entryKey} className="flex flex-col gap-1.5">
               <div className="flex items-start justify-between gap-2">
                 {added ? (
                   // Same header as a parsed achievement — an added entry stores
@@ -964,16 +1050,19 @@ function AchievementsSection({
                     year={achievement.year}
                     yearSeparator={achievement.year_separator}
                     onFieldChange={(field, value) =>
-                      onAchievementField(i, field, value)
+                      onAchievementField(parsedIdx, field, value)
                     }
                   />
                 )}
-                {added && (
-                  <RemoveButton
-                    label="Remove achievement"
-                    onClick={() => onRemoveEntry(added.id)}
-                  />
-                )}
+                <RemoveButton
+                  label="Remove achievement"
+                  onClick={() =>
+                    removeEntryWithBullets(entryKey, group?.bullets ?? [], {
+                      onRemoveEntry,
+                      onRemoveBullet,
+                    })
+                  }
+                />
               </div>
               {group && group.bullets.length > 0 && (
                 <ul className="list-none">
@@ -1078,6 +1167,7 @@ export function ReconstructedResume({
     descriptionOverrides,
     setDescriptionField,
     removeBullet,
+    removedEntries,
     educationOverrides,
     setEducationField,
     setAchievementField,
@@ -1140,6 +1230,43 @@ export function ReconstructedResume({
   const originalProjCount = projects.length - addedProjects.length;
   const originalAchCount = achievements.length - addedAchievements.length;
 
+  // Render position → PARSED index, per section (#856). `applyOverrides` filters
+  // a deleted parsed entry out of these arrays, so from the first deletion on, a
+  // rendered row's position is NOT the index its overrides are keyed by. Every
+  // section resolves through the map rather than re-deriving one, so the four
+  // cannot drift; see `survivingParsedIndices` for why it is enumerated rather
+  // than computed by subtraction.
+  const expParsedIndices = survivingParsedIndices(
+    "experience",
+    removedEntries,
+    originalExpCount,
+  );
+  const eduParsedIndices = survivingParsedIndices(
+    "education",
+    removedEntries,
+    originalEduCount,
+  );
+  const projParsedIndices = survivingParsedIndices(
+    "projects",
+    removedEntries,
+    originalProjCount,
+  );
+  const achParsedIndices = survivingParsedIndices(
+    "achievements",
+    removedEntries,
+    originalAchCount,
+  );
+
+  // The RESOLVED experience entry behind a parsed index — what the #672 date
+  // rule compares a commit against. It sits at the entry's RENDER position, so
+  // the map has to be walked back the other way; identity while nothing is
+  // deleted. Undefined for an index no row renders, which simply opts that
+  // commit out of the rule rather than resolving it against a neighbour.
+  const resolvedExperience = (parsedIndex: number) => {
+    const pos = expParsedIndices.indexOf(parsedIndex);
+    return pos < 0 ? undefined : parsed.experience[pos];
+  };
+
   // One grouping pass over experiences + projects + achievements so their
   // bullets are attributed to their own entry and never leak into the experience
   // "Other" group (#95, #96). The "Other" group (bullets matched to none) renders
@@ -1179,9 +1306,11 @@ export function ReconstructedResume({
       groups={achievementGroups}
       addedAchievements={addedAchievements}
       originalCount={originalAchCount}
+      parsedIndices={achParsedIndices}
       onAddEntry={() => addEntry("achievements")}
       onPruneEmpty={() => pruneEmptyAddedEntries("achievements")}
       onRemoveEntry={removeEntry}
+      onRemoveBullet={removeBullet}
       onEntryField={setEntryField}
       onAchievementField={setAchievementField}
       onAddBullet={addBullet}
@@ -1277,7 +1406,7 @@ export function ReconstructedResume({
         // the pre-write override map so the sparse write-back does not compare a
         // previously-overridden key against a base that contains it.
         onExperienceFieldChange={(index, field, value) =>
-          setExperienceField(index, field, value, parsed.experience[index])
+          setExperienceField(index, field, value, resolvedExperience(index))
         }
         onBulletChange={(index, value, original) =>
           setBulletField(index, value, original)
@@ -1286,6 +1415,7 @@ export function ReconstructedResume({
         addedBullets={edit.addedBullets}
         addedExperience={addedExperience}
         originalCount={originalExpCount}
+        parsedIndices={expParsedIndices}
         onAddEntry={() => addEntry("experience")}
         onPruneEmpty={(isHeld) => pruneEmptyAddedEntries("experience", isHeld)}
         onRemoveEntry={removeEntry}
@@ -1301,9 +1431,11 @@ export function ReconstructedResume({
         descriptionOverrides={descriptionOverrides}
         addedProjects={addedProjects}
         originalCount={originalProjCount}
+        parsedIndices={projParsedIndices}
         onAddEntry={() => addEntry("projects")}
         onPruneEmpty={() => pruneEmptyAddedEntries("projects")}
         onRemoveEntry={removeEntry}
+        onRemoveBullet={removeBullet}
         onEntryField={setEntryField}
         onDescriptionField={setDescriptionField}
         onAddBullet={addBullet}
@@ -1318,6 +1450,7 @@ export function ReconstructedResume({
         }
         addedEducation={addedEducation}
         originalCount={originalEduCount}
+        parsedIndices={eduParsedIndices}
         onAddEntry={() => addEntry("education")}
         onPruneEmpty={() => pruneEmptyAddedEntries("education")}
         onRemoveEntry={removeEntry}

@@ -22,6 +22,7 @@ import type {
   AddedEntry,
   AddedEntryField,
 } from "../../hooks/useEditableParse.ts";
+import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
 import { buildEducationDates } from "../../lib/score/entry-dates.ts";
 import { EditableField, SectionHeading } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
@@ -105,7 +106,8 @@ function EducationEntry({
   edu: ResumeEducation;
   overrides: EducationFieldOverrides | undefined;
   onFieldChange: (field: keyof EducationFieldOverrides, value: string) => void;
-  /** Remove this entry (only set for user-ADDED entries). */
+  /** Remove this entry. Set for a PARSED entry too since #856 — "is this
+   *  user-added?" is {@link isAdded}, never this prop's presence. */
   onRemove?: () => void;
   /** User-added entries carry no `field` (major) slot, so the major affordance
    *  renders on PARSED entries only. */
@@ -200,6 +202,7 @@ export function EducationSection({
   onEducationFieldChange,
   addedEducation,
   originalCount,
+  parsedIndices,
   onAddEntry,
   onRemoveEntry,
   onEntryField,
@@ -209,6 +212,8 @@ export function EducationSection({
   heading?: string;
   education: ResumeEducation[];
   educationOverrides: Record<number, EducationFieldOverrides>;
+  /** `index` is the entry's PARSED index — the key space `educationOverrides`
+   *  uses — not its render position (#856). */
   onEducationFieldChange: (
     index: number,
     field: keyof EducationFieldOverrides,
@@ -216,10 +221,14 @@ export function EducationSection({
   ) => void;
   /** User-added education entries, append-aligned to indices ≥ originalCount. */
   addedEducation: AddedEntry[];
-  /** Count of PARSED education entries; indices at/above this are user-added. */
+  /** Count of PARSED education entries still rendered; indices at/above this
+   *  are user-added. */
   originalCount: number;
+  /** Render position → PARSED index for the surviving parsed entries (#856),
+   *  from `survivingParsedIndices`. Identity until one is deleted. */
+  parsedIndices: readonly number[];
   onAddEntry: () => void;
-  onRemoveEntry: (id: string) => void;
+  onRemoveEntry: (key: string) => void;
   onEntryField: (id: string, field: AddedEntryField, value: string) => void;
   /** Drop a blank added entry when focus leaves the section (#379). */
   onPruneEmpty: () => void;
@@ -239,14 +248,22 @@ export function EducationSection({
               i >= originalCount
                 ? addedEducation[i - originalCount]
                 : undefined;
+            // PARSED index, not the render position — see `parsedIndices`.
+            const parsedIdx = parsedIndices[i] ?? i;
+            const entryKey = added
+              ? added.id
+              : parsedEntryKey("education", parsedIdx);
             return (
               <EducationEntry
-                key={added ? added.id : i}
+                // The ENTRY key, not the render position (#856): a deletion
+                // shifts every later row up one, and a position key would hand
+                // the deleted row's in-flight edit state to its successor.
+                key={entryKey}
                 edu={edu}
-                overrides={added ? undefined : educationOverrides[i]}
+                overrides={added ? undefined : educationOverrides[parsedIdx]}
                 onFieldChange={(field, value) => {
                   if (!added) {
-                    onEducationFieldChange(i, field, value);
+                    onEducationFieldChange(parsedIdx, field, value);
                     return;
                   }
                   // Added entries carry no major slot; the `field` edit can't
@@ -255,7 +272,10 @@ export function EducationSection({
                   if (field !== "field")
                     onEntryField(added.id, EDUCATION_FIELD_MAP[field], value);
                 }}
-                onRemove={added ? () => onRemoveEntry(added.id) : undefined}
+                // Education carries no bullets, so this is the one section whose
+                // delete is the bare `removeEntry` (#856) rather than the
+                // bullets-first `removeEntryWithBullets`.
+                onRemove={() => onRemoveEntry(entryKey)}
                 isAdded={Boolean(added)}
               />
             );

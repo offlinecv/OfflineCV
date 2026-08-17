@@ -123,6 +123,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     bulletOverrides,
     descriptionOverrides,
     removedBullets,
+    removedEntries,
     educationOverrides,
     achievementOverrides,
     skillsOverride,
@@ -177,6 +178,7 @@ export function useAnalyzedResume(): AnalyzedResume {
       achievementOverrides,
       descriptionOverrides,
       summaryOverride,
+      removedEntries,
     );
   }, [
     base,
@@ -192,6 +194,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     addedEntries,
     addedBullets,
     removedBullets,
+    removedEntries,
     profileOverrides,
   ]);
 
@@ -281,6 +284,11 @@ export function useAnalyzedResume(): AnalyzedResume {
     addedEntries,
     addedBullets,
     removedBullets,
+    // Deleting a parsed entry moves the score twice over (#856): Completeness
+    // counts `experience`/`education` entries, and a title-only entry's own
+    // pooled line leaves `sections` with it. Both are `editedCore` effects, so
+    // this dep is what the hand-maintained invariant above demands.
+    removedEntries,
     // Derived from `bulletOverrides` + `removedBullets`, both already above, so
     // this dep adds no re-grade of its own — listed because the memo reads it.
     claimedBulletKeys,
