@@ -748,6 +748,3 @@ describe("buildJobQuery titleNoise (issue 579)", () => {
     });
   });
 });
-
-Manus is browsing...
-Take over
