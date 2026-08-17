@@ -430,8 +430,8 @@ describe("buildJobQuery", () => {
 
   it("ranks leadership-competency skills as canonical, not just tool skills (#583)", () => {
     // Before #583, every entry in a leadership résumé's skill list was
-    // non-canonical, so `isCanonical` tied across the board and the canonical-first
-    // sort collapsed to a no-op (résumé order only).
+    // non-canonical, so `isCanonical` tied across the board and the
+    // canonical-first sort collapsed to a no-op (résumé order only).
     const parsed = baseParsed({
       skills: [
         "public speaking",
@@ -657,7 +657,7 @@ describe("buildJobQuery titleNoise (issue 579)", () => {
       );
     });
 
-    it("keeps a single role whole when its punctuation is NOT a role stack (#605)", () =>
+    it("keeps a single role whole when its punctuation is NOT a role stack (#605)", () => {
       // These are the two shapes that made an unguarded splitter egress a
       // fragment. The comma is not in the separator set at all, and `/` splits
       // only when spaced — so both survive intact.
@@ -748,3 +748,6 @@ describe("buildJobQuery titleNoise (issue 579)", () => {
     });
   });
 });
+
+Manus is browsing...
+Take over
