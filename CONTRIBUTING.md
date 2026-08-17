@@ -136,6 +136,36 @@ These architecture rules are enforced at two layers:
    Warnings are non-blocking; bypass for one session with
    `export OFFLINECV_SKIP_HOOKS=1`.
 
+## Claiming an issue
+
+**Check the labels before you start.** An issue carrying `status:claimed`
+already has someone on it — pick another, or comment and ask where it stands.
+Do not open a PR against a claimed issue without talking to the assignee
+first; you will almost certainly duplicate their work.
+
+To take an unclaimed issue, comment on it saying you're starting. A
+maintainer will assign it to you and add `status:claimed`, which is what makes
+the claim visible to everyone else. Two signals are needed because the
+assignee alone is not enough: `gh issue list` prints labels and not assignees,
+and on the web list the assignee is a small avatar in the right margin.
+Contributors — and tooling that scans the backlog — read the label.
+
+**If you have write access and assign yourself, add `status:claimed` too.**
+Self-assignment skips the maintainer step that would normally attach the label,
+and an assignee on its own is exactly the invisible claim described above — it
+is how #681 got built twice.
+
+Claims lapse. If a claimed issue goes **7 days** with no linked PR and no
+activity, a scheduled job
+([`stale-claims.yml`](./.github/workflows/stale-claims.yml)) unassigns it,
+drops the label, and comments to say so. Any activity resets the clock, and an
+open PR exempts the claim entirely — so if you are mid-work and quiet, a
+one-line comment keeps it. If yours does lapse and you still want it, say so
+and we'll assign it straight back.
+
+If a maintainer assigns you an issue you didn't ask for, that's a request, not
+an obligation. Say no and it goes back to the pool.
+
 ## Filing issues
 
 Apply at least one type label (`bug`, `feature`, `improvement`,

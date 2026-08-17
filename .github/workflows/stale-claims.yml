@@ -1,0 +1,160 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The offlinecv Authors
+#
+# Expire stale issue claims.
+#
+# A claim is `status:claimed` + an assignee. It exists so a contributor
+# browsing the backlog can see an issue is taken WITHOUT opening it — the
+# assignee field is invisible in `gh issue list` and is a small avatar on the
+# web list, which is why two contributors independently built #681 while it
+# was assigned to a third.
+#
+# A claim that never expires is worse than no claim: it reads as abandoned,
+# so people route around it, and the label stops meaning anything. This job
+# drops the claim when nothing has happened for STALE_AFTER_DAYS, leaving the
+# issue open and unassigned for the next person.
+#
+# Safe by construction: it never closes, never edits the body, and never
+# touches an issue with an open linked PR. Everything it does is reversible by
+# re-assigning and re-adding the label.
+name: Expire stale claims
+
+on:
+  schedule:
+    # Daily, off the hour — GitHub drops scheduled runs at popular minutes.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log what would expire, write nothing"
+        type: boolean
+        default: false
+
+permissions:
+  issues: write
+
+# A manual dispatch fired while the cron run is mid-flight would re-read the
+# same still-labelled issues and comment on them twice. Queue instead of
+# cancelling: an interrupted run has already unassigned some issues without
+# commenting, which is the one state this job should never leave behind.
+concurrency:
+  group: stale-claims
+  cancel-in-progress: false
+
+jobs:
+  expire:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Expire stale claims
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Days of silence before a claim lapses. A claimant who comments
+            // ("still on this") resets the clock, because any activity bumps
+            // the issue's `updated_at`.
+            const STALE_AFTER_DAYS = 7;
+            const CLAIM_LABEL = "status:claimed";
+
+            // `workflow_dispatch` inputs arrive as strings.
+            const dryRun = String(context.payload.inputs?.dry_run ?? "") === "true";
+            if (dryRun) core.info("DRY RUN — no writes will be made.");
+
+            const { owner, repo } = context.repo;
+            const cutoffMs = STALE_AFTER_DAYS * 86_400_000;
+
+            const claimed = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: "open",
+              labels: CLAIM_LABEL,
+              per_page: 100,
+            });
+            core.info(`${claimed.length} open issue(s) carry "${CLAIM_LABEL}".`);
+
+            for (const issue of claimed) {
+              // `listForRepo` returns PRs too; a PR cannot hold a claim.
+              if (issue.pull_request) continue;
+
+              const idleMs = Date.now() - new Date(issue.updated_at).getTime();
+              const idleDays = (idleMs / 86_400_000).toFixed(1);
+
+              if (idleMs < cutoffMs) {
+                core.info(`#${issue.number}: active ${idleDays}d ago — keeping.`);
+                continue;
+              }
+
+              // An open PR IS the work. Never reap a claim that produced one,
+              // however quiet the issue itself has gone.
+              const timeline = await github.paginate(
+                github.rest.issues.listEventsForTimeline,
+                { owner, repo, issue_number: issue.number, per_page: 100 },
+              );
+              // Scoped to THIS repo on purpose. `cross-referenced` fires for a
+              // reference from any public repo on GitHub, including a PR opened
+              // on someone's fork against the fork's own `main` and never
+              // submitted here. Unscoped, any of those reads as "the work is
+              // happening" and the claim never expires.
+              const openPr = timeline.find(
+                (e) =>
+                  e.event === "cross-referenced" &&
+                  e.source?.issue?.pull_request &&
+                  e.source.issue.state === "open" &&
+                  e.source.issue.repository?.full_name === `${owner}/${repo}`,
+              );
+              if (openPr) {
+                core.info(
+                  `#${issue.number}: idle ${idleDays}d but PR #${openPr.source.issue.number} is open — keeping.`,
+                );
+                continue;
+              }
+
+              const assignees = issue.assignees.map((a) => a.login);
+              core.info(
+                `#${issue.number}: idle ${idleDays}d, no open PR, assignees [${assignees.join(", ") || "none"}] — expiring.`,
+              );
+              if (dryRun) continue;
+
+              // Per-issue isolation. Every call below can fail on one issue for
+              // reasons that say nothing about the rest of the batch — a label
+              // removed concurrently (404), a locked issue (403), a suspended
+              // assignee. Unguarded, the first such rejection ends the run and
+              // every remaining stale claim silently keeps its label until
+              // tomorrow. Log it and carry on instead.
+              try {
+                if (assignees.length > 0) {
+                  await github.rest.issues.removeAssignees({
+                    owner,
+                    repo,
+                    issue_number: issue.number,
+                    assignees,
+                  });
+                }
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  name: CLAIM_LABEL,
+                });
+
+                // A label vanishing with no explanation reads as a maintainer
+                // snub. Say what happened and how to take it back.
+                const who = assignees.map((a) => `@${a}`).join(", ");
+                const preamble = assignees.length
+                  ? `${who} — releasing this claim after ${STALE_AFTER_DAYS} days with no linked PR and no activity.`
+                  : `Dropping \`${CLAIM_LABEL}\` — the issue carried the label but no assignee.`;
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issue.number,
+                  body:
+                    `${preamble}\n\n` +
+                    `This is automated backlog hygiene, not a judgement — a claim that sits ` +
+                    `unmoved reads as abandoned to the next person browsing, and that has already ` +
+                    `cost us duplicated work. The issue is open and unassigned again.\n\n` +
+                    `**If you are still on it, just say so and we'll re-assign it to you.** ` +
+                    `Nothing you have done is lost.`,
+                });
+              } catch (err) {
+                core.error(`#${issue.number}: failed to expire claim: ${err.message}`);
+              }
+            }
