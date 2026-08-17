@@ -245,6 +245,26 @@ function stripAchievementLabel(key: string): string | null {
 }
 
 /**
+ * True when `key` (already in {@link normalizeTitleKey} form) names a line one
+ * of `ownedKeys` owns — matching on EITHER the whole key or the key minus a
+ * leading achievement type run (#456), the composed-vs-split reconciliation
+ * described on {@link stripAchievementLabel}. The second candidate is additive:
+ * it only ever matches more, and it is keyed on the entry's canonical `title`,
+ * so editing an achievement's `type` cannot move the key off the raw line it has
+ * to match.
+ *
+ * The ONE place the ownership relation is defined, shared by the two directions
+ * that must agree on it: {@link suppressTitleOwnedBullets} hides a line the
+ * entry owns, {@link isTitleOwnedLine} finds the same line so deleting the entry
+ * can drop it (#856).
+ */
+function matchesOwnedKey(key: string, ownedKeys: ReadonlySet<string>): boolean {
+  if (ownedKeys.has(key)) return true;
+  const unlabelled = stripAchievementLabel(key);
+  return unlabelled !== null && ownedKeys.has(unlabelled);
+}
+
+/**
  * Drop from a bullet list every bullet whose content is already OWNED by a
  * title-only entry — i.e. a `• Label … [year]` achievement/project that renders
  * its whole line as a header and carries no `description` for the grouper to
@@ -252,12 +272,6 @@ function stripAchievementLabel(key: string): string | null {
  * the same content twice. We suppress it from "Other" rather than re-attributing
  * it to the entry: the entry's own title already IS that content, so rendering it
  * again as the entry's bullet would just move the duplicate, not remove it.
- *
- * A bullet matches on EITHER its whole key or its key minus a leading achievement
- * type run (#456) — the composed-vs-split reconciliation described on
- * {@link stripAchievementLabel}. The second candidate is additive: it only ever
- * suppresses more, and it is keyed on the entry's canonical `title`, so editing an
- * achievement's `type` cannot move the key off the raw line it has to match.
  *
  * Ownership is exact on the residue-tolerant {@link normalizeTitleKey} — a tight
  * key, not substring containment — so a genuinely-unmatched bullet that merely
@@ -276,12 +290,36 @@ export function suppressTitleOwnedBullets(
     if (key) ownedKeys.add(key);
   }
   if (ownedKeys.size === 0) return [...bullets];
-  return bullets.filter((b) => {
-    const key = normalizeTitleKey(b.text);
-    if (ownedKeys.has(key)) return false;
-    const unlabelled = stripAchievementLabel(key);
-    return !(unlabelled && ownedKeys.has(unlabelled));
-  });
+  return bullets.filter(
+    (b) => !matchesOwnedKey(normalizeTitleKey(b.text), ownedKeys),
+  );
+}
+
+/**
+ * True when `line` is a source line the entry titled `title` OWNS — the exact
+ * relation {@link suppressTitleOwnedBullets} hides a bullet on, exposed so the
+ * INVERSE operation can reuse it: deleting a parsed entry (#856) has to drop the
+ * entry's own line from `rawText` and from the graded section pool, and that line
+ * is not otherwise identifiable (the parsed model keeps no source-line
+ * provenance).
+ *
+ * Getting this from the suppressor rather than from a second matcher is what
+ * makes the two agree by construction. It matters most for the case the
+ * suppressor exists for: a title-only achievement/project is parsed OUT of a
+ * `•`-marked line, so that line stays in the pool the anonymous scorer grades
+ * even though nothing renders it — deleting the entry with a matcher that
+ * disagreed here would leave its content grading the résumé forever.
+ *
+ * Exact-key, never containment, for the reason spelled out on the suppressor: a
+ * different entry's line that merely shares a prefix is not owned.
+ */
+export function isTitleOwnedLine(
+  line: string,
+  title: string | undefined,
+): boolean {
+  const owned = normalizeTitleKey(title ?? "");
+  if (!owned) return false;
+  return matchesOwnedKey(normalizeTitleKey(line), new Set([owned]));
 }
 
 // ── Header formatting ─────────────────────────────────────────────────────────

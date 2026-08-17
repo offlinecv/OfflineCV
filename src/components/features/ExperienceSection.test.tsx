@@ -109,6 +109,9 @@ function Harness() {
     addedBullets: {},
     addedExperience: [],
     originalCount: EXPERIENCES.length,
+    // Identity: nothing is deleted in this harness, so a render position IS its
+    // parsed index (#856).
+    parsedIndices: EXPERIENCES.map((_, i) => i),
     onAddEntry: () => {},
     onRemoveEntry: () => {},
     onEntryField: () => {},

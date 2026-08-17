@@ -224,6 +224,9 @@ function Harness() {
     addedBullets: edit.addedBullets,
     addedExperience: edit.addedEntries.filter((e) => e.section === "experience"),
     originalCount: 1,
+    // Identity: no parsed entry is deleted here, so a render position IS its
+    // parsed index (#856).
+    parsedIndices: [0],
     onAddEntry: () => edit.addEntry("experience"),
     onRemoveEntry: edit.removeEntry,
     onEntryField: edit.setEntryField,

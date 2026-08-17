@@ -259,7 +259,7 @@ interface RoleEntryProps {
   /** Commit a bullet edit, keyed by BulletObservation.id (#82, #648). The
    *  optional third argument identifies the added-bullets bucket + line, which
    *  is the ONLY way to reach a user-ADDED bullet (#657); this component
-   *  supplies it from `entryKey`, exactly as it does for a removal. */
+   *  supplies it from `entryKey`, just as it does for a removal. */
   onBulletChange?: (id: string, value: string, added?: AddedBulletRef) => void;
   /** Append a new bullet to this role (#180-followup). Renders a "+ Add bullet"
    *  affordance under the bullet list when provided. */
@@ -283,8 +283,10 @@ interface RoleEntryProps {
   /** Snapshot the slots a rewrite batch will write, so the whole batch can be
    *  reversed in one action (issue 510). Omitted → no Undo is offered. */
   captureUndo?: SectionRewriteApply["captureUndo"];
-  /** Remove this role (only set for user-ADDED roles). Renders an X control in
-   *  the header row when provided. */
+  /** Remove this role. Renders an X control in the header row when provided —
+   *  set for a PARSED role too since #856, so "is this role user-added?" is read
+   *  off `entryKey` (see `isAdded` below) rather than off this prop's presence.
+   *  Absent only for the "Other bullets" bucket, which owns no entry. */
   onRemove?: () => void;
   /** A remove-confirmation control owned by an ANCESTOR, for a group that can
    *  disappear from the render list when its last bullet goes (the "Other
@@ -321,6 +323,11 @@ export function RoleEntry({
   // gate let it destroy. Scoped to that timer: the section-exit prune (#379)
   // still reads a draft as emptiness, which is pre-existing and filed on its own.
   const rootRef = useRef<HTMLDivElement>(null);
+  // Whether this row is a user-ADDED role. Read off `entryKey`, not off
+  // `onRemove` (#856): a parsed role now carries a remove control too, so the
+  // presence of that prop no longer distinguishes the two. Same test
+  // `useHoldWhile` below already makes — only an added entry is prunable.
+  const isAdded = entryKey !== undefined && isAddedEntryKey(entryKey);
   // Tag every write issued from this role's own rows with the bucket that owns
   // them, so a USER-ADDED bullet is spliced (#637) or rewritten (#657) in
   // `addedBullets` rather than filed under an id that reaches nothing there.
@@ -353,7 +360,7 @@ export function RoleEntry({
   // (focus containment, and an open text control).
   useHoldWhile(
     pruneHold,
-    entryKey !== undefined && isAddedEntryKey(entryKey) ? entryKey : undefined,
+    isAdded ? entryKey : undefined,
     hostsStrip && removes.pending,
     rootRef,
   );
@@ -457,13 +464,13 @@ export function RoleEntry({
           {rewritePanel}
         </>
       ) : (
-        // A user-added role (onRemove set) starts empty — the "+ Add bullet"
-        // affordance below is its call to action, so suppress the note for it.
-        // A PARSED role with no bullets still shows the note: that the parser
-        // found none is the diagnostic signal this surface exists to expose —
-        // UNLESS the empty state is because the last bullet was just removed
-        // (#626), which the confirmation strip below already explains.
-        !onRemove &&
+        // A user-added role starts empty — the "+ Add bullet" affordance below
+        // is its call to action, so suppress the note for it. A PARSED role with
+        // no bullets still shows the note: that the parser found none is the
+        // diagnostic signal this surface exists to expose — UNLESS the empty
+        // state is because the last bullet was just removed (#626), which the
+        // confirmation strip below already explains.
+        !isAdded &&
         !removes.pending && (
           <p className="text-sm text-content-tertiary">
             No bullet-shaped lines detected.

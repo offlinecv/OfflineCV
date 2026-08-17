@@ -125,6 +125,9 @@ describe("EducationSection date-row symmetry (issue 376)", () => {
         onEducationFieldChange: () => {},
         addedEducation: [],
         originalCount: 1,
+        // Identity: nothing is deleted in this harness, so a render position IS
+        // its parsed index (#856).
+        parsedIndices: [0],
         onAddEntry: () => {},
         onRemoveEntry: () => {},
         onEntryField: () => {},

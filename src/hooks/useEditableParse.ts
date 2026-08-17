@@ -252,6 +252,16 @@ export interface EditSnapshot {
   /** Optional: drafts persisted before #427 carry link edits on
    *  `contactOverrides.{...}_url` instead — `migrateBlankDraft` upconverts. */
   profileOverrides?: ProfileOverride[];
+  /**
+   * {@link parsedEntryKey} tombstones for PARSED entries the user deleted
+   * (#856). An array, not a `Set` — a `Set` isn't JSON-safe.
+   *
+   * Optional: drafts persisted before #856 carry no such key, and `replay`
+   * defaults it to `[]`. Only PARSED keys ever land here; deleting a user-ADDED
+   * entry splices it out of `addedEntries` instead, so the two are never both
+   * describing the same entry.
+   */
+  removedEntries?: string[];
 }
 
 // ── Added entries + bullets ─────────────────────────────────────────────────
@@ -371,6 +381,44 @@ const ADDED_ENTRY_ID_PREFIX = "added:";
 /** The stable bullet key for a PARSED entry at `index` within `section`. */
 export function parsedEntryKey(section: AddableSection, index: number): string {
   return `${section}:${index}`;
+}
+
+/**
+ * The PARSED indices a section still renders, in display order (#856).
+ *
+ * `applyOverrides` FILTERS tombstoned entries out of the parsed arrays, so a
+ * rendered position stops being its parsed index the moment an earlier entry is
+ * deleted — while every per-entry channel stays keyed by the PARSED index:
+ * `experienceOverrides` / `educationOverrides` / `achievementOverrides`,
+ * `descriptionOverrides`, an entry's `addedBullets` bucket, and
+ * {@link EditableParse.removedEntries} itself. Feeding a render position into
+ * any of those after a deletion rebinds a surviving entry's edits to its
+ * neighbour's — the exact failure the tombstone design prevents one level down,
+ * arriving instead through the UI. Every caller resolves through here.
+ *
+ * `renderedCount` is how many PARSED entries the section is currently rendering
+ * (the section array's length minus its user-added entries), which the callers
+ * already compute to split added entries back out.
+ *
+ * Enumerating `[0, ∞)` and taking the first `renderedCount` survivors is what
+ * makes this exact rather than arithmetic. A tombstone can name an index the
+ * parse no longer has — a replayed draft, the same staleness
+ * `applyEducationFieldOverrides`' own `if (!edu) continue` absorbs — and such a
+ * key removes nothing, so subtracting the SET's size would over-shift every
+ * surviving entry. Taking survivors instead is unaffected by it: the first
+ * `renderedCount` members of `[0, ∞) \ removedEntries` are exactly the indices
+ * that survived, because every stale key sits above them.
+ */
+export function survivingParsedIndices(
+  section: AddableSection,
+  removedEntries: ReadonlySet<string>,
+  renderedCount: number,
+): number[] {
+  const out: number[] = [];
+  for (let i = 0; out.length < renderedCount; i++) {
+    if (!removedEntries.has(parsedEntryKey(section, i))) out.push(i);
+  }
+  return out;
 }
 
 /**
@@ -570,6 +618,12 @@ export interface EditableParse {
    *  removals, #211) — folded by applyOverrides to drop the line from the graded
    *  pool, rawText, and the role description. */
   removedBullets: ReadonlySet<string>;
+  /** {@link parsedEntryKey} tombstones for PARSED entries the user deleted
+   *  (#856). Folded LAST by applyOverrides, so the index-keyed override maps
+   *  above resolve against the un-renumbered arrays. Consumers that render a
+   *  section must map render position → parsed index through
+   *  {@link survivingParsedIndices}. */
+  removedEntries: ReadonlySet<string>;
   /**
    * Drop one bullet.
    *
@@ -613,8 +667,24 @@ export interface EditableParse {
   addedEntries: AddedEntry[];
   /** Append a new (empty-header) entry to a section. Returns its stable id. */
   addEntry: (section: AddableSection) => string;
-  /** Remove a previously-added entry by id (also drops its added bullets). */
-  removeEntry: (id: string) => void;
+  /**
+   * Remove one entry, PARSED or user-ADDED (#856), by its entry key — an added
+   * entry's `id`, or a parsed entry's {@link parsedEntryKey}. Also drops that
+   * entry's `addedBullets` bucket, which both kinds own under the same key.
+   *
+   * The two kinds are recorded differently because they exist differently. An
+   * added entry is a row in `addedEntries` and is simply spliced out. A parsed
+   * entry is a row in the parse itself, which the override maps address BY
+   * INDEX — so it is TOMBSTONED in {@link removedEntries} and filtered out at
+   * the end of `applyOverrides`, leaving every index-keyed edit above resolving
+   * against the array it was captured on. Idempotent either way.
+   *
+   * It does NOT drop the entry's bullets: a `•` line the entry does not itself
+   * own is not findable from the entry's fields, so the caller pairs this with
+   * `removeBullet` per rendered row — see `removeEntryWithBullets`, the one
+   * definition of the whole gesture.
+   */
+  removeEntry: (key: string) => void;
   /** Drop every EMPTY user-added entry in a section — one the user opened with
    *  "+ Add …" and left with no populated field and no bullets (#379). Called
    *  when focus leaves the section, so a blank ghost entry never persists in the
@@ -849,6 +919,13 @@ export function useEditableParse(): EditableParse {
   const [descriptionOverrides, setDescriptionOverrides] =
     useState<DescriptionOverrides>({});
   const [removedBullets, setRemovedBullets] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  // Tombstones for deleted PARSED entries (#856) — the entry-level analogue of
+  // `removedBullets`. No mirror ref beside it, unlike that one: `removeEntry`
+  // reports nothing back to its caller, so nothing here has to read the
+  // committed set synchronously.
+  const [removedEntries, setRemovedEntries] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   const [educationOverrides, setEducationOverrides] = useState<
@@ -1347,12 +1424,29 @@ export function useEditableParse(): EditableParse {
   }, []);
 
   const removeEntry = useCallback(
-    (id: string) => {
-      setAddedEntries((prev) => prev.filter((e) => e.id !== id));
+    (key: string) => {
+      if (isAddedEntryKey(key)) {
+        setAddedEntries((prev) => prev.filter((e) => e.id !== key));
+      } else {
+        // A PARSED entry is tombstoned, never spliced (#856) — see
+        // `applyRemovedEntries` for why renumbering the parsed arrays here would
+        // rebind every later entry's index-keyed edits.
+        setRemovedEntries((prev) => {
+          if (prev.has(key)) return prev;
+          const next = new Set(prev);
+          next.add(key);
+          return next;
+        });
+      }
+      // Both kinds own an `addedBullets` bucket under this same key, and it is
+      // folded in DOWNSTREAM of the tombstone filter (`applyAddedEntriesAndBullets`
+      // runs first, appending its lines to the graded pool). Dropping the bucket
+      // is therefore not cleanup — it is the only thing that stops a deleted
+      // entry's user-added bullets from going on grading the résumé.
       const prev = addedBulletsRef.current;
-      if (!(id in prev)) return;
+      if (!(key in prev)) return;
       const next = { ...prev };
-      delete next[id];
+      delete next[key];
       writeAddedBullets(next);
     },
     [writeAddedBullets],
@@ -1570,6 +1664,7 @@ export function useEditableParse(): EditableParse {
     setBulletOverrides({});
     setDescriptionOverrides({});
     setRemovedBullets(new Set());
+    setRemovedEntries(new Set());
     setEducationOverrides({});
     setAchievementOverrides({});
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
@@ -1598,6 +1693,7 @@ export function useEditableParse(): EditableParse {
       addedEntries,
       addedBullets,
       profileOverrides,
+      removedEntries: [...removedEntries],
     }),
     [
       contactOverrides,
@@ -1612,6 +1708,7 @@ export function useEditableParse(): EditableParse {
       addedEntries,
       addedBullets,
       profileOverrides,
+      removedEntries,
     ],
   );
 
@@ -1729,6 +1826,19 @@ export function useEditableParse(): EditableParse {
         bullets.forEach((text) => addBullet(mappedKey, text));
       }
 
+      // Deleted PARSED entries (#856). `?? []` because a draft or saved résumé
+      // written before this field existed carries no such key — the same
+      // back-compat default `descriptionOverrides` takes above.
+      //
+      // AFTER the two added-* loops on purpose: `removeEntry` also drops the
+      // entry's `addedBullets` bucket, so replaying it last means a snapshot
+      // that somehow carries both a tombstone and that entry's bucket resolves
+      // to the same state a live delete produces, rather than to a bucket the
+      // restore just re-created. (A live session cannot write that pair — the
+      // delete empties the bucket — so this is about a hand-edited or migrated
+      // snapshot, not about ordinary use.)
+      (snap.removedEntries ?? []).forEach((key) => removeEntry(key));
+
       // Contact-link overrides (#427): corrections (carrying a legacyKey) replay
       // through `setLegacyLink`; extras replay through `addProfile`. Fresh ids
       // are minted on replay — the old per-session ids are never reused.
@@ -1752,6 +1862,7 @@ export function useEditableParse(): EditableParse {
       addEntry,
       setEntryField,
       addBullet,
+      removeEntry,
       setLegacyLink,
       addProfile,
     ],
@@ -1762,6 +1873,7 @@ export function useEditableParse(): EditableParse {
     if (Object.keys(bulletOverrides).length > 0) return true;
     if (Object.keys(descriptionOverrides).length > 0) return true;
     if (removedBullets.size > 0) return true;
+    if (removedEntries.size > 0) return true;
     if (!isEmptySkillsOverride(skillsOverride)) return true;
     // Present-vs-absent, not truthy: `""` is an authoritative clear of the
     // summary and is very much an edit.
@@ -1790,6 +1902,7 @@ export function useEditableParse(): EditableParse {
     bulletOverrides,
     descriptionOverrides,
     removedBullets,
+    removedEntries,
     educationOverrides,
     achievementOverrides,
     skillsOverride,
@@ -1810,6 +1923,7 @@ export function useEditableParse(): EditableParse {
     setDescriptionField,
     removedBullets,
     removeBullet,
+    removedEntries,
     educationOverrides,
     setEducationField,
     achievementOverrides,

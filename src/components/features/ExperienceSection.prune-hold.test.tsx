@@ -166,6 +166,9 @@ function Harness() {
     addedExperience: edit.addedEntries.filter((e) => e.section === "experience"),
     // Index 0 is the parsed role; indices 1+ are the user-added ones.
     originalCount: 1,
+    // Identity: no parsed entry is deleted here, so a render position IS its
+    // parsed index (#856).
+    parsedIndices: [0],
     onAddEntry: () => edit.addEntry("experience"),
     onRemoveEntry: edit.removeEntry,
     onEntryField: edit.setEntryField,

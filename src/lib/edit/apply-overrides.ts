@@ -38,7 +38,10 @@ import type { BulletObservation } from "../score/score.ts";
 import type { HeuristicAchievement } from "../score/types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import type { SectionName } from "../heuristics/regex.ts";
-import { normalizeBulletText } from "../score/group-bullets.ts";
+import {
+  isTitleOwnedLine,
+  normalizeBulletText,
+} from "../score/group-bullets.ts";
 import {
   applyNormalizedExperienceDates,
   normalizeExperienceDates,
@@ -495,33 +498,49 @@ function applySkillOverrides(
 // over one of them. This collapses what were six near-identical bodies
 // (previously duplicated clone groups flagged by fallow) into three shared
 // traversals.
+//
+// They take the match as a PREDICATE rather than as the original text (#856):
+// removing a deleted entry's own header line walks the same three containers,
+// but identifies its line by title OWNERSHIP (`isTitleOwnedLine`) rather than by
+// bullet-text equality. Keeping one traversal and varying only the predicate is
+// what stops the entry removal growing a fourth near-identical copy of it.
 
-/** Index of the first line whose normalised form equals `target`, or -1. */
+/** Decides whether one line of a container is the line a mutation targets. */
+type LineMatcher = (line: string) => boolean;
+
+/** Match a bullet line: normalised equality with `originalText`. `null` when
+ *  `originalText` normalises to empty, which names no line at all. */
+function bulletLineMatcher(originalText: string): LineMatcher | null {
+  const target = normalizeBulletText(originalText);
+  if (!target) return null;
+  return (line) => normalizeBulletText(line) === target;
+}
+
+/** Index of the first line satisfying `matches`, or -1. */
 function findMatchingLineIndex(
   lines: readonly string[],
-  target: string,
+  matches: LineMatcher,
 ): number {
   for (let i = 0; i < lines.length; i++) {
-    if (normalizeBulletText(lines[i]) === target) return i;
+    if (matches(lines[i])) return i;
   }
   return -1;
 }
 
 /**
- * Split `rawText` into lines, find the first line matching `originalText`,
+ * Split `rawText` into lines, find the first line satisfying `matches`,
  * and let `mutate` rewrite the (mutable) lines array in place at that index
  * (replace the entry, or splice it out). Returns the rejoined text, or the
- * input unchanged when no line matches.
+ * input unchanged when no line matches (or the matcher is `null`).
  */
 function withMatchedRawTextLine(
   rawText: string,
-  originalText: string,
+  matches: LineMatcher | null,
   mutate: (lines: string[], idx: number) => void,
 ): string {
-  const target = normalizeBulletText(originalText);
-  if (!target) return rawText;
+  if (!matches) return rawText;
   const lines = rawText.split(/\r?\n/);
-  const idx = findMatchingLineIndex(lines, target);
+  const idx = findMatchingLineIndex(lines, matches);
   if (idx < 0) return rawText;
   mutate(lines, idx);
   return lines.join("\n");
@@ -529,24 +548,23 @@ function withMatchedRawTextLine(
 
 /**
  * Walk `sections.accomplishmentSections` in policy order, find the first
- * section whose lines contain a line matching `originalText`, and let
+ * section whose lines contain a line satisfying `matches`, and let
  * `mutate` rewrite a CLONED copy of that section's lines in place at the
  * matched index. Returns a NEW {@link SectionedResume} with a cloned
  * `byName` map (only the mutated section's array is cloned), or the input
- * unchanged when no line matches anywhere.
+ * unchanged when no line matches anywhere (or the matcher is `null`).
  */
 function withMatchedSectionLine(
   sections: SectionedResume,
-  originalText: string,
+  matches: LineMatcher | null,
   mutate: (lines: string[], idx: number) => void,
 ): SectionedResume {
-  const target = normalizeBulletText(originalText);
-  if (!target) return sections;
+  if (!matches) return sections;
 
   for (const name of sections.accomplishmentSections) {
     const lines = sections.byName.get(name);
     if (!lines) continue;
-    const idx = findMatchingLineIndex(lines, target);
+    const idx = findMatchingLineIndex(lines, matches);
     if (idx < 0) continue;
     const nextLines = lines.slice();
     mutate(nextLines, idx);
@@ -561,25 +579,24 @@ function withMatchedSectionLine(
 
 /**
  * Walk `experience` in order, find the first role whose (newline-split)
- * `description` contains a line matching `originalText`, and let `mutate`
+ * `description` contains a line satisfying `matches`, and let `mutate`
  * rewrite that role's description lines in place at the matched index —
  * mirroring `groupBulletsByExperience`'s first-match tiebreak so the bullet
  * lands in the same role the UI grouped it under. Mutates the role's
  * `description` directly (the caller already cloned the experience entries);
- * a no-op when no role matches.
+ * a no-op when no role matches (or the matcher is `null`).
  */
 function withMatchedDescriptionLine(
   experience: HeuristicParsedResume["experience"],
-  originalText: string,
+  matches: LineMatcher | null,
   mutate: (lines: string[], idx: number) => void,
 ): void {
-  const target = normalizeBulletText(originalText);
-  if (!target) return;
+  if (!matches) return;
 
   for (const exp of experience) {
     if (!exp.description) continue;
     const descLines = exp.description.split("\n");
-    const idx = findMatchingLineIndex(descLines, target);
+    const idx = findMatchingLineIndex(descLines, matches);
     if (idx < 0) continue;
     mutate(descLines, idx);
     exp.description = descLines.join("\n");
@@ -600,10 +617,14 @@ function replaceBulletInRawText(
   originalText: string,
   editedText: string,
 ): string {
-  return withMatchedRawTextLine(rawText, originalText, (lines, idx) => {
-    const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
-    lines[idx] = marker + editedText;
-  });
+  return withMatchedRawTextLine(
+    rawText,
+    bulletLineMatcher(originalText),
+    (lines, idx) => {
+      const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
+      lines[idx] = marker + editedText;
+    },
+  );
 }
 
 /**
@@ -622,10 +643,14 @@ function replaceBulletInSections(
   originalText: string,
   editedText: string,
 ): SectionedResume {
-  return withMatchedSectionLine(sections, originalText, (lines, idx) => {
-    const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
-    lines[idx] = marker + editedText;
-  });
+  return withMatchedSectionLine(
+    sections,
+    bulletLineMatcher(originalText),
+    (lines, idx) => {
+      const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
+      lines[idx] = marker + editedText;
+    },
+  );
 }
 
 /**
@@ -640,9 +665,13 @@ function replaceBulletInDescriptions(
   originalText: string,
   editedText: string,
 ): void {
-  withMatchedDescriptionLine(experience, originalText, (lines, idx) => {
-    lines[idx] = editedText;
-  });
+  withMatchedDescriptionLine(
+    experience,
+    bulletLineMatcher(originalText),
+    (lines, idx) => {
+      lines[idx] = editedText;
+    },
+  );
 }
 
 /**
@@ -655,9 +684,13 @@ function removeBulletFromRawText(
   rawText: string,
   originalText: string,
 ): string {
-  return withMatchedRawTextLine(rawText, originalText, (lines, idx) => {
-    lines.splice(idx, 1);
-  });
+  return withMatchedRawTextLine(
+    rawText,
+    bulletLineMatcher(originalText),
+    (lines, idx) => {
+      lines.splice(idx, 1);
+    },
+  );
 }
 
 /**
@@ -670,9 +703,13 @@ function removeBulletFromSections(
   sections: SectionedResume,
   originalText: string,
 ): SectionedResume {
-  return withMatchedSectionLine(sections, originalText, (lines, idx) => {
-    lines.splice(idx, 1);
-  });
+  return withMatchedSectionLine(
+    sections,
+    bulletLineMatcher(originalText),
+    (lines, idx) => {
+      lines.splice(idx, 1);
+    },
+  );
 }
 
 /**
@@ -684,9 +721,13 @@ function removeBulletFromDescriptions(
   experience: HeuristicParsedResume["experience"],
   originalText: string,
 ): void {
-  withMatchedDescriptionLine(experience, originalText, (lines, idx) => {
-    lines.splice(idx, 1);
-  });
+  withMatchedDescriptionLine(
+    experience,
+    bulletLineMatcher(originalText),
+    (lines, idx) => {
+      lines.splice(idx, 1);
+    },
+  );
 }
 
 // ── Bullet override application ─────────────────────────────────────────────
@@ -961,6 +1002,175 @@ function applyAddedBulletsToExistingEntries(
   return poolLines;
 }
 
+// ── Removed entries (#856) ───────────────────────────────────────────────────
+
+/**
+ * The sections an entry TOMBSTONE can name — the `<section>` half of a
+ * `parsedEntryKey`. Deliberately the same four `AddableSection` accepts: every
+ * section that can gain a user-added entry can also lose a parsed one.
+ */
+const REMOVABLE_SECTIONS = [
+  "experience",
+  "education",
+  "projects",
+  "achievements",
+] as const;
+
+type RemovableSection = (typeof REMOVABLE_SECTIONS)[number];
+
+/** Split a `"<section>:<index>"` tombstone, or `undefined` when the key names
+ *  no removable parsed entry (an added-entry id, or a malformed key).
+ *
+ *  The index half is matched as DIGITS, not coerced with `Number`: `Number("")`
+ *  is `0` and `Number.isInteger(0)` is true, so a truncated `"projects:"` would
+ *  otherwise silently delete the section's FIRST entry. */
+function parseRemovedEntryKey(
+  key: string,
+): { section: RemovableSection; index: number } | undefined {
+  const colon = key.indexOf(":");
+  if (colon < 0) return undefined;
+  const section = key.slice(0, colon);
+  const digits = key.slice(colon + 1);
+  if (!/^\d+$/.test(digits)) return undefined;
+  const match = REMOVABLE_SECTIONS.find((s) => s === section);
+  if (match === undefined) return undefined;
+  return { section: match, index: Number(digits) };
+}
+
+/**
+ * Drop the tombstoned entries of ONE section out of `nextParsed`, returning the
+ * dropped entries' owned titles so the caller can find their source lines.
+ *
+ * `filter`, not `splice`: every array here is either already a clone (the entry
+ * point clones experience + education) or replaced wholesale by a fresh array,
+ * so the input parse is never mutated — the same purity contract the rest of
+ * this module keeps.
+ */
+function dropRemovedEntries(
+  nextParsed: HeuristicParsedResume,
+  section: RemovableSection,
+  indices: ReadonlySet<number>,
+): string[] {
+  const titles: string[] = [];
+  function keep<T>(
+    list: readonly T[],
+    titleOf: (entry: T) => string | undefined,
+  ): T[] {
+    const out: T[] = [];
+    list.forEach((entry, i) => {
+      if (!indices.has(i)) {
+        out.push(entry);
+        return;
+      }
+      const title = titleOf(entry);
+      if (title) titles.push(title);
+    });
+    return out;
+  }
+
+  if (section === "experience") {
+    nextParsed.experience = keep(nextParsed.experience, (e) => e.title);
+  } else if (section === "education") {
+    nextParsed.education = keep(nextParsed.education, (e) => e.degree);
+  } else if (section === "projects") {
+    // `?` rather than `!`: a tombstone can outlive the array it was keyed
+    // against (a replayed draft whose re-parse produced no projects), exactly as
+    // the index-keyed override maps can — see `resolveParsedDescriptionTarget`.
+    if (nextParsed.projects) {
+      nextParsed.projects = keep(nextParsed.projects, (p) => p.name);
+    }
+  } else if (nextParsed.heuristic_achievements) {
+    nextParsed.heuristic_achievements = keep(
+      nextParsed.heuristic_achievements,
+      (a) => a.title,
+    );
+  }
+  return titles;
+}
+
+/**
+ * Fold `removedEntries` — user deletions of PARSED entries (#856) — into the
+ * parsed arrays and the two line views.
+ *
+ * TOMBSTONE, NOT SPLICE, and this runs LAST for that reason. Every per-entry
+ * override map (`applyExperienceHeaderOverrides`,
+ * `applyEducationFieldOverrides`, `applyAchievementOverrides`,
+ * `applyDescriptionOverrides`) is keyed by PARSED ARRAY INDEX, and so is the
+ * `addedBullets` bucket key of a parsed entry. Filtering an entry out before any
+ * of those have run shifts every later index and silently rebinds each later
+ * entry's edits to the wrong entry. Running after them — and after
+ * `applyAddedEntriesAndBullets`, which only APPENDS, so parsed index `i` is
+ * still at position `i` — leaves every key resolving against the array it was
+ * captured on.
+ *
+ * The entry's BULLETS are not this pass's job. They are dropped through
+ * `removedBullets` by the caller's own delete handler
+ * (`removeEntryWithBullets`), which reuses the tested
+ * `removeBulletFromRawText` / `…Sections` / `…Descriptions` trio rather than
+ * teaching this pass a second kind of text surgery — and that has to happen
+ * there anyway, because a line the entry does not own (an ordinary `•` bullet)
+ * is not findable from the entry's fields at all.
+ *
+ * What IS this pass's job is the one line the entry itself owns. Dropping the
+ * entry takes its `description` (hence the export and the JD-coverage pool) with
+ * it, but `rawText` and `sections` are parallel views the entry never owned, so
+ * its own line survives there. For the shape that matters most — a title-only
+ * achievement/project, parsed out of a single `•`-marked line — that surviving
+ * line is a POOLED BULLET, so leaving it would keep grading Specificity /
+ * Structure for an entry that is no longer on screen. {@link isTitleOwnedLine}
+ * is the scorer's own ownership relation (the one `suppressTitleOwnedBullets`
+ * hides such a line on), so the two cannot drift.
+ *
+ * BEST-EFFORT BY CONSTRUCTION, and safe when it misses: the parsed model keeps
+ * no source-line provenance, so a multi-line header ("Title" over "Company ·
+ * dates") matches nothing and the line simply stays in the raw-text view. That
+ * costs a stale line in a disclosure; it never costs a wrong score, because the
+ * lines this can miss are the UNMARKED ones the bullet pool ignores.
+ *
+ * It can also MIS-HIT, and that is benign for a different reason. The array
+ * filter above is by index, but the line search that follows has only the title,
+ * and {@link withMatchedRawTextLine} takes the FIRST match — so when two parsed
+ * entries collide on {@link isTitleOwnedLine} (the duplicated-role shape #856
+ * exists to fix), deleting the later one removes the earlier one's line. Exact
+ * duplicates are indistinguishable, so the resulting views are identical either
+ * way; near-duplicates that still collide leave a line the SURVIVING entry's
+ * title also owns, which `suppressTitleOwnedBullets` keeps out of the graded
+ * pool regardless. Either way the score is unaffected and the cost is at most one
+ * wrong line in the raw-text disclosure.
+ */
+function applyRemovedEntries(
+  nextParsed: HeuristicParsedResume,
+  views: BulletViews,
+  removedEntries: ReadonlySet<string>,
+): BulletViews {
+  if (removedEntries.size === 0) return views;
+
+  // Group by section first so each array is filtered exactly once — a
+  // per-key filter would renumber the array under the keys still to come.
+  const bySection = new Map<RemovableSection, Set<number>>();
+  for (const key of removedEntries) {
+    const target = parseRemovedEntryKey(key);
+    if (!target) continue;
+    const indices = bySection.get(target.section) ?? new Set<number>();
+    indices.add(target.index);
+    bySection.set(target.section, indices);
+  }
+
+  let { rawText, sections } = views;
+  for (const [section, indices] of bySection) {
+    for (const title of dropRemovedEntries(nextParsed, section, indices)) {
+      const matches: LineMatcher = (line) => isTitleOwnedLine(line, title);
+      rawText = withMatchedRawTextLine(rawText, matches, (lines, idx) => {
+        lines.splice(idx, 1);
+      });
+      sections = withMatchedSectionLine(sections, matches, (lines, idx) => {
+        lines.splice(idx, 1);
+      });
+    }
+  }
+  return { rawText, sections };
+}
+
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 /**
@@ -1023,6 +1233,11 @@ function applyAddedBulletsToExistingEntries(
  *                  drops the heading AND the body from the exported PDF); any
  *                  other value replaces it verbatim. Feeds the Completeness
  *                  ≥20-char threshold, so an edit re-grades. Default `undefined`.
+ * @param removedEntries {@link parsedEntryKey} tombstones for PARSED entries the
+ *                  user deleted (#856) — `"achievements:2"`. Folded LAST, after
+ *                  every index-keyed pass above, so no surviving entry's edits
+ *                  are rebound to its neighbour; see {@link applyRemovedEntries}.
+ *                  Default empty set.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -1042,6 +1257,7 @@ export function applyOverrides(
   achievements: Record<number, AchievementFieldOverrides> = {},
   descriptionOverrides: DescriptionOverrides = {},
   summaryOverride: string | undefined = undefined,
+  removedEntries: ReadonlySet<string> = new Set(),
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -1098,9 +1314,17 @@ export function applyOverrides(
     addedBullets,
   );
 
+  // LAST — after every index-keyed pass above, and after the append that only
+  // ever grows the arrays at the tail. See {@link applyRemovedEntries}.
+  const finalViews = applyRemovedEntries(
+    nextParsed,
+    { rawText: views.rawText, sections: nextSections },
+    removedEntries,
+  );
+
   return {
-    ...toCanonicalResume(nextParsed, nextSections, nextConfidence),
-    rawText: views.rawText,
+    ...toCanonicalResume(nextParsed, finalViews.sections, nextConfidence),
+    rawText: finalViews.rawText,
   };
 }
 
