@@ -559,7 +559,7 @@ function parseDegreeAndField(line: string): {
 function degreeFieldKey(line: string): string | null {
   if (!DEGREE_RE.test(line)) return null;
   const { degree, field } = parseDegreeAndField(line);
-  return `${degree} ${field ?? ""}`.toLowerCase();
+  return `${degree}\u0000${field ?? ""}`.toLowerCase();
 }
 
 /** Peel a trailing "City, ST" (US) or "City, Country" (international) location

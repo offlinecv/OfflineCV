@@ -29,11 +29,12 @@
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "check:fixtures": "node scripts/check-fixture-pii.mjs",
+    "check:nul": "node scripts/check-no-literal-nul.mjs",
     "check:baselines": "node scripts/check-known-failures.mjs",
     "check:core": "node scripts/check-core-package.mjs",
     "test:coverage": "vitest run --coverage",
-    "verify:quick": "tsc -b --noEmit && eslint . && npm run test:changed",
-    "verify": "tsc -b --noEmit && eslint . && npm run check:fixtures && npm run check:baselines && npm run check:core && npm run test:changed && vite build && (fallow audit --base origin/main || echo 'fallow audit exited non-zero (report-only, ignored)')"
+    "verify:quick": "tsc -b --noEmit && eslint . && npm run check:nul && npm run test:changed",
+    "verify": "tsc -b --noEmit && eslint . && npm run check:nul && npm run check:fixtures && npm run check:baselines && npm run check:core && npm run test:changed && vite build && (fallow audit --base origin/main || echo 'fallow audit exited non-zero (report-only, ignored)')"
   },
   "dependencies": {
     "@fontsource/poppins": "^5.2.7",
