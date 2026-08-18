@@ -195,12 +195,12 @@ export function useJobSearch(
   // joined key list rather than the array (a new array identity every render).
   // Additions are NOT handled here on purpose — they need a fetch, which is
   // `searchPendingCompanies`'s job.
-  const selectedKeyList = selectedCompanies.map(companyKey).join(" ");
+  const selectedKeyList = selectedCompanies.map(companyKey).join("\u0000");
   useEffect(() => {
     const snapshot = rawFetchRef.current;
     if (!snapshot) return;
     const selected = new Set(
-      selectedKeyList === "" ? [] : selectedKeyList.split(" "),
+      selectedKeyList === "" ? [] : selectedKeyList.split("\u0000"),
     );
     const removed = fetchedCompanyKeys.filter((key) => !selected.has(key));
     if (removed.length === 0) return;

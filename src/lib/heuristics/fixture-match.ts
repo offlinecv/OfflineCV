@@ -318,7 +318,7 @@ function axisKey(path: AxisPath, a: ReproArtifact, d: DerivedSignals): string {
       return canonicalList([...a.triggers]);
     case "disagreements":
       return canonicalList(
-        a.disagreements.map((x) => `${x.kind} ${x.field} ${x.likelyCause ?? ""}`),
+        a.disagreements.map((x) => `${x.kind}\u0000${x.field}\u0000${x.likelyCause ?? ""}`),
       );
     case "sectionSource":
       return a.sectionSource;
