@@ -17,6 +17,24 @@ function term(
   return { id, display, source, snippet: `…snippet for ${display}…` };
 }
 
+/** A single covered skill term, shared by the two tests that only need "one
+ *  term, fully covered" — kept as one fixture so the identical eleven-line
+ *  setup isn't written twice. */
+const ONE_TERM = term("react", "react", "skill");
+
+/** That term as a fully-covered keyword result. */
+function fullyCovered(): JdMatchResult {
+  return kw(
+    {
+      covered: [ONE_TERM],
+      missing: [],
+      score: 100,
+      weights: { skill: 1, noun: 0.5 },
+    },
+    [ONE_TERM],
+  );
+}
+
 /** Wrap a keyword-path coverage result in the path-agnostic union (#199). */
 function kw(
   coverage: CoverageResult,
@@ -110,26 +128,42 @@ describe("JdMatch", () => {
   });
 
   it("emits the snippet on the term row as a hover tooltip (title attribute)", () => {
-    const t = term("react", "react", "skill");
-    const coverage: CoverageResult = {
-      covered: [t],
-      missing: [],
-      score: 100,
-      weights: { skill: 1, noun: 0.5 },
-    };
     const html = renderToStaticMarkup(
-      createElement(JdMatch, { result: kw(coverage, [t]) }),
+      createElement(JdMatch, { result: fullyCovered() }),
     );
-    expect(html).toContain(`title="${t.snippet}"`);
+    expect(html).toContain(`title="${ONE_TERM.snippet}"`);
   });
 
-  it("renders nothing for a non-keyword (semantic) path until M6 builds its UI", () => {
+  it("routes the semantic path to the verdict view instead of rendering null", () => {
+    // The pre-#204 behaviour was `return null` for anything not `keyword`, so
+    // a finished on-device match rendered a blank panel. This is the assertion
+    // that would fail if the router regressed to that.
     const result: JdMatchResult = {
       path: "semantic",
-      verdicts: [],
-      summary: { met: 0, partial: 0, missing: 0, total: 0 },
+      verdicts: [
+        {
+          requirement: { id: "req-1", kind: "skill", text: "Ship Kubernetes" },
+          status: "met",
+          reason: "Ran production clusters at Acme.",
+        },
+      ],
+      summary: { met: 1, partial: 0, missing: 0, total: 1 },
     };
     const html = renderToStaticMarkup(createElement(JdMatch, { result }));
-    expect(html).toBe("");
+    expect(html).not.toBe("");
+    expect(html).toContain("Ship Kubernetes");
+    expect(html).toContain("1 met · 0 partial · 0 missing");
+    // …and it is the SEMANTIC view, not the keyword one dressed up: the
+    // keyword-only headline and its matcher disclaimer must be absent.
+    expect(html).not.toContain("terms from this JD");
+    expect(html).not.toContain("we don&#x27;t read context");
+  });
+
+  it("routes the keyword path away from the semantic view", () => {
+    const html = renderToStaticMarkup(
+      createElement(JdMatch, { result: fullyCovered() }),
+    );
+    expect(html).toContain("Your resume mentions 1 of 1 terms from this JD.");
+    expect(html).not.toContain("met ·");
   });
 });

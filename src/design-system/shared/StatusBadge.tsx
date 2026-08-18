@@ -12,13 +12,22 @@
  *   limited — amber / warning feedback tokens (e.g. "Limited parsing")
  *   warning — alias for limited; kept for callsite clarity
  *   info    — blue / informational feedback tokens (e.g. "Recovered with on-device AI")
+ *   neutral — subdued surface + muted content tokens, for a status that is
+ *             ordinary rather than a problem (e.g. a JD requirement the résumé
+ *             simply doesn't evidence). Added for #204's semantic verdict rows,
+ *             where the three statuses must read as ONE badge family: "met" and
+ *             "partial" already had tones, and giving "missing" a `warning`
+ *             pill would frame every unmet requirement as a fault. The
+ *             alternative — a bespoke pill at that one callsite — is the
+ *             parallel copy the CLAUDE.md Golden Rule forbids, so the variant
+ *             is added to the shared piece instead.
  *
  * Design rules (CLAUDE.md): semantic tokens only.
  */
 
 import type { ReactNode } from "react";
 
-export type StatusBadgeTone = "ok" | "limited" | "warning" | "info";
+export type StatusBadgeTone = "ok" | "limited" | "warning" | "info" | "neutral";
 
 interface StatusBadgeProps {
   tone: StatusBadgeTone;
@@ -35,6 +44,7 @@ const TONE_CLS: Record<StatusBadgeTone, string> = {
   limited: "bg-feedback-warning-bg text-feedback-warning-text",
   warning: "bg-feedback-warning-bg text-feedback-warning-text",
   info: "bg-feedback-info-bg text-feedback-info-text",
+  neutral: "bg-surface-subtle text-content-muted",
 };
 
 export function StatusBadge({

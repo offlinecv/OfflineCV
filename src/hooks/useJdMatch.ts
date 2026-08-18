@@ -133,11 +133,12 @@
  * supplies the persisted model id, so the picker on the WebLLM surfaces
  * drives which model this hook loads.
  *
- * Not a live wiring today: `PasteJdPanel` calls this with `semanticOptIn`
- * defaulting to `false`, so behavior is byte-identical to pre-#203. A future
- * issue (#204) that ships a user-visible opt-in (checkbox, consent dialog,
- * progress copy, semantic verdict UI) can flip the input without changing
- * this hook.
+ * Live since #204: `PasteJdPanel` owns an "Analyze with on-device AI" checkbox
+ * (default OFF) and passes it as `semanticOptIn`. With the box unticked every
+ * gate above still holds — no probe, no engine, no WebLLM event — so an
+ * untouched panel is byte-identical to pre-#203. #204 added one thing to this
+ * hook's surface: `capability` on the return, because the UI cannot otherwise
+ * tell "WebGPU is unavailable" from "the semantic run degraded".
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -207,6 +208,20 @@ export interface JdMatchController {
    * empty/degenerate — exactly when `status` is `idle`.
    */
   keyword: JdMatchResult | null;
+  /**
+   * The detected WebGPU capability, or `null` while detection has not run or
+   * has not resolved. Read-only view of the hook's own probe — the consumer
+   * must NOT call `detectWebGpu` itself (that would fire the WebLLM funnel's
+   * top analytics event outside this hook's opt-in gate).
+   *
+   * Exposed for #204: with `semanticOptIn` on and WebGPU unavailable, `status`
+   * settles on `ready` with the KEYWORD result — indistinguishable from
+   * opt-in-off, and from a semantic run that degraded. The UI needs the
+   * difference to explain, in one muted line, why ticking the box changed
+   * nothing. Stays `null` for a keyword-only consumer, since the probe is
+   * gated on the opt-in.
+   */
+  capability: WebGpuCapability | null;
 }
 
 /** Module-level constants so a keyword-path render's `status` doesn't produce
@@ -578,5 +593,5 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     setSlotIfCurrent,
   ]);
 
-  return { status, keyword: keywordResult };
+  return { status, keyword: keywordResult, capability };
 }
