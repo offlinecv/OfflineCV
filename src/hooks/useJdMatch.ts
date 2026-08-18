@@ -145,7 +145,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { detectWebGpu } from "../lib/webllm/capability.ts";
 import { computeCoverage } from "../lib/jd-match/coverage.ts";
 import { extractJdTerms } from "../lib/jd-match/extract-jd-terms.ts";
-import type { JdMatchResult } from "../lib/jd-match";
+import type {
+  JdMatchResult,
+  KeywordJdMatchResult,
+} from "../lib/jd-match";
 import type { HeuristicParsedResume } from "../lib/heuristics/types.ts";
 import type {
   ProgressUpdate,
@@ -206,8 +209,15 @@ export interface JdMatchController {
    * CONTROLLER, not of `status`: render `keyword` as the floor and let
    * `status` layer the semantic refinement on top. `null` only when the JD is
    * empty/degenerate — exactly when `status` is `idle`.
+   *
+   * Typed as the KEYWORD ARM, not the whole union (#866 review). `keywordResult`
+   * below can only ever build `{ path: "keyword", … }` or `null`, so declaring
+   * the union let the compiler forget an invariant the code guarantees — and
+   * `PasteJdPanel` paid for it with a `keyword?.path === "keyword" ? … : null`
+   * re-narrowing that could never take its false branch. Naming the arm moves
+   * that from a runtime check to a compile-time fact.
    */
-  keyword: JdMatchResult | null;
+  keyword: KeywordJdMatchResult | null;
   /**
    * The detected WebGPU capability, or `null` while detection has not run or
    * has not resolved. Read-only view of the hook's own probe — the consumer
@@ -304,8 +314,34 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
   // `navigator.gpu.requestAdapter()` runs on the `/jobs/` page. `detectWebGpu`
   // caches its result per page, so an opted-in flip re-uses a cached probe
   // if one exists. `cancelled` guards against a write after unmount.
+  //
+  // Opting out CLEARS the value rather than merely stopping (#866 review).
+  // Leaving it set made `capability`'s own docblock false the moment a user
+  // toggled off — it claims the field stays `null` for a keyword-only
+  // consumer, and every consumer that doesn't replicate `SemanticAnalysisOptIn`'s
+  // "check `checked` before reading `capability`" gate would have shown a
+  // stale probe result to an opted-out user. Now the field means what it says
+  // on its own, without a companion flag.
+  //
+  // Three things this deliberately does NOT do:
+  //   - It does not probe. `setCapability(null)` is a state write; the
+  //     `detectWebGpu()` call is on the other side of the early return, so
+  //     opting out still touches no WebGPU and fires no analytics.
+  //   - It does not re-render on mount. React bails out of a `setState` that
+  //     is `Object.is`-equal to the current value, and the initial value is
+  //     already `null`, so the keyword-only path costs one bail-out and no
+  //     commit.
+  //   - It does not race the in-flight probe. Cleanup sets `cancelled` before
+  //     the next effect run's write, so an opt-out mid-probe cancels the
+  //     pending `.then` first and clears second — a late resolve cannot
+  //     restore a value after opt-out. Re-opting in calls `detectWebGpu()`
+  //     again, which returns its cached promise: no second `requestAdapter()`
+  //     and no duplicate funnel event.
   useEffect(() => {
-    if (!semanticOptIn) return;
+    if (!semanticOptIn) {
+      setCapability(null);
+      return;
+    }
     let cancelled = false;
     void detectWebGpu().then((c) => {
       if (!cancelled) setCapability(c);
@@ -327,7 +363,7 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
   // trimming rules to the pre-#203 `PasteJdPanel` inline `useMemo`, so a
   // keyword-only consumer's status becomes `ready` on the SAME commit as
   // `debouncedJdText` changes.
-  const keywordResult = useMemo<JdMatchResult | null>(() => {
+  const keywordResult = useMemo<KeywordJdMatchResult | null>(() => {
     if (trimmedJdText.length === 0) return null;
     const extracted = extractJdTerms(trimmedJdText);
     if (extracted.all.length === 0) return null;

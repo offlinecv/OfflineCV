@@ -47,3 +47,17 @@ export type JdMatchResult =
       verdicts: readonly RequirementVerdict[];
       summary: SemanticMatchSummary;
     };
+
+/**
+ * The two arms, named once (#866 review).
+ *
+ * `Extract<JdMatchResult, { path: … }>` was being written out at each site that
+ * needed one arm — `KeywordMatch`, `SemanticMatch`, and `job-search/rank.ts`'s
+ * own `KeywordJdMatch` — so the idiom was duplicated rather than shared, and a
+ * producer whose type is narrower than its declaration (`useJdMatch`'s
+ * `keyword`, which by construction only ever builds the keyword arm) had no
+ * name to say so with. Declared HERE, beside the union, so a consumer never has
+ * to reach into another lane for the type of a value this module produced.
+ */
+export type KeywordJdMatchResult = Extract<JdMatchResult, { path: "keyword" }>;
+export type SemanticJdMatchResult = Extract<JdMatchResult, { path: "semantic" }>;

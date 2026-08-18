@@ -17,13 +17,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import { SemanticMatch } from "./SemanticMatch.tsx";
-import type { JdMatchResult } from "../../lib/jd-match";
+import type { SemanticJdMatchResult } from "../../lib/jd-match";
 import type { RequirementVerdict } from "../../lib/jd-match/llm/judge-evidence.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
-
-type SemanticResult = Extract<JdMatchResult, { path: "semantic" }>;
 
 function verdict(
   id: string,
@@ -42,7 +40,7 @@ function verdict(
 
 /** Wrap verdicts in the semantic arm, tallying the summary the way
  *  `runLlmMatch` does so the header's numbers are the real ones. */
-function semantic(verdicts: readonly RequirementVerdict[]): SemanticResult {
+function semantic(verdicts: readonly RequirementVerdict[]): SemanticJdMatchResult {
   let met = 0;
   let partial = 0;
   let missing = 0;
@@ -61,7 +59,7 @@ function semantic(verdicts: readonly RequirementVerdict[]): SemanticResult {
 let container: HTMLDivElement | undefined;
 let root: Root | undefined;
 
-function render(result: SemanticResult): HTMLDivElement {
+function render(result: SemanticJdMatchResult): HTMLDivElement {
   const el = document.createElement("div");
   document.body.appendChild(el);
   container = el;
@@ -179,6 +177,54 @@ describe("SemanticMatch row content", () => {
     expect(rowTexts[0].startsWith("Met")).toBe(true);
     expect(rowTexts[2].startsWith("Partial")).toBe(true);
     expect(rowTexts[3].startsWith("Missing")).toBe(true);
+  });
+
+  it("keeps every status badge visible against its own row (#866 review)", () => {
+    // The defect this pins: `neutral` filled with `bg-surface-subtle`, which is
+    // ALSO the `<li>`'s fill, so the "Missing" pill had no boundary and
+    // rendered as bare text while "Met"/"Partial" rendered as pills. That
+    // silently dropped the shape channel for the one status most worth
+    // flagging, contradicting the component's "never by colour alone" claim.
+    //
+    // Asserted as the INVARIANT rather than as a literal class string: a badge
+    // whose fill matches its row's fill must carry a border, whichever tone it
+    // is and whatever the tokens are renamed to later.
+    const el = render(MIXED);
+    const rows = [...el.querySelectorAll("li")];
+    expect(rows.length).toBeGreaterThan(0);
+
+    const fill = (cls: string): string | undefined =>
+      cls.split(/\s+/).find((c) => c.startsWith("bg-"));
+    const hasBorder = (cls: string): boolean =>
+      cls.split(/\s+/).some((c) => c === "border" || c.startsWith("border-"));
+
+    for (const row of rows) {
+      const badge = row.querySelector("span[class*='rounded-full']");
+      expect(badge).toBeTruthy();
+      const badgeCls = badge?.className ?? "";
+      if (fill(badgeCls) === fill(row.className)) {
+        expect(
+          hasBorder(badgeCls),
+          `badge "${badge?.textContent}" shares its row's ${fill(row.className)} fill, so it needs a border to stay visible`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("gives the Missing badge a boundary that does not read as a warning", () => {
+    const el = render(MIXED);
+    const missingRow = [...el.querySelectorAll("li")].find((li) =>
+      li.textContent?.startsWith("Missing"),
+    );
+    const badge = missingRow?.querySelector("span[class*='rounded-full']");
+    const cls = badge?.className ?? "";
+    // Visible: it carries a border.
+    expect(cls).toMatch(/\bborder\b/);
+    // …and still neutral — no feedback/warning/error colouring, so an unmet
+    // requirement is not framed as a fault.
+    expect(cls).not.toMatch(/feedback-(warning|error)/);
+    // The word survives regardless of any of the above.
+    expect(badge?.textContent).toBe("Missing");
   });
 
   it("shows the headline tally from the pre-computed summary", () => {

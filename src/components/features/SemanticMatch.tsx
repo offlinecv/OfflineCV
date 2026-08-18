@@ -47,12 +47,9 @@
  */
 
 import { Card, StatusBadge, type StatusBadgeTone } from "@design-system";
-import type { JdMatchResult } from "../../lib/jd-match";
+import type { SemanticJdMatchResult } from "../../lib/jd-match";
+import { JdMatchHeader } from "./JdMatchHeader.tsx";
 import type { RequirementVerdict } from "../../lib/jd-match/llm/judge-evidence.ts";
-
-/** The semantic arm of the union — same `Extract<…>` idiom `rank.ts` uses for
- *  `KeywordJdMatch`, so the two narrowings cannot drift. */
-type SemanticResult = Extract<JdMatchResult, { path: "semantic" }>;
 
 type VerdictStatus = RequirementVerdict["status"];
 
@@ -83,20 +80,12 @@ const GROUP_BADGE_TONE: Record<VerdictStatus, StatusBadgeTone> = {
   missing: "neutral",
 };
 
-export function SemanticMatch({ result }: { result: SemanticResult }) {
+export function SemanticMatch({ result }: { result: SemanticJdMatchResult }) {
   const { verdicts, summary } = result;
 
   return (
     <Card className="flex flex-col gap-4 shadow-xs">
-      <header className="flex flex-col gap-1">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-            JD match
-          </h2>
-          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-4xs font-semibold uppercase tracking-wider text-content-secondary">
-            alpha
-          </span>
-        </div>
+      <JdMatchHeader>
         {/* This is the headline `SemanticMatchSummary` was added for — its
             docblock in `jd-match/types.ts` spells the shape out. Tallied by
             `runLlmMatch`, so the view never re-counts the verdict list. */}
@@ -113,7 +102,7 @@ export function SemanticMatch({ result }: { result: SemanticResult }) {
           against your résumé and can get it wrong — check the evidence. Your
           JD text stays in this browser tab.
         </p>
-      </header>
+      </JdMatchHeader>
 
       {GROUP_ORDER.map((status) => {
         const group = verdicts.filter((verdict) => verdict.status === status);

@@ -25,4 +25,8 @@ export type { AtsPlatform } from "./fetch-jd.ts";
 
 export { htmlToPlaintext } from "./html-to-plaintext.ts";
 
-export type { JdMatchResult } from "./types.ts";
+export type {
+  JdMatchResult,
+  KeywordJdMatchResult,
+  SemanticJdMatchResult,
+} from "./types.ts";
