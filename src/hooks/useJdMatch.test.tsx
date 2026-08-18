@@ -53,7 +53,7 @@ import { extractJdTerms } from "../lib/jd-match/extract-jd-terms.ts";
 import { computeCoverage } from "../lib/jd-match/coverage.ts";
 import type { JdMatchResult } from "../lib/jd-match";
 import type { HeuristicParsedResume } from "../lib/heuristics/types.ts";
-import type { ProgressUpdate } from "../lib/webllm/types.ts";
+import type { ProgressUpdate, WebGpuCapability } from "../lib/webllm/types.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -85,10 +85,18 @@ let latestKeyword: JdMatchResult | null = null;
  *  the RENDER-TIME status — the invariant #203 protects for the keyword arm. */
 const renderStatuses: JdMatchStatus[] = [];
 
+/** The controller's WebGPU probe result as of the last render (#204). */
+let latestCapability: WebGpuCapability | null = null;
+
 function Probe({ parsed, jdText, semanticOptIn }: ProbeProps) {
-  const { status, keyword } = useJdMatch({ parsed, jdText, semanticOptIn });
+  const { status, keyword, capability } = useJdMatch({
+    parsed,
+    jdText,
+    semanticOptIn,
+  });
   latestStatus = status;
   latestKeyword = keyword;
+  latestCapability = capability;
   renderStatuses.push(status);
   return null;
 }
@@ -155,6 +163,7 @@ beforeEach(() => {
   detectWebGpuMock.mockClear();
   latestStatus = { kind: "idle" };
   latestKeyword = null;
+  latestCapability = null;
   renderStatuses.length = 0;
 });
 
@@ -196,6 +205,35 @@ describe("useJdMatch — keyword-only path touches NO WebLLM machinery (#203)", 
     update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
     await flushMicrotasks();
     expect(detectWebGpuMock).toHaveBeenCalled();
+  });
+
+  it("leaves `capability` null for a keyword-only consumer (#204)", async () => {
+    // The controller exposes the probe result so #204's UI can tell "no
+    // WebGPU" from "the semantic run degraded" — see the field's docblock.
+    // Null while opted out is the half that proves it is not a second,
+    // ungated probe: the value can only become non-null via the gated effect.
+    webgpu = "available";
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT });
+    flushDebounce();
+    await flushMicrotasks();
+    expect(latestCapability).toBeNull();
+    expect(detectWebGpuMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces the probe result on `capability` once opted in (#204)", async () => {
+    for (const detected of ["available", "no-webgpu", "unsupported-os"] as const) {
+      webgpu = detected;
+      await mount({
+        parsed: SPARSE_RESUME,
+        jdText: JD_TEXT,
+        semanticOptIn: true,
+      });
+      flushDebounce();
+      await flushMicrotasks();
+      expect(latestCapability).toBe(detected);
+      act(() => root.unmount());
+      container.remove();
+    }
   });
 });
 
