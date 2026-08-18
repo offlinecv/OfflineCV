@@ -28,29 +28,18 @@
  */
 
 import type { ExtractedTerm } from "../../lib/jd-match/extract-jd-terms.ts";
-import type { JdMatchResult } from "../../lib/jd-match";
+import type { KeywordJdMatchResult } from "../../lib/jd-match";
+import { JdMatchHeader } from "./JdMatchHeader.tsx";
 import { Card } from "@design-system";
 
-/** The keyword arm of the union — same `Extract<…>` idiom `rank.ts` uses for
- *  `KeywordJdMatch`, so the two narrowings cannot drift. */
-type KeywordResult = Extract<JdMatchResult, { path: "keyword" }>;
-
-export function KeywordMatch({ result }: { result: KeywordResult }) {
+export function KeywordMatch({ result }: { result: KeywordJdMatchResult }) {
   const { coverage, terms, nounsDropped } = result;
   const total = terms.length;
   const covered = coverage.covered.length;
 
   return (
     <Card className="flex flex-col gap-4 shadow-xs">
-      <header className="flex flex-col gap-1">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-            JD match
-          </h2>
-          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-4xs font-semibold uppercase tracking-wider text-content-secondary">
-            alpha
-          </span>
-        </div>
+      <JdMatchHeader>
         <p className="text-base font-semibold text-content-primary">
           Your resume mentions {covered} of {total} terms from this JD.
         </p>
@@ -66,7 +55,7 @@ export function KeywordMatch({ result }: { result: KeywordResult }) {
           Diagnostic, not a verdict. We look for skills and phrases by name —
           we don't read context. Your JD text stays in this browser tab.
         </p>
-      </header>
+      </JdMatchHeader>
 
       <div className="grid gap-4 md:grid-cols-2">
         <TermColumn

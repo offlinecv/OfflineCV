@@ -220,6 +220,79 @@ describe("useJdMatch — keyword-only path touches NO WebLLM machinery (#203)", 
     expect(detectWebGpuMock).not.toHaveBeenCalled();
   });
 
+  it("clears `capability` back to null on opt-out, with no new probe (#866 review)", async () => {
+    // The defect: the gating effect's cleanup only set a local `cancelled`
+    // flag, so `capability` kept the last probe result forever once a user had
+    // opted in even once — making the field's own docblock ("stays `null` for a
+    // keyword-only consumer") false, and handing any future consumer that
+    // doesn't replicate `SemanticAnalysisOptIn`'s `checked` gate a stale value.
+    webgpu = "available";
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    flushDebounce();
+    await flushMicrotasks();
+    expect(latestCapability).toBe("available");
+    const probesAfterOptIn = detectWebGpuMock.mock.calls.length;
+
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: false });
+    await flushMicrotasks();
+
+    expect(latestCapability).toBeNull();
+    // Clearing is a setState, not a probe — opting out must touch no WebGPU
+    // and fire no `webllm_capability_detected`.
+    expect(detectWebGpuMock.mock.calls.length).toBe(probesAfterOptIn);
+  });
+
+  it("a probe that resolves AFTER opt-out cannot restore capability (#866 review)", async () => {
+    // The race the `cancelled` flag has to win: opt in, opt out again before
+    // `detectWebGpu` settles, then let it settle. Cleanup runs before the next
+    // effect run's clear, so the late `.then` is already cancelled and the
+    // field stays null instead of flipping back to a value for a user who is
+    // no longer opted in.
+    let settle: (c: "available") => void = () => {};
+    detectWebGpuMock.mockImplementationOnce(
+      () =>
+        new Promise<"available">((resolve) => {
+          settle = resolve;
+        }),
+    );
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    flushDebounce();
+    await flushMicrotasks();
+    // Probe started but deliberately unresolved.
+    expect(latestCapability).toBeNull();
+
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: false });
+    await flushMicrotasks();
+    expect(latestCapability).toBeNull();
+
+    // The abandoned probe lands late.
+    await act(async () => {
+      settle("available");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestCapability).toBeNull();
+  });
+
+  it("re-detects on opt back in after an opt-out cleared the value", async () => {
+    // Clearing must not strand the field: ticking again has to be able to
+    // produce a value, or the semantic path could never activate a second time.
+    webgpu = "available";
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    flushDebounce();
+    await flushMicrotasks();
+    expect(latestCapability).toBe("available");
+
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: false });
+    await flushMicrotasks();
+    expect(latestCapability).toBeNull();
+
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    expect(latestCapability).toBe("available");
+  });
+
   it("surfaces the probe result on `capability` once opted in (#204)", async () => {
     for (const detected of ["available", "no-webgpu", "unsupported-os"] as const) {
       webgpu = detected;

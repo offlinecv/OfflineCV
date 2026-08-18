@@ -75,12 +75,11 @@ export function PasteJdPanel({ parsed, onTailor }: PasteJdPanelProps) {
   // occupied by `loading`/`running` for the whole engine load while keyword
   // coverage is already available. Reading `keyword` means this panel keeps
   // showing coverage through that window instead of blanking.
-  const { status, keyword, capability } = useJdMatch({
+  const { status, keyword: jdMatch, capability } = useJdMatch({
     parsed,
     jdText,
     semanticOptIn,
   });
-  const jdMatch = keyword?.path === "keyword" ? keyword : null;
 
   // What the card renders. Semantic verdicts REPLACE the keyword columns, but
   // only once a semantic run has actually finished — every other state

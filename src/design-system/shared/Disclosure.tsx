@@ -15,13 +15,23 @@
  * state variable.** If a caller needs render-on-demand, it needs a different
  * component, not a prop here.
  *
- * Reuse analysis (CLAUDE.md 3-tier rule). Six hand-rolled `<details>` already
- * exist and none of them is this: the three things they lack are the `count`
- * badge slot, the `warn` mark, and a summary row that clears the 44×44 touch
- * floor. Five are feature code (`Result`, `WebGpuUnavailableNotice`,
- * `ModelSelector`, `RewriteReviewList`, `AtsScoreReadout`) — one-line "why did
- * this happen?" toggles with no state to carry, and converting them is an
- * explicit #823 non-goal.
+ * Reuse analysis (CLAUDE.md 3-tier rule). Hand-rolled `<details>` already exist
+ * elsewhere and none of them is this: the three things they lack are the
+ * `count` badge slot, the `warn` mark, and a summary row that clears the 44×44
+ * touch floor. Most are feature code (`Result`, `WebGpuUnavailableNotice`,
+ * `ModelSelector`, `RewriteReviewList`, `AtsScoreReadout`, `TargetingSection`,
+ * `ResultDetail`, and `SemanticMatch`'s per-verdict Evidence toggle from #204)
+ * — one-line "why did this happen?" toggles with no state to carry, and
+ * converting them is an explicit #823 non-goal.
+ *
+ * Treat that list as a record, NOT a census: it is maintained by hand and has
+ * drifted before — `SemanticMatch` was added in the #866 review follow-up,
+ * which is also when `TargetingSection` and `ResultDetail` turned out to be
+ * missing and the count that used to open this paragraph turned out to be
+ * wrong. A batch-conversion sweep should re-derive the real set rather than
+ * trust the names here:
+ *
+ *     rg -l '<details' src/components src/design-system --glob '!*.test.*'
  *
  * The sixth, `ModelLoadProgress`, is in the SHARED tier, so the barrel now ships
  * two shared components over one concern — against "exactly one per concern".
