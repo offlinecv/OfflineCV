@@ -17,13 +17,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import { SemanticMatch } from "./SemanticMatch.tsx";
-import type { JdMatchResult } from "../../lib/jd-match";
+import type { SemanticJdMatchResult } from "../../lib/jd-match";
 import type { RequirementVerdict } from "../../lib/jd-match/llm/judge-evidence.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
-
-type SemanticResult = Extract<JdMatchResult, { path: "semantic" }>;
 
 function verdict(
   id: string,
@@ -42,7 +40,7 @@ function verdict(
 
 /** Wrap verdicts in the semantic arm, tallying the summary the way
  *  `runLlmMatch` does so the header's numbers are the real ones. */
-function semantic(verdicts: readonly RequirementVerdict[]): SemanticResult {
+function semantic(verdicts: readonly RequirementVerdict[]): SemanticJdMatchResult {
   let met = 0;
   let partial = 0;
   let missing = 0;
@@ -61,7 +59,7 @@ function semantic(verdicts: readonly RequirementVerdict[]): SemanticResult {
 let container: HTMLDivElement | undefined;
 let root: Root | undefined;
 
-function render(result: SemanticResult): HTMLDivElement {
+function render(result: SemanticJdMatchResult): HTMLDivElement {
   const el = document.createElement("div");
   document.body.appendChild(el);
   container = el;
