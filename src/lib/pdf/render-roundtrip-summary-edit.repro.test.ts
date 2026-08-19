@@ -119,7 +119,7 @@ describe("#625 — an edited summary round-trips through the export", { timeout:
     const model = exportModel(edited);
     expect(model.summary).toBe(edited);
 
-    const reparsed = await runCascade(await renderAtsResumePdf(model));
+    const reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
     expect(reparsed.rawText).toContain(edited);
     expect(reparsed.rawText).not.toContain(PARSED_SUMMARY);
   });
@@ -136,7 +136,7 @@ describe("#625 — an edited summary round-trips through the export", { timeout:
     const model = exportModel(override);
     expect(model.summary).toBeUndefined();
 
-    const reparsed = await runCascade(await renderAtsResumePdf(model));
+    const reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
     expect(reparsed.rawText).not.toContain(PARSED_SUMMARY);
     expect(reparsed.rawText).not.toContain(HEADING);
     // The rest of the résumé is untouched — the clear removed a section, not

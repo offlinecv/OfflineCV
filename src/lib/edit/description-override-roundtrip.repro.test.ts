@@ -114,7 +114,7 @@ describe("descriptionOverrides edit-leg round-trip (#489)", { timeout: 20000 }, 
       display,
       scoreEditedResume(applied, p1.triggers, []),
     );
-    const p3 = await runCascade(await renderAtsResumePdf(model));
+    const p3 = await runCascade((await renderAtsResumePdf(model)).bytes);
 
     const p3Text = JSON.stringify(p3.canonical.fields);
     expect(p3Text.includes(NEW_DESCRIPTION)).toBe(true);

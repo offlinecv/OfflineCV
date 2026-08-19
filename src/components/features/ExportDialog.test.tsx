@@ -25,6 +25,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
+import type { RenderFinding } from "../../lib/pdf/render-findings.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -33,6 +34,9 @@ const pdfDownload = vi.fn();
 const markdownDownload = vi.fn();
 const reportDownload = vi.fn(() => Promise.resolve(true));
 let pdfError: string | null = null;
+/** #621 export findings the PDF row surfaces — empty for a clean export, which
+ *  is what every case here renders unless it says otherwise. */
+let pdfFindings: RenderFinding[] = [];
 
 /** What each hook was handed as its journey Download-stage mark site (#826).
  *  The success point lives inside the hooks, so what this component owns — and
@@ -46,7 +50,12 @@ vi.mock("../../hooks/useDownloadPdf.ts", () => ({
     onDownloaded?: () => void,
   ) => {
     captured.pdf = onDownloaded;
-    return { download: pdfDownload, isGenerating: false, error: pdfError };
+    return {
+      download: pdfDownload,
+      isGenerating: false,
+      error: pdfError,
+      findings: pdfFindings,
+    };
   },
 }));
 vi.mock("../../hooks/useDownloadMarkdown.ts", () => ({
@@ -154,6 +163,7 @@ beforeEach(() => {
   markdownDownload.mockClear();
   reportDownload.mockClear();
   pdfError = null;
+  pdfFindings = [];
   // jsdom does not implement modal dialogs in every version, and the primitive
   // calls `showModal()` from an effect. Stubbed to a plain open so the tests
   // exercise the dialog's CONTENT rather than the UA's modality.
@@ -420,5 +430,47 @@ describe("ExportDialog", () => {
       captured[key]?.();
     }
     expect(onExported).toHaveBeenCalledTimes(3);
+  });
+
+  // #621 — the export reports what it could not render cleanly, on the row that
+  // produced the file. Advisory: the user already has the PDF.
+  describe("export findings", () => {
+    it("renders NO warning chrome when the export was clean", () => {
+      // The common case. A permanent "0 issues" strip on the download row would
+      // train every user to stop reading it.
+      const el = render(exportable());
+      expect(text(el)).not.toContain("Check the export");
+      expect(el.querySelector("[aria-live]:not([aria-live=\"off\"]) ul")).toBeNull();
+    });
+
+    it("names the field and states what happened, never colour alone", () => {
+      pdfFindings = [
+        {
+          kind: "glyph-degraded",
+          severity: "warning",
+          sourceField: "Experience \u2192 Staff Engineer \u00b7 Acme \u2192 bullet 3",
+          detail: 'The export font has no glyph for "\u2605", so it was drawn as "?".',
+        },
+      ];
+      const el = render(exportable());
+      // The badge carries a WORD, not just a tone.
+      expect(text(el)).toContain("Check the export");
+      expect(text(el)).toContain("Experience \u2192 Staff Engineer \u00b7 Acme \u2192 bullet 3");
+      expect(text(el)).toContain("\u2605");
+      // And it says the file arrived — a finding is not a refusal.
+      expect(text(el)).toContain("Your PDF downloaded");
+    });
+
+    it("counts the overflow instead of listing forty rows", () => {
+      pdfFindings = Array.from({ length: 8 }, (_, i) => ({
+        kind: "glyph-degraded" as const,
+        severity: "info" as const,
+        sourceField: `Experience \u2192 Role ${i + 1}`,
+        detail: 'The export font has no glyph for "\u2192", so it was drawn as "->".',
+      }));
+      const el = render(exportable());
+      expect(el.querySelectorAll("li")).toHaveLength(5);
+      expect(text(el)).toContain("and 3 more");
+    });
   });
 });

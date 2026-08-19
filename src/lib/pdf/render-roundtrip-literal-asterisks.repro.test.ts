@@ -84,7 +84,7 @@ describe("#284/#425 — literal `**` in a bullet round-trips byte-identically", 
 
   beforeAll(async () => {
     const model = buildAtsResumeModel(makeResult(), fakeScore);
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("re-parses each role's description with its literal `**` intact", () => {

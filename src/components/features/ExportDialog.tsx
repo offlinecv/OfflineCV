@@ -73,6 +73,7 @@ import {
 } from "../../lib/contact.ts";
 import { ExportGateBody, fixFirstGap } from "./ExportGateBody.tsx";
 import { ExportRow, ExportReportRow } from "./ExportRows.tsx";
+import { ExportFindings } from "./ExportFindings.tsx";
 import { useDownloadPdf } from "../../hooks/useDownloadPdf.ts";
 import { useDownloadMarkdown } from "../../hooks/useDownloadMarkdown.ts";
 import { useDownloadReport } from "../../hooks/useDownloadReport.ts";
@@ -198,6 +199,11 @@ export function ExportDialog({
             >
               {pdf.isGenerating ? "Generating…" : "Download PDF"}
             </Button>
+            {/* What the export could not draw cleanly (#621) — advisory, and
+                renders NOTHING for the clean résumé that is the common case.
+                It sits on the row that produced the file, beside the row's own
+                `ErrorState`, because that is the surface already mounted. */}
+            <ExportFindings findings={pdf.findings} />
           </ExportRow>
 
           <ExportRow

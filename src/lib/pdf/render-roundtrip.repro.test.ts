@@ -73,7 +73,7 @@ describe("#284 — Download-PDF reconstructed résumé round-trips through the p
   beforeAll(async () => {
     original = await runCascade(new Uint8Array(readFileSync(FIXTURE)));
     const model = buildAtsResumeModel(original, scoreFor(original));
-    const bytes = await renderAtsResumePdf(model);
+    const { bytes } = await renderAtsResumePdf(model);
     reparsed = await runCascade(bytes);
   });
 

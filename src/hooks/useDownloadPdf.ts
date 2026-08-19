@@ -17,6 +17,11 @@
  * résumé bytes leave the browser, which is the actual guarantee. Say custody,
  * not runtime.
  *
+ * It also carries the export's own findings (#621) — what the renderer could
+ * not draw cleanly — back to the surface. Those are ADVISORY and arrive only
+ * after the bytes have reached the user: the refusal below is the one thing that
+ * stops a download, and reporting must never grow into a second one.
+ *
  * This hook owns the refusal for #664. When the Poppins fetch fails, the
  * renderer falls back to Helvetica, whose WinAnsi codec replaces anything
  * outside it with `?` — including a candidate's own name. Rather than hand back
@@ -37,6 +42,7 @@ import {
   renderAtsResumePdf,
   type ExportGlyphLoss,
 } from "../lib/pdf/render-ats-pdf.ts";
+import type { RenderFinding } from "../lib/pdf/render-findings.ts";
 import { slugifyName, triggerBlobDownload } from "../lib/download/blob-download.ts";
 import { trackDownloadCompleted, type DownloadSource } from "../lib/analytics.ts";
 import { clearBlankDraft } from "./useResumeAnalysis.ts";
@@ -45,6 +51,13 @@ export interface UseDownloadPdf {
   download: () => Promise<void>;
   isGenerating: boolean;
   error: string | null;
+  /**
+   * What the LAST completed render could not draw cleanly (#621) — empty until a
+   * download has run, and empty again the moment the next one starts, so the
+   * surface can never show findings that belong to a résumé the user has since
+   * edited. Advisory only: the download already happened.
+   */
+  findings: RenderFinding[];
 }
 
 /** Turn a candidate name into a safe, lower-kebab PDF filename. */
@@ -87,10 +100,14 @@ export function useDownloadPdf(
 ): UseDownloadPdf {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [findings, setFindings] = useState<RenderFinding[]>([]);
 
   const download = useCallback(async () => {
     setIsGenerating(true);
     setError(null);
+    // Cleared up front, alongside `error`, for the same reason: a stale report
+    // about the PREVIOUS export would read as a verdict on this one.
+    setFindings([]);
     try {
       const model = buildAtsResumeModel(result, score);
 
@@ -105,7 +122,7 @@ export function useDownloadPdf(
         return;
       }
 
-      const bytes = await renderAtsResumePdf(model);
+      const { bytes, findings: rendered } = await renderAtsResumePdf(model);
       // `bytes.slice()` copies into a fresh ArrayBuffer-backed view so Blob gets
       // a clean buffer.
       triggerBlobDownload(
@@ -113,6 +130,9 @@ export function useDownloadPdf(
         "application/pdf",
         filenameFromName(model.contact.name),
       );
+      // AFTER the download, never before: a finding is a report on the file the
+      // user now has, not a gate in front of it (#621).
+      setFindings(rendered);
 
       // Distinguish a from-scratch authored download from an uploaded one
       // (#313). `tiers` is empty ONLY for `buildBlankResult()`'s output —
@@ -137,5 +157,5 @@ export function useDownloadPdf(
     // is keyed to the résumé that was on screen then.
   }, [result, score, onDownloaded]);
 
-  return { download, isGenerating, error };
+  return { download, isGenerating, error, findings };
 }

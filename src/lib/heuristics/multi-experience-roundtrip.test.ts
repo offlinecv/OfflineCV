@@ -97,7 +97,7 @@ describe("#311 multiple experience sections — parse + round-trip", { timeout: 
     const bytes = await fsp.readFile(FIXTURE);
     const parse1 = await runCascade(new Uint8Array(bytes));
     const model = buildAtsResumeModel(parse1, scoreOf(parse1));
-    const exportedBytes = await renderAtsResumePdf(model);
+    const { bytes: exportedBytes } = await renderAtsResumePdf(model);
     const parse3 = await runCascade(new Uint8Array(exportedBytes));
 
     // Two distinct experience-category groups on the way IN. (The export

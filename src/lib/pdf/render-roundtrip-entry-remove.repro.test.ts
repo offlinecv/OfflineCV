@@ -122,7 +122,7 @@ describe("#856 — a deleted entry stays out of the exported PDF", { timeout: 20
       new Set(["experience:0", "education:0", "achievements:0"]),
     );
     const model = buildAtsResumeModel(makeResult(edited.fields), fakeScore);
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("drops the deleted role and keeps the survivor's own edit", () => {
