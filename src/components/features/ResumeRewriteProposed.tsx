@@ -36,6 +36,7 @@ import {
 import { resolveSectionWrites } from "../../lib/rewrite-review/apply-accepted.ts";
 import { useRewriteReview, type RewriteReview } from "../../hooks/useRewriteReview.ts";
 import {
+  describeNumberDrift,
   NumberPreservationWarning,
   type SectionRewriteApply,
 } from "./SectionRewrite.tsx";
@@ -106,6 +107,10 @@ export function ProposedPanel({
     for (const outcome of result.sections) {
       const apply = applyBySection?.get(outcome.input.id);
       if (!apply) continue;
+      // A rejected rewrite (#778) returns the input verbatim, so aligning it
+      // would offer the user an "accept" on their own text. Fall through to
+      // the read-only redline, which captions why there is nothing to see.
+      if (outcome.data.reverted) continue;
       const pairs =
         outcome.kind === "summary"
           ? summaryPairs(
@@ -202,15 +207,24 @@ export function ProposedPanel({
 
   const accepted = review.acceptedCount;
 
+  // #778: `allNumbersPreserved` is true when every section reverted — the
+  // originals preserve themselves — so it cannot carry the tone on its own, and
+  // it cannot decide whether the warning renders either. Guarding the alert on
+  // it alone turned the panel warning-coloured on a revert while saying nothing:
+  // a border colour, no text, no `role="alert"`. Same condition as
+  // `ProposedSection`'s in SectionRewrite.tsx, one level up.
+  const anyReverted = result.sections.some((o) => o.data.reverted);
+
   return (
     <InlineResult
-      tone={result.allNumbersPreserved ? "success" : "warning"}
+      tone={result.allNumbersPreserved && !anyReverted ? "success" : "warning"}
       className="flex flex-col gap-4"
     >
-      {!result.allNumbersPreserved && (
+      {(anyReverted || !result.allNumbersPreserved) && (
         <NumberPreservationWarning
           dropped={aggregated.dropped}
           added={aggregated.added}
+          reverted={anyReverted}
         />
       )}
       <ul className="flex flex-col gap-4 list-none">
@@ -345,13 +359,20 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
             outcome.input.text,
             outcome.data.text || "",
           )}
+          noChangeLabel={
+            outcome.data.reverted ? revertedLabel(outcome.data) : undefined
+          }
         />
       </div>
     );
   }
-  const originalBullets = outcome.input.bullets.filter(
-    (b) => b.trim().length > 0,
-  );
+  // Both sides get the SAME blank filter. A revert hands back the input verbatim
+  // (blanks included) while this side has always dropped them, so filtering only
+  // the original made a section with one blank bullet diff as "changed" — which
+  // suppressed the `noChangeLabel` that exists to stop a revert reading as a
+  // silent no-op (#778).
+  const originalBullets = withoutBlanks(outcome.input.bullets);
+  const proposedBullets = withoutBlanks(outcome.data.bullets);
   return (
     <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-card p-3">
       <h4 className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
@@ -360,11 +381,34 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
       <InlineDiff
         segments={computeTextDiff(
           originalBullets.map((b) => `• ${b}`).join("\n"),
-          outcome.data.bullets.map((b) => `• ${b}`).join("\n"),
+          proposedBullets.map((b) => `• ${b}`).join("\n"),
         )}
+        noChangeLabel={
+          outcome.data.reverted ? revertedLabel(outcome.data) : undefined
+        }
       />
     </div>
   );
+}
+
+function withoutBlanks(bullets: readonly string[]): string[] {
+  return bullets.filter((b) => b.trim().length > 0);
+}
+
+/**
+ * Why a section in the whole-résumé review shows no redline (#778). Named per
+ * section rather than aggregated into the résumé-level warning because the
+ * chain rewrites each section independently — one reverting says nothing about
+ * the others, and a single banner would leave the reader guessing which.
+ */
+function revertedLabel(data: {
+  droppedNumbers: readonly string[];
+  addedNumbers: readonly string[];
+}): string {
+  const detail = describeNumberDrift(data.droppedNumbers, data.addedNumbers);
+  return detail === ""
+    ? "Kept unchanged — the rewrite was rejected."
+    : `Kept unchanged — the rewrite ${detail}.`;
 }
 
 export interface AggregateDrift {

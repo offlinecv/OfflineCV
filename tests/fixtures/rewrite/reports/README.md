@@ -97,6 +97,74 @@ runs show `Numbers` between 0% and 80% (#778) and `Dedup` at 0% in eight of
 nine cells — unrelated to #608, but visible in these files and worth its own
 look rather than being read as noise.
 
+> **The `Numbers` reading above describes the 2026-08-07 runs and the code as
+> it stood then.** #778 has since changed what the criterion measures — see
+> "Reading `Numbers` after #778" below before comparing a new run to these.
+
+## Reading `Numbers` after #778
+
+#778 made the number-preservation guardrail binding rather than advisory: a
+rewrite that would drop a concrete number **or invent one that was not in the
+input** is **rejected**, and the user keeps their original bullets
+(`applyNumberPreservation` in `src/lib/webllm/post-process.ts`). The eval
+harness runs the same gate before scoring, so `Numbers` is now a rate over what
+a user would have *received*.
+
+Three consequences for anyone reading a report:
+
+1. **A high `Numbers` no longer means the model kept the figures.** Read it
+   with the new **`Reverted`** column, which is the share of cells the gate
+   rejected. `100% / 0%` is a model that got it right; `100% / 60%` is the gate
+   carrying it. `Reverted` is deliberately excluded from `Aggregate` — a revert
+   is the guardrail working, and scoring it as a criterion in either direction
+   would corrupt the number a default-model choice is made from.
+2. **`Numbers` is now ~100% by construction, so it carries almost no signal
+   on its own.** The gate covers both halves the criterion measures — dropping
+   and inventing — so every cell that produced any output at all is either a
+   clean rewrite or a revert, and both score `PASS`. The only route to a `fail`
+   left is a generation that came back empty, which the gate deliberately does
+   not touch. `Reverted` is the column that carries the model's actual
+   behaviour; the earlier drop-only gate is why the invention-only cells (the
+   `weak-marketing-generalist` cells, most obviously) used to score `fail`
+   instead.
+3. **Every other criterion is scored on the reverted output too.** That is
+   intentional, not a bug: a reverted `redundant` fixture honestly scores
+   `Dedup: fail`, because the user's bullets were not deduped.
+
+The per-cell `Reverted` column carries the tokens that triggered each rejection
+(`REVERTED: $4.2M, 14%`), because the rubric can no longer re-derive them — the
+scored bullets *are* the input once a cell reverts. Dropped tokens are listed
+first and invented ones after, undifferentiated: the cell's verdict is the same
+either way, and if anything the invented half is the worse one — a dropped
+figure costs the user a true claim they can put back, an invented one would
+have put a false claim in the document they hand an employer.
+
+**The 2026-08-07 reports predate all of this.** Their `Numbers` column is the
+old measurement (did the raw generation keep every figure) and they carry no
+`Reverted` column at all, exactly as the 2026-06-23 pair carries no `Steering`
+column. Do not read the two generations of the column as one series.
+
+**No post-#778 run is committed yet.** The gate and the extraction fixes it
+rests on are unit-tested (`post-process.test.ts`, `preserve-numbers.test.ts`),
+but a fresh `npm run eval:rewrite` on a WebGPU machine is still owed here
+before any claim about the shipped model's post-fix rate is made from this
+directory. #778's ~100% `Numbers` target is now reachable *by construction* —
+both halves of the criterion revert — but "by construction" is an argument, not
+a measurement, and the run is what would show whether `Reverted` lands at 10% or
+at 90%. That share, not `Numbers`, is the number worth waiting for.
+
+### Why prompt tuning was not tried first
+
+Recorded because it is the obvious question a reader of a future run will ask.
+`PRESERVE_NUMBERS_RULE` has been in every rewrite prompt since #609 and the
+2026-08-07 runs measured all three registry models breaking it, including under
+the `terse` variant that strips every competing instruction. The models in
+`MODEL_REGISTRY` (1.5B–3B) are not reliable enough at "carry these tokens
+through verbatim" for a wording change to be expected to move the number, so
+#778 built the deterministic backstop instead. Prompt tuning is worth
+revisiting when a future model generation makes small-model instruction
+adherence trustworthy — not before.
+
 A third anomaly is in these files and no criterion catches it: **19 of the
 24 Gemma 2 `terse` bullets ship literal markdown bold** — `"**Led** the
 migration of the billing platform…"`. Those are `perBullet[].text`, i.e.

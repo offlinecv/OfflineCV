@@ -463,12 +463,21 @@ export function trackWebllmSectionRewriteCompleted(args: {
   inputBulletCount: number;
   outputBulletCount: number;
   numbersPreserved: boolean;
+  /**
+   * The #778 gate rejected the rewrite because it dropped or invented a
+   * number, so the user kept their original bullets. Reported alongside
+   * `numbersPreserved` rather than folded into it — that one keeps measuring
+   * the model's raw output, so its series stays comparable across the release,
+   * and this one says whether the drift reached the user.
+   */
+  reverted: boolean;
 }): void {
   track("webllm_section_rewrite_completed", {
     model: args.model,
     input_bullet_count: args.inputBulletCount,
     output_bullet_count: args.outputBulletCount,
     numbers_preserved: args.numbersPreserved,
+    reverted: args.reverted,
   });
 }
 
@@ -506,7 +515,16 @@ export function trackWebllmResumeRewriteSectionCompleted(args: {
   inputUnitCount: number;
   /** Bullets out for "experience"; 0 or 1 for "summary" (empty model output → 0). */
   outputUnitCount: number;
+  /**
+   * Measures the MODEL'S raw output, exactly as the section-level
+   * `webllm_section_rewrite_completed` does — not what the user received. The
+   * #778 gate makes the delivered units number-clean by construction, so
+   * reporting the delivered property here would silently flip this series'
+   * meaning mid-release and break comparability with everything logged before.
+   */
   numbersPreserved: boolean;
+  /** The #778 gate rejected this section's rewrite; the user kept the original. */
+  reverted: boolean;
 }): void {
   track("webllm_resume_rewrite_section_completed", {
     model: args.model,
@@ -515,18 +533,23 @@ export function trackWebllmResumeRewriteSectionCompleted(args: {
     input_unit_count: args.inputUnitCount,
     output_unit_count: args.outputUnitCount,
     numbers_preserved: args.numbersPreserved,
+    reverted: args.reverted,
   });
 }
 
 export function trackWebllmResumeRewriteCompleted(args: {
   model: string;
   sectionCount: number;
+  /** True iff every section's raw model output preserved its numbers. */
   allNumbersPreserved: boolean;
+  /** True iff the #778 gate rejected at least one section in the run. */
+  anyReverted: boolean;
 }): void {
   track("webllm_resume_rewrite_completed", {
     model: args.model,
     section_count: args.sectionCount,
     all_numbers_preserved: args.allNumbersPreserved,
+    any_reverted: args.anyReverted,
   });
 }
 

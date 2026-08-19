@@ -43,6 +43,7 @@ const RESULT: ResumeRewriteResult = {
       data: {
         bullets: ["Led a team of 5 engineers", "Mentored two interns"],
         numbersPreserved: true,
+        reverted: false,
         droppedNumbers: [],
         addedNumbers: [],
       },
@@ -274,6 +275,7 @@ function summaryResult(proposed: string): ResumeRewriteResult {
         data: {
           text: proposed,
           numbersPreserved: true,
+          reverted: false,
           droppedNumbers: [],
           addedNumbers: [],
         },
@@ -392,3 +394,159 @@ describe("ProposedPanel — summary review + apply (issue 625)", () => {
     ).toHaveLength(0);
   });
 });
+
+describe("ProposedPanel — rejected rewrites (#778)", () => {
+  const REVERTED: ResumeRewriteResult = {
+    allNumbersPreserved: true,
+    sections: [
+      {
+        kind: "experience",
+        input: {
+          kind: "experience",
+          id: "experience:0",
+          label: "Senior Engineer — Acme",
+          bullets: ["Grew ARR to $4.2M in FY24."],
+        },
+        data: {
+          bullets: ["Grew ARR to $4.2M in FY24."],
+          numbersPreserved: true,
+          reverted: true,
+          droppedNumbers: ["$4.2M"],
+          addedNumbers: [],
+        },
+      },
+    ],
+  };
+
+  it("falls through to the read-only redline instead of offering accept rows", () => {
+    // The gate returned the input verbatim, so a review row would ask the user
+    // to "accept" their own bullet.
+    const handlers: SectionRewriteApply = {
+      obsIds: ["0|a"],
+      onReplace: vi.fn(),
+      onRemove: vi.fn(),
+      onAdd: vi.fn(),
+    };
+    const el = render(
+      createElement(ProposedPanel, {
+        result: REVERTED,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+        applyBySection: new Map([["experience:0", handlers]]),
+      }),
+    );
+    const acceptButtons = [...el.querySelectorAll("button")].filter((b) =>
+      b.getAttribute("aria-label")?.startsWith("Accept this"),
+    );
+    expect(acceptButtons.length).toBe(0);
+    expect(el.textContent).toContain("Kept unchanged");
+    expect(el.textContent).toContain("$4.2M");
+  });
+
+  it("still shows the revert caption when the input carried a blank bullet", () => {
+    // The revert hands the input back verbatim, blanks included, while the
+    // original side has always filtered them. Filtering only one side made the
+    // two strings differ, so `InlineDiff` saw a change and suppressed the
+    // caption — leaving a revert looking like a silent no-op, the exact failure
+    // the caption exists to prevent.
+    const withBlank: ResumeRewriteResult = {
+      allNumbersPreserved: true,
+      sections: [
+        {
+          kind: "experience",
+          input: {
+            kind: "experience",
+            id: "experience:0",
+            label: "Senior Engineer — Acme",
+            bullets: ["Grew ARR to $4.2M in FY24.", "   "],
+          },
+          data: {
+            bullets: ["Grew ARR to $4.2M in FY24.", "   "],
+            numbersPreserved: true,
+            reverted: true,
+            droppedNumbers: ["$4.2M"],
+            addedNumbers: [],
+          },
+        },
+      ],
+    };
+    const el = render(
+      createElement(ProposedPanel, {
+        result: withBlank,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+      }),
+    );
+    expect(el.textContent).toContain("Kept unchanged");
+  });
+
+  it("does not dress a fully-reverted run as a clean success", () => {
+    // `allNumbersPreserved` is true here by construction; the tone has to come
+    // from `reverted` or the panel reads green on a run that changed nothing.
+    const el = render(
+      createElement(ProposedPanel, {
+        result: REVERTED,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+      }),
+    );
+    expect(el.innerHTML).toContain("border-feedback-warning-border");
+    expect(el.innerHTML).not.toContain("border-feedback-success-border");
+  });
+
+  it("explains the revert in the résumé-level alert, not just in the border colour", () => {
+    // The warning used to be guarded on `!allNumbersPreserved` alone, which is
+    // true-by-construction false here: a revert delivers the ORIGINAL bullets,
+    // and those preserve their own numbers. So the panel turned warning-toned
+    // and said nothing — no text, no `role="alert"` for a screen reader. Pinned
+    // by content, because a border class is not an explanation.
+    const el = render(
+      createElement(ProposedPanel, {
+        result: REVERTED,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+      }),
+    );
+    const alert = el.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    // The reverted copy, not the "AI altered a metric — review before saving"
+    // variant: the delivered bullets are the user's own.
+    expect(alert!.textContent).toContain("Kept your original");
+    expect(alert!.textContent).toContain("removed $4.2M");
+    expect(alert!.textContent).not.toContain("Review before saving");
+  });
+
+  it("names the invented figure when a section was reverted for inventing one", () => {
+    const invented: ResumeRewriteResult = {
+      allNumbersPreserved: true,
+      sections: [
+        {
+          kind: "experience",
+          input: {
+            kind: "experience",
+            id: "experience:0",
+            label: "Senior Engineer — Acme",
+            bullets: ["Completed phase 5 of the migration."],
+          },
+          data: {
+            bullets: ["Completed phase 5 of the migration."],
+            numbersPreserved: true,
+            reverted: true,
+            droppedNumbers: [],
+            addedNumbers: ["5"],
+          },
+        },
+      ],
+    };
+    const el = render(
+      createElement(ProposedPanel, {
+        result: invented,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+      }),
+    );
+    const alert = el.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("invented 5");
+  });
+});
+

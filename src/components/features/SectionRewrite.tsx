@@ -237,9 +237,14 @@ export function useSectionRewrite(
   // Per-bullet review state (#211). Aligned against the snapshot the model
   // actually saw (stable per proposal) — not the live bullets — so the rows and
   // the decision map don't churn under unrelated re-renders.
+  // A rejected rewrite (#778) has nothing to review: `result.bullets` IS the
+  // snapshot, so aligning them would build a row per bullet offering to
+  // "accept" the user's own text. The warning above the list carries the
+  // outcome instead — same precedent as the whole-résumé path, which drops a
+  // section with no reviewable pairs to its read-only redline.
   const pairs = useMemo<AlignedPair[]>(
     () =>
-      status.kind === "proposed"
+      status.kind === "proposed" && !status.result.reverted
         ? alignBullets(status.snapshot, status.result.bullets)
         : NO_PAIRS,
     [status],
@@ -421,7 +426,7 @@ export function useSectionRewrite(
         {status.kind === "proposed" &&
           (apply ? (
             <InlineResult
-              tone={status.result.numbersPreserved ? "success" : "warning"}
+              tone={resultTone(status.result)}
               className="flex flex-col gap-3"
             >
               <RewriteReviewList
@@ -430,12 +435,14 @@ export function useSectionRewrite(
                 onApply={onApply}
                 onDiscard={onReject}
                 warning={
-                  status.result.numbersPreserved ? undefined : (
+                  status.result.reverted ||
+                  !status.result.numbersPreserved ? (
                     <NumberPreservationWarning
                       dropped={status.result.droppedNumbers}
                       added={status.result.addedNumbers}
+                      reverted={status.result.reverted}
                     />
-                  )
+                  ) : undefined
                 }
               />
             </InlineResult>
@@ -537,14 +544,12 @@ export function ProposedSection({
   onReject: () => void;
 }) {
   return (
-    <InlineResult
-      tone={result.numbersPreserved ? "success" : "warning"}
-      className="flex flex-col gap-3"
-    >
-      {!result.numbersPreserved && (
+    <InlineResult tone={resultTone(result)} className="flex flex-col gap-3">
+      {(result.reverted || !result.numbersPreserved) && (
         <NumberPreservationWarning
           dropped={result.droppedNumbers}
           added={result.addedNumbers}
+          reverted={result.reverted}
         />
       )}
 
@@ -553,18 +558,24 @@ export function ProposedSection({
           original.map((b) => `• ${b}`).join("\n"),
           result.bullets.map((b) => `• ${b}`).join("\n"),
         )}
+        noChangeLabel={result.reverted ? REVERTED_DIFF_LABEL : undefined}
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <CopyButton
-          value={result.bullets.join("\n")}
-          variant="ghost"
-          size="sm"
-          className="rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-2xs text-content-primary hover:border-border hover:bg-surface-hover"
-          failedLabel="Couldn’t copy — select the bullets above"
-        >
-          Use this — copy all bullets
-        </CopyButton>
+        {/* No copy CTA on a rejected rewrite (#778): `result.bullets` is the
+            user's own text, so "Use this" would offer them what they already
+            have — and read as a contradiction of the notice above it. */}
+        {!result.reverted && (
+          <CopyButton
+            value={result.bullets.join("\n")}
+            variant="ghost"
+            size="sm"
+            className="rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-2xs text-content-primary hover:border-border hover:bg-surface-hover"
+            failedLabel="Couldn’t copy — select the bullets above"
+          >
+            Use this — copy all bullets
+          </CopyButton>
+        )}
         <Button
           variant="link"
           size="sm"
@@ -578,17 +589,56 @@ export function ProposedSection({
   );
 }
 
+/**
+ * Caption the diff carries when a rewrite was rejected (#778). The two sides
+ * are identical in that case, so without it the panel reads as "the model
+ * looked at your bullets and changed nothing" — which is a different, and
+ * false, story about what happened.
+ */
+const REVERTED_DIFF_LABEL = "No changes applied — your original bullets.";
+
+/**
+ * A reject/revert is a warning, not a success, even though the delivered
+ * bullets preserve every number: the user asked for a rewrite and did not get
+ * one, and the panel has to read that way. `numbersPreserved` alone can't
+ * decide the tone after #778 — it is true on a reverted rewrite by
+ * construction.
+ */
+function resultTone(result: {
+  numbersPreserved: boolean;
+  reverted: boolean;
+}): "success" | "warning" {
+  return result.reverted || !result.numbersPreserved ? "warning" : "success";
+}
+
 export function NumberPreservationWarning({
   dropped,
   added,
+  reverted = false,
 }: {
   dropped: readonly string[];
   added: readonly string[];
+  /**
+   * The rewrite was rejected and the original kept (#778). Changes the copy
+   * from "check what the AI changed" to "nothing changed, and here's why" —
+   * the delivered bullets are the user's own, so telling them to review a
+   * metric they never lost would be wrong.
+   */
+  reverted?: boolean;
 }) {
-  const parts: string[] = [];
-  if (dropped.length > 0) parts.push(`removed ${formatTokens(dropped)}`);
-  if (added.length > 0) parts.push(`invented ${formatTokens(added)}`);
-  const detail = parts.join(" and ");
+  const detail = describeNumberDrift(dropped, added);
+  if (reverted) {
+    return (
+      <p
+        role="alert"
+        className="text-2xs leading-snug text-feedback-warning-text"
+      >
+        <span aria-hidden="true">⚠ </span>
+        Kept your original — the rewrite {detail}, so I didn’t apply it. Try
+        again for a different attempt.
+      </p>
+    );
+  }
   return (
     <p
       role="alert"
@@ -598,6 +648,23 @@ export function NumberPreservationWarning({
       AI altered a metric — {detail}. Review before saving.
     </p>
   );
+}
+
+/**
+ * The one phrasing of "what the model did to the numbers", shared by the
+ * revert notice, the drift warning, and the whole-résumé per-section label.
+ * Both halves are named because the gate reverts on either since the #778
+ * widening — quoting only the dropped ones left an invention-only revert
+ * saying the rewrite dropped nothing at all.
+ */
+export function describeNumberDrift(
+  dropped: readonly string[],
+  added: readonly string[],
+): string {
+  const parts: string[] = [];
+  if (dropped.length > 0) parts.push(`removed ${formatTokens(dropped)}`);
+  if (added.length > 0) parts.push(`invented ${formatTokens(added)}`);
+  return parts.join(" and ");
 }
 
 export function formatTokens(tokens: readonly string[]): string {

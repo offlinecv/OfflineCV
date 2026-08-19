@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { cleanRewriteLine } from "./post-process.ts";
-import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import {
+  applyNumberPreservation,
+  cleanRewriteLine,
+} from "./post-process.ts";
 import {
   composeRulesPrompt,
   DROP_FILLER_RULE,
@@ -29,10 +31,11 @@ import { acquireInference, releaseInference } from "./web-llm.ts";
  *     the cross-model `acquireInference` lock can defer `.unload()` while
  *     this call is in flight.
  *   - Runs the deterministic number-preservation check after the model
- *     responds (same `checkNumbersPreserved` used by the section path —
- *     the multiset diff is shape-agnostic).
- *   - Returns `numbersPreserved` + `dropped/added` so the UI can surface
- *     the same inline warning shape as the section path.
+ *     responds (same `applyNumberPreservation` used by the section path —
+ *     the set diff is shape-agnostic), including the #778 reject gate:
+ *     a rewrite that drops or invents a number returns the ORIGINAL paragraph.
+ *   - Returns `numbersPreserved` + `reverted` + `dropped/added` so the UI can
+ *     surface the same inline warning shape as the section path.
  *
  * Output handling: paragraphs sometimes come back across multiple lines if
  * the model adds a wrap (or hallucinates a `Rewritten:` echo). We run each
@@ -112,11 +115,20 @@ export interface SummaryRewriteOptions {
 }
 
 export interface SummaryRewriteResult {
-  /** The rewritten summary paragraph. Empty string when the model returned nothing. */
+  /**
+   * What the user gets. Empty string when the model returned nothing; the
+   * ORIGINAL paragraph when the #778 gate rejected the rewrite.
+   */
   text: string;
-  /** True iff every input number survived and none were invented. */
+  /** True iff `text` carries every input number and invents none. */
   numbersPreserved: boolean;
-  /** Numeric tokens that did not survive (UI surfaces these inline). */
+  /**
+   * The rewrite dropped or invented a number and was rejected; `text` is the
+   * original paragraph (#778). The panel must say so rather than showing an
+   * empty diff.
+   */
+  reverted: boolean;
+  /** Numeric tokens the model dropped (UI surfaces these inline). */
   droppedNumbers: string[];
   /** Numeric tokens that appeared from nowhere (UI surfaces these inline). */
   addedNumbers: string[];
@@ -166,13 +178,21 @@ export async function rewriteSummaryWithLlm(
       .join(" ")
       .trim();
 
-    const preservation = checkNumbersPreserved([summary], text ? [text] : []);
+    // #778, applied to the one-unit paragraph shape: `applyNumberPreservation`
+    // works on arrays, so wrap and unwrap. A blank generation stays blank —
+    // the gate deliberately leaves an empty rewrite to the caller's
+    // failed-generation handling rather than dressing it up as "kept yours".
+    const outcome = applyNumberPreservation(
+      [summary],
+      text ? [text] : [],
+    );
 
     return {
-      text,
-      numbersPreserved: preservation.ok,
-      droppedNumbers: preservation.dropped,
-      addedNumbers: preservation.added,
+      text: outcome.bullets[0] ?? "",
+      numbersPreserved: outcome.numbersPreserved,
+      reverted: outcome.reverted,
+      droppedNumbers: outcome.droppedNumbers,
+      addedNumbers: outcome.addedNumbers,
     };
   } finally {
     releaseInference(modelId);

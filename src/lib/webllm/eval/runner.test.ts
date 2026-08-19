@@ -153,6 +153,123 @@ describe("runEval", () => {
     expect(r.fixtureIds).toEqual(["f"]);
   });
 
+  it("carries the #778 revert flag onto the record and into revertedRate", async () => {
+    // The harness runs the product's reject gate before scoring, so a reverted
+    // cell arrives already scoring `numbersPreserved: true` — the input IS the
+    // output. `revertedRate` is what keeps that from reading as a model that
+    // preserved everything on its own.
+    const fx = fixture("numeric", "numeric", ["Grew ARR to $4.2M in FY24."]);
+    const clean = fixture("clean", "strong", [
+      "Owned the write path end to end.",
+    ]);
+    const report = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx, clean],
+      rewriteFn: dispatchFn({
+        "M|V|numeric": {
+          bullets: ["Grew ARR to $4.2M in FY24."],
+          raw: "Grew ARR substantially.",
+          reverted: true,
+          revertedNumbers: ["$4.2M"],
+        },
+        "M|V|clean": {
+          bullets: ["Owned the write path end to end."],
+          raw: "Owned the write path end to end.",
+        },
+      }),
+    });
+    const reverted = report.records.find((r) => r.fixtureId === "numeric")!;
+    expect(reverted.reverted).toBe(true);
+    expect(reverted.revertedNumbers).toEqual(["$4.2M"]);
+    expect(reverted.rubric.numbersPreserved).toBe(true);
+    expect(report.records.find((r) => r.fixtureId === "clean")!.reverted).toBe(
+      false,
+    );
+    expect(report.aggregates[0]!.revertedRate).toBe(0.5);
+    expect(report.aggregates[0]!.numbersPreservedRate).toBe(1);
+  });
+
+  it("keeps revertedRate out of the composite aggregateScore", async () => {
+    // A revert is the guardrail working, so scoring it as a criterion in
+    // either direction would misstate the run the default model is picked from.
+    const fx = fixture("f", "strong", ["Cut p99 latency 40% on the write path."]);
+    const output: RawRewriteOutput = {
+      bullets: ["Cut p99 latency 40% on the write path."],
+      raw: "Cut p99 latency 40% on the write path.",
+      reverted: true,
+      revertedNumbers: ["40%"],
+    };
+    const withRevert = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx],
+      rewriteFn: dispatchFn({ "M|V|f": output }),
+    });
+    const withoutRevert = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx],
+      rewriteFn: dispatchFn({
+        "M|V|f": { bullets: output.bullets, raw: output.raw },
+      }),
+    });
+    expect(withRevert.aggregates[0]!.revertedRate).toBe(1);
+    expect(withoutRevert.aggregates[0]!.revertedRate).toBe(0);
+    expect(withRevert.aggregates[0]!.aggregateScore).toBe(
+      withoutRevert.aggregates[0]!.aggregateScore,
+    );
+  });
+
+  it("keeps numbersPreservedRate out of the composite aggregateScore too", async () => {
+    // Post-#778 the gate makes this rate ~1.0 for every model, so leaving it in
+    // the composite added a constant term to every row and displaced a
+    // criterion that actually discriminates. Same treatment as `revertedRate`.
+    const fx = fixture("f", "strong", ["Cut p99 latency 40% on the write path."]);
+    const preserved = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx],
+      rewriteFn: dispatchFn({
+        "M|V|f": {
+          bullets: ["Cut p99 latency 40% on the write path."],
+          raw: "Cut p99 latency 40% on the write path.",
+        },
+      }),
+    });
+    const dropped = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx],
+      rewriteFn: dispatchFn({
+        "M|V|f": {
+          bullets: ["Cut p99 latency on the write path."],
+          raw: "Cut p99 latency on the write path.",
+        },
+      }),
+    });
+    expect(preserved.aggregates[0]!.numbersPreservedRate).toBe(1);
+    expect(dropped.aggregates[0]!.numbersPreservedRate).toBe(0);
+    // Still reported in the row — only its contribution to the score is gone.
+    expect(dropped.aggregates[0]!.aggregateScore).toBe(
+      preserved.aggregates[0]!.aggregateScore,
+    );
+  });
+
+  it("defaults reverted to false for a stub that never ran the gate", async () => {
+    const fx = fixture("f", "weak", ["W"]);
+    const report = await runEval({
+      modelIds: ["M"],
+      variantIds: ["V"],
+      fixtures: [fx],
+      rewriteFn: dispatchFn({
+        "M|V|f": { bullets: ["Owned the write path end to end."], raw: "" },
+      }),
+    });
+    expect(report.records[0]!.reverted).toBe(false);
+    expect(report.records[0]!.revertedNumbers).toEqual([]);
+  });
+
   it("invokes onProgress once per cell with running counts", async () => {
     const fx = fixture("f", "weak", ["W"]);
     const good: RawRewriteOutput = {

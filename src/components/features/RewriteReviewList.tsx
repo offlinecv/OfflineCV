@@ -236,35 +236,44 @@ export function RewriteReviewList({
     <div className="flex flex-col gap-2.5">
       {warning}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-2xs text-content-secondary">
-          {total} change{total === 1 ? "" : "s"} proposed — review each below.
-        </span>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => review.acceptMany(ids)}
-            className="rounded-md px-2 py-0.5 text-2xs"
-          >
-            Accept all
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => review.rejectMany(ids)}
-            className="rounded-md px-2 py-0.5 text-2xs text-content-tertiary"
-          >
-            Reject all
-          </Button>
-        </div>
-      </div>
+      {/* Nothing to review renders no review chrome. Reachable since #778,
+          where a rejected rewrite deliberately yields zero pairs — "0 changes
+          proposed — review each below" over an empty list would be the
+          surface contradicting itself, with the `warning` above already
+          carrying the real outcome. */}
+      {total > 0 && (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-2xs text-content-secondary">
+              {total} change{total === 1 ? "" : "s"} proposed — review each below.
+            </span>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => review.acceptMany(ids)}
+                className="rounded-md px-2 py-0.5 text-2xs"
+              >
+                Accept all
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => review.rejectMany(ids)}
+                className="rounded-md px-2 py-0.5 text-2xs text-content-tertiary"
+              >
+                Reject all
+              </Button>
+            </div>
+          </div>
 
-      <ul className="flex flex-col gap-2 list-none">
-        {pairs.map((pair) => (
-          <BulletReviewRow key={pair.id} pair={pair} review={review} />
-        ))}
-      </ul>
+          <ul className="flex flex-col gap-2 list-none">
+            {pairs.map((pair) => (
+              <BulletReviewRow key={pair.id} pair={pair} review={review} />
+            ))}
+          </ul>
+        </>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button

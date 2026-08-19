@@ -2,7 +2,24 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * Per-line cleanup shared by the per-bullet and section rewrite paths.
+ * Post-processing shared by the per-bullet and section rewrite paths. Two
+ * stages, in order:
+ *
+ *   1. {@link cleanRewriteLine} — per-line cleanup of the wrappers small
+ *      instruct models put around a bullet.
+ *   2. {@link applyNumberPreservation} — the #778 reject gate: a rewrite that
+ *      drops a concrete number from the input, or invents one that was never
+ *      there, never reaches the user at all.
+ *
+ * Stage 2 is a whole-rewrite decision, not a per-line one, and that is not a
+ * convenience — section rewrite is explicitly allowed to merge, drop and
+ * reorder bullets (`MERGE_AND_PRUNE_RULE`), so output line *i* has no owning
+ * input bullet to check it against. `$4.2M` moving from bullet 2 to a merged
+ * bullet 1 is a correct rewrite; only the whole-section set diff can tell
+ * that apart from a drop. Hence a second exported function rather than an
+ * extra argument to `cleanRewriteLine`, which stays a pure `string → string`.
+ *
+ * ---
  *
  * Small instruct models emit a small but persistent set of wrappers
  * around each bullet, even when the system prompt says "no preamble,
@@ -24,6 +41,8 @@
  * bullets:" — see #150) are returned as empty so the caller's filter
  * drops them.
  */
+
+import { checkNumbersPreserved } from "./preserve-numbers.ts";
 
 /**
  * Exact-match scaffolding lines (post-cleanup). Cheap set lookup for the
@@ -194,4 +213,81 @@ export function cleanRewriteLine(line: string): string {
   if (PROMPT_ECHO_LINES.has(withoutQuotes.toLowerCase())) return "";
 
   return withoutQuotes;
+}
+
+/** What {@link applyNumberPreservation} decided, and why. */
+export interface NumberPreservationOutcome {
+  /**
+   * The units that may reach the user: the model's rewrite, or — when the
+   * rewrite dropped or invented a number — the caller's own `original`,
+   * unchanged.
+   */
+  bullets: string[];
+  /**
+   * True iff the rewrite was rejected and `bullets` is the original. The UI
+   * MUST surface this: a revert and a model that chose to change nothing
+   * produce the same empty diff, and letting them look alike is exactly the
+   * silent failure #778 exists to remove.
+   */
+  reverted: boolean;
+  /**
+   * Property of `bullets` — of what the user actually gets. True whenever
+   * `reverted` is true, because the original trivially preserves itself. This
+   * is the field the eval rubric re-derives, which is why a reverted rewrite
+   * counts toward `numbersPreservedRate`: no number reached the user wrong.
+   */
+  numbersPreserved: boolean;
+  /**
+   * Diagnostics about the MODEL'S raw output, kept whether or not it was
+   * applied — a non-empty list alongside `numbersPreserved: true` is the
+   * revert case, and it is what the revert notice quotes back ("kept your
+   * original — the rewrite would have removed $4.2M"). Reading either list as
+   * a property of `bullets` is the one misreading to avoid.
+   */
+  droppedNumbers: string[];
+  addedNumbers: string[];
+}
+
+/**
+ * The #778 reject gate: refuse a rewrite that changes the numeric facts —
+ * either by dropping a concrete number or by inventing one.
+ *
+ * `PRESERVE_NUMBERS_RULE` has been in every rewrite prompt since #609, and the
+ * 2026-08-07 eval reports measured every model in the registry breaking it —
+ * `numbersPreservedRate` between 0% and 80%, with whole figures (`$4.2M`,
+ * `120K`, `14%`) vanishing from rewritten bullets. A prompt cannot be the only
+ * enforcement of a rule this load-bearing: a fluent bullet missing its
+ * quantification is one the user accepts without re-checking, and
+ * quantification is what the score's `Specificity` dimension (weight 0.4)
+ * rewards them for having. So the guardrail becomes deterministic here —
+ * declining to rewrite beats rewriting away a fact.
+ *
+ * Gated on the full `ok`, so invention reverts too. #778 shipped drop-only on
+ * the reasoning that an invented number arrives *visible* with a warning on
+ * it; the eval data retired that. Invention is the worse half for a résumé
+ * tool — a dropped figure costs the user a true claim they can restore, an
+ * invented one puts a false claim in the document they hand an employer — and
+ * a drop-only gate could not reach the ~100% `numbersPreservedRate` #778 asked
+ * for, because whole failure cells (Qwen/baseline inventing `30%` on a fixture
+ * with zero drops) never triggered it.
+ *
+ * An empty rewrite is deliberately NOT reverted. Every caller already treats
+ * "the model returned nothing" as a failed generation with its own handling;
+ * turning it into a silent "kept your original" would hide the failure behind
+ * a success, and there is no rewrite there to reject in the first place.
+ */
+export function applyNumberPreservation(
+  original: readonly string[],
+  rewritten: readonly string[],
+): NumberPreservationOutcome {
+  const preservation = checkNumbersPreserved(original, rewritten);
+  const shouldRevert = rewritten.length > 0 && !preservation.ok;
+
+  return {
+    bullets: shouldRevert ? [...original] : [...rewritten],
+    reverted: shouldRevert,
+    numbersPreserved: shouldRevert ? true : preservation.ok,
+    droppedNumbers: preservation.dropped,
+    addedNumbers: preservation.added,
+  };
 }

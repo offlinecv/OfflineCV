@@ -98,7 +98,13 @@ describe("rewriteSummaryWithLlm", () => {
     const { engine } = makeEngine(async () =>
       reply("Senior engineer.\nLed a team of 5.\nShipped 3 products."),
     );
-    const out = await rewriteSummaryWithLlm("Engineer.", engine, TEST_MODEL);
+    // Input carries the headcount the stub returns so the number gate stays a
+    // no-op — this test is about line collapsing, not about the gate.
+    const out = await rewriteSummaryWithLlm(
+      "Engineer with a team of 5.",
+      engine,
+      TEST_MODEL,
+    );
     expect(out.text).toBe("Senior engineer. Led a team of 5. Shipped 3 products.");
   });
 
@@ -122,7 +128,7 @@ describe("rewriteSummaryWithLlm", () => {
     expect(out.numbersPreserved).toBe(true);
   });
 
-  it("flags numbersPreserved=false when a metric is dropped", async () => {
+  it("rejects a rewrite that drops a metric and returns the original paragraph (#778)", async () => {
     const { engine } = makeEngine(async () =>
       reply("Senior engineer with a decade of experience."),
     );
@@ -131,8 +137,23 @@ describe("rewriteSummaryWithLlm", () => {
       engine,
       TEST_MODEL,
     );
-    expect(out.numbersPreserved).toBe(false);
+    expect(out.text).toBe("I drove $5K in revenue per quarter.");
+    expect(out.reverted).toBe(true);
+    expect(out.numbersPreserved).toBe(true);
     expect(out.droppedNumbers).toEqual(["$5K"]);
+  });
+
+  it("leaves an empty generation empty rather than reverting it (#778)", async () => {
+    // A blank response is a failed generation the caller already handles; the
+    // gate must not dress it up as "kept your original".
+    const { engine } = makeEngine(async () => reply("   "));
+    const out = await rewriteSummaryWithLlm(
+      "I drove $5K in revenue per quarter.",
+      engine,
+      TEST_MODEL,
+    );
+    expect(out.text).toBe("");
+    expect(out.reverted).toBe(false);
   });
 
   it("returns an empty text on null model content without throwing", async () => {

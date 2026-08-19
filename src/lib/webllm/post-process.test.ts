@@ -3,7 +3,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { cleanRewriteLine } from "./post-process.ts";
+import {
+  applyNumberPreservation,
+  cleanRewriteLine,
+} from "./post-process.ts";
 
 describe("cleanRewriteLine", () => {
   it("returns empty for whitespace-only input", () => {
@@ -269,5 +272,127 @@ describe("cleanRewriteLine", () => {
         cleanRewriteLine("- **Developed** and **implemented** a design system."),
       ).toBe("Developed and **implemented** a design system.");
     });
+  });
+});
+
+describe("applyNumberPreservation (#778)", () => {
+  it("keeps a rewrite that carries every number through", () => {
+    const out = applyNumberPreservation(
+      ["Grew ARR to $4.2M across 2 regions."],
+      ["Grew ARR to $4.2M in 2 regions."],
+    );
+    expect(out.bullets).toEqual(["Grew ARR to $4.2M in 2 regions."]);
+    expect(out.reverted).toBe(false);
+    expect(out.numbersPreserved).toBe(true);
+    expect(out.droppedNumbers).toEqual([]);
+  });
+
+  it("rejects a rewrite that drops a number and returns the ORIGINAL", () => {
+    const original = ["Grew ARR to $4.2M in FY24."];
+    const out = applyNumberPreservation(original, ["Grew ARR substantially."]);
+    expect(out.bullets).toEqual(original);
+    expect(out.reverted).toBe(true);
+    expect(out.droppedNumbers).toEqual(["$4.2M"]);
+  });
+
+  it("counts a reverted rewrite as number-preserving — that is the user-facing outcome", () => {
+    // The metric measures what reached the user, and what reached the user is
+    // their own bullet with every figure intact.
+    const out = applyNumberPreservation(
+      ["Cut latency 40%."],
+      ["Cut latency."],
+    );
+    expect(out.reverted).toBe(true);
+    expect(out.numbersPreserved).toBe(true);
+  });
+
+  it("does not copy the caller's arrays into the result", () => {
+    const original = ["Cut latency 40%."];
+    const out = applyNumberPreservation(original, ["Cut latency."]);
+    expect(out.bullets).not.toBe(original);
+    out.bullets.push("mutated");
+    expect(original).toEqual(["Cut latency 40%."]);
+  });
+
+  it("allows a merge that moves a number into another bullet", () => {
+    // The gate is a whole-section set diff, not a per-line one, precisely
+    // so `MERGE_AND_PRUNE_RULE` stays usable.
+    const out = applyNumberPreservation(
+      ["Cut latency 40%.", "Owned the write path."],
+      ["Owned the write path, cutting latency 40%."],
+    );
+    expect(out.reverted).toBe(false);
+    expect(out.bullets).toHaveLength(1);
+  });
+
+  it("rejects a rewrite that INVENTS a number even though it dropped none", () => {
+    // The widening on top of #778: an invented figure is a false claim in a
+    // document the user hands an employer, so it is gated exactly like a drop.
+    const original = ["Improved availability."];
+    const out = applyNumberPreservation(
+      original,
+      ["Improved availability to 99.9%."],
+    );
+    expect(out.bullets).toEqual(original);
+    expect(out.reverted).toBe(true);
+    expect(out.droppedNumbers).toEqual([]);
+    expect(out.addedNumbers).toEqual(["99.9%"]);
+    // Same reasoning as the drop case: the original is what reached the user.
+    expect(out.numbersPreserved).toBe(true);
+  });
+
+  it("rejects a rewrite that both drops and invents, and reports both lists", () => {
+    const original = ["Cut latency 40%."];
+    const out = applyNumberPreservation(original, ["Cut latency 4%."]);
+    expect(out.bullets).toEqual(original);
+    expect(out.reverted).toBe(true);
+    expect(out.droppedNumbers).toEqual(["40%"]);
+    expect(out.addedNumbers).toEqual(["4%"]);
+  });
+
+  it("leaves a rewrite that changes no numeric fact alone", () => {
+    // The gate's whole job is to be invisible on a clean rewrite — no drop,
+    // no invention, so the model's text is what ships.
+    const out = applyNumberPreservation(
+      ["Cut p99 latency 40% for 1,200 users."],
+      ["Cut p99 latency 40%, serving 1,200 users."],
+    );
+    expect(out.reverted).toBe(false);
+    expect(out.numbersPreserved).toBe(true);
+    expect(out.droppedNumbers).toEqual([]);
+    expect(out.addedNumbers).toEqual([]);
+    expect(out.bullets).toEqual(["Cut p99 latency 40%, serving 1,200 users."]);
+  });
+
+  it("leaves an empty rewrite empty — a failed generation is not a rejected one", () => {
+    const out = applyNumberPreservation(["Cut latency 40%."], []);
+    expect(out.bullets).toEqual([]);
+    expect(out.reverted).toBe(false);
+  });
+
+  it("is a no-op when the input carries no numbers at all", () => {
+    const out = applyNumberPreservation(
+      ["Owned the write path."],
+      ["Owned and hardened the write path."],
+    );
+    expect(out.reverted).toBe(false);
+    expect(out.bullets).toEqual(["Owned and hardened the write path."]);
+  });
+
+  it("rejects on the extraction gaps #778 closed — `~50` and `50-100`", () => {
+    // The gate is only as good as the detector under it; these two would have
+    // sailed through before the extraction fix.
+    expect(
+      applyNumberPreservation(
+        ["Triaged ~50 tickets a week."],
+        ["Triaged tickets each week."],
+      ).reverted,
+    ).toBe(true);
+    expect(
+      applyNumberPreservation(
+        ["Handled 50-100 tickets a week."],
+        ["Handled a high volume of tickets."],
+      ).reverted,
+    ).toBe(true);
   });
 });

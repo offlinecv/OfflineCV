@@ -18,7 +18,7 @@ import { startsWithActionVerb } from "./verbs.ts";
  *
  * The six criteria are the issue #65 AC list:
  *
- *   1. numbersPreserved   — multiset of numeric tokens unchanged
+ *   1. numbersPreserved   — set of numeric tokens unchanged
  *   2. oneLinePerBullet   — no embedded `\n` after the runner's split
  *   3. actionVerbLead     — first token of each bullet in the curated set
  *   4. lengthSanity       — each bullet in a sane char band

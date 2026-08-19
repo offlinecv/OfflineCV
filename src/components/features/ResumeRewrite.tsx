@@ -425,13 +425,25 @@ function CompletedList({
             ✓
           </span>
           <span>{outcome.input.label}</span>
-          {!outcome.data.numbersPreserved && (
+          {/* #778: a reverted section preserves every number by construction,
+              so `numbersPreserved` alone would render it as a clean pass and
+              the user would never learn their section went unrewritten. */}
+          {outcome.data.reverted ? (
             <span
               className="rounded bg-feedback-warning-bg px-1.5 py-0.5 text-3xs text-feedback-warning-text"
-              title="A metric was altered or removed"
+              title="The rewrite dropped or invented a metric, so the original was kept"
             >
-              metric drift
+              kept original
             </span>
+          ) : (
+            !outcome.data.numbersPreserved && (
+              <span
+                className="rounded bg-feedback-warning-bg px-1.5 py-0.5 text-3xs text-feedback-warning-text"
+                title="A metric was altered or removed"
+              >
+                metric drift
+              </span>
+            )
           )}
         </li>
       ))}

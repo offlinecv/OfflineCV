@@ -110,12 +110,12 @@ export interface RubricResult {
   /** Per-bullet diagnostic detail surfaced in the report. */
   perBullet: PerBulletDiagnostic[];
   /**
-   * Numbers that the model dropped from input (multiset diff). Empty when
+   * Numbers that the model dropped from input (set diff). Empty when
    * numbersPreserved is true.
    */
   droppedNumbers: string[];
   /**
-   * Numbers that appeared in output but not input (multiset diff). Empty
+   * Numbers that appeared in output but not input (set diff). Empty
    * when numbersPreserved is true.
    */
   addedNumbers: string[];
@@ -146,6 +146,26 @@ export interface RawRewriteOutput {
    * preamble leakage across the whole response (not just per-bullet).
    */
   raw: string;
+  /**
+   * The #778 reject gate fired: the model dropped or invented a number, so
+   * `bullets` is the fixture's input rather than the model's rewrite. Optional
+   * because the Node test stubs produce output directly and never run the
+   * gate; absent is read as `false`.
+   *
+   * Diagnostic only — it is deliberately NOT a rubric criterion. A revert is a
+   * *success* of the guardrail and a *failure* of the model, and folding those
+   * into one pass/fail would make the composite score unreadable.
+   */
+  reverted?: boolean;
+  /**
+   * The numeric tokens that triggered the revert — dropped ones first, then
+   * invented ones, undifferentiated because the cell's verdict is the same
+   * either way. Recorded because the rubric re-derives its diff from
+   * `bullets`, which after a revert equals the input — so without this the
+   * committed report would show a clean cell with no trace of what the model
+   * actually lost or made up.
+   */
+  revertedNumbers?: readonly string[];
 }
 
 /**
@@ -179,6 +199,18 @@ export interface RunRecord {
   inputBulletCount: number;
   outputBulletCount: number;
   rubric: RubricResult;
+  /**
+   * The #778 gate rejected this cell's rewrite and the input bullets were
+   * scored instead. `numbersPreserved` on a reverted row is true by
+   * construction, so this is the field that keeps the rate honest — read the
+   * two together, never `Numbers` alone.
+   */
+  reverted: boolean;
+  /**
+   * The numeric tokens that triggered the revert — dropped then invented,
+   * undifferentiated; empty when the gate did not fire.
+   */
+  revertedNumbers: string[];
   /** Wall-clock ms spent inside the `RewriteFn` (browser-leg only). */
   rewriteDurationMs: number | null;
   /**
@@ -215,8 +247,29 @@ export interface AggregateRow {
   variantId: string;
   /** Number of fixtures that produced a usable rubric (i.e. not errored). */
   scoredFixtures: number;
-  /** 0..1 per-criterion pass rate across scored fixtures. */
+  /**
+   * 0..1 per-criterion pass rate across scored fixtures.
+   *
+   * Since #778 this is a rate over the DELIVERED output, so a reverted cell
+   * counts as preserved. Read it with `revertedRate`, which is the only column
+   * that separates the two ways to score 100% here: 100%/0% is a model that
+   * kept every number, 100%/60% is the gate carrying it. Now that the gate
+   * covers invention as well as dropping, every cell that produced any output
+   * at all scores true — the rate is ~100% BY CONSTRUCTION, and reading it
+   * without `revertedRate` says nothing about the model.
+   *
+   * A diagnostic, NOT a criterion — excluded from `aggregateScore` for exactly
+   * that reason. A term that is ~1.0 for every model adds no signal to the
+   * composite and dilutes the criteria that do discriminate.
+   */
   numbersPreservedRate: number;
+  /**
+   * 0..1 share of scored fixtures whose rewrite the #778 gate rejected.
+   * A diagnostic, NOT a criterion — deliberately excluded from
+   * `aggregateScore`, since a revert is the guardrail working and scoring it
+   * as either a pass or a fail would misstate the run.
+   */
+  revertedRate: number;
   oneLineRate: number;
   actionVerbRate: number;
   lengthSanityRate: number;

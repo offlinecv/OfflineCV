@@ -6,8 +6,10 @@ import {
   trackWebllmSectionRewriteCompleted,
   trackWebllmSectionRewriteStarted,
 } from "../analytics.ts";
-import { cleanRewriteLine } from "./post-process.ts";
-import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import {
+  applyNumberPreservation,
+  cleanRewriteLine,
+} from "./post-process.ts";
 import {
   composeRulesPrompt,
   keepIfAlreadyStrongRule,
@@ -143,11 +145,19 @@ export interface SectionRewriteOptions {
 }
 
 export interface SectionRewriteResult {
-  /** The rewritten bullets (M may differ from N). */
+  /**
+   * What the user gets (M may differ from N) — the model's rewrite, or the
+   * input bullets unchanged when the #778 gate rejected it.
+   */
   bullets: string[];
-  /** True iff every input number survived and none were invented. */
+  /** True iff `bullets` carries every input number and invents none. */
   numbersPreserved: boolean;
-  /** Numeric tokens that did not survive (UI surfaces these inline). */
+  /**
+   * The rewrite dropped a number and was rejected; `bullets` is the input
+   * (#778). The panel must say so — see `NumberPreservationWarning`.
+   */
+  reverted: boolean;
+  /** Numeric tokens the model dropped (UI surfaces these inline). */
   droppedNumbers: string[];
   /** Numeric tokens that appeared from nowhere (UI surfaces these inline). */
   addedNumbers: string[];
@@ -220,13 +230,24 @@ export async function rewriteSectionWithLlm(
       .map((line) => cleanRewriteLine(line))
       .filter((line) => line.length > 0);
 
-    const preservation = checkNumbersPreserved(bullets, rewrittenBullets);
+    // #778: a rewrite that drops OR invents a number is rejected here and the
+    // input bullets are returned instead.
+    const outcome = applyNumberPreservation(bullets, rewrittenBullets);
 
+    // Telemetry measures the MODEL, not the delivered outcome: every property
+    // below describes `rewrittenBullets`, so `numbers_preserved` means the
+    // same thing after #778 as before it and the series stays comparable
+    // across the release. `reverted` is what says whether the gate fired: the
+    // gate now covers both halves, so `numbers_preserved: false` with
+    // `reverted: false` narrows to a generation that came back empty.
     trackWebllmSectionRewriteCompleted({
       model: modelId,
       inputBulletCount: bullets.length,
       outputBulletCount: rewrittenBullets.length,
-      numbersPreserved: preservation.ok,
+      numbersPreserved:
+        outcome.droppedNumbers.length === 0 &&
+        outcome.addedNumbers.length === 0,
+      reverted: outcome.reverted,
     });
 
     // Same gating as the per-bullet path: only count the first *successful*
@@ -241,10 +262,11 @@ export async function rewriteSectionWithLlm(
     }
 
     return {
-      bullets: rewrittenBullets,
-      numbersPreserved: preservation.ok,
-      droppedNumbers: preservation.dropped,
-      addedNumbers: preservation.added,
+      bullets: outcome.bullets,
+      numbersPreserved: outcome.numbersPreserved,
+      reverted: outcome.reverted,
+      droppedNumbers: outcome.droppedNumbers,
+      addedNumbers: outcome.addedNumbers,
     };
   } finally {
     releaseInference(modelId);

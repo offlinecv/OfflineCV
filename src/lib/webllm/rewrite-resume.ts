@@ -108,6 +108,14 @@ export interface ResumeRewriteResult {
    * True iff every section's `numbersPreserved` was true. The UI aggregates
    * each section's `dropped` / `added` tokens for the warning copy, so the
    * orchestrator only needs the boolean.
+   *
+   * Since #778 this is a property of what the user RECEIVED, so a section
+   * whose rewrite was rejected counts as preserved — the original preserves
+   * itself. It is therefore no longer sufficient to drive the panel's tone:
+   * read `sections[].data.reverted` alongside it, or a run where every section
+   * was rejected renders as a clean success. Now that invention reverts too,
+   * the only way this reads false is a section whose generation came back
+   * empty — there is no rewrite there to reject.
    */
   allNumbersPreserved: boolean;
 }
@@ -239,13 +247,21 @@ export async function rewriteResumeWithLlm(
     completed.push(outcome);
     accumulateOutcomeSignals(outcome, usedVerbs, usedPhrases);
 
+    // Telemetry measures the MODEL, not the delivered outcome — the same rule
+    // `rewrite-section.ts` follows. `outcome.data.numbersPreserved` is a
+    // property of what the user RECEIVED and is therefore true on every revert,
+    // so passing it through would flip `numbers_preserved` from "the model kept
+    // the numbers" to "the user got clean numbers" with no rename and no way to
+    // compare against anything logged before #778. Re-derive it from the raw
+    // diff lists and report the gate separately as `reverted`.
     trackWebllmResumeRewriteSectionCompleted({
       model: modelId,
       sectionIndex: i,
       sectionKind: outcome.kind,
       inputUnitCount: inputUnitCountOf(section),
       outputUnitCount: outputUnitCountOf(outcome),
-      numbersPreserved: outcome.data.numbersPreserved,
+      numbersPreserved: modelPreservedNumbers(outcome),
+      reverted: outcome.data.reverted,
     });
   }
 
@@ -254,7 +270,10 @@ export async function rewriteResumeWithLlm(
   trackWebllmResumeRewriteCompleted({
     model: modelId,
     sectionCount: totalSections,
-    allNumbersPreserved,
+    // Aggregate of the same MODEL-facing property, not of the delivered
+    // `allNumbersPreserved` the function returns to the UI.
+    allNumbersPreserved: completed.every(modelPreservedNumbers),
+    anyReverted: completed.some((o) => o.data.reverted),
   });
 
   // Per-model one-shot — only counts a run that produced at least one
@@ -276,6 +295,19 @@ export async function rewriteResumeWithLlm(
   });
 
   return { sections: completed, allNumbersPreserved };
+}
+
+/**
+ * Did the MODEL'S raw output preserve the section's numbers? Re-derived from
+ * the diff lists rather than read off `data.numbersPreserved`, which since #778
+ * describes the delivered units and is true on every revert by construction.
+ * This is the property the telemetry series has always carried.
+ */
+function modelPreservedNumbers(outcome: SectionOutcome): boolean {
+  return (
+    outcome.data.droppedNumbers.length === 0 &&
+    outcome.data.addedNumbers.length === 0
+  );
 }
 
 function isNonEmptySection(section: SectionInput): boolean {
