@@ -61,7 +61,7 @@ describe("Headline round-trip", () => {
     };
     const modifiedCascade = { ...baseCascade, canonical };
     const model = buildAtsResumeModel(modifiedCascade, scoreFor(modifiedCascade));
-    const bytes = await renderAtsResumePdf(model);
+    const { bytes } = await renderAtsResumePdf(model);
     const reparsed = await runCascade(bytes);
     return {
       headline: reparsed.canonical.fields.headline,

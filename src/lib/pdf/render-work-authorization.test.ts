@@ -79,9 +79,9 @@ describe("renderAtsResumePdf — work authorization on the contact line (#792)",
   let glyphLossSites: string[];
 
   beforeAll(async () => {
-    const bytes = await renderAtsResumePdf(MODEL);
+    const { bytes } = await renderAtsResumePdf(MODEL);
     stated = await extractPdfDrawnLines(bytes);
-    silent = await extractPdfDrawnLines(await renderAtsResumePdf(SILENT_MODEL));
+    silent = await extractPdfDrawnLines((await renderAtsResumePdf(SILENT_MODEL)).bytes);
     urls = await linkAnnotationUrls(bytes);
     glyphLossSites = (
       await findExportGlyphLosses({

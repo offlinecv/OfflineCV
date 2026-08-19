@@ -45,14 +45,14 @@ const MODEL: AtsResumeModel = {
 
 describe("renderAtsResumePdf", () => {
   it("returns a non-trivial PDF with the %PDF magic header", async () => {
-    const bytes = await renderAtsResumePdf(MODEL);
+    const { bytes } = await renderAtsResumePdf(MODEL);
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(500);
     expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
   });
 
   it("produces selectable, searchable text (AC#3) for name + headings", async () => {
-    const bytes = await renderAtsResumePdf(MODEL);
+    const { bytes } = await renderAtsResumePdf(MODEL);
     const text = await extractPdfText(bytes);
     expect(text).toContain("Jane Candidate");
     expect(text).toMatch(/EXPERIENCE/i);
@@ -74,7 +74,7 @@ describe("renderAtsResumePdf", () => {
       contact: { name: "Jane Candidate", links: [] },
       sections: [{ heading: "Experience", entries: manyEntries }],
     };
-    const bytes = await renderAtsResumePdf(bigModel);
+    const { bytes } = await renderAtsResumePdf(bigModel);
     const pdfjs = await import("pdfjs-dist");
     const doc = await pdfjs.getDocument({
       data: bytes.slice(),
@@ -111,7 +111,7 @@ describe("renderAtsResumePdf", () => {
       ],
     };
 
-    const bytes = await renderAtsResumePdf(model);
+    const { bytes } = await renderAtsResumePdf(model);
     const pdfjs = await import("pdfjs-dist");
     const doc = await pdfjs.getDocument({
       data: bytes.slice(),
@@ -171,7 +171,7 @@ describe("renderAtsResumePdf", () => {
       ],
     };
 
-    const bytes = await renderAtsResumePdf(model);
+    const { bytes } = await renderAtsResumePdf(model);
     const pdfjs = await import("pdfjs-dist");
     const doc = await pdfjs.getDocument({
       data: bytes.slice(),
@@ -229,9 +229,8 @@ describe("renderAtsResumePdf", () => {
     ];
 
     it.each(crashingGlyphs)("does not throw on %s", async (_label, text) => {
-      await expect(renderAtsResumePdf(glyphModel(text))).resolves.toBeInstanceOf(
-        Uint8Array,
-      );
+      const { bytes } = await renderAtsResumePdf(glyphModel(text));
+      expect(bytes).toBeInstanceOf(Uint8Array);
     });
 
     // #298 review — a section heading is drawn with `uppercase: true`, and
@@ -257,9 +256,8 @@ describe("renderAtsResumePdf", () => {
     it.each(caseExpandingHeadings)(
       "does not throw on an uppercased heading with %s",
       async (_label, heading) => {
-        await expect(
-          renderAtsResumePdf(headingModel(heading)),
-        ).resolves.toBeInstanceOf(Uint8Array);
+        const { bytes } = await renderAtsResumePdf(headingModel(heading));
+        expect(bytes).toBeInstanceOf(Uint8Array);
       },
     );
 
@@ -281,9 +279,8 @@ describe("renderAtsResumePdf", () => {
         0x2600, 0x4e2d, 0xfb01, 0x1f680,
       ];
       const text = codePoints.map((cp) => String.fromCodePoint(cp)).join(" X ");
-      await expect(renderAtsResumePdf(glyphModel(text))).resolves.toBeInstanceOf(
-        Uint8Array,
-      );
+      const { bytes } = await renderAtsResumePdf(glyphModel(text));
+      expect(bytes).toBeInstanceOf(Uint8Array);
     });
   });
 
@@ -383,7 +380,7 @@ describe("#425 render — headline + metric bold", () => {
       },
       sections: [],
     };
-    const text = await extractPdfText(await renderAtsResumePdf(model));
+    const text = await extractPdfText((await renderAtsResumePdf(model)).bytes);
     expect(text).toContain("Jane Candidate");
     expect(text).toContain("Engineering Lead");
   });
@@ -404,7 +401,7 @@ describe("#425 render — headline + metric bold", () => {
         },
       ],
     };
-    const text = await extractPdfText(await renderAtsResumePdf(model));
+    const text = await extractPdfText((await renderAtsResumePdf(model)).bytes);
     // The emphasis markers are stripped before drawing, so no `*` reaches the
     // page — the visible text is the un-emphasized bullet (round-trip guard).
     // `extractPdfText` emits each drawn run as a separate token, so assert the
@@ -434,7 +431,7 @@ describe("#425 render — headline + metric bold", () => {
         },
       ],
     };
-    const text = await extractPdfText(await renderAtsResumePdf(model));
+    const text = await extractPdfText((await renderAtsResumePdf(model)).bytes);
     expect(text).not.toContain(EMPHASIS_OPEN);
     expect(text).not.toContain(EMPHASIS_CLOSE);
     for (const token of ["Patent", "US10275736B1", "editor", "2019"])

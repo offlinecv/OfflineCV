@@ -97,7 +97,7 @@ describe("§7 header-vs-entry — a one-line `Title  Dates` role routes as a dat
 
   beforeAll(async () => {
     model = buildAtsResumeModel(makeResult(), fakeScore);
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("renders the title-only role with its range drawn flush-right on the header (the entry cue)", () => {

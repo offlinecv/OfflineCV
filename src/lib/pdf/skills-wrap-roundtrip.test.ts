@@ -105,7 +105,7 @@ describe("#301 — multi-word skill does not split at the line-wrap boundary", (
       withSyntheticSkills,
       scoreFor(withSyntheticSkills),
     );
-    const bytes = await renderAtsResumePdf(model);
+    const { bytes } = await renderAtsResumePdf(model);
     const reparsed = await runCascade(bytes);
     reparsedSkills = reparsed.canonical.fields.skills ?? [];
   }, 20000);
@@ -155,7 +155,7 @@ describe("#791 — a categorised-plus-ungrouped skills list survives export and 
       withMixedSkills,
       scoreFor(withMixedSkills),
     );
-    const bytes = await renderAtsResumePdf(model);
+    const { bytes } = await renderAtsResumePdf(model);
     const reparsed = await runCascade(bytes);
     reparsedSkills = reparsed.canonical.fields.skills ?? [];
   }, 20000);

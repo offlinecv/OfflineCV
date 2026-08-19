@@ -123,7 +123,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
     vi.resetModules();
     const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-    const bytes = await renderAtsResumePdf(model("Poppins embed check"));
+    const { bytes } = await renderAtsResumePdf(model("Poppins embed check"));
     expect(fetchMock).toHaveBeenCalled();
     await expect(hasEmbeddedFontFile2(bytes)).resolves.toBe(true);
   });
@@ -133,7 +133,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
     vi.resetModules();
     const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-    const bytes = await renderAtsResumePdf(model("fallback check"));
+    const { bytes } = await renderAtsResumePdf(model("fallback check"));
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(bytes.length).toBeGreaterThan(500);
     await expect(hasEmbeddedFontFile2(bytes)).resolves.toBe(false);
@@ -146,7 +146,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
     const { renderAtsResumePdf: renderEmbedded } = await import(
       "./render-ats-pdf.ts"
     );
-    const embeddedBytes = await renderEmbedded(model("Łukasz, Wrocław"));
+    const { bytes: embeddedBytes } = await renderEmbedded(model("Łukasz, Wrocław"));
     const embeddedText = await extractPdfText(embeddedBytes);
     expect(embeddedText).toContain("ł");
 
@@ -157,7 +157,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
     const { renderAtsResumePdf: renderFallback } = await import(
       "./render-ats-pdf.ts"
     );
-    const fallbackBytes = await renderFallback(model("Łukasz, Wrocław"));
+    const { bytes: fallbackBytes } = await renderFallback(model("Łukasz, Wrocław"));
     const fallbackText = await extractPdfText(fallbackBytes);
     expect(fallbackText).not.toContain("ł");
     expect(fallbackText).toContain("?");
@@ -186,7 +186,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
         vi.resetModules();
         const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-        const bytes = await renderAtsResumePdf(model(`Alpha ${ch} Omega`));
+        const { bytes } = await renderAtsResumePdf(model(`Alpha ${ch} Omega`));
         const text = await extractPdfText(bytes);
 
         // The defect, stated directly.
@@ -209,7 +209,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       vi.resetModules();
       const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-      const bytes = await renderAtsResumePdf(model("Łukasz → Wrocław"));
+      const { bytes } = await renderAtsResumePdf(model("Łukasz → Wrocław"));
       const text = await extractPdfText(bytes);
 
       await expect(hasEmbeddedFontFile2(bytes)).resolves.toBe(true);
@@ -238,7 +238,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
         vi.resetModules();
         const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-        const bytes = await renderAtsResumePdf(model("Alpha \0 Omega"));
+        const { bytes } = await renderAtsResumePdf(model("Alpha \0 Omega"));
         const text = await extractPdfText(bytes);
 
         expect(text).not.toContain("\0");
@@ -259,7 +259,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       vi.resetModules();
       const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-      const bytes = await renderAtsResumePdf({
+      const { bytes } = await renderAtsResumePdf({
         contact: { name: "Jane Candidate", links: [] },
         sections: [
           {
@@ -289,7 +289,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       vi.resetModules();
       const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-      const bytes = await renderAtsResumePdf(model("http error check"));
+      const { bytes } = await renderAtsResumePdf(model("http error check"));
 
       expect(fetchMock).toHaveBeenCalled();
       // The load bailed on the status. Without the check we would have read the
@@ -310,7 +310,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       vi.resetModules();
       const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-      const first = await renderAtsResumePdf(model("attempt one"));
+      const { bytes: first } = await renderAtsResumePdf(model("attempt one"));
       await expect(hasEmbeddedFontFile2(first)).resolves.toBe(false);
       const callsWhileFailing = failing.mock.calls.length;
       expect(callsWhileFailing).toBeGreaterThan(0);
@@ -319,7 +319,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       // point. The same module instance, with its cache already poisoned by the
       // failure above, must issue a fresh request.
       const recovered = stubFetchSucceeds();
-      const second = await renderAtsResumePdf(model("attempt two"));
+      const { bytes: second } = await renderAtsResumePdf(model("attempt two"));
 
       expect(recovered).toHaveBeenCalled();
       await expect(hasEmbeddedFontFile2(second)).resolves.toBe(true);

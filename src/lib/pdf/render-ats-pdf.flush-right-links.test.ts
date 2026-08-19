@@ -90,7 +90,7 @@ const MODEL: AtsResumeModel = {
 
 describe("renderAtsResumePdf — flush-right dates + link annotations (#425)", () => {
   it("draws the entry date flush-right against the content margin", async () => {
-    const { items } = await inspect(await renderAtsResumePdf(MODEL));
+    const { items } = await inspect((await renderAtsResumePdf(MODEL)).bytes);
     // A year token from the date range, on the right side of the page.
     const dateItems = items.filter((i) => /20(20|23)/.test(i.str) && i.x > 300);
     expect(dateItems.length).toBeGreaterThan(0);
@@ -105,7 +105,7 @@ describe("renderAtsResumePdf — flush-right dates + link annotations (#425)", (
   });
 
   it("registers clickable URI link annotations for the contact links", async () => {
-    const { links } = await inspect(await renderAtsResumePdf(MODEL));
+    const { links } = await inspect((await renderAtsResumePdf(MODEL)).bytes);
     expect(links).toContain("https://linkedin.com/in/jane");
     expect(links).toContain("https://github.com/jane");
     expect(links).toContain("mailto:jane@example.com");
@@ -125,7 +125,7 @@ describe("renderAtsResumePdf — flush-right dates + link annotations (#425)", (
       },
       sections: [],
     };
-    const { annots } = await inspect(await renderAtsResumePdf(model));
+    const { annots } = await inspect((await renderAtsResumePdf(model)).bytes);
     const email = annots.find((a) => a.url === "mailto:jane@example.com");
     const site = annots.find((a) => a.url.startsWith("https://example.com"));
     expect(email).toBeDefined();
@@ -148,7 +148,7 @@ describe("renderAtsResumePdf — flush-right dates + link annotations (#425)", (
     };
     // pdfjs may normalize a bare-host URL with a trailing slash, so match on the
     // scheme+host rather than an exact string.
-    const { links } = await inspect(await renderAtsResumePdf(model));
+    const { links } = await inspect((await renderAtsResumePdf(model)).bytes);
     expect(links.some((u) => u.startsWith("https://www.jane.dev"))).toBe(true);
     expect(links.some((u) => u.startsWith("http://portfolio.example"))).toBe(true);
     // The naive display-rebuilt targets (www dropped, forced https) must NOT appear.

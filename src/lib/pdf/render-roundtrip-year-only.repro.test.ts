@@ -71,7 +71,7 @@ describe("#358 — year-only experience role round-trips (no title/company swap,
 
   beforeAll(async () => {
     const original = makeResult();
-    const bytes = await renderAtsResumePdf(buildAtsResumeModel(original, STUB_SCORE));
+    const { bytes } = await renderAtsResumePdf(buildAtsResumeModel(original, STUB_SCORE));
     reparsed = await runCascade(bytes);
   });
 

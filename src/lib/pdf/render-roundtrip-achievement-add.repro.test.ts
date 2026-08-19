@@ -94,7 +94,7 @@ describe("#455 — an added achievement round-trips through the export", () => {
       {},
     );
     model = buildAtsResumeModel(makeResult(edited.fields), fakeScore);
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("composes the added type + description into the canonical title", () => {

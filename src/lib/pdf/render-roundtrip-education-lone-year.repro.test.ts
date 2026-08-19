@@ -94,7 +94,7 @@ describe("#618 — degreed entry with a lone graduation year", () => {
       }),
       fakeScore,
     );
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("renders `2023` as flush-right `subLineDate` — no glue on the sub-line", () => {
@@ -171,7 +171,7 @@ describe("#618 — regression guard for #302 (two degree-less entries stay two)"
       }),
       fakeScore,
     );
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("re-parses BOTH degree-less entries as SEPARATE entries, not one merged", () => {
@@ -207,7 +207,7 @@ describe("#618 — control: a range date on Education still round-trips exactly 
       }),
       fakeScore,
     );
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("range: sub-line free of the date, `subLineDate` carries the range (pre-#618 shape)", () => {

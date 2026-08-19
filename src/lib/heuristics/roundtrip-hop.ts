@@ -78,7 +78,7 @@ export async function runRoundtripHop(
     layer = HOP_LAYERS[1];
     const model = buildAtsResumeModel(before, score);
     layer = HOP_LAYERS[2];
-    const bytes = await renderAtsResumePdf(model);
+    const { bytes } = await renderAtsResumePdf(model);
     layer = HOP_LAYERS[3];
     return { after: await runCascade(bytes) };
   } catch (err) {

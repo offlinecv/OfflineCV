@@ -71,7 +71,7 @@ describe("#425 — full www-strip contact link round-trips", { timeout: 20000 },
     // The displayed link is fully stripped (no scheme, no www).
     expect(model.contact.links).toContain("linkedin.com/in/janesmith");
 
-    const p3 = await runCascade(await renderAtsResumePdf(model));
+    const p3 = await runCascade((await renderAtsResumePdf(model)).bytes);
     // The www-less display re-parses to the same canonical linkedin_url.
     expect(p3.canonical.fields.linkedin_url).toBe(p1.canonical.fields.linkedin_url);
     expect(p3.canonical.fields.linkedin_url).toBe("https://linkedin.com/in/janesmith");

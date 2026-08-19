@@ -543,7 +543,7 @@ async function editRoundtrip(
       display,
       scoreEditedResume(applied, p1.triggers, Object.keys(edits.bullets)),
     );
-    return { p3: await runCascade(await renderAtsResumePdf(model)) };
+    return { p3: await runCascade((await renderAtsResumePdf(model)).bytes) };
   } catch (err) {
     return { renderError: `export/re-parse threw: ${(err as Error).message}` };
   }

@@ -118,7 +118,7 @@ async function renderAndReparse(
     linkAnnotations: [],
     rawText: "",
   } as unknown as CascadeResult;
-  const bytes = await renderAtsResumePdf(buildAtsResumeModel(display, STUB_SCORE));
+  const { bytes } = await renderAtsResumePdf(buildAtsResumeModel(display, STUB_SCORE));
   return runCascade(bytes);
 }
 

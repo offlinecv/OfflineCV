@@ -80,7 +80,7 @@ describe("empty-company + location round-trip (#466 / PR #483 review)", () => {
 
   beforeAll(async () => {
     model = buildAtsResumeModel(makeResult(), fakeScore);
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("emits Title,Team on the header line and City,ST on a subLine", () => {

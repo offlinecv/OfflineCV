@@ -61,6 +61,14 @@
  * estimated. This is manual pdf-lib layout, not an HTML/Chromium print path —
  * CSS `break-after: avoid` / `orphans` / `widows` do not apply here.
  *
+ * The engine also REPORTS what it could not render cleanly (#621): it returns
+ * `{ bytes, findings }`, where a finding names a character the export font had
+ * no glyph for, or a bullet a page break fell inside. Both are observations of
+ * decisions the draw pass makes anyway — the font-matched sanitizer, and the
+ * `ensure` that moved the cursor to a new page — so `bytes` is unchanged by
+ * their presence. The shape lives in `render-findings.ts`; see there for why a
+ * finding is advisory, never a refusal and never a score input.
+ *
  * The `rgb()` colors here are PDF graphics-state values (black text, a muted
  * gray rule) — NOT Tailwind tokens. The style guard scans component/feature
  * code, not this draw module.
@@ -75,6 +83,14 @@ import {
 } from "./auto-bold-metrics.ts";
 import { toJsonResume } from "./to-json-resume.ts";
 import { wrapWordsToLines } from "./text-wrap.ts";
+import {
+  bulletSplitFinding,
+  collectModelTextFields,
+  entryPathLabel,
+  findGlyphFindings,
+  type BulletSplit,
+  type RenderFinding,
+} from "./render-findings.ts";
 import poppinsRegularUrl from "../../assets/fonts/Poppins-Regular.ttf?url";
 import poppinsBoldUrl from "../../assets/fonts/Poppins-Bold.ttf?url";
 
@@ -460,11 +476,13 @@ export interface ExportGlyphLoss {
  *
  *  1. **It lives here, not in `renderAtsResumePdf`.** An earlier design gave the
  *     renderer a policy parameter so the browser could ask to refuse while the
- *     corpus harness asked to degrade. `renderAtsResumePdf` has ~35 call sites,
- *     all typed `Promise<Uint8Array>` — every round-trip, export-layout and
- *     repro test in the repo. A separate probe leaves all of them untouched, and
- *     leaves the corpus round-trip oracle (which needs a rendered PDF, degraded
- *     or not) working by construction rather than by opt-out.
+ *     corpus harness asked to degrade. A separate probe leaves the renderer's
+ *     ~35 call sites — every round-trip, export-layout and repro test in the
+ *     repo — free to keep rendering, and leaves the corpus round-trip oracle
+ *     (which needs a rendered PDF, degraded or not) working by construction
+ *     rather than by opt-out. The renderer now REPORTS what it degraded (#621),
+ *     which is the complement of this, not a replacement: reporting never
+ *     refuses.
  *  2. **Empty when the embedded font loads.** It shares the memoized
  *     {@link loadPoppinsBytes}, so the probe and the subsequent render make one
  *     fetch attempt between them, not two. On the failure path the memo is
@@ -478,11 +496,19 @@ export interface ExportGlyphLoss {
  *
  * Deliberate limit: this covers the **fallback** path only. On the embedded path
  * `toEmbeddedFontSafe` can still emit `?` for a code point Poppins lacks (`★`,
- * `✓`) — decorative symbols, not identity fields, and outside #664's scope. It
- * is also mildly conservative: headings are uppercased before sanitizing at draw
- * time, and this probe reads the un-cased text, so a character that would
- * upper-case into WinAnsi could be reported as a loss it isn't. That errs toward
- * asking the user, which is the safe direction.
+ * `✓`) — decorative symbols, not identity fields, and outside #664's scope. That
+ * half is now REPORTED rather than refused, by the export findings
+ * `renderAtsResumePdf` returns (#621); this remains the only gate that stops a
+ * download.
+ *
+ * The field walk is shared with those findings ({@link collectModelTextFields}),
+ * which corrects two things this probe used to get wrong and which only showed
+ * up once one walk had to serve both. It scanned `headerLine` with the emphasis
+ * sentinels still in it, so every auto-bolded achievement header reported U+E000
+ * as a loss and could refuse a download over a character that is stripped before
+ * it ever reaches a font; and it skipped the summary HEADING, which is drawn.
+ * Both are the safe direction to move in — one false refusal fewer, one real
+ * loss more.
  */
 export async function findExportGlyphLosses(
   model: AtsResumeModel,
@@ -496,37 +522,18 @@ export async function findExportGlyphLosses(
   }
 
   const losses: ExportGlyphLoss[] = [];
-  const check = (where: string, text: string | undefined): void => {
-    if (!text) return;
+  for (const { where, text } of collectModelTextFields(model)) {
+    // The COARSE label, not the walk's `path`: this list is read out in a
+    // sentence ("...every character in your Name, Experience and Skills"), so it
+    // names fields to check rather than enumerating entries inside them.
+    //
+    // Deliberately reads the UN-cased text even for a heading the renderer will
+    // upper-case, which is mildly conservative: a character that would
+    // upper-case into WinAnsi can be reported as a loss it isn't. That errs
+    // toward asking the user, which is the safe direction for a refusal.
     const degraded = toWinAnsi(text);
     if (degraded !== text) losses.push({ where, original: text, degraded });
-  };
-
-  const { contact } = model;
-  check("Name", contact.name);
-  check("Headline", contact.headline);
-  check("Email", contact.email);
-  check("Phone", contact.phone);
-  check("Location", contact.location);
-  check("Work authorization", contact.workAuthorization);
-  for (const link of contact.links) check("Links", link);
-  check(model.summaryHeading || "Summary", model.summary);
-
-  for (const section of model.sections) {
-    // The section's own heading labels its entries, so a loss inside Experience
-    // reads as "Experience" rather than as an index into a model the user has
-    // never seen.
-    const where = section.heading || "Section";
-    check(where, section.heading);
-    for (const entry of section.entries) {
-      check(where, entry.headerLine);
-      check(where, entry.headerLineDate);
-      check(where, entry.subLine);
-      check(where, entry.subLineDate);
-      for (const bullet of entry.bullets) check(where, bullet);
-    }
   }
-
   return losses;
 }
 
@@ -804,6 +811,14 @@ type DrawTextOpts = {
    *  {@link Layout.drawBullet}, and only for an entry's second-to-last bullet.
    *  Like `widowControl`, not an input to wrapping. */
   followKeepHeight?: number;
+  /**
+   * Called when a page break falls BETWEEN two lines of this block (#621) —
+   * observation only, never a layout input, so a caller that passes it renders
+   * byte-identical output to one that does not. Set only by
+   * {@link Layout.drawBullet}: the summary body is the other `widowControl`
+   * block and a break inside it is ordinary prose flow, not a defect.
+   */
+  onPageSplit?: (split: BulletSplit) => void;
 };
 
 /**
@@ -813,6 +828,12 @@ type DrawTextOpts = {
 class Layout {
   page: Page;
   y: number;
+  /**
+   * How many pages have been started, 1-based. Read ONLY to notice that a
+   * pagination decision moved the cursor to a new page (#621) — nothing in the
+   * layout consults it, so it cannot influence a single drawn byte.
+   */
+  private pageOrdinal = 1;
 
   constructor(
     private doc: Doc,
@@ -838,6 +859,7 @@ class Layout {
   private newPage() {
     this.page = this.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     this.y = PAGE_HEIGHT - MARGIN;
+    this.pageOrdinal++;
   }
 
   /**
@@ -941,17 +963,30 @@ class Layout {
     index: number,
     total: number,
     lineHeight: number,
-    opts: { widowControl?: boolean; followKeepHeight?: number },
+    opts: {
+      widowControl?: boolean;
+      followKeepHeight?: number;
+      onPageSplit?: (split: BulletSplit) => void;
+    },
   ) {
     const startsTail =
       (opts.widowControl ?? false) &&
       total >= 2 * BULLET_KEEP_LINES &&
       index === total - BULLET_KEEP_LINES;
+    const pageBefore = this.pageOrdinal;
     this.ensure(
       startsTail
         ? BULLET_KEEP_LINES * lineHeight + (opts.followKeepHeight ?? 0)
         : lineHeight,
     );
+    // Report a break that landed INSIDE the block (#621). `index > 0` is the
+    // whole test: a break before the first line PLACES the block (it moves
+    // whole, which is what every reservation above exists to arrange), while a
+    // break after it SPLITS the block. Purely observational — the reservation
+    // was already made above and nothing here can change it.
+    if (index > 0 && this.pageOrdinal !== pageBefore) {
+      opts.onPageSplit?.({ totalLines: total, linesBeforeBreak: index });
+    }
   }
 
   advance(points: number) {
@@ -1222,7 +1257,14 @@ class Layout {
     text: string,
     size: number,
     hangingIndent: number,
-    opts: { alreadyReserved?: boolean; followKeepHeight?: number } = {},
+    opts: {
+      alreadyReserved?: boolean;
+      followKeepHeight?: number;
+      /** Fired at most ONCE, for the FIRST page break that falls inside this
+       *  bullet (#621). A bullet taller than a page breaks more than once; that
+       *  is still one bullet to fix, so the caller gets one finding. */
+      onSplit?: (split: BulletSplit) => void;
+    } = {},
   ) {
     // Break-position control (#629 orphan half, #631 widow half): a wrapped
     // bullet reserves `bulletKeepLines` lines before it starts, so it can never
@@ -1260,6 +1302,14 @@ class Layout {
       // does, so reserve only when the block asks for more than that.
       if (height > lineHeight) this.ensureBlock(height);
     }
+    let splitReported = false;
+    const onPageSplit = opts.onSplit
+      ? (split: BulletSplit) => {
+          if (splitReported) return;
+          splitReported = true;
+          opts.onSplit?.(split);
+        }
+      : undefined;
     const marked = autoBoldMetrics(text);
     if (!marked.includes(EMPHASIS_OPEN)) {
       this.drawText(`${BULLET_MARKER}${text}`, {
@@ -1267,12 +1317,14 @@ class Layout {
         hangingIndent,
         widowControl: true,
         followKeepHeight: followKeep,
+        onPageSplit,
       });
       return;
     }
     this.drawRuns(parseBoldRuns(marked), size, hangingIndent, {
       widowControl: true,
       followKeepHeight: followKeep,
+      onPageSplit,
     });
   }
 
@@ -1379,6 +1431,7 @@ class Layout {
       color?: RGB;
       widowControl?: boolean;
       followKeepHeight?: number;
+      onPageSplit?: (split: BulletSplit) => void;
     } = {},
   ) {
     const marker = opts.marker ?? BULLET_MARKER;
@@ -1455,10 +1508,29 @@ class Layout {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Render an ATS résumé model to PDF bytes (Uint8Array). */
+/** What {@link renderAtsResumePdf} hands back: the PDF, and what it could not
+ *  render cleanly on the way to producing it (#621). */
+export interface RenderAtsPdfResult {
+  bytes: Uint8Array;
+  /** Empty for a clean résumé — the common case, and the one that must render
+   *  no warning chrome at all downstream. */
+  findings: RenderFinding[];
+}
+
+/**
+ * Render an ATS résumé model to PDF bytes, plus the export findings gathered
+ * while drawing them (#621).
+ *
+ * The findings are ADVISORY and produced strictly as a side observation: the
+ * glyph pass reads the same font-matched sanitizer the draw uses, and the
+ * pagination pass watches breaks the reservations above already placed. Neither
+ * feeds a layout decision, so `bytes` for a clean résumé is byte-for-byte what
+ * this function produced before findings existed — the property the round-trip
+ * corpus pins.
+ */
 export async function renderAtsResumePdf(
   model: AtsResumeModel,
-): Promise<Uint8Array> {
+): Promise<RenderAtsPdfResult> {
   const parts = await loadPdfLibOnce();
   const { PDFDocument, rgb } = parts;
 
@@ -1466,6 +1538,13 @@ export async function renderAtsResumePdf(
   doc.setTitle(model.contact.name || "Resume");
 
   const { regular, bold, sanitize } = await loadFonts(doc, parts);
+
+  // Glyph coverage is decided by the font that was ACTUALLY loaded above, so
+  // this runs after `loadFonts` and against its sanitizer, never a guess about
+  // which path was taken. It touches no page and embeds no glyph — the coverage
+  // predicate reads its own fontkit faces, not pdf-lib's embedded subset — so it
+  // cannot perturb the bytes below.
+  const findings: RenderFinding[] = findGlyphFindings(model, sanitize);
 
   const black = rgb(0.1, 0.1, 0.1);
   const gray = rgb(0.55, 0.55, 0.55);
@@ -1570,7 +1649,12 @@ export async function renderAtsResumePdf(
         : 0,
     );
     for (let i = 0; i < section.entries.length; i++) {
-      drawEntry(layout, section.entries[i], muted);
+      drawEntry(layout, section.entries[i], muted, {
+        // The SAME label `collectModelTextFields` gives this entry, so a glyph
+        // finding and a pagination finding about one role name it identically.
+        entryPath: entryPathLabel(section.heading || "Section", section.entries[i], i),
+        findings,
+      });
       if (i < section.entries.length - 1) layout.advance(GAP_BETWEEN_ENTRIES);
     }
     layout.advance(GAP_BETWEEN_ENTRIES);
@@ -1602,7 +1686,7 @@ export async function renderAtsResumePdf(
     description: "JSON Resume (jsonresume.org) — machine-readable copy",
   });
 
-  return doc.save();
+  return { bytes: await doc.save(), findings };
 }
 
 /** The `drawText` options for a section/summary heading — shared by the draw and
@@ -1830,7 +1914,14 @@ function trailingBulletKeepHeight(layout: Layout, entry: AtsEntry): number {
   return bulletKeepLines(lines) * SIZE_BODY * LINE_GAP;
 }
 
-function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
+function drawEntry(
+  layout: Layout,
+  entry: AtsEntry,
+  mutedColor: RGB,
+  /** Where to file a finding raised while drawing this entry, and what to call
+   *  the entry when filing it (#621). */
+  report: { entryPath: string; findings: RenderFinding[] },
+) {
   // Keep-with-next (#629): commit to this page only if the header AND its first
   // bullet's keep-opening (`bulletKeepLines` of its lines — all of them when it
   // is too short to split) fit together, so the header is never the final drawn
@@ -1885,6 +1976,8 @@ function drawEntry(layout: Layout, entry: AtsEntry, mutedColor: RGB) {
     layout.drawBullet(entry.bullets[i], SIZE_BODY, BULLET_INDENT, {
       alreadyReserved: i === 0 && keepHeight > 0,
       followKeepHeight: i === entry.bullets.length - 2 ? trailingKeep : 0,
+      onSplit: (split) =>
+        report.findings.push(bulletSplitFinding(report.entryPath, i, split)),
     });
   }
 }

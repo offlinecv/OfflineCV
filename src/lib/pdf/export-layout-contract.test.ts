@@ -185,7 +185,7 @@ async function drawnLines(
   build: ModelBuilder,
   filler: number,
 ): Promise<PdfDrawnLine[]> {
-  return extractPdfDrawnLines(await renderAtsResumePdf(build(filler)));
+  return extractPdfDrawnLines((await renderAtsResumePdf(build(filler))).bytes);
 }
 
 /** Index of the single drawn line containing `token` (fails if 0 or 2+ match). */
@@ -766,7 +766,7 @@ describe("export layout contract — keep-with-next pagination (#629)", () => {
         },
       ],
     };
-    const lines = await extractPdfDrawnLines(await renderAtsResumePdf(model));
+    const lines = await extractPdfDrawnLines((await renderAtsResumePdf(model)).bytes);
     const pages = Math.max(...lines.map((l) => l.page));
     const densest = Math.max(
       ...Array.from({ length: pages }, (_, i) => linesOnPage(lines, i + 1)),
@@ -827,7 +827,7 @@ describe("export layout contract — the Summary body honours widow control", ()
    *  {@link bulletLinesPerPage} returns, so a `1` is the widow. */
   async function summaryLinesPerPage(words: number): Promise<number[]> {
     const lines = await extractPdfDrawnLines(
-      await renderAtsResumePdf(summaryModel(words)),
+      (await renderAtsResumePdf(summaryModel(words))).bytes,
     );
     const perPage = new Map<number, number>();
     for (const line of lines) {

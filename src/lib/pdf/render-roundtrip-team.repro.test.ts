@@ -87,7 +87,7 @@ describe("#425 — team on the org line round-trips through the parser", () => {
 
   beforeAll(async () => {
     model = buildAtsResumeModel(makeResult(), fakeScore);
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("renders the team as the trailing middot segment on the one-line header", () => {

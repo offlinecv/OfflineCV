@@ -102,7 +102,7 @@ describe("#454 — an edited achievement round-trips through the export", () => 
       },
     );
     model = buildAtsResumeModel(makeResult(edited.fields), fakeScore);
-    reparsed = await runCascade(await renderAtsResumePdf(model));
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
   it("bolds exactly the edited type label, and nothing else", () => {
