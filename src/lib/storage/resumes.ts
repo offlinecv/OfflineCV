@@ -11,6 +11,7 @@ import {
   putRecord,
   getRecord,
   getAllRecords,
+  getAllRecordsFromExisting,
   deleteRecord,
 } from "./crud.ts";
 import type { ResumeRecord } from "./types.ts";
@@ -43,6 +44,15 @@ export function getAllResumes(): Promise<ResumeRecord[]> {
   return getAllRecords<ResumeRecord>("resumes");
 }
 
+/** Same as {@link getAllResumes}, opened via `getExistingDB()` instead — what
+ *  {@link listResumeChoicesFromExisting} calls, for the browser extension's
+ *  content script. Private: unlike `getAllResumes` it has no consumer outside
+ *  this file, and exporting it would put a whole résumé corpus (blobs included)
+ *  on a surface only the narrow `ResumeChoice` projection is meant to reach. */
+function getAllResumesFromExisting(): Promise<ResumeRecord[]> {
+  return getAllRecordsFromExisting<ResumeRecord>("resumes");
+}
+
 export function deleteResume(id: string): Promise<void> {
   return deleteRecord("resumes", id);
 }
@@ -63,7 +73,20 @@ export interface ResumeChoice {
  *  the narrow, cross-origin-safe answer: id, filename, and a timestamp, and
  *  nothing that touches the resume corpus. */
 export async function listResumeChoices(): Promise<ResumeChoice[]> {
-  const records = await getAllResumes();
+  return listResumeChoicesVia(getAllResumes);
+}
+
+/** Same as {@link listResumeChoices}, opened via `getExistingDB()` instead —
+ *  the variant `@offlinecv/core` re-exports as `listResumeChoices` to a
+ *  content-script consumer; see `db.ts`'s `getExistingDB` docblock for why. */
+export async function listResumeChoicesFromExisting(): Promise<ResumeChoice[]> {
+  return listResumeChoicesVia(getAllResumesFromExisting);
+}
+
+async function listResumeChoicesVia(
+  getAll: typeof getAllResumes,
+): Promise<ResumeChoice[]> {
+  const records = await getAll();
   return records
     .map((r) => ({ id: r.id, filename: r.filename, updatedAt: r.updatedAt }))
     .sort((a, b) => b.updatedAt - a.updatedAt);

@@ -9,7 +9,7 @@
  */
 
 import type { IDBPDatabase } from "idb";
-import { getDB, UPDATED_AT_INDEX } from "./db.ts";
+import { getDB, getExistingDB, UPDATED_AT_INDEX } from "./db.ts";
 import { postLibraryChange } from "./library-channel.ts";
 import type { StoreName, StoredRecord, SyncableStoreName } from "./types.ts";
 
@@ -111,9 +111,18 @@ function emitChange(store: StoreName): void {
  * runtime). These helpers operate through a loosely-typed handle on purpose;
  * the store-specific record type is reasserted via the `<T>` parameter, so
  * callers (`resumes.ts` / `jobs.ts`) still get a fully-typed surface.
+ *
+ * Takes the opener as a parameter, defaulting to `getDB`, so this app's own
+ * code keeps opening at `DB_VERSION` (and migrating when due) without having
+ * to say so at every call site. The `…FromExisting`/`…IntoExisting` exports
+ * below are the only other caller, and they pass {@link getExistingDB} — see
+ * that function's docblock for why a content script must never request a
+ * version.
  */
-async function looseDB(): Promise<IDBPDatabase> {
-  return (await getDB()) as unknown as IDBPDatabase;
+async function looseDB(
+  opener: () => Promise<IDBPDatabase<any>> = getDB,
+): Promise<IDBPDatabase> {
+  return (await opener()) as unknown as IDBPDatabase;
 }
 
 /** Upsert a record, stamping timestamps from a single `now`: `createdAt` comes
@@ -145,7 +154,29 @@ export async function putRecord<T extends StoredRecord>(
     Partial<Pick<T, "createdAt" | "updatedAt">>,
   options: { touch?: boolean } = {},
 ): Promise<T> {
-  const db = await looseDB();
+  return putRecordVia(getDB, store, record, options);
+}
+
+/** Same as {@link putRecord}, opened via {@link getExistingDB} instead — the
+ *  variant `@offlinecv/core` re-exports as `putRecord` to a content-script
+ *  consumer. */
+export async function putRecordIntoExisting<T extends StoredRecord>(
+  store: StoreName,
+  record: Omit<T, "createdAt" | "updatedAt"> &
+    Partial<Pick<T, "createdAt" | "updatedAt">>,
+  options: { touch?: boolean } = {},
+): Promise<T> {
+  return putRecordVia(getExistingDB, store, record, options);
+}
+
+async function putRecordVia<T extends StoredRecord>(
+  opener: () => Promise<IDBPDatabase<any>>,
+  store: StoreName,
+  record: Omit<T, "createdAt" | "updatedAt"> &
+    Partial<Pick<T, "createdAt" | "updatedAt">>,
+  options: { touch?: boolean } = {},
+): Promise<T> {
+  const db = await looseDB(opener);
   const now = Date.now();
   const existing = (await db.get(store, record.id)) as T | undefined;
   const written = {
@@ -169,6 +200,17 @@ export async function getRecord<T extends StoredRecord>(
   return (await db.get(store, id)) as T | undefined;
 }
 
+/** Same as {@link getRecord}, opened via {@link getExistingDB} instead — the
+ *  variant `@offlinecv/core` re-exports as `getRecord` to a content-script
+ *  consumer. */
+export async function getRecordFromExisting<T extends StoredRecord>(
+  store: StoreName,
+  id: string,
+): Promise<T | undefined> {
+  const db = await looseDB(getExistingDB);
+  return (await db.get(store, id)) as T | undefined;
+}
+
 /**
  * Every record in a store — **excluding tombstones by default** (#730).
  *
@@ -187,6 +229,18 @@ export async function getAllRecords<T extends StoredRecord>(
   options: { includeDeleted?: boolean } = {},
 ): Promise<T[]> {
   const db = await looseDB();
+  const all = (await db.getAll(store)) as T[];
+  return options.includeDeleted === true ? all : all.filter(isLive);
+}
+
+/** Same as {@link getAllRecords}, opened via {@link getExistingDB} instead —
+ *  what `listResumeChoices`'s `…FromExisting` variant calls, for a
+ *  content-script consumer. */
+export async function getAllRecordsFromExisting<T extends StoredRecord>(
+  store: StoreName,
+  options: { includeDeleted?: boolean } = {},
+): Promise<T[]> {
+  const db = await looseDB(getExistingDB);
   const all = (await db.getAll(store)) as T[];
   return options.includeDeleted === true ? all : all.filter(isLive);
 }
@@ -223,6 +277,20 @@ export async function listRecordsUpdatedSince<T extends StoredRecord>(
   since: number,
 ): Promise<T[]> {
   const db = await looseDB();
+  return (await db.getAllFromIndex(
+    store,
+    UPDATED_AT_INDEX,
+    IDBKeyRange.lowerBound(since, true),
+  )) as T[];
+}
+
+/** Same as {@link listRecordsUpdatedSince}, opened via {@link getExistingDB}
+ *  instead — the variant `@offlinecv/core` re-exports as
+ *  `listRecordsUpdatedSince` to a content-script consumer. */
+export async function listRecordsUpdatedSinceFromExisting<
+  T extends StoredRecord,
+>(store: SyncableStoreName, since: number): Promise<T[]> {
+  const db = await looseDB(getExistingDB);
   return (await db.getAllFromIndex(
     store,
     UPDATED_AT_INDEX,
@@ -276,6 +344,20 @@ export async function deleteRecord(
   id: string,
 ): Promise<void> {
   const db = await looseDB();
+  await db.delete(store, id);
+  emitChange(store);
+}
+
+/** Same as {@link deleteRecord}, opened via {@link getExistingDB} instead —
+ *  the variant `@offlinecv/core` re-exports as `deleteRecord` to a content
+ *  script. `…IntoExisting`, not `…FromExisting`: this family reserves the
+ *  `From` suffix for reads and `Into` for writes, and a hard delete is a write
+ *  (`db.delete` + `emitChange`), like `putRecordIntoExisting` beside it. */
+export async function deleteRecordIntoExisting(
+  store: StoreName,
+  id: string,
+): Promise<void> {
+  const db = await looseDB(getExistingDB);
   await db.delete(store, id);
   emitChange(store);
 }

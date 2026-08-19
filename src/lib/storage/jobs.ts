@@ -9,7 +9,9 @@
 
 import {
   putRecord,
+  putRecordIntoExisting,
   getRecord,
+  getRecordFromExisting,
   getAllRecords,
   isLive,
   softDeleteRecord,
@@ -26,12 +28,34 @@ export async function saveJob(
   input: Partial<JobRecord> & { id?: string },
   options: { touch?: boolean } = {},
 ): Promise<JobRecord> {
+  return saveJobVia(putRecord, input, options);
+}
+
+/** Same as {@link saveJob}, opened via `getExistingDB()` instead (through
+ *  `putRecordIntoExisting`) — what `captureJob`'s `…IntoExisting` variant
+ *  calls, for a content-script consumer. */
+export async function saveJobIntoExisting(
+  input: Partial<JobRecord> & { id?: string },
+  options: { touch?: boolean } = {},
+): Promise<JobRecord> {
+  return saveJobVia(putRecordIntoExisting, input, options);
+}
+
+/** The body both `saveJob` twins share, parameterized on the writer. One copy,
+ *  so a later change to the id default or the write shape cannot reach one twin
+ *  and miss the other — the same `…Via` seam `captureJobVia` and
+ *  `putRecordVia` use. */
+async function saveJobVia(
+  put: typeof putRecord,
+  input: Partial<JobRecord> & { id?: string },
+  options: { touch?: boolean },
+): Promise<JobRecord> {
   // The store is intentionally permissive — it writes whatever fields the caller
   // supplies (the domain layer in `job-tracker.ts` owns completeness). Reads are
   // typed as a full `JobRecord` because every production write goes through the
   // domain layer with the required fields set; the cast bridges the permissive
   // write shape to `putRecord`'s complete-record parameter.
-  return putRecord<JobRecord>("jobs", {
+  return put<JobRecord>("jobs", {
     ...input,
     id: input.id ?? crypto.randomUUID(),
   } as Omit<JobRecord, "createdAt" | "updatedAt"> &
@@ -49,7 +73,26 @@ export async function saveJob(
  * needs and what the tracker must never have.
  */
 export async function getJob(id: string): Promise<JobRecord | undefined> {
-  const record = await getRecord<JobRecord>("jobs", id);
+  return getJobVia(getRecord, id);
+}
+
+/** Same as {@link getJob}, opened via `getExistingDB()` instead (through
+ *  `getRecordFromExisting`) — what `captureJob`'s `…IntoExisting` variant
+ *  calls, for a content-script consumer. */
+export async function getJobFromExisting(
+  id: string,
+): Promise<JobRecord | undefined> {
+  return getJobVia(getRecordFromExisting, id);
+}
+
+/** The liveness check both `getJob` twins share, parameterized on the reader —
+ *  one definition of "a tombstoned job reads as gone", so the tombstone
+ *  semantics {@link getJob}'s docblock states cannot drift between them. */
+async function getJobVia(
+  get: typeof getRecord,
+  id: string,
+): Promise<JobRecord | undefined> {
+  const record = await get<JobRecord>("jobs", id);
   return record !== undefined && isLive(record) ? record : undefined;
 }
 

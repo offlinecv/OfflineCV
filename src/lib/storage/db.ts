@@ -16,7 +16,7 @@
  * is for structured/binary data only.
  */
 
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import { openDB, deleteDB, type DBSchema, type IDBPDatabase } from "idb";
 import type {
   ResumeRecord,
   JobRecord,
@@ -38,14 +38,14 @@ export const DB_NAME = "offlinecv";
  *  that read this constant would compare the code to itself and pass even if
  *  `upgrade()` never ran.
  *
- *  ⚠️ A bump is a BREAKING change for the browser extension, which builds this
- *  module from a pinned commit of this repo (`extension/offlinecv-pin.json`)
- *  and reaches `getDB()` from a content script in the app's own origin — so it
- *  carries whatever version the pin had. Once the app has upgraded a user's
- *  database, an extension built at the older pin opens it at the lower version
- *  and gets a `VersionError`, breaking its captures. Bump the pin in lockstep
- *  and rebuild it; this repo's CI never compiles the extension, so nothing else
- *  will catch it. */
+ *  ⚠️ When you bump this, bump `extension/offlinecv-pin.json` in lockstep and
+ *  rebuild the extension: this repo's CI never compiles it, so nothing else
+ *  will catch the drift. {@link getExistingDB} is the opener a content script
+ *  should use — it never requests a version, so it cannot hang waiting on a
+ *  stale, still-open app tab — but the extension's own barrel
+ *  (`extension/src/offlinecv-core.ts`) still imports the `getDB()`-backed
+ *  functions by relative path, so the pin is what keeps this constant and that
+ *  build in step. */
 const DB_VERSION = 4;
 
 /** Index name shared by every syncable store — one string so a range query and
@@ -61,6 +61,7 @@ interface OfflineCvDB extends DBSchema {
 }
 
 let dbPromise: Promise<IDBPDatabase<OfflineCvDB>> | null = null;
+let existingDbPromise: Promise<IDBPDatabase<OfflineCvDB>> | null = null;
 
 /** Open (once) and return the shared DB handle. Cached so concurrent callers
  *  share one connection. */
@@ -131,13 +132,83 @@ export function getDB(): Promise<IDBPDatabase<OfflineCvDB>> {
   return dbPromise;
 }
 
-/** Close the open connection (if any) and drop the cached handle. Test-only
- *  seam — an open connection blocks `deleteDB`, so a suite that wipes the
- *  database between cases must close first, then reopen fresh. */
-export async function closeDB(): Promise<void> {
-  if (dbPromise !== null) {
-    const db = await dbPromise;
-    db.close();
-    dbPromise = null;
+/**
+ * Open the database AT WHATEVER VERSION IT ALREADY IS, requesting no upgrade.
+ *
+ * For a content script — the browser extension's bridge, injected into an
+ * already-open `offlinecv.org` tab — this repo's own page script is what owns
+ * this database's schema, and by the time a content script runs, that page has
+ * already opened it (and migrated it, if a migration was due) for this
+ * session. A content script that instead calls {@link getDB} asks for THIS
+ * repo's pinned `DB_VERSION`, which can be ahead of what the page's own
+ * (possibly older, un-reloaded) connection is holding open. IndexedDB then
+ * needs that older connection to close before the upgrade transaction the
+ * extension just requested can even start; if it does not close, the request
+ * never resolves — the content script hangs, silently, mid-capture, with
+ * nothing in the console to say why.
+ *
+ * `indexedDB.open(name)` with no version argument cannot trigger that: it
+ * attaches to the database's current version, whatever that is, and never
+ * asks for an upgrade.
+ *
+ * ## The one case a versionless open cannot serve, and why it falls back
+ *
+ * Called against a database that does not exist yet — a profile that has only
+ * ever used the extension, never the app itself, or one whose site data was
+ * cleared — a versionless open still CREATES one, at version 1 with none of
+ * `upgrade()`'s object stores, because IndexedDB has no "version 0" to open
+ * at. That handle is not a usable empty library: `db.get`/`db.put`/`db.getAll`
+ * against a store name the database does not have throw `NotFoundError`
+ * synchronously rather than answering `undefined`/`[]`, so a first capture on
+ * such a profile would throw instead of writing.
+ *
+ * So this opener detects that shape — a database with zero object stores, which
+ * only a versionless open of a nonexistent database can produce — and falls
+ * back to {@link getDB}, which creates the real schema. Falling back is safe
+ * here precisely because nothing exists yet: the hang this function avoids
+ * needs an OLDER connection to still be open, and there can be no connection
+ * to a database that was not there a moment ago.
+ *
+ * The stray v1 database is DELETED before the fallback rather than handed to
+ * `getDB()` to upgrade. `upgrade()`'s first block is guarded `oldVersion < 1`,
+ * so an open at v1 skips it and the `resumes`/`jobs` stores would never be
+ * created — the fallback would hand back a handle as unusable as the one it
+ * replaced. Deleting first makes `getDB()`'s open a true v0 → v4 migration.
+ * Nothing is lost: the database being deleted is the store-less one this call
+ * just created, and it can hold no records by construction.
+ */
+export function getExistingDB(): Promise<IDBPDatabase<OfflineCvDB>> {
+  if (existingDbPromise === null) {
+    existingDbPromise = openExisting();
   }
+  return existingDbPromise;
+}
+
+async function openExisting(): Promise<IDBPDatabase<OfflineCvDB>> {
+  const db = await openDB<OfflineCvDB>(DB_NAME);
+  if (db.objectStoreNames.length > 0) return db;
+  db.close();
+  await deleteDB(DB_NAME);
+  return getDB();
+}
+
+/** Close the open connection(s), if any, and drop the cached handle(s).
+ *  Test-only seam — an open connection blocks `deleteDB`, so a suite that
+ *  wipes the database between cases must close first, then reopen fresh.
+ *
+ *  Both handles are cleared BEFORE either is awaited, and awaited through
+ *  `allSettled`, so one rejected opener cannot strand the other's connection
+ *  open — which would defeat the one thing this function exists to guarantee.
+ *  A rejected promise has no connection to close, and a settled rejection is
+ *  the correct no-op for it. Note the two can resolve to the SAME handle when
+ *  {@link getExistingDB} fell back to {@link getDB}; `close()` is idempotent. */
+export async function closeDB(): Promise<void> {
+  const open = [dbPromise, existingDbPromise];
+  dbPromise = null;
+  existingDbPromise = null;
+  await Promise.allSettled(
+    open.map(async (pending) => {
+      (await pending)?.close();
+    }),
+  );
 }
