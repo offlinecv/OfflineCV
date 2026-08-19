@@ -62,6 +62,20 @@
  * `TermQualityAdvisory` itself can't be reused as-is: it writes into a
  * `JobQuery`, not the résumé model, and its copy is query-framed throughout.
  * So this is a new, narrowly-scoped sibling, not a parallel copy of either.
+ *
+ * SKILLS ORDERING (#544) IS HOSTED HERE, and this is now the ONLY place it
+ * renders. It first shipped inside `CritiqueResults`, which only mounts under
+ * `status.kind === "done"` — i.e. after the visitor opts into the on-device
+ * model download and runs it. A HEURISTIC finding that needs WebGPU to be seen
+ * is not a heuristic finding in any way the user can tell, and most visitors
+ * never run the model, so the issue's "a buried high-signal skill triggers a
+ * call-out" was unmet on the majority path. This panel is the surface the
+ * paragraph above says did not exist yet: same lane, no model gate, keyed off
+ * the same `titles[0]` the ordering heuristic scores against, and its Apply
+ * writes through the same `useEditableParse` seam `onAddSkill` does. It is
+ * mounted here and nowhere else, so the LLM-running and LLM-absent paths
+ * cannot show the row twice — the controller is shared state, so two mounted
+ * rows would both enter the confirmation strip on a single Apply.
  */
 
 import { useState } from "react";
@@ -70,6 +84,8 @@ import { assessQueryTerms } from "../../lib/job-search/term-quality.ts";
 import { buildJobQuery, type ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
 import { missingTermLabel } from "./TermQualityAdvisory.tsx";
 import { AddPill } from "./ReconstructedAdd.tsx";
+import { SkillsOrderFindingRow } from "./SkillsOrderFinding.tsx";
+import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 
 /**
  * Read the parse through the term-quality classifier: what it recognized, what
@@ -103,12 +119,18 @@ export function assessResumeSkills(parsed: ResumeQueryInput) {
 export function SkillTermGuidance({
   parsed,
   onAddSkill,
+  skillsOrder,
 }: {
   /** The current parse — same shape `FindJobsPanel` feeds `buildJobQuery`. */
   parsed: ResumeQueryInput;
   /** The existing inline-edit path (`useEditableParse.addSkill`) — the ONLY
    *  way a suggestion here reaches the résumé. */
   onAddSkill: (skill: string) => void;
+  /** The skills-ordering coaching controller (#544, `useSkillsReorder`) — a
+   *  second HEURISTIC finding about the same Skills section, hosted here (see
+   *  the module docblock). Optional: a caller that omits it, or a résumé with
+   *  nothing to flag, gets byte-identical pre-#544 output. */
+  skillsOrder?: SkillsReorderController;
 }) {
   // Terms added from this panel, in click order. Purely a confirmation trail:
   // the résumé itself is written by `onAddSkill`, and an added term leaves
@@ -119,7 +141,23 @@ export function SkillTermGuidance({
   const { recognized, unrecognized, missing: missingSkills } =
     assessResumeSkills(parsed);
 
-  if (recognized.length === 0 && unrecognized.length === 0 && missingSkills.length === 0) {
+  // `applied` keeps the block up while the confirmation strip serves out its
+  // own hold, after the underlying finding has already recomputed away.
+  const showSkillsOrder =
+    skillsOrder !== undefined &&
+    (skillsOrder.finding !== undefined || skillsOrder.applied);
+
+  // The ordering finding is an INDEPENDENT reason to render: it needs only
+  // title tokens, whereas all three buckets above empty out whenever
+  // `term-quality.ts` cannot resolve a role PROFILE from the same titles
+  // (its rule 1). A résumé that hits one and not the other is ordinary, and
+  // self-hiding on the buckets alone would drop the ordering call-out on it.
+  if (
+    recognized.length === 0 &&
+    unrecognized.length === 0 &&
+    missingSkills.length === 0 &&
+    !showSkillsOrder
+  ) {
     return null;
   }
 
@@ -171,6 +209,16 @@ export function SkillTermGuidance({
           <span className="font-medium text-feedback-success-text">Added</span>{" "}
           to your Skills section: {added.join(", ")}.
         </p>
+      )}
+
+      {/* Between the skills you don't have and the ones you do — the ordering
+       *  finding is about skills already IN the résumé, so it belongs on this
+       *  side of that boundary. `<ul>` because the row is an `<li>`, shared
+       *  verbatim with the finding-row visual language it was written for. */}
+      {showSkillsOrder && skillsOrder && (
+        <ul className="flex flex-col gap-2 list-none">
+          <SkillsOrderFindingRow skillsOrder={skillsOrder} />
+        </ul>
       )}
 
       {recognized.length > 0 && (

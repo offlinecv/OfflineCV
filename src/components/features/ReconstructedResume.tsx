@@ -88,6 +88,7 @@ import {
   survivingParsedIndices,
 } from "../../hooks/useEditableParse.ts";
 import { removeEntryWithBullets } from "../../lib/edit/entry-remove.ts";
+import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 import { useAddedEntryPruneHold } from "../../hooks/useAddedEntryPruneHold.ts";
 import {
   batchUndoTargets,
@@ -1124,6 +1125,7 @@ export function ReconstructedResume({
   jdContext,
   critique,
   onRewriteApplied,
+  skillsOrder,
 }: {
   result: CascadeResult;
   /** EDITED score — re-graded by App from the current overrides. Its
@@ -1143,6 +1145,12 @@ export function ReconstructedResume({
    *  to the rewrite controller; `ResultDetail` decides what it means, since it
    *  is the one that knows whether a JD is steering. */
   onRewriteApplied?: () => void;
+  /** Skills-ordering coaching (#544) — passed straight through to
+   *  `TargetingSection` → `SkillTermGuidance`, the one surface that renders
+   *  it. The controller is owned by `ResultDetail` (a single instance, so the
+   *  apply/undo state is shared) rather than built here; nothing in this file
+   *  reads it. */
+  skillsOrder?: SkillsReorderController;
 }) {
   // Display projection (#443, Stage B) — parsed field core + the user's own
   // section headings, read off the canonical model rather than `result` directly.
@@ -1379,6 +1387,10 @@ export function ReconstructedResume({
         // existing `addSkill` inline-edit path.
         parsed={parsed}
         onAddSkill={addSkill}
+        // Skills-ordering coaching (#544) rides the same panel: it is scored
+        // against `titles[0]` exactly as the term guidance is, and unlike the
+        // critique lane this surface is not behind a WebGPU model download.
+        skillsOrder={skillsOrder}
       />
       {/* Summary leads the document body, matching the exported model's own
        *  order (`ats-resume-model.ts`: Summary → Experience → …) so the preview

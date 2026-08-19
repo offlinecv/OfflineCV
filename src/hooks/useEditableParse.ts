@@ -769,6 +769,11 @@ export interface EditableParse {
    *  (which the editor still wires the chip Remove buttons to) rather than
    *  emitting a flat `removed` key the categorised branch rejects. */
   removeSkill: (skill: string) => void;
+  /** Rewrite the flat skills list into `order` (a permutation of the current
+   *  resolved list) — the Apply action for the skills-ordering coaching
+   *  finding (#544). No-op while a non-empty category snapshot exists; see
+   *  the implementation's docblock. */
+  reorderSkills: (order: readonly string[]) => void;
   /** Rename the category at `index` in `cats` (the current rendered grouping) —
    *  label-only, members untouched (#476). */
   renameSkillCategory: (
@@ -1311,6 +1316,48 @@ export function useEditableParse(): EditableParse {
         ? prev.removed
         : [...prev.removed, key];
       return { ...prev, removed, added };
+    });
+  }, []);
+
+  /**
+   * Rewrite the FLAT skills list into `order` — the write path for the
+   * skills-ordering coaching finding's Apply action (#544, `useSkillsReorder`).
+   *
+   * `order` must be a permutation of the CURRENT resolved skills list (what
+   * `computeEditedSkills` currently returns) — that is exactly the contract
+   * `computeSkillsOrderFinding.suggestedOrder` promises. Implemented by
+   * reusing `applyFlatEdits`'s existing remove-then-append semantics rather
+   * than adding a new override field: marking every skill in `order` as
+   * `removed` empties the base list, and re-`added`-ing them in `order`
+   * rebuilds it in the new sequence — one flat override write, no new state
+   * shape (mirrors the flat halves of `addSkill`/`removeSkill` above).
+   *
+   * `removed` is MERGED with the existing set, never replaced. A skill the
+   * user deleted is kept out of the list by its key STAYING in `removed`, and
+   * `order` is a permutation of the CURRENT list, which by definition no
+   * longer contains it — so an overwrite un-deletes it, and `applyFlatEdits`
+   * re-emits it from the pristine parse AHEAD of everything in `added`. A
+   * deleted skill would silently return, at the most prominent position, from
+   * a control that only claims to reorder.
+   *
+   * A no-op while a non-empty category snapshot exists: `SkillsSection`
+   * renders a categorised résumé from `skillCategories`, not the flat list's
+   * order (`ReconstructedSkills.tsx`), so writing a new flat order here would
+   * silently do nothing on screen — and `computeEditedSkills` asserts (in DEV)
+   * that `removed`/`added` stay empty on that branch. Callers gate the Apply
+   * affordance itself on the same condition (`useSkillsReorder`'s `canApply`)
+   * so the button isn't offered when it would be a no-op.
+   */
+  const reorderSkills = useCallback((order: readonly string[]) => {
+    setSkillsOverride((prev) => {
+      if (prev.categories && prev.categories.length > 0) return prev;
+      const removed = [
+        ...new Set([
+          ...prev.removed,
+          ...order.map((s) => s.trim().toLowerCase()),
+        ]),
+      ];
+      return { ...prev, removed, added: [...order] };
     });
   }, []);
 
@@ -1946,6 +1993,7 @@ export function useEditableParse(): EditableParse {
     skillsOverride,
     addSkill,
     removeSkill,
+    reorderSkills,
     renameSkillCategory,
     deleteSkillCategory,
     addSkillCategory,
