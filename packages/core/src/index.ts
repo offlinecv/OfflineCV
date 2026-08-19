@@ -217,7 +217,10 @@ export { deriveJobId, canonicalJobUrl } from "../../../src/lib/storage/job-url.t
  * that captures from elsewhere: it must hand the record to something running in
  * this app's origin rather than write the library itself.
  */
-export { captureJob, type JobCaptureResult } from "../../../src/lib/storage/capture.ts";
+export {
+  captureJobIntoExisting as captureJob,
+  type JobCaptureResult,
+} from "../../../src/lib/storage/capture.ts";
 
 export type { JobRecord, JobStatus, JobOrigin } from "../../../src/lib/storage/types.ts";
 
@@ -250,14 +253,36 @@ export type { JobRecord, JobStatus, JobOrigin } from "../../../src/lib/storage/t
  * is a purge and `softDeleteRecord` is the right call; that one is not on this
  * surface.
  */
+/**
+ * Re-exported under their app-facing names, but bound to the `…FromExisting`/
+ * `…IntoExisting` variant of each: every consumer of THIS package is a content
+ * script in the sense `src/lib/storage/db.ts`'s `getExistingDB()` docblock
+ * describes, and the plain `getRecord`/`putRecord`/`deleteRecord`/
+ * `listRecordsUpdatedSince` open at this repo's pinned `DB_VERSION`, which can
+ * hang a content script when a bump lands here ahead of a stale, still-open app
+ * tab. Renaming on the way out — rather than the consumer importing a
+ * differently-named function — keeps the rebinding invisible to it.
+ *
+ * ⚠️ **This does not reach the extension in `extension/`.** That checkout
+ * (`116-Ideas/recruidea-extension`, pinned by `extension/offlinecv-pin.json`)
+ * predates this package and does not import it: its own barrel,
+ * `extension/src/offlinecv-core.ts`, re-exports these same symbols directly
+ * from `../../src/lib/storage/*.ts` by relative path, so it still binds the
+ * `getDB()`-backed originals and is still exposed to the hang. Repointing that
+ * barrel at the `…Existing` variants is a change in the extension's own repo;
+ * nothing in this file can make it from here.
+ */
 export {
-  getRecord,
-  putRecord,
-  deleteRecord,
-  listRecordsUpdatedSince,
+  getRecordFromExisting as getRecord,
+  putRecordIntoExisting as putRecord,
+  deleteRecordIntoExisting as deleteRecord,
+  listRecordsUpdatedSinceFromExisting as listRecordsUpdatedSince,
 } from "../../../src/lib/storage/crud.ts";
 
-export { getSyncCursor, setSyncCursor } from "../../../src/lib/storage/sync-cursor.ts";
+export {
+  getSyncCursorFromExisting as getSyncCursor,
+  setSyncCursorIntoExisting as setSyncCursor,
+} from "../../../src/lib/storage/sync-cursor.ts";
 
 export type {
   LetterRecord,
@@ -284,7 +309,10 @@ export {
  * newest first — no blob, no parse, nothing that makes a picker built on this a
  * second corpus channel. Same IndexedDB constraint as `captureJob`.
  */
-export { listResumeChoices, type ResumeChoice } from "../../../src/lib/storage/resumes.ts";
+export {
+  listResumeChoicesFromExisting as listResumeChoices,
+  type ResumeChoice,
+} from "../../../src/lib/storage/resumes.ts";
 
 /**
  * The compensation parser. A posting's pay range is free-text prose, and this is

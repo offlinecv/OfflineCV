@@ -37,7 +37,7 @@
  * the ownership merge below rather than reimplementing it against the store.
  */
 
-import { getJob, saveJob } from "./jobs.ts";
+import { getJob, saveJob, getJobFromExisting, saveJobIntoExisting } from "./jobs.ts";
 import { validateJobRecord, type JobRecordIssue } from "./job-record-contract.ts";
 import { dedupeCanonicalUrls, deriveJobId } from "./job-url.ts";
 import type { JobRecord } from "./types.ts";
@@ -105,6 +105,25 @@ function resolveCaptureId(input: Record<string, unknown>): string {
  * revived job keeps the date it was first saved.
  */
 export async function captureJob(input: unknown): Promise<JobCaptureResult> {
+  return captureJobVia(getJob, saveJob, input);
+}
+
+/** Same as {@link captureJob}, opened via `getExistingDB()` instead — the
+ *  variant `@offlinecv/core` re-exports as `captureJob` to a content-script
+ *  consumer; see `db.ts`'s `getExistingDB` docblock for why. This is the
+ *  capture door, so it is the hang this whole `…Existing` family exists to
+ *  close. */
+export async function captureJobIntoExisting(
+  input: unknown,
+): Promise<JobCaptureResult> {
+  return captureJobVia(getJobFromExisting, saveJobIntoExisting, input);
+}
+
+async function captureJobVia(
+  getJobFn: typeof getJob,
+  saveJobFn: typeof saveJob,
+  input: unknown,
+): Promise<JobCaptureResult> {
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
     return { ok: false, reasons: ["A captured job must be a plain JSON object."] };
   }
@@ -118,7 +137,7 @@ export async function captureJob(input: unknown): Promise<JobCaptureResult> {
   if (!validation.ok) return validation;
 
   const merged: JobRecord = { ...validation.record };
-  const existing = await getJob(merged.id);
+  const existing = await getJobFn(merged.id);
   if (existing) {
     // The three user-owned fields. `??`, not `||`: notes the user cleared to
     // `""` is a choice, and only a genuinely absent value falls through to
@@ -146,6 +165,6 @@ export async function captureJob(input: unknown): Promise<JobCaptureResult> {
     else delete merged.aliasUrls;
   }
 
-  const record = await saveJob(merged, { touch: false });
+  const record = await saveJobFn(merged, { touch: false });
   return { ok: true, record, created: existing === undefined, warnings: validation.warnings };
 }

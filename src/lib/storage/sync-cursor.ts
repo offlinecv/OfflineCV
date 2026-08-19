@@ -25,7 +25,7 @@
  * lives anywhere else is a second definition of the record shape.
  */
 
-import { getDB } from "./db.ts";
+import { getDB, getExistingDB } from "./db.ts";
 import type { SyncableStoreName, SyncCursorRecord } from "./types.ts";
 
 /**
@@ -40,6 +40,16 @@ export async function getSyncCursor(
   store: SyncableStoreName,
 ): Promise<SyncCursorRecord | undefined> {
   const db = await getDB();
+  return db.get("sync", store);
+}
+
+/** Same as {@link getSyncCursor}, opened via {@link getExistingDB} instead —
+ *  the variant `@offlinecv/core` re-exports as `getSyncCursor` to a
+ *  content-script consumer; see that function's docblock for why. */
+export async function getSyncCursorFromExisting(
+  store: SyncableStoreName,
+): Promise<SyncCursorRecord | undefined> {
+  const db = await getExistingDB();
   return db.get("sync", store);
 }
 
@@ -60,7 +70,25 @@ export async function setSyncCursor(
   store: SyncableStoreName,
   patch: Omit<Partial<SyncCursorRecord>, "id">,
 ): Promise<SyncCursorRecord> {
-  const db = await getDB();
+  return setSyncCursorVia(getDB, store, patch);
+}
+
+/** Same as {@link setSyncCursor}, opened via {@link getExistingDB} instead —
+ *  the variant `@offlinecv/core` re-exports as `setSyncCursor` to a
+ *  content-script consumer; see that function's docblock for why. */
+export async function setSyncCursorIntoExisting(
+  store: SyncableStoreName,
+  patch: Omit<Partial<SyncCursorRecord>, "id">,
+): Promise<SyncCursorRecord> {
+  return setSyncCursorVia(getExistingDB, store, patch);
+}
+
+async function setSyncCursorVia(
+  opener: typeof getDB | typeof getExistingDB,
+  store: SyncableStoreName,
+  patch: Omit<Partial<SyncCursorRecord>, "id">,
+): Promise<SyncCursorRecord> {
+  const db = await opener();
   const existing = await db.get("sync", store);
   const written: SyncCursorRecord = { ...existing, ...patch, id: store };
   await db.put("sync", written);
