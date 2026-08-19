@@ -412,4 +412,5 @@ for the attribution string.
 Alpha. The score we surface is our own reference number for iterating on the
 parser, not a universal verdict; different applicant tracking systems weigh
 things differently and we make no comparative claims about how any one of
-them would score a given PDF.
+them would score a given PDF. See [`docs/scoring.md`](./docs/scoring.md) for
+how the number is computed.
