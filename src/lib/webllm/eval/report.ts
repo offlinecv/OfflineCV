@@ -3,7 +3,7 @@
 
 import { getModelById } from "../models.ts";
 import { getVariantById } from "./prompt-variants.ts";
-import type { EvalReport } from "./types.ts";
+import type { EvalReport, RunRecord } from "./types.ts";
 
 /**
  * Render the eval report in two flavors:
@@ -40,16 +40,16 @@ export function renderMarkdownReport(report: EvalReport): string {
   lines.push("## Aggregate (per model × variant)");
   lines.push("");
   lines.push(
-    "| Model | Variant | Numbers | One-line | Verb | Length | No-preamble | Dedup | Steering | Judge | **Aggregate** |",
+    "| Model | Variant | Numbers | Reverted | One-line | Verb | Length | No-preamble | Dedup | Steering | Judge | **Aggregate** |",
   );
   lines.push(
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const row of report.aggregates) {
     const modelLabel = getModelById(row.modelId)?.name ?? row.modelId;
     const variantLabel = getVariantById(row.variantId)?.label ?? row.variantId;
     lines.push(
-      `| ${modelLabel} | ${variantLabel} | ${pct(row.numbersPreservedRate)} | ${pct(row.oneLineRate)} | ${pct(row.actionVerbRate)} | ${pct(row.lengthSanityRate)} | ${pct(row.noPreambleLeakRate)} | ${pctOrDash(row.dedupEffectiveRate)} | ${pctOrDash(row.steeringAdherenceRate)} | ${numOrDash(row.judgeMean)} | **${pct(row.aggregateScore)}** |`,
+      `| ${modelLabel} | ${variantLabel} | ${pct(row.numbersPreservedRate)} | ${pct(row.revertedRate)} | ${pct(row.oneLineRate)} | ${pct(row.actionVerbRate)} | ${pct(row.lengthSanityRate)} | ${pct(row.noPreambleLeakRate)} | ${pctOrDash(row.dedupEffectiveRate)} | ${pctOrDash(row.steeringAdherenceRate)} | ${numOrDash(row.judgeMean)} | **${pct(row.aggregateScore)}** |`,
     );
   }
   lines.push("");
@@ -65,15 +65,15 @@ export function renderMarkdownReport(report: EvalReport): string {
       lines.push(`#### ${variantLabel}`);
       lines.push("");
       lines.push(
-        "| Fixture | Kind | In → Out | Numbers | Verb | Length | Preamble | Dedup | Steering | Error |",
+        "| Fixture | Kind | In → Out | Numbers | Reverted | Verb | Length | Preamble | Dedup | Steering | Error |",
       );
       lines.push(
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
       );
       for (const r of report.records) {
         if (r.modelId !== modelId || r.variantId !== variantId) continue;
         lines.push(
-          `| ${r.fixtureId} | ${r.fixtureKind} | ${r.inputBulletCount} → ${r.outputBulletCount} | ${tick(r.rubric.numbersPreserved)} | ${tick(r.rubric.actionVerbLead)} | ${tick(r.rubric.lengthSanity)} | ${tick(r.rubric.noPreambleLeak)} | ${tickOrDash(r.rubric.dedupEffective)} | ${tickOrDash(r.rubric.steeringAdherence)} | ${r.error ? `\`${r.error}\`` : ""} |`,
+          `| ${r.fixtureId} | ${r.fixtureKind} | ${r.inputBulletCount} → ${r.outputBulletCount} | ${tick(r.rubric.numbersPreserved)} | ${revertCell(r)} | ${tick(r.rubric.actionVerbLead)} | ${tick(r.rubric.lengthSanity)} | ${tick(r.rubric.noPreambleLeak)} | ${tickOrDash(r.rubric.dedupEffective)} | ${tickOrDash(r.rubric.steeringAdherence)} | ${r.error ? `\`${r.error}\`` : ""} |`,
         );
       }
       lines.push("");
@@ -93,6 +93,19 @@ function pctOrDash(v: number | null): string {
 
 function numOrDash(v: number | null): string {
   return v === null ? "—" : v.toFixed(2);
+}
+
+/**
+ * The #778 revert cell: not a PASS/fail, because a revert is neither. It reads
+ * as the tokens the gate refused to lose or to let through (`REVERTED: $4.2M,
+ * 14%`) so the committed report keeps the evidence the rubric can no longer
+ * re-derive — the scored bullets ARE the input once a cell reverts.
+ */
+function revertCell(r: RunRecord): string {
+  if (!r.reverted) return "";
+  return r.revertedNumbers.length === 0
+    ? "REVERTED"
+    : `REVERTED: ${r.revertedNumbers.join(", ")}`;
 }
 
 function tick(v: boolean): string {

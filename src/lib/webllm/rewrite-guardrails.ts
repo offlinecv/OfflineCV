@@ -33,7 +33,7 @@
  * The single most important rule in the tree, and the one #609 required to
  * have exactly one definition.
  *
- * The deterministic `checkNumbersPreserved` multiset diff is what actually
+ * The deterministic `checkNumbersPreserved` set diff is what actually
  * catches a violation after the fact; this sentence is what stops the model
  * producing one. Both halves are needed — the check can only warn, it cannot
  * repair — so neither is redundant with the other.

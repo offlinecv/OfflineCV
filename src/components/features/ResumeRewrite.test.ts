@@ -45,6 +45,7 @@ const okResult: ResumeRewriteResult = {
       data: {
         text: "Senior engineer.",
         numbersPreserved: true,
+        reverted: false,
         droppedNumbers: [],
         addedNumbers: [],
       },
@@ -55,6 +56,7 @@ const okResult: ResumeRewriteResult = {
       data: {
         bullets: ["Shipped Foo to 10M users."],
         numbersPreserved: true,
+        reverted: false,
         droppedNumbers: [],
         addedNumbers: [],
       },
@@ -71,6 +73,7 @@ const driftResult: ResumeRewriteResult = {
       data: {
         bullets: ["Saved money."],
         numbersPreserved: false,
+        reverted: false,
         droppedNumbers: ["$5K"],
         addedNumbers: [],
       },
@@ -81,6 +84,7 @@ const driftResult: ResumeRewriteResult = {
       data: {
         text: "Senior engineer with 99.9% availability.",
         numbersPreserved: false,
+        reverted: false,
         droppedNumbers: [],
         addedNumbers: ["99.9%"],
       },
@@ -164,13 +168,23 @@ describe("sectionsEqual", () => {
 
 describe("aggregateDrift", () => {
   it("returns empty arrays for an all-clean result", () => {
-    expect(aggregateDrift(okResult)).toEqual({ dropped: [], added: [] });
+    expect(aggregateDrift(okResult, () => true)).toEqual({
+      dropped: [],
+      added: [],
+    });
   });
 
-  it("collects dropped and added tokens across every section regardless of kind", () => {
-    expect(aggregateDrift(driftResult)).toEqual({
+  it("collects dropped and added tokens across every included section regardless of kind", () => {
+    expect(aggregateDrift(driftResult, () => true)).toEqual({
       dropped: ["$5K"],
       added: ["99.9%"],
+    });
+  });
+
+  it("only collects tokens from sections `include` selects (#874 review)", () => {
+    expect(aggregateDrift(driftResult, () => false)).toEqual({
+      dropped: [],
+      added: [],
     });
   });
 });
@@ -330,3 +344,92 @@ describe("ResumeRewritePanel", () => {
     expect(html).toContain("99.9%");
   });
 });
+
+// ── #778: reverted sections must not read as clean passes ───────────────────
+
+describe("reverted sections (#778)", () => {
+  /** One reverted experience section + one clean one. */
+  const revertedResult: ResumeRewriteResult = {
+    allNumbersPreserved: true,
+    sections: [
+      {
+        kind: "experience",
+        input: {
+          kind: "experience",
+          id: "experience:0",
+          label: "Engineer — Acme",
+          bullets: ["Grew ARR to $4.2M in FY24."],
+        },
+        data: {
+          bullets: ["Grew ARR to $4.2M in FY24."],
+          numbersPreserved: true,
+          reverted: true,
+          droppedNumbers: ["$4.2M"],
+          addedNumbers: [],
+        },
+      },
+      {
+        kind: "experience",
+        input: {
+          kind: "experience",
+          id: "experience:1",
+          label: "Engineer — Beta",
+          bullets: ["Owned the write path."],
+        },
+        data: {
+          bullets: ["Owned and hardened the write path."],
+          numbersPreserved: true,
+          reverted: false,
+          droppedNumbers: [],
+          addedNumbers: [],
+        },
+      },
+    ],
+  };
+
+  it("badges a reverted section in the in-flight list instead of showing a clean tick", () => {
+    // `numbersPreserved` is true on a reverted section by construction, so
+    // without an explicit branch the user would never learn their section
+    // went unrewritten.
+    const status: ResumeRewriteStatus = {
+      kind: "running",
+      progress: {
+        currentIndex: 2,
+        totalSections: 2,
+        currentLabel: null,
+        completed: revertedResult.sections,
+      },
+    };
+    const html = renderToStaticMarkup(
+      createElement(ResumeRewritePanel, {
+        status,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
+    );
+    expect(html).toContain("kept original");
+    // The clean section must not pick up the badge.
+    expect(html.match(/kept original/g)).toHaveLength(1);
+    expect(html).not.toContain("metric drift");
+  });
+
+  it("captions the reverted section's empty diff in the proposed view", () => {
+    const status: ResumeRewriteStatus = {
+      kind: "proposed",
+      result: revertedResult,
+      snapshot: [],
+    };
+    const html = renderToStaticMarkup(
+      createElement(ResumeRewritePanel, {
+        status,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
+    );
+    expect(html).toContain("Kept unchanged");
+    expect(html).toContain("$4.2M");
+  });
+});
+

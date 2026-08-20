@@ -27,6 +27,8 @@ function passingRecord(modelId: string, variantId: string, fixtureId: string): R
       droppedNumbers: [],
       addedNumbers: [],
     },
+    reverted: false,
+    revertedNumbers: [],
     rewriteDurationMs: 1200,
     error: null,
   };
@@ -49,6 +51,7 @@ const sampleReport: EvalReport = {
       variantId: "baseline",
       scoredFixtures: 2,
       numbersPreservedRate: 1,
+      revertedRate: 0,
       oneLineRate: 1,
       actionVerbRate: 1,
       lengthSanityRate: 1,
@@ -91,6 +94,33 @@ describe("renderMarkdownReport", () => {
     const md = renderMarkdownReport(sampleReport);
     // The aggregate row's dedup + judge columns should render `—`.
     expect(md).toMatch(/\| — \| — \| \*\*100%\*\* \|/);
+  });
+
+  it("renders the Reverted column with the tokens the gate refused to lose (#778)", () => {
+    // The rubric re-derives its diff from the scored bullets, which after a
+    // revert ARE the input — so the report has to carry the evidence itself or
+    // the cell reads as a clean pass with no trace of what the model lost.
+    const revertReport: EvalReport = {
+      ...sampleReport,
+      records: [
+        {
+          ...passingRecord("Qwen2.5-1.5B-Instruct-q4f16_1-MLC", "baseline", "fx-weak"),
+          reverted: true,
+          revertedNumbers: ["$4.2M", "14%"],
+        },
+      ],
+      aggregates: [{ ...sampleReport.aggregates[0]!, revertedRate: 0.5 }],
+    };
+    const md = renderMarkdownReport(revertReport);
+    expect(md).toContain("| Numbers | Reverted |");
+    expect(md).toContain("REVERTED: $4.2M, 14%");
+    expect(md).toContain("| 100% | 50% |");
+  });
+
+  it("leaves the Reverted cell empty when the gate did not fire", () => {
+    const md = renderMarkdownReport(sampleReport);
+    expect(md).toContain("| Numbers | Reverted |");
+    expect(md).not.toContain("REVERTED");
   });
 
   it("renders an error column for errored cells", () => {

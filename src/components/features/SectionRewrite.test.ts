@@ -16,13 +16,11 @@
 import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { labelFor, ProposedSection, type Status } from "./SectionRewrite.tsx";
 import {
   formatTokens,
-  labelFor,
   NumberPreservationWarning,
-  ProposedSection,
-  type Status,
-} from "./SectionRewrite.tsx";
+} from "./NumberPreservationWarning.tsx";
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 
 // ── labelFor ────────────────────────────────────────────────────────────────
@@ -37,6 +35,7 @@ describe("labelFor", () => {
   const result: SectionRewriteResult = {
     bullets: ["x"],
     numbersPreserved: true,
+    reverted: false,
     droppedNumbers: [],
     addedNumbers: [],
   };
@@ -118,6 +117,48 @@ describe("NumberPreservationWarning", () => {
 
 // ── ProposedSection ─────────────────────────────────────────────────────────
 
+describe("NumberPreservationWarning — reverted copy (#778)", () => {
+  function render(props: {
+    dropped: string[];
+    added: string[];
+    reverted?: boolean;
+  }): string {
+    return renderToStaticMarkup(
+      createElement(NumberPreservationWarning, props),
+    );
+  }
+
+  it("tells the user nothing was applied and names what would have been lost", () => {
+    const html = render({ dropped: ["$4.2M"], added: [], reverted: true });
+    expect(html).toContain("Kept your original");
+    expect(html).toContain("$4.2M");
+    // Never the "review before saving" copy — there is nothing new to review.
+    expect(html).not.toContain("Review before saving");
+  });
+
+  it("names the INVENTED token when the gate reverted on invention alone", () => {
+    // The widened gate reverts on pure invention, where `dropped` is empty —
+    // copy that quoted only the dropped list rendered an empty token list.
+    const html = render({ dropped: [], added: ["30%"], reverted: true });
+    expect(html).toContain("Kept your original");
+    expect(html).toContain("invented 30%");
+    expect(html).not.toContain("removed");
+    expect(html).not.toContain("Review before saving");
+  });
+
+  it("keeps the drift copy when the rewrite was applied", () => {
+    const html = render({ dropped: [], added: ["99.9%"], reverted: false });
+    expect(html).toContain("invented 99.9%");
+    expect(html).toContain("Review before saving");
+    expect(html).not.toContain("Kept your original");
+  });
+
+  it("defaults to the drift copy when `reverted` is omitted", () => {
+    const html = render({ dropped: ["40%"], added: [] });
+    expect(html).toContain("removed 40%");
+  });
+});
+
 describe("ProposedSection", () => {
   function render(result: SectionRewriteResult): string {
     return renderToStaticMarkup(
@@ -133,6 +174,7 @@ describe("ProposedSection", () => {
     const html = render({
       bullets: ["Reduced p99 latency by 40%.", "Drove $1.2M ARR."],
       numbersPreserved: true,
+      reverted: false,
       droppedNumbers: [],
       addedNumbers: [],
     });
@@ -146,6 +188,7 @@ describe("ProposedSection", () => {
     const html = render({
       bullets: ["Reduced p99 latency."],
       numbersPreserved: false,
+      reverted: false,
       droppedNumbers: ["40%"],
       addedNumbers: [],
     });
@@ -163,6 +206,7 @@ describe("ProposedSection", () => {
     const html = render({
       bullets: ["one", "two", "three"],
       numbersPreserved: true,
+      reverted: false,
       droppedNumbers: [],
       addedNumbers: [],
     });
@@ -174,6 +218,30 @@ describe("ProposedSection", () => {
     expect(html).toContain("two");
   });
 
+  it("says the rewrite was rejected instead of showing a bare no-op diff (#778)", () => {
+    // The gate returns the ORIGINAL bullets, so the diff is all-equal. Without
+    // the notice the panel would read as "the model looked at your bullets and
+    // changed nothing", which is a different — and false — story.
+    const html = render({
+      bullets: ["Original bullet 1.", "Original bullet 2."],
+      numbersPreserved: true,
+      reverted: true,
+      droppedNumbers: ["$4.2M", "14%"],
+      addedNumbers: [],
+    });
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Kept your original");
+    expect(html).toContain("$4.2M and 14%");
+    // The diff itself carries the caption, so the surface is never silent even
+    // if the alert is scrolled past.
+    expect(html).toContain("No changes applied");
+    // Warning chrome, not success — the user asked for a rewrite and did not
+    // get one, even though every number survived.
+    expect(html).toContain("border-feedback-warning-border");
+    // And no "Use this" CTA offering the user their own bullets back.
+    expect(html).not.toContain("Use this — copy all bullets");
+  });
+
   // The label swap after a successful copy moved into the shared `CopyButton`
   // with #609 — it is covered against a real stubbed clipboard in
   // `design-system/primitives/CopyButton.test.tsx`, which this static-markup
@@ -183,6 +251,7 @@ describe("ProposedSection", () => {
     const html = render({
       bullets: ["one"],
       numbersPreserved: true,
+      reverted: false,
       droppedNumbers: [],
       addedNumbers: [],
     });

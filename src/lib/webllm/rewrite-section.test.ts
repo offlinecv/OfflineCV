@@ -166,8 +166,17 @@ describe("rewriteSectionWithLlm", () => {
     );
     // Three input bullets, three output bullets — but the model could
     // legitimately return 2 or 4, and the function must handle it.
+    //
+    // The inputs carry the same figures the stub returns so the number gate is
+    // a no-op here: this test is about line splitting, and a stub that invents
+    // `10M` against a numberless input would revert and measure the gate
+    // instead.
     const out = await rewriteSectionWithLlm(
-      ["worked on Foo", "led the team", "sold things"],
+      [
+        "worked on Foo for 10M users",
+        "led 5 engineers, p99 latency 40%",
+        "sold things, $1.2M ARR",
+      ],
       engine,
       TEST_MODEL,
     );
@@ -208,7 +217,7 @@ describe("rewriteSectionWithLlm", () => {
     expect(out.addedNumbers).toEqual([]);
   });
 
-  it("flags numbersPreserved=false with the specific dropped token", async () => {
+  it("rejects a rewrite that drops a number and returns the input bullets (#778)", async () => {
     const { engine } = makeEngine(async () =>
       reply("Saved the team some money each quarter."),
     );
@@ -217,21 +226,72 @@ describe("rewriteSectionWithLlm", () => {
       engine,
       TEST_MODEL,
     );
-    expect(out.numbersPreserved).toBe(false);
+    // The user gets their own bullet back, verbatim — the model's fluent but
+    // figure-less rewrite never reaches them.
+    expect(out.bullets).toEqual(["Saved the team $5K per quarter."]);
+    expect(out.reverted).toBe(true);
+    // `numbersPreserved` describes what was DELIVERED, so it is true here:
+    // nothing reached the user missing. `droppedNumbers` still names what the
+    // model lost, which is what the revert notice quotes.
+    expect(out.numbersPreserved).toBe(true);
     expect(out.droppedNumbers).toEqual(["$5K"]);
   });
 
-  it("flags an invented number in added", async () => {
+  it("keeps a rewrite that carries every number through (#778)", async () => {
     const { engine } = makeEngine(async () =>
-      reply("Improved availability to 99.9%."),
+      reply("Cut $5K per quarter from the team's cloud spend."),
     );
     const out = await rewriteSectionWithLlm(
-      ["Improved availability."],
+      ["Saved the team $5K per quarter."],
       engine,
       TEST_MODEL,
     );
-    expect(out.numbersPreserved).toBe(false);
+    expect(out.bullets).toEqual([
+      "Cut $5K per quarter from the team's cloud spend.",
+    ]);
+    expect(out.reverted).toBe(false);
+    expect(out.numbersPreserved).toBe(true);
+  });
+
+  it("does NOT revert a merge that moves a number to another bullet (#778)", async () => {
+    // Section rewrite is allowed to merge; the gate is a whole-section
+    // set diff precisely so a number changing bullets is not a drop.
+    const { engine } = makeEngine(async () =>
+      reply("Cut cloud spend $5K per quarter while lifting uptime 40%."),
+    );
+    const out = await rewriteSectionWithLlm(
+      ["Saved the team $5K per quarter.", "Lifted uptime 40%."],
+      engine,
+      TEST_MODEL,
+    );
+    expect(out.reverted).toBe(false);
+    expect(out.bullets).toHaveLength(1);
+  });
+
+  it("does NOT revert an empty generation — that is a failure, not a drop (#778)", async () => {
+    const { engine } = makeEngine(async () => reply("   "));
+    const out = await rewriteSectionWithLlm(
+      ["Saved the team $5K per quarter."],
+      engine,
+      TEST_MODEL,
+    );
+    expect(out.bullets).toEqual([]);
+    expect(out.reverted).toBe(false);
+  });
+
+  it("reverts an invented number and reports it in added", async () => {
+    // The widened #778 gate: invention reverts exactly like a drop, so the
+    // user's own bullet comes back and `addedNumbers` carries the evidence.
+    const original = ["Improved availability."];
+    const { engine } = makeEngine(async () =>
+      reply("Improved availability to 99.9%."),
+    );
+    const out = await rewriteSectionWithLlm(original, engine, TEST_MODEL);
+    expect(out.bullets).toEqual(original);
+    expect(out.reverted).toBe(true);
     expect(out.addedNumbers).toEqual(["99.9%"]);
+    // Property of what was DELIVERED — the original invents nothing.
+    expect(out.numbersPreserved).toBe(true);
   });
 
   it("fires webllm_section_rewrite_started and _completed with counts and preservation flag", async () => {
@@ -248,6 +308,27 @@ describe("rewriteSectionWithLlm", () => {
       inputBulletCount: 3,
       outputBulletCount: 2,
       numbersPreserved: true,
+      reverted: false,
+    });
+  });
+
+  it("reports the MODEL's preservation plus a reverted flag in telemetry (#778)", async () => {
+    const { engine } = makeEngine(async () =>
+      reply("Saved the team some money each quarter."),
+    );
+    await rewriteSectionWithLlm(
+      ["Saved the team $5K per quarter."],
+      engine,
+      TEST_MODEL,
+    );
+    // `numbers_preserved` keeps measuring the raw generation so the series is
+    // comparable across the release; `reverted` is what says the gate fired.
+    expect(trackCompletedMock).toHaveBeenCalledWith({
+      model: TEST_MODEL,
+      inputBulletCount: 1,
+      outputBulletCount: 1,
+      numbersPreserved: false,
+      reverted: true,
     });
   });
 

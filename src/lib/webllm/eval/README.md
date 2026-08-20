@@ -80,6 +80,20 @@ doesn't apply); the aggregate's dedup rate is computed over `redundant`
 fixtures only. The **Steering** column behaves the same way for fixtures
 that carry a steering probe — see below.
 
+The **Reverted** column (#778) is a diagnostic, not a criterion, and is the
+one column that must be read *with* another. The harness runs the product's
+number-preservation gate (`applyNumberPreservation`) before scoring, so a cell
+whose rewrite dropped **or invented** a number is scored on the fixture's own
+bullets and passes `Numbers` by construction — `Reverted` is what tells you the
+model did not earn that pass. Because the gate covers both halves `Numbers`
+measures, `Numbers` now reads ~100% on any run where every cell produced
+output; treat `Reverted` as the column that describes the models, and `Numbers`
+as a check that the gate ran. It is excluded from `Aggregate` on purpose: a
+revert is the guardrail working, so counting it as either a pass or a fail
+would misstate the run. Per-cell it prints the tokens that triggered the
+rejection — dropped first, then invented — because the rubric cannot re-derive
+them once the scored bullets are the input.
+
 The judge column is `—` until the optional LLM-judge gate is enabled.
 That path is flag-plumbed (`runEval({ judgeEnabled })`) but the
 implementation is intentionally stubbed — coherence judging is a follow-up.

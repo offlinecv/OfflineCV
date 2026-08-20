@@ -109,6 +109,8 @@ export async function runEval({
             inputBulletCount: fixture.bullets.length,
             outputBulletCount: output.bullets.length,
             rubric,
+            reverted: output.reverted ?? false,
+            revertedNumbers: [...(output.revertedNumbers ?? [])],
             rewriteDurationMs: now() - cellStart,
             error: null,
           };
@@ -121,6 +123,8 @@ export async function runEval({
             inputBulletCount: fixture.bullets.length,
             outputBulletCount: 0,
             rubric: emptyRubricForError(),
+            reverted: false,
+            revertedNumbers: [],
             rewriteDurationMs: now() - cellStart,
             error: err instanceof Error ? err.message : String(err),
           };
@@ -154,6 +158,11 @@ export async function runEval({
  * and the report renders `—`. The composite `aggregateScore` is the
  * equal-weight mean of the deterministic rates (judge excluded) so
  * choosing a default-model from the report is one column.
+ *
+ * "Deterministic rate" is narrower than "every rate in the row": a column has
+ * to DISCRIMINATE between models to earn a place in the composite. The two
+ * #778 columns (`numbersPreservedRate`, `revertedRate`) are reported but not
+ * summed for that reason — see the comment at their computation.
  */
 function aggregateRecords(
   records: readonly RunRecord[],
@@ -168,7 +177,18 @@ function aggregateRecords(
       );
       const scored = cell.filter((r) => r.error === null);
 
+      // Both #778 diagnostics, and BOTH kept out of `deterministicRates` below
+      // for the same reason: neither discriminates between models any more.
+      // The gate makes every cell that produced output number-clean, so
+      // `numbersPreservedRate` is ~1.0 by construction and would add a constant
+      // term that inflates every composite equally while displacing a real
+      // criterion; and a revert is the guardrail working, so scoring it in
+      // either direction would misstate the run. They stay reported side by
+      // side — 100%/0% is a model that kept every number, 100%/60% is the gate
+      // carrying it — just not summed into the score the default model is
+      // chosen from.
       const numbersPreservedRate = rate(scored, (r) => r.rubric.numbersPreserved);
+      const revertedRate = rate(scored, (r) => r.reverted);
       const oneLineRate = rate(scored, (r) => r.rubric.oneLinePerBullet);
       const actionVerbRate = rate(scored, (r) => r.rubric.actionVerbLead);
       const lengthSanityRate = rate(scored, (r) => r.rubric.lengthSanity);
@@ -203,7 +223,6 @@ function aggregateRecords(
           : judgeScores.reduce((s, v) => s + v, 0) / judgeScores.length;
 
       const deterministicRates = [
-        numbersPreservedRate,
         oneLineRate,
         actionVerbRate,
         lengthSanityRate,
@@ -219,6 +238,7 @@ function aggregateRecords(
         variantId,
         scoredFixtures: scored.length,
         numbersPreservedRate,
+        revertedRate,
         oneLineRate,
         actionVerbRate,
         lengthSanityRate,

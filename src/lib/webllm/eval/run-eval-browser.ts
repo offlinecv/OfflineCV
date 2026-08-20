@@ -31,7 +31,10 @@
  * benchmarking.
  */
 
-import { cleanRewriteLine } from "../post-process.ts";
+import {
+  applyNumberPreservation,
+  cleanRewriteLine,
+} from "../post-process.ts";
 import {
   buildSectionUserPrompt,
   sectionMaxTokens,
@@ -91,11 +94,30 @@ function makeRealRewriteFn(engine: WebLlmEngine): RewriteFn {
     });
 
     const raw = response.choices[0]?.message?.content ?? "";
-    const bullets = raw
+    const cleaned = raw
       .split("\n")
       .map((line) => cleanRewriteLine(line))
       .filter((line) => line.length > 0);
-    return { bullets, raw } satisfies RawRewriteOutput;
+
+    // #778: the harness runs the SAME reject gate the product does, so the
+    // rubric scores what a user would actually have received. A reverted cell
+    // therefore scores `numbersPreserved: true` — no number reached the user
+    // wrong — and `reverted` is what keeps that from reading as a model that
+    // got it right. Every other criterion is scored on the reverted output too,
+    // which is the point: `dedupEffective` on a reverted redundant fixture is
+    // honestly false, because the user's bullets were not deduped.
+    //
+    // Both halves of the diff go into `revertedNumbers`, not just the dropped
+    // half: the gate now fires on invention as well, and an invention-only
+    // cell would otherwise print a bare `REVERTED` with no trace of the figure
+    // the model made up — the one thing the rubric cannot re-derive.
+    const outcome = applyNumberPreservation(fixture.bullets, cleaned);
+    return {
+      bullets: outcome.bullets,
+      raw,
+      reverted: outcome.reverted,
+      revertedNumbers: [...outcome.droppedNumbers, ...outcome.addedNumbers],
+    } satisfies RawRewriteOutput;
   };
 }
 

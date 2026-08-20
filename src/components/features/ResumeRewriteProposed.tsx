@@ -35,10 +35,12 @@ import {
 } from "../../lib/rewrite-review/align-bullets.ts";
 import { resolveSectionWrites } from "../../lib/rewrite-review/apply-accepted.ts";
 import { useRewriteReview, type RewriteReview } from "../../hooks/useRewriteReview.ts";
+import type { SectionRewriteApply } from "./SectionRewrite.tsx";
 import {
+  describeNumberDrift,
+  numberDriftStatus,
   NumberPreservationWarning,
-  type SectionRewriteApply,
-} from "./SectionRewrite.tsx";
+} from "./NumberPreservationWarning.tsx";
 import { BulletReviewRow } from "./RewriteReviewList.tsx";
 
 /** Per-section apply wiring for the whole-résumé review, keyed by the
@@ -95,7 +97,18 @@ export function ProposedPanel({
    *  Absent → every section renders read-only (graceful fallback). */
   applyBySection?: ResumeRewriteApply;
 }) {
-  const aggregated = useMemo(() => aggregateDrift(result), [result]);
+  const revertedDrift = useMemo(
+    () => aggregateDrift(result, (o) => o.data.reverted),
+    [result],
+  );
+  const emptiedDrift = useMemo(
+    () =>
+      aggregateDrift(
+        result,
+        (o) => !o.data.reverted && !o.data.numbersPreserved,
+      ),
+    [result],
+  );
 
   // Experience sections with an apply wiring become per-bullet reviewable;
   // pair ids are namespaced by section id so the one combined decision map
@@ -106,6 +119,10 @@ export function ProposedPanel({
     for (const outcome of result.sections) {
       const apply = applyBySection?.get(outcome.input.id);
       if (!apply) continue;
+      // A rejected rewrite (#778) returns the input verbatim, so aligning it
+      // would offer the user an "accept" on their own text. Fall through to
+      // the read-only redline, which captions why there is nothing to see.
+      if (outcome.data.reverted) continue;
       const pairs =
         outcome.kind === "summary"
           ? summaryPairs(
@@ -202,15 +219,43 @@ export function ProposedPanel({
 
   const accepted = review.acceptedCount;
 
+  // #778: `allNumbersPreserved` is true when every section reverted — the
+  // originals preserve themselves — so it cannot carry the tone on its own, and
+  // it cannot decide whether the warning renders either. Guarding the alert on
+  // it alone turned the panel warning-coloured on a revert while saying nothing:
+  // a border colour, no text, no `role="alert"`. Same condition as
+  // `ProposedSection`'s in SectionRewrite.tsx, one level up.
+  const anyReverted = result.sections.some((o) => o.data.reverted);
+  // A generation that came back empty is NOT reverted — `applyNumberPreservation`
+  // deliberately leaves it blank rather than restoring the original (#778,
+  // `post-process.ts`) — so its drift can't share the "Kept your original"
+  // copy with a genuinely reverted section without misdescribing what
+  // happened to it. Split by outcome rather than one aggregate boolean+list
+  // covering every section (#874 review).
+  const anyEmptiedDrift =
+    emptiedDrift.dropped.length > 0 || emptiedDrift.added.length > 0;
+
+  const tone =
+    numberDriftStatus({
+      numbersPreserved: result.allNumbersPreserved,
+      reverted: anyReverted,
+    }) === "clean"
+      ? "success"
+      : "warning";
+
   return (
-    <InlineResult
-      tone={result.allNumbersPreserved ? "success" : "warning"}
-      className="flex flex-col gap-4"
-    >
-      {!result.allNumbersPreserved && (
+    <InlineResult tone={tone} className="flex flex-col gap-4">
+      {anyReverted && (
         <NumberPreservationWarning
-          dropped={aggregated.dropped}
-          added={aggregated.added}
+          dropped={revertedDrift.dropped}
+          added={revertedDrift.added}
+          reverted
+        />
+      )}
+      {anyEmptiedDrift && (
+        <NumberPreservationWarning
+          dropped={emptiedDrift.dropped}
+          added={emptiedDrift.added}
         />
       )}
       <ul className="flex flex-col gap-4 list-none">
@@ -345,13 +390,20 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
             outcome.input.text,
             outcome.data.text || "",
           )}
+          noChangeLabel={
+            outcome.data.reverted ? revertedLabel(outcome.data) : undefined
+          }
         />
       </div>
     );
   }
-  const originalBullets = outcome.input.bullets.filter(
-    (b) => b.trim().length > 0,
-  );
+  // Both sides get the SAME blank filter. A revert hands back the input verbatim
+  // (blanks included) while this side has always dropped them, so filtering only
+  // the original made a section with one blank bullet diff as "changed" — which
+  // suppressed the `noChangeLabel` that exists to stop a revert reading as a
+  // silent no-op (#778).
+  const originalBullets = withoutBlanks(outcome.input.bullets);
+  const proposedBullets = withoutBlanks(outcome.data.bullets);
   return (
     <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-card p-3">
       <h4 className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
@@ -360,11 +412,34 @@ function SectionResult({ outcome }: { outcome: SectionOutcome }) {
       <InlineDiff
         segments={computeTextDiff(
           originalBullets.map((b) => `• ${b}`).join("\n"),
-          outcome.data.bullets.map((b) => `• ${b}`).join("\n"),
+          proposedBullets.map((b) => `• ${b}`).join("\n"),
         )}
+        noChangeLabel={
+          outcome.data.reverted ? revertedLabel(outcome.data) : undefined
+        }
       />
     </div>
   );
+}
+
+function withoutBlanks(bullets: readonly string[]): string[] {
+  return bullets.filter((b) => b.trim().length > 0);
+}
+
+/**
+ * Why a section in the whole-résumé review shows no redline (#778). Named per
+ * section rather than aggregated into the résumé-level warning because the
+ * chain rewrites each section independently — one reverting says nothing about
+ * the others, and a single banner would leave the reader guessing which.
+ */
+function revertedLabel(data: {
+  droppedNumbers: readonly string[];
+  addedNumbers: readonly string[];
+}): string {
+  const detail = describeNumberDrift(data.droppedNumbers, data.addedNumbers);
+  return detail === ""
+    ? "Kept unchanged — the rewrite was rejected."
+    : `Kept unchanged — the rewrite ${detail}.`;
 }
 
 export interface AggregateDrift {
@@ -373,18 +448,26 @@ export interface AggregateDrift {
 }
 
 /**
- * Concatenate every section's dropped/added numeric tokens in encounter
- * order so the whole-résumé warning quotes the same specific metrics that
- * each per-section panel would have shown individually.
+ * Concatenate the dropped/added numeric tokens of every section `include`
+ * selects, in encounter order, so a warning built from the result quotes the
+ * same specific metrics each per-section panel would have shown individually.
  *
- * Both `SectionOutcome` variants store the diff in `.data.droppedNumbers`
- * / `.data.addedNumbers`, so the kind discriminator doesn't change the
- * lookup — one shared loop covers both.
+ * `include` exists because "reverted" and "emptied-but-not-reverted" (#778's
+ * deliberate no-revert-on-empty-generation exemption) are different stories
+ * about what happened to a section's content, and a caller aggregating both
+ * into one list would hand a warning copy that's accurate for one and false
+ * for the other (#874 review). Both `SectionOutcome` variants store the diff
+ * in `.data.droppedNumbers` / `.data.addedNumbers`, so the kind discriminator
+ * doesn't change the lookup — one shared loop covers both.
  */
-export function aggregateDrift(result: ResumeRewriteResult): AggregateDrift {
+export function aggregateDrift(
+  result: ResumeRewriteResult,
+  include: (outcome: SectionOutcome) => boolean,
+): AggregateDrift {
   const dropped: string[] = [];
   const added: string[] = [];
   for (const outcome of result.sections) {
+    if (!include(outcome)) continue;
     dropped.push(...outcome.data.droppedNumbers);
     added.push(...outcome.data.addedNumbers);
   }

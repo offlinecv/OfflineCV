@@ -113,6 +113,7 @@ describe("buildResumeContext", () => {
         data: {
           bullets: ["Shipped Foo to 10M users."],
           numbersPreserved: true,
+          reverted: false,
           droppedNumbers: [],
           addedNumbers: [],
         },
@@ -132,6 +133,7 @@ describe("buildResumeContext", () => {
         data: {
           bullets: [long],
           numbersPreserved: true,
+          reverted: false,
           droppedNumbers: [],
           addedNumbers: [],
         },
@@ -249,7 +251,7 @@ describe("rewriteResumeWithLlm", () => {
     );
   });
 
-  it("aggregates allNumbersPreserved across sections", async () => {
+  it("reverts the one section that dropped a metric, leaving the others rewritten (#778)", async () => {
     const { engine } = makeEngine(async (req: ChatCompletionRequest) => {
       // Drop a metric on the second call only.
       const ord = req.messages[1]!.content;
@@ -266,13 +268,45 @@ describe("rewriteResumeWithLlm", () => {
       TEST_MODEL,
       () => {},
     );
-    expect(result.allNumbersPreserved).toBe(false);
-    expect(result.sections[0]!.kind === "experience" && result.sections[0]!.data.numbersPreserved).toBe(
-      true,
+    const [first, second] = result.sections;
+    expect(first!.kind === "experience" && first!.data.reverted).toBe(false);
+    expect(first!.kind === "experience" && first!.data.bullets).toEqual([
+      "Drove $1.2M ARR.",
+    ]);
+    // The dropping section keeps the user's own bullet — one bad section does
+    // not cost them the rest of the run.
+    expect(second!.kind === "experience" && second!.data.reverted).toBe(true);
+    expect(second!.kind === "experience" && second!.data.bullets).toEqual([
+      "Saved $5K per quarter",
+    ]);
+    // Every number reached the user, so the aggregate is true — which is why
+    // the UI reads `reverted` and not this flag alone.
+    expect(result.allNumbersPreserved).toBe(true);
+  });
+
+  it("reverts a section that invents a metric, and still reports the token", async () => {
+    // Invention is gated too since the #778 widening, so the aggregate reads
+    // true (the original invents nothing) and `reverted` is what carries the
+    // story — the same pairing the drop case already had.
+    const { engine } = makeEngine(async () =>
+      reply("Drove revenue with 99.9% availability."),
     );
-    expect(result.sections[1]!.kind === "experience" && result.sections[1]!.data.numbersPreserved).toBe(
-      false,
+    const sections: SectionInput[] = [
+      experienceSection("experience:0", "Acme", ["Drove revenue"]),
+    ];
+    const result = await rewriteResumeWithLlm(
+      sections,
+      engine,
+      TEST_MODEL,
+      () => {},
     );
+    expect(result.sections[0]!.data.reverted).toBe(true);
+    const section = result.sections[0]!;
+    expect(section.kind === "experience" && section.data.bullets).toEqual([
+      "Drove revenue",
+    ]);
+    expect(result.sections[0]!.data.addedNumbers).toEqual(["99.9%"]);
+    expect(result.allNumbersPreserved).toBe(true);
   });
 
   it("fires webllm_resume_rewrite_started and _completed exactly once per run", async () => {
@@ -291,6 +325,7 @@ describe("rewriteResumeWithLlm", () => {
       model: TEST_MODEL,
       sectionCount: 1,
       allNumbersPreserved: true,
+      anyReverted: false,
     });
   });
 
@@ -309,6 +344,7 @@ describe("rewriteResumeWithLlm", () => {
       inputUnitCount: 1,
       outputUnitCount: 1,
       numbersPreserved: true,
+      reverted: false,
     });
     expect(sectionCompletedMock).toHaveBeenNthCalledWith(2, {
       model: TEST_MODEL,
@@ -317,7 +353,38 @@ describe("rewriteResumeWithLlm", () => {
       inputUnitCount: 1,
       outputUnitCount: 1,
       numbersPreserved: true,
+      reverted: false,
     });
+  });
+
+  it("reports the MODEL's number preservation, not the delivered outcome, on a revert", async () => {
+    // The delivered bullets are the user's own after a revert, so
+    // `data.numbersPreserved` is true by construction. Passing that through
+    // would flip what `numbers_preserved` measures mid-release; the series has
+    // to keep describing the model. `reverted` is the new dimension that says
+    // the gate fired. Mirrors `rewrite-section.ts`.
+    const { engine } = makeEngine(async () => reply("Drove revenue."));
+    const sections: SectionInput[] = [
+      experienceSection("experience:0", "Acme", ["Drove $1.2M in ARR"]),
+    ];
+    const result = await rewriteResumeWithLlm(
+      sections,
+      engine,
+      TEST_MODEL,
+      () => {},
+    );
+    expect(result.sections[0]!.data.reverted).toBe(true);
+    expect(sectionCompletedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ numbersPreserved: false, reverted: true }),
+    );
+    expect(completedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allNumbersPreserved: false,
+        anyReverted: true,
+      }),
+    );
+    // The value the UI reads is unchanged — it is a property of what shipped.
+    expect(result.allNumbersPreserved).toBe(true);
   });
 
   it("fires webllm_first_resume_rewrite exactly once per model", async () => {
@@ -490,8 +557,8 @@ describe("app findings reach the rewrite prompt (#608)", () => {
 
   it("still catches a fabricated number when a finding names one", async () => {
     // A finding is allowed to mention a number (a critique suggestion routinely
-    // does). If the model copies it into the résumé, `allNumbersPreserved` must
-    // still report the invention — a finding must not become a fabrication
+    // does). If the model copies it into the résumé, the gate must still see
+    // and reject the invention — a finding must not become a fabrication
     // vector that the deterministic checker stops seeing.
     const numeric = new Map<string, readonly string[]>([
       [
@@ -510,10 +577,15 @@ describe("app findings reach the rewrite prompt (#608)", () => {
       () => {},
       { findings: numeric },
     );
-    expect(result.allNumbersPreserved).toBe(false);
+    expect(result.sections[0]!.data.reverted).toBe(true);
     // `checkNumbersPreserved` tokenizes the percent with its unit, so the
     // invented token is "40%" — the point is that it is reported as ADDED.
     expect(result.sections[0]!.data.addedNumbers).toContain("40%");
+    // And the fabrication never reaches the résumé.
+    const section = result.sections[0]!;
+    expect(section.kind === "experience" && section.data.bullets).toEqual([
+      "Worked on the payments API",
+    ]);
   });
 });
 

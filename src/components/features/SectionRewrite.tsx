@@ -16,9 +16,10 @@
  *     means clicking section-rewrite after per-bullet (or in a sibling role)
  *     reuses the same engine — no second multi-GB download.
  *   - Number-preservation guardrail runs deterministically on every output.
- *     When a numeric token is dropped or invented, an inline warning names
- *     the specific token (non-blocking) so the user can still accept the
- *     rewrite knowingly.
+ *     Since #778 a dropped or invented numeric token is a hard block: the
+ *     rewrite is reverted to the user's original bullets, and an inline
+ *     warning names the specific token so the user knows why nothing
+ *     changed.
  *
  * Reuse analysis (CLAUDE.md 3-tier rule):
  *   - Primitive: `Button` from `@design-system` for every interactive
@@ -70,6 +71,11 @@ import {
   UndoBatchButton,
   UNDO_HOLD_MS,
 } from "./ApplyConfirmation.tsx";
+import {
+  numberDriftStatus,
+  NumberPreservationWarning,
+  REVERTED_DIFF_LABEL,
+} from "./NumberPreservationWarning.tsx";
 import { RewriteReviewList } from "./RewriteReviewList.tsx";
 
 /**
@@ -237,9 +243,14 @@ export function useSectionRewrite(
   // Per-bullet review state (#211). Aligned against the snapshot the model
   // actually saw (stable per proposal) — not the live bullets — so the rows and
   // the decision map don't churn under unrelated re-renders.
+  // A rejected rewrite (#778) has nothing to review: `result.bullets` IS the
+  // snapshot, so aligning them would build a row per bullet offering to
+  // "accept" the user's own text. The warning above the list carries the
+  // outcome instead — same precedent as the whole-résumé path, which drops a
+  // section with no reviewable pairs to its read-only redline.
   const pairs = useMemo<AlignedPair[]>(
     () =>
-      status.kind === "proposed"
+      status.kind === "proposed" && !status.result.reverted
         ? alignBullets(status.snapshot, status.result.bullets)
         : NO_PAIRS,
     [status],
@@ -421,7 +432,7 @@ export function useSectionRewrite(
         {status.kind === "proposed" &&
           (apply ? (
             <InlineResult
-              tone={status.result.numbersPreserved ? "success" : "warning"}
+              tone={resultTone(status.result)}
               className="flex flex-col gap-3"
             >
               <RewriteReviewList
@@ -430,12 +441,14 @@ export function useSectionRewrite(
                 onApply={onApply}
                 onDiscard={onReject}
                 warning={
-                  status.result.numbersPreserved ? undefined : (
+                  status.result.reverted ||
+                  !status.result.numbersPreserved ? (
                     <NumberPreservationWarning
                       dropped={status.result.droppedNumbers}
                       added={status.result.addedNumbers}
+                      reverted={status.result.reverted}
                     />
-                  )
+                  ) : undefined
                 }
               />
             </InlineResult>
@@ -499,8 +512,9 @@ export function useSectionRewrite(
 // Helpers exported for unit tests (see SectionRewrite.test.ts). The component
 // itself is harder to render in non-idle states from a smoke test (status is
 // internal + driven by async work), so the testable surface is the helpers
-// that own the branching: `labelFor`, `formatTokens`, `ProposedSection`,
-// `NumberPreservationWarning`.
+// that own the branching: `labelFor` and `ProposedSection` here, plus
+// `formatTokens` / `NumberPreservationWarning` in the sibling file they now
+// live in.
 export function labelFor(status: Status, lockedByOther: boolean): string {
   if (lockedByOther) return "Another rewrite running…";
   switch (status.kind) {
@@ -537,14 +551,12 @@ export function ProposedSection({
   onReject: () => void;
 }) {
   return (
-    <InlineResult
-      tone={result.numbersPreserved ? "success" : "warning"}
-      className="flex flex-col gap-3"
-    >
-      {!result.numbersPreserved && (
+    <InlineResult tone={resultTone(result)} className="flex flex-col gap-3">
+      {(result.reverted || !result.numbersPreserved) && (
         <NumberPreservationWarning
           dropped={result.droppedNumbers}
           added={result.addedNumbers}
+          reverted={result.reverted}
         />
       )}
 
@@ -553,18 +565,24 @@ export function ProposedSection({
           original.map((b) => `• ${b}`).join("\n"),
           result.bullets.map((b) => `• ${b}`).join("\n"),
         )}
+        noChangeLabel={result.reverted ? REVERTED_DIFF_LABEL : undefined}
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <CopyButton
-          value={result.bullets.join("\n")}
-          variant="ghost"
-          size="sm"
-          className="rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-2xs text-content-primary hover:border-border hover:bg-surface-hover"
-          failedLabel="Couldn’t copy — select the bullets above"
-        >
-          Use this — copy all bullets
-        </CopyButton>
+        {/* No copy CTA on a rejected rewrite (#778): `result.bullets` is the
+            user's own text, so "Use this" would offer them what they already
+            have — and read as a contradiction of the notice above it. */}
+        {!result.reverted && (
+          <CopyButton
+            value={result.bullets.join("\n")}
+            variant="ghost"
+            size="sm"
+            className="rounded-md border border-border-light bg-surface-card px-2.5 py-1 text-2xs text-content-primary hover:border-border hover:bg-surface-hover"
+            failedLabel="Couldn’t copy — select the bullets above"
+          >
+            Use this — copy all bullets
+          </CopyButton>
+        )}
         <Button
           variant="link"
           size="sm"
@@ -578,30 +596,16 @@ export function ProposedSection({
   );
 }
 
-export function NumberPreservationWarning({
-  dropped,
-  added,
-}: {
-  dropped: readonly string[];
-  added: readonly string[];
-}) {
-  const parts: string[] = [];
-  if (dropped.length > 0) parts.push(`removed ${formatTokens(dropped)}`);
-  if (added.length > 0) parts.push(`invented ${formatTokens(added)}`);
-  const detail = parts.join(" and ");
-  return (
-    <p
-      role="alert"
-      className="text-2xs leading-snug text-feedback-warning-text"
-    >
-      <span aria-hidden="true">⚠ </span>
-      AI altered a metric — {detail}. Review before saving.
-    </p>
-  );
-}
-
-export function formatTokens(tokens: readonly string[]): string {
-  if (tokens.length === 1) return tokens[0]!;
-  if (tokens.length === 2) return `${tokens[0]} and ${tokens[1]}`;
-  return `${tokens.slice(0, -1).join(", ")}, and ${tokens[tokens.length - 1]}`;
+/**
+ * A reject/revert is a warning, not a success, even though the delivered
+ * bullets preserve every number: the user asked for a rewrite and did not get
+ * one, and the panel has to read that way. `numbersPreserved` alone can't
+ * decide the tone after #778 — it is true on a reverted rewrite by
+ * construction.
+ */
+function resultTone(result: {
+  numbersPreserved: boolean;
+  reverted: boolean;
+}): "success" | "warning" {
+  return numberDriftStatus(result) === "clean" ? "success" : "warning";
 }
