@@ -19,6 +19,16 @@
  * navigates to the "Your resume" tab, where the per-role wand
  * button (useSectionRewrite) already lives.
  *
+ * Everything rendered here is LLM output, and deliberately so. The heuristic
+ * skills-ordering finding (#544) briefly rendered in this body too, for the
+ * finding-row visual language; it moved to `SkillTermGuidance`, because this
+ * body only ever mounts under `status.kind === "done"` and a heuristic that
+ * needs a WebGPU model download to be seen is not one the user can distinguish
+ * from LLM output. Its row (`SkillsOrderFindingRow`, in
+ * `SkillsOrderFinding.tsx`) is mounted there and nowhere else — do not add a
+ * second mount here, the controller is shared state and both rows would react
+ * to one Apply.
+ *
  * Design rules (CLAUDE.md):
  *   - Semantic tokens only; no hardcoded hex or raw palette classes.
  *   - All interactive elements via <Button> from "@design-system".

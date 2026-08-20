@@ -15,6 +15,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { SkillTermGuidance } from "./SkillTermGuidance.tsx";
 import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
+import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -22,14 +23,42 @@ import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
 let container: HTMLDivElement;
 let root: Root;
 
-function render(parsed: ResumeQueryInput, onAddSkill: (skill: string) => void) {
+function render(
+  parsed: ResumeQueryInput,
+  onAddSkill: (skill: string) => void,
+  skillsOrder?: SkillsReorderController,
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root.render(createElement(SkillTermGuidance, { parsed, onAddSkill }));
+    root.render(
+      createElement(SkillTermGuidance, { parsed, onAddSkill, skillsOrder }),
+    );
   });
   return container;
+}
+
+/** A `useSkillsReorder` controller with something to say. Stubbed rather than
+ *  driven through the real hook: the hook's own lifecycle is covered in
+ *  `useSkillsReorder.test.tsx`, and what this file has to pin is that the row
+ *  reaches the screen HERE — on a surface with no model, no WebGPU check and
+ *  no `status.kind` (#544). */
+function reorderController(
+  overrides: Partial<SkillsReorderController> = {},
+): SkillsReorderController {
+  return {
+    finding: {
+      buried: ["Kubernetes"],
+      suggestedOrder: ["Kubernetes", "PostgreSQL", "C#"],
+    },
+    canApply: true,
+    applied: false,
+    apply: () => {},
+    undo: () => {},
+    dismiss: () => {},
+    ...overrides,
+  };
 }
 
 afterEach(() => {
@@ -134,5 +163,86 @@ describe("SkillTermGuidance", () => {
   it("renders nothing for an entirely empty résumé", () => {
     const el = render({ skills: [], experience: [] }, () => {});
     expect(el.textContent).toBe("");
+  });
+});
+
+// ── Skills ordering (#544) ────────────────────────────────────────────────────
+
+/**
+ * The regression these cover: the ordering row first shipped inside
+ * `CritiqueResults`, which mounts only under `status.kind === "done"` — so a
+ * finding computed on every parse was visible only after a visitor opted into
+ * the on-device model download. Nothing in this file touches WebGPU, a model,
+ * or an `AnalysisController`, which is the point: if the row renders here, it
+ * renders for the majority path.
+ */
+describe("SkillTermGuidance — skills ordering (#544)", () => {
+  it("renders the ordering call-out with no on-device model in play", () => {
+    const el = render(resolvableParsed(), () => {}, reorderController());
+    expect(el.textContent).toContain(
+      '"Kubernetes" looks highly relevant to your target role',
+    );
+    const reorder = el.querySelector(
+      'button[aria-label^="Move the highly relevant skills"]',
+    );
+    expect(reorder).not.toBeNull();
+  });
+
+  it("renders no ordering copy when the caller passes no controller", () => {
+    const el = render(resolvableParsed(), () => {});
+    expect(el.textContent).not.toContain("sits well down your Skills list");
+  });
+
+  it("renders no ordering copy when the controller has nothing to flag", () => {
+    const el = render(
+      resolvableParsed(),
+      () => {},
+      reorderController({ finding: undefined }),
+    );
+    expect(el.textContent).not.toContain("sits well down your Skills list");
+  });
+
+  it("Apply writes through the controller, never on render alone", () => {
+    let applied = 0;
+    const el = render(resolvableParsed(), () => {}, {
+      ...reorderController(),
+      apply: () => {
+        applied += 1;
+      },
+    });
+    expect(applied).toBe(0);
+    const reorder = el.querySelector(
+      'button[aria-label^="Move the highly relevant skills"]',
+    ) as HTMLButtonElement;
+    act(() => reorder.click());
+    expect(applied).toBe(1);
+  });
+
+  it("still renders when the classifier resolved no role at all", () => {
+    // All three term-quality buckets are empty here (`term-quality.ts` rule 1),
+    // which is the panel's own self-hide condition. The ordering heuristic
+    // needs only title TOKENS, not a resolved role profile, so the two can
+    // disagree — and the panel must not take the finding down with it.
+    const el = render(
+      {
+        skills: [],
+        experience: [{ title: "Chief Happiness Officer", company: "Acme Corp" }],
+      },
+      () => {},
+      reorderController(),
+    );
+    expect(el.textContent).toContain("sits well down your Skills list");
+  });
+
+  it("keeps the confirmation strip up while `applied` holds, finding gone", () => {
+    // Post-Apply the finding recomputes to undefined (the skills are no longer
+    // buried), but the undo affordance still has to be reachable.
+    const el = render(
+      resolvableParsed(),
+      () => {},
+      reorderController({ finding: undefined, applied: true }),
+    );
+    expect(el.querySelector("button[aria-label]")).not.toBeNull();
+    expect(el.textContent).toContain("Skills");
   });
 });

@@ -40,6 +40,7 @@ vi.mock("./ReconstructedResume.tsx", async () => {
     ReconstructedResume: (props: {
       jdContext?: string;
       onRewriteApplied?: () => void;
+      skillsOrder?: { finding?: { buried: string[] } };
     }) =>
       createElement(
         "div",
@@ -48,6 +49,13 @@ vi.mock("./ReconstructedResume.tsx", async () => {
           "div",
           { key: "probe", "data-testid": "reconstructed-probe" },
           `jdContext=${props.jdContext ?? "NULL"}`,
+        ),
+        // Its own testid, not appended to the probe above: several assertions
+        // read that probe's whole `textContent` with `toBe`.
+        createElement(
+          "div",
+          { key: "skills-order", "data-testid": "skills-order-probe" },
+          `buried=${props.skillsOrder?.finding?.buried.join(",") ?? "NONE"}`,
         ),
         createElement(
           "div",
@@ -81,11 +89,15 @@ import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
 
 const EMPTY_CRITIQUE: ResumeCritique = { bulletFindings: [], missingSections: [] };
 
-function result(summary?: string, title?: string): CascadeResult {
+function result(
+  summary?: string,
+  title?: string,
+  skills: string[] = [],
+): CascadeResult {
   return {
     canonical: {
       fields: {
-        skills: [],
+        skills,
         experience: title ? [{ title }] : [],
         education: [],
         ...(summary ? { summary } : {}),
@@ -159,9 +171,20 @@ let root: Root;
 
 const HOST_IDENTITY = parseIdentity();
 
-function Host({ opts, summary }: { opts: ControllerOpts; summary?: string }) {
+function Host({
+  opts,
+  summary,
+  buriedSkills,
+}: {
+  opts: ControllerOpts;
+  summary?: string;
+  /** A résumé whose Skills section trips the ordering heuristic (#544). */
+  buriedSkills?: { title: string; skills: string[] };
+}) {
   const edit = useEditableParse();
-  const res = result(summary);
+  const res = buriedSkills
+    ? result(summary, buriedSkills.title, buriedSkills.skills)
+    : result(summary);
   return createElement(ResultDetail, {
     activeResult: res,
     parseIdentity: HOST_IDENTITY,
@@ -176,12 +199,16 @@ function Host({ opts, summary }: { opts: ControllerOpts; summary?: string }) {
   });
 }
 
-function render(opts: ControllerOpts, summary?: string) {
+function render(
+  opts: ControllerOpts,
+  summary?: string,
+  buriedSkills?: { title: string; skills: string[] },
+) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root.render(createElement(Host, { opts, summary }));
+    root.render(createElement(Host, { opts, summary, buriedSkills }));
   });
   return container;
 }
@@ -719,5 +746,72 @@ describe("ResultDetail — the journey rail's steering report (#812)", () => {
         ?.click(),
     );
     expect(applied).not.toHaveBeenCalled();
+  });
+});
+
+// ── Skills-ordering placement (#544) ──────────────────────────────────────────
+
+/**
+ * The heuristic skills-ordering finding must reach the user WITHOUT the
+ * on-device model. It first shipped inside `CritiqueResults`, which mounts only
+ * under `status.kind === "done"` — so on a browser with no WebGPU the "Local AI
+ * feedback" disclosure is absent entirely and the finding was computed on every
+ * render and then thrown away. These pin the wiring that fixed it: the
+ * controller travels to `ReconstructedResume` (→ `TargetingSection` →
+ * `SkillTermGuidance`), which renders unconditionally.
+ *
+ * `ReconstructedResume` is mocked at the top of this file, so what is asserted
+ * here is the hand-off, not the row's markup — the row itself is covered in
+ * `SkillTermGuidance.test.tsx`.
+ */
+describe("ResultDetail — skills-ordering placement (#544)", () => {
+  /** Buried-skill résumé: "Engineering Leadership" is the top-scoring skill
+   *  against the title and sits outside the front window (skills-order.ts). */
+  const BURIED = {
+    title: "Engineering Manager",
+    skills: [
+      "Docker",
+      "AWS",
+      "Kubernetes",
+      "Engineering Leadership",
+      "Terraform",
+    ],
+  };
+
+  function buried(el: HTMLElement): string {
+    return (
+      el.querySelector('[data-testid="skills-order-probe"]')?.textContent ?? ""
+    );
+  }
+
+  /** Substring, not equality: `summaries()` returns the row's whole text, and
+   *  `Disclosure` prefixes its own ▸ glyph. An `toContain` over the array
+   *  would pass vacuously in BOTH directions. */
+  function hasAiSection(el: HTMLElement): boolean {
+    return summaries(el).some((s) => s.includes("Local AI feedback"));
+  }
+
+  it("hands the finding to the résumé surface on a browser with no WebGPU", () => {
+    const el = render({ isAvailable: false }, undefined, BURIED);
+    // The precondition that made this a real defect: with no WebGPU there is
+    // no "Local AI feedback" section at all, so a row hosted inside it would
+    // have been unreachable on this exact render.
+    expect(hasAiSection(el)).toBe(false);
+    expect(buried(el)).toBe("buried=Engineering Leadership");
+  });
+
+  it("hands it over on a WebGPU browser too — one mount, not two", () => {
+    const el = render({ isAvailable: true }, undefined, BURIED);
+    expect(hasAiSection(el)).toBe(true);
+    expect(buried(el)).toBe("buried=Engineering Leadership");
+    // The critique body is the surface it LEFT. A second mount there would put
+    // two rows over one shared controller, so both would enter the
+    // confirmation strip on a single Apply.
+    expect(el.textContent).not.toContain("Skills ordering");
+  });
+
+  it("passes a controller with no finding for a résumé with nothing buried", () => {
+    const el = render({ isAvailable: false });
+    expect(buried(el)).toBe("buried=NONE");
   });
 });

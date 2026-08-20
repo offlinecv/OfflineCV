@@ -64,7 +64,9 @@ import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
 import type { EscapeHatchController } from "../../hooks/useLlmEscapeHatch.ts";
 import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
 import { useTailorHandoff } from "../../hooks/useTailorHandoff.ts";
+import { useSkillsReorder } from "../../hooks/useSkillsReorder.ts";
 import { SECTION_IDS, scrollToSection } from "../../lib/anchors.ts";
+import { deriveTitles } from "../../lib/job-search/query-builder.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
 
@@ -204,6 +206,29 @@ export function ResultDetail({
     !recoveryOffered &&
     (analysis.isAvailable || unavailableCapability !== null);
 
+  // Skills-ordering coaching (#544) — a HEURISTIC finding, independent of
+  // `analysis`'s on-device LLM pass, computed from the same edited fields
+  // `ReconstructedResume` renders (overrides already folded into
+  // `activeResult` — see `useAnalyzedResume.ts`).
+  //
+  // It renders inside `SkillTermGuidance` (via `ReconstructedResume` →
+  // `TargetingSection`), the résumé lane's other heuristic skills advisory —
+  // NOT in the critique lane, where it first shipped. `CritiqueResults` mounts
+  // only under `status.kind === "done"`, so a finding this hook computes on
+  // every parse was reachable only by a visitor who owns a WebGPU browser AND
+  // opts into the model download. "Independent of the on-device LLM" has to be
+  // true of what the user can see, not just of how it is computed.
+  //
+  // Owned here rather than inside that panel because this is the level both
+  // the résumé and the critique lane hang off, and one instance is what keeps
+  // the apply/undo state single — see `SkillTermGuidance`'s docblock.
+  const skillsOrder = useSkillsReorder(
+    activeResult.canonical.fields.skills,
+    activeResult.canonical.fields.skillCategories,
+    deriveTitles(activeResult.canonical.fields),
+    edit.reorderSkills,
+  );
+
   return (
     <>
       {escapeHatch.isAvailable && (
@@ -242,6 +267,10 @@ export function ResultDetail({
               ? analysis.status.critique
               : undefined
           }
+          // #544: passed through to `TargetingSection` → `SkillTermGuidance`,
+          // which is where the heuristic ordering call-out renders. Nothing
+          // between here and there reads it.
+          skillsOrder={skillsOrder}
         />
       </Card>
 

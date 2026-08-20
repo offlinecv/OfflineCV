@@ -558,6 +558,87 @@ describe("useEditableParse — ungrouped remainder on the first category (#791)"
   });
 });
 
+// ── reorderSkills (#544) ───────────────────────────────────────────────────────
+
+describe("useEditableParse — reorderSkills (#544)", () => {
+  it("rewrites a flat (uncategorised) skills list into the given order", () => {
+    const parsed = {
+      skills: ["Docker", "AWS", "Kubernetes", "Terraform"],
+      skillCategories: undefined,
+    };
+    act(() =>
+      api.reorderSkills(["Kubernetes", "Docker", "AWS", "Terraform"]),
+    );
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([
+      "Kubernetes",
+      "Docker",
+      "AWS",
+      "Terraform",
+    ]);
+  });
+
+  it("a second reorderSkills call restores the original order (undo)", () => {
+    const parsed = {
+      skills: ["Docker", "AWS", "Kubernetes", "Terraform"],
+      skillCategories: undefined,
+    };
+    act(() =>
+      api.reorderSkills(["Kubernetes", "Docker", "AWS", "Terraform"]),
+    );
+    act(() =>
+      api.reorderSkills(["Docker", "AWS", "Kubernetes", "Terraform"]),
+    );
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([
+      "Docker",
+      "AWS",
+      "Kubernetes",
+      "Terraform",
+    ]);
+  });
+
+  it("does NOT resurrect a skill the user deleted first", () => {
+    const parsed = {
+      skills: ["React", "PHP", "Python", "Docker", "AWS", "GraphQL"],
+      skillCategories: undefined,
+    };
+    act(() => api.removeSkill("PHP"));
+    const current = computeEditedSkills(parsed, api.skillsOverride).skills;
+    expect(current).toEqual(["React", "Python", "Docker", "AWS", "GraphQL"]);
+
+    // `order` is a permutation of the CURRENT list, so PHP is legitimately
+    // absent from it — which is exactly why REPLACING `removed` with the
+    // order's keys (instead of merging) un-deleted PHP, and `applyFlatEdits`
+    // then re-emitted it from the pristine parse ahead of every `added` entry:
+    // a deleted skill silently returning at the FRONT, from a control labelled
+    // "Reorder skills".
+    act(() => api.reorderSkills([...current].reverse()));
+
+    expect(computeEditedSkills(parsed, api.skillsOverride).skills).toEqual([
+      "GraphQL",
+      "AWS",
+      "Docker",
+      "Python",
+      "React",
+    ]);
+    // The tombstone itself, not just its effect — the merge is the mechanism.
+    expect(api.skillsOverride.removed).toContain("php");
+  });
+
+  it("is a no-op while a non-empty category snapshot exists", () => {
+    const cats: SkillCategory[] = [
+      { label: "Cloud", skills: ["AWS", "Docker"] },
+      { label: "Languages", skills: ["Python", "Go"] },
+    ];
+    act(() => api.moveSkillToCategory(cats, "AWS", 1)); // mints a non-empty snapshot
+    const before = api.skillsOverride;
+    act(() => api.reorderSkills(["Docker", "AWS", "Python", "Go"]));
+    // Unchanged: the categorised branch owns order, not the flat override —
+    // writing removed/added here would trip `computeEditedSkills`'s DEV
+    // assertion, so the write must not happen at all.
+    expect(api.skillsOverride).toBe(before);
+  });
+});
+
 // ── Summary override (#625) ───────────────────────────────────────────────────
 
 /** The summary's SECOND writer, as the whole-résumé review drives it: build the

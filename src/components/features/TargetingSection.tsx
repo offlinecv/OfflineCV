@@ -48,6 +48,7 @@ import {
   assessResumeSkills,
 } from "./SkillTermGuidance.tsx";
 import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
+import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 
 interface TargetingSectionProps {
   /** Distinct role titles, most-recent-first, from `deriveTitles`. */
@@ -60,6 +61,12 @@ interface TargetingSectionProps {
   parsed: ResumeQueryInput;
   /** `useEditableParse.addSkill` — the only way a suggestion reaches the résumé. */
   onAddSkill: (skill: string) => void;
+  /** Skills-ordering coaching (#544) — forwarded straight to
+   *  `SkillTermGuidance`, which hosts the row. Not read here: the summary
+   *  `count` stays the ADDABLE half only (see below), and the ordering finding
+   *  cannot fire without titles, so it can never be the thing that would have
+   *  kept this section from self-hiding. */
+  skillsOrder?: SkillsReorderController;
 }
 
 export function TargetingSection({
@@ -68,6 +75,7 @@ export function TargetingSection({
   onPrimaryChange,
   parsed,
   onAddSkill,
+  skillsOrder,
 }: TargetingSectionProps) {
   const skills = assessResumeSkills(parsed);
 
@@ -110,7 +118,11 @@ export function TargetingSection({
           primary={primary}
           onPrimaryChange={onPrimaryChange}
         />
-        <SkillTermGuidance parsed={parsed} onAddSkill={onAddSkill} />
+        <SkillTermGuidance
+          parsed={parsed}
+          onAddSkill={onAddSkill}
+          skillsOrder={skillsOrder}
+        />
       </div>
     </Disclosure>
   );
