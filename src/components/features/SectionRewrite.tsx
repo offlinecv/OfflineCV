@@ -16,9 +16,10 @@
  *     means clicking section-rewrite after per-bullet (or in a sibling role)
  *     reuses the same engine — no second multi-GB download.
  *   - Number-preservation guardrail runs deterministically on every output.
- *     When a numeric token is dropped or invented, an inline warning names
- *     the specific token (non-blocking) so the user can still accept the
- *     rewrite knowingly.
+ *     Since #778 a dropped or invented numeric token is a hard block: the
+ *     rewrite is reverted to the user's original bullets, and an inline
+ *     warning names the specific token so the user knows why nothing
+ *     changed.
  *
  * Reuse analysis (CLAUDE.md 3-tier rule):
  *   - Primitive: `Button` from `@design-system` for every interactive
@@ -70,6 +71,11 @@ import {
   UndoBatchButton,
   UNDO_HOLD_MS,
 } from "./ApplyConfirmation.tsx";
+import {
+  numberDriftStatus,
+  NumberPreservationWarning,
+  REVERTED_DIFF_LABEL,
+} from "./NumberPreservationWarning.tsx";
 import { RewriteReviewList } from "./RewriteReviewList.tsx";
 
 /**
@@ -506,8 +512,9 @@ export function useSectionRewrite(
 // Helpers exported for unit tests (see SectionRewrite.test.ts). The component
 // itself is harder to render in non-idle states from a smoke test (status is
 // internal + driven by async work), so the testable surface is the helpers
-// that own the branching: `labelFor`, `formatTokens`, `ProposedSection`,
-// `NumberPreservationWarning`.
+// that own the branching: `labelFor` and `ProposedSection` here, plus
+// `formatTokens` / `NumberPreservationWarning` in the sibling file they now
+// live in.
 export function labelFor(status: Status, lockedByOther: boolean): string {
   if (lockedByOther) return "Another rewrite running…";
   switch (status.kind) {
@@ -590,14 +597,6 @@ export function ProposedSection({
 }
 
 /**
- * Caption the diff carries when a rewrite was rejected (#778). The two sides
- * are identical in that case, so without it the panel reads as "the model
- * looked at your bullets and changed nothing" — which is a different, and
- * false, story about what happened.
- */
-const REVERTED_DIFF_LABEL = "No changes applied — your original bullets.";
-
-/**
  * A reject/revert is a warning, not a success, even though the delivered
  * bullets preserve every number: the user asked for a rewrite and did not get
  * one, and the panel has to read that way. `numbersPreserved` alone can't
@@ -608,67 +607,5 @@ function resultTone(result: {
   numbersPreserved: boolean;
   reverted: boolean;
 }): "success" | "warning" {
-  return result.reverted || !result.numbersPreserved ? "warning" : "success";
-}
-
-export function NumberPreservationWarning({
-  dropped,
-  added,
-  reverted = false,
-}: {
-  dropped: readonly string[];
-  added: readonly string[];
-  /**
-   * The rewrite was rejected and the original kept (#778). Changes the copy
-   * from "check what the AI changed" to "nothing changed, and here's why" —
-   * the delivered bullets are the user's own, so telling them to review a
-   * metric they never lost would be wrong.
-   */
-  reverted?: boolean;
-}) {
-  const detail = describeNumberDrift(dropped, added);
-  if (reverted) {
-    return (
-      <p
-        role="alert"
-        className="text-2xs leading-snug text-feedback-warning-text"
-      >
-        <span aria-hidden="true">⚠ </span>
-        Kept your original — the rewrite {detail}, so I didn’t apply it. Try
-        again for a different attempt.
-      </p>
-    );
-  }
-  return (
-    <p
-      role="alert"
-      className="text-2xs leading-snug text-feedback-warning-text"
-    >
-      <span aria-hidden="true">⚠ </span>
-      AI altered a metric — {detail}. Review before saving.
-    </p>
-  );
-}
-
-/**
- * The one phrasing of "what the model did to the numbers", shared by the
- * revert notice, the drift warning, and the whole-résumé per-section label.
- * Both halves are named because the gate reverts on either since the #778
- * widening — quoting only the dropped ones left an invention-only revert
- * saying the rewrite dropped nothing at all.
- */
-export function describeNumberDrift(
-  dropped: readonly string[],
-  added: readonly string[],
-): string {
-  const parts: string[] = [];
-  if (dropped.length > 0) parts.push(`removed ${formatTokens(dropped)}`);
-  if (added.length > 0) parts.push(`invented ${formatTokens(added)}`);
-  return parts.join(" and ");
-}
-
-export function formatTokens(tokens: readonly string[]): string {
-  if (tokens.length === 1) return tokens[0]!;
-  if (tokens.length === 2) return `${tokens[0]} and ${tokens[1]}`;
-  return `${tokens.slice(0, -1).join(", ")}, and ${tokens[tokens.length - 1]}`;
+  return numberDriftStatus(result) === "clean" ? "success" : "warning";
 }

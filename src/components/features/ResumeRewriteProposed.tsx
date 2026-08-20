@@ -35,11 +35,12 @@ import {
 } from "../../lib/rewrite-review/align-bullets.ts";
 import { resolveSectionWrites } from "../../lib/rewrite-review/apply-accepted.ts";
 import { useRewriteReview, type RewriteReview } from "../../hooks/useRewriteReview.ts";
+import type { SectionRewriteApply } from "./SectionRewrite.tsx";
 import {
   describeNumberDrift,
+  numberDriftStatus,
   NumberPreservationWarning,
-  type SectionRewriteApply,
-} from "./SectionRewrite.tsx";
+} from "./NumberPreservationWarning.tsx";
 import { BulletReviewRow } from "./RewriteReviewList.tsx";
 
 /** Per-section apply wiring for the whole-résumé review, keyed by the
@@ -96,7 +97,18 @@ export function ProposedPanel({
    *  Absent → every section renders read-only (graceful fallback). */
   applyBySection?: ResumeRewriteApply;
 }) {
-  const aggregated = useMemo(() => aggregateDrift(result), [result]);
+  const revertedDrift = useMemo(
+    () => aggregateDrift(result, (o) => o.data.reverted),
+    [result],
+  );
+  const emptiedDrift = useMemo(
+    () =>
+      aggregateDrift(
+        result,
+        (o) => !o.data.reverted && !o.data.numbersPreserved,
+      ),
+    [result],
+  );
 
   // Experience sections with an apply wiring become per-bullet reviewable;
   // pair ids are namespaced by section id so the one combined decision map
@@ -214,17 +226,36 @@ export function ProposedPanel({
   // a border colour, no text, no `role="alert"`. Same condition as
   // `ProposedSection`'s in SectionRewrite.tsx, one level up.
   const anyReverted = result.sections.some((o) => o.data.reverted);
+  // A generation that came back empty is NOT reverted — `applyNumberPreservation`
+  // deliberately leaves it blank rather than restoring the original (#778,
+  // `post-process.ts`) — so its drift can't share the "Kept your original"
+  // copy with a genuinely reverted section without misdescribing what
+  // happened to it. Split by outcome rather than one aggregate boolean+list
+  // covering every section (#874 review).
+  const anyEmptiedDrift =
+    emptiedDrift.dropped.length > 0 || emptiedDrift.added.length > 0;
+
+  const tone =
+    numberDriftStatus({
+      numbersPreserved: result.allNumbersPreserved,
+      reverted: anyReverted,
+    }) === "clean"
+      ? "success"
+      : "warning";
 
   return (
-    <InlineResult
-      tone={result.allNumbersPreserved && !anyReverted ? "success" : "warning"}
-      className="flex flex-col gap-4"
-    >
-      {(anyReverted || !result.allNumbersPreserved) && (
+    <InlineResult tone={tone} className="flex flex-col gap-4">
+      {anyReverted && (
         <NumberPreservationWarning
-          dropped={aggregated.dropped}
-          added={aggregated.added}
-          reverted={anyReverted}
+          dropped={revertedDrift.dropped}
+          added={revertedDrift.added}
+          reverted
+        />
+      )}
+      {anyEmptiedDrift && (
+        <NumberPreservationWarning
+          dropped={emptiedDrift.dropped}
+          added={emptiedDrift.added}
         />
       )}
       <ul className="flex flex-col gap-4 list-none">
@@ -417,18 +448,26 @@ export interface AggregateDrift {
 }
 
 /**
- * Concatenate every section's dropped/added numeric tokens in encounter
- * order so the whole-résumé warning quotes the same specific metrics that
- * each per-section panel would have shown individually.
+ * Concatenate the dropped/added numeric tokens of every section `include`
+ * selects, in encounter order, so a warning built from the result quotes the
+ * same specific metrics each per-section panel would have shown individually.
  *
- * Both `SectionOutcome` variants store the diff in `.data.droppedNumbers`
- * / `.data.addedNumbers`, so the kind discriminator doesn't change the
- * lookup — one shared loop covers both.
+ * `include` exists because "reverted" and "emptied-but-not-reverted" (#778's
+ * deliberate no-revert-on-empty-generation exemption) are different stories
+ * about what happened to a section's content, and a caller aggregating both
+ * into one list would hand a warning copy that's accurate for one and false
+ * for the other (#874 review). Both `SectionOutcome` variants store the diff
+ * in `.data.droppedNumbers` / `.data.addedNumbers`, so the kind discriminator
+ * doesn't change the lookup — one shared loop covers both.
  */
-export function aggregateDrift(result: ResumeRewriteResult): AggregateDrift {
+export function aggregateDrift(
+  result: ResumeRewriteResult,
+  include: (outcome: SectionOutcome) => boolean,
+): AggregateDrift {
   const dropped: string[] = [];
   const added: string[] = [];
   for (const outcome of result.sections) {
+    if (!include(outcome)) continue;
     dropped.push(...outcome.data.droppedNumbers);
     added.push(...outcome.data.addedNumbers);
   }

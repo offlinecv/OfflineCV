@@ -16,13 +16,11 @@
 import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { labelFor, ProposedSection, type Status } from "./SectionRewrite.tsx";
 import {
   formatTokens,
-  labelFor,
   NumberPreservationWarning,
-  ProposedSection,
-  type Status,
-} from "./SectionRewrite.tsx";
+} from "./NumberPreservationWarning.tsx";
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 
 // ── labelFor ────────────────────────────────────────────────────────────────

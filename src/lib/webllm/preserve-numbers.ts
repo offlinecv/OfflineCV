@@ -49,16 +49,35 @@
  * by them:
  *
  * 1. **The claim decides what we look FOR; presence decides whether we found
- *    it.** A claimed input atom is a drop only if its key is absent from *every*
- *    atom on the other side — claimed or not. Whether a bare integer claims
- *    depends on the surrounding words (`Managed 12 people` vs
- *    `a 12-person team`, `50-100` vs `50 to 100`), so requiring the other side
- *    to claim it too would make the gate fire on numbers the user typed
- *    themselves, purely because the model re-spelled the phrasing around them.
- *    Undecorated keys share one `num:` namespace for the same reason: a
- *    headcount, a year, a range endpoint and a comma-grouped figure holding the
- *    same digits are the same value, and only the prose (or the grouping)
- *    around them differs.
+ *    it — except for a headcount, where a same-value digit that was ALREADY
+ *    sitting unclaimed on both sides before the rewrite doesn't count.** For
+ *    `form`/`range`/`year`, a claimed input atom is a drop only if its key is
+ *    absent from *every* atom on the other side — claimed or not. Whether a
+ *    bare integer reads as a range endpoint or a grouped figure depends on the
+ *    surrounding prose (`50-100` vs `50 to 100`) or punctuation (`1,200` vs
+ *    `1200`), so requiring the other side to re-produce the exact same reading
+ *    would make the gate fire on numbers the user typed themselves, purely
+ *    because the model re-spelled the phrasing around them; `year` has no
+ *    unclaimed state to compare against in the first place (a 4-digit number
+ *    in range is always a year, see `bareIntegerClaim`), so the lenient lookup
+ *    is also the only one available to it. A headcount is different: its
+ *    context (a management verb, a people noun) is common enough to
+ *    reproduce by accident on a digit that means something else entirely —
+ *    `"Managed a team of 12 engineers"` dropped down to `"Led the
+ *    department"`, sitting next to an unrelated, UNCHANGED `"Completed module
+ *    12"`, would score clean under a blanket `outputKeys.has`, because the
+ *    coincidental `12` was already there before the rewrite touched anything.
+ *    So a headcount counts as present only if the output claims it too, OR a
+ *    *NEW* unclaimed occurrence of the key appears that the input didn't
+ *    already carry — `outputClaimedKeys` and the unclaimed-occurrence counts
+ *    below implement exactly that, and the "new" qualifier is what keeps
+ *    `"Managed 5 engineers"` → `"Completed phase 5"` (the digit's ONLY
+ *    occurrence, reworded away from headcount context) reading as a
+ *    legitimate reword rather than a drop. Undecorated keys still share one
+ *    `num:` namespace across all four bare-integer readings, because a
+ *    headcount, a year, a range endpoint and a comma-grouped figure holding
+ *    the same digits are the same value; the presence rule is what differs
+ *    per claim kind, not the key they share.
  * 2. **Set semantics, not multiset.** A number is dropped only when it is gone
  *    entirely, never when its count fell. `MERGE_AND_PRUNE_RULE` licenses the
  *    model to fold two bullets into one, and `["Cut 5% cost", "Cut 5% churn"] →
@@ -68,9 +87,10 @@
  *    that trade is deliberate, because the gate reverts silently and the merge
  *    case is the one the prompt actively asks for.
  * 3. **The two directions are asymmetric, because they ask different
- *    questions.** Rule 1 is right for a DROP — a figure the user typed is only
- *    lost if its value is gone from the output in every spelling. It is wrong
- *    for an INVENTION: that a digit happens to appear somewhere in the input is
+ *    questions.** Rule 1's lenient half (`form`/`range`) is right for a DROP —
+ *    a figure the user typed is only lost if its value is gone from the
+ *    output in every spelling. That same leniency is wrong for an INVENTION:
+ *    that a digit happens to appear somewhere in the input is
  *    not evidence that a claim the output newly asserts was ever made. `phase 5`
  *    → `5 engineers` reuses the digit and invents the headcount, and under a
  *    plain rule-1 lookup it scored clean. So an output atom the surrounding
@@ -165,6 +185,22 @@ const PEOPLE_VERB_PREFIX =
  */
 const PEOPLE_NOUN_FOLLOW = new RegExp(
   `^(?:\\s|${RANGE_DASH.source})*(?:engineers?|developers?|designers?|analysts?|interns?|reports?|people|persons?|members?|employees?|contractors?|consultants?|staff|hires?|recruits?)\\b`,
+  "i",
+);
+
+/**
+ * What a `PEOPLE_VERB_PREFIX` match is allowed to run into when there is no
+ * people noun to confirm it: end-of-string, punctuation, or a closed list of
+ * prepositions/conjunctions. Anchored to the start of the suffix slice, same
+ * as `PEOPLE_NOUN_FOLLOW`.
+ *
+ * This is what stops the verb alone from claiming a headcount when a
+ * NON-people noun follows it — `Managed 5 projects` — where the verb is
+ * pointing at that noun, not at a headcount. `Managed 8 across the data
+ * platform` (noun elided) still qualifies, because `across` is in the list.
+ */
+const FUNCTION_WORD_FOLLOWS = new RegExp(
+  "^(?:\\s*$|\\s*[.,;:!?)]|\\s+(?:across|in|on|at|for|to|from|over|within|during|and|with|through|by|per)\\b)",
   "i",
 );
 
@@ -279,7 +315,15 @@ function bareIntegerClaim(
     matchStart + digits.length + PEOPLE_CONTEXT_WINDOW,
   );
 
-  if (PEOPLE_VERB_PREFIX.test(before) || PEOPLE_NOUN_FOLLOW.test(after)) {
+  // A people noun after the digit is decisive on its own.
+  if (PEOPLE_NOUN_FOLLOW.test(after)) {
+    return "headcount";
+  }
+  // The verb alone qualifies only when NO noun follows — the digit runs into
+  // a preposition, punctuation, or the end of the bullet. A non-people noun
+  // right after the digit (`Managed 5 projects`) means the verb is modifying
+  // that noun, not asserting a headcount.
+  if (PEOPLE_VERB_PREFIX.test(before) && FUNCTION_WORD_FOLLOWS.test(after)) {
     return "headcount";
   }
 
@@ -384,6 +428,18 @@ function missingFrom(
   return missing;
 }
 
+/** How many UNCLAIMED atoms share each key — the drop side's masking guard. */
+function countUnclaimedByKey(
+  atoms: readonly ClassifiedAtom[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const atom of atoms) {
+    if (isClaimed(atom)) continue;
+    counts.set(atom.key, (counts.get(atom.key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
  * Check that every numeric fact from the input bullets survives into the
  * rewritten bullets, and that no new numeric fact was invented.
@@ -408,9 +464,38 @@ export function checkNumbersPreserved(
   const inputClaimedKeys = new Set(
     inputAtoms.filter(isClaimed).map((a) => a.key),
   );
+  const outputClaimedKeys = new Set(
+    outputAtoms.filter(isClaimed).map((a) => a.key),
+  );
+  // Per-key counts of UNCLAIMED occurrences on each side — the baseline of
+  // "this digit shows up elsewhere for unrelated reasons" that already
+  // existed before the rewrite touched anything. Only headcount needs this:
+  // it is the one claim kind with a real unclaimed state on the same key
+  // (`num:12` from "team of 12" vs `num:12` from "module 12" of a curriculum).
+  const inputUnclaimedCounts = countUnclaimedByKey(inputAtoms);
+  const outputUnclaimedCounts = countUnclaimedByKey(outputAtoms);
 
-  // Drop: the value is gone from the output in every spelling (rule 1).
-  const dropped = missingFrom(inputAtoms, (atom) => outputKeys.has(atom.key));
+  // Drop: the value is gone from the output in every spelling (rule 1) —
+  // except for a headcount, which counts as present only if the output
+  // claims it too, OR a NEW unclaimed occurrence of the key appears that
+  // wasn't already there before the rewrite (the "phase 5" masking case
+  // below, which rule 1 is right to treat as a reword, not a loss). Without
+  // the "new" qualifier, an unrelated digit the input ALREADY carried
+  // unclaimed (e.g. "module 12" sitting next to a genuinely-dropped
+  // "12 engineers") would mask the drop just by surviving unchanged — the
+  // masking bug rule 1's blanket `outputKeys.has` used to have. `form`/
+  // `range`/`year` keep the fully lenient lookup: those claims genuinely
+  // depend on prose a rewrite is licensed to move (or, for `year`, have no
+  // unclaimed state to compare against at all), so tightening them risks a
+  // false revert on a legitimate reword rule 1 exists to allow.
+  const dropped = missingFrom(inputAtoms, (atom) => {
+    if (atom.claim !== "headcount") return outputKeys.has(atom.key);
+    if (outputClaimedKeys.has(atom.key)) return true;
+    return (
+      (outputUnclaimedCounts.get(atom.key) ?? 0) >
+      (inputUnclaimedCounts.get(atom.key) ?? 0)
+    );
+  });
   // Invention: the same lookup, except that a headcount the output asserts is
   // "present" only if the input asserted that value too (rule 3). `phase 5` →
   // `5 engineers` reuses the digit while making a claim the résumé never made.

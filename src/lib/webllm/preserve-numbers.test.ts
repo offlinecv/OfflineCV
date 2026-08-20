@@ -189,6 +189,75 @@ describe("checkNumbersPreserved", () => {
     expect(result.dropped).toEqual(["12"]);
   });
 
+  // ── #874 review: a management verb alone must not claim a headcount when a
+  // non-people noun follows the digit (Samhit21) ─────────────────────────────
+
+  describe("a management verb needs a people noun or a bare context, not any noun (#874 review)", () => {
+    it("does NOT flag a headcount when the verb's object is not a person", () => {
+      // `projects` isn't a people noun, so `Managed 5 projects` is a verb
+      // pointing at a non-people object, not a headcount claim.
+      expect(
+        checkNumbersPreserved(
+          ["Owned 5 projects."],
+          ["Managed 5 projects."],
+        ),
+      ).toEqual({ ok: true, dropped: [], added: [] });
+      expect(
+        checkNumbersPreserved(["Built 8 features."], ["Led 8 features."]),
+      ).toEqual({ ok: true, dropped: [], added: [] });
+      expect(
+        checkNumbersPreserved(
+          ["Delivered 4 programs."],
+          ["Ran 4 programs."],
+        ),
+      ).toEqual({ ok: true, dropped: [], added: [] });
+      expect(
+        checkNumbersPreserved(
+          ["Shipped 6 releases."],
+          ["Directed 6 releases."],
+        ),
+      ).toEqual({ ok: true, dropped: [], added: [] });
+    });
+
+    it("still claims a headcount when the verb has no noun to run into", () => {
+      // `Managed 8 across the data platform` elides the noun — the verb alone
+      // has to be enough, or a real headcount rewording (Managed 8 people →
+      // Managed 8 across the platform) would score as an invention.
+      const result = checkNumbersPreserved(
+        ["Managed 8 people across the data platform."],
+        ["Managed 8 across the data platform."],
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it("still claims a headcount when a verb-object noun IS a person", () => {
+      expect(
+        checkNumbersPreserved(
+          ["Managed 5 engineers."],
+          ["Led 5 engineers."],
+        ),
+      ).toEqual({ ok: true, dropped: [], added: [] });
+    });
+
+    it("still catches the genuine invention this fix must not blunt — phase 5 to 5 engineers", () => {
+      const result = checkNumbersPreserved(
+        ["Completed phase 5 of the migration"],
+        ["Managed 5 engineers through the migration"],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.added).toEqual(["5"]);
+    });
+
+    it("still catches a dropped $ figure — the fix is scoped to bare-integer headcount context", () => {
+      const result = checkNumbersPreserved(
+        ["Saved the team $4.2M last quarter."],
+        ["Saved the team money last quarter."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["$4.2M"]);
+    });
+  });
+
   // ── #778: extraction gaps that let a real drop score clean ────────────────
   //
   // Every case below was INVISIBLE before #778: the token produced no atom at
@@ -579,6 +648,57 @@ describe("checkNumbersPreserved", () => {
           ["Completed phase 5 of the migration"],
         ).dropped,
       ).toEqual([]);
+    });
+  });
+
+  describe("a dropped headcount is not excused by an unrelated pre-existing unclaimed digit (#874 review)", () => {
+    // The drop side used to test presence against outputKeys — every output
+    // atom, claimed or not — so a genuinely-dropped headcount scored clean
+    // whenever an unrelated digit of the same value survived unclaimed,
+    // unchanged, elsewhere in the output. The fix is count-aware, not a flat
+    // "must be claimed": a NEW unclaimed occurrence still counts as a
+    // legitimate reword (the "phase 5" case below, pinned since #778), only
+    // a pre-existing, unrelated one doesn't.
+
+    it("catches a dropped headcount masked by an unrelated same-value digit that was already there", () => {
+      const result = checkNumbersPreserved(
+        [
+          "Managed a team of 12 engineers.",
+          "Completed certification module 12 of the curriculum.",
+        ],
+        [
+          "Led the engineering department.",
+          "Completed certification module 12 of the curriculum.",
+        ],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["12"]);
+    });
+
+    it("does NOT extend to year — a year has no unclaimed state to compare against (documented residual)", () => {
+      // Every 4-digit number in 1900-2099 auto-claims as a year regardless of
+      // context (see `bareIntegerClaim`), so "suite 1900" is itself always
+      // claimed — there is no unclaimed bucket for the count-aware guard to
+      // compare against, and this masking case survives. Catching it needs a
+      // context gate on year classification itself (mirroring headcount's
+      // verb/noun check), which is a separate, larger change than this fix;
+      // tracked as a follow-up rather than silently left unmentioned.
+      const result = checkNumbersPreserved(
+        ["Founded the program in 1900.", "Operated out of suite 1900."],
+        ["Founded the program.", "Operated out of suite 1900."],
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it("keeps a range/form drop lenient — an unclaimed same-value digit elsewhere still counts as present", () => {
+      // The deliberate trade rule 1 keeps for form/range: a re-spelling that
+      // our heuristic fails to classify identically on the other side must
+      // not false-revert a legitimate reword.
+      const result = checkNumbersPreserved(
+        ["Handled 50-100 tickets per week."],
+        ["Handled up to 100 tickets. Reference: ticket #50 opened the queue."],
+      );
+      expect(result.ok).toBe(true);
     });
   });
 

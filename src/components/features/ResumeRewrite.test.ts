@@ -168,13 +168,23 @@ describe("sectionsEqual", () => {
 
 describe("aggregateDrift", () => {
   it("returns empty arrays for an all-clean result", () => {
-    expect(aggregateDrift(okResult)).toEqual({ dropped: [], added: [] });
+    expect(aggregateDrift(okResult, () => true)).toEqual({
+      dropped: [],
+      added: [],
+    });
   });
 
-  it("collects dropped and added tokens across every section regardless of kind", () => {
-    expect(aggregateDrift(driftResult)).toEqual({
+  it("collects dropped and added tokens across every included section regardless of kind", () => {
+    expect(aggregateDrift(driftResult, () => true)).toEqual({
       dropped: ["$5K"],
       added: ["99.9%"],
+    });
+  });
+
+  it("only collects tokens from sections `include` selects (#874 review)", () => {
+    expect(aggregateDrift(driftResult, () => false)).toEqual({
+      dropped: [],
+      added: [],
     });
   });
 });
