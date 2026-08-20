@@ -25,7 +25,7 @@
       "skills",
       "website_url"
     ],
-    "skillsCount": 8,
+    "skillsCount": 7,
     "experienceCount": 3,
     "educationCount": 2,
     "projectsCount": 2,
@@ -76,7 +76,7 @@
     "sectionSource": "regex",
     "pageCount": 2,
     "rawCharCount": 2279,
-    "extractedCharCount": 1709,
+    "extractedCharCount": 1681,
     "sections": [
       {
         "name": "profile",
@@ -107,7 +107,7 @@
       "hasSummary": false,
       "experienceCount": 3,
       "educationCount": 2,
-      "skillsCount": 8
+      "skillsCount": 7
     },
     "linkAnnotationCount": 0,
     "disagreements": []
