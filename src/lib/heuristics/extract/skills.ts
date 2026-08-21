@@ -304,6 +304,36 @@ const SUBLABEL_PREFIX_RE = new RegExp(`^(${SUBLABEL_BODY}):\\s*`);
  *  tore off its body. See the rejoin in `splitColumnCells`. */
 const BARE_SUBLABEL_RE = new RegExp(`^${SUBLABEL_BODY}:$`);
 
+/** A Skills sub-label that MAY head a spoken-language row. Deliberately NOT
+ * added to NON_SKILL_SUBLABEL_RE: on most engineering résumés `Languages:`
+ * heads the programming-language row, so the label is ambiguous and the body
+ * must decide whether this is a proficiency statement. Qualifiers are allowed
+ * because `Foreign Languages:` and `Spoken Languages:` are common variants. */
+const LANGUAGE_LABEL_RE =
+  /^(?:foreign\s+|spoken\s+|other\s+)?languages?\s*$/i;
+
+/** A spoken-language proficiency predication, distinguished from a delimited
+ * programming-language list by its proficiency wording rather than by the
+ * label. Keep this vocabulary broad enough to cover standard proficiency
+ * scales, but apply it per fragment so `Visual Basic` and `React Native` do
+ * not cause an entire programming-language row to disappear. */
+const LANGUAGE_PROFICIENCY_BODY_RE =
+  /\b(fluent|native|bilingual|conversational|proficient|proficiency|proficiencies|intermediate|elementary|limited|beginner|basic|working\s+proficiency|mother\s+tongue)\b/i;
+
+function isLanguageProficiencyCell(cell: string): boolean {
+  const debulleted = stripBullet(cell);
+  const match = debulleted.match(SUBLABEL_PREFIX_RE);
+  if (!match || !LANGUAGE_LABEL_RE.test(match[1])) return false;
+
+  const fragments = splitRespectingParens(debulleted.slice(match[0].length))
+    .map((fragment) => fragment.trim())
+    .filter((fragment) => fragment !== "");
+  return (
+    fragments.length > 0 &&
+    fragments.every((fragment) => LANGUAGE_PROFICIENCY_BODY_RE.test(fragment))
+  );
+}
+
 /**
  * Tokenizes a single column cell into valid skill tokens and adds them to
  * `out`. Drops the cell entirely when it looks like a contact/profile link —
@@ -317,7 +347,11 @@ function tokenizeCell(cell: string, out: Set<string>): void {
   // leading `Label:` prefix and drop the whole cell when it names a
   // hobbies/interests list — before the label is stripped and the items split.
   const labelMatch = debulleted.match(SUBLABEL_PREFIX_RE);
-  if (labelMatch && NON_SKILL_SUBLABEL_RE.test(labelMatch[1])) return;
+  if (
+    labelMatch &&
+    (NON_SKILL_SUBLABEL_RE.test(labelMatch[1]) || isLanguageProficiencyCell(debulleted))
+  )
+    return;
   const clean = debulleted.replace(SUBLABEL_PREFIX_RE, "");
   // A whole cell that is a profile link ("github.com/janesmith") must be
   // dropped before splitting — a path slash would otherwise leave the path
@@ -613,10 +647,16 @@ function upcomingContinuationTexts(lineCells: string[][], from: number): string[
  * A non-skill sub-label (Interests/Hobbies) is not a category: `tokenizeCell`
  * drops such a cell whole, so it never contributes tokens and never reaches the
  * caller's category branch — but the guard here keeps the two decisions aligned.
+ * Language-proficiency rows retain their label here so a dropped row can still
+ * anchor a soft-wrapped continuation in `extractSkills`.
  */
 function matchCellLabel(cell: string): string | undefined {
   const m = stripBullet(cell).match(SUBLABEL_PREFIX_RE);
-  if (!m || NON_SKILL_SUBLABEL_RE.test(m[1])) return undefined;
+  if (
+    !m ||
+    NON_SKILL_SUBLABEL_RE.test(m[1])
+  )
+    return undefined;
   return m[1].trim();
 }
 
@@ -647,11 +687,21 @@ export function extractSkills(
       value.push(tok);
       cellTokens.push(tok);
     }
+    const label = matchCellLabel(cell);
+    // A dropped language-proficiency row still opens a category boundary. Keep
+    // that anchor so a soft-wrapped tail cannot be misfiled under the previous
+    // category; the category is emitted only if a later continuation contributes
+    // a token.
+    if (cellTokens.length === 0) {
+      if (label !== undefined && isLanguageProficiencyCell(cell)) {
+        categories.push({ label, skills: [] });
+      }
+      continue;
+    }
+
     // A cell that produced nothing (dropped link/hobbies label, or all-duplicate)
     // is neither a category nor a bare contribution — skip it on both axes.
-    if (cellTokens.length === 0) continue;
 
-    const label = matchCellLabel(cell);
     if (label !== undefined) {
       categories.push({ label, skills: cellTokens });
     } else if (categories.length > 0) {
@@ -666,13 +716,18 @@ export function extractSkills(
     }
   }
 
+  const nonEmptyCategories = categories.filter(
+    (category) => category.skills.length > 0,
+  );
   const confidence = value.length >= 5 ? 0.85 : value.length >= 2 ? 0.6 : 0.2;
   return {
     value,
     // Emit the structured view ONLY when the section is fully categorised: at
-    // least one label AND no bare head. Otherwise the field is absent (never
-    // `[]`), which reads as "uncategorised" per invariant (2).
-    ...(categories.length > 0 && !hasUncategorisedHead ? { categories } : {}),
+    // least one non-empty label AND no bare head. Otherwise the field is absent
+    // (never `[]`), which reads as "uncategorised" per invariant (2).
+    ...(nonEmptyCategories.length > 0 && !hasUncategorisedHead
+      ? { categories: nonEmptyCategories }
+      : {}),
     confidence,
   };
 }
