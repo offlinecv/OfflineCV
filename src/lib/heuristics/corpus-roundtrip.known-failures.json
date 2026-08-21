@@ -26,30 +26,5 @@
     "summary",
     "render"
   ],
-  "baselines": {
-    "google-docs/google-docs-skia-proxy-classic.pdf": [
-      {
-        "category": "experience",
-        "issue": 326,
-        "status": "accepted",
-        "note": "The ONLY diff is a Unicode glyph the #295 toWinAnsi() render sanitizer rewrites lossily: a role title '… Intern → Junior Engineer' round-trips as '… Intern -> Junior Engineer' (→ U+2192 → '->'). #326 records the decision: no-crash beats glyph fidelity, and a real fix needs a Unicode-capable embedded font. Delete when such a font lands."
-      }
-    ],
-    "unknown/weasyprint-cairo-classic.pdf": [
-      {
-        "category": "experience",
-        "issue": 326,
-        "status": "accepted",
-        "note": "Same single-glyph toWinAnsi() substitution as google-docs-skia-proxy-classic; see #326's decision record."
-      }
-    ],
-    "unknown/extended-latin-name-roundtrip.pdf": [
-      {
-        "category": "contact",
-        "issue": 664,
-        "status": "accepted",
-        "note": "full_name 'ANNA WIŚNIEWSKA' → 'ANNA WI?NIEWSKA'. ś (U+015B) is Latin Extended-A, outside WinAnsi, so toWinAnsi() degrades it to '?' on the standard-font path. ACCEPTED under #664 with an explicit written decision — not inherited from #326, whose recorded tradeoff covers a punctuation glyph in a role TITLE and does not extend to an identity field. The decision: the USER-FACING export refuses rather than degrading. useDownloadPdf calls findExportGlyphLosses() before rendering and, on the Helvetica fallback, blocks the download and names the affected fields instead of handing back a mangled name. That refusal deliberately does NOT live in renderAtsResumePdf, so this corpus row keeps exercising the un-refused path: the round-trip oracle needs a rendered PDF to measure, and it is the only fixture in the corpus with a character outside WinAnsi (verified: 0 of 57 expected snapshots contain one). So the '?' recorded here is the intentional Node/CI behaviour, not an open defect. Delete this row if a Unicode-capable font ever removes the fallback entirely. Minted under #654 as the corpus's first evidence for roundtrip-contact-value-changed."
-      }
-    ]
-  }
+  "baselines": {}
 }

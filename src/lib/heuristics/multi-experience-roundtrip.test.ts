@@ -10,11 +10,12 @@
  * reconstructed-PDF export → re-parse. The verbatim source heading of each group
  * is preserved (extending #285 from one heading to per-group), and the
  * round-trip fidelity target holds at the SECTION level on the way IN and at the
- * ROLE level end-to-end (no role lost). The 2 → 2 SECTION round-trip is a #436
- * known gap: main's one-line experience header (#434) renders each role as a
- * single dated line under its category heading, which the text-only re-parser
- * reads as a company entry (#354 suppression) and flattens the two groups to one.
- * Closing that needs the one-line-header title/company disambiguation in #436.
+ * ROLE level end-to-end (no role lost). The 2 → 2 SECTION round-trip currently
+ * holds too, but only because the export keeps main's one-line experience header
+ * (#434) on ONE line. When that header wraps, the text-only re-parser reads the
+ * dated continuation as a company entry (#354 suppression) and flattens the two
+ * groups to one — the #436 mechanism, still unfixed. The durable fix is the
+ * one-line-header title/company disambiguation tracked in #436.
  *
  * Scoring is intentionally NOT grouped — every role pools flat regardless of
  * label — so this file asserts only the grouping/round-trip contract; the corpus
@@ -105,16 +106,45 @@ describe("#311 multiple experience sections — parse + round-trip", { timeout: 
     expect(distinctLabels(parse1.canonical.fields.experience ?? []).length).toBe(2);
     // No roles lost across the round-trip — every role survives export + re-parse.
     expect(parse3.canonical.fields.experience?.length).toBe(parse1.canonical.fields.experience?.length);
-    // #436 known gap: on the way BACK OUT the grouping currently flattens to a
-    // single unlabeled experience section — 0 distinct category labels survive.
-    // Main's one-line experience header (#434) renders each role as a single
-    // "Title · Company, Location  Dates" line under the category heading; the
-    // text-only re-parser then reads the dated role line under "TEACHING
-    // EXPERIENCE" as a company entry (`isInstitutionRepeat` / #354 suppression)
-    // rather than a new category, so neither category heading re-emits a
-    // section_label. Restoring the 2 → 2 round-trip needs the one-line-header
-    // title/company disambiguation tracked in #436; this assertion tightens back
-    // to `.toBe(2)` when #436 lands.
-    expect(distinctLabels(parse3.canonical.fields.experience ?? []).length).toBe(0);
+    // Both category labels survive the round-trip — but by GEOMETRY, not because
+    // #436 landed, so do not read this as the known gap being closed.
+    //
+    // The #436 mechanism is unchanged: main's one-line experience header (#434)
+    // renders each role as a single "Title · Company, Location  Dates" line under
+    // its category heading, and when that line WRAPS the text-only re-parser reads
+    // the dated continuation as a company entry (`isInstitutionRepeat` / #354
+    // suppression) rather than a new category, flattening both groups to 0 labels.
+    // While that header fits on one line the misread never happens.
+    //
+    // Measured on this fixture at every rung of the export fit ladder (8, 8.5, 9,
+    // 9.5, 10): 2 labels survive at all five. That is a wider margin than it was
+    // under the Poppins this engine used to embed, where the same fixture held 2
+    // only at <= 8.5pt and flattened to 0 at >= 9 — Liberation Sans is narrow
+    // enough that the header no longer wraps at any size we ship.
+    //
+    // The assertion is still load-bearing on that header not wrapping, so a longer
+    // company name would put it back at 0 even now. Until #436's title/company
+    // disambiguation lands, a change here means the export geometry moved, not
+    // that the parser regressed.
+    expect(distinctLabels(parse3.canonical.fields.experience ?? []).length).toBe(2);
+  });
+
+  it("holds the 2 → 2 grouping at every fit-ladder rung (8, 8.5, 9, 9.5, 10)", async () => {
+    // Sweeps what the previous test's comment only claimed: the one-line
+    // experience header must not wrap at ANY rung `fitToPage` can pick, since
+    // the round-trip in the previous test only exercises whichever rung the
+    // fit pass happens to choose for this fixture.
+    const bytes = await fsp.readFile(FIXTURE);
+    const parse1 = await runCascade(new Uint8Array(bytes));
+    const model = buildAtsResumeModel(parse1, scoreOf(parse1));
+
+    for (const bodyPt of [8, 8.5, 9, 9.5, 10] as const) {
+      const { bytes: exportedBytes } = await renderAtsResumePdf(model, { bodyPt });
+      const parse3 = await runCascade(new Uint8Array(exportedBytes));
+      expect(
+        distinctLabels(parse3.canonical.fields.experience ?? []).length,
+        `rung ${bodyPt}pt`,
+      ).toBe(2);
+    }
   });
 });

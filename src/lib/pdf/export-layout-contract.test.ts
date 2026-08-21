@@ -9,7 +9,7 @@
  *   - REVERSE-CHRONOLOGICAL entries (document order, as parsed).
  *   - CANONICAL section headers — every heading the exporter emits must be a
  *     header our OWN parser re-recognizes on re-upload.
- *   - STANDARD fonts (Poppins with a Helvetica fallback, both text-layer fonts).
+ *   - STANDARD fonts (Liberation Sans with a Helvetica fallback, both text-layer fonts).
  *
  * This test enforces the headers half: it asserts that every heading the
  * exporter can emit — the canonical fallback set, PLUS every verbatim
@@ -42,7 +42,7 @@ import { computeAnonymousAtsScore } from "../score/score.ts";
 import type { CascadeResult } from "../heuristics/types.ts";
 import type { AtsEntry, AtsResumeModel } from "./ats-resume-model.ts";
 import { buildAtsResumeModel } from "./ats-resume-model.ts";
-import { renderAtsResumePdf } from "./render-ats-pdf.ts";
+import { REFERENCE_BODY_PT, renderAtsResumePdf } from "./render-ats-pdf.ts";
 import {
   extractPdfDrawnLines,
   type PdfDrawnLine,
@@ -147,20 +147,24 @@ function fillerEntry(bullets: number): AtsEntry {
  * of a 2/1 or 1/2 break strands a lone line — so it can only move whole.
  */
 const THREE_LINE_BULLET =
-  "BULLETSTART partnered across engineering, product and design to land a " +
-  "platform initiative that measurably improved customer outcomes BULLETMID " +
-  "and then carried the same practice into the wider organisation BULLETEND";
+  "BULLETSTART partnered closely across engineering, product, design and " +
+  "operations leadership to land a platform initiative that measurably " +
+  "improved customer outcomes across every core segment BULLETMID and then " +
+  "carried the same practice into the wider organisation over several " +
+  "subsequent quarters of sustained delivery BULLETEND";
 const THREE_LINE_TOKENS = ["BULLETSTART", "BULLETMID", "BULLETEND"];
 
 /** A bullet wrapping to exactly FOUR drawn lines, one token per line. Four is
  *  the shortest bullet that CAN legally split (2/2), so it is the case that
  *  exercises break placement rather than a whole-bullet reservation (#631). */
 const FOUR_LINE_BULLET =
-  "BULLETSTART partnered across engineering, product and design to land a " +
-  "platform initiative that measurably improved customer outcomes BULLETTWO " +
-  "and then carried the same practice into the wider organisation, writing " +
-  "the runbooks BULLETTHREE and training the on-call rotation before handing " +
-  "the whole programme over to its permanent owners BULLETEND";
+  "BULLETSTART partnered closely across engineering, product, design and " +
+  "operations leadership to land a platform initiative that measurably " +
+  "improved customer outcomes across every core segment BULLETTWO and then " +
+  "carried the same practice into the wider organisation, writing the " +
+  "complete set of on-call runbooks and operational playbooks BULLETTHREE " +
+  "and training the whole on-call rotation before handing the entire " +
+  "programme over to its permanent long-term owners BULLETEND";
 const FOUR_LINE_TOKENS = [
   "BULLETSTART",
   "BULLETTWO",
@@ -181,11 +185,25 @@ const withFillerBefore =
     ],
   });
 
+/**
+ * Every contract in this file is about WHERE the engine breaks a page, so each
+ * render pins the body size instead of letting the fit pass choose it.
+ *
+ * Unpinned, these tests would be vacuous rather than wrong: the fit pass exists
+ * to keep a résumé on one page, and it would shrink each deliberately-oversized
+ * fixture below until there was no page break left to make a claim about. The
+ * rung itself is arbitrary — the reference size keeps the fixtures calibrated
+ * where they already were.
+ */
+const PINNED = { bodyPt: REFERENCE_BODY_PT } as const;
+
 async function drawnLines(
   build: ModelBuilder,
   filler: number,
 ): Promise<PdfDrawnLine[]> {
-  return extractPdfDrawnLines((await renderAtsResumePdf(build(filler))).bytes);
+  return extractPdfDrawnLines(
+    (await renderAtsResumePdf(build(filler), PINNED)).bytes,
+  );
 }
 
 /** Index of the single drawn line containing `token` (fails if 0 or 2+ match). */
@@ -766,7 +784,9 @@ describe("export layout contract — keep-with-next pagination (#629)", () => {
         },
       ],
     };
-    const lines = await extractPdfDrawnLines((await renderAtsResumePdf(model)).bytes);
+    const lines = await extractPdfDrawnLines(
+      (await renderAtsResumePdf(model, PINNED)).bytes,
+    );
     const pages = Math.max(...lines.map((l) => l.page));
     const densest = Math.max(
       ...Array.from({ length: pages }, (_, i) => linesOnPage(lines, i + 1)),
@@ -827,7 +847,7 @@ describe("export layout contract — the Summary body honours widow control", ()
    *  {@link bulletLinesPerPage} returns, so a `1` is the widow. */
   async function summaryLinesPerPage(words: number): Promise<number[]> {
     const lines = await extractPdfDrawnLines(
-      (await renderAtsResumePdf(summaryModel(words))).bytes,
+      (await renderAtsResumePdf(summaryModel(words), PINNED)).bytes,
     );
     const perPage = new Map<number, number>();
     for (const line of lines) {
@@ -843,7 +863,7 @@ describe("export layout contract — the Summary body honours widow control", ()
    * Bracketed on both sides: the low end must fit page one entirely and the high
    * end must spill, which is what stops the window below from being vacuous.
    */
-  async function spillBoundary(max = 800): Promise<number> {
+  async function spillBoundary(max = 1400): Promise<number> {
     expect(
       (await summaryLinesPerPage(0)).length,
       "an empty summary must not spill onto page two",

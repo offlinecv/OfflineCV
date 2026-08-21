@@ -412,7 +412,7 @@ describe("corpus snapshots", () => {
           //   The nine `*ChangedAcrossRoundtrip` bits come from the export →
           //   re-parse hop, so they pin EXACT BITS of `pdf-lib`'s render output
           //   AND of the font-fallback path (the current goldens were baked with
-          //   "Poppins font embed failed, falling back to Helvetica"). A pdf-lib
+          //   "Body font embed failed, falling back to Helvetica"). A pdf-lib
           //   bump, a font-loading fix, or a change to `render-ats-pdf.ts` can
           //   therefore turn corpus tests red WITHOUT any parser change.
           //

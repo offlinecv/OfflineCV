@@ -159,13 +159,37 @@ describe("useDownloadPdf — download-source tagging (#313)", () => {
 /**
  * #664 — refuse rather than silently substituting "?" in the user's own fields.
  *
- * These cases need no font stub: under Node the Poppins `?url` asset is a bare
- * path that `fetch` cannot resolve, so the export ALWAYS takes the Helvetica
- * fallback here. That is the same condition a browser hits when the font fetch
- * fails, which makes this environment the natural place to test the refusal —
- * the ASCII cases above prove the same path still downloads normally.
+ * The real, correctly-served embedded font (Liberation Sans) covers ś/ł, so
+ * there is nothing to refuse over on the happy path — `render-ats-pdf.fonts.
+ * test.ts`'s "reports nothing when the embedded font loads" pins that. To
+ * exercise the refusal, this block stubs `fetch` to fail and forces a fresh
+ * module instance via `vi.resetModules()` + a dynamic re-import (the same
+ * pattern `render-ats-pdf.fonts.test.ts` uses) rather than relying on the
+ * statically-imported `useDownloadPdf` above: `render-ats-pdf.ts` memoizes a
+ * SUCCESSFUL font fetch at module scope for the life of that module instance
+ * (#664 — so a repeat download doesn't re-fetch), and the tagging describe
+ * above already forced one real success against the shared instance. Without
+ * a fresh module, `loadBodyFontBytes()` would short-circuit on that cached
+ * success and never call the failing stub at all.
  */
 describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
+  let freshUseDownloadPdf: typeof useDownloadPdf;
+
+  beforeEach(async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network unavailable (simulated)");
+      }),
+    );
+    vi.resetModules();
+    ({ useDownloadPdf: freshUseDownloadPdf } = await import("./useDownloadPdf.ts"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   function namedResult(fullName: string): CascadeResult {
     const base = uploadedResult();
     return {
@@ -177,8 +201,27 @@ describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
     };
   }
 
+  function FreshProbe({ result }: { result: CascadeResult }) {
+    const score = computeAnonymousAtsScore({
+      parsed: result.canonical.fields,
+      fieldConfidence: result.canonical.fieldConfidence,
+      triggers: result.triggers,
+      rawText: result.rawText,
+      sections: result.canonical.sections,
+    });
+    api = freshUseDownloadPdf(result, score, onDownloaded);
+    return null;
+  }
+
+  function mountFresh(result: CascadeResult): void {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(<FreshProbe result={result} />));
+  }
+
   it("refuses the download and names the field when the fallback would mangle the name", async () => {
-    mount(namedResult("ANNA WIŚNIEWSKA"));
+    mountFresh(namedResult("ANNA WIŚNIEWSKA"));
 
     await act(async () => {
       await api.download();
@@ -192,7 +235,7 @@ describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
   });
 
   it("fires no download, no analytics event and no journey mark when it refuses", async () => {
-    mount(namedResult("ANNA WIŚNIEWSKA"));
+    mountFresh(namedResult("ANNA WIŚNIEWSKA"));
 
     await act(async () => {
       await api.download();
@@ -209,7 +252,7 @@ describe("useDownloadPdf — glyph-loss refusal (#664)", () => {
   it("still downloads a pure-ASCII résumé on the same failing-font path", async () => {
     // The gate that keeps a font problem from blocking everyone: this is the
     // identical code path as the refusal above, differing only in the data.
-    mount(namedResult("Jane Candidate"));
+    mountFresh(namedResult("Jane Candidate"));
 
     await act(async () => {
       await api.download();

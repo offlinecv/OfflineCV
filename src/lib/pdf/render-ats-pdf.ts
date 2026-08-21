@@ -5,15 +5,15 @@
  * render-ats-pdf — the single-column, text-only ATS PDF draw engine (#171).
  *
  * Renders an `AtsResumeModel` to PDF bytes using pdf-lib. The brand font
- * (Poppins) is embedded when its vendored TTF bytes load and pdf-lib accepts
+ * (Liberation Sans) is embedded when its vendored TTF bytes load and pdf-lib accepts
  * them (#314); on ANY failure the engine falls back to pdf-lib's built-in
  * Helvetica / Helvetica-Bold (`StandardFonts`), so a downloaded PDF is never
  * blocked by a font problem. Either way: no images, no rasterization, no
  * network egress — every glyph is selectable, searchable text, and the
- * Poppins bytes are bundled locally + fetched from the app's own origin (see
+ * Font bytes are bundled locally + fetched from the app's own origin (see
  * `loadFonts()` below), never a CDN.
  *
- * Layout: US Letter (612×792 pt), single column, ~54pt margins. The engine
+ * Layout: US Letter (612×792 pt), single column, 36pt margins. The engine
  * tracks a `y` cursor from the top margin downward; when the next line would
  * cross the bottom margin it adds a page and resets the cursor. Long lines are
  * word-wrapped by measuring with `font.widthOfTextAtSize`; bullets get a "• "
@@ -91,14 +91,16 @@ import {
   type BulletSplit,
   type RenderFinding,
 } from "./render-findings.ts";
-import poppinsRegularUrl from "../../assets/fonts/Poppins-Regular.ttf?url";
-import poppinsBoldUrl from "../../assets/fonts/Poppins-Bold.ttf?url";
+import bodyFontRegularUrl from "../../assets/fonts/LiberationSans-Regular.ttf?url";
+import bodyFontBoldUrl from "../../assets/fonts/LiberationSans-Bold.ttf?url";
 
 // ── Page geometry (points) ────────────────────────────────────────────────────
 
 const PAGE_WIDTH = 612; // US Letter
 const PAGE_HEIGHT = 792;
-const MARGIN = 54;
+// 54 → 36 (#878): narrower margin recovers page width for the fit ladder's
+// larger rungs; #878's own contact-line example (540.0pt) is worked out at 36.
+const MARGIN = 36;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const CONTENT_BOTTOM = MARGIN;
 // Drawable height of a FRESH page — `newPage()` resets the cursor to
@@ -111,7 +113,7 @@ const USABLE_PAGE_HEIGHT = PAGE_HEIGHT - MARGIN - CONTENT_BOTTOM;
 //
 // Font-signal stance (#284, Part 2 — documented limitation, not a fix here).
 // This engine DOES emit bold (Helvetica-Bold) and a real type scale — a role
-// header is bold at SIZE_HEADER, its date muted at SIZE_SUB, bullets at SIZE_BODY.
+// header is bold at `t.header`, its date muted at `t.sub`, bullets at `t.body`.
 // Those signals are, however, invisible to the round-trip: our own text-only
 // parser classifies role title / company / bullet purely from text shape and
 // x/y geometry — `groupIntoLines` collapses per-glyph `fontSize`/`fontName` away
@@ -123,32 +125,101 @@ const USABLE_PAGE_HEIGHT = PAGE_HEIGHT - MARGIN - CONTENT_BOTTOM;
 // separate change (it would touch `groupIntoLines` retention + `entry-blocks`
 // anchoring) and is intentionally out of scope here; if we later want
 // font-aware parsing, file it as its own follow-up.
-const SIZE_NAME = 18;
-// Professional headline under the name (#425) — regular weight, sized between
-// the name and the contact line so it reads as a subordinate title, not a
-// second name.
-const SIZE_HEADLINE = 11;
-const SIZE_CONTACT = 9;
-const SIZE_SECTION = 11;
-const SIZE_HEADER = 10.5;
-const SIZE_SUB = 9.5;
-const SIZE_BODY = 10;
+// Every size and gap below is expressed at ONE reference body size and scaled
+// together by {@link makeTypeScale}, because the fit pass re-renders the same
+// résumé at successively smaller rungs and the proportions have to survive the
+// shrink. Scaling the body text alone does not work: the gaps, the rule and the
+// name block are ~140pt of fixed overhead — roughly 19% of the usable page — so
+// leaving them at full size cuts the achievable shrink by about a third.
+/** The body size {@link BASE} is written at. Exported so a test that must hold
+ *  geometry still — every pagination contract — can pin the size the fit pass
+ *  would otherwise choose for it. */
+export const REFERENCE_BODY_PT = 8.5;
+const BASE = {
+  name: 18,
+  // Professional headline under the name (#425) — regular weight, sized between
+  // the name and the contact line so it reads as a subordinate title, not a
+  // second name.
+  headline: 11,
+  contact: 9,
+  section: 10,
+  header: 9.5,
+  sub: 8.5,
+  body: 8.5,
+  gapAfterContact: 7,
+  gapBeforeSection: 7,
+  gapAfterRule: 3,
+  gapBetweenEntries: 3,
+  gapAfterHeader: 2,
+  // Vertical space the section-heading rule consumes (`drawRule`). Named because
+  // the keep-with-next reservation for a section heading must include it (#629) —
+  // the heading, its rule, and the first line of its content move as one unit.
+  ruleHeight: 2,
+} as const;
 
-// Line-height multiplier applied to the font size for vertical advance.
-const LINE_GAP = 1.25;
-// Extra vertical breathing room (points) between blocks.
-const GAP_AFTER_CONTACT = 10;
-const GAP_BEFORE_SECTION = 12;
-const GAP_AFTER_RULE = 6;
-const GAP_BETWEEN_ENTRIES = 7;
-const GAP_AFTER_HEADER = 2;
-// Vertical space the section-heading rule consumes (`drawRule`). Named because
-// the keep-with-next reservation for a section heading must include it (#629) —
-// the heading, its rule, and the first line of its content move as one unit.
-const RULE_HEIGHT = 2;
+/** Line-height multiplier applied to the font size for vertical advance. A
+ *  ratio, so it is the one value {@link makeTypeScale} must NOT scale.
+ *  1.25 → 1.15 (#878): the old value was tuned against the fixed 8.5pt body;
+ *  at the fit ladder's larger rungs it cost more vertical space than the
+ *  bigger type needed, so it's tightened here alongside the margin change. */
+const LINE_GAP = 1.15;
+
+/** Every point-valued layout input for one render pass, at one body size. */
+export type TypeScale = { readonly [K in keyof typeof BASE]: number } & {
+  /** The rung this scale was built at — what the fit pass selected. */
+  readonly bodyPt: number;
+};
+
+/**
+ * Build the type scale for a body size, holding every proportion fixed.
+ *
+ * `makeTypeScale(REFERENCE_BODY_PT)` reproduces {@link BASE} exactly, so the
+ * geometry at the reference rung is the same layout this engine drew before the
+ * fit pass existed — the property `render-ats-pdf.type-scale.test.ts` pins.
+ */
+export function makeTypeScale(bodyPt: number): TypeScale {
+  const k = bodyPt / REFERENCE_BODY_PT;
+  const scaled = Object.fromEntries(
+    Object.entries(BASE).map(([key, pt]) => [key, pt * k]),
+  ) as { [K in keyof typeof BASE]: number };
+  return { ...scaled, bodyPt };
+}
+
+/**
+ * Body sizes the fit pass tries, largest first (#-fit).
+ *
+ * The rungs are 0.5pt apart because the page height a résumé occupies is
+ * quantized by wrap counts — a three-line bullet stays three lines until it
+ * drops to two — so a finer ladder costs renders without moving the break.
+ *
+ * The floor is a READABILITY floor, not a layout one: at 8pt Liberation Sans
+ * the x-height is 4.22pt, which is about as small as résumé body text can be
+ * set and still survive a recruiter skim on screen. {@link fitToPage} ships
+ * whichever rung achieves the fewest pages (tie-broken to the largest) — see
+ * its docblock for the exact rule, which is narrower than "the floor" or "the
+ * top rung": a résumé that spills at every rung ships at whichever rung first
+ * reaches the minimum page count, not necessarily either extreme.
+ */
+const FIT_LADDER = [10, 9.5, 9, 8.5, 8] as const;
+
+/** How far {@link Layout.fitToOneLine} may shrink the contact line before it
+ *  gives up and lets it wrap. Below this the line stops reading as contact
+ *  detail and starts reading as a mistake. */
+const CONTACT_MIN_SIZE_RATIO = 0.8;
+
+/**
+ * The shave {@link Layout.fitToOneLine} applies to the size it computes.
+ *
+ * `size * CONTENT_WIDTH / width` is the exact fitting size in the reals, but
+ * re-multiplying it by the font's width-per-point in binary floating point can
+ * land a hair ABOVE `CONTENT_WIDTH` — enough for the wrapper's `<=` test to
+ * fail and hand back the two-line contact this whole path exists to prevent.
+ * One part in a billion is far below a rendering difference and far above the
+ * rounding error.
+ */
+const FIT_ONE_LINE_SHAVE = 1 - 1e-9;
 
 const BULLET_MARKER = "• ";
-const BULLET_INDENT = 12; // hanging-indent width for wrapped bullet lines
 
 // Minimum drawn lines of a wrapped bullet that must land on EACH side of a page
 // break it straddles — the orphan half (#629, no lone line at a page bottom) and
@@ -280,9 +351,9 @@ const WINANSI_TRANSLITERATIONS: Record<string, string> = {
  *
  * An embedded font is not a licence to skip sanitization. pdf-lib does not
  * throw on a code point the embedded font lacks — it emits the font's
- * `.notdef` glyph, which extracts back as **U+0000**. So a character Poppins
+ * `.notdef` glyph, which extracts back as **U+0000**. So a character the font
  * has no glyph for (U+2192 "→", U+2605 "★", U+2713 "✓" — verified against the
- * vendored `Poppins-Regular.ttf`) survived to `drawText` unsanitized and
+ * vendored `LiberationSans-Regular.ttf`) survived to `drawText` unsanitized and
  * landed in the downloaded PDF as a NUL byte. Re-parsing that PDF reads the
  * NUL straight back into a user-facing field (a role title, a name), where it
  * is invisible on screen and travels into every downstream consumer.
@@ -293,12 +364,12 @@ const WINANSI_TRANSLITERATIONS: Record<string, string> = {
  * font could not reproduce it.
  *
  * `hasGlyph` is the font's own coverage predicate, so this degrades ONLY what
- * the font genuinely cannot draw. Latin-Extended glyphs Poppins does cover
+ * the font genuinely cannot draw. Latin-Extended glyphs the font does cover
  * (e.g. "ś" in a candidate's name) still pass through untouched — the reason
  * the embedded path skipped `toWinAnsi()` in the first place, preserved here.
  *
  * The predicate is NOT trusted for control characters, which are dropped
- * before it runs: Poppins answers `true` for U+0000, so a NUL already in an
+ * before it runs: the font answers `true` for U+0000, so a NUL already in an
  * input field (re-uploading a PDF exported by a pre-fix build puts one there)
  * would otherwise pass the probe and ride straight back out.
  */
@@ -316,7 +387,7 @@ function toEmbeddedFontSafe(
       continue;
     }
     // Other C0/C1 control characters: drop silently (as toWinAnsi does).
-    // This MUST precede the coverage probe. Poppins reports a real glyph for
+    // This MUST precede the coverage probe. The font reports a real glyph for
     // U+0000 (`hasGlyphForCodePoint(0) === true` in both vendored faces — the
     // one control code point it claims), so probing first would let the exact
     // byte this function exists to eliminate through verbatim, and would make
@@ -394,16 +465,16 @@ type Doc = Awaited<ReturnType<PdfLibParts["PDFDocument"]["create"]>>;
 type Page = ReturnType<Doc["addPage"]>;
 type PdfFont = Awaited<ReturnType<Doc["embedFont"]>>;
 
-// ── Poppins font embed (#314) ─────────────────────────────────────────────────
+// ── Body font embed (#314) ────────────────────────────────────────────────────
 //
-// The Poppins TTF bytes are bundled as Vite assets (imported via `?url` above
+// The Liberation Sans TTF bytes are bundled as Vite assets (imported via `?url` above
 // — the same mechanism `src/main.tsx` uses for the pdfjs worker) and fetched
 // from the app's own bundled-asset origin at download time. That `fetch()`
 // never leaves the browser's own origin, so it does NOT violate offlinecv's
 // zero-egress guarantee — this is loading a local asset, not calling a font
 // CDN (e.g. `fonts.gstatic.com`), which is explicitly forbidden here.
 // Cached module-scoped so repeat downloads reuse the same fetched bytes.
-let poppinsBytesPromise: Promise<{
+let bodyFontBytesPromise: Promise<{
   regular: ArrayBuffer;
   bold: ArrayBuffer;
 }> | null = null;
@@ -427,31 +498,31 @@ async function fetchFontBytes(url: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
-function loadPoppinsBytes(): Promise<{
+function loadBodyFontBytes(): Promise<{
   regular: ArrayBuffer;
   bold: ArrayBuffer;
 }> {
-  if (!poppinsBytesPromise) {
-    poppinsBytesPromise = Promise.all([
-      fetchFontBytes(poppinsRegularUrl),
-      fetchFontBytes(poppinsBoldUrl),
+  if (!bodyFontBytesPromise) {
+    bodyFontBytesPromise = Promise.all([
+      fetchFontBytes(bodyFontRegularUrl),
+      fetchFontBytes(bodyFontBoldUrl),
     ])
       .then(([regular, bold]) => ({ regular, bold }))
       .catch((err: unknown) => {
         // Clear the memo on failure so the NEXT call re-fetches (#664).
         //
-        // The guard above is `!poppinsBytesPromise`, so without this the
+        // The guard above is `!bodyFontBytesPromise`, so without this the
         // REJECTED promise stays cached forever: one transient blip degraded
         // every subsequent download for the life of the page, even after the
         // network recovered. That also made a user-facing "try again" a lie —
         // the retry resolved to the same stored rejection without issuing a
         // request. Only the failure path is cleared; a successful fetch stays
         // memoized, which is what this cache is for.
-        poppinsBytesPromise = null;
+        bodyFontBytesPromise = null;
         throw err;
       });
   }
-  return poppinsBytesPromise;
+  return bodyFontBytesPromise;
 }
 
 /** One field whose text the Helvetica fallback cannot draw intact (#664). */
@@ -484,7 +555,7 @@ export interface ExportGlyphLoss {
  *     which is the complement of this, not a replacement: reporting never
  *     refuses.
  *  2. **Empty when the embedded font loads.** It shares the memoized
- *     {@link loadPoppinsBytes}, so the probe and the subsequent render make one
+ *     {@link loadBodyFontBytes}, so the probe and the subsequent render make one
  *     fetch attempt between them, not two. On the failure path the memo is
  *     cleared (that is what makes Retry work), so a *no-loss* résumé costs a
  *     second failing attempt when the render then re-tries — acceptable, since
@@ -495,7 +566,7 @@ export interface ExportGlyphLoss {
  *     outside WinAnsi.
  *
  * Deliberate limit: this covers the **fallback** path only. On the embedded path
- * `toEmbeddedFontSafe` can still emit `?` for a code point Poppins lacks (`★`,
+ * `toEmbeddedFontSafe` can still emit `?` for a code point the font lacks (`★`,
  * `✓`) — decorative symbols, not identity fields, and outside #664's scope. That
  * half is now REPORTED rather than refused, by the export findings
  * `renderAtsResumePdf` returns (#621); this remains the only gate that stops a
@@ -514,7 +585,7 @@ export async function findExportGlyphLosses(
   model: AtsResumeModel,
 ): Promise<ExportGlyphLoss[]> {
   try {
-    await loadPoppinsBytes();
+    await loadBodyFontBytes();
     return [];
   } catch {
     // The embedded font is unavailable, so the render below would fall back to
@@ -539,7 +610,7 @@ export async function findExportGlyphLosses(
 
 /**
  * Load the `{ regular, bold }` font pair the renderer draws with. Tries
- * embedding the vendored Poppins TTFs (registering `@pdf-lib/fontkit` first,
+ * embedding the vendored Liberation Sans TTFs (registering `@pdf-lib/fontkit` first,
  * since pdf-lib's built-in `embedFont` can only parse the 14 standard fonts
  * without it); on ANY failure — fetch error, corrupt bytes, an embed
  * rejection — falls back to pdf-lib's built-in Helvetica / Helvetica-Bold, so
@@ -548,7 +619,7 @@ export async function findExportGlyphLosses(
  * Returns the `sanitize` step to run before every `drawText`, chosen to match
  * the font that was actually loaded — never skipped. On the Helvetica fallback
  * that is `toWinAnsi()` (StandardFonts encode WinAnsi only, #295); on the
- * embedded path it is {@link toEmbeddedFontSafe} bound to Poppins' own glyph
+ * embedded path it is {@link toEmbeddedFontSafe} bound to the embedded font's own glyph
  * coverage, because an embedded font silently emits `.notdef` (extracting as
  * U+0000) for a glyph it lacks rather than throwing.
  *
@@ -575,10 +646,10 @@ async function loadFonts(
     // that hands it to pdf-lib's `registerFontkit` — the narrowest possible
     // untyped surface, rather than threading `any` through load-pdf-lib.ts.
     doc.registerFontkit(parts.fontkit as Parameters<Doc["registerFontkit"]>[0]);
-    const bytes = await loadPoppinsBytes();
+    const bytes = await loadBodyFontBytes();
     // `subset: true` prunes the embedded font to only the glyphs the résumé
     // actually uses — a downloaded PDF touches ~60–80 glyphs, so this trims the
-    // full Poppins Regular + Bold (a few hundred KB) down to what's on the page.
+    // full Liberation Sans Regular + Bold (~276KB) down to what's on the page.
     // Orthogonal to the sanitizer choice: subsetting prunes unused glyphs, it
     // doesn't change which code points the font can encode.
     const regular = await doc.embedFont(bytes.regular, { subset: true });
@@ -586,11 +657,11 @@ async function loadFonts(
     return {
       regular,
       bold,
-      sanitize: makePoppinsSanitizer(parts, bytes.regular, bytes.bold),
+      sanitize: makeEmbeddedFontSanitizer(parts, bytes.regular, bytes.bold),
     };
   } catch (err) {
     console.warn(
-      "Poppins font embed failed, falling back to Helvetica:",
+      "Body font embed failed, falling back to Helvetica:",
       err,
     );
   }
@@ -600,8 +671,8 @@ async function loadFonts(
 }
 
 /**
- * The sanitizer for the embedded-Poppins path: {@link toEmbeddedFontSafe}
- * bound to Poppins' real coverage, read off the same TTF bytes pdf-lib just
+ * The sanitizer for the embedded-font path: {@link toEmbeddedFontSafe}
+ * bound to Liberation Sans' real coverage, read off the same TTF bytes pdf-lib just
  * embedded (so the predicate cannot drift from the font on the page).
  *
  * BOTH faces are probed and a code point must be covered by both to survive.
@@ -610,7 +681,7 @@ async function loadFonts(
  * files happen to have identical coverage today (diffed across U+0020–U+10FFFF
  * minus surrogates: zero differences), so a Regular-only probe would be
  * correct by accident; requiring both makes the fix independent of that, so a
- * weight swap, a variable-font migration or a Poppins bump cannot silently
+ * weight swap, a variable-font migration or a font bump cannot silently
  * reinstate `.notdef` in bold text.
  *
  * Coverage is memoized per byte-buffer and probed lazily — `hasGlyphForCodePoint`
@@ -619,11 +690,11 @@ async function loadFonts(
  *
  * Falls back to `toWinAnsi` if fontkit can't parse the bytes here for any
  * reason. That is deliberately the CONSERVATIVE direction: `toWinAnsi` may
- * degrade a Latin-Extended glyph Poppins could have drawn, but it can never
+ * degrade a Latin-Extended glyph the embedded font could have drawn, but it can never
  * emit a NUL — and a fallback that silently returned the text unsanitized
  * would reinstate the exact defect this function exists to prevent.
  */
-function makePoppinsSanitizer(
+function makeEmbeddedFontSanitizer(
   parts: PdfLibParts,
   regularBytes: ArrayBuffer,
   boldBytes: ArrayBuffer,
@@ -653,7 +724,7 @@ function makePoppinsSanitizer(
     return (text) => toEmbeddedFontSafe(text, hasGlyph);
   } catch (err) {
     console.warn(
-      "Poppins glyph-coverage probe failed, sanitizing to WinAnsi:",
+      "Body font glyph-coverage probe failed, sanitizing to WinAnsi:",
       err,
     );
     return toWinAnsi;
@@ -835,16 +906,26 @@ class Layout {
    */
   private pageOrdinal = 1;
 
+  /** How many pages this layout has drawn on so far — 1 until a break. Read by
+   *  {@link fitToPage} to decide whether a rung fit. */
+  get pageCount(): number {
+    return this.pageOrdinal;
+  }
+
   constructor(
     private doc: Doc,
     private fonts: { regular: PdfFont; bold: PdfFont },
+    /** The point sizes and gaps for this pass. Public because the module-level
+     *  draw helpers below all receive a `Layout` and read their sizes off it —
+     *  which is what keeps a single rung's geometry internally consistent. */
+    readonly t: TypeScale,
     private black: RGB,
     private gray: RGB,
     // Literal-string constructor from pdf-lib, used to build Link-annotation
     // `/URI` values (#425 — see `registerLink`).
     private pdfString: PdfLibParts["PDFString"],
     // The font-matched sanitizer every string passes through before it is
-    // measured or drawn — `toWinAnsi` on the Helvetica fallback, Poppins'
+    // measured or drawn — `toWinAnsi` on the Helvetica fallback, the embedded font's
     // coverage-aware sanitizer on the embedded path (see `loadFonts`). It is
     // never a no-op: an embedded font emits `.notdef` (which extracts as
     // U+0000) for a glyph it lacks, so "the font can encode it" is a claim
@@ -860,6 +941,27 @@ class Layout {
     this.page = this.doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     this.y = PAGE_HEIGHT - MARGIN;
     this.pageOrdinal++;
+  }
+
+  /**
+   * Hanging indent (pt) for a wrapped bullet at `size` — exactly the width of
+   * {@link BULLET_MARKER}, so a continuation line starts under the first line's
+   * TEXT rather than a fixed distance from the margin.
+   *
+   * Measured off the font rather than carried as a scale constant. It was a
+   * constant (12pt at the reference size, ~14pt at the top rung) against a
+   * marker only ~6pt wide, which drew every wrapped bullet's tail visibly
+   * further right than the text it continues. A constant also cannot follow a
+   * font swap: the correct value is a property of the marker glyph, not of the
+   * layout.
+   *
+   * Still clear of `isWrappedContinuation`'s `markerX + 2` threshold
+   * (entry-blocks.ts) at every rung — the marker sits at `MARGIN` and its own
+   * width is the smallest indent that puts the tail past it — so the re-parse
+   * still folds a wrapped tail back into the bullet it belongs to.
+   */
+  bulletIndent(size: number): number {
+    return this.fonts.regular.widthOfTextAtSize(BULLET_MARKER, size);
   }
 
   /**
@@ -1090,7 +1192,7 @@ class Layout {
     rValue: string;
     rSize: number;
   } {
-    const size = opts.size ?? SIZE_BODY;
+    const size = opts.size ?? this.t.body;
     const font = opts.bold ? this.fonts.bold : this.fonts.regular;
     const x = opts.x ?? MARGIN;
     // Sanitize LAST — after the case transform — so a case-expansion can never
@@ -1134,6 +1236,56 @@ class Layout {
   measureTextHeight(text: string, opts: DrawTextOpts = {}): number {
     const { lines, lineHeight } = this.resolveDrawLines(text, opts);
     return lines.length * lineHeight;
+  }
+
+  /**
+   * The largest size at or below `size` that draws `text` on ONE line, floored
+   * at `CONTACT_MIN_SIZE_RATIO * size`.
+   *
+   * Used for the contact line, which must not wrap. It is not a cosmetic
+   * preference: the re-parse reads contact fields off a single header line, so
+   * a contact line that wraps loses whichever links land on the continuation —
+   * `latex/multi-degree-coursework.pdf` drops its `linkedin_url` exactly this
+   * way. That was unreachable while the export drew at one fixed size and the
+   * fixtures happened to fit; the fit pass can now choose a rung a point and a
+   * half larger, which is enough to push a long contact line over.
+   *
+   * Returns a size, not a decision: if even the floor will not fit, the caller
+   * splits the line at a field boundary ({@link contactSplitIndex}) or, failing
+   * that, draws at the floor and lets it wrap. Legibility wins over a guarantee
+   * we cannot make for an arbitrarily long contact line.
+   */
+  fitToOneLine(text: string, size: number): number {
+    return Math.max(size * CONTACT_MIN_SIZE_RATIO, this.oneLineSize(text, size));
+  }
+
+  /**
+   * The size at which `text` exactly fills one line, UNFLOORED — the same
+   * quantity {@link fitToOneLine} returns before the readability floor is
+   * applied, capped at `size` for text that already fits.
+   *
+   * Separate because the floor makes every over-long candidate score
+   * identically, which is useless to a caller choosing BETWEEN candidates
+   * (see {@link contactSplitIndex}). Sizing a draw still goes through
+   * `fitToOneLine`; this only ranks.
+   */
+  oneLineSize(text: string, size: number): number {
+    const width = this.fonts.regular.widthOfTextAtSize(
+      this.sanitize(text),
+      size,
+    );
+    if (width <= CONTENT_WIDTH) return size;
+    return (size * CONTENT_WIDTH * FIT_ONE_LINE_SHAVE) / width;
+  }
+
+  /**
+   * Whether `text` draws on ONE line at `size` — measured through the same
+   * wrapper that will draw it, so the answer cannot disagree with the draw.
+   * {@link fitToOneLine} returns a size rather than a verdict, so this is how a
+   * caller learns whether the floor was enough.
+   */
+  fitsOneLine(text: string, size: number): boolean {
+    return this.resolveDrawLines(text, { size }).lines.length === 1;
   }
 
   /**
@@ -1495,14 +1647,14 @@ class Layout {
   }
 
   drawRule() {
-    this.ensure(RULE_HEIGHT);
+    this.ensure(this.t.ruleHeight);
     this.page.drawLine({
       start: { x: MARGIN, y: this.y },
       end: { x: PAGE_WIDTH - MARGIN, y: this.y },
       thickness: 0.75,
       color: this.gray,
     });
-    this.advance(RULE_HEIGHT);
+    this.advance(this.t.ruleHeight);
   }
 }
 
@@ -1515,11 +1667,147 @@ export interface RenderAtsPdfResult {
   /** Empty for a clean résumé — the common case, and the one that must render
    *  no warning chrome at all downstream. */
   findings: RenderFinding[];
+  /** The body point size this render was drawn at — the rung {@link fitToPage}
+   *  selected, or `bodyPt` if the caller pinned one. */
+  bodyPt: number;
+  /** Pages the render produced. `1` whenever the fit pass succeeded. */
+  pages: number;
 }
 
 /**
- * Render an ATS résumé model to PDF bytes, plus the export findings gathered
- * while drawing them (#621).
+ * Where to break a contact line that will not hold one row — an index into
+ * `parts`, everything from it moving to the second row.
+ *
+ * Only indices at or below the links boundary are considered, so the links
+ * move down together and are never split between rows: they are the parts most
+ * likely to overflow (a URL slug is the longest field on the line) and the ones
+ * the re-parse can least afford to lose track of.
+ *
+ * Among those, the winner is the index that lets the rows be drawn LARGEST —
+ * scored by the size the wider of the two rows can hold, which is what the
+ * caller will set both rows at. That reduces to "the boundary itself" whenever
+ * the boundary already yields two rows that fit, and degrades usefully when it
+ * does not: moving one more field down is worth it exactly when it buys type
+ * size. Ties go to the larger index, keeping the break as close to the links
+ * boundary as the geometry allows.
+ *
+ * `parts` always leads with the email when there is one, so the returned index
+ * is at least 1 and the email never leaves the first row.
+ */
+function contactSplitIndex(
+  layout: Layout,
+  parts: readonly string[],
+  linkCount: number,
+): number {
+  const boundary = Math.max(1, parts.length - linkCount);
+  const size = layout.t.contact;
+  let best = boundary;
+  let bestFit = -1;
+  for (let cut = boundary; cut >= 1; cut--) {
+    const fit = Math.min(
+      layout.oneLineSize(parts.slice(0, cut).join(" • "), size),
+      layout.oneLineSize(parts.slice(cut).join(" • "), size),
+    );
+    if (fit > bestFit) {
+      bestFit = fit;
+      best = cut;
+    }
+  }
+  return best;
+}
+
+/**
+ * Draw the header's contact line — one row when it fits, a field-boundary
+ * split into two when it doesn't, falling back to a single wrapping row when
+ * even the split can't produce two clean rows. Split out of
+ * {@link renderAtsResumePdfAtSize} (#878) so that function's own complexity
+ * doesn't grow with the contact-line decision tree.
+ */
+function drawContactLine(layout: Layout, contact: AtsResumeModel["contact"], muted: RGB): void {
+  // Work authorization (#792) sits after location and before the links, so the
+  // statement rides the existing contact line and costs the header no extra
+  // row. It is deliberately absent from `linkSpans` below: it is a sentence,
+  // not a URL, so it receives no clickable overlay and no scheme-stripping.
+  const identityParts = [contact.email, contact.phone, contact.location, contact.workAuthorization].filter(
+    (p): p is string => Boolean(p),
+  );
+  const contactParts = [...identityParts, ...contact.links.filter(Boolean)];
+  if (contactParts.length === 0) return;
+
+  // Clickable overlays (#425): email → mailto:, each scheme-stripped link slug
+  // → its real target. The visible text stays the shortened display; the
+  // annotation carries the real target. Annotations are outside the content
+  // stream, so the text round-trip is unaffected.
+  //
+  // The href is the ORIGINAL parsed URL (`contact.linkHrefs`, aligned with
+  // `links`) rather than one rebuilt from the `www.`-stripped display: rebuilding
+  // `https://${slug}` from the display would force `https` and drop any `www.`
+  // the source URL carried, so a portfolio/website served only at `www.host` or
+  // over `http` would get a 404-ing link. The display stays `www.`-less; only
+  // the click target uses the original.
+  const emailSpans = contact.email
+    ? [{ display: contact.email, href: `mailto:${contact.email}` }]
+    : [];
+  const linkSpans = contact.links.map((link, i) => ({
+    display: link,
+    href: contact.linkHrefs?.[i] ?? `https://${link}`,
+  }));
+  const contactLine = contactParts.join(" • ");
+  // Sized to hold one line (see `fitToOneLine`) — a wrapped contact line
+  // costs the re-parse whichever links land on the continuation.
+  const fitted = layout.fitToOneLine(contactLine, layout.t.contact);
+  const drawSingleLine = () =>
+    layout.drawText(contactLine, {
+      size: fitted,
+      color: muted,
+      linkSpans: [...emailSpans, ...linkSpans],
+    });
+
+  if (layout.fitsOneLine(contactLine, fitted)) {
+    drawSingleLine();
+    return;
+  }
+  if (identityParts.length === 0 || contactParts.length <= 1) {
+    // Nothing to split on — one row of a single kind, too long even at the
+    // floor. It wraps, as it did before any of this existed.
+    drawSingleLine();
+    return;
+  }
+
+  // Even the floor could not hold one row, so the break is going to happen —
+  // take it at a FIELD boundary instead of wherever the word wrapper lands.
+  // Word wrapping strands whichever fields overflow, which reads as a mistake
+  // (one lone slug under a full row, its separator left dangling above it)
+  // and hands the re-parse a continuation with no field boundary to key on.
+  //
+  // Each row is drawn separately, so each gets its own `linkSpans` pass —
+  // `decorateFirstLine` only overlays a call's FIRST line, so a link on a
+  // wrapped continuation loses its clickable annotation as well as its field.
+  const cut = contactSplitIndex(layout, contactParts, contact.links.length);
+  const top = contactParts.slice(0, cut).join(" • ");
+  const bottom = contactParts.slice(cut).join(" • ");
+  // One size for both rows — two rows of a single header block set at
+  // visibly different sizes read as two different things.
+  const rowSize = Math.min(
+    layout.fitToOneLine(top, layout.t.contact),
+    layout.fitToOneLine(bottom, layout.t.contact),
+  );
+  // `fitToOneLine` is floored at CONTACT_MIN_SIZE_RATIO — below that floor it
+  // still returns the floor size as though the text fit. Verify the split
+  // actually bought two clean rows before trusting it; otherwise fall back to
+  // the single (still-wrapping) line rather than silently stranding a field
+  // with no separator.
+  if (!layout.fitsOneLine(top, rowSize) || !layout.fitsOneLine(bottom, rowSize)) {
+    drawSingleLine();
+    return;
+  }
+  layout.drawText(top, { size: rowSize, color: muted, linkSpans: emailSpans });
+  layout.drawText(bottom, { size: rowSize, color: muted, linkSpans });
+}
+
+/**
+ * Render an ATS résumé model to PDF bytes at ONE body size, plus the export
+ * findings gathered while drawing them (#621).
  *
  * The findings are ADVISORY and produced strictly as a side observation: the
  * glyph pass reads the same font-matched sanitizer the draw uses, and the
@@ -1527,9 +1815,14 @@ export interface RenderAtsPdfResult {
  * feeds a layout decision, so `bytes` for a clean résumé is byte-for-byte what
  * this function produced before findings existed — the property the round-trip
  * corpus pins.
+ *
+ * Private: the size is chosen by {@link fitToPage} or pinned through
+ * `renderAtsResumePdf`'s `bodyPt` option, so nothing outside this module needs
+ * to name a rung directly.
  */
-export async function renderAtsResumePdf(
+async function renderAtsResumePdfAtSize(
   model: AtsResumeModel,
+  bodyPt: number,
 ): Promise<RenderAtsPdfResult> {
   const parts = await loadPdfLibOnce();
   const { PDFDocument, rgb } = parts;
@@ -1553,6 +1846,7 @@ export async function renderAtsResumePdf(
   const layout = new Layout(
     doc,
     { regular, bold },
+    makeTypeScale(bodyPt),
     black,
     gray,
     parts.PDFString,
@@ -1561,7 +1855,7 @@ export async function renderAtsResumePdf(
 
   // ── Header: name + (headline) + contact line ──
   if (model.contact.name) {
-    layout.drawText(model.contact.name, { bold: true, size: SIZE_NAME });
+    layout.drawText(model.contact.name, { bold: true, size: layout.t.name });
   }
   // Professional headline (#425) — regular weight, muted, under the name.
   // Populated when the parser lifted a standalone title tagline from the header
@@ -1569,58 +1863,18 @@ export async function renderAtsResumePdf(
   // otherwise, so most résumés draw just name + contact line as before.
   if (model.contact.headline) {
     layout.drawText(model.contact.headline, {
-      size: SIZE_HEADLINE,
+      size: layout.t.headline,
       color: muted,
     });
   }
-  // Work authorization (#792) sits after location and before the links, so the
-  // statement rides the existing contact line and costs the header no extra
-  // row. It is deliberately absent from `linkSpans` below: it is a sentence,
-  // not a URL, so it receives no clickable overlay and no scheme-stripping.
-  const contactParts = [
-    model.contact.email,
-    model.contact.phone,
-    model.contact.location,
-    model.contact.workAuthorization,
-    ...model.contact.links,
-  ].filter((p): p is string => Boolean(p));
-  if (contactParts.length > 0) {
-    // Clickable overlays (#425): email → mailto:, each scheme-stripped link slug
-    // → its real target. The visible text stays the shortened display; the
-    // annotation carries the real target. Annotations are outside the content
-    // stream, so the text round-trip is unaffected.
-    //
-    // The href is the ORIGINAL parsed URL (`contact.linkHrefs`, aligned with
-    // `links`) rather than one rebuilt from the `www.`-stripped display: rebuilding
-    // `https://${slug}` from the display would force `https` and drop any `www.`
-    // the source URL carried, so a portfolio/website served only at `www.host` or
-    // over `http` would get a 404-ing link. The display stays `www.`-less; only
-    // the click target uses the original.
-    const linkSpans: Array<{ display: string; href: string }> = [];
-    if (model.contact.email)
-      linkSpans.push({
-        display: model.contact.email,
-        href: `mailto:${model.contact.email}`,
-      });
-    model.contact.links.forEach((link, i) =>
-      linkSpans.push({
-        display: link,
-        href: model.contact.linkHrefs?.[i] ?? `https://${link}`,
-      }),
-    );
-    layout.drawText(contactParts.join("  •  "), {
-      size: SIZE_CONTACT,
-      color: muted,
-      linkSpans,
-    });
-  }
-  layout.advance(GAP_AFTER_CONTACT);
+  drawContactLine(layout, model.contact, muted);
+  layout.advance(layout.t.gapAfterContact);
 
   // ── Summary ──
   if (model.summary) {
     // The summary body is plain wrapped text, so the heading must keep one BODY
     // line with it (#629).
-    drawSectionHeading(layout, model.summaryHeading ?? "Summary", SIZE_BODY * LINE_GAP);
+    drawSectionHeading(layout, model.summaryHeading ?? "Summary", layout.t.body * LINE_GAP);
     // The body takes `widowControl` for the same reason a bullet does (#631): it
     // is a wrapped block, so per-line pagination can leave its last line alone at
     // a page top. It is the only NON-bullet caller — a summary long enough to
@@ -1631,8 +1885,8 @@ export async function renderAtsResumePdf(
     // The orphan half needs nothing: the heading above already reserves one body
     // line, and this block can only ever BEGIN at the top of page one, so its
     // opening can never sit at a page bottom.
-    layout.drawText(model.summary, { size: SIZE_BODY, widowControl: true });
-    layout.advance(GAP_BETWEEN_ENTRIES);
+    layout.drawText(model.summary, { size: layout.t.body, widowControl: true });
+    layout.advance(layout.t.gapBetweenEntries);
   }
 
   // ── Sections ──
@@ -1655,9 +1909,9 @@ export async function renderAtsResumePdf(
         entryPath: entryPathLabel(section.heading || "Section", section.entries[i], i),
         findings,
       });
-      if (i < section.entries.length - 1) layout.advance(GAP_BETWEEN_ENTRIES);
+      if (i < section.entries.length - 1) layout.advance(layout.t.gapBetweenEntries);
     }
-    layout.advance(GAP_BETWEEN_ENTRIES);
+    layout.advance(layout.t.gapBetweenEntries);
   }
 
   // ── Embedded machine-readable copy (#334, Europass pattern) ──
@@ -1686,16 +1940,73 @@ export async function renderAtsResumePdf(
     description: "JSON Resume (jsonresume.org) — machine-readable copy",
   });
 
-  return { bytes: await doc.save(), findings };
+  return {
+    bytes: await doc.save(),
+    findings,
+    bodyPt,
+    pages: layout.pageCount,
+  };
+}
+
+/**
+ * Render at the largest {@link FIT_LADDER} rung that costs the fewest pages.
+ *
+ * Descending scan with early exit, which makes the common case cheap: a résumé
+ * that already fits at the top rung costs exactly one render, and one that
+ * spills costs one render per rung tried. There is no separate "measure" path
+ * on purpose — the pass that decides the size IS the pass that produces the
+ * bytes, so the decision cannot be made against geometry the download does not
+ * have. (A cheaper dry-run measure is possible; a divergent one is not worth
+ * the milliseconds it would save.)
+ *
+ * The rung chosen is the LARGEST one that achieves the fewest pages — which
+ * makes the top rung the fallback whenever shrinking buys nothing at all.
+ * Saving a page is worth type size whether the saving is 2→1 or 4→3; being
+ * smaller for its own sake never is. So a résumé with more content than the
+ * floor can absorb stays at the top rung and runs long, rather than being set
+ * cramped AND long.
+ */
+async function fitToPage(model: AtsResumeModel): Promise<RenderAtsPdfResult> {
+  let best: RenderAtsPdfResult | null = null;
+  for (const pt of FIT_LADDER) {
+    const attempt = await renderAtsResumePdfAtSize(model, pt);
+    // The top rung is the fallback, so it is `best` until something beats it.
+    if (!best) best = attempt;
+    else if (attempt.pages < best.pages) best = attempt;
+    // Nothing below can do better than one page, so stop paying for renders.
+    if (best.pages <= 1) break;
+  }
+  // `FIT_LADDER` is a non-empty literal, so the loop always assigns.
+  return best as RenderAtsPdfResult;
+}
+
+/**
+ * Render an ATS résumé model to PDF bytes, choosing the body size that fits.
+ *
+ * Sizing is per-résumé because a single fixed size cannot serve both ends: the
+ * size that keeps a dense résumé on one page sets a short one several points
+ * smaller than a typographer would, and the size that reads well on a short one
+ * spills a dense one onto a second page for want of a few lines.
+ *
+ * `bodyPt` pins a rung and skips the fit pass entirely — for tests that assert
+ * a specific geometry, and for a caller that has already decided.
+ */
+export async function renderAtsResumePdf(
+  model: AtsResumeModel,
+  opts: { bodyPt?: number } = {},
+): Promise<RenderAtsPdfResult> {
+  return opts.bodyPt === undefined
+    ? fitToPage(model)
+    : renderAtsResumePdfAtSize(model, opts.bodyPt);
 }
 
 /** The `drawText` options for a section/summary heading — shared by the draw and
  *  its keep-with-next measurement (#629) so the two cannot drift. */
-const HEADING_OPTS = {
+const headingOpts = (t: TypeScale): DrawTextOpts => ({
   bold: true,
-  size: SIZE_SECTION,
+  size: t.section,
   uppercase: true,
-} as const;
+});
 
 /**
  * Draw a section (or Summary) heading plus its rule. `followHeight` is the
@@ -1709,49 +2020,57 @@ function drawSectionHeading(
   heading: string,
   followHeight: number,
 ) {
-  layout.advance(GAP_BEFORE_SECTION);
+  layout.advance(layout.t.gapBeforeSection);
   layout.ensureBlock(
-    layout.measureTextHeight(heading, HEADING_OPTS) +
-      RULE_HEIGHT +
-      GAP_AFTER_RULE +
+    layout.measureTextHeight(heading, headingOpts(layout.t)) +
+      layout.t.ruleHeight +
+      layout.t.gapAfterRule +
       followHeight,
   );
-  layout.drawText(heading, HEADING_OPTS);
+  layout.drawText(heading, headingOpts(layout.t));
   layout.drawRule();
-  layout.advance(GAP_AFTER_RULE);
+  layout.advance(layout.t.gapAfterRule);
 }
 
 /** The `drawText` options for an entry's header line — shared by the draw and its
  *  keep-with-next measurement (#629). */
-function headerLineOpts(entry: AtsEntry, mutedColor: RGB): DrawTextOpts {
+function headerLineOpts(
+  entry: AtsEntry,
+  mutedColor: RGB,
+  t: TypeScale,
+): DrawTextOpts {
   return {
     // Every header is bold EXCEPT where the model opts out — the skills list,
     // which reads as regular-weight body text (#425).
     bold: entry.headerBold ?? true,
-    size: SIZE_HEADER,
+    size: t.header,
     atomicSegments: entry.atomicSegments,
     hangingIndent: entry.headerHangingIndent,
     // Flush-right date on the header line (#425) — set for a title-less role /
     // degree-less program, where the org/date anchor lives on the header.
     rightText: entry.headerLineDate,
     rightColor: mutedColor,
-    rightSize: SIZE_SUB,
+    rightSize: t.sub,
   };
 }
 
 /** The `drawText` options for an entry's sub-line — shared by the draw and its
  *  keep-with-next measurement (#629). See `drawEntry` for why the middot
  *  segments are atomic here. */
-function subLineOpts(entry: AtsEntry, mutedColor: RGB): DrawTextOpts {
+function subLineOpts(
+  entry: AtsEntry,
+  mutedColor: RGB,
+  t: TypeScale,
+): DrawTextOpts {
   return {
-    size: SIZE_SUB,
+    size: t.sub,
     color: mutedColor,
     atomicSegments: true,
     // Flush-right date on the sub-line (#425) — set for a titled role /
     // degreed entry, where the org anchor lives on the sub-line.
     rightText: entry.subLineDate,
     rightColor: mutedColor,
-    rightSize: SIZE_SUB,
+    rightSize: t.sub,
   };
 }
 
@@ -1814,22 +2133,22 @@ function entryHeadHeight(
   let height = 0;
   if (entry.headerLine) {
     if (entry.headerLine.includes(EMPHASIS_OPEN)) {
-      height += layout.measureHeaderRunsHeight(entry.headerLine, SIZE_HEADER);
+      height += layout.measureHeaderRunsHeight(entry.headerLine, layout.t.header);
     } else {
       const full = layout.measureTextHeight(
         entry.headerLine,
-        headerLineOpts(entry, mutedColor),
+        headerLineOpts(entry, mutedColor, layout.t),
       );
       height +=
         entry.headerBold === false && entry.bullets.length === 0
-          ? Math.min(full, BODY_HEADER_KEEP_LINES * SIZE_HEADER * LINE_GAP)
+          ? Math.min(full, BODY_HEADER_KEEP_LINES * layout.t.header * LINE_GAP)
           : full;
     }
   }
   if (entry.subLine) {
     height +=
-      GAP_AFTER_HEADER +
-      layout.measureTextHeight(entry.subLine, subLineOpts(entry, mutedColor));
+      layout.t.gapAfterHeader +
+      layout.measureTextHeight(entry.subLine, subLineOpts(entry, mutedColor, layout.t));
   }
   return height;
 }
@@ -1865,13 +2184,13 @@ function entryKeepHeight(
   entry: AtsEntry,
   mutedColor: RGB,
 ): number {
-  const bulletLine = SIZE_BODY * LINE_GAP;
+  const bulletLine = layout.t.body * LINE_GAP;
   const head = entryHeadHeight(layout, entry, mutedColor);
   if (entry.bullets.length === 0) return head;
   const firstBulletLines = layout.measureBulletLines(
     entry.bullets[0],
-    SIZE_BODY,
-    BULLET_INDENT,
+    layout.t.body,
+    layout.bulletIndent(layout.t.body),
   );
   const keep = bulletKeepLines(firstBulletLines);
   const base = head + keep * bulletLine;
@@ -1908,10 +2227,10 @@ function entryKeepHeight(
 function trailingBulletKeepHeight(layout: Layout, entry: AtsEntry): number {
   const lines = layout.measureBulletLines(
     entry.bullets[entry.bullets.length - 1],
-    SIZE_BODY,
-    BULLET_INDENT,
+    layout.t.body,
+    layout.bulletIndent(layout.t.body),
   );
-  return bulletKeepLines(lines) * SIZE_BODY * LINE_GAP;
+  return bulletKeepLines(lines) * layout.t.body * LINE_GAP;
 }
 
 function drawEntry(
@@ -1936,20 +2255,20 @@ function drawEntry(
       // Mixed-weight header (#425 — an achievement "type" label bolded, the rest
       // regular). Routed to the run-aware draw; these headers carry no flush-right
       // date, so the marker-less run path covers them.
-      layout.drawHeaderRuns(entry.headerLine, SIZE_HEADER);
+      layout.drawHeaderRuns(entry.headerLine, layout.t.header);
     } else {
-      layout.drawText(entry.headerLine, headerLineOpts(entry, mutedColor));
+      layout.drawText(entry.headerLine, headerLineOpts(entry, mutedColor, layout.t));
     }
   }
   if (entry.subLine) {
-    layout.advance(GAP_AFTER_HEADER);
+    layout.advance(layout.t.gapAfterHeader);
     // Sub-lines are the "Company · Location · Team  Dates" / "Institution ·
     // Location  Dates" org lines (see `ats-resume-model.ts`) — the middot here
     // is a re-parse-critical boundary, NOT a display joiner: word-wrapping
     // inside a multi-word location (e.g. "San Francisco Bay Area") re-parses it
     // into fragmented location tokens (#301). Unlike the 3+ segment achievement
     // HEADER lines (#307), these must stay atomic, so opt in unconditionally.
-    layout.drawText(entry.subLine, subLineOpts(entry, mutedColor));
+    layout.drawText(entry.subLine, subLineOpts(entry, mutedColor, layout.t));
   }
   // #632: the LAST bullet of a multi-bullet entry must never be the only thing
   // its page opens with. The whole rule is one hand-off — the SECOND-TO-LAST
@@ -1973,7 +2292,7 @@ function drawEntry(
     // for the one shape where it must (see there), and passing it on here is
     // harmless: `drawBullet` uses it only on the reservation covering the bullet's
     // final line, which for a divisible bullet is its tail — not suppressed.
-    layout.drawBullet(entry.bullets[i], SIZE_BODY, BULLET_INDENT, {
+    layout.drawBullet(entry.bullets[i], layout.t.body, layout.bulletIndent(layout.t.body), {
       alreadyReserved: i === 0 && keepHeight > 0,
       followKeepHeight: i === entry.bullets.length - 2 ? trailingKeep : 0,
       onSplit: (split) =>

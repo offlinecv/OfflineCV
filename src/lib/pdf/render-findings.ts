@@ -214,7 +214,7 @@ function isInvisibleDegradation(ch: string, drawn: string): boolean {
  * Every character the export font could not draw as authored, one finding per
  * (field, character) pair (#621).
  *
- * `sanitize` is the renderer's OWN font-matched sanitizer — Poppins' coverage
+ * `sanitize` is the renderer's OWN font-matched sanitizer — Liberation Sans' coverage
  * predicate on the embedded path, `toWinAnsi` on the Helvetica fallback — so
  * this measures the font that is actually on the page rather than a guess about
  * it. That is what makes the pass render-time: swap the font and the answer

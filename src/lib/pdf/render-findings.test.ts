@@ -10,7 +10,7 @@
  * only exists once something has been paginated.
  *
  * The font path is chosen the same way `render-ats-pdf.fonts.test.ts` chooses
- * it — by stubbing `fetch` and re-importing the module — so the embedded-Poppins
+ * it — by stubbing `fetch` and re-importing the module — so the embedded-font
  * case (this issue's target: a character the embedded font has no glyph for) is
  * tested on the embedded path and not by accident on the Helvetica fallback.
  *
@@ -25,8 +25,8 @@ import { findGlyphFindings, type RenderFinding } from "./render-findings.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 
 const FONTS_DIR = fileURLToPath(new URL("../../assets/fonts/", import.meta.url));
-const REGULAR_BYTES = readFileSync(`${FONTS_DIR}Poppins-Regular.ttf`);
-const BOLD_BYTES = readFileSync(`${FONTS_DIR}Poppins-Bold.ttf`);
+const REGULAR_BYTES = readFileSync(`${FONTS_DIR}LiberationSans-Regular.ttf`);
+const BOLD_BYTES = readFileSync(`${FONTS_DIR}LiberationSans-Bold.ttf`);
 
 function toArrayBuffer(buf: Buffer): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
@@ -96,7 +96,7 @@ describe("export findings — glyph coverage (#621)", { timeout: 30000 }, () => 
   });
 
   it("does not report a Latin-Extended glyph the embedded font DOES cover", async () => {
-    // Poppins covers ś/ł. Reporting them would be the #664 false positive
+    // Liberation Sans covers ś/ł. Reporting them would be the #664 false positive
     // wearing a different hat — and it is the whole reason the embedded path
     // exists.
     stubFetchSucceeds();
@@ -110,7 +110,7 @@ describe("export findings — glyph coverage (#621)", { timeout: 30000 }, () => 
   });
 
   it("names the character AND its source field for a glyph the font lacks", async () => {
-    // Poppins has no glyph for ★ (verified in render-ats-pdf.fonts.test.ts), so
+    // Liberation Sans has no glyph for ★ (verified in render-ats-pdf.fonts.test.ts), so
     // the export draws "?" — the exact silent degradation #621 exists to stop
     // being silent.
     stubFetchSucceeds();
@@ -167,7 +167,7 @@ describe("export findings — glyph coverage (#621)", { timeout: 30000 }, () => 
   });
 
   it("reports a transliterated glyph as info, not as a warning", async () => {
-    // "→" is degraded — the export draws "->" — but the meaning survives, so it
+    // "‣" is degraded — the export draws "-" — but the meaning survives, so it
     // is worth stating and not worth alarming over. Grading every substitution
     // `warning` would make the badge meaningless on the one that destroys text.
     stubFetchSucceeds();
@@ -177,14 +177,14 @@ describe("export findings — glyph coverage (#621)", { timeout: 30000 }, () => 
         {
           heading: "Experience",
           entries: [
-            { headerLine: "Intern → Engineer · Acme", bullets: ["Did work"] },
+            { headerLine: "Intern ‣ Engineer · Acme", bullets: ["Did work"] },
           ],
         },
       ],
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].severity).toBe("info");
-    expect(findings[0].detail).toContain("->");
+    expect(findings[0].detail).toContain("-");
   });
 
   it("collapses repeats of one character within one field to a single finding", async () => {
@@ -232,16 +232,16 @@ describe("export findings — glyph coverage (#621)", { timeout: 30000 }, () => 
 
   it("checks a heading through the case transform the renderer applies", async () => {
     // Headings are drawn upper-cased, and `toUpperCase()` can turn a covered
-    // glyph into an uncovered one: µ (U+00B5) becomes Μ (U+039C, Greek capital
-    // mu), which Poppins has no glyph for. Scanning the raw text would miss
-    // exactly the loss the draw is about to produce.
+    // glyph into an uncovered one: ƒ (U+0192) becomes Ƒ (U+0191, capital F with
+    // hook), which Liberation Sans has no glyph for. Scanning the raw text would
+    // miss exactly the loss the draw is about to produce.
     stubFetchSucceeds();
     const { renderAtsResumePdf } = await loadRenderer();
-    const heading = "µ-services";
+    const heading = "ƒ-stop";
     const raw = (
       await renderAtsResumePdf({
         contact: { name: "Jane Candidate", links: [] },
-        // Same text NOT in a heading: drawn as-is, and Poppins covers µ, so it
+        // Same text NOT in a heading: drawn as-is, and Liberation Sans covers ƒ, so it
         // is the control that proves the case transform is what makes the
         // difference rather than the character itself.
         summary: heading,
@@ -262,10 +262,10 @@ describe("export findings — glyph coverage (#621)", { timeout: 30000 }, () => 
       })
     ).findings;
     expect(cased.map((f) => f.sourceField)).toEqual([heading]);
-    // The reported character is what the user typed (µ, U+00B5), not what the
+    // The reported character is what the user typed (ƒ, U+0192), not what the
     // case transform drew (Μ, U+039C) — the user can search their résumé for
     // the former; the latter is provably absent from their input.
-    expect(cased[0]!.detail).toContain('"µ" (U+00B5)');
+    expect(cased[0]!.detail).toContain('"ƒ" (U+0192)');
     expect(cased[0]!.detail).not.toContain("U+039C");
   });
 });
@@ -337,18 +337,22 @@ describe("export findings — invisible degradations are not reported", () => {
  *  bullet that can legally split (2/2), and therefore the shortest one this
  *  finding can fire on. */
 const FOUR_LINE_BULLET =
-  "BULLETSTART partnered across engineering, product and design to land a " +
-  "platform initiative that measurably improved customer outcomes BULLETTWO " +
-  "and then carried the same practice into the wider organisation, writing " +
-  "the runbooks BULLETTHREE and training the on-call rotation before handing " +
-  "the whole programme over to its permanent owners BULLETEND";
+  "BULLETSTART partnered closely across engineering, product, design and " +
+  "operations leadership to land a platform initiative that measurably " +
+  "improved customer outcomes across every core segment BULLETTWO and then " +
+  "carried the same practice into the wider organisation, writing the " +
+  "complete set of on-call runbooks and operational playbooks BULLETTHREE " +
+  "and training the whole on-call rotation before handing the entire " +
+  "programme over to its permanent long-term owners BULLETEND";
 
 /** Wraps to exactly three drawn lines — indivisible under #630/#631, so it must
  *  move whole and must never produce this finding. */
 const THREE_LINE_BULLET =
-  "BULLETSTART partnered across engineering, product and design to land a " +
-  "platform initiative that measurably improved customer outcomes BULLETMID " +
-  "and then carried the same practice into the wider organisation BULLETEND";
+  "BULLETSTART partnered closely across engineering, product, design and " +
+  "operations leadership to land a platform initiative that measurably " +
+  "improved customer outcomes across every core segment BULLETMID and then " +
+  "carried the same practice into the wider organisation over several " +
+  "subsequent quarters of sustained delivery BULLETEND";
 
 function modelWith(subject: AtsEntry, filler: number): AtsResumeModel {
   return {
@@ -386,8 +390,13 @@ describe(
       const { extractPdfDrawnLines } = await import(
         "./render-ats-pdf.test-utils.ts"
       );
+      const { REFERENCE_BODY_PT } = await import("./render-ats-pdf.ts");
+      // Pinned for the same reason the export-layout contracts are: this probe
+      // asserts a page BREAK, and the fit pass would shrink the fixture until
+      // there was no break left to name.
       const { bytes, findings } = await renderAtsResumePdf(
         modelWith(subject, filler),
+        { bodyPt: REFERENCE_BODY_PT },
       );
       const lines = await extractPdfDrawnLines(bytes);
       const pageOf = (token: string) => {

@@ -55,7 +55,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
  *
  * Every entry is a format that carries NULs as a matter of course, so scanning
  * it would report thousands of findings about files nobody edits by hand. The
- * live ones in this repo are the two Poppins faces under `src/assets/fonts/`
+ * live ones in this repo are the two Liberation Sans faces under `src/assets/fonts/`
  * (~15k NULs each) and the 58 PDF fixtures under `tests/fixtures/pdfs/`; the
  * rest are here so the first `.png` or `.woff2` someone commits does not fail
  * the build for a reason that has nothing to do with them.
