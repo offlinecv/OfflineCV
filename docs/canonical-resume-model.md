@@ -224,7 +224,7 @@ passes through verbatim and may contain any glyph.
 | `Company, Location` | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (experience mapping) |
 | `Title, Team` (empty-company branch, #466) | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (empty-company branch) |
 | `Institution · Location` | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
-| `Degree, Field` | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
+| `Degree, Field, Honors, GPA: <grade>` | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
 | `Type · Title` (achievement) | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (achievement mapping) |
 | Skills, within a category | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (skills mapping) |
 | Header ↔ trailing single-token date | `"  "` (two spaces) | `ats-resume-model.ts` → `buildAtsResumeModel` |

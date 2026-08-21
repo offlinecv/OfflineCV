@@ -187,7 +187,17 @@ export interface ResumeEducation {
    *  `start_date`. */
   end_date?: string;
   end_date_precision?: "day" | "month" | "year" | null;
-  description?: string;
+  /** Grade exactly as the résumé wrote it — "3.72/4.00", "3.9", "8.4/10",
+   *  "85%", "First Class", "2:1". A STRING on purpose (#883): normalising to a
+   *  number drops the scale, so a 8.4/10 and a 3.9/4.0 would compare as if they
+   *  were on the same axis, and a classification would have no representation at
+   *  all. Nothing downstream does arithmetic on it. */
+  gpa?: string;
+  /** Latin honors / distinction as written — "cum laude", "magna cum laude",
+   *  "with distinction" (#883). Distinct from `gpa`: a résumé can carry either,
+   *  both, or neither, and JSON Resume has a slot for the grade
+   *  (`education[].score`) but none for honors. */
+  honors?: string;
   /** Relevant-coursework items recovered from bullet lines inside the education
    *  section (e.g. a "Relevant Coursework" block, #164). Section-level by nature
    *  — attribution to a specific degree is ambiguous, so the heuristic parser

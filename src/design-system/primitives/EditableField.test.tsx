@@ -119,6 +119,16 @@ describe("EditableField call sites (issue 376 — repo-wide, no site skipped)", 
   const CALL_SITE_RE = /<EditableField\b[\s\S]*?\/>/g;
   const PLACEHOLDER_RE = /placeholder=(?:"([^"]*)"|\{`([^`]*)`\})/;
   const PLAIN_RE = /emptyAffordance=["{]?["']?plain/;
+  /**
+   * A placeholder that is entirely an ACRONYM ("GPA", "URL"). The leading-capital
+   * check above is a proxy for the real rule — "a bare noun, not sentence-case
+   * prose" — and an acronym is a bare noun that has no lowercase form: "+ gpa"
+   * is not the fix for "+ GPA", it is a misspelling. The exemption is deliberately
+   * narrow (the WHOLE placeholder must be one all-caps token), so every defect
+   * this sweep was written for is still caught: "Link URL", "Custom label" and
+   * "Not detected" all carry lowercase letters and fail as before.
+   */
+  const ACRONYM_RE = /^[A-Z]{2,}$/;
 
   const SRC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -144,7 +154,10 @@ describe("EditableField call sites (issue 376 — repo-wide, no site skipped)", 
         // No placeholder at all is the GOOD case: the primitive derives it from
         // `label`, which is what makes "+ not detected" unrepresentable.
         if (!placeholder) continue;
-        if (/not detected/i.test(placeholder) || /^[A-Z]/.test(placeholder)) {
+        if (
+          /not detected/i.test(placeholder) ||
+          (/^[A-Z]/.test(placeholder) && !ACRONYM_RE.test(placeholder))
+        ) {
           offenders.push(`${file}: placeholder="${placeholder}"`);
         }
       }

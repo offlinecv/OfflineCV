@@ -4,11 +4,11 @@
 import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { EducationSection } from "./ReconstructedEducationSkills.tsx";
 import {
   resolveEduValue,
   resolveEducationDisplay,
-  EducationSection,
-} from "./ReconstructedEducationSkills.tsx";
+} from "../../lib/edit/education-display.ts";
 import type { ResumeEducation } from "../../lib/score/types.ts";
 
 describe("resolveEduValue", () => {
@@ -100,6 +100,31 @@ describe("resolveEducationDisplay", () => {
     expect(d.dates).toBe("2025");
   });
 
+  it("resolves gpa and honors, and applies their overrides (#883)", () => {
+    const edu: ResumeEducation = {
+      degree: "B.S.",
+      institution: "State University",
+      gpa: "3.72/4.00",
+      honors: "cum laude",
+    };
+    expect(resolveEducationDisplay(edu, undefined)).toMatchObject({
+      gpa: "3.72/4.00",
+      honors: "cum laude",
+    });
+    expect(
+      resolveEducationDisplay(edu, { gpa: "8.4/10", honors: "" }),
+    ).toMatchObject({ gpa: "8.4/10", honors: undefined });
+  });
+
+  it("surfaces gpa and honors a parse never found, so the field can be added", () => {
+    expect(
+      resolveEducationDisplay(
+        { degree: "B.S.", institution: "State University" },
+        { gpa: "First Class" },
+      ),
+    ).toMatchObject({ gpa: "First Class", honors: undefined });
+  });
+
   it("defaults coursework to an empty array when absent", () => {
     const noCoursework: ResumeEducation = {
       degree: "BSc",
@@ -180,5 +205,53 @@ describe("EducationSection date-row symmetry (issue 376)", () => {
     expect(html).toContain(`<span aria-hidden="true">+ </span>start`);
     expect(html).toContain(`<span aria-hidden="true">+ </span>end`);
     expect(html).toContain("–");
+  });
+});
+
+describe("EducationSection GPA / honors row (#883)", () => {
+  function renderSection(edu: ResumeEducation, addedCount = 0): string {
+    return renderToStaticMarkup(
+      createElement(EducationSection, {
+        education: [edu],
+        educationOverrides: {},
+        onEducationFieldChange: () => {},
+        addedEducation: addedCount
+          ? [{ id: "added:edu:0", section: "education" as const, title: "" }]
+          : [],
+        originalCount: addedCount ? 0 : 1,
+        parsedIndices: addedCount ? [] : [0],
+        onAddEntry: () => {},
+        onRemoveEntry: () => {},
+        onEntryField: () => {},
+        onPruneEmpty: () => {},
+      }),
+    );
+  }
+
+  it("renders both values, labelling only the grade", () => {
+    const html = renderSection({
+      degree: "B.S.",
+      institution: "State University",
+      gpa: "3.72/4.00",
+      honors: "cum laude",
+    });
+    expect(html).toContain(">cum laude<");
+    expect(html).toContain(">3.72/4.00<");
+    expect(html).toContain(">GPA:<");
+  });
+
+  it("offers an add affordance for each field the parse missed (AC#4)", () => {
+    const html = renderSection({ degree: "B.S.", institution: "State University" });
+    expect(html).toContain(`<span aria-hidden="true">+ </span>honors`);
+    expect(html).toContain(`<span aria-hidden="true">+ </span>GPA`);
+    // No static "GPA:" label in front of an empty field — it would read as
+    // "GPA: + GPA"; the add affordance already names the thing.
+    expect(html).not.toContain(">GPA:<");
+  });
+
+  it("renders no such row on a user-ADDED entry, which has no slot for either", () => {
+    const html = renderSection({ degree: "", institution: "" }, 1);
+    expect(html).not.toContain("honors");
+    expect(html).not.toContain("GPA");
   });
 });

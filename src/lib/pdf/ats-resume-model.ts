@@ -48,6 +48,7 @@ import {
   buildProjectDates,
 } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
+import { formatGradeNote } from "../heuristics/extract/education-grade.ts";
 import { formatExperienceDateRange } from "../edit/experience-dates.ts";
 import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
@@ -132,6 +133,10 @@ export interface AtsEntryFields {
   url?: string;
   /** JSON Resume `education.courses` — relevant-coursework items (#164). */
   courses?: string[];
+  /** JSON Resume `education.score` — the grade as the résumé wrote it, scale and
+   *  all ("3.72/4.00", "First Class", #883). A string, matching both the spec's
+   *  free-form `score` and `ResumeEducation.gpa`. */
+  score?: string;
   /** JSON Resume `skills` — the flat skill list, carried on the skills entry
    *  (whose `headerLine` is the same list joined by " · "). On a CATEGORISED
    *  skills entry (#473) this holds that ONE category's members. */
@@ -725,7 +730,19 @@ export function buildAtsResumeModel(
     // whitespace gap so it becomes the entry's date anchor. Emitting the old
     // glued "Degree — Institution" one-liner did not round-trip: re-parsing
     // collapsed degree/field/institution into each other (#291).
-    const degreeField = [edu.degree, edu.field].filter(Boolean).join(", ");
+    // Honors and grade ride the degree line, in the order and shape a résumé
+    // writes them — "B.S., Computer Science, cum laude, GPA: 3.72/4.00" (#883).
+    // `edu.gpa` holds only the VALUE ("3.72/4.00", "First Class"), so
+    // `formatGradeNote` — the extractor's own inverse — decides whether it needs
+    // the `GPA: ` label to be recognised on re-parse. They must NOT become
+    // bullets: a bullet under an education entry re-parses as coursework.
+    const eduNotes = [
+      edu.honors,
+      edu.gpa ? formatGradeNote(edu.gpa) : undefined,
+    ].filter(Boolean);
+    const degreeField = [edu.degree, edu.field, ...eduNotes]
+      .filter(Boolean)
+      .join(", ");
     const org = joinHeader([edu.institution, edu.location], " · ");
     // Spaced " – " range (the experience shape) so the re-parser recognizes and
     // strips the date anchor off the institution line; `buildEducationDates`'
@@ -777,14 +794,20 @@ export function buildAtsResumeModel(
       endDate: edu.end_date || edu.year || undefined,
       courses:
         edu.coursework && edu.coursework.length > 0 ? edu.coursework : undefined,
+      // JSON Resume carries the grade on `education[].score` (#883). Honors has
+      // no slot in the spec, so it is deliberately NOT mapped — it survives the
+      // PDF export on the degree line and nowhere else in the JSON.
+      score: edu.gpa || undefined,
     };
     if (!edu.degree && edu.field) {
       // Degree-less program: the field title leads the header, the graduation
       // date flush-right on that same header line (the #302 inline-dated cue),
-      // institution alone on the sub-line.
+      // institution alone on the sub-line. `degreeField` IS the field here (the
+      // degree half is empty) plus any honors/grade notes, so the two header
+      // shapes compose their notes in one place.
       if (rightAlignEduDate) {
         return {
-          headerLine: edu.field,
+          headerLine: degreeField,
           headerLineDate: eduDates,
           subLine: org || undefined,
           bullets,
@@ -792,7 +815,7 @@ export function buildAtsResumeModel(
         };
       }
       return {
-        headerLine: [edu.field, eduDates].filter(Boolean).join("  "),
+        headerLine: [degreeField, eduDates].filter(Boolean).join("  "),
         subLine: org || undefined,
         bullets,
         fields: eduFields,

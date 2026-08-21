@@ -5,12 +5,15 @@
  * ReconstructedEducationSkills — the editable Education section of the
  * reconstructed resume (#176). Split out of ReconstructedResume.tsx to keep that
  * container under ~200 LOC; the Skills section moved to its sibling
- * `ReconstructedSkills.tsx` when category editing (#476) grew it past that limit.
+ * `ReconstructedSkills.tsx` when category editing (#476) grew it past that limit,
+ * and the per-entry row moved to `ReconstructedEducationEntry.tsx` when the GPA /
+ * honors fields (#883) did the same here.
  *
  * Education was read-only; since the surface exports to PDF, a parser miss was
  * uncorrectable. It now exposes inline edit affordances wired to the lifted
- * override model (useEditableParse): degree / institution / dates editable via
- * the shared EditableField, a cleared field shows an "+ <noun>" add-affordance.
+ * override model (useEditableParse): degree / institution / dates / GPA / honors
+ * editable via the shared EditableField, a cleared field shows an "+ <noun>"
+ * add-affordance.
  *
  * The override maps live in App and feed applyOverrides → re-grade → PDF, so an
  * edit here moves the ATS score AND the downloaded PDF, not just the display.
@@ -23,23 +26,31 @@ import type {
   AddedEntryField,
 } from "../../hooks/useEditableParse.ts";
 import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
-import { buildEducationDates } from "../../lib/score/entry-dates.ts";
-import { EditableField, SectionHeading } from "@design-system";
-import { validateDate } from "../../lib/edit/field-validators.ts";
-import { AddPill, RemoveButton, sectionExitBlur } from "./ReconstructedAdd.tsx";
+import { SectionHeading } from "@design-system";
+import { AddPill, sectionExitBlur } from "./ReconstructedAdd.tsx";
+import { EducationEntry } from "./ReconstructedEducationEntry.tsx";
 
-/** Map an EducationEntry field name to the flat AddedEntry field it edits.
- *  `field` (major) is intentionally omitted — added entries carry no major slot,
- *  so the major affordance renders on PARSED entries only and never routes here. */
-const EDUCATION_FIELD_MAP: Record<
-  Exclude<keyof EducationFieldOverrides, "field">,
-  AddedEntryField
-> = {
+/** The education fields a USER-ADDED entry can carry. `field` (major), `gpa` and
+ *  `honors` have no slot on `AddedEntry`, so their affordances render on PARSED
+ *  entries only and can never route to `onEntryField`. Deriving the exclusion
+ *  from the map below (rather than restating it) is what keeps a future field
+ *  from being silently dropped instead of failing to compile. */
+type AddedEducationField = Exclude<
+  keyof EducationFieldOverrides,
+  "field" | "gpa" | "honors"
+>;
+
+/** Map an EducationEntry field name to the flat AddedEntry field it edits. */
+const EDUCATION_FIELD_MAP: Record<AddedEducationField, AddedEntryField> = {
   degree: "title",
   institution: "subtitle",
   start_date: "start_date",
   end_date: "end_date",
 };
+
+const isAddedEducationField = (
+  field: keyof EducationFieldOverrides,
+): field is AddedEducationField => field in EDUCATION_FIELD_MAP;
 
 // ── Shared section chrome (mirrors ReconstructedResume's local helpers) ────────
 
@@ -48,152 +59,6 @@ function NotDetected({ what }: { what: string }) {
 }
 
 // ── Education ──────────────────────────────────────────────────────────────────
-
-/** Resolve a field's display value, applying the override ("" = cleared). */
-export function resolveEduValue(
-  parsed: string | undefined,
-  override: string | undefined,
-): string | undefined {
-  if (override === undefined) return parsed || undefined;
-  return override || undefined; // "" clears
-}
-
-/** The resolved education fields an entry renders, after applying overrides. */
-export interface EducationDisplay {
-  degree: string | undefined;
-  /** Subject of study ("Computer Science & Engineering"); for a degree-less
-   *  program (#238) this holds the program title and degree is absent. */
-  field: string | undefined;
-  institution: string | undefined;
-  startDate: string | undefined;
-  endDate: string | undefined;
-  /** Compact display string (e.g. "2018 – 2022"), reflecting date edits. */
-  dates: string;
-  coursework: string[];
-}
-
-/**
- * Fold an education entry's overrides into the display values. Pure (no JSX) so
- * the resolution/clearing/date branches are unit-tested directly — this is the
- * risk-bearing logic; the component is then render-only.
- */
-export function resolveEducationDisplay(
-  edu: ResumeEducation,
-  overrides: EducationFieldOverrides | undefined,
-): EducationDisplay {
-  // Dates: the override fields feed buildEducationDates so the compact display
-  // string reflects edits; the read-only display still falls back to `year`.
-  const startDate = resolveEduValue(edu.start_date, overrides?.start_date);
-  const endDate = resolveEduValue(edu.end_date, overrides?.end_date);
-  return {
-    degree: resolveEduValue(edu.degree, overrides?.degree),
-    field: resolveEduValue(edu.field, overrides?.field),
-    institution: resolveEduValue(edu.institution, overrides?.institution),
-    startDate,
-    endDate,
-    dates: buildEducationDates({ ...edu, start_date: startDate, end_date: endDate }),
-    coursework: edu.coursework ?? [],
-  };
-}
-
-function EducationEntry({
-  edu,
-  overrides,
-  onFieldChange,
-  onRemove,
-  isAdded = false,
-}: {
-  edu: ResumeEducation;
-  overrides: EducationFieldOverrides | undefined;
-  onFieldChange: (field: keyof EducationFieldOverrides, value: string) => void;
-  /** Remove this entry. Set for a PARSED entry too since #856 — "is this
-   *  user-added?" is {@link isAdded}, never this prop's presence. */
-  onRemove?: () => void;
-  /** User-added entries carry no `field` (major) slot, so the major affordance
-   *  renders on PARSED entries only. */
-  isAdded?: boolean;
-}) {
-  const { degree, field, institution, startDate, endDate, dates, coursework } =
-    resolveEducationDisplay(edu, overrides);
-
-  // A degree-less program (#238, e.g. "ACME Applied Robotics") keeps its
-  // title in `field`; promote it into the primary (semibold) slot so the entry
-  // doesn't read as an empty "degree not detected". Otherwise the major follows
-  // the degree after a comma ("Bachelor of Science, Mechanical Engineering & …").
-  const majorInPrimary = !degree && Boolean(field);
-  const showMajor = !isAdded && Boolean(field);
-
-  // The editable start/end fields ARE the date display, so the compact `dates`
-  // string would duplicate them. Show it ONLY in the legacy year-only fallback
-  // (no start/end parsed, just a graduation `year`), where no editable field
-  // surfaces it otherwise.
-  const yearOnly = !startDate && !endDate && Boolean(dates);
-
-  return (
-    <li className="flex flex-col gap-0.5 text-sm">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-          {!majorInPrimary && (
-            <EditableField
-              value={degree}
-              placeholder="degree"
-              label="Degree"
-              textWeight="semibold"
-              onCommit={(v) => onFieldChange("degree", v)}
-            />
-          )}
-          {showMajor && (
-            <>
-              {degree && <span className="text-content-muted">,</span>}
-              <EditableField
-                value={field}
-                placeholder="major"
-                label="Field of study"
-                textWeight={majorInPrimary ? "semibold" : undefined}
-                onCommit={(v) => onFieldChange("field", v)}
-              />
-            </>
-          )}
-          <span className="text-content-muted">—</span>
-          <EditableField
-            value={institution}
-            placeholder="institution"
-            label="Institution"
-            onCommit={(v) => onFieldChange("institution", v)}
-          />
-        </div>
-        {onRemove && (
-          <RemoveButton label="Remove education" onClick={onRemove} />
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-1.5 text-content-tertiary">
-        <EditableField
-          value={startDate}
-          placeholder="start"
-          label="Education start date"
-          textSize="xs"
-          validate={validateDate}
-          onCommit={(v) => onFieldChange("start_date", v)}
-        />
-        <span aria-hidden="true">–</span>
-        <EditableField
-          value={endDate}
-          placeholder="end"
-          label="Education end date"
-          textSize="xs"
-          validate={validateDate}
-          onCommit={(v) => onFieldChange("end_date", v)}
-        />
-        {yearOnly && <span className="text-content-muted">{dates}</span>}
-      </div>
-      {coursework.length > 0 && (
-        <span className="block text-content-tertiary">
-          Coursework: {coursework.join(" · ")}
-        </span>
-      )}
-    </li>
-  );
-}
 
 export function EducationSection({
   heading,
@@ -266,10 +131,11 @@ export function EducationSection({
                     onEducationFieldChange(parsedIdx, field, value);
                     return;
                   }
-                  // Added entries carry no major slot; the `field` edit can't
-                  // originate here (the major affordance is parsed-only), and
-                  // EDUCATION_FIELD_MAP has no "field" key — narrow it out.
-                  if (field !== "field")
+                  // An added entry has no major / GPA / honors slot, so those
+                  // edits cannot originate here (their affordances are
+                  // parsed-only) and the map has no key for them — narrow them
+                  // out rather than inventing a destination.
+                  if (isAddedEducationField(field))
                     onEntryField(added.id, EDUCATION_FIELD_MAP[field], value);
                 }}
                 // Education carries no bullets, so this is the one section whose
