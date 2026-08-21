@@ -1,6 +1,6 @@
 ---
 name: pr-ready
-description: Solicit review on one or more open PRs — post one short ping asking for a single explicit 👍 by an absolute merge time, wait, send at most one reminder, and report per PR which of SILENT / ACKED / REVIEWING / REVIEWED was reached and by whom. Detects an in-progress review from GitHub (the 👀 /pr-review posts) and grants it one bounded grace extension. Carries no review guidance — that lives in the PR body. Never changes a PR's merge state. Use when the user says "pr-ready", "/pr-ready", "ask for review on this PR", "ping reviewers", or has open PRs nobody has looked at yet.
+description: Solicit review on one or more open PRs — autonomously post a short ping asking for a single explicit 👍 by an absolute merge time (appended onto the most recent live ping if one exists, rather than a new standalone message), wait, send at most one reminder, and report per PR which of SILENT / ACKED / REVIEWING / REVIEWED was reached and by whom. Detects an in-progress review from GitHub (the 👀 /pr-review posts) and grants it one bounded grace extension. Carries no review guidance — that lives in the PR body. Never changes a PR's merge state. Use when the user says "pr-ready", "/pr-ready", "ask for review on this PR", "ping reviewers", or has open PRs nobody has looked at yet.
 argument-hint: [<pr-number>[,<pr-number>...]]
 ---
 
@@ -100,11 +100,17 @@ check what emoji are actually on the ping.
 - **One chat backend, on a marked seam.** All chat calls are isolated behind
   the seam in Phase 2, Phase 4, and the ack predicate so a second backend is
   possible later — none is built now.
-- **Nothing is posted without an explicit go-ahead.** Both outbound messages —
-  the Phase 2 ping and the Phase 4 reminder — are shown to the user in full
-  and sent only after they say so. Posting to a shared channel with
-  @-mentions is outward-facing and effectively irreversible; the skill never
-  composes and sends in one motion.
+- **Posts are autonomous, like `/pr-review` and `/pr-autopilot`.** Both
+  outbound messages — the Phase 2 ping and the Phase 4 reminder — are composed
+  and sent without a confirmation prompt, matching the trust level the rest of
+  this skill family already operates at (`/pr-review` posts a full review
+  unattended; `/pr-autopilot` chains three autonomous skills with no
+  human-in-the-loop step of its own). What makes this safe to automate is that
+  the channel and the reviewer roster are **pre-approved, git-ignored config**
+  (One-time setup) reviewed once by a human, not something guessed at runtime —
+  there is no live decision left to confirm, only a template to fill in. The
+  exact text sent is always in the session output and the Phase 6 report, so
+  nothing is silent after the fact even though nothing is gated before it.
 
 ## Input
 
@@ -134,8 +140,11 @@ again at the phase that owns them:
 
 - **Preflight is per PR, and partitions rather than aborts** (Phase 1). One
   unready PR must not block the ask for the ready ones.
-- **The idempotency scan matches the set exactly** (Phase 2). A partial overlap
-  with an earlier ping stops the run rather than guessing.
+- **The idempotency scan is per PR, not per ask** (Phase 2). A PR already
+  covered by a live prior ping is adopted from it; a PR that isn't gets folded
+  into the most recent live ping as a threaded reply — `/pr-ready 892` after
+  today's `/pr-ready 879,886,887,888,889` appends #892 to that same message
+  instead of spawning an unrelated new one.
 - **The ack predicate is per PR for GitHub activity, ask-level for chat**
   (below). A 👀 on the ping cannot be attributed to one PR in the list.
 
@@ -210,9 +219,10 @@ AUTHOR=$(gh pr view <the first PR in the list> --repo "$REPO" --json author -q .
 **One `$AUTHOR`, not one per PR.** The author exclusion in the ack predicate
 answers "is this the person doing the asking?", and the person running this
 skill is the same human for every PR in one ask. Capture it once. If the PRs in
-the list turn out to have *different* authors, say so at the confirmation step:
-the ask is then on someone else's behalf, and their activity on their own PR is
-a legitimate ack under this `$AUTHOR` — visible, not silently reinterpreted.
+the list turn out to have *different* authors, say so in the pre-send print
+(Phase 2): the ask is then on someone else's behalf, and their activity on
+their own PR is a legitimate ack under this `$AUTHOR` — visible, not silently
+reinterpreted.
 
 **Exclude, don't abort.** Each PR is checked independently against the table
 below; a failing PR is **dropped from the ask** and every passing one still
@@ -221,9 +231,10 @@ hold back two ready ones and cost a round-trip for no reviewer benefit. Two
 guards keep the exclusion from being silent, which is the failure mode that
 matters — a reviewer who sees two PRs assumes two is all there is:
 
-- **List every excluded PR and its specific reason at the Phase 2
-  confirmation**, above the composed message, before anything is sent. The user
-  approves the ask *and* the drops in the same breath.
+- **List every excluded PR and its specific reason in the Phase 2 pre-send
+  print**, above the composed message, before it's sent — the same session
+  output that's the only place these were ever going to be reviewed, now that
+  sending doesn't wait on anyone reading it.
 - **Repeat the exclusions in the Phase 6 report**, so the terminal artifact
   says what was never asked about rather than reading as full coverage.
 
@@ -272,24 +283,58 @@ same PR must not double-post:
 > the window is exhausted. Collect the PR set of every message that matches, so
 > the next block can compare sets rather than stopping at the first hit.
 
-**Match the SET, not any one PR.** With a list, a candidate ping can stand in
-three relations to the ask, and only the first is safe to resume:
+**Split the requested set by PR, not by ask.** Scan every ping in the lookback
+window (not just the newest) and build, per requested PR, which prior ping (if
+any) already names it:
 
-| Prior ping covers | Do |
+| That PR is... | Do |
 |---|---|
-| Exactly the requested set | **Adopt** its `ts` and resume from elapsed time — the existing behaviour |
-| Nothing in the requested set | **Post** the new ping — no overlap, no double-ping |
-| *Some* of the requested set | **Stop.** Name the overlapping PRs and the ping's age, and say which subset would be safe to re-run |
+| Named in a prior ping whose deadline hasn't passed | **Adopt** — resume from elapsed time on that ping's `ts`, same as a single-PR run always did |
+| Named in a prior ping whose deadline has already passed | **Adopt**, then go straight to Phase 6 for it (the "adopted ping's deadline has already passed" shortcut below) — that ask is over, not re-askable by appending to it |
+| Named in no prior ping at all | **NEW** — goes to the append/post step below |
 
-The partial case is the one worth being strict about. Posting would re-ping
-people about a PR they were already asked to look at, and the no-double-post
-rule in the Rules below is absolute — it does not have a "mostly" setting.
-Adopting is worse: the run would then wait on a ping that never mentioned the
-PRs you just added, and report on them as though it had asked. Merging the two
-asks into one thread is a third behaviour nobody specified, so this skill does
-not invent it. Stopping costs the user one re-run with a narrower list, and
-tells them exactly what to pass — the only outcome here that can't mislead a
-reviewer.
+A PR can only be adopted from **one** prior ping — if it somehow appears in
+more than one (a hand-typed re-ask, say), adopt the most recent and say so;
+don't average or merge histories.
+
+**NEW PRs get folded into the most recent *live* ping, not a fresh top-level
+message.** "Live" means that ping's own deadline (`ts + default_deadline_minutes`
+using *this run's* config, same arithmetic as the adopt-shortcut above) hasn't
+passed yet:
+
+| Most recent ping in the window | Do with the NEW PRs |
+|---|---|
+| Exists and is still live | **Append** — post them as a threaded reply on that ping (below), not a new top-level message |
+| Exists but its deadline has passed, or none exists at all | **Post** a fresh top-level ping — the original behaviour, now the new "most recent ping" for next time |
+
+This is what makes `/pr-ready 892` after this morning's `/pr-ready
+879,886,887,888,889` land as one line added under the existing message instead
+of a second unrelated `:mag: Review requested` block minutes later — reviewers
+already looking at the thread see the addition without a second notification
+to parse. A NEW PR never gets silently dropped into an already-*expired*
+ping's thread, though — that reads as still-open work under a message everyone
+has already mentally closed, so it starts fresh instead.
+
+**Appending only changes *where* this run's message lands, not what it is.**
+Whether the NEW subset gets appended as a thread reply or posted fresh at the
+top level, it is still exactly **one ask** for those PRs — one message, one
+`ts`, one deadline, one reminder budget — identical to today's "post the new
+ping" path in every way except its placement in the channel. So `PING_TS` for
+the rest of this run (Phases 3–6) is simply that message's `ts`: the reply's,
+if it appended; the fresh post's, otherwise. Nothing downstream needs to know
+which happened.
+
+The only place a second timestamp can enter is a **mixed** run — some
+requested PRs adopted from an *older*, unrelated ping, the rest NEW. The
+adopted subset keeps using the `PING_ISO` it was adopted with (captured when
+this skill originally pinged them), never this run's own `PING_TS` — an old
+PR's ack predicate must not suddenly require activity *after* today's append
+just because today's append happens to share a report. Phase 6 evaluates each
+PR against its own recorded ping, exactly as the per-PR table there already
+implies; this just makes explicit that "recorded ping" isn't always this
+run's. The common case — this run's actual motivating example — is simpler
+than the general one: a single NEW PR, appended onto one live prior ping nobody
+in this run adopted from, giving one `PING_TS` and nothing to reconcile.
 
 Compare by **PR number extracted from the URLs in the message**, not by
 substring — `…/pull/57` is a prefix of `…/pull/572`, and a bare `#605` in prose
@@ -332,13 +377,14 @@ way a private-channel run would silently have **no** existing-ping check and
 double-post on every invocation. Search-query modifiers also don't take a bare
 channel id, so the scan would miss even where it was allowed.
 
-If no existing ping is found, compose the message from the fixed template —
-but do not send it yet:
+For the NEW subset (PRs no prior ping named), compose the message — the
+**fresh-post** template when there's no live ping to append to, the shorter
+**append** template when there is:
 
 ```
 :mag: Review requested
 
-<for EACH eligible PR, in the order given — exactly two lines each:>
+<for EACH eligible NEW PR, in the order given — exactly two lines each:>
 *<PR title>* (<+adds/-dels>, <n> files)
 <PR url>
 
@@ -350,16 +396,34 @@ still welcome, they become issues.
 Where to look is in the PR description; `/pr-review` is the review itself.
 ```
 
-**That is the entire message. Do not add to it.** No per-PR summary, no file
-slices, no "here's what changed and why" — every one of those was moved into the
-PR body's `## Review focus` (see `open-pr` Step 5), which is where the reviewer
-already is when they act on it. A pointer delivered in chat costs the reviewer a
-context switch to use and costs everyone else in the channel the scroll to get
-past it. The ping's only job is **"this exists, here's when it merges, say if
-you're on it."**
+**Appending drops the parts the parent message already said.** `:mag: Review
+requested`, the 👍 ask, and the `/pr-review` pointer are all still true and
+already sitting one message up in the same thread — restating them reads as a
+second, competing ask rather than an addition to the first one. The append
+carries only what's new:
+
+```
+<for EACH eligible NEW PR, in the order given — exactly two lines each:>
+*<PR title>* (<+adds/-dels>, <n> files)
+<PR url>
+
+<@reviewer 1> <@reviewer 2>
+
+Also merging *<absolute local time>* — same 👍 if you'll get to this one too.
+```
+
+**Both templates are the entire message. Do not add to either.** No per-PR
+summary, no file slices, no "here's what changed and why" — every one of those
+was moved into the PR body's `## Review focus` (see `open-pr` Step 5), which is
+where the reviewer already is when they act on it. A pointer delivered in chat
+costs the reviewer a context switch to use and costs everyone else in the
+channel the scroll to get past it. The ping's only job is **"this exists,
+here's when it merges, say if you're on it"** — the append's only job is the
+same thing for one more PR.
 
 **One PR keeps its two lines; the shape doesn't change.** A single-PR ask renders
-one title/url pair; a list renders several. Same template either way.
+one title/url pair; a list renders several. Same template either way — fresh-post
+or append.
 
 **Order the blocks as the user passed them** (Input), and don't fold two PRs
 into one block even when they're related — each needs its own URL on its own
@@ -400,27 +464,29 @@ one exits non-zero, so the same line works on either checkout. Deliberately
 **local** time here — this string is read by humans in the channel; the UTC
 conversion below is a separate value for a separate purpose.
 
-**Confirm before sending.** Print the composed message in full — exact text,
-named channel, the reviewers it will @-mention, and **every PR the preflight
-excluded, with its reason** (Phase 1) — and ask for an explicit go-ahead. The
-exclusions belong here rather than only in the final report: this is the last
-moment where the user can fix a red check or collapse a commit and re-run with
-the full set, and it is the only moment where approving the ask also means
-approving what the ask leaves out. Wait for it. This posts to a shared channel and pings humans by
-name; it cannot be taken back, so it is never sent on the skill's own
-initiative. If the user hasn't reviewed the text, or wants to edit it before
-it lands, use `slack_send_message_draft` instead of sending — the send tool's
-own contract says so.
+**Send it — no confirmation gate.** This skill posts autonomously (Non-goals),
+the same trust level `/pr-review` and `/pr-autopilot` already operate at: the
+channel and roster are pre-approved config, so there's no per-run judgment call
+left to confirm. Still **print the exact text sent, the target (channel or
+thread), and every PR the preflight excluded with its reason** (Phase 1) to the
+session output before sending — the exclusions belong there because it's the
+last point where a red check or an uncollapsed commit is still fixable with a
+same-session re-run, not because anyone needs to approve it first.
 
-> **Chat seam.** Once the user has approved the exact text:
-> `slack_send_message` with `channel_id` = the configured channel, `message` =
-> the composed text above. Record the returned message `ts` — every later
-> phase keys off it.
+> **Chat seam.** Fresh post: `slack_send_message` with `channel_id` = the
+> configured channel, `message` = the fresh-post text above. Append:
+> `slack_send_message` with `channel_id` = the configured channel,
+> `thread_ts` = the live prior ping's `ts`, `reply_broadcast: true` (so
+> reviewers see it in the channel, not only inside the thread), `message` =
+> the append text above. Either way, record the returned message `ts` — every
+> later phase keys off it, and for an append this is a **new, distinct** `ts`
+> from the parent's — the append is its own ask (own wait, own reminder, own
+> deadline), merely posted as a reply for placement.
 
 **Convert the ping `ts` to a UTC ISO timestamp here, once.** Do this for the
-`ts` you just posted *and* for one adopted from an existing ping above — both
-paths feed the same `PING_ISO`, and input 3 of the ack predicate compares
-every GitHub timestamp against it:
+`ts` you just posted (fresh or appended) *and* for one adopted from an existing
+ping above — all three paths feed the same `PING_ISO` for the PR(s) they cover,
+and input 3 of the ack predicate compares every GitHub timestamp against it:
 
 ```bash
 PING_TS="<the ts just returned, or the one adopted from an existing ping>"
@@ -512,10 +578,8 @@ manually. When it returns, proceed to Phase 4.
 Evaluate the **ack predicate** (below). If **any** state above SILENT was
 reached, skip straight to Phase 6 and report who and which. If still SILENT,
 compose the reminder — a short "still open, merging `<time>`" message — and
-**confirm it the same way as the Phase 2 ping**: show the exact text and wait
-for an explicit go-ahead, since `reply_broadcast` puts it in the shared channel,
-not just the thread. Use `slack_send_message_draft` if the user hasn't reviewed
-the text.
+**send it, same as the Phase 2 ping**: no confirmation gate, print the exact
+text to the session output before sending it.
 
 **With a list, the reminder fires only when NOTHING has been acked** — no chat
 ack on the ping, and no post-ping GitHub activity on **any** listed PR. Once a
@@ -534,8 +598,9 @@ When it does fire, the reminder **names only the still-unacked PRs**, which in
 this branch is all of them; it never re-lists a PR that has activity, even
 though the run reached here with nothing acked overall.
 
-> **Chat seam.** Once approved, post exactly one reminder:
-> `slack_send_message` with `thread_ts` = the ping's `ts` and
+> **Chat seam.** Post exactly one reminder: `slack_send_message` with
+> `thread_ts` = **this run's own** `ts` (the fresh post or append from Phase 2
+> — never the parent it was appended to, if it appended) and
 > `reply_broadcast: true` (so it lands in the channel too, not only the
 > thread). Do this at most once per run — the final check in Phase 6 must
 > **not** post again.
@@ -707,12 +772,17 @@ unread, and who is already busy elsewhere?).
 
 Inputs 3–5 are GitHub, evaluated **per listed PR**, and every one of them
 compares against `PING_ISO` — the UTC Z-form value pinned once in Phase 2 when
-the `ts` is recorded or adopted. Reuse it for every comparison; never re-derive
-it in local time here. Both exclusions described below are already folded into
-the commands — run them as written, don't strip the `select(...)`. **Tag every
-result with its `<PR_NUM>`** so the Phase 6 table can attribute it; a flat merged
-list answers "did anyone review anything", which is the one question the report is
-not allowed to stop at.
+the `ts` is recorded or adopted for **that PR**. This is this run's own
+`PING_ISO` for every PR except one case: a PR adopted (Phase 2) from an
+*older* ping than the one this run itself posted or appended to uses **that
+older ping's** `PING_ISO`, not this run's — an ack that landed between the old
+ping and today's run is still a real ack, and comparing it against today's
+timestamp would wrongly exclude it. Reuse whichever value applies; never
+re-derive either in local time here. Both exclusions described below are
+already folded into the commands — run them as written, don't strip the
+`select(...)`. **Tag every result with its `<PR_NUM>`** so the Phase 6 table
+can attribute it; a flat merged list answers "did anyone review anything",
+which is the one question the report is not allowed to stop at.
 
 3. **A 👀 reaction on the PR** from that reviewer's `gh_login`, created after
    the ping. → **REVIEWING** (starts the grace window at its `created_at`)
@@ -801,9 +871,14 @@ exactly four operations:
 | Operation | Tool | Used in |
 |---|---|---|
 | Scan recent channel messages (idempotency) | `slack_read_channel` | Phase 2 |
-| Send / draft a message | `slack_send_message`, `slack_send_message_draft` | Phase 2, Phase 4 |
+| Send a message (fresh, append, or reminder) | `slack_send_message` | Phase 2, Phase 4 |
 | Read a message's reactions | `slack_get_reactions` | ack predicate |
 | Read a message's thread replies | `slack_read_thread` | ack predicate |
+
+`slack_send_message_draft` stays in the Phase 0 tool resolution as a manual
+escape hatch — nothing in the automated flow calls it, since Phase 2 and Phase
+4 both send directly now, but it's there if you want to compose one by hand
+outside this skill.
 
 Those names are **not callable as written** — every one is namespaced by its
 providing plugin (`mcp__<slack-plugin>__slack_*`), and that prefix varies by
@@ -820,15 +895,16 @@ be added later, not as work to do now.
 - **Config missing/malformed** → stop at Phase 0, point at One-time setup.
   Don't fall back to a hardcoded channel or roster.
 - **Preflight fails for a PR** → exclude that PR, name the specific reason
-  (table above) at the confirmation and in the report, and ping the rest.
+  (table above) in the pre-send print and in the report, and ping the rest.
   Don't post a ping for a PR that isn't ready to be reviewed; don't hold back
   the ready ones because a sibling isn't.
 - **Preflight fails for every PR** → stop at Phase 1 with every reason listed.
   There is no ask left to make.
-- **A prior ping partially overlaps the requested set** → stop at Phase 2,
-  name the overlapping PRs and which subset is safe to re-run. Never re-ping a
-  PR that was already asked about, and never adopt a ping that didn't mention
-  every PR in the current ask.
+- **Some requested PRs are already covered by a prior ping, others aren't** →
+  no longer a stop condition. Adopt the covered ones from their own ping;
+  compose one ask for the rest, appended to the most recent live ping if one
+  exists, posted fresh otherwise. Never re-ping a PR that's already covered by
+  a live ping under this run's own new message.
 - **Chat send fails** (permissions, channel archived, etc.) → report the
   failure and stop; don't silently skip to the wait phases with no ping
   posted.
@@ -876,16 +952,19 @@ be added later, not as work to do now.
   durable/background timer, and closing the session cancels whatever wait phase
   is in flight. (It is deliberately *not* in the ping any more; the ping is for
   reviewers, and this is the author's operational caveat.)
-- **Idempotent posting.** Always scan the channel for an existing ping
-  (Phase 2, via `slack_read_channel`) before sending a new one; adopt it and
-  resume instead of double-posting. With a list, adopt only on an **exact**
-  set match — a partial overlap stops the run, because re-pinging someone
-  about a PR they were already asked to look at is the thing this rule exists
-  to prevent, and "only one of the three is a repeat" is still a repeat.
-- **Confirm every outbound message.** Show the composed text and wait for an
-  explicit go-ahead before the Phase 2 ping and before the Phase 4 reminder;
-  both are outward-facing and irreversible. Draft rather than send when the
-  user hasn't reviewed the text.
+- **Idempotent posting, per PR.** Always scan the channel for existing pings
+  (Phase 2, via `slack_read_channel`) before sending; adopt any PR a live prior
+  ping already names rather than re-pinging it. PRs the scan finds nowhere get
+  exactly one new ask, appended to the most recent live ping if one exists so
+  the channel doesn't accumulate unrelated top-level pings, or posted fresh if
+  it doesn't. Never re-ping a PR that's already covered by a live ping — that
+  rule is per PR now, not per ask, precisely so a covered PR can't get re-asked
+  just because it happens to share a run with a NEW one.
+- **Outbound messages are autonomous, not confirmed.** The Phase 2 ping and the
+  Phase 4 reminder send without a go-ahead prompt — see Non-goals for why that's
+  safe here (pre-approved config, no runtime judgment call). Always print the
+  exact text sent to the session output regardless, so nothing is silent after
+  the fact even though nothing is gated before it.
 - **Verify before flagging acked.** Every ack input is timestamped after the
   ping and excludes bots and the PR author — a stale or excluded hit is not
   an ack.
