@@ -663,4 +663,69 @@ describe("buildAtsResumeModel", () => {
     expect(skills.entries[0].headerBoldLead).toBeUndefined();
     expect(skills.entries[0].fields?.skillCategory).toBeUndefined();
   });
+
+  it("composes honors and grade onto the degree line, in résumé order (#883)", () => {
+    const result = makeResult({
+      education: [
+        {
+          degree: "B.S.",
+          field: "Computer Science",
+          institution: "State University",
+          honors: "cum laude",
+          gpa: "3.72/4.00",
+          year: "2024",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const edu = model.sections.find((s) => s.heading === "Education")!;
+    expect(edu.entries[0].headerLine).toBe(
+      "B.S., Computer Science, cum laude, GPA: 3.72/4.00",
+    );
+    // Never a bullet: a bullet under an education entry re-parses as coursework.
+    expect(edu.entries[0].bullets).toEqual([]);
+    expect(edu.entries[0].fields?.score).toBe("3.72/4.00");
+  });
+
+  it("leaves a classification unlabelled — 'GPA: First Class' is not a thing (#883)", () => {
+    const result = makeResult({
+      education: [
+        {
+          degree: "B.A.",
+          field: "Economics",
+          institution: "Northwind University",
+          gpa: "First Class",
+          year: "2024",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const edu = model.sections.find((s) => s.heading === "Education")!;
+    expect(edu.entries[0].headerLine).toBe("B.A., Economics, First Class");
+  });
+
+  it("carries honors and grade on a degree-LESS program header too (#883)", () => {
+    const result = makeResult({
+      education: [
+        {
+          degree: "",
+          field: "Applied Robotics Certificate",
+          institution: "Northwind Institute",
+          gpa: "3.5",
+          year: "2023",
+        },
+      ],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const edu = model.sections.find((s) => s.heading === "Education")!;
+    expect(edu.entries[0].headerLine).toContain("Applied Robotics Certificate");
+    expect(edu.entries[0].headerLine).toContain("GPA: 3.5");
+  });
+
+  it("emits no dangling separator when an entry carries neither (#883)", () => {
+    const model = buildAtsResumeModel(makeResult(), makeScore([]));
+    const edu = model.sections.find((s) => s.heading === "Education")!;
+    expect(edu.entries[0].headerLine).toBe("BS Computer Science");
+    expect(edu.entries[0].fields?.score).toBeUndefined();
+  });
 });

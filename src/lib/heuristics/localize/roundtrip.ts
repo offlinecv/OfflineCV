@@ -68,6 +68,22 @@ export const ROUNDTRIP_CATEGORY_CLASS: Readonly<
   render: "roundtrip-render-crash",
 };
 
+/** The education fields every round-trip consumer compares. One list, three
+ *  readers (the corpus gate's ratchet, the dev harness's value diff, and the
+ *  localizer's boolean) — a fourth field added to only one of them would make
+ *  the gate and the localizer disagree about whether the same hop regressed.
+ *  `gpa` / `honors` (#883) belong here for the same reason `degree` does: they
+ *  are written onto the exported degree line and read back off it, so a
+ *  renderer or recogniser change that drops one, or re-reads it as a different
+ *  string, is a round-trip regression. */
+const EDUCATION_ROUNDTRIP_KEYS = [
+  "degree",
+  "field",
+  "institution",
+  "gpa",
+  "honors",
+] as const;
+
 const same = (a: unknown, b: unknown): boolean =>
   JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -224,7 +240,7 @@ export function invariantFailures(
     education: entryListFails(
       c1.education ?? [],
       c3.education ?? [],
-      ["degree", "field", "institution"] as const,
+      EDUCATION_ROUNDTRIP_KEYS,
       "entry",
     ),
     skills: sk1 !== sk3 ? [`count ${sk1} → ${sk3}`] : [],
@@ -251,7 +267,7 @@ export function harnessDiff(
     education: entryValueFails(
       c1.education ?? [],
       c3.education ?? [],
-      ["degree", "field", "institution"] as const,
+      EDUCATION_ROUNDTRIP_KEYS,
       "entry",
     ),
     skills: skillsValueFails(c1.skills ?? [], c3.skills ?? []),
@@ -301,7 +317,7 @@ export function localizeRoundtripHop(
     entryValueFails(
       c1.education ?? [],
       c3.education ?? [],
-      ["degree", "field", "institution"] as const,
+      EDUCATION_ROUNDTRIP_KEYS,
       "entry",
     ).length > 0;
   const skillsChanged =

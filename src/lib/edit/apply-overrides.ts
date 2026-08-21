@@ -368,6 +368,10 @@ function applyEducationFieldOverrides(
     if (fields.institution !== undefined) edu.institution = fields.institution;
     if (fields.start_date !== undefined) edu.start_date = fields.start_date;
     if (fields.end_date !== undefined) edu.end_date = fields.end_date;
+    // `gpa` / `honors` are optional like `field`: a clear ("") drops the key so
+    // the exporter emits no dangling ", GPA: " on the degree line (#883).
+    if (fields.gpa !== undefined) edu.gpa = fields.gpa || undefined;
+    if (fields.honors !== undefined) edu.honors = fields.honors || undefined;
   }
 }
 

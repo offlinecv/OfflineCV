@@ -90,7 +90,7 @@ const FULL_MODEL: AtsResumeModel = {
       kind: "education",
       entries: [
         {
-          headerLine: "B.S., Computer Science",
+          headerLine: "B.S., Computer Science, cum laude, GPA: 3.72/4.00",
           bullets: ["Coursework: Algorithms, Databases"],
           fields: {
             organization: "State University",
@@ -98,6 +98,7 @@ const FULL_MODEL: AtsResumeModel = {
             area: "Computer Science",
             endDate: "2019",
             courses: ["Algorithms", "Databases"],
+            score: "3.72/4.00",
           },
         },
       ],
@@ -209,7 +210,7 @@ describe("toJsonResume — work", () => {
 describe("toJsonResume — education, skills, projects", () => {
   const doc = toJsonResume(FULL_MODEL);
 
-  it("maps education institution/studyType/area/courses", () => {
+  it("maps education institution/studyType/area/courses/score", () => {
     expect(doc.education[0]).toEqual({
       institution: "State University",
       studyType: "B.S.",
@@ -217,7 +218,17 @@ describe("toJsonResume — education, skills, projects", () => {
       startDate: undefined,
       endDate: "2019",
       courses: ["Algorithms", "Databases"],
+      // JSON Resume's own grade slot (#883), free-form so the scale survives.
+      score: "3.72/4.00",
     });
+  });
+
+  it("invents no field for honors, which the spec has no slot for (#883)", () => {
+    // The honors phrase rides the exported PDF's degree line and is captured on
+    // the canonical model; the JSON export must not smuggle it into `score` or
+    // conjure a non-spec key for it.
+    expect(doc.education[0].score).toBe("3.72/4.00");
+    expect(JSON.stringify(doc.education[0])).not.toMatch(/laude/i);
   });
 
   it("maps each skill to { name }", () => {

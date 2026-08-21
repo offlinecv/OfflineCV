@@ -174,6 +174,10 @@ export interface EducationFieldOverrides {
   institution?: string;
   start_date?: string;
   end_date?: string;
+  /** Grade as written — free text, never validated as a number (#883): the
+   *  scale is part of the value, and "First Class" is as legitimate as "3.9". */
+  gpa?: string;
+  honors?: string;
 }
 
 // ── Achievement overrides (#454) ──────────────────────────────────────────────

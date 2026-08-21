@@ -334,6 +334,25 @@ describe("extractEducation — capstone/project sub-line stays annotation, not s
     expect(value).toHaveLength(2);
     expect(value[0].institution).toBe("Cornell University");
   });
+
+  it("does NOT split an honor-society line into a phantom entry, even with a year (#883 review round 2)", () => {
+    // "Phi Beta Kappa, cum laude 2021" carries no EDUCATION_ANNOTATION_RE
+    // keyword ("honor society" isn't "honors"), and once the trailing "cum
+    // laude" note is cut for the #883 GPA-rescue check, "Phi Beta Kappa"
+    // reads exactly like a real degree-less program title. This is why
+    // isInlineDatedProgram's #883 rescue is scoped to GPA-kind notes only —
+    // an honors-kind note falls back to testing the un-cut line, where "cum
+    // laude" still correctly vetoes it as an annotation.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Harvard University                                   May 2022",
+        "B.A. in Economics",
+        "Phi Beta Kappa, cum laude 2021",
+      ]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Harvard University");
+  });
 });
 
 describe("extractEducation — degree/field split + location peel (#222)", () => {

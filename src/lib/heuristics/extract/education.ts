@@ -11,6 +11,7 @@ import {
   NUMERIC_MONTH_YEAR_RE,
   US_STATE_CODE_RE,
   COUNTRY_GAZETTEER,
+  PROGRAM_NOTE_RE,
 } from "../regex.ts";
 import {
   isBulletLine,
@@ -19,6 +20,14 @@ import {
   stripBullet,
 } from "../line-primitives.ts";
 import { isDateOnlyLine, isEntryHeaderShape } from "../entry-blocks.ts";
+import {
+  EDUCATION_SEGMENT_SPLIT_SRC,
+  classifyGradeSegment,
+  cutTrailingGradeNote,
+  isEducationNoteSegment,
+  isGradeAnnotationLine,
+  parseEducationGrade,
+} from "./education-grade.ts";
 import { avgScore } from "./shared.ts";
 
 // ── Education ───────────────────────────────────────────────────────────────
@@ -367,6 +376,56 @@ function isInlineDatedProgram(line: string): boolean {
   // ("20XX …", "Sep 20XX – May 20XX") is rejected on the same footing as a
   // real-year lead.
   if (DATE_LEAD_RE.test(t)) return false;
+  // Drop a trailing "| City, Region" location segment before measuring the
+  // program remainder — a date+location line ("… 2011 | Kolkata, India") must
+  // not pass on the strength of its city words.
+  const noLocation = t.replace(/[|,]\s*[A-Z][A-Za-z.\-]+(?:\s*,\s*[A-Za-z.\-]+)*$/, "");
+  // Strip years and date connective words (seasons / months / range words) —
+  // a real program name leaves substantive text, a bare date line leaves
+  // nothing. Done BEFORE the note-cut and the annotation-keyword test below
+  // (#883): a composed export line can carry a real GPA/honors NOTE right
+  // after the year with no punctuation to separate them ("Certificate, cum
+  // laude  2023"), and the note-cut needs the year already gone to see "cum
+  // laude" as its own clean trailing segment rather than "cum laude  2023",
+  // which no note pattern recognizes.
+  const datesStripped = noLocation
+    .replace(/\b(19|20)\d{2}\b/g, "")
+    .replace(new RegExp(String.raw`\b` + REDACTED_YEAR + String.raw`\b`, "gi"), "")
+    .replace(
+      /\b(?:spring|summer|fall|autumn|winter|present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi,
+      "",
+    );
+  // A trailing GPA NOTE the exporter composed onto this line (#883) is a
+  // recognized structured sub-field, not free-form annotation prose — cut it
+  // with the same predicate {@link cleanField} uses (`cutFieldNotes`) before
+  // testing for the keywords below. Without this, a real degree-less program
+  // that merely carries its own GPA ("Applied Robotics Certificate, GPA:
+  // 3.9") is vetoed by the exact keyword that must otherwise reject genuine
+  // annotation prose.
+  //
+  // Gated to a GPA-kind note ONLY — never an unlabelled honors phrase like
+  // "cum laude". A GPA note is unambiguous structured data that essentially
+  // never appears on genuine annotation prose; a bare Latin-honors phrase is
+  // exactly the shape a real annotation line ALSO takes ("Phi Beta Kappa, cum
+  // laude 2021" — an honor-society mention, not a program). Rescuing on
+  // honors alone turned that line into a phantom degree-less entry (review
+  // round 2 regression, pinned by the "Phi Beta Kappa" case in
+  // education.test.ts). So a degree-less program that carries ONLY honors —
+  // no degree line, no GPA — is a known, accepted gap: the honors value still
+  // reaches the exported PDF text, it just doesn't survive a re-parse. The
+  // degree-BEARING path (a real `degree` field present) is unaffected either
+  // way — it never reaches this function at all.
+  const notesStripped = cutFieldNotes(datesStripped);
+  const cutSuffix = datesStripped.slice(notesStripped.length);
+  const rescueIsGpaOnly =
+    cutSuffix.length === 0 ||
+    cutSuffix
+      .replace(/^\s*[,;·•|]\s*|^\s+[-–—]\s+/, "")
+      .split(new RegExp(EDUCATION_SEGMENT_SPLIT_SRC))
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .every((seg) => classifyGradeSegment(seg)?.kind === "gpa");
+  const testTarget = rescueIsGpaOnly ? notesStripped : datesStripped;
   // An honors / awards / activity annotation that happens to carry a year
   // ("Dean's List 2021", "Honors Thesis: … (2024)", "Teaching Assistant for …
   // (2022 - 2023)", "Study Abroad, Florence 2021", "Capstone Project: Sentiment
@@ -374,28 +433,18 @@ function isInlineDatedProgram(line: string): boolean {
   // it must not split off a phantom degree-less entry (#219, #251). These read as
   // annotations, not program names, so an exact keyword denylist is safe: a real
   // second program ("MIT Applied Data Science (2023)", "Google Data Analytics
-  // Certificate 2022") carries none of them. NOTE: "project" is denied only in its
-  // annotation shape — a qualifier-led "Senior/Final/… Project" or a "Project: …"
-  // sub-line — NOT bare anywhere, so a genuine credential title that merely contains
-  // the word ("Project Management Certificate 2022", PMP) still splits into its own
-  // program entry (#251 adversarial review).
-  if (EDUCATION_ANNOTATION_RE.test(t) || /\bproject\s*:/i.test(t))
+  // Certificate 2022") carries none of them, and neither does one that also
+  // carries its own recognized GPA note (#883) — `testTarget` has already cut
+  // that trailing note when it's GPA-kind, so the test below only sees the
+  // program text and any UNRECOGNIZED annotation prose that rode along with
+  // it. NOTE: "project" is denied only in its annotation shape — a
+  // qualifier-led "Senior/Final/… Project" or a "Project: …" sub-line — NOT
+  // bare anywhere, so a genuine credential title that merely contains the
+  // word ("Project Management Certificate 2022", PMP) still splits into its
+  // own program entry (#251 adversarial review).
+  if (EDUCATION_ANNOTATION_RE.test(testTarget) || /\bproject\s*:/i.test(testTarget))
     return false;
-  // Drop a trailing "| City, Region" location segment before measuring the
-  // program remainder — a date+location line ("… 2011 | Kolkata, India") must
-  // not pass on the strength of its city words.
-  const noLocation = t.replace(/[|,]\s*[A-Z][A-Za-z.\-]+(?:\s*,\s*[A-Za-z.\-]+)*$/, "");
-  // Strip years and date connective words (seasons / months / range words); a
-  // real program name leaves substantive text, a bare date line leaves nothing.
-  const remainder = noLocation
-    .replace(/\b(19|20)\d{2}\b/g, "")
-    .replace(new RegExp(String.raw`\b` + REDACTED_YEAR + String.raw`\b`, "gi"), "")
-    .replace(
-      /\b(?:spring|summer|fall|autumn|winter|present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi,
-      "",
-    )
-    .replace(/[\s,–\-—|/().:]+/g, "")
-    .trim();
+  const remainder = testTarget.replace(/[\s,–\-—|/().:]+/g, "").trim();
   return remainder.length >= 3;
 }
 
@@ -436,9 +485,46 @@ function isProgramLeadAt(
   return isInstitutionLine(partner);
 }
 
+/** Cut a degree field at the first trailing sub-field NOTE segment — a grade, an
+ *  honors phrase, or a minor/major/concentration label ({@link
+ *  isEducationNoteSegment}). Segment-wise rather than a keyword regex over the
+ *  whole string, so a note reached through an EARLIER non-note segment is still
+ *  cut ("Computer Science, cum laude, GPA: 3.72/4.00" → "Computer Science", where
+ *  a `[,;]\s*gpa`-anchored cut left "cum laude" glued on), while an interior
+ *  separator inside a genuine two-part subject ("Mathematics · Statistics") is
+ *  untouched.
+ *
+ *  The LEAD segment is treated asymmetrically, and the asymmetry is load-bearing.
+ *  When it is a GRADE or HONORS note the whole field is dropped: the line carries
+ *  no subject at all, the note's content is already on `gpa`/`honors`, and
+ *  keeping it would both duplicate the value and break the round-trip (the
+ *  exporter re-emits it from `gpa`, so a re-parse would find it twice). When it
+ *  is a `Minor`/`Major`/`Concentration` label it is KEPT, as before #883: those
+ *  name a real subject ("Major in Data Science") that no other field would
+ *  receive, so dropping them would lose it outright. */
+function cutFieldNotes(f: string): string {
+  // Built per call, not hoisted: a shared `/g` regex carries `lastIndex` between
+  // calls, and this function returns early from inside the scan.
+  const re = new RegExp(EDUCATION_SEGMENT_SPLIT_SRC, "g");
+  let segStart = 0;
+  let prevSegEnd = -1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(f)) !== null) {
+    const seg = f.slice(segStart, m.index);
+    if (prevSegEnd < 0 && classifyGradeSegment(seg)) return "";
+    if (prevSegEnd >= 0 && isEducationNoteSegment(seg))
+      return f.slice(0, prevSegEnd);
+    prevSegEnd = m.index;
+    segStart = m.index + m[0].length;
+  }
+  const last = f.slice(segStart);
+  if (prevSegEnd < 0) return classifyGradeSegment(last) ? "" : f;
+  return isEducationNoteSegment(last) ? f.slice(0, prevSegEnd) : f;
+}
+
 /** Trim a parsed field string down to the subject, cutting any trailing date,
- *  column break, pipe, or GPA/Minor/Major note that rode along on the degree
- *  line ("Computer Science   Sep. 2024 - Jun. 2027" → "Computer Science").
+ *  column break, pipe, or GPA/honors/Minor/Major note that rode along on the
+ *  degree line ("Computer Science   Sep. 2024 - Jun. 2027" → "Computer Science").
  *  Returns undefined when nothing substantive survives. */
 function cleanField(raw: string): string | undefined {
   let f = raw
@@ -452,9 +538,15 @@ function cleanField(raw: string): string | undefined {
   // templates ship, so a reconstructed institution sub-line that carries it
   // (#297) normalizes to the same field as its degree header.
   f = f.replace(CLEAN_FIELD_DATE_RE, "");
-  // Cut a trailing "… , Minor in Economics" / "… , GPA: 3.8" note — a sub-field,
-  // not part of the subject.
-  f = f.replace(/[,;]\s*(?:minor|major|gpa|concentration)\b.*$/i, "");
+  // Cut a trailing "… , Minor in Economics" / "… , GPA: 3.8" / "… , cum laude"
+  // note — a sub-field, not part of the subject. Since #883 the grade and honors
+  // halves are ALSO lifted onto the entry, so this cut and that collection read
+  // the same predicate and cannot disagree about what a note is.
+  f = cutFieldNotes(f);
+  // Then cut a grade that rode onto the subject with NO separator in front of it
+  // ("Computer Science GPA 3.8") — the segment-wise cut above cannot see it,
+  // because subject and note are one segment there (#883).
+  f = cutTrailingGradeNote(f);
   // Strip leftover edge punctuation and separators — the middot/bullet a
   // template used to divide the header from a field this parse did not keep
   // ("Computer Science · 2020" loses the year above, leaving the "·", #835).
@@ -931,6 +1023,15 @@ function educationFromChunk(chunk: string[]): {
   const dates = parseEducationDates(datesInput);
   const hasDate = !!(dates.start_date || dates.end_date);
 
+  // Grade + honors (#883). Read off the WHOLE chunk, not just the degree line:
+  // a résumé writes them either inline after the subject ("B.S. in Computer
+  // Science, cum laude, GPA: 3.72/4.00") or on their own annotation line under
+  // the entry, and both belong to the same qualification. They contribute
+  // nothing to `score` — the confidence weights are the three fields an entry
+  // must have (institution / degree / date), and an entry is no more or less
+  // confidently parsed for carrying a GPA.
+  const { gpa, honors } = parseEducationGrade(chunk);
+
   let score = 0;
   if (institution) score += 0.3;
   if (degree) score += 0.4;
@@ -942,6 +1043,8 @@ function educationFromChunk(chunk: string[]): {
       degree,
       ...(field ? { field } : {}),
       ...(location ? { location } : {}),
+      ...(gpa ? { gpa } : {}),
+      ...(honors ? { honors } : {}),
       ...educationDateFields(dates),
     },
     score: Math.min(score, 1),
@@ -1137,6 +1240,15 @@ export function extractEducation(
       hasDegree &&
       hasInstitution &&
       !isDateOnlyLine(text) &&
+      // …and is not itself a sub-field NOTE (#883). The next-line lookahead
+      // below was the only thing keeping "GPA: 3.8" inside its entry, and it
+      // fails on a Degree-then-Degree ordering where the note IS followed by a
+      // degree: the note then leads the next chunk and its grade is attributed
+      // to the wrong qualification. `PROGRAM_NOTE_RE` recognises the labelled
+      // notes by prefix; `isGradeAnnotationLine` covers an unlabelled honors
+      // phrase ("Magna Cum Laude"), which has no prefix to recognise.
+      !PROGRAM_NOTE_RE.test(text) &&
+      !isGradeAnnotationLine(text) &&
       // Same `isRealEntryHeader` gate as `isDeg` above (#462/#467): a phantom
       // DEGREE_RE hit on a body-prose "Graduated B.E. with Distinction" sentence
       // must not persuade the chunker that this hint-less line leads a new

@@ -9,8 +9,8 @@
  *
  * Coverage rules:
  *   - Build a flat lowercased corpus from the resume — summary, skills array,
- *     experience titles + descriptions, education degree + institution +
- *     description.
+ *     experience titles + descriptions, education degree + field +
+ *     institution.
  *   - For each JD term:
  *       · `skill` source: check any alias of that canonical ID against the
  *         corpus, word-boundary-aware via the same regex shape as the JD
@@ -104,7 +104,9 @@ export function computeCoverageFromCorpus(
  *
  * `parsed` is the cascade's HeuristicParsedResume — `skills: string[]`,
  * `experience[].description`, `summary?`, `education[]`. We tolerate any
- * field being missing.
+ * field being missing. Education contributes its degree / field / institution
+ * only: `ResumeEducation` carried a `description` that no producer ever wrote
+ * (#883), so the read was dead and is gone along with the field.
  *
  * A thin wrapper over `computeCoverageFromCorpus`, kept at its original
  * signature so every existing caller is untouched. This is the ONLY place the
@@ -144,7 +146,7 @@ export function buildResumeProjection(parsed: HeuristicParsedResume): string {
     // part of an education entry a JD ever asks for: measured on a real résumé,
     // a posting requiring "Computer Science" scored it MISSING against a CS
     // graduate purely because the field never reached the corpus.
-    pushPresent(parts, edu.degree, edu.field, edu.institution, edu.description);
+    pushPresent(parts, edu.degree, edu.field, edu.institution);
   }
   return parts.join("\n");
 }

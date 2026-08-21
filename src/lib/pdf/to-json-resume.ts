@@ -99,6 +99,11 @@ export interface JsonResumeEducation {
   startDate?: string;
   endDate?: string;
   courses?: string[];
+  /** JSON Resume `education[].score` — the grade, free-form per the spec, so the
+   *  résumé's own notation and scale survive ("3.72/4.00", "8.4/10", "First
+   *  Class", #883). Honors has no field in the spec and is deliberately not
+   *  invented here. */
+  score?: string;
 }
 
 export interface JsonResumeSkill {
@@ -372,6 +377,7 @@ function toEducation(fields: AtsEntryFields): JsonResumeEducation {
     startDate: normalizeJsonResumeDate(fields.startDate),
     endDate: normalizeJsonResumeDate(fields.endDate),
     courses: fields.courses,
+    score: fields.score,
   };
 }
 
