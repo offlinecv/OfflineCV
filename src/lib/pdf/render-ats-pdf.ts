@@ -82,7 +82,7 @@ import {
   EMPHASIS_CLOSE,
 } from "./auto-bold-metrics.ts";
 import { toJsonResume } from "./to-json-resume.ts";
-import { wrapWordsToLines } from "./text-wrap.ts";
+import { wrapWordsToLines, firstLineInset } from "./text-wrap.ts";
 import {
   bulletSplitFinding,
   collectModelTextFields,
@@ -736,15 +736,26 @@ function makeEmbeddedFontSanitizer(
  * The wrap point only falls between segments (rejoined with
  * `MIDDOT_SEGMENT_SEP`); a segment wider than `maxWidth` on its own falls
  * back to `wrapWordsToLines` for that segment only. Exported for testing.
+ *
+ * `firstLineMaxWidth` narrows line 0 for a bold inset drawn ahead of it (#881)
+ * and behaves exactly as it does in {@link wrapWordsToLines}, including the
+ * empty line 0 an inset too wide to share its line produces. It defaults to
+ * `maxWidth`, which is the pre-#881 wrap.
  */
 export function wrapSegmentsToLines(
   segments: string[],
   font: PdfFont,
   size: number,
   maxWidth: number,
+  firstLineMaxWidth = maxWidth,
 ): string[] {
   if (segments.length === 0) return [];
   const lines: string[] = [];
+  const { limit, needsEmptyFirstLine } = firstLineInset(
+    lines,
+    maxWidth,
+    firstLineMaxWidth,
+  );
   // Seed `current` from the empty string and run EVERY segment — including
   // segments[0] — through the same width check + word-wrap fallback, so an
   // overlong first segment (e.g. a long "Company · Location" org line whose
@@ -754,12 +765,15 @@ export function wrapSegmentsToLines(
     const seg = segments[i];
     const candidate =
       current === "" ? seg : `${current}${MIDDOT_SEGMENT_SEP}${seg}`;
-    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+    if (font.widthOfTextAtSize(candidate, size) <= limit()) {
       current = candidate;
       continue;
     }
     if (current !== "") lines.push(current);
-    if (font.widthOfTextAtSize(seg, size) > maxWidth) {
+    if (needsEmptyFirstLine(font.widthOfTextAtSize(seg, size))) {
+      lines.push("");
+    }
+    if (font.widthOfTextAtSize(seg, size) > limit()) {
       // `wrapWordsToLines` never loops on a single word wider than maxWidth
       // (it emits it as its own line), so this terminates.
       const subLines = wrapWordsToLines(
@@ -767,6 +781,8 @@ export function wrapSegmentsToLines(
         font,
         size,
         maxWidth,
+        false,
+        limit(),
       );
       lines.push(...subLines.slice(0, -1));
       current = subLines[subLines.length - 1] ?? "";
@@ -860,6 +876,19 @@ type DrawTextOpts = {
   hangingIndent?: number;
   uppercase?: boolean;
   atomicSegments?: boolean;
+  /**
+   * A short BOLD lead drawn at the start of the first line, with that line's
+   * wrap width narrowed by its measured width so `text` flows beside it (#881 —
+   * the category label on a categorised skills line).
+   *
+   * This is how a mixed-weight line keeps ATOMIC segment wrapping: routing it
+   * through `drawRuns` instead would bold the lead but wrap `text` on plain
+   * whitespace words, splitting a multi-word skill mid-name (#301). The lead
+   * carries its own trailing separator space — the members are drawn flush
+   * against its measured end, so the space has to be inside the drawn string
+   * for the re-parse to see a word boundary there.
+   */
+  boldLead?: string;
   /** A short tail (a role/degree date range) drawn FLUSH-RIGHT, regular
    *  weight, on the first wrapped line's baseline (#425). */
   rightText?: string;
@@ -1124,6 +1153,7 @@ class Layout {
     size: number,
     maxWidth: number,
     atomicSegments = false,
+    firstLineMaxWidth = maxWidth,
   ): string[] {
     if (atomicSegments && text.includes(MIDDOT_SEGMENT_SEP)) {
       return wrapSegmentsToLines(
@@ -1131,6 +1161,7 @@ class Layout {
         font,
         size,
         maxWidth,
+        firstLineMaxWidth,
       );
     }
     return wrapWordsToLines(
@@ -1138,6 +1169,8 @@ class Layout {
       font,
       size,
       maxWidth,
+      false,
+      firstLineMaxWidth,
     );
   }
 
@@ -1161,13 +1194,21 @@ class Layout {
     maxWidth: number,
     atomic: boolean,
     rightReserve: number,
+    firstLineMaxWidth: number,
   ): string[] {
-    const lines = this.wrap(value, font, size, maxWidth, atomic);
+    const lines = this.wrap(value, font, size, maxWidth, atomic, firstLineMaxWidth);
     if (
       rightReserve > 0 &&
-      font.widthOfTextAtSize(lines[0], size) > maxWidth - rightReserve
+      font.widthOfTextAtSize(lines[0], size) > firstLineMaxWidth - rightReserve
     ) {
-      return this.wrap(value, font, size, maxWidth - rightReserve, atomic);
+      return this.wrap(
+        value,
+        font,
+        size,
+        maxWidth - rightReserve,
+        atomic,
+        firstLineMaxWidth - rightReserve,
+      );
     }
     return lines;
   }
@@ -1191,6 +1232,8 @@ class Layout {
     lineHeight: number;
     rValue: string;
     rSize: number;
+    leadValue: string;
+    leadWidth: number;
   } {
     const size = opts.size ?? this.t.body;
     const font = opts.bold ? this.fonts.bold : this.fonts.regular;
@@ -1204,7 +1247,6 @@ class Layout {
     // sanitize the result — `sanitize` is the final step before measure/draw,
     // and it runs on BOTH font paths (see the constructor doc).
     const cased = opts.uppercase ? text.toUpperCase() : text;
-    const value = this.sanitize(cased);
     const atomic = opts.atomicSegments ?? false;
     const maxWidth = CONTENT_WIDTH - (x - MARGIN);
     const rSize = opts.rightSize ?? size;
@@ -1212,6 +1254,26 @@ class Layout {
     const rightReserve = rValue
       ? this.fonts.regular.widthOfTextAtSize(rValue, rSize) + DATE_COLUMN_GAP
       : 0;
+
+    // The lead is measured in BOLD because that is the weight it is drawn in, so
+    // the width line 0 is narrowed by is the width it actually occupies (#881).
+    //
+    // A lead too wide for a whole line cannot lead one — inset or not, it would
+    // run past the right margin, and it is drawn as one piece so the wrapper
+    // cannot break it. Fold it back into the wrapped text instead: it word-wraps
+    // like any other over-long run, which is exactly what a glued "Label: a · b"
+    // header did before this option existed. The label loses its weight; the
+    // page never loses its margin.
+    const lead = opts.boldLead ? this.sanitize(opts.boldLead) : "";
+    const leadWidth = lead
+      ? this.fonts.bold.widthOfTextAtSize(lead, size)
+      : 0;
+    const leads = leadWidth > 0 && leadWidth <= maxWidth;
+    const leadValue = leads ? lead : "";
+    const inset = leads ? leadWidth : 0;
+    const value = leads
+      ? this.sanitize(cased)
+      : `${lead}${this.sanitize(cased)}`;
 
     // Reserve the flush-right date column when the header collides with it
     // (#436) — see wrapReservingRight for why this is collision-gated, not a
@@ -1223,8 +1285,19 @@ class Layout {
       maxWidth,
       atomic,
       rightReserve,
+      maxWidth - inset,
     );
-    return { lines, font, size, x, lineHeight: size * LINE_GAP, rValue, rSize };
+    return {
+      lines,
+      font,
+      size,
+      x,
+      lineHeight: size * LINE_GAP,
+      rValue,
+      rSize,
+      leadValue,
+      leadWidth: inset,
+    };
   }
 
   /**
@@ -1297,22 +1370,37 @@ class Layout {
    * cursor and paginates as needed.
    */
   drawText(text: string, opts: DrawTextOpts = {}) {
-    const { lines, font, size, x, lineHeight, rValue, rSize } =
+    const { lines, font, size, x, lineHeight, rValue, rSize, leadValue, leadWidth } =
       this.resolveDrawLines(text, opts);
     const color = opts.color ?? this.black;
     const hanging = opts.hangingIndent ?? 0;
     const singleLine = lines.length === 1;
     for (let i = 0; i < lines.length; i++) {
       this.ensureWrappedLine(i, lines.length, lineHeight, opts);
-      const lineX = i === 0 ? x : x + hanging;
+      // The bold lead sits at the line's left edge and the first line's text
+      // starts flush against its measured end (#881); `resolveDrawLines` already
+      // wrapped line 0 to what is left, so this cannot overrun the margin. Line
+      // 0 comes back empty when the lead needs the whole line.
+      const lineX = i === 0 ? x + leadWidth : x + hanging;
       const topY = this.y;
-      this.page.drawText(lines[i], {
-        x: lineX,
-        y: topY - size,
-        size,
-        font,
-        color,
-      });
+      if (i === 0 && leadValue) {
+        this.page.drawText(leadValue, {
+          x,
+          y: topY - size,
+          size,
+          font: this.fonts.bold,
+          color,
+        });
+      }
+      if (lines[i]) {
+        this.page.drawText(lines[i], {
+          x: lineX,
+          y: topY - size,
+          size,
+          font,
+          color,
+        });
+      }
       if (i === 0) {
         this.decorateFirstLine(opts, {
           line: lines[0],
@@ -2044,6 +2132,9 @@ function headerLineOpts(
     // which reads as regular-weight body text (#425).
     bold: entry.headerBold ?? true,
     size: t.header,
+    // Bold category label leading a categorised skills line (#881). Set here so
+    // `entryHeadHeight` measures the inset line 0 the draw will produce.
+    boldLead: entry.headerBoldLead,
     atomicSegments: entry.atomicSegments,
     hangingIndent: entry.headerHangingIndent,
     // Flush-right date on the header line (#425) — set for a title-less role /

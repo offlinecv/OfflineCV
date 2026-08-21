@@ -17,6 +17,32 @@ export interface TextMeasurer {
 }
 
 /**
+ * The "first-line inset" wrap rule shared by `wrapWordsToLines` here and
+ * `wrapSegmentsToLines` in `render-ats-pdf.ts` (#881 review) — extracted so the
+ * empty-line-0 rule can't drift between the word wrapper and the atomic-segment
+ * wrapper the way the rest of this module's docblock already guards against for
+ * a whole-wrap-improvement duplication (#421).
+ *
+ * `limit()` returns the width the line currently being packed (`lines.length`)
+ * should wrap to: `firstLineMaxWidth` for line 0, `maxWidth` for every line
+ * after it. `needsEmptyFirstLine` reports whether the very first unit (a word
+ * or a segment) doesn't fit beside the inset at all — when it doesn't, the
+ * caller seats an empty line 0 so that unit starts fresh on line 1 instead of
+ * running past the inset's right edge.
+ */
+export function firstLineInset(
+  lines: string[],
+  maxWidth: number,
+  firstLineMaxWidth: number,
+): { limit: () => number; needsEmptyFirstLine: (unitWidth: number) => boolean } {
+  return {
+    limit: () => (lines.length === 0 ? firstLineMaxWidth : maxWidth),
+    needsEmptyFirstLine: (unitWidth: number) =>
+      lines.length === 0 && firstLineMaxWidth < maxWidth && unitWidth > firstLineMaxWidth,
+  };
+}
+
+/**
  * Break a single word that is itself wider than `maxWidth` into character-run
  * chunks that each fit. Guarantees progress (at least one char per chunk) so a
  * pathologically narrow `maxWidth` still terminates.
@@ -54,6 +80,13 @@ function breakLongWord(
  *     long URL is a single word with no interior whitespace and there is no
  *     re-parse invariant to protect (#421 Blocking #5).
  *
+ * `firstLineMaxWidth` narrows line 0 only, for a caller drawing an inset ahead
+ * of it (the bold category label on a skills line, #881). When nothing fits
+ * beside the inset, line 0 comes back EMPTY and the words start on line 1 —
+ * the inset then owns its own line instead of pushing the first word past the
+ * right margin. Defaulting it to `maxWidth` disables both the narrowing and the
+ * empty-line rule, so every existing caller wraps exactly as before.
+ *
  * Always terminates: without breaking, an overlong word advances the loop as
  * its own line; with breaking, `breakLongWord` makes at least one char of
  * progress per chunk.
@@ -64,16 +97,22 @@ export function wrapWordsToLines(
   size: number,
   maxWidth: number,
   breakLongWords = false,
+  firstLineMaxWidth = maxWidth,
 ): string[] {
   if (words.length === 0) return [];
   const lines: string[] = [];
+  const { limit, needsEmptyFirstLine } = firstLineInset(
+    lines,
+    maxWidth,
+    firstLineMaxWidth,
+  );
   let current = "";
   for (const word of words) {
     // Extend the current line when the word still fits alongside it; otherwise
     // flush it and fall through to seat `word` on a fresh (empty) line.
     if (current !== "") {
       const candidate = `${current} ${word}`;
-      if (font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      if (font.widthOfTextAtSize(candidate, size) <= limit()) {
         current = candidate;
         continue;
       }
@@ -83,8 +122,11 @@ export function wrapWordsToLines(
     // `current` is empty here: seat `word` as the start of a new line. A word
     // that alone overflows is broken across lines when asked, else emitted whole
     // (the round-trip-safe overflow the résumé renderer relies on).
-    if (breakLongWords && font.widthOfTextAtSize(word, size) > maxWidth) {
-      const chunks = breakLongWord(word, font, size, maxWidth);
+    if (needsEmptyFirstLine(font.widthOfTextAtSize(word, size))) {
+      lines.push("");
+    }
+    if (breakLongWords && font.widthOfTextAtSize(word, size) > limit()) {
+      const chunks = breakLongWord(word, font, size, limit());
       lines.push(...chunks.slice(0, -1));
       current = chunks[chunks.length - 1] ?? "";
     } else {

@@ -593,7 +593,11 @@ describe("buildAtsResumeModel", () => {
       "Data Stores",
       "Backend",
     ]);
-    expect(skills.entries[0].headerLine).toBe("Data Stores: PostgreSQL · Redis");
+    // The label leads the line in bold, carried apart from the members so they
+    // keep atomic middot wrapping (#881); its trailing space is drawn.
+    expect(skills.entries[0].headerBoldLead).toBe("Data Stores: ");
+    expect(skills.entries[0].headerLine).toBe("PostgreSQL · Redis");
+    expect(skills.entries[1].headerBoldLead).toBe("Backend: ");
   });
 
   it("drops an empty category so the PDF renders no dangling 'Label:' (#476)", () => {
@@ -625,6 +629,9 @@ describe("buildAtsResumeModel", () => {
     expect(skills.entries[0].fields?.skillCategory).toBe("Data Stores");
     expect(skills.entries[1].fields?.skillCategory).toBeUndefined();
     expect(skills.entries[1].headerLine).toBe("Excel · PowerPoint");
+    // The remainder is a plain flat line — no bold lead to invent a label for
+    // skills the user never grouped (#881 AC).
+    expect(skills.entries[1].headerBoldLead).toBeUndefined();
     // The union across every entry equals the flat list — nothing lost or
     // duplicated.
     const exported = skills.entries.flatMap((e) => e.fields?.skills ?? []);
@@ -653,6 +660,7 @@ describe("buildAtsResumeModel", () => {
     const skills = model.sections.find((s) => s.heading === "Skills")!;
     expect(skills.entries).toHaveLength(1);
     expect(skills.entries[0].headerLine).toBe("React · TypeScript · Node.js");
+    expect(skills.entries[0].headerBoldLead).toBeUndefined();
     expect(skills.entries[0].fields?.skillCategory).toBeUndefined();
   });
 });
