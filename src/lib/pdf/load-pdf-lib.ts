@@ -12,13 +12,13 @@
  *
  * We load `PDFDocument`, `StandardFonts`, `rgb` — the pdf-lib core the
  * exporter always needs — plus `fontkit`, the custom-font engine pdf-lib
- * requires to embed a TrueType font (Poppins, #314) instead of relying solely
+ * requires to embed a TrueType font (Liberation Sans, #314) instead of relying solely
  * on the 14 built-in Helvetica-family fonts. `fontkit` ships no usable `.d.ts`
  * default-export shape (`export as namespace fontkit`), so it's typed
  * `unknown` here and cast at the one call site that hands it to
  * `doc.registerFontkit()` (render-ats-pdf.ts) — this keeps the untyped surface
  * to a single line rather than threading `any` through this module. Both
- * fontkit and the Poppins TTF bytes it embeds are dynamic-imported / fetched
+ * fontkit and the TTF bytes it embeds are dynamic-imported / fetched
  * lazily (see render-ats-pdf.ts), so the entry chunk does not grow.
  */
 

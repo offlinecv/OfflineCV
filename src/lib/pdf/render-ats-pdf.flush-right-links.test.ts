@@ -13,8 +13,8 @@ import { renderAtsResumePdf } from "./render-ats-pdf.ts";
 import type { AtsResumeModel } from "./ats-resume-model.ts";
 
 const PAGE_WIDTH = 612;
-const MARGIN = 54;
-const RIGHT_EDGE = PAGE_WIDTH - MARGIN; // 558
+const MARGIN = 36; // matches production's MARGIN (render-ats-pdf.ts), post-#878
+const RIGHT_EDGE = PAGE_WIDTH - MARGIN; // 576
 
 interface Item {
   str: string;

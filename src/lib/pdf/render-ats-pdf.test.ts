@@ -2,7 +2,12 @@
 // Copyright 2026 The offlinecv Authors
 
 import { describe, expect, it } from "vitest";
-import { renderAtsResumePdf, toWinAnsi, parseBoldRuns } from "./render-ats-pdf.ts";
+import {
+  renderAtsResumePdf,
+  toWinAnsi,
+  parseBoldRuns,
+  REFERENCE_BODY_PT,
+} from "./render-ats-pdf.ts";
 import {
   EMPHASIS_OPEN,
   EMPHASIS_CLOSE,
@@ -74,7 +79,9 @@ describe("renderAtsResumePdf", () => {
       contact: { name: "Jane Candidate", links: [] },
       sections: [{ heading: "Experience", entries: manyEntries }],
     };
-    const { bytes } = await renderAtsResumePdf(bigModel);
+    const { bytes } = await renderAtsResumePdf(bigModel, {
+      bodyPt: REFERENCE_BODY_PT,
+    });
     const pdfjs = await import("pdfjs-dist");
     const doc = await pdfjs.getDocument({
       data: bytes.slice(),
@@ -162,7 +169,8 @@ describe("renderAtsResumePdf", () => {
               headerLine: "Principal Engineer",
               subLine:
                 "Global Interdisciplinary Research and Development Consortium " +
-                "International Institute Limited · " +
+                "International Institute Limited for Advanced Cross-Sector " +
+                "Collaborative Studies and Applied Innovation · " +
                 "San Francisco Bay Area  2020 – 2024",
               bullets: [],
             },

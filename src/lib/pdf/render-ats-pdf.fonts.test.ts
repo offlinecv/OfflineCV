@@ -2,12 +2,12 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * render-ats-pdf.fonts.test.ts — Poppins font-embed behavior (#314).
+ * render-ats-pdf.fonts.test.ts — Body-font embed behavior (#314).
  *
  * Split from render-ats-pdf.test.ts because these tests need to control
- * `global.fetch` (the mechanism `loadPoppinsBytes()` uses to read the
- * bundled Poppins TTFs) and reset the module registry between cases — the
- * module-scoped `poppinsBytesPromise` cache means a rejected fetch would
+ * `global.fetch` (the mechanism `loadBodyFontBytes()` uses to read the
+ * bundled Liberation Sans TTFs) and reset the module registry between cases — the
+ * module-scoped `bodyFontBytesPromise` cache means a rejected fetch would
  * otherwise "stick" for the rest of the file. Each case stubs `fetch`, then
  * `vi.resetModules()` + a fresh dynamic `import()` so it starts from a clean
  * cache.
@@ -22,8 +22,8 @@ import type { AtsResumeModel } from "./ats-resume-model.ts";
 const FONTS_DIR = fileURLToPath(
   new URL("../../assets/fonts/", import.meta.url),
 );
-const REGULAR_BYTES = readFileSync(`${FONTS_DIR}Poppins-Regular.ttf`);
-const BOLD_BYTES = readFileSync(`${FONTS_DIR}Poppins-Bold.ttf`);
+const REGULAR_BYTES = readFileSync(`${FONTS_DIR}LiberationSans-Regular.ttf`);
+const BOLD_BYTES = readFileSync(`${FONTS_DIR}LiberationSans-Bold.ttf`);
 
 function toArrayBuffer(buf: Buffer): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
@@ -33,7 +33,7 @@ function toArrayBuffer(buf: Buffer): ArrayBuffer {
 function stubFetchSucceeds() {
   const fetchMock = vi.fn(async (input: string | URL) => {
     const url = String(input);
-    // Zero-egress guard (#314 AC): the URL loadPoppinsBytes() fetches must be
+    // Zero-egress guard (#314 AC): the URL loadBodyFontBytes() fetches must be
     // a local/bundled asset path, never an external host or font CDN.
     expect(url).not.toMatch(/^https?:\/\//);
     expect(url.toLowerCase()).not.toContain("fonts.gstatic.com");
@@ -108,22 +108,22 @@ const model = (text: string): AtsResumeModel => ({
   sections: [],
 });
 
-// Each case does a real fontkit Poppins-embed render (the failing glyph case
+// Each case does a real fontkit embed render (the failing glyph case
 // renders twice); slow under a coverage-instrumented full-suite `verify` run,
 // so scope a higher timeout to just this suite rather than bumping vitest's
 // global default (#360).
-describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
+describe("Body font embed (#314)", { timeout: 20000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.resetModules();
   });
 
-  it("embeds Poppins (a /FontFile2 TrueType program is present) when the local asset fetch succeeds", async () => {
+  it("embeds Liberation Sans (a /FontFile2 TrueType program is present) when the local asset fetch succeeds", async () => {
     const fetchMock = stubFetchSucceeds();
     vi.resetModules();
     const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-    const { bytes } = await renderAtsResumePdf(model("Poppins embed check"));
+    const { bytes } = await renderAtsResumePdf(model("Liberation Sans embed check"));
     expect(fetchMock).toHaveBeenCalled();
     await expect(hasEmbeddedFontFile2(bytes)).resolves.toBe(true);
   });
@@ -139,8 +139,8 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
     await expect(hasEmbeddedFontFile2(bytes)).resolves.toBe(false);
   });
 
-  it("renders a Latin-Extended glyph (ł) under embedded Poppins that the Helvetica fallback degrades to '?'", async () => {
-    // Embedded path: Poppins' cmap covers "ł" (verified via fontkit).
+  it("renders a Latin-Extended glyph (ł) under the embedded font that the Helvetica fallback degrades to '?'", async () => {
+    // Embedded path: Liberation Sans' cmap covers "ł" (verified via fontkit).
     stubFetchSucceeds();
     vi.resetModules();
     const { renderAtsResumePdf: renderEmbedded } = await import(
@@ -172,10 +172,11 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
   // A NUL is strictly worse than the WinAnsi path's "?": it is invisible on
   // screen, and it rides into every downstream consumer of the re-parsed field.
   describe("a glyph the embedded font lacks (#664, embedded half)", () => {
-    // Verified against the vendored Poppins-Regular.ttf via fontkit's
-    // `hasGlyphForCodePoint`: Poppins covers "ś"/"ł" but NOT these three.
+    // Verified against the vendored LiberationSans-Regular.ttf via fontkit's
+    // `hasGlyphForCodePoint`: Liberation Sans covers "ś"/"ł" — and, unlike the
+    // Poppins it replaced, "→" as well (see the covered-glyph case below) — but
+    // NOT these two.
     const UNCOVERED = [
-      { ch: "→", name: "rightwards arrow", want: "->" },
       { ch: "★", name: "black star", want: "?" },
       { ch: "✓", name: "check mark", want: "?" },
     ];
@@ -199,29 +200,51 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       });
     }
 
-    it("still embeds Poppins — the fix sanitizes, it does not fall back to Helvetica", async () => {
-      // Guards the conservative fallback in `makePoppinsSanitizer`: if the
+    // The arrow is the case that motivated #664 — a real role title read back
+    // out of a download with a NUL where "→" had been. Under Poppins the best
+    // available outcome was the "->" transliteration; Liberation Sans has the
+    // glyph, so the character now survives the round-trip as itself.
+    //
+    // Asserted as its own case rather than folded into UNCOVERED because the
+    // two make opposite claims, and this one is the reason the font changed.
+    it("draws → intact — Liberation Sans covers it, so no transliteration", async () => {
+      stubFetchSucceeds();
+      vi.resetModules();
+      const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
+
+      const { bytes } = await renderAtsResumePdf(
+        model("Software Engineer Intern → Junior Engineer"),
+      );
+      const text = await extractPdfText(bytes);
+
+      expect(text).not.toContain("\0");
+      expect(text).toContain("→");
+      expect(text).not.toContain("->");
+    });
+
+    it("still embeds Liberation Sans — the fix sanitizes, it does not fall back to Helvetica", async () => {
+      // Guards the conservative fallback in `makeEmbeddedFontSanitizer`: if the
       // coverage probe silently failed we would sanitize with `toWinAnsi`, the
-      // "→" case above would STILL pass, and every Latin-Extended glyph would
+      // "★" case above would STILL pass, and every Latin-Extended glyph would
       // regress unnoticed. Pin that the embedded font is genuinely in use and
       // that both properties hold at once.
       stubFetchSucceeds();
       vi.resetModules();
       const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
 
-      const { bytes } = await renderAtsResumePdf(model("Łukasz → Wrocław"));
+      const { bytes } = await renderAtsResumePdf(model("Łukasz ★ Wrocław"));
       const text = await extractPdfText(bytes);
 
       await expect(hasEmbeddedFontFile2(bytes)).resolves.toBe(true);
       expect(text).not.toContain("\0");
-      expect(text).toContain("->");
+      expect(text).toContain("?");
       // The whole point of the embedded path, still true after the fix.
       expect(text).toContain("ł");
     });
   });
 
   // A NUL already IN the input is a distinct class from an uncovered glyph, and
-  // the one the coverage probe cannot be trusted for: Poppins reports a real
+  // the one the coverage probe cannot be trusted for: the font reports a real
   // glyph for U+0000 (`hasGlyphForCodePoint(0) === true` in both vendored
   // faces), so a probe-first sanitizer emits it verbatim.
   //
@@ -230,7 +253,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
   // every later export. Both font paths must eat it.
   describe("a NUL already in the input (#664, the probe's blind spot)", () => {
     for (const { label, stub } of [
-      { label: "embedded Poppins", stub: stubFetchSucceeds },
+      { label: "embedded Liberation Sans", stub: stubFetchSucceeds },
       { label: "Helvetica fallback", stub: stubFetchFails },
     ]) {
       it(`drops a NUL under ${label}`, async () => {
@@ -254,7 +277,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
       // `fonts.bold` — a different TTF from `fonts.regular`. Both faces are
       // probed, so this holds independently of the two files' coverage
       // matching; without that, a Regular-only probe would be right by
-      // accident and a Poppins bump could silently reinstate the NUL here.
+      // accident and a font bump could silently reinstate the NUL here.
       stubFetchSucceeds();
       vi.resetModules();
       const { renderAtsResumePdf } = await import("./render-ats-pdf.ts");
@@ -301,8 +324,8 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
     });
 
     it("re-fetches after a failure instead of replaying the cached rejection", async () => {
-      // The defect: `poppinsBytesPromise` is memoized and the guard is
-      // `!poppinsBytesPromise`, so a REJECTED promise used to stay cached for
+      // The defect: `bodyFontBytesPromise` is memoized and the guard is
+      // `!bodyFontBytesPromise`, so a REJECTED promise used to stay cached for
       // the life of the page. Every later download replayed it without issuing
       // a request, which silently made "check your connection and try again"
       // impossible to satisfy.
@@ -350,7 +373,7 @@ describe("Poppins font embed (#314)", { timeout: 20000 }, () => {
     });
 
     it("reports nothing when the embedded font loads, even with Latin-Extended text", async () => {
-      // Poppins covers ś/ł, so there is no loss to refuse over — the whole
+      // Liberation Sans covers ś/ł, so there is no loss to refuse over — the whole
       // reason this issue's original framing stopped being accurate.
       stubFetchSucceeds();
       vi.resetModules();

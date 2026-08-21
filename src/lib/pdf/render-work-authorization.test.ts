@@ -20,8 +20,8 @@
  * per-test default when the suite runs under load.
  */
 
-import { describe, expect, it, beforeAll } from "vitest";
-import { renderAtsResumePdf, findExportGlyphLosses } from "./render-ats-pdf.ts";
+import { describe, expect, it, beforeAll, vi } from "vitest";
+import { renderAtsResumePdf } from "./render-ats-pdf.ts";
 import {
   extractPdfDrawnLines,
   type PdfDrawnLine,
@@ -72,6 +72,42 @@ async function linkAnnotationUrls(bytes: Uint8Array): Promise<string[]> {
   return urls;
 }
 
+/**
+ * The `where` labels {@link findExportGlyphLosses} reports for a work-authorization
+ * statement carrying a non-WinAnsi code point, measured ON THE FALLBACK PATH.
+ *
+ * The audit answers "what would the Helvetica/WinAnsi fallback cost this user",
+ * and returns an empty list whenever the embedded font loads — so it can only be
+ * exercised with the font load FAILING. This used to come for free: Node could
+ * not resolve the renderer's Vite `?url` font specifier, so every test run took
+ * the fallback by accident. The suite now serves the real Liberation Sans bytes (see
+ * `src/test-setup.ts`), which is what makes the layout assertions above true of
+ * the actual download — and which means this audit has to ask for the fallback
+ * explicitly rather than inherit it.
+ *
+ * A fresh module registry is required, not just a failing `fetch`: `loadBodyFontBytes`
+ * memoizes SUCCESS for the life of the module, and the renders above have already
+ * populated that memo, so a stub installed afterwards would never be consulted.
+ */
+async function workAuthGlyphLossSites(): Promise<string[]> {
+  vi.resetModules();
+  vi.stubGlobal("fetch", async () => {
+    throw new Error("network unavailable (simulated)");
+  });
+  try {
+    const { findExportGlyphLosses: audit } = await import("./render-ats-pdf.ts");
+    const losses = await audit({
+      ...MODEL,
+      // `✓` (U+2713) has no WinAnsi code point; an em dash does, which is why
+      // the sample is not simply punctuation-heavy.
+      contact: { ...MODEL.contact, workAuthorization: "US Citizen ✓" },
+    });
+    return losses.map((l) => l.where);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+}
+
 describe("renderAtsResumePdf — work authorization on the contact line (#792)", () => {
   let stated: PdfDrawnLine[];
   let silent: PdfDrawnLine[];
@@ -83,14 +119,7 @@ describe("renderAtsResumePdf — work authorization on the contact line (#792)",
     stated = await extractPdfDrawnLines(bytes);
     silent = await extractPdfDrawnLines((await renderAtsResumePdf(SILENT_MODEL)).bytes);
     urls = await linkAnnotationUrls(bytes);
-    glyphLossSites = (
-      await findExportGlyphLosses({
-        ...MODEL,
-        // `✓` (U+2713) has no WinAnsi code point; an em dash does, which is why
-        // the sample below is not simply punctuation-heavy.
-        contact: { ...MODEL.contact, workAuthorization: "US Citizen ✓" },
-      })
-    ).map((l) => l.where);
+    glyphLossSites = await workAuthGlyphLossSites();
   }, 60_000);
 
   const contactLine = (): string => {
@@ -124,9 +153,8 @@ describe("renderAtsResumePdf — work authorization on the contact line (#792)",
 
   it("is covered by the export glyph-loss audit", () => {
     // A statement carrying a code point the WinAnsi fallback cannot draw must be
-    // REPORTED, not silently rewritten to `?`. `findExportGlyphLosses` returns
-    // an empty list when the embedded font loads; under Node it does not, which
-    // is the fallback path this audit exists to measure.
+    // REPORTED, not silently rewritten to `?`. Measured with the font load forced
+    // to fail — see `workAuthGlyphLossSites` for why that has to be explicit.
     expect(glyphLossSites).toContain("Work authorization");
   });
 });

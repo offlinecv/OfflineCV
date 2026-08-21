@@ -29,7 +29,7 @@
  * prints or persists a résumé field VALUE.
  *
  * Runs under vite-node (`runCascade` needs no pdfjs `?url` setup here). The
- * round-trip hop's Poppins font fetch fails under vite-node and falls back to
+ * round-trip hop's body-font fetch fails under vite-node and falls back to
  * Helvetica with a stderr warning — expected and harmless; the render succeeds.
  *
  * Usage:

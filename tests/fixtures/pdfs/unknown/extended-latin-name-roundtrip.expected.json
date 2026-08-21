@@ -117,7 +117,7 @@
     "experienceEntriesFewerThanDateRangeLines": false,
     "achievementsParsedEmpty": true,
     "achievementsEntriesFewerThanHeaderLines": false,
-    "fullNameChangedAcrossRoundtrip": true,
+    "fullNameChangedAcrossRoundtrip": false,
     "emailChangedAcrossRoundtrip": false,
     "phoneChangedAcrossRoundtrip": false,
     "locationChangedAcrossRoundtrip": false,

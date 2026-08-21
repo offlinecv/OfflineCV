@@ -16,7 +16,7 @@
  * The mechanism is the #295 `toWinAnsi()` render sanitizer, whose lossy
  * degradation #326 recorded as an accepted by-design tradeoff (degrade a glyph,
  * never crash the export). `toWinAnsi()` runs on the STANDARD-FONT path — i.e.
- * whenever the Poppins embed does not happen: always under Node (the font is a
+ * whenever the Liberation Sans embed does not happen: always under Node (the font is a
  * bundler `?url` asset there is no server to fetch), and in the browser whenever
  * that fetch fails. The two `experience` baselines #326 records
  * (`google-docs-skia-proxy-classic`, `weasyprint-cairo-classic`) are the same
@@ -35,8 +35,8 @@
  * left to round-trip — a separate, real defect, filed nowhere yet.
  *
  * The SOURCE pdf must embed a font that actually has the glyph (pdf-lib's
- * `StandardFonts` throw on it), so this generator embeds the repo's own Poppins
- * via fontkit — the same TTF `render-ats-pdf.ts` tries to embed.
+ * `StandardFonts` throw on it), so this generator embeds the repo's own
+ * Liberation Sans via fontkit — the same TTF `render-ats-pdf.ts` embeds.
  *
  * Everything is drawn as a SINGLE column so `detectColumnBoundaries` finds no
  * gutter (`triggers` == `[]`).
@@ -73,14 +73,14 @@ const BLACK = rgb(0, 0, 0);
 const doc = await PDFDocument.create();
 doc.registerFontkit(fontkit);
 const page = doc.addPage([612, 792]);
-// `subset: true` keeps the committed fixture small — the full Poppins pair is
-// ~300 kB, and this résumé touches under a hundred glyphs.
+// `subset: true` keeps the committed fixture small — the full Liberation Sans
+// pair is well over 100 kB, and this résumé touches under a hundred glyphs.
 const font = await doc.embedFont(
-  readFileSync(join(FONT_DIR, "Poppins-Regular.ttf")),
+  readFileSync(join(FONT_DIR, "LiberationSans-Regular.ttf")),
   { subset: true },
 );
 const bold = await doc.embedFont(
-  readFileSync(join(FONT_DIR, "Poppins-Bold.ttf")),
+  readFileSync(join(FONT_DIR, "LiberationSans-Bold.ttf")),
   { subset: true },
 );
 

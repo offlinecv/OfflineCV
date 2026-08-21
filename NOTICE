@@ -16,7 +16,9 @@ limitations under the License.
 Third-party fonts
 -----------------
 
-This product includes the Poppins typeface (src/assets/fonts/), embedded in
-downloaded resume PDFs. Copyright 2020 The Poppins Project Authors
-(https://github.com/itfoundry/Poppins), licensed under the SIL Open Font
-License, Version 1.1. Full license text: src/assets/fonts/Poppins-OFL.txt.
+This product includes the Liberation Sans typeface (src/assets/fonts/),
+embedded in downloaded resume PDFs. Digitized data copyright 2010 Google
+Corporation with Reserved Font Arimo, Tinos and Cousine; copyright 2012 Red
+Hat, Inc. with Reserved Font Name Liberation, licensed under the SIL Open
+Font License, Version 1.1. Full license text:
+src/assets/fonts/LiberationSans-OFL.txt.

@@ -61,7 +61,7 @@ describe("nulPositions", () => {
 
 describe("isBinaryPath", () => {
   it("skips the font and PDF assets that legitimately carry NULs", () => {
-    expect(isBinaryPath("src/assets/fonts/Poppins-Bold.ttf")).toBe(true);
+    expect(isBinaryPath("src/assets/fonts/LiberationSans-Bold.ttf")).toBe(true);
     expect(isBinaryPath("tests/fixtures/pdfs/latex/awesome-cv-cv.pdf")).toBe(true);
   });
 

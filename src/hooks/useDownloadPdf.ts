@@ -11,7 +11,7 @@
  * temporary object URL.
  *
  * Zero-egress holds, but not because nothing is fetched: the renderer DOES issue
- * a `fetch` for the vendored Poppins TTFs, and this docblock previously claimed
+ * a `fetch` for the vendored Liberation Sans TTFs, and this docblock previously claimed
  * "no network request is made (no font fetch, no upload)", which was false. The
  * fetch targets the app's own bundled-asset origin — never a font CDN — so no
  * résumé bytes leave the browser, which is the actual guarantee. Say custody,
@@ -22,7 +22,7 @@
  * after the bytes have reached the user: the refusal below is the one thing that
  * stops a download, and reporting must never grow into a second one.
  *
- * This hook owns the refusal for #664. When the Poppins fetch fails, the
+ * This hook owns the refusal for #664. When the font fetch fails, the
  * renderer falls back to Helvetica, whose WinAnsi codec replaces anything
  * outside it with `?` — including a candidate's own name. Rather than hand back
  * a PDF reading `ANNA WI?NIEWSKA`, the hook probes first and refuses, because

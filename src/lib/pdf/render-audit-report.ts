@@ -17,7 +17,7 @@
  * is drawn ONLY when `input.includeIdentity` is true AND an `identity` block is
  * present. Default-off upstream, so the default artifact is anonymous.
  *
- * This uses pdf-lib's built-in Helvetica (no Poppins fetch): the report is a
+ * This uses pdf-lib's built-in Helvetica (no embedded-font fetch): the report is a
  * plain document, not the brand-faithful résumé, so the 14 standard fonts are
  * enough and it keeps the module dependency-light. Every string is run through
  * `toWinAnsi()` because StandardFonts encode WinAnsi only (#295). The `rgb()`
