@@ -207,6 +207,27 @@ const FIT_LADDER = [10, 9.5, 9, 8.5, 8] as const;
  *  detail and starts reading as a mistake. */
 const CONTACT_MIN_SIZE_RATIO = 0.8;
 
+/** How far below the baseline {@link Layout.drawLineWithSpans} draws a link
+ *  span's underline, as a fraction of the draw size. A descender (`g`/`y`/`p`/`j`)
+ *  in this font reaches -0.2075em, so the offset has to clear that, not just
+ *  read as "below the text" — 0.12 (this constant's original value) put the
+ *  stroke at -0.0975…-0.1425em, squarely inside the descender and striking
+ *  through the `g` that starts every `github.com/…` link. 0.24 puts the
+ *  stroke's near edge at -0.2175em, past the descender with margin, and still
+ *  lands well inside {@link Layout.t}'s `gapAfterContact` (a flat 7pt) before
+ *  the next line starts, so it doesn't collide with anything below it either. */
+const CONTACT_LINK_UNDERLINE_OFFSET_RATIO = 0.24;
+
+/** The underline's stroke width as a fraction of the draw size (#880) —
+ *  visible without reading as a heavier weight than the muted contact text
+ *  beside it. */
+const CONTACT_LINK_UNDERLINE_THICKNESS_RATIO = 0.045;
+
+/** Floor under {@link CONTACT_LINK_UNDERLINE_THICKNESS_RATIO} so the stroke
+ *  stays visible at the contact line's smallest fit-ladder rung, where the
+ *  ratio alone would round to sub-pixel. */
+const CONTACT_LINK_UNDERLINE_MIN_THICKNESS = 0.5;
+
 /**
  * The shave {@link Layout.fitToOneLine} applies to the size it computes.
  *
@@ -950,6 +971,10 @@ class Layout {
     readonly t: TypeScale,
     private black: RGB,
     private gray: RGB,
+    // The contact-line hyperlink affordance colour (#880) — distinct from
+    // `muted` so a link span reads as clickable even before the underline
+    // {@link drawLineWithSpans} draws beneath it registers.
+    private accent: RGB,
     // Literal-string constructor from pdf-lib, used to build Link-annotation
     // `/URI` values (#425 — see `registerLink`).
     private pdfString: PdfLibParts["PDFString"],
@@ -1393,13 +1418,17 @@ class Layout {
         });
       }
       if (lines[i]) {
-        this.page.drawText(lines[i], {
-          x: lineX,
-          y: topY - size,
-          size,
-          font,
-          color,
-        });
+        if (i === 0 && singleLine && opts.linkSpans?.length) {
+          this.drawLineWithSpans(lines[i], lineX, topY, size, font, color, opts.linkSpans);
+        } else {
+          this.page.drawText(lines[i], {
+            x: lineX,
+            y: topY - size,
+            size,
+            font,
+            color,
+          });
+        }
       }
       if (i === 0) {
         this.decorateFirstLine(opts, {
@@ -1411,7 +1440,6 @@ class Layout {
           color,
           rValue,
           rSize,
-          singleLine,
         });
       }
       this.advance(lineHeight);
@@ -1419,14 +1447,18 @@ class Layout {
   }
 
   /**
-   * Draw the first line's optional decorations: the flush-right date tail, a
-   * whole-line link annotation, and per-substring link annotations (#425).
+   * Draw the first line's optional decorations: the flush-right date tail and
+   * a whole-line link annotation (#425). Per-substring link spans (#425
+   * contact-line slugs, #880 their underline+accent affordance) are handled
+   * by {@link drawLineWithSpans} at draw time instead, since they change which
+   * colour each character is drawn in — this method only overlays annotations
+   * and text on top of an already-drawn line.
    *
    * Split out of {@link drawText} purely to keep that method's line loop
-   * readable — all three apply only to `i === 0`, none touches the cursor, and
-   * none participates in wrapping or pagination. Extracting them therefore
-   * cannot drift measurement from drawing (the #629 invariant): the geometry
-   * they consume is passed in, already resolved by `resolveDrawLines`.
+   * readable — neither decoration touches the cursor or participates in
+   * wrapping or pagination. Extracting them therefore cannot drift measurement
+   * from drawing (the #629 invariant): the geometry they consume is passed in,
+   * already resolved by `resolveDrawLines`.
    */
   private decorateFirstLine(
     opts: DrawTextOpts,
@@ -1439,7 +1471,6 @@ class Layout {
       color: RGB;
       rValue: string;
       rSize: number;
-      singleLine: boolean;
     },
   ) {
     const { line, lineX, topY, font, size, color, rValue, rSize } = geom;
@@ -1461,26 +1492,81 @@ class Layout {
       const w = font.widthOfTextAtSize(line, size);
       this.registerLink(lineX, topY - size, lineX + w, topY, opts.linkUrl);
     }
-    // Per-substring link annotations (#425 contact-line slugs). Measure against
-    // the DRAWN first line (whitespace already collapsed by wrap); skip if the
-    // text wrapped so offsets stay accurate. Drawn glyphs are untouched either
-    // way, so the text round-trip is unaffected.
-    //
-    // Search from a running offset that advances past each matched span, so a
-    // display that is a SUBSTRING of an earlier part (e.g. website slug
-    // `example.com` inside email `jane@example.com`, and the email is drawn
-    // first) can't match inside that earlier part and land the rect on the wrong
-    // text. The spans are supplied in draw order, so a monotonic offset maps each
-    // to its own occurrence.
-    if (!opts.linkSpans || !geom.singleLine) return;
-    let searchFrom = 0;
-    for (const span of opts.linkSpans) {
-      const idx = line.indexOf(span.display, searchFrom);
+  }
+
+  /**
+   * Draw line 0 in place of the plain single-colour `page.drawText` call when
+   * it carries {@link DrawTextOpts.linkSpans} (#880 — the contact line's
+   * clickable slugs). Each matched span draws in `this.accent` with an
+   * underline beneath it and its link annotation registered; everything else
+   * draws in `color` unchanged.
+   *
+   * Segments are drawn end-to-end from `line`, each character exactly once —
+   * unlike drawing the whole line in `color` and then overlaying an
+   * accent-coloured redraw of the span on top, which would add a SECOND
+   * text-showing operator over the same glyphs. `pdftotext`/pdfjs extraction
+   * walks operators in stream order with no notion of overlap, so that
+   * approach would double the span's text in the extracted string and break
+   * the parse→export→re-parse round-trip this file is pinned against
+   * (`corpus-roundtrip.test.ts`). Drawing disjoint segments instead keeps the
+   * text layer byte-identical to the single-color call it replaces.
+   *
+   * The underline's x-range and the link annotation's `Rect` both come from
+   * the same `font.widthOfTextAtSize` measurement of `line.slice(0, idx)`, so
+   * neither can drift from the other or from the glyphs they sit under.
+   *
+   * Mirrors the span search {@link decorateFirstLine} used before this method
+   * existed: a running offset so a display that recurs earlier in the line
+   * (e.g. a website slug inside an email) matches its own occurrence, not an
+   * earlier one.
+   */
+  private drawLineWithSpans(
+    line: string,
+    lineX: number,
+    topY: number,
+    size: number,
+    font: PdfFont,
+    color: RGB,
+    spans: Array<{ display: string; href: string }>,
+  ) {
+    const baseY = topY - size;
+    const widthTo = (end: number) => font.widthOfTextAtSize(line.slice(0, end), size);
+    let cursor = 0;
+    for (const span of spans) {
+      const idx = line.indexOf(span.display, cursor);
       if (idx < 0) continue;
-      const x0 = lineX + font.widthOfTextAtSize(line.slice(0, idx), size);
+      if (idx > cursor) {
+        this.page.drawText(line.slice(cursor, idx), {
+          x: lineX + widthTo(cursor),
+          y: baseY,
+          size,
+          font,
+          color,
+        });
+      }
+      const x0 = lineX + widthTo(idx);
       const x1 = x0 + font.widthOfTextAtSize(span.display, size);
-      this.registerLink(x0, topY - size, x1, topY, span.href);
-      searchFrom = idx + span.display.length;
+      this.page.drawText(span.display, { x: x0, y: baseY, size, font, color: this.accent });
+      this.page.drawLine({
+        start: { x: x0, y: baseY - size * CONTACT_LINK_UNDERLINE_OFFSET_RATIO },
+        end: { x: x1, y: baseY - size * CONTACT_LINK_UNDERLINE_OFFSET_RATIO },
+        thickness: Math.max(
+          CONTACT_LINK_UNDERLINE_MIN_THICKNESS,
+          size * CONTACT_LINK_UNDERLINE_THICKNESS_RATIO,
+        ),
+        color: this.accent,
+      });
+      this.registerLink(x0, baseY, x1, topY, span.href);
+      cursor = idx + span.display.length;
+    }
+    if (cursor < line.length) {
+      this.page.drawText(line.slice(cursor), {
+        x: lineX + widthTo(cursor),
+        y: baseY,
+        size,
+        font,
+        color,
+      });
     }
   }
 
@@ -1930,6 +2016,10 @@ async function renderAtsResumePdfAtSize(
   const black = rgb(0.1, 0.1, 0.1);
   const gray = rgb(0.55, 0.55, 0.55);
   const muted = rgb(0.35, 0.35, 0.35);
+  // Contact-line link affordance (#880) — the design system's
+  // `--color-accent-primary` (`#1a56db`), the same blue the web app already
+  // uses for a clickable/interactive accent, translated to pdf-lib's 0-1 RGB.
+  const accent = rgb(0.102, 0.337, 0.859);
 
   const layout = new Layout(
     doc,
@@ -1937,6 +2027,7 @@ async function renderAtsResumePdfAtSize(
     makeTypeScale(bodyPt),
     black,
     gray,
+    accent,
     parts.PDFString,
     sanitize,
   );
