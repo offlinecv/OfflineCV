@@ -309,32 +309,57 @@ passed yet:
 
 This is what makes `/pr-ready 892` after this morning's `/pr-ready
 879,886,887,888,889` land as one line added under the existing message instead
-of a second unrelated `:mag: Review requested` block minutes later — reviewers
-already looking at the thread see the addition without a second notification
-to parse. A NEW PR never gets silently dropped into an already-*expired*
-ping's thread, though — that reads as still-open work under a message everyone
-has already mentally closed, so it starts fresh instead.
+of a second unrelated `:mag: Review requested` block minutes later. **The
+benefit is a quieter channel, not a quieter notification** — the append still
+sets `reply_broadcast: true` and still @-mentions reviewers (below), so it
+notifies exactly as loudly as a fresh post would. What it avoids is the
+channel accumulating a second standalone block for the same kind of ask; a
+reviewer scrolling the channel sees one thread growing, not two unrelated
+pings minutes apart. A NEW PR never gets silently dropped into an
+already-*expired* ping's thread, though — that reads as still-open work
+under a message everyone has already mentally closed, so it starts fresh
+instead.
 
-**Appending only changes *where* this run's message lands, not what it is.**
-Whether the NEW subset gets appended as a thread reply or posted fresh at the
-top level, it is still exactly **one ask** for those PRs — one message, one
-`ts`, one deadline, one reminder budget — identical to today's "post the new
-ping" path in every way except its placement in the channel. So `PING_TS` for
-the rest of this run (Phases 3–6) is simply that message's `ts`: the reply's,
-if it appended; the fresh post's, otherwise. Nothing downstream needs to know
-which happened.
+**Appending changes where this run's message lands, and that split has to be
+tracked as two timestamps, not one.** Whether the NEW subset gets appended as
+a thread reply or posted fresh at the top level, it is still exactly **one
+ask** for those PRs — one deadline, one reminder budget — identical to
+today's "post the new ping" path in every way except its placement in the
+channel. `PING_TS` (deadline/reminder arithmetic, `PING_ISO`, and the per-PR
+GitHub inputs 3–5 later in the ack predicate) is always *this ask's own*
+`ts`: the reply's, if it appended; the fresh post's, otherwise.
 
-The only place a second timestamp can enter is a **mixed** run — some
+But the ack predicate's **chat** reads (inputs 1–2: a reaction, a thread
+reply) cannot key off `PING_TS` when this ask is an append — reviewers react
+and reply to the message they can see, and the append template's own copy
+says *"same 👍"*, pointing at the **parent**, not at the reply that was just
+posted under it. So a second value, `PARENT_TS`, is recorded alongside
+`PING_TS`:
+
+| Case | `PING_TS` | `PARENT_TS` |
+|---|---|---|
+| Fresh post | the post's own `ts` | the same value — there is no parent to distinguish it from |
+| Append | the reply's own `ts` | the live prior ping's `ts` — the message reactions and replies actually land on |
+
+Inputs 1–2 (below) always read against `PARENT_TS`; `PING_TS` never appears
+in the chat half of the ack predicate again. In the fresh-post case the two
+are equal, so nothing about that path changes — this split is only live on
+the append path.
+
+The only other place a second timestamp can enter is a **mixed** run — some
 requested PRs adopted from an *older*, unrelated ping, the rest NEW. The
-adopted subset keeps using the `PING_ISO` it was adopted with (captured when
-this skill originally pinged them), never this run's own `PING_TS` — an old
-PR's ack predicate must not suddenly require activity *after* today's append
-just because today's append happens to share a report. Phase 6 evaluates each
-PR against its own recorded ping, exactly as the per-PR table there already
-implies; this just makes explicit that "recorded ping" isn't always this
-run's. The common case — this run's actual motivating example — is simpler
-than the general one: a single NEW PR, appended onto one live prior ping nobody
-in this run adopted from, giving one `PING_TS` and nothing to reconcile.
+adopted subset keeps using the `PING_ISO`, `PING_TS`, and `PARENT_TS` it was
+adopted with (captured when this skill originally pinged them — a ping that
+was itself either a fresh post or an append has its own `PARENT_TS` by the
+same table above), never this run's own values — an old PR's ack predicate
+must not suddenly require activity *after* today's append just because
+today's append happens to share a report. Phase 6 evaluates each PR against
+its own recorded ping, exactly as the per-PR table there already implies;
+this just makes explicit that "recorded ping" carries a `PARENT_TS` too, and
+isn't always this run's. The common case — this run's actual motivating
+example — is simpler than the general one: a single NEW PR, appended onto one
+live prior ping nobody in this run adopted from, giving one `PING_TS`, one
+`PARENT_TS`, and nothing to reconcile.
 
 Compare by **PR number extracted from the URLs in the message**, not by
 substring — `…/pull/57` is a prefix of `…/pull/572`, and a bare `#605` in prose
@@ -478,10 +503,14 @@ same-session re-run, not because anyone needs to approve it first.
 > `slack_send_message` with `channel_id` = the configured channel,
 > `thread_ts` = the live prior ping's `ts`, `reply_broadcast: true` (so
 > reviewers see it in the channel, not only inside the thread), `message` =
-> the append text above. Either way, record the returned message `ts` — every
-> later phase keys off it, and for an append this is a **new, distinct** `ts`
-> from the parent's — the append is its own ask (own wait, own reminder, own
-> deadline), merely posted as a reply for placement.
+> the append text above. Either way, record the returned message `ts` as
+> `PING_TS` — deadline/reminder arithmetic and `PING_ISO` key off it, and for
+> an append this is a **new, distinct** `ts` from the parent's — the append
+> is its own ask (own wait, own reminder, own deadline), merely posted as a
+> reply for placement. **For an append, also keep the live prior ping's `ts`
+> you posted onto** as `PARENT_TS` — the ack predicate's chat reads key off
+> this one, not `PING_TS` (see the timestamp table above). For a fresh post,
+> `PARENT_TS = PING_TS`.
 
 **Convert the ping `ts` to a UTC ISO timestamp here, once.** Do this for the
 `ts` you just posted (fresh or appended) *and* for one adopted from an existing
@@ -599,11 +628,14 @@ this branch is all of them; it never re-lists a PR that has activity, even
 though the run reached here with nothing acked overall.
 
 > **Chat seam.** Post exactly one reminder: `slack_send_message` with
-> `thread_ts` = **this run's own** `ts` (the fresh post or append from Phase 2
-> — never the parent it was appended to, if it appended) and
-> `reply_broadcast: true` (so it lands in the channel too, not only the
-> thread). Do this at most once per run — the final check in Phase 6 must
-> **not** post again.
+> `thread_ts` = `PING_TS` (this run's own `ts` — the fresh post or append from
+> Phase 2) and `reply_broadcast: true` (so it lands in the channel too, not
+> only the thread). Passing `PARENT_TS` instead would land in the same
+> visible thread either way — Slack resolves any `ts` inside a thread to its
+> root — so this is a placement no-op either way, not a correctness choice;
+> `PING_TS` is used simply because it's the value already in hand from Phase
+> 2. Do this at most once per run — the final check in Phase 6 must **not**
+> post again.
 
 This phase checks and reminds; it does not wait. Go to Phase 5.
 
@@ -754,21 +786,56 @@ three". Phases 4 and 6 consume the scopes differently: the reminder needs the
 union (has *anything* been acked?), the report needs them apart (which PR is still
 unread, and who is already busy elsewhere?).
 
-1. **A reaction on the ping message**, from that reviewer's `chat_id`, whose
-   emoji is in the config's `ack_reactions` allowlist. → **ACKED**
-   > **Chat seam.** `slack_get_reactions` on the ping's `channel_id` +
-   > `message_ts`; check the `users` list under each allowlisted emoji for the
-   > reviewer's `chat_id`. A reaction can only exist on a message that already
-   > posted, so it is inherently after the ping — no separate timestamp check
-   > needed. Caveat: each emoji's `users` list is truncated at 50, so on a
-   > heavily-reacted message a reviewer's ack can fall outside it — treat a
-   > miss there as inconclusive, not as "not acked", and let inputs 2–5
-   > decide.
-2. **Any threaded reply on the ping**, from that reviewer's `chat_id`.
-   → **ACKED**
-   > **Chat seam.** `slack_read_thread` on the ping's `channel_id` +
-   > `message_ts`; any reply whose `user` is the reviewer's `chat_id` counts.
-   > Same reasoning — a thread reply cannot predate its parent.
+**Both inputs below read against `PARENT_TS`, never `PING_TS`.** On a fresh
+post the two are the same value, so this is invisible. On an append,
+`PING_TS` is the reply nobody but Slack's thread view shows on its own — the
+reviewer reacts and replies to the **parent**, per the append template's own
+"same 👍" copy — so reading `PING_TS` there finds nothing and reports every
+real ack as SILENT. This is not hypothetical: it shipped in #893 and a
+post-merge review caught it live.
+
+1. **A reaction on the parent message**, from that reviewer's `chat_id`,
+   whose emoji is in the config's `ack_reactions` allowlist. → **ACKED**
+   > **Chat seam.** `slack_get_reactions` on `PARENT_TS`'s `channel_id` +
+   > `message_ts`. Check the `users` list under each allowlisted emoji for
+   > the reviewer's `chat_id`.
+   >
+   > **Known gap, not fixable with this API: no per-reaction timestamp.**
+   > Slack's reactions endpoint returns who reacted, never when. On a fresh
+   > post that's fine — a reaction can only exist on a message that already
+   > posted, so it's inherently after the ping. On an append, it is not fine:
+   > a reviewer who reacted to the parent for an *earlier* ask, and never
+   > touches this one, reads identically to a reviewer who just reacted for
+   > *this* PR — both are simply "present in the `users` list". There is no
+   > field to filter on. Treat this as an accepted false-ACK risk specific to
+   > the append path, not a bug to chase further: it trades a rare
+   > over-credit for reading the message reviewers can actually see, which is
+   > strictly better than the alternative this replaced (reading the wrong
+   > message and reporting **every** real ack as SILENT). If this risk turns
+   > out to matter in practice, the fix is to stop accepting input 1 on the
+   > append path and require input 2 (a fresh, freshly-timestamped reply)
+   > instead — not to keep guessing at reaction recency Slack doesn't expose.
+   > Caveat, unchanged from before: each emoji's `users` list is truncated at
+   > 50, so on a heavily-reacted message a reviewer's ack can fall outside it
+   > — treat a miss there as inconclusive, not as "not acked", and let inputs
+   > 2–5 decide.
+2. **A threaded reply on the parent, posted after this ask's own `PING_TS`**,
+   from that reviewer's `chat_id`. → **ACKED**
+   > **Chat seam.** `slack_read_thread` on `PARENT_TS`'s `channel_id` +
+   > `message_ts`; keep replies whose `user` is the reviewer's `chat_id` **and**
+   > whose own `ts` is greater than this ask's `PING_TS`.
+   >
+   > **The time filter is required on the append path and is why `PARENT_TS`
+   > and `PING_TS` are both kept.** `slack_read_thread` on a parent returns
+   > the *whole* thread — every reply since the parent was first posted, not
+   > just the ones after this ask's append. Unlike input 1, a reply's `ts` is
+   > a real, orderable value, so "a thread reply cannot predate its parent"
+   > (true, but the wrong parent to reason about) is replaced by an explicit
+   > `ts > PING_TS` filter: a reply from this morning's unrelated ask must not
+   > count as an ack for a PR appended onto the thread this afternoon. On a
+   > fresh post `PARENT_TS == PING_TS` and every reply in the thread postdates
+   > the message by construction, so the filter is a no-op there — it only
+   > does work on the append path, which is exactly where it's needed.
 
 Inputs 3–5 are GitHub, evaluated **per listed PR**, and every one of them
 compares against `PING_ISO` — the UTC Z-form value pinned once in Phase 2 when
