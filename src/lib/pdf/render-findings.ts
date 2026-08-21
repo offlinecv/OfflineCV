@@ -105,7 +105,10 @@ export function entryPathLabel(
   index: number,
 ): string {
   const heading = sectionHeading || "Section";
-  const name = stripEmphasisSentinels(entry.headerLine || entry.subLine || "").trim();
+  // The bold lead is part of the drawn header line (#881), so it is part of the
+  // name — a categorised skills entry is "Skills → Languages: Python · Go".
+  const header = `${entry.headerBoldLead ?? ""}${entry.headerLine}`.trim();
+  const name = stripEmphasisSentinels(header || entry.subLine || "").trim();
   return name ? `${heading} → ${elide(name)}` : `${heading} → entry ${index + 1}`;
 }
 
@@ -183,6 +186,7 @@ export function collectModelTextFields(
     add(where, section.heading, { uppercase: true });
     section.entries.forEach((entry, i) => {
       const path = entryPathLabel(where, entry, i);
+      add(where, entry.headerBoldLead, { path });
       add(where, entry.headerLine, { path });
       add(where, entry.headerLineDate, { path });
       add(where, entry.subLine, { path });

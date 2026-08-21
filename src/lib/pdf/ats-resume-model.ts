@@ -175,9 +175,24 @@ export interface AtsEntry {
   /**
    * Whether `headerLine` is drawn bold. Defaults to `true` (every role /
    * degree / achievement header is bold); set `false` on the skills entry so
-   * the skills list renders as regular-weight body text (#425).
+   * the skills list renders as regular-weight body text (#425). It governs
+   * `headerLine` only — {@link headerBoldLead} is bold regardless.
    */
   headerBold?: boolean;
+  /**
+   * A bold lead drawn ahead of `headerLine` on its first line, which wraps into
+   * whatever width is left beside it (#881) — the category label of a
+   * categorised skills entry, the only structure that section has.
+   *
+   * It is carried APART from `headerLine` (rather than emitted inside emphasis
+   * sentinels, the way an achievement's "type" label is) because the sentinel
+   * path wraps on plain whitespace words: a bolded label there would break a
+   * multi-word skill mid-name and re-parse it as two skills (#301). The lead
+   * includes its trailing separator space, which is drawn — the members sit
+   * flush against its end, so that space is the only word boundary the re-parse
+   * has between the label and the first member.
+   */
+  headerBoldLead?: string;
   /** Bullet body lines (already stripped of leading markers, non-empty). */
   bullets: string[];
   /**
@@ -847,7 +862,10 @@ export function buildAtsResumeModel(
   let skillsEntries: AtsEntry[];
   if (skillCategories && skillCategories.length > 0) {
     skillsEntries = skillCategories.map((c) => ({
-      headerLine: `${c.label}: ${c.skills.join(" · ")}`,
+      headerLine: c.skills.join(" · "),
+      // The label leads the line in bold (#881) and the members wrap beside it;
+      // see `headerBoldLead` for why it is not glued into `headerLine`.
+      headerBoldLead: `${c.label}: `,
       bullets: [],
       atomicSegments: true,
       headerBold: false,
