@@ -91,6 +91,17 @@ gh pr view "$PR_NUM" --repo "$REPO" \
 If the PR is not `OPEN`, stop and say so. Note the **author login** — it tunes the
 review stance (see the careful-review note in Rules).
 
+Also capture the identity actually posting the review:
+
+```bash
+VIEWER_LOGIN="$(gh api user -q .login)"
+```
+
+If `VIEWER_LOGIN` equals the author login, this is a **self-review** — GitHub
+will not accept an `APPROVE` or `REQUEST_CHANGES` event from a PR's own author,
+no matter what branch protection allows (see Step 6). Carry this flag through;
+it changes nothing before Step 6.
+
 **Note what this call deliberately does not fetch: `body`.** The field list above
 is title/state/refs/author/files and nothing else, so the PR's prose never enters
 the review until Step 3f. Don't add `body` to it "while you're there."
@@ -714,6 +725,33 @@ Assemble the review body (Markdown: a one-line stance, then `## Blocking` /
 `## Secondary` / `## Nits`, findings most-severe first, plus the `## Fixed in <sha>` list
 from Step 5.5 — or, if the fixes could not land, why they didn't).
 
+**Self-review: GitHub refuses `APPROVE`/`REQUEST_CHANGES` from the PR's own author.**
+If Step 0's `VIEWER_LOGIN` matched the author login, the
+`pulls/.../reviews` POST **422s outright** for `event: APPROVE` or
+`event: REQUEST_CHANGES` — "Can not approve your own pull request" (and the
+same for requesting changes). This is a hard GitHub API restriction, not a
+branch-protection setting, and there is no flag or scope that lifts it — the
+`require_last_push_approval: false` discussion in Step 5 covers a *second*
+approver approving a commit this run pushed, which is a different case from
+the author reviewing their own PR at all.
+
+Handle it without touching the semantic verdict Step 5 computed:
+
+- Keep computing and reporting the **real** verdict (APPROVE / REQUEST_CHANGES /
+  COMMENT) exactly as Step 5 decided — Step 5.5's auto-fix, Step 5.6's
+  suggestions, and the finding severities are all unaffected; only the outer
+  API `event` changes.
+- **Force the posted `event` to `COMMENT`** regardless of that verdict.
+- Put the real verdict in plain words as the **first line** of the body, since
+  the GitHub review state can no longer carry it:
+  `**Verdict: APPROVE (self-review — posted as COMMENT; GitHub blocks a PR
+  author's own APPROVE/REQUEST_CHANGES)**` — substitute `REQUEST_CHANGES` when
+  that's what Step 5 decided.
+- Say this plainly in Step 7 (`self-review: event forced to COMMENT, semantic
+  verdict is <X>`), so a caller reading only the posted GitHub review state —
+  not the body — does not mistake a self-reviewed `REQUEST_CHANGES` for an
+  approval, or a self-reviewed `APPROVE` for an unresolved comment.
+
 **Post the review automatically at the end of the run** — do NOT prompt the user for interactive confirmation. (If `--local` is set, print the draft to stdout and stop without posting.)
 
 **Sign the review with your model.** End the body with one line naming the model
@@ -775,7 +813,8 @@ every ` ` (context) and `+` line, never on a `-`. The anchor must be a `+` line.
 the body, and every inline comment — so the author gets one notification, not N:
 
 ```bash
-# event: REQUEST_CHANGES | APPROVE | COMMENT  (must match the Step 5 verdict)
+# event: REQUEST_CHANGES | APPROVE | COMMENT  (must match the Step 5 verdict —
+# except self-review, where it is forced to COMMENT regardless of verdict; see above)
 cat > /tmp/review.json <<'JSON'
 {
   "event": "REQUEST_CHANGES",
@@ -826,6 +865,12 @@ back to body-only after a `422`, say that too, and say **whose** push moved the 
 the author's, or Step 5.5's own auto-fix — so the note doesn't blame the author for a
 push this skill made.
 
+If Step 6 forced the event to `COMMENT` for self-review, say so explicitly and
+separately from the verdict line: `self-review: event forced to COMMENT,
+semantic verdict is <APPROVE|REQUEST_CHANGES>` — a reader (or a calling skill)
+scanning only for "REQUEST_CHANGES"/"APPROVE" in the printed report must not
+have to infer this from the GitHub review state, which no longer carries it.
+
 Also report **the Step 5.5 push outcome in one line**, because it is the only part of the
 run that rewrote someone's branch: whether the branch was collapsed or left multi-commit
 and **which reason** (author class, lease lost, a `/collapse-pr` gate, `--no-commit`, ≥1
@@ -866,6 +911,11 @@ recoverable. Carry its classification across too (*already upstream* / *merely b
   Never soft-gate on nits. State the rule you applied. A fix this run pushed itself does
   **not** downgrade the verdict — approving your own auto-fix commit is the intended
   behaviour (Step 5, and the bound that makes it safe).
+- **Self-review posts as COMMENT, never as a fabricated APPROVE/REQUEST_CHANGES.**
+  GitHub 422s an `APPROVE` or `REQUEST_CHANGES` review from the PR's own author —
+  no override exists. Compute the real verdict as usual, force the posted `event`
+  to `COMMENT`, and state the real verdict as the first line of the body and again
+  in Step 7 (Step 6). Never skip posting because the "natural" event is blocked.
 - **Blocking bar is specific:** correctness-on-normal-use, real fixture PII,
   hardcoded colors / wrong component tier, a command bug that breaks every
   invocation, a gate CI will fail. Everything softer is Secondary/Nit.
