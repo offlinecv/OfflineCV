@@ -3,7 +3,8 @@
 
 /**
  * Leaf-level line primitives shared by the entry-block parser and the field
- * extractors: bullet detection/stripping and date-range parsing.
+ * extractors: bullet detection/stripping, date-range parsing, and the
+ * closed-vocabulary bare-location predicate.
  *
  * These live in their own module to break the import cycle that arises when
  * `entry-blocks.ts` (the shared windowing primitive) and `extract-fields.ts`
@@ -16,10 +17,14 @@
 import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
 import type { PdfLine } from "./line-model.ts";
 import {
+  COUNTRY_GAZETTEER,
   DATE_RANGE_RE,
+  INTL_LOCATION_RE,
   MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
   STRICT_MONTH_YEAR_RE,
+  US_LOCATION_RE,
+  US_STATE_CODE_RE,
   YEAR_RE,
 } from "./regex.ts";
 
@@ -324,6 +329,89 @@ const CV_FURNITURE_RE = /(?:^|\s)cv(?:$|\s)/i;
  *  that lands mid-section on a page break is stripped on every entry path. */
 export function isPageFurniture(line: PdfLine): boolean {
   return PAGE_FURNITURE_RE.test(line.text) || CV_FURNITURE_RE.test(line.text);
+}
+
+/** Multi-word US cities recognized by BOTH the whole-string `BARE_LOCATION_RE`
+ *  (case-insensitive) and the embedded-fold `KNOWN_MULTIWORD_US_CITY_RE`
+ *  (case-sensitive Title-case). Single source of truth so the two can't drift
+ *  apart. Longest-first so "New York City" wins over "New York" in the embedded
+ *  alternation (regex first-match); order is irrelevant for the `^…$`-anchored
+ *  `BARE_LOCATION_RE`.
+ *
+ *  Silicon-Valley/Peninsula additions (#616): "Mountain View", "Palo Alto",
+ *  "Menlo Park" are the multi-word tech-hub cities that show up co-located
+ *  with Globex/Meta/Stanford in a `Title · Company, City · Team` middot header
+ *  with NO trailing state suffix. Without the vocab entry, Pass F of
+ *  `stripLocationSuffix` (bare-city tail check) failed to full-match them and
+ *  the middle segment stayed whole ("Globex, Mountain View" → company). Same
+ *  closed-vocab discipline as the pre-existing entries: a real company that
+ *  merely contains one of these tokens ("Mountain View Software") still fails
+ *  the `^…$`-anchored full-string match.
+ *
+ *  #634 review follow-up: "Santa Clara", "Redwood City" and "Ann Arbor" close
+ *  the three headers the review reproduced as still-broken (Nvidia, Meta, Ford).
+ *  They do NOT make the vocabulary complete — this list is a closed set by
+ *  design, so any multi-word city outside it still folds into `company`. That
+ *  narrowing is the standing limitation of the approach, not a bug to be fixed
+ *  by growing the list without bound; see `experience.multiword-city.test.ts`,
+ *  which pins both halves (a listed city splits; an unlisted one does not, and
+ *  a company merely containing a listed city stays whole). */
+export const MULTIWORD_US_CITY_ALT =
+  "New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City|Mountain View|Palo Alto|Menlo Park|Santa Clara|Redwood City|Ann Arbor";
+
+/** Bare city/region names (no "City, ST" state tail, so `US_LOCATION_RE` misses
+ *  them) that show up as a `"Title, Location"` header tail — must NOT be cleaved
+ *  off as the company. Exact whole-string match keeps a real company that merely
+ *  contains a city word ("New York Times", "Boston Consulting") splittable. */
+export const BARE_LOCATION_RE = new RegExp(
+  `^(remote|hybrid|on-?site|${MULTIWORD_US_CITY_ALT}|washington|washington d\\.?c\\.?|boston|chicago|seattle|austin|denver|portland|atlanta|dallas|houston|phoenix|miami|detroit|philadelphia|pittsburgh|minneapolis|nashville|charlotte|columbus|indianapolis|baltimore|sacramento|raleigh|london|paris|berlin|munich|tokyo|singapore|bangalore|bengaluru|mumbai|delhi|hyderabad|toronto|vancouver|sydney|melbourne|dublin|amsterdam)$`,
+  "i",
+);
+
+/**
+ * True when `s` is ENTIRELY a bare location string — a lone US state code, a
+ * bare well-known city, or a "City, ST" / "City, Country" shape that spans the
+ * WHOLE string (not merely a trailing suffix). The full-length check on the
+ * US/intl matches distinguishes a self-contained location ("Pomona, CA",
+ * "Mountain View, CA") from a company that merely carries a trailing city
+ * ("Globex, Toronto, Canada", where INTL_LOCATION_RE matches only a substring).
+ *
+ * Shape is NOT sufficient — the comma-tail must resolve against a REAL location
+ * signal, not merely a "CapWords, CapWords" shape. `US_LOCATION_RE` /
+ * `INTL_LOCATION_RE` are generic Title-Case-pair matchers (regex.ts:42/45), so
+ * on their own they full-match a comma-formatted job title whose role word is
+ * outside the finite `looksLikeTitle` keyword list ("Buyer, Home Goods",
+ * "Merchandiser, Footwear", "Barista, Downtown Store"), silently erasing a real
+ * title into `location` (the #325 step-5 rescue false-positive class). So each
+ * shape branch additionally requires its tail to be in a CLOSED vocabulary — a
+ * valid 2-letter USPS code (`US_STATE_CODE_RE`) or a real country
+ * (`COUNTRY_GAZETTEER`) — the same closed-vocabulary discipline
+ * `stripLocationSuffix` already applies. A generic Title-Case tail
+ * ("Home Goods", "Footwear") is in neither set and stays a title.
+ *
+ * The single shared bare-location predicate in {@link disambiguateCompanyTitle}:
+ * the step-3a rotate-guard (negated — a rotatable "Company, City, Country" is
+ * NOT a whole-string location), the step-3b `team`→location rescue, and the
+ * step-5 `title`→location rescue all route through it, so the same closed-vocab
+ * discipline gates every path and no branch can reintroduce the shape-only leak.
+ *
+ * Lives here rather than in `experience-disambiguate.ts` (#891) because
+ * `entry-blocks.ts` — which sits BELOW the extractors — needs the same
+ * vocabulary to qualify a flush-right trailer before it peels one
+ * (`peelFlushRightLocation`). Sharing the predicate is what keeps the two
+ * layers from disagreeing about what counts as a location.
+ */
+export function isBareLocationString(s: string): boolean {
+  const usLoc = US_LOCATION_RE.exec(s);
+  const intlLoc = INTL_LOCATION_RE.exec(s);
+  return (
+    US_STATE_CODE_RE.test(s) ||
+    BARE_LOCATION_RE.test(s) ||
+    (usLoc !== null && usLoc[0].length === s.length && US_STATE_CODE_RE.test(usLoc[2])) ||
+    (intlLoc !== null &&
+      intlLoc[0].length === s.length &&
+      COUNTRY_GAZETTEER.has(intlLoc[2].toLowerCase()))
+  );
 }
 
 /** Collapse internal whitespace and trim — the canonical date-token normalizer. */

@@ -38,12 +38,14 @@ import {
   dateSeparator,
   parseDateRange,
   stripDateRange,
+  isBareLocationString,
   isBulletLine,
   isPageFurniture,
   isProseLine,
   looksLikeBelowAnchorProse,
   stripBullet,
 } from "./line-primitives.ts";
+import { mergeItemText, splitOnFlushRightGap } from "./line-assembly.ts";
 
 // ── Shared entry-header shape recognition ───────────────────────────────────
 //
@@ -1263,6 +1265,54 @@ function nextHeaderStart(
 }
 
 /**
+ * Peel a flush-right bare-location trailer off a below-anchor header line.
+ *
+ * A tab-justified sub-line ("Software Developer" at the left margin, "Remote"
+ * right-aligned on the SAME PDF row) reaches us as one `PdfLine`: pdfjs draws
+ * the justification as a single whitespace-only item whose own width spans the
+ * gap, so no adjacent-pair gap exists for line assembly to cut on and
+ * `mergeItemText` collapses the run to one space — `"Software Developer
+ * Remote"`, with the location welded into the title and no downstream pass able
+ * to tell where the seam was (#891).
+ *
+ * `splitOnFlushRightGap` recovers the seam from the geometry; this function
+ * decides whether to act on it. The gate is deliberately narrow: the trailer
+ * must whole-match the closed bare-location/work-mode vocabulary
+ * (`isBareLocationString`), so an ordinary multi-word title never splits, and
+ * the #425 flush-right-DATE shape — the other thing templates park at the right
+ * margin — is not a bare location and stays merged onto its header line.
+ *
+ * Splitting here rather than in line assembly keeps the shared
+ * `columnGapCuts` / `rowIsMultiColumn` machinery untouched (see
+ * {@link splitOnFlushRightGap}), and it lands the two halves in exactly the
+ * shape `disambiguateCompanyTitle` already parses correctly when a template
+ * puts the location on its own row: the trailer becomes a separate header
+ * candidate, falls into the `team` slot, and `rescueTeamLocation`
+ * (`experience-disambiguate.ts`) promotes it to `location`. No new
+ * field-mapping logic — the peel only makes the same-row case LOOK like the
+ * separate-row case.
+ *
+ * Both halves inherit the source line's page/y/font metadata; only `text`,
+ * `items` and the trailer's `x` are rebuilt. Sharing the y is deliberate —
+ * `foldBelowAnchorLines` folds on a POSITIVE y-delta, so two same-row halves
+ * can never be re-glued by the fold. Returns `[line]` unchanged whenever the
+ * row carries no flush-right gap, the trailer is not a bare location, or
+ * either half is nothing but whitespace.
+ */
+function peelFlushRightLocation(line: PdfLine): PdfLine[] {
+  const split = splitOnFlushRightGap(line.items);
+  if (!split) return [line];
+  const trailerText = mergeItemText(split.trailer).trim();
+  if (!trailerText || !isBareLocationString(trailerText)) return [line];
+  const headText = mergeItemText(split.head).trim();
+  if (!headText) return [line];
+  return [
+    { ...line, items: split.head, text: headText },
+    { ...line, items: split.trailer, text: trailerText, x: split.trailer[0].x },
+  ];
+}
+
+/**
  * Fold consecutive below-anchor `PdfLine`s into logical strings using the same
  * sub-paragraph y-gap signal `buildEntryBlock`'s `bodyUnits` loop uses on
  * bullets. A wrapped role-scope paragraph rendered by pdfjs as three lines
@@ -1524,7 +1574,7 @@ function buildEntryBlock(
       break;
     }
     if (isWrappedContinuation(lines[i], markerX)) continue;
-    belowHeaderLines.push(lines[i]);
+    belowHeaderLines.push(...peelFlushRightLocation(lines[i]));
   }
 
   // Assemble header lines in document order — above lines, the anchor line

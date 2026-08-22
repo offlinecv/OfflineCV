@@ -8,6 +8,11 @@ import {
   COUNTRY_GAZETTEER,
   matchSectionHeader,
 } from "../regex.ts";
+import {
+  BARE_LOCATION_RE,
+  MULTIWORD_US_CITY_ALT,
+  isBareLocationString,
+} from "../line-primitives.ts";
 import { looksLikeTitle, looksLikeCompany } from "./shared.ts";
 
 /** The role fields `disambiguateCompanyTitle` maps a header block onto. */
@@ -37,43 +42,6 @@ type Split = {
 
 const LEGAL_SUFFIX_RE =
   /^(inc\.?|llc|l\.l\.c\.?|ltd\.?|corp\.?|co\.?|gmbh|plc|lp|llp|pc|s\.a\.?|n\.a\.?|sa)$/i;
-
-/** Multi-word US cities recognized by BOTH the whole-string `BARE_LOCATION_RE`
- *  (case-insensitive) and the embedded-fold `KNOWN_MULTIWORD_US_CITY_RE`
- *  (case-sensitive Title-case). Single source of truth so the two can't drift
- *  apart. Longest-first so "New York City" wins over "New York" in the embedded
- *  alternation (regex first-match); order is irrelevant for the `^…$`-anchored
- *  `BARE_LOCATION_RE`.
- *
- *  Silicon-Valley/Peninsula additions (#616): "Mountain View", "Palo Alto",
- *  "Menlo Park" are the multi-word tech-hub cities that show up co-located
- *  with Globex/Meta/Stanford in a `Title · Company, City · Team` middot header
- *  with NO trailing state suffix. Without the vocab entry, Pass F of
- *  `stripLocationSuffix` (bare-city tail check) failed to full-match them and
- *  the middle segment stayed whole ("Globex, Mountain View" → company). Same
- *  closed-vocab discipline as the pre-existing entries: a real company that
- *  merely contains one of these tokens ("Mountain View Software") still fails
- *  the `^…$`-anchored full-string match.
- *
- *  #634 review follow-up: "Santa Clara", "Redwood City" and "Ann Arbor" close
- *  the three headers the review reproduced as still-broken (Nvidia, Meta, Ford).
- *  They do NOT make the vocabulary complete — this list is a closed set by
- *  design, so any multi-word city outside it still folds into `company`. That
- *  narrowing is the standing limitation of the approach, not a bug to be fixed
- *  by growing the list without bound; see `experience.multiword-city.test.ts`,
- *  which pins both halves (a listed city splits; an unlisted one does not, and
- *  a company merely containing a listed city stays whole). */
-const MULTIWORD_US_CITY_ALT =
-  "New York City|New York|New Orleans|San Francisco|San Diego|San Jose|San Antonio|Los Angeles|Las Vegas|Salt Lake City|Mountain View|Palo Alto|Menlo Park|Santa Clara|Redwood City|Ann Arbor";
-
-/** Bare city/region names (no "City, ST" state tail, so `US_LOCATION_RE` misses
- *  them) that show up as a `"Title, Location"` header tail — must NOT be cleaved
- *  off as the company. Exact whole-string match keeps a real company that merely
- *  contains a city word ("New York Times", "Boston Consulting") splittable. */
-const BARE_LOCATION_RE = new RegExp(
-  `^(remote|hybrid|on-?site|${MULTIWORD_US_CITY_ALT}|washington|washington d\\.?c\\.?|boston|chicago|seattle|austin|denver|portland|atlanta|dallas|houston|phoenix|miami|detroit|philadelphia|pittsburgh|minneapolis|nashville|charlotte|columbus|indianapolis|baltimore|sacramento|raleigh|london|paris|berlin|munich|tokyo|singapore|bangalore|bengaluru|mumbai|delhi|hyderabad|toronto|vancouver|sydney|melbourne|dublin|amsterdam)$`,
-  "i",
-);
 
 /** True when the comma tail reads like a location rather than an employer —
  *  either a "City, ST"/"City, Country" shape, a bare well-known city, or a
@@ -485,46 +453,6 @@ function anchorCarriesOrgSignal(text: string): boolean {
   // reconstructed-export signature our own emit appends to a location-less
   // company sub-line, ats-resume-model.ts) — either bounded by whitespace/edge.
   return /(?:^|\s)·(?:\s|$)/.test(text);
-}
-
-/**
- * True when `s` is ENTIRELY a bare location string — a lone US state code, a
- * bare well-known city, or a "City, ST" / "City, Country" shape that spans the
- * WHOLE string (not merely a trailing suffix). The full-length check on the
- * US/intl matches distinguishes a self-contained location ("Pomona, CA",
- * "Mountain View, CA") from a company that merely carries a trailing city
- * ("Globex, Toronto, Canada", where INTL_LOCATION_RE matches only a substring).
- *
- * Shape is NOT sufficient — the comma-tail must resolve against a REAL location
- * signal, not merely a "CapWords, CapWords" shape. `US_LOCATION_RE` /
- * `INTL_LOCATION_RE` are generic Title-Case-pair matchers (regex.ts:42/45), so
- * on their own they full-match a comma-formatted job title whose role word is
- * outside the finite `looksLikeTitle` keyword list ("Buyer, Home Goods",
- * "Merchandiser, Footwear", "Barista, Downtown Store"), silently erasing a real
- * title into `location` (the #325 step-5 rescue false-positive class). So each
- * shape branch additionally requires its tail to be in a CLOSED vocabulary — a
- * valid 2-letter USPS code (`US_STATE_CODE_RE`) or a real country
- * (`COUNTRY_GAZETTEER`) — the same closed-vocabulary discipline
- * `stripLocationSuffix` already applies. A generic Title-Case tail
- * ("Home Goods", "Footwear") is in neither set and stays a title.
- *
- * The single shared bare-location predicate in {@link disambiguateCompanyTitle}:
- * the step-3a rotate-guard (negated — a rotatable "Company, City, Country" is
- * NOT a whole-string location), the step-3b `team`→location rescue, and the
- * step-5 `title`→location rescue all route through it, so the same closed-vocab
- * discipline gates every path and no branch can reintroduce the shape-only leak.
- */
-function isBareLocationString(s: string): boolean {
-  const usLoc = US_LOCATION_RE.exec(s);
-  const intlLoc = INTL_LOCATION_RE.exec(s);
-  return (
-    US_STATE_CODE_RE.test(s) ||
-    BARE_LOCATION_RE.test(s) ||
-    (usLoc !== null && usLoc[0].length === s.length && US_STATE_CODE_RE.test(usLoc[2])) ||
-    (intlLoc !== null &&
-      intlLoc[0].length === s.length &&
-      COUNTRY_GAZETTEER.has(intlLoc[2].toLowerCase()))
-  );
 }
 
 /** Result of the leading-section-header strip: the surviving header lines, the
