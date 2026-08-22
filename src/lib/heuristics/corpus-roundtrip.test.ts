@@ -242,6 +242,72 @@ describe("certifications round-trip (#884)", () => {
 });
 
 /**
+ * Institution-led education with HINT-LESS schools (#882).
+ *
+ * The whole-corpus ratchet above compares parse1 against parse3, so it can only
+ * see a round-trip that CHANGES something. This entry shape needs the other half
+ * of the proof too — that parse1 is right in the FIRST place — because the two
+ * halves fail together and the ratchet is blind to that:
+ *
+ *   • #882 flips a degreed education entry to lead with the INSTITUTION, dated
+ *     flush-right on that line, degree beneath. That is what the widely-copied
+ *     templates do and what the exporter now emits.
+ *   • The segmenter's institution cue is `INSTITUTION_HINTS`
+ *     (`University|College|Institute|School|Academy|Polytechnic`), which matches
+ *     none of `Caltech`, `MIT`, `Georgia Tech`. Under DEGREE-first ordering the
+ *     shortfall was invisible — the degree line led, and the degree-repeat flush
+ *     found every boundary. Under INSTITUTION-first the boundary lands one line
+ *     earlier than any cue that can see it.
+ *
+ * Measured on this fixture BEFORE the institution-lead cue existed: three
+ * entries came back as three chunks whose degrees were paired with the WRONG
+ * schools ("Georgia Tech" carrying MIT's `M.S.`) and whose third institution was
+ * the tail of a degree line (", Computer Science, cum laude"). The COUNT was
+ * right the whole time. So a count-only assertion proves nothing here, and this
+ * block asserts the pairing.
+ *
+ * PII-free: synthetic persona (`scripts/fixtures/gen-education-hintless-institution-lead.mjs`);
+ * the asserted strings are institution/degree names, synthetic by policy.
+ */
+describe("hint-less institution-led education (#882)", () => {
+  const FIXTURE = join(
+    FIXTURE_ROOT,
+    "unknown",
+    "education-hintless-institution-lead.pdf",
+  );
+
+  /** `[institution, degree, field]` per entry, in document order. */
+  const EXPECTED = [
+    ["Caltech", "Ph.D.", "Applied Mathematics"],
+    ["MIT", "M.S.", "Computer Science"],
+    ["Georgia Tech", "B.S.", "Computer Science"],
+  ];
+
+  it("parses three hint-less schools as three entries, each with its own degree", async () => {
+    const before = await runCascade(new Uint8Array(readFileSync(FIXTURE)));
+    const edu = before.canonical.fields.education ?? [];
+    expect(edu.map((e) => [e.institution, e.degree, e.field])).toEqual(EXPECTED);
+    // The open-ended range keeps its ongoing flag rather than collapsing to a
+    // bare start date (#882) — `ResumeEducation.is_current` did not exist before.
+    expect(edu[0]?.is_current).toBe(true);
+    expect(edu[0]?.start_date).toBe("Sep 2022");
+    // The lone MONTH-YEAR shape, which used to draw glued: recovered whole.
+    expect(edu[1]?.end_date).toBe("May 2022");
+  });
+
+  it("re-exports and re-parses to the SAME three entries — 3 in, 3 out", async () => {
+    const before = await runCascade(new Uint8Array(readFileSync(FIXTURE)));
+    const { after, renderError } = await runRoundtripHop(before);
+    expect(renderError).toBeUndefined();
+    const edu = after?.canonical.fields.education ?? [];
+    expect(edu.map((e) => [e.institution, e.degree, e.field])).toEqual(EXPECTED);
+    expect(edu[0]?.is_current).toBe(true);
+    expect(edu[2]?.gpa).toBe("3.72/4.00");
+    expect(edu[2]?.honors).toBe("cum laude");
+  });
+});
+
+/**
  * Dev triage harness — inert in CI, runs ONLY when `RL_RT_PDF=<path>` is set:
  *
  *   RL_RT_PDF=/path/to/real-resume.pdf [RL_RT_ROUNDS=2] npx vitest run \

@@ -187,6 +187,13 @@ export interface ResumeEducation {
    *  `start_date`. */
   end_date?: string;
   end_date_precision?: "day" | "month" | "year" | null;
+  /** Ongoing enrolment — the `Present` half of "Sep 2022 – Present" (#882).
+   *  Mirrors `ResumeExperience.is_current`, and exists for the same reason: with
+   *  no flag, an open-ended range parses to a start date and nothing else, so the
+   *  export draws a bare "Sep 2022" and the résumé stops saying the degree is in
+   *  progress. Set only beside a `start_date` — an open end with nothing to
+   *  anchor it has no range to draw. */
+  is_current?: boolean;
   /** Grade exactly as the résumé wrote it — "3.72/4.00", "3.9", "8.4/10",
    *  "85%", "First Class", "2:1". A STRING on purpose (#883): normalising to a
    *  number drops the scale, so a 8.4/10 and a 3.9/4.0 would compare as if they

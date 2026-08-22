@@ -123,13 +123,15 @@ describe("buildAtsResumeModel", () => {
     ]);
 
     const edu = model.sections[1].entries[0];
-    // Stacked shape (#291): degree leads the header, institution moves to the
-    // sub-line (mirroring experience) so it round-trips back through the parser.
-    // Since #618 the lone graduation year is drawn flush-right via `subLineDate`
-    // rather than glued after a whitespace gap, matching the range shape.
-    expect(edu.headerLine).toBe("BS Computer Science");
-    expect(edu.subLine).toBe("State University");
-    expect(edu.subLineDate).toBe("2016");
+    // Institution-led shape (#882): the institution leads the bold header with
+    // the graduation date flush-right on that line, and degree + field + notes
+    // drop to the sub-line. Before #882 the stacked shape ran the other way
+    // (#291) — the flip is safe only because the segmenter gained an
+    // institution-lead cue; see `education-hintless-institution-lead.pdf`.
+    expect(edu.headerLine).toBe("State University");
+    expect(edu.headerLineDate).toBe("2016");
+    expect(edu.subLine).toBe("BS Computer Science");
+    expect(edu.subLineDate).toBeUndefined();
     expect(edu.bullets[0]).toMatch(/Coursework: Algorithms, Databases/);
 
     const skills = model.sections[2].entries[0];
@@ -155,20 +157,25 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const edu = model.sections.find((s) => s.heading === "Education")!;
-    // Stacked shape (#291): degree(+field) on the header, institution on the
-    // sub-line (with the date anchor appended after a whitespace gap).
+    // DEGREE-led, not institution-led (#882): this entry carries no date at all,
+    // and `orgCanLead` requires the date column, because the institution-lead
+    // segmenter cue recognises the leading line by its inline date. So the entry
+    // keeps the pre-#882 shape that anchors the boundary on `DEGREE_RE`, with the
+    // institution alone on the sub-line and no date drawn anywhere.
     expect(edu.entries[0].headerLine).toBe(
       "Bachelor of Science, Mechanical Engineering",
     );
+    expect(edu.entries[0].headerLineDate).toBeUndefined();
     expect(edu.entries[0].subLine).toBe("Riverside College Of Engineering");
+    expect(edu.entries[0].subLineDate).toBeUndefined();
     // Degree-less program (#302): the header carries NO degree cue, so the
     // graduation date stays on the HEADER line (making it an
     // `isInlineDatedProgram` entry lead the re-parser segments on) and the
     // institution drops alone to the sub-line — otherwise two degree-less entries
-    // collapse to one on round-trip. Since #618 the lone year is drawn
-    // flush-right via `headerLineDate` on that same header line rather than
-    // glued after a whitespace gap. No `columnGapCuts` change was needed — see
-    // the `isLoneDateRange` docblock for why the parser side stays range-only.
+    // collapse to one on round-trip. #882 leaves this shape deliberately
+    // untouched while flipping the degreed one: the institution-lead cue it
+    // introduces requires a DEGREE on the following line, which this shape has
+    // not got, so the program title keeps both the header and the date.
     expect(edu.entries[1].headerLine).toBe("Applied Robotics Program");
     expect(edu.entries[1].headerLineDate).toBe("2024");
     expect(edu.entries[1].subLine).toBe("ACME Professional Education");
@@ -534,7 +541,7 @@ describe("buildAtsResumeModel", () => {
     expect(exp.entries[0].headerLineDate).toBeUndefined();
   });
 
-  it("keeps a non-year single-token graduation date glued on Education (#436)", () => {
+  it("draws a lone MONTH-YEAR graduation date in the date column too (#882)", () => {
     const result = makeResult({
       education: [
         {
@@ -547,8 +554,30 @@ describe("buildAtsResumeModel", () => {
     const edu = buildAtsResumeModel(result, makeScore([])).sections.find(
       (s) => s.heading === "Education",
     )!;
-    expect(edu.entries[0].subLine).toBe("Ridgemont State University  May 2020");
-    expect(edu.entries[0].subLineDate).toBeUndefined();
+    // Pre-#882 this was the GLUED case: `isLoneDateRange` admits a range and
+    // (since #618) a bare year, but never a lone month-year, so "May 2020" drew
+    // two spaces after the institution. It is the most common graduation shape
+    // of all, and it now takes the same flush-right column every other date does.
+    expect(edu.entries[0].headerLine).toBe("Ridgemont State University");
+    expect(edu.entries[0].headerLineDate).toBe("May 2020");
+    expect(edu.entries[0].subLine).toBe("BS Data Science");
+  });
+
+  it("falls back to the degree-led shape when a hint-less institution has no date (#882)", () => {
+    const result = makeResult({
+      education: [{ degree: "B.S.", field: "Computer Science", institution: "MIT" }],
+    });
+    const edu = buildAtsResumeModel(result, makeScore([])).sections.find(
+      (s) => s.heading === "Education",
+    )!;
+    // `MIT` is `isEntryHeaderShape`-clean, so shape alone would let it lead — but
+    // with no date it carries no cue any education segmenter predicate can see:
+    // `INSTITUTION_HINTS` misses the name, and `isInstitutionLeadAt` needs the
+    // inline date. Leading with it would export an entry the re-parser cannot
+    // bound, absorbing the NEXT entry's institution. The degree leads instead.
+    expect(edu.entries[0].headerLine).toBe("B.S., Computer Science");
+    expect(edu.entries[0].subLine).toBe("MIT");
+    expect(edu.entries[0].headerLineDate).toBeUndefined();
   });
 
   it("fully display-formats contact links (scheme + www stripped) so the www round-trip holds (#425)", () => {
@@ -679,7 +708,7 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const edu = model.sections.find((s) => s.heading === "Education")!;
-    expect(edu.entries[0].headerLine).toBe(
+    expect(edu.entries[0].subLine).toBe(
       "B.S., Computer Science, cum laude, GPA: 3.72/4.00",
     );
     // Never a bullet: a bullet under an education entry re-parses as coursework.
@@ -701,7 +730,7 @@ describe("buildAtsResumeModel", () => {
     });
     const model = buildAtsResumeModel(result, makeScore([]));
     const edu = model.sections.find((s) => s.heading === "Education")!;
-    expect(edu.entries[0].headerLine).toBe("B.A., Economics, First Class");
+    expect(edu.entries[0].subLine).toBe("B.A., Economics, First Class");
   });
 
   it("carries honors and grade on a degree-LESS program header too (#883)", () => {
@@ -725,7 +754,7 @@ describe("buildAtsResumeModel", () => {
   it("emits no dangling separator when an entry carries neither (#883)", () => {
     const model = buildAtsResumeModel(makeResult(), makeScore([]));
     const edu = model.sections.find((s) => s.heading === "Education")!;
-    expect(edu.entries[0].headerLine).toBe("BS Computer Science");
+    expect(edu.entries[0].subLine).toBe("BS Computer Science");
     expect(edu.entries[0].fields?.score).toBeUndefined();
   });
 });
