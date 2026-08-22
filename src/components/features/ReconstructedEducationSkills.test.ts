@@ -45,7 +45,10 @@ describe("resolveEducationDisplay", () => {
     expect(d.institution).toBe("State University");
     expect(d.startDate).toBe("2018");
     expect(d.endDate).toBe("2022");
-    expect(d.dates).toBe("2018–2022");
+    // Spaced en dash since #882: `buildEducationDates` is now the SAME join the
+    // PDF exporter draws, so the card and the file can no longer show two
+    // different strings for one entry.
+    expect(d.dates).toBe("2018 – 2022");
     expect(d.coursework).toEqual(["Algorithms", "Databases"]);
   });
 
@@ -57,7 +60,7 @@ describe("resolveEducationDisplay", () => {
     expect(d.degree).toBe("MSc Computer Science");
     expect(d.institution).toBe("State University"); // unchanged
     expect(d.endDate).toBe("2024");
-    expect(d.dates).toBe("2018–2024");
+    expect(d.dates).toBe("2018 – 2024");
   });
 
   it("clears a field when its override is an empty string", () => {

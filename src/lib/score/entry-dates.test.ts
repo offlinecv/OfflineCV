@@ -52,10 +52,47 @@ describe("buildProjectDates", () => {
 describe("buildEducationDates", () => {
   const base = { degree: "BS", institution: "U" };
 
-  it("renders a closed range as start–end", () => {
+  it("renders a closed range with the SPACED en dash the exporter draws (#882)", () => {
+    // One join function across the edit surface and the PDF (#882). It used to
+    // be two: this formatter joined tight ("Sep 2021–May 2025") and the
+    // exporter's `formatExperienceDateRange` spaced, so the same entry showed
+    // one string on screen and drew another in the file. The spaced form wins
+    // because it is the round-trip-tested one — `stripInstitutionDate` peels it
+    // off the institution line, where the tight dash stayed glued (#291).
     expect(
       buildEducationDates({ ...base, start_date: "Sep 2021", end_date: "May 2025" }),
-    ).toBe("Sep 2021–May 2025");
+    ).toBe("Sep 2021 – May 2025");
+  });
+
+  it("composes start + graduation `year` into a RANGE instead of dropping the year (#882)", () => {
+    // The #882 defect: the old body asked `formatExperienceDateRange(...) ||
+    // edu.year`, and that formatter returns the START alone when there is no
+    // end — so the `||` short-circuited and `year` was never read. A user who
+    // added a start date to a year-only parse deleted their graduation year from
+    // both the card and the export.
+    expect(
+      buildEducationDates({ ...base, start_date: "Sep 2020", year: "2024" }),
+    ).toBe("Sep 2020 – 2024");
+  });
+
+  it("refuses a `year` the start already contains, so an ongoing entry never draws `Sep 2022 – 2022` (#882)", () => {
+    // `year` is a back-compat MIRROR, and for an open-ended range
+    // `parseEducationDates` mirrors the START's year. Promoting it to the end
+    // anchor unconditionally would draw the same year twice.
+    expect(
+      buildEducationDates({ ...base, start_date: "Sep 2022", year: "2022" }),
+    ).toBe("Sep 2022");
+  });
+
+  it("renders `Present` for an in-progress entry (#882)", () => {
+    expect(
+      buildEducationDates({
+        ...base,
+        start_date: "Sep 2022",
+        is_current: true,
+        year: "2022",
+      }),
+    ).toBe("Sep 2022 – Present");
   });
 
   it("prefers end_date alone (graduation date) over start", () => {

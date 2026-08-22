@@ -19,8 +19,18 @@
  * `isLoneDateRange` docblock for the full reasoning (and why extending the
  * parser side caused a wrap-continuation corpus regression).
  *
+ * SHAPE NOTE (#882). A degreed entry now leads with the INSTITUTION, so the
+ * flush-right slot this test pins moved from `subLineDate` to `headerLineDate`
+ * and the degree moved to the sub-line. What #618 owns is unchanged and is what
+ * these assertions still check: a lone year is NOT glued after a whitespace gap,
+ * it re-parses onto its org line, and two degree-less entries stay two. #882 also
+ * retired the `isLoneDateRange` gate this test's docblock describes — the
+ * exporter now owns that decision (`educationDateDrawsFlushRight`), while
+ * `isLoneDateRange` itself and every parser call site are untouched, exactly as
+ * described below.
+ *
  * Acceptance coverage (from the issue):
- *   • Model: `subLineDate === "2023"`, `subLine` free of the year
+ *   • Model: the year in the flush-right slot, the org line free of it
  *   • Round-trip: `education[0].end_date === "2023"`, institution free of the year
  *   • #302 regression guard: two adjacent degree-less entries each with a lone
  *     year still re-parse as TWO entries (not one)
@@ -97,14 +107,15 @@ describe("#618 — degreed entry with a lone graduation year", () => {
     reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
-  it("renders `2023` as flush-right `subLineDate` — no glue on the sub-line", () => {
+  it("renders `2023` in the flush-right date column — no glue on the org line", () => {
     const edu = model.sections.find((s) => s.heading === "Education");
     const entry = edu?.entries[0];
-    expect(entry?.headerLine).toBe("BS Computer Science");
-    // The pre-fix bug: subLine was "Ridgemont State University  2023" (two-space glue).
-    // Post-fix: institution alone, year in the flush-right slot.
-    expect(entry?.subLine).toBe("Ridgemont State University");
-    expect(entry?.subLineDate).toBe("2023");
+    // The pre-#618 bug: the org line read "Ridgemont State University  2023"
+    // (two-space glue). Post-fix: institution alone, year in the flush-right
+    // slot — which since #882 is `headerLineDate`, the org line being the header.
+    expect(entry?.headerLine).toBe("Ridgemont State University");
+    expect(entry?.headerLineDate).toBe("2023");
+    expect(entry?.subLine).toBe("BS Computer Science");
   });
 
   it("re-parses with `end_date === 2023` and the institution free of the year", () => {
@@ -210,11 +221,11 @@ describe("#618 — control: a range date on Education still round-trips exactly 
     reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
   });
 
-  it("range: sub-line free of the date, `subLineDate` carries the range (pre-#618 shape)", () => {
+  it("range: org line free of the date, the date column carries the range (pre-#618 shape)", () => {
     const entry = model.sections.find((s) => s.heading === "Education")?.entries[0];
-    expect(entry?.headerLine).toBe("MS Data Science");
-    expect(entry?.subLine).toBe("Ridgemont State University");
-    expect(entry?.subLineDate).toBe("2019 – 2021");
+    expect(entry?.headerLine).toBe("Ridgemont State University");
+    expect(entry?.headerLineDate).toBe("2019 – 2021");
+    expect(entry?.subLine).toBe("MS Data Science");
   });
 
   it("range: re-parses back with clean institution + start/end dates preserved", () => {

@@ -52,7 +52,12 @@ import {
   buildProjectDates,
 } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
+import { isEntryHeaderShape } from "../heuristics/entry-blocks.ts";
 import { formatGradeNote } from "../heuristics/extract/education-grade.ts";
+import {
+  buildEducationDates,
+  educationDateAnchors,
+} from "../score/entry-dates.ts";
 import { formatExperienceDateRange } from "../edit/experience-dates.ts";
 import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
@@ -429,6 +434,45 @@ export function isDatedEntry(entry: {
 }
 
 /**
+ * Does an EDUCATION entry's formatted date go in the flush-right date column?
+ *
+ * Yes whenever there is a date at all (#882) — and the whole value of this
+ * two-line function is WHERE it lives, not what it computes. The decision used to
+ * be `isLoneDateRange(eduDates, { allowSingle: true })`, a predicate SHARED with
+ * the parser: `columnGapCuts`/`flush` in `line-assembly.ts` call it in default
+ * mode, and its narrowness there is anchored to real external fixtures (the
+ * season carve-out protects a Word fixture; admitting a lone year into the parser
+ * side broke a Google-Docs wrap-continuation fixture). Asking that predicate an
+ * EXPORTER question meant the only way to right-align one more date shape was to
+ * widen a parser primitive for no parser benefit — so a lone `May 2024`, the
+ * single most common graduation shape, fell through to the glued fallback and
+ * drew two spaces after the institution. This predicate is the exporter's own,
+ * `isLoneDateRange` is untouched, and neither can drift the other.
+ *
+ * WHY RIGHT-ALIGNING EVERY SHAPE IS SAFE ON OUR OWN EXPORT. The drawn text is the
+ * same either way. Glued, the date is joined into one run; flush-right, it is a
+ * second run at the right margin, and pdfjs synthesizes a whitespace filler item
+ * across the gap whose measured width leaves an x-gap of ≈0pt — far under
+ * `COLUMN_GAP_THRESHOLD` — so `columnGapCuts` never computes a cut and the line
+ * re-parses as ONE line, exactly as the glued form does. The extracted text
+ * differs only in the length of a whitespace run.
+ *
+ * That rests on pdfjs behaviour with no pinned contract, and only a genuine RANGE
+ * has the `flush()` date-range exemption to fall back on if it changed. So every
+ * newly-admitted shape is pinned by a round-trip test that actually goes through
+ * pdfjs — `render-roundtrip-education-date-column.repro.test.ts` — which fails
+ * loudly on a pdfjs bump rather than silently splitting the date onto its own
+ * line. Read it before upgrading pdfjs.
+ *
+ * Education only. Experience keeps its `isLoneDateRange` gate (out of scope,
+ * #882): a role header is a one-line "Title · Company, Location" run whose wrap
+ * and date-column reservation were tuned against that predicate.
+ */
+function educationDateDrawsFlushRight(formattedDate: string): boolean {
+  return formattedDate.trim().length > 0;
+}
+
+/**
  * Build an achievement's header string, emphasizing ONLY its `type` label (e.g.
  * "Patent", "Publication") — the rest of the header stays regular weight.
  *
@@ -783,17 +827,11 @@ export function buildAtsResumeModel(
     if (edu.coursework && edu.coursework.length > 0) {
       bullets.push(`Coursework: ${edu.coursework.join(", ")}`);
     }
-    // Degree + major share the primary slot ("Bachelor of Science, Mechanical
+    // Degree + major share the secondary slot ("Bachelor of Science, Mechanical
     // Engineering"); a degree-less program (#238) shows its title (in `field`)
-    // alone. Stacked shape (mirrors the experience fix in #284, and #291): the
-    // degree leads the (bold) header line, and "Institution · Location  Dates"
-    // sits on the sub-line — institution on the sub-line, the date after a
-    // whitespace gap so it becomes the entry's date anchor. Emitting the old
-    // glued "Degree — Institution" one-liner did not round-trip: re-parsing
-    // collapsed degree/field/institution into each other (#291).
-    // Honors and grade ride the degree line, in the order and shape a résumé
-    // writes them — "B.S., Computer Science, cum laude, GPA: 3.72/4.00" (#883).
-    // `edu.gpa` holds only the VALUE ("3.72/4.00", "First Class"), so
+    // alone. Honors and grade ride that same line, in the order and shape a
+    // résumé writes them — "B.S., Computer Science, cum laude, GPA: 3.72/4.00"
+    // (#883). `edu.gpa` holds only the VALUE ("3.72/4.00", "First Class"), so
     // `formatGradeNote` — the extractor's own inverse — decides whether it needs
     // the `GPA: ` label to be recognised on re-parse. They must NOT become
     // bullets: a bullet under an education entry re-parses as coursework.
@@ -805,54 +843,55 @@ export function buildAtsResumeModel(
       .filter(Boolean)
       .join(", ");
     const org = joinHeader([edu.institution, edu.location], " · ");
-    // Spaced " – " range (the experience shape) so the re-parser recognizes and
-    // strips the date anchor off the institution line; `buildEducationDates`'
-    // unspaced en-dash was left glued into `institution` on round-trip (#291).
-    // Fall back to the bare year when only a single year is known.
-    const eduDates =
-      experienceDateRange({
-        start_date: edu.start_date,
-        end_date: edu.end_date,
-      }) ||
-      edu.year ||
-      "";
-    // The graduation date is drawn FLUSH-RIGHT on the org line's baseline
-    // (#425), carried in `subLineDate`/`headerLineDate` rather than glued. A
-    // genuine range AND a bare single graduation year (`allowSingle: true`,
-    // #618) are both right-aligned. For a RANGE the existing `flush()`
-    // date-range exemption (`sections.ts`) keeps the wide same-`y` gap from
-    // splitting it off on re-parse; for a lone YEAR the parser side is
-    // deliberately unchanged — `columnGapCuts` never computes a wide gap on
-    // our own export because pdfjs synthesizes a whitespace item spanning the
-    // flush-right space (measured gap ≈ 0), so the year re-parses onto the
-    // org line without any predicate change. See the `isLoneDateRange`
-    // docblock for the corpus-fixture reasoning behind not extending the
-    // parser side.
-    const rightAlignEduDate = isLoneDateRange(eduDates, { allowSingle: true });
-    // Entry-boundary cue (#302). The re-parser's education segmenter opens a NEW
-    // entry when a line reads as an entry lead — a DEGREE line, an
-    // institution-hint line, or an `isInlineDatedProgram` header (a program/field
-    // title carrying its own inline year, extract/education.ts). A degree-BEARING
-    // entry leads with its degree, so the segmenter always sees the boundary and
-    // two of them round-trip cleanly. A degree-LESS entry's header is a bare
-    // program/field title with NO such cue: the graduation date must stay on that
-    // HEADER line (so it reads as an `isInlineDatedProgram` lead), or two
-    // degree-less entries re-parse as ONE (entry LOSS, 2 → 1). So the date's
-    // flush-right slot follows the org anchor: `headerLineDate` for the
-    // degree-less program (date on the field header), `subLineDate` for a
-    // degreed entry (date on the institution sub-line). Either way the exemption
-    // keeps it merged into that line on re-parse, preserving the #302 cue.
+    // The ONE education date string (#882) — `buildEducationDates` is also what
+    // the edit surface renders, so the card and the file can no longer disagree
+    // about the same entry. It composes the spaced " – " range the re-parser's
+    // `stripInstitutionDate` recognises and peels off the institution line (an
+    // unspaced en-dash was left glued into `institution`, #291), resolves `year`
+    // as the END anchor rather than a whole-string fallback (so a `start_date`
+    // beside a graduation `year` composes a RANGE instead of dropping the year),
+    // and renders "Present" for an in-progress entry.
+    const eduDates = buildEducationDates(edu);
+    // Every education date draws in the flush-right column (#882) — see
+    // `educationDateDrawsFlushRight` for why that decision is the exporter's own
+    // and not `isLoneDateRange`'s. The glued `[text, date].join("  ")` fallback
+    // is gone with it: the predicate is false only when there is no date to draw.
+    const drawsDateColumn = educationDateDrawsFlushRight(eduDates);
+    // WHICH LINE LEADS, and the entry-boundary cue each shape depends on (#302).
+    // The re-parser's education segmenter opens a NEW entry when a line reads as
+    // an entry lead, and it has four cues: a DEGREE line, an institution-HINT
+    // line, an `isInlineDatedProgram` header (a program title carrying its own
+    // inline date), and — added by #882 — an institution-LEAD line (a hint-less
+    // school name carrying its own date, followed by that entry's degree).
+    //
+    //   • DEGREED entry → the INSTITUTION leads the bold header with the date
+    //     flush-right on it, degree + field + honors + GPA on the sub-line. This
+    //     is the conventional shape the widely-copied templates use and the one a
+    //     recruiter scans first; it is also what the #882 segmenter cue exists to
+    //     make safe, because `INSTITUTION_HINTS` cannot see `MIT` or
+    //     `Georgia Tech` and the boundary would otherwise fall on an invisible
+    //     line (proven on `education-hintless-institution-lead.pdf`, not reasoned).
+    //   • DEGREE-LESS program → UNCHANGED: the program title keeps the header and
+    //     keeps the date on it. That date IS the `isInlineDatedProgram` cue, and
+    //     it is the only cue this shape has — move it to the sub-line, or lead
+    //     with the institution instead, and two degree-less entries re-parse as
+    //     ONE (entry LOSS, the #302 failure). The #882 cue cannot stand in: it
+    //     requires a degree on the following line, which this shape has not got.
+    //
     // JSON-Resume `education[]` source (#334): institution←institution,
-    // studyType←degree, area←field. `endDate` carries the graduation date,
-    // falling back to the lead `year` when only a single date was parsed;
-    // `courses` carries the relevant-coursework list (#164). Shared across both
-    // header shapes below.
+    // studyType←degree, area←field, `courses`←coursework (#164). The dates come
+    // from `educationDateAnchors` — the same resolution `eduDates` draws — so the
+    // JSON and the drawn line can never claim different dates; `endDate` is
+    // dropped when the entry is ongoing, as JSON Resume reads an absent endDate
+    // as in-progress. Shared across every header shape below.
+    const dateAnchors = educationDateAnchors(edu);
     const eduFields: AtsEntryFields = {
       organization: edu.institution || undefined,
       studyType: edu.degree || undefined,
       area: edu.field || undefined,
-      startDate: edu.start_date || undefined,
-      endDate: edu.end_date || edu.year || undefined,
+      startDate: dateAnchors.start_date,
+      endDate: dateAnchors.is_current ? undefined : dateAnchors.end_date,
+      isCurrent: dateAnchors.is_current,
       courses:
         edu.coursework && edu.coursework.length > 0 ? edu.coursework : undefined,
       // JSON Resume carries the grade on `education[].score` (#883). Honors has
@@ -860,51 +899,75 @@ export function buildAtsResumeModel(
       // PDF export on the degree line and nowhere else in the JSON.
       score: edu.gpa || undefined,
     };
+    const dateColumn = drawsDateColumn ? { headerLineDate: eduDates } : {};
+    // Can the org line actually LEAD the entry on re-parse? Institution-first
+    // only works if the institution line reads as an entry lead, and
+    // `isEntryHeaderShape` is the parser's own predicate for exactly that
+    // question — the one `isEntryHeaderShape`-shaped line the segmenter will
+    // accept. It refuses a date-only line, prose, and a `GPA:`/`Minor`/`Major`
+    // PROGRAM NOTE, and that last class is not hypothetical: a corpus fixture
+    // parses "Major in Computer Science; Minors in Mathematics and Psychology"
+    // INTO `institution`. Leading with that line exported a document whose
+    // education section the parser could not segment at all — the entry boundary
+    // vanished and the next degree's institution came back as ", GPA: 3.93/4.0".
+    // Reusing the parser's predicate rather than hand-rolling a note check keeps
+    // the exporter's "can this lead" and the segmenter's "is this a lead" the
+    // same question. When it says no, the entry falls back to the pre-#882
+    // degree-led shape, which anchors on `DEGREE_RE` instead — a worse-looking
+    // entry, never a corrupted one.
+    //
+    // `drawsDateColumn` is part of that question, not a separate one. The #882
+    // segmenter cue `isInstitutionLeadAt` recognises a hint-less school ONLY by
+    // the date on its line (`isInlineDatedProgram`), so a DATELESS hint-less
+    // institution satisfies no cue at all: `INSTITUTION_HINTS` misses the name by
+    // construction, and the older hint-less fallback needs a hint match to have
+    // set `hasInstitution` in the first place. Leading with it exports an entry
+    // with no boundary the segmenter can see, and the NEXT entry's institution
+    // gets absorbed into it (`Caltech` came back as ", Physics"). Requiring the
+    // date keeps the exporter's "can this lead" honest about what the cue needs.
+    const orgCanLead = Boolean(org) && drawsDateColumn && isEntryHeaderShape(org);
     if (!edu.degree && edu.field) {
-      // Degree-less program: the field title leads the header, the graduation
-      // date flush-right on that same header line (the #302 inline-dated cue),
-      // institution alone on the sub-line. `degreeField` IS the field here (the
-      // degree half is empty) plus any honors/grade notes, so the two header
-      // shapes compose their notes in one place.
-      if (rightAlignEduDate) {
-        return {
-          headerLine: degreeField,
-          headerLineDate: eduDates,
-          subLine: org || undefined,
-          bullets,
-          fields: eduFields,
-        };
-      }
+      // Degree-less program: the field title leads the header with the date
+      // flush-right on that same line (the #302 inline-dated cue), institution
+      // alone on the sub-line. `degreeField` IS the field here (the degree half
+      // is empty) plus any honors/grade notes, so both shapes compose their notes
+      // in one place.
       return {
-        headerLine: [degreeField, eduDates].filter(Boolean).join("  "),
+        headerLine: degreeField,
+        ...dateColumn,
         subLine: org || undefined,
         bullets,
         fields: eduFields,
       };
     }
-    if (degreeField) {
-      // Degreed entry: degree leads the header, "Institution · Location" on the
-      // sub-line. A range date draws flush-right on the sub-line; a single-token
-      // graduation year — or a range with no institution sub-line to anchor
-      // against — stays glued after a whitespace gap (as #291).
-      const rightAlign = rightAlignEduDate && Boolean(org);
+    if (degreeField && orgCanLead) {
+      // Degreed entry, institution-led (#882).
       return {
-        headerLine: degreeField,
-        subLine: rightAlign
-          ? org
-          : [org, eduDates].filter(Boolean).join("  ") || undefined,
-        subLineDate: rightAlign ? eduDates : undefined,
+        headerLine: org,
+        ...dateColumn,
+        subLine: degreeField,
         bullets,
         fields: eduFields,
       };
     }
-    // Neither degree nor field: the org line leads the header; date flush-right
-    // on it (falling back to glued when the date is a single token / org empty).
-    if (org && rightAlignEduDate) {
-      return { headerLine: org, headerLineDate: eduDates, bullets, fields: eduFields };
+    if (degreeField) {
+      // The institution cannot lead — either there is none, or it is not a line
+      // the re-parser could read as an entry lead (see `orgCanLead`). Fall back
+      // to the pre-#882 degree-led shape, which anchors the boundary on
+      // `DEGREE_RE` instead, with the org and its date on the sub-line.
+      return {
+        headerLine: degreeField,
+        ...(org ? { subLine: org } : {}),
+        ...(org && drawsDateColumn ? { subLineDate: eduDates } : {}),
+        ...(org ? {} : dateColumn),
+        bullets,
+        fields: eduFields,
+      };
     }
+    // Neither degree nor field: the org line is all there is.
     return {
-      headerLine: [org, eduDates].filter(Boolean).join("  ") || "Education",
+      headerLine: org || "Education",
+      ...dateColumn,
       bullets,
       fields: eduFields,
     };

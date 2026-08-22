@@ -11,6 +11,10 @@
  */
 
 import type { ResumeProject, ResumeEducation } from "./types.ts";
+import {
+  formatExperienceDateRange,
+  type ExperienceDateFields,
+} from "../edit/experience-dates.ts";
 
 /** Compact "start–end" / "start–Present" / "start" date string for a project. */
 export function buildProjectDates(project: ResumeProject): string {
@@ -25,15 +29,67 @@ export function buildProjectDates(project: ResumeProject): string {
 }
 
 /**
- * Compact "start–end" / "end" date string for an education entry, falling back
- * to the single `year` when no start/end was parsed (#97).
+ * The date pair an education entry actually DRAWS, resolved from the four fields
+ * it can carry (#882).
+ *
+ * `year` is a BACK-COMPAT MIRROR, not a fourth date: `parseEducationDates` sets
+ * it to the end's year for a range, the lone date's year for a graduation date,
+ * and — for an open-ended range — the START's year. So it is a fallback for the
+ * END anchor and nothing else, and it has to refuse two shapes:
+ *
+ *   • a `year` the start already contains, or an ongoing "Sep 2022 – Present"
+ *     entry whose mirror is "2022" draws "Sep 2022 – 2022";
+ *   • a `year` beside a real `end_date`, which is the same value spelled worse.
+ *
+ * The hole this closes is that the old composition asked
+ * `formatExperienceDateRange(...) || edu.year`, and that formatter returns the
+ * START alone when there is no end — so the `||` short-circuited and `year` was
+ * never consulted. An entry holding `start_date: "Sep 2020"` beside
+ * `year: "2024"` exported and displayed as "Sep 2020": the graduation year
+ * silently gone. It is reachable straight from the edit surface, whose education
+ * card exposes `start_date` and `end_date` as separate cells over a parse that
+ * may have produced only a `year`.
+ */
+export function educationDateAnchors(
+  edu: ResumeEducation,
+): ExperienceDateFields {
+  const start = edu.start_date?.trim() || undefined;
+  const explicitEnd = edu.end_date?.trim() || undefined;
+  const year = edu.year?.trim() || undefined;
+  const end =
+    explicitEnd ?? (year && !(start && start.includes(year)) ? year : undefined);
+  return {
+    ...(start ? { start_date: start } : {}),
+    ...(end ? { end_date: end } : {}),
+    // An END DATE SAYS IT ENDED — the same rule `normalizeExperienceDates`
+    // states for experience, applied here because education has no override
+    // normaliser of its own. `parseEducationDates` never emits both (its
+    // open-ended branch returns no `end_date`), so this only bites on the EDIT
+    // path: a user who types a graduation date onto an in-progress entry would
+    // otherwise watch `formatExperienceDateRange` let the flag win and draw
+    // "Present" over the date they just typed.
+    ...(edu.is_current && !explicitEnd ? { is_current: true } : {}),
+  };
+}
+
+/**
+ * The ONE date string an education entry renders — on the edit surface and in
+ * the exported PDF alike (#882).
+ *
+ * Both surfaces call this, and that is the point: it used to be two formatters
+ * that disagreed. This one joined with a TIGHT en dash ("2018–2022"), the
+ * exporter's `formatExperienceDateRange` with a SPACED one ("2018 – 2022"), so
+ * the same résumé showed one string on screen and drew a different one in the
+ * file. The spaced form wins because it is the round-trip-tested shape: the
+ * re-parser's `stripInstitutionDate` recognises and peels a spaced range off the
+ * institution line, where the tight en-dash was left glued into `institution`
+ * (#291).
+ *
+ * Falls back to the single `year` when no start/end was parsed (#97) and renders
+ * "Present" for an ongoing entry, both via {@link educationDateFields}.
  */
 export function buildEducationDates(edu: ResumeEducation): string {
-  const { start_date, end_date } = edu;
-  if (start_date && end_date) return `${start_date}–${end_date}`;
-  if (end_date) return end_date;
-  if (start_date) return start_date;
-  return edu.year ?? "";
+  return formatExperienceDateRange(educationDateAnchors(edu));
 }
 
 /** The separator an achievement header falls back to between its title and its

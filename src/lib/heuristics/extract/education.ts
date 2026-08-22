@@ -65,16 +65,23 @@ function parseEducationDates(text: string): {
   start_date_precision?: "month" | "year";
   end_date?: string;
   end_date_precision?: "month" | "year";
+  is_current?: boolean;
   year?: string;
 } {
   const { start_date, end_date, is_current } = parseDateRange(text);
 
   // Open-ended range ("Sep 2021 - Present"): keep the start, mark graduation
-  // open. Rare for education but handled for parity with experience.
+  // open. The FLAG is what carries "still enrolled" (#882) — without it the
+  // entry is indistinguishable from a lone start date, so the exporter drew a
+  // bare "Sep 2021" and the résumé silently stopped claiming the degree was in
+  // progress. `year` still mirrors the START's year here (there is no end), which
+  // is why the export's `year`-as-end-anchor fallback has to refuse a `year` the
+  // start already contains.
   if (is_current && start_date) {
     return {
       start_date,
       start_date_precision: inferDatePrecision(start_date),
+      is_current: true,
       year: yearOf(start_date),
     };
   }
@@ -139,6 +146,7 @@ function educationDateFields(
     ...(dates.end_date_precision
       ? { end_date_precision: dates.end_date_precision }
       : {}),
+    ...(dates.is_current ? { is_current: true } : {}),
     ...(dates.year ? { year: dates.year } : {}),
   };
 }
@@ -483,6 +491,67 @@ function isProgramLeadAt(
   if (DEGREE_RE.test(lead) || INSTITUTION_HINTS.test(lead)) return false;
   if (!isInlineDatedProgram(lead)) return false;
   return isInstitutionLine(partner);
+}
+
+/**
+ * Whether the lines at [`i`, `i+1`] form an INSTITUTION-LED entry — a hint-less
+ * school name carrying its own date, immediately followed by that entry's degree
+ * line ("Georgia Tech  May 2024" / "B.S., Computer Science").
+ *
+ * WHY THIS CUE HAS TO EXIST (#882). The segmenter's two reliable entry-lead cues
+ * are `DEGREE_RE` and `INSTITUTION_HINTS`, and the second matches only a school
+ * whose NAME contains `University|College|Institute|School|Academy|Polytechnic`
+ * — not `MIT`, `Caltech`, `Georgia Tech`, or `Wharton`. Under the DEGREE-first
+ * ordering that shortfall was invisible: the degree line led every entry, so the
+ * degree-repeat flush found every boundary and the hint-less school simply rode
+ * along inside its chunk. Under INSTITUTION-first ordering — which is what this
+ * repo's own exporter now emits, and what the widely-copied templates use — the
+ * boundary falls one line EARLIER than the only cue that can see it, and the
+ * chunks shift by a line: measured on `education-hintless-institution-lead.pdf`
+ * before this cue existed, three entries came back as three chunks whose degrees
+ * were paired with the WRONG schools and whose third institution was the tail of
+ * a degree line. A count-only assertion passes on that, which is why the fixture
+ * gate asserts values.
+ *
+ * WHY THE LEAD MUST STAY HINT-LESS. A hint-bearing lead already has its own cue
+ * (`isInst`/`INSTITUTION_HINTS`), so admitting it here too was tried and reverted:
+ * broadening this predicate to any dated, credential-followed header — hinted or
+ * not — fixed a genuine hint-less→hinted boundary miss (below) but also fired
+ * inside `education-lone-year-flush-right.pdf`'s existing multi-entry chunking,
+ * where a hint-bearing institution's own inline-dated line was never meant to be
+ * read by THIS cue and the corpus round-trip regressed. The actual fix for the
+ * hint-less→hinted boundary miss is in the caller (`hasInstitution` tracking
+ * below), not here — keep this predicate narrowly hint-less, exactly as it was
+ * designed.
+ *
+ * WHY NOT A WIDER HINT LIST. A hint word is a property of the school's NAME, and
+ * the space of school names has no closed vocabulary — every added word leaves
+ * the next acronym school out. This cue is about SHAPE instead: a header-shaped,
+ * dated line whose next line is a credential is an entry lead whatever the school
+ * is called.
+ *
+ * The lead reuses {@link isInlineDatedProgram} — the same well-tested guard set
+ * the #219/#238 program-lead cue uses (Title-case/digit lead, a real year token,
+ * not a `GPA:`/`Minor` note, not a `Grad./Expected/Class of` line, not a
+ * date-LED line, not an honors annotation, and real text left once the date words
+ * are stripped). {@link isProgramLeadAt} cannot serve here: its partner test is
+ * {@link isInstitutionLine}, which REJECTS a degree line — a degreed entry is
+ * exactly the shape it was written to exclude.
+ *
+ * The next-line-is-a-degree requirement is the whole conservatism of the cue: a
+ * trailing dated note under a school ("Dean's List 2021") is followed by prose or
+ * by nothing, never by a credential, so it cannot open a phantom entry.
+ */
+function isInstitutionLeadAt(lines: { text: string }[], i: number): boolean {
+  const lead = lines[i]?.text;
+  const next = lines[i + 1]?.text;
+  if (lead === undefined || next === undefined) return false;
+  // A degree or institution-hint lead already HAS a cue; this one is only for the
+  // lines neither of them can see.
+  if (DEGREE_RE.test(lead) || INSTITUTION_HINTS.test(lead)) return false;
+  if (!isRealEntryHeader(lead)) return false;
+  if (!isInlineDatedProgram(lead)) return false;
+  return DEGREE_RE.test(next) && isRealEntryHeader(next);
 }
 
 /** Cut a degree field at the first trailing sub-field NOTE segment — a grade, an
@@ -1095,10 +1164,21 @@ export function extractEducation(
     // past one line; the single-line cap plus the opt-in `isCourseworkContinuation`
     // guard stop the loop from swallowing an acronym school or trailing prose
     // (`GPA: 3.8`) from the next entry into the prior course.
+    //
+    // `isCourseworkContinuation` alone missed a Title-case, hint-less, non-
+    // acronym school ("Georgia Tech") immediately after a coursework bullet —
+    // its guards reject only DEGREE_RE/INSTITUTION_HINTS/date-only lines and an
+    // all-caps acronym token, none of which "Georgia Tech" trips, so it read as
+    // a wrapped continuation and swallowed the next entry's institution whole
+    // (#882 review). `isInstitutionLeadAt` is the segmenter's own predicate for
+    // exactly this shape (a dated header followed by a degree line); decline the
+    // absorb whenever the candidate line satisfies it, regardless of what
+    // `isCourseworkContinuation` says.
     if (
       j < ls.length &&
       !isBulletLine(ls[j]) &&
-      isCourseworkContinuation(ls[j].text)
+      isCourseworkContinuation(ls[j].text) &&
+      !isInstitutionLeadAt(ls, j)
     ) {
       item += ` ${ls[j].text.trim()}`;
       span.push(j);
@@ -1268,6 +1348,14 @@ export function extractEducation(
     // excluded because `hasProgramLead` is not yet set when it arrives.
     const startsAfterProgramLead =
       hasProgramLead && (isDeg || isInst || isProgramLead);
+    // A hint-less INSTITUTION LEAD (#882) — "Georgia Tech  May 2024" followed by
+    // its degree line — closes whatever entry is open. Gated on the current chunk
+    // already holding an entry's worth of content for the same reason every other
+    // cue here is: the FIRST institution lead in the section opens the section's
+    // first entry and must not flush an empty chunk.
+    const isInstLead = isInstitutionLeadAt(lines, li);
+    const startsInstitutionLead =
+      isInstLead && (hasDegree || hasInstitution || hasProgramLead);
     // A degree line that parses to the SAME degree+field as the current chunk's
     // header is that entry's own institution SUB-LINE (the reconstructed
     // "Institution" line polluted with the degree text, #297) — not a second
@@ -1284,7 +1372,8 @@ export function extractEducation(
       ((isDeg && hasDegree) ||
         (isInst && hasInstitution) ||
         startsHintlessEntry ||
-        startsAfterProgramLead)
+        startsAfterProgramLead ||
+        startsInstitutionLead)
     )
       flush();
     current.push(lines[li]);
@@ -1293,7 +1382,18 @@ export function extractEducation(
       currentDegreeKey = degreeFieldKey(text);
       degreeHeaderLi = li;
     }
-    if (isInst) hasInstitution = true;
+    // `isInstLead` (a HINT-LESS institution lead, #882) has to set this flag
+    // too, not just the hint-based `isInst` — otherwise a hint-less school
+    // (`MIT`) followed by a hint-BEARING one (`Stanford University`) has no cue
+    // that can see the second boundary: `isInst && hasInstitution` needs
+    // `hasInstitution` to already be true, but the hint-less predecessor never
+    // set it via `isInst` (it has no hint word to match). Caught in review —
+    // Stanford's line rode into MIT's still-open chunk and the two schools'
+    // degrees swapped on export. Broadening `isInstitutionLeadAt` itself to
+    // admit hinted leads was tried first and reverted (see its docblock) — this
+    // is the narrower, corpus-safe fix: the CUE stays hint-less, only the
+    // TRACKING widens to recognize what it already found.
+    if (isInst || isInstLead) hasInstitution = true;
     // A program lead claims the NEXT line as its institution; mark the chunk a
     // complete program entry only once that institution line has been consumed.
     if (isProgramLead) programLeadInstIdx = li + 1;
