@@ -8,7 +8,7 @@
  * `AddedEntry` carries the type + description split raw (`achievementType` +
  * `title`); `pushAddedEntry` recomposes "type · description" into the pushed
  * achievement's canonical `title` via `joinAchievementTitle` — the same
- * recomposition `applyAchievementOverrides` does for a parsed edit. This proves
+ * recomposition `applyCredentialOverrides` does for a parsed edit. This proves
  * the loop is closed end to end for the ADD path — reconstructed add →
  * applyOverrides → ats-resume-model → PDF → re-parse yields the same
  * type / description / year, and the type is the run the PDF bolds (#452).

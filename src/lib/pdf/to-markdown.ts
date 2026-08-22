@@ -180,7 +180,8 @@ function renderSection(heading: string, blocks: readonly (string | undefined)[])
  * no I/O, no pdf-lib. Drives entirely off {@link projectAtsExport} for the
  * section entries; `summary` is read straight off the model (it has no
  * per-section entry of its own). Section order: Summary, Experience,
- * Projects, Education, Skills, Achievements — an empty section is omitted.
+ * Projects, Education, Skills, Achievements, Certifications — an empty section
+ * is omitted.
  */
 export function toCareerOpsMarkdown(model: AtsResumeModel): string {
   const projection = projectAtsExport(model);
@@ -202,6 +203,10 @@ export function toCareerOpsMarkdown(model: AtsResumeModel): string {
   const education: (string | undefined)[] = [];
   const skills: (string | undefined)[] = [];
   const achievements: (string | undefined)[] = [];
+  // Its own bucket since #884. Certifications reach this projection with
+  // `kind: "certifications"`, which the `default:` arm would silently drop —
+  // the export would lose them entirely, not merely mislabel them.
+  const certifications: (string | undefined)[] = [];
 
   for (const entry of projection.entries) {
     switch (entry.kind) {
@@ -220,6 +225,9 @@ export function toCareerOpsMarkdown(model: AtsResumeModel): string {
       case "achievements":
         achievements.push(renderAchievement(entry));
         break;
+      case "certifications":
+        certifications.push(renderAchievement(entry));
+        break;
       default:
         break;
     }
@@ -235,6 +243,8 @@ export function toCareerOpsMarkdown(model: AtsResumeModel): string {
   if (skillsSection) doc.push(skillsSection);
   const achievementsSection = renderSection("Achievements", achievements);
   if (achievementsSection) doc.push(achievementsSection);
+  const certificationsSection = renderSection("Certifications", certifications);
+  if (certificationsSection) doc.push(certificationsSection);
 
   return doc.join("\n\n") + "\n";
 }

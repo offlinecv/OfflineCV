@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "cascade": {
     "confidence": 0.84,
     "triggers": [],
@@ -19,6 +19,7 @@
       "github_url",
       "given_name",
       "heuristic_achievements",
+      "heuristic_certifications",
       "location",
       "phone",
       "phoneIsValid",
@@ -28,7 +29,8 @@
     "experienceCount": 2,
     "educationCount": 2,
     "projectsCount": 0,
-    "achievementsCount": 25,
+    "achievementsCount": 17,
+    "certificationsCount": 8,
     "rawTextCharCount": 2772,
     "pageCount": 2,
     "linkAnnotationCount": 0,
@@ -126,7 +128,7 @@
     "experienceRegionHasDateRangeLines": true,
     "experienceEntriesFewerThanDateRangeLines": false,
     "achievementsParsedEmpty": false,
-    "achievementsEntriesFewerThanHeaderLines": false,
+    "achievementsEntriesFewerThanHeaderLines": true,
     "fullNameChangedAcrossRoundtrip": false,
     "emailChangedAcrossRoundtrip": false,
     "phoneChangedAcrossRoundtrip": false,

@@ -298,6 +298,53 @@ describe("toJsonResume — never fabricates data", () => {
     expect(doc.awards).toBeUndefined();
     expect("awards" in doc).toBe(false);
   });
+
+  // #884: JSON Resume has a first-class `certificates[]` (name/date/issuer/url).
+  // Flattening certs into `awards[]` threw away both the distinction and the
+  // credential URL, which `awards[]` has no slot for.
+  it("maps certification entries to certificates[], not awards[]", () => {
+    const doc = toJsonResume({
+      contact: { name: "X", links: [] },
+      sections: [
+        {
+          heading: "Achievements",
+          kind: "achievements",
+          entries: [
+            {
+              headerLine: "Patent US1234 · 2021",
+              bullets: [],
+              fields: { title: "Patent US1234", startDate: "2021" },
+            },
+          ],
+        },
+        {
+          heading: "Certifications",
+          kind: "certifications",
+          entries: [
+            {
+              headerLine: "CKA · 2023",
+              bullets: [],
+              fields: {
+                title: "CKA",
+                startDate: "2023",
+                url: "https://verify.example.com/abc",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(doc.awards).toEqual([{ title: "Patent US1234", date: "2021" }]);
+    expect(doc.certificates).toEqual([
+      { name: "CKA", date: "2023", url: "https://verify.example.com/abc" },
+    ]);
+  });
+
+  it("omits certificates entirely when there is no certifications section", () => {
+    const doc = toJsonResume({ contact: { name: "X", links: [] }, sections: [] });
+    expect(doc.certificates).toBeUndefined();
+    expect("certificates" in doc).toBe(false);
+  });
 });
 
 describe("normalizeJsonResumeDate", () => {

@@ -80,6 +80,7 @@ import type {
   AddedEntry,
   AddedEntryField,
   AchievementFieldOverrides,
+  AddableSection,
   AddedBulletRef,
   AddedBullets,
 } from "../../hooks/useEditableParse.ts";
@@ -263,13 +264,20 @@ function NotDetected({ what }: { what: string }) {
  * the SAME "every parsed entry renders, even with zero matched bullets"
  * guarantee, and the trailing "Other" group only holds bullets matched to none.
  *
- * Projects (#95) and achievements (#96) are each mapped onto the
- * `BulletExperience` shape (`name`/`title → title`, `description` verbatim) and
- * concatenated after experiences, so a single `groupBulletsByExperience` call
- * attributes every bullet. Without this, project/achievement bullets — which are
- * not in any `experience.description` — fall into the null "Other" group (the
- * leak #95 fixed). The combined index space is split back out by source length:
- * `[experiences | projects | achievements]`.
+ * Projects (#95), achievements (#96) and certifications (#884) are each mapped
+ * onto the `BulletExperience` shape (`name`/`title → title`, `description`
+ * verbatim) and concatenated after experiences, so a single
+ * `groupBulletsByExperience` call attributes every bullet. Without this,
+ * project/achievement bullets — which are not in any `experience.description` —
+ * fall into the null "Other" group (the leak #95 fixed). The combined index
+ * space is split back out by source length:
+ * `[experiences | projects | achievements | certifications]`.
+ *
+ * Certifications sit LAST on purpose. Nothing in the graded pool comes from a
+ * certifications section (it is not one of `ACCOMPLISHMENT_SECTION_NAMES`), so
+ * the only bullets they can claim are ones a user ADDED to a certification —
+ * and the grouper's first-match tiebreak means a trailing source can never take
+ * a bullet away from an entry that legitimately owns it.
  *
  * We do NOT rely on groupBulletsByExperience's output alone: it omits entries
  * with no matched bullet, which would silently drop those roles/projects/items.
@@ -278,19 +286,23 @@ function buildEntryGroups(
   experiences: BulletExperience[],
   projects: ResumeProject[],
   achievements: HeuristicAchievement[],
+  certifications: HeuristicAchievement[],
   bullets: readonly BulletObservation[],
 ): {
   experienceGroups: BulletGroup[];
   projectGroups: BulletGroup[];
   achievementGroups: BulletGroup[];
+  certificationGroups: BulletGroup[];
   other: BulletGroup | null;
 } {
   const projectsAsExperience = toBulletExperience(projects);
   const achievementsAsExperience = toBulletExperience(achievements);
+  const certificationsAsExperience = toBulletExperience(certifications);
   const combined = [
     ...experiences,
     ...projectsAsExperience,
     ...achievementsAsExperience,
+    ...certificationsAsExperience,
   ];
   const grouped = groupBulletsByExperience([...bullets], combined);
 
@@ -336,8 +348,18 @@ function buildEntryGroups(
     achievementsAsExperience,
     experiences.length + projects.length,
   );
+  const certificationGroups = sliceGroups(
+    certificationsAsExperience,
+    experiences.length + projects.length + achievements.length,
+  );
 
-  return { experienceGroups, projectGroups, achievementGroups, other };
+  return {
+    experienceGroups,
+    projectGroups,
+    achievementGroups,
+    certificationGroups,
+    other,
+  };
 }
 
 /** Map a RoleHeader field name to the flat AddedEntry field it edits. */
@@ -951,6 +973,12 @@ function AchievementHeader({
  * single `year`, not a date range, so the header equivalent of
  * `buildProjectDates` is just the year string.
  *
+ * Certifications render through this SAME component (#884) — they carry the
+ * identical item shape and the identical edit affordances, so the `section` prop
+ * (which names the bucket the override keys address) plus the three labels are
+ * the whole difference. Building a second component for them would be the
+ * parallel surface the reuse gate exists to prevent.
+ *
  * Both branches are editable: a PARSED achievement's type / title / year through
  * `AchievementHeader` (#454, overrides keyed by parsed index and already folded
  * into `achievements` by `applyOverrides`), a user-ADDED one through the flat
@@ -963,7 +991,11 @@ function AchievementHeader({
 // component, so the regression test has to render it. Not part of the surface
 // any other module imports; same arrangement as `ExperienceSection` above.
 export function AchievementsSection({
+  section = "achievements",
   heading,
+  fallbackHeading = "Achievements",
+  emptyHint = "Awards, patents, publications, and honors go here.",
+  entryNoun = "achievement",
   achievements,
   groups,
   addedAchievements,
@@ -977,8 +1009,15 @@ export function AchievementsSection({
   onAddBullet,
   onPruneEmpty,
 }: {
-  /** Verbatim source heading (#285); falls back to "Achievements" when absent. */
+  /** Which bucket these entries live in — the `<section>` half of the
+   *  {@link parsedEntryKey} an override/tombstone is filed under (#884). */
+  section?: AddableSection;
+  /** Verbatim source heading (#285); falls back to {@link fallbackHeading}. */
   heading?: string;
+  fallbackHeading?: string;
+  emptyHint?: string;
+  /** Singular noun for the add/remove affordances ("achievement"). */
+  entryNoun?: string;
   achievements: HeuristicAchievement[];
   /** Pre-built achievement groups, index-aligned with `achievements`. */
   groups: BulletGroup[];
@@ -1010,7 +1049,7 @@ export function AchievementsSection({
       className="flex flex-col gap-3"
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
-      <SectionHeading>{heading ?? "Achievements"}</SectionHeading>
+      <SectionHeading>{heading ?? fallbackHeading}</SectionHeading>
       <div className="flex flex-col gap-4">
         {achievements.map((achievement, i) => {
           const group = groups[i];
@@ -1020,9 +1059,7 @@ export function AchievementsSection({
               : undefined;
           // PARSED index, not the render position — see `parsedIndices`.
           const parsedIdx = parsedIndices[i] ?? i;
-          const entryKey = added
-            ? added.id
-            : parsedEntryKey("achievements", parsedIdx);
+          const entryKey = added ? added.id : parsedEntryKey(section, parsedIdx);
           return (
             // The ENTRY key, not the render position (#856) — see the same note
             // in `ExperienceSection`.
@@ -1056,7 +1093,7 @@ export function AchievementsSection({
                   />
                 )}
                 <RemoveButton
-                  label="Remove achievement"
+                  label={`Remove ${entryNoun}`}
                   onClick={() =>
                     removeEntryWithBullets(entryKey, group?.bullets ?? [], {
                       onRemoveEntry,
@@ -1083,11 +1120,9 @@ export function AchievementsSection({
         })}
       </div>
       {achievements.length === 0 && (
-        <SectionEmptyHint>
-          Awards, patents, publications, and honors go here.
-        </SectionEmptyHint>
+        <SectionEmptyHint>{emptyHint}</SectionEmptyHint>
       )}
-      <AddPill label="Add achievement" onClick={onAddEntry} />
+      <AddPill label={`Add ${entryNoun}`} onClick={onAddEntry} />
     </section>
   );
 }
@@ -1160,6 +1195,10 @@ export function ReconstructedResume({
   const bullets = score.bullets ?? [];
   const projects = parsed.projects ?? [];
   const achievements = parsed.heuristic_achievements ?? [];
+  // Its own bucket since #884 — a credential the résumé listed under its own
+  // heading is not an award, and folding the two lost the heading and merged
+  // two sections into one on export.
+  const certifications = parsed.heuristic_certifications ?? [];
   // "above_experience" promotes the Achievements section between Summary and
   // Experience; "default" (or unset) renders it after Projects.
   const achievementsAbove =
@@ -1179,6 +1218,7 @@ export function ReconstructedResume({
     educationOverrides,
     setEducationField,
     setAchievementField,
+    setCertificationField,
     addEntry,
     removeEntry,
     pruneEmptyAddedEntries,
@@ -1233,10 +1273,14 @@ export function ReconstructedResume({
   const addedAchievements = edit.addedEntries.filter(
     (e) => e.section === "achievements",
   );
+  const addedCertifications = edit.addedEntries.filter(
+    (e) => e.section === "certifications",
+  );
   const originalExpCount = parsed.experience.length - addedExperience.length;
   const originalEduCount = parsed.education.length - addedEducation.length;
   const originalProjCount = projects.length - addedProjects.length;
   const originalAchCount = achievements.length - addedAchievements.length;
+  const originalCertCount = certifications.length - addedCertifications.length;
 
   // Render position → PARSED index, per section (#856). `applyOverrides` filters
   // a deleted parsed entry out of these arrays, so from the first deletion on, a
@@ -1264,6 +1308,11 @@ export function ReconstructedResume({
     removedEntries,
     originalAchCount,
   );
+  const certParsedIndices = survivingParsedIndices(
+    "certifications",
+    removedEntries,
+    originalCertCount,
+  );
 
   // The RESOLVED experience entry behind a parsed index — what the #672 date
   // rule compares a commit against. It sits at the entry's RENDER position, so
@@ -1275,12 +1324,23 @@ export function ReconstructedResume({
     return pos < 0 ? undefined : parsed.experience[pos];
   };
 
-  // One grouping pass over experiences + projects + achievements so their
-  // bullets are attributed to their own entry and never leak into the experience
-  // "Other" group (#95, #96). The "Other" group (bullets matched to none) renders
+  // One grouping pass over experiences + projects + achievements +
+  // certifications so their bullets are attributed to their own entry and never
+  // leak into the experience "Other" group (#95, #96, #884). The "Other" group (bullets matched to none) renders
   // at the tail of the Experience section, as before.
-  const { experienceGroups, projectGroups, achievementGroups, other } =
-    buildEntryGroups(parsed.experience, projects, achievements, bullets);
+  const {
+    experienceGroups,
+    projectGroups,
+    achievementGroups,
+    certificationGroups,
+    other,
+  } = buildEntryGroups(
+    parsed.experience,
+    projects,
+    achievements,
+    certifications,
+    bullets,
+  );
   const experienceRenderGroups = other
     ? [...experienceGroups, other]
     : experienceGroups;
@@ -1309,6 +1369,7 @@ export function ReconstructedResume({
   // Skills, which also render an add affordance unconditionally.
   const achievementsSection = (
     <AchievementsSection
+      key="achievements"
       heading={display.sectionHeadings?.get("achievements")}
       achievements={achievements}
       groups={achievementGroups}
@@ -1324,6 +1385,37 @@ export function ReconstructedResume({
       onAddBullet={addBullet}
     />
   );
+
+  // Drawn immediately beside the achievements block, in the order the source
+  // document opened the two (#884) — the same adjacency and the same signal the
+  // exported PDF uses, so the screen and the download agree on section order.
+  const certificationsSection = (
+    <AchievementsSection
+      key="certifications"
+      section="certifications"
+      heading={display.sectionHeadings?.get("certifications")}
+      fallbackHeading="Certifications"
+      emptyHint="Licences and issued credentials go here."
+      entryNoun="certification"
+      achievements={certifications}
+      groups={certificationGroups}
+      addedAchievements={addedCertifications}
+      originalCount={originalCertCount}
+      parsedIndices={certParsedIndices}
+      onAddEntry={() => addEntry("certifications")}
+      onPruneEmpty={() => pruneEmptyAddedEntries("certifications")}
+      onRemoveEntry={removeEntry}
+      onRemoveBullet={removeBullet}
+      onEntryField={setEntryField}
+      onAchievementField={setCertificationField}
+      onAddBullet={addBullet}
+    />
+  );
+
+  const credentialSections =
+    parsed.certifications_placement === "above_achievements"
+      ? [certificationsSection, achievementsSection]
+      : [achievementsSection, certificationsSection];
 
   return (
     <section
@@ -1400,7 +1492,7 @@ export function ReconstructedResume({
         summary={parsed.summary}
         onSummaryChange={setSummaryField}
       />
-      {achievementsAbove && achievementsSection}
+      {achievementsAbove && credentialSections}
       <ExperienceSection
         heading={display.sectionHeadings?.get("experience")}
         sectionLabels={parsed.experience.map((e) => e.section_label)}
@@ -1452,7 +1544,7 @@ export function ReconstructedResume({
         onDescriptionField={setDescriptionField}
         onAddBullet={addBullet}
       />
-      {!achievementsAbove && achievementsSection}
+      {!achievementsAbove && credentialSections}
       <EducationSection
         heading={display.sectionHeadings?.get("education")}
         education={parsed.education}

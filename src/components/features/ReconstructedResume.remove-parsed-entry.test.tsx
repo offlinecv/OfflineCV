@@ -242,3 +242,70 @@ describe("index resolution after a deletion (#856)", () => {
     );
   });
 });
+
+/**
+ * #884 — the same component, instantiated for the CERTIFICATIONS bucket.
+ *
+ * Certifications render through `AchievementsSection` rather than a second
+ * copy of it (the reuse gate), which makes the `section` prop the only thing
+ * standing between a certification's edits and the achievements bucket's index
+ * space. It is exactly the #856 failure mode one level up: a key that names the
+ * wrong SECTION rebinds an edit to a different list entirely, silently and
+ * plausibly. So the key is asserted here, at the boundary, for the same reason
+ * the parsed index is above.
+ */
+describe("the same section rendered for certifications (#884)", () => {
+  const CERTS: readonly HeuristicAchievement[] = [
+    { type: "AWS", title: "Solutions Architect", year: "2022" },
+    { title: "CKA", year: "2023" },
+  ];
+
+  function renderCerts(): ReturnType<typeof vi.fn> {
+    const onRemoveEntry = vi.fn();
+    act(() =>
+      root.render(
+        createElement(AchievementsSection, {
+          section: "certifications",
+          fallbackHeading: "Certifications",
+          entryNoun: "certification",
+          achievements: [...CERTS],
+          groups: [],
+          addedAchievements: [],
+          originalCount: CERTS.length,
+          parsedIndices: survivingParsedIndices(
+            "certifications",
+            new Set(),
+            CERTS.length,
+          ),
+          onAddEntry: () => {},
+          onEntryField: () => {},
+          onAddBullet: () => {},
+          onPruneEmpty: () => {},
+          onRemoveEntry,
+          onRemoveBullet: vi.fn(() => true),
+          onAchievementField: vi.fn(),
+        }),
+      ),
+    );
+    return onRemoveEntry;
+  }
+
+  it("deletes by a certifications-scoped key, never an achievements one", () => {
+    const onRemoveEntry = renderCerts();
+    const buttons = [
+      ...container.querySelectorAll<HTMLElement>(
+        '[aria-label="Remove certification"]',
+      ),
+    ];
+    expect(buttons).toHaveLength(2);
+    act(() => buttons[1].click());
+    expect(onRemoveEntry).toHaveBeenCalledExactlyOnceWith("certifications:1");
+  });
+
+  it("renders its own heading and add affordance", () => {
+    renderCerts();
+    expect(container.textContent).toContain("Certifications");
+    expect(container.textContent).not.toContain("Achievements");
+    expect(container.textContent).toContain("Add certification");
+  });
+});

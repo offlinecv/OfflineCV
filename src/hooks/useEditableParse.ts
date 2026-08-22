@@ -245,6 +245,10 @@ export interface EditSnapshot {
   educationOverrides: Record<number, EducationFieldOverrides>;
   /** Optional: drafts persisted before #454 carry no such key. */
   achievementOverrides?: Record<number, AchievementFieldOverrides>;
+  /** Certification field overrides (#884), keyed by `heuristic_certifications`
+   *  index. Same value shape as `achievementOverrides`, its own index space.
+   *  Optional: drafts persisted before #884 carry no such key. */
+  certificationOverrides?: Record<number, AchievementFieldOverrides>;
   skillsOverride: SkillsOverride;
   /** Optional: drafts persisted before #625 carry no such key. `""` is a real
    *  value (an authoritative clear), so absent — not empty — means "no
@@ -281,7 +285,8 @@ export type AddableSection =
   | "experience"
   | "education"
   | "projects"
-  | "achievements";
+  | "achievements"
+  | "certifications";
 
 /**
  * A user-added entry appended to a section. Header fields share one flat shape
@@ -292,6 +297,8 @@ export type AddableSection =
  *   - achievements: achievementType, title, year — mapped straight onto the
  *                   achievement's real `type` / `title` / `year` fields, matching
  *                   the parsed-achievement edit model (#455, #456)
+ *   - certifications: the same three fields, into the separate
+ *                   `heuristic_certifications` bucket (#884)
  * `id` is a stable per-session key (`"added:<n>"`) so the entry's bullets (in
  * `addedBullets`) and inline header edits track it without relying on array
  * position.
@@ -667,6 +674,18 @@ export interface EditableParse {
     field: keyof AchievementFieldOverrides,
     value: string | undefined,
   ) => void;
+  /** Override map for parsed certifications, keyed by
+   *  `heuristic_certifications` array index (#884). A separate map from
+   *  `achievementOverrides` because the two buckets are separate arrays — one
+   *  index-keyed map cannot address both. */
+  certificationOverrides: Record<number, AchievementFieldOverrides>;
+  /** Update one field on a specific parsed certification by its array index.
+   *  Same contract as {@link setAchievementField}. */
+  setCertificationField: (
+    index: number,
+    field: keyof AchievementFieldOverrides,
+    value: string | undefined,
+  ) => void;
   /** User-added entries across all sections, in insertion order. */
   addedEntries: AddedEntry[];
   /** Append a new (empty-header) entry to a section. Returns its stable id. */
@@ -941,6 +960,9 @@ export function useEditableParse(): EditableParse {
     Record<number, EducationFieldOverrides>
   >({});
   const [achievementOverrides, setAchievementOverrides] = useState<
+    Record<number, AchievementFieldOverrides>
+  >({});
+  const [certificationOverrides, setCertificationOverrides] = useState<
     Record<number, AchievementFieldOverrides>
   >({});
   const [skillsOverride, setSkillsOverride] = useState<SkillsOverride>(
@@ -1237,6 +1259,22 @@ export function useEditableParse(): EditableParse {
       value: string | undefined,
     ) => {
       setAchievementOverrides((prev) => {
+        const entry = { ...prev[index] };
+        if (value === undefined) delete entry[field];
+        else entry[field] = value;
+        return { ...prev, [index]: entry };
+      });
+    },
+    [],
+  );
+
+  const setCertificationField = useCallback(
+    (
+      index: number,
+      field: keyof AchievementFieldOverrides,
+      value: string | undefined,
+    ) => {
+      setCertificationOverrides((prev) => {
         const entry = { ...prev[index] };
         if (value === undefined) delete entry[field];
         else entry[field] = value;
@@ -1718,6 +1756,7 @@ export function useEditableParse(): EditableParse {
     setRemovedEntries(new Set());
     setEducationOverrides({});
     setAchievementOverrides({});
+    setCertificationOverrides({});
     setSkillsOverride(EMPTY_SKILLS_OVERRIDE);
     setSummaryOverride(undefined);
     setAddedEntries([]);
@@ -1739,6 +1778,7 @@ export function useEditableParse(): EditableParse {
       removedBullets: [...removedBullets],
       educationOverrides,
       achievementOverrides,
+      certificationOverrides,
       skillsOverride,
       summaryOverride,
       addedEntries,
@@ -1754,6 +1794,7 @@ export function useEditableParse(): EditableParse {
       removedBullets,
       educationOverrides,
       achievementOverrides,
+      certificationOverrides,
       skillsOverride,
       summaryOverride,
       addedEntries,
@@ -1824,8 +1865,8 @@ export function useEditableParse(): EditableParse {
         );
       });
 
-      // Each achievement override key is a real field (#456), so replaying them
-      // one by one rebuilds the map exactly.
+      // Each credential override key is a real field (#456), so replaying them
+      // one by one rebuilds each map exactly.
       Object.entries(snap.achievementOverrides ?? {}).forEach(
         ([index, fields]) => {
           (
@@ -1835,6 +1876,18 @@ export function useEditableParse(): EditableParse {
             ][]
           ).forEach(([field, value]) =>
             setAchievementField(Number(index), field, value),
+          );
+        },
+      );
+      Object.entries(snap.certificationOverrides ?? {}).forEach(
+        ([index, fields]) => {
+          (
+            Object.entries(fields) as [
+              keyof AchievementFieldOverrides,
+              string,
+            ][]
+          ).forEach(([field, value]) =>
+            setCertificationField(Number(index), field, value),
           );
         },
       );
@@ -1906,6 +1959,7 @@ export function useEditableParse(): EditableParse {
       removeBullet,
       setEducationField,
       setAchievementField,
+      setCertificationField,
       addSkill,
       removeSkill,
       restoreSkillsGrouping,
@@ -1944,6 +1998,12 @@ export function useEditableParse(): EditableParse {
       )
     )
       return true;
+    if (
+      Object.values(certificationOverrides).some(
+        (entry) => Object.keys(entry).length > 0,
+      )
+    )
+      return true;
     return Object.values(experienceOverrides).some(
       (entry) => Object.keys(entry).length > 0,
     );
@@ -1956,6 +2016,7 @@ export function useEditableParse(): EditableParse {
     removedEntries,
     educationOverrides,
     achievementOverrides,
+    certificationOverrides,
     skillsOverride,
     summaryOverride,
     addedEntries,
@@ -1979,6 +2040,8 @@ export function useEditableParse(): EditableParse {
     setEducationField,
     achievementOverrides,
     setAchievementField,
+    certificationOverrides,
+    setCertificationField,
     addedEntries,
     addEntry,
     removeEntry,

@@ -86,7 +86,12 @@ const UPDATE = process.env.UPDATE_FIXTURES === "1";
  *    (`fixture-match.ts`) can match a real résumé's defects against WITHOUT
  *    re-parsing 45 PDFs. Both blocks are PII-free BY TYPE — numbers, booleans,
  *    fixed enums, no free-form string slot — so the snapshots stay "lossy by
- *    design, never field values". */
+ *    design, never field values".
+ *  - v6 (#884): added `cascade.certificationsCount`; a Certifications section is
+ *    no longer folded into the achievements bucket, so `achievementsCount` falls
+ *    on every fixture that has one and `fieldsPopulated` may now include
+ *    `heuristic_certifications`. The new count is what makes "the certs moved"
+ *    distinguishable from "the certs were lost" in a snapshot diff. */
 const SNAPSHOT_SCHEMA_VERSION = CORPUS_SNAPSHOT_SCHEMA_VERSION;
 
 /**
@@ -287,6 +292,8 @@ describe("corpus snapshots", () => {
               projectsCount: cascade.canonical.fields.projects?.length ?? 0,
               achievementsCount:
                 cascade.canonical.fields.heuristic_achievements?.length ?? 0,
+              certificationsCount:
+                cascade.canonical.fields.heuristic_certifications?.length ?? 0,
               rawTextCharCount: cascade.rawText.length,
               pageCount: cascade.diagnostics.pages,
               linkAnnotationCount: cascade.linkAnnotations.length,

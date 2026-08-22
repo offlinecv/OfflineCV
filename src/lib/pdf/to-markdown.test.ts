@@ -189,6 +189,31 @@ describe("toCareerOpsMarkdown — achievements", () => {
     const md = toCareerOpsMarkdown(FULL_MODEL);
     expect(md).toContain("## Achievements\n\n- Employee of the year");
   });
+
+  // #884: certifications reach this adapter as their own section kind. Without
+  // an arm of their own they fall through `default:` and are DROPPED from the
+  // Markdown export entirely — lost, not merely mislabelled.
+  it("gives certifications their own ## Certifications section", () => {
+    const md = toCareerOpsMarkdown({
+      ...FULL_MODEL,
+      sections: [
+        ...FULL_MODEL.sections,
+        {
+          heading: "Certifications",
+          kind: "certifications",
+          entries: [
+            {
+              headerLine: "CKA · 2023",
+              bullets: [],
+              fields: { title: "CKA" },
+            },
+          ],
+        },
+      ],
+    });
+    expect(md).toContain("## Achievements\n\n- Employee of the year");
+    expect(md).toContain("## Certifications\n\n- CKA");
+  });
 });
 
 describe("toCareerOpsMarkdown — empty sections omitted", () => {

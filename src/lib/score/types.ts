@@ -260,6 +260,12 @@ export interface Achievement {
 
 export type AchievementsPlacement = "default" | "above_experience";
 
+/** Where the Certifications section sits RELATIVE TO Achievements (#884). The
+ *  two are adjacent blocks in the export, and `sectionPrecedes` reads which one
+ *  the source document opened first; "above_achievements" is that inversion.
+ *  Absent (the default) keeps the achievements-first order. */
+export type CertificationsPlacement = "default" | "above_achievements";
+
 // ── Heuristic achievements ──────────────────────────────────────────────────
 // The deterministic parser cannot CLASSIFY an achievement into the closed
 // `AchievementType` enum (patent vs. award vs. talk) — that requires the LLM
@@ -351,7 +357,6 @@ export interface ResumeData {
   experience: ResumeExperience[];
   education: ResumeEducation[];
   projects?: ResumeProject[];
-  certifications?: string[];
   achievements?: Achievement[];
   /** Heuristic-path achievements (#96): honest, structure-free items the
    *  deterministic parser can assert without classifying a type. The LLM path
@@ -360,6 +365,21 @@ export interface ResumeData {
   /** "default" renders the Achievements section between Education and Skills;
    *  "above_experience" promotes it between Summary and Experience. */
   achievements_placement?: AchievementsPlacement;
+  /** Heuristic-path certifications (#884). Same item shape as
+   *  `heuristic_achievements` — a credential is title-led, dated, sometimes
+   *  linked — but its OWN bucket: an issued, verifiable credential is a
+   *  different claim from a one-off accomplishment, and the source document
+   *  said so by writing two sections. Folding them (as #234 did) is not
+   *  recoverable downstream, so the two stay apart from parse to export.
+   *
+   *  This replaces the never-written `certifications?: string[]` the model
+   *  carried before #884. */
+  heuristic_certifications?: HeuristicAchievement[];
+  /** Document order of the two accomplishment sections (#884). Set only when
+   *  the résumé opened Certifications BEFORE Achievements; absent means the
+   *  achievements-first default, so a résumé without the inversion parses
+   *  byte-identically to before. */
+  certifications_placement?: CertificationsPlacement;
 }
 
 /**
