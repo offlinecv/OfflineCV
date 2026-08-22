@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "cascade": {
     "confidence": 0.9,
     "triggers": [],
@@ -20,6 +20,7 @@
       "given_name",
       "headline",
       "heuristic_achievements",
+      "heuristic_certifications",
       "linkedin_url",
       "location",
       "phone",
@@ -31,7 +32,8 @@
     "experienceCount": 8,
     "educationCount": 1,
     "projectsCount": 0,
-    "achievementsCount": 24,
+    "achievementsCount": 15,
+    "certificationsCount": 9,
     "rawTextCharCount": 9512,
     "pageCount": 3,
     "linkAnnotationCount": 5,
@@ -128,7 +130,7 @@
     "experienceRegionHasDateRangeLines": true,
     "experienceEntriesFewerThanDateRangeLines": false,
     "achievementsParsedEmpty": false,
-    "achievementsEntriesFewerThanHeaderLines": false,
+    "achievementsEntriesFewerThanHeaderLines": true,
     "fullNameChangedAcrossRoundtrip": false,
     "emailChangedAcrossRoundtrip": false,
     "phoneChangedAcrossRoundtrip": false,

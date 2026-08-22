@@ -729,3 +729,104 @@ describe("buildAtsResumeModel", () => {
     expect(edu.entries[0].fields?.score).toBeUndefined();
   });
 });
+
+describe("buildAtsResumeModel — certifications as their own section (#884)", () => {
+  it("draws a certifications-only résumé under its own verbatim heading", () => {
+    // The regression this issue names: `sectionHeadings` has always carried the
+    // source's "Certifications" under the `certifications` key, and the exporter
+    // read only the `achievements` one — so a résumé whose ONLY such section is
+    // Certifications shipped a PDF headed "Achievements" (#285 violation).
+    const result = makeResult(
+      {
+        heuristic_achievements: [],
+        heuristic_certifications: [
+          { title: "AWS Certified Solutions Architect", year: "2022" },
+        ],
+      },
+      { certifications: "CERTIFICATIONS" },
+    );
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const headings = model.sections.map((s) => s.heading);
+    expect(headings).toContain("CERTIFICATIONS");
+    expect(headings).not.toContain("Achievements");
+    const certs = model.sections.find((s) => s.kind === "certifications")!;
+    expect(certs.entries.map((e) => e.headerLine)).toEqual([
+      "AWS Certified Solutions Architect · 2022",
+    ]);
+  });
+
+  it("exports TWO sections, each under its own heading, when both are present", () => {
+    const result = makeResult(
+      {
+        heuristic_achievements: [{ title: "Best Paper Award", year: "2021" }],
+        heuristic_certifications: [{ title: "CKA", year: "2023" }],
+      },
+      { achievements: "HONORS & AWARDS", certifications: "CERTIFICATIONS" },
+    );
+    const model = buildAtsResumeModel(result, makeScore([]));
+    const headings = model.sections.map((s) => s.heading);
+    expect(headings).toContain("HONORS & AWARDS");
+    expect(headings).toContain("CERTIFICATIONS");
+    // Default document order: achievements first, certifications immediately
+    // after — the two are adjacent blocks, not one merged one.
+    expect(headings.indexOf("CERTIFICATIONS")).toBe(
+      headings.indexOf("HONORS & AWARDS") + 1,
+    );
+  });
+
+  it("puts Certifications first when the résumé wrote it first", () => {
+    const result = makeResult(
+      {
+        heuristic_achievements: [{ title: "Best Paper Award", year: "2021" }],
+        heuristic_certifications: [{ title: "CKA", year: "2023" }],
+        certifications_placement: "above_achievements",
+      },
+      { achievements: "AWARDS", certifications: "CERTIFICATIONS" },
+    );
+    const headings = buildAtsResumeModel(result, makeScore([])).sections.map(
+      (s) => s.heading,
+    );
+    expect(headings.indexOf("CERTIFICATIONS")).toBe(
+      headings.indexOf("AWARDS") - 1,
+    );
+  });
+
+  it("leaves an achievements-only résumé exactly as it was", () => {
+    // The no-drift half of the change: with no certifications bucket, the model
+    // must be indistinguishable from the pre-#884 one.
+    const result = makeResult({
+      heuristic_achievements: [{ title: "Best Paper Award", year: "2021" }],
+    });
+    const model = buildAtsResumeModel(result, makeScore([]));
+    expect(model.sections.filter((s) => s.kind === "certifications")).toEqual(
+      [],
+    );
+    expect(model.sections.map((s) => s.heading)).toEqual([
+      "Experience",
+      "Achievements",
+      "Education",
+      "Skills",
+    ]);
+  });
+
+  it("carries a credential URL, which the awards mapping has no slot for", () => {
+    const result = makeResult({
+      heuristic_achievements: [],
+      heuristic_certifications: [
+        {
+          type: "AWS",
+          title: "Solutions Architect – Professional",
+          year: "2022",
+          url: "https://verify.example.com/abc",
+        },
+      ],
+    });
+    const entry = buildAtsResumeModel(result, makeScore([])).sections.find(
+      (s) => s.kind === "certifications",
+    )!.entries[0];
+    expect(entry.fields?.url).toBe("https://verify.example.com/abc");
+    // `title` recomposes the label back onto the name (#456).
+    expect(entry.fields?.title).toBe("AWS · Solutions Architect – Professional");
+    expect(entry.fields?.startDate).toBe("2022");
+  });
+});

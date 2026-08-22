@@ -1490,6 +1490,98 @@ describe("applyOverrides — achievements", () => {
   });
 });
 
+// ── Certifications (#884) ────────────────────────────────────────────────────
+// Certifications carry the identical item shape and the identical override
+// shape as achievements, into a SEPARATE bucket. What these pin is the thing
+// that only a separate bucket can get wrong: that the two index spaces stay
+// apart, so an `achievements:0` edit never lands on a certification.
+
+/** A parse carrying one achievement AND one certification, so an override
+ *  keyed `0` is ambiguous unless the buckets are genuinely separate. */
+function credentialParsed(): HeuristicParsedResume {
+  return {
+    ...baseParsed(),
+    heuristic_achievements: [{ title: "Best Paper Award", year: "2021" }],
+    heuristic_certifications: [{ type: "AWS", title: "SAA", year: "2022" }],
+  };
+}
+
+/** applyOverrides with only the certification overrides (+ optional added
+ *  entries) set — the 19th positional arg. */
+function applyCerts(
+  parsed: HeuristicParsedResume,
+  certifications: Parameters<typeof applyOverrides>[18],
+  addedEntries: Parameters<typeof applyOverrides>[9] = [],
+) {
+  return applyOverrides(
+    parsed,
+    "raw",
+    makeSections(),
+    {},
+    {},
+    {},
+    [],
+    {},
+    undefined,
+    addedEntries,
+    {},
+    undefined,
+    undefined,
+    undefined,
+    {},
+    {},
+    undefined,
+    undefined,
+    certifications,
+  );
+}
+
+describe("applyOverrides — certifications (#884)", () => {
+  it("writes index 0 onto the certification, never onto the achievement", () => {
+    const { fields: out } = applyCerts(credentialParsed(), {
+      0: { title: "Solutions Architect – Professional" },
+    });
+    expect(out.heuristic_certifications?.[0]).toMatchObject({
+      type: "AWS",
+      title: "Solutions Architect – Professional",
+    });
+    expect(out.heuristic_achievements?.[0].title).toBe("Best Paper Award");
+  });
+
+  it("leaves the certifications bucket alone when only achievements are edited", () => {
+    const { fields: out } = applyAch(credentialParsed(), {
+      0: { title: "Runner-up" },
+    });
+    expect(out.heuristic_achievements?.[0].title).toBe("Runner-up");
+    expect(out.heuristic_certifications?.[0].title).toBe("SAA");
+  });
+
+  it("appends a user-added certification to the certifications bucket", () => {
+    const { fields: out } = applyCerts(credentialParsed(), {}, [
+      {
+        id: "added:1",
+        section: "certifications",
+        achievementType: "CNCF",
+        title: "CKA",
+        year: "2023",
+      },
+    ]);
+    expect(out.heuristic_certifications?.map((c) => c.title)).toEqual([
+      "SAA",
+      "CKA",
+    ]);
+    expect(out.heuristic_achievements?.map((a) => a.title)).toEqual([
+      "Best Paper Award",
+    ]);
+  });
+
+  it("does not mutate the input parse", () => {
+    const parsed = credentialParsed();
+    applyCerts(parsed, { 0: { title: "edited" } });
+    expect(parsed.heuristic_certifications?.[0].title).toBe("SAA");
+  });
+});
+
 // ── Summary override (#625) ───────────────────────────────────────────────────
 
 /** applyOverrides with ONLY the summary override set — the 17th positional

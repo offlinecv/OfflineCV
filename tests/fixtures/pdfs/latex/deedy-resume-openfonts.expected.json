@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "cascade": {
     "confidence": 0.64,
     "triggers": [
@@ -32,6 +32,7 @@
     "educationCount": 3,
     "projectsCount": 0,
     "achievementsCount": 7,
+    "certificationsCount": 0,
     "rawTextCharCount": 3304,
     "pageCount": 1,
     "linkAnnotationCount": 9,

@@ -203,6 +203,45 @@ describe("skills categories round-trip (#473)", () => {
 });
 
 /**
+ * Certifications round-trip (#884). Same reason the skills-category hop above
+ * has its own block: the whole-corpus ratchet pins contact / experience /
+ * education / skills / summary, and the credential buckets are in none of those
+ * categories — so nothing there would notice certifications coming back in the
+ * WRONG bucket.
+ *
+ * What makes the hop non-trivial is that the bucket survives only because the
+ * exporter draws the source's VERBATIM heading. Under the pre-#884 fold this
+ * fixture exported the literal word "Achievements" over its certifications, and
+ * a re-parse of that PDF put them in the achievements bucket — the parse was
+ * lossy in one direction and self-consistently wrong in the other.
+ *
+ * PII-free: the fixture is a synthetic persona; only counts are asserted.
+ */
+describe("certifications round-trip (#884)", () => {
+  const CERTIFICATIONS_FIXTURE = join(
+    FIXTURE_ROOT,
+    "google-docs",
+    "google-docs-skia-proxy-certifications.pdf",
+  );
+
+  it("re-parses an exported Certifications section back into its own bucket", async () => {
+    const before = await runCascade(
+      new Uint8Array(readFileSync(CERTIFICATIONS_FIXTURE)),
+    );
+    const certCount = before.canonical.fields.heuristic_certifications?.length;
+    expect(certCount).toBeGreaterThan(0);
+    expect(before.canonical.fields.heuristic_achievements).toBeUndefined();
+
+    const { after, renderError } = await runRoundtripHop(before);
+    expect(renderError).toBeUndefined();
+    expect(after?.canonical.fields.heuristic_certifications?.length).toBe(
+      certCount,
+    );
+    expect(after?.canonical.fields.heuristic_achievements).toBeUndefined();
+  });
+});
+
+/**
  * Dev triage harness — inert in CI, runs ONLY when `RL_RT_PDF=<path>` is set:
  *
  *   RL_RT_PDF=/path/to/real-resume.pdf [RL_RT_ROUNDS=2] npx vitest run \

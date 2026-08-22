@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "cascade": {
     "confidence": 0.84,
     "triggers": [],
@@ -16,7 +16,7 @@
       "family_name",
       "full_name",
       "given_name",
-      "heuristic_achievements",
+      "heuristic_certifications",
       "location",
       "phone",
       "phoneIsValid"
@@ -25,7 +25,8 @@
     "experienceCount": 1,
     "educationCount": 2,
     "projectsCount": 0,
-    "achievementsCount": 3,
+    "achievementsCount": 0,
+    "certificationsCount": 3,
     "rawTextCharCount": 629,
     "pageCount": 1,
     "linkAnnotationCount": 0,
@@ -115,7 +116,7 @@
     "educationEntriesFewerThanDegreeTokens": false,
     "experienceRegionHasDateRangeLines": true,
     "experienceEntriesFewerThanDateRangeLines": false,
-    "achievementsParsedEmpty": false,
+    "achievementsParsedEmpty": true,
     "achievementsEntriesFewerThanHeaderLines": false,
     "fullNameChangedAcrossRoundtrip": false,
     "emailChangedAcrossRoundtrip": false,

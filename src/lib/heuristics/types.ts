@@ -188,7 +188,8 @@ export type FieldConfidence = Partial<
     | "experience"
     | "education"
     | "projects"
-    | "achievements",
+    | "achievements"
+    | "certifications",
     number
   >
 >;

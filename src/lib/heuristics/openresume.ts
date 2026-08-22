@@ -307,9 +307,13 @@ function harvestInlineLabeledSkills(sections: PdfSection[]): string[] {
 /**
  * True when section `a` opens before section `b` in document order — earlier
  * page first, then higher on the page (`y` increases downward in the line
- * geometry). A missing section never precedes a present one. Used to fold the
- * achievements + certifications buckets in the order they actually appear,
- * since `findSection` locates each independently of page position.
+ * geometry). A missing section never precedes a present one.
+ *
+ * `findSection` locates each section independently of page position, so this is
+ * the only signal that survives to say which of Certifications / Achievements
+ * the résumé opened first. Since #884 it decides SECTION ORDER (the two are
+ * separate blocks the exporter draws adjacently) rather than the order two
+ * buckets were concatenated in.
  */
 function sectionPrecedes(
   a: PdfSection | undefined,
@@ -320,26 +324,6 @@ function sectionPrecedes(
   if (!la) return false;
   if (!lb) return true;
   return la.page !== lb.page ? la.page < lb.page : la.y < lb.y;
-}
-
-/**
- * Confidence for the merged achievements + certifications bucket. Each
- * extractor returns the unweighted mean score over its own entries, so the
- * combined confidence is the count-weighted mean of the two — `Math.max` would
- * overclaim (a perfect 2-entry cert list would drag a weak 5-entry award list
- * up to 1.0). Falls back to 0 when both buckets are empty.
- */
-function mergedConfidence(
-  achievements: { value: unknown[]; confidence: number },
-  certifications: { value: unknown[]; confidence: number },
-): number {
-  const total = achievements.value.length + certifications.value.length;
-  if (total === 0) return 0;
-  return (
-    (achievements.confidence * achievements.value.length +
-      certifications.confidence * certifications.value.length) /
-    total
-  );
 }
 
 function buildHeuristicResult(
@@ -409,16 +393,15 @@ function buildHeuristicResult(
   const skillsSection = findSection(ownedSections, "skills");
   const projectsSection = findSection(ownedSections, "projects");
   const achievementsSection = findSection(ownedSections, "achievements");
-  // A recognized Certifications section reaches a `certifications` PdfSection but
-  // had no extractor wired, so its content sat in rawText and never surfaced in
-  // `parsed` (#225). Certifications are name-led, often single-line credential
-  // items — structurally the same shape as achievements — so we route them
-  // through the same extractor and fold them into `heuristic_achievements`.
-  // That bucket already renders and pools into the scorer, so certs surface in
-  // display and scoring with no new parallel surface (the reuse gate). The two
-  // buckets are concatenated in document order — `findSection` locates each
-  // independently of page position, so a resume that places Certifications
-  // above Awards must still read certs-first (see `sectionsInDocumentOrder`).
+  // Certifications are name-led, often single-line credential items —
+  // structurally the same shape as achievements — so they route through the
+  // SAME extractor (#225). They do NOT share the bucket (#884): an issued,
+  // verifiable credential is a different claim from a one-off accomplishment,
+  // and a résumé that wrote both sections said so. #234 folded them on a
+  // reuse-gate argument, but the gate is about not building a second workflow
+  // surface; a second SECTION is one more block in the surfaces that already
+  // exist. Concatenating is also not recoverable downstream — the heading is
+  // lost and two sections export as one.
   const certificationsSection = findSection(ownedSections, "certifications");
 
   // Experience: group distinct experience-category sections (#311) so a résumé
@@ -439,9 +422,6 @@ function buildHeuristicResult(
   const projects = extractProjects(projectsSection);
   const achievements = extractAchievements(achievementsSection);
   const certifications = extractAchievements(certificationsSection);
-  const allAchievements = sectionPrecedes(certificationsSection, achievementsSection)
-    ? [...certifications.value, ...achievements.value]
-    : [...achievements.value, ...certifications.value];
 
   const parsed: HeuristicParsedResume = {
     ...(name.value ? { full_name: name.value } : {}),
@@ -477,8 +457,23 @@ function buildHeuristicResult(
     experience: experience.value,
     education: education.value,
     ...(projects.value.length > 0 ? { projects: projects.value } : {}),
-    ...(allAchievements.length > 0
-      ? { heuristic_achievements: allAchievements }
+    ...(achievements.value.length > 0
+      ? { heuristic_achievements: achievements.value }
+      : {}),
+    ...(certifications.value.length > 0
+      ? { heuristic_certifications: certifications.value }
+      : {}),
+    // Document order of the two credential blocks, kept as a placement signal
+    // rather than an item concatenation (#884). Only the INVERSION is recorded,
+    // and only when BOTH blocks have items: a placement relative to a section
+    // the résumé never wrote is not a fact about the document, and the exporter
+    // would have nothing to order it against. Absent therefore means
+    // "achievements-first, or only one of the two" — every résumé that had no
+    // such section before.
+    ...(achievements.value.length > 0 &&
+    certifications.value.length > 0 &&
+    sectionPrecedes(certificationsSection, achievementsSection)
+      ? { certifications_placement: "above_achievements" as const }
       : {}),
     // Best-effort current role derivation.
     ...(experience.value[0]?.title ? { current_title: experience.value[0].title } : {}),
@@ -505,7 +500,8 @@ function buildHeuristicResult(
     experience: experience.confidence,
     education: education.confidence,
     projects: projects.confidence,
-    achievements: mergedConfidence(achievements, certifications),
+    achievements: achievements.confidence,
+    certifications: certifications.confidence,
   };
 
   // #122 — ADDITIONAL/inline-label skills re-route. When the recognized SKILLS

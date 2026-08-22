@@ -378,38 +378,42 @@ function applyEducationFieldOverrides(
 // ── Achievements (#454) ─────────────────────────────────────────────────────
 
 /**
- * Fold `achievements` field overrides into the parsed achievements, keyed by
- * array index. Each override key names a REAL field on `HeuristicAchievement`
- * (`type`, `title`, `year`) and is copied straight onto it (#456) — there is no
- * compose/decompose step, so an edit to one field can never perturb another.
+ * Fold credential field overrides into one parsed bucket — `achievements` or,
+ * since #884, `certifications` — keyed by that bucket's array index. Each
+ * override key names a REAL field on `HeuristicAchievement` (`type`, `title`,
+ * `year`) and is copied straight onto it (#456) — there is no compose/decompose
+ * step, so an edit to one field can never perturb another.
  *
  * An empty `type` or `year` drops the key (mirroring the optional
  * `location`/`team` clears on experience); an empty `title` is kept verbatim,
  * since `title` is required and its empty string is the parser's own
  * no-usable-header value.
  *
- * `heuristic_achievements` is cloned here (the entry point pre-clones only
- * experience / education / skills). A later re-clone by
- * {@link applyAddedEntriesAndBullets} preserves these edits.
+ * The bucket is cloned here (the entry point pre-clones only experience /
+ * education / skills). A later re-clone by {@link applyAddedEntriesAndBullets}
+ * preserves these edits.
  *
- * Achievement overrides are keyed against the PARSED array, and added entries
- * are appended AFTER this runs, so the two index spaces never collide.
+ * Overrides are keyed against the PARSED array, and added entries are appended
+ * AFTER this runs, so the two index spaces never collide. The two buckets are
+ * separate index spaces for the same reason they are separate model fields — an
+ * `achievements:2` edit must never resolve against a certification.
  */
-function applyAchievementOverrides(
+function applyCredentialOverrides(
   nextParsed: HeuristicParsedResume,
+  bucket: "heuristic_achievements" | "heuristic_certifications",
   overrides: Record<number, AchievementFieldOverrides>,
 ): void {
   if (Object.keys(overrides).length === 0) return;
-  const parsedAchievements = nextParsed.heuristic_achievements;
-  if (!parsedAchievements || parsedAchievements.length === 0) return;
+  const parsedItems = nextParsed[bucket];
+  if (!parsedItems || parsedItems.length === 0) return;
 
-  const achievements = parsedAchievements.map((a) => ({ ...a }));
+  const items = parsedItems.map((a) => ({ ...a }));
   for (const [idxStr, fields] of Object.entries(overrides)) {
-    const ach = achievements[Number(idxStr)];
-    if (!ach) continue;
-    mergeAchievementFields(ach, fields);
+    const item = items[Number(idxStr)];
+    if (!item) continue;
+    mergeAchievementFields(item, fields);
   }
-  nextParsed.heuristic_achievements = achievements;
+  nextParsed[bucket] = items;
 }
 
 /** Fold one achievement's field overrides into the (already cloned) entry. */
@@ -435,10 +439,10 @@ function mergeAchievementFields(
  * An empty string clears the description (treated as absent); a non-empty value
  * replaces it verbatim.
  *
- * `projects` / `heuristic_achievements` are NOT pre-cloned by the entry point
- * (it clones only experience / education / skills), so clone the arrays + their
- * entries here before mutating a description — mirroring
- * {@link applyAchievementOverrides}. `experience` entries are already cloned by
+ * `projects` / `heuristic_achievements` / `heuristic_certifications` are NOT
+ * pre-cloned by the entry point (it clones only experience / education /
+ * skills), so clone the arrays + their entries here before mutating a
+ * description — mirroring {@link applyCredentialOverrides}. `experience` entries are already cloned by
  * the entry point, so mutating one in place is safe. A later re-clone by
  * {@link applyAddedEntriesAndBullets} preserves these edits.
  */
@@ -454,6 +458,10 @@ function applyDescriptionOverrides(
     nextParsed.heuristic_achievements = nextParsed.heuristic_achievements.map(
       (a) => ({ ...a }),
     );
+  }
+  if (nextParsed.heuristic_certifications) {
+    nextParsed.heuristic_certifications =
+      nextParsed.heuristic_certifications.map((a) => ({ ...a }));
   }
   for (const [key, value] of Object.entries(overrides)) {
     const target = resolveParsedDescriptionTarget(nextParsed, key);
@@ -864,6 +872,8 @@ function resolveParsedDescriptionTarget(
   if (section === "projects") return nextParsed.projects?.[index];
   if (section === "achievements")
     return nextParsed.heuristic_achievements?.[index];
+  if (section === "certifications")
+    return nextParsed.heuristic_certifications?.[index];
   return undefined;
 }
 
@@ -906,11 +916,16 @@ function pushAddedEntry(
   } else if (entry.section === "projects") {
     nextParsed.projects!.push({ name: entry.title, description });
   } else {
-    // The added entry's flat header fields map straight onto the achievement's
+    // The added entry's flat header fields map straight onto the credential's
     // real fields (#456) — `achievementType` is the bold label, `title` the rest
     // — so an added achievement is indistinguishable from a parsed-then-edited
-    // one (#455) without any recomposition.
-    nextParsed.heuristic_achievements!.push({
+    // one (#455) without any recomposition. A certification carries the same
+    // shape (#884) and differs only in which bucket it lands in.
+    const bucket =
+      entry.section === "certifications"
+        ? nextParsed.heuristic_certifications!
+        : nextParsed.heuristic_achievements!;
+    bucket.push({
       type: entry.achievementType || undefined,
       title: entry.title,
       year: entry.year,
@@ -946,11 +961,11 @@ function appendPoolLinesToSections(
 }
 
 /**
- * Fold `addedEntries` (whole new experience/education/projects/achievements
- * rows) and `addedBullets` (bullet lines appended to a new or existing entry)
- * into `nextParsed` (mutated in place — projects/heuristic_achievements are
- * cloned here first since the entry point only pre-clones
- * experience/education/skills) and `sections`. Added bullet lines land in
+ * Fold `addedEntries` (whole new experience / education / projects /
+ * achievements / certifications rows) and `addedBullets` (bullet lines appended
+ * to a new or existing entry) into `nextParsed` (mutated in place — projects and
+ * both credential buckets are cloned here first since the entry point only
+ * pre-clones experience/education/skills) and `sections`. Added bullet lines land in
  * BOTH the entry description (display / PDF / grouping / fallback grading)
  * and the graded bullet pool (Specificity / Structure). A no-op when there
  * are no additions.
@@ -965,13 +980,16 @@ function applyAddedEntriesAndBullets(
     addedEntries.length > 0 || Object.keys(addedBullets).length > 0;
   if (!hasAdds) return sections;
 
-  // projects + heuristic_achievements weren't cloned by the entry point (only
-  // experience / education / skills were). Clone them — and their entries —
-  // before we push or mutate descriptions, so the original parse is never
+  // projects + the two credential buckets weren't cloned by the entry point
+  // (only experience / education / skills were). Clone them — and their entries
+  // — before we push or mutate descriptions, so the original parse is never
   // touched.
   nextParsed.projects = (nextParsed.projects ?? []).map((p) => ({ ...p }));
   nextParsed.heuristic_achievements = (
     nextParsed.heuristic_achievements ?? []
+  ).map((a) => ({ ...a }));
+  nextParsed.heuristic_certifications = (
+    nextParsed.heuristic_certifications ?? []
   ).map((a) => ({ ...a }));
 
   // "• "-prefixed copies of every added bullet, pooled for grading.
@@ -1010,7 +1028,7 @@ function applyAddedBulletsToExistingEntries(
 
 /**
  * The sections an entry TOMBSTONE can name — the `<section>` half of a
- * `parsedEntryKey`. Deliberately the same four `AddableSection` accepts: every
+ * `parsedEntryKey`. Deliberately the same set `AddableSection` accepts: every
  * section that can gain a user-added entry can also lose a parsed one.
  */
 const REMOVABLE_SECTIONS = [
@@ -1018,6 +1036,7 @@ const REMOVABLE_SECTIONS = [
   "education",
   "projects",
   "achievements",
+  "certifications",
 ] as const;
 
 type RemovableSection = (typeof REMOVABLE_SECTIONS)[number];
@@ -1083,11 +1102,20 @@ function dropRemovedEntries(
     if (nextParsed.projects) {
       nextParsed.projects = keep(nextParsed.projects, (p) => p.name);
     }
-  } else if (nextParsed.heuristic_achievements) {
-    nextParsed.heuristic_achievements = keep(
-      nextParsed.heuristic_achievements,
-      (a) => a.title,
-    );
+  } else if (section === "achievements") {
+    if (nextParsed.heuristic_achievements) {
+      nextParsed.heuristic_achievements = keep(
+        nextParsed.heuristic_achievements,
+        (a) => a.title,
+      );
+    }
+  } else if (section === "certifications") {
+    if (nextParsed.heuristic_certifications) {
+      nextParsed.heuristic_certifications = keep(
+        nextParsed.heuristic_certifications,
+        (a) => a.title,
+      );
+    }
   }
   return titles;
 }
@@ -1098,7 +1126,7 @@ function dropRemovedEntries(
  *
  * TOMBSTONE, NOT SPLICE, and this runs LAST for that reason. Every per-entry
  * override map (`applyExperienceHeaderOverrides`,
- * `applyEducationFieldOverrides`, `applyAchievementOverrides`,
+ * `applyEducationFieldOverrides`, `applyCredentialOverrides`,
  * `applyDescriptionOverrides`) is keyed by PARSED ARRAY INDEX, and so is the
  * `addedBullets` bucket key of a parsed entry. Filtering an entry out before any
  * of those have run shifts every later index and silently rebinds each later
@@ -1242,6 +1270,11 @@ function applyRemovedEntries(
  *                  every index-keyed pass above, so no surviving entry's edits
  *                  are rebound to its neighbour; see {@link applyRemovedEntries}.
  *                  Default empty set.
+ * @param certifications certification-field overrides keyed by
+ *                  `heuristic_certifications` array index (#884). Identical in
+ *                  shape and semantics to `achievements` — the two buckets hold
+ *                  the same item type — but its OWN index space, since the
+ *                  buckets are separate arrays. Default `{}`.
  */
 export function applyOverrides(
   parsed: HeuristicParsedResume,
@@ -1262,6 +1295,7 @@ export function applyOverrides(
   descriptionOverrides: DescriptionOverrides = {},
   summaryOverride: string | undefined = undefined,
   removedEntries: ReadonlySet<string> = new Set(),
+  certifications: Record<number, AchievementFieldOverrides> = {},
 ): ApplyOverridesResult {
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
@@ -1302,8 +1336,13 @@ export function applyOverrides(
 
   applyEducationFieldOverrides(nextParsed.education, education);
   // Before the added-entry append below, so the override keys stay aligned with
-  // the PARSED achievement indices they were captured against.
-  applyAchievementOverrides(nextParsed, achievements);
+  // the PARSED credential indices they were captured against.
+  applyCredentialOverrides(nextParsed, "heuristic_achievements", achievements);
+  applyCredentialOverrides(
+    nextParsed,
+    "heuristic_certifications",
+    certifications,
+  );
   // Prose-body descriptions (#489). Runs before the added-entry append so its
   // clone-and-set stays aligned with the PARSED entry indices the override keys
   // were captured against; the later re-clone in applyAddedEntriesAndBullets

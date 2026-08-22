@@ -25,8 +25,10 @@
  *   experience → `work[]`, projects → `projects[]`, education → `education[]`,
  *   skills → `skills[]`, achievements → `awards[]` (title + optional date only;
  *   we invent no awarder/summary — JSON Resume treats every award field
- *   optional, so this is faithful, #421 review). `awards` is omitted entirely
- *   when the résumé has no Achievements section.
+ *   optional, so this is faithful, #421 review), certifications →
+ *   `certificates[]` (#884 — the spec's own first-class array for an issued
+ *   credential, so certs are no longer flattened into `awards[]`). Both are
+ *   omitted entirely when the résumé carries no such section.
  */
 
 import type {
@@ -131,6 +133,17 @@ export interface JsonResumeAward {
   summary?: string;
 }
 
+/** JSON Resume `certificates[]` (#884). `issuer` is typed because the spec has
+ *  it, and left unset because the parser never reads one off the credential
+ *  line — inventing an issuer would be a fabricated claim, the same reasoning
+ *  that leaves `awarder`/`summary` unset above. */
+export interface JsonResumeCertificate {
+  name?: string;
+  date?: string;
+  issuer?: string;
+  url?: string;
+}
+
 export interface JsonResumeMeta {
   /** Producing app build id (`APP_VERSION`) — provenance, not the schema rev. */
   version?: string;
@@ -147,6 +160,9 @@ export interface JsonResume {
    *  otherwise so a résumé without one stays byte-identical to the pre-#421
    *  export (no empty `awards: []` churn). */
   awards?: JsonResumeAward[];
+  /** Present only when the résumé carries a Certifications section — omitted
+   *  otherwise, matching `awards` above. */
+  certificates?: JsonResumeCertificate[];
   meta: JsonResumeMeta;
 }
 
@@ -369,6 +385,19 @@ function toAward(fields: AtsEntryFields): JsonResumeAward {
   };
 }
 
+/** Certifications → JSON Resume `certificates` (#884). `name` is the full
+ *  header line (label included, exactly as `awards[].title` carries it), `date`
+ *  the credential year, and `url` the header link when the résumé wrote one —
+ *  a slot `awards[]` does not have, which is half of why folding certs into it
+ *  was lossy. */
+function toCertificate(fields: AtsEntryFields): JsonResumeCertificate {
+  return {
+    name: fields.title,
+    date: normalizeJsonResumeDate(fields.startDate),
+    url: fields.url,
+  };
+}
+
 function toEducation(fields: AtsEntryFields): JsonResumeEducation {
   return {
     institution: fields.organization,
@@ -383,13 +412,14 @@ function toEducation(fields: AtsEntryFields): JsonResumeEducation {
 
 // ── Adapter ─────────────────────────────────────────────────────────────────────
 
-/** The four JSON Resume arrays accumulated while walking the model's sections. */
+/** The JSON Resume arrays accumulated while walking the model's sections. */
 interface ResumeBuckets {
   work: JsonResumeWork[];
   education: JsonResumeEducation[];
   skills: JsonResumeSkill[];
   projects: JsonResumeProject[];
   awards: JsonResumeAward[];
+  certificates: JsonResumeCertificate[];
 }
 
 /**
@@ -427,6 +457,9 @@ function appendEntry(entry: AtsExportEntry, buckets: ResumeBuckets): void {
     case "achievements":
       if (fields) buckets.awards.push(toAward(fields));
       break;
+    case "certifications":
+      if (fields) buckets.certificates.push(toCertificate(fields));
+      break;
     default:
       break;
   }
@@ -450,6 +483,7 @@ export function toJsonResume(model: AtsResumeModel): JsonResume {
     skills: [],
     projects: [],
     awards: [],
+    certificates: [],
   };
 
   for (const entry of projection.entries) {
@@ -466,6 +500,9 @@ export function toJsonResume(model: AtsResumeModel): JsonResume {
     // Omit `awards` entirely when there are none, keeping the achievement-free
     // export byte-identical to before (#421 review, Secondary #12).
     ...(buckets.awards.length > 0 ? { awards: buckets.awards } : {}),
+    ...(buckets.certificates.length > 0
+      ? { certificates: buckets.certificates }
+      : {}),
     meta: { version: APP_VERSION },
   };
 }

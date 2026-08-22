@@ -21,8 +21,12 @@
  * removes everywhere else, and one an id-keyed map could not express at all.
  *
  * Section order is standard ATS top-to-bottom:
- *   Summary → (Achievements if "above_experience") → Experience → Projects →
- *   Achievements (default placement) → Education → Skills.
+ *   Summary → (Achievements + Certifications if "above_experience") →
+ *   Experience → Projects → Achievements + Certifications (default placement) →
+ *   Education → Skills.
+ * The two credential blocks are adjacent and ordered between themselves by the
+ * parse's `certifications_placement` — the document order the résumé wrote them
+ * in (#884).
  *
  * Every join literal below (` · `, `, `, two-space date gap, en dash) is a
  * parser-coupled separator, not a cosmetic choice — see the #466 empty-company
@@ -231,6 +235,7 @@ export type AtsSectionKind =
   | "experience"
   | "projects"
   | "achievements"
+  | "certifications"
   | "education"
   | "skills";
 
@@ -515,6 +520,49 @@ function groupExperienceEntriesByLabel(
   return out;
 }
 
+/**
+ * The full header text of a credential entry, label included — the JSON
+ * Resume `awards[].title` / `certificates[].name` source. `HeuristicAchievement.title`
+ * is stored WITHOUT its leading `type` label (#456), so recomposing it here is
+ * what keeps "Patent · Foo" from exporting as bare "Foo".
+ */
+function credentialTitle(item: HeuristicAchievement): string {
+  return [item.type?.trim(), item.title].filter(Boolean).join(" · ");
+}
+
+/**
+ * One credential-shaped entry — an achievement or a certification (#884). The
+ * two carry the identical item shape (optional bold `type` label, title, single
+ * year) and draw through the same `drawEntry`, so the header composition lives
+ * once here and each caller supplies only what genuinely differs: the bullet
+ * body (pooled vs description-only, see the Certifications block) and the
+ * structured `fields` its JSON Resume array wants.
+ */
+function buildCredentialEntry(
+  item: HeuristicAchievement,
+  bullets: string[],
+  fields: AtsEntryFields,
+  fallbackHeader: string,
+): AtsEntry {
+  // Bold only the `type` label ("Patent", "Publication"); the rest of the header
+  // stays regular. A type-less item keeps the whole header bold.
+  const { headerLine, emphasized } = buildAchievementHeader(
+    item.type,
+    item.title,
+    item.year,
+    item.year_separator,
+  );
+  return {
+    headerLine: headerLine || fallbackHeader,
+    // The emphasized header carries its own per-run weight (via the sentinels),
+    // so the base line is drawn regular; a plain header stays fully bold.
+    headerBold: emphasized ? false : true,
+    subLine: undefined,
+    bullets,
+    fields,
+  };
+}
+
 // ── Builder ───────────────────────────────────────────────────────────────────
 
 /**
@@ -551,6 +599,8 @@ export function buildAtsResumeModel(
   const projects: ResumeProject[] = parsed.projects ?? [];
   const achievements: HeuristicAchievement[] =
     parsed.heuristic_achievements ?? [];
+  const certifications: HeuristicAchievement[] =
+    parsed.heuristic_certifications ?? [];
   const education: ResumeEducation[] = parsed.education ?? [];
   const skills = parsed.skills ?? [];
   const bulletPool = score.bullets ?? [];
@@ -686,35 +736,46 @@ export function buildAtsResumeModel(
   }));
 
   // ── Achievements ──
-  const achievementEntries: AtsEntry[] = achievements.map((ach, i) => {
-    // Bold only the `type` label ("Patent", "Publication"); the rest of the
-    // header stays regular. A type-less achievement keeps the whole header bold.
-    const { headerLine, emphasized } = buildAchievementHeader(
-      ach.type,
-      ach.title,
-      ach.year,
-      ach.year_separator,
-    );
-    const awardTitle = [ach.type?.trim(), ach.title].filter(Boolean).join(" · ");
-    return {
-      headerLine: headerLine || "Achievement",
-      // The emphasized header carries its own per-run weight (via the sentinels),
-      // so the base line is drawn regular; a plain header stays fully bold.
-      headerBold: emphasized ? false : true,
-      subLine: undefined,
-      bullets: resolveBullets(bulletsByIndex.get(achOffset + i), ach.description),
-      // Structured source for the JSON Resume `awards[]` export (#421). Display
-      // code never reads `fields`; it renders `headerLine`/`bullets` above.
-      //
-      // JSON Resume has no slot for a type label, so `title` carries the FULL
-      // "Patent · Foo" line (#456) — dropping the label to match the narrowed
-      // `HeuristicAchievement.title` would silently lose it from the export.
-      fields: {
-        ...(awardTitle ? { title: awardTitle } : {}),
+  const achievementEntries: AtsEntry[] = achievements.map((ach, i) =>
+    // Structured source for the JSON Resume `awards[]` export (#421). Display
+    // code never reads `fields`; it renders `headerLine`/`bullets`.
+    //
+    // JSON Resume has no slot for a type label, so `title` carries the FULL
+    // "Patent · Foo" line (#456) — dropping the label to match the narrowed
+    // `HeuristicAchievement.title` would silently lose it from the export.
+    buildCredentialEntry(
+      ach,
+      resolveBullets(bulletsByIndex.get(achOffset + i), ach.description),
+      {
+        ...(credentialTitle(ach) ? { title: credentialTitle(ach) } : {}),
         ...(ach.year ? { startDate: ach.year } : {}),
       },
-    };
-  });
+      "Achievement",
+    ),
+  );
+
+  // ── Certifications ──
+  // Its own section since #884 — same entry shape, same `drawEntry`, its own
+  // verbatim heading. Bullets come from the entry's parsed `description` only:
+  // `certifications` is NOT one of `ACCOMPLISHMENT_SECTION_NAMES`, so a
+  // certification's body lines never enter the graded bullet pool and there is
+  // nothing in `bulletsByIndex` to attribute to it. That is also why the
+  // certification entries are absent from the `combined` grouping above — they
+  // could only take a bullet AWAY from an achievement that legitimately owns it.
+  const certificationEntries: AtsEntry[] = certifications.map((cert) =>
+    buildCredentialEntry(
+      cert,
+      resolveBullets(undefined, cert.description),
+      {
+        ...(credentialTitle(cert) ? { title: credentialTitle(cert) } : {}),
+        ...(cert.year ? { startDate: cert.year } : {}),
+        // JSON Resume's `certificates[].url` has a slot the `awards[]` mapping
+        // does not, so a credential link is carried here and nowhere else.
+        ...(cert.url ? { url: cert.url } : {}),
+      },
+      "Certification",
+    ),
+  );
 
   // ── Education ──
   const educationEntries: AtsEntry[] = education.map((edu) => {
@@ -919,9 +980,32 @@ export function buildAtsResumeModel(
           kind: "achievements",
         }
       : null;
+  // `sectionHeadings` has always been keyed by `SectionName`, so a source
+  // heading of "Certifications" was already stored under the `certifications`
+  // key — it was just never read (#884). Reading it is what stops a
+  // certifications-only résumé from exporting under the literal word
+  // "Achievements", a #285 verbatim-heading violation.
+  const certificationsSection: AtsSection | null =
+    certificationEntries.length > 0
+      ? {
+          heading: headings?.get("certifications") ?? "Certifications",
+          entries: certificationEntries,
+          kind: "certifications",
+        }
+      : null;
+  // The two credential blocks are emitted TOGETHER, at whichever slot
+  // `achievements_placement` names, in the order the source document opened them
+  // (`certifications_placement`, #884). Keeping them adjacent is what makes the
+  // parse's document-order signal a SECTION-order one and not a second
+  // independent placement axis. A résumé carrying only one of the two emits
+  // exactly the one section it did before.
+  const credentialSections = (
+    parsed.certifications_placement === "above_achievements"
+      ? [certificationsSection, achievementsSection]
+      : [achievementsSection, certificationsSection]
+  ).filter((sec): sec is AtsSection => sec !== null);
 
-  if (achievementsAbove && achievementsSection)
-    sections.push(achievementsSection);
+  if (achievementsAbove) sections.push(...credentialSections);
   // Experience: one AtsSection per distinct experience-category group (#311),
   // in document order, each with its own verbatim heading. Falls back to a
   // single "Experience" section (the #285 verbatim heading, or the canonical
@@ -939,8 +1023,7 @@ export function buildAtsResumeModel(
       entries: projectEntries,
       kind: "projects",
     });
-  if (!achievementsAbove && achievementsSection)
-    sections.push(achievementsSection);
+  if (!achievementsAbove) sections.push(...credentialSections);
   if (educationEntries.length > 0)
     sections.push({
       heading: headings?.get("education") ?? "Education",

@@ -552,9 +552,15 @@ function scoreCompleteness(data: ResumeData): { score: number; missing: string[]
 export function computeAtsScore(data: ResumeData): AtsScore {
   // Projects (#95) and heuristic achievements (#96) both contribute their bullet
   // bodies to the same pool as experience bullets — pooled here as extra sources.
+  // Certifications (#884) are pooled alongside achievements rather than beside
+  // them: splitting the two buckets is a MODEL change, and the scoring input has
+  // to stay the one list it was while they shared a bucket, or every résumé with
+  // a Certifications section would silently re-grade off a rubric nobody
+  // changed. No `ATS_SCORE_ALGO_VERSION` bump follows from #884 for that reason.
   const extraSources = [
     ...(data.projects ?? []),
     ...(data.heuristic_achievements ?? []),
+    ...(data.heuristic_certifications ?? []),
   ];
   const specificity = scoreSpecificity(data.experience, extraSources);
   const structure = scoreStructure(data.experience, extraSources);

@@ -23,8 +23,8 @@
  * and a shrunken corpus does not report an error: it reports "NO FIXTURE COVERS
  * THIS". That is the single worst failure mode of the whole tool, because it
  * reads as a legitimate result and its remedy ("mint a fixture") duplicates one
- * we already have. So: any snapshot that is not v5-with-both-blocks is a throw,
- * naming the file and the fix (`npm run bake-fixtures`).
+ * we already have. So: any snapshot that is not the current schema with both
+ * blocks is a throw, naming the file and the fix (`npm run bake-fixtures`).
  */
 
 import { readdirSync, readFileSync, existsSync } from "node:fs";
@@ -37,7 +37,7 @@ import { DERIVED_SIGNAL_KEYS } from "../defect-classes.ts";
 import type { ReproArtifact } from "../repro-artifact.ts";
 
 /** The snapshot schema the loader (and `corpus.test.ts`'s bake) speaks. */
-export const CORPUS_SNAPSHOT_SCHEMA_VERSION = 5;
+export const CORPUS_SNAPSHOT_SCHEMA_VERSION = 6;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** `src/lib/heuristics/__test-utils__` → repo root. */

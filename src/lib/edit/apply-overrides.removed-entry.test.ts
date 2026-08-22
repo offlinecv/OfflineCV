@@ -7,7 +7,7 @@
  *
  * The second half is the load-bearing one and the reason `removedEntries` is a
  * tombstone set folded LAST rather than a splice. `applyExperienceHeader-
- * Overrides`, `applyEducationFieldOverrides` and `applyAchievementOverrides`
+ * Overrides`, `applyEducationFieldOverrides` and `applyCredentialOverrides`
  * are each keyed by PARSED ARRAY INDEX; removing entry 0 by splicing it out of
  * the array before they run shifts every later entry down one, so entry 2's
  * title edit silently lands on what used to be entry 3. Nothing throws and the
