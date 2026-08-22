@@ -18,6 +18,11 @@
  *      — country is not a 2-letter USPS code so Pass A/B missed it;
  *        Pass C (COUNTRY_GAZETTEER) now strips it.
  *
+ *   4. Tab-justified flush-right sub-line on ONE PDF row (#891):
+ *      "Software Developer" + a wide whitespace-only run + "Remote"
+ *      — pdfjs draws the justification as a single blank item, so line
+ *        assembly saw no gap to cut on and welded the two cells together.
+ *
  * Synthetic personas only, per the fixtures PII policy.
  */
 
@@ -26,7 +31,7 @@ import { groupIntoLines, splitIntoSections, findSection } from "../sections.ts";
 import { extractExperience } from "../extract-fields.ts";
 import { mkItems } from "../__test-utils__/mkItem.ts";
 
-function roleFromSection(specs: Array<{ text: string; fontSize?: number }>) {
+function roleFromSection(specs: Array<{ text: string; fontSize?: number; x?: number; lineIndex?: number }>) {
   const sections = splitIntoSections(groupIntoLines(mkItems(specs)));
   const experience = findSection(sections, "experience");
   expect(experience).toBeDefined();
@@ -421,5 +426,132 @@ describe("role location extraction (#218)", () => {
         expect(role.location).toBe("Seoul, S.Korea");
       });
     });
+  });
+});
+
+describe("tab-justified flush-right location (#891)", () => {
+  // pdfjs renders a right-aligned cell on a shared row as THREE items with no
+  // gap between any adjacent pair: the left cell, one whitespace-only item
+  // whose own `width` spans the justification, then the right cell. Chain each
+  // x to the previous item's `x + width` (`mkItem` computes
+  // `width = text.length * fontSize * 0.5`, so 5.5pt/char at the default
+  // fontSize 11) to reproduce that adjacent-gap-of-zero shape exactly.
+  const TITLE_X = 41.76;
+  const TITLE = "Software Developer";
+  const GAP_X = TITLE_X + TITLE.length * 5.5; // 140.76
+  const GAP = " ".repeat(72); // 396pt wide — well past COLUMN_GAP_THRESHOLD (50)
+  const TRAILER_X = GAP_X + GAP.length * 5.5; // 536.76
+
+  /** The motivating shape: company + date anchor, then a single PDF row
+   *  carrying the title at the left margin and `trailer` flush right. */
+  function roleFromJustifiedRow(trailer: string) {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13, lineIndex: 0 },
+      { text: "Acme Corp", x: TITLE_X, lineIndex: 1 },
+      { text: "Sep. 2025 - Apr. 2026", x: TITLE_X, lineIndex: 2 },
+      { text: TITLE, x: TITLE_X, lineIndex: 3 },
+      { text: GAP, x: GAP_X, lineIndex: 3 },
+      { text: trailer, x: TRAILER_X, lineIndex: 3 },
+      {
+        text: "• Automated risk-scoring pipeline for 1M accounts.",
+        x: TITLE_X,
+        lineIndex: 4,
+      },
+    ]);
+    expect(roles).toHaveLength(1);
+    return roles[0];
+  }
+
+  it("peels a flush-right work-mode keyword off the title (primary AC)", () => {
+    // Pre-#891: title === "Software Developer Remote", location undefined.
+    const role = roleFromJustifiedRow("Remote");
+    expect(role.title).toBe("Software Developer");
+    expect(role.title).not.toContain("Remote");
+    expect(role.location).toBe("Remote");
+    expect(role.company).toBe("Acme Corp");
+    expect(role.start_date).toBe("Sep. 2025");
+  });
+
+  it("peels the other work-mode keywords BARE_LOCATION_RE knows", () => {
+    expect(roleFromJustifiedRow("Hybrid").location).toBe("Hybrid");
+    expect(roleFromJustifiedRow("Hybrid").title).toBe("Software Developer");
+    expect(roleFromJustifiedRow("On-site").location).toBe("On-site");
+    expect(roleFromJustifiedRow("On-site").title).toBe("Software Developer");
+  });
+
+  it("keeps a flush-right 'City, ST' off the title", () => {
+    // Not a #891 fail-before case — a welded "Software Developer Bellevue, WA"
+    // was already rescued downstream by `stripLocationSuffix`'s "City, ST"
+    // pass. Pinned so the peel, which now claims this row first, lands the
+    // same fields the suffix strip used to.
+    const role = roleFromJustifiedRow("Bellevue, WA");
+    expect(role.title).toBe("Software Developer");
+    expect(role.location).toBe("Bellevue, WA");
+  });
+
+  it("no-regression: an ordinary multi-word title with normal spacing is not split", () => {
+    // No whitespace-only item wide enough to be a justification rail, so the
+    // peel is a strict no-op and the title survives whole.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13, lineIndex: 0 },
+      { text: "Acme Corp", x: TITLE_X, lineIndex: 1 },
+      { text: "Sep. 2025 - Apr. 2026", x: TITLE_X, lineIndex: 2 },
+      { text: "Senior", x: TITLE_X, lineIndex: 3 },
+      { text: "   ", x: TITLE_X + 33, lineIndex: 3 },
+      { text: "Software Developer", x: TITLE_X + 49.5, lineIndex: 3 },
+      {
+        text: "• Automated risk-scoring pipeline for 1M accounts.",
+        x: TITLE_X,
+        lineIndex: 4,
+      },
+    ]);
+    expect(roles).toHaveLength(1);
+    expect(roles[0].title).toBe("Senior Software Developer");
+    expect(roles[0].location).toBeUndefined();
+  });
+
+  it("no-regression: a flush-right DATE stays merged onto its header line (#425)", () => {
+    // The other thing templates park at the right margin. It is not a bare
+    // location, so the peel declines and the #425 exemption's behaviour holds:
+    // the date parses off the header instead of becoming a location.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13, lineIndex: 0 },
+      { text: "Acme Corp", x: TITLE_X, lineIndex: 1 },
+      { text: TITLE, x: TITLE_X, lineIndex: 2 },
+      { text: GAP, x: GAP_X, lineIndex: 2 },
+      { text: "Sep. 2025 - Apr. 2026", x: TRAILER_X, lineIndex: 2 },
+      {
+        text: "• Automated risk-scoring pipeline for 1M accounts.",
+        x: TITLE_X,
+        lineIndex: 3,
+      },
+    ]);
+    expect(roles).toHaveLength(1);
+    expect(roles[0].title).toBe("Software Developer");
+    expect(roles[0].start_date).toBe("Sep. 2025");
+    expect(roles[0].end_date).toBe("Apr. 2026");
+    expect(roles[0].location).toBeUndefined();
+  });
+
+  it("no-regression: a location on a genuinely separate PDF row still resolves", () => {
+    // The shape the same résumé's other roles use — location on its own row at
+    // a different y, which already parsed correctly before #891. The row
+    // carries no whitespace-only item, so `splitOnFlushRightGap` returns
+    // undefined and this path is byte-for-byte untouched.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13, lineIndex: 0 },
+      { text: "Acme Corp", x: TITLE_X, lineIndex: 1 },
+      { text: "Sep. 2025 - Apr. 2026", x: TITLE_X, lineIndex: 2 },
+      { text: TITLE, x: TITLE_X, lineIndex: 3 },
+      { text: "Bellevue, WA", x: TITLE_X, lineIndex: 4 },
+      {
+        text: "• Automated risk-scoring pipeline for 1M accounts.",
+        x: TITLE_X,
+        lineIndex: 5,
+      },
+    ]);
+    expect(roles).toHaveLength(1);
+    expect(roles[0].title).toBe("Software Developer");
+    expect(roles[0].location).toBe("Bellevue, WA");
   });
 });

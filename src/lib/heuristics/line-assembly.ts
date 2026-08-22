@@ -138,6 +138,46 @@ function columnGapCuts(sorted: PdfTextItem[]): number[] {
   return cuts;
 }
 
+/**
+ * Split an x-sorted, same-row item run at a tab-justified flush-right gap:
+ * `{ head, trailer }` around the first interior whitespace-only item wider than
+ * `COLUMN_GAP_THRESHOLD`, or `undefined` when the row carries no such item.
+ *
+ * Why this is NOT part of `columnGapCuts` (#891). `columnGapCuts` measures the
+ * gap BETWEEN adjacent items, and a tab-justified flush-right sub-line does not
+ * present one: pdfjs renders the stretched padding as a single whitespace-only
+ * text item whose own declared `width` spans the gap, so the adjacent-pair gap
+ * on both sides of it is ~0 and no cut ever fires. The row then merges into one
+ * `PdfLine` and `mergeItemText` collapses the 400pt blank run to a single
+ * space — `"Software Developer Remote"`, with the geometry that separated the
+ * two cells destroyed and unrecoverable downstream.
+ *
+ * Why it is a standalone helper rather than a broader cut rule inside the
+ * shared chokepoint: `columnGapCuts` feeds BOTH the line splitter (`flush`) and
+ * the embedded-grid detector (`rowIsMultiColumn`), so teaching it to cut after
+ * any wide whitespace item re-bands genuine layouts — 21 tests regressed when
+ * that was tried during #891 triage, including page-footer text bleeding back
+ * into role titles on the #283 repro fixture. This helper therefore exposes the
+ * geometry and leaves the decision to the one caller that can qualify it by
+ * content (`entry-blocks.ts`, which peels the trailer only when it is a bare
+ * location). Line grouping itself is untouched.
+ *
+ * `sorted` must be left-to-right by x — `PdfLine.items` already is, so callers
+ * pass `line.items` directly. Interior-only: a leading or trailing blank item
+ * is padding, not a separator, and yields `undefined`.
+ */
+export function splitOnFlushRightGap(
+  sorted: PdfTextItem[],
+): { head: PdfTextItem[]; trailer: PdfTextItem[] } | undefined {
+  for (let i = 1; i < sorted.length - 1; i++) {
+    const it = sorted[i];
+    if (it.str.trim() === "" && it.width > COLUMN_GAP_THRESHOLD) {
+      return { head: sorted.slice(0, i), trailer: sorted.slice(i + 1) };
+    }
+  }
+  return undefined;
+}
+
 /** A row is "multi-column" when its x-sorted items carry a column-sized
  *  horizontal gap (the same `COLUMN_GAP_THRESHOLD` the line splitter uses),
  *  after the #425 flush-right-date exemption — so a lone flush-right date rail is
