@@ -417,8 +417,12 @@ describe("buildJobQuery", () => {
     });
     const query = buildJobQuery(parsed);
     // Canonical tier keeps its own relative order (Python before Java)...
+    expect(query.skills).toContain("Python");
+    expect(query.skills).toContain("Java");
     expect(query.skills.indexOf("Python")).toBeLessThan(query.skills.indexOf("Java"));
     // ...and the unrecognized tier keeps its own relative order too.
+    expect(query.skills).toContain("Underwater Basket Weaving");
+    expect(query.skills).toContain("Competitive Juggling");
     expect(query.skills.indexOf("Underwater Basket Weaving")).toBeLessThan(
       query.skills.indexOf("Competitive Juggling"),
     );
