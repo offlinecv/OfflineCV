@@ -304,6 +304,60 @@ const SUBLABEL_PREFIX_RE = new RegExp(`^(${SUBLABEL_BODY}):\\s*`);
  *  tore off its body. See the rejoin in `splitColumnCells`. */
 const BARE_SUBLABEL_RE = new RegExp(`^${SUBLABEL_BODY}:$`);
 
+/** A Skills sub-label that MAY head a spoken-language row. Deliberately NOT
+ * added to NON_SKILL_SUBLABEL_RE: on most engineering résumés `Languages:`
+ * heads the programming-language row, so the label is ambiguous and the body
+ * must decide whether this is a proficiency statement. Qualifiers are allowed
+ * because `Foreign Languages:` and `Spoken Languages:` are common variants. */
+const LANGUAGE_LABEL_RE =
+  /^(?:foreign\s+|spoken\s+|other\s+)?languages?\s*$/i;
+
+/** Spoken-language proficiency ADJECTIVES/predicates ("fluent", "native",
+ * "basic", …). Unlike the NOUN forms below, these collide with real compound
+ * proper nouns — "Visual Basic", "React Native" — so a bare substring test
+ * over a fragment is not enough; see LANGUAGE_PROFICIENCY_PREDICATION_RE for
+ * the structural test that disambiguates them. */
+const LANGUAGE_PROFICIENCY_ADJECTIVES =
+  "fluent|native|bilingual|conversational|proficient|intermediate|elementary|limited|beginner|basic|mother\\s+tongue";
+
+/** A single fragment that reads as a spoken-language proficiency PREDICATION
+ * ("Fluent in Spanish", "Native German", "Spanish (native)", "Native
+ * speaker") rather than a token that merely CONTAINS proficiency vocabulary
+ * ("Visual Basic", "React Native", bare "BASIC"). The noun forms
+ * "proficiency"/"proficiencies" are unambiguous in any position — no
+ * programming-language or tool name ends in "Proficiency" — so they match
+ * anywhere. The adjective forms only count when they carry predicate
+ * structure: leading the fragment with something after them ("Native
+ * German", ruling out a bare "BASIC" with nothing to modify), joined by "in"
+ * ("Fluent in Spanish"), parenthesised ("Spanish (native)"), or followed by
+ * "speaker" ("Native speaker"). Applied per fragment so a delimited
+ * programming-language list survives even when every one of its items
+ * happens to contain proficiency vocabulary. */
+const LANGUAGE_PROFICIENCY_PREDICATION_RE = new RegExp(
+  "\\b(?:proficiency|proficiencies)\\b" +
+    `|^(?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\s+\\S` +
+    `|\\b(?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\s+in\\b` +
+    `|\\((?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\)` +
+    `|\\b(?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\s+speaker\\b`,
+  "i",
+);
+
+function isLanguageProficiencyCell(cell: string): boolean {
+  const debulleted = stripBullet(cell);
+  const match = debulleted.match(SUBLABEL_PREFIX_RE);
+  if (!match || !LANGUAGE_LABEL_RE.test(match[1])) return false;
+
+  const fragments = splitRespectingParens(debulleted.slice(match[0].length))
+    .map((fragment) => fragment.trim())
+    .filter((fragment) => fragment !== "");
+  return (
+    fragments.length > 0 &&
+    fragments.every((fragment) =>
+      LANGUAGE_PROFICIENCY_PREDICATION_RE.test(fragment),
+    )
+  );
+}
+
 /**
  * Tokenizes a single column cell into valid skill tokens and adds them to
  * `out`. Drops the cell entirely when it looks like a contact/profile link —
@@ -317,7 +371,11 @@ function tokenizeCell(cell: string, out: Set<string>): void {
   // leading `Label:` prefix and drop the whole cell when it names a
   // hobbies/interests list — before the label is stripped and the items split.
   const labelMatch = debulleted.match(SUBLABEL_PREFIX_RE);
-  if (labelMatch && NON_SKILL_SUBLABEL_RE.test(labelMatch[1])) return;
+  if (
+    labelMatch &&
+    (NON_SKILL_SUBLABEL_RE.test(labelMatch[1]) || isLanguageProficiencyCell(debulleted))
+  )
+    return;
   const clean = debulleted.replace(SUBLABEL_PREFIX_RE, "");
   // A whole cell that is a profile link ("github.com/janesmith") must be
   // dropped before splitting — a path slash would otherwise leave the path
@@ -401,6 +459,19 @@ function isSoftWrapContinuation(
   if (looksLikeContactLink(nextText)) return false;
   // Always skip if the next line starts a new sub-list (label or bullet).
   if (SKILLS_NEW_ENTRY_RE.test(nextText)) return false;
+  // Always skip when `pending` ALONE already resolves as a complete
+  // spoken-language proficiency cell (#833) — e.g. "Languages: Fluent in
+  // Spanish, conversational French". Such a cell is grammatically finished,
+  // so a following comma-bearing line is an independent, unrelated entry
+  // ("Project Management, Agile, Scrum"), not its wrap continuation. Without
+  // this guard, Condition B below joins the two into one cell whose merged
+  // fragment list contains real skill tokens, defeating
+  // `isLanguageProficiencyCell`'s per-fragment check and re-admitting the
+  // proficiency phrase as a skill. A cell that genuinely wraps mid-list ends
+  // on a trailing comma/semicolon instead ("English (native), Spanish
+  // (fluent),"), which `isLanguageProficiencyCell` — and this guard — leaves
+  // alone because a trailing delimiter never resolves as a complete cell.
+  if (isLanguageProficiencyCell(pending)) return false;
 
   // Condition A′ (symmetric to A): the NEXT line LEADS with a bare connector
   // glyph — a soft-wrap that broke a skill/list immediately BEFORE the connector
@@ -613,10 +684,16 @@ function upcomingContinuationTexts(lineCells: string[][], from: number): string[
  * A non-skill sub-label (Interests/Hobbies) is not a category: `tokenizeCell`
  * drops such a cell whole, so it never contributes tokens and never reaches the
  * caller's category branch — but the guard here keeps the two decisions aligned.
+ * Language-proficiency rows retain their label here so a dropped row can still
+ * anchor a soft-wrapped continuation in `extractSkills`.
  */
 function matchCellLabel(cell: string): string | undefined {
   const m = stripBullet(cell).match(SUBLABEL_PREFIX_RE);
-  if (!m || NON_SKILL_SUBLABEL_RE.test(m[1])) return undefined;
+  if (
+    !m ||
+    NON_SKILL_SUBLABEL_RE.test(m[1])
+  )
+    return undefined;
   return m[1].trim();
 }
 
@@ -647,11 +724,31 @@ export function extractSkills(
       value.push(tok);
       cellTokens.push(tok);
     }
+    const label = matchCellLabel(cell);
+    // A dropped language-proficiency row still opens a category boundary, but
+    // ONLY when the row is itself unterminated (ends on a trailing
+    // comma/semicolon, e.g. "English (native), Spanish (fluent),") — the same
+    // "list got cut off mid-item" signal `isSoftWrapContinuation`'s Condition
+    // B uses. That is what distinguishes a genuine soft-wrapped tail ("…,"
+    // then "French") from an unrelated, independent bare cell that merely
+    // happens to follow the dropped row ("Languages: Fluent in Spanish" then
+    // "Python, Go, TypeScript"): the latter is already a complete cell with no
+    // trailing delimiter, so nothing after it can be "its" continuation. The
+    // category is emitted only if a later continuation contributes a token.
+    if (cellTokens.length === 0) {
+      if (
+        label !== undefined &&
+        isLanguageProficiencyCell(cell) &&
+        /[,;]\s*$/.test(stripBullet(cell))
+      ) {
+        categories.push({ label, skills: [] });
+      }
+      continue;
+    }
+
     // A cell that produced nothing (dropped link/hobbies label, or all-duplicate)
     // is neither a category nor a bare contribution — skip it on both axes.
-    if (cellTokens.length === 0) continue;
 
-    const label = matchCellLabel(cell);
     if (label !== undefined) {
       categories.push({ label, skills: cellTokens });
     } else if (categories.length > 0) {
@@ -666,13 +763,18 @@ export function extractSkills(
     }
   }
 
+  const nonEmptyCategories = categories.filter(
+    (category) => category.skills.length > 0,
+  );
   const confidence = value.length >= 5 ? 0.85 : value.length >= 2 ? 0.6 : 0.2;
   return {
     value,
     // Emit the structured view ONLY when the section is fully categorised: at
-    // least one label AND no bare head. Otherwise the field is absent (never
-    // `[]`), which reads as "uncategorised" per invariant (2).
-    ...(categories.length > 0 && !hasUncategorisedHead ? { categories } : {}),
+    // least one non-empty label AND no bare head. Otherwise the field is absent
+    // (never `[]`), which reads as "uncategorised" per invariant (2).
+    ...(nonEmptyCategories.length > 0 && !hasUncategorisedHead
+      ? { categories: nonEmptyCategories }
+      : {}),
     confidence,
   };
 }

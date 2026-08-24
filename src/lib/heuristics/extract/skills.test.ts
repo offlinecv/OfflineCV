@@ -426,6 +426,84 @@ describe("tokenizeSkillLine — issue #221 non-skill sub-labels", () => {
   });
 });
 
+describe("tokenizeSkillLine — issue #833 language proficiency rows", () => {
+  it("drops spoken-language proficiency rows across common label variants", () => {
+    expect(tokenizeSkillLine("Language: Fluent in Spanish")).toEqual([]);
+    expect(tokenizeSkillLine("Foreign Languages: Fluent in Spanish")).toEqual([]);
+    expect(
+      tokenizeSkillLine("Spoken Languages: Native German, conversational French"),
+    ).toEqual([]);
+    expect(tokenizeSkillLine("Languages : Fluent in Spanish")).toEqual([]);
+  });
+
+  it("drops standard proficiency-scale wording", () => {
+    expect(
+      tokenizeSkillLine("Languages: Full professional proficiency in German"),
+    ).toEqual([]);
+    expect(tokenizeSkillLine("Languages: Elementary proficiency in French")).toEqual(
+      [],
+    );
+    expect(tokenizeSkillLine("Languages: JLPT N2 Japanese Proficiency")).toEqual(
+      [],
+    );
+  });
+
+  it("keeps programming-language rows when one token contains proficiency wording", () => {
+    expect(tokenizeSkillLine("Languages: C, C++, Visual Basic")).toEqual([
+      "C",
+      "C++",
+      "Visual Basic",
+    ]);
+    expect(tokenizeSkillLine("Languages: Kotlin, Swift, React Native")).toEqual([
+      "Kotlin",
+      "Swift",
+      "React Native",
+    ]);
+    expect(tokenizeSkillLine("Languages: Proficient in Java, Python, Go")).toEqual([
+      "Proficient in Java",
+      "Python",
+      "Go",
+    ]);
+    expect(tokenizeSkillLine("Languages: Java, Python (proficient), Go")).toEqual([
+      "Java",
+      "Python (proficient)",
+      "Go",
+    ]);
+  });
+
+  it("keeps a SOLE skill whose name contains proficiency wording (single-fragment row)", () => {
+    // A single-item row has no siblings to protect it from a whole-cell drop —
+    // the per-fragment check must reject "Visual Basic"/"BASIC" on their own
+    // structural shape (no leading proficiency adjective with an object, no
+    // "in", no parens, no "speaker"), not merely because they are outnumbered.
+    expect(tokenizeSkillLine("Languages: Visual Basic")).toEqual(["Visual Basic"]);
+    expect(tokenizeSkillLine("Languages: BASIC")).toEqual(["BASIC"]);
+    expect(tokenizeSkillLine("Languages: React Native")).toEqual(["React Native"]);
+  });
+
+  it("still drops a single-item genuine proficiency predication", () => {
+    expect(tokenizeSkillLine("Languages: Native German")).toEqual([]);
+    expect(tokenizeSkillLine("Languages: Spanish (native)")).toEqual([]);
+    expect(tokenizeSkillLine("Languages: Native speaker")).toEqual([]);
+  });
+
+  it("keeps bare spoken-language lists and non-language proficiency skills", () => {
+    expect(tokenizeSkillLine("Languages: Python, Go, TypeScript")).toEqual([
+      "Python",
+      "Go",
+      "TypeScript",
+    ]);
+    expect(tokenizeSkillLine("Languages: Spanish, French, Mandarin")).toEqual([
+      "Spanish",
+      "French",
+      "Mandarin",
+    ]);
+    expect(
+      tokenizeSkillLine("Certifications: Certified in AWS Solutions Architecture"),
+    ).toEqual(["Certified in AWS Solutions Architecture"]);
+  });
+});
+
 describe("tokenizeSkillLine — issue #832 single-letter languages", () => {
   it("keeps C, R, and D as real programming languages", () => {
     expect(tokenizeSkillLine("Languages: C, R, D")).toEqual(
@@ -820,6 +898,62 @@ describe("extractSkills — bulleted labelled single-column rows (#465)", () => 
   });
 });
 
+describe("extractSkills — language proficiency category boundary (#833)", () => {
+  it("does not misfile a wrapped tail under the previous category", () => {
+    const section = skillsLines([
+      [{ x: 74, str: "Frameworks: React, Vue", w: 110 }],
+      [{ x: 74, str: "Languages: English (native), Spanish (fluent),", w: 180 }],
+      [{ x: 74, str: "French", w: 35 }],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(value).toEqual(["React", "Vue", "French"]);
+    expect(categories).toEqual([
+      { label: "Frameworks", skills: ["React", "Vue"] },
+      { label: "Languages", skills: ["French"] },
+    ]);
+  });
+
+  it("does not join a complete proficiency row with a following, unrelated skill line", () => {
+    // "Languages: Fluent in Spanish, conversational French" is a complete cell
+    // on its own (no trailing comma) — a following comma-bearing but unrelated
+    // line must not be pulled into it by the soft-wrap Condition B join, or the
+    // merged fragment list re-admits the proficiency phrase and garbles a token
+    // across the line break.
+    const section = skillsLines([
+      [
+        {
+          x: 74,
+          str: "Languages: Fluent in Spanish, conversational French",
+          w: 220,
+        },
+      ],
+      [{ x: 74, str: "Project Management, Agile, Scrum", w: 160 }],
+    ]);
+    const { value } = extractSkills(section);
+
+    expect(value).toEqual(["Project Management", "Agile", "Scrum"]);
+    expect(value.some((v) => v.includes("French"))).toBe(false);
+  });
+
+  it("does not misfile an unrelated bare list under a dropped row's anchor category", () => {
+    // "Languages: Fluent in Spanish" is a single item with no trailing comma —
+    // a COMPLETE cell, not an unterminated one — so nothing after it is "its"
+    // wrap continuation. An unrelated bare list that merely follows it must
+    // not be swept under a "Languages" category the dropped row left behind.
+    const section = skillsLines([
+      [{ x: 74, str: "Languages: Fluent in Spanish", w: 160 }],
+      [{ x: 74, str: "Python, Go, TypeScript", w: 130 }],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(value).toEqual(["Python", "Go", "TypeScript"]);
+    expect(
+      categories?.find((c) => c.label === "Languages")?.skills ?? [],
+    ).not.toEqual(expect.arrayContaining(["Python", "Go", "TypeScript"]));
+  });
+});
+
 describe("extractSkills — category capture (#473)", () => {
   it("captures each label as a category and keeps `skills` the flat union", () => {
     const section = skillsLines([
@@ -833,6 +967,39 @@ describe("extractSkills — category capture (#473)", () => {
       { label: "Frontend", skills: ["React", "TypeScript"] },
       { label: "Backend", skills: ["Java", "Python"] },
     ]);
+  });
+
+  it("drops language proficiency rows without dropping language lists", () => {
+    const section = skillsLines([
+      [...BULLET_RUNS, { x: 74, str: "Languages: Python, Go, TypeScript", w: 180 }],
+      [...BULLET_RUNS, { x: 74, str: "Language: Fluent in Spanish", w: 160 }],
+      [...BULLET_RUNS, { x: 74, str: "Languages: Spanish, French, Mandarin", w: 180 }],
+      [
+        ...BULLET_RUNS,
+        { x: 74, str: "Certifications: Certified in AWS Solutions Architecture", w: 220 },
+      ],
+    ]);
+    const { value, categories } = extractSkills(section);
+
+    expect(value).toEqual([
+      "Python",
+      "Go",
+      "TypeScript",
+      "Spanish",
+      "French",
+      "Mandarin",
+      "Certified in AWS Solutions Architecture",
+    ]);
+    expect(categories).toEqual([
+      { label: "Languages", skills: ["Python", "Go", "TypeScript"] },
+      { label: "Languages", skills: ["Spanish", "French", "Mandarin"] },
+      { label: "Certifications", skills: ["Certified in AWS Solutions Architecture"] },
+    ]);
+    expect(value).not.toContain("Fluent in Spanish");
+    expect(categories).not.toContainEqual({
+      label: "Language",
+      skills: ["Fluent in Spanish"],
+    });
   });
 
   it("INVARIANT 1: `skills` deep-equals `categories.flatMap((c) => c.skills)`", () => {
