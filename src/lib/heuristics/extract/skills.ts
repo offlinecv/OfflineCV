@@ -312,13 +312,35 @@ const BARE_SUBLABEL_RE = new RegExp(`^${SUBLABEL_BODY}:$`);
 const LANGUAGE_LABEL_RE =
   /^(?:foreign\s+|spoken\s+|other\s+)?languages?\s*$/i;
 
-/** A spoken-language proficiency predication, distinguished from a delimited
- * programming-language list by its proficiency wording rather than by the
- * label. Keep this vocabulary broad enough to cover standard proficiency
- * scales, but apply it per fragment so `Visual Basic` and `React Native` do
- * not cause an entire programming-language row to disappear. */
-const LANGUAGE_PROFICIENCY_BODY_RE =
-  /\b(fluent|native|bilingual|conversational|proficient|proficiency|proficiencies|intermediate|elementary|limited|beginner|basic|working\s+proficiency|mother\s+tongue)\b/i;
+/** Spoken-language proficiency ADJECTIVES/predicates ("fluent", "native",
+ * "basic", …). Unlike the NOUN forms below, these collide with real compound
+ * proper nouns — "Visual Basic", "React Native" — so a bare substring test
+ * over a fragment is not enough; see LANGUAGE_PROFICIENCY_PREDICATION_RE for
+ * the structural test that disambiguates them. */
+const LANGUAGE_PROFICIENCY_ADJECTIVES =
+  "fluent|native|bilingual|conversational|proficient|intermediate|elementary|limited|beginner|basic|mother\\s+tongue";
+
+/** A single fragment that reads as a spoken-language proficiency PREDICATION
+ * ("Fluent in Spanish", "Native German", "Spanish (native)", "Native
+ * speaker") rather than a token that merely CONTAINS proficiency vocabulary
+ * ("Visual Basic", "React Native", bare "BASIC"). The noun forms
+ * "proficiency"/"proficiencies" are unambiguous in any position — no
+ * programming-language or tool name ends in "Proficiency" — so they match
+ * anywhere. The adjective forms only count when they carry predicate
+ * structure: leading the fragment with something after them ("Native
+ * German", ruling out a bare "BASIC" with nothing to modify), joined by "in"
+ * ("Fluent in Spanish"), parenthesised ("Spanish (native)"), or followed by
+ * "speaker" ("Native speaker"). Applied per fragment so a delimited
+ * programming-language list survives even when every one of its items
+ * happens to contain proficiency vocabulary. */
+const LANGUAGE_PROFICIENCY_PREDICATION_RE = new RegExp(
+  "\\b(?:proficiency|proficiencies)\\b" +
+    `|^(?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\s+\\S` +
+    `|\\b(?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\s+in\\b` +
+    `|\\((?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\)` +
+    `|\\b(?:${LANGUAGE_PROFICIENCY_ADJECTIVES})\\s+speaker\\b`,
+  "i",
+);
 
 function isLanguageProficiencyCell(cell: string): boolean {
   const debulleted = stripBullet(cell);
@@ -330,7 +352,9 @@ function isLanguageProficiencyCell(cell: string): boolean {
     .filter((fragment) => fragment !== "");
   return (
     fragments.length > 0 &&
-    fragments.every((fragment) => LANGUAGE_PROFICIENCY_BODY_RE.test(fragment))
+    fragments.every((fragment) =>
+      LANGUAGE_PROFICIENCY_PREDICATION_RE.test(fragment),
+    )
   );
 }
 
@@ -435,6 +459,19 @@ function isSoftWrapContinuation(
   if (looksLikeContactLink(nextText)) return false;
   // Always skip if the next line starts a new sub-list (label or bullet).
   if (SKILLS_NEW_ENTRY_RE.test(nextText)) return false;
+  // Always skip when `pending` ALONE already resolves as a complete
+  // spoken-language proficiency cell (#833) — e.g. "Languages: Fluent in
+  // Spanish, conversational French". Such a cell is grammatically finished,
+  // so a following comma-bearing line is an independent, unrelated entry
+  // ("Project Management, Agile, Scrum"), not its wrap continuation. Without
+  // this guard, Condition B below joins the two into one cell whose merged
+  // fragment list contains real skill tokens, defeating
+  // `isLanguageProficiencyCell`'s per-fragment check and re-admitting the
+  // proficiency phrase as a skill. A cell that genuinely wraps mid-list ends
+  // on a trailing comma/semicolon instead ("English (native), Spanish
+  // (fluent),"), which `isLanguageProficiencyCell` — and this guard — leaves
+  // alone because a trailing delimiter never resolves as a complete cell.
+  if (isLanguageProficiencyCell(pending)) return false;
 
   // Condition A′ (symmetric to A): the NEXT line LEADS with a bare connector
   // glyph — a soft-wrap that broke a skill/list immediately BEFORE the connector
@@ -688,12 +725,22 @@ export function extractSkills(
       cellTokens.push(tok);
     }
     const label = matchCellLabel(cell);
-    // A dropped language-proficiency row still opens a category boundary. Keep
-    // that anchor so a soft-wrapped tail cannot be misfiled under the previous
-    // category; the category is emitted only if a later continuation contributes
-    // a token.
+    // A dropped language-proficiency row still opens a category boundary, but
+    // ONLY when the row is itself unterminated (ends on a trailing
+    // comma/semicolon, e.g. "English (native), Spanish (fluent),") — the same
+    // "list got cut off mid-item" signal `isSoftWrapContinuation`'s Condition
+    // B uses. That is what distinguishes a genuine soft-wrapped tail ("…,"
+    // then "French") from an unrelated, independent bare cell that merely
+    // happens to follow the dropped row ("Languages: Fluent in Spanish" then
+    // "Python, Go, TypeScript"): the latter is already a complete cell with no
+    // trailing delimiter, so nothing after it can be "its" continuation. The
+    // category is emitted only if a later continuation contributes a token.
     if (cellTokens.length === 0) {
-      if (label !== undefined && isLanguageProficiencyCell(cell)) {
+      if (
+        label !== undefined &&
+        isLanguageProficiencyCell(cell) &&
+        /[,;]\s*$/.test(stripBullet(cell))
+      ) {
         categories.push({ label, skills: [] });
       }
       continue;
