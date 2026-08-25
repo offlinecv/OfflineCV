@@ -71,6 +71,11 @@ export {
   deleteLetter,
   clearLetterResumeLink,
 } from "./letters.ts";
+// `lettersForCompany`, `standardLetters` (`letters.ts`) and `deriveCompanyKey`
+// (`company-key.ts`) are deliberately NOT re-exported here yet (#766). Nothing
+// in this build reads a company or standard letter — the surfaces that will are
+// the sibling UI issue — and a barrel entry with no importer is dead surface
+// fallow flags as such. Add them here in the change that adds the first caller.
 export {
   requestStoragePersistence,
   isStoragePersisted,

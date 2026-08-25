@@ -1,13 +1,20 @@
-# Cover letter contract (v1)
+# Cover letter contract (v2)
 
 **Audience: anyone writing a cover letter into offlinecv from outside this repo** — a Claude Code
 skill driving `offlinecv.org` through browser automation, the browser extension, a script that
 converts drafts out of another tool. You do not need to read the source to implement this. If a rule
 here and the code disagree, that is a bug; file it.
 
-**Status:** version 1, introduced in [#711](https://github.com/offlinecv/OfflineCV/issues/711).
-Implemented by `src/lib/storage/letter-contract.ts` (validation), `src/lib/storage/letters.ts` (the
-store and its integrity rules), and `src/lib/storage/backup.ts` (export/import).
+**Status:** version 2, introduced in [#766](https://github.com/offlinecv/OfflineCV/issues/766);
+version 1 was [#711](https://github.com/offlinecv/OfflineCV/issues/711). Implemented by
+`src/lib/storage/letter-contract.ts` (validation), `src/lib/storage/letters.ts` (the store and its
+integrity rules), `src/lib/storage/company-key.ts` (the company normaliser), and
+`src/lib/storage/backup.ts` (export/import).
+
+**What v2 changed:** a letter is no longer necessarily *for one job*. `jobId` became **optional** and
+`companyKey` joined it, so a letter can be scoped to a job, to a company, or to nothing at all — the
+letter half of [#765](https://github.com/offlinecv/OfflineCV/issues/765)'s standard → company → job
+hierarchy. **If you already produce letters, nothing you send has to change**: see §6.
 
 Records that violate this contract are **refused**, not repaired. offlinecv would rather tell you
 your record was wrong than store a mangled version of it and report success.
@@ -34,7 +41,7 @@ path that produces a letter, so the validator is the only thing standing between
 the object store, and provenance (§6) is the only thing that will ever distinguish your drafts from
 offlinecv's own.
 
-The **PDF export of a letter is out of scope** in v1. `render-ats-pdf.ts` is résumé-shaped
+The **PDF export of a letter is out of scope**, in v2 as in v1. `render-ats-pdf.ts` is résumé-shaped
 (sections / roles / bullets); a letter is a different document model and needs a different renderer.
 
 ---
@@ -50,22 +57,69 @@ document as-is with no encoding step.
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | non-empty string | Primary key. See §2. |
-| `jobId` | non-empty string | The `JobRecord.id` this letter is for. See §5 — this link is what makes the letter reachable. |
 | `body` | string | The letter itself, **markdown**. May be empty (an empty draft is a real state), but the key must be present. |
 
-### Optional
+### Optional — the scope keys
 
 | Field | Type | Meaning |
 |---|---|---|
-| `label` | string | User-facing name, so two drafts for one job are tellable apart (`"Warm open"`, `"Short version"`). |
+| `jobId` | non-empty string | The `JobRecord.id` this letter is for. |
+| `companyKey` | non-empty string | The company this letter is for, **normalised** — see §1.1. |
+
+These two are optional *individually* but not independent. Their combinations form a three-case
+lattice, and **exactly one reading applies to any record**:
+
+| `jobId` | `companyKey` | Reading |
+|---|---|---|
+| set | — | Letter for one job — every letter that existed before v2 |
+| — | set | Letter for one company |
+| — | — | **Standard** letter |
+
+**A record carrying both is REFUSED**, with a reason naming both fields. It has no single reading,
+and resolving it by precedence would mean picking a rule no producer could guess — your letter would
+be filed somewhere you never asked for. Send one key, or neither.
+
+Each key is a non-empty string **when present**, so `""` is a refusal, not a fourth state. **Absent is
+not empty.** An absent key is a positive statement about scope; `""` reads as *set* to a key check and
+as *unset* to every comparison, which is how a letter ends up in no list at all. If you have no
+company name, send no `companyKey` — that is a standard letter, and it is a legitimate record.
+
+### Optional — everything else
+
+| Field | Type | Meaning |
+|---|---|---|
+| `label` | string | User-facing name, so two drafts for one scope are tellable apart (`"Warm open"`, `"Short version"`). |
 | `resumeId` | non-empty string | The `ResumeRecord.id` this letter was written from. **User-owned.** Cleared, not orphaned, if that résumé is deleted — see §5. |
 | `producer` | object | Provenance. See §6. |
 | `createdAt` / `updatedAt` | finite number (epoch ms) | Timestamps. The store owns them; a backup file carries them so a restore preserves both. |
 | `deletedAt` | finite number (epoch ms) | A **tombstone**: the letter is deleted, and its presence says so. See §5. |
 
-`body` is required but **may be empty**, while `jobId` may not. The asymmetry is deliberate: an
-empty draft is something the user can see and fix, whereas a letter with no job is reachable from
-nothing and survives no cascade.
+`body` is required but **may be empty**, while a scope key that is present may not. The asymmetry is
+deliberate: an empty draft is something the user can see and fix, whereas an empty scope key is a
+claim to a scope that does not exist.
+
+### 1.1 Deriving `companyKey`
+
+**There is no company entity in offlinecv.** `JobRecord.company` is free text captured off a posting
+page; it may be empty, and two postings for one employer may spell it differently or differ only in a
+legal suffix. So `companyKey` is a *normalised string*, not a foreign key.
+
+The normalisation is `deriveCompanyKey` in `src/lib/storage/company-key.ts`: lowercase, collapse
+whitespace, drop punctuation, strip **one** trailing legal suffix (`Inc` · `LLC` · `Ltd` · `Limited` ·
+`Corp` · `Corporation` · `Co` · `GmbH` · `S.A.` · `B.V.` · `Pty`). `Northwind`, `Northwind Inc.` and
+`northwind, inc.` all key to `northwind`. An empty or all-punctuation name yields **`undefined`**, not
+`""` — precisely so a job with no company gives you "no key" rather than a key this contract refuses.
+
+Two things follow, and both are load-bearing:
+
+- **Derive the key; do not send the raw name.** A letter written under `"Northwind Inc."` and looked
+  up under `"Northwind"` is a letter the user cannot find. If you cannot run offlinecv's function,
+  reimplement the rules above exactly.
+- **The key is ADVISORY.** It drives a *suggestion the user confirms* ("You have a letter for
+  Northwind — start from it?"), never an automatic attachment. This is the rule `JobRecord.aliasUrls`
+  already states: a link between two things is never inferred, it is confirmed. Normalisation
+  collides, and the cost of a collision must be a suggestion declined — not a letter silently filed
+  under the wrong employer. Do not build identity on this string.
 
 ### Unknown fields are PRESERVED
 
@@ -131,15 +185,44 @@ until IndexedDB's own clone throws.
 This is the part of the contract with no analogue in the job document, and the two links behave
 differently on purpose.
 
-### Deleting the job CASCADES
+### Deleting the job CASCADES — to that job's letters, and only those
 
-**Deleting a job deletes every letter written for it.** Not orphan-and-keep.
+**Deleting a job deletes every letter written for it.** Not orphan-and-keep. A company letter and a
+standard letter are untouched.
 
-A letter reaches every surface through its job — a letters list is a list *within* a job. So a
-letter whose job is gone is unreachable: nothing can list it, open it, edit it, or delete it.
-Keeping it would not preserve anything the user could ever get back; it would only grow the store
-invisibly, against a browser quota they do not see until it is exceeded. `jobId` is required
-precisely so this rule has no exceptions.
+| Deleted | Job letters for it | Company letters at that company | Standard letters |
+|---|---|---|---|
+| A job | **Deleted** (tombstoned) | Untouched | Untouched |
+| The **last** job at a company | **Deleted** | **Untouched** — it was never that job's | Untouched |
+| A résumé | Kept, `resumeId` cleared | Kept, `resumeId` cleared | Kept, `resumeId` cleared |
+
+There is no delete-company action, because there is no company (§1.1). A company letter and a
+standard letter are therefore only ever deleted **explicitly**, by the user, one letter at a time.
+
+#### Why the cascade is right, and why it is right *only* for job letters
+
+v1 justified the cascade with an argument that no longer holds, and it is worth stating what
+replaced it rather than quietly editing the conclusion. v1 said:
+
+> A letter reaches every surface through its job — a letters list is a list *within* a job. So a
+> letter whose job is gone is unreachable: nothing can list it, open it, edit it, or delete it.
+
+That was true when written, and it is exactly what v2 invalidates. Once standard and company letter
+surfaces exist, a jobless letter is **reachable on its own terms** — it is listed, opened, edited and
+deleted from its own scope, not through a job. So "no job" stopped meaning "no way back".
+
+What survives is the narrower claim, and it is enough. A letter that names a *specific, now-deleted*
+job is unreachable: it is scoped to a row that no longer exists, no list can hold it, and keeping it
+would only grow the store invisibly against a browser quota the user does not see until it is
+exceeded. That is a statement about job letters, and only job letters — which is why `jobId` could
+become optional without weakening it.
+
+**The scoping enforces this by construction, not by a guard.** `deleteLettersForJob` sweeps
+`lettersForJob`, which matches `letter.jobId === jobId`; a company or standard letter has no `jobId`
+at all, and `undefined` never equals a real id. If you are reimplementing this: do **not** widen the
+sweep to "letters at this company", and do not add a redundant second check — the first deletes what
+this contract exists to protect, and the second is a weaker copy of a rule the scoping already makes
+airtight.
 
 The cascade lives in the store (`deleteJob` → `deleteLettersForJob`), not in a UI layer, so no
 caller can forget it. The job record is deleted first: if the letter sweep then fails, the delete
@@ -177,13 +260,26 @@ The repair is written with `touch: false`, so `updatedAt` is **not** stamped. A 
 not make must not reshuffle a list sorted most-recently-updated-first — otherwise deleting one
 résumé floats every letter that merely referenced it to the top.
 
-### Known gap in v1: neither link is reconciled on import
+### Known gap: neither link is reconciled on import
 
 **Merge-mode import can strand either link.** A partial or stale backup from another device can
 graft in a letter whose `jobId` matches no job here — that letter is stored but *unreachable*, since
-§5 says a letter is only ever reached through its job — and equally a letter whose `resumeId` matches
-no résumé here, which is the milder degrade (the letter still opens; its résumé line just reads "not
-linked" forever). Nothing sweeps either one today.
+a letter scoped to a specific job is only ever reached through that job — and equally a letter whose
+`resumeId` matches no résumé here, which is the milder degrade (the letter still opens; its résumé
+line just reads "not linked" forever). Nothing sweeps either one today.
+
+v2 makes this gap strictly **smaller**, not larger. A standard letter has no `jobId` to dangle, and a
+company letter's `companyKey` is a derived string rather than a reference — it points at no record,
+so there is no record whose absence could strand it. A merge-import of a v2 backup therefore strands
+*fewer* letters than the same import under v1, and every letter it does strand is a job letter, for
+the same reason as before.
+
+**Sync is the exception, and it is a real one.** The remote `cover_letters` table has no company
+column, and the extension's `letter-mapping.ts` **refuses a pulled row with no `local_job_id`** while
+happily pushing one — so today a standard or company letter uploads and can never come back, failing
+silently on a second device. That asymmetry must be fixed before letters written under v2 are safe to
+sync: <https://github.com/s-annam/recruidea-extension/issues/55>. Local storage and the backup
+document carry both scope keys fine; it is only the sync path that is short.
 
 Jobs are only half-covered by the existing sweep, and not for the same link: `reconcileResumeLinks`
 clears a dangling **`resumeId` on a job**, so it is the analogue of the *second* case above, not the
@@ -212,18 +308,31 @@ Three version numbers exist and they are not the same thing.
 
 ```jsonc
 "producer": {
-  "contract": 1,                          // required within the object: which version you targeted
+  "contract": 2,                          // required within the object: which version you targeted
   "producer": "claude-code-letter-skill", // optional, free text
   "producerVersion": "0.1.0",             // optional
   "generatedAt": 1753900000000            // optional epoch ms — when YOU generated the draft
 }
 ```
 
+### What the bump to 2 asks of you: nothing
+
+`LETTER_CONTRACT_VERSION` is `2` since #766. A v1 producer — one that always sends `jobId` and has
+never heard of `companyKey` — **keeps working untouched**, and is a valid v2 producer that happens to
+write only job letters. Nothing here refuses a record for saying `"contract": 1`, and the validator
+deliberately does not compare your number against its own (see above).
+
+The bump says there is **more you MAY send**, not that anything you already send became wrong. Take
+it up when you have a reason to: a letter that belongs to an employer rather than to one posting, or
+a standard letter holding the candidate-specific material that has no place on a résumé.
+
 The field is `producer` and the timestamp is `generatedAt`, where a job carries `capture` and
 `capturedAt`. That is the distinction, not an inconsistency: a job is *captured* from a page that
 already existed; a letter is *generated*.
 
-`producer` is **optional**, and its absence means "written by offlinecv itself, contract 1". It
+`producer` is **optional**, and its absence means "written by offlinecv itself, contract 1" — the
+version that was current when the field appeared, and the reading a record with no version has
+forever. It
 exists in v1 rather than later because a producer version cannot be retrofitted: once third-party
 producers are writing records, a record with no version is indistinguishable from one written before
 the field existed, and the ambiguity is permanent. Since offlinecv currently writes **no** letters at
@@ -249,9 +358,8 @@ letters. Replace means "make storage match this file"; skipping the wipe would l
 stranded on jobs the restore just deleted, which is exactly the orphan §5's cascade exists to make
 impossible.
 
-Nothing renders `skippedLetters` yet — v1 ships the store with no UI at all. It is reported from the
-first commit anyway, because a counter added later cannot recover the records already dropped in
-silence.
+Nothing renders `skippedLetters` yet. It has been reported since the first commit anyway, because a
+counter added later cannot recover the records already dropped in silence.
 
 ---
 
@@ -263,14 +371,24 @@ typed over `keyof Required<LetterRecord>` and its guards are typed against each 
 That is the mechanism keeping the validator from quietly ceasing to cover a field. Update this
 document in the same change.
 
-Changing §5's cascade rule, or §2's "no derivation", is a **contract version bump** — both are
-things a producer builds assumptions on top of.
+A **cross-field** rule — one where no single value is wrong on its own — has no home in that map and
+goes in `validateLetterRecord` itself, after `checkDeclaredFields`. The both-scope-keys refusal (§1)
+is the only one today; write the reason so it names every field involved, since a producer that sent
+two fields cannot act on a complaint about one.
+
+Changing §5's cascade rule, §2's "no derivation", or §1's scope lattice is a **contract version
+bump** — all three are things a producer builds assumptions on top of. Relaxing a rule still counts:
+v2 made `jobId` optional, which no existing producer had to react to, and it is a bump anyway,
+because the *readings* of a record changed. Adding a field a producer may ignore is what a bump most
+often means; §6 is where you say so, so nobody reads a new number as a demand.
 
 ---
 
 ## Appendix — a complete example
 
 Every value below is synthetic.
+
+### A job letter — one key, and the shape every v1 letter already had
 
 ```json
 {
@@ -280,11 +398,42 @@ Every value below is synthetic.
   "label": "Short version",
   "body": "Dear hiring team,\n\nI am applying for the Staff Engineer role at Northwind. I have spent the last six years on browser-side document tooling, most recently leading the parser rewrite that cut our extraction failures by half.\n\nI would welcome the chance to talk.\n\nJordan Vance\njordan.vance@example.com",
   "producer": {
-    "contract": 1,
+    "contract": 2,
     "producer": "claude-code-letter-skill",
     "producerVersion": "0.1.0",
     "generatedAt": 1753900000000
   },
+  "createdAt": 1753900000000,
+  "updatedAt": 1753900000000
+}
+```
+
+### A company letter — `companyKey` instead, never both
+
+Note the key is the *derived* form (§1.1), not `"Northwind, Inc."` as the posting printed it.
+
+```json
+{
+  "id": "9c4d1e70-8a52-4b39-8f0d-2e6b7c9a4455",
+  "companyKey": "northwind",
+  "label": "Why Northwind",
+  "body": "I have followed Northwind's work on browser-side document tooling since the 3.0 release, and the reason I keep coming back to it is the same reason I want to work there: the constraint that nothing leaves the device is treated as a product decision rather than a limitation.",
+  "producer": { "contract": 2, "producer": "claude-code-letter-skill" },
+  "createdAt": 1753900000000,
+  "updatedAt": 1753900000000
+}
+```
+
+### A standard letter — neither key
+
+The base the other two are tailored *from* (#765), not a generic letter to submit as-is.
+
+```json
+{
+  "id": "2b7f5a13-6c04-4d8e-91a7-5f3e0d8c6612",
+  "label": "Career change narrative",
+  "body": "After six years in infrastructure I moved deliberately into document tooling, and the throughline is the same one I would bring to this role: I like problems where correctness is checkable and the failure modes are silent.",
+  "producer": { "contract": 2, "producer": "claude-code-letter-skill" },
   "createdAt": 1753900000000,
   "updatedAt": 1753900000000
 }

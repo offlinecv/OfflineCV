@@ -24,13 +24,20 @@ import {
   getLetter,
   getAllLetters,
   lettersForJob,
+  lettersForCompany,
+  standardLetters,
   deleteLetter,
   deleteLettersForJob,
   clearLetterResumeLink,
 } from "./letters.ts";
 import { saveJob, getAllJobs, deleteJob } from "./jobs.ts";
+import { deriveCompanyKey } from "./company-key.ts";
 import { saveResume, getAllResumes } from "./resumes.ts";
-import { validateLetterRecord, LETTER_RECORD_RULES } from "./letter-contract.ts";
+import {
+  validateLetterRecord,
+  LETTER_RECORD_RULES,
+  LETTER_CONTRACT_VERSION,
+} from "./letter-contract.ts";
 import { exportAll, exportToJson, importAll, importFromJson } from "./backup.ts";
 import { tick } from "./__test-utils__/clock.ts";
 import type { LetterRecord, StorageExport } from "./types.ts";
@@ -87,6 +94,64 @@ describe("storage: letters CRUD (#711)", () => {
   });
 });
 
+describe("storage: letter scope keys (#766)", () => {
+  it("saves a company letter with no jobId and reads it back from lettersForCompany", async () => {
+    const saved = await saveLetter({ companyKey: "northwind", body: BODY, label: "Why here" });
+    expect(saved.jobId).toBeUndefined();
+    expect(saved.companyKey).toBe("northwind");
+
+    expect((await lettersForCompany("northwind")).map((l) => l.id)).toEqual([saved.id]);
+    expect(await lettersForCompany("contoso")).toEqual([]);
+    // It is not a job letter and not a standard one — exactly one reading.
+    expect(await standardLetters()).toEqual([]);
+  });
+
+  it("saves a standard letter with neither key and reads it back from standardLetters", async () => {
+    const saved = await saveLetter({ body: BODY, label: "My story" });
+    expect(saved.jobId).toBeUndefined();
+    expect(saved.companyKey).toBeUndefined();
+
+    expect((await standardLetters()).map((l) => l.id)).toEqual([saved.id]);
+    expect(await lettersForCompany("northwind")).toEqual([]);
+  });
+
+  it("keeps the three scopes apart, each most-recently-updated first", async () => {
+    const older = await saveLetter({ companyKey: "northwind", body: "older" });
+    await tick();
+    const newer = await saveLetter({ companyKey: "northwind", body: "newer" });
+    await saveLetter({ jobId: "job-1", body: "for the posting" });
+    await saveLetter({ body: "standard" });
+
+    expect((await lettersForCompany("northwind")).map((l) => l.id)).toEqual([
+      newer.id,
+      older.id,
+    ]);
+    expect(await lettersForJob("job-1")).toHaveLength(1);
+    expect(await standardLetters()).toHaveLength(1);
+    expect(await getAllLetters()).toHaveLength(4);
+  });
+
+  it("a jobless letter is invisible to lettersForJob, whatever it is asked for", async () => {
+    // The property the cascade rests on, asserted on the reader it rests on:
+    // `undefined` never equals a real id, so no `jobId` argument can reach one.
+    await saveLetter({ companyKey: "northwind", body: "company" });
+    await saveLetter({ body: "standard" });
+    for (const id of ["job-1", "", "undefined", "northwind"]) {
+      expect(await lettersForJob(id)).toEqual([]);
+    }
+  });
+
+  it("company letters are keyed by the DERIVED key, so two spellings find one letter", async () => {
+    // `deriveCompanyKey` is the caller's job, not the store's — the store
+    // compares keys. This is the round trip a suggestion surface will make.
+    const key = deriveCompanyKey("Northwind, Inc.");
+    await saveLetter({ companyKey: key, body: BODY });
+    expect((await lettersForCompany(deriveCompanyKey("northwind")!)).map((l) => l.body)).toEqual([
+      BODY,
+    ]);
+  });
+});
+
 describe("storage: letters follow their job and their résumé (#711)", () => {
   it("CASCADES: deleting a job deletes its letters, and only its letters", async () => {
     const job = await saveJob({ title: "Staff Engineer" });
@@ -103,6 +168,42 @@ describe("storage: letters follow their job and their résumé (#711)", () => {
     expect(await lettersForJob(job.id)).toEqual([]);
     expect((await getAllLetters()).map((l) => l.id)).toEqual([survivor.id]);
     expect((await getAllJobs()).map((j) => j.id)).toEqual([other.id]);
+  });
+
+  it("CASCADES to job letters ONLY — company and standard letters survive (#766)", async () => {
+    // The invariant the whole lattice rests on, asserted directly rather than
+    // inferred from `lettersForJob`'s filter: deleting the LAST job at a company
+    // must not take that company's letter with it, because the letter was never
+    // that job's.
+    const job = await saveJob({ title: "Staff Engineer", company: "Northwind" });
+    const key = deriveCompanyKey("Northwind")!;
+    await saveLetter({ jobId: job.id, body: "for the posting" });
+    const company = await saveLetter({ companyKey: key, body: "why Northwind" });
+    const standard = await saveLetter({ body: "my story" });
+
+    expect(await deleteLettersForJob(job.id)).toBe(1);
+    await deleteJob(job.id);
+
+    expect(await getAllJobs()).toEqual([]);
+    expect(await lettersForJob(job.id)).toEqual([]);
+    expect((await lettersForCompany(key)).map((l) => l.id)).toEqual([company.id]);
+    expect((await standardLetters()).map((l) => l.id)).toEqual([standard.id]);
+    expect((await getAllLetters()).map((l) => l.id).sort()).toEqual(
+      [company.id, standard.id].sort(),
+    );
+  });
+
+  it("the cascade stays idempotent with jobless letters in the store (#766)", async () => {
+    const job = await saveJob({ title: "Staff Engineer" });
+    await saveLetter({ jobId: job.id, body: "for the posting" });
+    await saveLetter({ companyKey: "northwind", body: "why Northwind" });
+    await saveLetter({ body: "my story" });
+
+    expect(await deleteLettersForJob(job.id)).toBe(1);
+    // A retried cascade finds nothing live and must not start counting — or
+    // worse, re-stamping — the letters it was never entitled to touch.
+    expect(await deleteLettersForJob(job.id)).toBe(0);
+    expect(await getAllLetters()).toHaveLength(2);
   });
 
   it("cascade is a no-op for a job that never had a letter", async () => {
@@ -262,12 +363,7 @@ describe("storage: letter contract (#711)", () => {
     expect(result.record).toEqual(validLetter());
   });
 
-  it("names a missing jobId, a non-string body, and a non-JSON-safe field", () => {
-    const missingJob = validateLetterRecord(validLetter({ jobId: undefined }));
-    expect(missingJob.ok).toBe(false);
-    if (missingJob.ok) return;
-    expect(missingJob.reasons.join(" ")).toContain("`jobId` is required");
-
+  it("names a non-string body and a non-JSON-safe field", () => {
     const badBody = validateLetterRecord(validLetter({ body: 42 }));
     expect(badBody.ok).toBe(false);
     if (badBody.ok) return;
@@ -283,10 +379,14 @@ describe("storage: letter contract (#711)", () => {
     expect(notJsonSafe.reasons.join(" ")).toContain("Date");
   });
 
-  it("refuses an empty jobId but accepts an empty body", () => {
-    // A letter with no job is reachable from nothing; an empty draft is a state
-    // the user can plainly see and fix.
+  it("refuses an empty scope key but accepts an empty body", () => {
+    // Absent ≠ empty (#766). An absent key is a scope statement; `""` is a
+    // fourth state that reads as set to `hasOwn` and unset to every comparison,
+    // so it stays a refusal. An empty draft is a state the user can see and fix.
     expect(validateLetterRecord(validLetter({ jobId: "" })).ok).toBe(false);
+    expect(
+      validateLetterRecord(validLetter({ jobId: undefined, companyKey: "" })).ok,
+    ).toBe(false);
     expect(validateLetterRecord(validLetter({ body: "" })).ok).toBe(true);
   });
 
@@ -320,6 +420,54 @@ describe("storage: letter contract (#711)", () => {
     expect(record.revision).toBe(3);
   });
 
+  it("accepts all three scope readings, and refuses the fourth (#766)", () => {
+    const job = validateLetterRecord(validLetter());
+    expect(job.ok).toBe(true);
+
+    const company = validateLetterRecord(
+      validLetter({ jobId: undefined, companyKey: "northwind" }),
+    );
+    expect(company.ok).toBe(true);
+    if (company.ok) expect(company.record.companyKey).toBe("northwind");
+
+    const standard = validateLetterRecord(validLetter({ jobId: undefined }));
+    expect(standard.ok).toBe(true);
+    if (standard.ok) {
+      expect(standard.record.jobId).toBeUndefined();
+      expect(standard.record.companyKey).toBeUndefined();
+    }
+
+    // Both keys set has no single reading, and resolving it by precedence would
+    // file the letter somewhere the producer never asked for.
+    const both = validateLetterRecord(validLetter({ companyKey: "northwind" }));
+    expect(both.ok).toBe(false);
+    if (both.ok) return;
+    const reason = both.reasons.join(" ");
+    expect(reason).toContain("`jobId`");
+    expect(reason).toContain("`companyKey`");
+  });
+
+  it("a v1-shaped record still validates and stores unchanged (#766)", async () => {
+    // The forward-compatibility half of the bump: a producer written against v1
+    // always sends `jobId` and has never heard of `companyKey`. Nothing about it
+    // changes, and it must not have to know the contract moved.
+    const v1 = validLetter({ producer: { contract: 1 } });
+    const result = validateLetterRecord(v1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.record).toEqual(v1);
+
+    await importAll(backupWith([v1]));
+    const [stored] = await getAllLetters();
+    expect(stored.jobId).toBe("job-1");
+    expect(stored.companyKey).toBeUndefined();
+    expect((await lettersForJob("job-1")).map((l) => l.id)).toEqual(["letter-1"]);
+  });
+
+  it("the contract version is 2, matching the doc header (#766)", () => {
+    expect(LETTER_CONTRACT_VERSION).toBe(2);
+  });
+
   it.each(Object.keys(LETTER_RECORD_RULES))(
     "the rule for `%s` actually rejects something",
     (field) => {
@@ -332,6 +480,22 @@ describe("storage: letter contract (#711)", () => {
     },
   );
 });
+
+/**
+ * A parsed backup document with the two fields no export can reproduce removed:
+ * `exportedAt` (stamped per export) and every record's `updatedAt` (restamped by
+ * `putRecord` on the import write). What is left is what an export → import →
+ * export cycle is required to preserve exactly.
+ */
+function stripVolatile(json: string): unknown {
+  const doc = JSON.parse(json) as {
+    exportedAt?: number;
+    letters?: Record<string, unknown>[];
+  };
+  delete doc.exportedAt;
+  for (const letter of doc.letters ?? []) delete letter.updatedAt;
+  return doc;
+}
 
 /** A backup document carrying exactly the letters given, and nothing else. */
 function backupWith(letters: unknown[]): StorageExport {
@@ -372,6 +536,34 @@ describe("storage: letters through export / import (#711)", () => {
     const [restored] = await getAllLetters();
     expect(restored).toEqual({ ...saved, updatedAt: expect.any(Number) });
     expect(restored.createdAt).toBe(saved.createdAt);
+  });
+
+  it("round-trips a company letter and a standard letter byte-identically (#766)", async () => {
+    // Byte-identical, not merely field-equal: the scope keys ride the backup
+    // document as ordinary JSON, and a company letter that came back as a
+    // standard one would be a letter silently unfiled.
+    await saveLetter({ companyKey: "northwind", body: BODY, label: "Why here" });
+    await saveLetter({ body: "My story", label: "Standard" });
+
+    const first = await exportToJson();
+
+    await closeDB();
+    await deleteDB(DB_NAME);
+    const counts = await importFromJson(first, "replace");
+    expect(counts.letters).toBe(2);
+    expect(counts.skippedLetters).toEqual([]);
+
+    const second = await exportToJson();
+    // `exportedAt` is stamped per export, and `updatedAt` is restamped by
+    // `putRecord` on any write that does not opt out — the pre-existing rule for
+    // every record type. Everything else must be identical, including both
+    // scope keys and the ABSENCE of the one each letter does not carry.
+    expect(stripVolatile(second)).toEqual(stripVolatile(first));
+
+    const company = (await lettersForCompany("northwind"))[0];
+    expect(company.companyKey).toBe("northwind");
+    expect("jobId" in company).toBe(false);
+    expect(await standardLetters()).toHaveLength(1);
   });
 
   it("survives the JSON string round-trip, not just the in-memory object", async () => {
@@ -432,7 +624,9 @@ describe("storage: letters through export / import (#711)", () => {
     const counts = await importAll(
       backupWith([
         validLetter(),
-        validLetter({ id: "letter-2", label: "Second", jobId: undefined }),
+        // `""` rather than an absent `jobId`, which since #766 is a standard
+        // letter and perfectly valid.
+        validLetter({ id: "letter-2", label: "Second", jobId: "" }),
         validLetter({ id: "letter-3", body: null }),
       ]),
     );

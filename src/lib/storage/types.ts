@@ -355,11 +355,14 @@ export interface LetterProvenance {
 }
 
 /**
- * A cover letter for one tracked job (#711).
+ * A cover letter, scoped to one job, to one company, or to nothing at all
+ * (#711, #766). The three-case lattice is on {@link LetterRecord.jobId}.
  *
  * A separate store rather than a field on {@link JobRecord} because letters are
- * ITERATED — several drafts per job, and versions of one draft, are the normal
- * case, and a field gives you exactly one forever.
+ * ITERATED — several drafts per scope, and versions of one draft, are the
+ * normal case, and a field gives you exactly one forever. That a letter is no
+ * longer necessarily a job's at all (#766) is the second, independent reason
+ * the same decision was right.
  *
  * Every field is JSON-safe (no `Blob`, unlike `ResumeRecord`), so the whole
  * record rides through the export document as-is with no base64 step.
@@ -371,10 +374,49 @@ export interface LetterProvenance {
  * to describe it in `docs/cover-letter-contract.md`.
  */
 export interface LetterRecord extends StoredRecord {
-  /** The job this letter is for (`JobRecord.id`). Required — a letter with no
-   *  job is unreachable from every surface. Deleting the job CASCADES to its
-   *  letters; see `deleteLettersForJob` and §5 of the contract doc. */
-  jobId: string;
+  /**
+   * The job this letter is for (`JobRecord.id`). Optional since contract v2
+   * (#766), and it is one of two keys that together give a letter its SCOPE.
+   *
+   * Exactly one reading applies to any record:
+   *
+   * | `jobId` | `companyKey` | Reading |
+   * |---|---|---|
+   * | set | — | Letter for one job (every letter written before v2) |
+   * | — | set | Letter for one company |
+   * | — | — | Standard letter |
+   *
+   * **A record carrying BOTH is refused** (`validateLetterRecord`). It has no
+   * single reading, and accepting one would mean picking a precedence rule no
+   * producer could guess. Each key is a non-empty string *when present*, so
+   * `""` stays a refusal rather than becoming a silent fourth state.
+   *
+   * Deleting a job still CASCADES to that job's letters, and cannot reach a
+   * jobless one — `lettersForJob` matches `letter.jobId === jobId` and
+   * `undefined` never equals a real id, so the scoping is what makes the
+   * cascade safe rather than a guard bolted on beside it. See
+   * `deleteLettersForJob` and §5 of the contract doc.
+   *
+   * What v1 said here — that a letter with no job is unreachable from every
+   * surface, so `jobId` had to be required — was true when written and is
+   * exactly what #765 invalidates: once a standard/company letter surface
+   * exists, a jobless letter is reachable.
+   */
+  jobId?: string;
+  /**
+   * The company this letter is for, as a derived key (`deriveCompanyKey` in
+   * `company-key.ts`), for a letter that belongs to an employer rather than to
+   * one posting. See `jobId` above for the lattice the two keys form.
+   *
+   * There is no company entity — {@link JobRecord.company} is free text and may
+   * be empty — so this is a NORMALISED string, not a foreign key, and it is
+   * **advisory**: per #765 it only ever drives a suggestion the user confirms.
+   * Nothing auto-attaches a letter to a job by company match, for the reason
+   * `aliasUrls` gives about links never being inferred: a normaliser collides,
+   * and a false merge must cost a declined suggestion rather than a letter
+   * silently attached to the wrong employer.
+   */
+  companyKey?: string;
   /** Optional link to the saved resume this letter was written from
    *  (`ResumeRecord.id`). Cleared (not orphaned) if that resume is later
    *  deleted — the same rule `JobRecord.resumeId` follows. */
