@@ -44,6 +44,8 @@ const NO_COMPANIES: CompanyTargets = {
   isSelected: () => false,
   toggle: () => {},
   switchToRunnerUp: () => {},
+  isWatched: () => false,
+  toggleWatched: () => {},
 };
 
 /**

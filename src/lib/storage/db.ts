@@ -4,8 +4,9 @@
 /**
  * IndexedDB handle for the local-first storage foundation (#321).
  *
- * One database, five object stores (`resumes`, `jobs`, `boards`, `letters` and
- * the `sync` bookmarks that describe three of them), opened through the ~1KB
+ * One database, six object stores (`resumes`, `jobs`, `boards`, `letters`,
+ * `watched` and the `sync` bookmarks that describe three of them), opened
+ * through the ~1KB
  * `idb` wrapper. Schema versioning lives here from day one: every future store
  * or index is a `DB_VERSION` bump with a matching branch in `upgrade()`, so an
  * existing user's data migrates forward instead of stranding. `upgrade()` runs
@@ -23,6 +24,7 @@ import type {
   BoardCacheRecord,
   LetterRecord,
   SyncCursorRecord,
+  WatchedCompanyRecord,
 } from "./types.ts";
 
 // Renamed from "resumelint" during the OfflineCV rename (#498). Safe to change
@@ -46,7 +48,7 @@ export const DB_NAME = "offlinecv";
  *  (`extension/src/offlinecv-core.ts`) still imports the `getDB()`-backed
  *  functions by relative path, so the pin is what keeps this constant and that
  *  build in step. */
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /** Index name shared by every syncable store — one string so a range query and
  *  the three `createIndex` calls cannot drift apart. */
@@ -58,6 +60,7 @@ interface OfflineCvDB extends DBSchema {
   boards: { key: string; value: BoardCacheRecord };
   letters: { key: string; value: LetterRecord; indexes: { updatedAt: number } };
   sync: { key: string; value: SyncCursorRecord };
+  watched: { key: string; value: WatchedCompanyRecord };
 }
 
 let dbPromise: Promise<IDBPDatabase<OfflineCvDB>> | null = null;
@@ -125,6 +128,16 @@ export function getDB(): Promise<IDBPDatabase<OfflineCvDB>> {
             tx.objectStore(store).createIndex(UPDATED_AT_INDEX, "updatedAt");
           }
           db.createObjectStore("sync", { keyPath: "id" });
+        }
+        // v4 → v5 (#864): the persisted company-watchlist store. Additive like
+        // every block above — an existing user's résumés/jobs/letters/sync state
+        // is untouched, and this new store simply starts empty, which is the
+        // correct reading of "never saved a shortlist". No index: `useCompanyTargets`
+        // reads the whole (small) store on mount, same as `getAllLetters` does for
+        // `letters` — see the `oldVersion < 3` note above for why an index isn't
+        // worth it before a caller needs one.
+        if (oldVersion < 5) {
+          db.createObjectStore("watched", { keyPath: "id" });
         }
       },
     });

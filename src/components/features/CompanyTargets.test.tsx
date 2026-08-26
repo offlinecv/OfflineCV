@@ -12,9 +12,17 @@
  * The assertions that matter are the ones the fan-out depends on: what
  * `selected` contains after a toggle, and that a sector switch re-seeds it —
  * because that array is passed straight to `searchJobs`.
+ *
+ * Since #864 the hook also reaches IndexedDB (the persisted watchlist), so
+ * this suite runs against `fake-indexeddb/auto` like `watched-companies.test.ts`
+ * — without it, every mount's dynamic import of `watched-companies.ts` would
+ * throw (no `indexedDB` global in plain jsdom), which the hook's own `catch`
+ * swallows into an empty, unreadable pool.
  */
 
-import { describe, it, expect, afterEach } from "vitest";
+import "fake-indexeddb/auto";
+import { deleteDB } from "idb";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -26,8 +34,18 @@ import {
   COMPANY_LIMIT,
   type CompanyTargets as CompanyTargetsState,
 } from "../../hooks/useCompanyTargets.ts";
+import { DB_NAME, closeDB } from "../../lib/storage/db.ts";
+import {
+  getWatchedCompanies,
+  saveWatchedCompany,
+} from "../../lib/job-search/watched-companies.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { CompanyEntry } from "../../lib/job-search/company-registry.ts";
+
+beforeEach(async () => {
+  await closeDB();
+  await deleteDB(DB_NAME);
+});
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -130,12 +148,54 @@ async function expand(): Promise<void> {
   });
 }
 
+/**
+ * Runs `body` with IndexedDB unavailable — the private-browsing / content-
+ * blocker / corporate-policy shape, where `open()` throws outright. Same
+ * simulation `board-cache.test.ts` uses; `closeDB()` on both sides so neither
+ * the cached handle from an earlier test nor the poisoned one from this test
+ * leaks across the boundary.
+ */
+async function withStorageBlocked(body: () => Promise<void>): Promise<void> {
+  const original = globalThis.indexedDB;
+  Object.defineProperty(globalThis, "indexedDB", {
+    configurable: true,
+    value: {
+      open() {
+        throw new Error("storage disabled");
+      },
+    },
+  });
+  await closeDB();
+  try {
+    await body();
+  } finally {
+    Object.defineProperty(globalThis, "indexedDB", {
+      configurable: true,
+      value: original,
+    });
+    await closeDB();
+  }
+}
+
 function buttons(): HTMLButtonElement[] {
   return [...(container?.querySelectorAll("button") ?? [])] as HTMLButtonElement[];
 }
 
+/** The per-company SELECT toggles — `aria-pressed` but no `aria-label` (the
+ *  pin buttons below carry both, so the absence of a label is what tells
+ *  the two apart). */
 function companyButtons(): HTMLButtonElement[] {
-  return buttons().filter((b) => b.hasAttribute("aria-pressed"));
+  return buttons().filter(
+    (b) => b.hasAttribute("aria-pressed") && !b.hasAttribute("aria-label"),
+  );
+}
+
+/** The per-company PIN toggles (#864) — `aria-pressed` with an `aria-label`
+ *  ("Watch …" / "Stop watching …"), independent of the select toggle above. */
+function pinButtons(): HTMLButtonElement[] {
+  return buttons().filter(
+    (b) => b.hasAttribute("aria-pressed") && b.hasAttribute("aria-label"),
+  );
 }
 
 describe("useCompanyTargets", () => {
@@ -225,6 +285,153 @@ describe("useCompanyTargets", () => {
   });
 });
 
+/** #864: with the `watched` store empty, mount seeds from the sector guess as
+ *  before; once it holds a saved shortlist, a fresh mount shows THAT instead —
+ *  the sector heuristic no longer overwrites a decision the user already
+ *  made. Seeded directly through `saveWatchedCompany`, the real write path a
+ *  pin click drives, per this suite's own top-of-file harness note. */
+describe("useCompanyTargets persisted shortlist", () => {
+  it("with an empty store, seeds from the sector guess exactly as before", async () => {
+    await mount(fintechResume);
+    expect(latest?.sector).toBe("fintech");
+    expect(latest?.suggested.length).toBeGreaterThan(0);
+    expect(latest?.selected).toEqual(latest?.suggested);
+  });
+
+  it("with a saved shortlist, a fresh mount shows it instead of the sector guess", async () => {
+    // A gaming company, saved ahead of a mount whose résumé classifies as
+    // fintech — the saved shortlist must win regardless of what the résumé
+    // would otherwise suggest.
+    const discord: CompanyEntry = {
+      name: "Discord",
+      ats: "greenhouse",
+      slug: "discord",
+      sectors: ["gaming", "consumer-social"],
+    };
+    await saveWatchedCompany(discord);
+
+    await mount(fintechResume);
+
+    expect(latest?.suggested.map(companyKey)).toEqual([companyKey(discord)]);
+    expect(latest?.suggested[0].name).toBe("Discord");
+    // Freshly seeded from the watchlist: every entry starts selected, same as
+    // a fresh sector-seeded pool would.
+    expect(latest?.selected).toEqual(latest?.suggested);
+    // The header text and "try other sector" affordance still work off the
+    // real classifier guess — only the POOL source changed.
+    expect(latest?.sector).toBe("fintech");
+  });
+
+  it("a saved shortlist is what a fresh mount shows, marked watched", async () => {
+    const discord: CompanyEntry = {
+      name: "Discord",
+      ats: "greenhouse",
+      slug: "discord",
+      sectors: ["gaming"],
+    };
+    await saveWatchedCompany(discord);
+
+    await mount(fintechResume);
+
+    expect(latest?.isWatched(latest!.suggested[0])).toBe(true);
+  });
+
+  it("a chip toggle for one search does not mutate the saved shortlist", async () => {
+    const discord: CompanyEntry = {
+      name: "Discord",
+      ats: "greenhouse",
+      slug: "discord",
+      sectors: ["gaming"],
+    };
+    await saveWatchedCompany(discord);
+    await mount(fintechResume);
+    const entry = latest!.suggested[0];
+
+    await act(async () => latest!.toggle(entry));
+    expect(latest?.isSelected(entry)).toBe(false);
+
+    // Unmount and remount: an exploratory deselect must not have touched the
+    // persisted store — the next mount still shows the same saved shortlist.
+    act(() => root?.unmount());
+    container?.remove();
+    root = null;
+    container = null;
+    await mount(fintechResume);
+
+    expect(latest?.suggested.map(companyKey)).toEqual([companyKey(discord)]);
+    expect(latest?.selected).toEqual(latest?.suggested);
+  });
+
+  // The regression #864 could have shipped: before this store existed, the
+  // sector heuristic and the company registry had ZERO storage dependency, so
+  // a profile with IndexedDB blocked still got suggestions. Reading the
+  // watchlist inside the same try block as those two imports would have handed
+  // that user the keyless-only search instead.
+  it("still seeds from the sector guess when IndexedDB is unavailable", async () => {
+    await withStorageBlocked(async () => {
+      await mount(fintechResume);
+
+      expect(latest?.sector).toBe("fintech");
+      expect(latest?.suggested.length).toBeGreaterThan(0);
+      expect(latest?.selected).toEqual(latest?.suggested);
+    });
+  });
+
+  // A failed READ must not disarm the save path: the module loaded fine, so
+  // the pin still works for the rest of the session.
+  it("can still pin a company after the initial watchlist read failed", async () => {
+    await withStorageBlocked(async () => {
+      await mount(fintechResume);
+    });
+    const entry = latest!.suggested[0];
+
+    await act(async () => {
+      pinButtons()[0].click();
+    });
+    // `toggleWatched` returns void — the write is fire-and-forget, and this one
+    // also has to reopen the database `withStorageBlocked` closed behind it, so
+    // poll for the row instead of assuming a fixed number of ticks is enough. A
+    // dead `watchedApiRef` (no save ever issued) exhausts the deadline and the
+    // assertion below then reports the empty list, which is the real failure.
+    const deadline = Date.now() + 3_000;
+    let saved = await getWatchedCompanies();
+    while (saved.length === 0 && Date.now() < deadline) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      saved = await getWatchedCompanies();
+    }
+
+    expect(latest?.isWatched(entry)).toBe(true);
+    expect(saved.map((c) => `${c.ats}:${c.slug}`)).toEqual([companyKey(entry)]);
+  });
+
+  // #897 review: an uncapped watchlist branch fed a `selected` of unbounded
+  // width straight into the board fan-out — the same COMPANY_LIMIT the sector
+  // branch already respects (docblock above the constant) must hold here too.
+  it("caps a shortlist larger than COMPANY_LIMIT, all still auto-selected", async () => {
+    for (let i = 0; i < COMPANY_LIMIT + 3; i++) {
+      await saveWatchedCompany({
+        name: `Watched ${i}`,
+        ats: "greenhouse",
+        slug: `watched-${i}`,
+        sectors: [],
+      });
+    }
+
+    await mount(fintechResume);
+
+    expect(latest?.suggested.length).toBe(COMPANY_LIMIT);
+    expect(latest?.selected).toEqual(latest?.suggested);
+    const savedKeys = new Set(
+      (await getWatchedCompanies()).map((c) => `${c.ats}:${c.slug}`),
+    );
+    for (const entry of latest!.suggested) {
+      expect(savedKeys.has(companyKey(entry))).toBe(true);
+    }
+  });
+});
+
 describe("CompanyTargets rendering", () => {
   it("renders one toggle per suggested company, all pressed initially", async () => {
     await mount(fintechResume);
@@ -283,6 +490,55 @@ describe("CompanyTargets rendering", () => {
   it("notes that self-hosted-careers employers aren't reachable here", async () => {
     await mount(fintechResume);
     expect(container?.textContent).toContain("their own careers site");
+  });
+});
+
+/** #864: the per-chip pin — the save affordance for the persisted watchlist,
+ *  independent of the select toggle used for THIS search. */
+describe("CompanyTargets watchlist pin", () => {
+  it("renders one pin button per suggested company, none pressed initially", async () => {
+    await mount(fintechResume);
+    expect(pinButtons()).toHaveLength(latest!.suggested.length);
+    expect(pinButtons().every((b) => b.getAttribute("aria-pressed") === "false")).toBe(
+      true,
+    );
+  });
+
+  it("clicking a pin toggles aria-pressed and calls toggleWatched for that entry", async () => {
+    await mount(fintechResume);
+    const entry = latest!.suggested[0];
+
+    await act(async () => {
+      pinButtons()[0].click();
+    });
+
+    expect(latest?.isWatched(entry)).toBe(true);
+    expect(pinButtons()[0].getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("toggling the SELECT button does not change watched state", async () => {
+    await mount(fintechResume);
+    const entry = latest!.suggested[0];
+
+    await act(async () => {
+      companyButtons()[0].click();
+    });
+
+    expect(latest?.isSelected(entry)).toBe(false);
+    expect(latest?.isWatched(entry)).toBe(false);
+    expect(pinButtons()[0].getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("toggling a pin does not change selection state", async () => {
+    await mount(fintechResume);
+    const entry = latest!.suggested[0];
+
+    await act(async () => {
+      pinButtons()[0].click();
+    });
+
+    expect(latest?.isSelected(entry)).toBe(true);
+    expect(companyButtons()[0].getAttribute("aria-pressed")).toBe("true");
   });
 });
 
