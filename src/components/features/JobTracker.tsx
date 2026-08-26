@@ -78,6 +78,10 @@ import { JobArchiveSweepDialog } from "./JobArchiveSweepDialog.tsx";
 import { useJobTracker, type JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import { useSavedJobRatings } from "../../hooks/useSavedJobRatings.ts";
 import { useJobLetters } from "../../hooks/useJobLetters.ts";
+import { StandardLetterButton } from "./StandardLetterButton.tsx";
+import type { InheritedLetter } from "./LetterRevealDialog.tsx";
+import { resolveLetterForJob } from "../../lib/letters/resolve-letter.ts";
+import { deriveCompanyKey } from "../../lib/storage/company-key.ts";
 import {
   useJobDuplicates,
   type JobDuplicateSuggestion,
@@ -86,6 +90,38 @@ import { useJobRepostClusters } from "../../hooks/useJobRepostClusters.ts";
 import type { JobRepostCluster } from "../../lib/job-repost-clusters.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
+
+/**
+ * The letter one row INHERITS, phrased for display (#767), or `undefined` when
+ * the job has its own letter or there is nothing to inherit.
+ *
+ * The `scope === "job"` case is dropped here rather than inside
+ * `resolveLetterForJob`, because the chain answers "which letter applies" and
+ * this surface asks the narrower "is the applying letter someone else's" — the
+ * row's own drafts already reach it through `lettersById`.
+ *
+ * The phrase is built here because this is the layer holding `job.company`;
+ * the dialogs downstream only need something to print. It is a fragment, not a
+ * sentence, so a caller can capitalize it or embed it mid-sentence.
+ */
+function inheritedFor(
+  job: JobRecord,
+  letters: readonly LetterRecord[] | undefined,
+): InheritedLetter | undefined {
+  if (!letters || letters.length === 0) return undefined;
+  const resolved = resolveLetterForJob(job, letters);
+  if (!resolved || resolved.scope === "job") return undefined;
+  return {
+    letter: resolved.letter,
+    // `job.company` verbatim, not the normalised key: the key is a lookup
+    // token ("northwind"), and printing it back at the user would show them a
+    // lowercased, suffix-stripped version of a name they typed.
+    label:
+      resolved.scope === "company"
+        ? `your ${job.company} letter`
+        : "your standard letter",
+  };
+}
 
 interface JobTrackerProps {
   tracker: Tracker;
@@ -115,6 +151,14 @@ interface JobTrackerProps {
   /** Every letter, grouped by job id (#715) — `useJobLetters`' shape. A job id
    *  absent from the map has no letters, so its row renders no indicator. */
   lettersById?: ReadonlyMap<string, readonly LetterRecord[]>;
+  /** Every live letter, flat (#767) — what each row's `resolveLetterForJob`
+   *  runs against to find the company or standard letter it would inherit.
+   *  Omitted resolves nothing, so a caller that has not read the store gets
+   *  exactly the pre-#767 behaviour. */
+  allLetters?: readonly LetterRecord[];
+  /** The user's standard letter, if written (#767) — the panel-level button's
+   *  state. Absent renders "Write a standard letter". */
+  standardLetter?: LetterRecord;
   /** Re-read the letter store after a row writes one. Optional so a caller
    *  that only displays letters need not supply one; without it a saved letter
    *  will not appear until this view remounts. */
@@ -150,6 +194,8 @@ export function JobTrackerSection({
   | "ratings"
   | "hasResume"
   | "lettersById"
+  | "allLetters"
+  | "standardLetter"
   | "onLettersChanged"
   | "duplicatesByJobId"
   | "onDismissDuplicate"
@@ -171,6 +217,12 @@ export function JobTrackerSection({
       ratings={ratings}
       hasResume={parsed !== undefined}
       lettersById={letters.byJobId}
+      allLetters={letters.all}
+      // `standard` is most-recently-updated first, so `[0]` is the current
+      // standard letter. Nothing writes a second one — the panel button edits
+      // the existing record — but the store holds a list, so this reads the
+      // newest rather than assuming there is exactly one.
+      standardLetter={letters.standard[0]}
       onLettersChanged={letters.refresh}
       duplicatesByJobId={duplicates.byJobId}
       onDismissDuplicate={duplicates.dismiss}
@@ -188,6 +240,8 @@ export function JobTracker({
   resumeName,
   resumeOptions,
   lettersById,
+  allLetters,
+  standardLetter,
   onLettersChanged,
   duplicatesByJobId,
   onDismissDuplicate,
@@ -242,6 +296,21 @@ export function JobTracker({
   // which would otherwise render as a page of headers over no rows, the very
   // failure collapse-by-default exists to avoid. Then every section opens; the
   // "only non-empty bucket is rejected" case is the single-bucket case of it.
+  // One pass over the letter set for the whole library, not one per row per
+  // render. `resolveLetterForJob` walks `allLetters` up to three times, and the
+  // row `.map()` below re-runs on every keystroke in an `EditableField` and
+  // every status-filter toggle — without this the cost is O(jobs x letters x 3)
+  // per render. Keyed by job id so a row still gets its own answer.
+  const inheritedByJobId = useMemo(() => {
+    const byId = new Map<string, InheritedLetter>();
+    if (!allLetters || allLetters.length === 0) return byId;
+    for (const job of jobs) {
+      const resolved = inheritedFor(job, allLetters);
+      if (resolved) byId.set(job.id, resolved);
+    }
+    return byId;
+  }, [jobs, allLetters]);
+
   const anyOpenByDefault = groups.some(({ bucket }) => !isCollapsedByDefault(bucket));
 
   if (!ready) return null;
@@ -262,6 +331,12 @@ export function JobTracker({
           <StatusBadge tone={persisted ? "ok" : "warning"}>
             {persisted ? "Persistent" : "Best-effort"}
           </StatusBadge>
+          {/* Panel-level, not per-row (#767): the standard letter is the one
+              letter with no job to hang off. See `StandardLetterButton`. */}
+          <StandardLetterButton
+            letter={standardLetter}
+            onSaved={onLettersChanged}
+          />
           <Button
             variant="ghost"
             size="sm"
@@ -329,6 +404,8 @@ export function JobTracker({
                   rated={ratings !== null}
                   rating={ratings?.get(job.id)}
                   letters={lettersById?.get(job.id)}
+                  inherited={inheritedByJobId.get(job.id)}
+                  companyKey={deriveCompanyKey(job.company)}
                   onLettersChanged={onLettersChanged}
                   duplicates={duplicatesByJobId?.get(job.id)}
                   onMerge={(survivorId, absorbedId) =>

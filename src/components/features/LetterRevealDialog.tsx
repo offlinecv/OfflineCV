@@ -41,6 +41,15 @@ import { useEffect, useState } from "react";
 import { Button, Dialog, useCopyToClipboard } from "@design-system";
 import type { LetterRecord } from "../../lib/storage/index.ts";
 
+/** A letter this job INHERITS rather than owns (#767) — its company's, or the
+ *  standard one — with the phrase that names where it came from. */
+export interface InheritedLetter {
+  letter: LetterRecord;
+  /** User-facing scope, e.g. "your standard letter" / "your Northwind letter".
+   *  Built by the caller, which is the side that knows the company name. */
+  label: string;
+}
+
 interface LetterRevealDialogProps {
   open: boolean;
   onClose: () => void;
@@ -49,10 +58,35 @@ interface LetterRevealDialogProps {
    *  the caller (`JobLetterIndicator`) opens the editor instead when there are
    *  none, so this dialog is never opened empty. */
   letters: readonly LetterRecord[];
-  /** Revise the draft currently on screen. */
+  /** The letter this job would inherit if it had none of its own (#767).
+   *  Offered as one more entry in the picker, always LAST — the job's own
+   *  drafts are what the row's glyph promised, and an inherited letter must
+   *  never be what opens by default. Omitted when nothing is inherited. */
+  inherited?: InheritedLetter;
+  /** Revise the draft currently on screen. Never called for the inherited
+   *  entry — editing that would change a letter this job does not own, which
+   *  is what `onCustomize` exists to avoid. */
   onEdit: (letter: LetterRecord) => void;
   /** Start an additional draft for the same job. */
   onCompose: () => void;
+  /** Copy the inherited letter into a new draft for THIS job (#767). Required
+   *  alongside `inherited` for the offer to render. */
+  onCustomize?: (source: LetterRecord) => void;
+  /**
+   * Copy whatever letter is on screen into a COMPANY-scoped draft (#767) — the
+   * only write path to the company tier, so without it that rung of the
+   * resolution chain can only ever hold a record an outside producer wrote.
+   *
+   * Offered for the job's own drafts too, not just the inherited entry, and
+   * that is the point: "I wrote this for one posting and want it for every job
+   * at this employer" is the way a company letter actually comes to exist.
+   * Omitted when the job has no company name to derive a key from — a company
+   * letter with no key is one nothing could look up.
+   */
+  companyOffer?: {
+    label: string;
+    onCustomize: (source: LetterRecord) => void;
+  };
 }
 
 function formatDate(ms: number): string {
@@ -67,8 +101,11 @@ export function LetterRevealDialog({
   open,
   onClose,
   letters,
+  inherited,
   onEdit,
   onCompose,
+  onCustomize,
+  companyOffer,
 }: LetterRevealDialogProps) {
   const [selectedId, setSelectedId] = useState<string | undefined>(
     letters[0]?.id,
@@ -95,9 +132,19 @@ export function LetterRevealDialog({
     }
   }, [open, letters, resetCopy]);
 
-  const selected = letters.find((letter) => letter.id === selectedId) ?? letters[0];
+  // The job's own drafts first, then the inherited one if there is a handler
+  // to act on it. Appended rather than merged-and-sorted: `letters` is already
+  // in most-recently-updated order and an inherited letter is often the newest
+  // thing in the store, so sorting the combined list would float someone
+  // else's letter above this job's own — the opposite of what the row promised.
+  const offered: readonly LetterRecord[] =
+    inherited && onCustomize ? [...letters, inherited.letter] : letters;
+
+  const selected = offered.find((letter) => letter.id === selectedId) ?? offered[0];
 
   if (!selected) return null;
+
+  const isInherited = inherited !== undefined && selected.id === inherited.letter.id;
 
   return (
     <Dialog
@@ -107,13 +154,13 @@ export function LetterRevealDialog({
       className="max-w-lg"
     >
       <div className="flex flex-col gap-3">
-        {letters.length > 1 && (
+        {offered.length > 1 && (
           <div
             className="flex flex-wrap items-center gap-1"
             role="group"
             aria-label="Choose a draft"
           >
-            {letters.map((letter) => (
+            {offered.map((letter) => (
               <Button
                 key={letter.id}
                 variant={letter.id === selected.id ? "primary" : "ghost"}
@@ -123,10 +170,23 @@ export function LetterRevealDialog({
                   resetCopy();
                 }}
               >
-                {letter.label || "Untitled draft"}
+                {inherited && letter.id === inherited.letter.id
+                  ? inherited.label
+                  : letter.label || "Untitled draft"}
               </Button>
             ))}
           </div>
+        )}
+
+        {/* Named whenever the letter is inherited, and nothing extra when it is
+            the job's own (#767). An unlabelled inherited letter reads as one
+            written for THIS employer — the user would paste it into an
+            application believing it was tailored. */}
+        {isInherited && (
+          <p className="text-2xs leading-relaxed text-feedback-info-text">
+            This is {inherited.label}, not a letter for this job. Customize it
+            to make a copy you can tailor.
+          </p>
         )}
 
         <p className="text-2xs text-content-tertiary">
@@ -162,9 +222,37 @@ export function LetterRevealDialog({
           <Button variant="ghost" size="sm" onClick={onCompose}>
             New draft
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => onEdit(selected)}>
-            Edit
-          </Button>
+          {/* Customize REPLACES Edit for an inherited letter rather than
+              sitting beside it: editing in place would rewrite a letter this
+              job does not own — the standard letter already submitted
+              elsewhere — which is precisely the live-link failure #767's
+              copy model exists to prevent. */}
+          {isInherited ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onCustomize?.(selected)}
+            >
+              Customize for this job
+            </Button>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={() => onEdit(selected)}>
+              Edit
+            </Button>
+          )}
+          {/* Beside the job/edit action rather than replacing either: lifting a
+              letter to company scope is a third thing to do with the text on
+              screen, available whether it is this job's own draft or the one it
+              inherits. */}
+          {companyOffer && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => companyOffer.onCustomize(selected)}
+            >
+              {companyOffer.label}
+            </Button>
+          )}
           <Button
             variant="primary"
             size="sm"

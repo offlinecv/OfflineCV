@@ -172,3 +172,196 @@ describe("JobLetterIndicator", () => {
     }
   });
 });
+
+/** #767: inheritance reaches the user through the DIALOGS, never through the
+ *  glyph. These are the two halves of that: what the row still says, and what
+ *  the customize path hands the editor. */
+describe("JobLetterIndicator inherited letters (#767)", () => {
+  const standard: LetterRecord = {
+    id: "standard-1",
+    createdAt: 1,
+    updatedAt: 9,
+    body: "My standard letter.",
+  };
+  const inherited = { letter: standard, label: "your standard letter" };
+
+  it("a standard letter does NOT flip the row's glyph to has-letter", () => {
+    // The acceptance criterion with teeth: the row must keep offering to WRITE
+    // one. Flipping it would claim a letter the user never wrote for this
+    // employer, and the reveal would then show text they did not intend for it.
+    dom.render(
+      <JobLetterIndicator jobId="job-1" letters={[]} inherited={inherited} />,
+    );
+    expect(
+      dom.container.querySelector('button[aria-label="Write a cover letter"]'),
+    ).toBeTruthy();
+    expect(
+      dom.container.querySelector('button[aria-label="View cover letter"]'),
+    ).toBeNull();
+  });
+
+  it("offers the inherited letter as a starting point in the editor", () => {
+    dom.render(
+      <JobLetterIndicator jobId="job-1" letters={[]} inherited={inherited} />,
+    );
+    clickButton("Write a cover letter");
+
+    // Offered, capitalized for a standalone chip — and NOT seeded: the body is
+    // still empty until the user picks it.
+    const chip = [...dom.container.querySelectorAll("button")].find(
+      (b) => b.textContent === "Your standard letter",
+    );
+    expect(chip).toBeTruthy();
+    expect(dom.container.querySelector("textarea")!.value).toBe("");
+  });
+
+  it("Customize seeds the editor from the inherited letter", () => {
+    dom.render(
+      <JobLetterIndicator
+        jobId="job-1"
+        letters={[ownLetter({ id: "own", label: "Mine", body: "Own body." })]}
+        inherited={inherited}
+      />,
+    );
+    clickButton("View cover letter");
+    clickButton("your standard letter");
+    clickButton("Customize for this job");
+
+    // Seeded with the SOURCE's text, in an editor composing a new draft — the
+    // copy notice is what proves it is not revising the standard letter.
+    expect(dom.container.querySelector("textarea")!.value).toBe(
+      "My standard letter.",
+    );
+    expect(dom.container.textContent).toContain("Started from");
+  });
+
+  it("a plain write-one click never seeds, even with something to inherit", () => {
+    dom.render(
+      <JobLetterIndicator jobId="job-1" letters={[]} inherited={inherited} />,
+    );
+    clickButton("Write a cover letter");
+    expect(dom.container.querySelector("textarea")!.value).toBe("");
+    expect(dom.container.textContent).not.toContain("Started from");
+  });
+});
+
+/** #767 review, blocking 1: the egress acknowledgement must gate everything
+ *  this component can put on screen, not just the job's OWN letters. Adding the
+ *  inherited entry added two routes to an outside-produced body — the reveal's
+ *  chip and the editor's picker — and neither read its `producer`. */
+describe("JobLetterIndicator egress gate over inherited letters (#767)", () => {
+  const outsideStandard: LetterRecord = {
+    id: "standard-1",
+    createdAt: 1,
+    updatedAt: 9,
+    body: "My standard letter.",
+    producer: { contract: 1, producer: "some-outside-producer" },
+  };
+  const inherited = { letter: outsideStandard, label: "your standard letter" };
+
+  it("warns before revealing, when only the INHERITED letter came from outside", () => {
+    // The job's own letter was hand-typed, so the pre-#767 test
+    // (`hasOutsideProducer(letters)`) says don't warn — but one click on the
+    // inherited chip would put outside-produced text on screen.
+    dom.render(
+      <JobLetterIndicator
+        jobId="job-1"
+        letters={[ownLetter({ id: "own", label: "Mine" })]}
+        inherited={inherited}
+      />,
+    );
+    clickButton("View cover letter");
+    expect(dom.openDialogText()).toContain("Before you view this letter");
+  });
+
+  it("warns before the EDITOR too, when the job has no letters of its own", () => {
+    // The worse path: no own letters means the glyph opens the editor directly,
+    // and the picker chip is one click from the same outside-produced body.
+    dom.render(
+      <JobLetterIndicator jobId="job-1" letters={[]} inherited={inherited} />,
+    );
+    clickButton("Write a cover letter");
+    expect(dom.openDialogText()).toContain("Before you view this letter");
+  });
+
+  it("lands on the right surface after acknowledging, per own-letter state", () => {
+    // The ack path used to hard-code `reveal`, which was correct only while the
+    // empty case could never warn. It can now.
+    dom.render(
+      <JobLetterIndicator jobId="job-1" letters={[]} inherited={inherited} />,
+    );
+    clickButton("Write a cover letter");
+    clickButton("Got it");
+    expect(dom.openDialogText()).toContain("Write a cover letter");
+    expect(dom.container.querySelector("textarea")).toBeTruthy();
+  });
+
+  it("does not warn when nothing reachable came from outside", () => {
+    // The other direction, still true: a hand-typed own letter and a hand-typed
+    // inherited one must not be gated behind a warning that would be false.
+    const { producer: _drop, ...cleanStandard } = outsideStandard;
+    void _drop;
+    dom.render(
+      <JobLetterIndicator
+        jobId="job-1"
+        letters={[ownLetter({ id: "own", label: "Mine" })]}
+        inherited={{ letter: cleanStandard, label: "your standard letter" }}
+      />,
+    );
+    clickButton("View cover letter");
+    expect(dom.openDialogText()).not.toContain("Before you view this letter");
+  });
+});
+
+/** #767 review, blocking 2: the company tier had no write path at all, so
+ *  `scope: "company"` could only ever fire for a record an outside producer
+ *  wrote. "Customize for this company" is that path. */
+describe("JobLetterIndicator company write path (#767)", () => {
+  it("offers to lift a letter to company scope when the job has a company key", () => {
+    dom.render(
+      <JobLetterIndicator
+        jobId="job-1"
+        companyKey="northwind"
+        letters={[ownLetter({ id: "own", label: "Mine", body: "Own body." })]}
+      />,
+    );
+    clickButton("View cover letter");
+    expect(
+      [...dom.container.querySelectorAll("button")].some(
+        (b) => b.textContent === "Customize for this company",
+      ),
+    ).toBe(true);
+  });
+
+  it("offers nothing of the sort when the job has no company to key on", () => {
+    dom.render(
+      <JobLetterIndicator
+        jobId="job-1"
+        letters={[ownLetter({ id: "own", label: "Mine" })]}
+      />,
+    );
+    clickButton("View cover letter");
+    expect(
+      [...dom.container.querySelectorAll("button")].some(
+        (b) => b.textContent === "Customize for this company",
+      ),
+    ).toBe(false);
+  });
+
+  it("opens the editor in COMPANY scope, seeded, with no jobId", () => {
+    dom.render(
+      <JobLetterIndicator
+        jobId="job-1"
+        companyKey="northwind"
+        letters={[ownLetter({ id: "own", label: "Mine", body: "Own body." })]}
+      />,
+    );
+    clickButton("View cover letter");
+    clickButton("Customize for this company");
+
+    // The title is what tells the user which letter they are about to write,
+    // and it is derived from the scope keys the save will carry.
+    expect(dom.openDialogText()).toContain("Write a company letter");
+    expect(dom.container.querySelector("textarea")!.value).toBe("Own body.");
+  });
+});

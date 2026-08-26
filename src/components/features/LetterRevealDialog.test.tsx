@@ -216,3 +216,89 @@ describe("LetterRevealDialog", () => {
     expect(dom.container.textContent).toContain("claude-code-letter-skill");
   });
 });
+
+/** #767: an inherited letter is offered here as one more entry, and must be
+ *  unmistakable as someone else's. The failure this guards is a user pasting
+ *  their standard letter into an application believing it was tailored. */
+describe("LetterRevealDialog inherited letters (#767)", () => {
+  const inheritedLetter = letter({
+    id: "standard-1",
+    jobId: undefined,
+    body: "My standard letter.",
+  });
+  const inherited = { letter: inheritedLetter, label: "your standard letter" };
+
+  function renderWithInherited(
+    letters: readonly LetterRecord[],
+    onCustomize = () => {},
+  ) {
+    dom.render(
+      <LetterRevealDialog
+        open
+        onClose={() => {}}
+        letters={letters}
+        inherited={inherited}
+        onEdit={() => {}}
+        onCompose={() => {}}
+        onCustomize={onCustomize}
+      />,
+    );
+  }
+
+  it("opens on the job's OWN letter, never on the inherited one", () => {
+    // The row's glyph promised this job's letter; opening on someone else's
+    // would make the glyph a lie.
+    renderWithInherited([letter({ id: "own", label: "Mine", body: "Own body." })]);
+    expect(dom.container.textContent).toContain("Own body.");
+    expect(dom.container.textContent).not.toContain("My standard letter.");
+  });
+
+  it("says nothing extra while the job's own letter is showing", () => {
+    renderWithInherited([letter({ id: "own", label: "Mine" })]);
+    expect(dom.container.textContent).not.toContain("not a letter for this job");
+    // Edit, not Customize — this letter is the job's to edit in place.
+    expect(clickButton("Customize for this job")).toBeUndefined();
+  });
+
+  it("names the scope once the inherited letter is selected", () => {
+    renderWithInherited([letter({ id: "own", label: "Mine" })]);
+    // The chip carries `inherited.label` verbatim — this dialog reads the
+    // phrase mid-sentence, so it is lowercase here and the editor's picker is
+    // what capitalizes it.
+    expect(clickButton("your standard letter")).toBeTruthy();
+    expect(dom.container.textContent).toContain("your standard letter");
+    expect(dom.container.textContent).toContain("not a letter for this job");
+    expect(dom.container.textContent).toContain("My standard letter.");
+  });
+
+  it("offers Customize instead of Edit for the inherited letter", () => {
+    const onCustomize = vi.fn();
+    renderWithInherited([letter({ id: "own", label: "Mine" })], onCustomize);
+    clickButton("your standard letter");
+
+    // Edit is GONE, not merely joined: editing in place would rewrite a letter
+    // this job does not own.
+    expect(
+      [...dom.container.querySelectorAll("button")].some((b) => b.textContent === "Edit"),
+    ).toBe(false);
+    clickButton("Customize for this job");
+    expect(onCustomize).toHaveBeenCalledTimes(1);
+    expect(onCustomize.mock.calls[0]![0].id).toBe("standard-1");
+  });
+
+  it("ignores an inherited letter with no handler to act on it", () => {
+    // `onCustomize` is what makes the entry actionable; without it the offer
+    // would be a chip that does nothing.
+    dom.render(
+      <LetterRevealDialog
+        open
+        onClose={() => {}}
+        letters={[letter({ id: "own", label: "Mine" })]}
+        inherited={inherited}
+        onEdit={() => {}}
+        onCompose={() => {}}
+      />,
+    );
+    expect(clickButton("your standard letter")).toBeUndefined();
+  });
+});

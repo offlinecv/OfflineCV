@@ -111,6 +111,22 @@ describe("useJobLetters", () => {
     expect(latest?.byJobId.has("job-1")).toBe(true);
   });
 
+  it("exposes every letter flat for the resolution chain to run over (#767)", async () => {
+    await saveLetter({ jobId: "job-1", body: "for the posting" });
+    await saveLetter({ companyKey: "northwind", body: "why Northwind" });
+    await saveLetter({ body: "my story" });
+    await mount();
+
+    // The same records the three views were built from — one store read, four
+    // shapes. `resolveLetterForJob` takes this one.
+    expect(latest?.all).toHaveLength(3);
+    expect([...(latest?.all ?? [])].map((l) => l.body).sort()).toEqual([
+      "for the posting",
+      "my story",
+      "why Northwind",
+    ]);
+  });
+
   it("splits the three scopes, with no undefined-keyed entry in byJobId (#766)", async () => {
     await saveLetter({ jobId: "job-1", body: "for the posting" });
     await saveLetter({ companyKey: "northwind", body: "why Northwind" });

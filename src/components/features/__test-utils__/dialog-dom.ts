@@ -22,6 +22,9 @@
  *  - `Dialog` always renders its children into the DOM and toggles `open`
  *    imperatively, so a suite must scope assertions to `dialog[open]` rather
  *    than the whole container's `textContent` — see `openDialogText`.
+ *  - A controlled `<textarea>`'s `.value = x` is SWALLOWED by React's value
+ *    tracker, so a suite that assigns it directly types nothing and asserts
+ *    against a stale empty string — see {@link typeIntoTextArea}.
  */
 
 import { act } from "react";
@@ -91,4 +94,49 @@ export function setupDomRoot(): DomRoot {
       return container.querySelector("dialog[open]")?.textContent ?? null;
     },
   };
+}
+
+/**
+ * Click the button whose visible text — or `aria-label`, for an icon button
+ * with no text — is `name`. Returns it, so a caller can assert on presence in
+ * the same line, and returns `undefined` rather than throwing when there is no
+ * match: "this control is absent" is a thing several suites assert directly.
+ *
+ * Text equality, not `includes`: "Edit" and "Edit cover letter" are different
+ * controls in these dialogs, and a substring match would silently pick
+ * whichever came first in the DOM.
+ */
+export function clickButtonIn(
+  container: HTMLElement,
+  name: string,
+): HTMLButtonElement | undefined {
+  const button = [...container.querySelectorAll("button")].find(
+    (candidate) => (candidate.textContent || candidate.getAttribute("aria-label")) === name,
+  );
+  act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  return button;
+}
+
+/**
+ * Type into the first `<textarea>` in `container` the way a controlled React
+ * input requires.
+ *
+ * The native value setter, then an `input` event: React installs its own
+ * property descriptor to track changes, so a plain `area.value = text` updates
+ * the DOM node while React's tracker still believes the value is unchanged —
+ * the re-render never happens and the component's state stays empty. A suite
+ * that gets this wrong sees an empty body and a disabled Save with no error to
+ * explain either.
+ */
+export function typeIntoTextArea(container: HTMLElement, text: string): void {
+  const area = container.querySelector("textarea");
+  if (!area) throw new Error("typeIntoTextArea: no <textarea> in the container");
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    "value",
+  )!.set!;
+  act(() => {
+    setter.call(area, text);
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 }
