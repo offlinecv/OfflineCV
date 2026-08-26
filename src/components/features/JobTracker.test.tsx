@@ -21,6 +21,7 @@ import type { JobRecord, LetterRecord } from "../../lib/storage/index.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
 import type { JobDuplicateSuggestion } from "../../hooks/useJobDuplicates.ts";
 import { findRepostClusters } from "../../lib/job-repost-clusters.ts";
+import { groupByScope } from "../../hooks/useJobLetters.ts";
 import { installDialogPolyfill } from "./__test-utils__/dialog-dom.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -44,6 +45,20 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
 });
+
+/** Click the button whose visible text is `label`, and hand it back so a caller
+ *  can assert on presence in the same line. `undefined` rather than a throw when
+ *  there is no match: "this control is absent" is asserted directly here.
+ *
+ *  Module scope, one copy — three describes had grown their own identical one
+ *  and fallow was reporting the clone family. */
+function clickButton(label: string) {
+  const button = [...container.querySelectorAll("button")].find(
+    (b) => b.textContent === label,
+  );
+  act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  return button;
+}
 
 function job(over: Partial<JobRecord>): JobRecord {
   return {
@@ -254,14 +269,6 @@ describe("JobTracker: resume link picker", () => {
     { id: "r2", filename: "resume-v2.pdf" },
   ];
 
-  function clickButton(label: string) {
-    const button = [...container.querySelectorAll("button")].find(
-      (b) => b.textContent === label,
-    );
-    act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    return button;
-  }
-
   it("offers the saved resumes and links the one picked", () => {
     const tracker = makeTracker([job({ id: "j1" })]);
     act(() =>
@@ -336,6 +343,150 @@ describe("JobTracker: letter indicator (#715)", () => {
     expect(
       container.querySelector('button[aria-label="View cover letter"]'),
     ).toBeNull();
+  });
+});
+
+describe("JobTracker: inherited letters, wired as the app wires them (#767)", () => {
+  /**
+   * The wiring is the point of this block, not the components.
+   *
+   * `lettersById` and `allLetters` are BOTH derived here from one letter set
+   * through the real `groupByScope`, exactly as `JobTrackerSection` derives them
+   * from one store read. That is the only arrangement in which the #767 review's
+   * blocker is visible: the component-level suites pass `letters` and
+   * `inherited` as independent props, so they can hand a row its own letter AND
+   * something to inherit — a pair the production wiring cannot produce, because
+   * owning a letter is exactly what used to make `inheritedFor` answer
+   * `undefined`. Every assertion below was red before `inheritedLetterForJob`.
+   */
+  function wire(letters: readonly LetterRecord[]) {
+    const grouped = groupByScope(letters);
+    return { lettersById: grouped.byJobId, allLetters: letters };
+  }
+
+  function standardLetter(over: Partial<LetterRecord> = {}): LetterRecord {
+    return {
+      id: "standard-1",
+      createdAt: 1,
+      updatedAt: 5,
+      body: "STANDARD-BODY.",
+      ...over,
+    };
+  }
+
+  function ownLetter(jobId: string): LetterRecord {
+    return {
+      id: "own-1",
+      jobId,
+      createdAt: 1,
+      updatedAt: 9,
+      label: "Mine",
+      body: "OWN-BODY.",
+    };
+  }
+
+  function mount(letters: readonly LetterRecord[]) {
+    const tracker = makeTracker([
+      job({ id: "j1", title: "SWE", company: "Northwind" }),
+    ]);
+    act(() => root.render(<JobTracker tracker={tracker} {...wire(letters)} />));
+  }
+
+  it("offers the standard letter inside the reveal of a job that HAS its own", () => {
+    mount([ownLetter("j1"), standardLetter()]);
+    clickButton("View cover letter");
+
+    // The row's own draft is what opens — the glyph promised a letter for this
+    // job, so the inherited one must never be what is showing first.
+    expect(container.textContent).toContain("OWN-BODY.");
+    expect(container.textContent).not.toContain("STANDARD-BODY.");
+
+    // …and the inherited entry is offered beside it. This is the half that was
+    // dead in production: `inherited` arrived `undefined` for exactly the jobs
+    // whose reveal opens.
+    expect(clickButton("Your standard letter")).toBeTruthy();
+    expect(container.textContent).toContain("STANDARD-BODY.");
+    expect(container.textContent).toContain(
+      "This is your standard letter, not a letter for this job",
+    );
+  });
+
+  it("swaps Edit for Customize on that inherited entry (AC 6 + 7, in the product)", () => {
+    mount([ownLetter("j1"), standardLetter()]);
+    clickButton("View cover letter");
+    clickButton("Your standard letter");
+
+    expect(
+      [...container.querySelectorAll("button")].some(
+        (b) => b.textContent === "Edit",
+      ),
+    ).toBe(false);
+    expect(
+      [...container.querySelectorAll("button")].some(
+        (b) => b.textContent === "Customize for this job",
+      ),
+    ).toBe(true);
+  });
+
+  it("prefers the company letter over the standard one, through the same wiring", () => {
+    mount([
+      ownLetter("j1"),
+      standardLetter(),
+      {
+        id: "company-1",
+        companyKey: "northwind",
+        createdAt: 1,
+        updatedAt: 3,
+        body: "COMPANY-BODY.",
+      },
+    ]);
+    clickButton("View cover letter");
+
+    // Specificity, not recency: the standard letter is the newer record.
+    expect(clickButton("Your Northwind letter")).toBeTruthy();
+    expect(container.textContent).toContain("COMPANY-BODY.");
+    expect(container.textContent).not.toContain("STANDARD-BODY.");
+  });
+
+  it("still offers nothing to inherit when the only letter IS the job's own", () => {
+    mount([ownLetter("j1")]);
+    clickButton("View cover letter");
+    expect(container.textContent).not.toContain("not a letter for this job");
+    expect(clickButton("Customize for this job")).toBeUndefined();
+  });
+});
+
+describe("JobTracker: the standard-letter button waits for the store (#767)", () => {
+  it("renders no standard-letter control while the letter read is in flight", () => {
+    // `standardLetter` is `standard[0]`, and `[0]` of a not-yet-loaded list is
+    // `undefined` — the same value as "the user has none". Offering to COMPOSE
+    // in that window writes a second unscoped record and orphans the first,
+    // because only `[0]` is ever surfaced (#767 review).
+    act(() =>
+      root.render(
+        <JobTracker tracker={makeTracker([job({ id: "j1" })])} lettersReady={false} />,
+      ),
+    );
+    expect(clickButton("Write a standard letter")).toBeUndefined();
+    expect(clickButton("Edit standard letter")).toBeUndefined();
+  });
+
+  it("renders it once the read has landed", () => {
+    act(() =>
+      root.render(
+        <JobTracker tracker={makeTracker([job({ id: "j1" })])} lettersReady />,
+      ),
+    );
+    expect(clickButton("Write a standard letter")).toBeTruthy();
+  });
+
+  it("defaults to ready, so a caller holding the record is unaffected", () => {
+    // The flag is about a live store read in flight; a caller that passes the
+    // record directly has already done one.
+    act(() =>
+      root.render(<JobTracker tracker={makeTracker([job({ id: "j1" })])} />),
+    );
+    expect(clickButton("Write a standard letter")).toBeTruthy();
   });
 });
 

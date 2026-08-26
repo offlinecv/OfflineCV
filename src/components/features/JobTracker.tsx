@@ -78,6 +78,10 @@ import { JobArchiveSweepDialog } from "./JobArchiveSweepDialog.tsx";
 import { useJobTracker, type JobTracker as Tracker } from "../../hooks/useJobTracker.ts";
 import { useSavedJobRatings } from "../../hooks/useSavedJobRatings.ts";
 import { useJobLetters } from "../../hooks/useJobLetters.ts";
+import { StandardLetterButton } from "./StandardLetterButton.tsx";
+import type { InheritedLetter } from "./LetterRevealDialog.tsx";
+import { inheritedLetterForJob } from "../../lib/letters/resolve-letter.ts";
+import { deriveCompanyKey } from "../../lib/storage/company-key.ts";
 import {
   useJobDuplicates,
   type JobDuplicateSuggestion,
@@ -86,6 +90,50 @@ import { useJobRepostClusters } from "../../hooks/useJobRepostClusters.ts";
 import type { JobRepostCluster } from "../../lib/job-repost-clusters.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { JobRating } from "../../lib/job-search/rating.ts";
+
+/**
+ * The letter one row INHERITS, phrased for display (#767), or `undefined` when
+ * the job has its own letter or there is nothing to inherit.
+ *
+ * This surface asks the narrower "what would this job inherit", not the chain's
+ * "which letter applies" — the row's own drafts already reach it through
+ * `lettersById` — so it calls the entry that starts one rung down. See
+ * {@link inheritedLetterForJob} for why asking the wide question and dropping
+ * the `"job"` answer is not the same thing.
+ *
+ * The phrase is built here because this is the layer holding `job.company`;
+ * the dialogs downstream only need something to print. It is a lowercase
+ * FRAGMENT — the render sites that stand it alone capitalize it themselves
+ * (`scope-phrase.ts`), because the same phrase is embedded mid-sentence
+ * elsewhere and no one string can be right in both.
+ */
+function inheritedFor(
+  job: JobRecord,
+  letters: readonly LetterRecord[] | undefined,
+): InheritedLetter | undefined {
+  if (!letters || letters.length === 0) return undefined;
+  // `inheritedLetterForJob`, NOT `resolveLetterForJob` with the `"job"` answer
+  // filtered out. The two are not the same question, and filtering answers the
+  // wrong one: `resolveLetterForJob` returns `"job"` exactly when some letter
+  // carries this job's id, which is exactly when `lettersById` is non-empty,
+  // which is what makes the indicator open the REVEAL rather than the editor.
+  // So the filtered form was `undefined` for precisely the jobs whose reveal
+  // opens — the inherited chip, the scope notice and "Customize for this job"
+  // could never render in the product, though their unit tests passed on a
+  // `letters` + `inherited` pair this component cannot produce (#767 review).
+  const resolved = inheritedLetterForJob(job, letters);
+  if (!resolved) return undefined;
+  return {
+    letter: resolved.letter,
+    // `job.company` verbatim, not the normalised key: the key is a lookup
+    // token ("northwind"), and printing it back at the user would show them a
+    // lowercased, suffix-stripped version of a name they typed.
+    label:
+      resolved.scope === "company"
+        ? `your ${job.company} letter`
+        : "your standard letter",
+  };
+}
 
 interface JobTrackerProps {
   tracker: Tracker;
@@ -115,6 +163,30 @@ interface JobTrackerProps {
   /** Every letter, grouped by job id (#715) — `useJobLetters`' shape. A job id
    *  absent from the map has no letters, so its row renders no indicator. */
   lettersById?: ReadonlyMap<string, readonly LetterRecord[]>;
+  /** Every live letter, flat (#767) — what each row's `inheritedLetterForJob`
+   *  runs against to find the company or standard letter it would inherit.
+   *  Omitted resolves nothing, so a caller that has not read the store gets
+   *  exactly the pre-#767 behaviour. */
+  allLetters?: readonly LetterRecord[];
+  /** The user's standard letter, if written (#767) — the panel-level button's
+   *  state. Absent renders "Write a standard letter", so it is only a truthful
+   *  answer once {@link JobTrackerProps.lettersReady} is true. */
+  standardLetter?: LetterRecord;
+  /** Whether the letter store has actually been read (#767 review).
+   *
+   *  `standardLetter` is `standard[0]`, and `[0]` of a not-yet-loaded list is
+   *  `undefined` — indistinguishable from "the user has none". The tracker
+   *  early-returns on ITS OWN `ready` only, and `useJobLetters` resolves
+   *  independently, so there is a window where the rows are on screen and the
+   *  letters are not. Composing in that window writes a SECOND unscoped record,
+   *  and since only `[0]` is ever surfaced the original becomes unreachable —
+   *  the standard tier is the one that loses a record this way, because it is
+   *  the one with a single window onto it.
+   *
+   *  Defaults to `true` so a caller that passes `standardLetter` directly (every
+   *  test, any future read-only view) is unaffected: the flag is about a live
+   *  store read in flight, which a caller holding the record has already done. */
+  lettersReady?: boolean;
   /** Re-read the letter store after a row writes one. Optional so a caller
    *  that only displays letters need not supply one; without it a saved letter
    *  will not appear until this view remounts. */
@@ -150,6 +222,9 @@ export function JobTrackerSection({
   | "ratings"
   | "hasResume"
   | "lettersById"
+  | "allLetters"
+  | "standardLetter"
+  | "lettersReady"
   | "onLettersChanged"
   | "duplicatesByJobId"
   | "onDismissDuplicate"
@@ -171,6 +246,17 @@ export function JobTrackerSection({
       ratings={ratings}
       hasResume={parsed !== undefined}
       lettersById={letters.byJobId}
+      allLetters={letters.all}
+      // `standard` is most-recently-updated first, so `[0]` is the current
+      // standard letter. Nothing writes a second one — the panel button edits
+      // the existing record — but the store holds a list, so this reads the
+      // newest rather than assuming there is exactly one.
+      //
+      // `ready` travels with it because that "nothing writes a second one" holds
+      // only AFTER the read lands: before it, `standard` is `[]`, `[0]` is
+      // `undefined`, and an unguarded button would offer to compose one.
+      standardLetter={letters.standard[0]}
+      lettersReady={letters.ready}
       onLettersChanged={letters.refresh}
       duplicatesByJobId={duplicates.byJobId}
       onDismissDuplicate={duplicates.dismiss}
@@ -188,6 +274,9 @@ export function JobTracker({
   resumeName,
   resumeOptions,
   lettersById,
+  allLetters,
+  standardLetter,
+  lettersReady = true,
   onLettersChanged,
   duplicatesByJobId,
   onDismissDuplicate,
@@ -244,6 +333,35 @@ export function JobTracker({
   // "only non-empty bucket is rejected" case is the single-bucket case of it.
   const anyOpenByDefault = groups.some(({ bucket }) => !isCollapsedByDefault(bucket));
 
+  // One pass over the letter set for the whole library, not one per row per
+  // render. `inheritedLetterForJob` walks `allLetters` up to twice, and the row
+  // `.map()` below re-runs on every keystroke in an `EditableField` and every
+  // status-filter toggle — without this the cost is O(jobs x letters x 2) per
+  // render. Keyed by job id so a row still gets its own answer.
+  const inheritedByJobId = useMemo(() => {
+    const byId = new Map<string, InheritedLetter>();
+    if (!allLetters || allLetters.length === 0) return byId;
+    for (const job of jobs) {
+      const resolved = inheritedFor(job, allLetters);
+      if (resolved) byId.set(job.id, resolved);
+    }
+    return byId;
+  }, [jobs, allLetters]);
+
+  // Same reason, its own memo: `deriveCompanyKey` is a unicode regex replace, a
+  // split, a filter and an 11-entry suffix scan, and it was running per row per
+  // render directly under the memo above (#767 review). Keyed off `jobs` alone
+  // because the key is derived from `job.company` and owes nothing to the
+  // letter set — so a letter write does not recompute it.
+  const companyKeyByJobId = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const job of jobs) {
+      const key = deriveCompanyKey(job.company);
+      if (key !== undefined) byId.set(job.id, key);
+    }
+    return byId;
+  }, [jobs]);
+
   if (!ready) return null;
 
   return (
@@ -262,6 +380,21 @@ export function JobTracker({
           <StatusBadge tone={persisted ? "ok" : "warning"}>
             {persisted ? "Persistent" : "Best-effort"}
           </StatusBadge>
+          {/* Panel-level, not per-row (#767): the standard letter is the one
+              letter with no job to hang off. See `StandardLetterButton`.
+
+              Held back until the letter store has been read, rather than
+              rendered against an `undefined` that cannot yet be told from "the
+              user has none" — see `lettersReady`. Absent, not disabled: the
+              control appears once with the right label, instead of flickering
+              from a disabled "Write a standard letter" to "Edit standard
+              letter" and inviting a click at the wrong moment. */}
+          {lettersReady && (
+            <StandardLetterButton
+              letter={standardLetter}
+              onSaved={onLettersChanged}
+            />
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -329,6 +462,8 @@ export function JobTracker({
                   rated={ratings !== null}
                   rating={ratings?.get(job.id)}
                   letters={lettersById?.get(job.id)}
+                  inherited={inheritedByJobId.get(job.id)}
+                  companyKey={companyKeyByJobId.get(job.id)}
                   onLettersChanged={onLettersChanged}
                   duplicates={duplicatesByJobId?.get(job.id)}
                   onMerge={(survivorId, absorbedId) =>

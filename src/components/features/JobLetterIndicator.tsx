@@ -27,7 +27,9 @@
  * the résumé and the job details to that model's API, and the user deserves to
  * be told once. A letter typed into `LetterEditorDialog` sent nothing
  * anywhere, so gating it behind that warning would be telling the user
- * something untrue about their own typing. `hasOutsideProducer` is the test:
+ * something untrue about their own typing. {@link letterEgressNeedsAck} is the
+ * test — shared with `StandardLetterButton` since #767 gave that surface its own
+ * door onto the same class of text, so one wording and one flag serve both:
  * `docs/cover-letter-contract.md` §6 reads an absent `producer` block as
  * "written by offlinecv itself", and the editor never writes one. That marker
  * is self-reported and optional, so it is used ONLY in this direction — a
@@ -57,13 +59,17 @@
  */
 
 import { useState } from "react";
-import { Button, Dialog } from "@design-system";
+import { Button } from "@design-system";
 import {
-  hasAcknowledgedLetterEgress,
-  recordLetterEgressAcknowledged,
-} from "../../lib/letter-egress-ack.ts";
-import { LetterRevealDialog } from "./LetterRevealDialog.tsx";
-import { LetterEditorDialog } from "./LetterEditorDialog.tsx";
+  LetterEgressAckDialog,
+  letterEgressNeedsAck,
+} from "./LetterEgressAckDialog.tsx";
+import { isCompanyLetter } from "../../lib/letters/resolve-letter.ts";
+import { LetterRevealDialog, type InheritedLetter } from "./LetterRevealDialog.tsx";
+import {
+  LetterEditorDialog,
+  type LetterStartingPoint,
+} from "./LetterEditorDialog.tsx";
 import type { LetterRecord } from "../../lib/storage/index.ts";
 
 /** Shared frame for both glyphs, so the two states differ only in the mark
@@ -113,8 +119,24 @@ interface JobLetterIndicatorProps {
   /** The job these letters belong to — needed to write a new one. */
   jobId: string;
   /** Every letter for this one job, most-recently-updated first. Empty (or
-   *  omitted) renders the "write one" state, not nothing. */
+   *  omitted) renders the "write one" state, not nothing.
+   *
+   *  THIS JOB'S OWN letters only, and that is what the glyph reports (#767). A
+   *  company or standard letter existing must never flip a row to "has letter":
+   *  the row would claim a letter the user never wrote for that employer, and
+   *  the reveal would then show text they did not intend for it. Inheritance
+   *  surfaces inside the dialogs, where there is room to say what it is. */
   letters?: readonly LetterRecord[];
+  /** The letter this job would inherit — its company's, or the standard one
+   *  (#767). Drives the reveal's extra entry and the editor's "Start from…"
+   *  picker. Omitted when the user has written nothing this job can reach. */
+  inherited?: InheritedLetter;
+  /** This job's company as a DERIVED key (`deriveCompanyKey`), when it has one
+   *  (#767). Present enables "Customize for this company", which is the only
+   *  write path to the company tier — absent when the job's `company` is blank
+   *  or all punctuation, which is exactly when a company letter would have no
+   *  key to be found by. */
+  companyKey?: string;
   /** Re-read the letter store after a write. Optional so a caller that only
    *  displays letters (a test, a future read-only view) need not supply one;
    *  without it a saved letter will not appear until the view remounts. */
@@ -123,45 +145,110 @@ interface JobLetterIndicatorProps {
 
 type Stage = "closed" | "ack" | "reveal" | "edit";
 
-/** True when any letter here was written OUTSIDE this app — the only case the
- *  egress warning is about. See the docblock on why this is read one-way. */
-function hasOutsideProducer(letters: readonly LetterRecord[]): boolean {
-  return letters.some((letter) => letter.producer !== undefined);
-}
-
 export function JobLetterIndicator({
   jobId,
   letters = [],
+  inherited,
+  companyKey,
   onSaved = () => {},
 }: JobLetterIndicatorProps) {
   const [stage, setStage] = useState<Stage>("closed");
   // Which letter the editor is revising. `undefined` composes a new draft,
   // which is also the empty-state path — one editor, both jobs.
   const [editing, setEditing] = useState<LetterRecord | undefined>(undefined);
+  // Set only by a Customize click — the user picking a letter to copy. Every
+  // other route into the editor clears it, which is what keeps a plain "Write a
+  // cover letter" click opening an empty draft.
+  const [seed, setSeed] = useState<LetterStartingPoint | undefined>(undefined);
+  // Which scope the editor is composing FOR. "job" everywhere except
+  // "Customize for this company", which is the only write path to the company
+  // tier — see `openEditor`.
+  const [composeScope, setComposeScope] = useState<"job" | "company">("job");
 
   const hasLetters = letters.length > 0;
+
+  // What the editor may be started from. One entry, because `resolveLetterForJob`
+  // already picked the single most specific inherited letter — offering both a
+  // company and a standard letter here would ask the user to redo a decision the
+  // chain exists to make. Empty while revising is enforced by the editor itself.
+  // The label stays the lowercase FRAGMENT it arrives as; the editor's picker
+  // capitalizes it for the chip and its copy notice embeds it mid-sentence.
+  // See `scope-phrase.ts` for why the casing cannot be decided here.
+  const startFrom: readonly LetterStartingPoint[] = inherited
+    ? [{ letter: inherited.letter, label: inherited.label }]
+    : [];
   const label = !hasLetters
     ? "Write a cover letter"
     : letters.length === 1
       ? "View cover letter"
       : `View cover letters (${letters.length})`;
 
+  /** What to call a letter being copied FROM, in the editor's copy notice. The
+   *  inherited letter has a scope phrase; one of this job's own drafts has only
+   *  its user-set label, and falls back to the same wording the reveal titles
+   *  an unlabelled draft with. */
+  function labelFor(source: LetterRecord): string {
+    if (inherited && source.id === inherited.letter.id) return inherited.label;
+    return source.label || "this job's letter";
+  }
+
+  /**
+   * Open into an editor composing a fresh draft for `scope`, optionally seeded
+   * from `from`. The ONE route into compose mode, so the three pieces of state
+   * that define it can never drift apart: no `editing` record (which is what
+   * makes a save an insert rather than an upsert over the source), the seed,
+   * and the scope key the save will carry.
+   */
+  function openEditor(
+    scope: "job" | "company",
+    from?: LetterStartingPoint,
+  ): void {
+    setEditing(undefined);
+    setSeed(from);
+    setComposeScope(scope);
+    setStage("edit");
+  }
+
+  /**
+   * Open into an editor REVISING `letter` under `scope` — the counterpart of
+   * {@link openEditor}, and the one route in, so the seed can never survive
+   * from a previous Customize click into a revise that must not be a copy.
+   */
+  function editLetter(letter: LetterRecord, scope: "job" | "company"): void {
+    setEditing(letter);
+    setSeed(undefined);
+    setComposeScope(scope);
+    setStage("edit");
+  }
+
   function open() {
-    if (!hasLetters) {
-      setEditing(undefined);
-      setStage("edit");
-      return;
-    }
+    // Gate on everything a click from here can put on screen, not just this
+    // job's own letters. Since #767 the reveal offers the inherited letter as
+    // an entry and the editor offers it as a starting point, so an
+    // outside-produced STANDARD letter reaches the screen through a job whose
+    // own letters are all hand-typed — and the warning is about egress that
+    // already happened to the text being shown, whichever scope holds it.
+    //
     // Read the acknowledgement fresh, not from a cached hook value: several
     // rows' indicators are mounted at once on this page, and it is meant to be
     // "once, ever" — not "once per row." See `letter-egress-ack.ts`.
-    const mustWarn =
-      hasOutsideProducer(letters) && !hasAcknowledgedLetterEgress();
-    setStage(mustWarn ? "ack" : "reveal");
+    if (letterEgressNeedsAck([...letters, inherited?.letter])) {
+      setStage("ack");
+      return;
+    }
+    reveal();
   }
 
-  function acknowledge() {
-    recordLetterEgressAcknowledged();
+  /** Where `open` lands once the warning (if any) is out of the way — the
+   *  reveal for a job with its own drafts, the editor for one without. Shared
+   *  with `acknowledge` so the post-warning destination cannot diverge from the
+   *  no-warning one; before #767 the ack path hard-coded `"reveal"`, which was
+   *  right only while the empty case could never warn. */
+  function reveal() {
+    if (!hasLetters) {
+      openEditor("job");
+      return;
+    }
     setStage("reveal");
   }
 
@@ -182,51 +269,69 @@ export function JobLetterIndicator({
         {hasLetters ? <LetterGlyph /> : <LetterAddGlyph />}
       </Button>
 
-      <Dialog
+      <LetterEgressAckDialog
         open={stage === "ack"}
         onClose={() => setStage("closed")}
-        title="Before you view this letter"
-        className="max-w-md"
-      >
-        <div className="flex flex-col gap-3">
-          <p className="text-sm leading-relaxed text-content-secondary">
-            offlinecv stores this letter — it did not write it. To draft it,
-            whatever generated the text sent your résumé and the job details
-            out to a model&rsquo;s API. That step happened outside this
-            app&rsquo;s on-device guarantee. Reading the letter here, or
-            copying it, sends nothing further.
-          </p>
-          <p className="text-2xs leading-relaxed text-content-tertiary">
-            Your confirmation is saved in this browser, so you normally see
-            this once. If this browser blocks that storage, it will ask again.
-          </p>
-          <div className="mt-1 flex justify-end">
-            <Button variant="primary" size="sm" onClick={acknowledge}>
-              Got it
-            </Button>
-          </div>
-        </div>
-      </Dialog>
+        onAcknowledged={reveal}
+      />
 
       <LetterRevealDialog
         open={stage === "reveal"}
         onClose={() => setStage("closed")}
         letters={letters}
-        onEdit={(letter) => {
-          setEditing(letter);
-          setStage("edit");
-        }}
-        onCompose={() => {
-          setEditing(undefined);
-          setStage("edit");
-        }}
+        inherited={inherited}
+        onEdit={(letter) => editLetter(letter, "job")}
+        onCompose={() => openEditor("job")}
+        // Compose, NOT revise — `openEditor` leaves `editing` undefined so the
+        // editor writes a new record with no id. Handing the source record to
+        // `editing` would make Save OVERWRITE the letter being copied, which is
+        // the one failure this whole flow is arranged to prevent.
+        //
+        // `source` is the letter the reveal actually has on screen, taken from
+        // the argument rather than reached for in `startFrom` — the two are the
+        // same record while there is one inherited entry, and taking the
+        // argument keeps this correct if a second is ever offered.
+        onCustomize={(source) =>
+          openEditor("job", { letter: source, label: labelFor(source) })
+        }
+        // Fork OR revise, decided by what is actually on screen. Lifting a job
+        // letter to company scope must insert — that is a new record at a new
+        // scope. But the reveal also offers this while the COMPANY's own letter
+        // is selected, and inserting there forks the letter from itself: the
+        // first record keeps the same key, only the newest is ever surfaced by
+        // the chain, it has no `jobId` for `deleteLettersForJob` to cascade to,
+        // and there is no company-letter list to delete it from — so it is
+        // unreachable forever (#767 review). Same predicate the chain reads the
+        // rung with, so the two cannot disagree about what "the company's
+        // letter" is.
+        companyOffer={
+          companyKey !== undefined
+            ? {
+                companyKey,
+                onCustomize: (source) =>
+                  isCompanyLetter(source, companyKey)
+                    ? editLetter(source, "company")
+                    : openEditor("company", {
+                        letter: source,
+                        label: labelFor(source),
+                      }),
+              }
+            : undefined
+        }
       />
 
       <LetterEditorDialog
         open={stage === "edit"}
         onClose={() => setStage("closed")}
-        jobId={jobId}
+        // Exactly one scope key, never both — the contract refuses a record
+        // carrying two. Composing for the company tier drops `jobId` entirely,
+        // which is what makes the saved letter reachable from every job at that
+        // employer rather than just this one.
+        jobId={composeScope === "company" ? undefined : jobId}
+        companyKey={composeScope === "company" ? companyKey : undefined}
         letter={editing}
+        startFrom={startFrom}
+        seed={seed}
         onSaved={onSaved}
       />
     </>
