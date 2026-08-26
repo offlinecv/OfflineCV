@@ -46,7 +46,7 @@
  * privacy defect — sees a whole file the moment anything imports it, not just
  * the one export it used. Routing `computeCoverageFromCorpus` through the barrel
  * would drag a network primitive onto that graph for nothing. Measured: the
- * value-edge closure of the specifiers below is 27 modules and reaches no
+ * value-edge closure of the specifiers below is 28 modules and reaches no
  * `fetch`/`WebSocket`/`XMLHttpRequest`/`EventSource` at all. That is a statement
  * about **this entry's** value-edge closure, and not about the tarball's file
  * list, which is larger — see "The tarball ships more files than the graph
@@ -75,7 +75,7 @@
  * cannot arrive here by accident. Read `src/job-search.ts`'s own docblock for
  * the full argument; the two facts that belong on this side of the seam are:
  *
- *   - **The two runtime closures are disjoint.** Measured: 27 modules from this
+ *   - **The two runtime closures are disjoint.** Measured: 28 modules from this
  *     entry, 11 from `./job-search`, zero modules in common. Importing one
  *     cannot pull the other in, in either direction, which is what makes the
  *     network-free claim above survive the subpath's existence rather than merely
@@ -91,8 +91,8 @@
  *
  * `tsc` emits a `.js` for every file in the program, the ones reached only by
  * `import type` included, and `files` ships all of them. So `npm pack` produces
- * 62 modules, of which 38 are reachable — 27 from this barrel and 11 from
- * `./job-search` — and two of the unreachable 24 read exactly like the thing
+ * 65 modules, of which 39 are reachable — 28 from this barrel and 11 from
+ * `./job-search` — and two of the unreachable 26 read exactly like the thing
  * this file says is absent:
  *
  *   - `dist/src/lib/analytics.js` — `import.meta.env`, `await import("posthog-js")`
@@ -111,7 +111,7 @@
  * an egress path.
  *
  * The network-free claim above is therefore about **this entry's** RUNTIME GRAPH
- * rather than about the file list, and on that graph it holds exactly: 27
+ * rather than about the file list, and on that graph it holds exactly: 28
  * modules, no network primitive, one bare import (`idb`). Which means grepping
  * the tarball for `fetch(` is the wrong audit twice over — it finds the seven
  * modules that legitimately fetch on the OTHER entry, plus prose mentions in

@@ -197,7 +197,7 @@ const EXPECTED_EXPORTS = {
  * `EXPECTED_EXPORTS` above catches a provider SYMBOL moved onto `.`. It cannot
  * catch a value EDGE, which is the cheaper mistake by far: one
  * `import "…/fetch-jd.ts";` side-effect line in `src/index.ts` leaves the export
- * set byte-identical while taking that closure from 27 modules to 29, putting a
+ * set byte-identical while taking that closure from 28 modules to 30, putting a
  * live `fetch(` on it, and making the two closures overlap. At that point every
  * network-free claim in `src/index.ts`, `src/job-search.ts` and
  * `tsconfig.build.json` is false — in a public repo — and the downstream
@@ -222,7 +222,7 @@ const EXPECTED_EXPORTS = {
  * the assertion silently covering two of three surfaces.
  */
 const ENTRY_CLOSURES = {
-  ".": { modules: 27, networkBearingModules: 0 },
+  ".": { modules: 28, networkBearingModules: 0 },
   "./job-search": { modules: 11, networkBearingModules: 7 },
 };
 
@@ -233,7 +233,7 @@ const ENTRY_CLOSURES = {
  * same reason `importSpecifiers` does — and here the difference is not
  * theoretical but load-bearing on the very first run. `tsc` preserves docblocks
  * into the emit verbatim, and the emitted `.` entry contains the sentence "the
- * value-edge closure of the specifiers below is 27 modules and reaches no
+ * value-edge closure of the specifiers below is 28 modules and reaches no
  * `fetch`/`WebSocket`/…" — so the obvious `/\b(fetch|…)\s*\(/` sweep reports
  * FOUR network primitives in the one file whose whole claim is that it has
  * none. A comment is not a node; the parse simply does not see it.

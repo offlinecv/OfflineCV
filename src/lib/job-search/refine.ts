@@ -3,8 +3,16 @@
 
 /**
  * refineSearchResult — apply the query's LOCAL refinement knobs (role
- * families #568, exclude terms #563) and rank (#545/#561/#562/#564) over an
- * already-fetched, already-deduped posting set.
+ * families #568, exclude terms #563, local-only #809) and rank
+ * (#545/#561/#562/#564) over an already-fetched, already-deduped posting set.
+ *
+ * The three hard filters here are the ONLY things in the lane that remove a
+ * posting, and all three are user-armed: chips the user can see and clear.
+ * Everything else about narrowing — level, comp floor, and location's default
+ * behavior — is a bounded soft axis inside `rankPostings` that reorders and
+ * drops nothing (#570/#716). Keep it that way: #809's fix for "the search
+ * returns everything" is giving the user an explicit lever, not re-inflating an
+ * implicit boost.
  *
  * Pulled out of `searchJobs` (`search.ts`) so `FindJobsPanel` can re-run the
  * SAME pipeline on every edit to a refinement control (role family, target
@@ -30,6 +38,7 @@ import {
   filterPostingsByExcludeTerms,
   roleFilterForFamilies,
 } from "./role-keywords.ts";
+import { filterPostingsByLocation } from "./location-match.ts";
 import type { JobSearchResult } from "./search.ts";
 
 export async function refineSearchResult(
@@ -75,8 +84,20 @@ export async function refineSearchResult(
     roleFiltered = [...rawPostings];
   }
 
-  const { postings: filtered, suppressed: excludeSuppressed } =
+  const { postings: excludeFiltered, suppressed: excludeSuppressed } =
     filterPostingsByExcludeTerms(roleFiltered, query.excludeTerms);
+
+  // Local-only (#809): the hard arm of the location axis, applied LAST so its
+  // never-fail-closed check reads the set the user will actually see — running
+  // it before the role/exclude filters could keep a location that those then
+  // empty anyway, and the notice would name the wrong control. Skipped entirely
+  // unless the user turned the toggle on AND a location is set; the soft axis
+  // in `rankPostings` is unchanged either way.
+  const { postings: filtered, suppressed: locationSuppressed } =
+    filterPostingsByLocation(
+      excludeFiltered,
+      query.locationOnly ? query.location : undefined,
+    );
 
   return {
     jobs: rankPostings(parsed, filtered, query),
@@ -84,6 +105,8 @@ export async function refineSearchResult(
     providerCount,
     excludeSuppressed,
     roleSuppressed,
+    locationSuppressed,
+    locationFilteredOut: excludeFiltered.length - filtered.length,
     rawPostings: [...rawPostings],
   };
 }

@@ -24,7 +24,14 @@
  *     Everything was reachable and nothing was findable. The steps ARE the
  *     reading order of the work, and each rail entry states its own current
  *     value (`describeQuerySteps`), so a closed step is still legible.
- *  2. **Results**, owning the full width.
+ *  2. **The narrowing strip** (#809) — `JobResultRefineStrip`, rendered only
+ *     once a search has loaded. The fold above is what made this necessary: it
+ *     is right that a form worth the full page width while being filled in is
+ *     worth none of it afterwards, but it also put every narrowing lever behind
+ *     "Edit search" at the exact moment a user finally has results to react to.
+ *     The strip is not a second query surface — it edits this same `query`
+ *     through this same `setQuery`.
+ *  3. **Results**, owning the full width.
  *
  * The whole query folds to a one-line `JobQuerySummary` + Search again on
  * submit — the rail included, since a form worth the full page width while
@@ -88,6 +95,7 @@ import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import { JobSearchResults } from "./JobSearchResults.tsx";
 import { JobQueryEditor } from "./JobQueryEditor.tsx";
 import { JobQuerySummary } from "./JobQuerySummary.tsx";
+import { JobResultRefineStrip } from "./JobResultRefineStrip.tsx";
 import { PasteJdPanel } from "./PasteJdPanel.tsx";
 import { PendingCompaniesNotice } from "./PendingCompaniesNotice.tsx";
 import { useCompanyTargets } from "../../hooks/useCompanyTargets.ts";
@@ -237,6 +245,16 @@ export function FindJobsPanel({
           onSearch={searchPendingCompanies}
           isUpdating={isUpdating}
         />
+      )}
+
+      {/* The narrowing controls, WITH the results (#809). Only over a real
+       *  result set: before the first search there is nothing to narrow, and
+       *  over the loading skeleton or the error state the strip would be a
+       *  control with no subject. Mounted OUTSIDE the fold on purpose — the
+       *  fold is what hid these levers from the three respondents who reported
+       *  the search "returns everything". */}
+      {phase.kind === "loaded" && (
+        <JobResultRefineStrip query={query} onChange={setQuery} />
       )}
 
       <JobSearchResults phase={phase} onRetry={runSearch} onTailor={onTailor} />

@@ -24,12 +24,12 @@
     "rewriteRelativeImportExtensions": true,
 
     // Load-bearing for the privacy property the barrels' docblocks claim. The
-    // program is 62 modules: 38 are value-reachable (27 from `src/index.ts`, 11
+    // program is 65 modules: 39 are value-reachable (28 from `src/index.ts`, 11
     // from `src/job-search.ts`, and those two sets are disjoint), and the other
-    // 24 are reachable from neither entry.
+    // 26 are reachable from neither entry.
     //
-    // `import type` edges are how those 24 get into the program, but NOT how all
-    // of them got there directly — 13 of the 24 have an ordinary value edge into
+    // `import type` edges are how those 26 get into the program, but NOT how all
+    // of them got there directly — 15 of the 26 have an ordinary value edge into
     // them from another module that is itself only type-reachable, so they enter
     // BEHIND a type edge rather than through one. `job-search/sector.ts` is the
     // clearest case: nothing imports it for a value, but its own

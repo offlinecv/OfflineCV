@@ -49,6 +49,8 @@ import { ROLE_HINT } from "../../lib/job-search/query-steps.ts";
 import {
   canonicalSkillLabels,
   parseSeniorityLabel,
+  withExcludeTerm,
+  withoutExcludeTerm,
 } from "../../lib/job-search/query-builder.ts";
 import { promoteSkill, promoteTitle } from "../../lib/job-search/search-plan.ts";
 import type { RoleFamily } from "../../lib/job-search/role-keywords.ts";
@@ -131,12 +133,9 @@ export function JobQueryEditor({
     onChange((q) => withSkills(q, q.skills.filter((s) => s !== skill)));
 
   const addExcludeTerm = (term: string) =>
-    onChange((q) => ({ ...q, excludeTerms: [...(q.excludeTerms ?? []), term] }));
+    onChange((q) => withExcludeTerm(q, term));
   const removeExcludeTerm = (term: string) =>
-    onChange((q) => ({
-      ...q,
-      excludeTerms: (q.excludeTerms ?? []).filter((t) => t !== term),
-    }));
+    onChange((q) => withoutExcludeTerm(q, term));
 
   // Role families (#568): REMOVAL only — see RoleFamilyChips' doc for why
   // there's no free-text add. Narrowing to an empty list is safe: readers

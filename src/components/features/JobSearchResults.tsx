@@ -108,7 +108,15 @@ function Loaded({
   onRetry: () => void;
   onTailor?: (jdContext: string) => void;
 }) {
-  const { jobs, degradedProviders, providerCount, excludeSuppressed, roleSuppressed } = result;
+  const {
+    jobs,
+    degradedProviders,
+    providerCount,
+    excludeSuppressed,
+    roleSuppressed,
+    locationSuppressed,
+    locationFilteredOut,
+  } = result;
   const [page, setPage] = useState(1);
   // Anchor for the scroll-to-top on a page change. A numbered jump replaces the
   // whole list under a scroll position that was meaningful for the old page, so
@@ -198,6 +206,20 @@ function Loaded({
             Role filter skipped — it would have hidden every result, so we kept
             them all for this search. Open Edit search to adjust the Role chips
             and apply role filtering again.
+          </p>
+        )}
+        {locationFilteredOut > 0 && (
+          <p className="text-sm text-content-tertiary">
+            {locationFilteredOut} posting{locationFilteredOut === 1 ? "" : "s"}{" "}
+            hidden as too far away — untick &ldquo;only jobs near me&rdquo; to
+            see {locationFilteredOut === 1 ? "it" : "them"} again.
+          </p>
+        )}
+        {locationSuppressed && (
+          <p className="text-sm text-content-tertiary">
+            None of these postings say where they are, so we kept them all
+            rather than showing you an empty page — turn off &ldquo;only jobs
+            near me&rdquo; to stop asking, or try a broader location.
           </p>
         )}
       </div>
