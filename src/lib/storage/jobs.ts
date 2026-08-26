@@ -106,12 +106,19 @@ export function getAllJobs(): Promise<JobRecord[]> {
  * TOMBSTONED rather than removed (#730) — see `StoredRecord.deletedAt`.
  *
  * The cascade lives here, at the store, rather than a layer up in
- * `job-tracker.ts`: `LetterRecord.jobId` is a required parent link, so "no
- * letter outlives its job" is referential integrity, not tracker policy, and
- * putting it behind the one door means no future caller of `deleteJob` can
- * forget it. (Contrast `clearResumeLink`, which is called from the resume-delete
- * path a layer up — that one is cross-aggregate policy about a link, not about
- * a child record's existence.)
+ * `job-tracker.ts`: a letter that CARRIES a `LetterRecord.jobId` is that job's
+ * child, so "no letter outlives the job it names" is referential integrity, not
+ * tracker policy, and putting it behind the one door means no future caller of
+ * `deleteJob` can forget it. (Contrast `clearResumeLink`, which is called from
+ * the resume-delete path a layer up — that one is cross-aggregate policy about
+ * a link, not about a child record's existence.)
+ *
+ * `jobId` is OPTIONAL since #766 — a letter may instead be scoped to a company
+ * or to nothing — which narrows the premise above without weakening it: the
+ * sweep runs through `lettersForJob`, so it reaches a letter only by matching
+ * the id it names, and a jobless letter is not this job's child to cascade to.
+ * See `letters.ts`'s {@link deleteLettersForJob} for why that is enforced by
+ * the scoping rather than by a guard.
  *
  * The job goes first. If the letter sweep then fails, the user's actual
  * intent — the job is gone — still happened; the reverse order would let a

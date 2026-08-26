@@ -4,9 +4,11 @@
 // @vitest-environment jsdom
 
 /**
- * useJobLetters (#715): the grouping + sort the Saved jobs library depends on
- * for its per-row indicator. Exercised through a probe component against
- * `fake-indexeddb`, same pattern as `useResumeLibrary.test.tsx`.
+ * useJobLetters (#715, #766): the grouping + sort the Saved jobs library depends
+ * on for its per-row indicator, and since #766 the three-way scope split under
+ * it. Exercised through a probe component against `fake-indexeddb`, same pattern
+ * as `useResumeLibrary.test.tsx`; the pure grouping gets its own describe at the
+ * bottom, where the `undefined`-key hazard is visible without a render.
  */
 
 import "fake-indexeddb/auto";
@@ -16,7 +18,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { DB_NAME, closeDB, saveLetter } from "../lib/storage/index.ts";
 import { tick } from "../lib/storage/__test-utils__/clock.ts";
-import { useJobLetters, type JobLetters } from "./useJobLetters.ts";
+import type { LetterRecord } from "../lib/storage/index.ts";
+import { useJobLetters, groupByScope, type JobLetters } from "./useJobLetters.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -106,5 +109,69 @@ describe("useJobLetters", () => {
       await latest?.refresh();
     });
     expect(latest?.byJobId.has("job-1")).toBe(true);
+  });
+
+  it("splits the three scopes, with no undefined-keyed entry in byJobId (#766)", async () => {
+    await saveLetter({ jobId: "job-1", body: "for the posting" });
+    await saveLetter({ companyKey: "northwind", body: "why Northwind" });
+    await saveLetter({ body: "my story" });
+    await mount();
+
+    expect([...(latest?.byJobId.keys() ?? [])]).toEqual(["job-1"]);
+    expect([...(latest?.byCompanyKey.keys() ?? [])]).toEqual(["northwind"]);
+    expect(latest?.standard).toHaveLength(1);
+  });
+});
+
+/**
+ * The grouping itself, at module scope. A rendered probe proves the hook wires
+ * it up; these prove the `undefined`-key hazard specifically, which is a
+ * property of the loop and not of the subscription around it.
+ */
+describe("groupByScope (#766)", () => {
+  /** Enough of a `LetterRecord` for the grouping — everything it reads is
+   *  present and nothing it does not is invented. */
+  const letter = (fields: Partial<LetterRecord>): LetterRecord =>
+    ({ id: "l", body: "", createdAt: 0, updatedAt: 0, ...fields }) as LetterRecord;
+
+  it("never creates a literal `undefined` key, the failure it exists to prevent", () => {
+    const grouped = groupByScope([
+      letter({ id: "standard" }),
+      letter({ id: "company", companyKey: "northwind" }),
+    ]);
+    // `Map.set(undefined)` would stringify into an entry every consumer reads as
+    // a job — a bucket no `JobRecord.id` can match, holding letters nothing
+    // would then find.
+    expect(grouped.byJobId.size).toBe(0);
+    expect([...grouped.byJobId.keys()]).not.toContain(undefined);
+    expect([...grouped.byJobId.keys()]).not.toContain("undefined");
+    expect(grouped.standard.map((l) => l.id)).toEqual(["standard"]);
+  });
+
+  it("reads a both-keys record as a job letter — the reading it had under v1", () => {
+    // `validateLetterRecord` refuses this shape, so it can only arrive from a
+    // pre-v2 store or a producer that skipped the validator. Filing it under its
+    // job is the only reading that cannot hide it from a surface that already
+    // existed.
+    const grouped = groupByScope([
+      letter({ id: "both", jobId: "job-1", companyKey: "northwind" }),
+    ]);
+    expect(grouped.byJobId.get("job-1")?.map((l) => l.id)).toEqual(["both"]);
+    expect(grouped.byCompanyKey.size).toBe(0);
+    expect(grouped.standard).toEqual([]);
+  });
+
+  it("sorts every tier most-recently-updated first, standard included", () => {
+    const grouped = groupByScope([
+      letter({ id: "job-old", jobId: "j", updatedAt: 1 }),
+      letter({ id: "job-new", jobId: "j", updatedAt: 2 }),
+      letter({ id: "co-old", companyKey: "c", updatedAt: 1 }),
+      letter({ id: "co-new", companyKey: "c", updatedAt: 2 }),
+      letter({ id: "std-old", updatedAt: 1 }),
+      letter({ id: "std-new", updatedAt: 2 }),
+    ]);
+    expect(grouped.byJobId.get("j")?.map((l) => l.id)).toEqual(["job-new", "job-old"]);
+    expect(grouped.byCompanyKey.get("c")?.map((l) => l.id)).toEqual(["co-new", "co-old"]);
+    expect(grouped.standard.map((l) => l.id)).toEqual(["std-new", "std-old"]);
   });
 });

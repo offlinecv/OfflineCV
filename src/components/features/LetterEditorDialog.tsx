@@ -46,8 +46,11 @@ import type { LetterRecord } from "../../lib/storage/index.ts";
 interface LetterEditorDialogProps {
   open: boolean;
   onClose: () => void;
-  /** The job this letter belongs to. Required even when editing, because a
-   *  letter with no `jobId` is unreachable from every surface. */
+  /** The job this letter belongs to. Required even when editing: this dialog
+   *  only ever composes a JOB letter, and one that named no job would be
+   *  unreachable from the only surface that opens it. Since #766 the store
+   *  itself allows a company-scoped or standard letter — neither has an editor
+   *  yet, and giving them one is the sibling issue to #766, not this prop. */
   jobId: string;
   /** The letter being revised. Omitted = compose a new draft. */
   letter?: LetterRecord;
