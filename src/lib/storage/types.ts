@@ -316,6 +316,23 @@ export const JOB_ORIGINS: readonly JobOrigin[] = [
   "manual",
 ];
 
+/** A company on the user's persisted job-search shortlist (#864) — a
+ *  statement of user intent, unlike `BoardCacheRecord`'s re-fetchable cache.
+ *  `ats` is kept as a bare string rather than importing job-search's `Ats`
+ *  union, for the same reason `BoardCacheRecord.postings` stays `unknown[]`:
+ *  this module doesn't import the job-search graph. Not in
+ *  `SyncableStoreName` and absent from the backup document — local-first,
+ *  per-browser, no account, no export (see the issue's out-of-scope list). */
+export interface WatchedCompanyRecord extends StoredRecord {
+  /** ATS vendor — `"greenhouse"` | `"lever"` | `"ashby"`, mirrored from
+   *  job-search's `Ats` union. */
+  ats: string;
+  /** The ATS board slug, e.g. "stripe". */
+  slug: string;
+  /** Display name, e.g. "Stripe". */
+  displayName: string;
+}
+
 /** A cached company ATS board: the light-index postings one board returned,
  *  keyed `${ats}:${slug}` (#533). A pure CACHE — deliberately absent from the
  *  backup document, because re-fetching a board is cheap and a stale export
@@ -397,7 +414,7 @@ export interface LetterRecord extends StoredRecord {
  * neither, so it gets its own two-function accessor (`sync-cursor.ts`) rather
  * than a cast that would let `putRecord` write a `createdAt` onto a bookmark.
  */
-export type StoreName = "resumes" | "jobs" | "boards" | "letters";
+export type StoreName = "resumes" | "jobs" | "boards" | "letters" | "watched";
 
 /** A resume as it appears in an export file: blob replaced by base64 + MIME so
  *  the whole backup is a single JSON document. */

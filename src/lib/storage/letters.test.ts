@@ -202,12 +202,12 @@ describe("storage: letters schema migration v2 → v3 (#711)", () => {
     // Read the OPEN database's version, not the module constant — a test that
     // compared `DB_VERSION` to itself would pass even if `upgrade()` never ran.
     //
-    // The literal moves with every schema bump (4 since #730) because a v2
+    // The literal moves with every schema bump (5 since #864) because a v2
     // profile migrates ALL the way forward, not one step: `upgrade()` runs for
     // the whole range `(oldVersion, DB_VERSION]`. What this case is actually
     // about is the `letters` store below — that a profile written before it
     // existed comes back with it present and its resumes and jobs untouched.
-    expect(db.version).toBe(4);
+    expect(db.version).toBe(5);
     expect(db.objectStoreNames.contains("letters")).toBe(true);
 
     expect((await getAllResumes()).map((r) => r.filename)).toEqual(["cv.pdf"]);

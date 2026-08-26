@@ -47,6 +47,7 @@ import { resolveInitialJobsTab, type JobsTabId } from "../lib/jobs-landing.ts";
 import { useArrivedFromRoot } from "../hooks/useArrivedFromRoot.ts";
 import { useResumeLibrary } from "../hooks/useResumeLibrary.ts";
 import { useFallbackResume } from "../hooks/useFallbackResume.ts";
+import { useWatchedCompaniesBridge } from "../hooks/useWatchedCompaniesBridge.ts";
 import {
   writeTailorHandoff,
   fingerprintParse,
@@ -62,6 +63,10 @@ function goToResume() {
 }
 
 export default function JobsApp() {
+  // #864: answers the extension's read-only `get-watched-companies` request
+  // for the lifetime of this page. No return value to wire up.
+  useWatchedCompaniesBridge();
+
   // Read once, on first render (lazy initializer): the payload is inert JSON and
   // the read is non-destructive, so there is no StrictMode double-invoke hazard
   // of the kind a destructive consume would.

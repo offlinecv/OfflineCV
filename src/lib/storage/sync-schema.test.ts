@@ -94,8 +94,10 @@ describe("storage: schema migration v3 → v4 (#730)", () => {
 
     const db = await getDB();
     // The OPEN database's version, not the module constant — see the note in
-    // `db.ts` on why `DB_VERSION` is private.
-    expect(db.version).toBe(4);
+    // `db.ts` on why `DB_VERSION` is private. Pinned to the CURRENT
+    // `DB_VERSION` (5 as of #864), not literally 4: `getDB()` always migrates
+    // to whatever `DB_VERSION` is now, past v4 as later stores are added.
+    expect(db.version).toBe(5);
 
     expect((await getAllResumes()).map((r) => r.filename)).toEqual(["cv.pdf"]);
     expect((await getAllJobs()).map((j) => j.title)).toEqual(["Staff Engineer"]);
@@ -135,7 +137,7 @@ describe("storage: schema migration v3 → v4 (#730)", () => {
     // oldVersion 0 runs every block in one transaction, so block 4 creates its
     // indexes on stores blocks 1 and 3 made moments earlier.
     const db = await getDB();
-    expect(db.version).toBe(4);
+    expect(db.version).toBe(5);
     expect(db.objectStoreNames.contains("sync")).toBe(true);
     expect(
       Array.from(db.transaction("jobs").objectStore("jobs").indexNames),

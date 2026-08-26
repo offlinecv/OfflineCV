@@ -29,12 +29,12 @@ beforeEach(async () => {
 describe("getExistingDB", () => {
   it("attaches to a database the app already migrated, without re-requesting a version", async () => {
     const app = await getDB();
-    expect(app.version).toBe(4);
+    expect(app.version).toBe(5);
     expect([...app.objectStoreNames]).toContain("jobs");
     await closeDB();
 
     const contentScript = await getExistingDB();
-    expect(contentScript.version).toBe(4);
+    expect(contentScript.version).toBe(5);
     expect([...contentScript.objectStoreNames]).toEqual([
       ...app.objectStoreNames,
     ]);
@@ -49,7 +49,7 @@ describe("getExistingDB", () => {
     // guarded `oldVersion < 1`, so upgrading the stray v1 in place would skip
     // it and leave `resumes`/`jobs` uncreated.)
     const db = await getExistingDB();
-    expect(db.version).toBe(4);
+    expect(db.version).toBe(5);
     expect([...db.objectStoreNames]).toContain("jobs");
     expect([...db.objectStoreNames]).toContain("resumes");
   });

@@ -243,7 +243,7 @@ const REPLY_TYPES: ReadonlySet<string> = new Set<ReplyType>([
  * can read the parse directly — but a forged `resume-profile-stored` would make
  * this surface report a share that never happened, and that is cheap to refuse.
  */
-function isFromThisPage(event: MessageEvent<unknown>, appOrigin: string): boolean {
+export function isFromThisPage(event: MessageEvent<unknown>, appOrigin: string): boolean {
   return event.source === window && event.origin === appOrigin;
 }
 

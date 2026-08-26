@@ -47,10 +47,13 @@
  *    `StoreName` joined for the same reason (#760): `useLibraryChanges`
  *    (`src/hooks/`) has to name the store it's subscribing to.
  *
- * The one standing exception is `src/lib/job-search/board-cache.ts`, which
- * reaches `./crud.ts` for the generic `getRecord`/`putRecord` accessors. There
- * is no `boards.ts` domain module to wrap them, and routing it here would pull
- * `backup.ts` + `resumes.ts` into the job-search chunk for two functions.
+ * The standing exceptions are `src/lib/job-search/board-cache.ts` and
+ * `src/lib/job-search/watched-companies.ts` (#864), which reach `./crud.ts`
+ * directly for the generic `getRecord`/`putRecord`/`getAllRecords`/
+ * `deleteRecord` accessors. Neither has a domain module here to wrap it — a
+ * `boards.ts` or `watched.ts` would exist for exactly one job-search caller
+ * each — and routing either through this barrel would pull `backup.ts` +
+ * `resumes.ts` into the job-search chunk for a couple of functions.
  */
 
 export { DB_NAME, closeDB } from "./db.ts";

@@ -117,22 +117,48 @@ export function CompanyTargets({ targets }: { targets: CompanyTargetsState }) {
           <div className="flex flex-wrap gap-1.5">
             {suggested.map((entry: CompanyEntry) => {
               const isOn = targets.isSelected(entry);
+              const isWatched = targets.isWatched(entry);
               return (
-                <Button
+                <div
                   key={`${entry.ats}:${entry.slug}`}
-                  variant="ghost"
-                  size="sm"
-                  aria-pressed={isOn}
-                  onClick={() => targets.toggle(entry)}
                   className={
                     isOn
-                      ? "rounded-full border border-accent-primary px-2.5 py-1"
-                      : "rounded-full border border-border-light px-2.5 py-1 text-content-secondary"
+                      ? "flex items-center rounded-full border border-accent-primary"
+                      : "flex items-center rounded-full border border-border-light"
                   }
                 >
-                  <span aria-hidden="true">{isOn ? "✓︎" : "+"}</span>
-                  {entry.name}
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={isOn}
+                    onClick={() => targets.toggle(entry)}
+                    className={
+                      isOn ? "px-2.5 py-1" : "px-2.5 py-1 text-content-secondary"
+                    }
+                  >
+                    <span aria-hidden="true">{isOn ? "✓︎" : "+"}</span>
+                    {entry.name}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-pressed={isWatched}
+                    aria-label={
+                      isWatched ? `Stop watching ${entry.name}` : `Watch ${entry.name}`
+                    }
+                    onClick={() => targets.toggleWatched(entry)}
+                    className="px-1.5 py-1"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={
+                        isWatched ? "text-accent-primary" : "text-content-secondary"
+                      }
+                    >
+                      {isWatched ? "★" : "☆"}
+                    </span>
+                  </Button>
+                </div>
               );
             })}
           </div>
