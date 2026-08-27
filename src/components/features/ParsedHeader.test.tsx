@@ -37,7 +37,11 @@ afterEach(() => {
   container.remove();
 });
 
-function render(saveState: ResumeSaveState, onSave = () => {}): HTMLElement {
+function render(
+  saveState: ResumeSaveState,
+  onSave = () => {},
+  onOpenFeedback?: () => void,
+): HTMLElement {
   act(() =>
     root.render(
       createElement(ParsedHeader, {
@@ -49,6 +53,7 @@ function render(saveState: ResumeSaveState, onSave = () => {}): HTMLElement {
         onReset: () => {},
         saveState,
         onSave,
+        onOpenFeedback,
       }),
     ),
   );
@@ -100,5 +105,21 @@ describe("ParsedHeader: persistence state", () => {
     // that loses "Try another file" to gain a save link is a net regression.
     const el = render("none");
     expect(button(el, "Try another file")).not.toBeNull();
+  });
+});
+
+describe("ParsedHeader: ambient feedback trigger (#900)", () => {
+  it("hides the Feedback button when no handler is passed", () => {
+    const el = render("none");
+    expect(button(el, "★ Feedback")).toBeNull();
+  });
+
+  it("shows the Feedback button and opens the dialog on click", () => {
+    const onOpenFeedback = vi.fn();
+    const el = render("none", () => {}, onOpenFeedback);
+    const feedbackButton = button(el, "★ Feedback");
+    expect(feedbackButton).not.toBeNull();
+    act(() => feedbackButton?.click());
+    expect(onOpenFeedback).toHaveBeenCalledTimes(1);
   });
 });

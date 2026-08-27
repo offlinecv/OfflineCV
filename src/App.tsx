@@ -20,12 +20,14 @@ import { ResumeLibrary } from "./components/features/ResumeLibrary.tsx";
 import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionBar.tsx";
 import { ExportDialog } from "./components/features/ExportDialog.tsx";
 import { ResumeChooserDialog } from "./components/features/ResumeChooserDialog.tsx";
+import { FeedbackDialog } from "./components/features/FeedbackDialog.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { useAutoRestoreResume } from "./hooks/useAutoRestoreResume.ts";
 import { useAutosaveResume } from "./hooks/useAutosaveResume.ts";
 import { useLlmRecovery } from "./hooks/useLlmRecovery.ts";
+import { useFeedbackDialog } from "./hooks/useFeedbackDialog.ts";
 import {
   departToJobs,
   departToJobsAndNavigate,
@@ -121,6 +123,13 @@ export default function App() {
   // résumé. Corrected during render rather than from an effect so there is no
   // committed frame in between for that to be visible in.
   if (recovery === null && exportOpen) setExportOpen(false);
+
+  // The multi-step feedback interstitial (#900) — one controller for both
+  // ways in: the ambient `[★ Feedback]` button (threaded through `Result` to
+  // `ParsedHeader`) and the automatic trigger, earned below from the export
+  // dialog's résumé-only callback and flushed when that dialog closes. Owned
+  // here, next to `exportOpen`, since both dialogs are page-level siblings.
+  const feedback = useFeedbackDialog();
 
   // Local-first resume library (#322) — save/reload parsed resumes without
   // re-uploading. Loading hydrates the "done" state from the cached parse.
@@ -455,6 +464,7 @@ export default function App() {
       badge="alpha"
       onSavedJobsNavigate={goToSavedJobs}
       journey={{ state: journeyState, onSelect: onJourneySelect }}
+      onOpenFeedback={feedback.openDialog}
     >
       {(state.phase === "idle" ||
         state.phase === "parsing" ||
@@ -650,6 +660,8 @@ export default function App() {
               // it IS the Tailor stage, done. `ResultDetail` owns the pairing;
               // the key it is recorded under is only knowable here.
               onTailorApplied={() => progress.mark("tailor")}
+              // #900 — ambient feedback button trigger.
+              onOpenFeedback={feedback.openDialog}
             />
             {/* Hand the parse to the capture extension (#620) — self-hides when
                 no extension answers a probe, so it costs nothing on the visit
@@ -721,7 +733,14 @@ export default function App() {
         // artifact matches what the page shows.
         <ExportDialog
           open={exportOpen}
-          onClose={() => setExportOpen(false)}
+          // #900 — closing is also when a pending feedback milestone flushes.
+          // The export dialog stays open after a download on purpose (#421),
+          // so opening the interstitial any earlier would stack a second
+          // native modal over the findings the download just produced.
+          onClose={() => {
+            setExportOpen(false);
+            feedback.notifyExportClosed();
+          }}
           result={recovery.activeResult}
           score={recovery.activeScore}
           contactOverrides={edit.contactOverrides}
@@ -729,8 +748,19 @@ export default function App() {
           // Download stage, the audit report included: the ledger records that
           // the user went through here, and the report is downloaded from it.
           onExported={() => progress.mark("download")}
+          // #900 — the résumé-only subset of the same success point feeds the
+          // feedback dialog's automatic first-export trigger.
+          onResumeExported={feedback.notifyResumeExported}
         />
       )}
+
+      {/* #900 — the multi-step feedback interstitial. Page level, beside the
+          export dialog whose résumé-only callback can open it automatically. */}
+      <FeedbackDialog
+        open={feedback.open}
+        onClose={feedback.close}
+        onSubmitted={feedback.markSubmitted}
+      />
 
       {/* #826 — which saved résumé did you mean? Opened only by a rail click
           that arrived with nothing on the page and two or more saved, and it

@@ -24,7 +24,6 @@ import type { SectionName } from "../../lib/heuristics/regex.ts";
 import type { ParseDisagreement } from "../../lib/heuristics/disagreement.ts";
 
 vi.mock("../../lib/analytics.ts", () => ({
-  ANALYTICS_ENABLED: false,
   trackFeedback: vi.fn(),
   trackGapReported: vi.fn(),
 }));

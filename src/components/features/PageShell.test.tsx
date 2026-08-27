@@ -365,3 +365,26 @@ describe("PageShell — the journey rail", () => {
     expect(el.querySelector('[role="status"]')).not.toBeNull();
   });
 });
+
+describe("PageShell — footer feedback trigger (#900)", () => {
+  it("renders no Feedback button in the footer when onOpenFeedback is not provided", () => {
+    const el = render();
+    const footer = el.querySelector("footer")!;
+    const feedbackBtn = [...footer.querySelectorAll("button")].find(
+      (b) => b.textContent === "Feedback",
+    );
+    expect(feedbackBtn).toBeUndefined();
+  });
+
+  it("renders a Feedback button in the footer and calls onOpenFeedback on click", () => {
+    const onOpenFeedback = vi.fn();
+    const el = render({ onOpenFeedback });
+    const footer = el.querySelector("footer")!;
+    const feedbackBtn = [...footer.querySelectorAll("button")].find(
+      (b) => b.textContent === "Feedback",
+    );
+    expect(feedbackBtn).toBeDefined();
+    act(() => feedbackBtn?.click());
+    expect(onOpenFeedback).toHaveBeenCalledTimes(1);
+  });
+});

@@ -126,6 +126,7 @@ function render(
   overrides: ContactOverrides = {},
   onClose = () => {},
   onExported?: () => void,
+  onResumeExported?: () => void,
 ): HTMLElement {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -139,6 +140,7 @@ function render(
         score: SCORE,
         contactOverrides: overrides,
         onExported,
+        onResumeExported,
       }),
     );
   });
@@ -430,6 +432,17 @@ describe("ExportDialog", () => {
       captured[key]?.();
     }
     expect(onExported).toHaveBeenCalledTimes(3);
+  });
+
+  it("fires the résumé-only feedback milestone (#900) for PDF and Markdown, never the report", () => {
+    const onResumeExported = vi.fn();
+    render(exportable(), {}, () => {}, undefined, onResumeExported);
+    captured.report?.();
+    expect(onResumeExported).not.toHaveBeenCalled();
+    captured.pdf?.();
+    expect(onResumeExported).toHaveBeenCalledTimes(1);
+    captured.markdown?.();
+    expect(onResumeExported).toHaveBeenCalledTimes(2);
   });
 
   // #621 — the export reports what it could not render cleanly, on the row that

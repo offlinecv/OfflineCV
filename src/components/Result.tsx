@@ -4,7 +4,6 @@
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, ErrorState } from "@design-system";
-import { FeedbackPanel } from "./features/FeedbackPanel.tsx";
 import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
 import { isScoreRevealed } from "../lib/contact.ts";
 import { useResumeAnalysisLlm } from "../hooks/useResumeAnalysisLlm.ts";
@@ -57,6 +56,10 @@ interface ResultProps {
   /** A JD-steered whole-résumé rewrite was applied (#826) — see `ResultDetail`,
    *  which pairs the rewrite event with the steering it owns. */
   onTailorApplied?: () => void;
+  /** Opens `FeedbackDialog` (#900) — threaded down to `ParsedHeader`'s
+   *  ambient `[★ Feedback]` trigger. `App` owns the dialog itself, since the
+   *  automatic export-milestone trigger fires from page level too. */
+  onOpenFeedback?: () => void;
 }
 
 export function Result({
@@ -70,6 +73,7 @@ export function Result({
   autosave,
   onJdContextChange,
   onTailorApplied,
+  onOpenFeedback,
 }: ResultProps) {
   const isFontsUnmappable = result.triggers.includes("fonts_unmappable");
   if (isFontsUnmappable) {
@@ -90,6 +94,7 @@ export function Result({
       autosave={autosave}
       onJdContextChange={onJdContextChange}
       onTailorApplied={onTailorApplied}
+      onOpenFeedback={onOpenFeedback}
     />
   );
 }
@@ -107,6 +112,7 @@ function ParsedCard({
   autosave,
   onJdContextChange,
   onTailorApplied,
+  onOpenFeedback,
 }: {
   result: CascadeResult;
   bytes?: ArrayBuffer;
@@ -118,6 +124,7 @@ function ParsedCard({
   autosave: AutosaveResume;
   onJdContextChange?: (jdContext: string | null) => void;
   onTailorApplied?: () => void;
+  onOpenFeedback?: () => void;
 }) {
   const triggerCount = result.triggers.length;
   const { activeResult, activeScore, parseIdentity, isLlmRecovered } = recovery;
@@ -182,6 +189,7 @@ function ParsedCard({
           onReset={onReset}
           saveState={autosave.state}
           onSave={autosave.save}
+          onOpenFeedback={onOpenFeedback}
         />
 
         {isTwoColumn && (
@@ -199,11 +207,6 @@ function ParsedCard({
             role are filled in below.
           </p>
         )}
-        {/* Star-rating feedback (#51). The "Report a parsing gap" affordance
-            lives in the "What an ATS misses" bottom section of the "Local AI
-            feedback" disclosure (#273), next to the disagreements it
-            characterizes. */}
-        <FeedbackPanel />
       </Card>
 
       <ResultDetail

@@ -41,7 +41,7 @@
  */
 
 import { useState, type MouseEvent, type ReactNode } from "react";
-import { UpdateBanner, GitHubStarCta } from "@design-system";
+import { Button, UpdateBanner, GitHubStarCta } from "@design-system";
 import { useGitHubStars } from "../../hooks/useGitHubStars.ts";
 import { useUpdateChecker } from "../../hooks/useUpdateChecker.ts";
 import {
@@ -92,6 +92,10 @@ export interface PageShellProps {
    * full-width row below the brand row at every width.
    */
   journey?: PageShellJourney;
+  /**
+   * Opens the feedback dialog on demand (#900) from the shared footer.
+   */
+  onOpenFeedback?: () => void;
   children: ReactNode;
 }
 
@@ -103,6 +107,7 @@ export function PageShell({
   hideSavedJobsLink,
   onSavedJobsNavigate,
   journey,
+  onOpenFeedback,
   children,
 }: PageShellProps) {
   const { count: starCount } = useGitHubStars();
@@ -260,6 +265,11 @@ export function PageShell({
             lives on /privacy/, one link away, instead of being asserted in
             passing on every screen. */}
         <div className="flex flex-wrap justify-center gap-x-4 gap-y-1">
+          {onOpenFeedback && (
+            <Button variant="link" onClick={onOpenFeedback}>
+              Feedback
+            </Button>
+          )}
           {/* Same-tab, base-aware links to the static content pages under
               public/. They are the only pages on this site a crawler can read
               without executing the bundle (every app entry renders into an

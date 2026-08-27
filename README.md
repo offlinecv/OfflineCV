@@ -139,12 +139,12 @@ production`) so maintainer/staging/teammate traffic can be excluded from
 user-facing metrics; this app supplies the properties, the filter itself is
 configured in the PostHog project rather than here.
 
-The one exception is the optional feedback panel (`feedback_submitted`): it
+The one exception is the optional feedback dialog (`feedback_submitted`): it
 carries a 1–5 `rating` plus, **only when the user chooses to fill them**, a
 `category`, free-text `feedback_text`, and an `email`. That email is the single
 piece of user-supplied PII any event can carry — it is opt-in (the field is
 blank by default and is never sent as an empty string; see `buildFeedbackProps`),
-attached only as a property on that single event, and the whole panel is
+attached only as a property on that single event, and the whole dialog is
 hidden in builds where `VITE_POSTHOG_KEY` is unset. It is never promoted to a
 PostHog person profile: this app never calls `identify()` or
 `setPersonProperties` anywhere. (`register()` is used, but only for the
@@ -167,9 +167,8 @@ scoped to your browser:
 
 | Key | Purpose |
 |---|---|
-| `ocv_feedback_seen` | counts how many times the feedback ask has rendered; after 2 the panel switches from the full card to a quiet compact star strip |
-| `ocv_feedback_submitted` | set after a successful feedback submit so the panel never re-asks in that browser |
-| `ocv_star_cta_seen` | one-time flag so the post-feedback GitHub-star prompt shows only once per browser |
+| `ocv_feedback_dialog_seen` | counts how many times the feedback dialog has been opened; once it is non-zero the dialog no longer opens itself after an export — you can still open it from the `★ Feedback` button |
+| `ocv_feedback_submitted` | set after a successful feedback submit so the dialog never opens itself again in that browser |
 | `ocv_gh_stars_cache` | caches the fetched star count (~1h TTL) to avoid re-hitting the GitHub API on every parse |
 | `ocv_internal` | marks this browser as internal so team traffic can be filtered out of analytics; set via `?ocv_internal=1`, cleared via `?ocv_internal=0` — only written in builds where `VITE_POSTHOG_KEY` is set |
 
