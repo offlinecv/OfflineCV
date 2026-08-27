@@ -195,6 +195,14 @@ export function collectModelTextFields(
         add(where, bullet, { path: `${path} → bullet ${b + 1}` }),
       );
     });
+    // The compact certifications line (#899) is a SEPARATE string from the
+    // section's own `entries` — `sectionDrawEntries` draws it instead of them —
+    // so without this it is the one string the page actually draws that the
+    // glyph audit never sees. Walked explicitly rather than trusted to already
+    // be covered via the entries it was joined from.
+    if (section.compactLine) {
+      add(where, section.compactLine, { path: `${where} → compact line` });
+    }
   }
 
   return out;

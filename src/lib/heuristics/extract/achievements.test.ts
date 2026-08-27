@@ -164,6 +164,329 @@ describe("extractAchievements — year_separator (#380)", () => {
   });
 });
 
+describe("extractAchievements — splitType: false (#899)", () => {
+  it("never splits a leading 'Type · title' segment for a certification", () => {
+    // Un-opted-in (achievements default): a header carrying the canonical
+    // "Type · title" shape splits — the exact shape `splitAchievementType`
+    // recognizes, and the one a credential line can genuinely carry when a
+    // résumé sets its issuer or category off with a middot ("AWS · Certified
+    // Solutions Architect").
+    const split = extractAchievements(
+      mkAchievements(["AWS · Certified Solutions Architect"]),
+    );
+    expect(split.value[0].type).toBe("AWS");
+    expect(split.value[0].title).toBe("Certified Solutions Architect");
+
+    // `splitType: false` preserves the whole credential name and never sets
+    // `type` — nonsensical for a credential, which is not "Type · label" shaped
+    // even when it happens to contain a middot (#899). This exercises the
+    // option ALONE; the real certifications call site pairs it with
+    // `splitCompactList`, under which that same middot reads as a credential
+    // boundary instead — see the `splitCompactList` block below for why that
+    // reading has to win.
+    const unsplit = extractAchievements(
+      mkAchievements(["AWS · Certified Solutions Architect"]),
+      { splitType: false },
+    );
+    expect(unsplit.value[0].type).toBeUndefined();
+    expect(unsplit.value[0].title).toBe("AWS · Certified Solutions Architect");
+  });
+
+  it("preserves a plain credential title (no split candidate either way)", () => {
+    const { value } = extractAchievements(
+      mkAchievements(["Patent Bar Registration"]),
+      { splitType: false },
+    );
+    expect(value[0].type).toBeUndefined();
+    expect(value[0].title).toBe("Patent Bar Registration");
+  });
+});
+
+// ── The compact certifications line, read back apart (#899) ──────────────────
+//
+// The exporter compresses two or more credentials onto ONE middot-joined line
+// and the renderer wraps it ATOMICALLY, so every extracted line of the block
+// begins at a credential boundary. `splitCompactList` is the inverse of that,
+// and these cover the shapes the hop can produce plus the source shapes the
+// split must not damage. The end-to-end proof over a real PDF lives in
+// `corpus-roundtrip.test.ts`; this pins the line-level contract.
+describe("extractAchievements — splitCompactList (#899)", () => {
+  /** The certifications call site: both options, exactly as `openresume.ts`
+   *  passes them. */
+  const certifications = (rows: string[]) =>
+    extractAchievements(mkAchievements(rows), {
+      splitType: false,
+      splitCompactList: true,
+    }).value;
+
+  it("splits one middot-joined line into one entry per credential", () => {
+    const value = certifications([
+      "AWS Certified Cloud Practitioner (2025) · AWS Certified Solutions Architect (2026) · CKA",
+    ]);
+    expect(value.map((v) => [v.title, v.year])).toEqual([
+      ["AWS Certified Cloud Practitioner", "2025"],
+      ["AWS Certified Solutions Architect", "2026"],
+      ["CKA", undefined],
+    ]);
+  });
+
+  it("splits a WRAPPED compact list, whose lines are credential-aligned", () => {
+    // What `wrapSegmentsToLines` actually emits: whole segments per line, the
+    // separator re-drawn only BETWEEN the segments that share a line. The tail
+    // line carries no separator of its own and must still open its own entry.
+    const value = certifications([
+      "AWS Certified Cloud Practitioner (2025) · AWS Certified Solutions Architect (2026)",
+      "Certified Kubernetes Administrator (CKA) (2021)",
+    ]);
+    expect(value.map((v) => v.title)).toEqual([
+      "AWS Certified Cloud Practitioner",
+      "AWS Certified Solutions Architect",
+      "Certified Kubernetes Administrator (CKA)",
+    ]);
+    expect(value.map((v) => v.year)).toEqual(["2025", "2026", "2021"]);
+  });
+
+  it("opens an entry for a lowercase-led credential on a wrapped tail line", () => {
+    // The wrapped-tail FOLD (`isAwardContinuation`) is switched off for the
+    // whole section once any line carries the separator: a credential that
+    // happens to start lowercase would otherwise be swallowed by the line
+    // above, silently losing it. Nothing can be a wrapped tail here — the
+    // renderer never breaks inside a credential.
+    const value = certifications([
+      "AWS Certified Cloud Practitioner (2025) · AWS Certified Solutions Architect (2026)",
+      "iOS App Development Certification (2020)",
+    ]);
+    expect(value).toHaveLength(3);
+    expect(value[2].title).toBe("iOS App Development Certification");
+  });
+
+  it("re-joins a date-only fragment to the credential it dates", () => {
+    // A source that wrote "CKA · 2021" means the middot as its YEAR separator,
+    // not as a list boundary. Splitting there would strand "2021" as a
+    // title-less entry (dropped) and rob "CKA" of its year, so the fragment is
+    // re-joined verbatim — leaving this line parsing exactly as it did before
+    // the split existed, separator included.
+    const value = certifications(["CKA · 2021 · AWS Certified Developer"]);
+    expect(value).toEqual([
+      { title: "CKA", year: "2021", year_separator: "·" },
+      { title: "AWS Certified Developer" },
+    ]);
+  });
+
+  it("re-joins a MONTH-year fragment, not only a bare 4-digit year", () => {
+    // The first cut gated the re-join on `isLoneDateRange({allowSingle:true})`,
+    // which by its own docblock admits ONLY a bare `(19|20)\d{2}`. "May 2021"
+    // fell through it, opened an empty-titled block of its own and was dropped
+    // by `finalizeEntries` — the credential silently lost its date on an
+    // ordinary source shape. The gate is now "the segment reduces to nothing
+    // but a date", which every parseable date form satisfies.
+    expect(certifications(["CKA · May 2021"])).toEqual([
+      { title: "CKA", year: "2021", year_separator: "·" },
+    ]);
+    expect(certifications(["CKA · May 2021 · AWS Certified Developer"])).toEqual(
+      [
+        { title: "CKA", year: "2021", year_separator: "·" },
+        { title: "AWS Certified Developer" },
+      ],
+    );
+  });
+
+  it("keeps an apostrophe-year with its credential instead of minting one", () => {
+    // No date regex in the pipeline reads a bare "'21" as a date, so it cannot
+    // become a `year` — but it must not become a CREDENTIAL either. Re-joining
+    // keeps it verbatim on the title it dates; splitting it off listed a
+    // certification named "'21".
+    const value = certifications(["CKA · '21 · AWS Certified Developer"]);
+    expect(value.map((v) => v.title)).toEqual([
+      "CKA · '21",
+      "AWS Certified Developer",
+    ]);
+  });
+
+  it("dates the credential AFTER a leading date fragment", () => {
+    // A source that writes the year on the left has nothing behind the date to
+    // re-join it to. Holding it for the credential that follows is what keeps
+    // the year; the first cut opened a title-less block and dropped it.
+    expect(certifications(["2021 · CKA · AWS Certified Developer"])).toEqual([
+      { title: "CKA", year: "2021", year_separator: "·" },
+      { title: "AWS Certified Developer" },
+    ]);
+  });
+
+  it("reads 'Name · Issuer · Year' as ONE dated credential, not two", () => {
+    // The fabrication case. Split segment-by-segment, the trailing year binds
+    // to the ISSUER and the section lists a certification called "Amazon Web
+    // Services, 2024" that the résumé never claimed. A trailing date after two
+    // or more date-less segments is the everyday "Credential · Issuer · Date"
+    // row — a shape our own exporter never emits, since it parenthesises every
+    // year — so the whole line stays one entry.
+    expect(
+      certifications([
+        "AWS Certified Solutions Architect · Amazon Web Services · 2024",
+      ]),
+    ).toEqual([
+      {
+        title: "AWS Certified Solutions Architect · Amazon Web Services",
+        year: "2024",
+        year_separator: "·",
+      },
+    ]);
+  });
+
+  it("still splits a list whose credentials each carry their own year", () => {
+    // The guard that keeps the row-reading above from swallowing a genuine
+    // list: an EARLIER segment carrying a date of its own means the middots are
+    // list boundaries, so the trailing year dates only the credential before it.
+    expect(
+      certifications(["CKA · 2021 · AWS Certified Developer · 2022"]),
+    ).toEqual([
+      { title: "CKA", year: "2021", year_separator: "·" },
+      { title: "AWS Certified Developer", year: "2022", year_separator: "·" },
+    ]);
+    // Same guard, the exporter's own parenthesised shape.
+    expect(
+      certifications([
+        "AWS Certified Cloud Practitioner (2025) · CKA · 2021",
+      ]).map((v) => [v.title, v.year]),
+    ).toEqual([
+      ["AWS Certified Cloud Practitioner", "2025"],
+      ["CKA", "2021"],
+    ]);
+  });
+
+  it("reads SEVERAL dated credential rows off ONE line", () => {
+    // A two-column certifications block reaches line assembly as a single
+    // `PdfLine`, so the "Credential · Issuer · Year" row above arrives twice
+    // over. Judged whole-line, the first triple's year counts as "an earlier
+    // segment carries a date", the collapse is refused for the entire line, and
+    // every trailing year binds to the ISSUER beside it — fabricating "Google,
+    // 2023" and "CNCF, 2021". Each date-terminated RUN is judged on its own.
+    expect(
+      certifications([
+        "Google Cloud Architect · Google · Mar 2023 · CKA · CNCF · Jun 2021",
+      ]),
+    ).toEqual([
+      {
+        title: "Google Cloud Architect · Google",
+        year: "2023",
+        year_separator: "·",
+      },
+      { title: "CKA · CNCF", year: "2021", year_separator: "·" },
+    ]);
+  });
+
+  it("never dates the ISSUER of a trailing UNDATED row", () => {
+    // Same line shape, but the second triple's year is missing. The dated run
+    // still collapses; the undated tail has no year to bind, so it splits per
+    // credential exactly as any other date-less delimited stretch does — two
+    // truthful strings rather than an invented "PMI, 2020".
+    expect(
+      certifications(["PMP · PMI · 2020 · CSM · Scrum Alliance"]),
+    ).toEqual([
+      { title: "PMP · PMI", year: "2020", year_separator: "·" },
+      { title: "CSM" },
+      { title: "Scrum Alliance" },
+    ]);
+  });
+
+  it("keeps a per-credential year list splitting when a dated ROW precedes it", () => {
+    // The two readings on ONE line: a dated row, then a list whose credentials
+    // each carry their own middot-separated year. Judged per run, the row
+    // collapses and the list stays a list — neither reading leaks into the
+    // other's half of the line.
+    expect(
+      certifications([
+        "AWS Certified Solutions Architect · Amazon Web Services · 2024 · CKA · 2021",
+      ]),
+    ).toEqual([
+      {
+        title: "AWS Certified Solutions Architect · Amazon Web Services",
+        year: "2024",
+        year_separator: "·",
+      },
+      { title: "CKA", year: "2021", year_separator: "·" },
+    ]);
+  });
+
+  it("drops a second leading date instead of picking one of the two", () => {
+    // A section opening on two bare dates has no block to re-join to and no
+    // credential yet to date, and the two cannot both be the credential's year.
+    // Silently keeping the last (what the held date used to do) dates "CKA" 2025
+    // on a coin flip; the held date is flushed into a title-less block and
+    // dropped by `finalizeEntries` instead, leaving the credential undated.
+    expect(certifications(["2024 · 2025 · CKA"])).toEqual([{ title: "CKA" }]);
+  });
+
+  it("leaves a single undelimited credential exactly as it was", () => {
+    // No separator anywhere in the section, so nothing splits and the flag is
+    // inert — the one-certification résumé is byte-identical to pre-#899.
+    expect(certifications(["Certified Kubernetes Administrator (CKA), 2021"])).toEqual([
+      { title: "Certified Kubernetes Administrator (CKA)", year: "2021", year_separator: "," },
+    ]);
+  });
+
+  it("still folds a genuine wrapped tail while no line carries a separator", () => {
+    // The undelimited section keeps `parseFlatAwardList`'s original behaviour:
+    // a lowercase-led line is a wrapped tail of the award above it (#225).
+    const value = certifications([
+      "Certified Information Systems Security Professional",
+      "issued by ISC2, 2022",
+    ]);
+    expect(value).toHaveLength(1);
+    expect(value[0].title).toBe(
+      "Certified Information Systems Security Professional issued by ISC2",
+    );
+  });
+
+  it("absorbs the spacing variance a PDF extractor hands back", () => {
+    // The boundary is "middot with WHITESPACE on both sides", not one literal
+    // U+0020 either side: the extractor widens or narrows the drawn gap freely.
+    // `\s` is what expresses that, and it also covers the NBSP / thin spaces a
+    // PDF can carry — those need no case of their own, since a class this test
+    // already proves is applied cannot then exclude one of its own members.
+    const value = certifications([
+      "AWS Certified Developer  ·   CKA · Terraform Associate",
+    ]);
+    expect(value.map((v) => v.title)).toEqual([
+      "AWS Certified Developer",
+      "CKA",
+      "Terraform Associate",
+    ]);
+  });
+
+  it("does not split a middot glued inside a token", () => {
+    // Whitespace is required on both sides, so a glyph carried INSIDE a
+    // credential name is not a boundary.
+    expect(certifications(["R·D Practitioner Certificate"])).toEqual([
+      { title: "R·D Practitioner Certificate" },
+    ]);
+  });
+
+  it("is OFF for achievements — a 'Type · title' header stays one award", () => {
+    // The default. An achievement header uses the middot as a DISPLAY joiner
+    // ("Patent · Foo", "keyword · statement · year", #307/#456), so splitting
+    // one would shred a single award into fragments.
+    const { value } = extractAchievements(
+      mkAchievements(["Patent · System and method for ranking catalogs, 2019"]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].type).toBe("Patent");
+    expect(value[0].title).toBe("System and method for ranking catalogs");
+  });
+
+  it("reads an issuer middot as a boundary — the deliberate tradeoff", () => {
+    // "Issuer · Credential" on a source line is genuinely ambiguous against the
+    // compact list, and this reading is the one that has to win: over-segmenting
+    // a source quirk splits one credential into two truthful strings, while the
+    // other reading MERGES every credential of our own exported PDF into one and
+    // loses N-1 of them outright. Pinned so the choice is a decision, not drift.
+    expect(certifications(["AWS · Certified Solutions Architect"])).toEqual([
+      { title: "AWS" },
+      { title: "Certified Solutions Architect" },
+    ]);
+  });
+});
+
 // ── A word that merely STARTS with a month prefix is not a month ─────────────
 //
 // The lone-date fallback and `stripDateRange` both key on a month regex. Keyed

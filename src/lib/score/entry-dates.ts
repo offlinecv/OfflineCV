@@ -145,3 +145,18 @@ export function splitAchievementType(
   if (!type || type.length > ACHIEVEMENT_TYPE_MAX_LEN) return null;
   return { type, rest: title.slice(idx + 3) };
 }
+
+/**
+ * Recompose a stored `type` + `title` into the one header string the source
+ * wrote — the inverse of {@link splitAchievementType}, and the reason it lives
+ * beside it: two call sites now need the composition (the PDF exporter's
+ * credential title, and the certifications fold in `apply-overrides.ts` that
+ * retires a legacy `type`), and a second spelling of the glue would be a second
+ * definition of what a "Type · title" header IS.
+ */
+export function joinAchievementType(
+  type: string | undefined,
+  title: string | undefined,
+): string {
+  return [type?.trim(), title].filter(Boolean).join(" · ");
+}

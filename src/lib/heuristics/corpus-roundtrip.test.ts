@@ -53,7 +53,8 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { runCascade } from "./cascade.ts";
 import type { CascadeResult } from "./types.ts";
-import { runRoundtripHop } from "./roundtrip-hop.ts";
+import { runRoundtripHop, scoreForCascade } from "./roundtrip-hop.ts";
+import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
 import type { RoundtripCategory } from "./localize/roundtrip.ts";
 import { invariantFailures, harnessDiff } from "./localize/roundtrip.ts";
 import {
@@ -215,9 +216,19 @@ describe("skills categories round-trip (#473)", () => {
  * a re-parse of that PDF put them in the achievements bucket — the parse was
  * lossy in one direction and self-consistently wrong in the other.
  *
- * PII-free: the fixture is a synthetic persona; only counts are asserted.
+ * Since #899 the hop carries a SECOND lossy step, and this fixture (three
+ * credentials, so the compaction fires) is where both are proved together: the
+ * exporter no longer draws one row per credential but compresses all three onto
+ * a single middot-joined line, which the re-parser has to split back apart. The
+ * count assertion alone would not have caught the first attempt at that — it
+ * came back with TWO certifications, one of them two credentials glued into a
+ * single title — so the entries themselves are compared, not just how many there
+ * are.
+ *
+ * PII-free: the fixture is a synthetic persona; the parse is compared against
+ * ITSELF (before vs after), so no résumé value is written into this file.
  */
-describe("certifications round-trip (#884)", () => {
+describe("certifications round-trip (#884, #899)", () => {
   const CERTIFICATIONS_FIXTURE = join(
     FIXTURE_ROOT,
     "google-docs",
@@ -228,15 +239,24 @@ describe("certifications round-trip (#884)", () => {
     const before = await runCascade(
       new Uint8Array(readFileSync(CERTIFICATIONS_FIXTURE)),
     );
-    const certCount = before.canonical.fields.heuristic_certifications?.length;
-    expect(certCount).toBeGreaterThan(0);
+    const certs = before.canonical.fields.heuristic_certifications;
+    // Multi-credential by construction — the shape #899 compacts. A fixture
+    // that ever dropped to one would make every assertion below vacuous.
+    expect(certs?.length).toBeGreaterThan(1);
     expect(before.canonical.fields.heuristic_achievements).toBeUndefined();
+
+    // The export really does compact: without this the hop below could pass on
+    // the OLD one-row-per-credential layout and prove nothing about #899.
+    const model = buildAtsResumeModel(before, scoreForCascade(before));
+    const section = model.sections.find((s) => s.kind === "certifications");
+    expect(section?.entries).toHaveLength(certs!.length);
+    expect(section?.compactLine?.split(" · ")).toHaveLength(certs!.length);
 
     const { after, renderError } = await runRoundtripHop(before);
     expect(renderError).toBeUndefined();
-    expect(after?.canonical.fields.heuristic_certifications?.length).toBe(
-      certCount,
-    );
+    // Every credential comes back whole — same title, same year, same year
+    // punctuation — not merely the same number of them.
+    expect(after?.canonical.fields.heuristic_certifications).toEqual(certs);
     expect(after?.canonical.fields.heuristic_achievements).toBeUndefined();
   });
 });

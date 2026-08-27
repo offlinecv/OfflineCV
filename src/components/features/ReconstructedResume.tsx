@@ -905,12 +905,32 @@ function ProjectsSection({
  * vocabulary ("Patent", "Talk", "Award"), so typing it out invites the typo the
  * exporter would then bold. The picker still commits free text for the labels a
  * real résumé used that no preset covers — see `AchievementTypePicker`.
+ *
+ * `showTypePicker` scopes the picker to ACHIEVEMENTS only (#899): a
+ * certification's title is never "Type · label" shaped — extraction never sets
+ * `type` for one (`splitType: false`, `extractAchievements`) — so the closed
+ * "Patent" / "Talk" / "Award" vocabulary makes no sense on a credential row.
+ * The same flag also drops the title↔year separator when there is no year: a
+ * certification the résumé never dated should not draw a dangling `·` in front
+ * of an empty field. Achievements always show the separator (byte-identical to
+ * before #899) because their year IS the field the picker's paired glyph
+ * anchors to.
+ *
+ * `compactYear` is the ROW-level half of that (#899), and separate from
+ * `showTypePicker` on purpose: it is set only for a credential that actually
+ * SHARES the compact line with another — never for one drawn on a full-width
+ * row of its own, and never for a lone credential. The exporter draws the same
+ * parenthesised form but decides WHO shares the line by a different predicate
+ * (see `compactCredentialHeader` in `ats-resume-model.ts` for both and where
+ * they disagree), so this is not a mirror of it. See {@link AchievementYearSlot}.
  */
 function AchievementHeader({
   type,
   title,
   year,
   yearSeparator,
+  showTypePicker = true,
+  compactYear = false,
   onFieldChange,
 }: {
   type?: string;
@@ -918,51 +938,152 @@ function AchievementHeader({
   year?: string;
   /** The source's own title↔year punctuation (#380); middot when it had none. */
   yearSeparator?: string;
+  /** Achievements-only affordance (#899) — see the docblock above. */
+  showTypePicker?: boolean;
+  /** This row joins the shared compact line (#899) — see the docblock above. */
+  compactYear?: boolean;
   onFieldChange: (field: keyof AchievementFieldOverrides, value: string) => void;
 }) {
   return (
     <div className="flex min-w-0 grow flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-      <AchievementTypePicker
-        value={type || undefined}
-        onSelect={(v) => onFieldChange("type", v)}
-      />
-      <span className="text-content-muted" aria-hidden="true">
-        ·
-      </span>
+      {showTypePicker && (
+        <>
+          <AchievementTypePicker
+            value={type || undefined}
+            onSelect={(v) => onFieldChange("type", v)}
+          />
+          <span className="text-content-muted" aria-hidden="true">
+            ·
+          </span>
+        </>
+      )}
       <EditableField
         value={title || undefined}
-        placeholder="achievement"
-        label="Achievement description"
+        placeholder={showTypePicker ? "achievement" : "certification"}
+        label={showTypePicker ? "Achievement description" : "Certification title"}
         textSize="sm"
         // With no type label there is no run to single out, so the exporter
         // bolds the whole header (`ats-resume-model.ts`, headerBold). Match it
         // here, or the view and the PDF disagree on emphasis for the common
-        // type-less "Best Paper Award" shape.
+        // type-less "Best Paper Award" shape (and, since #899, every
+        // certification, which never carries a type at all).
         textWeight={type ? undefined : "semibold"}
         multiline
         onCommit={(v) => onFieldChange("title", v)}
       />
-      {/* The source's own separator, not a hardcoded middot: a résumé that wrote
-          "Globex Engineering Excellence, 2021" keeps its comma (#380). Tight
-          punctuation cancels the flex row's gap so it hugs the title, matching
-          how the exported PDF spaces it (`achievementYearJoiner`). */}
-      <span
-        className={`text-content-muted ${
-          yearSeparator && isTightYearSeparator(yearSeparator) ? "-ml-1.5" : ""
-        }`}
-        aria-hidden="true"
-      >
-        {yearSeparator ?? DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR}
-      </span>
-      <EditableField
-        value={year || undefined}
-        placeholder="year"
-        label="Year"
-        textSize="xs"
-        validate={validateDate}
+      <AchievementYearSlot
+        year={year}
+        yearSeparator={yearSeparator}
+        alwaysShowSeparator={showTypePicker}
+        compact={compactYear}
         onCommit={(v) => onFieldChange("year", v)}
       />
     </div>
+  );
+}
+
+/**
+ * The trailing year of a credential / achievement header, with the punctuation
+ * that sets it off from the title.
+ *
+ * Normally that punctuation is the SOURCE's own, not a hardcoded middot: a
+ * résumé that wrote "Globex Engineering Excellence, 2021" keeps its comma
+ * (#380). Tight punctuation cancels the flex row's gap so it hugs the title,
+ * matching how the exported PDF spaces it (`achievementYearJoiner`). The
+ * separator is drawn even with no year for an ACHIEVEMENT, whose year field is
+ * always offered; for a dateless credential it is omitted, since a `·` in front
+ * of nothing is just a dangling glyph (#899).
+ *
+ * `compact` — the row joins the shared middot-joined credential line — changes
+ * both halves, and both changes exist because that line reuses ONE glyph for two
+ * jobs (#899):
+ *
+ *   - the year is PARENTHESISED rather than middot-separated, exactly as
+ *     `compactCredentialHeader` does it in `ats-resume-model.ts` and under the
+ *     same condition (a source separator that is neither absent nor the default
+ *     middot is still re-emitted verbatim). Without this the line reads
+ *     "Solutions Architect·2022·CKA", where nothing distinguishes the middot
+ *     that ends a year from the one that ends a credential — and the view would
+ *     be drawing a line the PDF does not.
+ *   - a MISSING year draws its "+ year" add-affordance at zero cost AT REST:
+ *     `opacity-0`, revealed only on `group-hover`/`group-focus-within` of the
+ *     row (the row is already a hover target for the remove control, so this
+ *     adds no new surface). Every dateless credential would otherwise
+ *     permanently contribute a "+ year" to the shared line — both the clutter
+ *     the compact form exists to remove and one more thing competing with the
+ *     boundary glyph — but hiding it outright made a parsed, undated
+ *     credential impossible to date at all before export (#899 AC 5). A
+ *     user-ADDED credential is unaffected — it draws on a full-width row of
+ *     its own (see `AchievementsSection`) and keeps the ordinary, always-shown
+ *     slot.
+ */
+function AchievementYearSlot({
+  year,
+  yearSeparator,
+  alwaysShowSeparator,
+  compact,
+  onCommit,
+}: {
+  year?: string;
+  yearSeparator?: string;
+  alwaysShowSeparator: boolean;
+  compact: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const field = (
+    <EditableField
+      value={year || undefined}
+      placeholder="year"
+      label="Year"
+      textSize="xs"
+      validate={validateDate}
+      onCommit={onCommit}
+    />
+  );
+  const sourceSeparator = yearSeparator?.trim();
+  if (
+    compact &&
+    (!sourceSeparator ||
+      sourceSeparator === DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR)
+  ) {
+    // A dateless credential's add-affordance costs nothing AT REST (opacity-0)
+    // and reveals on the row's hover/focus (`group` on the row wrapper below) —
+    // the row is already a hover target for the remove control, so this adds
+    // no new surface. A credential that already carries a year stays visible
+    // as normal running text.
+    const hiddenAtRest = !year;
+    return (
+      <span
+        className={`inline-flex items-baseline${
+          hiddenAtRest
+            ? " opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+            : ""
+        }`}
+      >
+        <span className="text-content-muted" aria-hidden="true">
+          (
+        </span>
+        {field}
+        <span className="text-content-muted" aria-hidden="true">
+          )
+        </span>
+      </span>
+    );
+  }
+  return (
+    <>
+      {(alwaysShowSeparator || year) && (
+        <span
+          className={`text-content-muted ${
+            yearSeparator && isTightYearSeparator(yearSeparator) ? "-ml-1.5" : ""
+          }`}
+          aria-hidden="true"
+        >
+          {yearSeparator ?? DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR}
+        </span>
+      )}
+      {field}
+    </>
   );
 }
 
@@ -1044,13 +1165,46 @@ export function AchievementsSection({
   /** Drop a blank added entry when focus leaves the section (#379). */
   onPruneEmpty: () => void;
 }) {
+  // Compact certifications (#899): multiple credentials compress onto a
+  // wrapped, middot-separated line instead of each taking a full vertical row
+  // — achievements are UNCHANGED (`compact` is false there, taking the
+  // original one-row-per-entry branch below verbatim). Derived from `section`
+  // rather than a new prop: the two are already 1:1 (every certifications
+  // caller passes `section="certifications"`) and a caller can't set one
+  // without the other going stale.
+  const compact = section === "certifications";
+  // Which rows actually join the shared compact line. Two exclusions, and both
+  // of them own an affordance the line has no room for:
+  //   - a credential carrying a BULLET body (only a user-added one can — see
+  //     `ats-resume-model.ts`'s certifications comment) needs the full-width
+  //     block those bullets render in;
+  //   - a user-ADDED credential needs `InlineBulletAdd`, which lives on that
+  //     same full-width block. It starts life with no bullets, so routing it by
+  //     bullets alone put it on the compact line and left it with no way to
+  //     ever get one — the affordance was gone permanently, not merely hidden.
+  const joinsCompactLine = (idx: number) =>
+    compact && idx < originalCount && (groups[idx]?.bullets.length ?? 0) === 0;
+  // Whether the line is genuinely SHARED. The parenthesised year exists to stop
+  // one `·` from meaning both "end of year" and "end of credential", and with a
+  // single credential on the line there is no boundary middot to be confused
+  // with — which is also why the exporter's own compaction starts at two
+  // (`ats-resume-model.ts`). Below that, the row keeps the ordinary separator
+  // and matches the PDF, which draws a lone credential as its own row.
+  const sharesCompactLine =
+    achievements.filter((_, idx) => joinsCompactLine(idx)).length >= 2;
   return (
     <section
       className="flex flex-col gap-3"
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? fallbackHeading}</SectionHeading>
-      <div className="flex flex-col gap-4">
+      <div
+        className={
+          sharesCompactLine
+            ? "flex flex-wrap items-baseline gap-x-1.5 gap-y-2"
+            : "flex flex-col gap-4"
+        }
+      >
         {achievements.map((achievement, i) => {
           const group = groups[i];
           const added =
@@ -1060,58 +1214,97 @@ export function AchievementsSection({
           // PARSED index, not the render position — see `parsedIndices`.
           const parsedIdx = parsedIndices[i] ?? i;
           const entryKey = added ? added.id : parsedEntryKey(section, parsedIdx);
+          const inline = joinsCompactLine(i);
+          const compactYear = inline && sharesCompactLine;
+          const header = added ? (
+            // Same header as a parsed achievement — an added entry stores its
+            // label under `achievementType` on the flat AddedEntry, so only the
+            // commit target differs.
+            <AchievementHeader
+              showTypePicker={!compact}
+              compactYear={compactYear}
+              type={added.achievementType}
+              title={added.title}
+              year={added.year}
+              onFieldChange={(field, value) =>
+                onEntryField(
+                  added.id,
+                  field === "type" ? "achievementType" : field,
+                  value,
+                )
+              }
+            />
+          ) : (
+            <AchievementHeader
+              showTypePicker={!compact}
+              compactYear={compactYear}
+              type={achievement.type}
+              title={achievement.title}
+              year={achievement.year}
+              yearSeparator={achievement.year_separator}
+              onFieldChange={(field, value) =>
+                onAchievementField(parsedIdx, field, value)
+              }
+            />
+          );
+          const removeButton = (
+            <RemoveButton
+              label={`Remove ${entryNoun}`}
+              onClick={() =>
+                removeEntryWithBullets(entryKey, group?.bullets ?? [], {
+                  onRemoveEntry,
+                  onRemoveBullet,
+                })
+              }
+            />
+          );
+          const bullets =
+            group && group.bullets.length > 0 ? (
+              <ul className="list-none">
+                {group.bullets.map((b) => (
+                  <ResumeBulletRow key={b.id} bullet={b} />
+                ))}
+              </ul>
+            ) : null;
+
+          // A parsed, bullet-less credential (the common shape) joins the shared
+          // flex-wrap line, middot-separated from its neighbour. Everything
+          // `joinsCompactLine` excludes falls through to the same full-width
+          // block an achievement gets, `w-full` forcing it onto its own row
+          // inside the flex-wrap container.
+          //
+          // The between-item middot is drawn only when the NEXT row also joins
+          // the line — keyed on that rather than on "not the last entry", or a
+          // credential followed by a full-width added one would trail a
+          // separator into a line break.
+          if (inline) {
+            return (
+              <div
+                key={entryKey}
+                className="group inline-flex items-baseline gap-1"
+              >
+                {header}
+                {removeButton}
+                {joinsCompactLine(i + 1) && (
+                  <span className="text-content-muted" aria-hidden="true">
+                    ·
+                  </span>
+                )}
+              </div>
+            );
+          }
           return (
             // The ENTRY key, not the render position (#856) — see the same note
             // in `ExperienceSection`.
-            <div key={entryKey} className="flex flex-col gap-1.5">
+            <div
+              key={entryKey}
+              className={`flex flex-col gap-1.5${compact ? " w-full" : ""}`}
+            >
               <div className="flex items-start justify-between gap-2">
-                {added ? (
-                  // Same header as a parsed achievement — an added entry stores
-                  // its label under `achievementType` on the flat AddedEntry, so
-                  // only the commit target differs.
-                  <AchievementHeader
-                    type={added.achievementType}
-                    title={added.title}
-                    year={added.year}
-                    onFieldChange={(field, value) =>
-                      onEntryField(
-                        added.id,
-                        field === "type" ? "achievementType" : field,
-                        value,
-                      )
-                    }
-                  />
-                ) : (
-                  <AchievementHeader
-                    type={achievement.type}
-                    title={achievement.title}
-                    year={achievement.year}
-                    yearSeparator={achievement.year_separator}
-                    onFieldChange={(field, value) =>
-                      onAchievementField(parsedIdx, field, value)
-                    }
-                  />
-                )}
-                <RemoveButton
-                  label={`Remove ${entryNoun}`}
-                  onClick={() =>
-                    removeEntryWithBullets(entryKey, group?.bullets ?? [], {
-                      onRemoveEntry,
-                      onRemoveBullet,
-                    })
-                  }
-                />
+                {header}
+                {removeButton}
               </div>
-              {group && group.bullets.length > 0 && (
-                <ul className="list-none">
-                  {group.bullets.map((b) => (
-                    <ResumeBulletRow
-                      key={b.id}
-                      bullet={b}
-                    />
-                  ))}
-                </ul>
-              )}
+              {bullets}
               {added && (
                 <InlineBulletAdd onAdd={(text) => onAddBullet(added.id, text)} />
               )}
