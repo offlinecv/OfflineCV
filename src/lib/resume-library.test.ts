@@ -11,7 +11,9 @@
 import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as storage from "./storage/index.ts";
 import { DB_NAME, closeDB, saveResume } from "./storage/index.ts";
+import type { ResumeRecord } from "./storage/types.ts";
 import {
   saveResumeToLibrary,
   listLibrary,
@@ -90,6 +92,50 @@ describe("resume-library: save + list", () => {
     expect(list).toHaveLength(2);
     expect(list.map((e) => e.filename)).toEqual(["tailored.pdf", "general.pdf"]);
     expect(list[0]).toMatchObject({ scoreOverall: 84, sourceKind: "pdf", hasCachedParse: true });
+  });
+
+  it("breaks ties deterministically on same-millisecond savedAt", async () => {
+    const tiedSavedAt = 1_700_000_000_000;
+    const recordA: ResumeRecord = {
+      id: "id-a",
+      filename: "a.pdf",
+      blob: new Blob([bytes()]),
+      parse: { result: result(), score: score(80), sourceKind: "pdf", shapeVersion: "1:1" },
+      createdAt: tiedSavedAt,
+      updatedAt: tiedSavedAt,
+    };
+    const recordB: ResumeRecord = {
+      id: "id-b",
+      filename: "b.pdf",
+      blob: new Blob([bytes()]),
+      parse: { result: result(), score: score(70), sourceKind: "pdf", shapeVersion: "1:1" },
+      createdAt: tiedSavedAt,
+      updatedAt: tiedSavedAt,
+    };
+
+    // Return the tied records in reverse primary-key order ("id-b" before "id-a")
+    // to prove that listLibrary's explicit tiebreaker overrides the underlying
+    // store's return order rather than merely agreeing with it by coincidence (#907).
+    vi.spyOn(storage, "getAllResumes").mockResolvedValue([recordB, recordA]);
+    try {
+      const list = await listLibrary();
+      expect(list).toHaveLength(2);
+      expect(list.map((e) => e.id)).toEqual(["id-a", "id-b"]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("preserves newest-first save order when saves occur in the same clock millisecond", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    try {
+      await save("first.pdf", 70);
+      await save("second.pdf", 80);
+      const list = await listLibrary();
+      expect(list.map((e) => e.filename)).toEqual(["second.pdf", "first.pdf"]);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 

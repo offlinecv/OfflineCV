@@ -169,6 +169,18 @@ export async function putRecordIntoExisting<T extends StoredRecord>(
   return putRecordVia(getExistingDB, store, record, options);
 }
 
+let lastTimestamp = 0;
+
+function monotonicNow(): number {
+  const now = Date.now();
+  if (now <= lastTimestamp) {
+    lastTimestamp += 1;
+    return lastTimestamp;
+  }
+  lastTimestamp = now;
+  return now;
+}
+
 async function putRecordVia<T extends StoredRecord>(
   opener: () => Promise<IDBPDatabase<any>>,
   store: StoreName,
@@ -177,7 +189,7 @@ async function putRecordVia<T extends StoredRecord>(
   options: { touch?: boolean } = {},
 ): Promise<T> {
   const db = await looseDB(opener);
-  const now = Date.now();
+  const now = monotonicNow();
   const existing = (await db.get(store, record.id)) as T | undefined;
   const written = {
     ...record,
@@ -325,7 +337,7 @@ export async function softDeleteRecord(
   const db = await looseDB();
   const existing = (await db.get(store, id)) as StoredRecord | undefined;
   if (existing === undefined || !isLive(existing)) return false;
-  const now = Date.now();
+  const now = monotonicNow();
   await db.put(store, { ...existing, deletedAt: now, updatedAt: now });
   emitChange(store);
   return true;
