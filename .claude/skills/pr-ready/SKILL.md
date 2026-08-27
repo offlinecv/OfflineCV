@@ -1,7 +1,7 @@
 ---
 name: pr-ready
 description: Solicit review on one or more open PRs — autonomously post a short ping asking for a single explicit 👍 by an absolute merge time (appended onto the most recent live ping if one exists, rather than a new standalone message), wait, send at most one reminder, and report per PR which of SILENT / ACKED / REVIEWING / REVIEWED was reached and by whom. Detects an in-progress review from GitHub (the 👀 /pr-review posts) and grants it one bounded grace extension. Carries no review guidance — that lives in the PR body. Never changes a PR's merge state. Use when the user says "pr-ready", "/pr-ready", "ask for review on this PR", "ping reviewers", or has open PRs nobody has looked at yet.
-argument-hint: [<pr-number>[,<pr-number>...]]
+argument-hint: "[<pr-number>[,<pr-number>...]]"
 ---
 
 # PR Ready
