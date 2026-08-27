@@ -433,3 +433,53 @@ describe("reverted sections (#778)", () => {
   });
 });
 
+// ── #877: emptied-generation sections badged as emptied ─────────────────────
+
+describe("emptied sections (#877)", () => {
+  const emptiedResult: ResumeRewriteResult = {
+    allNumbersPreserved: false,
+    sections: [
+      {
+        kind: "experience",
+        input: {
+          kind: "experience",
+          id: "experience:0",
+          label: "Engineer — Acme",
+          bullets: ["Managed 10 engineers."],
+        },
+        data: {
+          bullets: [],
+          numbersPreserved: false,
+          reverted: false,
+          droppedNumbers: ["10"],
+          addedNumbers: [],
+        },
+      },
+    ],
+  };
+
+  it("badges an emptied section as 'emptied' instead of 'metric drift'", () => {
+    const status: ResumeRewriteStatus = {
+      kind: "running",
+      progress: {
+        currentIndex: 1,
+        totalSections: 1,
+        currentLabel: null,
+        completed: emptiedResult.sections,
+      },
+    };
+    const html = renderToStaticMarkup(
+      createElement(ResumeRewritePanel, {
+        status,
+        onDismiss: () => {},
+        onApplied: () => {},
+        onUndo: () => {},
+      }),
+    );
+    expect(html).toContain("emptied");
+    expect(html).not.toContain("metric drift");
+    expect(html).not.toContain("kept original");
+  });
+});
+
+

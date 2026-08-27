@@ -23,8 +23,7 @@
  */
 
 import { useCallback, useMemo } from "react";
-import { Button, InlineResult, InlineDiff } from "@design-system";
-import { computeTextDiff } from "../../lib/diff/text-diff.ts";
+import { Button, InlineResult } from "@design-system";
 import type {
   ResumeRewriteResult,
   SectionOutcome,
@@ -37,11 +36,39 @@ import { resolveSectionWrites } from "../../lib/rewrite-review/apply-accepted.ts
 import { useRewriteReview, type RewriteReview } from "../../hooks/useRewriteReview.ts";
 import type { SectionRewriteApply } from "./SectionRewrite.tsx";
 import {
-  describeNumberDrift,
   numberDriftStatus,
   NumberPreservationWarning,
 } from "./NumberPreservationWarning.tsx";
 import { BulletReviewRow } from "./RewriteReviewList.tsx";
+import { SectionResult } from "./ResumeRewriteSectionResult.tsx";
+
+interface AggregatedDriftBuckets {
+  reverted: { dropped: string[]; added: string[] };
+  emptied: { dropped: string[]; added: string[] };
+  drift: { dropped: string[]; added: string[] };
+}
+
+/**
+ * Single-pass bucketing across all sections into reverted, emptied, and
+ * metric drift categories (#877).
+ */
+function bucketDriftByStatus(
+  result: ResumeRewriteResult,
+): AggregatedDriftBuckets {
+  const buckets: AggregatedDriftBuckets = {
+    reverted: { dropped: [], added: [] },
+    emptied: { dropped: [], added: [] },
+    drift: { dropped: [], added: [] },
+  };
+  for (const outcome of result.sections) {
+    const status = numberDriftStatus(outcome.data);
+    if (status === "clean") continue;
+    const target = buckets[status];
+    target.dropped.push(...outcome.data.droppedNumbers);
+    target.added.push(...outcome.data.addedNumbers);
+  }
+  return buckets;
+}
 
 /** Per-section apply wiring for the whole-résumé review, keyed by the
  *  `SectionInput.id` (`experience:<index>`, or `summary`). A section with no
@@ -97,18 +124,11 @@ export function ProposedPanel({
    *  Absent → every section renders read-only (graceful fallback). */
   applyBySection?: ResumeRewriteApply;
 }) {
-  const revertedDrift = useMemo(
-    () => aggregateDrift(result, (o) => o.data.reverted),
-    [result],
-  );
-  const emptiedDrift = useMemo(
-    () =>
-      aggregateDrift(
-        result,
-        (o) => !o.data.reverted && !o.data.numbersPreserved,
-      ),
-    [result],
-  );
+  const {
+    reverted: revertedDrift,
+    emptied: emptiedDrift,
+    drift: metricDrift,
+  } = useMemo(() => bucketDriftByStatus(result), [result]);
 
   // Experience sections with an apply wiring become per-bullet reviewable;
   // pair ids are namespaced by section id so the one combined decision map
@@ -225,23 +245,25 @@ export function ProposedPanel({
   // it alone turned the panel warning-coloured on a revert while saying nothing:
   // a border colour, no text, no `role="alert"`. Same condition as
   // `ProposedSection`'s in SectionRewrite.tsx, one level up.
-  const anyReverted = result.sections.some((o) => o.data.reverted);
+  const anyReverted =
+    result.sections.some((o) => o.data.reverted) ||
+    revertedDrift.dropped.length > 0 ||
+    revertedDrift.added.length > 0;
   // A generation that came back empty is NOT reverted — `applyNumberPreservation`
   // deliberately leaves it blank rather than restoring the original (#778,
   // `post-process.ts`) — so its drift can't share the "Kept your original"
   // copy with a genuinely reverted section without misdescribing what
   // happened to it. Split by outcome rather than one aggregate boolean+list
-  // covering every section (#874 review).
-  const anyEmptiedDrift =
-    emptiedDrift.dropped.length > 0 || emptiedDrift.added.length > 0;
+  // covering every section (#874 review, #877).
+  const anyEmptied =
+    result.sections.some((o) => numberDriftStatus(o.data) === "emptied") ||
+    emptiedDrift.dropped.length > 0 ||
+    emptiedDrift.added.length > 0;
+  const anyMetricDrift =
+    metricDrift.dropped.length > 0 || metricDrift.added.length > 0;
 
   const tone =
-    numberDriftStatus({
-      numbersPreserved: result.allNumbersPreserved,
-      reverted: anyReverted,
-    }) === "clean"
-      ? "success"
-      : "warning";
+    anyReverted || anyEmptied || anyMetricDrift ? "warning" : "success";
 
   return (
     <InlineResult tone={tone} className="flex flex-col gap-4">
@@ -252,10 +274,17 @@ export function ProposedPanel({
           reverted
         />
       )}
-      {anyEmptiedDrift && (
+      {anyEmptied && (
         <NumberPreservationWarning
           dropped={emptiedDrift.dropped}
           added={emptiedDrift.added}
+          emptied
+        />
+      )}
+      {anyMetricDrift && (
+        <NumberPreservationWarning
+          dropped={metricDrift.dropped}
+          added={metricDrift.added}
         />
       )}
       <ul className="flex flex-col gap-4 list-none">
@@ -378,69 +407,7 @@ function summaryPairs(
   ];
 }
 
-function SectionResult({ outcome }: { outcome: SectionOutcome }) {
-  if (outcome.kind === "summary") {
-    return (
-      <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-card p-3">
-        <h4 className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
-          {outcome.input.label}
-        </h4>
-        <InlineDiff
-          segments={computeTextDiff(
-            outcome.input.text,
-            outcome.data.text || "",
-          )}
-          noChangeLabel={
-            outcome.data.reverted ? revertedLabel(outcome.data) : undefined
-          }
-        />
-      </div>
-    );
-  }
-  // Both sides get the SAME blank filter. A revert hands back the input verbatim
-  // (blanks included) while this side has always dropped them, so filtering only
-  // the original made a section with one blank bullet diff as "changed" — which
-  // suppressed the `noChangeLabel` that exists to stop a revert reading as a
-  // silent no-op (#778).
-  const originalBullets = withoutBlanks(outcome.input.bullets);
-  const proposedBullets = withoutBlanks(outcome.data.bullets);
-  return (
-    <div className="flex flex-col gap-2 rounded border border-border-light bg-surface-card p-3">
-      <h4 className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
-        {outcome.input.label}
-      </h4>
-      <InlineDiff
-        segments={computeTextDiff(
-          originalBullets.map((b) => `• ${b}`).join("\n"),
-          proposedBullets.map((b) => `• ${b}`).join("\n"),
-        )}
-        noChangeLabel={
-          outcome.data.reverted ? revertedLabel(outcome.data) : undefined
-        }
-      />
-    </div>
-  );
-}
 
-function withoutBlanks(bullets: readonly string[]): string[] {
-  return bullets.filter((b) => b.trim().length > 0);
-}
-
-/**
- * Why a section in the whole-résumé review shows no redline (#778). Named per
- * section rather than aggregated into the résumé-level warning because the
- * chain rewrites each section independently — one reverting says nothing about
- * the others, and a single banner would leave the reader guessing which.
- */
-function revertedLabel(data: {
-  droppedNumbers: readonly string[];
-  addedNumbers: readonly string[];
-}): string {
-  const detail = describeNumberDrift(data.droppedNumbers, data.addedNumbers);
-  return detail === ""
-    ? "Kept unchanged — the rewrite was rejected."
-    : `Kept unchanged — the rewrite ${detail}.`;
-}
 
 export interface AggregateDrift {
   dropped: string[];
