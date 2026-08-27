@@ -10,7 +10,7 @@
 
 import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DB_NAME, getDB, closeDB } from "./db.ts";
 import {
   saveResume,
@@ -19,7 +19,8 @@ import {
   deleteResume,
   listResumeChoices,
 } from "./resumes.ts";
-import { saveJob, getAllJobs } from "./jobs.ts";
+import { saveJob, getAllJobs, deleteJob } from "./jobs.ts";
+import { getRecord } from "./crud.ts";
 import { exportAll, exportToJson, importAll, importFromJson } from "./backup.ts";
 import { captureJob } from "./capture.ts";
 import { requestStoragePersistence, isStoragePersisted } from "./persist.ts";
@@ -122,6 +123,23 @@ describe("storage: jobs CRUD", () => {
     expect(job.id).toBeTruthy();
     expect(job.title).toBe("SWE");
     expect(await getAllJobs()).toHaveLength(1);
+  });
+
+  it("monotonicNow guarantees softDeleteRecord timestamp is strictly greater than preceding writes in the same millisecond", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    try {
+      const job1 = await saveJob({ title: "SWE 1" });
+      const job2 = await saveJob({ title: "SWE 2" });
+      expect(job2.updatedAt).toBeGreaterThan(job1.updatedAt);
+
+      await deleteJob(job1.id);
+
+      const record = await getRecord<JobRecord>("jobs", job1.id);
+      expect(record?.deletedAt).toBeDefined();
+      expect(record!.updatedAt).toBeGreaterThan(job2.updatedAt);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 
