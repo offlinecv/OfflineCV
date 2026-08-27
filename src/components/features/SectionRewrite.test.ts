@@ -19,6 +19,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { labelFor, ProposedSection, type Status } from "./SectionRewrite.tsx";
 import {
   formatTokens,
+  numberDriftStatus,
   NumberPreservationWarning,
 } from "./NumberPreservationWarning.tsx";
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
@@ -156,6 +157,105 @@ describe("NumberPreservationWarning — reverted copy (#778)", () => {
   it("defaults to the drift copy when `reverted` is omitted", () => {
     const html = render({ dropped: ["40%"], added: [] });
     expect(html).toContain("removed 40%");
+  });
+});
+
+describe("NumberPreservationWarning — emptied copy (#877)", () => {
+  it("explains the section was emptied rather than altered when metrics were lost", () => {
+    const html = renderToStaticMarkup(
+      createElement(NumberPreservationWarning, {
+        dropped: ["$10M"],
+        added: [],
+        emptied: true,
+      }),
+    );
+    expect(html).toContain("Section emptied — removed $10M. Review before saving.");
+    expect(html).not.toContain("AI altered a metric");
+    expect(html).not.toContain("Kept your original");
+  });
+
+  it("renders a clean emptied notice without trailing dash when no metrics existed", () => {
+    const html = renderToStaticMarkup(
+      createElement(NumberPreservationWarning, {
+        dropped: [],
+        added: [],
+        emptied: true,
+      }),
+    );
+    expect(html).toContain("Section emptied. Review before saving.");
+    expect(html).not.toContain("—");
+  });
+});
+
+describe("numberDriftStatus (#877)", () => {
+  it("returns 'reverted' when reverted is true", () => {
+    expect(
+      numberDriftStatus({
+        numbersPreserved: true,
+        reverted: true,
+        bullets: ["b1"],
+      }),
+    ).toBe("reverted");
+  });
+
+  it("returns 'clean' when numbersPreserved is true and bullets are non-empty", () => {
+    expect(
+      numberDriftStatus({
+        numbersPreserved: true,
+        reverted: false,
+        bullets: ["b1"],
+      }),
+    ).toBe("clean");
+  });
+
+  it("returns 'emptied' when numbersPreserved is true and bullets are empty (non-numeric section)", () => {
+    expect(
+      numberDriftStatus({
+        numbersPreserved: true,
+        reverted: false,
+        bullets: [],
+      }),
+    ).toBe("emptied");
+  });
+
+  it("returns 'emptied' when numbersPreserved is true and text is blank (non-numeric section)", () => {
+    expect(
+      numberDriftStatus({
+        numbersPreserved: true,
+        reverted: false,
+        text: "",
+      }),
+    ).toBe("emptied");
+  });
+
+  it("returns 'emptied' when unpreserved, not reverted, and bullets are empty", () => {
+    expect(
+      numberDriftStatus({
+        numbersPreserved: false,
+        reverted: false,
+        bullets: [],
+      }),
+    ).toBe("emptied");
+  });
+
+  it("returns 'emptied' when unpreserved, not reverted, and text is whitespace", () => {
+    expect(
+      numberDriftStatus({
+        numbersPreserved: false,
+        reverted: false,
+        text: "   ",
+      }),
+    ).toBe("emptied");
+  });
+
+  it("returns 'drift' when unpreserved, not reverted, and content is present", () => {
+    expect(
+      numberDriftStatus({
+        numbersPreserved: false,
+        reverted: false,
+        bullets: ["reworded without number"],
+      }),
+    ).toBe("drift");
   });
 });
 

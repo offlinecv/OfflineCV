@@ -548,5 +548,77 @@ describe("ProposedPanel — rejected rewrites (#778)", () => {
     const alert = el.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain("invented 5");
   });
+
+  it("renders 'Section emptied' alert when an emptied section dropped metrics (#877)", () => {
+    const emptied: ResumeRewriteResult = {
+      allNumbersPreserved: false,
+      sections: [
+        {
+          kind: "experience",
+          input: {
+            kind: "experience",
+            id: "experience:0",
+            label: "Senior Engineer — Acme",
+            bullets: ["Managed 10 engineers."],
+          },
+          data: {
+            bullets: [],
+            numbersPreserved: false,
+            reverted: false,
+            droppedNumbers: ["10"],
+            addedNumbers: [],
+          },
+        },
+      ],
+    };
+    const el = render(
+      createElement(ProposedPanel, {
+        result: emptied,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+      }),
+    );
+    const alert = el.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert!.textContent).toContain("Section emptied");
+    expect(alert!.textContent).toContain("removed 10");
+    expect(alert!.textContent).not.toContain("AI altered a metric");
+    expect(alert!.textContent).not.toContain("Kept your original");
+  });
+
+  it("renders 'Section emptied' alert when a non-numeric section is emptied (#877)", () => {
+    const emptiedNonNumeric: ResumeRewriteResult = {
+      allNumbersPreserved: true,
+      sections: [
+        {
+          kind: "experience",
+          input: {
+            kind: "experience",
+            id: "experience:0",
+            label: "Senior Engineer — Acme",
+            bullets: ["Collaborated with product designers."],
+          },
+          data: {
+            bullets: [],
+            numbersPreserved: true,
+            reverted: false,
+            droppedNumbers: [],
+            addedNumbers: [],
+          },
+        },
+      ],
+    };
+    const el = render(
+      createElement(ProposedPanel, {
+        result: emptiedNonNumeric,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+      }),
+    );
+    const alert = el.querySelector('[role="alert"]');
+    expect(alert).not.toBeNull();
+    expect(alert!.textContent).toContain("Section emptied");
+    expect(alert!.textContent).not.toContain("—");
+  });
 });
 

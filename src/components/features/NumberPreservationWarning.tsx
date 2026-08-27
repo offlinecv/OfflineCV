@@ -21,14 +21,23 @@
  * the tree reduces to. `"reverted"` must be checked before `"drift"`:
  * `numbersPreserved` is true on a reverted rewrite by construction (#778),
  * so testing it first would read a reverted section as a clean pass.
+ * `"emptied"` (#877) captures when the generation came back completely empty
+ * (the empty-generation exemption in post-process.ts), so it is badged/described
+ * as emptied rather than partial metric drift.
  */
-export type NumberDriftStatus = "reverted" | "drift" | "clean";
+export type NumberDriftStatus = "reverted" | "emptied" | "drift" | "clean";
 
 export function numberDriftStatus(result: {
   numbersPreserved: boolean;
   reverted: boolean;
+  bullets?: readonly string[];
+  text?: string;
 }): NumberDriftStatus {
   if (result.reverted) return "reverted";
+  const isEmptied =
+    (result.bullets !== undefined && result.bullets.length === 0) ||
+    (result.text !== undefined && result.text.trim().length === 0);
+  if (isEmptied) return "emptied";
   if (!result.numbersPreserved) return "drift";
   return "clean";
 }
@@ -46,6 +55,7 @@ export function NumberPreservationWarning({
   dropped,
   added,
   reverted = false,
+  emptied = false,
 }: {
   dropped: readonly string[];
   added: readonly string[];
@@ -56,6 +66,11 @@ export function NumberPreservationWarning({
    * metric they never lost would be wrong.
    */
   reverted?: boolean;
+  /**
+   * The generation came back empty (#877). Changes the copy to distinguish an
+   * emptied section from partial metric drift.
+   */
+  emptied?: boolean;
 }) {
   const detail = describeNumberDrift(dropped, added);
   if (reverted) {
@@ -67,6 +82,18 @@ export function NumberPreservationWarning({
         <span aria-hidden="true">⚠ </span>
         Kept your original — the rewrite {detail}, so I didn’t apply it. Try
         again for a different attempt.
+      </p>
+    );
+  }
+  if (emptied) {
+    const reason = detail ? ` — ${detail}` : "";
+    return (
+      <p
+        role="alert"
+        className="text-2xs leading-snug text-feedback-warning-text"
+      >
+        <span aria-hidden="true">⚠ </span>
+        Section emptied{reason}. Review before saving.
       </p>
     );
   }
