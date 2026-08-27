@@ -337,7 +337,7 @@ export async function softDeleteRecord(
   const db = await looseDB();
   const existing = (await db.get(store, id)) as StoredRecord | undefined;
   if (existing === undefined || !isLive(existing)) return false;
-  const now = Date.now();
+  const now = monotonicNow();
   await db.put(store, { ...existing, deletedAt: now, updatedAt: now });
   emitChange(store);
   return true;
