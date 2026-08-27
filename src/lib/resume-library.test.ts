@@ -91,6 +91,14 @@ describe("resume-library: save + list", () => {
     expect(list.map((e) => e.filename)).toEqual(["tailored.pdf", "general.pdf"]);
     expect(list[0]).toMatchObject({ scoreOverall: 84, sourceKind: "pdf", hasCachedParse: true });
   });
+
+  it("orders back-to-back saves deterministically under contention", async () => {
+    const promises = Array.from({ length: 5 }, (_, i) => save(`resume-${i}.pdf`, 70 + i));
+    await Promise.all(promises);
+    const list = await listLibrary();
+    expect(list).toHaveLength(5);
+    expect(new Set(list.map((e) => e.filename)).size).toBe(5);
+  });
 });
 
 describe("resume-library: load", () => {

@@ -209,7 +209,7 @@ export async function listLibrary(): Promise<ResumeLibraryEntry[]> {
         hasCachedParse: snap !== null,
       };
     })
-    .sort((a, b) => b.savedAt - a.savedAt);
+    .sort((a, b) => b.savedAt - a.savedAt || a.id.localeCompare(b.id));
 }
 
 /**
