@@ -4,11 +4,13 @@
 import { describe, expect, it } from "vitest";
 import { bulletId } from "../score/bullet-id.ts";
 import { buildAtsResumeModel } from "./ats-resume-model.ts";
+import type { AtsSection } from "./ats-resume-model.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import type {
   CascadeResult,
   HeuristicParsedResume,
 } from "../heuristics/types.ts";
+import type { HeuristicAchievement } from "../score/types.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "../heuristics/sections.ts";
 import type { AnonymousAtsScore, BulletObservation } from "../score/score.ts";
 import { countWords } from "../score/score.ts";
@@ -857,5 +859,153 @@ describe("buildAtsResumeModel — certifications as their own section (#884)", (
     // `title` recomposes the label back onto the name (#456).
     expect(entry.fields?.title).toBe("AWS · Solutions Architect – Professional");
     expect(entry.fields?.startDate).toBe("2022");
+  });
+
+  it("emits no dangling separator when a certification has no year (#899)", () => {
+    const result = makeResult({
+      heuristic_achievements: [],
+      heuristic_certifications: [{ title: "Patent Bar Registration" }],
+    });
+    const entry = buildAtsResumeModel(result, makeScore([])).sections.find(
+      (s) => s.kind === "certifications",
+    )!.entries[0];
+    // `joinHeader` (buildAchievementHeader) already drops a falsy part rather
+    // than joining it with the separator, so a dateless credential draws its
+    // title alone — no trailing "·" left dangling in front of nothing.
+    expect(entry.headerLine).toBe("Patent Bar Registration");
+  });
+});
+
+describe("buildAtsResumeModel — compact certifications line (#899)", () => {
+  const certs = (
+    heuristic_certifications: HeuristicAchievement[],
+  ): AtsSection =>
+    buildAtsResumeModel(
+      makeResult({ heuristic_achievements: [], heuristic_certifications }),
+      makeScore([]),
+    ).sections.find((s) => s.kind === "certifications")!;
+
+  it("joins two or more credentials onto one middot-separated line", () => {
+    const section = certs([
+      { title: "AWS Certified Cloud Practitioner", year: "2025" },
+      { title: "AWS Certified Solutions Architect", year: "2026" },
+      { title: "CKA" },
+    ]);
+    expect(section.compactLine).toBe(
+      "AWS Certified Cloud Practitioner (2025) · AWS Certified Solutions Architect (2026) · CKA",
+    );
+    // A dateless credential contributes its bare title — no parenthesised
+    // nothing, no dangling separator (#899).
+    expect(section.entries[2].headerLine).toBe("CKA");
+  });
+
+  it("keeps every entry, so the JSON/Markdown exports still see N credentials", () => {
+    // The compaction is LAYOUT. `projectAtsExport` reads `entries`, never
+    // `compactLine`, so collapsing the drawn rows must not collapse the export.
+    const section = certs([
+      { title: "AWS Certified Cloud Practitioner", year: "2025" },
+      { title: "CKA", year: "2021", url: "https://verify.example.com/cka" },
+    ]);
+    expect(section.entries).toHaveLength(2);
+    expect(section.entries.map((e) => e.fields?.title)).toEqual([
+      "AWS Certified Cloud Practitioner",
+      "CKA",
+    ]);
+    expect(section.entries.map((e) => e.fields?.startDate)).toEqual([
+      "2025",
+      "2021",
+    ]);
+    expect(section.entries[1].fields?.url).toBe("https://verify.example.com/cka");
+  });
+
+  it("re-emits the source's own year punctuation when it is not the middot", () => {
+    // #380 fidelity survives the compaction: a résumé that wrote a comma keeps
+    // its comma, because a comma cannot be mistaken for the list separator.
+    const section = certs([
+      { title: "AWS Certified Developer", year: "2022", year_separator: "," },
+      { title: "CKA", year: "2021", year_separator: "," },
+    ]);
+    expect(section.compactLine).toBe(
+      "AWS Certified Developer, 2022 · CKA, 2021",
+    );
+  });
+
+  it("parenthesises a year the source set off with a MIDDOT", () => {
+    // The one separator that cannot survive verbatim: on the compact line the
+    // middot is the credential boundary, so re-emitting it around a year would
+    // re-parse "CKA · 2021" as a credential plus a stray date. The parser has a
+    // date-only re-join for exactly that source shape, but the exporter must not
+    // manufacture the ambiguity in the first place.
+    const section = certs([
+      { title: "AWS Certified Developer", year: "2022", year_separator: "·" },
+      { title: "CKA", year: "2021" },
+    ]);
+    expect(section.compactLine).toBe(
+      "AWS Certified Developer (2022) · CKA (2021)",
+    );
+  });
+
+  it("leaves a lone certification as its own row", () => {
+    const section = certs([{ title: "CKA", year: "2021" }]);
+    expect(section.compactLine).toBeUndefined();
+    // Unchanged from pre-#899: the middot fallback still sets the year off.
+    expect(section.entries[0].headerLine).toBe("CKA · 2021");
+  });
+
+  it("does NOT compact when a credential carries a bullet body", () => {
+    // Folding it would either lose the bullets or hang them under whichever
+    // credential drew last (`latex/awesome-cv-cv.pdf` is the corpus case).
+    const section = certs([
+      { title: "AWS Certified Developer", year: "2022" },
+      { title: "Speaker Certification", description: "Presented at re:Invent." },
+    ]);
+    expect(section.compactLine).toBeUndefined();
+    expect(section.entries[1].bullets).toEqual(["Presented at re:Invent."]);
+  });
+
+  it("does NOT compact when a credential carries a type label", () => {
+    // A `type` draws with emphasis sentinels, and the renderer picks the
+    // run-measuring path off their presence — which does NOT wrap atomically,
+    // so the joined line could break inside a credential.
+    const section = certs([
+      { type: "AWS", title: "Certified Developer", year: "2022" },
+      { title: "CKA", year: "2021" },
+    ]);
+    expect(section.compactLine).toBeUndefined();
+  });
+
+  it("does NOT compact when a run-collapsed credential's title itself carries the list separator (#899)", () => {
+    // `isDatedCredentialRow` (achievements.ts) legitimately collapses a dated
+    // multi-segment source row like "Google Cloud Architect · Google · Mar
+    // 2023" into ONE credential titled "Google Cloud Architect · Google".
+    // Compacting it onto a shared line would put an unescaped
+    // CREDENTIAL_LIST_SEPARATOR *inside* that credential, and the re-parser
+    // cannot tell that boundary apart from a boundary BETWEEN credentials —
+    // it would fabricate a second, dated entry named "Google" (2023).
+    const section = certs([
+      { title: "Google Cloud Architect · Google", year: "2023" },
+      { title: "CKA · CNCF", year: "2021" },
+    ]);
+    expect(section.compactLine).toBeUndefined();
+    // Kept as ordinary per-row entries instead — re-parses to the same title.
+    expect(section.entries[0].headerLine).toBe(
+      "Google Cloud Architect · Google · 2023",
+    );
+    expect(section.entries[1].headerLine).toBe("CKA · CNCF · 2021");
+  });
+
+  it("leaves the achievements section alone", () => {
+    const model = buildAtsResumeModel(
+      makeResult({
+        heuristic_achievements: [
+          { title: "Best Paper Award", year: "2021" },
+          { title: "Innovation Prize", year: "2023" },
+        ],
+      }),
+      makeScore([]),
+    );
+    expect(
+      model.sections.find((s) => s.kind === "achievements")?.compactLine,
+    ).toBeUndefined();
   });
 });

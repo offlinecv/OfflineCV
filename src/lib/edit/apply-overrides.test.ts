@@ -1497,12 +1497,15 @@ describe("applyOverrides — achievements", () => {
 // apart, so an `achievements:0` edit never lands on a certification.
 
 /** A parse carrying one achievement AND one certification, so an override
- *  keyed `0` is ambiguous unless the buckets are genuinely separate. */
+ *  keyed `0` is ambiguous unless the buckets are genuinely separate. The
+ *  certification carries NO `type`: extraction stopped splitting one off a
+ *  credential header in #899 (`splitType: false`), and a stored record that
+ *  still has one is folded away — pinned in its own block below. */
 function credentialParsed(): HeuristicParsedResume {
   return {
     ...baseParsed(),
     heuristic_achievements: [{ title: "Best Paper Award", year: "2021" }],
-    heuristic_certifications: [{ type: "AWS", title: "SAA", year: "2022" }],
+    heuristic_certifications: [{ title: "SAA", year: "2022" }],
   };
 }
 
@@ -1542,8 +1545,8 @@ describe("applyOverrides — certifications (#884)", () => {
       0: { title: "Solutions Architect – Professional" },
     });
     expect(out.heuristic_certifications?.[0]).toMatchObject({
-      type: "AWS",
       title: "Solutions Architect – Professional",
+      year: "2022",
     });
     expect(out.heuristic_achievements?.[0].title).toBe("Best Paper Award");
   });
@@ -1561,7 +1564,6 @@ describe("applyOverrides — certifications (#884)", () => {
       {
         id: "added:1",
         section: "certifications",
-        achievementType: "CNCF",
         title: "CKA",
         year: "2023",
       },
@@ -1575,10 +1577,150 @@ describe("applyOverrides — certifications (#884)", () => {
     ]);
   });
 
+  it("folds an ADDED certification's legacy label into its title too", () => {
+    // The picker is achievements-only (#899), so an `achievementType` on an
+    // added CERTIFICATION can only come from an entry captured before that gate
+    // — the same legacy shape `foldCertificationTypes` retires on the parsed
+    // side. Pushed raw it survives only on the added lane, which is worse than
+    // either surface alone: the view has no slot to draw it in, the PDF still
+    // draws it bold, and one raw label fails the exporter's `every(c =>
+    // !c.type)` compaction guard for the WHOLE section.
+    const { fields: out } = applyCerts(credentialParsed(), {}, [
+      {
+        id: "added:1",
+        section: "certifications",
+        achievementType: "CNCF",
+        title: "CKA",
+        year: "2023",
+      },
+    ]);
+    expect(out.heuristic_certifications?.[1]).toEqual({
+      title: "CNCF · CKA",
+      year: "2023",
+      description: undefined,
+    });
+    expect(out.heuristic_certifications?.every((c) => !c.type?.trim())).toBe(
+      true,
+    );
+  });
+
+  it("keeps an ADDED achievement's label a real field", () => {
+    // The other half of the same fork: `type` is picker-edited on an
+    // achievement, so it must reach the bucket intact and NOT be folded.
+    const { fields: out } = applyCerts(credentialParsed(), {}, [
+      {
+        id: "added:1",
+        section: "achievements",
+        achievementType: "Patent",
+        title: "Bulk editor",
+        year: "2023",
+      },
+    ]);
+    expect(out.heuristic_achievements?.[1]).toMatchObject({
+      type: "Patent",
+      title: "Bulk editor",
+    });
+  });
+
   it("does not mutate the input parse", () => {
     const parsed = credentialParsed();
     applyCerts(parsed, { 0: { title: "edited" } });
     expect(parsed.heuristic_certifications?.[0].title).toBe("SAA");
+  });
+});
+
+// ── The legacy certification `type`, retired (#899) ──────────────────────────
+//
+// Every résumé saved to the library BEFORE #899 carries a `type` the old split
+// lopped off the front of a credential title. Nothing reads it on a credential
+// any more — no picker, no `AchievementHeader` slot — so left alone the record
+// would display as the tail ALONE while the PDF kept drawing the whole thing,
+// and it would fail the exporter's compaction guard, keeping #899's compact
+// line off every pre-existing résumé. Folding it back into the title at this
+// one seam is what both surfaces then read.
+
+/** The shape a pre-#899 save left behind: "AWS · Certified Solutions Architect"
+ *  stored as a type + the remainder. */
+function legacyCertParsed(): HeuristicParsedResume {
+  return {
+    ...baseParsed(),
+    heuristic_achievements: [{ type: "Patent", title: "Bulk editor", year: "2019" }],
+    heuristic_certifications: [
+      { type: "AWS", title: "Certified Solutions Architect", year: "2022" },
+      { title: "CKA", year: "2021" },
+    ],
+  };
+}
+
+describe("applyOverrides — legacy certification type fold (#899)", () => {
+  it("folds the label back into the title and drops the field", () => {
+    const { fields: out } = applyCerts(legacyCertParsed(), {});
+    expect(out.heuristic_certifications?.[0].title).toBe(
+      "AWS · Certified Solutions Architect",
+    );
+    expect(out.heuristic_certifications?.[0].type).toBeUndefined();
+    // The composition is the exporter's own (`credentialTitle`), so the PDF a
+    // legacy record draws is unchanged by the fold — only the view it was
+    // missing from changes.
+    expect(out.heuristic_certifications?.[0].year).toBe("2022");
+    // A credential that never had one is untouched, field for field.
+    expect(out.heuristic_certifications?.[1]).toEqual({
+      title: "CKA",
+      year: "2021",
+    });
+  });
+
+  it("leaves the compaction guard satisfiable — no type survives the fold", () => {
+    // The guard is `certifications.every(c => !c.type?.trim() && …)` in
+    // `ats-resume-model.ts`. Before the fold a single legacy record failed it
+    // for the whole section.
+    const { fields: out } = applyCerts(legacyCertParsed(), {});
+    expect(out.heuristic_certifications?.every((c) => !c.type?.trim())).toBe(
+      true,
+    );
+  });
+
+  it("never touches an ACHIEVEMENT's type — that field is still real", () => {
+    const { fields: out } = applyCerts(legacyCertParsed(), {});
+    expect(out.heuristic_achievements?.[0]).toMatchObject({
+      type: "Patent",
+      title: "Bulk editor",
+    });
+  });
+
+  it("lets a title edit replace the folded string, not be re-prefixed", () => {
+    // The fold runs BEFORE the overrides for exactly this: the user edits the
+    // title they can SEE ("AWS · Certified Solutions Architect"), so re-folding
+    // the label onto their edit afterwards would read "AWS · AWS · …" and grow
+    // by one label on every render.
+    const { fields: out } = applyCerts(legacyCertParsed(), {
+      0: { title: "AWS · Certified Solutions Architect – Professional" },
+    });
+    expect(out.heuristic_certifications?.[0].title).toBe(
+      "AWS · Certified Solutions Architect – Professional",
+    );
+  });
+
+  it("ignores a stale type override on a certification", () => {
+    // The picker is achievements-only now, so a certification type override can
+    // only be one captured before that gate — and re-applying it would put back
+    // the very label the fold just retired.
+    const { fields: out } = applyCerts(legacyCertParsed(), {
+      0: { type: "Amazon Web Services" },
+    });
+    expect(out.heuristic_certifications?.[0].type).toBeUndefined();
+    expect(out.heuristic_certifications?.[0].title).toBe(
+      "AWS · Certified Solutions Architect",
+    );
+  });
+
+  it("does not mutate the stored parse it folded", () => {
+    const parsed = legacyCertParsed();
+    applyCerts(parsed, {});
+    expect(parsed.heuristic_certifications?.[0]).toMatchObject({
+      type: "AWS",
+      title: "Certified Solutions Architect",
+    });
   });
 });
 

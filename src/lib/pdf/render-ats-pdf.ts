@@ -75,7 +75,11 @@
  */
 
 import { loadPdfLibOnce, type PdfLibParts } from "./load-pdf-lib.ts";
-import type { AtsResumeModel, AtsEntry } from "./ats-resume-model.ts";
+import type {
+  AtsResumeModel,
+  AtsEntry,
+  AtsSection,
+} from "./ats-resume-model.ts";
 import {
   autoBoldMetrics,
   EMPHASIS_OPEN,
@@ -1167,10 +1171,11 @@ class Layout {
    * statement · year" achievement HEADER uses the middot purely as a display
    * joiner, so it opts OUT: atomic wrapping there would strand a whole segment
    * — the lone keyword or year — on its own line (#307). But the skills entry
-   * (re-parsed segment-by-segment, #301) and the "Company · Location  Dates" /
-   * "Institution · Location  Dates" sub-lines opt IN — there the middot is a
+   * (re-parsed segment-by-segment, #301), the "Company · Location  Dates" /
+   * "Institution · Location  Dates" sub-lines, and the compact certifications
+   * line (#899, {@link sectionDrawEntries}) opt IN — there the middot is a
    * re-parse-critical boundary and word-wrapping inside a multi-word location
-   * would fragment it on re-parse.
+   * or credential name would fragment it on re-parse.
    */
   private wrap(
     text: string,
@@ -2070,6 +2075,7 @@ async function renderAtsResumePdfAtSize(
 
   // ── Sections ──
   for (const section of model.sections) {
+    const drawn = sectionDrawEntries(section);
     // Keep-with-next (#629): the heading reserves its rule, its trailing gap AND
     // the whole keep-block of its first entry. Reserving only "heading + one
     // line" would let the entry's own reservation fire immediately afterwards and
@@ -2077,18 +2083,21 @@ async function renderAtsResumePdfAtSize(
     drawSectionHeading(
       layout,
       section.heading,
-      section.entries.length > 0
-        ? entryKeepHeight(layout, section.entries[0], muted)
-        : 0,
+      drawn.length > 0 ? entryKeepHeight(layout, drawn[0], muted) : 0,
     );
-    for (let i = 0; i < section.entries.length; i++) {
-      drawEntry(layout, section.entries[i], muted, {
+    for (let i = 0; i < drawn.length; i++) {
+      drawEntry(layout, drawn[i], muted, {
         // The SAME label `collectModelTextFields` gives this entry, so a glyph
-        // finding and a pagination finding about one role name it identically.
-        entryPath: entryPathLabel(section.heading || "Section", section.entries[i], i),
+        // finding and a pagination finding about one role name it identically —
+        // EXCEPT for a compacted certifications section (#899): `drawn` here is
+        // `sectionDrawEntries`' one synthesized entry, while the glyph walk
+        // still labels each real credential in `section.entries`, so a
+        // pagination finding there names the whole joined line rather than the
+        // one credential a glyph finding about it would name.
+        entryPath: entryPathLabel(section.heading || "Section", drawn[i], i),
         findings,
       });
-      if (i < section.entries.length - 1) layout.advance(layout.t.gapBetweenEntries);
+      if (i < drawn.length - 1) layout.advance(layout.t.gapBetweenEntries);
     }
     layout.advance(layout.t.gapBetweenEntries);
   }
@@ -2413,6 +2422,40 @@ function trailingBulletKeepHeight(layout: Layout, entry: AtsEntry): number {
     layout.bulletIndent(layout.t.body),
   );
   return bulletKeepLines(lines) * layout.t.body * LINE_GAP;
+}
+
+/**
+ * The entries a section actually DRAWS. Its own, normally — but a section
+ * carrying an {@link AtsSection.compactLine} (the compact certifications list,
+ * #899) draws exactly ONE synthesized body-text entry holding that whole joined
+ * line, so N credentials cost one wrapped row instead of N rows.
+ *
+ * `atomicSegments` is what makes the compression round-trip rather than merely
+ * look tidy: the line's `" · "` segments ARE the credentials, and
+ * {@link Layout.wrap} can only break BETWEEN segments — so every extracted line
+ * of the block starts at a credential boundary and the re-parser splits it back
+ * into N entries (`parseFlatAwardList`). It is the same guarantee the skills
+ * list has depended on since #301, reused rather than re-derived.
+ *
+ * The section's real `entries` are untouched: they remain the export-semantic
+ * source `projectAtsExport` hands the JSON-Resume and Markdown exports, which
+ * therefore still emit one certificate per credential. `entries` is also still
+ * the glyph AUDIT's source (`collectModelTextFields`) for those per-credential
+ * strings — the compact line itself is walked separately, since it is not one
+ * of them (see that function) — which is what puts a pagination finding about
+ * this synthesized entry out of step with a glyph finding about the same
+ * credential; see the call site in `renderAtsResumePdf`.
+ */
+function sectionDrawEntries(section: AtsSection): AtsEntry[] {
+  if (!section.compactLine) return section.entries;
+  return [
+    {
+      headerLine: section.compactLine,
+      headerBold: false,
+      atomicSegments: true,
+      bullets: [],
+    },
+  ];
 }
 
 function drawEntry(

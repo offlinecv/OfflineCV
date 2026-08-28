@@ -421,7 +421,16 @@ function buildHeuristicResult(
   const education = extractEducation(educationSection);
   const projects = extractProjects(projectsSection);
   const achievements = extractAchievements(achievementsSection);
-  const certifications = extractAchievements(certificationsSection);
+  // `splitType: false` (#899): a certification's title is a credential name,
+  // never a "Type · label" award header, so it must never lose a leading word
+  // to `splitAchievementType` — see `extractAchievements`'s docblock.
+  // `splitCompactList: true` is the other half of the same issue: this is the
+  // ONE bucket the exporter compresses onto a single middot-joined line, so it
+  // is the one bucket that must split such a line back apart.
+  const certifications = extractAchievements(certificationsSection, {
+    splitType: false,
+    splitCompactList: true,
+  });
 
   const parsed: HeuristicParsedResume = {
     ...(name.value ? { full_name: name.value } : {}),

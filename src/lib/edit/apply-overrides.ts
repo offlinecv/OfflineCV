@@ -50,6 +50,7 @@ import {
   computeEditedSkills,
   isEmptySkillsOverride,
 } from "./skills-categories.ts";
+import { joinAchievementType } from "../score/entry-dates.ts";
 import { classifyProfile, profilesFromUrls } from "../contact/profile-registry.ts";
 import type { LegacyLinkKey, ProfileLink } from "../score/types.ts";
 import type {
@@ -411,19 +412,65 @@ function applyCredentialOverrides(
   for (const [idxStr, fields] of Object.entries(overrides)) {
     const item = items[Number(idxStr)];
     if (!item) continue;
-    mergeAchievementFields(item, fields);
+    mergeAchievementFields(item, fields, bucket !== "heuristic_certifications");
   }
   nextParsed[bucket] = items;
 }
 
-/** Fold one achievement's field overrides into the (already cloned) entry. */
+/** Fold one achievement's field overrides into the (already cloned) entry.
+ *  `allowType` is false for the certifications bucket (#899): the type picker
+ *  is achievements-only, so a certification can only carry a type override
+ *  captured before that gate existed — and re-applying one would put back the
+ *  very label {@link foldCertificationTypes} just retired. */
 function mergeAchievementFields(
   ach: HeuristicAchievement,
   fields: AchievementFieldOverrides,
+  allowType: boolean,
 ): void {
-  if (fields.type !== undefined) ach.type = fields.type || undefined;
+  if (allowType && fields.type !== undefined) ach.type = fields.type || undefined;
   if (fields.title !== undefined) ach.title = fields.title;
   if (fields.year !== undefined) ach.year = fields.year || undefined;
+}
+
+/**
+ * Retire a certification's `type` label by folding it back into the title
+ * (#899).
+ *
+ * Extraction stopped splitting one off a credential header (`splitType: false`)
+ * and the edit surface stopped rendering the picker — but every résumé saved to
+ * the library BEFORE that carries a label the old split lopped off the front of
+ * its title (`{type: "AWS", title: "Certified Solutions Architect"}`). With
+ * nothing reading `type` on a credential any more, such a record would display
+ * as the tail alone, silently missing the half the résumé led with, while the
+ * PDF still drew the whole thing — the two surfaces disagreeing about the same
+ * stored record. It also failed the exporter's compaction guard, so #899's
+ * compact line never applied to a single pre-existing résumé.
+ *
+ * Folding here, at the ONE seam both the edit surface and the export projection
+ * read (`applyOverrides`'s display result), is what keeps them agreeing without
+ * a second copy of the rule at each read site. The composition is
+ * {@link joinAchievementType} — the exact string `credentialTitle` already
+ * composed for the PDF, so a legacy record's EXPORT is byte-identical across
+ * the fold and only the view it was missing from changes.
+ *
+ * Runs BEFORE {@link applyCredentialOverrides}, so a title the user edits after
+ * the fold replaces the folded string wholesale instead of being prefixed with
+ * the label a second time on the next render.
+ *
+ * ACHIEVEMENTS ARE UNTOUCHED — their `type` is a real, picker-edited field.
+ */
+function foldCertificationTypes(nextParsed: HeuristicParsedResume): void {
+  const items = nextParsed.heuristic_certifications;
+  if (!items?.some((c) => c.type?.trim())) return;
+  nextParsed.heuristic_certifications = items.map((c) => {
+    if (!c.type?.trim()) return c;
+    const folded: HeuristicAchievement = {
+      ...c,
+      title: joinAchievementType(c.type, c.title),
+    };
+    delete folded.type;
+    return folded;
+  });
 }
 
 // ── Prose descriptions (#489) ───────────────────────────────────────────────
@@ -920,14 +967,27 @@ function pushAddedEntry(
     // real fields (#456) — `achievementType` is the bold label, `title` the rest
     // — so an added achievement is indistinguishable from a parsed-then-edited
     // one (#455) without any recomposition. A certification carries the same
-    // shape (#884) and differs only in which bucket it lands in.
-    const bucket =
-      entry.section === "certifications"
-        ? nextParsed.heuristic_certifications!
-        : nextParsed.heuristic_achievements!;
+    // shape (#884) and differs in which bucket it lands in and in carrying no
+    // label of its own (#899, below).
+    const certification = entry.section === "certifications";
+    const bucket = certification
+      ? nextParsed.heuristic_certifications!
+      : nextParsed.heuristic_achievements!;
     bucket.push({
-      type: entry.achievementType || undefined,
-      title: entry.title,
+      // A credential's label is folded into its title, exactly as
+      // `foldCertificationTypes` does on the PARSED side (#899) — the picker is
+      // gated off for certifications, so a label here can only come from an
+      // entry added before that gate existed. Left raw, one such entry drew a
+      // bold run in the PDF and failed the exporter's `every(c => !c.type)`
+      // compaction guard for the WHOLE section. The folded title is the same
+      // string `credentialTitle` composed for the PDF anyway, so the export text
+      // is unchanged and only the emphasis and the guard are. What this does NOT
+      // reach is the VIEW: `AchievementHeader` renders an added entry from its
+      // own `AddedEntry` fields, where the label stays unrendered (no picker) —
+      // closing that needs the stored entry migrated, not a fold here.
+      ...(certification
+        ? { title: joinAchievementType(entry.achievementType, entry.title) }
+        : { type: entry.achievementType || undefined, title: entry.title }),
       year: entry.year,
       description,
     });
@@ -1335,6 +1395,10 @@ export function applyOverrides(
   );
 
   applyEducationFieldOverrides(nextParsed.education, education);
+  // Retire a legacy certification `type` before ANY credential override lands,
+  // so an edit to the folded title replaces it rather than being re-prefixed
+  // (#899) — see the function's docblock for why this is the seam.
+  foldCertificationTypes(nextParsed);
   // Before the added-entry append below, so the override keys stay aligned with
   // the PARSED credential indices they were captured against.
   applyCredentialOverrides(nextParsed, "heuristic_achievements", achievements);

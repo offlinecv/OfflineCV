@@ -50,10 +50,16 @@ import {
 import {
   achievementYearJoiner,
   buildProjectDates,
+  joinAchievementType,
+  DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR,
 } from "../score/entry-dates.ts";
 import { isLoneDateRange } from "../heuristics/line-primitives.ts";
 import { isEntryHeaderShape } from "../heuristics/entry-blocks.ts";
 import { formatGradeNote } from "../heuristics/extract/education-grade.ts";
+import {
+  CREDENTIAL_LIST_SEPARATOR,
+  CREDENTIAL_SPLIT_RE,
+} from "../heuristics/extract/achievements.ts";
 import {
   buildEducationDates,
   educationDateAnchors,
@@ -213,9 +219,12 @@ export interface AtsEntry {
    * When `true`, `headerLine` must wrap with each `" · "`-delimited segment
    * kept atomic (never split mid-segment) — required for the skills list,
    * where a multi-word skill re-parses as two skills if the wrap point lands
-   * inside it (#301). Every other entry's middot is a display joiner only
-   * (e.g. "keyword · statement · year" achievement headers, #307) and must
-   * word-wrap normally, so this defaults to `false`/unset everywhere else.
+   * inside it (#301), and for the compact certifications line the renderer
+   * synthesizes from {@link AtsSection.compactLine} (#899), where a credential
+   * split across a wrap re-parses as two credentials. Every other entry's
+   * middot is a display joiner only (e.g. "keyword · statement · year"
+   * achievement headers, #307) and must word-wrap normally, so this defaults to
+   * `false`/unset everywhere else.
    */
   atomicSegments?: boolean;
   /**
@@ -250,6 +259,18 @@ export interface AtsSection {
   /** JSON-Resume mapping hint (#334); absent on sections not modeled by the
    *  export. Display code ignores it. */
   kind?: AtsSectionKind;
+  /**
+   * Draw the WHOLE section as this one wrapped line instead of one row per
+   * entry (#899) — the compact certifications list, its entries' headers joined
+   * by {@link CREDENTIAL_LIST_SEPARATOR}. Set only by the certifications block
+   * below, and only when compressing is safe (see there).
+   *
+   * LAYOUT ONLY. `entries` is untouched and stays the export-semantic source, so
+   * `projectAtsExport` — which never reads this field — still hands the
+   * JSON-Resume `certificates[]` and the Markdown export one entry per
+   * credential. Only `render-ats-pdf.ts` reads it, via `sectionDrawEntries`.
+   */
+  compactLine?: string;
 }
 
 export interface AtsResumeModel {
@@ -571,7 +592,59 @@ function groupExperienceEntriesByLabel(
  * what keeps "Patent · Foo" from exporting as bare "Foo".
  */
 function credentialTitle(item: HeuristicAchievement): string {
-  return [item.type?.trim(), item.title].filter(Boolean).join(" · ");
+  return joinAchievementType(item.type, item.title);
+}
+
+/**
+ * One credential's segment inside a COMPACT certifications line (#899):
+ * `"Title (Year)"`, or the source's own year punctuation when it wrote some that
+ * is not the middot.
+ *
+ * The middot is the LIST separator on that line, so a year set off by one would
+ * re-parse as a CREDENTIAL boundary — splitting one dated credential into a
+ * credential plus a stray date. Two sources hit that: a résumé that punctuated
+ * with whitespace alone (where `achievementYearJoiner`'s fallback IS the middot)
+ * and one that genuinely wrote a middot. Both parenthesise the year instead:
+ * `stripDateRange` already removes a paren pair left empty by the year it just
+ * deleted, so "CKA (2021)" re-parses to title "CKA" + year "2021" with nothing
+ * dangling. Every other source separator is re-emitted verbatim through
+ * `achievementYearJoiner`, keeping the #380 punctuation fidelity the
+ * one-row-per-credential header has. The `year_separator` of the two
+ * parenthesised cases does not survive the hop — there is no glyph left to read
+ * it back off — but the shape is idempotent from the first hop on, since the
+ * compact form is composed from `year`, not from the separator.
+ *
+ * The EDIT surface draws the SAME form (`AchievementYearSlot` in
+ * `ReconstructedResume.tsx`). It used to be exempt on the grounds that its
+ * credentials were structurally separate rows — true until #899 joined them onto
+ * one line with the same glyph, at which point the view was drawing a line the
+ * PDF does not and reintroducing the very ambiguity this function exists to
+ * remove. Where the credentials are NOT joined (a lone one, or a row of its
+ * own), both sides fall back to the source separator and #380's punctuation
+ * fidelity is untouched.
+ *
+ * The two surfaces do NOT share the condition, though, and can disagree about
+ * which credentials are joined at all. The view routes row by row
+ * (`joinsCompactLine`: this row has no bullets AND is a PARSED credential),
+ * while the section below compacts all-or-nothing (`certifications.every(…)`,
+ * which does not distinguish an added credential from a parsed one). So a
+ * user-ADDED credential draws on its own full-width row in the view and joins
+ * the compact line in the PDF, and one credential carrying a description keeps
+ * its own row in the view while switching compaction off for the whole section
+ * in the PDF. Both disagreements are cosmetic — the compact line round-trips
+ * either way — and unifying the predicates is a change of its own; this is here
+ * so the gap is known rather than rediscovered.
+ */
+function compactCredentialHeader(item: HeuristicAchievement): string {
+  const title = credentialTitle(item);
+  if (!item.year) return title;
+  // Degenerate (a user blanked the title): match what `joinHeader` does on the
+  // non-compact path and emit the year alone rather than inventing a shape.
+  if (!title) return item.year;
+  const separator = item.year_separator?.trim();
+  return separator && separator !== DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR
+    ? `${title}${achievementYearJoiner(separator)}${item.year}`
+    : `${title} (${item.year})`;
 }
 
 /**
@@ -581,13 +654,31 @@ function credentialTitle(item: HeuristicAchievement): string {
  * once here and each caller supplies only what genuinely differs: the bullet
  * body (pooled vs description-only, see the Certifications block) and the
  * structured `fields` its JSON Resume array wants.
+ *
+ * `compact` (#899) swaps the header for its {@link compactCredentialHeader}
+ * segment form — the entry is about to be joined onto one shared line rather
+ * than drawn as a row of its own, so it must carry no emphasis run and no
+ * middot the join would be mistaken for. `fields` is identical either way: the
+ * compaction is a layout decision and must not reach the JSON/Markdown exports.
  */
 function buildCredentialEntry(
   item: HeuristicAchievement,
   bullets: string[],
   fields: AtsEntryFields,
   fallbackHeader: string,
+  compact = false,
 ): AtsEntry {
+  if (compact) {
+    return {
+      headerLine: compactCredentialHeader(item) || fallbackHeader,
+      // Regular weight, like the skills list this line wraps exactly as (#425):
+      // a bold run per credential would read as N headers crowded onto one row.
+      headerBold: false,
+      subLine: undefined,
+      bullets,
+      fields,
+    };
+  }
   // Bold only the `type` label ("Patent", "Publication"); the rest of the header
   // stays regular. A type-less item keeps the whole header bold.
   const { headerLine, emphasized } = buildAchievementHeader(
@@ -806,6 +897,44 @@ export function buildAtsResumeModel(
   // nothing in `bulletsByIndex` to attribute to it. That is also why the
   // certification entries are absent from the `combined` grouping above — they
   // could only take a bullet AWAY from an achievement that legitimately owns it.
+  //
+  // COMPACT (#899). Credentials are short, and one vertical row each spends a
+  // disproportionate share of the page on them, so two or more compress onto a
+  // single wrapped middot-joined line (`compactLine` on the section below).
+  // Both guards are load-bearing, not conservatism:
+  //   - a credential carrying a BULLET body cannot be folded onto a shared line
+  //     at all — its bullets would either be lost or land under whichever
+  //     credential happened to be drawn last (`latex/awesome-cv-cv.pdf` is the
+  //     corpus case, and it keeps the per-row shape);
+  //   - a credential carrying a `type` LABEL draws with emphasis sentinels, and
+  //     the renderer picks the run-measuring path off the presence of one —
+  //     which does not wrap atomically, so the joined line could break inside a
+  //     credential and re-parse as two. Nothing upstream produces one any more:
+  //     extraction does not (`splitType: false`), the edit surface offers no
+  //     picker for a credential, and the legacy label a pre-#899 save left
+  //     behind is folded back into the title by `applyOverrides` before this
+  //     runs. The guard stays because the renderer's wrap path depends on it,
+  //     not because a live path still reaches it.
+  //   - a credential whose TITLE itself already contains
+  //     {@link CREDENTIAL_LIST_SEPARATOR} cannot be folded onto a shared line
+  //     either — the run-collapse in `achievements.ts` (`isDatedCredentialRow`)
+  //     legitimately produces a title like "Google Cloud Architect · Google"
+  //     for a dated multi-segment source row, and joining it onto a compact
+  //     line the same way would put an unescaped separator inside one
+  //     credential; the re-parser cannot tell that boundary apart from a
+  //     boundary BETWEEN credentials, and would fabricate a second, dated
+  //     entry named after the trailing segment. Excluded the same way as the
+  //     `type`/`description` cases: kept as its own per-row entry instead.
+  // A lone credential is left exactly as it was: nothing to join it to, and no
+  // separator on the line means the re-parser's compact split is a no-op.
+  const compactCertifications =
+    certifications.length >= 2 &&
+    certifications.every(
+      (c) =>
+        !c.type?.trim() &&
+        !c.description?.trim() &&
+        !CREDENTIAL_SPLIT_RE.test(c.title),
+    );
   const certificationEntries: AtsEntry[] = certifications.map((cert) =>
     buildCredentialEntry(
       cert,
@@ -818,6 +947,7 @@ export function buildAtsResumeModel(
         ...(cert.url ? { url: cert.url } : {}),
       },
       "Certification",
+      compactCertifications,
     ),
   );
 
@@ -1054,6 +1184,16 @@ export function buildAtsResumeModel(
           heading: headings?.get("certifications") ?? "Certifications",
           entries: certificationEntries,
           kind: "certifications",
+          // The compact line is COMPOSED from the very entries it replaces on
+          // the page (#899), so the two can never drift into disagreeing about
+          // the same credential — and the entries stay the export source.
+          ...(compactCertifications
+            ? {
+                compactLine: certificationEntries
+                  .map((e) => e.headerLine)
+                  .join(CREDENTIAL_LIST_SEPARATOR),
+              }
+            : {}),
         }
       : null;
   // The two credential blocks are emitted TOGETHER, at whichever slot
