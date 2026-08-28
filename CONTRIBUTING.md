@@ -70,6 +70,11 @@ on merge.
 CI must pass before merge — typecheck, tests, and build all run on
 every PR (see `.github/workflows/ci.yml`).
 
+What happens to the PR after that — what the single `verify` check
+covers, how findings are sorted, and the two rules that catch people out
+(one commit per PR, and a push dismissing an approval) — is
+[`docs/pr-review-process.md`](./docs/pr-review-process.md).
+
 ## Tests
 
 New logic ships with a `*.test.ts` next to the file it tests. Tests
