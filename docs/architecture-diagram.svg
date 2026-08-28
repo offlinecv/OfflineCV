@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1098 412" width="1098" height="412" role="img" aria-labelledby="t d">
+<title id="t">OfflineCV architecture at a glance</title>
+<desc id="d">The OfflineCV pipeline drawn inside a dashed box labelled "your browser tab": drop a résumé file, read it with pdf.js, parse it in tiers, score it, edit it, export an ATS-safe PDF. Local storage and job matching also sit inside the box. Three dashed arrows leave the box — a keyword string, a pasted job-description URL, and a product-analytics event — and a footnote names what else leaves, including the on-device model download.</desc>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8793A3"/></marker></defs>
+<rect x="0" y="0" width="1098" height="412" fill="#FFF8EA"/>
+<rect x="2" y="22" width="1094" height="270" rx="14" fill="#FFFFFF" fill-opacity="0.55" stroke="#00A6A6" stroke-width="2" stroke-dasharray="9 6"/>
+<rect x="24" y="13" width="196" height="18" fill="#FFF8EA"/>
+<text x="34" y="26" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#00A6A6" text-anchor="start" letter-spacing="1.4">YOUR BROWSER TAB</text>
+<rect x="27.0" y="48" width="5" height="96" rx="2.5" fill="#3157D5"/>
+<rect x="36.0" y="48" width="149" height="96" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="50.0" y="69" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#3157D5" text-anchor="start" letter-spacing="1.2">01</text>
+<text x="50.0" y="90" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#101A3A" text-anchor="start">Drop</text>
+<text x="50.0" y="108" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">PDF, DOCX or Markdown</text>
+<text x="50.0" y="121" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">from your own machine</text>
+<text x="50.0" y="137" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">components/DropZone</text>
+<path d="M 190.6 90.0 L 198.6 96.0 L 190.6 102.0" fill="none" stroke="#8793A3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="204.2" y="48" width="5" height="96" rx="2.5" fill="#3157D5"/>
+<rect x="213.2" y="48" width="149" height="96" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="227.2" y="69" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#3157D5" text-anchor="start" letter-spacing="1.2">02</text>
+<text x="227.2" y="90" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#101A3A" text-anchor="start">Read</text>
+<text x="227.2" y="108" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">Tier 0 — pdf.js text</text>
+<text x="227.2" y="121" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">+ layout probes</text>
+<text x="227.2" y="137" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">lib/heuristics</text>
+<path d="M 367.8 90.0 L 375.8 96.0 L 367.8 102.0" fill="none" stroke="#8793A3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="381.4" y="48" width="5" height="96" rx="2.5" fill="#3157D5"/>
+<rect x="390.4" y="48" width="149" height="96" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="404.4" y="69" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#3157D5" text-anchor="start" letter-spacing="1.2">03</text>
+<text x="404.4" y="90" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#101A3A" text-anchor="start">Parse</text>
+<text x="404.4" y="108" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">Tier 1 heuristics,</text>
+<text x="404.4" y="121" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">Tier 1.5 regex fill-in</text>
+<text x="404.4" y="137" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">lib/heuristics</text>
+<path d="M 545.0 90.0 L 553.0 96.0 L 545.0 102.0" fill="none" stroke="#8793A3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="558.5999999999999" y="48" width="5" height="96" rx="2.5" fill="#00A6A6"/>
+<rect x="567.5999999999999" y="48" width="149" height="96" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="581.5999999999999" y="69" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#00A6A6" text-anchor="start" letter-spacing="1.2">04</text>
+<text x="581.5999999999999" y="90" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#101A3A" text-anchor="start">Score</text>
+<text x="581.5999999999999" y="108" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">3 dimensions, then a</text>
+<text x="581.5999999999999" y="121" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">layout penalty</text>
+<text x="581.5999999999999" y="137" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">lib/score</text>
+<path d="M 722.1999999999999 90.0 L 730.1999999999999 96.0 L 722.1999999999999 102.0" fill="none" stroke="#8793A3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="735.8" y="48" width="5" height="96" rx="2.5" fill="#00A6A6"/>
+<rect x="744.8" y="48" width="149" height="96" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="758.8" y="69" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#00A6A6" text-anchor="start" letter-spacing="1.2">05</text>
+<text x="758.8" y="90" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#101A3A" text-anchor="start">Edit</text>
+<text x="758.8" y="108" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">inline fixes, plus</text>
+<text x="758.8" y="121" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">on-device AI rewrite</text>
+<text x="758.8" y="137" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">lib/edit · lib/webllm</text>
+<path d="M 899.4 90.0 L 907.4 96.0 L 899.4 102.0" fill="none" stroke="#8793A3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="913.0" y="48" width="5" height="96" rx="2.5" fill="#F5A623"/>
+<rect x="922.0" y="48" width="149" height="96" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="936.0" y="69" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#F5A623" text-anchor="start" letter-spacing="1.2">06</text>
+<text x="936.0" y="90" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#101A3A" text-anchor="start">Export</text>
+<text x="936.0" y="108" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">ATS-safe PDF,</text>
+<text x="936.0" y="121" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">Markdown, audit report</text>
+<text x="936.0" y="137" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">lib/pdf</text>
+<text x="27" y="162" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#8793A3" text-anchor="start" letter-spacing="1.3">ALSO INSIDE THE TAB</text>
+<rect x="27" y="172" width="5" height="64" rx="2.5" fill="#00A6A6"/>
+<rect x="36" y="172" width="504" height="64" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="50" y="196" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#101A3A" text-anchor="start">Saved on your device</text>
+<text x="50" y="213" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">Autosaves to an IndexedDB library on your first edit — never before.</text>
+<text x="50" y="228" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">lib/storage</text>
+<rect x="558" y="172" width="5" height="64" rx="2.5" fill="#F5A623"/>
+<rect x="567" y="172" width="504" height="64" rx="8" fill="#FFFFFF" stroke="#E6E1D6" stroke-width="1"/>
+<text x="581" y="196" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#101A3A" text-anchor="start">Match jobs — the /jobs/ lane</text>
+<text x="581" y="213" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#5F6B7A" text-anchor="start">Ranks live postings against the résumé you just parsed; save and track them.</text>
+<text x="581" y="228" font-family="'Aptos Mono', 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">lib/job-search · lib/jd-match</text>
+<text x="27" y="262" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="13" font-weight="700" fill="#00A6A6" text-anchor="start">Your résumé bytes and your résumé text never leave this box.</text>
+<text x="1071" y="312" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="700" fill="#8793A3" text-anchor="end" letter-spacing="1.3">WHAT DOES LEAVE</text>
+<path d="M 35 292 V 322" fill="none" stroke="#8793A3" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#ah)" opacity="0.85"/>
+<text x="27" y="344" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#101A3A" text-anchor="start">A keyword string</text>
+<text x="27" y="360" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="400" fill="#5F6B7A" text-anchor="start">Your job title and skills reach the job</text>
+<text x="27" y="373" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="400" fill="#5F6B7A" text-anchor="start">feeds. Never your résumé text.</text>
+<path d="M 387 292 V 322" fill="none" stroke="#8793A3" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#ah)" opacity="0.85"/>
+<text x="379" y="344" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#101A3A" text-anchor="start">A job-description URL</text>
+<text x="379" y="360" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="400" fill="#5F6B7A" text-anchor="start">Only when you paste one — it fetches that</text>
+<text x="379" y="373" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="400" fill="#5F6B7A" text-anchor="start">public posting page, nothing else.</text>
+<path d="M 739 292 V 322" fill="none" stroke="#8793A3" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#ah)" opacity="0.85"/>
+<text x="731" y="344" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="11.5" font-weight="700" fill="#101A3A" text-anchor="start">A product-analytics event</text>
+<text x="731" y="360" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="400" fill="#5F6B7A" text-anchor="start">Hosted build only. The open-source build</text>
+<text x="731" y="373" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="10" font-weight="400" fill="#5F6B7A" text-anchor="start">you clone ships none.</text>
+<text x="27" y="398" font-family="Aptos, 'Segoe UI', Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif" font-size="9.5" font-weight="400" fill="#8793A3" text-anchor="start">Also leaving the tab: the on-device model download (1.6–2.3 GB) and the company job boards. The GitHub star count is third-party; the version check is same-origin. Any third-party call reveals your IP — full list in docs/architecture.md.</text>
+</svg>

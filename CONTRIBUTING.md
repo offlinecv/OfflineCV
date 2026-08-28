@@ -4,7 +4,9 @@ Thanks for picking up a piece of this. offlinecv is a browser-side PDF
 parser audit and job-search workbench. Code lives under `src/`, license is
 [Apache-2.0](./LICENSE) (patent grant included; see `NOTICE`). See
 [`README.md`](./README.md) for what offlinecv is and what it surfaces;
-see [`CLAUDE.md`](./CLAUDE.md) for the pipeline shape and tier layout; and see
+see [`docs/architecture.md`](./docs/architecture.md) for a one-page map of the
+pipeline and where each piece lives (and [`CLAUDE.md`](./CLAUDE.md) for the same
+ground in more depth); and see
 [`docs/CONTRIBUTING-PROCESS.md`](./docs/CONTRIBUTING-PROCESS.md) for the shipping
 process this file summarizes — the **test-fixture PII policy** (mandatory before
 you add any PDF), AI attribution, squash messages, and deploy.
