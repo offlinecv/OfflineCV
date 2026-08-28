@@ -10,8 +10,13 @@
  * provides that path inside the Find Jobs surface: same `<JdInput>` (paste +
  * URL fetch), same `computeCoverage` three-liner, same `<JdMatch>` renderer,
  * same "Tailor résumé to this job" button feeding the same `onTailor` a
- * `JobResultCard` uses — so the paste lane and the discover lane can never
- * disagree about what steers a rewrite.
+ * `JobResultCard` uses.
+ *
+ * The two lanes do NOT carry the same steering, and since #867 they cannot:
+ * this panel prefers semantic verdicts whenever a semantic result is on
+ * screen, while `JobResultCard` is keyword-only by construction
+ * (`RankedJob.jdMatch` is typed `KeywordJdMatch`, `job-search/rank.ts`). The
+ * shared piece is the button and the `onTailor` contract, not the payload.
  *
  * Collapsed by default so it does not compete with the primary discovery
  * flow — the ranked posting list is what a user arrives here for; pasting a
@@ -45,7 +50,10 @@ import { Button } from "@design-system";
 import { JdInput } from "./JdInput.tsx";
 import { JdMatch } from "./JdMatch.tsx";
 import { SemanticAnalysisOptIn } from "./SemanticAnalysisOptIn.tsx";
-import { buildJdRewriteContext } from "../../lib/jd-match/rewrite-context.ts";
+import {
+  buildJdRewriteContext,
+  buildJdRewriteContextFromVerdicts,
+} from "../../lib/jd-match/rewrite-context.ts";
 import { useJdMatch } from "../../hooks/useJdMatch.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 
@@ -101,16 +109,14 @@ export function PasteJdPanel({ parsed, onTailor }: PasteJdPanelProps) {
   // why the button's visibility must be derived from the built instruction
   // and not from `missing.length`.
   //
-  // Built from the KEYWORD coverage regardless of which view is on screen:
-  // `buildJdRewriteContext` consumes a `CoverageResult`, which only the
-  // keyword arm carries, and the steering a rewrite gets must not silently
-  // change shape when a user ticks a checkbox. Wiring the semantic verdicts
-  // into rewrite steering is its own piece of work, not a side effect of the
-  // verdict UI.
-  const jdContext = useMemo(
-    () => (jdMatch === null ? null : buildJdRewriteContext(jdMatch.coverage)),
-    [jdMatch],
-  );
+  // Built from semantic verdicts when a semantic result is displayed (#867),
+  // falling back to keyword coverage otherwise.
+  const jdContext = useMemo(() => {
+    if (semanticResult !== null) {
+      return buildJdRewriteContextFromVerdicts(semanticResult.verdicts);
+    }
+    return jdMatch === null ? null : buildJdRewriteContext(jdMatch.coverage);
+  }, [semanticResult, jdMatch]);
 
   return (
     <section

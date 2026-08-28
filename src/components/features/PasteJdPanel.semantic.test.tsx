@@ -77,6 +77,7 @@ vi.mock("../../lib/jd-match/llm/run-llm-match.ts", () => ({
 
 import { PasteJdPanel } from "./PasteJdPanel.tsx";
 import { extractJdTerms, computeCoverage } from "../../lib/jd-match";
+import { buildJdRewriteContextFromVerdicts } from "../../lib/jd-match/rewrite-context.ts";
 import type { JdMatchResult } from "../../lib/jd-match";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { RequirementVerdict } from "../../lib/jd-match/llm/judge-evidence.ts";
@@ -143,11 +144,27 @@ function keywordResult(jdText: string): JdMatchResult {
 let container: HTMLDivElement;
 let root: Root;
 
-function mount(strict = false): void {
+/** Options `mount` accepts. All optional, so the 22 bare `mount()` calls that
+ *  predate the tailor-steering tests keep working unchanged. `parsed` and
+ *  `onTailor` exist because those tests need a résumé whose keyword coverage
+ *  is 100% and a spy they can assert the handoff payload on — without them a
+ *  test has to hand-roll this whole helper, which is what #867 originally did
+ *  three times over. */
+interface MountOptions {
+  strict?: boolean;
+  parsed?: HeuristicParsedResume;
+  onTailor?: (jdContext: string) => void;
+}
+
+function mount({
+  strict = false,
+  parsed = SPARSE_RESUME,
+  onTailor = vi.fn(),
+}: MountOptions = {}): void {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  const tree = <PasteJdPanel parsed={SPARSE_RESUME} onTailor={vi.fn()} />;
+  const tree = <PasteJdPanel parsed={parsed} onTailor={onTailor} />;
   act(() => {
     root.render(strict ? <StrictMode>{tree}</StrictMode> : tree);
   });
@@ -213,6 +230,13 @@ function showsKeywordColumns(): boolean {
 
 function showsSemanticVerdicts(): boolean {
   return /Met \(\d+\)/.test(text());
+}
+
+/** The tailor handoff trigger, absent when there is nothing to steer with. */
+function tailorButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll("button")].find((b) =>
+    b.textContent?.includes("Tailor résumé to this job"),
+  ) as HTMLButtonElement | undefined;
 }
 
 function progressBar(): HTMLElement | null {
@@ -543,7 +567,7 @@ describe("PasteJdPanel — cancellation and races", () => {
   });
 
   it("StrictMode's double-invoke does not kill the live run", async () => {
-    mount(true);
+    mount({ strict: true });
     await setJd(JD_A);
     await toggleOptIn();
     await settle();
@@ -598,39 +622,98 @@ describe("PasteJdPanel — semantic fallback", () => {
   });
 });
 
-// ── The tailor handoff must be untouched by any of this ────────────────────
+// ── The tailor handoff derives from semantic verdicts when displayed (#867) ──
 
-describe("PasteJdPanel — tailor steering is unchanged by the opt-in", () => {
-  it("hands over the same keyword-derived steering on both paths", async () => {
+describe("PasteJdPanel — tailor steering with semantic opt-in (#867)", () => {
+  it("hands over semantic-derived steering when semantic verdicts are on screen", async () => {
     const onTailor = vi.fn();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    act(() => {
-      root.render(<PasteJdPanel parsed={SPARSE_RESUME} onTailor={onTailor} />);
-    });
-    act(() => discloseButton().click());
+    mount({ onTailor });
     await setJd(JD_A);
 
-    const tailor = () =>
-      [...container.querySelectorAll("button")].find((b) =>
-        b.textContent?.includes("Tailor résumé to this job"),
-      ) as HTMLButtonElement | undefined;
-
-    expect(tailor()).toBeTruthy();
-    act(() => tailor()?.click());
+    expect(tailorButton()).toBeTruthy();
+    act(() => tailorButton()?.click());
     const keywordSteering = onTailor.mock.calls[0][0] as string;
+    expect(keywordSteering).toContain("Kubernetes");
 
-    // Same button, same payload, after a semantic verdict has replaced the
-    // columns — the rewrite steering is built from coverage, so ticking a
-    // checkbox must not change what a rewrite is told to do.
+    // Once a semantic verdict has replaced the columns, the rewrite steering
+    // is built from the semantic verdicts (#867).
     await toggleOptIn();
-    act(() => runs[0].resolve(semanticResult()));
+    const sem = semanticResult();
+    act(() => runs[0].resolve(sem));
     await settle();
     expect(showsSemanticVerdicts()).toBe(true);
 
-    act(() => tailor()?.click());
+    act(() => tailorButton()?.click());
     expect(onTailor).toHaveBeenCalledTimes(2);
-    expect(onTailor.mock.calls[1][0]).toBe(keywordSteering);
+    const expectedSemanticSteering = buildJdRewriteContextFromVerdicts(
+      sem.path === "semantic" ? sem.verdicts : [],
+    );
+    expect(expectedSemanticSteering).toBeTruthy();
+    expect(onTailor.mock.calls[1][0]).toBe(expectedSemanticSteering);
+    expect(onTailor.mock.calls[1][0]).toContain("Five years of Go");
+    expect(onTailor.mock.calls[1][0]).not.toContain("Run Kubernetes");
+  });
+
+  it("renders the Tailor button for semantic missing requirements even when keyword coverage was 100%", async () => {
+    const onTailor = vi.fn();
+    const coveringResume: HeuristicParsedResume = {
+      skills: ["Kubernetes", "Terraform", "Go"],
+      experience: [
+        {
+          title: "Platform Engineer",
+          company: "Acme",
+          description:
+            "Ran production infrastructure with Kubernetes, Terraform, and Go",
+        },
+      ],
+      education: [],
+    } as unknown as HeuristicParsedResume;
+
+    mount({ parsed: coveringResume, onTailor });
+    await setJd(JD_A);
+
+    // Keyword coverage is 100% covered -> no tailor button initially
+    expect(tailorButton()).toBeUndefined();
+
+    // Opt into semantic analysis -> returns missing requirement "Five years of Go"
+    await toggleOptIn();
+    const sem = semanticResult();
+    act(() => runs[0].resolve(sem));
+    await settle();
+    expect(showsSemanticVerdicts()).toBe(true);
+
+    // Now Tailor button appears based on semantic gaps!
+    expect(tailorButton()).toBeTruthy();
+    act(() => tailorButton()?.click());
+    expect(onTailor).toHaveBeenCalledTimes(1);
+    const steering = onTailor.mock.calls[0][0] as string;
+    expect(steering).toContain("Five years of Go");
+    expect(steering).not.toContain("Run Kubernetes");
+  });
+
+  it("hides the Tailor button when all semantic verdicts are met", async () => {
+    mount();
+    await setJd(JD_A);
+
+    expect(tailorButton()).toBeTruthy();
+
+    await toggleOptIn();
+    const allMetResult: JdMatchResult = {
+      path: "semantic",
+      verdicts: [
+        {
+          requirement: { id: "r1", kind: "skill", text: "React" },
+          status: "met",
+          reason: "Has React experience.",
+        },
+      ],
+      summary: { met: 1, partial: 0, missing: 0, total: 1 },
+    };
+    act(() => runs[0].resolve(allMetResult));
+    await settle();
+    expect(showsSemanticVerdicts()).toBe(true);
+
+    // All semantic requirements are met -> button is hidden
+    expect(tailorButton()).toBeUndefined();
   });
 });

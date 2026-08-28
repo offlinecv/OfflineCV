@@ -9,9 +9,12 @@
  * paste-a-JD disclosure below the results — is not on the same page as the
  * rewrite engine (which lives on `/` inside `ReconstructedResume` → the
  * whole-résumé rewrite hook). This module lets `/jobs/` stash the JD-driven
- * rewrite instruction (`buildJdRewriteContext`'s output) in sessionStorage,
- * navigate back to `/`, and have `useTailorHandoff` consume it: set
- * `jdContext` and switch to the Reconstructed tab.
+ * rewrite instruction in sessionStorage, navigate back to `/`, and have
+ * `useTailorHandoff` consume it: set `jdContext` and switch to the
+ * Reconstructed tab. The instruction comes from `rewrite-context.ts`, which
+ * has TWO builders since #867 — `buildJdRewriteContext` (keyword coverage)
+ * and `buildJdRewriteContextFromVerdicts` (semantic verdicts) — so this
+ * module must not assume which one produced the payload it carries.
  *
  * Consumed ONCE — a manual reload of `/` falls back to the plain rewrite
  * prompt rather than silently keeping steering toward a JD from a different
@@ -40,7 +43,8 @@ export const TAILOR_HANDOFF_KEY = "ocv_tailor_handoff";
 
 export interface TailorHandoff {
   /** The steering instruction the rewrite engine folds into
-   *  `RewriteSteering.userInstructions` — see `buildJdRewriteContext`. */
+   *  `RewriteSteering.userInstructions` — see `rewrite-context.ts`, whose two
+   *  builders (keyword coverage / semantic verdicts) both produce this. */
   jdContext: string;
   /** `fingerprintParse` of the résumé the JD coverage was computed against.
    *  The consumer compares it against its OWN parse and discards on a
