@@ -18,8 +18,10 @@ encoding doesn't decode to characters. For that last case the parser falls
 back to the PDF's embedded link annotations as recovered signal, so a
 candidate can still see what survived.
 
-New contributors: see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for setup,
-branch + commit conventions, and the PR checklist.
+New contributors: see [`docs/architecture.md`](./docs/architecture.md) for a
+one-page map of the pipeline and which folder each piece lives in, and
+[`CONTRIBUTING.md`](./CONTRIBUTING.md) for setup, branch + commit conventions,
+and the PR checklist.
 
 ## Quick start
 
@@ -215,7 +217,7 @@ and the rest of the UI is unaffected. Because the request originates in your
 browser, **your IP address is seen by GitHub** (a US third party) as a result
 of loading the app.
 
-### Job-search feeds (Find jobs tab)
+### Job-search feeds
 
 The **Find jobs** tab can fetch a sample of live postings from free, keyless,
 CORS-open job feeds and rank them against your parsed résumé. These requests
