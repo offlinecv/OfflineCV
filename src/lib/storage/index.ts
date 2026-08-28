@@ -75,10 +75,21 @@ export {
   clearLetterResumeLink,
 } from "./letters.ts";
 // `lettersForCompany`, `standardLetters` (`letters.ts`) and `deriveCompanyKey`
-// (`company-key.ts`) are deliberately NOT re-exported here yet (#766). Nothing
-// in this build reads a company or standard letter — the surfaces that will are
-// the sibling UI issue — and a barrel entry with no importer is dead surface
-// fallow flags as such. Add them here in the change that adds the first caller.
+// (`company-key.ts`) are still deliberately NOT re-exported here (#766, #767).
+// #766 predicted the UI issue would add them; #767 landed and did not, which is
+// worth recording rather than quietly leaving the note stale:
+//
+//  - The two readers have no caller at all. `useJobLetters` reads the whole
+//    store once and groups in memory, so every surface asks the hook rather
+//    than the store — the same trade `lettersForJob`'s own docblock makes.
+//  - `deriveCompanyKey` DOES have one now (`lib/letters/resolve-letter.ts`),
+//    which reaches `./company-key.ts` directly. That leaf is pure and
+//    zero-dep; routing it through this barrel would pull `backup.ts` +
+//    `resumes.ts` into the letters chunk for one string function, which is the
+//    standing exception the docblock above already grants `board-cache.ts`.
+//
+// A barrel entry with no importer is dead surface fallow flags as such, so add
+// each here only when something actually imports it from here.
 export {
   requestStoragePersistence,
   isStoragePersisted,

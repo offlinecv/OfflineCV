@@ -28,6 +28,31 @@
  * letter exists and shows nothing is worse than no row. Whitespace-only counts
  * as empty for the same reason.
  *
+ * ## Three scopes, one editor (#767)
+ *
+ * Since #766 a letter is scoped to a job, to a company, or to nothing at all,
+ * and this dialog authors all three — `jobId` and `companyKey` are both
+ * optional, and passing neither composes the standard letter. Extended rather
+ * than joined by a sibling editor, per #767's reuse analysis: they are the same
+ * act on the same record type, and a second editor would be a parallel surface
+ * to keep in step for no gain. Passing BOTH is a caller bug the contract would
+ * refuse at the store, so the prop docs say so and `save` sends only what it
+ * was given.
+ *
+ * ## Start-from is a COPY, and says so
+ *
+ * The picker seeds `body` from an existing letter and carries **no `id`**, so
+ * saving writes a NEW record. That is the whole model: a live link would mean
+ * editing job B's letter rewrote the standard letter already submitted for job
+ * A, and for prose there is no merge that makes that safe (#765 — it is why
+ * letters ship before résumés). A seeded editor therefore states the copy
+ * plainly at the moment of copying; "Starting from your Northwind letter" on
+ * its own reads as a link.
+ *
+ * It never seeds automatically. An unpicked editor opens empty even when there
+ * is something to start from, because pre-filling would put words the user did
+ * not choose into a letter addressed to an employer.
+ *
  * Reuse analysis: this ADDS a workflow surface (it creates and edits a
  * `LetterRecord`), so the gate applies. Searched the tree for an existing one:
  * `useJobLetters`' own docblock records that "#715 explicitly excludes in-app
@@ -43,34 +68,97 @@ import { Button, Dialog, TextAreaField } from "@design-system";
 import { saveLetter } from "../../lib/storage/index.ts";
 import type { LetterRecord } from "../../lib/storage/index.ts";
 
+/** One offer in the "Start from…" picker (#767) — a letter to copy the body
+ *  from, and what to call it on screen. The caller builds the label because it
+ *  is the side that knows the company's display name; this dialog only needs
+ *  something to print. */
+export interface LetterStartingPoint {
+  letter: LetterRecord;
+  /** User-facing, e.g. "Your standard letter" / "Your Northwind letter". */
+  label: string;
+}
+
 interface LetterEditorDialogProps {
   open: boolean;
   onClose: () => void;
-  /** The job this letter belongs to. Required even when editing: this dialog
-   *  only ever composes a JOB letter, and one that named no job would be
-   *  unreachable from the only surface that opens it. Since #766 the store
-   *  itself allows a company-scoped or standard letter — neither has an editor
-   *  yet, and giving them one is the sibling issue to #766, not this prop. */
-  jobId: string;
+  /** The job this letter is for. Absent composes a company or standard letter
+   *  instead — see `companyKey`. Exactly one of the two, or neither: a record
+   *  carrying both is refused by `validateLetterRecord`, so passing both here
+   *  is a caller bug that surfaces as a failed save. */
+  jobId?: string;
+  /** The company this letter is for, ALREADY normalised through
+   *  `deriveCompanyKey` (#766). Absent alongside an absent `jobId` composes the
+   *  standard letter, which is the scope with no key at all. Raw free text
+   *  here would store a key nothing can look up. */
+  companyKey?: string;
   /** The letter being revised. Omitted = compose a new draft. */
   letter?: LetterRecord;
+  /** Letters this draft may be started FROM (#767). Rendered as a picker only
+   *  while composing, and only when non-empty; picking copies the body into
+   *  the editor and nothing else. Never seeds on its own — see the docblock. */
+  startFrom?: readonly LetterStartingPoint[];
+  /** A starting point the CALLER already chose, seeded on open. This is not a
+   *  loophole in "never seeds automatically": the pick happened, it just
+   *  happened one dialog earlier — "Customize for this job" in the reveal is
+   *  the user selecting this letter. Absent for an editor opened to compose
+   *  from scratch, which still opens empty however many offers `startFrom`
+   *  carries. */
+  seed?: LetterStartingPoint;
   /** Called after a successful write, so the caller can re-read the store.
    *  Awaited before the dialog closes — closing first would race the refresh
    *  and flash the pre-save state. */
   onSaved: () => Promise<void> | void;
 }
 
+/** Dialog title per scope. A table rather than a nested ternary in the JSX
+ *  because there are six cases and the standard/company wording is the only
+ *  thing that tells the user which letter they are about to write — a wrong
+ *  title here means editing the standard letter thinking it is this job's. */
+const TITLES = {
+  job: { compose: "Write a cover letter", edit: "Edit cover letter" },
+  company: { compose: "Write a company letter", edit: "Edit company letter" },
+  standard: { compose: "Write your standard letter", edit: "Edit your standard letter" },
+} as const;
+
+/** Where the letter lands, per scope — the first half of the storage line.
+ *  "with your other letters for this job" is false for the other two scopes,
+ *  and a letter the user thinks is job-specific is the one failure this whole
+ *  surface is arranged to prevent. */
+const STORAGE_LINE = {
+  job: "Saved on this device, with your other letters for this job.",
+  company: "Saved on this device as your letter for this company — offered as a starting point for any job there.",
+  standard: "Saved on this device as your standard letter — offered as a starting point for any job.",
+} as const;
+
+/** What this dialog is composing, for the title and the storage line. Derived
+ *  from which scope key it was handed, so the copy can never disagree with the
+ *  record that gets written. */
+function scopeOf(
+  jobId: string | undefined,
+  companyKey: string | undefined,
+): "job" | "company" | "standard" {
+  if (jobId !== undefined) return "job";
+  return companyKey !== undefined ? "company" : "standard";
+}
+
 export function LetterEditorDialog({
   open,
   onClose,
   jobId,
+  companyKey,
   letter,
+  startFrom = [],
+  seed,
   onSaved,
 }: LetterEditorDialogProps) {
   const [body, setBody] = useState(letter?.body ?? "");
   const [label, setLabel] = useState(letter?.label ?? "");
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
+  // The label of the letter this draft was seeded from, or undefined for one
+  // typed from scratch. Display only — it names the source in the copy notice
+  // and is deliberately NOT stored, because the record has no link to it.
+  const [seededFrom, setSeededFrom] = useState<string | undefined>(undefined);
 
   // Reseed from the record every time the dialog opens. Without this, closing
   // a half-typed draft and reopening it — or opening a DIFFERENT letter from
@@ -79,13 +167,39 @@ export function LetterEditorDialog({
   // `open`, for that second case.
   useEffect(() => {
     if (open) {
-      setBody(letter?.body ?? "");
+      // Revising wins over seeding: an existing letter's own body is never
+      // replaced by a starting point, whatever the caller passed.
+      setBody(letter?.body ?? seed?.letter.body ?? "");
       setLabel(letter?.label ?? "");
       setFailed(false);
+      // Re-derived on every open rather than merely cleared, so a pick made in
+      // a previous session of this dialog cannot leave the copy notice claiming
+      // a source this draft wasn't started from.
+      setSeededFrom(letter === undefined ? seed?.label : undefined);
     }
-  }, [open, letter]);
+    // Deps hand-audited (`exhaustive-deps` is NOT enforced here — CLAUDE.md):
+    // `seed` joins `open` and `letter` because reopening the same dialog with a
+    // DIFFERENT starting point must reseed — the reveal can hand this a company
+    // letter on one row and the standard letter on the next without unmounting.
+  }, [open, letter, seed]);
 
+  const scope = scopeOf(jobId, companyKey);
   const isBlank = body.trim().length === 0;
+  // Composing only, and only until a starting point has been taken.
+  //
+  // Revising an existing letter has nothing to start FROM — it already has a
+  // body. And once a seed IS in place, the picker retires rather than staying
+  // available: `startFromLetter` replaces the whole body unconditionally, a
+  // controlled `<textarea>` has no undo across a re-render, so a mis-click on a
+  // still-present chip after writing five hundred words would discard them with
+  // no recovery. Retiring it costs the ability to swap starting points — there
+  // is only ever one offer today — and buys back the typed draft.
+  const offers = letter === undefined && seededFrom === undefined ? startFrom : [];
+
+  function startFromLetter(option: LetterStartingPoint) {
+    setBody(option.letter.body);
+    setSeededFrom(option.label);
+  }
 
   async function save() {
     if (isBlank || saving) return;
@@ -93,8 +207,16 @@ export function LetterEditorDialog({
     setFailed(false);
     try {
       await saveLetter({
+        // No `id` when composing — including on a draft seeded from another
+        // letter. That absence is what makes start-from a copy: `saveLetter`
+        // upserts, so carrying the source's id would OVERWRITE the source.
         ...(letter?.id ? { id: letter.id } : {}),
-        jobId,
+        // Only the key this scope owns. Sending `jobId: undefined` explicitly
+        // would be harmless today (`checkDeclaredFields` reads an explicit
+        // `undefined` as absent), but spreading only what exists keeps the
+        // written record the exact shape the scope claims.
+        ...(jobId !== undefined ? { jobId } : {}),
+        ...(companyKey !== undefined ? { companyKey } : {}),
         body,
         // A blank label is stored as absent, not as `""`: the reveal falls back
         // to "Cover letter" on a missing label, and an empty string would make
@@ -117,10 +239,47 @@ export function LetterEditorDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title={letter ? "Edit cover letter" : "Write a cover letter"}
+      title={TITLES[scope][letter ? "edit" : "compose"]}
       className="w-[min(36rem,90vw)]"
     >
       <div className="flex flex-col gap-3">
+        {offers.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <span className="text-2xs text-content-tertiary">
+              Start from… (optional)
+            </span>
+            <div
+              className="flex flex-wrap items-center gap-1"
+              role="group"
+              aria-label="Start from an existing letter"
+            >
+              {offers.map((option) => (
+                <Button
+                  key={option.letter.id}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => startFromLetter(option)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {seededFrom !== undefined && (
+          // The copy said plainly, once, at the moment of copying (#767). The
+          // second sentence is the load-bearing half: without it "Started from
+          // your standard letter" reads as a live link, and the user would
+          // expect an edit here to follow the source — or worse, expect the
+          // source to be safe from an edit here.
+          <p role="status" className="text-2xs leading-relaxed text-content-secondary">
+            Started from {seededFrom}. This is a <strong>copy</strong> — saving
+            writes a new letter, and editing it later leaves {seededFrom} exactly
+            as it is.
+          </p>
+        )}
+
         <label className="flex flex-col gap-1">
           <span className="text-2xs text-content-tertiary">
             Draft name (optional)
@@ -150,8 +309,8 @@ export function LetterEditorDialog({
         />
 
         <p className="text-2xs leading-relaxed text-content-tertiary">
-          Saved on this device, with your other letters for this job. offlinecv
-          does not write it for you and sends nothing anywhere.
+          {STORAGE_LINE[scope]} offlinecv does not write it for you and sends
+          nothing anywhere.
         </p>
 
         <div className="flex items-center justify-end gap-2">

@@ -49,6 +49,13 @@ export interface JobLetters {
    *  list because there is no key to group by — that is what makes them
    *  standard. */
   standard: readonly LetterRecord[];
+  /** Every live letter, flat and unsorted (#767) — what `resolveLetterForJob`
+   *  takes. The three views above answer "what is in this scope"; the chain
+   *  asks the opposite question, "which scope does this job reach", and running
+   *  it against three maps would mean re-deriving the rung order at every call
+   *  site. Same array the grouping above was built from, so exposing it costs
+   *  one field and no extra store read. */
+  all: readonly LetterRecord[];
   refresh: () => Promise<void>;
 }
 
@@ -108,6 +115,7 @@ export function useJobLetters(): JobLetters {
     () => new Map(),
   );
   const [standard, setStandard] = useState<readonly LetterRecord[]>(() => []);
+  const [all, setAll] = useState<readonly LetterRecord[]>(() => []);
 
   // `isStale` lets ONE code path serve both callers: the mount effect passes an
   // unmount guard, an imperative caller passes nothing. It is deliberately
@@ -115,11 +123,13 @@ export function useJobLetters(): JobLetters {
   // parameter is invisible to consumers, and inventing a second copy of the
   // load just to hold the guard is how the two would drift.
   const refresh = useCallback(async (isStale: () => boolean = () => false) => {
-    const grouped = groupByScope(await getAllLetters());
+    const letters = await getAllLetters();
+    const grouped = groupByScope(letters);
     if (isStale()) return;
     setByJobId(grouped.byJobId);
     setByCompanyKey(grouped.byCompanyKey);
     setStandard(grouped.standard);
+    setAll(letters);
     setReady(true);
   }, []);
 
@@ -137,5 +147,5 @@ export function useJobLetters(): JobLetters {
     // `[]`, so this runs once per mount. Nothing else is captured.
   }, [refresh]);
 
-  return { ready, byJobId, byCompanyKey, standard, refresh };
+  return { ready, byJobId, byCompanyKey, standard, all, refresh };
 }
