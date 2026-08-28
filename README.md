@@ -19,9 +19,13 @@ back to the PDF's embedded link annotations as recovered signal, so a
 candidate can still see what survived.
 
 New contributors: see [`docs/architecture.md`](./docs/architecture.md) for a
-one-page map of the pipeline and which folder each piece lives in, and
+one-page map of the pipeline and which folder each piece lives in,
 [`CONTRIBUTING.md`](./CONTRIBUTING.md) for setup, branch + commit conventions,
-and the PR checklist.
+and the PR checklist, and
+[`docs/pr-review-process.md`](./docs/pr-review-process.md) for what happens to a
+PR after you open it. [`docs/ai-usage.md`](./docs/ai-usage.md) separates the
+three places AI appears here — in the product, in how the code gets written, and
+in the repo's automation.
 
 ## Quick start
 
@@ -87,6 +91,9 @@ Chromium rides the Vulkan backend — if `chrome://gpu` shows `Vulkan: Disabled`
 `unsupported-os` guidance. Enable it via `chrome://flags/#enable-vulkan` →
 Enabled → relaunch. (The hosted site is HTTPS, so real users only hit the
 adapter question, never the secure-context one.)
+
+Which surfaces use a model, which models are offered, and what a model download
+puts on the network: [`docs/ai-usage.md`](./docs/ai-usage.md).
 
 ## Debugging the parser
 

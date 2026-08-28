@@ -118,6 +118,9 @@ README covers several of them in more detail:
    colour-token rules, so running it here rather than at push time is what
    saves you a surprise. `npm run verify` is the full pre-push gate and runs
    automatically on `git push`.
+4. Open the PR. [How a change gets reviewed and
+   merged](./pr-review-process.md) covers what the `verify` check runs, how
+   review findings are sorted, and why the branch has to arrive as one commit.
 
 `CLAUDE.md` carries the same pipeline in more depth, alongside the rules for
 writing code in this repo. Read it when this page runs out.
