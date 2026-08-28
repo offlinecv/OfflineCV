@@ -98,6 +98,13 @@ interface ExportDialogProps {
    * every row can fail into an inline error without the dialog closing.
    */
   onExported?: () => void;
+  /**
+   * Fired only when the résumé itself — PDF or Markdown — downloads, never
+   * the audit report (#900). Feeds `FeedbackDialog`'s automatic milestone
+   * trigger, which cares about "you got your résumé" rather than every
+   * artifact this dialog can produce.
+   */
+  onResumeExported?: () => void;
 }
 
 export function ExportDialog({
@@ -107,6 +114,7 @@ export function ExportDialog({
   score,
   contactOverrides,
   onExported,
+  onResumeExported,
 }: ExportDialogProps) {
   const [body, setBody] = useState<"formats" | "gate">("formats");
   // Focus for the half of the swap `ExportGateBody` cannot own. It focuses
@@ -125,8 +133,17 @@ export function ExportDialog({
   const [includeIdentity, setIncludeIdentity] = useState(false);
   const formatName = useId();
 
-  const pdf = useDownloadPdf(result, score, onExported);
-  const markdown = useDownloadMarkdown(result, score, onExported);
+  // pdf/markdown fire BOTH callbacks — the shared Download-stage mark (#826)
+  // and the résumé-only feedback milestone (#900). `report` fires only the
+  // former: an audit report is not "you got your résumé".
+  const pdf = useDownloadPdf(result, score, () => {
+    onExported?.();
+    onResumeExported?.();
+  });
+  const markdown = useDownloadMarkdown(result, score, () => {
+    onExported?.();
+    onResumeExported?.();
+  });
   const report = useDownloadReport(result, score, onExported);
 
   // Re-derived every render, so the checklist reflects the edit the user just

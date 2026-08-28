@@ -55,6 +55,11 @@ interface ParsedHeaderProps {
   /** Save it now. Only offered while `saveState` is `"none"` — once a record
    *  exists the autosave keeps it current and the badge carries the state. */
   onSave: () => void;
+  /**
+   * Opens `FeedbackDialog` on demand (#900) — the ambient trigger, always
+   * available regardless of the automatic milestone one.
+   */
+  onOpenFeedback?: () => void;
 }
 
 export function ParsedHeader({
@@ -66,6 +71,7 @@ export function ParsedHeader({
   onReset,
   saveState,
   onSave,
+  onOpenFeedback,
 }: ParsedHeaderProps) {
   const save = saveBadge(saveState);
   return (
@@ -90,6 +96,11 @@ export function ParsedHeader({
         </span>
       </div>
       <div className="flex items-center gap-3">
+        {onOpenFeedback && (
+          <Button variant="link" onClick={onOpenFeedback}>
+            <span aria-hidden="true">★</span> Feedback
+          </Button>
+        )}
         {saveState === "none" && (
           <Button variant="link" onClick={onSave}>
             Save to library

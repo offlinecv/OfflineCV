@@ -34,6 +34,7 @@ export * from "./shared/Stepper.tsx";
 export * from "./shared/Tabs.tsx";
 export * from "./shared/CountBadge.tsx";
 export * from "./shared/Disclosure.tsx";
+export * from "./shared/EmailOptIn.tsx";
 export * from "./shared/ErrorState.tsx";
 export * from "./shared/ErrorBoundary.tsx";
 export * from "./shared/UpdateBanner.tsx";

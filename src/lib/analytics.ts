@@ -90,9 +90,6 @@ export function readInternalFlag(): boolean {
   }
 }
 
-/** True when analytics are enabled (VITE_POSTHOG_KEY is set at build time). */
-export const ANALYTICS_ENABLED = !!KEY;
-
 let ph: PostHog | null = null;
 const queue: Array<[string, Record<string, unknown>]> = [];
 
@@ -191,7 +188,7 @@ export function trackParseCompleted(args: {
 export interface FeedbackArgs {
   /** 1–5 star rating. Always present (submission is gated on it). */
   rating: number;
-  /** Optional area pill: Parsing · Scoring · UI · Other. */
+  /** Optional area pill: Parsing · Scoring · UI / Editor · Export · Other. */
   category?: string;
   /** Optional free-text feedback. */
   feedbackText?: string;
