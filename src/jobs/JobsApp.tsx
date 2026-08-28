@@ -114,8 +114,9 @@ export default function JobsApp() {
   // tab switch until #823 took `/`'s tab rail off).
   //
   // The caller hands over the BUILT steering, not the raw coverage: the
-  // decision "is there anything to steer with" is `buildJdRewriteContext`
-  // returning non-null, and the surface that renders the button has to make
+  // decision "is there anything to steer with" is whichever `rewrite-context.ts`
+  // builder the surface used (keyword coverage, or semantic verdicts since
+  // #867) returning non-null, and the surface that renders the button has to make
   // that decision anyway to know whether the button leads anywhere. Taking
   // the string here means the gate and the payload can never be two different
   // predicates — the shape that let a button render for a coverage the
