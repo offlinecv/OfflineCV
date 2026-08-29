@@ -15,7 +15,7 @@
  *
  *   parse1  = runCascade(fixture)
  *   edits   = synthesizeOverrides(parse1)      // synthetic, deterministic, PII-free
- *   applied = applyOverrides(parse1.fields, …edits)
+ *   applied = applyOverrides({ …parse1 }, edits)
  *   score2  = scoreEditedResume(applied, parse1.triggers)
  *   display = { ...parse1, canonical: { …, fields: applied.fields,
  *                                       fieldConfidence: applied.fieldConfidence } }
@@ -512,24 +512,24 @@ async function editRoundtrip(
 ): Promise<{ p3?: CascadeResult; renderError?: string }> {
   try {
     const applied = applyOverrides(
-      p1.canonical.fields,
-      p1.rawText,
-      p1.canonical.sections,
-      edits.contact,
-      edits.experience,
-      edits.bullets,
-      observations,
-      {}, // education field overrides — none; we ADD an entry instead
-      edits.skills,
-      edits.addedEntries,
-      {}, // addedBullets
-      new Set<string>(), // removedBullets
-      [], // profileOverrides
-      // The base per-field confidence — production passes this
-      // (`useAnalyzedResume.ts`). Omitting it defaults every non-edited field to
-      // confidence 0, which gates it, which makes `buildContact` drop phone /
-      // location / links from the export — a model production never renders.
-      p1.canonical.fieldConfidence,
+      {
+        parsed: p1.canonical.fields,
+        rawText: p1.rawText,
+        sections: p1.canonical.sections,
+        observations,
+        // The base per-field confidence — production passes this
+        // (`useAnalyzedResume.ts`). Omitting it defaults every non-edited field to
+        // confidence 0, which gates it, which makes `buildContact` drop phone /
+        // location / links from the export — a model production never renders.
+        fieldConfidence: p1.canonical.fieldConfidence,
+      },
+      {
+        contactOverrides: edits.contact,
+        experienceOverrides: edits.experience,
+        bulletOverrides: edits.bullets,
+        skillsOverride: edits.skills,
+        addedEntries: edits.addedEntries,
+      },
     );
     const display: CascadeResult = {
       ...p1,

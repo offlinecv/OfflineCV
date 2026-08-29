@@ -46,6 +46,7 @@ import {
   stripBullet,
 } from "./line-primitives.ts";
 import { mergeItemText, splitOnFlushRightGap } from "./line-assembly.ts";
+import { MIDDOT } from "../resume-format/index.ts";
 
 // ── Shared entry-header shape recognition ───────────────────────────────────
 //
@@ -147,8 +148,11 @@ export function isEntryHeaderShape(text: string): boolean {
 
 /** The middot the Download-PDF renderer emits as the "Company · Location · Date"
  *  org separator on a reconstructed sub-line (#284/#298). Matching the bare glyph
- *  (not " · " with spaces) is robust to spacing collapse on re-extraction. */
-const MIDDOT_SEP = "·";
+ *  ({@link MIDDOT}, not the spaced {@link MIDDOT_JOIN} the exporter composes with)
+ *  is robust to spacing collapse on re-extraction — which is exactly why the two
+ *  spellings both live in the shared contract module (#649) instead of being
+ *  re-typed at each end. */
+const MIDDOT_SEP = MIDDOT;
 
 /** True when the line's trailing token is a bare 4-digit year (1900–2099) — the
  *  "…Company · Location 2022" year-only date tail. Used with

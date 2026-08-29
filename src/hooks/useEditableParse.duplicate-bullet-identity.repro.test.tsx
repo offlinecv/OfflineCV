@@ -129,20 +129,18 @@ function fold(
       sections: base.canonical.sections,
     }).bullets ?? [];
   const core = applyOverrides(
-    base.canonical.fields,
-    base.rawText,
-    base.canonical.sections,
-    {},
-    {},
-    bulletOverrides,
-    observations,
-    {},
-    { removed: [], added: [] },
-    [],
-    {},
-    removedBullets,
-    [],
-    base.canonical.fieldConfidence,
+    {
+      parsed: base.canonical.fields,
+      rawText: base.rawText,
+      sections: base.canonical.sections,
+      observations,
+      fieldConfidence: base.canonical.fieldConfidence,
+    },
+    {
+      bulletOverrides,
+      skillsOverride: { removed: [], added: [] },
+      removedBullets: [...removedBullets],
+    },
   );
   const score = scoreEditedResume(core, base.triggers, [
     ...Object.keys(bulletOverrides),

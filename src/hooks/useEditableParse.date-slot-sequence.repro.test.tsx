@@ -77,13 +77,15 @@ function parsedWith(
  *  overrides-APPLIED role, re-derived from the current map. */
 function appliedRole(parsed: HeuristicParsedResume, api: EditableParse) {
   const applied = applyOverrides(
-    parsed,
-    "raw",
-    makeSections(),
-    {},
-    api.experienceOverrides,
-    {},
-    [],
+    {
+      parsed,
+      rawText: "raw",
+      sections: makeSections(),
+      observations: [],
+    },
+    {
+      experienceOverrides: api.experienceOverrides,
+    },
   );
   return applied.fields.experience[0];
 }

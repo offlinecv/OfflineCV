@@ -14,6 +14,21 @@ import {
   isBareLocationString,
 } from "../line-primitives.ts";
 import { looksLikeTitle, looksLikeCompany } from "./shared.ts";
+import { MIDDOT, MIDDOT_SPLIT_RE } from "../../resume-format/index.ts";
+import { composeSuffixRegex, selectSuffixTokens } from "./corporate-suffix.ts";
+
+/** The header-delimiter split `splitHeaderSegments` cleaves a header row on.
+ *  The middot branch is {@link MIDDOT_SPLIT_RE} itself, spliced in by `.source`
+ *  rather than respelled: this is the SPLIT end of the exporter↔parser contract
+ *  for our own one-line `Title · Company, Location · Team` header (#649), so a
+ *  literal here would be exactly the silent-drift failure `resume-format`
+ *  exists to remove. The other branches are this site's own — the pipe
+ *  deliberately accepts whitespace on at least one side (#554) while
+ *  `@`/`—`/`·` require both, so they cannot come from the contract.
+ *  Module-scope so the composition runs once, not per header row. */
+const HEADER_DELIM_SPLIT_RE = new RegExp(
+  `\\s+@\\s+|\\s+—\\s+|\\s+\\|\\s*|\\s*\\|\\s+|${MIDDOT_SPLIT_RE.source}`,
+);
 
 /** The role fields `disambiguateCompanyTitle` maps a header block onto. */
 type Fields = {
@@ -40,8 +55,25 @@ type Split = {
   middot?: boolean;
 };
 
-const LEGAL_SUFFIX_RE =
-  /^(inc\.?|llc|l\.l\.c\.?|ltd\.?|corp\.?|co\.?|gmbh|plc|lp|llp|pc|s\.a\.?|n\.a\.?|sa)$/i;
+// Composed via `corporate-suffix.ts` (#917) — see that module's docblock for
+// what's mechanical (escaping, anchors, the #641 trailing-dot allowance) vs
+// what's this set's own judgement (the token list below).
+// Lowercased because this set's haystack is already lowercased at the call
+// site — same tokens as its siblings, rendered for that comparison.
+const LEGAL_SUFFIX_RE = composeSuffixRegex(
+  selectSuffixTokens(
+    ["INC", "LLC", "L_L_C", "LTD", "CORP", "CO", "GMBH", "PLC", "LP", "LLP", "PC", "S_A", "N_A", "SA"],
+    { lowercase: true },
+  ),
+  {
+    anchor: "full",
+    capture: true,
+    allowTrailingDot: selectSuffixTokens(
+      ["INC", "L_L_C", "LTD", "CORP", "CO", "S_A", "N_A"],
+      { lowercase: true },
+    ),
+  },
+);
 
 /** True when the comma tail reads like a location rather than an employer —
  *  either a "City, ST"/"City, Country" shape, a bare well-known city, or a
@@ -150,8 +182,20 @@ const LOCALITY_SUFFIX_RE =
  *  state code (that is group 2), and no US or gazetteer locality is named "Co".
  *  A deferral misfire is harmless by construction anyway: the whole string
  *  stays company and the state/country is still peeled on its own. */
-const COMPANY_TAIL_TOKENS_RE =
-  /^(?:Bank|Co|Corp|Corporation|Group|Systems|Solutions|Technologies|Studios|Media|Software|Consulting|Partners|Ventures|Holdings|Industries|Financial|Health|Healthcare|Networks|Digital|Analytics|Labs|Ltd|LLC|Inc|GmbH|SA|PLC)\.?$/i;
+// Composed via `corporate-suffix.ts` (#917). Deliberately BROADER than
+// `COMPANY_LEGAL_TAIL_RE` and `title-shape.ts`'s `COMPANY_SUFFIX_RE` — see
+// this constant's own docblock above for why a false positive here is safe
+// and `Media`/`Partners` etc. must stay.
+const COMPANY_TAIL_TOKENS_RE = composeSuffixRegex(
+  selectSuffixTokens([
+    "BANK", "CO", "CORP", "CORPORATION", "GROUP", "SYSTEMS", "SOLUTIONS",
+    "TECHNOLOGIES", "STUDIOS", "MEDIA", "SOFTWARE", "CONSULTING", "PARTNERS",
+    "VENTURES", "HOLDINGS", "INDUSTRIES", "FINANCIAL", "HEALTH", "HEALTHCARE",
+    "NETWORKS", "DIGITAL", "ANALYTICS", "LABS", "LTD", "LLC", "INC", "GMBH",
+    "SA", "PLC",
+  ]),
+  { anchor: "full", allowTrailingDot: true },
+);
 
 /** Unambiguous LEGAL-ENTITY markers — a strictly narrower closed vocabulary
  *  than {@link COMPANY_TAIL_TOKENS_RE}, used by `mapTitleFirst` case 3a to
@@ -163,8 +207,18 @@ const COMPANY_TAIL_TOKENS_RE =
  *  `Digital`, `Labs`, `Solutions`, `Networks`, `Group`) are deliberately
  *  excluded — they legitimately end team names like `Core Systems`,
  *  `Growth Analytics`, `Consumer Health`, `Payments Digital`. */
-const COMPANY_LEGAL_TAIL_RE =
-  /^(?:Inc\.?|LLC|L\.L\.C\.?|Ltd\.?|GmbH|PLC|Corp\.?|Corporation|Holdings)$/i;
+// Composed via `corporate-suffix.ts` (#917) — see this constant's own
+// docblock above for why its vocabulary is strictly narrower than
+// `COMPANY_TAIL_TOKENS_RE`.
+const COMPANY_LEGAL_TAIL_RE = composeSuffixRegex(
+  selectSuffixTokens([
+    "INC", "LLC", "L_L_C", "LTD", "GMBH", "PLC", "CORP", "CORPORATION", "HOLDINGS",
+  ]),
+  {
+    anchor: "full",
+    allowTrailingDot: selectSuffixTokens(["INC", "L_L_C", "LTD", "CORP"]),
+  },
+);
 
 /** Trailing "…, <Country>$" strip used by {@link stripLocationSuffix}'s Pass E
  *  (#461 follow-up). Module-scope so it's built once, matching the siblings
@@ -448,11 +502,18 @@ function splitEnDashTitleCompany(h: string): [string, string] | null {
  * Austin, TX") returns false, so control falls through to the pre-#298 default
  * (company = first line): generic real résumés behave exactly as they did before.
  */
+// The glyph is the shared exporter ↔ parser contract byte (#649); the bounding
+// is this site's own, and deliberately WIDER than `MIDDOT_SPLIT_RE`: a trailing
+// " ·" (no second segment on the row) is a signature too, so whitespace is
+// required on ONE side plus an edge, not on both. Built once at module scope —
+// `MIDDOT` is not a regex metacharacter, so no escaping is involved.
+const ORG_SIGNATURE_RE = new RegExp(`(?:^|\\s)${MIDDOT}(?:\\s|$)`);
+
 function anchorCarriesOrgSignal(text: string): boolean {
   // A " · " mid-dot (Company · Location) or a trailing " ·" marker (the
   // reconstructed-export signature our own emit appends to a location-less
   // company sub-line, ats-resume-model.ts) — either bounded by whitespace/edge.
-  return /(?:^|\s)·(?:\s|$)/.test(text);
+  return ORG_SIGNATURE_RE.test(text);
 }
 
 /** Result of the leading-section-header strip: the surviving header lines, the
@@ -542,12 +603,12 @@ function splitHeaderSegments(filtered: string[]): Split[] {
     // (#554). A zero-width `A|B` with no surrounding whitespace stays unsplit
     // so a URL / table residue is never split. `@`/`—`/`·` keep the stricter
     // both-sides rule (an email `a@b` must not split).
-    const atSplit = h.split(/\s+@\s+|\s+—\s+|\s+\|\s*|\s*\|\s+|\s+·\s+/);
+    const atSplit = h.split(HEADER_DELIM_SPLIT_RE);
     if (atSplit.length > 1) {
       // A PURE-middot line ("Title · Company · Team") — the exporter's one-line
       // shape (#436). Excludes a line that also carries `@`/`—`/`|`, which follow
       // other ordering conventions.
-      const middot = /\s+·\s+/.test(h) && !/\s+[@—|]\s+/.test(h);
+      const middot = MIDDOT_SPLIT_RE.test(h) && !/\s+[@—|]\s+/.test(h);
       atSplit.forEach((s, si) => {
         const text = s.trim();
         // Only segment 0, and only on a two-segment line — see the docblock.

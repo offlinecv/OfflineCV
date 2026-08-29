@@ -73,16 +73,14 @@ describe("#455 — an added achievement round-trips through the export", () => {
   beforeAll(async () => {
     // The user adds an achievement with distinct type / description / year.
     const edited = applyOverrides(
-      PARSED,
-      "",
-      EMPTY_SECTIONS,
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [
+      {
+        parsed: PARSED,
+        rawText: "",
+        sections: EMPTY_SECTIONS,
+        observations: [],
+      },
+      {
+        addedEntries: [
         {
           id: "added:0",
           section: "achievements",
@@ -91,7 +89,7 @@ describe("#455 — an added achievement round-trips through the export", () => {
           year: "2019",
         },
       ],
-      {},
+      },
     );
     model = buildAtsResumeModel(makeResult(edited.fields), fakeScore);
     reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
