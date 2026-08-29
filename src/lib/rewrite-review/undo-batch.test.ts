@@ -274,18 +274,17 @@ describe("an undone batch exports identically to one never applied", () => {
     const sections = makeSections(["• Built a thing", "• Shipped another thing"]);
     const fold = (store: EditStore) =>
       applyOverrides(
-        baseParsed(),
-        rawText,
-        sections,
-        {},
-        {},
-        store.bulletOverrides,
-        observations,
-        {},
-        undefined,
-        [],
-        store.addedBullets,
-        store.removedBullets,
+        {
+          parsed: baseParsed(),
+          rawText,
+          sections,
+          observations,
+        },
+        {
+          bulletOverrides: store.bulletOverrides,
+          addedBullets: store.addedBullets,
+          removedBullets: [...store.removedBullets],
+        },
       );
 
     const store = new EditStore();

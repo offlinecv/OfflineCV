@@ -23,13 +23,12 @@ import {
 } from "./storage/index.ts";
 import { runCascade } from "./heuristics/index.ts";
 import { CANONICAL_SHAPE_VERSION } from "./heuristics/canonical.ts";
-import { projectScoreSections } from "./heuristics/projections.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
 import {
-  computeAnonymousAtsScore,
   ATS_SCORE_ALGO_VERSION,
   type AnonymousAtsScore,
 } from "./score/score.ts";
+import { scoreParsedResume } from "./score/score-cascade.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
 
@@ -104,19 +103,6 @@ function readSnapshot(parse: unknown): SavedResumeSnapshot | null {
     sourceKind: snap.sourceKind ?? "pdf",
     shapeVersion: snap.shapeVersion,
   };
-}
-
-/** Re-grade a (re-parsed) canonical result — mirrors the parse-time score
- *  computation in `useResumeAnalysis` exactly so a re-parsed record scores
- *  identically to a fresh upload. */
-function scoreForResult(result: CascadeResult): AnonymousAtsScore {
-  return computeAnonymousAtsScore({
-    parsed: result.canonical.fields,
-    fieldConfidence: result.canonical.fieldConfidence,
-    triggers: result.triggers,
-    rawText: result.rawText,
-    sections: projectScoreSections(result.canonical),
-  });
 }
 
 /** What a save is asked to persist. `bytesUnchanged` is the caller's assertion
@@ -283,7 +269,10 @@ export async function loadResumeFromLibrary(
     // rather than throwing inside the cascade.
     if (sourceKind !== "pdf") return undefined;
     const result = await runCascade(bytes);
-    const score = scoreForResult(result);
+    // The SHARED base-grade recipe (#652), not a local copy of it: a re-parsed
+    // record has to score identically to a fresh upload, and that only holds
+    // while both go through the same constructor.
+    const score = scoreParsedResume(result);
     // Re-stamp the record at the current shape version so this migration is a
     // one-time cost (#452 review). Without re-saving, every subsequent load of a
     // stale record re-parses from the Blob again. Preserve the stored blob and id;

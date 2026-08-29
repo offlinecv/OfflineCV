@@ -126,13 +126,15 @@ async function roundTrip(
   overrides: Record<number, ExperienceFieldOverrides>,
 ): Promise<{ applied: HeuristicParsedResume; reparsed: CascadeResult }> {
   const applied = applyOverrides(
-    baseParsed(),
-    "raw",
-    makeSections(),
-    {},
-    overrides,
-    {},
-    [],
+    {
+      parsed: baseParsed(),
+      rawText: "raw",
+      sections: makeSections(),
+      observations: [],
+    },
+    {
+      experienceOverrides: overrides,
+    },
   );
   return { applied: applied.fields, reparsed: await renderAndReparse(applied) };
 }
@@ -228,16 +230,15 @@ describe("#672 — a role whose start date was cleared round-trips as one date, 
 describe("#672 — a role ADDED with only an end date round-trips the same way", () => {
   it("routes the added role through the same rule as an edited one", async () => {
     const applied = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        addedEntries: [
         {
           id: "added:1",
           section: "experience",
@@ -246,7 +247,8 @@ describe("#672 — a role ADDED with only an end date round-trips the same way",
           end_date: "2021",
         },
       ],
-      { "added:1": ["Ran the fellowship programme."] },
+        addedBullets: { "added:1": ["Ran the fellowship programme."] },
+      },
     );
     const added = applied.fields.experience.find((e) => e.title === "Foxtrot Fellow");
     expect(added).toBeDefined();

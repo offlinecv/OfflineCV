@@ -81,23 +81,15 @@ const fakeScore = { bullets: [] } as unknown as AnonymousAtsScore;
  *  the exporter draws from. */
 function exportModel(summaryOverride: string | undefined) {
   const edited = applyOverrides(
-    PARSED,
-    "",
-    SECTIONS,
-    {},
-    {},
-    {},
-    [],
-    {},
-    undefined,
-    [],
-    {},
-    undefined,
-    undefined,
-    undefined,
-    {},
-    {},
-    summaryOverride,
+    {
+      parsed: PARSED,
+      rawText: "",
+      sections: SECTIONS,
+      observations: [],
+    },
+    {
+      summaryOverride,
+    },
   );
   return buildAtsResumeModel(makeResult(edited.fields), fakeScore);
 }

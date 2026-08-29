@@ -79,26 +79,20 @@ describe("#454 — an edited achievement round-trips through the export", () => 
   beforeAll(async () => {
     // The user fixes the type typo, tightens the description, and adds the year.
     const edited = applyOverrides(
-      PARSED,
-      "",
-      EMPTY_SECTIONS,
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [],
-      {},
-      undefined,
-      undefined,
-      undefined,
       {
+        parsed: PARSED,
+        rawText: "",
+        sections: EMPTY_SECTIONS,
+        observations: [],
+      },
+      {
+        achievementOverrides: {
         0: {
           type: "Patent",
           title: "Bulk catalog editor for marketplaces",
           year: "2019",
         },
+      },
       },
     );
     model = buildAtsResumeModel(makeResult(edited.fields), fakeScore);
@@ -134,21 +128,15 @@ describe("#454 — an edited achievement round-trips through the export", () => 
     // label the user never typed. The label is a real field now, so an empty
     // one means exactly that: no bold run.
     const edited = applyOverrides(
-      PARSED,
-      "",
-      EMPTY_SECTIONS,
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [],
-      {},
-      undefined,
-      undefined,
-      undefined,
-      { 0: { type: "", title: "Deep Learning · NeurIPS 2023" } },
+      {
+        parsed: PARSED,
+        rawText: "",
+        sections: EMPTY_SECTIONS,
+        observations: [],
+      },
+      {
+        achievementOverrides: { 0: { type: "", title: "Deep Learning · NeurIPS 2023" } },
+      },
     );
     const cleared = buildAtsResumeModel(makeResult(edited.fields), fakeScore);
     const entry = cleared.sections.find((s) => s.kind === "achievements")!

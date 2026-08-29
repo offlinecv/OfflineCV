@@ -76,22 +76,17 @@ describe("descriptionOverrides edit-leg round-trip (#489)", { timeout: 20000 }, 
 
     const observations = scoreForCascade(p1).bullets ?? [];
     const applied = applyOverrides(
-      p1.canonical.fields,
-      p1.rawText,
-      p1.canonical.sections,
-      {}, // contact
-      {}, // experience
-      {}, // bullets
-      observations,
-      {}, // education
-      { removed: [], added: [] }, // skills
-      [], // addedEntries
-      {}, // addedBullets
-      new Set<string>(), // removedBullets
-      [], // profileOverrides
-      p1.canonical.fieldConfidence,
-      {}, // achievements
-      { [parsedEntryKey("projects", index)]: NEW_DESCRIPTION },
+      {
+        parsed: p1.canonical.fields,
+        rawText: p1.rawText,
+        sections: p1.canonical.sections,
+        observations,
+        fieldConfidence: p1.canonical.fieldConfidence,
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        descriptionOverrides: { [parsedEntryKey("projects", index)]: NEW_DESCRIPTION },
+      },
     );
 
     // 1. The edit is authoritative on the parsed model (feeds display + export).

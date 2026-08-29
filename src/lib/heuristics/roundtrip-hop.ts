@@ -20,7 +20,7 @@
  * PII-free: returns parses, never prints or persists a value.
  */
 
-import { computeAnonymousAtsScore } from "../score/score.ts";
+import { scoreParsedResume } from "../score/score-cascade.ts";
 import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
 import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
 import { runCascade } from "./cascade.ts";
@@ -30,13 +30,7 @@ import type { CascadeResult } from "./types.ts";
  *  leg gate (#459) scores its override-applied `displayResult` through the exact
  *  same recipe the render hop uses, rather than re-deriving it. */
 export function scoreForCascade(cascade: CascadeResult) {
-  return computeAnonymousAtsScore({
-    parsed: { ...cascade.canonical.fields },
-    fieldConfidence: cascade.canonical.fieldConfidence,
-    triggers: cascade.triggers,
-    rawText: cascade.rawText,
-    sections: cascade.canonical.sections,
-  });
+  return scoreParsedResume(cascade);
 }
 
 export interface RoundtripHop {

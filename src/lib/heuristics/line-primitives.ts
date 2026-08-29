@@ -15,6 +15,8 @@
  */
 
 import { startsWithActionVerb } from "../lexicon/action-verbs.ts";
+import { MIDDOT } from "../resume-format/index.ts";
+import { composeSuffixRegex, selectSuffixTokens } from "./extract/corporate-suffix.ts";
 import type { PdfLine } from "./line-model.ts";
 import {
   COUNTRY_GAZETTEER,
@@ -155,8 +157,17 @@ export function isProseLine(text: string): boolean {
 // `description`. `.?$` anchors to line end; the alternation is
 // Anglo-American legal suffixes only (adding `AG` / `AB` / `SE` / `NV` /
 // `AS` / `Oy` widens the same class of false positive, so it stays out).
-const LEGAL_TERMINAL_SUFFIX_RE =
-  /\b(?:Inc|Corp|Corporation|Ltd|LLC|L\.L\.C|GmbH|PLC|Co|SA|NA|LP|LLP|PC)\.?$/i;
+// Composed via `extract/corporate-suffix.ts` (#917) — see that module's
+// docblock for what's mechanical (escaping, anchors, the #641 trailing-dot
+// allowance) vs what's this set's own judgement (the token list below, kept
+// deliberately narrow per the docblock above).
+const LEGAL_TERMINAL_SUFFIX_RE = composeSuffixRegex(
+  selectSuffixTokens([
+    "INC", "CORP", "CORPORATION", "LTD", "LLC", "L_L_C", "GMBH", "PLC", "CO",
+    "SA", "NA", "LP", "LLP", "PC",
+  ]),
+  { anchor: "trailing", allowTrailingDot: true },
+);
 export function looksLikeBelowAnchorProse(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
@@ -290,7 +301,10 @@ const MIDDOT_METADATA_GRADE_CODE_RE =
   /^[A-Z]{1,3}\d{1,2}(?:\/[A-Z]{1,3}\d{1,2})*$/;
 function looksLikeMiddotMetadata(text: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed.includes("·")) return false;
+  if (!trimmed.includes(MIDDOT)) return false;
+  // Looser than the contract's `MIDDOT_SPLIT_RE` on purpose: a metadata
+  // line is source text, not our own export, so it may glue the glyph to a
+  // segment ("L7·18 engineers"). The membership test above is the shared byte.
   const segments = trimmed.split(/\s*·\s*/).filter((s) => s.length > 0);
   if (segments.length < 2) return false;
   return MIDDOT_METADATA_GRADE_CODE_RE.test(segments[0]);
