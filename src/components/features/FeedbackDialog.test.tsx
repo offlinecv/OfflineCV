@@ -28,6 +28,8 @@ async function mountDialog(opts: {
   trackFeedback?: (...args: unknown[]) => void;
   onClose?: () => void;
   onSubmitted?: () => void;
+  /** #912 — a star already picked on the inline nudge. */
+  initialRating?: number;
 } = {}): Promise<HTMLDivElement> {
   // jsdom does not implement modal dialogs in every version, and the `Dialog`
   // primitive calls `showModal()` from an effect. Stubbed to a plain open so
@@ -58,6 +60,9 @@ async function mountDialog(opts: {
         open: true,
         onClose: opts.onClose ?? (() => {}),
         onSubmitted: opts.onSubmitted ?? (() => {}),
+        ...(opts.initialRating !== undefined
+          ? { initialRating: opts.initialRating }
+          : {}),
       }),
     );
   });
@@ -252,5 +257,40 @@ describe("FeedbackDialog", () => {
     expect(trackFeedback).not.toHaveBeenCalled();
     expect(onSubmitted).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** #912: the nudge collects a star before this dialog exists, so opening on
+ *  the star step would ask for it twice — and the second ask is where people
+ *  drop out. */
+describe("FeedbackDialog opened from the nudge (#912)", () => {
+  it("opens straight onto the constructive branch for a low pre-picked star", async () => {
+    const el = await mountDialog({ initialRating: 2 });
+    expect(el.textContent).toContain("How can we make OfflineCV better?");
+    // Not the star step: no second ask.
+    expect(el.textContent).not.toContain("Tap a star to rate your experience.");
+  });
+
+  it("opens straight onto the positive branch for a high pre-picked star", async () => {
+    const el = await mountDialog({ initialRating: 5 });
+    expect(el.textContent).toContain("Thank you! We're glad it helped.");
+    expect(el.querySelector('a[href*="github.com"]')).not.toBeNull();
+  });
+
+  it("submits the pre-picked rating, not a zero", async () => {
+    // The value only ever arrived as a prop, so a shell that forgot to seed
+    // its own state would still render the right step and report `rating: 0`.
+    const trackFeedback = vi.fn();
+    const el = await mountDialog({ initialRating: 2, trackFeedback });
+    // The constructive step's own label — the positive step says "Submit".
+    await act(async () => button(el, "Submit Feedback")?.click());
+
+    expect(trackFeedback).toHaveBeenCalledTimes(1);
+    expect(trackFeedback.mock.calls[0][0]).toMatchObject({ rating: 2 });
+  });
+
+  it("still opens on the star step when nothing was pre-picked", async () => {
+    const el = await mountDialog({ initialRating: 0 });
+    expect(el.textContent).toContain("Tap a star to rate your experience.");
   });
 });

@@ -21,6 +21,7 @@ import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionB
 import { ExportDialog } from "./components/features/ExportDialog.tsx";
 import { ResumeChooserDialog } from "./components/features/ResumeChooserDialog.tsx";
 import { FeedbackDialog } from "./components/features/FeedbackDialog.tsx";
+import { FeedbackNudge } from "./components/features/FeedbackNudge.tsx";
 import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
@@ -633,6 +634,16 @@ export default function App() {
       )}
 
       <ErrorBoundary onReset={reset}>
+        {/* #912 — the export milestone's ask. Above the result rather than
+            buried under it: it is raised by an action the user just took, and
+            an invitation they have to scroll to find is one they never see.
+            Inline and non-modal on purpose — see `FeedbackNudge`. */}
+        {feedback.nudgeVisible && state.phase === "done" && (
+          <FeedbackNudge
+            onRate={feedback.openDialog}
+            onDismiss={feedback.dismissNudge}
+          />
+        )}
         {state.phase === "done" && edited && displayResult && recovery && (
           <>
             <Result
@@ -733,10 +744,10 @@ export default function App() {
         // artifact matches what the page shows.
         <ExportDialog
           open={exportOpen}
-          // #900 — closing is also when a pending feedback milestone flushes.
+          // #900/#912 — closing is when a pending feedback milestone flushes.
           // The export dialog stays open after a download on purpose (#421),
-          // so opening the interstitial any earlier would stack a second
-          // native modal over the findings the download just produced.
+          // and the nudge raised here would sit behind it, unseen, if it were
+          // shown any earlier.
           onClose={() => {
             setExportOpen(false);
             feedback.notifyExportClosed();
@@ -759,6 +770,7 @@ export default function App() {
       <FeedbackDialog
         open={feedback.open}
         onClose={feedback.close}
+        initialRating={feedback.initialRating}
         onSubmitted={feedback.markSubmitted}
       />
 
