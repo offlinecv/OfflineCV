@@ -23,6 +23,34 @@ adds only the lane-specific rules that are silent to break.
 - Before adding any `fetch()` here, confirm what leaves. A new adapter that sends more
   than its slug breaks epic #528's privacy posture and the root-`CLAUDE.md` custody claim.
 
+## Soft axes rank; three hard filters remove
+
+Only `refineSearchResult` (`refine.ts`) removes a posting, and only through three
+user-armed filters: role families (#568), exclude terms (#563), and local-only (#809).
+Everything else that sounds like narrowing — target level, comp floor, and location's
+DEFAULT behavior — is a bounded soft axis inside `rankPostings` that reorders and drops
+nothing. That was a deliberate correction (#570 de-boosted location from a sort key,
+#716 bounded the axes), and #809 re-litigating "search returns everything" does **not**
+reopen it: the answer is an explicit lever the user can see, never a re-inflated implicit
+boost. Do not add a fourth remover without a visible control that arms it.
+
+All three share the **never-fail-closed** floor: when a filter would reduce a non-empty
+set to empty, it is skipped, the input is kept, and a `*Suppressed` flag goes back for the
+panel's notice. A blank panel the user cannot diagnose is worse than an unfiltered one.
+
+A remover must also never report a fact it does not have. A posting whose feed omitted
+`location` **passes** the local-only filter — `locationMatches` reads the blank as a
+non-match because it is scoring a rating with no evidence to credit, but hiding it and
+calling it "too far away" would state a location the app never saw. The two readers of
+that blank differ on purpose (`filterPostingsByLocation`), and `locationFilteredOut`
+counts only postings that stated a location somewhere else.
+
+`location-match.ts` owns the ONE location predicate. `rank.ts` reads it for the soft
+axis, `refine.ts` for the hard filter — so the local-only toggle can never hide a posting
+whose own card shows a location match. It is a string comparison, not geography: no
+radius, no geocoding, because a distance model needs a geocoder and that is a network
+call this app does not make.
+
 ## Per-vendor adapters duplicate on purpose
 
 Each provider in `providers/` is its own factory with its own inline `mapJob`/post-filter

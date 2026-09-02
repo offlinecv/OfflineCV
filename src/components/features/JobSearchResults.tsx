@@ -27,6 +27,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, ErrorState, Pagination, StatusBadge } from "@design-system";
 import { JobResultCard } from "./JobResultCard.tsx";
+import { JobSearchNotices } from "./JobSearchNotices.tsx";
 import { WeakMatchesSection } from "./WeakMatchesSection.tsx";
 import { isWeakMatch } from "./weakMatchThreshold.ts";
 import type { JobSearchResult } from "../../lib/job-search/search.ts";
@@ -108,7 +109,7 @@ function Loaded({
   onRetry: () => void;
   onTailor?: (jdContext: string) => void;
 }) {
-  const { jobs, degradedProviders, providerCount, excludeSuppressed, roleSuppressed } = result;
+  const { jobs, degradedProviders, providerCount } = result;
   const [page, setPage] = useState(1);
   // Anchor for the scroll-to-top on a page change. A numbered jump replaces the
   // whole list under a scroll position that was meaningful for the old page, so
@@ -180,26 +181,7 @@ function Loaded({
           </span>
         </div>
         <p className="max-w-prose text-sm text-content-tertiary">{SAMPLE_LABEL}</p>
-        {degradedProviders.length > 0 && (
-          <p className="text-sm text-content-tertiary">
-            Couldn&apos;t reach {degradedProviders.join(", ")} — showing results
-            from the other feeds.
-          </p>
-        )}
-        {excludeSuppressed && (
-          <p className="text-sm text-content-tertiary">
-            Your exclude terms would have removed every match, so we skipped
-            them for this search — open Edit search to remove or narrow a term
-            and apply exclusion again.
-          </p>
-        )}
-        {roleSuppressed && (
-          <p className="text-sm text-content-tertiary">
-            Role filter skipped — it would have hidden every result, so we kept
-            them all for this search. Open Edit search to adjust the Role chips
-            and apply role filtering again.
-          </p>
-        )}
+        <JobSearchNotices {...result} />
       </div>
 
       {strong.length > 0 && (
