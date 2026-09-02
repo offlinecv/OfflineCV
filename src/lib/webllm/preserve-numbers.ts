@@ -26,7 +26,7 @@
  *   - Approximations: `~50`, `~$4.2M`, `≈30%`  (#778)
  *   - At-least markers: `10+`, `500+`, `$1M+`  (#778)
  *   - Plain numbers with commas/decimals: `1,200`, `3.14`
- *   - Years (1900-2099) and date ranges: `2019`, `2019-2021`
+ *   - Years (1900-2099) in temporal context and date ranges: `2019`, `2019-2021`
  *   - Both endpoints of a numeric range: `50-100`, `10–15%`  (#778)
  *   - Headcounts in people-management context: `led 5`, `managed 8`,
  *     `team of 12`, `5 engineers`
@@ -49,32 +49,31 @@
  * by them:
  *
  * 1. **The claim decides what we look FOR; presence decides whether we found
- *    it — except for a headcount, where a same-value digit that was ALREADY
- *    sitting unclaimed on both sides before the rewrite doesn't count.** For
- *    `form`/`range`/`year`, a claimed input atom is a drop only if its key is
- *    absent from *every* atom on the other side — claimed or not. Whether a
- *    bare integer reads as a range endpoint or a grouped figure depends on the
+ *    it — except for a headcount or year (#876), where a same-value digit that
+ *    was ALREADY sitting unclaimed on both sides before the rewrite doesn't
+ *    count.** For `form`/`range`, a claimed input atom is a drop only if its
+ *    key is absent from *every* atom on the other side — claimed or not. Whether
+ *    a bare integer reads as a range endpoint or a grouped figure depends on the
  *    surrounding prose (`50-100` vs `50 to 100`) or punctuation (`1,200` vs
  *    `1200`), so requiring the other side to re-produce the exact same reading
  *    would make the gate fire on numbers the user typed themselves, purely
- *    because the model re-spelled the phrasing around them; `year` has no
- *    unclaimed state to compare against in the first place (a 4-digit number
- *    in range is always a year, see `bareIntegerClaim`), so the lenient lookup
- *    is also the only one available to it. A headcount is different: its
- *    context (a management verb, a people noun) is common enough to
- *    reproduce by accident on a digit that means something else entirely —
- *    `"Managed a team of 12 engineers"` dropped down to `"Led the
- *    department"`, sitting next to an unrelated, UNCHANGED `"Completed module
- *    12"`, would score clean under a blanket `outputKeys.has`, because the
- *    coincidental `12` was already there before the rewrite touched anything.
- *    So a headcount counts as present only if the output claims it too, OR a
- *    *NEW* unclaimed occurrence of the key appears that the input didn't
- *    already carry — `outputClaimedKeys` and the unclaimed-occurrence counts
- *    below implement exactly that, and the "new" qualifier is what keeps
- *    `"Managed 5 engineers"` → `"Completed phase 5"` (the digit's ONLY
- *    occurrence, reworded away from headcount context) reading as a
- *    legitimate reword rather than a drop. Undecorated keys still share one
- *    `num:` namespace across all four bare-integer readings, because a
+ *    because the model re-spelled the phrasing around them. Headcount and year
+ *    are different: their context (a management verb / people noun, or a
+ *    temporal preposition / date range) is common enough to coincide with a
+ *    digit that means something else entirely — `"Managed a team of 12
+ *    engineers"` dropped down to `"Led the department"`, sitting next to an
+ *    unrelated, UNCHANGED `"Completed module 12"`, or `"Founded the program in
+ *    1900"` dropped next to `"Operated out of suite 1900"`, would score clean
+ *    under a blanket `outputKeys.has`, because the coincidental digit was
+ *    already there before the rewrite touched anything. So a headcount or year
+ *    counts as present only if the output claims it too, OR a *NEW* unclaimed
+ *    occurrence of the key appears that the input didn't already carry —
+ *    `outputClaimedKeys` and the unclaimed-occurrence counts below implement
+ *    exactly that, and the "new" qualifier is what keeps `"Managed 5
+ *    engineers"` → `"Completed phase 5"` or `"Founded in 1900"` → `"Project
+ *    1900"` (the digit's ONLY occurrence, reworded away from temporal context)
+ *    reading as a legitimate reword rather than a drop. Undecorated keys still
+ *    share one `num:` namespace across all four bare-integer readings, because a
  *    headcount, a year, a range endpoint and a comma-grouped figure holding
  *    the same digits are the same value; the presence rule is what differs
  *    per claim kind, not the key they share.
@@ -95,14 +94,18 @@
  *    → `5 engineers` reuses the digit and invents the headcount, and under a
  *    plain rule-1 lookup it scored clean. So an output atom the surrounding
  *    prose reads as a HEADCOUNT counts as present only when the same value is a
- *    claimed fact on the input side too. Every other claim kind keeps the
- *    lenient rule-1 lookup, because for those the unclaimed→claimed move is
- *    exactly the re-spelling rule 1 protects: `50 to 100` → `50-100` (unclaimed
- *    → range) and `1200` → `1,200` (unclaimed → grouped figure) are the same
- *    claim written differently. `12-person` is read as people context for the
- *    same reason — the hyphen is how English attaches the noun, not a different
- *    claim from `12 people`. The residual cost is a people phrasing our lexicon
- *    misses on the input side but recognises on the output side
+ *    claimed fact on the input side too. `year` takes the strict count-parity
+ *    rule on the DROP side (rule 1) to prevent an unrelated digit from masking
+ *    a dropped year, but stays lenient on the ADD side because a year migrates
+ *    into temporal context during a rewrite far more often than a headcount does
+ *    (`"2019 Excellence Award"` → `"Award in 2019"`). Every other claim kind
+ *    keeps the lenient rule-1 lookup, because for those the unclaimed→claimed
+ *    move is exactly the re-spelling rule 1 protects: `50 to 100` → `50-100`
+ *    (unclaimed → range) and `1200` → `1,200` (unclaimed → grouped figure) are
+ *    the same claim written differently. `12-person` is read as people context
+ *    for the same reason — the hyphen is how English attaches the noun, not a
+ *    different claim from `12 people`. The residual cost is a people phrasing
+ *    our lexicon misses on the input side but recognises on the output side
  *    (`a team comprising 5` → `5 engineers`) reverting as an invention; that is
  *    the deliberate trade for catching a headcount the model made up.
  *
@@ -220,7 +223,7 @@ const PEOPLE_CONTEXT_WINDOW = 30;
  * written shape ($, %, x, ~, +, a magnitude suffix, grouping commas, a decimal
  * point); the other three are the prose around a bare integer.
  */
-type NumericClaim = "none" | "form" | "headcount" | "year" | "range";
+type NumericClaim = "none" | "form" | "headcount" | "year" | "year_verb" | "range";
 
 interface ClassifiedAtom {
   /** Match key used for set equality (lowercased so `$5K` ≡ `$5k`). */
@@ -283,13 +286,217 @@ function isDecorated(groups: Record<string, string | undefined>): boolean {
 }
 
 /**
+ * Month names and standard abbreviations (with optional abbreviation period)
+ * used across year prefix and follow cues (#876).
+ */
+const MONTH_NAME =
+  /(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?/i;
+
+/**
+ * Punctuation/dash characters that separate a bullet-initial date anchor from
+ * the following bullet text (#876). Requires date-range dash to be followed by
+ * a year (1900-2099), ongoing marker, or non-numeric prose text so numeric
+ * ranges like `2000 - 3000 units` do not match.
+ */
+const LEADING_DATE_ANCHOR_SEPARATOR = new RegExp(
+  `^\\s*(?:[:.)]` +
+    `|(?:${RANGE_DASH.source}\\s*(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)\\b)` +
+    `|(?:${RANGE_DASH.source}(?!\\s*\\d)))\\s*`,
+  "i",
+);
+
+/**
+ * Context window (in characters) scanned before and after a 4-digit number
+ * when checking for year context cues (#876). Raised to 64 to hold full
+ * multi-word credential titles (e.g. "Google Cloud Certified Professional Cloud Architect").
+ */
+const YEAR_CONTEXT_WINDOW = 64;
+
+/**
+ * Case-SENSITIVE: CamelCase conference/product names (#876). Kept out of
+ * YEAR_PREFIX_CUE because that regex is /i, which makes [A-Z] match a-z.
+ */
+const YEAR_PREFIX_CUE_CAMEL =
+  /\b[A-Z][A-Za-z0-9]*(?:Con|Conf|Summit|Meetup|Expo|Fest|Symposium|Workshop|Awards?)\s*$/;
+
+/**
+ * Case-SENSITIVE: Capitalized venue/company names following "at" (#876). Kept
+ * out of YEAR_PREFIX_CUE because that regex is /i, which makes [A-Z] match a-z.
+ */
+const YEAR_PREFIX_CUE_VENUE =
+  /\bat\s+(?:[A-Z][A-Za-z0-9&.'-]*\s+)+$/;
+
+/**
+ * Temporal prepositions, verbs, credential/award phrases, month names,
+ * seasons, quarters, parentheses/commas, and range connectors that signal a
+ * 4-digit number (1900–2099) is being used as a year when appearing immediately
+ * before the digit (#876).
+ */
+const YEAR_PREFIX_CUE = new RegExp(
+  "(?:\\b(?:" +
+    "in|since|during|until|through|between|before|after|around|circa|c\\.|" +
+    "as\\s+of|class\\s+of|cohort\\s+of|batch\\s+of|" +
+    "winner,?\\s*|won,?\\s*|recipient\\s+of(?:\\s+the)?|speaker\\s+at|talk\\s+at|presented\\s+at|worked\\s+at|" +
+    "(?:awarded|certified|earned|completed|launched|published|promoted|shipped|graduated|founded|established|joined|built|deployed|released|delivered|led)\\s+(?:the|a|an|our|this)\\s+[A-Za-z0-9&.'-]+\\s+|" +
+    "(?:employee|person|engineer|team|member|volunteer)\\s+of\\s+the\\s+year\\s+|" +
+    "(?:awards?|prizes?|medals?|fellowships?|scholarships?|honou?rs?|certifications?|certificates?)\\s+|" +
+    "(?:certified\\s+(?!(?:the|a|an|our|this)\\b)(?:[A-Za-z0-9&.'-]+\\s+){1,4})|" +
+    `${MONTH_NAME.source}|` +
+    "spring|summer|fall|autumn|winter|" +
+    "q[1-4]|h[1-2]|fy" +
+    ")\\s*|" +
+    `[(,]\\s*|` +
+    `(?:\\b(?:19\\d\\d|20\\d\\d)\\s*(?:${RANGE_DASH.source}|/|to|and)\\s*)|` +
+    `(?:\\b\\d{1,2}\\s*[/.]\\s*))$`,
+  "i",
+);
+
+/**
+ * Weak prepositions, qualifiers, determiners, or temporal adverbs that signal
+ * a 4-digit number is a year when preceding the digit (#876).
+ *
+ * Mapped to the lenient "verb" / `year_verb` tier so legitimate bullet merges
+ * on quantities (e.g. "Reduced by 2000 hours" + "Tracked 2000 bugs") do not
+ * false-revert on count parity, while dropping the year completely is caught.
+ */
+const YEAR_PREFIX_WEAK_CUE = new RegExp(
+  "\\b(?:from|by|for|of|over|the|our|this|early|mid|late)[\\s-]*$",
+  "i",
+);
+
+/**
+ * Bare past-tense action verbs that signal a year when immediately preceding
+ * the digit AND followed by a function word or punctuation (#876).
+ */
+const YEAR_PREFIX_VERB_CUE = new RegExp(
+  "\\b(?:awarded|certified|earned|completed|launched|published|promoted|shipped|graduated|founded|established|joined)\\s*$",
+  "i",
+);
+
+/**
+ * Award and prize titles following a leading 4-digit year (#876).
+ */
+const YEAR_FOLLOW_AWARD_CUE =
+  /^(?:\s+[A-Za-z][A-Za-z0-9&.'-]*)*\s+(?:award|prize|medal|fellowship|scholarship|honou?r)s?\b/i;
+
+/**
+ * Connectives, qualifiers, range markers, or month/season names that signal
+ * a 4-digit number is a year when appearing immediately after the digit (#876).
+ */
+const YEAR_FOLLOW_CUE = new RegExp(
+  "^(?:\\s*(?:" +
+    "onwards?|present|current|now|ongoing|" +
+    "to\\s+(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)|" +
+    "until\\s+(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)|" +
+    "through\\s+(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)|" +
+    "and\\s+(?:19\\d\\d|20\\d\\d)|" +
+    `${MONTH_NAME.source}` +
+    ")\\b|" +
+    `\\s*(?:${RANGE_DASH.source}|/)\\s*(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)\\b)`,
+  "i",
+);
+
+/**
+ * Slice preceding context without fabricating artificial word boundaries (\b)
+ * when the fixed character window cuts mid-word (#876).
+ */
+function contextSliceBefore(
+  bullet: string,
+  matchStart: number,
+  windowSize: number,
+): string {
+  const rawStart = Math.max(0, matchStart - windowSize);
+  return rawStart > 0 && /\w/.test(bullet[rawStart - 1] ?? "")
+    ? bullet.slice(rawStart, matchStart).replace(/^\S*/, "")
+    : bullet.slice(rawStart, matchStart);
+}
+
+/**
+ * Slice following context without fabricating artificial word boundaries (\b)
+ * when the fixed character window cuts mid-word (#876).
+ */
+function contextSliceAfter(
+  bullet: string,
+  matchEnd: number,
+  windowSize: number,
+): string {
+  const rawEnd = matchEnd + windowSize;
+  if (rawEnd < bullet.length && /\w/.test(bullet[rawEnd] ?? "")) {
+    const stripped = bullet.slice(matchEnd, rawEnd).replace(/\S*$/, "");
+    return stripped.trim().length === 0 ? " …" : stripped;
+  }
+  return bullet.slice(matchEnd, rawEnd);
+}
+
+/**
+ * Does this 4-digit bare integer sit in temporal/year context? (#876)
+ *
+ * Distinguishes high-confidence explicit temporal cues ("strict" parity) from
+ * bare past-tense verb cues or weak prepositions ("verb" — lenient on drop side
+ * to prevent false reverts on plain quantities like "Shipped 2000 to partners").
+ */
+function isYearContext(
+  match: RegExpExecArray,
+  bullet: string,
+  digits: string,
+): "strict" | "verb" | "none" {
+  if (digits.length !== 4) return "none";
+  const year = Number(digits);
+  if (year < 1900 || year > 2099) return "none";
+
+  const matchStart = match.index;
+  const before = contextSliceBefore(bullet, matchStart, YEAR_CONTEXT_WINDOW);
+  const after = contextSliceAfter(
+    bullet,
+    matchStart + digits.length,
+    YEAR_CONTEXT_WINDOW,
+  );
+
+  // 1. Explicit temporal prefix cue (e.g. "in 1900", "since 2019", "Jan 2021", "2019 - 2021", "KubeCon 2022", "at Acme 2020")
+  if (
+    YEAR_PREFIX_CUE.test(before) ||
+    YEAR_PREFIX_CUE_CAMEL.test(before) ||
+    YEAR_PREFIX_CUE_VENUE.test(before)
+  ) {
+    return "strict";
+  }
+
+  // 2. Explicit temporal follow cue (e.g. "2019 onwards", "2019 - Present", "2019 to 2021", "2019 Excellence Award")
+  if (YEAR_FOLLOW_CUE.test(after) || YEAR_FOLLOW_AWARD_CUE.test(after)) {
+    return "strict";
+  }
+
+  // 3. Leading date anchor at the start of a bullet (e.g. "2019: Founded company", "• 2019 - Started role")
+  const leadingText = bullet
+    .slice(0, matchStart)
+    .trim()
+    .replace(/^[-*•⁃–—\s]+/, "");
+  if (leadingText.length === 0 && LEADING_DATE_ANCHOR_SEPARATOR.test(after)) {
+    return "strict";
+  }
+
+  // 1b. Bare past-tense verb followed by a function word, punctuation, or end of bullet (#876)
+  if (YEAR_PREFIX_VERB_CUE.test(before) && FUNCTION_WORD_FOLLOWS.test(after)) {
+    return "verb";
+  }
+
+  // 1c. Weak prepositions, qualifiers, or bullet-initial attributive years (#876)
+  if (YEAR_PREFIX_WEAK_CUE.test(before) || leadingText.length === 0) {
+    return "verb";
+  }
+
+  return "none";
+}
+
+/**
  * What, if anything, makes this bare integer worth defending, given the words
  * around it?
  *
  * Three ways to qualify — a headcount, a year, or one endpoint of a tight
- * range. Everything else ("the 3 of us", "phase 2", "section 4") is noise: it
- * still produces an atom, so the other side can match against it, but it is
- * never itself reported as dropped or added.
+ * range. Everything else ("the 3 of us", "phase 2", "section 4", "suite 1900")
+ * is noise: on the drop side, it is not required to be preserved unless matched
+ * on the other side. On the add side, hallucinated numbers are guarded by
+ * checking whether newly introduced values existed in the input.
  *
  * The match index IS the digit index on this branch: every prefix decoration
  * (approximation, sign, currency) implies `isDecorated`, so a caller that
@@ -306,13 +513,11 @@ function bareIntegerClaim(
   digits: string,
 ): NumericClaim {
   const matchStart = match.index;
-  const before = bullet.slice(
-    Math.max(0, matchStart - PEOPLE_CONTEXT_WINDOW),
-    matchStart,
-  );
-  const after = bullet.slice(
+  const before = contextSliceBefore(bullet, matchStart, PEOPLE_CONTEXT_WINDOW);
+  const after = contextSliceAfter(
+    bullet,
     matchStart + digits.length,
-    matchStart + digits.length + PEOPLE_CONTEXT_WINDOW,
+    PEOPLE_CONTEXT_WINDOW,
   );
 
   // A people noun after the digit is decisive on its own.
@@ -327,9 +532,12 @@ function bareIntegerClaim(
     return "headcount";
   }
 
-  if (digits.length === 4) {
-    const year = Number(digits);
-    if (year >= 1900 && year <= 2099) return "year";
+  const yearKind = isYearContext(match, bullet, digits);
+  if (yearKind === "strict") {
+    return "year";
+  }
+  if (yearKind === "verb") {
+    return "year_verb";
   }
 
   // A range endpoint (#778). `50-100 tickets` used to track NEITHER number:
@@ -338,7 +546,19 @@ function bareIntegerClaim(
   // two endpoints are two independent atoms rather than one `50-100` atom, so a
   // rewrite that re-spells the dash (`50–100`) or the whole range (`50 to 100`)
   // still matches — the dash is detection context, never part of the key.
-  return isRangeEndpoint(match, bullet) ? "range" : "none";
+  if (isRangeEndpoint(match, bullet)) {
+    return "range";
+  }
+
+  // Never demote below main: a 4-digit integer in 1900-2099 that no cue
+  // recognised stays CLAIMED, but leniently. A cue MISS then costs nothing
+  // relative to main; only a strict-tier cue HIT can change the answer (#876 redesign).
+  const n = Number(digits);
+  if (digits.length === 4 && n >= 1900 && n <= 2099) {
+    return "year_verb";
+  }
+
+  return "none";
 }
 
 function classifyAtom(match: RegExpExecArray, bullet: string): ClassifiedAtom {
@@ -353,9 +573,7 @@ function classifyAtom(match: RegExpExecArray, bullet: string): ClassifiedAtom {
   // Grouping commas are presentation, not value: `1,200` and `1200` are the
   // same figure spelled two ways. The KEY drops them so the two spellings
   // match; `display` keeps whichever the author (or the model) wrote, because
-  // that is what the warning copy quotes back. Keying on the literal spelling
-  // is what made "Processed 1,200 orders" → "Processed 1200 orders" report a
-  // dropped `1,200` and revert a rewrite that changed nothing but the comma.
+  // that is what the warning copy quotes back.
   const value = digits.replace(/,/g, "");
 
   if (isDecorated(g)) {
@@ -366,11 +584,8 @@ function classifyAtom(match: RegExpExecArray, bullet: string): ClassifiedAtom {
     };
   }
 
-  // Undecorated. ONE key namespace regardless of what (if anything) qualified
-  // it — a headcount `12`, a year `2019`, a range endpoint `50` and a grouped
-  // `1,200` are the same value as the same digits written with no context and
-  // no commas, and splitting them by namespace is what made `Managed 12 people`
-  // → `Managed a 12-person team` report a dropped `12`.
+  // Undecorated (bare integer, grouped integer `1,200`, or decimal `3.14`).
+  // ONE key namespace (`num:1200`) regardless of grouping.
   return {
     key: `num:${value}`,
     display,
@@ -404,6 +619,14 @@ export interface PreservationResult {
   added: string[];
 }
 
+function is4DigitYearValue(atom: ClassifiedAtom): boolean {
+  if (!atom.key.startsWith("num:")) return false;
+  const digits = atom.key.slice(4);
+  if (digits.length !== 4) return false;
+  const n = Number(digits);
+  return n >= 1900 && n <= 2099;
+}
+
 /**
  * Every claimed atom in `atoms` that `isPresent` cannot find on the other side,
  * reported by its display form in first-encounter order, at most once per key.
@@ -415,12 +638,13 @@ export interface PreservationResult {
  */
 function missingFrom(
   atoms: readonly ClassifiedAtom[],
+  isCandidate: (atom: ClassifiedAtom) => boolean,
   isPresent: (atom: ClassifiedAtom) => boolean,
 ): string[] {
   const reported = new Set<string>();
   const missing: string[] = [];
   for (const atom of atoms) {
-    if (!isClaimed(atom)) continue;
+    if (!isCandidate(atom)) continue;
     if (reported.has(atom.key) || isPresent(atom)) continue;
     reported.add(atom.key);
     missing.push(atom.display);
@@ -434,7 +658,7 @@ function countUnclaimedByKey(
 ): Map<string, number> {
   const counts = new Map<string, number>();
   for (const atom of atoms) {
-    if (isClaimed(atom)) continue;
+    if (isClaimed(atom) && atom.claim !== "year_verb") continue;
     counts.set(atom.key, (counts.get(atom.key) ?? 0) + 1);
   }
   return counts;
@@ -467,42 +691,63 @@ export function checkNumbersPreserved(
   const outputClaimedKeys = new Set(
     outputAtoms.filter(isClaimed).map((a) => a.key),
   );
+  const outputStrictYearKeys = new Set(
+    outputAtoms.filter((a) => a.claim === "year").map((a) => a.key),
+  );
   // Per-key counts of UNCLAIMED occurrences on each side — the baseline of
   // "this digit shows up elsewhere for unrelated reasons" that already
-  // existed before the rewrite touched anything. Only headcount needs this:
-  // it is the one claim kind with a real unclaimed state on the same key
-  // (`num:12` from "team of 12" vs `num:12` from "module 12" of a curriculum).
+  // existed before the rewrite touched anything. Headcount and year (#876) need
+  // this: they are the two claim kinds with a real unclaimed state on the same key
+  // (`num:12` from "team of 12" vs `num:12` from "module 12", or `num:1900` from
+  // "in 1900" vs `num:1900` from "suite 1900").
   const inputUnclaimedCounts = countUnclaimedByKey(inputAtoms);
   const outputUnclaimedCounts = countUnclaimedByKey(outputAtoms);
 
   // Drop: the value is gone from the output in every spelling (rule 1) —
-  // except for a headcount, which counts as present only if the output
-  // claims it too, OR a NEW unclaimed occurrence of the key appears that
+  // except for a headcount and strict year (#876), which count as present only if the
+  // output claims it too, OR a NEW unclaimed occurrence of the key appears that
   // wasn't already there before the rewrite (the "phase 5" masking case
   // below, which rule 1 is right to treat as a reword, not a loss). Without
   // the "new" qualifier, an unrelated digit the input ALREADY carried
   // unclaimed (e.g. "module 12" sitting next to a genuinely-dropped
-  // "12 engineers") would mask the drop just by surviving unchanged — the
-  // masking bug rule 1's blanket `outputKeys.has` used to have. `form`/
-  // `range`/`year` keep the fully lenient lookup: those claims genuinely
-  // depend on prose a rewrite is licensed to move (or, for `year`, have no
-  // unclaimed state to compare against at all), so tightening them risks a
-  // false revert on a legitimate reword rule 1 exists to allow.
-  const dropped = missingFrom(inputAtoms, (atom) => {
-    if (atom.claim !== "headcount") return outputKeys.has(atom.key);
-    if (outputClaimedKeys.has(atom.key)) return true;
-    return (
-      (outputUnclaimedCounts.get(atom.key) ?? 0) >
-      (inputUnclaimedCounts.get(atom.key) ?? 0)
-    );
-  });
+  // "12 engineers", or "suite 1900" sitting next to "in 1900") would mask the
+  // drop just by surviving unchanged — the masking bug rule 1's blanket
+  // `outputKeys.has` used to have. `form`/`range` keep the fully lenient
+  // lookup: those claims genuinely depend on prose a rewrite is licensed to
+  // move, so tightening them risks a false revert on a legitimate reword rule 1
+  // exists to allow.
+  const dropped = missingFrom(
+    inputAtoms,
+    isClaimed,
+    (atom) => {
+      if (atom.claim !== "headcount" && atom.claim !== "year") {
+        return outputKeys.has(atom.key);
+      }
+      const claimedOnOtherSide =
+        atom.claim === "year"
+          ? outputStrictYearKeys.has(atom.key)
+          : outputClaimedKeys.has(atom.key);
+      if (claimedOnOtherSide) return true;
+      return (
+        (outputUnclaimedCounts.get(atom.key) ?? 0) >
+        (inputUnclaimedCounts.get(atom.key) ?? 0)
+      );
+    },
+  );
   // Invention: the same lookup, except that a headcount the output asserts is
   // "present" only if the input asserted that value too (rule 3). `phase 5` →
   // `5 engineers` reuses the digit while making a claim the résumé never made.
-  const added = missingFrom(outputAtoms, (atom) =>
-    atom.claim === "headcount"
-      ? inputClaimedKeys.has(atom.key)
-      : inputKeys.has(atom.key),
+  // `year` / 4-digit years (1900–2099) defend against invented values while
+  // remaining lenient on additions (#876): an output year only needs its numeric
+  // value present in the input in any form (e.g. "2019 Excellence Award" -> "Award in 2019"),
+  // preventing legitimate temporal rewording from being flagged as an invented year.
+  const added = missingFrom(
+    outputAtoms,
+    (atom) => isClaimed(atom) || is4DigitYearValue(atom),
+    (atom) =>
+      atom.claim === "headcount"
+        ? inputClaimedKeys.has(atom.key)
+        : inputKeys.has(atom.key),
   );
 
   return {
