@@ -247,13 +247,16 @@ export function FindJobsPanel({
         />
       )}
 
-      {/* The narrowing controls, WITH the results (#809). Only over a real
-       *  result set: before the first search there is nothing to narrow, and
-       *  over the loading skeleton or the error state the strip would be a
-       *  control with no subject. Mounted OUTSIDE the fold on purpose — the
-       *  fold is what hid these levers from the three respondents who reported
-       *  the search "returns everything". */}
-      {phase.kind === "loaded" && (
+      {/* The narrowing controls, WITH the results (#809). Gated on a non-empty
+       *  ranked set, not merely on `kind === "loaded"`: `searchJobs` never
+       *  rejects, so a total provider failure and a zero-match search BOTH
+       *  arrive as `loaded` and render `JobSearchResults`' error states — under
+       *  which the strip would be a control with no subject, and the zero-match
+       *  copy tells the user to BROADEN while narrowing controls sit above it
+       *  (#905 review). Mounted OUTSIDE the fold on purpose — the fold is what
+       *  hid these levers from the three respondents who reported the search
+       *  "returns everything". */}
+      {phase.kind === "loaded" && phase.result.jobs.length > 0 && (
         <JobResultRefineStrip query={query} onChange={setQuery} />
       )}
 

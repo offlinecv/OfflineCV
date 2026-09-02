@@ -17,9 +17,11 @@
  * results view, which is the #809 acceptance criterion stated literally.
  *
  * NOT A SECOND SURFACE. It edits the SAME `JobQuery` the form does, through the
- * same `onChange`, and reuses the same controls (`LevelSelect`,
- * `ChipListEditor`, `EditableField`) — a chip removed here is gone from the
- * form's Narrow step too, because there is one query. Every edit re-ranks
+ * same `onChange`, and renders the SAME controls the form does — `LevelSelect`
+ * and, since the #905 review, `LocationField`/`ExcludeTermsEditor` out of
+ * `QueryFilterFields.tsx`, so the exclude hint has one definition rather than a
+ * copy per surface. A chip removed here is gone from the form's Narrow step
+ * too, because there is one query. Every edit re-ranks
  * through `refineSearchResult` via `useJobSearch`'s live-re-rank effect, so
  * nothing here fetches and nothing here egresses: `providers/keywords.ts` stays
  * the sole resume-derived egress helper, untouched by this file.
@@ -35,14 +37,14 @@
  * this strip must never trigger.
  */
 
-import { Card, Checkbox, EditableField } from "@design-system";
-import {
-  withExcludeTerm,
-  withoutExcludeTerm,
-  type JobQuery,
-} from "../../lib/job-search/query-builder.ts";
-import { ChipListEditor } from "./ChipListEditor.tsx";
+import { Card, Checkbox } from "@design-system";
+import type { JobQuery } from "../../lib/job-search/query-builder.ts";
 import { LevelSelect } from "./LevelSelect.tsx";
+import {
+  EXCLUDE_TERMS_HINT,
+  ExcludeTermsEditor,
+  LocationField,
+} from "./QueryFilterFields.tsx";
 import { QueryStepSection } from "./QueryStepSection.tsx";
 
 /** The toggle's label, which must name the place it filters on so the user can
@@ -69,11 +71,6 @@ export function JobResultRefineStrip({
 }) {
   const hasLocation = (query.location ?? "").trim().length > 0;
 
-  const addExcludeTerm = (term: string) =>
-    onChange((q) => withExcludeTerm(q, term));
-  const removeExcludeTerm = (term: string) =>
-    onChange((q) => withoutExcludeTerm(q, term));
-
   return (
     <Card className="flex flex-col gap-4">
       <QueryStepSection
@@ -82,12 +79,7 @@ export function JobResultRefineStrip({
       >
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="text-content-secondary">Location</span>
-          <EditableField
-            value={query.location}
-            placeholder="location"
-            label="Location"
-            onCommit={(v) => onChange((q) => ({ ...q, location: v || undefined }))}
-          />
+          <LocationField query={query} onChange={onChange} />
         </div>
         {/* Disabled rather than hidden while no location is set: a control that
          *  vanishes teaches nothing, and the hint names the field to fill in.
@@ -118,19 +110,8 @@ export function JobResultRefineStrip({
         />
       </QueryStepSection>
 
-      <QueryStepSection
-        title="Exclude"
-        hint="A posting is dropped when its title contains one of these — its description is not checked."
-      >
-        <ChipListEditor
-          label="Excluded titles"
-          labelHidden
-          items={query.excludeTerms ?? []}
-          onAdd={addExcludeTerm}
-          onRemove={removeExcludeTerm}
-          placeholder="Add a title to exclude…"
-          addAriaLabel="Add exclude term"
-        />
+      <QueryStepSection title="Exclude" hint={EXCLUDE_TERMS_HINT}>
+        <ExcludeTermsEditor query={query} onChange={onChange} />
       </QueryStepSection>
     </Card>
   );

@@ -20,8 +20,8 @@
  * free-text `location` field can actually support. Anything finer needs a
  * geocoder, which is a network call this app does not get to make.
  *
- * Zero-dep and pure, so it stays out of the dynamic-import tiers: `refine.ts`
- * can filter before it has paid for `rank.ts`.
+ * Zero-dep and pure, so nothing that imports it pays for a tier it wasn't
+ * already loading.
  */
 
 const REMOTE_PATTERN = /\b(remote|worldwide|anywhere|wfh)\b/i;
@@ -32,27 +32,71 @@ export function isRemotePosting(location: string): boolean {
   return REMOTE_PATTERN.test(location);
 }
 
+/** "Austin, TX, USA" → ["austin", "tx", "usa"]. Empty segments are dropped so a
+ *  stray comma can't produce an empty city that matches everything below. */
+function segments(location: string): string[] {
+  return location
+    .toLowerCase()
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+}
+
+/** Whole words of a city segment — the unit the fallback compares, because raw
+ *  substrings are what let a bare "IN" posting survive an "Austin, TX" filter. */
+function words(city: string): string[] {
+  return city.split(/\s+/).filter((word) => word.length > 0);
+}
+
+/** The state/country behind the city must not CONTRADICT the one asked for.
+ *  Either side may omit it (a feed's "Austin" against a query's "Austin, TX"),
+ *  but "Portland, OR" and "Portland, ME" are exactly the pair a location filter
+ *  exists to separate, so two stated qualifiers that differ are a mismatch. */
+function qualifiersAgree(a: string | undefined, b: string | undefined): boolean {
+  return a === undefined || b === undefined || a === b;
+}
+
+/** True when every word of `inner` appears in `outer` — "new york" inside
+ *  "new york city", never "in" inside "austin". */
+function containsAllWords(outer: readonly string[], inner: readonly string[]): boolean {
+  const haystack = new Set(outer);
+  return inner.length > 0 && inner.every((word) => haystack.has(word));
+}
+
 /**
  * True when `postingLocation` should count as a match for `queryLocation`.
- * Compares the leading city/region token (text before the first comma) so
- * "Austin, TX" matches a feed's "Austin, TX, USA" without requiring an exact
- * string match, and falls back to a loose substring check either direction for
- * postings that don't follow the "City, ST" shape.
+ *
+ * Compares the city segment (text before the first comma) and requires the
+ * qualifier behind it not to conflict, so "Austin, TX" matches a feed's
+ * "Austin, TX, USA" without an exact string match while "Portland, OR" does
+ * NOT match "Portland, ME". When the city segments differ, it falls back to
+ * WHOLE-WORD containment either direction, which admits "New York, NY" against
+ * "New York City, NY" without admitting a bare "IN" posting against "Austin,
+ * TX" the way a raw substring test did (#905 review).
+ *
+ * Known limits, both needing data this module deliberately doesn't carry: an
+ * alias table would be required for "SF Bay Area" vs "San Francisco, CA", and a
+ * gazetteer to tell a city refinement from a company name in "Boston Consulting
+ * Group, London". Both fail toward the soft axis, and the never-fail-closed
+ * floor below is what keeps either from emptying the panel.
  *
  * An EMPTY posting location returns false — a feed that told us nothing about
  * where the job is has not told us it is near you. That is the conservative
- * read for the rating axis (no evidence, no credit) and, since #809, the reason
- * `locationOnly` needs its never-fail-closed floor: a feed whose postings all
- * carry an empty location would otherwise be filtered to nothing.
+ * read for the RATING axis (no evidence, no credit); the hard filter takes the
+ * opposite read on the same fact, see `filterPostingsByLocation`.
  */
 export function locationMatches(queryLocation: string, postingLocation: string): boolean {
   if (isRemotePosting(postingLocation)) return true;
-  const posting = postingLocation.trim().toLowerCase();
-  const query = queryLocation.trim().toLowerCase();
-  if (!posting || !query) return false;
-  const postingCity = posting.split(",")[0].trim();
-  const queryCity = query.split(",")[0].trim();
-  return postingCity === queryCity || posting.includes(query) || query.includes(posting);
+  const posting = segments(postingLocation);
+  const query = segments(queryLocation);
+  if (posting.length === 0 || query.length === 0) return false;
+  if (!qualifiersAgree(posting[1], query[1])) return false;
+  if (posting[0] === query[0]) return true;
+  const postingWords = words(posting[0]);
+  const queryWords = words(query[0]);
+  return (
+    containsAllWords(postingWords, queryWords) || containsAllWords(queryWords, postingWords)
+  );
 }
 
 /**
@@ -61,13 +105,21 @@ export function locationMatches(queryLocation: string, postingLocation: string):
  * (#809). Returns the input untouched when there is no location to filter on,
  * so an unset location is byte-identical to pre-#809 behavior.
  *
+ * UNKNOWN IS NOT FAR. A posting whose feed omitted `location` (documented as
+ * `""` on `JobPosting`, and the keyless aggregator feeds are inconsistent about
+ * filling it at all) PASSES this filter, the same way a remote posting does.
+ * `locationMatches` reads the same blank as a non-match because it is scoring a
+ * rating and has no evidence to credit; a remover cannot borrow that read
+ * without telling the user it hid a posting "as too far away" when it has no
+ * idea where the posting is (#905 review). So the two readers of the blank
+ * differ on purpose, and `locationFilteredOut` counts only postings that stated
+ * a location somewhere else.
+ *
  * NEVER FAIL CLOSED, the same floor `filterPostingsByExcludeTerms` and the
  * #566 role filter already apply: when the filter would reduce a NON-EMPTY set
  * to EMPTY, the input is kept and `suppressed` is set for the panel's notice.
- * The keyless aggregator feeds skew remote and are inconsistent about filling
- * `location` at all, so "local only" over a set that named no locations is a
- * blank screen the user cannot diagnose — the notice points them back at the
- * toggle instead.
+ * A blank screen the user cannot diagnose is worse than an unfiltered one, and
+ * the notice points them back at the toggle.
  */
 export function filterPostingsByLocation<T extends { location: string }>(
   postings: readonly T[],
@@ -75,7 +127,10 @@ export function filterPostingsByLocation<T extends { location: string }>(
 ): { postings: T[]; suppressed: boolean } {
   const query = queryLocation?.trim();
   if (!query) return { postings: [...postings], suppressed: false };
-  const kept = postings.filter((posting) => locationMatches(query, posting.location));
+  const kept = postings.filter(
+    (posting) =>
+      posting.location.trim().length === 0 || locationMatches(query, posting.location),
+  );
   if (kept.length === 0 && postings.length > 0) {
     return { postings: [...postings], suppressed: true };
   }

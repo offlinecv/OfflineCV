@@ -161,7 +161,7 @@ describe("refineSearchResult — local-only (issue 809)", () => {
   it("never fails closed: a set it would empty is kept whole and flagged", async () => {
     const elsewhere = [
       posting({ id: "far", location: "Seattle, WA" }),
-      posting({ id: "unstated", location: "" }),
+      posting({ id: "further", location: "Portland, ME" }),
     ];
     const result = await refineSearchResult(
       elsewhere,
@@ -173,6 +173,24 @@ describe("refineSearchResult — local-only (issue 809)", () => {
     expect(result.jobs).toHaveLength(2);
     expect(result.locationSuppressed).toBe(true);
     expect(result.locationFilteredOut).toBe(0);
+  });
+
+  it("does not count a posting whose feed stated no location as hidden (#905 review)", async () => {
+    const mixed = [
+      posting({ id: "local", location: "Austin, TX" }),
+      posting({ id: "far", location: "Seattle, WA" }),
+      posting({ id: "unstated", location: "" }),
+    ];
+    const result = await refineSearchResult(
+      mixed,
+      parsed,
+      { ...query, location: "Austin, TX", locationOnly: true },
+      [],
+      1,
+    );
+    expect(result.jobs.map((j) => j.posting.id).sort()).toEqual(["local", "unstated"]);
+    expect(result.locationFilteredOut).toBe(1);
+    expect(result.locationSuppressed).toBe(false);
   });
 
   it("counts only what IT removed, not what the exclude filter already took", async () => {

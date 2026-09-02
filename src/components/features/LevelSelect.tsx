@@ -24,6 +24,7 @@
  * so clearing is discoverable two ways, not just via the toggle.
  */
 
+import { useId } from "react";
 import { Button } from "@design-system";
 import { SENIORITY_LADDER } from "../../lib/job-search/seniority.ts";
 
@@ -40,12 +41,17 @@ interface LevelSelectProps {
 }
 
 export function LevelSelect({ value, onChange }: LevelSelectProps) {
+  // Minted per instance, not hardcoded: since #809 two LevelSelects can be
+  // mounted at once — the results strip and the query form's Narrow step, which
+  // `StepPanel` keeps mounted while inactive — and a shared literal id would
+  // point the second radiogroup's `aria-labelledby` at the first one's node.
+  const labelId = useId();
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-2">
         {/* Named visibly by the caller's section heading (#602); kept here so
             the radiogroup still has an accessible name. */}
-        <span id="level-select-label" className="sr-only">
+        <span id={labelId} className="sr-only">
           Target level
         </span>
         {value !== undefined && (
@@ -56,7 +62,7 @@ export function LevelSelect({ value, onChange }: LevelSelectProps) {
       </div>
       <div
         role="radiogroup"
-        aria-labelledby="level-select-label"
+        aria-labelledby={labelId}
         className="flex flex-wrap gap-1 rounded-md border border-border-light bg-surface-subtle p-1"
       >
         {LEVELS.map((level) => {

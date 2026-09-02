@@ -38,6 +38,13 @@ All three share the **never-fail-closed** floor: when a filter would reduce a no
 set to empty, it is skipped, the input is kept, and a `*Suppressed` flag goes back for the
 panel's notice. A blank panel the user cannot diagnose is worse than an unfiltered one.
 
+A remover must also never report a fact it does not have. A posting whose feed omitted
+`location` **passes** the local-only filter — `locationMatches` reads the blank as a
+non-match because it is scoring a rating with no evidence to credit, but hiding it and
+calling it "too far away" would state a location the app never saw. The two readers of
+that blank differ on purpose (`filterPostingsByLocation`), and `locationFilteredOut`
+counts only postings that stated a location somewhere else.
+
 `location-match.ts` owns the ONE location predicate. `rank.ts` reads it for the soft
 axis, `refine.ts` for the hard filter — so the local-only toggle can never hide a posting
 whose own card shows a location match. It is a string comparison, not geography: no

@@ -317,6 +317,18 @@ describe("JobSearchResults local-only notices (issue 809)", () => {
       kind: "loaded",
       result: loaded(2, [], 3, false, false, true, 0),
     });
-    expect(el.textContent).toContain("None of these postings say where they are");
+    expect(el.textContent).toContain("Local-only filter skipped");
+    // The floor fires for any reason the filter would empty the set, so the
+    // copy must not blame the postings for stating no location (#905 review).
+    expect(el.textContent).not.toContain("None of these postings say where they are");
+  });
+
+  it("names the local-only filter by role, never by its location-less label", () => {
+    const el = render({
+      kind: "loaded",
+      result: loaded(2, [], 3, false, false, true, 4),
+    });
+    expect(el.textContent).toContain("untick the local-only filter above");
+    expect(el.textContent?.toLowerCase()).not.toContain("only jobs near me");
   });
 });

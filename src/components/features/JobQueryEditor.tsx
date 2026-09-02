@@ -43,14 +43,12 @@
  */
 
 import { useState } from "react";
-import { EditableField, StepPanel } from "@design-system";
+import { StepPanel } from "@design-system";
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
 import { ROLE_HINT } from "../../lib/job-search/query-steps.ts";
 import {
   canonicalSkillLabels,
   parseSeniorityLabel,
-  withExcludeTerm,
-  withoutExcludeTerm,
 } from "../../lib/job-search/query-builder.ts";
 import { promoteSkill, promoteTitle } from "../../lib/job-search/search-plan.ts";
 import type { RoleFamily } from "../../lib/job-search/role-keywords.ts";
@@ -59,6 +57,11 @@ import type { JobBoardLink } from "../../lib/job-search/deep-links.ts";
 import type { CompanyTargets as CompanyTargetsState } from "../../hooks/useCompanyTargets.ts";
 import { ChipListEditor } from "./ChipListEditor.tsx";
 import { CompanyTargets } from "./CompanyTargets.tsx";
+import {
+  EXCLUDE_TERMS_HINT,
+  ExcludeTermsEditor,
+  LocationField,
+} from "./QueryFilterFields.tsx";
 import { CompFloorInput } from "./CompFloorInput.tsx";
 import { ExternalBoardLinks } from "./ExternalBoardLinks.tsx";
 import { RoleFamilyChips } from "./RoleFamilyChips.tsx";
@@ -132,10 +135,6 @@ export function JobQueryEditor({
   const removeSkill = (skill: string) =>
     onChange((q) => withSkills(q, q.skills.filter((s) => s !== skill)));
 
-  const addExcludeTerm = (term: string) =>
-    onChange((q) => withExcludeTerm(q, term));
-  const removeExcludeTerm = (term: string) =>
-    onChange((q) => withoutExcludeTerm(q, term));
 
   // Role families (#568): REMOVAL only — see RoleFamilyChips' doc for why
   // there's no free-text add. Narrowing to an empty list is safe: readers
@@ -279,12 +278,7 @@ export function JobQueryEditor({
          *  behavior at all. */}
         <QueryStepSection title="Location">
           <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm">
-            <EditableField
-              value={query.location}
-              placeholder="location"
-              label="Location"
-              onCommit={(v) => onChange((q) => ({ ...q, location: v || undefined }))}
-            />
+            <LocationField query={query} onChange={onChange} />
           </div>
         </QueryStepSection>
 
@@ -292,19 +286,8 @@ export function JobQueryEditor({
          *  contains one of these, never when only its description does.
          *  Removable chips may already be seeded from the role-family
          *  classification (e.g. GTM/field roles for an engineering search). */}
-        <QueryStepSection
-          title="Exclude"
-          hint="A posting is dropped when its title contains one of these — its description is not checked."
-        >
-          <ChipListEditor
-            label="Excluded titles"
-            labelHidden
-            items={query.excludeTerms ?? []}
-            onAdd={addExcludeTerm}
-            onRemove={removeExcludeTerm}
-            placeholder="Add a title to exclude…"
-            addAriaLabel="Add exclude term"
-          />
+        <QueryStepSection title="Exclude" hint={EXCLUDE_TERMS_HINT}>
+          <ExcludeTermsEditor query={query} onChange={onChange} />
         </QueryStepSection>
 
         <QueryStepSection title="Minimum pay">

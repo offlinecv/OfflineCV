@@ -27,6 +27,27 @@ describe("locationMatches", () => {
     expect(locationMatches("Austin, TX", "Seattle, WA")).toBe(false);
   });
 
+  it("rejects a same-named city in a different state or country (#905 review)", () => {
+    expect(locationMatches("Portland, OR", "Portland, ME")).toBe(false);
+    expect(locationMatches("Columbus, OH", "Columbus, GA")).toBe(false);
+    expect(locationMatches("Kansas City, MO", "Kansas City, KS")).toBe(false);
+    expect(locationMatches("San Jose, CA", "San Jose, Costa Rica")).toBe(false);
+  });
+
+  it("compares whole words, so a bare state code isn't a substring match", () => {
+    expect(locationMatches("Austin, TX", "IN")).toBe(false);
+    expect(locationMatches("Norwich, UK", "OR")).toBe(false);
+  });
+
+  it("keeps a city the feed spells one word longer", () => {
+    expect(locationMatches("New York, NY", "New York City, NY")).toBe(true);
+  });
+
+  it("still matches when only one side names a state", () => {
+    expect(locationMatches("Austin, TX", "Austin")).toBe(true);
+    expect(locationMatches("Austin", "Austin, TX")).toBe(true);
+  });
+
   it("counts every remote spelling as a match for any query location", () => {
     for (const remote of ["Remote", "Worldwide", "Anywhere", "WFH"]) {
       expect(isRemotePosting(remote)).toBe(true);
@@ -66,10 +87,19 @@ describe("filterPostingsByLocation (issue 809)", () => {
     expect(result.suppressed).toBe(false);
   });
 
+  it("keeps a posting whose feed stated no location — unknown is not far (#905 review)", () => {
+    const result = filterPostingsByLocation(
+      [at("local", "Austin, TX"), at("far", "Seattle, WA"), at("unstated", "")],
+      "Austin, TX",
+    );
+    expect(result.postings.map((p) => p.id)).toEqual(["local", "unstated"]);
+    expect(result.suppressed).toBe(false);
+  });
+
   it("never fails closed: a set it would empty is kept whole and flagged", () => {
-    const postings = [at("far", "Seattle, WA"), at("unstated", "")];
+    const postings = [at("far", "Seattle, WA"), at("further", "Portland, ME")];
     const result = filterPostingsByLocation(postings, "Austin, TX");
-    expect(result.postings.map((p) => p.id)).toEqual(["far", "unstated"]);
+    expect(result.postings.map((p) => p.id)).toEqual(["far", "further"]);
     expect(result.suppressed).toBe(true);
   });
 
