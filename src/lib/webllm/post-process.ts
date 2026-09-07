@@ -106,11 +106,25 @@ const LEADING_BOLD_WORD_PATTERN = /^\*\*([A-Za-z][\w-]*)\*\*\s+/;
  *     `- 3.5x revenue growth` became `5x revenue growth`. Silent numeric
  *     corruption on the product path, in a bullet the rewrite prompt actively
  *     asks the model to quantify. Nothing needs a tight `1.Foo`.
- *   - **`-` and `•` allow `\s*`**, so a tight `-Shipped X` still normalizes.
+ *   - **`•` allows `\s*`**, so a tight `•Shipped X` still normalizes. Safe
+ *     with zero-or-more because `•` is only ever a glyph — it never carries
+ *     meaning as part of the text it precedes.
+ *   - **`-` allows `\s*` only when what follows is not a number.** `-` is the
+ *     one marker that is also an ordinary character mid-content: a minus sign.
+ *     With a bare `\s*` this branch was the dash-side twin of the numbered bug
+ *     above — pass 1 stripped `- ` from `- -5% churn`, pass 2 read the
+ *     uncovered `-` as a glyph and ate it too, shipping `5% churn`. A
+ *     reduction reads as a gain, and the line stays grammatical, so nothing
+ *     downstream looks wrong. The bare `-5% churn` shape needed only one pass
+ *     and predates the loop entirely. `(?!\.?\d)` withholds the zero-space
+ *     branch from a sign, covering `-.5%` as well as `-5%`; the `\s+` branch
+ *     is unguarded because `- 5%` is a marker plus a positive number, and a
+ *     genuine negative is written `- -5%`. Nothing needs a tight `-5`-as-marker
+ *     reading. Fix for #821.
  *   - **`*` requires `\s+`**, because `*X*` is italics and is handled by the
  *     paired-emphasis strip instead.
  */
-const LIST_MARKER_PATTERN = /^(?:\d+[.)]\s+|[•\-]\s*|\*\s+)/;
+const LIST_MARKER_PATTERN = /^(?:\d+[.)]\s+|•\s*|-(?:\s+|(?!\.?\d))|\*\s+)/;
 
 /**
  * Runaway guard for the markdown-prefix loop in `cleanRewriteLine` — not a

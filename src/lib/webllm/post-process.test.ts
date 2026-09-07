@@ -231,8 +231,28 @@ describe("cleanRewriteLine", () => {
       ["• 4.2% conversion lift.", "4.2% conversion lift."],
       // Not marker-prefixed at all — the same branch mangled this on its own.
       ["3.5x revenue growth.", "3.5x revenue growth."],
-    ])("does not eat a decimal a marker strip uncovers: %s", (input, want) => {
+      // The dash-side twin of the same bug (#821). `-` is the one marker that
+      // is also ordinary content — a minus sign — so the zero-space branch ate
+      // the sign a `- ` strip had just uncovered. A reduction then reads as a
+      // gain, and unlike a mangled decimal the line stays wholly plausible.
+      ["- -5% churn in Q3.", "-5% churn in Q3."],
+      ["- -12% cost reduction.", "-12% cost reduction."],
+      ["• -5% churn in Q3.", "-5% churn in Q3."],
+      ["- -3.5x infra cost.", "-3.5x infra cost."],
+      // Single-pass shapes — no marker to uncover the sign, so this branch
+      // mangled them on its own, as with the bare decimal above.
+      ["-5% churn in Q3.", "-5% churn in Q3."],
+      ["-.5% weekly churn.", "-.5% weekly churn."],
+    ])("does not eat a number a marker strip uncovers: %s", (input, want) => {
       expect(cleanRewriteLine(input)).toBe(want);
+    });
+
+    it("preserves a leading minus sign, for any marker", () => {
+      // Sign-preservation counterpart to the decimal property below, asserted
+      // as a property so a new marker branch has to satisfy it too.
+      for (const marker of ["-", "*", "•", "1.", "1)"]) {
+        expect(cleanRewriteLine(`${marker} -5% churn.`)).toBe("-5% churn.");
+      }
     });
 
     it("preserves every digit of a leading decimal, for any marker", () => {
