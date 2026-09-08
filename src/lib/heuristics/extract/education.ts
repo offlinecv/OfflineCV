@@ -12,6 +12,12 @@ import {
   US_STATE_CODE_RE,
   COUNTRY_GAZETTEER,
   PROGRAM_NOTE_RE,
+  MONTH,
+  MONTH_ALT,
+  SEASON,
+  SEASON_ALT,
+  OPEN_ENDED,
+  OPEN_ENDED_ALT,
 } from "../regex.ts";
 import {
   isBulletLine,
@@ -37,8 +43,7 @@ import { avgScore } from "./shared.ts";
  *  Used to fill the `*_precision` companions honestly from what the text shows.
  *  Non-global regexes (no shared `lastIndex` state) so the helper is reentrant. */
 function inferDatePrecision(date: string): "month" | "year" {
-  const monthName =
-    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\b/i;
+  const monthName = new RegExp(String.raw`\b${MONTH}\b`, "i");
   if (monthName.test(date)) return "month";
   if (/\b(0?[1-9]|1[0-2])[\/\-]\d{4}\b/.test(date)) return "month";
   return "year";
@@ -172,7 +177,7 @@ const EDUCATION_ANNOTATION_RE =
  *  ("Aug 2023 – Present"). Uses the STRICT month regex, not the loose
  *  `MONTH_YEAR_RE`, because this value is both EXTRACTED and DELETED — the loose
  *  `[a-z]*` tail would false-match a word like "Marketing" and eat it (#380). */
-const ATTENDANCE_RANGE_END = `(?:${STRICT_MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source}|\\b\\d{4}\\b|present|current|ongoing|now)`;
+const ATTENDANCE_RANGE_END = `(?:${STRICT_MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source}|\\b\\d{4}\\b|${OPEN_ENDED_ALT})`;
 const TRAILING_ATTENDANCE_DATE_RE = new RegExp(
   `[.,;\\s]+(?<date>(?:${STRICT_MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source})(?:\\s*[–—-]\\s*${ATTENDANCE_RANGE_END})?)\\s*$`,
   "i",
@@ -325,7 +330,7 @@ const YEAR_OR_REDACTED_RE = new RegExp(
 const DATE_LEAD_RE = new RegExp(
   String.raw`^(?:` +
     YEAR_OR_REDACTED_SRC +
-    String.raw`|(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+` +
+    String.raw`|${MONTH}\.?\s+` +
     YEAR_OR_REDACTED_SRC +
     String.raw`|\d{1,2}\/\d{4})`,
   "i",
@@ -335,7 +340,7 @@ const DATE_LEAD_RE = new RegExp(
  *  redacted) year and everything after. Reuses {@link YEAR_OR_REDACTED_SRC} so
  *  the redacted `20XX` stub ("Sep 20XX – May 20XX") strips like a real year. */
 const CLEAN_FIELD_DATE_RE = new RegExp(
-  String.raw`\s*[-–—,;]?\s*(?:(?:expected|anticipated|graduat\w*|class of|present|current)\b\s*)*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*)?\(?` +
+  String.raw`\s*[-–—,;]?\s*(?:(?:expected|anticipated|graduat\w*|class of|present|current)\b\s*)*(?:${MONTH}\.?\s*)?\(?` +
     YEAR_OR_REDACTED_SRC +
     String.raw`\b.*$`,
   "i",
@@ -400,7 +405,13 @@ function isInlineDatedProgram(line: string): boolean {
     .replace(/\b(19|20)\d{2}\b/g, "")
     .replace(new RegExp(String.raw`\b` + REDACTED_YEAR + String.raw`\b`, "gi"), "")
     .replace(
-      /\b(?:spring|summer|fall|autumn|winter|present|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi,
+      // All three vocabularies share ONE trailing `[a-z]*`, so this composes
+      // the bare `_ALT` alternations rather than the wrapped MONTH/SEASON —
+      // nesting a second tail inside would change the matched language.
+      new RegExp(
+        String.raw`\b(?:${SEASON_ALT}|present|${MONTH_ALT})[a-z]*\b`,
+        "gi",
+      ),
       "",
     );
   // A trailing GPA NOTE the exporter composed onto this line (#883) is a
@@ -873,16 +884,12 @@ function stripInstitutionDate(s: string): string {
   // trailing YEAR of a "Fall 2013 – Spring 2014" range and leaves a corrupted
   // "… Fall 2013 – Spring" glued onto the institution (#294 review) — worse than
   // leaving the whole range intact.
-  const SEASON = `(?:spring|summer|fall|autumn|winter)`;
   // Redacted-year stub ("Sep 20XX", "Fall 20XX", bare "20XX") Word/Office
   // templates ship — `MONTH_YEAR_RE` requires a real 4-digit year, so without
   // this a reconstructed "Institution  Sep 20XX – May 20XX" sub-line keeps the
   // date glued to the institution and never round-trips (#297).
-  const REDACTED = `(?:(?:${SEASON}|(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\\.?)\\s+)?${REDACTED_YEAR}`;
+  const REDACTED = `(?:(?:${SEASON}|${MONTH}\\.?)\\s+)?${REDACTED_YEAR}`;
   const DATE = `(?:${MONTH_YEAR_RE.source}|${NUMERIC_MONTH_YEAR_RE.source}|${REDACTED}|(?:${SEASON}\\s+)?\\b\\d{4}\\b)`;
-  // Open-ended range tail: "Present"/"Current"/"Ongoing"/"Now" as well as a
-  // second date — so "… 2015 – Current" peels whole, not nothing.
-  const OPEN = `(?:present|current|ongoing|now)`;
   const SEP = `\\s*[–—-]\\s*`;
   // Optional column separator immediately before the trailing date, so a
   // one-line "Institution | 2018 – 2022" (#375) peels cleanly instead of
@@ -891,8 +898,10 @@ function stripInstitutionDate(s: string): string {
   // ("University of Washington, Seattle 2010 – 2015") that already has no
   // preceding whitespace still cannot match this optional group.
   const COL_SEP = `(?:[|·,]\\s+)?`;
+  // The range tail admits an open-ended word as well as a second date, so
+  // "… 2015 – Current" peels whole rather than not at all.
   const TRAILING_DATE_RE = new RegExp(
-    `\\s+${COL_SEP}${DATE}(?:${SEP}(?:${DATE}|${OPEN}))?\\s*$`,
+    `\\s+${COL_SEP}${DATE}(?:${SEP}(?:${DATE}|${OPEN_ENDED}))?\\s*$`,
     "i",
   );
   const stripped = s.replace(TRAILING_DATE_RE, "").trim();

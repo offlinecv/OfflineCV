@@ -22,6 +22,8 @@ import {
   INTL_LOCATION_RE,
   MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
+  OPEN_ENDED_ALT,
+  SEASON,
   STRICT_MONTH_YEAR_RE,
   US_LOCATION_RE,
   US_STATE_CODE_RE,
@@ -555,7 +557,7 @@ export function dateSeparator(text: string): string | undefined {
 
 // A range whose START token is a bare SEASON ("Fall 2013 – Spring 2014",
 // "Summer 2013, 2014"). Deliberately EXCLUDED from `isLoneDateRange` (see below).
-const SEASON_LEAD_RE = /^(?:Spring|Summer|Fall|Autumn|Winter)\b/i;
+const SEASON_LEAD_RE = new RegExp(String.raw`^${SEASON}\b`, "i");
 
 /**
  * True when `text` is nothing but a month-year / year date range. The single
@@ -678,7 +680,9 @@ export function stripDateRange(text: string): string {
   // Remove the paired match and leftover year tokens.
   let cleaned = text.replace(DATE_RANGE_RE, "").trim();
   DATE_RANGE_RE.lastIndex = 0;
-  cleaned = cleaned.replace(/\b(Present|Current|Now|Ongoing)\b/gi, "").trim();
+  cleaned = cleaned
+    .replace(new RegExp(String.raw`\b(${OPEN_ENDED_ALT})\b`, "gi"), "")
+    .trim();
   // Lone month-year tokens BEFORE bare years: a `Mon. YYYY` that no range
   // matched is one token, and removing its year first would strand the month in
   // the title ("… Link Jan.", #380). This is the exact token `parseDateRange`'s
