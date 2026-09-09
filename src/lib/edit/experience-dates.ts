@@ -75,16 +75,31 @@
  *
  * WHAT THIS MODULE DOES NOT OWN. "The one rule" above is the rule for the EDIT
  * and EXPORT paths — the two that can corrupt a stored value. Two display-only
- * formatters still hand-roll their own collapse and disagree with this one on the
- * unanchored-`is_current` row: `buildDateRange` (`score/group-bullets.ts:328`,
- * which feeds `formatExperienceHeader`) and `buildProjectDates`
- * (`score/entry-dates.ts:16`) both draw a bare "Present" where
- * {@link formatExperienceDateRange} draws "". They also use a tight "–" against
- * this module's spaced " – ". Nothing is broken by that today: the shape is
- * unreachable from the parser and, since #672, from the edit lane too, and
- * neither formatter's output is ever re-parsed. Folding them in needs a separator
- * parameter and a decision on that row, which is a change to display strings, not
- * to #672's corruption — deliberately out of scope here. (`buildEducationDates`
+ * formatters still hand-roll their own collapse and disagree with this one:
+ * `buildDateRange` (`score/group-bullets.ts:366`, which feeds
+ * `formatExperienceHeader`) and `buildProjectDates` (`score/entry-dates.ts:20`).
+ * The disagreement is a TRIM, not a collapse, and it shows up on exactly one
+ * row — a whitespace-only start beside `is_current`, where this module trims the
+ * start away and draws the unanchored "Present" while both siblings read "  " as
+ * a real anchor and draw "  –Present":
+ *
+ *     {is_current: true}                    → all three draw "Present"
+ *     {start_date: "  ", is_current: true}  → "Present" here, "  –Present" there
+ *
+ * They also use a tight "–" against this module's spaced " – ". An earlier
+ * revision of this paragraph claimed the siblings draw "Present" where this
+ * function draws "" — that is wrong for THIS function on any `is_current` row
+ * (`end` is "Present" before either fallthrough is reached, so "" is
+ * unreachable) and was only ever true of the composite
+ * `normalizeExperienceDates` → format that `ReconstructedRole` runs. Corrected
+ * in #817, which is also where that row first got a test.
+ *
+ * Nothing is broken by the divergence today: neither formatter's output is ever
+ * re-parsed, and the whitespace row that provokes it is reachable only from a
+ * raw export-path entry — never from the parser, nor, since #672, from the edit
+ * lane. Folding them in needs a separator parameter and a decision on that row,
+ * which is a change to display strings, not to #672's corruption — deliberately
+ * out of scope here. (`buildEducationDates`
  * in the same file is NOT a candidate: it reads `end_date` first on purpose,
  * because a lone education date is a graduation date, #97.)
  *
