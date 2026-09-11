@@ -126,11 +126,40 @@ export const COUNTRY_GAZETTEER: ReadonlySet<string> = _buildGazetteer();
 
 // ── Date patterns ───────────────────────────────────────────────────────────
 
-const MONTH =
-  "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*";
+/**
+ * Bare alternations — no group wrapper, no `[a-z]*` tail.
+ *
+ * Exported for the two jobs the wrapped forms below cannot do:
+ *   - **Compose under a shared tail.** `education.ts` folds months, seasons
+ *     and `present` into ONE group sharing a single trailing `[a-z]*`; handing
+ *     it a pre-wrapped `MONTH` would nest the tail and change the language.
+ *   - **Splice into a CAPTURING group.** `DATE_RANGE_RE` below interpolates the
+ *     open-ended words into `(...)` whose group numbering the callers index by
+ *     position, so the token must not bring a group of its own.
+ *
+ * Every other call site wants the wrapped constants underneath instead.
+ */
+export const MONTH_ALT =
+  "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
+export const SEASON_ALT = "Spring|Summer|Fall|Autumn|Winter";
+export const OPEN_ENDED_ALT = "Present|Current|Now|Ongoing";
+
+/**
+ * Month, prefix-matched: the twelve abbreviations plus an arbitrary lowercase
+ * tail, so "Sep", "Sept" and "September" all match.
+ *
+ * `Sept` is redundant here — `Sep` plus the tail already covers it, which is
+ * why the copies this replaced could spell the same thing `sept?` and stay
+ * equivalent. It is kept because {@link STRICT_MONTH}, which drops the tail,
+ * genuinely needs the longer alternative, and the two are read as a pair.
+ */
+export const MONTH = `(?:${MONTH_ALT})[a-z]*`;
 
 /** Academic / seasonal period words. Case-insensitive at use site. */
-const SEASON = "(?:Spring|Summer|Fall|Autumn|Winter)";
+export const SEASON = `(?:${SEASON_ALT})`;
+
+/** Open-ended end-date words, wrapped non-capturing. */
+export const OPEN_ENDED = `(?:${OPEN_ENDED_ALT})`;
 
 /** "Jan 2020", "January 2020", "Jan. 2020", "Jan '20". 2-digit apostrophe
  *  form (`'20`) covers older resumes that use AP-style short dates. */
@@ -141,6 +170,10 @@ export const MONTH_YEAR_RE = new RegExp(
 
 // Month names spelled out in full, longest-first. NO `[a-z]*` tail — see
 // STRICT_MONTH_YEAR_RE.
+// NOT exported, unlike the tokens above: every use is inside this module, and
+// an export with no importer is dead surface. The change that needs it outside
+// is #925 (swapping education's loose `[a-z]*` month strip for this enumerated
+// form) — it should be exported by that PR, where it gains a real consumer.
 const STRICT_MONTH =
   "January|Jan|February|Feb|March|Mar|April|Apr|May|June|Jun|July|Jul|" +
   "August|Aug|September|Sept|Sep|October|Oct|November|Nov|December|Dec";
@@ -177,7 +210,7 @@ export const NUMERIC_MONTH_YEAR_RE = /\b(0?[1-9]|1[0-2])[\/\-]\d{4}\b/g;
 export const YEAR_RE = /\b(19|20)\d{2}\b/g;
 
 /** "Present" / "Current" / "Now" — open-ended end dates. */
-export const PRESENT_RE = /\b(Present|Current|Now|Ongoing)\b/i;
+export const PRESENT_RE = new RegExp(`\\b(${OPEN_ENDED_ALT})\\b`, "i");
 
 // Year-position forms a date anchor may carry. Beyond real years (4-digit and
 // apostrophe-2-digit) this includes the redacted placeholder stubs Word/Office
@@ -267,9 +300,9 @@ const EXPECTED_END_QUALIFIER = `(?:(?:Expected|Exp\\.?)\\s+)?`;
  */
 export const DATE_RANGE_RE = new RegExp(
   // (a) classic: any anchor, explicit separator, [Expected] any anchor|Present
-  `(?:(${DATE_ANCHOR})\\s*(?:–|—|-|to|through)\\s*${EXPECTED_END_QUALIFIER}(${DATE_ANCHOR}|Present|Current|Now|Ongoing))` +
+  `(?:(${DATE_ANCHOR})\\s*(?:–|—|-|to|through)\\s*${EXPECTED_END_QUALIFIER}(${DATE_ANCHOR}|${OPEN_ENDED_ALT}))` +
     // (b) separator-less: month-year WS [Expected] month-year (or Present)
-    `|(?:(${MONTH_YEAR_ANCHOR})\\s+${EXPECTED_END_QUALIFIER}(${MONTH_YEAR_ANCHOR}|Present|Current|Now|Ongoing))` +
+    `|(?:(${MONTH_YEAR_ANCHOR})\\s+${EXPECTED_END_QUALIFIER}(${MONTH_YEAR_ANCHOR}|${OPEN_ENDED_ALT}))` +
     // (c) season-comma: "Season YYYY, YYYY" (e.g. "Summer 2013, 2014")
     `|(?:(${SEASON}\\s+\\d{4}),\\s*(\\d{4}))`,
   "i",

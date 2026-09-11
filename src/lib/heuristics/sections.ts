@@ -33,6 +33,9 @@ import {
   INSTITUTION_HINTS,
   SECTION_KEYWORDS,
   type SectionName,
+  MONTH,
+  SEASON,
+  OPEN_ENDED,
 } from "./regex.ts";
 import { isEntryHeaderShape, mergeWrappedContinuations } from "./entry-blocks.ts";
 import { isBulletLine } from "./line-primitives.ts";
@@ -828,13 +831,13 @@ const LEADING_TOKEN_SECTIONS: readonly SectionName[] = ["experience", "education
 const STRONG_DATE_TOKEN_RE = new RegExp(
   [
     // month-year: "Aug 2024", "August 2024", "Aug. '24", "Sep 20XX"
-    "\\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\\.?\\s+(?:\\d{4}|'\\d{2}|20XX)",
+    `\\b${MONTH}\\.?\\s+(?:\\d{4}|'\\d{2}|20XX)`,
     // season-year: "Summer 2013"
-    "\\b(?:Spring|Summer|Fall|Autumn|Winter)\\s+\\d{4}",
+    `\\b${SEASON}\\s+\\d{4}`,
     // numeric slash date: "06/2021", "6-2021"
     "\\d{1,2}[/-]\\d{4}",
     // open-ended present-family token
-    "\\b(?:Present|Current|Ongoing|Now)\\b",
+    `\\b${OPEN_ENDED}\\b`,
     // apostrophe-year / redaction stub, standalone
     "'\\d{2}\\b",
     "\\b20XX\\b",

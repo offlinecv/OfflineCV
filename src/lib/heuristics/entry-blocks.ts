@@ -32,6 +32,8 @@ import {
   PRESENT_RE,
   INSTITUTION_HINTS,
   PROGRAM_NOTE_RE,
+  MONTH,
+  SEASON,
 } from "./regex.ts";
 import {
   dateRegionStart,
@@ -67,8 +69,8 @@ import { mergeItemText, splitOnFlushRightGap } from "./line-assembly.ts";
  *  nothing but a date. Shared by education chunking and {@link isEntryHeaderShape}. */
 export function isDateOnlyLine(text: string): boolean {
   const stripped = text
-    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?/gi, "")
-    .replace(/\b(?:spring|summer|fall|autumn|winter)\b/gi, "")
+    .replace(new RegExp(String.raw`\b${MONTH}\.?`, "gi"), "")
+    .replace(new RegExp(String.raw`\b${SEASON}\b`, "gi"), "")
     .replace(/\b\d{4}\b/g, "")
     .replace(/\b(?:present|current|expected|graduation|graduated|anticipated)\b/gi, "")
     .replace(/[\s,–\-—|/().:]+/g, "")
