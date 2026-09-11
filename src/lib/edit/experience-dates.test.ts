@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyNormalizedDateOverrides,
   applyNormalizedExperienceDates,
+  formatExperienceDateRange,
   normalizeExperienceDates,
   relocatedEndAnchor,
 } from "./experience-dates.ts";
@@ -209,5 +210,92 @@ describe("relocatedEndAnchor", () => {
     expect(relocatedEndAnchor({})).toBeUndefined();
     expect(relocatedEndAnchor({ end_date: "" })).toBeUndefined();
     expect(relocatedEndAnchor({ is_current: true })).toBeUndefined();
+  });
+});
+
+/**
+ * The formatter, which is exported, consumed on BOTH the edit path
+ * (`ReconstructedRole`) and the EXPORT path (`ats-resume-model.ts`'s
+ * `experienceDateRange`), and until #817 had no direct test at all.
+ *
+ * The `.trim()` calls are the part worth pinning. They are a deliberate
+ * behaviour change on the export path — the old `experienceDateRange` body
+ * tested truthiness without trimming, so an entry holding `start_date: "  "`
+ * drew two spaces into the header slot and now draws nothing. That population is
+ * exactly the one this module is total over: raw entries that never passed
+ * through `applyOverrides`. Mutation-checked during the #682 review, removing
+ * both trims left `src/lib/edit/**` and two repro suites entirely green.
+ */
+describe("formatExperienceDateRange", () => {
+  it("joins both anchors with a spaced en-dash", () => {
+    expect(formatExperienceDateRange({ start_date: "2019", end_date: "2022" })).toBe(
+      "2019 \u2013 2022",
+    );
+  });
+
+  it("trims each anchor before joining", () => {
+    // Red without the `.trim()` calls: yields " 2019  \u2013  2022 ".
+    expect(
+      formatExperienceDateRange({ start_date: " 2019 ", end_date: " 2022 " }),
+    ).toBe("2019 \u2013 2022");
+  });
+
+  it("treats a whitespace-only anchor as absent, not as a value", () => {
+    // The reachable export-path case, and the one the trim exists for. Red
+    // without the trims: yields "   \u2013 2022" and "2019 \u2013   ".
+    expect(formatExperienceDateRange({ start_date: "  ", end_date: "2022" })).toBe(
+      "2022",
+    );
+    expect(formatExperienceDateRange({ start_date: "2019", end_date: "  " })).toBe(
+      "2019",
+    );
+    expect(formatExperienceDateRange({ start_date: " ", end_date: "\t" })).toBe("");
+  });
+
+  it("trims a whitespace start into the UNANCHORED is_current shape", () => {
+    // The one row where the two display-only formatters genuinely disagree with
+    // this one, and the intersection the rest of this block leaves uncovered:
+    // the trim and the `is_current` substitution are each pinned above, never
+    // together. `buildProjectDates` and `buildDateRange` read "  " as a real
+    // anchor and draw "  –Present"; this module trims it away and draws the
+    // unanchored "Present". Reachable from a raw export-path entry — exactly the
+    // population this module is total over (#817 review).
+    expect(
+      formatExperienceDateRange({ start_date: "  ", is_current: true }),
+    ).toBe("Present");
+  });
+
+  it("substitutes \"Present\" for the end anchor when is_current", () => {
+    expect(
+      formatExperienceDateRange({ start_date: "2019", is_current: true }),
+    ).toBe("2019 \u2013 Present");
+  });
+
+  it("lets is_current win over a populated end_date", () => {
+    // `is_current` is read BEFORE `end_date`, so a stale end anchor cannot
+    // out-rank it — the shape `applyOverrides` produces for an ongoing role.
+    expect(
+      formatExperienceDateRange({
+        start_date: "2019",
+        end_date: "2022",
+        is_current: true,
+      }),
+    ).toBe("2019 \u2013 Present");
+  });
+
+  it("draws a lone \"Present\" when is_current has no start anchor", () => {
+    // Unanchored `is_current` — one of the two raw shapes the docblock says
+    // reach here from the export path but never from the edit card.
+    expect(formatExperienceDateRange({ is_current: true })).toBe("Present");
+  });
+
+  it("falls through to whichever single anchor exists", () => {
+    expect(formatExperienceDateRange({ start_date: "2019" })).toBe("2019");
+    expect(formatExperienceDateRange({ end_date: "2022" })).toBe("2022");
+  });
+
+  it("returns the empty string when the entry carries no date at all", () => {
+    expect(formatExperienceDateRange({})).toBe("");
+    expect(formatExperienceDateRange({ is_current: false })).toBe("");
   });
 });

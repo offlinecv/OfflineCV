@@ -365,24 +365,66 @@ function presenceCheck(
 }
 
 /** The ONE re-parsed role the experience edit landed on: the entry carrying our
- *  synthetic marker. `NEW_TITLE`/`NEW_COMPANY` are literals that appear nowhere
- *  in any fixture, so at most one entry matches. Returns the whole-experience
- *  JSON when no entry carries the marker — the presence half is already failing
- *  in that case and must not be masked by a silently-skipped absence half. */
-function editedRoleText(experience: readonly unknown[], fallback: string): string {
-  const hit = experience.find(
+ *  synthetic marker, or `undefined` when none does. `NEW_TITLE`/`NEW_COMPANY`
+ *  are literals that appear nowhere in any fixture, so at most one entry
+ *  matches. Sole owner of the marker lookup — both slicers below derive from it
+ *  so their fallbacks cannot drift apart independently (#817 review). */
+function markedRole(experience: readonly unknown[]): unknown | undefined {
+  return experience.find(
     (e) => j(e).includes(NEW_TITLE) || j(e).includes(NEW_COMPANY),
   );
+}
+
+/** The marked role as searchable text. Falls back to the whole-experience JSON
+ *  when no entry carries the marker — the presence half is already failing in
+ *  that case and must not be masked by a silently-skipped absence half. */
+function editedRoleText(experience: readonly unknown[], fallback: string): string {
+  const hit = markedRole(experience);
   return hit === undefined ? fallback : j(hit);
 }
 
-/** One string field off a re-parsed experience entry, or `undefined` when the
- *  key is absent or non-string. */
 type EditedRoleField = "title" | "company" | "start_date" | "end_date";
 
+/** One string field off a re-parsed experience entry, or `undefined` when the
+ *  key is absent or non-string. */
 function stringField(entry: unknown, key: EditedRoleField): string | undefined {
   const v = (entry as Record<string, unknown> | null)?.[key];
   return typeof v === "string" ? v : undefined;
+}
+
+const DATE_KEYS: ReadonlySet<EditedRoleField> = new Set(["start_date", "end_date"]);
+
+/** The DATE SLOTS of the ONE re-parsed role the experience edit landed on, as
+ *  searchable text — `{"start_date":…,"end_date":…}` and nothing else.
+ *
+ *  Why the absence half needs its own, narrower slice for a date key: `replaced`
+ *  there is the fixture's OWN prior `start_date`, which is frequently a bare
+ *  `"2019"`. The wide slice is `j(hit)` — the whole edited role, `description`
+ *  included — so a fixture whose role-0 prose merely mentions that year ("shipped
+ *  the platform in 2019", "since 2019") fails the gate for a reason that has
+ *  nothing to do with the slot under test. The title/company keys are safe on the
+ *  wide slice by luck, not by design: `NEW_TITLE`/`NEW_COMPANY` and the originals
+ *  they replace are long, distinctive strings. A four-digit year is not.
+ *
+ *  The narrowing forfeits nothing even in principle (#817 review): a replaced
+ *  `start_date` can only reach `title`/`company` if `applyExperienceHeaderOverrides`
+ *  writes a date into a header field, which is a different defect class with its
+ *  own gate, and the one way the collapse CAN misplace the value — leaving it in
+ *  `end_date` — is inside this slice, and checked again from the other side by
+ *  the `end_date survived the lone-end-date collapse` assertion below.
+ *
+ *  The no-marker fallback is every role's date slots. That is DELIBERATELY not
+ *  the same "wide" as {@link editedRoleText}'s whole-experience JSON — wider in
+ *  role count, narrower in field count — so the two can drift independently.
+ *  Safe either way: the branch is only reached once the presence half has already
+ *  failed, so the worst case is a second failure line, never a false green. */
+function editedRoleDateText(experience: readonly unknown[]): string {
+  const hit = markedRole(experience);
+  const slots = (e: unknown) => ({
+    start_date: stringField(e, "start_date"),
+    end_date: stringField(e, "end_date"),
+  });
+  return hit === undefined ? j(experience.map(slots)) : j(slots(hit));
 }
 
 /**
@@ -406,7 +448,12 @@ function experienceFieldCheck(
 ): void {
   if (!experience.some((e) => stringField(e, key) === present))
     into.push(`${key} "${present}" missing on re-parse`);
-  if (replaced && absenceText.includes(replaced))
+  if (!replaced) return;
+  // A date key searches its own slots; everything else searches the caller's
+  // slice. See {@link editedRoleDateText} for why the wide slice cannot be used
+  // for a value that may be a bare year.
+  const haystack = DATE_KEYS.has(key) ? editedRoleDateText(experience) : absenceText;
+  if (haystack.includes(replaced))
     into.push(`replaced ${key} still present on re-parse`);
 }
 
@@ -466,6 +513,9 @@ function computeEditFailures(
     //   • this shape (START cleared, END supplied)  → 45 of 60 FAIL
     //   • the earlier shape (a new `start_date`)    → 60/60 GREEN
     // The presence of a date field was never the thing under test; the SLOT is.
+    // `roleText` is INERT here: a date key routes its absence half through
+    // `editedRoleDateText` instead (#817). Passed anyway so the call reads
+    // uniformly with the title/company ones above, which do use it.
     experienceFieldCheck(
       f3.experience, "start_date", NEW_END_DATE, edits.replaced.start_date,
       roleText, fails.experience,
@@ -548,6 +598,61 @@ async function editRoundtrip(
     return { renderError: `export/re-parse threw: ${(err as Error).message}` };
   }
 }
+
+/**
+ * The absence half's scoping rule, asserted directly (#817).
+ *
+ * These run at module scope over synthetic roles rather than over the corpus,
+ * because the defect they pin is one NO fixture currently exhibits: it needs a
+ * role whose prose happens to repeat its own start year. The gate is green over
+ * the present fixtures and would go red on the next one added — which is exactly
+ * the class of failure a corpus gate cannot self-test.
+ */
+describe("experienceFieldCheck absence scoping (#817)", () => {
+  const role = (over: Record<string, unknown>) => ({
+    title: NEW_TITLE,
+    company: "Acme Corporation",
+    start_date: "2020",
+    end_date: "2022",
+    ...over,
+  });
+
+  // The `j(experience[0])` argument in the two date cases below is deliberately
+  // inert — a date key ignores `absenceText` — and is passed precisely to show
+  // that a wide slice containing the replaced value no longer fires the check.
+  it("does not fire when the replaced year merely recurs in role prose", () => {
+    const fails: string[] = [];
+    const experience = [
+      role({ description: "Shipped the billing platform in 2019 and scaled it." }),
+    ];
+    experienceFieldCheck(
+      experience, "start_date", "2020", "2019", j(experience[0]), fails,
+    );
+    expect(fails).toEqual([]);
+  });
+
+  it("still fires when the replaced year survives in the date slot itself", () => {
+    const fails: string[] = [];
+    const experience = [role({ start_date: "2019" })];
+    experienceFieldCheck(
+      experience, "start_date", "2020", "2019", j(experience[0]), fails,
+    );
+    expect(fails).toContain("replaced start_date still present on re-parse");
+  });
+
+  it("keeps searching the caller's wide slice for a non-date key", () => {
+    // The narrowing is date-only: a replaced TITLE that leaked into another
+    // field of the same role must still be caught.
+    const fails: string[] = [];
+    const experience = [
+      role({ description: "Formerly Office manager, same team." }),
+    ];
+    experienceFieldCheck(
+      experience, "title", NEW_TITLE, "Office manager", j(experience[0]), fails,
+    );
+    expect(fails).toContain("replaced title still present on re-parse");
+  });
+});
 
 describe("corpus edit-leg round-trip (#459)", { timeout: 20000 }, () => {
   const fixtures = walkPdfs(FIXTURE_ROOT);
