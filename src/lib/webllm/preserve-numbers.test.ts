@@ -197,19 +197,13 @@ describe("checkNumbersPreserved", () => {
       // `projects` isn't a people noun, so `Managed 5 projects` is a verb
       // pointing at a non-people object, not a headcount claim.
       expect(
-        checkNumbersPreserved(
-          ["Owned 5 projects."],
-          ["Managed 5 projects."],
-        ),
+        checkNumbersPreserved(["Owned 5 projects."], ["Managed 5 projects."]),
       ).toEqual({ ok: true, dropped: [], added: [] });
       expect(
         checkNumbersPreserved(["Built 8 features."], ["Led 8 features."]),
       ).toEqual({ ok: true, dropped: [], added: [] });
       expect(
-        checkNumbersPreserved(
-          ["Delivered 4 programs."],
-          ["Ran 4 programs."],
-        ),
+        checkNumbersPreserved(["Delivered 4 programs."], ["Ran 4 programs."]),
       ).toEqual({ ok: true, dropped: [], added: [] });
       expect(
         checkNumbersPreserved(
@@ -232,10 +226,7 @@ describe("checkNumbersPreserved", () => {
 
     it("still claims a headcount when a verb-object noun IS a person", () => {
       expect(
-        checkNumbersPreserved(
-          ["Managed 5 engineers."],
-          ["Led 5 engineers."],
-        ),
+        checkNumbersPreserved(["Managed 5 engineers."], ["Led 5 engineers."]),
       ).toEqual({ ok: true, dropped: [], added: [] });
     });
 
@@ -394,9 +385,9 @@ describe("checkNumbersPreserved", () => {
     });
 
     it("is case-insensitive on the multiplier — `10X` matches `10x`", () => {
-      expect(
-        checkNumbersPreserved(["Scaled 10X."], ["Scaled 10x."]).ok,
-      ).toBe(true);
+      expect(checkNumbersPreserved(["Scaled 10X."], ["Scaled 10x."]).ok).toBe(
+        true,
+      );
     });
 
     it("catches a dropped `10+`", () => {
@@ -675,19 +666,472 @@ describe("checkNumbersPreserved", () => {
       expect(result.dropped).toEqual(["12"]);
     });
 
-    it("does NOT extend to year — a year has no unclaimed state to compare against (documented residual)", () => {
-      // Every 4-digit number in 1900-2099 auto-claims as a year regardless of
-      // context (see `bareIntegerClaim`), so "suite 1900" is itself always
-      // claimed — there is no unclaimed bucket for the count-aware guard to
-      // compare against, and this masking case survives. Catching it needs a
-      // context gate on year classification itself (mirroring headcount's
-      // verb/noun check), which is a separate, larger change than this fix;
-      // tracked as a follow-up rather than silently left unmentioned.
+    it("extends to year (#876) — catches a dropped year masked by an unrelated same-value digit", () => {
+      // With year context gating (#876), "suite 1900" is unclaimed while
+      // "in 1900" is claimed as a year. A genuinely dropped year is caught
+      // even when an unrelated 4-digit number of the same value survives.
       const result = checkNumbersPreserved(
         ["Founded the program in 1900.", "Operated out of suite 1900."],
         ["Founded the program.", "Operated out of suite 1900."],
       );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["1900"]);
+    });
+
+    it("catches a dropped year date range across all 6 dash characters (#876)", () => {
+      const dashes = [
+        "-", // U+002D ASCII hyphen
+        "–", // U+2013 en dash
+        "—", // U+2014 em dash
+        "‒", // U+2012 figure dash
+        "‑", // U+2011 non-breaking hyphen
+        "−", // U+2212 minus sign
+      ];
+      for (const dash of dashes) {
+        const input = [`Acme Corp 2019 ${dash} 2021 senior engineer.`];
+        const output = ["Acme Corp senior engineer."];
+        const result = checkNumbersPreserved(input, output);
+        expect(result.ok).toBe(false);
+        expect(result.dropped).toEqual(["2019", "2021"]);
+      }
+    });
+
+    it("catches dropped years with month abbreviations and date slashes (#876)", () => {
+      const result1 = checkNumbersPreserved(
+        ["Sep. 2025 – Apr. 2026: Senior Staff Engineer."],
+        ["Senior Staff Engineer."],
+      );
+      expect(result1.ok).toBe(false);
+      expect(result1.dropped).toEqual(["2025", "2026"]);
+
+      const result2 = checkNumbersPreserved(
+        ["01/2019 - 02/2022: Lead Architect."],
+        ["Lead Architect."],
+      );
+      expect(result2.ok).toBe(false);
+      expect(result2.dropped).toEqual(["2019", "2022"]);
+    });
+
+    it("catches dropped years across common resume forms (#876)", () => {
+      const cases = [
+        ["Speaker at PyCon (2019).", "Speaker at PyCon.", "2019"],
+        ["B.S. Computer Science, 2019.", "B.S. Computer Science.", "2019"],
+        [
+          "Awarded Employee of the Year 2021.",
+          "Awarded Employee of the Year.",
+          "2021",
+        ],
+        ["AWS Certified Architect 2019.", "AWS Certified Architect.", "2019"],
+        ["Shipped the platform 2018.", "Shipped the platform.", "2018"],
+        ["Worked at Acme Corp 2019.", "Worked at Acme Corp.", "2019"],
+        [
+          "Recipient of the 2019 Excellence Award.",
+          "Recipient of the Excellence Award.",
+          "2019",
+        ],
+        ["Winner, 2020 Innovation Award.", "Innovation Award winner.", "2020"],
+        ["Presented at KubeCon 2022.", "Presented at KubeCon.", "2022"],
+      ];
+      for (const [inputStr, outputStr, expectedYear] of cases) {
+        const result = checkNumbersPreserved([inputStr], [outputStr]);
+        expect(result.ok).toBe(false);
+        expect(result.dropped).toEqual([expectedYear]);
+      }
+    });
+
+    it("accepts surviving year in rephrased context (#876)", () => {
+      const result = checkNumbersPreserved(
+        ["Presented at KubeCon in 2022.", "Refactored 2022 legacy modules."],
+        ["KubeCon 2022 speaker; refactored legacy modules."],
+      );
       expect(result.ok).toBe(true);
+      expect(result.dropped).toEqual([]);
+    });
+
+    it("does not falsely report dropped years on plain-English merges of 4-digit quantities (#876)", () => {
+      const mergePairs: [string[], string[]][] = [
+        [
+          ["Delivered the 2000 units.", "Tracked 2000 tickets."],
+          ["Delivered and tracked 2000 items."],
+        ],
+        [
+          ["Reduced by 2000 hours.", "Cut 2000 tickets."],
+          ["Cut 2000 hours and tickets."],
+        ],
+        [
+          ["A total of 2000 records.", "Indexed 2000 rows."],
+          ["Indexed 2000 records and rows."],
+        ],
+        [
+          ["Ran campaign for 2000 customers.", "Emailed 2000 leads."],
+          ["Reached 2000 customers and leads."],
+        ],
+      ];
+      for (const [input, output] of mergePairs) {
+        const result = checkNumbersPreserved(input, output);
+        expect(result.ok).toBe(true);
+        expect(result.dropped).toEqual([]);
+      }
+    });
+
+    it("treats range endpoints uniformly across the 1900-2099 boundary (#876)", () => {
+      const result1 = checkNumbersPreserved(
+        ["Processed 1000-2000 tickets.", "Closed 2000 escalations."],
+        ["Processed 1000 to 2000 tickets."],
+      );
+      expect(result1.ok).toBe(true);
+
+      const result2 = checkNumbersPreserved(
+        ["Processed 50-100 tickets.", "Closed 100 escalations."],
+        ["Processed 50 to 100 tickets."],
+      );
+      expect(result2.ok).toBe(true);
+    });
+
+    it("accepts legitimate temporal reword of an attributive year (#876)", () => {
+      const result = checkNumbersPreserved(
+        ["Recipient of the 2019 Excellence Award."],
+        ["Won the Excellence Award in 2019."],
+      );
+      expect(result.ok).toBe(true);
+      expect(result.added).toEqual([]);
+    });
+
+    it("accepts a year date-anchor at the start of a bullet (#876)", () => {
+      const input = [
+        "2019: Founded the company and led initial product launch.",
+      ];
+      expect(checkNumbersPreserved(input, input).ok).toBe(true);
+      const dropped = checkNumbersPreserved(input, [
+        "Founded the company and led initial product launch.",
+      ]);
+      expect(dropped.ok).toBe(false);
+      expect(dropped.dropped).toEqual(["2019"]);
+    });
+
+    it("accepts a year with month/season prefix or range (#876)", () => {
+      const input = ["Spring 2021: Graduated with honors."];
+      expect(checkNumbersPreserved(input, input).ok).toBe(true);
+      const dropped = checkNumbersPreserved(input, ["Graduated with honors."]);
+      expect(dropped.ok).toBe(false);
+      expect(dropped.dropped).toEqual(["2021"]);
+    });
+
+    it("preserves non-temporal 4-digit quantities while allowing quantity merges (#876 redesign)", () => {
+      // Dropping a concrete 4-digit quantity is defended (main baseline / #778)
+      const dropped = checkNumbersPreserved(
+        ["Delivered 2000 units to production."],
+        ["Delivered units to production."],
+      );
+      expect(dropped.ok).toBe(false);
+      expect(dropped.dropped).toEqual(["2000"]);
+
+      // Merging repeated 4-digit quantities across bullets is accepted
+      const merged = checkNumbersPreserved(
+        ["Delivered 2000 units to production.", "Stocked 2000 SKUs."],
+        ["Stocked 2000 SKUs and delivered units."],
+      );
+      expect(merged.ok).toBe(true);
+      expect(merged.dropped).toEqual([]);
+    });
+
+    it("accepts legitimate reword of a sole year occurrence (#876)", () => {
+      // When "in 1900" is the only occurrence and rewords to an unclaimed digit,
+      // the new unclaimed count allows the reword.
+      const result = checkNumbersPreserved(
+        ["Founded in 1900."],
+        ["Operated as project 1900."],
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it("does not treat bare past-tense verbs before 4-digit counts as year claims (#876 review)", () => {
+      const mergePairs: [string[], string[]][] = [
+        [
+          ["Shipped 2000 features.", "Reviewed 2000 PRs."],
+          ["Reviewed 2000 PRs and features."],
+        ],
+        [
+          ["Completed 2000 tickets.", "Logged 2000 hours."],
+          ["Logged 2000 hours and tickets."],
+        ],
+        [
+          ["Launched 2000 campaigns.", "Tracked 2000 leads."],
+          ["Tracked 2000 leads and campaigns."],
+        ],
+      ];
+      for (const [input, output] of mergePairs) {
+        const result = checkNumbersPreserved(input, output);
+        expect(result.ok).toBe(true);
+        expect(result.dropped).toEqual([]);
+      }
+    });
+
+    it("ensures context window slicing is positionally stable and does not match mid-word fragments (#876 review)", () => {
+      // Words ending in "at" (that, great, format, combat) should not fabricate a `\b at \b` match
+      const sentences = [
+        "Team that   absorbed a traffic surge over a 2024 launch.",
+        "Team great  absorbed a traffic surge over a 2024 launch.",
+        "Team format absorbed a traffic surge over a 2024 launch.",
+        "Team combat absorbed a traffic surge over a 2024 launch.",
+      ];
+      for (const s of sentences) {
+        const result = checkNumbersPreserved([s, "Delivered 2024 units."], [
+          "Delivered 2024 units after the surge.",
+        ]);
+        expect(result.ok).toBe(true);
+        expect(result.dropped).toEqual([]);
+      }
+    });
+
+    it("catches an invented 4-digit number or year on the add side (#876 review)", () => {
+      // 1. Invented bare count
+      const r1 = checkNumbersPreserved(
+        ["Delivered units to production."],
+        ["Delivered 2000 units to production."],
+      );
+      expect(r1.ok).toBe(false);
+      expect(r1.added).toEqual(["2000"]);
+
+      // 2. Invented credential/award year
+      const r2 = checkNumbersPreserved(
+        ["Received the Excellence Award."],
+        ["Received the 2019 Excellence Award."],
+      );
+      expect(r2.ok).toBe(false);
+      expect(r2.added).toEqual(["2019"]);
+
+      // 3. Invented temporal preposition year
+      const r3 = checkNumbersPreserved(
+        ["Worked on the platform."],
+        ["Worked on the platform in 2019."],
+      );
+      expect(r3.ok).toBe(false);
+      expect(r3.added).toEqual(["2019"]);
+    });
+
+    it("enforces case sensitivity for CamelCase conference names (#876 review)", () => {
+      // DevCon / KubeCon match
+      const devCon = checkNumbersPreserved(
+        ["Speaker at DevCon 2022."],
+        ["Speaker at conference."],
+      );
+      expect(devCon.ok).toBe(false);
+      expect(devCon.dropped).toEqual(["2022"]);
+
+      // silicon / falcon should NOT match as year cues
+      const silicon = checkNumbersPreserved(
+        ["Produced silicon 2000 wafers.", "Tested 2000 chips."],
+        ["Produced and tested 2000 chips."],
+      );
+      expect(silicon.ok).toBe(true);
+      expect(silicon.dropped).toEqual([]);
+    });
+
+    it("narrows credential prefixes so generic nouns do not claim years (#876 review)", () => {
+      // Certified Architect matches
+      const cert = checkNumbersPreserved(
+        ["AWS Certified Architect 2019."],
+        ["AWS Architect."],
+      );
+      expect(cert.ok).toBe(false);
+      expect(cert.dropped).toEqual(["2019"]);
+
+      // Senior developer / Lead architect as counts do not claim
+      const dev = checkNumbersPreserved(
+        [
+          "Senior developer 2000 hours logged.",
+          "Completed 2000 tasks.",
+        ],
+        ["Completed 2000 tasks and logged hours."],
+      );
+      expect(dev.ok).toBe(true);
+      expect(dev.dropped).toEqual([]);
+    });
+
+    it("treats range endpoints uniformly regardless of short or long left endpoints (#876 review)", () => {
+      const shortLeft = checkNumbersPreserved(
+        ["Processed 50-2000 tickets.", "Closed 2000 escalations."],
+        ["Processed 50 to 2000 tickets."],
+      );
+      expect(shortLeft.ok).toBe(true);
+      expect(shortLeft.dropped).toEqual([]);
+
+      const longLeft = checkNumbersPreserved(
+        ["Processed 1000-2000 tickets.", "Closed 2000 escalations."],
+        ["Processed 1000 to 2000 tickets."],
+      );
+      expect(longLeft.ok).toBe(true);
+      expect(longLeft.dropped).toEqual([]);
+    });
+
+    it("defends multi-word award names and multi-word certifications (#876 review)", () => {
+      const awardAndCertCases = [
+        "Awarded the Excellence Award 2019.",
+        "Won the Innovation Prize 2019.",
+        "Received the Chairman Award 2021.",
+        "AWS Certified Solutions Architect 2019.",
+        "Certified Kubernetes Administrator 2021.",
+        "Google Cloud Certified Professional Cloud Architect 2019.",
+      ];
+      for (const c of awardAndCertCases) {
+        const year = c.match(/\b(2019|2021)\b/)![0];
+        const dropped = checkNumbersPreserved([c], ["Honored for achievements."]);
+        expect(dropped.ok).toBe(false);
+        expect(dropped.dropped).toEqual([year]);
+      }
+
+      // Decoys: "Certified the 2000 units shipped" should not claim 2000 as year
+      const decoy1 = checkNumbersPreserved(
+        ["Certified the 2000 units shipped.", "Tested 2000 units."],
+        ["Tested 2000 units."],
+      );
+      expect(decoy1.ok).toBe(true);
+      expect(decoy1.dropped).toEqual([]);
+
+      const decoy2 = checkNumbersPreserved(
+        ["Senior Architect 2019 promotion.", "Managed 2019 items."],
+        ["Managed 2019 items."],
+      );
+      expect(decoy2.ok).toBe(true);
+      expect(decoy2.dropped).toEqual([]);
+    });
+
+    it("defends leading award and prize year anchors (#876 review round 5)", () => {
+      const leadingAwardCases = [
+        "2019 Excellence Award recipient for outstanding performance.",
+        "• 2019 Innovation Prize winner.",
+        "2021 Founders Medal honoree.",
+      ];
+      for (const c of leadingAwardCases) {
+        const year = c.match(/\b(2019|2021)\b/)![0];
+        const dropped = checkNumbersPreserved([c], ["Recognized for outstanding performance."]);
+        expect(dropped.ok).toBe(false);
+        expect(dropped.dropped).toEqual([year]);
+      }
+    });
+
+    it("accepts dash-then-prose date anchors at bullet start while rejecting numeric ranges (#876 review)", () => {
+      const dashAnchors = [
+        "2019 - Led the platform migration.",
+        "2019 – Led the platform migration.",
+        "• 2019 - Led the platform migration.",
+      ];
+      for (const a of dashAnchors) {
+        const dropped = checkNumbersPreserved([a], ["Led the platform migration."]);
+        expect(dropped.ok).toBe(false);
+        expect(dropped.dropped).toEqual(["2019"]);
+      }
+
+      // Numeric ranges must still NOT be treated as date anchors
+      const numRange = checkNumbersPreserved(
+        ["2000 - 3000 units delivered.", "Stocked 2000 SKUs."],
+        ["Delivered units and stocked 2000 SKUs."],
+      );
+      expect(numRange.ok).toBe(true);
+      expect(numRange.dropped).toEqual([]);
+    });
+
+    it("defends safe bare verbs followed by function words while ignoring count nouns (#876 review)", () => {
+      const safeVerbs = [
+        "Graduated 2019 from MIT.",
+        "Founded 2019 and scaled it.",
+        "Awarded 2019 for excellence.",
+        "Promoted 2019 to staff engineer.",
+      ];
+      for (const v of safeVerbs) {
+        const dropped = checkNumbersPreserved([v], ["Earned distinction."]);
+        expect(dropped.ok).toBe(false);
+        expect(dropped.dropped).toEqual(["2019"]);
+      }
+    });
+
+    it("defends common resume date phrasings with weak prepositions, determiners, and qualifiers (#876 review round 6)", () => {
+      const datePhrasings = [
+        ["Served on the board from 2019.", "Served on the board.", "2019"],
+        ["Rebuilt the pipeline in early 2019.", "Rebuilt the pipeline.", "2019"],
+        ["2019 revenue grew 40%.", "Revenue grew 40%.", "2019"],
+        ["Grew ARR over 2019.", "Grew ARR.", "2019"],
+        ["Owned the roadmap for 2020.", "Owned the roadmap.", "2020"],
+        ["Led the Q4 of 2021 launch.", "Led the Q4 launch.", "2021"],
+        ["Shipped in the summer of 2019.", "Shipped the release.", "2019"],
+        ["Joined the 2019 cohort.", "Joined the cohort.", "2019"],
+        ["Shipped v1 in mid-2020.", "Shipped v1.", "2020"],
+        ["Completed the migration by 2021.", "Completed the migration.", "2021"],
+      ];
+      for (const [before, after, year] of datePhrasings) {
+        const result = checkNumbersPreserved([before], [after]);
+        expect(result.ok).toBe(false);
+        expect(result.dropped).toEqual([year]);
+      }
+
+      // Quantity merges with weak prepositions stay lenient on count collisions
+      const countMerges = [
+        [["Reduced by 2000 hours.", "Tracked 2000 bugs."], ["Tracked 2000 bugs and reduced hours."]],
+        [["Sourced from 2000 vendors.", "Ranked 2000 vendors."], ["Ranked 2000 vendors and sourced."]],
+        [["Built support for 2000 users.", "Onboarded 2000 users."], ["Onboarded 2000 users and built support."]],
+      ];
+      for (const [inputs, outputs] of countMerges) {
+        const result = checkNumbersPreserved(inputs, outputs);
+        expect(result.ok).toBe(true);
+        expect(result.dropped).toEqual([]);
+      }
+    });
+
+    it("does not treat mid-word truncation of long tokens as end-of-bullet (#876 review round 6)", () => {
+      // Tokens longer than context window should not truncate to empty and trigger end-of-bullet matching
+      const result = checkNumbersPreserved(
+        ["Managed 4 third-party-integration-partnerships.", "Phase 4 shipped."],
+        ["Phase 4 shipped; owned partner integrations."],
+      );
+      expect(result.ok).toBe(true);
+      expect(result.dropped).toEqual([]);
+    });
+
+    it("defends lowercase leading award and prize year anchors (#876 review round 6)", () => {
+      const awardCases = [
+        "2019 excellence award recipient.",
+        "2019 innovation prize winner.",
+        "2021 founders medal honoree.",
+        "2019 dean's list scholarship.",
+        "2020 best engineering award winner.",
+        "2019 award for outstanding service.",
+      ];
+      for (const c of awardCases) {
+        const year = c.match(/\b(2019|2020|2021)\b/)![0];
+        const dropped = checkNumbersPreserved([c], ["Recognized for excellence."]);
+        expect(dropped.ok).toBe(false);
+        expect(dropped.dropped).toEqual([year]);
+
+        const preserved = checkNumbersPreserved([c], [`Won the award in ${year}.`]);
+        expect(preserved.ok).toBe(true);
+      }
+    });
+
+    it("requires capitalized venue tokens for strict venue year cues (#876 review round 6)", () => {
+      // Lowercase words after "at" should not strictly claim metrics like "2000 rps"
+      const result = checkNumbersPreserved(
+        ["Sustained throughput at peak load 2000 rps.", "Closed 2000 tickets."],
+        ["Closed 2000 tickets and sustained throughput at peak load."],
+      );
+      expect(result.ok).toBe(true);
+      expect(result.dropped).toEqual([]);
+    });
+
+    it("pins accepted residual: comma/parenthesis cues across two occurrences (#876 review)", () => {
+      // In phrases like "Cut infra spend, 2000 servers decommissioned", the comma
+      // immediately preceding 2000 triggers the year cue in YEAR_PREFIX_CUE (supporting "B.S. CS, 2019").
+      // Under strict count parity, if the surviving output 2000 is merged without a year cue,
+      // it reports dropped 2000. This is an explicit accepted residual trade-off.
+      const result = checkNumbersPreserved(
+        [
+          "Cut infra spend, 2000 servers decommissioned.",
+          "Retired 2000 legacy VMs.",
+        ],
+        ["Cut infra spend and retired 2000 legacy VMs."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["2000"]);
     });
 
     it("keeps a range/form drop lenient — an unclaimed same-value digit elsewhere still counts as present", () => {
