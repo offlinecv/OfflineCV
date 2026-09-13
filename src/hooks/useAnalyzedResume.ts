@@ -37,11 +37,12 @@ import {
   type LoadedDoneState,
 } from "./useResumeAnalysis.ts";
 import { useEditableParse, type EditableParse } from "./useEditableParse.ts";
+import { applyOverrides } from "../lib/edit/apply-overrides.ts";
 import {
-  applyOverrides,
-  applyProfileOverrides,
-  type LegacyLinkFields,
-} from "../lib/edit/apply-overrides.ts";
+  editBaseFromResult,
+  foldEditedIntoResult,
+  probeScoringProfileSlots,
+} from "../lib/edit/edit-pipeline.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { scoreEditedResume } from "../lib/edit/score-edited.ts";
 import type {
@@ -121,7 +122,6 @@ export function useAnalyzedResume(): AnalyzedResume {
     contactOverrides,
     experienceOverrides,
     bulletOverrides,
-    descriptionOverrides,
     removedBullets,
     removedEntries,
     educationOverrides,
@@ -132,7 +132,16 @@ export function useAnalyzedResume(): AnalyzedResume {
     addedEntries,
     addedBullets,
     profileOverrides,
+    snapshot,
   } = edit;
+  // `descriptionOverrides` is deliberately NOT pulled out here: since #652 every
+  // override map reaches `applyOverrides` through `snapshot`, and the only
+  // reason to name one individually is to list it as a `score` dep below.
+  // `descriptionOverrides` is not one of those — it was not a `score` dep before
+  // #652 either, and the `score` dep list is unchanged by that refactor.
+  // (`editedCore`'s deps DID change — 14 named override maps collapsed to
+  // `[base, doneScoreBullets, snapshot]` — but equivalently, because
+  // `useEditableParse` memoizes `snapshot` over exactly those same 14.)
 
   // The base CascadeResult overrides fold onto: the original parse in "done",
   // a fresh `buildBlankResult()` once an authoring session has no pending
@@ -162,70 +171,25 @@ export function useAnalyzedResume(): AnalyzedResume {
   const editedCore = useMemo(() => {
     if (base === null) return null;
     return applyOverrides(
-      base.canonical.fields,
-      base.rawText,
-      base.canonical.sections,
-      contactOverrides,
-      experienceOverrides,
-      bulletOverrides,
-      doneScoreBullets,
-      educationOverrides,
-      skillsOverride,
-      addedEntries,
-      addedBullets,
-      removedBullets,
-      profileOverrides,
-      base.canonical.fieldConfidence,
-      achievementOverrides,
-      descriptionOverrides,
-      summaryOverride,
-      removedEntries,
-      certificationOverrides,
+      editBaseFromResult(base, doneScoreBullets),
+      snapshot,
     );
-  }, [
-    base,
-    doneScoreBullets,
-    contactOverrides,
-    experienceOverrides,
-    bulletOverrides,
-    descriptionOverrides,
-    educationOverrides,
-    achievementOverrides,
-    certificationOverrides,
-    skillsOverride,
-    summaryOverride,
-    addedEntries,
-    addedBullets,
-    removedBullets,
-    removedEntries,
-    profileOverrides,
-  ]);
+    // `snapshot` is `useEditableParse`'s own memo over EVERY override map, so
+    // it changes exactly when one of them does — the same set of re-runs the
+    // fourteen individually-listed maps used to spell out. Handing the whole
+    // snapshot to `applyOverrides` (#652) is what makes "the fold sees every
+    // channel the snapshot carries" true by construction rather than by a
+    // nineteen-argument call staying in step with a fourteen-field type.
+  }, [base, doneScoreBullets, snapshot]);
 
-  // The slice of `profileOverrides`' effect the scorer actually reads (#428):
-  // only the linkedin_url/github_url legacy slots + their confidence move
-  // completeness (see `contact-profiles.ts` — a code/social profile beyond
-  // those two, or an extra that doesn't back-fill an empty slot, never
-  // reaches the scorer). Probed against a cheap 4-field object — never the
-  // full parsed resume — via the SAME `applyProfileOverrides` step
-  // `editedCore` runs, so "did this move the score" can never drift from what
-  // the real override does.
+  // The slice of `profileOverrides`' effect the scorer actually reads (#428) —
+  // see `probeScoringProfileSlots` for why it runs the real
+  // `applyProfileOverrides` step rather than a predicate that could drift from
+  // it. Null while there is nothing parsed, so the `score` memo below can hold
+  // its four primitives unconditionally.
   const scoreAffectingProfileSlots = useMemo(() => {
     if (base === null) return null;
-    const probe: LegacyLinkFields = {
-      linkedin_url: base.canonical.fields.linkedin_url,
-      github_url: base.canonical.fields.github_url,
-      portfolio_url: base.canonical.fields.portfolio_url,
-      website_url: base.canonical.fields.website_url,
-    };
-    const confEdits = applyProfileOverrides(probe, profileOverrides);
-    return {
-      linkedin_url: probe.linkedin_url,
-      github_url: probe.github_url,
-      linkedinConfidence: confEdits.find((e) => e.key === "linkedin_url")
-        ?.confidence,
-      githubConfidence: confEdits.find((e) => e.key === "github_url")
-        ?.confidence,
-    };
+    return probeScoringProfileSlots(base.canonical.fields, profileOverrides);
   }, [base, profileOverrides]);
 
   // Every key the two bullet maps already hold, so the re-graded pool allocates
@@ -255,6 +219,22 @@ export function useAnalyzedResume(): AnalyzedResume {
   // score silently returns a stale value for that channel. The object-identity
   // tests pin both directions: a non-scoring profile edit keeps the score
   // object-identical; a scoring correction produces a NEW score reference.
+  //
+  // CHANNELS KNOWINGLY ABSENT FROM THE DEP LIST BELOW — read this before adding
+  // one. Until #652, `editedCore`'s dep list spelled out the same fourteen maps
+  // and sat directly above this one, so an omission was visible by diffing the
+  // two arrays. `editedCore` is now `[base, doneScoreBullets, snapshot]`: a new
+  // override channel joins the FOLD automatically and joins this memo only by
+  // hand, so the omission has no local signal at all. Hence this list:
+  //   - `profileOverrides` — deliberate, replaced by
+  //     `scoreAffectingProfileSlots` per the invariant above (#428).
+  //   - `descriptionOverrides` — a KNOWN PRE-EXISTING BUG, not a decision. It
+  //     moves `editedCore` and can move the score (an edited description feeds
+  //     the bullet pool), but it was never a dep here and #652 did not change
+  //     that. Left as-is on purpose: fixing it is its own change with its own
+  //     repro, not a refactor's drive-by.
+  // Anything else absent from the array below is unaccounted for — either add
+  // it or add it to this list with the reason.
   const score = useMemo(() => {
     if (base === null || editedCore === null) return null;
     // The anonymous scorer pools its bullet set from `sections` (#133), so the
@@ -317,17 +297,7 @@ export function useAnalyzedResume(): AnalyzedResume {
 
   const displayResult = useMemo<CascadeResult | null>(() => {
     if (base === null || edited === null) return null;
-    // Fold the edited fields + confidence back onto the base result's canonical
-    // model. `sections` (and `rawText`) stay the base's — display never showed
-    // the edited section pool or rawText, only the edited parsed fields (#445).
-    return {
-      ...base,
-      canonical: {
-        ...base.canonical,
-        fields: edited.parsed,
-        fieldConfidence: edited.fieldConfidence,
-      },
-    };
+    return foldEditedIntoResult(base, edited.parsed, edited.fieldConfidence);
   }, [base, edited]);
 
   // Clear edits whenever a fresh parse lands (new file, reset) or a fresh

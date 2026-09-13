@@ -102,24 +102,16 @@ describe("#856 — a deleted entry stays out of the exported PDF", { timeout: 20
     // Delete the FIRST entry of each section, and edit the survivor of one of
     // them — the pair that a renumbering bug would silently swap.
     const edited = applyOverrides(
-      PARSED,
-      "",
-      EMPTY_SECTIONS,
-      {},
-      { 1: { company: "Acme Corp." } },
-      {},
-      [],
-      {},
-      undefined,
-      [],
-      {},
-      undefined,
-      undefined,
-      undefined,
-      {},
-      {},
-      undefined,
-      new Set(["experience:0", "education:0", "achievements:0"]),
+      {
+        parsed: PARSED,
+        rawText: "",
+        sections: EMPTY_SECTIONS,
+        observations: [],
+      },
+      {
+        experienceOverrides: { 1: { company: "Acme Corp." } },
+        removedEntries: ["experience:0", "education:0", "achievements:0"],
+      },
     );
     const model = buildAtsResumeModel(makeResult(edited.fields), fakeScore);
     reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);

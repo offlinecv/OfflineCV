@@ -4,7 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { bulletId } from "../score/bullet-id.ts";
 import { applyOverrides, applyProfileOverrides } from "./apply-overrides.ts";
-import type { LegacyLinkFields } from "./apply-overrides.ts";
+import type { EditOverrides, LegacyLinkFields } from "./apply-overrides.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
 import { groupBulletsByExperience } from "../score/group-bullets.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
@@ -59,13 +59,15 @@ describe("applyOverrides", () => {
   it("replaces contact fields on a clone", () => {
     const parsed = baseParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      { full_name: "John Smith", email: "john@example.com" },
-      {},
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        contactOverrides: { full_name: "John Smith", email: "john@example.com" },
+      },
     );
     expect(out.full_name).toBe("John Smith");
     expect(out.email).toBe("john@example.com");
@@ -76,13 +78,15 @@ describe("applyOverrides", () => {
 
   it("treats an empty contact override as cleared (absent)", () => {
     const { fields: out } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      { full_name: "" },
-      {},
-      {},
-      [],
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        contactOverrides: { full_name: "" },
+      },
     );
     expect(out.full_name).toBeUndefined();
   });
@@ -92,13 +96,15 @@ describe("applyOverrides", () => {
   // fold below) are the ones already proven for `location`.
   it("creates, edits and clears work_authorization through the contact channel (#792)", () => {
     const created = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      { work_authorization: "US Citizen" },
-      {},
-      {},
-      [],
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        contactOverrides: { work_authorization: "US Citizen" },
+      },
     );
     expect(created.fields.work_authorization).toBe("US Citizen");
     // A user-affirmed contact edit earns full confidence, which is what lifts
@@ -106,13 +112,15 @@ describe("applyOverrides", () => {
     expect(created.fieldConfidence.work_authorization).toBe(1);
 
     const cleared = applyOverrides(
-      { ...baseParsed(), work_authorization: "US Citizen" },
-      "raw",
-      makeSections(),
-      { work_authorization: "" },
-      {},
-      {},
-      [],
+      {
+        parsed: { ...baseParsed(), work_authorization: "US Citizen" },
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        contactOverrides: { work_authorization: "" },
+      },
     );
     expect(cleared.fields.work_authorization).toBeUndefined();
     expect(cleared.fieldConfidence.work_authorization).toBe(0);
@@ -127,13 +135,15 @@ describe("applyOverrides", () => {
     // User fixes the number → the old `false` must not survive, else the
     // scorer keeps awarding half credit on the corrected phone.
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      { phone: "(312) 555-0123" },
-      {},
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        contactOverrides: { phone: "(312) 555-0123" },
+      },
     );
     expect(out.phone).toBe("(312) 555-0123");
     expect(out.phoneIsValid).toBeUndefined();
@@ -148,13 +158,15 @@ describe("applyOverrides", () => {
       phoneIsValid: false,
     };
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      { phone: "" },
-      {},
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        contactOverrides: { phone: "" },
+      },
     );
     expect(out.phone).toBeUndefined();
     expect(out.phoneIsValid).toBeUndefined();
@@ -163,13 +175,15 @@ describe("applyOverrides", () => {
   it("replaces experience header fields by index", () => {
     const parsed = baseParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { title: "Senior Engineer", company: "Globex" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { title: "Senior Engineer", company: "Globex" } },
+      },
     );
     expect(out.experience[0].title).toBe("Senior Engineer");
     expect(out.experience[0].company).toBe("Globex");
@@ -182,24 +196,28 @@ describe("applyOverrides", () => {
     const parsed = baseParsed();
     parsed.experience[0].location = "Springfield, IL";
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { location: "Santa Clara, CA" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { location: "Santa Clara, CA" } },
+      },
     );
     expect(out.experience[0].location).toBe("Santa Clara, CA");
 
     const { fields: cleared } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { location: "" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { location: "" } },
+      },
     );
     expect(cleared.experience[0].location).toBeUndefined();
     // Original untouched.
@@ -214,13 +232,15 @@ describe("applyOverrides", () => {
     // `start_date` alone.
     const parsed = baseParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { start_date: "" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { start_date: "" } },
+      },
     );
     expect(out.experience[0].start_date).toBe("2022");
     expect("end_date" in out.experience[0]).toBe(false);
@@ -238,13 +258,15 @@ describe("applyOverrides", () => {
       is_current: true,
     };
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { start_date: "" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { start_date: "" } },
+      },
     );
     // A bare "Present" draws into the header and re-parses to nothing at all, so
     // the flag cannot survive the round trip either way — it goes here, where the
@@ -266,13 +288,15 @@ describe("applyOverrides", () => {
       is_current: true,
     };
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { end_date: "2022" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { end_date: "2022" } },
+      },
     );
     expect(out.experience[0].start_date).toBe("2020");
     expect(out.experience[0].end_date).toBe("2022");
@@ -286,13 +310,15 @@ describe("applyOverrides", () => {
     const parsed = baseParsed();
     parsed.experience[0] = { ...parsed.experience[0], is_current: true };
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { title: "Staff Engineer" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { title: "Staff Engineer" } },
+      },
     );
     expect(out.experience[0].start_date).toBe("2020");
     expect(out.experience[0].end_date).toBe("2022");
@@ -303,24 +329,28 @@ describe("applyOverrides", () => {
     const parsed = baseParsed();
     parsed.experience[0].team = "Payments Platform";
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { team: "Cloud Infrastructure" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { team: "Cloud Infrastructure" } },
+      },
     );
     expect(out.experience[0].team).toBe("Cloud Infrastructure");
 
     const { fields: cleared } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      { 0: { team: "" } },
-      {},
-      [],
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        experienceOverrides: { 0: { team: "" } },
+      },
     );
     // A cleared team drops off entirely so the render/PDF emits no "· Team".
     expect(cleared.experience[0].team).toBeUndefined();
@@ -337,13 +367,15 @@ describe("applyOverrides", () => {
       rawText: outRaw,
       sections: outSections,
     } = applyOverrides(
-      parsed,
-      rawText,
-      sections,
-      {},
-      {},
-      { 0: "Built a thing that increased revenue by 30%" },
-      [obs(0, "Built a thing"), obs(1, "Shipped another thing")],
+      {
+        parsed,
+        rawText,
+        sections,
+        observations: [obs(0, "Built a thing"), obs(1, "Shipped another thing")],
+      },
+      {
+        bulletOverrides: { 0: "Built a thing that increased revenue by 30%" },
+      },
     );
     // rawText: marker preserved, body swapped → still extracts as a bullet.
     expect(outRaw).toContain("• Built a thing that increased revenue by 30%");
@@ -375,6 +407,7 @@ describe("applyOverrides", () => {
     const rawText = "- Led the migration effort";
     const { fields: out, rawText: outRaw } = applyOverrides(
       {
+        parsed: {
         ...baseParsed(),
         experience: [
           {
@@ -384,12 +417,13 @@ describe("applyOverrides", () => {
           },
         ],
       },
-      rawText,
-      makeSections(["- Led the migration effort"]),
-      {},
-      {},
-      { 5: "Led the migration of 12 services to k8s" },
-      [obs(5, "Led the migration effort")],
+        rawText,
+        sections: makeSections(["- Led the migration effort"]),
+        observations: [obs(5, "Led the migration effort")],
+      },
+      {
+        bulletOverrides: { 5: "Led the migration of 12 services to k8s" },
+      },
     );
     expect(outRaw).toBe("- Led the migration of 12 services to k8s");
     expect(out.experience[0].description).toBe(
@@ -404,18 +438,15 @@ describe("applyOverrides", () => {
       rawText: outRaw,
       sections: outSections,
     } = applyOverrides(
-      baseParsed(),
-      rawText,
-      makeSections(["• Built a thing", "• Shipped another thing"]),
-      {},
-      {},
-      {},
-      [obs(0, "Built a thing"), obs(1, "Shipped another thing")],
-      {},
-      undefined,
-      [],
-      {},
-      new Set([bulletId("Built a thing", 0)]),
+      {
+        parsed: baseParsed(),
+        rawText,
+        sections: makeSections(["• Built a thing", "• Shipped another thing"]),
+        observations: [obs(0, "Built a thing"), obs(1, "Shipped another thing")],
+      },
+      {
+        removedBullets: [bulletId("Built a thing", 0)],
+      },
     );
     expect(outRaw).toBe("• Shipped another thing");
     expect(out.experience[0].description).toBe("Shipped another thing");
@@ -427,18 +458,15 @@ describe("applyOverrides", () => {
   it("removal is a no-op when the id names no line", () => {
     const rawText = "• Built a thing\n• Shipped another thing";
     const { rawText: outRaw } = applyOverrides(
-      baseParsed(),
-      rawText,
-      makeSections(["• Built a thing", "• Shipped another thing"]),
-      {},
-      {},
-      {},
-      [obs(0, "Built a thing")],
-      {},
-      undefined,
-      [],
-      {},
-      new Set([bulletId("no such bullet", 0)]), // names no line
+      {
+        parsed: baseParsed(),
+        rawText,
+        sections: makeSections(["• Built a thing", "• Shipped another thing"]),
+        observations: [obs(0, "Built a thing")],
+      },
+      {
+        removedBullets: [bulletId("no such bullet", 0)],
+      },
     );
     expect(outRaw).toBe(rawText);
   });
@@ -447,13 +475,12 @@ describe("applyOverrides", () => {
     const parsed = baseParsed();
     const rawText = "• Built a thing";
     const { fields: out, rawText: outRaw } = applyOverrides(
-      parsed,
-      rawText,
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
+      {
+        parsed,
+        rawText,
+        sections: makeSections(),
+        observations: [],
+      },
     );
     expect(out).toEqual(parsed);
     expect(outRaw).toBe(rawText);
@@ -462,13 +489,15 @@ describe("applyOverrides", () => {
   it("is a no-op for a bullet edit equal to the original text", () => {
     const rawText = "• Built a thing";
     const { rawText: outRaw } = applyOverrides(
-      baseParsed(),
-      rawText,
-      makeSections(["• Built a thing"]),
-      {},
-      {},
-      { 0: "Built a thing" },
-      [obs(0, "Built a thing")],
+      {
+        parsed: baseParsed(),
+        rawText,
+        sections: makeSections(["• Built a thing"]),
+        observations: [obs(0, "Built a thing")],
+      },
+      {
+        bulletOverrides: { 0: "Built a thing" },
+      },
     );
     expect(outRaw).toBe(rawText);
   });
@@ -477,13 +506,15 @@ describe("applyOverrides", () => {
     const rawText = "• Built a thing";
     const parsed = baseParsed();
     const { rawText: outRaw, fields: out } = applyOverrides(
-      parsed,
-      rawText,
-      makeSections(["• Built a thing"]),
-      {},
-      {},
-      { 0: "   " },
-      [obs(0, "Built a thing")],
+      {
+        parsed,
+        rawText,
+        sections: makeSections(["• Built a thing"]),
+        observations: [obs(0, "Built a thing")],
+      },
+      {
+        bulletOverrides: { 0: "   " },
+      },
     );
     expect(outRaw).toBe(rawText);
     expect(out.experience[0].description).toBe(
@@ -495,13 +526,17 @@ describe("applyOverrides", () => {
     const parsed = baseParsed();
     const snapshot = JSON.parse(JSON.stringify(parsed));
     applyOverrides(
-      parsed,
-      "• Built a thing",
-      makeSections(["• Built a thing"]),
-      { full_name: "X" },
-      { 0: { title: "Y" } },
-      { 0: "Built a different thing" },
-      [obs(0, "Built a thing")],
+      {
+        parsed,
+        rawText: "• Built a thing",
+        sections: makeSections(["• Built a thing"]),
+        observations: [obs(0, "Built a thing")],
+      },
+      {
+        contactOverrides: { full_name: "X" },
+        experienceOverrides: { 0: { title: "Y" } },
+        bulletOverrides: { 0: "Built a different thing" },
+      },
     );
     expect(parsed).toEqual(snapshot);
   });
@@ -526,14 +561,17 @@ describe("applyOverrides — education", () => {
   it("replaces an education field by index on a clone", () => {
     const parsed = eduParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      { 0: { degree: "B.S. Software Engineering", institution: "MIT" } },
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        educationOverrides: {
+          0: { degree: "B.S. Software Engineering", institution: "MIT" },
+        },
+      },
     );
     expect(out.education[0].degree).toBe("B.S. Software Engineering");
     expect(out.education[0].institution).toBe("MIT");
@@ -545,14 +583,15 @@ describe("applyOverrides — education", () => {
 
   it("writes education dates so buildEducationDates reflects them", () => {
     const { fields: out } = applyOverrides(
-      eduParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      { 0: { start_date: "2018", end_date: "2022" } },
+      {
+        parsed: eduParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        educationOverrides: { 0: { start_date: "2018", end_date: "2022" } },
+      },
     );
     expect(out.education[0].start_date).toBe("2018");
     expect(out.education[0].end_date).toBe("2022");
@@ -560,40 +599,43 @@ describe("applyOverrides — education", () => {
 
   it("treats an empty education field override as cleared ('not detected')", () => {
     const { fields: out } = applyOverrides(
-      eduParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      { 1: { institution: "" } },
+      {
+        parsed: eduParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        educationOverrides: { 1: { institution: "" } },
+      },
     );
     expect(out.education[1].institution).toBe("");
   });
 
   it("writes the major (field) override, and a clear drops it to undefined", () => {
     const { fields: set } = applyOverrides(
-      eduParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      { 0: { field: "Computer Science & Engineering" } },
+      {
+        parsed: eduParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        educationOverrides: { 0: { field: "Computer Science & Engineering" } },
+      },
     );
     expect(set.education[0].field).toBe("Computer Science & Engineering");
 
     const { fields: cleared } = applyOverrides(
-      eduParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      { 0: { field: "" } },
+      {
+        parsed: eduParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        educationOverrides: { 0: { field: "" } },
+      },
     );
     expect(cleared.education[0].field).toBeUndefined();
   });
@@ -601,14 +643,15 @@ describe("applyOverrides — education", () => {
   it("ignores an education override for an out-of-range index", () => {
     const parsed = eduParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      { 5: { degree: "PhD" } },
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        educationOverrides: { 5: { degree: "PhD" } },
+      },
     );
     expect(out.education).toHaveLength(2);
     expect(out.education[0].degree).toBe("B.S. Computer Science");
@@ -619,15 +662,15 @@ describe("applyOverrides — skills", () => {
   it("removes a parsed skill by lower-cased key", () => {
     const parsed = eduParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: ["python"], added: [] },
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: ["python"], added: [] },
+      },
     );
     expect(out.skills).toEqual(["TypeScript"]);
     // Original untouched.
@@ -636,30 +679,30 @@ describe("applyOverrides — skills", () => {
 
   it("appends an added skill, de-duplicated case-insensitively", () => {
     const { fields: out } = applyOverrides(
-      eduParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: ["Go", "typescript"] }, // "typescript" already present
+      {
+        parsed: eduParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: ["Go", "typescript"] },
+      },
     );
     expect(out.skills).toEqual(["TypeScript", "Python", "Go"]);
   });
 
   it("applies removal then addition together", () => {
     const { fields: out } = applyOverrides(
-      eduParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: ["typescript"], added: ["Rust"] },
+      {
+        parsed: eduParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: ["typescript"], added: ["Rust"] },
+      },
     );
     expect(out.skills).toEqual(["Python", "Rust"]);
   });
@@ -667,15 +710,15 @@ describe("applyOverrides — skills", () => {
   it("is a no-op when the skills override is empty", () => {
     const parsed = eduParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+      },
     );
     expect(out.skills).toEqual(["TypeScript", "Python"]);
   });
@@ -684,15 +727,16 @@ describe("applyOverrides — skills", () => {
     const parsed = eduParsed();
     const snapshot = JSON.parse(JSON.stringify(parsed));
     applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      { 0: { degree: "Changed" } },
-      { removed: ["python"], added: ["Rust"] },
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        educationOverrides: { 0: { degree: "Changed" } },
+        skillsOverride: { removed: ["python"], added: ["Rust"] },
+      },
     );
     expect(parsed).toEqual(snapshot);
   });
@@ -745,17 +789,19 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
     // User edits bullet #1 to add a new metric.
     const editedText = "Reduced deploy time by 50%, saving $50K in compute.";
     const result = applyOverrides(
-      parsed,
-      rawText,
-      makeSections([
+      {
+        parsed,
+        rawText,
+        sections: makeSections([
         "• Built event-driven data pipeline.",
         "• Reduced deploy time by 50%.",
         "• Migrated legacy monolith.",
       ]),
-      {},
-      {},
-      { 1: editedText },
-      observations,
+        observations,
+      },
+      {
+        bulletOverrides: { 1: editedText },
+      },
     );
 
     // Sanity: BOTH rawText and the role's description picked up the edit.
@@ -807,13 +853,15 @@ describe("regression: post-edit bullet re-grouping (issue #63 testing artefact)"
     const editedText = "Reduced deploy time by 50%, saving $50K in compute.";
 
     applyOverrides(
-      parsed,
-      "• Reduced deploy time by 50%.",
-      makeSections(["• Reduced deploy time by 50%."]),
-      {},
-      {},
-      { 0: editedText },
-      observations,
+      {
+        parsed,
+        rawText: "• Reduced deploy time by 50%.",
+        sections: makeSections(["• Reduced deploy time by 50%."]),
+        observations,
+      },
+      {
+        bulletOverrides: { 0: editedText },
+      },
     );
 
     // Grouping the edited bullet against the ORIGINAL (un-edited) parsed.experience
@@ -833,16 +881,14 @@ describe("applyOverrides — added entries + bullets", () => {
   it("appends an added experience entry with its bullets in the description", () => {
     const parsed = baseParsed();
     const { fields: out } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        addedEntries: [
         {
           id: "added:0",
           section: "experience",
@@ -852,7 +898,8 @@ describe("applyOverrides — added entries + bullets", () => {
           end_date: "2021",
         },
       ],
-      { "added:0": ["Led a team of five to ship the launch on time"] },
+        addedBullets: { "added:0": ["Led a team of five to ship the launch on time"] },
+      },
     );
     expect(out.experience).toHaveLength(2);
     expect(out.experience[1]).toMatchObject({
@@ -866,21 +913,19 @@ describe("applyOverrides — added entries + bullets", () => {
 
   it("appends added education / project / achievement entries to their arrays", () => {
     const { fields: out } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        addedEntries: [
         { id: "added:0", section: "education", title: "BS CS", subtitle: "MIT" },
         { id: "added:1", section: "projects", title: "Side project" },
         { id: "added:2", section: "achievements", title: "Patent", year: "2021" },
       ],
-      {},
+      },
     );
     expect(out.education).toHaveLength(1);
     expect(out.education[0]).toMatchObject({ degree: "BS CS", institution: "MIT" });
@@ -895,16 +940,14 @@ describe("applyOverrides — added entries + bullets", () => {
 
   it("maps an added achievement's type + title onto the real fields (#455, #456)", () => {
     const { fields: out } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        addedEntries: [
         {
           id: "added:0",
           section: "achievements",
@@ -913,7 +956,7 @@ describe("applyOverrides — added entries + bullets", () => {
           year: "2021",
         },
       ],
-      {},
+      },
     );
     expect(out.heuristic_achievements?.[0]).toMatchObject({
       type: "Patent",
@@ -924,23 +967,21 @@ describe("applyOverrides — added entries + bullets", () => {
 
   it("adds an achievement with no type as a bare description (#455)", () => {
     const { fields: out } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        addedEntries: [
         {
           id: "added:0",
           section: "achievements",
           title: "Ran the local 10k for charity",
         },
       ],
-      {},
+      },
     );
     expect(out.heuristic_achievements?.[0].title).toBe(
       "Ran the local 10k for charity",
@@ -950,17 +991,15 @@ describe("applyOverrides — added entries + bullets", () => {
   it("folds an added bullet on an existing role into description AND the pool", () => {
     const parsed = baseParsed();
     const { fields: out, sections } = applyOverrides(
-      parsed,
-      "raw",
-      makeSections(["• Built a thing"]),
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [],
-      { "experience:0": ["Cut latency by 40% across the fleet"] },
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(["• Built a thing"]),
+        observations: [],
+      },
+      {
+        addedBullets: { "experience:0": ["Cut latency by 40% across the fleet"] },
+      },
     );
     // Appended to the existing role's description.
     expect(out.experience[0].description).toContain(
@@ -986,17 +1025,17 @@ describe("applyOverrides — added entries + bullets", () => {
       sections,
     });
     const { fields: out, sections: outSections } = applyOverrides(
-      base,
-      "raw",
-      sections,
-      {},
-      {},
-      {},
-      [],
-      {},
-      undefined,
-      [{ id: "added:0", section: "education", title: "BS", subtitle: "MIT" }],
-      {},
+      {
+        parsed: base,
+        rawText: "raw",
+        sections,
+        observations: [],
+      },
+      {
+        addedEntries: [
+          { id: "added:0", section: "education", title: "BS", subtitle: "MIT" },
+        ],
+      },
     );
     const after = computeAnonymousAtsScore({
       parsed: out,
@@ -1025,32 +1064,27 @@ function parsedWithLinks(): HeuristicParsedResume {
 describe("applyOverrides — profiles[] (#335)", () => {
   it("leaves profiles absent when no legacy link and no extras", () => {
     const { fields: out } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
     );
     expect(out.profiles).toBeUndefined();
   });
 
   it("re-mirrors profiles from a legacy link correction (never desyncs)", () => {
     const { fields: out } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         {
           id: "profile:0",
           url: "https://linkedin.com/in/corrected",
@@ -1059,6 +1093,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
           legacyKey: "linkedin_url",
         },
       ],
+      },
     );
     expect(out.linkedin_url).toBe("https://linkedin.com/in/corrected");
     expect(out.profiles).toEqual([
@@ -1072,19 +1107,15 @@ describe("applyOverrides — profiles[] (#335)", () => {
 
   it("clearing a legacy link drops it from the mirror", () => {
     const { fields: out } = applyOverrides(
-      parsedWithLinks(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: parsedWithLinks(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         // Clear LinkedIn (empty url correction); GitHub stays.
         {
           id: "profile:0",
@@ -1094,6 +1125,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
           legacyKey: "linkedin_url",
         },
       ],
+      },
     );
     expect(out.linkedin_url).toBeUndefined();
     expect(out.profiles).toEqual([
@@ -1103,21 +1135,18 @@ describe("applyOverrides — profiles[] (#335)", () => {
 
   it("appends added extras after the legacy slots, in order", () => {
     const { fields: out } = applyOverrides(
-      parsedWithLinks(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: parsedWithLinks(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         { id: "profile:0", url: "https://gitlab.com/jane", network: "GitLab", kind: "code" },
       ],
+      },
     );
     expect(out.profiles).toEqual([
       { url: "https://linkedin.com/in/jane", network: "LinkedIn", kind: "social" },
@@ -1128,21 +1157,18 @@ describe("applyOverrides — profiles[] (#335)", () => {
 
   it("keeps an unknown-host extra with its hostname + other kind", () => {
     const { fields: out } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         { id: "profile:0", url: "https://example.dev/jane", network: "example.dev", kind: "other" },
       ],
+      },
     );
     expect(out.profiles).toEqual([
       { url: "https://example.dev/jane", network: "example.dev", kind: "other" },
@@ -1151,21 +1177,18 @@ describe("applyOverrides — profiles[] (#335)", () => {
 
   it("de-dupes an extra that repeats a legacy link", () => {
     const { fields: out } = applyOverrides(
-      parsedWithLinks(),
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: parsedWithLinks(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         { id: "profile:0", url: "https://github.com/jane", network: "GitHub", kind: "code" },
       ],
+      },
     );
     expect(out.profiles).toEqual([
       { url: "https://linkedin.com/in/jane", network: "LinkedIn", kind: "social" },
@@ -1177,19 +1200,15 @@ describe("applyOverrides — profiles[] (#335)", () => {
     const parsed = parsedWithLinks();
     const snapshot = JSON.parse(JSON.stringify(parsed));
     applyOverrides(
-      parsed,
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed,
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         {
           id: "profile:0",
           url: "https://linkedin.com/in/moved",
@@ -1198,6 +1217,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
           legacyKey: "linkedin_url",
         },
       ],
+      },
     );
     expect(parsed).toEqual(snapshot);
   });
@@ -1208,19 +1228,15 @@ describe("applyOverrides — profiles[] (#335)", () => {
   // user-affirmed in the edited fieldConfidence, or the score never moves.
   it("back-fills the empty linkedin_url slot from an added LinkedIn profile", () => {
     const { fields: out, fieldConfidence } = applyOverrides(
-      baseParsed(), // no legacy linkedin_url
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         {
           id: "profile:0",
           url: "https://linkedin.com/in/jane",
@@ -1228,6 +1244,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
           kind: "social",
         },
       ],
+      },
     );
     expect(out.linkedin_url).toBe("https://linkedin.com/in/jane");
     expect(fieldConfidence.linkedin_url).toBe(1);
@@ -1235,19 +1252,15 @@ describe("applyOverrides — profiles[] (#335)", () => {
 
   it("does NOT overwrite an existing legacy slot when back-filling", () => {
     const { fields: out } = applyOverrides(
-      parsedWithLinks(), // linkedin_url already set to .../in/jane
-      "raw",
-      makeSections(),
-      {},
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: parsedWithLinks(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         {
           id: "profile:0",
           url: "https://linkedin.com/in/someone-else",
@@ -1255,6 +1268,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
           kind: "social",
         },
       ],
+      },
     );
     expect(out.linkedin_url).toBe("https://linkedin.com/in/jane");
   });
@@ -1263,19 +1277,17 @@ describe("applyOverrides — profiles[] (#335)", () => {
   // an explicit clear → 0; an untouched field keeps its base confidence.
   it("bumps edited contact-field confidence and drops a cleared one", () => {
     const { fieldConfidence } = applyOverrides(
-      baseParsed(),
-      "raw",
-      makeSections(),
-      { email: "" }, // clear email (non-link contact field)
-      {},
-      {},
-      [],
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(),
-      [
+      {
+        parsed: baseParsed(),
+        rawText: "raw",
+        sections: makeSections(),
+        observations: [],
+        fieldConfidence: { full_name: 0.9, email: 0.9 },
+      },
+      {
+        contactOverrides: { email: "" },
+        skillsOverride: { removed: [], added: [] },
+        profileOverrides: [
         // GitHub correction (a link edit) — affirmed → confidence 1.
         {
           id: "profile:0",
@@ -1285,7 +1297,7 @@ describe("applyOverrides — profiles[] (#335)", () => {
           legacyKey: "github_url",
         },
       ],
-      { full_name: 0.9, email: 0.9 },
+      },
     );
     expect(fieldConfidence.github_url).toBe(1); // affirmed
     expect(fieldConfidence.email).toBe(0); // cleared
@@ -1340,25 +1352,20 @@ function achParsed(): HeuristicParsedResume {
  *  set — the rest defaulted, so the calls below stay readable. */
 function applyAch(
   parsed: HeuristicParsedResume,
-  achievements: Parameters<typeof applyOverrides>[14],
-  addedEntries: Parameters<typeof applyOverrides>[9] = [],
+  achievements: EditOverrides["achievementOverrides"],
+  addedEntries: EditOverrides["addedEntries"] = [],
 ) {
   return applyOverrides(
-    parsed,
-    "raw",
-    makeSections(),
-    {},
-    {},
-    {},
-    [],
-    {},
-    undefined,
-    addedEntries,
-    {},
-    undefined,
-    undefined,
-    undefined,
-    achievements,
+    {
+      parsed,
+      rawText: "raw",
+      sections: makeSections(),
+      observations: [],
+    },
+    {
+      addedEntries,
+      achievementOverrides: achievements,
+    },
   );
 }
 
@@ -1510,32 +1517,23 @@ function credentialParsed(): HeuristicParsedResume {
 }
 
 /** applyOverrides with only the certification overrides (+ optional added
- *  entries) set — the 19th positional arg. */
+ *  entries) set — its own index space, separate from `achievementOverrides`. */
 function applyCerts(
   parsed: HeuristicParsedResume,
-  certifications: Parameters<typeof applyOverrides>[18],
-  addedEntries: Parameters<typeof applyOverrides>[9] = [],
+  certifications: EditOverrides["certificationOverrides"],
+  addedEntries: EditOverrides["addedEntries"] = [],
 ) {
   return applyOverrides(
-    parsed,
-    "raw",
-    makeSections(),
-    {},
-    {},
-    {},
-    [],
-    {},
-    undefined,
-    addedEntries,
-    {},
-    undefined,
-    undefined,
-    undefined,
-    {},
-    {},
-    undefined,
-    undefined,
-    certifications,
+    {
+      parsed,
+      rawText: "raw",
+      sections: makeSections(),
+      observations: [],
+    },
+    {
+      addedEntries,
+      certificationOverrides: certifications,
+    },
   );
 }
 
@@ -1726,30 +1724,22 @@ describe("applyOverrides — legacy certification type fold (#899)", () => {
 
 // ── Summary override (#625) ───────────────────────────────────────────────────
 
-/** applyOverrides with ONLY the summary override set — the 17th positional
- *  arg — so the cases below read as one input, one output. */
+/** applyOverrides with ONLY the summary override set, so the cases below read
+ *  as one input, one output. */
 function applySummary(
   parsed: HeuristicParsedResume,
-  summaryOverride: Parameters<typeof applyOverrides>[16],
+  summaryOverride: EditOverrides["summaryOverride"],
 ) {
   return applyOverrides(
-    parsed,
-    "raw",
-    makeSections(),
-    {},
-    {},
-    {},
-    [],
-    {},
-    undefined,
-    [],
-    {},
-    undefined,
-    undefined,
-    undefined,
-    {},
-    {},
-    summaryOverride,
+    {
+      parsed,
+      rawText: "raw",
+      sections: makeSections(),
+      observations: [],
+    },
+    {
+      summaryOverride,
+    },
   );
 }
 

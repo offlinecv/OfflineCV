@@ -218,37 +218,57 @@ verbatim.
 **The invariant:** the exporter's separator set is fixed and parser-coupled; user text
 passes through verbatim and may contain any glyph.
 
-| Join | Separator | Site |
-|---|---|---|
-| `Title · Company, Location · Team` | `" · "` | `ats-resume-model.ts` → `joinHeader` |
-| `Company, Location` | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (experience mapping) |
-| `Title, Team` (empty-company branch, #466) | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (empty-company branch) |
-| `Institution · Location` | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
-| `Degree, Field, Honors, GPA: <grade>` | `", "` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
-| `Type · Title` (achievement) | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (achievement mapping) |
-| Skills, within a category | `" · "` | `ats-resume-model.ts` → `buildAtsResumeModel` (skills mapping) |
-| Header ↔ trailing single-token date | `"  "` (two spaces) | `ats-resume-model.ts` → `buildAtsResumeModel` |
-| Experience/education date **range** | `" – "` spaced en dash | `ats-resume-model.ts` → `experienceDateRange` |
-| Project/education-fallback date **range** | `"–"` unspaced en dash | `score/entry-dates.ts` → `buildProjectDates` / `buildEducationDates` |
+Since #649 the separator BYTES have one owner — `src/lib/resume-format/` — imported by both
+the compose site and the split site rather than re-typed at each end. The `Constant` column
+names what to import; the `Site` column is where it is applied.
+
+| Join | Separator | Constant | Site |
+|---|---|---|---|
+| `Title · Company, Location · Team` | `" · "` | `MIDDOT_JOIN` | `resume-format/role-header.ts` → `composeRoleHeader` |
+| `Company, Location` | `", "` | `ORG_COMMA` | `resume-format/role-header.ts` → `composeRoleHeader` |
+| `Title, Team` (empty-company branch, #466) | `", "` | `ORG_COMMA` | `resume-format/role-header.ts` → `composeRoleHeader` |
+| `Institution · Location` | `" · "` | `MIDDOT_JOIN` | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
+| `Degree, Field, Honors, GPA: <grade>` | `", "` | — (literal) | `ats-resume-model.ts` → `buildAtsResumeModel` (education mapping) |
+| `Type · Title` (achievement) | `" · "` | `MIDDOT_JOIN` | `ats-resume-model.ts` → `buildAchievementHeader` (compose); `score/entry-dates.ts` → `joinAchievementType` / `splitAchievementType` |
+| Compact certifications line | `" · "` | `MIDDOT_JOIN` | `extract/achievements.ts` → `CREDENTIAL_LIST_SEPARATOR` (domain alias) |
+| Skills, within a category | `" · "` | `MIDDOT_JOIN` | `ats-resume-model.ts` → `buildAtsResumeModel` (skills mapping) |
+| Header ↔ trailing single-token date | `"  "` (two spaces) | `HEADER_DATE_GAP` | `ats-resume-model.ts` → `buildAtsResumeModel` |
+| Wrapped-header hanging indent | `12` pt | `HEADER_WRAP_INDENT` | `ats-resume-model.ts` ↔ `entry-blocks.ts` → `isWrappedContinuation` |
+| Experience/education date **range** | `" – "` spaced en dash | — (not yet extracted) | `ats-resume-model.ts` → `experienceDateRange` |
+| Project/education-fallback date **range** | `"–"` unspaced en dash | — (not yet extracted) | `score/entry-dates.ts` → `buildProjectDates` / `buildEducationDates` |
 
 Every `ats-resume-model.ts` row above is `src/lib/pdf/ats-resume-model.ts`; the date-range
-row is `src/lib/score/entry-dates.ts`, a different directory.
+row is `src/lib/score/entry-dates.ts`, a different directory. The two date-range dialects are
+deliberately still un-unified — unifying them changes rendered bytes and needs its own
+reviewed snapshot sweep (#649 step 3).
+
+The degree/notes comma is left a literal on purpose: it separates a LIST of qualifiers
+(degree, field, honors, grade), not an org boundary, so naming it `ORG_COMMA` would assert a
+contract that does not hold there.
+
+`resume-format` also owns the SPLIT side of the middot: `MIDDOT` (the bare glyph, matched by
+the parser because re-extraction can collapse the spacing) and `MIDDOT_SPLIT_RE` (the
+whitespace-bounded boundary). `splitRoleHeader` is the exact inverse of `composeRoleHeader`
+and is the executable spec for the grammar — it is deliberately NOT the production parser,
+which must read arbitrary third-party résumés and therefore splits on a much wider delimiter
+vocabulary (see `heuristics/extract/experience-disambiguate.ts`).
 
 Plus one deliberate exception: an **achievement's** title↔year separator echoes the
 *source's own* punctuation (`score/entry-dates.ts` → `achievementYearJoiner`, #380) — a hyphen
 there is also user-sourced, by design, so the export re-parses to the same `year_separator`
 it came from.
 
-`render-ats-pdf.ts` holds exactly one separator constant of its own —
-`MIDDOT_SEGMENT_SEP = " · "` (`render-ats-pdf.ts` → `MIDDOT_SEGMENT_SEP`) — used only to keep a middot-joined
-segment atomic across a wrap point; it does not choose which fields get middot-joined.
+`render-ats-pdf.ts` holds exactly one separator alias of its own —
+`MIDDOT_SEGMENT_SEP = MIDDOT_JOIN` (`render-ats-pdf.ts` → `MIDDOT_SEGMENT_SEP`) — used only to keep a
+middot-joined segment atomic across a wrap point; it does not choose which fields get
+middot-joined, and since #649 it cannot drift from the bytes the model composed.
 
 There is **no** ASCII hyphen anywhere in this set. A `Role - Subtitle` header is a title
 field whose value literally contains `" - "`, drawn verbatim.
 
 **Why it's load-bearing, not cosmetic:**
 
-- `joinHeader([title, org], " · ")` is what the re-parser's `mapTitleFirst` splits on to
+- `composeRoleHeader`'s `MIDDOT_JOIN` is what the re-parser's `mapTitleFirst` splits on to
   recover title / company / location / team.
 - The **#466 empty-company branch** exists precisely because swapping one separator changes
   the parse: a naive `"Title · Team"` middot join re-parses as a `Title · Company` shape and

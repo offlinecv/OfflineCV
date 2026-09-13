@@ -30,11 +30,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
-import { projectScoreSections } from "../lib/heuristics/projections.ts";
-import {
-  computeAnonymousAtsScore,
-  type AnonymousAtsScore,
-} from "../lib/score/score.ts";
+import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import { scoreParsedResume } from "../lib/score/score-cascade.ts";
 import { mergeLlmParse } from "../lib/webllm/merge-override.ts";
 import type { LlmParsedResume } from "../lib/webllm/parse-resume.ts";
 
@@ -117,15 +114,7 @@ export function useLlmRecovery(
 
   const activeScore = useMemo(() => {
     if (llmOverride === null || activeResult === null) return score;
-    return computeAnonymousAtsScore({
-      parsed: activeResult.canonical.fields,
-      fieldConfidence: activeResult.canonical.fieldConfidence,
-      triggers: activeResult.triggers,
-      rawText: activeResult.rawText,
-      // Score projection — section pools read off the canonical model, the sole
-      // parse shape (#445).
-      sections: projectScoreSections(activeResult.canonical),
-    });
+    return scoreParsedResume(activeResult);
     // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
     // CLAUDE.md): `activeResult` carries the merge, `llmOverride` selects the
     // branch, and `score` is the value the un-recovered branch returns.

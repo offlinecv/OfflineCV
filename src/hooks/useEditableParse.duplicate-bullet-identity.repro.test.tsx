@@ -41,7 +41,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { useEditableParse, type EditableParse } from "./useEditableParse.ts";
+import {
+  useEditableParse,
+  type EditableParse,
+  type EditSnapshot,
+} from "./useEditableParse.ts";
 import { applyOverrides } from "../lib/edit/apply-overrides.ts";
 import { scoreEditedResume } from "../lib/edit/score-edited.ts";
 import {
@@ -113,12 +117,8 @@ interface Folded {
   exportedBullets: string[];
 }
 
-/** Run the `/` pipeline over a pair of override maps, against `LINES`. */
-function fold(
-  lines: readonly string[],
-  bulletOverrides: Record<string, string>,
-  removedBullets: ReadonlySet<string>,
-): Folded {
+/** Run the `/` pipeline over the hook's edit snapshot, against `LINES`. */
+function fold(lines: readonly string[], snapshot: EditSnapshot): Folded {
   const base = baseResult(lines);
   const observations =
     computeAnonymousAtsScore({
@@ -129,24 +129,21 @@ function fold(
       sections: base.canonical.sections,
     }).bullets ?? [];
   const core = applyOverrides(
-    base.canonical.fields,
-    base.rawText,
-    base.canonical.sections,
-    {},
-    {},
-    bulletOverrides,
-    observations,
-    {},
-    { removed: [], added: [] },
-    [],
-    {},
-    removedBullets,
-    [],
-    base.canonical.fieldConfidence,
+    {
+      parsed: base.canonical.fields,
+      rawText: base.rawText,
+      sections: base.canonical.sections,
+      observations,
+      fieldConfidence: base.canonical.fieldConfidence,
+    },
+    // The WHOLE snapshot, not a hand-listed subset (#922 review): a channel
+    // added to `EditSnapshot` then reaches this fold the same way it reaches
+    // production's, instead of being silently dropped here.
+    snapshot,
   );
   const score = scoreEditedResume(core, base.triggers, [
-    ...Object.keys(bulletOverrides),
-    ...removedBullets,
+    ...Object.keys(snapshot.bulletOverrides),
+    ...snapshot.removedBullets.map(String),
   ]);
   const model = buildAtsResumeModel(
     {
@@ -196,7 +193,7 @@ afterEach(() => {
 
 /** What the hook's current state folds to. */
 function regrade(): Folded {
-  return fold(LINES, api.bulletOverrides, api.removedBullets);
+  return fold(LINES, api.snapshot);
 }
 
 /** The row currently rendered at `position` — id included, exactly as

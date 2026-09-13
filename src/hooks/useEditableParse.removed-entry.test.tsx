@@ -139,24 +139,18 @@ interface Regraded {
 function regrade(api: EditableParse): Regraded {
   const base = baseResult();
   const core = applyOverrides(
-    base.canonical.fields,
-    base.rawText,
-    base.canonical.sections,
-    api.contactOverrides,
-    api.experienceOverrides,
-    api.bulletOverrides,
-    OBSERVATIONS,
-    api.educationOverrides,
-    api.skillsOverride,
-    api.addedEntries,
-    api.addedBullets,
-    api.removedBullets,
-    api.profileOverrides,
-    base.canonical.fieldConfidence,
-    api.achievementOverrides,
-    api.descriptionOverrides,
-    api.summaryOverride,
-    api.removedEntries,
+    {
+      parsed: base.canonical.fields,
+      rawText: base.rawText,
+      sections: base.canonical.sections,
+      observations: OBSERVATIONS,
+      fieldConfidence: base.canonical.fieldConfidence,
+    },
+    // The WHOLE snapshot, not a hand-listed subset (#922 review): a channel
+    // added to `EditSnapshot` then reaches this fold the same way it reaches
+    // production's, instead of being silently dropped here. Listing them by
+    // hand had already lost `certificationOverrides` (#884).
+    api.snapshot,
   );
   const score = computeAnonymousAtsScore({
     parsed: core.fields,

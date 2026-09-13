@@ -20,23 +20,25 @@
  * PII-free: returns parses, never prints or persists a value.
  */
 
-import { computeAnonymousAtsScore } from "../score/score.ts";
+import { scoreParsedResume } from "../score/score-cascade.ts";
 import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
 import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
 import { runCascade } from "./cascade.ts";
 import type { CascadeResult } from "./types.ts";
 
-/** The score the reconstructed-PDF model is built against. Exported so the edit-
- *  leg gate (#459) scores its override-applied `displayResult` through the exact
- *  same recipe the render hop uses, rather than re-deriving it. */
+/** The score the reconstructed-PDF model is built against, for an UNEDITED parse.
+ *  Exported so a caller that needs the base grade — the model the reconstructed
+ *  PDF is built against (`corpus-roundtrip.test.ts`), or the base `score.bullets`
+ *  an override fold takes as its `observations` (`corpus-edit-roundtrip.test.ts`,
+ *  `description-override-roundtrip.repro.test.ts`) — goes through the same recipe
+ *  the hop uses rather than re-deriving it.
+ *
+ *  NOT for an override-applied résumé: that is `scoreEditedResume`, which grades
+ *  the EDITED section view and threads `claimedBulletKeys`. Reaching for this one
+ *  on edited input is the #487 defect — see `score-cascade.ts` for why the two
+ *  recipes are deliberately separate functions. */
 export function scoreForCascade(cascade: CascadeResult) {
-  return computeAnonymousAtsScore({
-    parsed: { ...cascade.canonical.fields },
-    fieldConfidence: cascade.canonical.fieldConfidence,
-    triggers: cascade.triggers,
-    rawText: cascade.rawText,
-    sections: cascade.canonical.sections,
-  });
+  return scoreParsedResume(cascade);
 }
 
 export interface RoundtripHop {

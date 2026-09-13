@@ -114,23 +114,18 @@ function Harness() {
   const groups = useMemo<BulletGroup[]>(() => {
     const base = baseResult();
     const core = applyOverrides(
-      base.canonical.fields,
-      base.rawText,
-      base.canonical.sections,
-      edit.contactOverrides,
-      edit.experienceOverrides,
-      edit.bulletOverrides,
-      [],
-      edit.educationOverrides,
-      edit.skillsOverride,
-      edit.addedEntries,
-      edit.addedBullets,
-      edit.removedBullets,
-      edit.profileOverrides,
-      base.canonical.fieldConfidence,
-      edit.achievementOverrides,
-      edit.descriptionOverrides,
-      edit.summaryOverride,
+      {
+        parsed: base.canonical.fields,
+        rawText: base.rawText,
+        sections: base.canonical.sections,
+        observations: [],
+        fieldConfidence: base.canonical.fieldConfidence,
+      },
+      // The WHOLE snapshot, not a hand-listed subset (#922 review): a channel
+      // added to `EditSnapshot` then reaches this fold the same way it reaches
+      // production's, instead of being silently dropped here. Listing them by
+      // hand had already lost `certificationOverrides` (#884).
+      edit.snapshot,
     );
     const score = computeAnonymousAtsScore({
       parsed: core.fields,
