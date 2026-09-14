@@ -28,6 +28,7 @@ import {
   DATE_ANCHOR,
   DATE_RANGE_RE,
   EMAIL_RE,
+  OPEN_ENDED_ALT,
 } from "../heuristics/regex.ts";
 import { normalizePhone, regionFromLocation } from "../heuristics/phone.ts";
 
@@ -36,24 +37,21 @@ export type FieldValidator = (value: string) => string | null;
 
 // ── Dates ────────────────────────────────────────────────────────────────────
 
-// Open-ended end-date words. Mirrors PRESENT_RE's alternation; inlined (rather
-// than reusing that `\b`-bounded RegExp) so it composes cleanly inside the
-// fully-anchored single-field pattern below.
-const PRESENT_WORDS = "Present|Current|Now|Ongoing";
-
 /**
  * A single date FIELD (start_date / end_date). Accepts the résumé date forms the
  * parser understands — one anchor (`Mon YYYY`, `YYYY`, `MM/YYYY`, `Season YYYY`,
  * `20XX`), an open-ended word (`Present`…), OR a full range typed into one field
  * (`YYYY – YYYY`, `Jan 2020 – Present`) — and nothing else.
  *
- * Built from the parser's exported `DATE_ANCHOR` fragment and `DATE_RANGE_RE`.
- * Both carry top-level `|` alternations, so each is wrapped in its own
+ * Built from the parser's exported `DATE_ANCHOR` fragment, `DATE_RANGE_RE`, and
+ * the bare `OPEN_ENDED_ALT` alternation — bare rather than the `\b`-bounded
+ * `PRESENT_RE`, which would not compose inside these anchors (#931). All three
+ * carry top-level `|` alternations, so each is wrapped in its own
  * non-capturing group before the outer `^…$` anchors bind (otherwise `^`/`$`
  * would attach to only the first/last alternative — the classic `^a|b$` trap).
  */
 const DATE_FIELD_RE = new RegExp(
-  `^\\s*(?:(?:${DATE_RANGE_RE.source})|(?:${DATE_ANCHOR})|(?:${PRESENT_WORDS}))\\s*$`,
+  `^\\s*(?:(?:${DATE_RANGE_RE.source})|(?:${DATE_ANCHOR})|(?:${OPEN_ENDED_ALT}))\\s*$`,
   "i",
 );
 
