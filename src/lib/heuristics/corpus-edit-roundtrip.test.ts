@@ -93,6 +93,7 @@ import type { CascadeResult } from "./types.ts";
 import { scoreForCascade } from "./roundtrip-hop.ts";
 import { scoreEditedResume } from "../edit/score-edited.ts";
 import type { BulletObservation } from "../score/score.ts";
+import { groupBulletsByExperience } from "../score/group-bullets.ts";
 import { applyOverrides } from "../edit/apply-overrides.ts";
 import { buildAtsResumeModel } from "../pdf/ats-resume-model.ts";
 import { renderAtsResumePdf } from "../pdf/render-ats-pdf.ts";
@@ -128,6 +129,12 @@ const NEW_TITLE = "Vantreon Platform Engineer";
 const NEW_COMPANY = "Vantreon Systems";
 const NEW_BULLET =
   "Vantreon: cut p99 checkout latency 43% by resharding the session store.";
+// A SECOND bullet edit, on a LATER bullet (#487). The first edit always lands on
+// `observations[0]`, and a gate that only ever edits the leading bullet cannot
+// tell "bullet overrides survive" from "the FIRST bullet override survives" —
+// which is exactly the distinction #487's correction said not to assume.
+const NEW_LATER_BULLET =
+  "Vantreon: halved the nightly reconciliation window by batching ledger writes.";
 const NEW_SKILL = "VantreonScript";
 // A DATE edit (#672), typed into the END cell of a role whose START the same
 // override clears — the exact unrepresentable shape, built corpus-wide. It is
@@ -153,6 +160,7 @@ const SENTINELS = [
   NEW_TITLE,
   NEW_COMPANY,
   NEW_BULLET,
+  NEW_LATER_BULLET,
   NEW_SKILL,
   ADDED_DEGREE,
   ADDED_INSTITUTION,
@@ -225,6 +233,16 @@ const CATEGORIES: EditCategory[] = [
  * beyond deleting the exporter's duplicate override pass; the harness now scores
  * the way production does. `bullets` therefore has teeth corpus-wide again.
  *
+ * …but only for the LEADING bullet, until #487's own correction was acted on: it
+ * reported that a non-first override failed too, and a gate editing nothing but
+ * `observations[0]` could never have said whether that still held. `bullets` now
+ * also edits the last bullet the surface offers an editor for (see
+ * {@link laterEditableBullet}), and it round-trips on every fixture that has one.
+ * Measured against an injected regression rather than argued: with
+ * `applyBulletTextOverrides` stopped after its FIRST override, the leading-bullet
+ * gate reports nothing new (its one `bullets` failure is the accepted #224 entry)
+ * while this one fails 57 fixtures.
+ *
  * Shrink it as the follow-ups land — the ratchet forces it.
  */
 const KNOWN_FAILURES = loadKnownFailures<EditCategory>(
@@ -247,8 +265,45 @@ interface SyntheticEdits {
     title?: string;
     company?: string;
     bullet?: string;
+    laterBullet?: string;
     start_date?: string;
   };
+  /** Whether a second, LATER bullet was edited — see {@link laterEditableBullet}. */
+  editedLaterBullet: boolean;
+}
+
+/**
+ * The last pooled bullet the reconstructed résumé offers an inline editor for,
+ * other than `observations[0]` — or `undefined` when there is none.
+ *
+ * "Offers an editor for" is the whole selection rule, and it is the product's
+ * rule, not one chosen to make this gate pass. Every surface that writes a bullet
+ * override — the inline row and the whole-résumé rewrite's apply — reaches a
+ * bullet only through an EXPERIENCE role (`ReconstructedResume.tsx`:
+ * `rewriteApplyBySection` wires `experience:<n>` sections; `ProjectsSection` and
+ * `AchievementsSection` render their rows with no `onBulletChange`). So a bullet
+ * grouped under a project or an achievement has no override a user can create,
+ * and synthesizing one measures nothing the Download PDF can lose. Grouping uses
+ * the same `groupBulletsByExperience` over `experience` the surface does.
+ *
+ * The "Other bullets" group is editable too, and is deliberately not chosen: a
+ * bullet the grouper attributes to no role is absent from the exported PDF
+ * whether or not it was edited, which is a property of the base export rather
+ * than of the edit leg this gate measures.
+ */
+function laterEditableBullet(
+  fields: CascadeResult["canonical"]["fields"],
+  observations: readonly BulletObservation[],
+): BulletObservation | undefined {
+  const first = observations[0]?.id;
+  const inRole = groupBulletsByExperience([...observations], fields.experience)
+    .filter((g) => g.experienceIndex !== null)
+    .flatMap((g) => g.bullets)
+    .filter((b) => b.id !== first);
+  return inRole.reduce<BulletObservation | undefined>(
+    (last, b) => (last === undefined || b.index > last.index ? b : last),
+    undefined,
+  );
 }
 
 /**
@@ -292,6 +347,12 @@ function synthesizeOverrides(
     replaced.bullet = observations[0].text;
     bullets[observations[0].id] = NEW_BULLET;
   }
+  // …and a LATER one, when the surface offers one to edit (#487).
+  const later = laterEditableBullet(fields, observations);
+  if (later !== undefined) {
+    replaced.laterBullet = later.text;
+    bullets[later.id] = NEW_LATER_BULLET;
+  }
 
   // skills — always addable.
   exercised.add("skills");
@@ -316,6 +377,7 @@ function synthesizeOverrides(
     addedEntries,
     exercised,
     replaced,
+    editedLaterBullet: later !== undefined,
   };
 }
 
@@ -542,6 +604,10 @@ function computeEditFailures(
   }
   if (has("bullets"))
     presenceCheck(allText, NEW_BULLET, edits.replaced.bullet, "bullet", fails.bullets);
+  if (edits.editedLaterBullet)
+    presenceCheck(
+      allText, NEW_LATER_BULLET, edits.replaced.laterBullet, "later bullet", fails.bullets,
+    );
   // skills / added are additive (no value replaced) — presence only.
   if (has("skills"))
     presenceCheck(skillsText, NEW_SKILL, undefined, "skill", fails.skills);
