@@ -1185,4 +1185,60 @@ describe("checkNumbersPreserved", () => {
       expect(result.dropped).toEqual(["5%"]);
     });
   });
+
+  describe("rupee figures and Indian magnitudes (#940)", () => {
+    it("flags a substituted rupee figure with Indian magnitude Cr", () => {
+      const result = checkNumbersPreserved(
+        ["Saved ₹2Cr in costs."],
+        ["Saved ₹3Cr in costs."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["₹2Cr"]);
+      expect(result.added).toEqual(["₹3Cr"]);
+    });
+
+    it("flags a substituted rupee figure before spaced magnitude lakh", () => {
+      const result = checkNumbersPreserved(
+        ["Saved ₹20 lakh in costs."],
+        ["Saved ₹30 lakh in costs."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["₹20"]);
+      expect(result.added).toEqual(["₹30"]);
+    });
+
+    it("flags sign loss on negative rupee figures", () => {
+      const result = checkNumbersPreserved(
+        ["Cut spend by -₹5M."],
+        ["Cut spend by ₹5M."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["-₹5M"]);
+      expect(result.added).toEqual(["₹5M"]);
+    });
+
+    it("keys rupee figures with currency symbol ₹", () => {
+      const result = checkNumbersPreserved(
+        ["Cut spend by ₹5M."],
+        ["Cut spend by ₹9M."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["₹5M"]);
+      expect(result.added).toEqual(["₹9M"]);
+    });
+
+    it("preserves identical rupee figures with various magnitude suffixes", () => {
+      const input = [
+        "Generated ₹2Cr in revenue across operations.",
+        "Saved ₹20L in licensing fees.",
+        "Managed a budget of ₹50 lakh effectively.",
+      ];
+      expect(checkNumbersPreserved(input, input)).toEqual({
+        ok: true,
+        dropped: [],
+        added: [],
+      });
+    });
+  });
 });
+
