@@ -122,11 +122,10 @@ const LEADING_BOLD_WORD_PATTERN = /^\*\*([A-Za-z][\w-]*)\*\*\s+/;
  *     withheld when what follows the `-` is an optional currency symbol
  *     ({@link CURRENCY_SYMBOL_CLASS}, shared with the atom classifier so the
  *     two agree on what a signed figure is), an optional leading `.`, then a
- *     digit. So `-5%`, `-.5%`, `-$5M` and `-€1.2M` all keep their sign. The
- *     #821 guard keyed on a bare digit, which let a currency symbol slip past
- *     it — `-$5M` shipped as `$5M`, a loss read as a gain (#930). `-₹2Cr` still
- *     does not: `₹` is outside the shared class, and widening that class is a
- *     change to both of its consumers, not to this one.
+ *     digit. So `-5%`, `-.5%`, `-$5M`, `-€1.2M` and `-₹2Cr` all keep their
+ *     sign. The #821 guard keyed on a bare digit, which let a currency symbol
+ *     slip past it — `-$5M` shipped as `$5M`, a loss read as a gain (#930);
+ *     `₹` joined the shared class in #940.
  *
  *     The `\s+` branch is unguarded because `- 5%` or `- $5M` is a marker plus a
  *     positive number, and a genuine negative is written `- -5%`. A tight
