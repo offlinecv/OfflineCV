@@ -7,6 +7,7 @@ import {
   applyNumberPreservation,
   cleanRewriteLine,
 } from "./post-process.ts";
+import { CURRENCY_SYMBOL_CLASS } from "./preserve-numbers.ts";
 
 describe("cleanRewriteLine", () => {
   it("returns empty for whitespace-only input", () => {
@@ -243,6 +244,16 @@ describe("cleanRewriteLine", () => {
       // mangled them on its own, as with the bare decimal above.
       ["-5% churn in Q3.", "-5% churn in Q3."],
       ["-.5% weekly churn.", "-.5% weekly churn."],
+      // The currency-first twin (#930). The #821 guard keyed on a bare digit,
+      // so a currency symbol between the `-` and the number slipped past it and
+      // the sign was stripped: `-$5M` shipped as `$5M`, a loss read as a gain.
+      ["- -$5M in infra spend.", "-$5M in infra spend."],
+      ["-$5M in infra spend.", "-$5M in infra spend."],
+      ["-€1.2M run-rate.", "-€1.2M run-rate."],
+      ["-£300k budget cut.", "-£300k budget cut."],
+      ["-¥1,000 cost.", "-¥1,000 cost."],
+      ["• -$5M saved.", "-$5M saved."],
+      ["-$.5M tiny.", "-$.5M tiny."],
     ])("does not eat a number a marker strip uncovers: %s", (input, want) => {
       expect(cleanRewriteLine(input)).toBe(want);
     });
@@ -253,6 +264,38 @@ describe("cleanRewriteLine", () => {
       for (const marker of ["-", "*", "•", "1.", "1)"]) {
         expect(cleanRewriteLine(`${marker} -5% churn.`)).toBe("-5% churn.");
       }
+    });
+
+    it("preserves a leading minus sign before every shared currency symbol, for any marker", () => {
+      // Derived from the shared class rather than enumerated, so a symbol added
+      // to it — and therefore to the atom classifier — is covered here for free.
+      for (const symbol of CURRENCY_SYMBOL_CLASS.slice(1, -1)) {
+        for (const marker of ["-", "*", "•", "1.", "1)"]) {
+          expect(cleanRewriteLine(`${marker} -${symbol}5M saved.`)).toBe(
+            `-${symbol}5M saved.`,
+          );
+        }
+      }
+    });
+
+    it("still strips a marker in front of a positive currency figure", () => {
+      // The `\s+` branch is unguarded on purpose: `- $5M` is a bullet plus a
+      // positive number, not a signed one.
+      expect(cleanRewriteLine("- $5M saved.")).toBe("$5M saved.");
+    });
+
+    it("reads a tight `-$5M` as a sign, not as a glued marker", () => {
+      // Genuinely ambiguous, and decided the way the digit branch decides
+      // `-5%`: a stray kept `-` is cosmetic, an eaten real one inverts a figure.
+      expect(cleanRewriteLine("-$5M saved.")).toBe("-$5M saved.");
+    });
+
+    it("KNOWN GAP: `₹` is outside the shared currency class, so `-₹` still loses its sign", () => {
+      // Pinned on purpose, so the gap is visible rather than silent. Neither
+      // consumer of CURRENCY_SYMBOL_CLASS — this strip nor the atom classifier —
+      // recognizes `₹`. Widening the class fixes both at once; when it does,
+      // this assertion flips, and `₹` belongs in the property test above.
+      expect(cleanRewriteLine("-₹2Cr loss.")).toBe("₹2Cr loss.");
     });
 
     it("preserves every digit of a leading decimal, for any marker", () => {
