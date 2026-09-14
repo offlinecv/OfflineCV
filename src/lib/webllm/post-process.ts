@@ -42,7 +42,7 @@
  * drops them.
  */
 
-import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import { CURRENCY_SYMBOL_CLASS, checkNumbersPreserved } from "./preserve-numbers.ts";
 
 /**
  * Exact-match scaffolding lines (post-cleanup). Cheap set lookup for the
@@ -116,15 +116,30 @@ const LEADING_BOLD_WORD_PATTERN = /^\*\*([A-Za-z][\w-]*)\*\*\s+/;
  *     uncovered `-` as a glyph and ate it too, shipping `5% churn`. A
  *     reduction reads as a gain, and the line stays grammatical, so nothing
  *     downstream looks wrong. The bare `-5% churn` shape needed only one pass
- *     and predates the loop entirely. `(?!\.?\d)` withholds the zero-space
- *     branch from a sign, covering `-.5%` as well as `-5%`; the `\s+` branch
- *     is unguarded because `- 5%` is a marker plus a positive number, and a
- *     genuine negative is written `- -5%`. Nothing needs a tight `-5`-as-marker
- *     reading. Fix for #821.
+ *     and predates the loop entirely. Fix for #821.
+ *
+ *     What the guard keys on is a NUMBER, not a sign: the zero-space branch is
+ *     withheld when what follows the `-` is an optional currency symbol
+ *     ({@link CURRENCY_SYMBOL_CLASS}, shared with the atom classifier so the
+ *     two agree on what a signed figure is), an optional leading `.`, then a
+ *     digit. So `-5%`, `-.5%`, `-$5M` and `-€1.2M` all keep their sign. The
+ *     #821 guard keyed on a bare digit, which let a currency symbol slip past
+ *     it — `-$5M` shipped as `$5M`, a loss read as a gain (#930). `-₹2Cr` still
+ *     does not: `₹` is outside the shared class, and widening that class is a
+ *     change to both of its consumers, not to this one.
+ *
+ *     The `\s+` branch is unguarded because `- 5%` or `- $5M` is a marker plus a
+ *     positive number, and a genuine negative is written `- -5%`. A tight
+ *     `-$5M saved.` is genuinely ambiguous — a glued marker, or a signed figure
+ *     — and is read as the SIGN, the call the digit case already makes for
+ *     `-5%`: keeping a stray `-` costs a cosmetic glyph, eating a real one
+ *     inverts the figure.
  *   - **`*` requires `\s+`**, because `*X*` is italics and is handled by the
  *     paired-emphasis strip instead.
  */
-const LIST_MARKER_PATTERN = /^(?:\d+[.)]\s+|•\s*|-(?:\s+|(?!\.?\d))|\*\s+)/;
+const LIST_MARKER_PATTERN = new RegExp(
+  String.raw`^(?:\d+[.)]\s+|•\s*|-(?:\s+|(?!${CURRENCY_SYMBOL_CLASS}?\.?\d))|\*\s+)`,
+);
 
 /**
  * Runaway guard for the markdown-prefix loop in `cleanRewriteLine` — not a

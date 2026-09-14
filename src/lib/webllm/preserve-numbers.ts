@@ -135,11 +135,22 @@
  */
 
 /**
+ * The currency symbols a figure may carry, as a regex character class — the one
+ * definition. {@link ATOM} reads it to decide which figures are decorated atoms,
+ * and `post-process.ts`'s list-marker guard reads it to decide which leading `-`
+ * is a minus sign rather than a bullet (#930). The two must agree: a sign the
+ * marker strip eats but the classifier keys on reverts a good rewrite, and a
+ * sign the strip protects that the classifier cannot see protects nothing.
+ * Deliberately `$ € £ ¥` only — widening it (`₹`, `₩`, …) widens both at once.
+ */
+export const CURRENCY_SYMBOL_CLASS = "[$€£¥]";
+
+/**
  * Atom regex: one numeric occurrence with all its optional decorations.
  *   1. optional approximation marker (`~`, `∼`, `≈`)
  *   2. optional leading `-` (preceded by start, whitespace, or punctuation —
  *      not by another digit, which would make it a date-range hyphen)
- *   3. optional currency symbol ($, €, £, ¥)
+ *   3. optional currency symbol ({@link CURRENCY_SYMBOL_CLASS}: $, €, £, ¥)
  *   4. digit body (comma-grouped, decimal, or bare integer)
  *   5. optional magnitude suffix (k/m/b/g/t with optional b/B for data
  *      sizes like MB / GB) OR an `x` multiplier — alternatives, never both
@@ -155,8 +166,10 @@
  * Named groups, not positional: seven optional decorations read as noise
  * positionally, and the group order is not the order they are assembled in.
  */
-const ATOM =
-  /(?<!\w)(?<approx>[~\u223C\u2248])?(?<sign>-)?(?<currency>[$€£¥])?(?<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)(?:(?<magnitude>[kKmMbBgGtT][bB]?)|(?<multiplier>[xX]))?(?<percent>%)?(?<plus>\+)?(?!\w)/g;
+const ATOM = new RegExp(
+  String.raw`(?<!\w)(?<approx>[~\u223C\u2248])?(?<sign>-)?(?<currency>${CURRENCY_SYMBOL_CLASS})?(?<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)(?:(?<magnitude>[kKmMbBgGtT][bB]?)|(?<multiplier>[xX]))?(?<percent>%)?(?<plus>\+)?(?!\w)`,
+  "g",
+);
 
 /**
  * Dash characters that can join the two endpoints of a numeric range:
