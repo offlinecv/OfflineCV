@@ -132,6 +132,11 @@
  *
  * **No spaced ranges** (`50 - 100`). Only a tight `50-100` is read as a range;
  * a spaced hyphen is ambiguous with negation (`50 -100`) and with prose dashes.
+ *
+ * **Deliberately import-free.** The open-ended date words this module needs to
+ * recognise a year are a local copy of the parser's lexicon, not an import of
+ * it — {@link OPEN_ENDED_WORDS} records the measured reason, and a test fails if
+ * the two ever diverge (#938).
  */
 
 /**
@@ -179,6 +184,26 @@ const ATOM = new RegExp(
  * so recognising only `-` would make range detection depend on the font.
  */
 const RANGE_DASH = /[\u002D\u2010-\u2015\u2212]/;
+
+/**
+ * The open-ended end-date words — `present`, `current`, `now`, `ongoing` — that
+ * turn a neighbouring 4-digit number into a year (`2019 – Present`). The one copy
+ * in this module: the six sites in {@link LEADING_DATE_ANCHOR_SEPARATOR} and
+ * {@link YEAR_FOLLOW_CUE} that used to spell it out all derive from it.
+ *
+ * A LOCAL copy of the parser lexicon's `OPEN_ENDED_ALT` (`heuristics/regex.ts`),
+ * on purpose. Importing it would be this module's first dependency, and not a
+ * cheap one: the rewrite lane's static import graph does not reach `regex.ts`
+ * today, and `regex.ts` does real work at module load (`COUNTRY_GAZETTEER` walks
+ * `Intl.DisplayNames`) — the eager-graph cost #915 warns about, paid for four
+ * words.
+ *
+ * So drift is caught rather than prevented: `preserve-numbers.test.ts` fails when
+ * this list and `OPEN_ENDED_ALT` differ as a case-insensitive word set, and that
+ * test is this export's only importer. Lower-case because both consuming regexes
+ * carry the `i` flag (#938).
+ */
+export const OPEN_ENDED_WORDS = "present|current|now|ongoing";
 
 /**
  * Verbs/phrasing that signal a bare integer is a headcount when they appear
@@ -313,7 +338,7 @@ const MONTH_NAME =
  */
 const LEADING_DATE_ANCHOR_SEPARATOR = new RegExp(
   `^\\s*(?:[:.)]` +
-    `|(?:${RANGE_DASH.source}\\s*(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)\\b)` +
+    `|(?:${RANGE_DASH.source}\\s*(?:(?:19\\d\\d|20\\d\\d)|${OPEN_ENDED_WORDS})\\b)` +
     `|(?:${RANGE_DASH.source}(?!\\s*\\d)))\\s*`,
   "i",
 );
@@ -398,14 +423,14 @@ const YEAR_FOLLOW_AWARD_CUE =
  */
 const YEAR_FOLLOW_CUE = new RegExp(
   "^(?:\\s*(?:" +
-    "onwards?|present|current|now|ongoing|" +
-    "to\\s+(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)|" +
-    "until\\s+(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)|" +
-    "through\\s+(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)|" +
+    `onwards?|${OPEN_ENDED_WORDS}|` +
+    `to\\s+(?:(?:19\\d\\d|20\\d\\d)|${OPEN_ENDED_WORDS})|` +
+    `until\\s+(?:(?:19\\d\\d|20\\d\\d)|${OPEN_ENDED_WORDS})|` +
+    `through\\s+(?:(?:19\\d\\d|20\\d\\d)|${OPEN_ENDED_WORDS})|` +
     "and\\s+(?:19\\d\\d|20\\d\\d)|" +
     `${MONTH_NAME.source}` +
     ")\\b|" +
-    `\\s*(?:${RANGE_DASH.source}|/)\\s*(?:(?:19\\d\\d|20\\d\\d)|present|current|now|ongoing)\\b)`,
+    `\\s*(?:${RANGE_DASH.source}|/)\\s*(?:(?:19\\d\\d|20\\d\\d)|${OPEN_ENDED_WORDS})\\b)`,
   "i",
 );
 
