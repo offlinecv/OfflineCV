@@ -36,9 +36,13 @@
  *     specificity factor (#561) discounts a high score resting on few extracted
  *     terms: a thin vague JD fully covered (100% over 6 terms) yields a smaller
  *     base than a well-specified JD covered 30/45, so it cannot outrank it.
- *   - location (#545) — a MATCH flag, remote always matching. Feeds a bounded
- *     minor axis in `rateJobs`; a non-local strong fit is never dropped, only
- *     edged by an equal-fit local one. No longer a flat sort-key boost (#570).
+ *   - location (#545) — a MATCH flag, remote always matching, read from the
+ *     shared `location-match.ts` predicate. Feeds a bounded minor axis in
+ *     `rateJobs`; a non-local strong fit is never dropped HERE, only edged by
+ *     an equal-fit local one. No longer a flat sort-key boost (#570). Dropping
+ *     is #809's separate, explicitly user-armed `locationOnly` filter in
+ *     `refine.ts` — it reads the SAME predicate, so the toggle can never hide a
+ *     posting whose card shows a location match.
  *   - seniority (#562) — the ladder-rung DISTANCE between the query's derived
  *     level and the posting title's level, or null when there is no comparison
  *     (no query seniority, or an unrecognized title level). Feeds a minor axis;
@@ -64,6 +68,7 @@ import type { JobQuery } from "./query-builder.ts";
 import { parseSeniorityLabel } from "./query-builder.ts";
 import { seniorityRung } from "./seniority.ts";
 import { extractCompensation, isBelowFloor, annualizedTop } from "./compensation.ts";
+import { locationMatches } from "./location-match.ts";
 import { rateJobs, type JobRating, type RatingInput } from "./rating.ts";
 
 /** The keyword arm of `JdMatchResult` — the only shape produced here. */
@@ -116,31 +121,6 @@ const SPECIFICITY_HALF_SATURATION = 10;
  */
 function specificityConfidence(termCount: number): number {
   return termCount / (termCount + SPECIFICITY_HALF_SATURATION);
-}
-
-const REMOTE_PATTERN = /\b(remote|worldwide|anywhere|wfh)\b/i;
-
-/** True for a posting location that reads as remote/location-agnostic — a remote
- *  posting fits any candidate location, so it always counts as a match. */
-function isRemotePosting(location: string): boolean {
-  return REMOTE_PATTERN.test(location);
-}
-
-/**
- * True when `postingLocation` should count as a match for `queryLocation`.
- * Compares the leading city/region token (text before the first comma) so
- * "Austin, TX" matches a feed's "Austin, TX, USA" without requiring an exact
- * string match, and falls back to a loose substring check either direction for
- * postings that don't follow the "City, ST" shape.
- */
-function locationMatches(queryLocation: string, postingLocation: string): boolean {
-  if (isRemotePosting(postingLocation)) return true;
-  const posting = postingLocation.trim().toLowerCase();
-  const query = queryLocation.trim().toLowerCase();
-  if (!posting || !query) return false;
-  const postingCity = posting.split(",")[0].trim();
-  const queryCity = query.split(",")[0].trim();
-  return postingCity === queryCity || posting.includes(query) || query.includes(posting);
 }
 
 /**

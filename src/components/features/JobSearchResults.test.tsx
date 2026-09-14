@@ -66,6 +66,8 @@ function loaded(
   providerCount = 3,
   excludeSuppressed = false,
   roleSuppressed = false,
+  locationSuppressed = false,
+  locationFilteredOut = 0,
 ): JobSearchResult {
   const jobs = rankPostings(
     parsed,
@@ -77,6 +79,8 @@ function loaded(
     providerCount,
     excludeSuppressed,
     roleSuppressed,
+    locationSuppressed,
+    locationFilteredOut,
     rawPostings: [],
   };
 }
@@ -231,6 +235,8 @@ describe("JobSearchResults", () => {
       providerCount: 1,
       excludeSuppressed: false,
       roleSuppressed: false,
+      locationSuppressed: false,
+      locationFilteredOut: 0,
       rawPostings: [],
     };
     const el = render({ kind: "loaded", result });
@@ -265,6 +271,8 @@ describe("JobSearchResults", () => {
       providerCount: 1,
       excludeSuppressed: false,
       roleSuppressed: false,
+      locationSuppressed: false,
+      locationFilteredOut: 0,
       rawPostings: [],
     };
     const el = render({ kind: "loaded", result });
@@ -278,5 +286,49 @@ describe("JobSearchResults", () => {
     ) as HTMLButtonElement;
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(toggle.textContent).toContain("Hide weak matches (2)");
+  });
+});
+
+describe("JobSearchResults local-only notices (issue 809)", () => {
+  it("states how many postings the local-only filter hid, and how to get them back", () => {
+    const el = render({
+      kind: "loaded",
+      result: loaded(2, [], 3, false, false, false, 4),
+    });
+    expect(el.textContent).toContain("4 postings hidden as too far away");
+    expect(el.textContent).toContain("untick");
+  });
+
+  it("says posting, singular, for one", () => {
+    const el = render({
+      kind: "loaded",
+      result: loaded(2, [], 3, false, false, false, 1),
+    });
+    expect(el.textContent).toContain("1 posting hidden as too far away");
+  });
+
+  it("says nothing at all when the filter removed nothing", () => {
+    const el = render({ kind: "loaded", result: loaded(2) });
+    expect(el.textContent).not.toContain("hidden as too far away");
+  });
+
+  it("explains a suppressed local-only filter rather than showing an empty page", () => {
+    const el = render({
+      kind: "loaded",
+      result: loaded(2, [], 3, false, false, true, 0),
+    });
+    expect(el.textContent).toContain("Local-only filter skipped");
+    // The floor fires for any reason the filter would empty the set, so the
+    // copy must not blame the postings for stating no location (#905 review).
+    expect(el.textContent).not.toContain("None of these postings say where they are");
+  });
+
+  it("names the local-only filter by role, never by its location-less label", () => {
+    const el = render({
+      kind: "loaded",
+      result: loaded(2, [], 3, false, false, true, 4),
+    });
+    expect(el.textContent).toContain("untick the local-only filter above");
+    expect(el.textContent?.toLowerCase()).not.toContain("only jobs near me");
   });
 });
