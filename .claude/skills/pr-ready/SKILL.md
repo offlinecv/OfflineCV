@@ -212,6 +212,17 @@ against the login string, not the object):
 for PR_NUM in <every PR in the list>; do
   gh pr view "$PR_NUM" --repo "$REPO" \
     --json state,mergeable,statusCheckRollup,commits,author,url,title -q '.'
+
+  # unresolved review threads — a merge gate since `required_conversation_resolution`,
+  # and invisible to every field above (see the note under the table)
+  gh api graphql -f query='
+    query($owner:String!,$repo:String!,$pr:Int!){
+      repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
+        reviewThreads(first:100){ pageInfo{ hasNextPage } nodes{ isResolved } } } } }' \
+    -f owner="${REPO%%/*}" -f repo="${REPO##*/}" -F pr="$PR_NUM" \
+    --jq '.data.repository.pullRequest.reviewThreads
+          | if .pageInfo.hasNextPage then error("more than 100 review threads — paginate before trusting this count")
+            else [.nodes[] | select(.isResolved==false)] | length end'
 done
 AUTHOR=$(gh pr view <the first PR in the list> --repo "$REPO" --json author -q .author.login)
 ```
@@ -248,6 +259,26 @@ is no ask, and the abort message is every PR's reason, not just the first.
 | Mergeability unknown after retries | `.mergeable == "UNKNOWN"` on every attempt (see below) | "GitHub hasn't computed mergeability for PR #N yet (`UNKNOWN` after `<n>` tries) — re-run in a minute." |
 | A check is not green | any `.statusCheckRollup[]` whose `(.conclusion // .state)` is not in `SUCCESS` / `NEUTRAL` / `SKIPPED` | "PR #N has a check that isn't green: `<check name>` is `<conclusion or "still running">` — wait for it or fix it; a red or half-finished PR trains reviewers to skip the ask." |
 | More than one commit | `.commits \| length > 1` | "PR #N has `<n>` commits — collapse to one before asking for review: `/collapse-pr <N>`." |
+
+**Unresolved threads are disclosed, never excluded.** `required_conversation_resolution:
+true` makes an open thread a merge gate, but unlike a red check it is not a sign the PR is
+unready for a reviewer — often it is waiting *on* one. The sibling skills leave threads open
+on purpose: `/pr-review` Step 6.5 leaves a suggestion block for the author's Apply click and
+a question for the author's answer, and `/revise-pr` Step 6 leaves a pushback open for the
+reviewer to adjudicate. Excluding on the count would withhold the ask from exactly the PRs
+that need a reviewer next — and `/pr-autopilot` Phase 3 passes a single PR, so one exclusion
+there is an aborted ask with no Phase 4 row to catch it.
+
+So the count goes in the Phase 2 pre-send print next to each PR (`#N · 2 threads open`), the
+ping is sent unchanged, and Phase 6 re-counts. What it never does is drop the PR.
+
+**No `gh pr view` field reports this.** `.mergeable` is only ever
+`MERGEABLE` / `CONFLICTING` / `UNKNOWN` — it answers "do the diffs conflict", not "does
+branch protection allow the merge", and a PR with five open threads reads `MERGEABLE`.
+`.mergeStateStatus` *does* go `BLOCKED`, but it conflates unresolved threads with a
+missing approval, a failing required check, and a stale branch, so it cannot name the
+cause and must not be reported as if it did — which is why the fetch above does not
+request it. Count the threads directly.
 
 **`UNKNOWN` is not a conflict.** GitHub computes mergeability asynchronously,
 so a freshly-pushed PR — exactly the state `/pr-ready` runs in, right after
@@ -698,17 +729,26 @@ Then Phase 6.
 
 Re-evaluate the ack predicate one last time and print a terminal summary: the
 state reached per PR, by whom and through which signal, each PR's current
-`state`/`mergeable`/check status, and the author's options. Stop there. Nothing
-after this phase runs automatically.
+`state`/`mergeable`/check status **and its unresolved-thread count**, and the author's
+options. Stop there. Nothing after this phase runs automatically.
+
+**Re-count the threads here; don't reuse Phase 1's number.** The whole point of the ask
+was to get someone to review, and a review that arrived during the wait opens threads —
+so the count that mattered at preflight is exactly the one most likely to be stale by
+Phase 6. A PR that reaches `REVIEWED (APPROVED)` with open threads is **approved and not
+mergeable**, and reporting only the approval is the failure this sweep exists to fix:
+`/pr-review` leaves open precisely the threads it decided the author owes an answer to,
+so an open thread beside an approval is a worklist, not a contradiction. Say
+`APPROVED · 2 threads open → /revise-pr <N>`, never `APPROVED` alone.
 
 **Report per PR — one row each, never one verdict for the set.**
 
-| PR | State | Who | Signal | Since | State / checks |
+| PR | State | Who | Signal | Since | State / checks / threads |
 |---|---|---|---|---|---|
-| #606 | REVIEWED (`APPROVED`) | `<login>` | submitted review | 15:42 | OPEN / green |
-| #607 | REVIEWING | `<login>` | 👀 on the PR | 16:10 | OPEN / green |
-| #608 | HELD BUT STALE | `<login>` | 👀 at 14:05, grace lapsed 15:05 | — | OPEN / green |
-| #605 | SILENT | — | — | — | OPEN / green |
+| #606 | REVIEWED (`APPROVED`) | `<login>` | submitted review | 15:42 | OPEN / green / **2 open → `/revise-pr 606`** |
+| #607 | REVIEWING | `<login>` | 👀 on the PR | 16:10 | OPEN / green / 0 open |
+| #608 | HELD BUT STALE | `<login>` | 👀 at 14:05, grace lapsed 15:05 | — | OPEN / green / 0 open |
+| #605 | SILENT | — | — | — | OPEN / green / 0 open |
 
 Above the table, on their own line, name the **ask-level** acks — a 👍 or a thread
 reply on the ping. They say someone picked up the ask, but they cannot say which
