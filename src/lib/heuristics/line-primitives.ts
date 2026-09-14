@@ -430,6 +430,13 @@ function isPlaceholderDate(token: string): boolean {
   return /^(?:month(?:\s+year)?|year)$/i.test(token.trim());
 }
 
+/** An end token that is ONLY an open-ended word — the test that decides
+ *  `is_current`. Derived from the shared lexicon rather than spelled out, like the
+ *  parser's other open-ended sites — and this is the one whose drift would not
+ *  merely mis-strip text but stop a role being marked current (#931).
+ *  Non-global, so `.test` is stateless across calls. */
+const OPEN_ENDED_ONLY_RE = new RegExp(`^(?:${OPEN_ENDED_ALT})$`, "i");
+
 /** Parse a date range (start/end) from a line. Tolerates M/YYYY, Mmm YYYY, YYYY,
  *  and Season YYYY[, YYYY] (branch (c) of DATE_RANGE_RE). */
 export function parseDateRange(text: string): {
@@ -451,7 +458,7 @@ export function parseDateRange(text: string): {
     // start with a placeholder end still keeps the start; see below.)
     if (isPlaceholderDate(start)) return {};
     const endRaw = m[2] ?? m[4];
-    if (/^(present|current|now|ongoing)$/i.test(endRaw)) {
+    if (OPEN_ENDED_ONLY_RE.test(endRaw)) {
       return { start_date: start, is_current: true };
     }
     const end = normalizeDate(endRaw);
