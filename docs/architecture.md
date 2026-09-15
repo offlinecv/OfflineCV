@@ -104,11 +104,12 @@ README covers several of them in more detail:
 
 ## Making your first change
 
-1. Pick something from the [open `good first issue`
-   list](https://github.com/offlinecv/OfflineCV/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-   and comment that you're starting —
+1. Pick something from the [open, unclaimed `good first issue`
+   list](https://github.com/offlinecv/OfflineCV/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee+-label%3A%22status%3Aclaimed%22)
+   and comment asking to be assigned, then wait for a maintainer to assign it
+   before you start —
    [Claiming an issue](../CONTRIBUTING.md#claiming-an-issue) explains why the
-   comment matters.
+   claim matters.
 2. Find the row in [Where things live](#where-things-live) that matches it, and
    open the closest existing file in that folder before writing anything. The
    repo has a consistent house style and the fastest way to match it is to
