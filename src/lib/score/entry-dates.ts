@@ -11,6 +11,7 @@
  */
 
 import type { ResumeProject, ResumeEducation } from "./types.ts";
+import { MIDDOT, MIDDOT_JOIN } from "../resume-format/index.ts";
 import {
   formatExperienceDateRange,
   type ExperienceDateFields,
@@ -94,7 +95,7 @@ export function buildEducationDates(edu: ResumeEducation): string {
 
 /** The separator an achievement header falls back to between its title and its
  *  year when the source used none of its own (whitespace only). */
-export const DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR = "·";
+export const DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR = MIDDOT;
 
 /** True when a separator glyph binds TIGHT to the word before it — a comma, a
  *  semicolon, a colon take no space in front ("Award, 2021"), where a dash or a
@@ -139,11 +140,11 @@ export const ACHIEVEMENT_TYPE_MAX_LEN = 28;
 export function splitAchievementType(
   title: string,
 ): { type: string; rest: string } | null {
-  const idx = title.indexOf(" · ");
+  const idx = title.indexOf(MIDDOT_JOIN);
   if (idx < 0) return null;
   const type = title.slice(0, idx).trim();
   if (!type || type.length > ACHIEVEMENT_TYPE_MAX_LEN) return null;
-  return { type, rest: title.slice(idx + 3) };
+  return { type, rest: title.slice(idx + MIDDOT_JOIN.length) };
 }
 
 /**
@@ -158,5 +159,5 @@ export function joinAchievementType(
   type: string | undefined,
   title: string | undefined,
 ): string {
-  return [type?.trim(), title].filter(Boolean).join(" · ");
+  return [type?.trim(), title].filter(Boolean).join(MIDDOT_JOIN);
 }

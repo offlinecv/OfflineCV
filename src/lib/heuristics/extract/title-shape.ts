@@ -23,7 +23,11 @@
  * only importer and now takes it from here directly.
  */
 
-/** Legal-entity suffixes that mark a line as an employer, not a role. */
+/** Legal-entity suffixes that mark a line as an employer, not a role.
+ *  Deliberately NOT built via `extract/corporate-suffix.ts`'s composer
+ *  (#917): that would add an import, and this module's own contract above
+ *  is that it imports nothing. Its membership is still pinned alongside the
+ *  four composed sets in `corporate-suffix.test.ts`. */
 export const COMPANY_SUFFIX_RE =
   /\b(Inc\.?|LLC|Ltd\.?|Limited|Corp\.?|Corporation|Company|Co\.?|GmbH|S\.A\.?|Pty\.?|plc|Group|Holdings|Technologies|Systems|Labs|Solutions)\b/i;
 

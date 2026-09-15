@@ -69,15 +69,12 @@ import { projectDisplay } from "../heuristics/projections.ts";
 import { EMPHASIS_OPEN, EMPHASIS_CLOSE } from "./auto-bold-metrics.ts";
 import { buildContactFields, formatLinkDisplay } from "../contact.ts";
 import type { ContactOverrides } from "../../hooks/useEditableParse.ts";
-
-/**
- * Hanging indent (pt) for a wrapped experience-header tail (#436). Matches the
- * renderer's bullet text indent so the tail sits just PAST the bullet-marker
- * margin — the threshold `isWrappedContinuation` (entry-blocks.ts) uses to fold
- * a marker-less continuation into the line it wraps from. Any value clear of that
- * margin works; 12 pt keeps the indented tail visually aligned with the bullets.
- */
-const HEADER_WRAP_INDENT = 12;
+import {
+  composeRoleHeader,
+  HEADER_DATE_GAP,
+  HEADER_WRAP_INDENT,
+  MIDDOT_JOIN,
+} from "../resume-format/index.ts";
 
 // ── Model shape ───────────────────────────────────────────────────────────────
 
@@ -527,7 +524,7 @@ function buildAchievementHeader(
   // and reads as the résumé's own line, not one we re-punctuated.
   const yearSep = achievementYearJoiner(yearSeparator);
   if (label && title) {
-    const emphasizedTitle = `${EMPHASIS_OPEN}${label}${EMPHASIS_CLOSE} · ${title}`;
+    const emphasizedTitle = `${EMPHASIS_OPEN}${label}${EMPHASIS_CLOSE}${MIDDOT_JOIN}${title}`;
     return {
       headerLine: joinHeader([emphasizedTitle, year], yearSep),
       emphasized: true,
@@ -778,38 +775,20 @@ export function buildAtsResumeModel(
   // deliberate look-over-fidelity choice for the reconstructed PDF.
   const experienceEntries: AtsEntry[] = experiences.map((exp, i) => {
     const title = (exp.title ?? "").trim();
-    // Company + Location join with a comma; the team/division (#425) attaches
-    // after a middot: "Company, Location · Team".
-    const companyLocation = [exp.company, exp.location]
-      .filter((p) => p && p.trim())
-      .join(", ");
-    const org = joinHeader([companyLocation, exp.team], " · ");
     const dateRange = experienceDateRange(exp);
-    // Full one-line header: "Title · Company, Location · Team".
-    //
-    // #466 EMPTY-COMPANY BRANCH — when `company` is empty but `team` is set,
-    // the naive "Title · Team" middot join re-parses as a `Title · Company`
-    // shape and mis-labels the team as the company. Emit the team after a
-    // COMMA instead ("Title, Team"), so the parser's role-comma split routes
-    // it back into `team` (case 3 in `mapTitleFirst`) and the
-    // `company === title` backstop clears the mirrored company on re-parse.
-    //
-    // When location is ALSO set (PR #483 review), the pre-fix else-branch
-    // emitted "Title · Location · Team" which re-parsed with `location` in the
-    // `company` slot and `location` lost entirely — same corruption class as
-    // the empty-company case. Route the location onto a SEPARATE `subLine`
-    // ("City, ST" on its own row below the header): `parseEntryBlocks`
-    // captures it as a below-anchor whole cell, and `recoverLocation` step 3c
-    // (extended in this PR for whole-cell below-anchor bare locations)
-    // surfaces it back into `location`.
-    let headerText: string;
-    let emptyCompanySubLine: string | undefined;
-    if (!exp.company?.trim() && exp.team?.trim()) {
-      headerText = title ? `${title}, ${exp.team.trim()}` : exp.team.trim();
-      if (exp.location?.trim()) emptyCompanySubLine = exp.location.trim();
-    } else {
-      headerText = joinHeader([title, org], " · ");
-    }
+    // The header grammar — "Title · Company, Location · Team", and the #466
+    // empty-company "Title, Team" + location sub-line dialect — lives in
+    // `resume-format/role-header.ts` (#649), beside the `splitRoleHeader`
+    // inverse that pins what each separator means to the re-parser. Read its
+    // docblock before changing a byte of it: the empty-company branch exists
+    // because the naive middot join re-parses the team as the company.
+    const { headerLine: headerText, subLine: emptyCompanySubLine } =
+      composeRoleHeader({
+        title,
+        company: exp.company,
+        location: exp.location,
+        team: exp.team,
+      });
     const bullets = resolveBullets(
       bulletsByIndex.get(expOffset + i),
       exp.description,
@@ -845,7 +824,7 @@ export function buildAtsResumeModel(
       };
     }
     return {
-      headerLine: [headerText, dateRange].filter(Boolean).join("  ") || "Experience",
+      headerLine: [headerText, dateRange].filter(Boolean).join(HEADER_DATE_GAP) || "Experience",
       ...(emptyCompanySubLine ? { subLine: emptyCompanySubLine } : {}),
       headerHangingIndent: HEADER_WRAP_INDENT,
       bullets,
@@ -855,7 +834,7 @@ export function buildAtsResumeModel(
 
   // ── Projects ──
   const projectEntries: AtsEntry[] = projects.map((proj, i) => ({
-    headerLine: joinHeader([proj.name, buildProjectDates(proj)], " · ") ||
+    headerLine: joinHeader([proj.name, buildProjectDates(proj)], MIDDOT_JOIN) ||
       "Project",
     subLine: undefined,
     bullets: resolveBullets(bulletsByIndex.get(projOffset + i), proj.description),
@@ -972,7 +951,7 @@ export function buildAtsResumeModel(
     const degreeField = [edu.degree, edu.field, ...eduNotes]
       .filter(Boolean)
       .join(", ");
-    const org = joinHeader([edu.institution, edu.location], " · ");
+    const org = joinHeader([edu.institution, edu.location], MIDDOT_JOIN);
     // The ONE education date string (#882) — `buildEducationDates` is also what
     // the edit surface renders, so the card and the file can no longer disagree
     // about the same entry. It composes the spaced " – " range the re-parser's
@@ -1127,7 +1106,7 @@ export function buildAtsResumeModel(
     (c) => c.skills.length > 0,
   );
   const flatSkillsEntry = (members: string[]): AtsEntry => ({
-    headerLine: members.join(" · "),
+    headerLine: members.join(MIDDOT_JOIN),
     bullets: [],
     atomicSegments: true,
     // Skills read as regular-weight body text, not a bold header (#425).
@@ -1139,7 +1118,7 @@ export function buildAtsResumeModel(
   let skillsEntries: AtsEntry[];
   if (skillCategories && skillCategories.length > 0) {
     skillsEntries = skillCategories.map((c) => ({
-      headerLine: c.skills.join(" · "),
+      headerLine: c.skills.join(MIDDOT_JOIN),
       // The label leads the line in bold (#881) and the members wrap beside it;
       // see `headerBoldLead` for why it is not glued into `headerLine`.
       headerBoldLead: `${c.label}: `,

@@ -87,6 +87,7 @@ import {
 } from "./auto-bold-metrics.ts";
 import { toJsonResume } from "./to-json-resume.ts";
 import { wrapWordsToLines, firstLineInset } from "./text-wrap.ts";
+import { MIDDOT_JOIN } from "../resume-format/index.ts";
 import {
   bulletSplitFinding,
   collectModelTextFields,
@@ -285,7 +286,9 @@ const DATE_COLUMN_GAP = 8;
 // The middot list/org-line join separator emitted by ats-resume-model.ts
 // (skills, "Company · Location", "Institution · Location", ...). Wrap logic
 // treats each middot-delimited segment as atomic — see `wrap()` (#301).
-const MIDDOT_SEGMENT_SEP = " · ";
+// The bytes come from the shared exporter ↔ parser contract (#649) so the
+// renderer can never wrap on a boundary the model did not compose.
+const MIDDOT_SEGMENT_SEP = MIDDOT_JOIN;
 
 // ── WinAnsi sanitization (#295) ───────────────────────────────────────────────
 //

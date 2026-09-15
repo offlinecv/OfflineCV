@@ -7,6 +7,7 @@ import { parseEntryBlocks } from "../entry-blocks.ts";
 import type { EntryBlock } from "../entry-blocks.ts";
 import { YEAR_RE } from "../regex.ts";
 import { splitAchievementType } from "../../score/entry-dates.ts";
+import { MIDDOT_JOIN, MIDDOT_SPLIT_RE } from "../../resume-format/index.ts";
 import {
   dateSeparator,
   isBulletLine,
@@ -26,7 +27,9 @@ import { liftHeaderLabel } from "./projects.ts";
 /**
  * The separator that joins several credentials onto ONE compact certifications
  * line (#899). It is deliberately the same `" · "` every other multi-value line
- * in the reconstructed PDF uses (the skills list, `Company · Location`), and the
+ * in the reconstructed PDF uses (the skills list, `Company · Location`) — since
+ * #649 that is enforced rather than asserted: the bytes are `MIDDOT_JOIN` from
+ * `lib/resume-format`, and this name is the credentials-domain alias. The
  * exporter imports THIS constant rather than spelling it a second time —
  * `ats-resume-model.ts` builds `AtsSection.compactLine` with it and the renderer
  * wraps that line on it ATOMICALLY (`MIDDOT_SEGMENT_SEP`, `wrapSegmentsToLines`).
@@ -38,7 +41,7 @@ import { liftHeaderLabel } from "./projects.ts";
  * parse → export → re-parse hop over `google-docs-skia-proxy-certifications.pdf`
  * (`corpus-roundtrip.test.ts`) is what pins the two ends to the same glyph.
  */
-export const CREDENTIAL_LIST_SEPARATOR = " · ";
+export const CREDENTIAL_LIST_SEPARATOR = MIDDOT_JOIN;
 
 /**
  * The boundary {@link CREDENTIAL_LIST_SEPARATOR} draws, as the re-parser sees
@@ -46,7 +49,7 @@ export const CREDENTIAL_LIST_SEPARATOR = " · ";
  * not a boundary, and `\s` (which covers the NBSP / thin spaces a PDF extractor
  * emits, not just U+0020) absorbs whatever spacing the extraction hands back.
  */
-export const CREDENTIAL_SPLIT_RE = /\s+·\s+/;
+export const CREDENTIAL_SPLIT_RE = MIDDOT_SPLIT_RE;
 
 /**
  * Extract an Achievements / Accomplishments / Awards / Activities section into

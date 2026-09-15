@@ -17,15 +17,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { applyOverrides } from "./apply-overrides.ts";
+import { applyOverrides, type EditOverrides } from "./apply-overrides.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
 import { projectScoreSections } from "../heuristics/projections.ts";
 
-/** Positional stand-ins for `applyOverrides`' long default tail, so each case
- *  below spells out only the arguments it actually exercises. */
-const NO_CONTACT = {};
+/** No base-parse bullet observations: these cases exercise entry removal, not
+ *  the legacy numeric-key migration path that reads them. */
 const NO_OBS: never[] = [];
 
 function makeSections(lines: readonly string[] = []): SectionedResume {
@@ -73,32 +72,27 @@ function fold(
   opts: {
     rawText?: string;
     sections?: SectionedResume;
-    experience?: Parameters<typeof applyOverrides>[4];
-    education?: Parameters<typeof applyOverrides>[7];
-    achievements?: Parameters<typeof applyOverrides>[14];
-    descriptions?: Parameters<typeof applyOverrides>[15];
-    removedEntries?: ReadonlySet<string>;
+    experience?: EditOverrides["experienceOverrides"];
+    education?: EditOverrides["educationOverrides"];
+    achievements?: EditOverrides["achievementOverrides"];
+    descriptions?: EditOverrides["descriptionOverrides"];
+    removedEntries?: EditOverrides["removedEntries"];
   } = {},
 ) {
   return applyOverrides(
-    parsed,
-    opts.rawText ?? "",
-    opts.sections ?? makeSections(),
-    NO_CONTACT,
-    opts.experience ?? {},
-    {},
-    NO_OBS,
-    opts.education ?? {},
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    opts.achievements ?? {},
-    opts.descriptions ?? {},
-    undefined,
-    opts.removedEntries ?? new Set(),
+    {
+      parsed,
+      rawText: opts.rawText ?? "",
+      sections: opts.sections ?? makeSections(),
+      observations: NO_OBS,
+    },
+    {
+      experienceOverrides: opts.experience,
+      educationOverrides: opts.education,
+      achievementOverrides: opts.achievements,
+      descriptionOverrides: opts.descriptions,
+      removedEntries: opts.removedEntries,
+    },
   );
 }
 
@@ -106,7 +100,7 @@ describe("#856 index integrity — a deletion must not rebind a survivor's edits
   it("keeps each surviving ACHIEVEMENT holding its own override", () => {
     const { fields } = fold(baseParsed(), {
       achievements: { 1: { title: "Best Paper (revised)" }, 2: { year: "2022" } },
-      removedEntries: new Set(["achievements:0"]),
+      removedEntries: ["achievements:0"],
     });
 
     const titles = fields.heuristic_achievements!.map((a) => a.title);
@@ -120,7 +114,7 @@ describe("#856 index integrity — a deletion must not rebind a survivor's edits
   it("keeps each surviving EXPERIENCE role holding its own override", () => {
     const { fields } = fold(baseParsed(), {
       experience: { 1: { title: "Senior Engineer" }, 2: { company: "Globex Inc." } },
-      removedEntries: new Set(["experience:0"]),
+      removedEntries: ["experience:0"],
     });
 
     expect(fields.experience.map((e) => e.title)).toEqual([
@@ -134,7 +128,7 @@ describe("#856 index integrity — a deletion must not rebind a survivor's edits
   it("keeps each surviving EDUCATION entry holding its own override", () => {
     const { fields } = fold(baseParsed(), {
       education: { 1: { degree: "B.S." }, 2: { institution: "MIT" } },
-      removedEntries: new Set(["education:0"]),
+      removedEntries: ["education:0"],
     });
 
     expect(fields.education.map((e) => e.degree)).toEqual(["B.S.", "MS"]);
@@ -145,7 +139,7 @@ describe("#856 index integrity — a deletion must not rebind a survivor's edits
   it("keeps a surviving entry's PROSE description override (#489 keys too)", () => {
     const { fields } = fold(baseParsed(), {
       descriptions: { "projects:1": "Rewritten blurb" },
-      removedEntries: new Set(["projects:0"]),
+      removedEntries: ["projects:0"],
     });
 
     expect(fields.projects).toEqual([
@@ -156,7 +150,7 @@ describe("#856 index integrity — a deletion must not rebind a survivor's edits
   it("removes two entries in one fold without shifting the second's key", () => {
     const { fields } = fold(baseParsed(), {
       achievements: { 2: { title: "Scaling parsers, revisited" } },
-      removedEntries: new Set(["achievements:0", "achievements:1"]),
+      removedEntries: ["achievements:0", "achievements:1"],
     });
 
     expect(fields.heuristic_achievements).toEqual([
@@ -177,12 +171,12 @@ describe("#856 fold basics", () => {
   it("never mutates the input parse", () => {
     const parsed = baseParsed();
     fold(parsed, {
-      removedEntries: new Set([
+      removedEntries: [
         "experience:0",
         "education:0",
         "projects:0",
         "achievements:0",
-      ]),
+      ],
     });
     expect(parsed.experience).toHaveLength(3);
     expect(parsed.education).toHaveLength(3);
@@ -194,7 +188,7 @@ describe("#856 fold basics", () => {
     // A stale key out of a replayed draft, the same staleness the index-keyed
     // override maps absorb with `if (!edu) continue`.
     const { fields } = fold(baseParsed(), {
-      removedEntries: new Set(["achievements:99", "coursework:0", "projects:"]),
+      removedEntries: ["achievements:99", "coursework:0", "projects:"],
     });
     expect(fields.heuristic_achievements).toHaveLength(3);
     expect(fields.projects).toHaveLength(2);
@@ -202,7 +196,7 @@ describe("#856 fold basics", () => {
 
   it("ignores an ADDED entry's id — those are spliced out upstream", () => {
     const { fields } = fold(baseParsed(), {
-      removedEntries: new Set(["added:3"]),
+      removedEntries: ["added:3"],
     });
     expect(fields.experience).toHaveLength(3);
   });
@@ -237,7 +231,7 @@ describe("#856 the deleted entry's own source line", () => {
     const after = fold(titleOnlyParsed(), {
       rawText: `${OWNED}\n${KEPT}`,
       sections: makeSections([OWNED, KEPT]),
-      removedEntries: new Set(["achievements:0"]),
+      removedEntries: ["achievements:0"],
     });
 
     expect(before.rawText).toContain("US10275736B1");
@@ -266,7 +260,7 @@ describe("#856 the deleted entry's own source line", () => {
     const out = fold(baseParsed(), {
       rawText: "Engineer\nAcme · 2020–2022\n• Built a thing",
       sections: makeSections(["• Built a thing"]),
-      removedEntries: new Set(["experience:1"]),
+      removedEntries: ["experience:1"],
     });
     expect(out.rawText).toBe("Acme · 2020–2022\n• Built a thing");
     expect(out.fields.experience.map((e) => e.title)).toEqual([
@@ -284,7 +278,7 @@ describe("#856 the deleted entry's own source line", () => {
     const out = fold(baseParsed(), {
       rawText: raw,
       sections: makeSections(["• Built a thing"]),
-      removedEntries: new Set(["experience:1"]),
+      removedEntries: ["experience:1"],
     });
     expect(out.rawText).toBe(raw);
     expect(out.fields.experience).toHaveLength(2);
@@ -297,7 +291,7 @@ describe("#856 the deleted entry's own source line", () => {
     const out = fold(titleOnlyParsed(), {
       rawText: near,
       sections: makeSections([near]),
-      removedEntries: new Set(["achievements:0"]),
+      removedEntries: ["achievements:0"],
     });
     expect(out.rawText).toBe(near);
   });

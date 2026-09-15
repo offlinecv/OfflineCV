@@ -128,18 +128,16 @@ describe("#626 — removing a bullet agrees across the reconstructed résumé an
     // Fold the removal through the real edit pipeline — the same path
     // `useEditableParse.removeBullet` drives via `applyOverrides`.
     const edited = applyOverrides(
-      parsed,
-      rawText,
-      sections,
-      {}, // contact
-      {}, // experience
-      {}, // bullets (text overrides)
-      observations,
-      {}, // education
-      { removed: [], added: [] }, // skills
-      [], // addedEntries
-      {}, // addedBullets
-      new Set([removedId]), // removedBullets (#626)
+      {
+        parsed,
+        rawText,
+        sections,
+        observations,
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        removedBullets: [removedId],
+      },
     );
 
     // The removed line is gone from BOTH the rawText pool and the role's own
@@ -203,18 +201,16 @@ describe("#626 — removing a bullet agrees across the reconstructed résumé an
     const bothIds = observations.map((b) => b.id);
 
     const edited = applyOverrides(
-      parsed,
-      rawText,
-      sections,
-      {},
-      {},
-      {},
-      observations,
-      {},
-      { removed: [], added: [] },
-      [],
-      {},
-      new Set(bothIds), // remove BOTH bullets
+      {
+        parsed,
+        rawText,
+        sections,
+        observations,
+      },
+      {
+        skillsOverride: { removed: [], added: [] },
+        removedBullets: [...new Set(bothIds)],
+      },
     );
 
     const score2 = computeAnonymousAtsScore({

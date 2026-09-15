@@ -64,6 +64,7 @@ import type {
   ProfileOverride,
   BulletOverrides,
   DescriptionOverrides,
+  EditSnapshot,
 } from "../../hooks/useEditableParse.ts";
 import { bulletIdText, isLegacyBulletKey } from "../score/bullet-id.ts";
 
@@ -1266,97 +1267,170 @@ function applyRemovedEntries(
 // ── Entry point ──────────────────────────────────────────────────────────────
 
 /**
+ * The frozen, pristine-parse half of an edit fold: everything `applyOverrides`
+ * reads that the USER did not type. A snapshot is always replayed against the
+ * ORIGINAL parse (or `buildBlankResult()`), never against a previous fold's
+ * output — the fold is not idempotent under re-entry, because index-keyed
+ * overrides are captured against the PARSED entry indices.
+ */
+export interface EditBase {
+  /** The cascade's parsed resume (NOT mutated — deep-ish cloned). */
+  parsed: HeuristicParsedResume;
+  /** The cascade's raw extracted text (NOT mutated). */
+  rawText: string;
+  /**
+   * The cascade's typed section view (NOT mutated — cloned only where a bullet
+   * edit lands). The anonymous scorer pools its bullet set from this (#133), so
+   * a live edit must be folded here to re-grade Specificity / Structure.
+   */
+  sections: SectionedResume;
+  /**
+   * The BASE parse's `score.bullets` array. Needed ONLY to resolve LEGACY
+   * numeric keys out of a pre-#648 snapshot back to their bullet text; an
+   * id-keyed override carries its own text and never consults it. Pass `[]`
+   * when there are no legacy overrides to migrate — REQUIRED rather than
+   * defaulted, so a caller that has them cannot silently forget to thread them.
+   */
+  observations: readonly BulletObservation[];
+  /**
+   * The base per-field confidence. Returned bumped to 1 for every user-affirmed
+   * contact edit (and dropped to 0 for a clear), so a typed-in / picker-added
+   * contact link scores + displays as present rather than as low-confidence
+   * against the frozen base parse (#421 Blocking #1 / #3). Default `{}`.
+   */
+  fieldConfidence?: FieldConfidence;
+}
+
+/**
+ * The user's half of a fold: {@link EditSnapshot} with every channel optional,
+ * because an absent override map is a no-op.
+ *
+ * Deriving this from `EditSnapshot` instead of re-declaring the channels is the
+ * whole point of #652. The two ARE the same set of override channels — one
+ * persisted, one folded — and while they were declared twice they drifted:
+ * `team` (#425) and `achievementType` (#455) each reached the snapshot and were
+ * silently dropped on the way back in.
+ *
+ * What stops that recurring is the RUNTIME shape, not the type. Callers hand
+ * the WHOLE snapshot object to `applyOverrides` — one argument, not nineteen
+ * positional ones — so a channel added to `EditSnapshot` is physically carried
+ * into the fold whether or not anyone thought about it. The type does NOT make
+ * drift a compile error: the fold destructures the snapshot, destructuring is
+ * not exhaustive-checked, and adding an optional key to `EditSnapshot` compiles
+ * with zero `tsc` errors (verified). Every drift named above was an optional
+ * key — exactly the case with no compiler signal. What `Partial<EditSnapshot>`
+ * does buy is one spelling per channel and rename safety across both halves,
+ * which is why the alias is derived rather than re-declared.
+ */
+export type EditOverrides = Partial<EditSnapshot>;
+
+/**
+ * `EditSnapshot` holds its two tombstone lists as JSON-safe arrays, and a
+ * pre-#648 snapshot's bullet keys are bare numbers. Normalise to the string key
+ * set the fold indexes by, using the same `String(key)` coercion
+ * `useEditableParse.replay` applies on the way back into the hook.
+ *
+ * The COERCION is identical; the two paths are not otherwise the same. `replay`
+ * funnels a removed-bullet key through `removeBullet`, which DROPS a `"<n>|"`
+ * key it cannot resolve to a live bullet, and this keeps it. The fold's OUTPUT
+ * is unaffected either way — an unresolvable key matches no bullet and removes
+ * nothing — so a snapshot folded directly and the same snapshot
+ * replayed-then-folded still agree; they just carry a different key set to get
+ * there.
+ */
+function toKeySet(
+  keys: readonly (string | number)[] | undefined,
+): ReadonlySet<string> {
+  return new Set((keys ?? []).map(String));
+}
+
+/**
  * Fold the override maps into a fresh `{ parsed, rawText, sections }` triple.
  *
- * @param parsed    the cascade's parsed resume (NOT mutated — deep-ish cloned).
- * @param rawText   the cascade's raw extracted text (NOT mutated).
- * @param sections  the cascade's typed section view (NOT mutated — cloned only
- *                  where a bullet edit lands). The anonymous scorer pools its
- *                  bullet set from this (#133), so a live edit must be folded
- *                  here to re-grade Specificity / Structure.
- * @param contact   contact-field overrides (full_name/email/phone/linkedin/location).
- * @param experience experience-header overrides keyed by experience array index.
- * @param bullets   bullet-text overrides keyed by {@link BulletObservation.id}
- *                  (#648). Applied in insertion order — see
- *                  {@link applyBulletTextOverrides}.
- * @param observations the BASE parse's `score.bullets` array. Needed ONLY to
- *                  resolve LEGACY numeric keys out of a pre-#648 snapshot back
- *                  to their bullet text; an id-keyed override carries its own
- *                  text and never consults it. Pass `[]` when there are no
- *                  legacy overrides to migrate.
- * @param education education-field overrides keyed by education array index
- *                  (degree/institution/start_date/end_date). Empty string clears
- *                  a field. Default `{}`.
- * @param skills    add/remove edits against `parsed.skills`. `removed` keys
- *                  (lower-cased) drop parsed skills; `added` are appended,
- *                  de-duplicated. Default `{ removed: [], added: [] }`.
- * @param addedEntries user-added entries appended to their section arrays
- *                  (experience/education/projects/achievements). Default `[]`.
- * @param addedBullets bullet lines a user appended to an entry, keyed by entry
- *                  key — `"<section>:<index>"` for a parsed entry or an added
- *                  entry's id. Folded into the entry description AND the graded
- *                  bullet pool so an addition moves Specificity / Structure.
- *                  Default `{}`.
- * @param removedBullets ids of bullets the user dropped (#211), same key space
- *                  as `bullets`. Default empty set.
- * @param profileOverrides the ONE consolidated contact-link edit list (#427):
- *                  corrections to the four legacy slots (entries with a
- *                  `legacyKey`) AND user-added extras (untagged). Folded into the
- *                  legacy slots + `parsed.profiles`, and the per-slot confidence
- *                  edits are threaded into `fieldConfidence`. Default `[]`.
- * @param fieldConfidence the base per-field confidence. Returned bumped to 1
- *                  for every user-affirmed contact edit (and dropped to 0 for a
- *                  clear), so a typed-in / picker-added contact link scores +
- *                  displays as present rather than as low-confidence against the
- *                  frozen base parse (#421 Blocking #1 / #3). Default `{}`.
- * @param achievements achievement-field overrides keyed by
- *                  `heuristic_achievements` array index (#454). `type`, `title`
- *                  and `year` are copied straight onto the entry — `type` is a
- *                  stored field, not a run of `title`, so nothing is recomposed
- *                  (#456). An empty `type` or `year` clears it. Default `{}`.
- * @param descriptionOverrides prose-description overrides keyed by
- *                  {@link parsedEntryKey} (`"<section>:<index>"`, #489). Applied
- *                  straight onto the matching parsed entry's `description` — the
- *                  edit path for a prose-body project (no `•` bullets). An empty
- *                  string clears the description; a non-empty value replaces it.
- *                  Default `{}`.
- * @param summaryOverride the single-value summary edit (#625). `undefined` means
- *                  no override; a blank string CLEARS `parsed.summary` (which
- *                  drops the heading AND the body from the exported PDF); any
- *                  other value replaces it verbatim. Feeds the Completeness
- *                  ≥20-char threshold, so an edit re-grades. Default `undefined`.
- * @param removedEntries {@link parsedEntryKey} tombstones for PARSED entries the
- *                  user deleted (#856) — `"achievements:2"`. Folded LAST, after
- *                  every index-keyed pass above, so no surviving entry's edits
- *                  are rebound to its neighbour; see {@link applyRemovedEntries}.
- *                  Default empty set.
- * @param certifications certification-field overrides keyed by
- *                  `heuristic_certifications` array index (#884). Identical in
- *                  shape and semantics to `achievements` — the two buckets hold
- *                  the same item type — but its OWN index space, since the
- *                  buckets are separate arrays. Default `{}`.
+ * @param base the frozen pristine-parse context — see {@link EditBase}.
+ * @param snapshot the user's edits, one field per override channel (see
+ *   {@link EditSnapshot} for the persisted shape each one round-trips through).
+ *   Every channel is optional and an absent one is a no-op:
+ *
+ *   - `contactOverrides` — contact-field overrides (full_name / email / phone /
+ *     location / headline / work_authorization). Default `{}`.
+ *   - `experienceOverrides` — experience-header overrides keyed by experience
+ *     array index. Default `{}`.
+ *   - `bulletOverrides` — bullet-text overrides keyed by
+ *     {@link BulletObservation.id} (#648). Applied in insertion order — see
+ *     {@link applyBulletTextOverrides}. Default `{}`.
+ *   - `educationOverrides` — education-field overrides keyed by education array
+ *     index (degree / institution / start_date / end_date). Empty string clears
+ *     a field. Default `{}`.
+ *   - `skillsOverride` — add/remove edits against `parsed.skills`. `removed`
+ *     keys (lower-cased) drop parsed skills; `added` are appended,
+ *     de-duplicated. Default `{ removed: [], added: [] }`.
+ *   - `addedEntries` — user-added entries appended to their section arrays
+ *     (experience / education / projects / achievements). Default `[]`.
+ *   - `addedBullets` — bullet lines a user appended to an entry, keyed by entry
+ *     key — `"<section>:<index>"` for a parsed entry or an added entry's id.
+ *     Folded into the entry description AND the graded bullet pool so an
+ *     addition moves Specificity / Structure. Default `{}`.
+ *   - `removedBullets` — ids of bullets the user dropped (#211), same key space
+ *     as `bulletOverrides`. Default `[]`.
+ *   - `profileOverrides` — the ONE consolidated contact-link edit list (#427):
+ *     corrections to the four legacy slots (entries with a `legacyKey`) AND
+ *     user-added extras (untagged). Folded into the legacy slots +
+ *     `parsed.profiles`, and the per-slot confidence edits are threaded into
+ *     the returned `fieldConfidence`. Default `[]`.
+ *   - `achievementOverrides` — achievement-field overrides keyed by
+ *     `heuristic_achievements` array index (#454). `type`, `title` and `year`
+ *     are copied straight onto the entry — `type` is a stored field, not a run
+ *     of `title`, so nothing is recomposed (#456). An empty `type` or `year`
+ *     clears it. Default `{}`.
+ *   - `certificationOverrides` — certification-field overrides keyed by
+ *     `heuristic_certifications` array index (#884). Identical in shape and
+ *     semantics to `achievementOverrides` — the two buckets hold the same item
+ *     type — but its OWN index space, since the buckets are separate arrays.
+ *     Default `{}`.
+ *   - `descriptionOverrides` — prose-description overrides keyed by
+ *     {@link parsedEntryKey} (`"<section>:<index>"`, #489). Applied straight
+ *     onto the matching parsed entry's `description` — the edit path for a
+ *     prose-body project (no `•` bullets). An empty string clears the
+ *     description; a non-empty value replaces it. Default `{}`.
+ *   - `summaryOverride` — the single-value summary edit (#625). `undefined`
+ *     means no override; a blank string CLEARS `parsed.summary` (which drops
+ *     the heading AND the body from the exported PDF); any other value replaces
+ *     it verbatim. Feeds the Completeness >=20-char threshold, so an edit
+ *     re-grades. Default `undefined`.
+ *   - `removedEntries` — {@link parsedEntryKey} tombstones for PARSED entries
+ *     the user deleted (#856) — `"achievements:2"`. Folded LAST, after every
+ *     index-keyed pass above, so no surviving entry's edits are rebound to its
+ *     neighbour; see {@link applyRemovedEntries}. Default `[]`.
  */
 export function applyOverrides(
-  parsed: HeuristicParsedResume,
-  rawText: string,
-  sections: SectionedResume,
-  contact: ContactOverrides,
-  experience: Record<number, ExperienceFieldOverrides>,
-  bullets: BulletOverrides,
-  observations: readonly BulletObservation[],
-  education: Record<number, EducationFieldOverrides> = {},
-  skills: SkillsOverride = { removed: [], added: [] },
-  addedEntries: readonly AddedEntry[] = [],
-  addedBullets: AddedBullets = {},
-  removedBullets: ReadonlySet<string> = new Set(),
-  profileOverrides: readonly ProfileOverride[] = [],
-  fieldConfidence: FieldConfidence = {},
-  achievements: Record<number, AchievementFieldOverrides> = {},
-  descriptionOverrides: DescriptionOverrides = {},
-  summaryOverride: string | undefined = undefined,
-  removedEntries: ReadonlySet<string> = new Set(),
-  certifications: Record<number, AchievementFieldOverrides> = {},
+  base: EditBase,
+  snapshot: EditOverrides = {},
 ): ApplyOverridesResult {
+  const {
+    parsed,
+    rawText,
+    sections,
+    observations,
+    fieldConfidence = {},
+  } = base;
+  const {
+    contactOverrides: contact = {},
+    experienceOverrides: experience = {},
+    bulletOverrides: bullets = {},
+    educationOverrides: education = {},
+    skillsOverride: skills = { removed: [], added: [] },
+    addedEntries = [],
+    addedBullets = {},
+    profileOverrides = [],
+    achievementOverrides: achievements = {},
+    certificationOverrides: certifications = {},
+    descriptionOverrides = {},
+    summaryOverride,
+  } = snapshot;
+  const removedBullets = toKeySet(snapshot.removedBullets);
+  const removedEntries = toKeySet(snapshot.removedEntries);
+
   // Clone so the original parse is never mutated. experience + education entries
   // are cloned individually because we rewrite fields on them; skills is cloned
   // because we rebuild the array from removed/added edits.

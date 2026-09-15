@@ -13,12 +13,9 @@
 import { useState, useCallback, useRef } from "react";
 import { runCascade, runCascadeFromMarkdown } from "../lib/heuristics";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
-import { projectScoreSections } from "../lib/heuristics/projections.ts";
 import { parseDocx } from "../lib/ingest/docx.ts";
-import {
-  computeAnonymousAtsScore,
-  type AnonymousAtsScore,
-} from "../lib/score/score.ts";
+import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import { scoreParsedResume } from "../lib/score/score-cascade.ts";
 import {
   trackBlankResumeStarted,
   trackCascadeEvent,
@@ -284,14 +281,7 @@ export function useResumeAnalysis(): ResumeAnalysis {
         pdfBytes = bytes;
       }
 
-      const score = computeAnonymousAtsScore({
-        parsed: result.canonical.fields,
-        fieldConfidence: result.canonical.fieldConfidence,
-        triggers: result.triggers,
-        rawText: result.rawText,
-        // Score projection off the canonical model (the sole parse shape, #445).
-        sections: projectScoreSections(result.canonical),
-      });
+      const score = scoreParsedResume(result);
 
       trackParseCompleted({
         pages: result.diagnostics.pages,
