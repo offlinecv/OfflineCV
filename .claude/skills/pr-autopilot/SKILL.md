@@ -13,7 +13,8 @@ conflict, or a review comment back and forth by hand:
 ```
 resolve conflicts → loop( /pr-review → /revise-pr ) until bot-clean
   → /pr-ready (solicit a human) → read the outcome
-      ├─ approved, clean            → done: report MERGE READY, stop
+      ├─ approved, 0 open threads   → done: report MERGE READY, stop
+      ├─ approved, threads open     → /revise-pr to close them, then re-check
       ├─ changes requested          → fold back through the bot loop, re-solicit
       └─ silent / still reviewing   → done for this run: report the state, stop
 ```
@@ -174,10 +175,19 @@ From `/pr-ready`'s report for this PR:
 
 | `/pr-ready` state | What this skill does |
 |---|---|
-| `REVIEWED (APPROVED)`, mergeable, checks green, no unresolved threads | **MERGE READY** — go to Phase 5 (converged). |
+| `REVIEWED (APPROVED)`, mergeable, checks green, **0 unresolved threads** | **MERGE READY** — go to Phase 5 (converged). |
+| `REVIEWED (APPROVED)` with **≥1 unresolved thread** | Approved but **not mergeable** — `main` requires conversation resolution. Nobody rejected anything, so this does **not** spend a human cycle. Run `/revise-pr <N> [--repo <REPO>]` once, then re-check. See the dismissal note below: if that run *pushed*, the approval is gone, and the pushed branch goes through Phase 1 (recheck conflicts) → Phase 2 (a fresh bot pass, bot-round counter reset to 0) → Phase 3 to re-solicit — the same route the `CHANGES_REQUESTED` row takes after the same push, because a human must not be asked to re-approve code no bot pass or conflict check has seen; if it closed the threads with replies alone, the approval stands and this goes straight to **MERGE READY**. Allow this path **once per human cycle** — a second pass through it with threads still open ends the run as **APPROVED · THREADS OPEN** (Phase 5), not a third attempt. It is not BOT STUCK: the usual cause is a `/revise-pr` pushback, which that skill leaves open for the reviewer by rule, so nothing is wrong with the bot and the next move is whoever each thread is waiting on. |
 | `REVIEWED (CHANGES_REQUESTED)` | A human found something. Increment the **human-cycle counter**. If `≤ --max-human-cycles`: **run `/revise-pr <N> [--repo <REPO>]` directly** — not `/pr-review` first (see below) — reset the bot-round counter to 0, then go through Phase 1 (recheck conflicts) → Phase 2 (a fresh bot pass — now meaningful, since the human's thread is already addressed) → Phase 3 again to re-solicit. If the counter now exceeds the bound: **HUMAN STUCK** — go to Phase 5 (stuck). |
 | `SILENT`, `ACKED`, `REVIEWING`, or `HELD BUT STALE` | Nobody rejected anything — there is nothing for the bot loop to act on, and `/pr-ready`'s own wait for this run is already over. Go to Phase 5 and report this state as-is; re-running `/pr-autopilot` later will pick it up. |
 | `REVIEWED (COMMENTED)` with no `CHANGES_REQUESTED` from anyone | Not a blocking review. Treat like the row above — report and stop; don't manufacture a revision cycle out of a non-blocking comment. |
+
+**A push after an approval dismisses it — `main` has `dismiss_stale_reviews: true`.** That
+is why the approved-with-threads row branches on whether `/revise-pr` pushed rather than on
+whether it "succeeded": a run that only replied and resolved leaves the approval intact and
+converges immediately, while a run that committed a fix has silently put the PR back to
+`REVIEW_REQUIRED`. Read `reviewDecision` after `/revise-pr` returns rather than assuming
+either outcome — treating a dismissed approval as still-standing is how this skill would
+report `MERGE READY` on a PR that needs a whole new reviewer.
 
 **Why `/revise-pr` runs first, not Phase 2's `/pr-review`.** `/pr-review` never
 reads existing review threads — its findings come from the issue, the diff,
@@ -212,11 +222,56 @@ approved, no conflicts, checks green, no unresolved threads. Merge is yours
 whenever you're ready.
 ```
 
-**BOT STUCK / HUMAN STUCK / not-yet-engaged:** post the equivalent short status
-(round/cycle count, what's outstanding, and — for the not-yet-engaged case — that
-`/pr-ready`'s wait already ran once and re-running `/pr-autopilot` will check
-again) and say so in the session. Don't dress up an unresolved state as
-converged.
+**Verify that last clause before posting it; never carry it over from Phase 4.** Every
+claim in the line is re-checkable in one call, and the thread count is the one that moves
+most — `/revise-pr` resolving threads, or a reviewer opening new ones, both land between
+the two phases:
+
+```bash
+# notGreen uses pr-ready's allowlist: a running check (empty/null conclusion) is not green
+gh pr view <N> --repo <REPO> --json reviewDecision,mergeable,mergeStateStatus,statusCheckRollup \
+  -q '{reviewDecision, mergeable, mergeStateStatus,
+       notGreen: [.statusCheckRollup[]
+                  | select(((.conclusion // .state) as $s | ["SUCCESS","NEUTRAL","SKIPPED"] | index($s)) | not)
+                  | "\(.name // .context): \(.conclusion // .state // "running")"]}'
+gh api graphql -f query='
+  query($owner:String!,$repo:String!,$pr:Int!){
+    repository(owner:$owner,name:$repo){ pullRequest(number:$pr){
+      reviewThreads(first:100){ pageInfo{ hasNextPage } nodes{ isResolved } } } } }' \
+  -f owner=<OWNER> -f repo=<NAME> -F pr=<N> \
+  --jq '.data.repository.pullRequest.reviewThreads
+        | if .pageInfo.hasNextPage then error("more than 100 review threads — paginate before trusting this count")
+          else [.nodes[] | select(.isResolved==false)] | length end'
+```
+
+`<OWNER>`/`<NAME>` are `<REPO>` split on the `/`, and `-F pr=` is typed — `-f` 422s an
+`Int!`. Past 100 threads the jq errors rather than undercounting — a count that decides
+MERGE READY fails closed. The line makes four claims, so four conditions each mean **not
+converged**:
+
+- the thread count is not 0, or `reviewDecision` is no longer `APPROVED` → take the matching
+  Phase 4 row;
+- `mergeable` is not `MERGEABLE` (re-poll `UNKNOWN` up to 5 times, ~5s apart, as
+  `/pr-ready`'s preflight does) → report the conflict;
+- `notGreen` is non-empty → report each check and its state; a check re-run between Phase 4
+  and now is exactly what this catches.
+
+Only when all four pass may the line be posted. `mergeStateStatus` is then the cross-check,
+not a substitute: it reads `BLOCKED` alike for a thread, a dismissed approval and a red
+required check, so it cannot name a cause — but once those have all been checked, a
+`BLOCKED` that remains is a real, unexplained block. Report it with the raw value instead of
+posting MERGE READY over it.
+
+**BOT STUCK / HUMAN STUCK / APPROVED · THREADS OPEN / not-yet-engaged:** post the
+equivalent short status (round/cycle count, what's outstanding, and — for the
+not-yet-engaged case — that `/pr-ready`'s wait already ran once and re-running
+`/pr-autopilot` will check again) and say so in the session. Don't dress up an
+unresolved state as converged.
+
+For **APPROVED · THREADS OPEN**, the outstanding part is a per-thread list, not a count:
+each open thread's `path:line`, who opened it, and whose reply it is waiting on (the
+opener, if the last comment is someone else's; otherwise the PR author). The blocker count
+the STUCK forms report is 0 here by construction, so reporting it would say nothing.
 
 Either way, print the same summary in this session as well — the PR comment is
 for the PR's audience, the session output is for whoever ran this.
@@ -234,6 +289,8 @@ for the PR's audience, the session output is for whoever ran this.
   a human on bot-flagged work.
 - **`--max-human-cycles` reached** → HUMAN STUCK, Phase 5, never re-solicit past
   the bound in the same run.
+- **Approved, and threads still open after the one `/revise-pr` pass** → APPROVED ·
+  THREADS OPEN, Phase 5, each thread named with the person it waits on.
 - **`/pr-ready`'s config is missing** (its own Phase 0 setup) → that failure
   surfaces from Phase 3 verbatim; this skill doesn't have a fallback channel of
   its own.

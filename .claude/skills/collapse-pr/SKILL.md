@@ -394,11 +394,13 @@ if [ -n "$PR_NUM" ]; then
   OPEN_THREADS="$(gh api graphql -f query='
   query($owner:String!,$name:String!,$pr:Int!){
     repository(owner:$owner,name:$name){
-      pullRequest(number:$pr){ reviewThreads(first:100){ nodes{ isResolved path line } } }
+      pullRequest(number:$pr){ reviewThreads(first:100){
+        pageInfo{ hasNextPage } nodes{ isResolved path line } } }
     }
   }' -f owner="$OWNER" -f name="$NAME" -F pr="$PR_NUM" \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
-           | select(.isResolved == false)] | length')"
+    --jq '.data.repository.pullRequest.reviewThreads
+          | if .pageInfo.hasNextPage then error("more than 100 review threads — paginate before trusting this count")
+            else [.nodes[] | select(.isResolved == false)] | length end' || echo unknown)"
 fi
 ```
 
@@ -410,6 +412,14 @@ another round, and they need to diff **just your delta** — a collapse replaces
 whole branch and costs them that diff.* This is `revise-pr` Step 5.1's rule; the
 decision of whether this round is the final one belongs to the caller, which is
 why the gate is soft.
+
+**Print the count even when the caller passes `--yes`, and say it holds the merge.**
+`main` carries `required_conversation_resolution: true`, so every one of these threads
+blocks the merge until someone resolves it — a collapsed, queue-ready branch with three
+open threads is not mergeable, and a caller who read only "collapsed ✓" will believe it
+is. The gate stays **soft** regardless: collapsing is not merging, and a final-round
+collapse alongside a thread the reviewer still owes an answer on is a legitimate state.
+Report it; never decide it here.
 
 #### 3c — Branch ownership (hard)
 

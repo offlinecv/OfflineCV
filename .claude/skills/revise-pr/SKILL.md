@@ -141,14 +141,15 @@ gh api graphql -f query='
 query($owner:String!,$name:String!,$pr:Int!){
   repository(owner:$owner,name:$name){
     pullRequest(number:$pr){
-      reviewThreads(first:100){ nodes{
+      reviewThreads(first:100){ pageInfo{ hasNextPage } nodes{
         id isResolved isOutdated path line
         comments(first:50){ nodes{ databaseId author{login} body } }
       }}
     }
   }
 }' -f owner="$OWNER" -f name="$NAME" -F pr="$PR_NUM" \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+  --jq '.data.repository.pullRequest.reviewThreads
+        | if .pageInfo.hasNextPage then error("more than 100 review threads — paginate before trusting this list") else .nodes[] end
         | select(.isResolved==false)
         | {threadId:.id, replyTo:.comments.nodes[0].databaseId,
            path, line, isOutdated,
@@ -255,10 +256,12 @@ skill exists* has the full rationale and is the only copy of it.
 split is the point of this step: `/collapse-pr` cannot know whether this is the
 last round, and this skill does. So **do not collapse on every round.** Gate it:
 
-- **Leaving any thread open *on the target*** (you pushed back, or deferred to a
-  follow-up issue) → the reviewer is coming back for another round. **Keep the
-  fixup commit separate.** They need to diff *just your delta*, not re-read the
-  whole change.
+- **Leaving any thread open *on the target*** (you pushed back and the call is the
+  reviewer's) → the reviewer is coming back for another round. **Keep the fixup commit
+  separate.** They need to diff *just your delta*, not re-read the whole change. Note that
+  such a thread also holds the merge now (`required_conversation_resolution`), so the
+  round is not optional — which is a reason to be sure the pushback is real, and not a
+  deferral you skipped filing the issue for.
 - **Every unresolved thread on the target is now addressed** and you're
   re-requesting a clean approval → **collapse.** This is the last round; the
   branch's single commit is what lands in `main`.
@@ -342,7 +345,9 @@ reader is looking at a different PR than the one that changed:
 | Item | Reply on | Resolve? |
 |---|---|---|
 | Target's own thread, fixed | target thread | **yes** |
-| Target's own thread, deferred / pushed back | target thread | no — leave for the reviewer |
+| Target's own thread, **deferred to a filed issue, and the thread's author proposed or agreed to the deferral** | target thread, naming the issue and quoting the agreement | **yes** — the tracking moved by agreement; see below |
+| Target's own thread, deferred to a filed issue on **your** judgement alone | target thread, naming the issue | no — that is a pushback with an issue attached; leave for the reviewer |
+| Target's own thread, pushed back (you disagree, it is the reviewer's call) | target thread | no — leave for the reviewer |
 | Imported, `reproduces`, fixed in target | source thread | **only** if the source PR's own copy of the defect is also gone; otherwise no |
 | Imported, `does not apply` | source thread, with the reason | **no** |
 | Source PR is merged or closed | source thread (replies still work) | **never** |
@@ -369,9 +374,24 @@ mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved
 - Reply to **every** unresolved thread — addressed, deferred, or non-reproducing.
   Silence isn't an option (PR-author signal norm), and that includes a reviewer on
   another PR whose finding you imported and then didn't act on.
-- Resolve threads you fixed or that are outdated. **Don't** resolve a thread where
-  you pushed back or deferred — leave it open for the reviewer to close, with your
-  rationale visible.
+- Resolve threads you fixed, deferred **by agreement** to a filed issue, or that are
+  outdated. **Don't** resolve a thread where you **pushed back** — leave that one open for
+  the reviewer to close, with your rationale visible.
+- **Deferral and pushback split here, and `required_conversation_resolution: true` on
+  `main` is why.** An open thread now blocks the merge outright, so the two cases have
+  opposite consequences. A pushback *should* block: you are asking the reviewer to decide,
+  and the PR waiting on them is the correct state. A deferral should not: the work has
+  moved to an issue by agreement, nobody is going to do it on this branch, and leaving the
+  thread open blocks the PR on a task that has, by construction, left it. **File the issue
+  first, name it in the reply, then resolve** — "Deferred to #N because …" with no `#N` in
+  it is a pushback wearing a deferral's words, and it merges nothing.
+- **The agreement has to be on the thread, not in your head.** It exists when the reviewer
+  asked for a follow-up ("worth an issue", "out of scope here"), when the reviewer filed
+  the issue themselves (`/pr-review` Step 5.7 — those arrive already resolved), or when they
+  replied agreeing. Otherwise filing an issue is a disposition *you* chose: name it in the
+  reply and leave the thread open, exactly like a pushback. Deciding unilaterally that your
+  own deferral clears the reviewer's merge gate is the move `/pr-review` Step 6.5 forbids the
+  reviewer — *never resolve a thread to tidy the merge path* — and it binds both sides.
 - The reply must match what you did: "Fixed in `<sha>`" only if the code changed;
   "Deferred to #N because …" otherwise. No claiming a fix you didn't make. For an
   imported fix, the sha lives in a different PR — name that PR in the reply, or
