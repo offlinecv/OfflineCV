@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { checkNumbersPreserved } from "./preserve-numbers.ts";
+import { OPEN_ENDED_ALT } from "../heuristics/regex.ts";
+import { OPEN_ENDED_WORDS, checkNumbersPreserved } from "./preserve-numbers.ts";
 
 describe("checkNumbersPreserved", () => {
   it("passes when every numeric token survives", () => {
@@ -1184,5 +1185,43 @@ describe("checkNumbersPreserved", () => {
       );
       expect(result.dropped).toEqual(["5%"]);
     });
+  });
+});
+
+describe("open-ended vocabulary stays in step with the parser lexicon (#938)", () => {
+  it("OPEN_ENDED_WORDS is the same word set as OPEN_ENDED_ALT", () => {
+    // preserve-numbers.ts keeps a local copy rather than importing regex.ts —
+    // see OPEN_ENDED_WORDS for why. This is what makes that safe: a word added
+    // to or dropped from the parser's lexicon fails here, instead of the parser
+    // and this gate silently disagreeing about what makes a year.
+    const words = (alt: string) => new Set(alt.toLowerCase().split("|"));
+    expect(words(OPEN_ENDED_WORDS)).toEqual(words(OPEN_ENDED_ALT));
+  });
+
+  it("classifies a year beside every lexicon word the way it does beside `Present`", () => {
+    // Behavioural twin of the set check, driven by the PARSER's list, so a word
+    // the lexicon gains is exercised here whether or not the local copy followed.
+    //
+    // The shape is one where the neighbouring word decides the outcome. Beside an
+    // open-ended word the `2019` reads as a year, so dropping it is NOT excused by
+    // an unrelated `2019` surviving in another bullet; beside an ordinary word it
+    // is excused, and the rewrite passes. Without the decoy bullet a dropped year
+    // is reported whatever word sits next to it, so the probe would pass for every
+    // word and prove nothing — measured while writing this test (#938).
+    const probe = (word: string) =>
+      checkNumbersPreserved(
+        [`Led the platform team 2019 – ${word}.`, "Counted 2019 units."],
+        ["Counted 2019 units."],
+      );
+    const present = probe("Present");
+    expect(present.ok).toBe(false);
+    for (const word of OPEN_ENDED_ALT.split("|")) {
+      expect(probe(word)).toEqual(present);
+      expect(probe(word.toLowerCase())).toEqual(present);
+    }
+    // Controls: an ordinary word, and a near-miss that only STARTS with a lexicon
+    // word — the `\b` closing each alternation is what keeps it out.
+    expect(probe("Tuesday").ok).toBe(true);
+    expect(probe("Presently").ok).toBe(true);
   });
 });
