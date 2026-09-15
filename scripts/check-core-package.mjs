@@ -61,7 +61,7 @@
  *      The same assertion covers what `exports` REFUSES: three subpaths that
  *      name real shipped files have to fail with `ERR_PACKAGE_PATH_NOT_EXPORTED`
  *      (see `UNEXPORTED_SUBPATHS`). That is the only thing standing between a
- *      consumer and the 24 unreachable emitted modules, two of which
+ *      consumer and the 26 unreachable emitted modules, two of which
  *      dynamic-import packages this one does not depend on.
  *   3. Its TYPES, from a consumer's position: a generated project resolves
  *      `@offlinecv/core` and `@offlinecv/core/job-search` under
@@ -197,7 +197,7 @@ const EXPECTED_EXPORTS = {
  * `EXPECTED_EXPORTS` above catches a provider SYMBOL moved onto `.`. It cannot
  * catch a value EDGE, which is the cheaper mistake by far: one
  * `import "…/fetch-jd.ts";` side-effect line in `src/index.ts` leaves the export
- * set byte-identical while taking that closure from 27 modules to 29, putting a
+ * set byte-identical while taking that closure from 29 modules to 31, putting a
  * live `fetch(` on it, and making the two closures overlap. At that point every
  * network-free claim in `src/index.ts`, `src/job-search.ts` and
  * `tsconfig.build.json` is false — in a public repo — and the downstream
@@ -222,7 +222,7 @@ const EXPECTED_EXPORTS = {
  * the assertion silently covering two of three surfaces.
  */
 const ENTRY_CLOSURES = {
-  ".": { modules: 27, networkBearingModules: 0 },
+  ".": { modules: 29, networkBearingModules: 0 },
   "./job-search": { modules: 11, networkBearingModules: 7 },
 };
 
@@ -233,7 +233,7 @@ const ENTRY_CLOSURES = {
  * same reason `importSpecifiers` does — and here the difference is not
  * theoretical but load-bearing on the very first run. `tsc` preserves docblocks
  * into the emit verbatim, and the emitted `.` entry contains the sentence "the
- * value-edge closure of the specifiers below is 27 modules and reaches no
+ * value-edge closure of the specifiers below is 29 modules and reaches no
  * `fetch`/`WebSocket`/…" — so the obvious `/\b(fetch|…)\s*\(/` sweep reports
  * FOUR network primitives in the one file whose whole claim is that it has
  * none. A comment is not a node; the parse simply does not see it.
@@ -274,7 +274,7 @@ const THIRD_ENTRY_CHECKLIST = [
  * shipped, are unreachable from either entry, and dynamic-import packages this
  * one does not depend on; what stops a consumer loading them anyway is `exports`
  * declaring two subpaths and no wildcard. Verified rather than asserted, because
- * a single `"./*"` entry added for convenience would silently publish all 62
+ * a single `"./*"` entry added for convenience would silently publish all 66
  * emitted modules.
  *
  * The three are deliberately different shapes, and only the first two name a

@@ -20,7 +20,8 @@
  *    fetch — that's what lets `FindJobsPanel` re-rank live without breaking
  *    responsibility 1's invariant. Scoped to exactly the controls #568
  *    wires (role families, target level, exclude terms, comp floor,
- *    location); a titles/skills edit still requires a fresh Search, since
+ *    location) plus #809's local-only toggle; a titles/skills edit still
+ *    requires a fresh Search, since
  *    `matchesQuery` already ran against the OLD titles/skills when the
  *    snapshot was taken.
  * 3. The company selection, which is deliberately ASYMMETRIC because the two
@@ -257,7 +258,17 @@ export function useJobSearch(
     // this array is deliberately scoped to the five refinement knobs #568
     // wires, not titles/skills (see the file docblock) and not `parsed`
     // (stable per panel mount — the résumé isn't edited from here).
-  }, [query.families, query.excludeTerms, query.seniority, query.compFloor, query.location]);
+    // #809 adds `locationOnly` — a HARD filter rather than an axis, but the
+    // same class of knob: it changes `refineSearchResult`'s output over an
+    // unchanged snapshot, so it re-ranks live with no fetch like the other five.
+  }, [
+    query.families,
+    query.excludeTerms,
+    query.seniority,
+    query.compFloor,
+    query.location,
+    query.locationOnly,
+  ]);
 
   return {
     phase,

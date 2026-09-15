@@ -6,6 +6,7 @@ import {
   countryCodeForToken,
   countryDisplayName,
   isUsStateToken,
+  usStateName,
 } from "./country-registry.ts";
 
 // These pin the deliberate 2-letter ambiguity carve-out (#429): the forward
@@ -26,6 +27,17 @@ describe("country-registry — CA-ambiguity invariant", () => {
     expect(isUsStateToken("CA")).toBe(true);
     expect(isUsStateToken("GA")).toBe(true);
     expect(isUsStateToken("IN")).toBe(true);
+  });
+
+  it("folds a USPS code and its spelled-out name onto one state name", () => {
+    expect(usStateName("TX")).toBe("texas");
+    expect(usStateName(" Texas ")).toBe("texas");
+    expect(usStateName("dc")).toBe("district of columbia");
+    expect(usStateName("District of Columbia")).toBe("district of columbia");
+    // Not a state: a country, a city, a Canadian province code.
+    expect(usStateName("India")).toBeUndefined();
+    expect(usStateName("Austin")).toBeUndefined();
+    expect(usStateName("ON")).toBeUndefined();
   });
 
   it("resolves the spelled-out country name and unambiguous short forms", () => {
