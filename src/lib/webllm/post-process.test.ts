@@ -290,12 +290,10 @@ describe("cleanRewriteLine", () => {
       expect(cleanRewriteLine("-$5M saved.")).toBe("-$5M saved.");
     });
 
-    it("KNOWN GAP: `₹` is outside the shared currency class, so `-₹` still loses its sign", () => {
-      // Pinned on purpose, so the gap is visible rather than silent. Neither
-      // consumer of CURRENCY_SYMBOL_CLASS — this strip nor the atom classifier —
-      // recognizes `₹`. Widening the class fixes both at once; when it does,
-      // this assertion flips, and `₹` belongs in the property test above.
-      expect(cleanRewriteLine("-₹2Cr loss.")).toBe("₹2Cr loss.");
+    it("preserves a leading minus sign before rupee figures (#940)", () => {
+      expect(cleanRewriteLine("-₹2Cr loss.")).toBe("-₹2Cr loss.");
+      expect(cleanRewriteLine("- -₹2Cr loss.")).toBe("-₹2Cr loss.");
+      expect(cleanRewriteLine("• -₹2Cr loss.")).toBe("-₹2Cr loss.");
     });
 
     it("preserves every digit of a leading decimal, for any marker", () => {
