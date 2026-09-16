@@ -1186,6 +1186,83 @@ describe("checkNumbersPreserved", () => {
       expect(result.dropped).toEqual(["5%"]);
     });
   });
+
+  describe("rupee figures and Indian magnitudes (#940)", () => {
+    it("flags a substituted rupee figure with Indian magnitude Cr", () => {
+      const result = checkNumbersPreserved(
+        ["Saved ₹2Cr in costs."],
+        ["Saved ₹3Cr in costs."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["₹2Cr"]);
+      expect(result.added).toEqual(["₹3Cr"]);
+    });
+
+    it("flags a substituted rupee figure before spaced magnitude lakh", () => {
+      // The spaced word 'lakh' is not part of the key on purpose (same as '$5 million'
+      // keying as '$5'), so this assertion pins the digits: ₹20 vs ₹30.
+      const result = checkNumbersPreserved(
+        ["Saved ₹20 lakh in costs."],
+        ["Saved ₹30 lakh in costs."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["₹20"]);
+      expect(result.added).toEqual(["₹30"]);
+    });
+
+    it("flags sign loss on negative rupee figures", () => {
+      const result = checkNumbersPreserved(
+        ["Cut spend by -₹5M."],
+        ["Cut spend by ₹5M."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["-₹5M"]);
+      expect(result.added).toEqual(["₹5M"]);
+    });
+
+    it("keys rupee figures with currency symbol ₹", () => {
+      const result = checkNumbersPreserved(
+        ["Cut spend by ₹5M."],
+        ["Cut spend by ₹9M."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["₹5M"]);
+      expect(result.added).toEqual(["₹9M"]);
+    });
+
+    it("preserves identical rupee figures with various magnitude suffixes", () => {
+      const input = [
+        "Generated ₹2Cr in revenue across operations.",
+        "Saved ₹20L in licensing fees.",
+        "Managed a budget of ₹50 lakh effectively.",
+      ];
+      expect(checkNumbersPreserved(input, input)).toEqual({
+        ok: true,
+        dropped: [],
+        added: [],
+      });
+    });
+
+    it("tracks glued Indian magnitude Cr/L on non-rupee figures, failing safe on prose expansion", () => {
+      // '20L users' without a currency symbol is recognized as an Indian magnitude.
+      // Non-currency units like '2L engine' also match the magnitude and fail safe
+      // (revert with warning) if expanded by the rewrite.
+      const quantity = checkNumbersPreserved(
+        ["Scaled to 20L active users."],
+        ["Scaled to 30L active users."],
+      );
+      expect(quantity.ok).toBe(false);
+      expect(quantity.dropped).toEqual(["20L"]);
+      expect(quantity.added).toEqual(["30L"]);
+
+      const engine = checkNumbersPreserved(
+        ["Tuned a 2L engine."],
+        ["Tuned a 2-liter engine."],
+      );
+      expect(engine.ok).toBe(false);
+      expect(engine.dropped).toEqual(["2L"]);
+    });
+  });
 });
 
 describe("open-ended vocabulary stays in step with the parser lexicon (#938)", () => {

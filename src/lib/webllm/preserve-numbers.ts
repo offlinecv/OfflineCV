@@ -19,9 +19,9 @@
  * rewrite, which is what drives the rules under "Comparison semantics".
  *
  * Tokens covered (per issue #63 decision #3, extended by #778):
- *   - Money with $, €, £, or ¥: `$5`, `€500K`, `£1.2M`, `¥1,000`
+ *   - Money with $, €, £, ¥, or ₹: `$5`, `€500K`, `£1.2M`, `¥1,000`, `₹2Cr`  (#940)
  *   - Percent: `40%`, `12.5%`, `-15%`
- *   - Magnitude: `5K`, `10M`, `1.2B`, `10MB`, `2GB`
+ *   - Magnitude: `5K`, `10M`, `1.2B`, `10MB`, `2GB`, `2Cr`, `20L`  (#940)
  *   - Multipliers: `10x`, `3.5x`  (#778)
  *   - Approximations: `~50`, `~$4.2M`, `≈30%`  (#778)
  *   - At-least markers: `10+`, `500+`, `$1M+`  (#778)
@@ -146,19 +146,20 @@
  * is a minus sign rather than a bullet (#930). The two must agree: a sign the
  * marker strip eats but the classifier keys on reverts a good rewrite, and a
  * sign the strip protects that the classifier cannot see protects nothing.
- * Deliberately `$ € £ ¥` only — widening it (`₹`, `₩`, …) widens both at once.
+ * Deliberately `$ € £ ¥ ₹` only — widening it widens both at once (#940).
  */
-export const CURRENCY_SYMBOL_CLASS = "[$€£¥]";
+export const CURRENCY_SYMBOL_CLASS = "[$€£¥₹]";
 
 /**
  * Atom regex: one numeric occurrence with all its optional decorations.
  *   1. optional approximation marker (`~`, `∼`, `≈`)
  *   2. optional leading `-` (preceded by start, whitespace, or punctuation —
  *      not by another digit, which would make it a date-range hyphen)
- *   3. optional currency symbol ({@link CURRENCY_SYMBOL_CLASS}: $, €, £, ¥)
+ *   3. optional currency symbol ({@link CURRENCY_SYMBOL_CLASS}: $, €, £, ¥, ₹)
  *   4. digit body (comma-grouped, decimal, or bare integer)
  *   5. optional magnitude suffix (k/m/b/g/t with optional b/B for data
- *      sizes like MB / GB) OR an `x` multiplier — alternatives, never both
+ *      sizes like MB / GB, or Cr/L for Indian magnitudes) OR an `x` multiplier
+ *      — alternatives, never both
  *   6. optional trailing `%`
  *   7. optional trailing `+` ("at least this much")
  *
@@ -172,7 +173,7 @@ export const CURRENCY_SYMBOL_CLASS = "[$€£¥]";
  * positionally, and the group order is not the order they are assembled in.
  */
 const ATOM = new RegExp(
-  String.raw`(?<!\w)(?<approx>[~\u223C\u2248])?(?<sign>-)?(?<currency>${CURRENCY_SYMBOL_CLASS})?(?<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)(?:(?<magnitude>[kKmMbBgGtT][bB]?)|(?<multiplier>[xX]))?(?<percent>%)?(?<plus>\+)?(?!\w)`,
+  String.raw`(?<!\w)(?<approx>[~\u223C\u2248])?(?<sign>-)?(?<currency>${CURRENCY_SYMBOL_CLASS})?(?<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)(?:(?<magnitude>[kKmMbBgGtT][bB]?|[cC][rR]|[lL])|(?<multiplier>[xX]))?(?<percent>%)?(?<plus>\+)?(?!\w)`,
   "g",
 );
 
