@@ -12,7 +12,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { extractEducation, splitDoubledCity } from "../extract/education.ts";
+import {
+  extractEducation,
+  isInlineDatedProgram,
+  splitDoubledCity,
+} from "./education.ts";
 import { type PdfLine, type PdfSection } from "../sections.ts";
 
 const mkLine = (text: string): PdfLine => ({
@@ -1020,5 +1024,205 @@ describe("extractEducation — parseDegreeAndField strips middot/bullet before i
     expect(value).toHaveLength(1);
     expect(value[0].degree).toBe("B.S.");
     expect(value[0].field).toBe("Mathematics · Statistics");
+  });
+});
+
+describe("isInlineDatedProgram: a date word must be a whole word (#925)", () => {
+  // The strip inside this predicate DELETES what it matches, then asks whether
+  // substantive text is left. With a `[a-z]*` tail on the month/season/`present`
+  // alternation it matched any word STARTING with one, so a single-word program
+  // name was erased and the line was rejected as a bare date. `Marketing` begins
+  // with `Mar` — the same hazard #380 fixed on the sibling `ATTENDANCE_RANGE_END`,
+  // which is why that one already uses the enumerated STRICT_MONTH.
+  it.each([
+    "Marketing 2020",
+    "Marketing (2020)",
+    "Marketing, 2020",
+    "Decision 2021",
+  ])("accepts a program whose name merely starts with a date word: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(true);
+  });
+
+  // `Junior Fellowship 2019` is deliberately NOT one of these: it is rejected,
+  // and correctly so — `EDUCATION_ANNOTATION_RE` lists `fellowships?`, and a
+  // fellowship line is an annotation on the current school, not a new program.
+  // The prefix cases below carry no denylist word, so they isolate the month
+  // prefix and nothing else.
+  // SINGLE-WORD on purpose (#951 review). The multi-word forms these replaced
+  // (`Marathon Training Program 2019`, `Junior Analyst Program 2020`, …) pass
+  // pre-fix too: the loose tail erased the prefix-matched word, but `Training
+  // Program` / `Analyst Program` survived and carried the remainder test on
+  // their own. A block named for the prefix must fail when the prefix fix is
+  // reverted, and only the single-word form does.
+  //
+  // `Oct` changes word deliberately: `October Intensive 2022` cannot reduce,
+  // because `October 2022` is a real date line and must stay `false`. `Octagon`
+  // is the nearest input that isolates the prefix; the control that keeps the
+  // reduction honest is the `October 2022` row in the bare-date-line block
+  // below, next to its siblings (#951 review).
+  it.each([
+    ["Marathon 2019", "Mar"],
+    ["Junior 2020", "Jun"],
+    ["Augmented 2021", "Aug"],
+    ["Presentation 2020", "present"],
+    ["Decorative 2017", "Dec"],
+    ["Octagon 2022", "Oct"],
+  ])("is not fooled by the prefix in %s (starts with %s)", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(true);
+  });
+
+  it.each([
+    "Marketing Certificate 2020",
+    "MIT Applied Data Science (2023)",
+    "Data Science Certificate 2020",
+  ])("still accepts a multi-word program: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(true);
+  });
+
+  // The behaviour the strip exists to produce, and the half a narrowing could
+  // silently break: a line made only of date words is still not a program.
+  it.each([
+    "Fall 2013 – Spring 2014",
+    "May 2011",
+    "September 2020",
+    "Sept. 2019",
+    "Sep 2019",
+    "Spring 2019",
+    "Summer 2013, 2014",
+    // The control for the prefix block above: `October Intensive 2022` could
+    // not reduce to a single word without asserting a real date line is a
+    // program, so `Oct` changed word instead (#951 review).
+    "October 2022",
+    // Dropping the `[a-z]*` tail took `Presently` with it, and this line then
+    // became an entry whose institution was the date range itself (#951 review
+    // round 2). Pinned here rather than with the plural seasons: it is a bare
+    // date line, not a season inflection.
+    "Fall 2013 – Presently",
+  ])("still rejects a bare date line: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(false);
+  });
+
+  // An earlier round of this PR dropped the season inflection entirely, so a
+  // plural season survived the strip as "program text". That was wrong, and the
+  // cost was not the one being weighed: `Winters Institute 2020` passes either
+  // way, so the relaxation bought nothing there, while a plural-season DATE line
+  // became an entry. Seasons now carry `s?` and nothing wider (#951 review).
+  it.each([
+    "Summers 2013, 2014",
+    "Springs 2014",
+    "Falls 2019",
+    "Autumns 2020",
+    "Winters 2013 - Springs 2014",
+  ])("still rejects a plural-season date line: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(false);
+  });
+
+  it("keeps a program name that merely starts with a season word", () => {
+    // The `\b` lands after the optional `s`, so the inflection never reaches
+    // into an ordinary word. SINGLE-WORD on purpose: the multi-word forms these
+    // replaced (`Springfield Academy 2020`, `Fallow Institute 2019`) pass under
+    // the loose `[a-z]*` tail too — `Academy` / `Institute` carries the
+    // remainder test on its own — so they pinned nothing (#951 review).
+    // `Summersville` is the row that pins `s?`-then-`\b`: it is the only input
+    // here where the optional `s` is followed by more letters.
+    expect(isInlineDatedProgram("Springfield 2020")).toBe(true);
+    expect(isInlineDatedProgram("Fallow 2019")).toBe(true);
+    expect(isInlineDatedProgram("Wintergreen 2021")).toBe(true);
+    expect(isInlineDatedProgram("Summersville 2018")).toBe(true);
+    // Cannot reduce to `Winters 2020`: that IS a plural-season date line and is
+    // pinned `false` above. Kept multi-word as a control, not as a prefix pin.
+    expect(isInlineDatedProgram("Winters Institute 2020")).toBe(true);
+  });
+
+  it("keeps a program name that merely starts with `present`", () => {
+    // The mirror of the block above, for the literal that carries `(?:ly)?`.
+    // `Presentation 2020` is already pinned in the prefix block at the top;
+    // these two are the inflection's own neighbours, and stripping them would
+    // be the exact defect #925 fixed, one word over.
+    expect(isInlineDatedProgram("Presents 2020")).toBe(true);
+    expect(isInlineDatedProgram("Presenting 2020")).toBe(true);
+  });
+
+  // `extractEducation`-level pins. The predicate-level ones above would not
+  // have caught what the #951 review found: the damage shows up here, where a
+  // date word became a `field` on the school after it, and with no school after
+  // it, an entry whose institution was a bare date. Uses the shared
+  // `mkEduSection` rather than a hand-rolled section — the hand-rolled one
+  // needed an `as unknown as PdfSection` cast, which is precisely the check
+  // that catches drift when `PdfLine` gains a required field (#951 review).
+  const runEdu = (texts: string[]) => extractEducation(mkEduSection(texts)).value;
+
+  it("does not let a plural-season date line reach an education entry", () => {
+    const polluted = runEdu([
+      "Yale University",
+      "B.A. History, 2010 - 2014",
+      "Summers 2013, 2014",
+      "Harvard Summer School",
+    ]);
+    expect(polluted).toHaveLength(2);
+    expect(polluted[1].institution).toBe("Harvard Summer School");
+    expect(polluted[1].field).toBeUndefined();
+
+    const fabricated = runEdu([
+      "Yale University",
+      "B.A. History, 2010 - 2014",
+      "Summers 2013, 2014",
+    ]);
+    expect(fabricated).toHaveLength(1);
+    expect(fabricated[0].institution).toBe("Yale University");
+  });
+
+  it("does not let a season-led open-ended range reach an education entry", () => {
+    // The sibling of the block above, and what the `(?:ly)?` inflection exists
+    // for: `main` rejected `Fall 2013 – Presently` through the `[a-z]*` tail,
+    // and dropping that tail turned this into a fabricated credential whose
+    // institution was the date range itself (#951 review round 2). Only the
+    // season-led form ever slipped — `DATE_LEAD_RE` rejects the month- and
+    // year-led shapes before the strip runs at all, which is the same
+    // asymmetry #952 turns on.
+    const fabricated = runEdu([
+      "Yale University",
+      "B.A. History, 2010 - 2014",
+      "Fall 2013 – Presently",
+    ]);
+    expect(fabricated).toHaveLength(1);
+    expect(fabricated[0].institution).toBe("Yale University");
+
+    const polluted = runEdu([
+      "Yale University",
+      "B.A. History, 2010 - 2014",
+      "Fall 2013 – Presently",
+      "Harvard Summer School",
+    ]);
+    expect(polluted).toHaveLength(2);
+    expect(polluted[1].institution).toBe("Harvard Summer School");
+    expect(polluted[1].field).toBeUndefined();
+  });
+
+  it("keeps the month-plural asymmetry honest at the entry level", () => {
+    // `education.ts` claims `Junes` / `Marches` flip the predicate but come out
+    // identical through `extractEducation`. That holds through a DIFFERENT
+    // expression than the one this PR changed: `stripInstitutionDate` composes
+    // the loose `MONTH`, whose `[a-z]*` tail swallows `Junes`, while the same
+    // expression uses the bare `SEASON` with no inflection — which is exactly
+    // why `Summers` reached an entry and `Junes` does not. Pinned from this
+    // side so the claim cannot rot if that neighbour changes (#951 review).
+    const withSchool = runEdu([
+      "Yale University",
+      "B.A. History, 2010 - 2014",
+      "Junes 2013, 2014",
+      "Harvard Summer School",
+    ]);
+    expect(withSchool).toHaveLength(2);
+    expect(withSchool[1].institution).toBe("Harvard Summer School");
+    expect(withSchool[1].field).toBeUndefined();
+
+    const alone = runEdu([
+      "Yale University",
+      "B.A. History, 2010 - 2014",
+      "Junes 2013, 2014",
+    ]);
+    expect(alone).toHaveLength(1);
+    expect(alone[0].institution).toBe("Yale University");
   });
 });
