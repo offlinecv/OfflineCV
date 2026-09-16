@@ -108,3 +108,83 @@ describe("refineSearchResult (issue 568)", () => {
     expect(result.providerCount).toBe(2);
   });
 });
+
+describe("refineSearchResult — local-only (issue 809)", () => {
+  const raw = [
+    posting({ id: "local", title: "Frontend Engineer", location: "Austin, TX, USA" }),
+    posting({ id: "far", title: "Frontend Engineer", location: "Seattle, WA" }),
+    posting({ id: "remote", title: "Frontend Engineer", location: "Remote" }),
+  ];
+
+  /** Every case here is the same call with a different posting set and a
+   *  different reading of the two location knobs; only those vary. */
+  function refine(postings: readonly JobPosting[], knobs: Partial<JobQuery>) {
+    return refineSearchResult(postings, parsed, { ...query, ...knobs }, [], 1);
+  }
+  const ids = (result: Awaited<ReturnType<typeof refine>>) =>
+    result.jobs.map((j) => j.posting.id).sort();
+
+  it("changes nothing while the toggle is off — location stays a soft axis", async () => {
+    const result = await refine(raw, { location: "Austin, TX" });
+    expect(ids(result)).toEqual(["far", "local", "remote"]);
+    expect(result.locationSuppressed).toBe(false);
+    expect(result.locationFilteredOut).toBe(0);
+  });
+
+  it("drops non-local postings once the user turns it on, keeping remote", async () => {
+    const result = await refine(raw, { location: "Austin, TX", locationOnly: true });
+    expect(ids(result)).toEqual(["local", "remote"]);
+    expect(result.locationFilteredOut).toBe(1);
+    expect(result.locationSuppressed).toBe(false);
+  });
+
+  it("is inert with no location set, however the toggle reads", async () => {
+    const result = await refine(raw, { locationOnly: true });
+    expect(result.jobs).toHaveLength(3);
+    expect(result.locationFilteredOut).toBe(0);
+  });
+
+  it("never fails closed: a set it would empty is kept whole and flagged", async () => {
+    const elsewhere = [
+      posting({ id: "far", location: "Seattle, WA" }),
+      posting({ id: "further", location: "Portland, ME" }),
+    ];
+    const result = await refine(elsewhere, { location: "Austin, TX", locationOnly: true });
+    expect(result.jobs).toHaveLength(2);
+    expect(result.locationSuppressed).toBe(true);
+    expect(result.locationFilteredOut).toBe(0);
+  });
+
+  it("does not count a posting whose feed stated no location as hidden (#905 review)", async () => {
+    const mixed = [
+      posting({ id: "local", location: "Austin, TX" }),
+      posting({ id: "far", location: "Seattle, WA" }),
+      posting({ id: "unstated", location: "" }),
+    ];
+    const result = await refine(mixed, { location: "Austin, TX", locationOnly: true });
+    expect(ids(result)).toEqual(["local", "unstated"]);
+    expect(result.locationFilteredOut).toBe(1);
+    expect(result.locationSuppressed).toBe(false);
+  });
+
+  it("counts only what IT removed, not what the exclude filter already took", async () => {
+    const mixed = [
+      posting({ id: "local", location: "Austin, TX" }),
+      posting({ id: "far", location: "Seattle, WA" }),
+      posting({ id: "excluded", title: "Sales Engineer", location: "Austin, TX" }),
+    ];
+    const result = await refine(mixed, {
+      location: "Austin, TX",
+      locationOnly: true,
+      excludeTerms: ["Sales"],
+    });
+    expect(ids(result)).toEqual(["local"]);
+    expect(result.locationFilteredOut).toBe(1);
+  });
+
+  it("still egresses nothing — the filter is a pure local set operation", async () => {
+    const before = raw.map((p) => ({ ...p }));
+    await refine(raw, { location: "Austin, TX", locationOnly: true });
+    expect(raw).toEqual(before);
+  });
+});

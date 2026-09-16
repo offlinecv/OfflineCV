@@ -93,6 +93,24 @@ export interface JobQuery {
    *  to union together. Undefined when the parse has no location and the
    *  user hasn't typed one. */
   location?: string;
+  /** Hard "only jobs at `location`" mode (#809). Off/undefined (the default,
+   *  and byte-identical to pre-#809 behavior) leaves location exactly where
+   *  #545/#570 put it: a bounded soft axis that edges the ranking and drops
+   *  nothing. ON makes `refineSearchResult` DROP every posting that
+   *  `locationMatches` rejects — the one place in the lane where location can
+   *  remove a result, and only ever because the user armed it.
+   *
+   *  Three respondents in the Aug 2026 round asked for this: the ranker's soft
+   *  axes meant a stated city returned the whole feed, reordered, with nothing
+   *  reachable that made it stop. Deliberately a BOOLEAN, not a radius — the
+   *  predicate is a string comparison over a feed's free-text location field
+   *  (`location-match.ts`), and a distance model would need a geocoder, which
+   *  is a network call this app does not make.
+   *
+   *  Inert while `location` is unset: a filter with nothing to filter on keeps
+   *  the whole set. Remote postings always pass (they fit any location), so
+   *  this narrows to "near me OR anywhere", never to "on-site only". */
+  locationOnly?: boolean;
   /** Title-only exclude terms (#563) — a posting is dropped when its TITLE
    *  (never its description) contains one of these as a case-insensitive
    *  substring. User-editable chips, same interaction as `titles`/`skills`.
@@ -169,6 +187,29 @@ export interface JobQuery {
    *  what makes the `ROLE_KEYWORDS` import below necessary — see it for why the
    *  resulting `role-keywords.ts` ↔ this-module cycle is safe. */
   titleNoise?: string[];
+}
+
+/**
+ * Add / remove one exclude-term chip, as pure whole-query transforms.
+ *
+ * They live here rather than inline in a component because TWO editors now
+ * write the same field — `JobQueryEditor`'s Narrow step and #809's
+ * `JobResultRefineStrip` beside the results — and an `excludeTerms` handler
+ * copied into the second one is how the `undefined`-means-`[]` contract above
+ * gets half-remembered in one of them. One definition, both callers.
+ *
+ * Neither dedups or trims: `ChipListEditor` already does both before it calls
+ * `onAdd`, and duplicating that here would put the rule in two places too.
+ */
+export function withExcludeTerm(query: JobQuery, term: string): JobQuery {
+  return { ...query, excludeTerms: [...(query.excludeTerms ?? []), term] };
+}
+
+export function withoutExcludeTerm(query: JobQuery, term: string): JobQuery {
+  return {
+    ...query,
+    excludeTerms: (query.excludeTerms ?? []).filter((t) => t !== term),
+  };
 }
 
 /**

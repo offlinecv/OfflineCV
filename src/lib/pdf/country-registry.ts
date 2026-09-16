@@ -103,6 +103,7 @@ const COUNTRIES: readonly CountryRule[] = [
   { code: "CL", name: "Chile" },
   { code: "CO", name: "Colombia" },
   { code: "PE", name: "Peru" },
+  { code: "CR", name: "Costa Rica" },
 ];
 
 /** Lowercased alias → alpha-2, built once from {@link COUNTRIES}. */
@@ -140,31 +141,85 @@ export function countryDisplayName(code: string): string | undefined {
 }
 
 /**
- * US states, both 2-letter USPS codes and full names (lowercased), including DC.
- * The trailing-token guard that keeps "…, CA" / "…, Georgia" as `region` rather
- * than mis-reading it as a country (Canada / Gabon-code / etc.).
+ * Two-letter SUBNATIONAL codes a location string writes in the same slot as a
+ * country: Canadian provinces and territories, Australian states and
+ * territories, Indian states and union territories. Any of these that is also
+ * an alpha-2 in {@link COUNTRIES} — "NL" (Newfoundland / Netherlands), "PE"
+ * (PEI / Peru), "SA" (South Australia / Saudi Arabia), "BR" (Bihar / Brazil),
+ * "AR" (Arunachal / Argentina), "TR" (Tripura / Turkey), "CH" (Chandigarh /
+ * Switzerland) — must never read as the country, for the reason the header
+ * gives for US states. Codes that are ALSO US states ("GA", "LA", "MN", "WA")
+ * are listed for completeness; {@link usStateName} claims them first anyway.
  */
-const US_STATES: ReadonlySet<string> = new Set(
-  [
-    // 2-letter USPS codes
-    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id",
-    "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms",
-    "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok",
-    "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv",
-    "wi", "wy", "dc",
-    // full names
-    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
-    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
-    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine",
-    "maryland", "massachusetts", "michigan", "minnesota", "mississippi",
-    "missouri", "montana", "nebraska", "nevada", "new hampshire", "new jersey",
-    "new mexico", "new york", "north carolina", "north dakota", "ohio",
-    "oklahoma", "oregon", "pennsylvania", "rhode island", "south carolina",
-    "south dakota", "tennessee", "texas", "utah", "vermont", "virginia",
-    "washington", "west virginia", "wisconsin", "wyoming",
-    "district of columbia",
-  ],
-);
+const SUBNATIONAL_CODES: ReadonlySet<string> = new Set([
+  // Canada
+  "ab", "bc", "mb", "nb", "nl", "ns", "nt", "nu", "on", "pe", "qc", "sk", "yt",
+  // Australia — the two-letter ones; NSW / VIC / QLD / TAS / ACT are three
+  "nt", "sa", "wa",
+  // India
+  "an", "ap", "ar", "as", "br", "cg", "ch", "dl", "dn", "ga", "gj", "hp", "hr",
+  "jh", "jk", "ka", "kl", "la", "ld", "mh", "ml", "mn", "mp", "mz", "nl", "od",
+  "pb", "py", "rj", "sk", "tn", "tr", "ts", "up", "uk", "wb",
+]);
+
+/**
+ * The alpha-2 a BARE two-letter token names when it can only be a country
+ * ("FR", "GB", "JP"), or `undefined` when it is not a code we carry OR is also
+ * a US state or a {@link SUBNATIONAL_CODES} entry ("CA", "IN", "NL", "PE",
+ * "SA"). This is the reverse table read with the SAME precedence the forward
+ * table encodes by omission (see the header): a consumer that wants "Paris,
+ * FR" to be France must not get "St. John's, NL" as the Netherlands along
+ * with it, and the carve-out lives here so no caller can reach around it by
+ * consulting {@link countryDisplayName} directly (`job-search/location-match.ts`,
+ * #905 review).
+ */
+export function isoCountryForBareCode(token: string): string | undefined {
+  const key = token.trim().toLowerCase();
+  if (key.length !== 2 || isUsStateToken(key) || SUBNATIONAL_CODES.has(key)) return undefined;
+  const code = key.toUpperCase();
+  return NAME_BY_CODE.has(code) ? code : undefined;
+}
+
+/**
+ * US states as USPS code → full name (lowercased), including DC. One table,
+ * two readers: {@link isUsStateToken} asks "is this a state" for the
+ * trailing-token guard that keeps "…, CA" / "…, Georgia" as `region` rather
+ * than mis-reading it as a country (Canada / Gabon-code / etc.), and
+ * {@link usStateName} folds a code and its spelled-out name onto one value so
+ * a feed's "Austin, Texas" and a résumé's "Austin, TX" name the same place
+ * (`job-search/location-match.ts`).
+ */
+const US_STATE_NAME_BY_CODE: Readonly<Record<string, string>> = {
+  al: "alabama", ak: "alaska", az: "arizona", ar: "arkansas", ca: "california",
+  co: "colorado", ct: "connecticut", de: "delaware", fl: "florida", ga: "georgia",
+  hi: "hawaii", id: "idaho", il: "illinois", in: "indiana", ia: "iowa",
+  ks: "kansas", ky: "kentucky", la: "louisiana", me: "maine", md: "maryland",
+  ma: "massachusetts", mi: "michigan", mn: "minnesota", ms: "mississippi",
+  mo: "missouri", mt: "montana", ne: "nebraska", nv: "nevada", nh: "new hampshire",
+  nj: "new jersey", nm: "new mexico", ny: "new york", nc: "north carolina",
+  nd: "north dakota", oh: "ohio", ok: "oklahoma", or: "oregon", pa: "pennsylvania",
+  ri: "rhode island", sc: "south carolina", sd: "south dakota", tn: "tennessee",
+  tx: "texas", ut: "utah", vt: "vermont", va: "virginia", wa: "washington",
+  wv: "west virginia", wi: "wisconsin", wy: "wyoming", dc: "district of columbia",
+};
+
+const US_STATE_NAMES: ReadonlySet<string> = new Set(Object.values(US_STATE_NAME_BY_CODE));
+
+/**
+ * The full lowercased name of a US state given either its 2-letter USPS code
+ * or its name ("TX" / "Texas" → "texas"), or `undefined` for anything else.
+ * Case- and whitespace-insensitive. Checked BEFORE {@link countryCodeForToken}
+ * by every caller that sees both, so "IN" is Indiana, never India, and
+ * "Georgia" is the state, never the country — the same precedence the
+ * registry header documents for the trailing token.
+ */
+export function usStateName(token: string): string | undefined {
+  const key = token.trim().toLowerCase();
+  if (US_STATE_NAMES.has(key)) return key;
+  // `hasOwn`, not a bare index: a plain object literal reads `Object.prototype`
+  // through, so "constructor" would come back as a function (#905 review).
+  return Object.hasOwn(US_STATE_NAME_BY_CODE, key) ? US_STATE_NAME_BY_CODE[key] : undefined;
+}
 
 /**
  * True when a trailing token is a US state (2-letter code or full name). Such a
@@ -172,5 +227,5 @@ const US_STATES: ReadonlySet<string> = new Set(
  * precedence that disambiguates "CA" (California) from Canada (#429).
  */
 export function isUsStateToken(token: string): boolean {
-  return US_STATES.has(token.trim().toLowerCase());
+  return usStateName(token) !== undefined;
 }
