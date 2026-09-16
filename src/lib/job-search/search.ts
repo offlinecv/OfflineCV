@@ -109,6 +109,26 @@ export interface JobSearchResult {
    *  panel surfaces this as a notice pointing at the Role chips rather than
    *  showing a misleading empty state. */
   roleSuppressed: boolean;
+  /** True when `locationOnly` (#809) would have emptied the WHOLE filtered
+   *  result set — the local-only filter was skipped (never-fail-closed, the
+   *  same floor as `excludeSuppressed`/`roleSuppressed`) and every posting
+   *  below is un-location-filtered. The keyless aggregator feeds are
+   *  inconsistent about populating a posting's `location` at all, so a set that
+   *  named no locations would otherwise blank the panel with no way to tell
+   *  "nothing near you" from "the feed didn't say". The panel surfaces this as
+   *  a notice pointing at the local-only toggle. Always false when the toggle
+   *  is off or no location is set. */
+  locationSuppressed: boolean;
+  /** How many postings the local-only filter (#809) actually removed. Zero
+   *  whenever the toggle is off, no location is set, or the filter was
+   *  suppressed. Distinct from `locationSuppressed`, which reports the filter
+   *  DECLINING to run: this is the count when it did run and dropped things.
+   *  Rendered as a line beside the match count — #809 requires that whatever is
+   *  hidden is stated as a count and recoverable, and unticking the toggle is
+   *  the recovery. The role/exclude filters state no such count; they predate
+   *  the requirement, and adding it for them is a separate change to their own
+   *  copy, not something to smuggle in here. */
+  locationFilteredOut: number;
   /** The deduped, `matchesQuery`-filtered postings BEFORE role/exclude
    *  filtering and ranking (#568) — everything `refineSearchResult` needs to
    *  redo that local work. `FindJobsPanel` keeps this snapshot from the last

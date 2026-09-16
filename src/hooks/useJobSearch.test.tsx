@@ -77,25 +77,31 @@ let latest: Hook;
 /** The journey's Match-stage mark site (#826), spied on per test. */
 let onSearchLoaded = vi.fn();
 
-function Harness({ companies }: { companies: readonly CompanyEntry[] }) {
-  latest = useJobSearch(query, parsed, companies, onSearchLoaded);
+function Harness({
+  companies,
+  query: q = query,
+}: {
+  companies: readonly CompanyEntry[];
+  query?: JobQuery;
+}) {
+  latest = useJobSearch(q, parsed, companies, onSearchLoaded);
   return null;
 }
 
 let container: HTMLDivElement;
 let root: Root;
 
-async function render(companies: readonly CompanyEntry[]) {
+async function render(companies: readonly CompanyEntry[], q?: JobQuery) {
   container = document.createElement("div");
   root = createRoot(container);
   await act(async () => {
-    root.render(createElement(Harness, { companies }));
+    root.render(createElement(Harness, { companies, query: q }));
   });
 }
 
-async function rerender(companies: readonly CompanyEntry[]) {
+async function rerender(companies: readonly CompanyEntry[], q?: JobQuery) {
   await act(async () => {
-    root.render(createElement(Harness, { companies }));
+    root.render(createElement(Harness, { companies, query: q }));
   });
   await flush();
 }
@@ -253,5 +259,45 @@ describe("useJobSearch — company selection", () => {
 
     await rerender([ACME]);
     expect(latest.pendingCompanies.map((c) => c.name)).toEqual(["Acme"]);
+  });
+});
+
+describe("useJobSearch — live re-rank on the local-only toggle (#809)", () => {
+  // The one line that makes the toggle do anything on screen is
+  // `query.locationOnly` in the re-rank effect's dep array, and `exhaustive-deps`
+  // is not lint-enforced here — so this is the only thing standing between that
+  // array and a tidy-up that silently kills the feature (#905 review). The
+  // assertion pins both halves of AC 4: the ranked set changes, and no fetch
+  // fires to make it change.
+  it("re-runs refineSearchResult when locationOnly flips, without a new fetch", async () => {
+    const local = { ...FEED_JOB, id: "remotive:local", location: "Austin, TX" };
+    const far = { ...ACME_JOB, id: "greenhouse:acme:far", location: "Seattle, WA" };
+    searchJobs.mockResolvedValue({
+      jobs: [{ posting: local }, { posting: far }],
+      degradedProviders: [],
+      providerCount: 4,
+      excludeSuppressed: false,
+      roleSuppressed: false,
+      rawPostings: [local, far],
+    });
+    const located: JobQuery = { ...query, location: "Austin, TX" };
+
+    await render([ACME], located);
+    await act(async () => latest.runSearch());
+    await flush();
+    expect(loadedCompanies()).toEqual(expect.arrayContaining(["Globex", "Acme"]));
+    expect(searchJobs).toHaveBeenCalledTimes(1);
+
+    await rerender([ACME], { ...located, locationOnly: true });
+    expect(loadedCompanies()).toEqual(["Globex"]);
+    if (latest.phase.kind !== "loaded") throw new Error("not loaded");
+    expect(latest.phase.result.locationFilteredOut).toBe(1);
+    // Local set arithmetic over the fetched snapshot — nothing went out.
+    expect(searchJobs).toHaveBeenCalledTimes(1);
+    expect(searchCompanyBoards).not.toHaveBeenCalled();
+
+    await rerender([ACME], { ...located, locationOnly: false });
+    expect(loadedCompanies()).toEqual(expect.arrayContaining(["Globex", "Acme"]));
+    expect(searchJobs).toHaveBeenCalledTimes(1);
   });
 });

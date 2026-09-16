@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   countryCodeForToken,
   countryDisplayName,
+  isoCountryForBareCode,
   isUsStateToken,
+  usStateName,
 } from "./country-registry.ts";
 
 // These pin the deliberate 2-letter ambiguity carve-out (#429): the forward
@@ -28,6 +30,20 @@ describe("country-registry — CA-ambiguity invariant", () => {
     expect(isUsStateToken("IN")).toBe(true);
   });
 
+  it("folds a USPS code and its spelled-out name onto one state name", () => {
+    expect(usStateName("TX")).toBe("texas");
+    expect(usStateName(" Texas ")).toBe("texas");
+    expect(usStateName("dc")).toBe("district of columbia");
+    expect(usStateName("District of Columbia")).toBe("district of columbia");
+    // Not a state: a country, a city, a Canadian province code.
+    expect(usStateName("India")).toBeUndefined();
+    expect(usStateName("Austin")).toBeUndefined();
+    expect(usStateName("ON")).toBeUndefined();
+    // Not a state either: an `Object.prototype` member the table never declared.
+    expect(usStateName("constructor")).toBeUndefined();
+    expect(isUsStateToken("constructor")).toBe(false);
+  });
+
   it("resolves the spelled-out country name and unambiguous short forms", () => {
     expect(countryCodeForToken("Canada")).toBe("CA");
     expect(countryCodeForToken("USA")).toBe("US");
@@ -39,5 +55,25 @@ describe("country-registry — CA-ambiguity invariant", () => {
     expect(countryDisplayName("CA")).toBe("Canada");
     expect(countryDisplayName("US")).toBe("USA");
     expect(countryDisplayName("GB")).toBe("UK");
+  });
+
+  it("resolves a bare alpha-2 only when no state or province claims it (#905 review)", () => {
+    expect(isoCountryForBareCode("FR")).toBe("FR");
+    expect(isoCountryForBareCode(" gb ")).toBe("GB");
+    expect(isoCountryForBareCode("JP")).toBe("JP");
+    // US states first, as everywhere else in this file.
+    expect(isoCountryForBareCode("CA")).toBeUndefined();
+    expect(isoCountryForBareCode("IN")).toBeUndefined();
+    expect(isoCountryForBareCode("DE")).toBeUndefined();
+    // Canadian, Australian and Indian subnational codes that spell like a
+    // country — the collision the forward table's omission exists to prevent.
+    expect(isoCountryForBareCode("NL")).toBeUndefined();
+    expect(isoCountryForBareCode("PE")).toBeUndefined();
+    expect(isoCountryForBareCode("SA")).toBeUndefined();
+    expect(isoCountryForBareCode("BR")).toBeUndefined();
+    expect(isoCountryForBareCode("TR")).toBeUndefined();
+    // Not two letters, or not a code we carry.
+    expect(isoCountryForBareCode("USA")).toBeUndefined();
+    expect(isoCountryForBareCode("XX")).toBeUndefined();
   });
 });
