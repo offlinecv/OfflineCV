@@ -72,6 +72,18 @@ locally instead of on the PR.
 - The hook install is a no-op on tarball installs and CI `npm ci` (no
   `.git/` work tree), so it never breaks a non-developer install.
 
+### Viewport / layout tests (Playwright)
+
+`npm run test:e2e` runs a small [Playwright](https://playwright.dev/) suite
+(`playwright.config.ts`, `e2e/`) against a real Chromium layout engine —
+`npm run test`/vitest runs in jsdom, which has no layout engine at all, so
+pixel-level claims (a component's height, whether content lands above the
+fold, whether a sticky header covers a scroll target) aren't otherwise
+regression-tested. First run `npx playwright install chromium`; after that,
+`npm run test:e2e` builds `dist/` and serves it itself. This suite is **not**
+part of `npm run verify` or the pre-push hook — it runs in its own CI job
+(`.github/workflows/ci.yml`) so a browser download never blocks a local push.
+
 ### On-device AI (WebGPU) in dev
 
 The optional AI rewrite runs on-device via WebGPU, which the browser only

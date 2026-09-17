@@ -52,6 +52,12 @@ __pycache__/
 # Playwright MCP snapshot artifacts
 .playwright-mcp/
 
+# Playwright e2e harness (#954) run output — reports/traces/videos, never
+# tracked. playwright.config.ts and e2e/ are the tracked, hand-authored parts.
+/test-results/
+/playwright-report/
+/blob-report/
+
 # Local symlinks into ~/tools/scripts/ (shared bash helpers). Tracked as
 # absolute-path symlinks they leaked the maintainer's home dir and were dead
 # for anyone else. Keep them on disk for local dev/deploy; don't track them.
