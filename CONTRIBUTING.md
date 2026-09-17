@@ -26,9 +26,35 @@ PostHog telemetry and deploying a build — see the [Telemetry](./README.md#tele
 and [Deploy](./README.md#deploy) sections of the README if you need
 those.
 
+## Finding something to work on
+
+New here? Start with the
+[open, unclaimed `good first issue` list](https://github.com/offlinecv/OfflineCV/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22+no%3Aassignee+-label%3A%22status%3Aclaimed%22).
+Those issues are scoped to be doable without knowing the whole codebase.
+
+Every issue goes through the same steps before any code is written:
+
+1. **Pick an unclaimed issue.** The list above is already filtered to issues
+   with no assignee and no `status:claimed` label. Arriving at an issue any
+   other way — a search, a link, the board — check both yourself: either one
+   means someone is on it.
+2. **Comment on the issue asking to be assigned.** One line is enough, e.g.
+   "I'd like to work on this — could you assign it to me?"
+3. **Wait for a maintainer to assign it to you** (they also add
+   `status:claimed`). Don't start work, open a branch, or open a PR before
+   that — it's how two people end up building the same thing. If you have
+   write access, assign yourself and add `status:claimed` — see [Claiming an
+   issue](#claiming-an-issue).
+4. **Then branch and build** — see [Branch workflow](#branch-workflow) below.
+
+[Claiming an issue](#claiming-an-issue) has the details: why the label matters,
+what to do if you self-assign, and when an idle claim lapses.
+
 ## Branch workflow
 
-Branch from `main`. Name branches `<your-initials>/<short-slug>`, e.g.
+Once the issue is assigned to you (see [Finding something to work
+on](#finding-something-to-work-on)), branch from `main`. Name branches
+`<your-initials>/<short-slug>`, e.g.
 `am/fix-two-column-rendering` or `sa/wire-up-webllm-pilot`. One branch
 per issue. Keep branches short-lived; rebase on `main` before opening a
 PR if it has drifted.
@@ -150,9 +176,11 @@ already has someone on it — pick another, or comment and ask where it stands.
 Do not open a PR against a claimed issue without talking to the assignee
 first; you will almost certainly duplicate their work.
 
-To take an unclaimed issue, comment on it saying you're starting. A
-maintainer will assign it to you and add `status:claimed`, which is what makes
-the claim visible to everyone else. Two signals are needed because the
+To take an unclaimed issue, comment on it asking to be assigned, then **wait
+until a maintainer assigns it to you before you start work**. The maintainer
+also adds `status:claimed`, which is what makes the claim visible to everyone
+else. Starting before that means two people can pick up the same issue from the
+same unlabelled list. Two signals are needed because the
 assignee alone is not enough: `gh issue list` prints labels and not assignees,
 and on the web list the assignee is a small avatar in the right margin.
 Contributors — and tooling that scans the backlog — read the label.
