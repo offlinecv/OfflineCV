@@ -713,7 +713,11 @@ export default function App() {
                 </Button>
               </div>
               {isScoreRevealed(displayResult.canonical, edit.contactOverrides) && (
-                <AtsScoreReadout score={edited.score} />
+                // The authoring lane never re-parses, so `parseKey` moves only
+                // on a genuinely new session (`authoring:<generation>`) — which
+                // is the one moment the reveal should fire again. Keying on the
+                // score would re-expand on every field typed in.
+                <AtsScoreReadout score={edited.score} resetKey={parseKey} />
               )}
               <ReconstructedResume
                 result={displayResult}

@@ -7,13 +7,21 @@ import { scoreBandTextClass } from "./scoreBand.ts";
 interface ScoreRingProps {
   score: number;
   max?: number;
+  /** Ring diameter in CSS px. Defaults to 96 (the original standalone size);
+   *  `AtsScoreReadout` passes 84 for the expanded score widget (#953).
+   *
+   *  Sizes much below ~80 would need the inner labels re-sized — `text-3xl`
+   *  overflows a small ring — so add that branch alongside the first caller
+   *  that actually passes one. An earlier revision carried it speculatively,
+   *  gated on `size < 80`, which no caller ever satisfied: an unreachable
+   *  branch that no test could cover and no reviewer could check. */
+  size?: number;
 }
 
-export function ScoreRing({ score, max = 100 }: ScoreRingProps) {
+export function ScoreRing({ score, max = 100, size = 96 }: ScoreRingProps) {
   const tier = getScoreTier(score);
   const ringColorCls = scoreBandTextClass(tier);
 
-  const size = 96;
   const strokeWidth = 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;

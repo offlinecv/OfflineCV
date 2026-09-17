@@ -26,6 +26,9 @@ import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
+import type { BulletObservation } from "../../lib/score/score.ts";
+import type { ContactDisplayField } from "../../lib/contact.ts";
+
 let container: HTMLDivElement;
 let root: Root | null = null;
 
@@ -33,6 +36,8 @@ interface RenderOptions {
   titles?: string[];
   primary?: string;
   parsed?: ResumeQueryInput;
+  bullets?: readonly BulletObservation[];
+  contactMissing?: ContactDisplayField[];
 }
 
 /** The same role-resolvable résumé `SkillTermGuidance.test.tsx` uses, so the
@@ -48,6 +53,8 @@ function render({
   titles = ["Backend Engineer"],
   primary,
   parsed = resolvableParsed(),
+  bullets,
+  contactMissing,
 }: RenderOptions = {}): HTMLElement {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -60,6 +67,8 @@ function render({
         onPrimaryChange: () => {},
         parsed,
         onAddSkill: () => {},
+        bullets,
+        contactMissing,
       }),
     );
   });
@@ -138,5 +147,95 @@ describe("TargetingSection", () => {
     const el = render({ titles: [], parsed: { skills: [], experience: [] } });
     expect(el.querySelector("details")).toBeNull();
     expect(el.textContent).toBe("");
+  });
+
+  it("renders nothing when bullets are present but all of them pass", () => {
+    // The case the guard above used to miss: it also required
+    // `bullets.length === 0`, so a résumé with bullets that all pass — nothing
+    // flagged, no titles, no skill guidance — opened a disclosure onto an
+    // empty box. Leaving `bullets` undefined (as the sibling test does) hides
+    // this, so pass a clean bullet explicitly.
+    const allPassing: BulletObservation[] = [
+      {
+        text: "Cut checkout latency 45% by adding a read-through cache",
+        id: "b1",
+        index: 0,
+        hasMetric: true,
+        startsWithActionVerb: true,
+        wellFormedLength: true,
+        wordCount: 9,
+      },
+    ];
+    const el = render({
+      titles: [],
+      parsed: { skills: [], experience: [] },
+      bullets: allPassing,
+    });
+    expect(el.querySelector("details")).toBeNull();
+    expect(el.textContent).toBe("");
+  });
+
+  it("summarizes bullet triage on the summary row and renders details inside", () => {
+    const fakeBullets: BulletObservation[] = [
+      {
+        text: "Did stuff",
+        id: "b1",
+        index: 0,
+        hasMetric: false,
+        startsWithActionVerb: false,
+        wellFormedLength: true,
+        wordCount: 8,
+      },
+    ];
+    const el = render({ bullets: fakeBullets });
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("Targeting & improvements");
+    expect(summary.textContent).toContain("1 bullet needs attention");
+
+    // Inside the disclosure, the bullet breakdown renders.
+    expect(el.textContent).toContain("missing a metric");
+    expect(el.textContent).toContain("weak verb");
+    // But NO bullet jump link (#956 review). It used to point at
+    // `#reconstructed-resume`, which wraps this very row, so "Review bullets ↓"
+    // scrolled UP past the contact card. There is no correct anchor to swap in
+    // — flagged bullets can live in Projects or Achievements as well as
+    // Experience — and the bullets are directly below this row anyway.
+    expect(el.textContent).not.toContain("Review bullets");
+    expect(
+      [...el.querySelectorAll("a")].map((a) => a.getAttribute("href")),
+    ).not.toContain("#reconstructed-resume");
+  });
+
+  it("summarizes missing contact fields on the summary row", () => {
+    const missingContact: ContactDisplayField[] = [
+      { key: "phone", label: "phone", value: "", group: "contact", gated: true },
+    ];
+    const el = render({ contactMissing: missingContact });
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("Targeting & improvements");
+    expect(summary.textContent).toContain("1 contact field missing");
+    expect(el.textContent).toContain("Edit contact ↑");
+  });
+
+  it("summarizes combined bullet and contact triage on the summary row", () => {
+    const fakeBullets: BulletObservation[] = [
+      {
+        text: "Did stuff",
+        id: "b1",
+        index: 0,
+        hasMetric: false,
+        startsWithActionVerb: false,
+        wellFormedLength: true,
+        wordCount: 8,
+      },
+    ];
+    const missingContact: ContactDisplayField[] = [
+      { key: "email", label: "email", value: "", group: "contact", gated: true },
+    ];
+    const el = render({ bullets: fakeBullets, contactMissing: missingContact });
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain(
+      "1 bullet & 1 contact field need attention",
+    );
   });
 });

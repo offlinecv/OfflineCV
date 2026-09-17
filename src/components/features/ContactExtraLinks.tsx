@@ -20,6 +20,12 @@
  * only in the editable card — extras are session edit state, never present in a
  * pure-display card. Built entirely from `@design-system` primitives + the
  * shared `ReconstructedAdd` affordances, no raw `<button>`/hardcoded palette.
+ *
+ * Renders a Fragment, not its own `<p>` (#953) — it now shares a row with
+ * `ContactWorkAuthorization`, composed by `ContactDetails`, which owns that
+ * row's layout classes. A `<p>` here would either wrap redundantly inside the
+ * row's own container or, if that container were ever a `<p>` itself, nest
+ * block content inside block content.
  */
 
 import { EditableField } from "@design-system";
@@ -42,7 +48,7 @@ export function ContactExtraLinks({
   onRemove,
 }: ContactExtraLinksProps) {
   return (
-    <p className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
+    <>
       {profiles.map((profile, i) => (
         <span key={profile.id} className="inline-flex items-center gap-x-2">
           {i > 0 && <span className="text-content-muted">·</span>}
@@ -70,10 +76,16 @@ export function ContactExtraLinks({
           </span>
         </span>
       ))}
+      {/* No leading `·` before the pill (#953). A separator earned its place
+          while this component owned a whole links line and the pill terminated
+          it; in the merged add row the pill is a button sitting beside the
+          work-auth pill, which gets no separator of its own — the row's `gap-2`
+          is what divides them. The span wrapper stays: it is the direct flex
+          child that absorbs `AddPill`'s `self-start`, which would otherwise
+          misalign the pill in the `items-center` row. */}
       <span className="inline-flex items-center gap-x-2">
-        {profiles.length > 0 && <span className="text-content-muted">·</span>}
         <ProfileLinkAdd onAdd={onAdd} label="Add a profile" stayOpenAfterAdd />
       </span>
-    </p>
+    </>
   );
 }
