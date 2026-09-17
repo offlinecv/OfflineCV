@@ -22,6 +22,10 @@
  * `ProfileLinkAdd`: that is a URL field whose add path rejects anything
  * `classifyProfile` cannot parse, which is how "US Citizen" used to be
  * swallowed (#790). This is free text and accepts the sentence as written.
+ *
+ * Renders inline with no wrapper of its own (#953) — the layout (row, gap,
+ * centering) belongs to whichever row this affordance shares with
+ * `ContactExtraLinks`; `ContactDetails` owns that composition.
  */
 
 import { InlineBulletAdd } from "./ReconstructedAdd.tsx";
@@ -34,12 +38,10 @@ export function ContactWorkAuthorization({
   onAdd: (value: string) => void;
 }) {
   return (
-    <div className="mt-2 flex justify-center">
-      <InlineBulletAdd
-        onAdd={onAdd}
-        label="Add work authorization"
-        placeholder="e.g. US Citizen (optional)"
-      />
-    </div>
+    <InlineBulletAdd
+      onAdd={onAdd}
+      label="Add work authorization"
+      placeholder="e.g. US Citizen (optional)"
+    />
   );
 }

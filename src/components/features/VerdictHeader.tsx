@@ -20,6 +20,13 @@ export function VerdictHeader({ score, recommendation }: VerdictHeaderProps) {
   return (
     <div className="flex flex-col justify-center gap-0.5">
       <p className={`text-2xl font-semibold ${colorCls}`}>{label}</p>
+      {/* Deliberately unclamped (#953). A `line-clamp` needs a non-hover way
+          back to the hidden remainder, and `title` is not one — it is
+          mouse-hover-only, so on touch and keyboard the clipped tail is simply
+          gone. That tail carries the instruction: the layout-penalty
+          recommendation runs ~150 chars and ends in what to actually do. The
+          sentence is short enough that letting it wrap costs a line or two
+          against the ~240px the rest of the compaction bought. */}
       <p className="text-sm text-content-secondary">{recommendation}</p>
     </div>
   );

@@ -197,7 +197,10 @@ function ParsedCard({
         )}
 
         {scoreRevealed ? (
-          <AtsScoreReadout score={activeScore} />
+          // `parseIdentity`, not the score: the reveal must re-fire for a new
+          // résumé (or a landed recovery pass) and stay put through the edits
+          // that re-grade `activeScore` — see `AtsScoreReadoutProps.resetKey`.
+          <AtsScoreReadout score={activeScore} resetKey={parseIdentity} />
         ) : (
           // No half-populated/near-zero score flashed while contact/experience
           // are still incomplete (#313) — a quiet placeholder instead of the

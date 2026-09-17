@@ -22,6 +22,7 @@ export * from "./primitives/CopyButton.tsx";
 export * from "./primitives/useCopyToClipboard.ts";
 export * from "./primitives/Dialog.tsx";
 export * from "./primitives/EditableField.tsx";
+export * from "./primitives/Popover.tsx";
 export * from "./primitives/StarRating.tsx";
 export * from "./primitives/TextAreaField.tsx";
 export * from "./shared/CapabilityStrip.tsx";

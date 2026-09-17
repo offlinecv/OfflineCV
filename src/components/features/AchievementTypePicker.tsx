@@ -15,10 +15,22 @@
  *
  * Committing "" clears the type, which is meaningful: the achievement then has
  * no label run, and the exporter bolds the whole header instead.
+ *
+ * Open/close, outside-click + Escape dismissal, and focus handling all belong to
+ * the `Popover` primitive now (#953). This file used to carry its own copy of
+ * that listener, which `Popover` was then written from — two copies of one
+ * behaviour, free to drift. What stays here is only what is actually about
+ * achievements: the preset grid, the checked state, and the free-text escape
+ * hatch. `close` arrives through the function child, so `pick` can still commit
+ * and dismiss in one step without this component owning any state.
+ *
+ * One accepted visual change came with that move: this menu's panel was `p-2`
+ * and `Popover`'s is `p-3`, so it is now +4px denser-padded. `className` cannot
+ * override it (no `tailwind-merge` in the tree — see the prop's docblock), and
+ * uniform panel padding was judged worth the 4px.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, EditableField } from "@design-system";
+import { Button, EditableField, Popover } from "@design-system";
 import {
   ACHIEVEMENT_PRESETS,
   matchAchievementPreset,
@@ -33,101 +45,78 @@ export function AchievementTypePicker({
   /** Commit a new label. "" clears it. */
   onSelect: (type: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const label = value?.trim();
   const preset = matchAchievementPreset(label);
 
-  const close = useCallback(() => setOpen(false), []);
-
-  // Dismiss on outside click / Escape — the popover is the only thing holding
-  // focus, so leaving it any other way would strand it open behind the résumé.
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open, close]);
-
-  const pick = (next: string) => {
-    onSelect(next);
-    close();
-  };
-
   return (
-    <div ref={rootRef} className="relative inline-flex">
-      <Button
-        variant="ghost"
-        size="sm"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={
-          label ? `Achievement type: ${label}. Change it.` : "Set achievement type"
-        }
-        onClick={() => setOpen((o) => !o)}
-        className="font-semibold text-content-primary"
-      >
-        {preset && <span aria-hidden="true">{preset.emoji}</span>}
-        <span>{label || "type"}</span>
-        <span aria-hidden="true" className="text-content-muted">
-          ▾
-        </span>
-      </Button>
+    <Popover
+      role="menu"
+      // The trigger names the current VALUE; the panel names the CHOICE.
+      label={
+        label ? `Achievement type: ${label}. Change it.` : "Set achievement type"
+      }
+      panelLabel="Achievement type"
+      trigger={{
+        variant: "ghost",
+        className: "font-semibold text-content-primary",
+      }}
+      triggerContent={
+        <>
+          {preset && <span aria-hidden="true">{preset.emoji}</span>}
+          <span>{label || "type"}</span>
+          <span aria-hidden="true" className="text-content-muted">
+            ▾
+          </span>
+        </>
+      }
+    >
+      {({ close }) => {
+        const pick = (next: string) => {
+          onSelect(next);
+          close();
+        };
+        return (
+          <>
+            <div className="grid grid-cols-2 gap-1">
+              {ACHIEVEMENT_PRESETS.map((p) => {
+                const selected =
+                  p.label.toLowerCase() === (label ?? "").toLowerCase();
+                return (
+                  <Button
+                    key={p.label}
+                    role="menuitemradio"
+                    aria-checked={selected}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => pick(p.label)}
+                    className={`justify-start ${
+                      selected
+                        ? "bg-surface-subtle font-semibold text-content-primary"
+                        : ""
+                    }`}
+                  >
+                    <span aria-hidden="true">{p.emoji}</span>
+                    <span className="truncate">{p.label}</span>
+                  </Button>
+                );
+              })}
+            </div>
 
-      {open && (
-        <div
-          role="menu"
-          aria-label="Achievement type"
-          className="absolute left-0 top-full z-20 mt-1 w-72 rounded-lg border border-border-light bg-surface-card p-2 shadow-lg"
-        >
-          <div className="grid grid-cols-2 gap-1">
-            {ACHIEVEMENT_PRESETS.map((p) => {
-              const selected =
-                p.label.toLowerCase() === (label ?? "").toLowerCase();
-              return (
-                <Button
-                  key={p.label}
-                  role="menuitemradio"
-                  aria-checked={selected}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => pick(p.label)}
-                  className={`justify-start ${
-                    selected
-                      ? "bg-surface-subtle font-semibold text-content-primary"
-                      : ""
-                  }`}
-                >
-                  <span aria-hidden="true">{p.emoji}</span>
-                  <span className="truncate">{p.label}</span>
-                </Button>
-              );
-            })}
-          </div>
-
-          <div className="mt-2 flex items-center gap-2 border-t border-border-light pt-2">
-            {/* The free-text escape hatch. A label the parser lifted from a real
-                résumé ("Best Paper Award") usually matches no preset — it has to
-                stay editable, or the picker would silently overwrite what the
-                PDF actually said. */}
-            <EditableField
-              value={label || undefined}
-              label="Custom achievement type"
-              textSize="xs"
-              onCommit={(v) => pick(v)}
-            />
-          </div>
-        </div>
-      )}
-    </div>
+            <div className="mt-2 flex items-center gap-2 border-t border-border-light pt-2">
+              {/* The free-text escape hatch. A label the parser lifted from a real
+                  résumé ("Best Paper Award") usually matches no preset — it has to
+                  stay editable, or the picker would silently overwrite what the
+                  PDF actually said. */}
+              <EditableField
+                value={label || undefined}
+                label="Custom achievement type"
+                textSize="xs"
+                onCommit={(v) => pick(v)}
+              />
+            </div>
+          </>
+        );
+      }}
+    </Popover>
   );
 }

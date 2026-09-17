@@ -127,6 +127,13 @@ export function ContactDetails({
   const workAuthorizationAbsent = !segments.some(
     (f) => f.key === WORK_AUTHORIZATION_KEY,
   );
+  const presentLinks = editable
+    ? links.filter((f) => !f.gated || f.reason !== "absent")
+    : links;
+  const absentLinks = editable
+    ? links.filter((f) => f.gated && f.reason === "absent")
+    : [];
+
   return (
     <>
       {/* Contact line: location / email / phone, pipe-joined, present-only. */}
@@ -141,19 +148,10 @@ export function ContactDetails({
         </p>
       )}
 
-      {/* Reachability for the hidden optional row (#792): without this, a
-          résumé that never stated work authorization offers no way to state
-          it. Editable card only — a display-only card has nothing to add to. */}
-      {editable && workAuthorizationAbsent && (
-        <ContactWorkAuthorization
-          onAdd={(value) => commit(WORK_AUTHORIZATION_KEY, value)}
-        />
-      )}
-
       {/* Links line: clickable slugs, middot-separated, license-safe (no logos). */}
-      {links.length > 0 && (
+      {presentLinks.length > 0 && (
         <p className="mt-2 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm">
-          {links.map((field, i) => (
+          {presentLinks.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">·</span>}
               {renderLink(field, editable, onLegacyLinkChange)}
@@ -162,18 +160,43 @@ export function ContactDetails({
         </p>
       )}
 
-      {/* Extra user-added links (#335) — add/edit/delete beyond the four legacy
-          slots. Edit-only: the affordance renders whenever an add handler is
-          wired (the editable card), even with zero extras so the first can be
-          added. */}
-      {editable && onAddProfile && onEditProfile && onRemoveProfile && (
-        <ContactExtraLinks
-          profiles={extraProfiles ?? []}
-          onAdd={onAddProfile}
-          onEdit={onEditProfile}
-          onRemove={onRemoveProfile}
-        />
-      )}
+      {/* The absent links, work-authorization, and extra-links "+ Add" affordances
+          share one row (#953) — grouping all secondary/optional add affordances on a
+          single line instead of stacking separate rows. */}
+      {editable &&
+        (absentLinks.length > 0 ||
+          workAuthorizationAbsent ||
+          (onAddProfile && onEditProfile && onRemoveProfile)) && (
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-sm">
+            {absentLinks.map((field) => (
+              <span key={field.key} className="inline-flex">
+                {renderLink(field, editable, onLegacyLinkChange)}
+              </span>
+            ))}
+            {workAuthorizationAbsent && (
+              // Wrapped so `AddPill`'s `self-start` (correct for its other,
+              // column-flow consumers) doesn't misalign it in this
+              // `items-center` row — `self-start` only affects a DIRECT flex
+              // child, and this wrapper, not the pill, is that child. It is a
+              // `div` rather than a `span` because `ContactWorkAuthorization`
+              // expands to `InlineBulletAdd`'s `<div class="flex …">`, and a
+              // `span` may only contain phrasing content.
+              <div className="inline-flex">
+                <ContactWorkAuthorization
+                  onAdd={(value) => commit(WORK_AUTHORIZATION_KEY, value)}
+                />
+              </div>
+            )}
+            {onAddProfile && onEditProfile && onRemoveProfile && (
+              <ContactExtraLinks
+                profiles={extraProfiles ?? []}
+                onAdd={onAddProfile}
+                onEdit={onEditProfile}
+                onRemove={onRemoveProfile}
+              />
+            )}
+          </div>
+        )}
     </>
   );
 }

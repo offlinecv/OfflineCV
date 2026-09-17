@@ -45,7 +45,6 @@ import type {
 } from "../../lib/score/group-bullets.ts";
 import {
   groupBulletsByExperience,
-  needsAttention,
   roleLabel,
   suppressTitleOwnedBullets,
   toBulletExperience,
@@ -57,7 +56,6 @@ import {
   applyContactOverrides,
   buildContactFields,
   contactCompleteness,
-  type ContactDisplayField,
 } from "../../lib/contact.ts";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
@@ -120,132 +118,6 @@ import { SkillsSection } from "./ReconstructedSkills.tsx";
 import { EditableField, SectionHeading } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 
-// ── Attention strip ────────────────────────────────────────────────────────────
-
-/**
- * The bullet-check segment of the AttentionStrip — the per-check rollup over the
- * full graded bullet pool, retained from the old PerBulletFeedback so the totals
- * stay visible above the resume even though individual flags live inline next to
- * each bullet. Returns null when every bullet passes (the strip handles the
- * all-clear line itself).
- */
-function BulletSegment({
-  bullets,
-}: {
-  bullets: readonly BulletObservation[];
-}) {
-  const total = bullets.length;
-  const flagged = bullets.filter(needsAttention).length;
-  if (flagged === 0) return null;
-
-  const missingMetric = bullets.filter((b) => !b.hasMetric).length;
-  const lengthIssues = bullets.filter((b) => !b.wellFormedLength).length;
-  const weakVerb = bullets.filter((b) => !b.startsWithActionVerb).length;
-
-  return (
-    <div className="flex flex-col gap-1.5 text-left">
-      <p className="text-sm font-medium text-content-primary">
-        {flagged} of {total} bullet{total === 1 ? "" : "s"} need attention
-      </p>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-content-secondary">
-        {missingMetric > 0 && (
-          <li className="tabular-nums">
-            <span className="font-semibold text-feedback-warning-text">
-              {missingMetric}
-            </span>{" "}
-            missing a metric
-          </li>
-        )}
-        {lengthIssues > 0 && (
-          <li className="tabular-nums">
-            <span className="font-semibold text-feedback-warning-text">
-              {lengthIssues}
-            </span>{" "}
-            length {lengthIssues === 1 ? "issue" : "issues"}
-          </li>
-        )}
-        {weakVerb > 0 && (
-          <li className="tabular-nums">
-            <span className="font-semibold text-feedback-warning-text">
-              {weakVerb}
-            </span>{" "}
-            weak verb{weakVerb === 1 ? "" : "s"}
-          </li>
-        )}
-      </ul>
-    </div>
-  );
-}
-
-/**
- * The contact-completeness segment — the parser-audit signal moved up from the
- * ContactCard footer (#146 redesign) so it sits with the bullet rollup as one
- * "needs your attention" triage strip. Names the missing required fields rather
- * than a bare ratio so it reads parallel to the bullet segment. Renders only
- * when something is missing; a complete contact block shows no segment.
- */
-function ContactSegment({ missing }: { missing: ContactDisplayField[] }) {
-  if (missing.length === 0) return null;
-  const count = missing.length;
-  return (
-    <div className="flex flex-col gap-1.5 text-left">
-      <p className="text-sm font-medium text-content-primary">
-        {count} contact field{count === 1 ? "" : "s"} missing
-      </p>
-      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-content-secondary">
-        {missing.map((f) => (
-          <li key={f.key}>
-            <span className="font-semibold text-feedback-warning-text">
-              {f.label}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/**
- * Centered triage strip co-locating every "needs your attention" signal above
- * the reconstructed resume: the bullet-check rollup and the contact-completeness
- * gap, divided by a vertical rule when both are present. Each segment omits
- * itself when clean; when both are clean it collapses to a single all-clear line
- * (only when there were bullets to check — a contact-only resume with no parsed
- * bullets renders nothing).
- */
-function AttentionStrip({
-  bullets,
-  contactMissing,
-}: {
-  bullets: readonly BulletObservation[];
-  contactMissing: ContactDisplayField[];
-}) {
-  const total = bullets.length;
-  const hasBulletGap = bullets.some(needsAttention);
-  const hasContactGap = contactMissing.length > 0;
-
-  if (!hasBulletGap && !hasContactGap) {
-    if (total === 0) return null;
-    return (
-      <p className="text-sm font-medium text-feedback-success-text">
-        All {total} bullet{total === 1 ? "" : "s"} pass every check.
-      </p>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap items-stretch justify-center gap-x-6 gap-y-3 rounded-lg border border-border-light bg-surface-subtle px-4 py-2.5">
-      <BulletSegment bullets={bullets} />
-      {hasBulletGap && hasContactGap && (
-        <div
-          aria-hidden="true"
-          className="self-stretch border-l border-border-light"
-        />
-      )}
-      <ContactSegment missing={contactMissing} />
-    </div>
-  );
-}
 
 // ── Section heading + "not detected" gap ──────────────────────────────────────
 
@@ -1615,30 +1487,6 @@ export function ReconstructedResume({
       id={SECTION_IDS.reconstructed}
       className="scroll-mt-6 flex flex-col gap-6"
     >
-      <div className="flex flex-col gap-2">
-        {/* Heading only. The three download buttons that sat opposite it —
-            "Download report", "Download as Markdown" and "Download resume",
-            one of which opened a dialog containing a fourth Download — moved
-            into the single `ExportDialog` the journey rail's Download stage
-            opens (#823). A row of three exports above a résumé, none of them
-            saying which artifact it produced, was the affordance #680 items 5
-            and 7 both describe. */}
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-          What the parser read
-        </h2>
-        <p className="max-w-prose text-sm text-content-tertiary">
-          What the parser recognized, in resume shape. Each bullet is checked
-          against three rules — an action verb, the 8–30-word length window, and
-          a metric — and flagged inline where it falls short.{" "}
-          <span className="text-content-secondary">
-            Click any field to edit it.
-          </span>
-        </p>
-        {(bullets.length > 0 || contactMissing.length > 0) && (
-          <AttentionStrip bullets={bullets} contactMissing={contactMissing} />
-        )}
-      </div>
-
       <ContactCard
         result={result}
         overrides={contactOverrides}
@@ -1649,20 +1497,11 @@ export function ReconstructedResume({
         onEditProfile={setProfileUrl}
         onRemoveProfile={removeProfile}
       />
-      {/* Decision zone (#605 review), in order: what needs fixing
-       *  (AttentionStrip, above) → who you are (ContactCard) → what you're
-       *  aiming at (RolesPanel) → what that target expects (SkillTermGuidance).
-       *  The last two are adjacent on purpose: the guidance is derived from the
-       *  starred title, via buildJobQuery → deriveTitles → titles[0]. Below
-       *  this line the page is the résumé document itself.
-       *
-       *  Those last two are COLLAPSED since #825 — two full Cards of advice
-       *  stood between the contact block and the first line of the résumé, so
-       *  the document the user dropped a file to see started below the fold.
-       *  `TargetingSection` owns the fold, keeps the pair adjacent (the
-       *  dependency above is the reason), and puts both panels' headlines on
-       *  the summary row as a count and a warn mark so nothing they had to say
-       *  needs the section opened to be seen. */}
+      {/* Decision zone (#605 review, #825, #953): who you are (ContactCard)
+       *  → what you're aiming at, what that target expects, and triage signals
+       *  (TargetingSection). Folded into a single disclosure so the document the
+       *  user dropped a file to see starts higher on the page. Below this line
+       *  the page is the résumé document itself. */}
       <TargetingSection
         titles={titles}
         primary={contactOverrides.headline ?? result.canonical.fields.headline}
@@ -1676,6 +1515,8 @@ export function ReconstructedResume({
         // against `titles[0]` exactly as the term guidance is, and unlike the
         // critique lane this surface is not behind a WebGPU model download.
         skillsOrder={skillsOrder}
+        bullets={bullets}
+        contactMissing={contactMissing}
       />
       {/* Summary leads the document body, matching the exported model's own
        *  order (`ats-resume-model.ts`: Summary → Experience → …) so the preview

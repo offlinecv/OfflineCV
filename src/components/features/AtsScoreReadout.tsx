@@ -2,150 +2,144 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * AtsScoreReadout — renders the full score section: ring, verdict header,
- * three dimension cards, layout penalty note, and algo version footer.
- * Extracted from Result.tsx (issue #83). Includes the Dimension sub-component.
+ * AtsScoreReadout — self-contained, auto-collapsing score widget (#953).
+ *
+ * Renders the score in two distinct states:
+ * 1. Full Reveal (Expanded): 84px ScoreRing, verdict headline, full recommendation,
+ *    and three detailed dimension rows with progress tracks.
+ * 2. Docked Strip (Collapsed): compact score pill with live score and band, inline
+ *    dimension metrics, Popover explainer, and expand toggle via `CollapsedScoreBar`.
+ *
+ * The collapse lifecycle — countdown, scroll, hover/focus hold, and the
+ * user-decision lock — belongs to `useAutoCollapse`, not to this component.
+ * `guardProps` must be spread on BOTH states' root: the hold is what keeps the
+ * widget from docking out from under someone who is still reading it, and a
+ * state that forgets to spread it silently loses that for keyboard users first.
+ *
+ * The two states are SEPARATE SUBTREES, which is why the toggle moves focus by
+ * hand. Activating `Collapse ▴` unmounts the very button that was pressed, so
+ * without the restore below focus falls to `<body>` and a keyboard user has to
+ * tab in from the top of the document after every toggle. `Popover` — added in
+ * this same change — restores focus for exactly this reason; a control that
+ * replaces itself owes the same.
  */
 
+import { useEffect, useRef } from "react";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
-import {
-  getScoreTier,
-  BULLET_LENGTH_MIN_WORDS,
-  BULLET_LENGTH_MAX_WORDS,
-} from "../../lib/score/score.ts";
-import type { SectionAnchor } from "../../lib/anchors.ts";
 import { getScoreRecommendation } from "../../lib/score/recommendation.ts";
+import { Button } from "@design-system";
+import { useAutoCollapse } from "../../hooks/useAutoCollapse.ts";
 import { ScoreRing } from "./ScoreRing.tsx";
 import { VerdictHeader } from "./VerdictHeader.tsx";
-import { scoreBandBgClass, scoreBandTextClass } from "./scoreBand.ts";
+import {
+  ScoreDimensionRow,
+  formatCompletenessHint,
+} from "./ScoreDimensionRow.tsx";
+import {
+  CollapsedScoreBar,
+  ScoreExplainerPopover,
+} from "./CollapsedScoreBar.tsx";
+import { EXPAND_LABEL, COLLAPSE_LABEL } from "./scoreToggleLabels.ts";
 import { timeAgo } from "../../lib/date-utils.ts";
 
-// ── Dimension card ────────────────────────────────────────────────────────────
-
-interface DimensionProps {
-  label: string;
-  value: number;
-  max: number;
-  gradable: boolean;
-  hint: string;
-  /** Spelled-out criterion behind a terse `hint`, surfaced as a tooltip. #624
-   *  shortened the Structure hint to bare counts (`length 13/23`), which no
-   *  longer states what "length" is measured against; this restores the
-   *  criterion without re-lengthening the visible line. */
-  hintTitle?: string;
-  /** Hash-prefixed scroll target — narrowed to a known section so a dead link
-   *  (a `#foo` with no matching rendered id) is a compile error (#153). */
-  anchor: SectionAnchor;
-}
-
-function Dimension({
-  label,
-  value,
-  max,
-  gradable,
-  hint,
-  hintTitle,
-  anchor,
-}: DimensionProps) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
-  const tier = getScoreTier(pct);
-  const barCls = scoreBandBgClass(tier);
-  const valueCls = scoreBandTextClass(tier);
-
-  return (
-    <a
-      href={anchor}
-      className="block flex flex-col gap-1.5 rounded-lg border border-border-light bg-surface-subtle p-3 hover:border-border-light"
-    >
-      <dt className="text-2xs font-semibold uppercase tracking-wider text-content-muted">
-        {label}
-      </dt>
-      <dd className="text-sm font-medium">
-        {gradable ? (
-          <>
-            <span className={valueCls}>{value}</span>
-            <span className="text-xs text-content-muted"> / {max}</span>
-          </>
-        ) : (
-          <span className="text-content-muted">—</span>
-        )}
-      </dd>
-      {gradable && (
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-card">
-          <div
-            className={`h-full rounded-full ${barCls}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      )}
-      <p className="text-2xs text-content-tertiary" title={hintTitle}>
-        {hint}
-      </p>
-    </a>
-  );
-}
-
-// ── AtsScoreReadout ───────────────────────────────────────────────────────────
-
-interface AtsScoreReadoutProps {
+export interface AtsScoreReadoutProps {
   score: AnonymousAtsScore;
+  /** Force an initial collapsed state (defaults to false for post-drop reveal). */
+  defaultCollapsed?: boolean;
+  /** Identity of the PARSE behind `score` — a new résumé is a new reveal; an
+   *  edit to the same one is not.
+   *
+   *  It must not be derived from the score. `score` is re-graded by
+   *  `useAnalyzedResume`'s `applyOverrides → re-score` memo on every override,
+   *  so keying the reveal on it re-expanded the docked widget whenever an edit
+   *  moved the number by a point — pushing the résumé being typed in down, then
+   *  back up 4.5s later, twice per edit (#956 review). The parse lane passes
+   *  `recovery.parseIdentity`, which also changes when a recovery pass lands —
+   *  genuinely a new reveal. Omitting it disables the re-reveal entirely. */
+  resetKey?: unknown;
 }
 
-export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
+export function AtsScoreReadout({
+  score,
+  defaultCollapsed = false,
+  resetKey,
+}: AtsScoreReadoutProps) {
+  const { collapsed, toggle, guardProps } = useAutoCollapse({
+    defaultCollapsed,
+    // A new parse is a new reveal: re-expand and re-arm so the next résumé gets
+    // its own read time rather than arriving into a docked strip.
+    resetKey,
+  });
+
+  const rootRef = useRef<HTMLElement>(null);
+  // Only a USER toggle moves focus. An automatic dock — the countdown or a
+  // scroll — must not, or the page would yank focus away from whatever the
+  // reader had moved on to.
+  const restoreFocus = useRef(false);
+
+  const userToggle = (next: boolean) => {
+    restoreFocus.current = true;
+    toggle(next);
+  };
+
+  useEffect(() => {
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    const label = collapsed ? EXPAND_LABEL : COLLAPSE_LABEL;
+    rootRef.current
+      ?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+      ?.focus();
+  }, [collapsed]);
+
   const buildDate = __BUILD_DATE__.slice(0, 10);
-  // Prefer a friendly "7m ago"; fall back to the absolute date if the build
-  // timestamp is unparseable or somehow in the future.
   const buildAgo = timeAgo(__BUILD_DATE__) || buildDate;
 
-  // Hint strings for the three Dimension cards.
   const specificityHint = `${score.specificity.metricBullets}/${score.specificity.totalBullets} bullets carry a metric`;
-  // Two distinct direct counts, not the fused half-credit sum (#624) — a
-  // résumé can lose all its Structure points on verbs alone, and the old
-  // single "goodBullets" number hid that from the user.
   const structureHint = `verb-led ${score.structure.verbLedBullets}/${score.structure.totalBullets} · length ${score.structure.inWindowBullets}/${score.structure.totalBullets}`;
-  const completenessHint =
-    (score.completeness.missing.length === 0
-      ? "All expected fields present"
-      : `Missing: ${score.completeness.missing.join(", ")}`) +
-    (score.completeness.redactedDates
-      ? " · Dates appear redacted — use 4-digit years for best results."
-      : "");
-
-  // One actionable next-step sentence for the verdict band (#42).
+  const completenessHint = formatCompletenessHint(score.completeness);
   const recommendation = getScoreRecommendation(score);
 
+  if (collapsed) {
+    return (
+      <section ref={rootRef} {...guardProps}>
+        <CollapsedScoreBar score={score} onExpand={() => userToggle(false)} />
+      </section>
+    );
+  }
+
   return (
-    <section className="flex flex-col gap-2">
-      <div className="flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-          Your resume score
-        </h2>
-        <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wider text-content-secondary">
-          alpha
-        </span>
+    <section ref={rootRef} className="flex flex-col gap-2" {...guardProps}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
+            Your resume score
+          </h2>
+          <span className="rounded bg-surface-subtle px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wider text-content-secondary">
+            alpha
+          </span>
+          <ScoreExplainerPopover />
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => userToggle(true)}
+          // `text-xs` omitted deliberately: `Button` appends `className`, the
+          // repo ships no `tailwind-merge`, and `SIZE.sm`'s `text-sm` is
+          // emitted later — so it never applied.
+          className="text-content-secondary hover:text-content-primary"
+          aria-label={COLLAPSE_LABEL}
+        >
+          Collapse ▴
+        </Button>
       </div>
-      <p className="text-sm text-content-tertiary">
-        Scored from what a generic text extractor pulled from your PDF — the
-        starting point most resume parsers share.
-      </p>
-      <details className="text-sm text-content-tertiary">
-        <summary className="cursor-pointer text-sm text-content-tertiary">
-          How is this scored?
-        </summary>
-        <p className="mt-1 max-w-prose text-sm text-content-tertiary">
-          A quick read on how your resume scores — based on what a generic text
-          extractor pulled from your PDF, the same starting point most ATS
-          parsers use. Not a universal score; systems weigh things differently.
-          Dimensions below show where the points landed.
-        </p>
-      </details>
-      <div className="flex flex-col gap-4 md:flex-row md:items-start">
+
+      <div className="flex flex-col gap-4 md:flex-row md:items-center">
         <div className="flex items-center gap-4 md:min-w-0 md:flex-1">
-          <ScoreRing score={score.overall} />
+          <ScoreRing score={score.overall} size={84} />
           <VerdictHeader score={score.overall} recommendation={recommendation} />
         </div>
-        <dl className="grid min-w-0 flex-1 grid-cols-1 gap-3 text-sm sm:grid-cols-3">
-          <Dimension
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <ScoreDimensionRow
             label="Specificity"
             value={score.specificity.score}
             max={score.specificity.max}
@@ -153,16 +147,15 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
             hint={specificityHint}
             anchor="#reconstructed-resume"
           />
-          <Dimension
+          <ScoreDimensionRow
             label="Structure"
             value={score.structure.score}
             max={score.structure.max}
             gradable={score.structure.gradable}
             hint={structureHint}
-            hintTitle={`Verb-led: bullet opens with an action verb. Length: bullet is ${BULLET_LENGTH_MIN_WORDS}–${BULLET_LENGTH_MAX_WORDS} words.`}
             anchor="#reconstructed-resume"
           />
-          <Dimension
+          <ScoreDimensionRow
             label="Completeness"
             value={score.completeness.score}
             max={score.completeness.max}
@@ -170,15 +163,16 @@ export function AtsScoreReadout({ score }: AtsScoreReadoutProps) {
             hint={completenessHint}
             anchor="#contact"
           />
-        </dl>
+        </div>
       </div>
-      {score.layout.multiplier < 1 && (
-        <p className="text-2xs text-feedback-warning-text">
-          Layout penalty applied (multiplier {score.layout.multiplier.toFixed(2)}
-          ): pre-layout score was {score.preLayoutOverall}.
-        </p>
-      )}
+
       <p className="text-2xs text-content-muted">
+        {score.layout.multiplier < 1 && (
+          <span className="text-feedback-warning-text">
+            Layout penalty ×{score.layout.multiplier.toFixed(2)} (pre-layout{" "}
+            {score.preLayoutOverall}) ·{" "}
+          </span>
+        )}
         {score.algoVersion && <>algo v{score.algoVersion} · </>}Built{" "}
         <span title={buildDate}>{buildAgo}</span>
       </p>

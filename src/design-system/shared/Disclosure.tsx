@@ -57,7 +57,7 @@ import { CountBadge } from "./CountBadge.tsx";
 
 interface DisclosureProps {
   /** The always-visible label on the summary row. */
-  summary: string;
+  summary: ReactNode;
   /** Optional count badge after the label (e.g. a layout-flag count). Renders
    *  nothing at null/undefined/≤ 0, so callers pass it unguarded. */
   count?: number;

@@ -164,6 +164,33 @@ describe("ContactCard", () => {
     expect(el.querySelector('[aria-label="Add a profile"]')).toBeNull();
   });
 
+  it("shares one row between the work-auth and extra-links add affordances (issue 953)", () => {
+    // Work authorization absent (no override given) AND the extra-links
+    // handlers wired — both affordances are eligible at once, which is the
+    // case the merged row exists for.
+    const el = render(makeResult(), {
+      overrides: {},
+      onFieldChange: () => {},
+      onAddProfile: () => undefined,
+      onEditProfile: () => {},
+      onRemoveProfile: () => {},
+    });
+    const workAuthPill = el.querySelector('[aria-label="Add work authorization"]');
+    const profilePill = el.querySelector('[aria-label="Add a profile"]');
+    expect(workAuthPill).not.toBeNull();
+    expect(profilePill).not.toBeNull();
+
+    // Co-location proved structurally, rather than through a `data-testid`
+    // shipped in every user's DOM or a class selector that breaks when
+    // utilities are reordered. `ContactExtraLinks` is a Fragment that wraps its
+    // pill in spans only, so the profile pill's nearest block ancestor IS the
+    // shared add row — and that same element must contain the work-auth pill,
+    // which sits in an inline `div` wrapper of its own inside that row.
+    const row = profilePill!.closest("div");
+    expect(row).not.toBeNull();
+    expect(row!.contains(workAuthPill)).toBe(true);
+  });
+
   it("renders a detected link as a clickable new-tab slug anchor", () => {
     const el = render(
       makeResult(
