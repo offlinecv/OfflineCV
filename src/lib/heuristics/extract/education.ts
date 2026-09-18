@@ -7,15 +7,14 @@ import {
   DEGREE_RE,
   INSTITUTION_HINTS,
   MONTH_YEAR_RE,
+  STRICT_MONTH,
   STRICT_MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
   US_STATE_CODE_RE,
   COUNTRY_GAZETTEER,
   PROGRAM_NOTE_RE,
   MONTH,
-  MONTH_ALT,
   SEASON,
-  SEASON_ALT,
   OPEN_ENDED,
   OPEN_ENDED_ALT,
 } from "../regex.ts";
@@ -326,11 +325,20 @@ const YEAR_OR_REDACTED_RE = new RegExp(
  *  "MM/YYYY" is the attendance/graduation DATE of the entry above, not a program
  *  name. Reuses {@link YEAR_OR_REDACTED_SRC} in both year slots so a redacted
  *  lead ("20XX …", "Sep 20XX – May 20XX") is rejected on the same footing as a
- *  real-year lead. */
+ *  real-year lead.
+ *
+ *  The month is the ENUMERATED `STRICT_MONTH`, not the tailed `MONTH`, for the
+ *  same reason the strip inside the predicate is (#925): this gate REJECTS what
+ *  it matches, so a prefix match turns a real program into a date lead —
+ *  `Marketing 2020` read as `Mar` + `keting`, `Decision 2021` as `Dec`,
+ *  `Marathon 2019` as `Mar`. Only the bare-space shape was affected, because
+ *  `\.?\s+` needs whitespace then digits, which is why `Marketing, 2020` and
+ *  `Marketing (2020)` slipped through and the defect read as punctuation-
+ *  dependent. `regex.ts` names this failure class on {@link MONTH} itself. */
 const DATE_LEAD_RE = new RegExp(
   String.raw`^(?:` +
     YEAR_OR_REDACTED_SRC +
-    String.raw`|${MONTH}\.?\s+` +
+    String.raw`|(?:${STRICT_MONTH})\.?\s+` +
     YEAR_OR_REDACTED_SRC +
     String.raw`|\d{1,2}\/\d{4})`,
   "i",
@@ -363,8 +371,12 @@ const CLEAN_FIELD_DATE_RE = new RegExp(
  *     date) while keeping "MIT Applied Data Science (2023)" (the "MIT Applied
  *     Data Science" remainder survives). `isDateOnlyLine` at the call site is the
  *     first such guard; this is the stricter companion that also rejects a
- *     season-qualified range whose only words ARE date words. */
-function isInlineDatedProgram(line: string): boolean {
+ *     season-qualified range whose only words ARE date words.
+ *
+ *  Exported for its own test: #925's acceptance criteria are written as direct
+ *  calls on this predicate, and the strip below is prose-sensitive enough that
+ *  driving it only through {@link extractEducation} hides which line flipped. */
+export function isInlineDatedProgram(line: string): boolean {
   const t = line.trim();
   if (!t) return false;
   if (/^(GPA[:\s]|Minor\b|Major\b)/i.test(t)) return false;
@@ -405,11 +417,48 @@ function isInlineDatedProgram(line: string): boolean {
     .replace(/\b(19|20)\d{2}\b/g, "")
     .replace(new RegExp(String.raw`\b` + REDACTED_YEAR + String.raw`\b`, "gi"), "")
     .replace(
-      // All three vocabularies share ONE trailing `[a-z]*`, so this composes
-      // the bare `_ALT` alternations rather than the wrapped MONTH/SEASON —
-      // nesting a second tail inside would change the matched language.
+      // WHOLE WORDS — no open `[a-z]*` tail, and that is the point. This strip
+      // DELETES what it matches and then asks whether substantive text is left,
+      // so a prefix match erases a real program name: `Marketing` begins with
+      // `Mar`, `Decision` with `Dec`, `Junior` with `Jun` (#925). The months are
+      // therefore the ENUMERATED `STRICT_MONTH`, longest-first so `September`
+      // wins over `Sep` — the same move #380 made on `ATTENDANCE_RANGE_END` one
+      // screen up, for the same reason, and the loose `MONTH` is what that
+      // docblock warns against.
+      //
+      // Seasons keep ONE inflection, `s?`, and nothing wider. A bare enumeration
+      // left `Summers 2013, 2014` unstripped, which made a date line read as
+      // program text: it became `field: "Summers"` on the school after it, and
+      // with no school after it, an entry whose institution was `Summers 2013` —
+      // a fabricated credential, strictly worse than the boundary miss #925
+      // fixes (#951 review). The inflection must bind to the WHOLE alternation,
+      // which is why this composes the wrapped `SEASON`: the bare season list
+      // followed by `s?` attaches the `s` to `Winter` alone and leaves
+      // `Summers` / `Springs` / `Falls` behind. The `\b` still lands after the
+      // optional `s`, so `Springfield` and `Fallow` are untouched. Month plurals
+      // need no equivalent — `Junes` / `Marches` flip this predicate but come
+      // out identical through `extractEducation`.
+      //
+      // `present` carries `(?:ly)?` for exactly the same reason, and it is the
+      // only other literal here that carries anything. Dropping the `[a-z]*`
+      // tail took `Presently` with it, so a season-led `Fall 2013 – Presently`
+      // became an entry whose institution was the date range itself (#951
+      // review round 2). Deliberately `ly` and NOT `s`: `Presents` /
+      // `Presenting` / `Presentation` are program names that merely begin with
+      // a date word — the `Marketing 2020` class this strip exists to keep.
+      // Only the season-led form ever slipped, because `DATE_LEAD_RE` above
+      // enumerates months and bare years but NO seasons, so a month- or
+      // year-led range is rejected before it ever reaches this strip — the
+      // same asymmetry #952 turns on.
+      //
+      // `current` / `now` / `ongoing` are deliberately absent: they were never
+      // in this strip, so `Fall 2013 – Currently` fabricates identically on
+      // `main`. That is #952 — a pre-existing gap, not this change's
+      // regression — and the fix it wants is the already-imported
+      // `OPEN_ENDED_ALT` in place of a hand-added literal, which is a wider
+      // change than a regression fix should carry.
       new RegExp(
-        String.raw`\b(?:${SEASON_ALT}|present|${MONTH_ALT})[a-z]*\b`,
+        String.raw`\b(?:${SEASON}s?|present(?:ly)?|${STRICT_MONTH})\b`,
         "gi",
       ),
       "",

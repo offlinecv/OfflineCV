@@ -129,19 +129,25 @@ export const COUNTRY_GAZETTEER: ReadonlySet<string> = _buildGazetteer();
 /**
  * Bare alternations — no group wrapper, no `[a-z]*` tail.
  *
- * Exported for the two jobs the wrapped forms below cannot do:
- *   - **Compose under a shared tail.** `education.ts` folds months, seasons
- *     and `present` into ONE group sharing a single trailing `[a-z]*`; handing
- *     it a pre-wrapped `MONTH` would nest the tail and change the language.
+ * `OPEN_ENDED_ALT` is exported for the one job the wrapped form below cannot do:
  *   - **Splice into a CAPTURING group.** `DATE_RANGE_RE` below interpolates the
  *     open-ended words into `(...)` whose group numbering the callers index by
  *     position, so the token must not bring a group of its own.
  *
+ * `MONTH_ALT` and `SEASON_ALT` are NOT exported. Each had exactly one external
+ * consumer, education's date-word strip, and both are gone: #925 moved the
+ * months to the enumerated {@link STRICT_MONTH}, and the #951 review moved the
+ * seasons to the wrapped {@link SEASON} so the `s?` inflection binds to the
+ * whole alternation rather than to `Winter` alone. A strip that DELETES what it
+ * matches cannot use a prefix match, and that is the only reason either bare
+ * form was ever wanted outside this file. They stay as the bases {@link MONTH}
+ * and {@link SEASON} are built from.
+ *
  * Every other call site wants the wrapped constants underneath instead.
  */
-export const MONTH_ALT =
+const MONTH_ALT =
   "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec";
-export const SEASON_ALT = "Spring|Summer|Fall|Autumn|Winter";
+const SEASON_ALT = "Spring|Summer|Fall|Autumn|Winter";
 export const OPEN_ENDED_ALT = "Present|Current|Now|Ongoing";
 
 /**
@@ -170,11 +176,18 @@ export const MONTH_YEAR_RE = new RegExp(
 
 // Month names spelled out in full, longest-first. NO `[a-z]*` tail — see
 // STRICT_MONTH_YEAR_RE.
-// NOT exported, unlike the tokens above: every use is inside this module, and
-// an export with no importer is dead surface. The change that needs it outside
-// is #925 (swapping education's loose `[a-z]*` month strip for this enumerated
-// form) — it should be exported by that PR, where it gains a real consumer.
-const STRICT_MONTH =
+//
+// Exported for the one job the tailed {@link MONTH} cannot do: a gate that
+// DELETES or REJECTS what it matches. `education.ts` uses it for both — the
+// strip inside `isInlineDatedProgram` erases date words to see whether a program
+// name is left, and `DATE_LEAD_RE` rejects a line that opens with a date. A
+// prefix match breaks each the same way: `Marketing` begins with `Mar`, so the
+// strip eats the program name and the reject reads `Mar` + ` 2020` as a date
+// lead (#925, and #380 before it on the sibling `ATTENDANCE_RANGE_END`). The
+// reject is the subtler of the two — `\.?\s+` only fires on the bare-space
+// shape, which is why the defect looked punctuation-dependent. Enumerating the
+// months, longest-first, is what makes both safe to run over prose.
+export const STRICT_MONTH =
   "January|Jan|February|Feb|March|Mar|April|Apr|May|June|Jun|July|Jul|" +
   "August|Aug|September|Sept|Sep|October|Oct|November|Nov|December|Dec";
 
