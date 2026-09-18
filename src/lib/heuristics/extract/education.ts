@@ -371,23 +371,19 @@ const CLEAN_FIELD_DATE_RE = new RegExp(
  *     date) while keeping "MIT Applied Data Science (2023)" (the "MIT Applied
  *     Data Science" remainder survives). `isDateOnlyLine` at the call site is the
  *     first such guard; this is the stricter companion that also rejects a
- *     season-qualified range whose only words ARE date words.
- *
- *  Exported for its own test: #925's acceptance criteria are written as direct
- *  calls on this predicate, and the strip below is prose-sensitive enough that
- *  driving it only through {@link extractEducation} hides which line flipped. */
-export function isInlineDatedProgram(line: string): boolean {
+ *     season-qualified range whose only words ARE date words. */
+function inlineDatedProgramText(line: string): string | null {
   const t = line.trim();
-  if (!t) return false;
-  if (/^(GPA[:\s]|Minor\b|Major\b)/i.test(t)) return false;
-  if (!/^[A-Z0-9]/.test(t)) return false;
-  if (!YEAR_OR_REDACTED_RE.test(t)) return false;
+  if (!t) return null;
+  if (/^(GPA[:\s]|Minor\b|Major\b)/i.test(t)) return null;
+  if (!/^[A-Z0-9]/.test(t)) return null;
+  if (!YEAR_OR_REDACTED_RE.test(t)) return null;
   // A graduation-date line ("Grad. May 2011 | Kolkata, India", "Expected
   // Graduation: 2026", "Class of 2025") is the DATE of an existing school, not a
   // new program — it leads with a graduation/date-context word. Reject so a
   // school's own grad-date line never splits off as a phantom entry.
   if (/^(grad(?:\.|uat\w*)?|expected|anticipated|class of|completed)\b/i.test(t))
-    return false;
+    return null;
   // A line that LEADS with a date — a bare year, a "2001 - 2005" range, or a
   // "May 2011" month-year — is the attendance/graduation DATE of the entry above
   // it, not a program name. A genuine inline-dated program leads with its program
@@ -400,7 +396,7 @@ export function isInlineDatedProgram(line: string): boolean {
   // Redacted year slots (via {@link DATE_LEAD_RE}) so a redacted-date lead
   // ("20XX …", "Sep 20XX – May 20XX") is rejected on the same footing as a
   // real-year lead.
-  if (DATE_LEAD_RE.test(t)) return false;
+  if (DATE_LEAD_RE.test(t)) return null;
   // Drop a trailing "| City, Region" location segment before measuring the
   // program remainder — a date+location line ("… 2011 | Kolkata, India") must
   // not pass on the strength of its city words.
@@ -511,9 +507,95 @@ export function isInlineDatedProgram(line: string): boolean {
   // word ("Project Management Certificate 2022", PMP) still splits into its
   // own program entry (#251 adversarial review).
   if (EDUCATION_ANNOTATION_RE.test(testTarget) || /\bproject\s*:/i.test(testTarget))
-    return false;
+    return null;
   const remainder = testTarget.replace(/[\s,–\-—|/().:]+/g, "").trim();
-  return remainder.length >= 3;
+  return remainder.length >= 3 ? testTarget : null;
+}
+
+/**
+ * Whether `line` is a dated program line rather than a date line — the strip
+ * question, and the one every regression on this path is written against.
+ *
+ * Answers only that. Whether such a line may OPEN AN ENTRY is
+ * {@link isInlineDatedProgramEntry}, which is strictly narrower; see its
+ * docblock for why the two are not the same question.
+ *
+ * Exported for its own test: #925's acceptance criteria are written as direct
+ * calls on this predicate, and the strip below is prose-sensitive enough that
+ * driving it only through {@link extractEducation} hides which line flipped.
+ */
+export function isInlineDatedProgram(line: string): boolean {
+  return inlineDatedProgramText(line) !== null;
+}
+
+/** Words that make a single-token line read as a credential rather than as a
+ *  stray proper noun. Deliberately a POSITIVE vocabulary and deliberately
+ *  small: it is consulted only for a one-word remainder, where there is no
+ *  other evidence to weigh, and a wider list would start admitting the mangled
+ *  dates this gate exists to reject. `INSTITUTION_HINTS`' own words are
+ *  included so the two never disagree about a one-word school — though in
+ *  practice every caller has already excluded an institution-hint lead.
+ *  `coursework` and `fellowship` are deliberately ABSENT: both are denied
+ *  upstream by `EDUCATION_ANNOTATION_RE`, so `inlineDatedProgramText` returns
+ *  null before this vocabulary is ever consulted and listing them would only
+ *  imply a reachable case that does not exist. */
+const PROGRAM_TITLE_WORD_RE =
+  /^(certificate|certification|certified|programme?|diploma|bootcamp|course|residency|nanodegree|apprenticeship|traineeship|training|specialisation|specialization|university|college|institute|school|academy|polytechnic)s?$/i;
+
+/**
+ * Whether `line` may OPEN AN EDUCATION ENTRY as a dated program lead (#979).
+ *
+ * {@link isInlineDatedProgram} plus one requirement: what survives the date
+ * strip must be more than a single bare word.
+ *
+ * The two are separate on purpose, and the separation is the fix. The strip
+ * predicate asks "did a real word survive, or was this line only a date?", and
+ * a one-word survivor is the right answer there — `Springfield 2020`,
+ * `Fallow 2019`, `Presenting 2020` are exactly the words #925/#951 proved the
+ * strip must not eat. But "a word survived" is far too weak a licence to MINT
+ * AN INSTITUTION from, because the vocabulary can never enumerate the ways a
+ * date can be misspelled: `Setember 2021` leaves `Setember`, and the parser
+ * emitted a school by that name — a fabricated credential, naming an
+ * institution the résumé does not contain. `Agust`, `Jnuary`, and equally
+ * `Zebra` or `Banking`, all reached it by the same route; the misspellings are
+ * just the shape a résumé actually produces.
+ *
+ * So the gate is not about months at all, and deliberately not a spell
+ * corrector (#979 rules one out): a single capitalised token sitting beside a
+ * year, with no program word and no institution hint, carries no evidence that
+ * it is a credential. Two tokens is enough — `Marketing Certificate 2020`,
+ * `MIT Applied Data Science (2023)` — because a mangled date leaves exactly one
+ * LETTER-BEARING token, the misspelling itself, however the range around it is
+ * punctuated. Counting only letter-bearing tokens is what makes that true; see
+ * the comment on the split below.
+ *
+ * The hint-less boundary site in {@link extractEducation} asks THIS when
+ * deciding whether an entry opens without a partner; the two callers with
+ * partner lookaheads ({@link isProgramLeadAt} and {@link isInstitutionLeadAt})
+ * deliberately ask the loose predicate {@link isInlineDatedProgram} (see the
+ * comments there).
+ */
+export function isInlineDatedProgramEntry(line: string): boolean {
+  const text = inlineDatedProgramText(line);
+  if (text === null) return false;
+  // Apostrophes, ampersands, periods and hyphens stay INSIDE a word, so
+  // "Dean's", "R&D", "B.Sc." and "Post-Graduate" each count once rather than
+  // splitting into a false second token that would satisfy the gate.
+  //
+  // Only LETTER-BEARING tokens count (#979 review round 2). Keeping `-` inside
+  // a word is what makes "Post-Graduate" one token, but it also leaves the bare
+  // hyphen of an ASCII range as a token of its own — `Agust 2018 - 2020` and
+  // `Agust 2018-2020` both survive the date strip as `Agust` + `-`, which read
+  // as two words and walked straight through the gate. A day number does the
+  // same: `Setember 12, 2021` leaves `Setember` + `12`. The ASCII-hyphen range
+  // is the ordinary way a résumé writes a range, so that was the normal input,
+  // not an edge. Punctuation-only and digit-only tokens are not words, and
+  // dropping them is what makes the docblock's claim above — a mangled date is
+  // one token — true of every separator rather than only of the en dash.
+  const words = text.split(/[^A-Za-z0-9&.'’-]+/).filter((w) => /[A-Za-z]/.test(w));
+  if (words.length === 0) return false;
+  if (words.length > 1) return true;
+  return PROGRAM_TITLE_WORD_RE.test(words[0]!.replace(/[.'’-]+$/, ""));
 }
 
 /** Whether `text` reads as an INSTITUTION line for a degree-less program entry —
@@ -540,7 +622,17 @@ function isInstitutionLine(text: string): boolean {
  *  year, not an honors/GPA/grad-date annotation); the partner reuses
  *  {@link isInstitutionLine}. Recognizing this pair lets the chunker bind the
  *  program's year to the program's own entry and stops it bleeding onto a
- *  neighbouring degree that has no date of its own (C2). */
+ *  neighbouring degree that has no date of its own (C2).
+ *
+ *  The lead deliberately asks the LOOSE predicate {@link isInlineDatedProgram},
+ *  not {@link isInlineDatedProgramEntry} (#979 review finding 1). A program or
+ *  field title is routinely one word ("Photography 2020" / "Coursera",
+ *  "Welding 2019" / "Lincoln Technical Institute"), and our own exporter relies
+ *  on that cue (#302). Requiring a multi-token title or credential vocabulary
+ *  here would drop legitimate one-word programs and break round-trip fidelity.
+ *  It can afford the loose predicate because its conservatism lives in the
+ *  partner lookahead: `isInstitutionLine(partner)` requires an institution line
+ *  under it, whereas a lone misspelled date has no institution partner. */
 function isProgramLeadAt(
   lines: { text: string }[],
   i: number,
@@ -610,6 +702,14 @@ function isInstitutionLeadAt(lines: { text: string }[], i: number): boolean {
   // lines neither of them can see.
   if (DEGREE_RE.test(lead) || INSTITUTION_HINTS.test(lead)) return false;
   if (!isRealEntryHeader(lead)) return false;
+  // The LOOSE predicate here, not `isInlineDatedProgramEntry` (#979). This cue
+  // recognises a hint-less SCHOOL, and a school name is routinely one token —
+  // `MIT  May 2024`, `Caltech 2019`. Requiring a program word would reject
+  // exactly the #882 shape this function exists for. It can afford the looser
+  // test because its conservatism lives in the next-line lookahead below: a
+  // mangled date is not followed by a credential line, which is what separates
+  // this from the program-lead sites, where the partner may be any institution
+  // line or nothing at all.
   if (!isInlineDatedProgram(lead)) return false;
   return DEGREE_RE.test(next) && isRealEntryHeader(next);
 }
@@ -1392,6 +1492,7 @@ export function extractEducation(
       // must not persuade the chunker that this hint-less line leads a new
       // acronym-school entry.
       ((next !== undefined && DEGREE_RE.test(next) && isRealEntryHeader(next)) ||
+        isProgramLead ||
         // …or the boundary line is itself a hint-less, degree-less PROGRAM NAME
         // carrying its own graduation year inline ("MIT Applied Data Science
         // (2023)", #219). The inline year is what the old code would bleed onto
@@ -1399,7 +1500,12 @@ export function extractEducation(
         // Requires a Title-case program lead (not a `GPA:`/`Minor` note, not a
         // bare "Fall 2013 – Spring 2014" date range — which `isDateOnlyLine`
         // already excluded above) so an honors/awards line never splits.
-        isInlineDatedProgram(text));
+        //
+        // Asks {@link isInlineDatedProgramEntry} (#979) because at this
+        // boundary site the partner may be nothing at all: a single bare token
+        // beside a year ("Setember 2021", "Agust 2018") must not mint an
+        // institution from a mangled date.
+        isInlineDatedProgramEntry(text));
     // Once the current chunk is a complete degree-less program entry (#238), a
     // new entry lead — a degree, an institution-hint, or another program lead —
     // closes it. The program's own institution line (`programLeadInstIdx`) is
