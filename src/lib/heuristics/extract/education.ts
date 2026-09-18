@@ -435,26 +435,26 @@ function inlineDatedProgramText(line: string): string | null {
       // need no equivalent — `Junes` / `Marches` flip this predicate but come
       // out identical through `extractEducation`.
       //
-      // `present` carries `(?:ly)?` for exactly the same reason, and it is the
-      // only other literal here that carries anything. Dropping the `[a-z]*`
-      // tail took `Presently` with it, so a season-led `Fall 2013 – Presently`
-      // became an entry whose institution was the date range itself (#951
-      // review round 2). Deliberately `ly` and NOT `s`: `Presents` /
-      // `Presenting` / `Presentation` are program names that merely begin with
-      // a date word — the `Marketing 2020` class this strip exists to keep.
-      // Only the season-led form ever slipped, because `DATE_LEAD_RE` above
-      // enumerates months and bare years but NO seasons, so a month- or
-      // year-led range is rejected before it ever reaches this strip — the
-      // same asymmetry #952 turns on.
+      // The open-ended words are the shared `OPEN_ENDED_ALT`, not a literal
+      // (#952). This strip once carried a hand-written `present` and nothing
+      // else, so `Fall 2013 – Current` / `– Ongoing` / `– Now` left the
+      // open-ended word behind as "program text" and a bare date line passed
+      // as a program — the same drifted-copy defect #931 fixed in
+      // `parseDateRange`. Whole words, so `Nowhere`, `Nowak` and `Currency`
+      // are untouched.
       //
-      // `current` / `now` / `ongoing` are deliberately absent: they were never
-      // in this strip, so `Fall 2013 – Currently` fabricates identically on
-      // `main`. That is #952 — a pre-existing gap, not this change's
-      // regression — and the fix it wants is the already-imported
-      // `OPEN_ENDED_ALT` in place of a hand-added literal, which is a wider
-      // change than a regression fix should carry.
+      // They carry `(?:ly)?` for exactly the same reason seasons carry `s?`.
+      // Dropping the `[a-z]*` tail took `Presently` with it, so a season-led
+      // `Fall 2013 – Presently` became an entry whose institution was the date
+      // range itself (#951 review round 2); `Currently` is the same shape.
+      // Deliberately `ly` and NOT `s`: `Presents` / `Presenting` /
+      // `Presentation` are program names that merely begin with a date word —
+      // the `Marketing 2020` class this strip exists to keep. Only the
+      // season-led form ever slipped, because `DATE_LEAD_RE` above enumerates
+      // months and bare years but NO seasons, so a month- or year-led range is
+      // rejected before it ever reaches this strip.
       new RegExp(
-        String.raw`\b(?:${SEASON}s?|present(?:ly)?|${STRICT_MONTH})\b`,
+        String.raw`\b(?:${SEASON}s?|(?:${OPEN_ENDED_ALT})(?:ly)?|${STRICT_MONTH})\b`,
         "gi",
       ),
       "",

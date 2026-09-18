@@ -1143,6 +1143,36 @@ describe("isInlineDatedProgram: a date word must be a whole word (#925)", () => 
     expect(isInlineDatedProgram("Presents 2020")).toBe(true);
     expect(isInlineDatedProgram("Presenting 2020")).toBe(true);
   });
+});
+
+describe("isInlineDatedProgram: every open-ended word is a date word (#952)", () => {
+  // The strip used to spell `present` as a literal and omit the rest of
+  // `OPEN_ENDED_ALT`, so a season-led range ending in any other open-ended
+  // word left that word behind as "program text". Season-led only: a month-
+  // or year-led range is rejected earlier by `DATE_LEAD_RE`.
+  it.each([
+    "Fall 2013 - Current",
+    "Fall 2013 - Ongoing",
+    "Fall 2013 - Now",
+    "Fall 2013 – Current",
+    "Fall 2013 – Currently",
+    "Sept 2019 – Present",
+  ])("rejects a season- or month-led open-ended range: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(false);
+  });
+
+  // Multi-word names whose FIRST word is open-ended: the rest carries the
+  // remainder test. The single-word rows pin the whole-word boundary — each
+  // name merely begins with an open-ended word and must not be erased.
+  it.each([
+    "Now Foundations Program 2020",
+    "Current Affairs Certificate 2021",
+    "Ongoing Research Seminar 2022",
+    "Nowhere 2020",
+    "Currency 2021",
+  ])("keeps a program whose name contains an open-ended word: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(true);
+  });
 
   // `extractEducation`-level pins. The predicate-level ones above would not
   // have caught what the #951 review found: the damage shows up here, where a
