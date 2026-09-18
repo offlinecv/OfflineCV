@@ -18,12 +18,18 @@
  *
  * The summary row displays:
  * 1. "Targeting & improvements" with bullet/contact triage callouts when issues
- *    are detected, or "Targeting — your role and its expected skills" when clean.
+ *    are detected; "Targeting — your role and its expected skills" plus an
+ *    explicit all-clear line naming the bullet count when there are bullets,
+ *    none is flagged and no contact field is missing (#957 — the confirmation
+ *    `AttentionStrip` used to carry, dropped silently when #953 moved triage
+ *    content in here); or the plain label alone when there is nothing to
+ *    report either way. With nothing to open onto, the all-clear renders as a
+ *    standalone `InlineResult` strip instead of a disclosure.
  * 2. Addable-skill count badge via `Disclosure`'s `count` prop.
  * 3. The `warn` mark when no role has been picked.
  */
 
-import { Disclosure } from "@design-system";
+import { Disclosure, InlineResult } from "@design-system";
 import { RolesPanel } from "./RolesPanel.tsx";
 import {
   SkillTermGuidance,
@@ -84,12 +90,25 @@ export function TargetingSection({
 
   // Every child self-hides when it has nothing to say, so the guard has to be
   // about whether ANY of them will render — not about whether bullets exist.
-  // A `bullets.length === 0` term used to sit here, which meant a résumé whose
-  // bullets all PASS (bullets present, none flagged) with no titles and no
-  // skill guidance opened a disclosure onto a literally empty box.
-  if (titles.length === 0 && !hasSkillGuidance && !hasTriage) {
-    return null;
-  }
+  // A guard keyed on bullets would open a disclosure onto a literally empty
+  // box for a résumé whose bullets all PASS (bullets present, none flagged)
+  // with no titles and no skill guidance.
+  //
+  // `hasBody` is that question asked directly, one term per child, instead of
+  // inferred: `TargetingTriageRow` is gated on `hasTriage` below, and
+  // `titles.length > 0` is exactly `RolesPanel`'s non-null condition. Term 3 is
+  // the loose one and is deliberately stated as such: `SkillTermGuidance` also
+  // renders on a skills-ORDER finding, which `hasSkillGuidance` does not cover,
+  // so `hasBody` can in principle read false while that child would render. It
+  // is unreachable in practice — `computeSkillsOrderFinding` returns undefined
+  // when the titles tokenize to nothing (`skills-order.ts`), so a finding
+  // implies titles, which term 2 already covers — and the one contrived path
+  // (an `applied` reorder surviving a cleared headline) rendered nothing on
+  // `main` either, so it is not a regression. Deriving the guard from the
+  // children at all is the point: a fourth child must still be added to this
+  // disjunction by hand, but each term now restates a child's own null
+  // condition, so a stale one is visible rather than inferred.
+  const hasBody = hasTriage || titles.length > 0 || hasSkillGuidance;
 
   const suggestions = skills.missing.length;
   const noRolePicked = !primary || primary.trim() === "";
@@ -99,11 +118,53 @@ export function TargetingSection({
     missingContactCount,
   );
 
+  // Mirrors the old `AttentionStrip`'s all-clear line, which fired only when
+  // BOTH the bullet and contact checks were clean — a résumé with a contact
+  // gap but no flagged bullets stays silent about bullets here too, same as
+  // it always has (`TargetingTriageRow`'s bullet segment already self-hides
+  // in that case).
+  // One definition, two render paths (summary chip and standalone strip), so
+  // the copy cannot drift — the treatment does differ: a chrome-less span on
+  // the summary row, a bordered `InlineResult` standalone. Singular takes
+  // "passes": `TargetingTriageRow`'s own docblock documents this same English
+  // trap one function over ("1 bullet NEEDS attention" vs "2 bullets NEED"),
+  // and the pre-#956 `AttentionStrip` string this restores got it wrong.
+  const allClearLine =
+    bullets.length === 1
+      ? "All 1 bullet passes every check"
+      : `All ${bullets.length} bullets pass every check`;
+
+  const allBulletsClear = !hasTriage && bullets.length > 0;
+
+  // Nothing to say at all, and nothing to open onto.
+  if (!hasBody && !allBulletsClear) return null;
+
+  // Something to say, but no body behind it: the all-clear line is the whole
+  // message, so it renders as a standalone `InlineResult` strip rather than as
+  // a `Disclosure` whose triangle opens onto ~24px of blank card. #956's rule
+  // — "a disclosure with nothing to say is worse than no disclosure" — is
+  // about the BODY, so the fix is to drop the disclosure, not the confirmation
+  // (#957 AC2).
+  if (!hasBody) {
+    return (
+      <InlineResult tone="success" className="text-sm text-feedback-success-text">
+        {allClearLine}
+      </InlineResult>
+    );
+  }
+
   const summary = hasTriage ? (
     <span>
       Targeting & improvements
       <span className="ml-1.5 font-normal text-content-secondary">
         · {triageHeadline}
+      </span>
+    </span>
+  ) : allBulletsClear ? (
+    <span>
+      Targeting — your role and its expected skills
+      <span className="ml-1.5 font-normal text-feedback-success-text">
+        · {allClearLine}
       </span>
     </span>
   ) : (

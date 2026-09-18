@@ -149,12 +149,12 @@ describe("TargetingSection", () => {
     expect(el.textContent).toBe("");
   });
 
-  it("renders nothing when bullets are present but all of them pass", () => {
-    // The case the guard above used to miss: it also required
-    // `bullets.length === 0`, so a résumé with bullets that all pass — nothing
-    // flagged, no titles, no skill guidance — opened a disclosure onto an
-    // empty box. Leaving `bullets` undefined (as the sibling test does) hides
-    // this, so pass a clean bullet explicitly.
+  it("shows an all-clear confirmation naming the count when bullets are present but all of them pass", () => {
+    // #957: a résumé with bullets that all pass — nothing flagged, no
+    // titles, no skill guidance — rendered nothing on `main`, because
+    // `hasTriage` stays false when nothing is flagged. The all-clear the old
+    // `AttentionStrip` used to print — naming the bullet count — never
+    // reached the user. It has its own branch now.
     const allPassing: BulletObservation[] = [
       {
         text: "Cut checkout latency 45% by adding a read-through cache",
@@ -171,8 +171,100 @@ describe("TargetingSection", () => {
       parsed: { skills: [], experience: [] },
       bullets: allPassing,
     });
+    // No `<details>`: with no titles, no skill guidance and nothing flagged,
+    // every body child self-hides, so a disclosure here would open onto ~24px
+    // of blank card — #956's defect, which the first pass at #957 reopened for
+    // exactly this input. The confirmation renders as a standalone
+    // `InlineResult` strip instead.
     expect(el.querySelector("details")).toBeNull();
-    expect(el.textContent).toBe("");
+    expect(el.textContent).toContain("All 1 bullet passes every check");
+    expect(el.textContent).not.toContain("Targeting & improvements");
+  });
+
+  it("renders the all-clear inside the disclosure summary when there IS a body", () => {
+    // Same all-passing bullets, but a title exists — so `RolesPanel` renders
+    // and the disclosure has something to open onto. The all-clear belongs on
+    // the summary row here, not as a standalone line.
+    const allPassing: BulletObservation[] = [
+      {
+        text: "Cut checkout latency 45% by adding a read-through cache",
+        id: "b1",
+        index: 0,
+        hasMetric: true,
+        startsWithActionVerb: true,
+        wellFormedLength: true,
+        wordCount: 9,
+      },
+      {
+        text: "Led a 4-engineer migration to a typed schema registry",
+        id: "b2",
+        index: 1,
+        hasMetric: true,
+        startsWithActionVerb: true,
+        wellFormedLength: true,
+        wordCount: 9,
+      },
+    ];
+    const el = render({
+      titles: ["Staff Engineer"],
+      parsed: { skills: [], experience: [] },
+      bullets: allPassing,
+    });
+    const summary = el.querySelector("summary")!;
+    // Plural takes "pass", singular takes "passes" — see the copy note in
+    // `TargetingSection.tsx`.
+    expect(summary.textContent).toContain("All 2 bullets pass every check");
+    // The assertion that would have caught the reopened #956 defect: whatever
+    // the summary promises, the body must actually have content behind it.
+    const body = el.querySelector("details > div");
+    expect(body?.textContent?.trim()).not.toBe("");
+  });
+
+  it("stays silent about bullets when they all pass but contact has a gap", () => {
+    // The deliberate narrowing (#957 scope call): the deleted `AttentionStrip`
+    // fired its all-clear only when BOTH checks were clean. Two guards enforce
+    // that, redundantly: `allBulletsClear`'s `!hasTriage` term, and
+    // `summary`'s ternary testing `hasTriage` first (a contact gap also makes
+    // `hasBody` true, so the standalone strip is unreachable). Either alone
+    // keeps this input silent, so widening the term to `!hasBulletGap`, or
+    // reordering the ternary, is behaviour-neutral by itself; the test fails
+    // once both go, which is the point at which the user would see it.
+    // Two bullets, not one, so the plural copy is the string under test —
+    // the singular "passes" is pinned by the standalone-strip test above.
+    const allPassing: BulletObservation[] = [
+      {
+        text: "Cut checkout latency 45% by adding a read-through cache",
+        id: "b1",
+        index: 0,
+        hasMetric: true,
+        startsWithActionVerb: true,
+        wellFormedLength: true,
+        wordCount: 9,
+      },
+      {
+        text: "Led a 4-engineer migration to a typed schema registry",
+        id: "b2",
+        index: 1,
+        hasMetric: true,
+        startsWithActionVerb: true,
+        wellFormedLength: true,
+        wordCount: 9,
+      },
+    ];
+    const el = render({
+      bullets: allPassing,
+      contactMissing: [
+        { key: "linkedin_url", label: "Professional profile", value: "", group: "link", gated: true },
+      ],
+    });
+    // Regex, not a substring: "pass every check" is not a substring of the
+    // singular "passes every check", which is how this line once went vacuous.
+    expect(el.textContent).not.toMatch(/pass(es)? every check/);
+    const summary = el.querySelector("summary")!;
+    expect(summary.textContent).toContain("1 contact field missing");
+    // With a contact gap the summary is the triage headline, never the
+    // all-clear label, whatever `allBulletsClear` says.
+    expect(summary.textContent).not.toContain("expected skills");
   });
 
   it("summarizes bullet triage on the summary row and renders details inside", () => {
