@@ -200,6 +200,45 @@ describe("#618 — regression guard for #302 (two degree-less entries stay two)"
   });
 });
 
+describe("#979 review — one-word degree-less entries round-trip with fields and dates preserved", () => {
+  let reparsed: CascadeResult;
+
+  beforeAll(async () => {
+    const model = buildAtsResumeModel(
+      makeResult({
+        education: [
+          {
+            degree: "",
+            field: "Photography",
+            institution: "Ridgemont State University",
+            year: "2023",
+          },
+          {
+            degree: "",
+            field: "Welding",
+            institution: "Lakeside Institute of Technology",
+            year: "2021",
+          },
+        ],
+      }),
+      fakeScore,
+    );
+    reparsed = await runCascade((await renderAtsResumePdf(model)).bytes);
+  });
+
+  it("re-parses one-word degree-less entries preserving field, institution, and date", () => {
+    const reEdu = reparsed.canonical.fields.education ?? [];
+    expect(reEdu.length).toBe(2);
+    expect(reEdu[0]?.institution).toBe("Ridgemont State University");
+    expect(reEdu[0]?.field).toBe("Photography");
+    expect(reEdu[0]?.end_date ?? reEdu[0]?.year).toBe("2023");
+
+    expect(reEdu[1]?.institution).toBe("Lakeside Institute of Technology");
+    expect(reEdu[1]?.field).toBe("Welding");
+    expect(reEdu[1]?.end_date ?? reEdu[1]?.year).toBe("2021");
+  });
+});
+
 describe("#618 — control: a range date on Education still round-trips exactly like today", () => {
   let model: ReturnType<typeof buildAtsResumeModel>;
   let reparsed: CascadeResult;

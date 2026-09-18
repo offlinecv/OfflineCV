@@ -15,6 +15,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractEducation,
   isInlineDatedProgram,
+  isInlineDatedProgramEntry,
   splitDoubledCity,
 } from "./education.ts";
 import { type PdfLine, type PdfSection } from "../sections.ts";
@@ -1224,5 +1225,187 @@ describe("isInlineDatedProgram: a date word must be a whole word (#925)", () => 
     ]);
     expect(alone).toHaveLength(1);
     expect(alone[0].institution).toBe("Yale University");
+  });
+});
+
+describe("a one-word line beside a year must not mint a school (#979)", () => {
+  // A misspelled month is not in the vocabulary and never can be — the space of
+  // misspellings is open — so `Setember 2021` survived the date strip as
+  // `Setember`, passed the "substantive text is left" test, and the parser
+  // emitted a SCHOOL by that name. That is the fabricated-credential class: the
+  // output names an institution the résumé does not contain, which is strictly
+  // worse than the date-attachment miss #925 fixes.
+  //
+  // The fix is not about months, and deliberately not a spell corrector. It is
+  // about what a remainder has to look like before an ENTRY is opened on it: a
+  // single capitalised token beside a year, with no program word, carries no
+  // evidence that it is a credential — and a mangled date leaves exactly one
+  // LETTER-BEARING token however the range around it is punctuated.
+  const BASE = ["Yale University", "B.A. History, 2010 - 2014"];
+
+  it.each(["Setember 2021", "Agust 2018", "Jnuary 2020"])(
+    "does not open a second entry on %s",
+    (line) => {
+      const { value } = extractEducation(mkEduSection([...BASE, line]));
+      expect(value).toHaveLength(1);
+      expect(value[0].institution).toBe("Yale University");
+    },
+  );
+
+  it.each([
+    "Agust 2018 - 2020",
+    "Agust 2018-2020",
+    "Agust 2018 - Present",
+    "Agust 2018 – 2020",
+    "Setember 12, 2021",
+  ])("does not open a second entry on the RANGE form %s", (line) => {
+    // The gate counts letter-bearing tokens, and this row is why (#979 review
+    // round 2). `-` is kept inside a word so that `Post-Graduate` counts once,
+    // which also left the bare hyphen of an ASCII range standing as a token of
+    // its own: `Agust` + `-` read as two words and walked through. The day
+    // number in `Setember 12, 2021` did the same. The ASCII-hyphen range is the
+    // ordinary way a résumé writes a range, so these are the normal shape of
+    // the input — the en-dash row is here as the form that already passed, to
+    // pin that all five now agree.
+    const { value } = extractEducation(mkEduSection([...BASE, line]));
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Yale University");
+  });
+
+  it.each(["Setember 2021", "Agust 2018", "Jnuary 2020"])(
+    "preserves the school following %s as a second entry (AC 2 relaxed for #302 round-trip)",
+    (line) => {
+      // AC 2 trade-off note (#979 review finding 1):
+      // When a one-token line beside a year is followed by an institution line,
+      // `isProgramLeadAt` sees the exact same shape as a legitimate one-word program
+      // ("Photography 2020" / "Coursera"). Keeping `isProgramLeadAt` loose preserves
+      // real one-word programs on parse and on export round-trip (#302), trading the
+      // rare fabricated field on an adversarial synthetic input for no entry loss
+      // on real resumes. The school itself is correctly preserved as the
+      // institution, and no second school named after the misspelling is minted.
+      const { value } = extractEducation(
+        mkEduSection([...BASE, line, "Harvard Summer School"]),
+      );
+      expect(value).toHaveLength(2);
+      expect(value[0].institution).toBe("Yale University");
+      expect(value[1].institution).toBe("Harvard Summer School");
+    },
+  );
+
+  it("preserves one-word degree-less program leads with institution partner", () => {
+    const input = [
+      "Photography 2020",
+      "Coursera",
+      "Welding 2019",
+      "Lincoln Technical Institute",
+    ];
+    const { value } = extractEducation(mkEduSection(input));
+    expect(value).toHaveLength(2);
+    expect(value[0].institution).toBe("Coursera");
+    expect(value[0].field).toBe("Photography");
+    expect(value[0].year ?? value[0].end_date).toBe("2020");
+    expect(value[1].institution).toBe("Lincoln Technical Institute");
+    expect(value[1].field).toBe("Welding");
+    expect(value[1].year ?? value[1].end_date).toBe("2019");
+  });
+
+  it("preserves one-word degree-less program following a degreed entry", () => {
+    const input = [
+      ...BASE,
+      "Photography 2020",
+      "Coursera",
+    ];
+    const { value } = extractEducation(mkEduSection(input));
+    expect(value).toHaveLength(2);
+    expect(value[0].institution).toBe("Yale University");
+    expect(value[1].institution).toBe("Coursera");
+    expect(value[1].field).toBe("Photography");
+    expect(value[1].year ?? value[1].end_date).toBe("2020");
+  });
+
+  it("catches the whole one-token class, not just misspelled months", () => {
+    // `Zebra` and `Banking` reached the same fabrication by the same route.
+    // Enumerating month misspellings would have fixed three inputs and left the
+    // shape intact; this pins that the gate is about the SHAPE.
+    for (const line of ["Zebra 2020", "Banking 2020", "Running 2020"]) {
+      const { value } = extractEducation(mkEduSection([...BASE, line]));
+      expect(value, line).toHaveLength(1);
+    }
+  });
+
+  it("still opens an entry on a real program title", () => {
+    // Two tokens is enough — and `Certificate` is the word that makes these
+    // read as credentials rather than as stray proper nouns.
+    for (const line of [
+      "Marketing Certificate 2020",
+      "Data Science Certificate 2020",
+    ]) {
+      const { value } = extractEducation(mkEduSection([...BASE, line]));
+      expect(value, line).toHaveLength(2);
+      expect(value[1].institution, line).toBe(line.replace(/\s*20\d{2}$/, ""));
+    }
+  });
+
+  it("leaves the #925 controls exactly as they were", () => {
+    // `Marketing 2020` alone already produced one entry before this change (a
+    // downstream strip erased the word), and it still does. The control is that
+    // the OUTPUT is unchanged, not that the path through it is.
+    const { value } = extractEducation(mkEduSection([...BASE, "Marketing 2020"]));
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Yale University");
+  });
+
+  it("keeps the strip predicate and the entry gate as separate questions", () => {
+    // `isInlineDatedProgram` answers "did a real word survive the date strip, or
+    // was this line only a date?" — and a one-word survivor is the RIGHT answer
+    // there; that is precisely what #925/#951 proved the strip must not eat.
+    // What changed is that surviving is no longer a licence to mint a school.
+    for (const line of [
+      "Springfield 2020",
+      "Fallow 2019",
+      "Presenting 2020",
+      "Setember 2021",
+    ]) {
+      expect(isInlineDatedProgram(line), line).toBe(true);
+      expect(isInlineDatedProgramEntry(line), line).toBe(false);
+    }
+  });
+
+  it("admits a one-word remainder that names a credential", () => {
+    // The positive vocabulary's whole job: one token is not disqualifying, an
+    // EVIDENCE-FREE one token is.
+    expect(isInlineDatedProgramEntry("Certificate 2020")).toBe(true);
+    expect(isInlineDatedProgramEntry("Diploma 2019")).toBe(true);
+    expect(isInlineDatedProgramEntry("Bootcamp 2021")).toBe(true);
+  });
+
+  it("keeps an intra-word hyphen, period and ampersand as ONE token", () => {
+    // The counterpart of the range rows above: dropping non-letter tokens must
+    // not also split the words the keep-set exists to hold together. Each line
+    // here has a genuine second word, and would still pass if the first were
+    // split — so the assertion that carries the weight is the one-word row.
+    expect(isInlineDatedProgramEntry("Post-Graduate Diploma 2019")).toBe(true);
+    expect(isInlineDatedProgramEntry("R&D Certificate 2021")).toBe(true);
+    expect(isInlineDatedProgramEntry("MIT Applied Data Science (2023)")).toBe(true);
+    // One word by virtue of the keep-set, and a credential by vocabulary: if
+    // the hyphen split it, this would be two tokens and pass for the wrong
+    // reason; if the hyphen were dropped as a token, it stays one and passes
+    // through `PROGRAM_TITLE_WORD_RE`.
+    expect(isInlineDatedProgramEntry("Post-Graduate 2019")).toBe(false);
+  });
+
+  it("still rejects every real date line", () => {
+    // The gate narrows what opens an entry; it must not widen it anywhere.
+    for (const line of [
+      "May 2011",
+      "September 2020",
+      "Sept. 2019",
+      "Fall 2013 – Spring 2014",
+      "Summers 2013, 2014",
+      "Fall 2013 – Presently",
+    ]) {
+      expect(isInlineDatedProgram(line), line).toBe(false);
+      expect(isInlineDatedProgramEntry(line), line).toBe(false);
+    }
   });
 });
