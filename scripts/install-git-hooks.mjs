@@ -13,6 +13,9 @@
 //     `npm ci` checkout that ran `prepare` outside a work tree). `prepare`
 //     must never fail the install, so every path exits 0.
 //   - Honors the `OFFLINECV_SKIP_HOOKS=1` escape hatch at hook runtime.
+//   - Inside Claude Code, also records which session pushed which commit
+//     (`.git/offlinecv-session-pushes.log`), even when the escape hatch is
+//     set; `scripts/gh-as-reviewer.sh` reads it to refuse self-approval.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -21,6 +24,19 @@ const MARKER_BEGIN = "# >>> offlinecv managed pre-push (npm run verify) >>>";
 const MARKER_END = "# <<< offlinecv managed pre-push <<<";
 
 const MANAGED_BLOCK = `${MARKER_BEGIN}
+# Record which Claude Code session pushed which commit, BEFORE the skip check so a
+# hook-skipping push (the collapse) is still recorded. scripts/gh-as-reviewer.sh
+# reads this to refuse an APPROVE from the session that wrote the change. No-op
+# outside Claude Code. Deletions (all-zero local SHA) push no commit. Written before
+# \`npm run verify\` too, so a push the gate then blocks still leaves an entry; that
+# only ever refuses an approval, which is the safe direction for a backstop.
+if [ -n "\${CLAUDE_CODE_SESSION_ID:-}" ]; then
+  _ledger="$(git rev-parse --git-common-dir)/offlinecv-session-pushes.log"
+  while read -r _lref _lsha _rref _rsha; do
+    case "$_lsha" in *[!0]*) ;; *) continue ;; esac
+    printf '%s\\t%s\\t%s\\n' "$CLAUDE_CODE_SESSION_ID" "$_lsha" "$_rref" >> "$_ledger"
+  done
+fi
 # Mirror CI locally before push. Bypass with OFFLINECV_SKIP_HOOKS=1.
 if [ "\${OFFLINECV_SKIP_HOOKS:-0}" = "1" ]; then
   exit 0

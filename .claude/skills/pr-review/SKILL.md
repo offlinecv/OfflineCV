@@ -1,7 +1,7 @@
 ---
 name: pr-review
 description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits), auto-fix & push small items if 0 blockers exist, collapse the branch back to one commit via /collapse-pr before the review lands, emit suggestion blocks for what it does not push, file a follow-up issue for every finding that outlives the run, post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip — then resolve the threads it disposed of itself, so no finding is lost to a merge and the open threads left blocking are only the ones the author owes an answer to.
-argument-hint: <#|#N> [--repo owner/repo] [--local] [--effort low|medium|high] [--no-commit]
+argument-hint: <#|#N> [--repo owner/repo] [--local] [--effort low|medium|high] [--no-commit] [--as <login>]
 ---
 
 # Review PR
@@ -67,7 +67,7 @@ spend the skill's effort on the offlinecv-specific gates and the workflow.
 ## Input
 
 Parse `$ARGUMENTS` for a **PR number** (`390`, `#390`) and optionally
-`--repo owner/repo`, `--local`, `--effort`, `--no-commit`. If no PR number is given, infer
+`--repo owner/repo`, `--local`, `--effort`, `--no-commit`, `--as <login>`. If no PR number is given, infer
 it from the current branch:
 
 ```bash
@@ -79,9 +79,62 @@ guess. `--effort` is passed straight through to `/code-review` (default `high`).
 
 - **Autonomous by default**: `pr-review` runs unattended to completion and posts the review
   to GitHub at the end without prompting for confirmation. There is no flag to request this —
-  it is the only mode. `--local` and `--no-commit` are the two switches that change behaviour.
+  it is the only mode. `--local`, `--no-commit` and `--as` are the switches that change behaviour.
 - `--local`: Print the draft review and findings locally to stdout and stop without posting to GitHub.
 - `--no-commit`: Skip committing small fixes directly; leave them as comments only.
+- `--as <login>`: Review **as a second GitHub account** (e.g. a maintainer's approver bot),
+  so the review can count as the approval `main` requires. The commands below call its value
+  `AS_LOGIN`. See below.
+
+### `--as <login>` — reviewing as a second account
+
+Every GitHub write that carries the reviewer's identity — the 👀 (Step 0.6), the review
+(Step 6), and the thread replies and resolves (Step 6.5) — goes through
+`scripts/gh-as-reviewer.sh`, never through a `GH_TOKEN=… gh …` command. The wrapper takes the
+token from `gh`'s own keyring entry for `<login>`, allows exactly those actions and nothing
+else, and enforces two guards on `review` (its header has the detail):
+
+1. **No self-approval.** An `APPROVE` is refused (exit 3) when the Claude Code session running
+   it pushed any commit on the PR. The evidence is a push ledger the managed pre-push hook
+   writes, keyed by `CLAUDE_CODE_SESSION_ID`.
+2. **Signed.** A review body without a `Reviewed by: <model> (<effort>)` line is refused.
+
+**The ledger is a backstop, not the rule.** The rule is yours to apply first: if *this
+session* wrote or pushed any commit on the PR — through `/open-pr`, `/revise-pr`,
+`/collapse-pr`, an `/implement-*` skill, or by hand — the semantic verdict still gets
+computed, but the posted event is `COMMENT`, handled exactly like the self-review case in
+Step 6. A second account's approval of the agent's own work is the reviewing agent checking
+itself, and the required approval then certifies nothing. The ledger misses a push that
+skipped the hook entirely (`git push --no-verify`), so don't lean on the wrapper to catch you.
+
+**What "this session" means.** The wrapper's unit is one `CLAUDE_CODE_SESSION_ID`, recorded
+in one clone's `.git`. `/clear` starts a new ID, and a push from another clone lands in that
+clone's ledger, so both pass guard 1. The rule is wider than the guard: a context that
+*knows* it authored the PR — the work is in its transcript, a compaction summary, an
+auto-loaded `STATE.md`, or you recall opening or revising the PR — is the author, whatever
+its session ID says. Post `COMMENT`. Only a context that learned the change from the diff
+and the issue alone reads it independently, and only that one may approve.
+
+**Step 5.5 does not run under `--as`.** Its whole premise is that the reviewer approves the
+commit it just pushed, which is precisely what guard 1 refuses. Nits and Secondary findings
+become Step 5.6 suggestion blocks instead: the author applies them, and the commit is theirs.
+
+Everything else still runs under the default `gh` identity: reads, `gh pr checkout`, and
+Step 5.7's follow-up issues (filing an issue approves nothing).
+
+**Setup, once per machine.** Log the account into `gh` (`gh auth login`, then
+`gh auth switch` back to your own account — the wrapper reads the token by login, so the
+active account does not matter). Then allow the wrapper, and only the wrapper, in
+`.claude/settings.local.json` (per-machine, not committed):
+
+```json
+{ "permissions": { "allow": ["Bash(scripts/gh-as-reviewer.sh:*)"] } }
+```
+
+Run `node scripts/install-git-hooks.mjs` (or `npm install`) so the pre-push hook carries the
+ledger block. **Call the wrapper as a command of its own**, from the repo root, exactly as
+`scripts/gh-as-reviewer.sh …`: the rule matches the command's prefix, so wrapping it in
+`$(…)` or chaining it after `&&` may not match and will prompt. Read ids from its output.
 
 ## Process
 
@@ -101,6 +154,9 @@ Also capture the identity actually posting the review:
 
 ```bash
 VIEWER_LOGIN="$(gh api user -q .login)"
+# under --as, the reviewer is the second account — read it through the wrapper instead
+# (its own command; see Input):
+scripts/gh-as-reviewer.sh --as "$AS_LOGIN" whoami
 ```
 
 If `VIEWER_LOGIN` equals the author login, this is a **self-review** — GitHub
@@ -165,6 +221,8 @@ you read it:
 
 ```bash
 gh api "repos/$REPO/issues/$PR_NUM/reactions" -f content=eyes --silent
+# under --as:
+scripts/gh-as-reviewer.sh --as "$AS_LOGIN" --repo "$REPO" react-eyes "$PR_NUM"
 ```
 
 This one write is safe to make *this early*, before anything has been reviewed:
@@ -453,9 +511,10 @@ and still `APPROVE`.
 
 ### Step 5.5 — Auto-fix small items, then collapse (0 Blockers)
 
-If 0 Blocking findings exist AND small fixes (Secondary or Nits) exist AND neither
-`--no-commit` nor `--local` is set (`--local` is a preview — it commits, pushes and collapses
-nothing; its fixes are printed as findings):
+If 0 Blocking findings exist AND small fixes (Secondary or Nits) exist AND none of
+`--no-commit`, `--local` or `--as` is set (`--local` is a preview — it commits, pushes and
+collapses nothing; its fixes are printed as findings; `--as` skips this step because its
+approval may not cover a commit this session pushed — see Input):
 
 **The order is the whole of this step**, and it is not rearrangeable:
 
@@ -846,6 +905,15 @@ Handle it without touching the semantic verdict Step 5 computed:
   not the body — does not mistake a self-reviewed `REQUEST_CHANGES` for an
   approval, or a self-reviewed `APPROVE` for an unresolved comment.
 
+**Session-authored, under `--as`: the same treatment, for a different reason.** If this
+session pushed any commit on the PR (see Input), force the posted event to `COMMENT` exactly as
+above, with the first line
+`**Verdict: APPROVE (posted as COMMENT — this session pushed commits to this PR, so its
+approval would certify its own work)**`. If you missed it and the wrapper refuses the `APPROVE`
+(exit 3, `REFUSED — this Claude Code session pushed …`), do the same and post again; that
+refusal is the guard doing its job, not an error to route around. Never retry the `APPROVE`
+under the default identity or with a hand-built `GH_TOKEN` command.
+
 **Post the review automatically at the end of the run** — do NOT prompt the user for interactive confirmation. (If `--local` is set, print the draft to stdout and stop without posting.)
 
 **Sign the review with your model.** End the body with one line naming the model
@@ -920,6 +988,10 @@ cat > /tmp/review.json <<'JSON'
 }
 JSON
 REVIEW_ID="$(gh api "repos/$REPO/pulls/$PR_NUM/reviews" --method POST --input /tmp/review.json --jq .id)"
+
+# under --as: its own command; it prints the review id, which you then carry as REVIEW_ID.
+# It also pins the review's commit_id to the head it checked.
+scripts/gh-as-reviewer.sh --as "$AS_LOGIN" --repo "$REPO" review "$PR_NUM" /tmp/review.json
 ```
 
 Keep `REVIEW_ID`: Step 6.5 uses it to tell this review's threads from everyone else's.
@@ -1014,6 +1086,10 @@ gh api -X POST "repos/$REPO/pulls/$PR_NUM/comments/$COMMENT_ID/replies" -f body=
 gh api graphql -f query='
   mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){
     thread{ isResolved } } }' -f id="$THREAD_ID"
+
+# under --as, both go through the wrapper (each its own command; the reply body is a file):
+scripts/gh-as-reviewer.sh --as "$AS_LOGIN" --repo "$REPO" reply "$PR_NUM" "$COMMENT_ID" /tmp/reply.md
+scripts/gh-as-reviewer.sh --as "$AS_LOGIN" resolve "$THREAD_ID"
 ```
 
 **Always reply before resolving.** A silently resolved thread reads as the finding being
@@ -1046,6 +1122,10 @@ separately from the verdict line: `self-review: event forced to COMMENT,
 semantic verdict is <APPROVE|REQUEST_CHANGES>` — a reader (or a calling skill)
 scanning only for "REQUEST_CHANGES"/"APPROVE" in the printed report must not
 have to infer this from the GitHub review state, which no longer carries it.
+
+Under `--as`, name the account the review posted as, and report a session-authored downgrade
+the same way: `session-authored: event forced to COMMENT, semantic verdict is <X>` — including
+whether you applied the rule yourself or the wrapper's guard refused first.
 
 Report **the thread ledger in one line**: how many threads the review opened, how many
 Step 6.5 resolved and under which disposition (filed as `#N` / no action wanted — Step 5.5's
@@ -1104,6 +1184,10 @@ recoverable. Carry its classification across too (*already upstream* / *merely b
   no override exists. Compute the real verdict as usual, force the posted `event`
   to `COMMENT`, and state the real verdict as the first line of the body and again
   in Step 7 (Step 6). Never skip posting because the "natural" event is blocked.
+- **`--as` never approves this session's own work.** Under `--as`, every reviewer-identity
+  write goes through `scripts/gh-as-reviewer.sh`, Step 5.5 is off, and a PR this session
+  pushed to gets `COMMENT` with the real verdict in the first line. A wrapper refusal is
+  final — never retry it under another identity or with a hand-built `GH_TOKEN` command.
 - **Blocking bar is specific:** correctness-on-normal-use, real fixture PII,
   hardcoded colors / wrong component tier, a command bug that breaks every
   invocation, a gate CI will fail. Everything softer is Secondary/Nit.
