@@ -115,6 +115,7 @@ import {
   SUMMARY_SECTION_ID,
 } from "./ReconstructedSummary.tsx";
 import { SkillsSection } from "./ReconstructedSkills.tsx";
+import { DocumentBody } from "./DocumentBody.tsx";
 import { EditableField, SectionHeading } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 
@@ -1518,110 +1519,120 @@ export function ReconstructedResume({
         bullets={bullets}
         contactMissing={contactMissing}
       />
-      {/* Summary leads the document body, matching the exported model's own
-       *  order (`ats-resume-model.ts`: Summary → Experience → …) so the preview
-       *  reads in the same sequence as the artifact (#625). */}
-      <SummarySection
-        heading={display.sectionHeadings?.get("summary")}
-        summary={parsed.summary}
-        onSummaryChange={setSummaryField}
-      />
-      {achievementsAbove && credentialSections}
-      <ExperienceSection
-        heading={display.sectionHeadings?.get("experience")}
-        sectionLabels={parsed.experience.map((e) => e.section_label)}
-        groups={experienceRenderGroups}
-        resumeSections={resumeSections}
-        jdContext={jdContext}
-        critique={critique}
-        onRewriteApplied={onRewriteApplied}
-        hasBullets={bullets.length > 0}
-        experienceOverrides={experienceOverrides}
-        // The 4th argument is the RESOLVED entry, not the pristine parse:
-        // `parsed` is `display.parsed`, i.e. `applyOverrides` output, so it
-        // already carries every earlier edit — which is exactly what the #672
-        // rule has to resolve `??` against. `setExperienceField` pairs it with
-        // the pre-write override map so the sparse write-back does not compare a
-        // previously-overridden key against a base that contains it.
-        onExperienceFieldChange={(index, field, value) =>
-          setExperienceField(index, field, value, resolvedExperience(index))
-        }
-        onBulletChange={(index, value, original) =>
-          setBulletField(index, value, original)
-        }
-        onRemoveBullet={removeBullet}
-        addedBullets={edit.addedBullets}
-        addedExperience={addedExperience}
-        originalCount={originalExpCount}
-        parsedIndices={expParsedIndices}
-        onAddEntry={() => addEntry("experience")}
-        onPruneEmpty={(isHeld) => pruneEmptyAddedEntries("experience", isHeld)}
-        onRemoveEntry={removeEntry}
-        onEntryField={setEntryField}
-        onAddBullet={addBullet}
-        captureBulletUndo={captureBulletUndo}
-        summaryApply={summaryApply}
-      />
-      <ProjectsSection
-        heading={display.sectionHeadings?.get("projects")}
-        projects={projects}
-        groups={projectGroups}
-        descriptionOverrides={descriptionOverrides}
-        addedProjects={addedProjects}
-        originalCount={originalProjCount}
-        parsedIndices={projParsedIndices}
-        onAddEntry={() => addEntry("projects")}
-        onPruneEmpty={() => pruneEmptyAddedEntries("projects")}
-        onRemoveEntry={removeEntry}
-        onRemoveBullet={removeBullet}
-        onEntryField={setEntryField}
-        onDescriptionField={setDescriptionField}
-        onAddBullet={addBullet}
-      />
-      {!achievementsAbove && credentialSections}
-      <EducationSection
-        heading={display.sectionHeadings?.get("education")}
-        education={parsed.education}
-        educationOverrides={educationOverrides}
-        onEducationFieldChange={(index, field, value) =>
-          setEducationField(index, field, value)
-        }
-        addedEducation={addedEducation}
-        originalCount={originalEduCount}
-        parsedIndices={eduParsedIndices}
-        onAddEntry={() => addEntry("education")}
-        onPruneEmpty={() => pruneEmptyAddedEntries("education")}
-        onRemoveEntry={removeEntry}
-        onEntryField={setEntryField}
-      />
-      <SkillsSection
-        heading={display.sectionHeadings?.get("skills")}
-        skills={parsed.skills}
-        skillCategories={parsed.skillCategories}
-        onAddSkill={addSkill}
-        onRemoveSkill={removeSkill}
-        // Categorised edits (#476) — bound to the CURRENT edited grouping, which
-        // the override snapshot keeps in lockstep with the flat list. Each
-        // dispatches the same grouping-snapshot transform.
-        onRenameCategory={(i, label) =>
-          renameSkillCategory(parsed.skillCategories ?? [], i, label)
-        }
-        onDeleteCategory={(i) =>
-          deleteSkillCategory(parsed.skillCategories ?? [], i)
-        }
-        onAddCategory={(label) =>
-          addSkillCategory(parsed.skillCategories ?? [], parsed.skills, label)
-        }
-        onAddSkillToCategory={(i, skill) =>
-          addSkillToCategory(parsed.skillCategories ?? [], i, skill)
-        }
-        onMoveSkill={(skill, destIndex) =>
-          moveSkillToCategory(parsed.skillCategories ?? [], skill, destIndex)
-        }
-        onRemoveCategorySkill={(skill) =>
-          removeCategorySkill(parsed.skillCategories ?? [], skill)
-        }
-      />
+      {/* Document-body anchor (#958): the triage row's bullet jump link
+       *  target — see `DocumentBody.tsx`. */}
+      <DocumentBody>
+        {/* Summary leads the document body, matching the exported model's own
+         *  order (`ats-resume-model.ts`: Summary → Experience → …) so the
+         *  preview reads in the same sequence as the artifact (#625). */}
+        <SummarySection
+          heading={display.sectionHeadings?.get("summary")}
+          summary={parsed.summary}
+          onSummaryChange={setSummaryField}
+        />
+        {achievementsAbove && credentialSections}
+        <ExperienceSection
+          heading={display.sectionHeadings?.get("experience")}
+          sectionLabels={parsed.experience.map((e) => e.section_label)}
+          groups={experienceRenderGroups}
+          resumeSections={resumeSections}
+          jdContext={jdContext}
+          critique={critique}
+          onRewriteApplied={onRewriteApplied}
+          hasBullets={bullets.length > 0}
+          experienceOverrides={experienceOverrides}
+          // The 4th argument is the RESOLVED entry, not the pristine parse:
+          // `parsed` is `display.parsed`, i.e. `applyOverrides` output, so it
+          // already carries every earlier edit — which is exactly what the #672
+          // rule has to resolve `??` against. `setExperienceField` pairs it with
+          // the pre-write override map so the sparse write-back does not compare a
+          // previously-overridden key against a base that contains it.
+          onExperienceFieldChange={(index, field, value) =>
+            setExperienceField(index, field, value, resolvedExperience(index))
+          }
+          onBulletChange={(index, value, original) =>
+            setBulletField(index, value, original)
+          }
+          onRemoveBullet={removeBullet}
+          addedBullets={edit.addedBullets}
+          addedExperience={addedExperience}
+          originalCount={originalExpCount}
+          parsedIndices={expParsedIndices}
+          onAddEntry={() => addEntry("experience")}
+          onPruneEmpty={(isHeld) =>
+            pruneEmptyAddedEntries("experience", isHeld)
+          }
+          onRemoveEntry={removeEntry}
+          onEntryField={setEntryField}
+          onAddBullet={addBullet}
+          captureBulletUndo={captureBulletUndo}
+          summaryApply={summaryApply}
+        />
+        <ProjectsSection
+          heading={display.sectionHeadings?.get("projects")}
+          projects={projects}
+          groups={projectGroups}
+          descriptionOverrides={descriptionOverrides}
+          addedProjects={addedProjects}
+          originalCount={originalProjCount}
+          parsedIndices={projParsedIndices}
+          onAddEntry={() => addEntry("projects")}
+          onPruneEmpty={() => pruneEmptyAddedEntries("projects")}
+          onRemoveEntry={removeEntry}
+          onRemoveBullet={removeBullet}
+          onEntryField={setEntryField}
+          onDescriptionField={setDescriptionField}
+          onAddBullet={addBullet}
+        />
+        {!achievementsAbove && credentialSections}
+        <EducationSection
+          heading={display.sectionHeadings?.get("education")}
+          education={parsed.education}
+          educationOverrides={educationOverrides}
+          onEducationFieldChange={(index, field, value) =>
+            setEducationField(index, field, value)
+          }
+          addedEducation={addedEducation}
+          originalCount={originalEduCount}
+          parsedIndices={eduParsedIndices}
+          onAddEntry={() => addEntry("education")}
+          onPruneEmpty={() => pruneEmptyAddedEntries("education")}
+          onRemoveEntry={removeEntry}
+          onEntryField={setEntryField}
+        />
+        <SkillsSection
+          heading={display.sectionHeadings?.get("skills")}
+          skills={parsed.skills}
+          skillCategories={parsed.skillCategories}
+          onAddSkill={addSkill}
+          onRemoveSkill={removeSkill}
+          // Categorised edits (#476) — bound to the CURRENT edited grouping, which
+          // the override snapshot keeps in lockstep with the flat list. Each
+          // dispatches the same grouping-snapshot transform.
+          onRenameCategory={(i, label) =>
+            renameSkillCategory(parsed.skillCategories ?? [], i, label)
+          }
+          onDeleteCategory={(i) =>
+            deleteSkillCategory(parsed.skillCategories ?? [], i)
+          }
+          onAddCategory={(label) =>
+            addSkillCategory(
+              parsed.skillCategories ?? [],
+              parsed.skills,
+              label,
+            )
+          }
+          onAddSkillToCategory={(i, skill) =>
+            addSkillToCategory(parsed.skillCategories ?? [], i, skill)
+          }
+          onMoveSkill={(skill, destIndex) =>
+            moveSkillToCategory(parsed.skillCategories ?? [], skill, destIndex)
+          }
+          onRemoveCategorySkill={(skill) =>
+            removeCategorySkill(parsed.skillCategories ?? [], skill)
+          }
+        />
+      </DocumentBody>
     </section>
   );
 }

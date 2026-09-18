@@ -6,19 +6,21 @@
  * rendered at the top of the expanded TargetingSection disclosure (#953).
  *
  * Co-locates flagged bullet totals (metric, length, weak verb) and missing
- * contact fields, with a jump link to the contact block.
+ * contact fields, with jump links to the contact block and to the bullets
+ * themselves.
  *
- * There is deliberately NO bullet jump link (#956 review). This row renders
- * inside `TargetingSection`, which sits inside `#reconstructed-resume` — so
- * that anchor is ABOVE this row, and a "Review bullets ↓" pointing at it
- * scrolled up past the contact card while its arrow and label promised the
- * opposite. No correct target exists to swap in either: `score.bullets` pools
- * project and achievement bullets alongside experience ones
- * (`score.ts` — `scoreSpecificity`/`scoreStructure` both fold in
- * `extraSources`), so an Experience anchor would land wrong for exactly the
- * résumé whose flagged bullets are in Projects. The bullets are immediately
- * below this row on the page; `#contact` is the one jump that is genuinely
- * elsewhere, so it is the one that stays.
+ * #956 review removed a bullet jump link that pointed at
+ * `#reconstructed-resume` — that id sits on the section that WRAPS this row
+ * (ContactCard + TargetingSection + the document), so it is above the row,
+ * and "Review bullets ↓" scrolled up past the contact card while its arrow
+ * and label promised the opposite. #958 adds the corrected version: a link
+ * to `SECTION_IDS.documentBody`, a single id wrapping every résumé section
+ * below this disclosure (Summary through Skills). It has to be that broad,
+ * not an Experience-specific anchor, because `score.bullets` pools project
+ * and achievement bullets alongside experience ones (`score.ts` —
+ * `scoreSpecificity`/`scoreStructure` both fold in `extraSources`), so an
+ * Experience-only anchor would land wrong for the résumé whose flagged
+ * bullets live in Projects.
  */
 
 import type { BulletObservation } from "../../lib/score/score.ts";
@@ -156,6 +158,14 @@ export function TargetingTriageRow({
         {hasContactGap && <ContactSegment missing={contactMissing} />}
       </div>
       <div className="flex items-center gap-3 text-xs text-content-secondary">
+        {hasBulletGap && (
+          <a
+            href={`#${SECTION_IDS.documentBody}`}
+            className="font-medium text-accent-primary hover:underline"
+          >
+            Review bullets ↓
+          </a>
+        )}
         {hasContactGap && (
           <a
             href={`#${SECTION_IDS.contact}`}

@@ -17,11 +17,22 @@
  *
  * Only anchors actually referenced by score tiles belong here (e.g.
  * `jd-input-label` is intentionally excluded).
+ *
+ * `documentBody` (#958) is the one exception to "score tiles only": it is the
+ * triage row's bullet jump link. It deliberately does NOT point at a specific
+ * section (Experience, Projects, …) because the bullet pool `TargetingTriageRow`
+ * summarizes is not experience-only — `scoreSpecificity`/`scoreStructure`
+ * (`score.ts`) fold project and achievement bullets into the same
+ * `BulletObservation[]` an Experience-only anchor would misrepresent for a
+ * Projects-heavy résumé. `documentBody` wraps every résumé section
+ * (Summary through Skills) as one target, so it resolves no matter which
+ * section the flagged bullets actually live in.
  */
 
 export const SECTION_IDS = {
   contact: "contact",
   reconstructed: "reconstructed-resume",
+  documentBody: "resume-document-body",
 } as const;
 
 export type SectionId = (typeof SECTION_IDS)[keyof typeof SECTION_IDS];
