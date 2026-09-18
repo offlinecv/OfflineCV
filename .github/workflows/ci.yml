@@ -113,3 +113,39 @@ jobs:
           # purged from `main`'s code-scanning history so they stop being
           # expected.)
           category: fallow
+
+  # Real-browser viewport harness (#954). A separate job, deliberately not a
+  # step inside `verify` above: `verify` is the fast local pre-push gate, and
+  # a Chromium download does not belong in it. This job installs only
+  # Chromium (not the full `playwright install --with-deps` browser set —
+  # firefox/webkit are out of scope, see playwright.config.ts) and runs
+  # `npm run test:e2e`, which builds `dist/` itself and then lets the config's
+  # `webServer` serve it via `vite preview`, so no separate build step is
+  # needed here.
+  e2e:
+    runs-on: ubuntu-latest
+    # The suite runs in ~20s locally; a cold runner adds `npm ci`, a Chromium
+    # download and a `vite build`. This bounds a hung webServer rather than
+    # letting it burn the default 360.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      # `trace: retain-on-failure` writes into `test-results/`, which lives on
+      # the runner and dies with it — without this the artifact exists for the
+      # length of the job and nobody can ever open it. Only on failure, since a
+      # green run retains nothing.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: test-results/
+          retention-days: 7

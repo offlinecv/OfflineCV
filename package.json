@@ -33,6 +33,7 @@
     "check:baselines": "node scripts/check-known-failures.mjs",
     "check:core": "node scripts/check-core-package.mjs",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "npm run build && playwright test",
     "verify:quick": "tsc -b --noEmit && eslint . && npm run check:nul && npm run test:changed",
     "verify": "tsc -b --noEmit && eslint . && npm run check:nul && npm run check:fixtures && npm run check:baselines && npm run check:core && npm run test:changed && vite build && (fallow audit --base origin/main || echo 'fallow audit exited non-zero (report-only, ignored)')"
   },
@@ -53,6 +54,7 @@
     "turndown": "^7.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",

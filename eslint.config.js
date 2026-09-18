@@ -6,6 +6,12 @@
 import tseslint from "typescript-eslint";
 import reactPlugin from "eslint-plugin-react";
 import globals from "globals";
+import { fileURLToPath } from "node:url";
+
+/** Repo root, for the type-aware e2e block's `tsconfigRootDir`. Derived from
+ *  this file rather than left to default to `process.cwd()`, so the config
+ *  behaves the same when ESLint is invoked from a subdirectory or an editor. */
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
 
 /** Palette colour segments guarded by the token rules. */
 const PALETTE_COLOURS =
@@ -184,6 +190,56 @@ export default [
         },
       ],
       "no-restricted-syntax": ["error", ...restrictedSyntaxRules()],
+    },
+  },
+
+  // ── Playwright specs ────────────────────────────────────────────────────
+  // `eslint .` lints only what a `files:` block matches, and every block above
+  // is scoped to `src/**`, so `e2e/**` was walked and silently skipped — the
+  // same "reads as covered, never visited" gap the global `ignores` comments
+  // call out for `packages/core/dist/**` and `internal/**`, except without even
+  // an ignore entry to make it visible. `npx eslint e2e/` answered "no matching
+  // configuration was supplied". The e2e suite is also the worst place for that
+  // hole: it runs in its own CI job, so a spec-only change had no lint gate at
+  // all.
+  //
+  // Type-aware, unlike the `src/**` block, and that is the whole point. A
+  // Playwright locator call returns a promise, so the characteristic bug in a
+  // spec is a MISSING `await` — an assertion that never runs while the test
+  // reports green, which is exactly the failure this harness exists to remove.
+  // `no-floating-promises` needs type information to see it, so this block
+  // names `tsconfig.e2e.json` (the project that already owns these files).
+  // The cost is bounded: it applies to `e2e/**` only, which is a handful of
+  // files, and `src/**` keeps its fast syntax-only pass.
+  //
+  // `playwright.config.ts` is NOT here — it stays under the `*.config.ts`
+  // global ignore with `vite.config.ts`, deliberately.
+  {
+    files: ["e2e/**/*.ts"],
+    plugins: {
+      "@typescript-eslint": tseslint.plugin,
+    },
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        project: ["./tsconfig.e2e.json"],
+        tsconfigRootDir: ROOT,
+      },
+      globals: {
+        ...globals.node,
+        ...globals.browser,
+      },
+    },
+    rules: {
+      // The missing-await class, in both directions: a promise nobody waits
+      // on, and an `await` on something that was never thenable (which is how
+      // a locator helper silently loses its own await).
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/await-thenable": "error",
+      // A spec that stops using a fixture, a constant or a helper should say
+      // so. Left over imports are how a spec keeps claiming coverage it no
+      // longer has.
+      "@typescript-eslint/no-unused-vars": "error",
     },
   },
 
