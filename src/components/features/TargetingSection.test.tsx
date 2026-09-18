@@ -28,6 +28,7 @@ import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
 
 import type { BulletObservation } from "../../lib/score/score.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
+import { SECTION_IDS } from "../../lib/anchors.ts";
 
 let container: HTMLDivElement;
 let root: Root | null = null;
@@ -287,15 +288,18 @@ describe("TargetingSection", () => {
     // Inside the disclosure, the bullet breakdown renders.
     expect(el.textContent).toContain("missing a metric");
     expect(el.textContent).toContain("weak verb");
-    // But NO bullet jump link (#956 review). It used to point at
-    // `#reconstructed-resume`, which wraps this very row, so "Review bullets ↓"
-    // scrolled UP past the contact card. There is no correct anchor to swap in
-    // — flagged bullets can live in Projects or Achievements as well as
-    // Experience — and the bullets are directly below this row anyway.
-    expect(el.textContent).not.toContain("Review bullets");
-    expect(
-      [...el.querySelectorAll("a")].map((a) => a.getAttribute("href")),
-    ).not.toContain("#reconstructed-resume");
+    // The bullet jump link (#958) points at `SECTION_IDS.documentBody`, not
+    // the old, wrong `#reconstructed-resume` (#956 review removed that one
+    // because it wraps this very row, so "Review bullets ↓" scrolled UP past
+    // the contact card). `documentBody` wraps every résumé section below this
+    // disclosure, so it resolves for Projects/Achievements bullets too, not
+    // just Experience.
+    expect(el.textContent).toContain("Review bullets");
+    const hrefs = [...el.querySelectorAll("a")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).not.toContain("#reconstructed-resume");
+    expect(hrefs).toContain(`#${SECTION_IDS.documentBody}`);
   });
 
   it("summarizes missing contact fields on the summary row", () => {
