@@ -199,9 +199,9 @@ describe("collapsible score widget (#953)", () => {
     const el = render(makeScore(), true);
     expect(el.textContent).toContain("Score details ▾");
     // The collapsed bar still MOUNTS all 3 dimension anchors. Note what this
-    // does and does not prove: their container is `hidden sm:flex`, and jsdom
+    // does and does not prove: their container is `hidden lg:flex`, and jsdom
     // applies no CSS, so this asserts the anchor contract survives the
-    // collapse — not that a phone-width user can see them. Below `sm` the
+    // collapse — not that a sub-`lg` user can see them. Below `lg` the
     // dimensions are reached through the expand control instead.
     expect(tileAnchors(el)).toHaveLength(3);
   });
@@ -246,6 +246,101 @@ describe("collapsible score widget (#953)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("docked strip is structurally one line, not text-metric luck (#960)", () => {
+  // jsdom has no layout engine and can never see a wrap — that regression
+  // proof lives in `e2e/viewport.spec.ts` / `e2e/mobile/*.spec.ts`. What jsdom
+  // CAN see is the class contract the fix depends on: the verdict word is
+  // still visible text (color is never the sole carrier of the band — an
+  // earlier version of this fix dropped it to color-only and that was a
+  // WCAG 1.4.1 regression, caught in review), but it now sits in a
+  // FIXED-width slot rather than at its own intrinsic width, so the pill's
+  // width no longer depends on which band rendered. The optional layout
+  // penalty span still renders nowhere in the docked pill.
+  it("renders the verdict word for every band, inside the SAME fixed-width slot", () => {
+    const widthClasses = new Set<string>();
+    for (const [overall, word] of [
+      [92, "Strong"],
+      [72, "Getting There"],
+      [40, "Needs Work"],
+    ] as const) {
+      const score = { ...makeScore(), overall };
+      const el = render(score, true);
+      const pill = [...el.querySelectorAll("button")].find((b) =>
+        b.getAttribute("aria-label")?.startsWith("Resume score"),
+      );
+      expect(pill?.getAttribute("aria-label")).toContain(word);
+      expect(pill?.textContent).toContain(word);
+
+      // The element carrying the visible word text must be the one with the
+      // fixed-width slot class — otherwise a differently-sized ancestor
+      // could still make the PILL's rendered width band-dependent even
+      // though the word itself is present.
+      const wordEl = [...(pill?.querySelectorAll("span") ?? [])].find(
+        (s) => s.textContent === word,
+      );
+      const widthClass = [...(wordEl?.classList ?? [])].find((c) =>
+        c.startsWith("sm:w-"),
+      );
+      expect(widthClass, `${word} slot width class`).toBeDefined();
+      widthClasses.add(widthClass!);
+    }
+    // One slot width shared by all three bands — the actual fix for the
+    // wrap, since it makes group 1's width independent of which band
+    // rendered rather than of whether the word renders at all.
+    expect(widthClasses.size).toBe(1);
+  });
+
+  it("keeps the verdict word unwrappable inside its fixed-width slot", () => {
+    // The fixed-width slot is only a fix while its contents stay on one line.
+    // Two of the three labels are two words, so without `truncate`
+    // (`white-space: nowrap` + `overflow: hidden` + ellipsis) the span breaks
+    // at its space the moment the text needs more than the slot's 112px and
+    // re-inflates the pill — measured 26px -> 47.3px docked with the verdict
+    // word alone at 14px, which Chrome's minimum-font-size setting reaches
+    // without any code change. jsdom cannot see the wrap; `e2e/viewport.spec.ts`
+    // forces the font-size up and asserts the row holds. This pins the class
+    // that makes that possible.
+    for (const [overall, word] of [
+      [92, "Strong"],
+      [72, "Getting There"],
+      [40, "Needs Work"],
+    ] as const) {
+      const el = render({ ...makeScore(), overall }, true);
+      const wordEl = [...el.querySelectorAll("span")].find(
+        (s) => s.textContent === word,
+      );
+      expect(wordEl, `${word} slot`).toBeDefined();
+      expect([...wordEl!.classList], `${word} slot`).toContain("truncate");
+    }
+  });
+
+  it("does not render the inline layout-penalty span when docked, even when the multiplier is < 1", () => {
+    const score = makeScore();
+    score.layout = { triggers: ["two-column"], multiplier: 0.85, scanned: false };
+    const el = render(score, true);
+    expect(el.textContent).not.toContain("layout penalty");
+  });
+
+  it("reveals the dimension track group at lg, never at md or sm", () => {
+    // `lg`, not the `md` #960 first shipped: at 768px the row's leftover
+    // width fits no whole set of tiles, and #960's `overflow-hidden` turned
+    // that shortfall into a tile sliced through its own text instead of an
+    // absent one. Below `lg` the group must be `display:none` — absent from
+    // the tab order too, not merely invisible.
+    const el = render(makeScore(), true);
+    expect(el.innerHTML).toContain("hidden min-w-0");
+    expect(el.innerHTML).toContain("lg:flex");
+    expect(el.innerHTML).not.toContain("md:flex");
+    expect(el.innerHTML).not.toContain("sm:flex");
+  });
+
+  it("applies flex-nowrap (never flex-wrap) to the docked strip root", () => {
+    const el = render(makeScore(), true);
+    expect(el.innerHTML).toContain("flex-nowrap");
+    expect(el.innerHTML).not.toContain("flex-wrap");
   });
 });
 

@@ -22,15 +22,25 @@
  * Score-hero height, post-#956: `AtsScoreReadout`'s original static ≤160px
  * target (#953) was explicitly retired once #956 shipped the widget as a
  * two-state design instead, per the "Clarification (rewrite)" comment on
- * #953. Measured today: 185.5px expanded, 62px docked, identically at both
- * 1280x800 and 1440x900. `EXPANDED_MAX_PX` and `DOCKED_MAX_PX` are regression
- * ceilings on those two numbers, NOT design targets — each margin covers
- * cross-machine rendering variance and nothing more, so what a ceiling does
- * and does not catch is stated next to the constant rather than inferred from
- * its size. #955 owns any further compression of the expanded state; if it
- * lands one, tighten `EXPANDED_MAX_PX` (never `DOCKED_MAX_PX`, a different
+ * #953. Measured: 185.5px expanded and 26px docked, identically at both
+ * 1280x800 and 1440x900 and in all six `SCORE_REGIMES`. (The 62px #954
+ * recorded as "docked" was a strip already wrapped to two lines — that
+ * commit's own comment on `DOCKED_MAX_PX` said so and pointed here for the
+ * re-derivation; this is it.) `EXPANDED_MAX_PX` (here) and `DOCKED_MAX_PX`
+ * (`e2e/support/score-hero.ts`, shared with the #960 mobile spec) are
+ * regression ceilings on those two numbers, NOT design targets — each margin
+ * covers cross-machine rendering variance and nothing more, so what a ceiling
+ * does and does not catch is stated next to the constant rather than inferred
+ * from its size. #955 owns any further compression of the expanded state; if
+ * it lands one, tighten `EXPANDED_MAX_PX` (never `DOCKED_MAX_PX`, a different
  * state) and re-measure the docked figure too, since #955's own notes say the
  * ring/dimension-row block — not the hero's outer padding — sets the floor.
+ *
+ * The docked strip's ONE-LINE regression matrix (#960 — six fixtures
+ * spanning the three verdict bands crossed with the layout-penalty span)
+ * lives in its own describe block below, sharing `e2e/support/score-hero.ts`
+ * with `e2e/mobile/score-strip.spec.ts` rather than duplicating the
+ * drop/dock/locate helpers a second time.
  *
  * Above-the-fold, and what this spec does NOT defend: #955 ("...the first
  * résumé section still lands below the fold") is open, but its own table was
@@ -45,95 +55,38 @@
  * "~700px effective" fold height (751.5 already exceeds that budget). Do not
  * cite a pass here as those being fixed.
  */
-import { test, expect, type Page, type Locator } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-
-// The production strings, not private copies. `scoreToggleLabels.ts` exists
-// because `AtsScoreReadout` and `CollapsedScoreBar` are separate subtrees that
-// have to agree on these two names for focus restoration to work at all, and
-// its docblock is explicit that "a constant private to either one only guards
-// half of it". A third private copy here would put a rename three sites deep.
-// The `../src` edge this adds to `tsconfig.e2e.json`'s program is deliberate
-// and cheap: the module is two string constants with no imports of its own.
+import { test, expect } from "@playwright/test";
+import type { Page, Locator } from "@playwright/test";
 import {
   COLLAPSE_LABEL,
+  DOCKED_MAX_PX,
   EXPAND_LABEL,
-} from "../src/components/features/scoreToggleLabels.ts";
+  SCORE_REGIMES,
+  dockScoreHero,
+  dropFixtureAndWaitForParse,
+  expectDockedStripIsOneLine,
+  expectRegimeBand,
+  forceVerdictWordFontSize,
+  heroSection,
+} from "./support/score-hero.ts";
 
-const FIXTURE_PDF = fileURLToPath(
-  new URL("../tests/fixtures/pdfs/latex/awesome-cv-resume.pdf", import.meta.url),
-);
-
-// Measured 185.5px. +14.5px (~8%) covers cross-machine font/subpixel
-// variance; nowhere near the ~340px the pre-#956 static hero measured, which
-// is the regression this ceiling exists to catch.
+// Re-measured, not inherited: 185.5px, identically in all six `SCORE_REGIMES`
+// at both 1280x800 and 1440x900 — so unlike `DOCKED_MAX_PX` (which #960 found
+// had been calibrated against an already-wrapped strip), this figure and its
+// ceiling were sound as written. +14.5px (~8%) covers cross-machine
+// font/subpixel variance; nowhere near the ~340px the pre-#956 static hero
+// measured, which is the regression this ceiling exists to catch.
 const EXPANDED_MAX_PX = 200;
-// Measured 62px, both viewports. +8px (~13%) for the same rendering variance.
-//
-// Be clear about what this does NOT defend. 62px is ALREADY the wrapped
-// two-row state: `CollapsedScoreBar` is `flex flex-wrap`, and its children
-// currently land on two rows (measured child offsets 228/231 and 266, i.e.
-// 26 + 12 of `gap-3` + 24 = 62). So this ceiling is calibrated ON the wrap,
-// not against it, and a #960 regression that merely re-wraps the strip would
-// pass here. What it catches is the strip growing past its present two rows.
-// #965 moves this constant into `e2e/support/score-hero.ts` and re-derives it
-// from the true one-row height (26px); tighten it there, with a fresh
-// measurement, rather than guessing a smaller number here.
-const DOCKED_MAX_PX = 70;
 
 // Measured 275.5px expanded (identical at both viewports). The hero ceilings
-// above bound `AtsScoreReadout`'s own <section>; this one bounds the whole
-// score card that holds it — `ParsedHeader`, the two-column `ErrorState` and
-// the `gap-6` + `p-5` chrome add 90px that sits OUTSIDE both hero ceilings
-// while pushing the résumé down exactly the way #953/#956 care about. Without
-// this assertion, `ParsedHeader` growing a row moves the résumé and leaves
-// every other ceiling in this file untouched. +24.5px (~9%), same rendering
-// variance as the other two.
+// above and in `score-hero.ts` bound `AtsScoreReadout`'s own <section>; this
+// one bounds the whole score card that holds it — `ParsedHeader`, the
+// two-column `ErrorState` and the `gap-6` + `p-5` chrome add 90px that sits
+// OUTSIDE both hero ceilings while pushing the résumé down exactly the way
+// #953/#956 care about. Without this assertion, `ParsedHeader` growing a row
+// moves the résumé and leaves every other ceiling in this file untouched.
+// +24.5px (~9%), same rendering variance as the other two.
 const CARD_MAX_PX = 300;
-
-/** Drop the fixture PDF via the real (hidden, `sr-only`) file input and wait
- *  for the reconstructed résumé to render. `setInputFiles` doesn't require
- *  the element to be visible, only attached — `DropZone`'s input is
- *  `sr-only`, not `display:none`.
- *
- *  Scoped by `accept` rather than a bare `input[type="file"]`: `/` also
- *  renders a second, unrelated file input (JSON library-record import,
- *  `accept="application/json,.json"`), and a bare selector is a Playwright
- *  strict-mode violation with both on the page. */
-async function dropFixtureAndWaitForParse(page: Page): Promise<void> {
-  await page.goto("/");
-  await page
-    .locator('input[type="file"][accept*="application/pdf"]')
-    .setInputFiles(FIXTURE_PDF);
-  await page
-    .locator("#reconstructed-resume")
-    .waitFor({ state: "visible", timeout: 15_000 });
-}
-
-/** The score hero's outer `<section ref={rootRef}>`, whichever of the two
- *  states (`AtsScoreReadout`'s full reveal or `CollapsedScoreBar`'s docked
- *  strip) is currently mounted — selected via the toggle button's accessible
- *  name rather than a test id. No production component in this repo carries
- *  a `data-testid` (it's a test-file-only stub convention, see
- *  `ResultDetail.test.tsx`), and both states already expose a stable,
- *  user-facing name for their toggle.
- *
- *  `exact: true` matters: the docked strip's score pill carries a SEPARATE,
- *  longer aria-label ("Resume score 75 out of 100, Getting There. Expand
- *  score details.") that also *contains* `EXPAND_LABEL` as a substring, so a
- *  non-exact match resolves two elements and Playwright refuses to guess
- *  between them. */
-function heroSection(page: Page): Locator {
-  const collapseToggle = page.getByRole("button", {
-    name: COLLAPSE_LABEL,
-    exact: true,
-  });
-  const expandToggle = page.getByRole("button", {
-    name: EXPAND_LABEL,
-    exact: true,
-  });
-  return collapseToggle.or(expandToggle).locator("xpath=ancestor::section[1]");
-}
 
 /** The score `Card` wrapping the hero — `Result.tsx`'s
  *  `<Card className="flex flex-col gap-6 shadow-xs">`, which also holds
@@ -147,7 +100,7 @@ function scoreCard(page: Page): Locator {
 }
 
 test.describe("above-the-fold layout (#954)", () => {
-  test("score hero is <=200px expanded and docks to <=70px", async ({ page }) => {
+  test("score hero is <=200px expanded and docks to <=34px", async ({ page }) => {
     await dropFixtureAndWaitForParse(page);
 
     // Expanded (arrival) state first, and read immediately: `useAutoCollapse`
@@ -167,12 +120,7 @@ test.describe("above-the-fold layout (#954)", () => {
     // Force the docked state via the same user-toggle path `useAutoCollapse`
     // exposes (`toggle`, which locks out the timer), rather than waiting out
     // the real countdown — a spec that raced that timer would flake.
-    await page
-      .getByRole("button", { name: COLLAPSE_LABEL, exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: EXPAND_LABEL, exact: true })
-      .waitFor();
+    await dockScoreHero(page);
 
     const dockedBox = await heroSection(page).boundingBox();
     expect(dockedBox).not.toBeNull();
@@ -291,5 +239,76 @@ test.describe("above-the-fold layout (#954)", () => {
         headerBox!.y + headerBox!.height - 1,
       );
     }
+  });
+});
+
+test.describe("docked score strip stays one line regardless of the score (#960)", () => {
+  // Six fixtures × 4 widths. The bands cover the regression #960 found — the
+  // strip wrapped for a `Getting There`/`Needs Work` score at a width it held
+  // one line for `Strong`, because the old layout let the verdict word's and
+  // the layout-penalty span's rendered width decide the wrap. The widths
+  // cover the one #960's own fix then introduced: 1440 and 1280 are where the
+  // page container is at its 934px cap, 1024 is where it first reaches it
+  // (the tightest width at which the dimension tiles render at all), and 768
+  // is the widest width at which they must be absent rather than clipped.
+  //
+  // `expectDockedStripIsOneLine` carries both assertions and says why each
+  // one is shaped the way it is — in particular why the `getClientRects()`
+  // count this block used to assert proved nothing.
+  //
+  // Every test here sets its own widths (or, for the verdict-word test,
+  // measured its numbers at 1280), so the `desktop-1440` project would only
+  // re-run the identical block. Run it once.
+  test.beforeEach(({}, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "desktop-1280",
+      "viewport-independent block; runs under desktop-1280 only",
+    );
+  });
+
+  for (const regime of SCORE_REGIMES) {
+    test(`${regime.name} (${regime.band}) — one line at 1440 / 1280 / 1024 / 768px`, async ({
+      page,
+    }) => {
+      await dropFixtureAndWaitForParse(page, regime.fixture);
+      await dockScoreHero(page);
+      await expectRegimeBand(page, regime);
+
+      for (const width of [1440, 1280, 1024, 768]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expectDockedStripIsOneLine(page, `${regime.name} @ ${width}px`);
+      }
+    });
+  }
+
+  test("verdict word cannot wrap its fixed-width slot and re-inflate the pill", async ({
+    page,
+  }) => {
+    // The `sm:w-28` slot is what makes group 1's width independent of the
+    // band — but a fixed-width box holding a TWO-word label ("Getting There",
+    // "Needs Work") is a wrap waiting to happen one level further down, and
+    // the span shipped with the default `white-space: normal`.
+    //
+    // 14px is not an arbitrary bump. "Getting There" is the widest label at
+    // 89.3px natural, so it needs 89.3 x 14/11 = 113.7px — the first whole
+    // pixel size that overruns the 112px slot. Measured at 1280 with only
+    // this span's font-size varied and `truncate` removed from it, the
+    // docked section went 26px (11px) -> 27.3px (13px) -> 47.3px (14px):
+    // the jump IS the wrap. `DEFAULT_FIXTURE_PDF` scores `Getting There`,
+    // so it renders exactly that label.
+    //
+    // Reachable without a code change: Chrome's minimum-font-size setting
+    // raises 11px text while the `rem`-based slot width stays at 112px.
+    //
+    // 14, and do NOT raise it to 18 thinking it more stringent: with
+    // `truncate` in place 18px lands the docked section at exactly 34.0px,
+    // which is `DOCKED_MAX_PX` to the pixel, so the assertion becomes a coin
+    // flip on sub-pixel rounding. 14px is the smallest size that reproduced
+    // the unfixed wrap (47.3px) and it clears the ceiling by 5.3px once
+    // fixed.
+    await dropFixtureAndWaitForParse(page);
+    await dockScoreHero(page);
+    await forceVerdictWordFontSize(page, 14);
+    await expectDockedStripIsOneLine(page, "verdict word forced to 14px");
   });
 });
