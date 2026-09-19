@@ -72,6 +72,7 @@ import {
   dropFixtureAndWaitForParse,
   expectDockedStripIsOneLine,
   expectRegimeBand,
+  expectVerdictSlotDidNotWrap,
   forceVerdictWordFontSize,
   heroSection,
 } from "./support/score-hero.ts";
@@ -306,15 +307,17 @@ test.describe("docked score strip stays one line regardless of the score (#960)"
     // Reachable without a code change: Chrome's minimum-font-size setting
     // raises 11px text while the `rem`-based slot width stays at 112px.
     //
-    // 14, and do NOT raise it to 18 thinking it more stringent: with
-    // `truncate` in place 18px lands the docked section at exactly 34.0px,
-    // which is `DOCKED_MAX_PX` to the pixel, so the assertion becomes a coin
-    // flip on sub-pixel rounding. 14px is the smallest size that reproduced
-    // the unfixed wrap (47.3px) and it clears the ceiling by 5.3px once
-    // fixed.
+    // 14px is the smallest size that reproduced the unfixed wrap (47.3px
+    // docked section; slot height jumps from 18.7px to 37.3px). #974 asserts
+    // `slotHeight < lineHeight * 1.5` directly on the slot FIRST, so a wrap
+    // fails with a message naming the wrap rather than a generic height
+    // overrun — and then still checks the strip's overall ceiling
+    // (`DOCKED_MAX_PX`) at the forced size, since the slot check alone would
+    // miss anything else the larger text pushes onto a second line.
     await dropFixtureAndWaitForParse(page);
     await dockScoreHero(page);
     await forceVerdictWordFontSize(page, 14);
+    await expectVerdictSlotDidNotWrap(page, "verdict word forced to 14px");
     await expectDockedStripIsOneLine(page, "verdict word forced to 14px");
   });
 });

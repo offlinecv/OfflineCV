@@ -116,6 +116,24 @@ export function assessResumeSkills(parsed: ResumeQueryInput) {
   };
 }
 
+/**
+ * Whether the skills-order row renders. `applied` keeps the block up while the
+ * confirmation strip serves out its own hold, after the underlying finding has
+ * already recomputed away.
+ *
+ * Exported for the same reason `assessResumeSkills` is: `TargetingSection`
+ * decides whether to mount at all from whether this component will render, and
+ * a hand-kept copy of the condition over there is the drift #972 fixed.
+ */
+export function showsSkillsOrder(
+  skillsOrder: SkillsReorderController | undefined,
+): boolean {
+  return (
+    skillsOrder !== undefined &&
+    (skillsOrder.finding !== undefined || skillsOrder.applied)
+  );
+}
+
 export function SkillTermGuidance({
   parsed,
   onAddSkill,
@@ -141,11 +159,7 @@ export function SkillTermGuidance({
   const { recognized, unrecognized, missing: missingSkills } =
     assessResumeSkills(parsed);
 
-  // `applied` keeps the block up while the confirmation strip serves out its
-  // own hold, after the underlying finding has already recomputed away.
-  const showSkillsOrder =
-    skillsOrder !== undefined &&
-    (skillsOrder.finding !== undefined || skillsOrder.applied);
+  const showSkillsOrder = showsSkillsOrder(skillsOrder);
 
   // The ordering finding is an INDEPENDENT reason to render: it needs only
   // title tokens, whereas all three buckets above empty out whenever

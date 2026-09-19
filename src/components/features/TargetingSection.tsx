@@ -34,6 +34,7 @@ import { RolesPanel } from "./RolesPanel.tsx";
 import {
   SkillTermGuidance,
   assessResumeSkills,
+  showsSkillsOrder,
 } from "./SkillTermGuidance.tsx";
 import {
   TargetingTriageRow,
@@ -77,10 +78,13 @@ export function TargetingSection({
 }: TargetingSectionProps) {
   const skills = assessResumeSkills(parsed);
 
+  const showSkillsOrder = showsSkillsOrder(skillsOrder);
+
   const hasSkillGuidance =
     skills.recognized.length > 0 ||
     skills.unrecognized.length > 0 ||
-    skills.missing.length > 0;
+    skills.missing.length > 0 ||
+    showSkillsOrder;
 
   const flaggedBullets = bullets.filter(needsAttention).length;
   const missingContactCount = contactMissing.length;
@@ -95,19 +99,13 @@ export function TargetingSection({
   // with no titles and no skill guidance.
   //
   // `hasBody` is that question asked directly, one term per child, instead of
-  // inferred: `TargetingTriageRow` is gated on `hasTriage` below, and
-  // `titles.length > 0` is exactly `RolesPanel`'s non-null condition. Term 3 is
-  // the loose one and is deliberately stated as such: `SkillTermGuidance` also
-  // renders on a skills-ORDER finding, which `hasSkillGuidance` does not cover,
-  // so `hasBody` can in principle read false while that child would render. It
-  // is unreachable in practice — `computeSkillsOrderFinding` returns undefined
-  // when the titles tokenize to nothing (`skills-order.ts`), so a finding
-  // implies titles, which term 2 already covers — and the one contrived path
-  // (an `applied` reorder surviving a cleared headline) rendered nothing on
-  // `main` either, so it is not a regression. Deriving the guard from the
+  // inferred: `TargetingTriageRow` is gated on `hasTriage` below,
+  // `titles.length > 0` is exactly `RolesPanel`'s non-null condition, and
+  // `hasSkillGuidance` covers both `SkillTermGuidance`'s vocabulary matching
+  // and its skills-ordering coaching (#972). Deriving the guard from the
   // children at all is the point: a fourth child must still be added to this
-  // disjunction by hand, but each term now restates a child's own null
-  // condition, so a stale one is visible rather than inferred.
+  // disjunction by hand, but each term restates a child's own null condition,
+  // so a stale one is visible rather than inferred.
   const hasBody = hasTriage || titles.length > 0 || hasSkillGuidance;
 
   const suggestions = skills.missing.length;

@@ -16,7 +16,7 @@
  * which is focusable and reads out; per-résumé numbers belong here, visible.
  */
 
-import type { SectionAnchor } from "../../lib/anchors.ts";
+import type { ScoreTileAnchor } from "../../lib/anchors.ts";
 import { scoreBandParts } from "./scoreBand.ts";
 
 export interface ScoreDimensionRowProps {
@@ -25,7 +25,7 @@ export interface ScoreDimensionRowProps {
   max: number;
   gradable: boolean;
   hint: string;
-  anchor: SectionAnchor;
+  anchor: ScoreTileAnchor;
 }
 
 export function formatCompletenessHint(completeness: {

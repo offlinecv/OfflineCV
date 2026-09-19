@@ -104,4 +104,9 @@ describe("ScoreDimensionRow", () => {
     expect(html).toContain("—");
     expect(html).not.toContain("0/0");
   });
+
+  it("rejects non-score-tile anchors at compile time (#973)", () => {
+    // @ts-expect-error — ScoreDimensionRow requires ScoreTileAnchor, not arbitrary SectionAnchor
+    <ScoreDimensionRow {...base} anchor="#resume-document-body" />;
+  });
 });
