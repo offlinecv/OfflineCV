@@ -214,6 +214,44 @@ describe("Popover", () => {
     expect(panel.className).not.toContain("left-0");
   });
 
+  // jsdom has no layout engine, so this pins only the CLASS CONTRACT — that
+  // the panel carries the viewport-pinning override at all, on both
+  // alignments — never the geometry the override produces. That's
+  // `e2e/mobile/popover-containment.spec.ts` (#959): a real browser is the
+  // only oracle for whether `top: 100%` on a `fixed` element (viewport-height
+  // relative, not trigger-relative) actually lands the panel on screen.
+  function expectViewportPinned(panel: Element) {
+    expect(panel.className).toContain("max-sm:fixed");
+    expect(panel.className).toContain("max-sm:inset-x-4");
+    expect(panel.className).toContain("max-sm:top-auto");
+    expect(panel.className).toContain("max-sm:bottom-4");
+    expect(panel.className).toContain("max-sm:w-auto");
+    // The sheet must be bounded, not just placed: `height:auto` off a
+    // `bottom` anchor grows upward off-screen with nothing scrollable.
+    expect(panel.className).toContain("max-sm:max-h-[calc(100vh-2rem)]");
+    expect(panel.className).toContain("max-sm:overflow-y-auto");
+  }
+
+  it("carries the below-sm viewport-pinning override when aligned to start", () => {
+    const el = render();
+    act(() => trigger(el).click());
+    expectViewportPinned(el.querySelector('[role="dialog"]')!);
+  });
+
+  it("carries the below-sm viewport-pinning override when aligned to end", () => {
+    const el = renderNode(
+      <Popover
+        align="end"
+        label="How is this scored?"
+        triggerContent={<span>ⓘ</span>}
+      >
+        <p>Explanation text.</p>
+      </Popover>,
+    );
+    act(() => trigger(el).click());
+    expectViewportPinned(el.querySelector('[role="dialog"]')!);
+  });
+
   it("does not close on a click inside the panel", () => {
     const el = render();
     act(() => trigger(el).click());

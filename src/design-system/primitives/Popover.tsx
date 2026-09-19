@@ -55,8 +55,57 @@ import { Button, type ButtonVariant } from "./Button.tsx";
 // clips it into a scrollable area; it just overhangs, and on the state most
 // users end up in. `right-0` anchors the other edge instead, which is a class
 // swap rather than the JS positioning this dependency-free primitive avoids.
+//
+// `align` only picks WHICH trigger edge the panel hangs off, and at narrow
+// viewports a 288px (or even the `max-w`-clamped ~343px) panel routinely has
+// nowhere on either edge that keeps it fully on screen — measured off-screen
+// in BOTH alignments at 375px (#959). Below `sm` the `max-sm:*` classes
+// therefore stop anchoring the panel to the trigger at all and pin it to the
+// VIEWPORT instead: `fixed` + `inset-x-4` centers it in a 2rem-gutter column
+// regardless of `align`, and `top-auto` + `bottom-4` (rather than leaving
+// `top-full` in effect) is load-bearing — for a `fixed` element `top: 100%`
+// resolves against the viewport's height, not the trigger's, so without the
+// override the panel renders a full viewport-height below the trigger,
+// entirely off-screen; a bottom-anchored sheet is the one placement that
+// stays reachable independent of where on the page the trigger sits. This
+// is CSS-only, per the primitive's no-JS-positioning constraint above — no
+// floating-ui, no measured trigger rect — and confirmed empirically (not
+// just reasoned about) with a real Chromium page at 375px, since the
+// `top: 100%` behavior above is exactly the kind of thing that looks right
+// on paper and renders the panel invisible in practice.
+//
+// The breakpoint stays `sm` (640px). Review proposed narrowing it to 480px,
+// on the grounds that an anchored panel is already contained at 560 and 639
+// so pinning it there buys nothing. Measured across the range that argument
+// skips, the narrowing REOPENS this bug: panel right edge is a constant 558px
+// (trigger x 269.8 + `w-72`), so at 481 it overflows by 76.8px and at 500 by
+// 57.8px — contained only from 558 up. The binding caller is the EXPANDED
+// header explainer (`align=start`), whose trigger x is fixed by that row's
+// copy; the docked strip's own trigger tracks the viewport via
+// `justify-between` and stops overflowing above ~460px, so it is not what
+// sets the floor. A 560px threshold clears the binding case by 2.2px, which
+// is luck, not margin — and the next defensible stop, 600px, buys an 80px
+// band in exchange for a margin that a single added word in the heading above
+// would silently eat, since `w-72` is fixed and the trigger's x is set by
+// that copy. `max-sm` is the narrowest threshold worth having.
+//
+// `max-h` + `overflow-y-auto` bound the sheet: `top:auto; bottom:16px;
+// height:auto` grows UPWARD without limit, and a long panel was measured at
+// h 1206 / y -410 with nothing scrollable — invisible off the top. Today's
+// two callers happen to fit; this is a shared primitive, so it must not
+// depend on that.
+//
+// `max-sm:fixed` pins to the viewport only while no ancestor establishes a
+// containing block for fixed descendants — a non-`none` `transform`,
+// `filter`, `backdrop-filter` or `perspective`, `contain: paint|layout`, or a
+// `will-change` naming one of those. Under such an ancestor the sheet pins to
+// THAT box instead. Today's callers are clear (both render in `PageShell`'s
+// children, a sibling of its header), but the header itself is
+// `backdrop-blur` and exposes `headerExtra`, so a `Popover` placed there would
+// anchor to the header, not the viewport. The containment e2e cannot catch
+// this: a header-anchored sheet still passes every on-screen bound it checks.
 const PANEL_BASE =
-  "absolute top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-light bg-surface-card p-3 text-content-primary shadow-lg";
+  "absolute top-full z-20 mt-1 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border-light bg-surface-card p-3 text-content-primary shadow-lg max-sm:fixed max-sm:inset-x-4 max-sm:top-auto max-sm:bottom-4 max-sm:w-auto max-sm:max-h-[calc(100vh-2rem)] max-sm:overflow-y-auto";
 
 /** Which of the trigger's edges the panel is anchored to. */
 const PANEL_ALIGN = { start: "left-0", end: "right-0" } as const;

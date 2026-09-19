@@ -42,6 +42,12 @@
  * with `e2e/mobile/score-strip.spec.ts` rather than duplicating the
  * drop/dock/locate helpers a second time.
  *
+ * The last describe block (#959) proves the `Popover` primitive's `align`
+ * still anchors the panel to a trigger edge at THIS file's `md`+ widths,
+ * after #959 added a `max-sm:*` override that pins the panel to the viewport
+ * instead, below `sm` — `e2e/mobile/popover-containment.spec.ts` is the
+ * below-`sm` half of that same proof.
+ *
  * Above-the-fold, and what this spec does NOT defend: #955 ("...the first
  * résumé section still lands below the fold") is open, but its own table was
  * measured on `gh-953` mid-implementation, before commits that shipped in
@@ -310,5 +316,55 @@ test.describe("docked score strip stays one line regardless of the score (#960)"
     await dockScoreHero(page);
     await forceVerdictWordFontSize(page, 14);
     await expectDockedStripIsOneLine(page, "verdict word forced to 14px");
+  });
+});
+
+// #959 pinned the score explainer's panel to the VIEWPORT below `sm`
+// (`max-sm:*` on `Popover`'s `PANEL_BASE`), because at 375px `align` alone
+// left it off-screen in both alignments. That override is media-gated —
+// `e2e/mobile/popover-containment.spec.ts` proves the below-`sm` behaviour;
+// this proves the fix left `align`'s own trigger-edge anchoring untouched at
+// this file's `md`+ widths (1280/1440), where #956 originally added `align`
+// specifically to fix.
+test.describe("Popover panel stays trigger-aligned above sm (#959)", () => {
+  test("docked strip explainer anchors to the trigger's right edge (align=end)", async ({
+    page,
+  }) => {
+    await dropFixtureAndWaitForParse(page);
+    await dockScoreHero(page);
+
+    const trigger = page.getByRole("button", { name: "How is this scored?" });
+    await trigger.click();
+    const panel = page.getByRole("dialog", { name: "How is this scored?" });
+    await expect(panel).toBeVisible();
+
+    const triggerBox = (await trigger.boundingBox())!;
+    const panelBox = (await panel.boundingBox())!;
+    const viewport = page.viewportSize()!;
+
+    expect(
+      Math.abs(panelBox.x + panelBox.width - (triggerBox.x + triggerBox.width)),
+    ).toBeLessThan(1);
+    expect(panelBox.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width);
+  });
+
+  test("expanded header explainer anchors to the trigger's left edge (align=start, default)", async ({
+    page,
+  }) => {
+    await dropFixtureAndWaitForParse(page);
+
+    const trigger = page.getByRole("button", { name: "How is this scored?" });
+    await trigger.click();
+    const panel = page.getByRole("dialog", { name: "How is this scored?" });
+    await expect(panel).toBeVisible();
+
+    const triggerBox = (await trigger.boundingBox())!;
+    const panelBox = (await panel.boundingBox())!;
+    const viewport = page.viewportSize()!;
+
+    expect(Math.abs(panelBox.x - triggerBox.x)).toBeLessThan(1);
+    expect(panelBox.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(viewport.width);
   });
 });
