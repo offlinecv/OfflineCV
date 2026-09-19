@@ -12,10 +12,11 @@
  * silent no-op (only Completeness, on `#contact`, scrolled).
  *
  * This renders `<AtsScoreReadout>`, collects every tile anchor from the DOM, and
- * asserts each resolves to a known scroll target in the typed `SECTION_IDS`
- * contract. The target components (`ContactCard`, `ReconstructedResume`) render
- * their `id` from that same constant, so contract membership guarantees a live
- * target — a dead link like `#per-bullet-feedback` fails here immediately.
+ * asserts each resolves to a known scroll target in the typed
+ * `SCORE_TILE_SECTION_IDS` contract (#973). The target components (`ContactCard`,
+ * `ReconstructedResume`) render their `id` from that same constant, so contract
+ * membership guarantees a live target — a dead link like `#per-bullet-feedback`
+ * fails here immediately.
  *
  * Runs in jsdom with raw `createRoot`, matching `ContactCard.test.tsx`.
  */
@@ -30,7 +31,7 @@ import { act } from "react";
 
 import { AtsScoreReadout } from "./AtsScoreReadout.tsx";
 import { ContactCard } from "./ContactCard.tsx";
-import { SECTION_IDS } from "../../lib/anchors.ts";
+import { SECTION_IDS, SCORE_TILE_SECTION_IDS } from "../../lib/anchors.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 
@@ -114,14 +115,14 @@ function tileAnchors(el: HTMLDivElement): string[] {
 }
 
 describe("AtsScoreReadout tile anchors", () => {
-  it("points every dimension tile at a known scroll target", () => {
+  it("points every dimension tile at a known score-tile scroll target (#973)", () => {
     const anchors = tileAnchors(render(makeScore()));
 
     // All three tiles render as anchors.
     expect(anchors).toHaveLength(3);
 
     const validTargets = new Set<string>(
-      Object.values(SECTION_IDS).map((id) => `#${id}`),
+      Object.values(SCORE_TILE_SECTION_IDS).map((id) => `#${id}`),
     );
     for (const href of anchors) {
       expect(validTargets.has(href)).toBe(true);
@@ -131,6 +132,12 @@ describe("AtsScoreReadout tile anchors", () => {
   it("does not resurrect the dead #per-bullet-feedback anchor", () => {
     expect(tileAnchors(render(makeScore()))).not.toContain(
       "#per-bullet-feedback",
+    );
+  });
+
+  it("does not point dimension tiles at documentBody (#973)", () => {
+    expect(tileAnchors(render(makeScore()))).not.toContain(
+      `#${SECTION_IDS.documentBody}`,
     );
   });
 });
@@ -204,6 +211,13 @@ describe("collapsible score widget (#953)", () => {
     // collapse — not that a sub-`lg` user can see them. Below `lg` the
     // dimensions are reached through the expand control instead.
     expect(tileAnchors(el)).toHaveLength(3);
+    const validTargets = new Set<string>(
+      Object.values(SCORE_TILE_SECTION_IDS).map((id) => `#${id}`),
+    );
+    for (const href of tileAnchors(el)) {
+      expect(validTargets.has(href)).toBe(true);
+    }
+    expect(tileAnchors(el)).not.toContain(`#${SECTION_IDS.documentBody}`);
   });
 
   it("expands when 'Score details ▾' is clicked and collapses when 'Collapse ▴' is clicked", () => {

@@ -47,7 +47,7 @@ import {
   BULLET_LENGTH_MIN_WORDS,
   BULLET_LENGTH_MAX_WORDS,
 } from "../../lib/score/score.ts";
-import type { SectionAnchor } from "../../lib/anchors.ts";
+import type { ScoreTileAnchor } from "../../lib/anchors.ts";
 import { Button, Popover } from "@design-system";
 import { scoreBandBgClass, scoreBandTextClass, scoreBandParts } from "./scoreBand.ts";
 import { EXPAND_LABEL } from "./scoreToggleLabels.ts";
@@ -92,7 +92,7 @@ interface CompactDimensionProps {
   value: number;
   max: number;
   gradable: boolean;
-  anchor: SectionAnchor;
+  anchor: ScoreTileAnchor;
 }
 
 function CompactDimension({

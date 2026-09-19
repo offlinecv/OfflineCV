@@ -249,6 +249,40 @@ export async function forceVerdictWordFontSize(
   expect(applied, "verdict-word slot font-size override").toEqual([`${px}px`]);
 }
 
+/** Assert the verdict word's fixed-width slot did not wrap to a second line.
+ *
+ *  A single-line slot has `slotHeight ≈ lineHeight` (~18.7px at 14px font);
+ *  wrapping to two lines jumps to `≥2 * lineHeight` (~37.3px).
+ *  Comparing `slotHeight < lineHeight * 1.5` detects the cause (the label
+ *  wrapped inside its fixed-width slot) directly rather than the symptom
+ *  (the whole docked strip exceeding `DOCKED_MAX_PX`). */
+export async function expectVerdictSlotDidNotWrap(
+  page: Page,
+  label?: string,
+): Promise<void> {
+  const { slotHeight, lineHeight } = await page
+    .locator(VERDICT_SLOT)
+    .evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      const parsedLineHeight = parseFloat(style.lineHeight);
+      const fontSize = parseFloat(style.fontSize);
+      const resolvedLineHeight = Number.isFinite(parsedLineHeight)
+        ? parsedLineHeight
+        : fontSize * 1.2;
+      return {
+        slotHeight: rect.height,
+        lineHeight: resolvedLineHeight,
+      };
+    });
+
+  const message = label
+    ? `${label}: verdict word wrapped inside its fixed-width slot`
+    : "verdict word wrapped inside its fixed-width slot";
+
+  expect(slotHeight, message).toBeLessThan(lineHeight * 1.5);
+}
+
 /** Sub-pixel slack for the height comparison below. Chromium reports the
  *  docked row and its tallest child as the same integral 26px here, so this
  *  only absorbs fractional layout on other machines — it is two orders of

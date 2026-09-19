@@ -29,6 +29,7 @@ import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
 import { SECTION_IDS } from "../../lib/anchors.ts";
+import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 
 let container: HTMLDivElement;
 let root: Root | null = null;
@@ -39,6 +40,7 @@ interface RenderOptions {
   parsed?: ResumeQueryInput;
   bullets?: readonly BulletObservation[];
   contactMissing?: ContactDisplayField[];
+  skillsOrder?: SkillsReorderController;
 }
 
 /** The same role-resolvable résumé `SkillTermGuidance.test.tsx` uses, so the
@@ -50,12 +52,27 @@ function resolvableParsed(): ResumeQueryInput {
   };
 }
 
+function reorderController(
+  overrides: Partial<SkillsReorderController> = {},
+): SkillsReorderController {
+  return {
+    finding: undefined,
+    canApply: true,
+    applied: false,
+    apply: () => {},
+    undo: () => {},
+    dismiss: () => {},
+    ...overrides,
+  };
+}
+
 function render({
   titles = ["Backend Engineer"],
   primary,
   parsed = resolvableParsed(),
   bullets,
   contactMissing,
+  skillsOrder,
 }: RenderOptions = {}): HTMLElement {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -70,6 +87,7 @@ function render({
         onAddSkill: () => {},
         bullets,
         contactMissing,
+        skillsOrder,
       }),
     );
   });
@@ -333,5 +351,27 @@ describe("TargetingSection", () => {
     expect(summary.textContent).toContain(
       "1 bullet & 1 contact field need attention",
     );
+  });
+
+  it("keeps the disclosure mounted when a skills reorder was applied and the headline is cleared", () => {
+    // #972: an applied reorder holds the confirmation strip in SkillTermGuidance
+    // via `skillsOrder.applied === true` (finding recomputed to undefined).
+    // If the headline is cleared (titles: []) with no triage and no role-matched
+    // terms, `hasBody` must not evaluate to false and drop the coaching confirmation.
+    const controller = reorderController({ applied: true });
+    const el = render({
+      titles: [],
+      parsed: { skills: [], experience: [] },
+      skillsOrder: controller,
+    });
+
+    const details = el.querySelector("details");
+    expect(details).not.toBeNull();
+    // Inside the disclosure, SkillTermGuidance mounts the confirmation strip with
+    // the Undo affordance.
+    expect(el.textContent).toContain("Skills");
+    expect(el.textContent).toContain("Applied");
+    const undoButton = el.querySelector('button[aria-label^="Undo"]');
+    expect(undoButton).not.toBeNull();
   });
 });

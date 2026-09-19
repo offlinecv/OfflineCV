@@ -26,7 +26,12 @@
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
-import { SECTION_IDS } from "../../lib/anchors.ts";
+import { SECTION_IDS, type SectionAnchor } from "../../lib/anchors.ts";
+
+// Typed as `SectionAnchor`, not left as an inferred `string`, so these hrefs
+// carry the narrowing `anchors.ts` documents for the wider target set (#973).
+const REVIEW_BULLETS_HREF: SectionAnchor = `#${SECTION_IDS.documentBody}`;
+const EDIT_CONTACT_HREF: SectionAnchor = `#${SECTION_IDS.contact}`;
 
 /**
  * The triage headline for `TargetingSection`'s summary row.
@@ -160,7 +165,7 @@ export function TargetingTriageRow({
       <div className="flex items-center gap-3 text-xs text-content-secondary">
         {hasBulletGap && (
           <a
-            href={`#${SECTION_IDS.documentBody}`}
+            href={REVIEW_BULLETS_HREF}
             className="font-medium text-accent-primary hover:underline"
           >
             Review bullets ↓
@@ -168,7 +173,7 @@ export function TargetingTriageRow({
         )}
         {hasContactGap && (
           <a
-            href={`#${SECTION_IDS.contact}`}
+            href={EDIT_CONTACT_HREF}
             className="font-medium text-accent-primary hover:underline"
           >
             Edit contact ↑

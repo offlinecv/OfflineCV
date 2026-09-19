@@ -9,29 +9,58 @@
  * (which had to render a matching `id`). Nothing coupled the two sides, so a
  * renamed/never-added target id silently rotted into a dead click.
  *
- * `SECTION_IDS` is the single source of truth for every scroll target a score
- * tile points at. Both sides consume it: the target component sets
- * `id={SECTION_IDS.x}` and the anchor prop narrows to `#${SectionId}`. A future
- * section-key rename is then a one-file change here that surfaces every broken
- * reference as a type error instead of a no-op click.
+ * Scroll targets are partitioned by caller scope (#973):
  *
- * Only anchors actually referenced by score tiles belong here (e.g.
- * `jd-input-label` is intentionally excluded).
+ * - `SCORE_TILE_SECTION_IDS` / `ScoreTileAnchor` is the tight contract for
+ *   dimension tiles (`ScoreDimensionRow`, `CollapsedScoreBar`). Only anchors
+ *   actually referenced by score tiles belong here. A score tile cannot be
+ *   given a non-score-tile anchor without a compile-time type error.
  *
- * `documentBody` (#958) is the one exception to "score tiles only": it is the
- * triage row's bullet jump link. It deliberately does NOT point at a specific
- * section (Experience, Projects, …) because the bullet pool `TargetingTriageRow`
- * summarizes is not experience-only — `scoreSpecificity`/`scoreStructure`
- * (`score.ts`) fold project and achievement bullets into the same
- * `BulletObservation[]` an Experience-only anchor would misrepresent for a
- * Projects-heavy résumé. `documentBody` wraps every résumé section
- * (Summary through Skills) as one target, so it resolves no matter which
- * section the flagged bullets actually live in.
+ * - `SECTION_IDS` / `SectionAnchor` is the wider contract for all typed scroll
+ *   targets across the workbench. Both sides consume it: the target component
+ *   sets `id={SECTION_IDS.x}` and anchor hrefs narrow to `#${SectionId}`. A
+ *   future section-key rename is then a one-file change here that surfaces
+ *   every broken reference as a type error instead of a no-op click.
+ *   Non-scroll targets that do not belong to the workbench contract (e.g.
+ *   `jd-input-label`) remain intentionally excluded.
+ *
+ * `documentBody` (#958) is the triage row's bullet jump link. It deliberately
+ * does NOT point at a specific section (Experience, Projects, …) because the
+ * bullet pool `TargetingTriageRow` summarizes is not experience-only —
+ * `scoreSpecificity`/`scoreStructure` (`score.ts`) fold project and
+ * achievement bullets into the same `BulletObservation[]` an Experience-only
+ * anchor would misrepresent for a Projects-heavy résumé. `documentBody` wraps
+ * every résumé section (Summary through Skills) as one target, so it resolves
+ * no matter which section the flagged bullets actually live in. Because it is
+ * NOT a score-tile target, it belongs to `SECTION_IDS` / `SectionAnchor` but is
+ * excluded from `SCORE_TILE_SECTION_IDS` / `ScoreTileAnchor` (#973).
  */
 
-export const SECTION_IDS = {
+/**
+ * Targets directly referenced by AtsScoreReadout's dimension tiles (#973).
+ *
+ * Consumed by `ScoreDimensionRow` and `CollapsedScoreBar` so score tiles cannot
+ * be pointed at non-score-tile targets (such as `documentBody`).
+ */
+export const SCORE_TILE_SECTION_IDS = {
   contact: "contact",
   reconstructed: "reconstructed-resume",
+} as const;
+
+export type ScoreTileSectionId =
+  (typeof SCORE_TILE_SECTION_IDS)[keyof typeof SCORE_TILE_SECTION_IDS];
+
+/** A hash-prefixed href pointing at one of the score-tile scroll targets (#973). */
+export type ScoreTileAnchor = `#${ScoreTileSectionId}`;
+
+/**
+ * All typed scroll targets across the workbench.
+ *
+ * Superset of {@link SCORE_TILE_SECTION_IDS} including targets used by other
+ * surfaces (e.g. `documentBody` for `TargetingTriageRow`).
+ */
+export const SECTION_IDS = {
+  ...SCORE_TILE_SECTION_IDS,
   documentBody: "resume-document-body",
 } as const;
 
