@@ -23,6 +23,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import type { Ref } from "react";
 
 interface TextAreaFieldProps {
   /** Controlled value. */
@@ -52,6 +53,18 @@ interface TextAreaFieldProps {
   autoGrow?: boolean;
   /** Extra classes on the root wrapper (layout stays with the caller). */
   className?: string;
+  /**
+   * Forwarded to the raw `<textarea>`, so a caller can focus or select it.
+   *
+   * This primitive owns its element and its own auto-grow ref, so before this
+   * there was no way to reach the field from outside — and a caller that
+   * replaces the body from elsewhere on the surface has to be able to land
+   * focus on it (`LetterEditorDialog`'s "Start from…", #767 review: taking a
+   * starting point unmounts the button that was clicked). React 19 takes `ref`
+   * as a plain prop, so this is additive — it is merged with the internal ref
+   * rather than replacing it.
+   */
+  ref?: Ref<HTMLTextAreaElement>;
 }
 
 export function TextAreaField({
@@ -64,8 +77,9 @@ export function TextAreaField({
   readOnly = false,
   autoGrow = true,
   className,
+  ref,
 }: TextAreaFieldProps) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const innerRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-grow: sync height to scroll height on every value change. Skip the
   // pin when the element is detached/hidden (scrollHeight 0) — e.g. mounted
@@ -73,7 +87,7 @@ export function TextAreaField({
   // `rows` height then shows once the field becomes visible.
   useEffect(() => {
     if (!autoGrow) return;
-    const ta = ref.current;
+    const ta = innerRef.current;
     if (!ta) return;
     ta.style.height = "auto";
     if (ta.scrollHeight > 0) ta.style.height = `${ta.scrollHeight}px`;
@@ -81,7 +95,14 @@ export function TextAreaField({
 
   return (
     <textarea
-      ref={ref}
+      // Both refs, not one: auto-grow reads `innerRef` on every value change,
+      // and a caller's `ref` must still reach the same element. Assigning only
+      // the forwarded one would silently disable auto-grow for that caller.
+      ref={(node) => {
+        innerRef.current = node;
+        if (typeof ref === "function") ref(node);
+        else if (ref) ref.current = node;
+      }}
       aria-label={label}
       value={value}
       rows={rows}

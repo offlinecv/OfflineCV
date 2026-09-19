@@ -29,7 +29,12 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
-import { installDialogPolyfill, setupDomRoot } from "./__test-utils__/dialog-dom.ts";
+import {
+  clickButtonIn,
+  installDialogPolyfill,
+  setupDomRoot,
+  typeIntoTextArea,
+} from "./__test-utils__/dialog-dom.ts";
 import type { LetterRecord } from "../../lib/storage/index.ts";
 
 const saveLetter = vi.hoisted(() => vi.fn());
@@ -51,25 +56,8 @@ function findButton(text: string) {
   );
 }
 
-function click(text: string) {
-  const button = findButton(text);
-  act(() => button?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-  return button;
-}
-
-/** Type into the body textarea the way React's controlled input requires — a
- *  bare `.value =` assignment is swallowed by React's value tracker. */
-function typeBody(text: string) {
-  const area = dom.container.querySelector("textarea")!;
-  const setter = Object.getOwnPropertyDescriptor(
-    HTMLTextAreaElement.prototype,
-    "value",
-  )!.set!;
-  act(() => {
-    setter.call(area, text);
-    area.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-}
+const click = (text: string) => clickButtonIn(dom.container, text);
+const typeBody = (text: string) => typeIntoTextArea(dom.container, text);
 
 function existing(over: Partial<LetterRecord> = {}): LetterRecord {
   return {
@@ -167,6 +155,27 @@ describe("LetterEditorDialog", () => {
     expect(dom.openDialogText()).toContain("Couldn’t save");
   });
 
+  it("does not report a failed save when only the refresh after it fails", async () => {
+    // The write landed. Saying "Couldn't save" would invite a second click,
+    // and a compose (no `id`) would then insert a SECOND record.
+    const onClose = vi.fn();
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={onClose}
+        jobId="job-1"
+        onSaved={vi.fn().mockRejectedValue(new Error("read"))}
+      />,
+    );
+    typeBody("Dear hiring team,");
+    click("Save letter");
+    await act(async () => {});
+
+    expect(saveLetter).toHaveBeenCalledTimes(1);
+    expect(dom.openDialogText() ?? "").not.toContain("Couldn’t save");
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("refreshes the caller BEFORE closing, so the row never flashes the old state", async () => {
     const order: string[] = [];
     const onSaved = vi.fn(async () => {
@@ -183,5 +192,309 @@ describe("LetterEditorDialog", () => {
     await act(async () => {});
 
     expect(order).toEqual(["saved", "closed"]);
+  });
+});
+
+/** #767: the same editor now authors all three scopes, and start-from is a
+ *  COPY. The assertions that matter are what reaches `saveLetter` — an `id`
+ *  carried over from a starting point would OVERWRITE the source, and a scope
+ *  key sent alongside another would be refused by the contract. */
+describe("LetterEditorDialog scopes and start-from (#767)", () => {
+  const standard = (): LetterRecord => ({
+    id: "standard-1",
+    createdAt: 1,
+    updatedAt: 2,
+    body: "My standard letter.",
+  });
+
+  const offer = () => [{ letter: standard(), label: "Your standard letter" }];
+
+  it("saves a standard letter with NEITHER scope key when given neither prop", async () => {
+    dom.render(<LetterEditorDialog open onClose={() => {}} onSaved={() => {}} />);
+    typeBody("My story.");
+    click("Save letter");
+    await act(async () => {});
+
+    const [input] = saveLetter.mock.calls[0]!;
+    expect("jobId" in input).toBe(false);
+    expect("companyKey" in input).toBe(false);
+    expect(input.body).toBe("My story.");
+  });
+
+  it("saves a company letter with companyKey and no jobId", async () => {
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        companyKey="northwind"
+        onSaved={() => {}}
+      />,
+    );
+    typeBody("Why Northwind.");
+    click("Save letter");
+    await act(async () => {});
+
+    const [input] = saveLetter.mock.calls[0]!;
+    expect(input.companyKey).toBe("northwind");
+    expect("jobId" in input).toBe(false);
+  });
+
+  it("never seeds without an explicit pick, however many offers it holds", () => {
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        startFrom={offer()}
+        onSaved={() => {}}
+      />,
+    );
+    // Offered, but the body is empty and Save is disabled — pre-filling would
+    // put words the user never chose into a letter to an employer.
+    expect(findButton("Your standard letter")).toBeTruthy();
+    expect(dom.container.querySelector("textarea")!.value).toBe("");
+    expect(findButton("Save letter")!.disabled).toBe(true);
+  });
+
+  it("picking a starting point copies the body and writes a NEW record", async () => {
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        startFrom={offer()}
+        onSaved={() => {}}
+      />,
+    );
+    click("Your standard letter");
+    expect(dom.container.querySelector("textarea")!.value).toBe("My standard letter.");
+
+    click("Save letter");
+    await act(async () => {});
+    const [input] = saveLetter.mock.calls[0]!;
+    // The property the whole copy model rests on: no `id`, so `saveLetter`
+    // inserts instead of upserting over `standard-1`.
+    expect("id" in input).toBe(false);
+    expect(input.jobId).toBe("job-1");
+    expect(input.body).toBe("My standard letter.");
+  });
+
+  it("says the copy is a copy, naming the source, once picked", () => {
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        startFrom={offer()}
+        onSaved={() => {}}
+      />,
+    );
+    expect(dom.container.textContent).not.toContain("Started from");
+    click("Your standard letter");
+    const notice = dom.container.textContent ?? "";
+    expect(notice).toContain("Started from Your standard letter");
+    expect(notice).toContain("copy");
+  });
+
+  it("a caller-chosen seed fills the body on open, still with no id", async () => {
+    // "Customize for this job" is the pick, made one dialog earlier.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        seed={{ letter: standard(), label: "Your standard letter" }}
+        onSaved={() => {}}
+      />,
+    );
+    expect(dom.container.querySelector("textarea")!.value).toBe("My standard letter.");
+    expect(dom.container.textContent).toContain("Started from");
+
+    click("Save letter");
+    await act(async () => {});
+    const [input] = saveLetter.mock.calls[0]!;
+    expect("id" in input).toBe(false);
+    expect(input.jobId).toBe("job-1");
+  });
+
+  it("offers nothing to start from while REVISING, and keeps the record's own body", async () => {
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        letter={existing()}
+        startFrom={offer()}
+        seed={{ letter: standard(), label: "Your standard letter" }}
+        onSaved={() => {}}
+      />,
+    );
+    expect(findButton("Your standard letter")).toBeUndefined();
+    // Revising wins over seeding — an existing letter's body is never replaced.
+    expect(dom.container.querySelector("textarea")!.value).toBe("Original body.");
+
+    click("Save letter");
+    await act(async () => {});
+    expect(saveLetter.mock.calls[0]![0].id).toBe("letter-1");
+  });
+
+  it("retires the picker once a starting point is taken, so a mis-click cannot wipe the draft", () => {
+    // #767 review: `startFromLetter` replaces the whole body unconditionally,
+    // and a controlled <textarea> has no undo across a re-render. A chip left on
+    // screen after the pick is one mis-click from discarding everything typed
+    // since.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        startFrom={offer()}
+        onSaved={() => {}}
+      />,
+    );
+    click("Your standard letter");
+    typeBody("Five hundred words of my own.");
+
+    expect(findButton("Your standard letter")).toBeUndefined();
+    expect(dom.container.querySelector("textarea")!.value).toBe(
+      "Five hundred words of my own.",
+    );
+  });
+
+  it("lands focus on the body after a pick, instead of dropping it to <body>", () => {
+    // #767 review: taking a starting point retires the picker, which unmounts
+    // the button the user just activated. Without an explicit move, focus falls
+    // to `document.body` and the next Tab restarts at the top of the dialog —
+    // while the textarea has silently acquired the whole source letter.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        startFrom={offer()}
+        onSaved={() => {}}
+      />,
+    );
+    click("Your standard letter");
+
+    const area = dom.container.querySelector("textarea");
+    expect(document.activeElement).toBe(area);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("keeps the copy notice's live region mounted BEFORE it has anything to say", () => {
+    // A `role="status"` inserted with its content already present is
+    // unreliably announced — NVDA and VoiceOver announce mutations to a region
+    // already in the accessibility tree (#767 review). So the region has to
+    // pre-exist the seed; it is `sr-only` while empty, which keeps it out of
+    // the visual flow without taking it out of the a11y tree.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        startFrom={offer()}
+        onSaved={() => {}}
+      />,
+    );
+    const region = dom.container.querySelector('p[role="status"]');
+    expect(region, "live region before any pick").not.toBeNull();
+    expect(region!.textContent?.trim()).toBe("");
+    // Not `hidden`/`display:none`, which would take it out of the a11y tree and
+    // put us back where we started.
+    expect(region!.className).toContain("sr-only");
+
+    click("Your standard letter");
+
+    // The SAME element, now filled — a mutation, not an insertion.
+    const after = dom.container.querySelector('p[role="status"]');
+    expect(after).toBe(region);
+    expect(after!.textContent).toContain("Started from Your standard letter");
+    expect(after!.className).not.toContain("sr-only");
+  });
+
+  it("shows no picker in the seeded Customize flow either", () => {
+    // Same hazard by the other route: `seed` sets `seededFrom` on open, so the
+    // chip would otherwise render over an already-seeded body.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        startFrom={offer()}
+        seed={{ letter: standard(), label: "Your standard letter" }}
+        onSaved={() => {}}
+      />,
+    );
+    expect(findButton("Your standard letter")).toBeUndefined();
+    expect(dom.container.textContent).toContain("Started from");
+  });
+
+  it("lets the seed fill the body of the record being revised, when asked explicitly", async () => {
+    // "Replace this company letter" (#767 review): the caller is revising the
+    // tier's occupant and wants the text the user selected to land in it. The
+    // default is the opposite — `letter` beats `seed` — so this only happens
+    // on an explicit opt-in, which is what stops a stale pick overwriting a
+    // record a later Edit opened.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        companyKey="northwind"
+        letter={existing({ id: "company-1", jobId: undefined, companyKey: "northwind", body: "Company letter v1." })}
+        seed={{ letter: standard(), label: "your standard letter" }}
+        seedReplacesBody
+        onSaved={() => {}}
+      />,
+    );
+
+    // The SEED's text, not the record's.
+    expect(dom.container.querySelector("textarea")!.value).toBe(
+      "My standard letter.",
+    );
+    // And the notice is the replace wording — calling this a copy would promise
+    // the record survives, which is exactly what Save is about to undo.
+    const text = dom.container.textContent ?? "";
+    expect(text).toContain("replaces");
+    expect(text).not.toContain("This is a copy");
+
+    click("Save letter");
+    await act(async () => {});
+    const [input] = saveLetter.mock.calls[0]!;
+    // Carries the OCCUPANT's id: an upsert over the tier's record, not a second
+    // record at the same key.
+    expect(input.id).toBe("company-1");
+    expect(input.companyKey).toBe("northwind");
+    expect(input.body).toBe("My standard letter.");
+  });
+
+  it("keeps the record's own body when the caller does NOT ask for the seed", () => {
+    // The default, stated as its own case because the flag above inverts it:
+    // without the opt-in an existing letter's body is never replaced, whatever
+    // seed the caller happened to pass.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        companyKey="northwind"
+        letter={existing({ id: "company-1", jobId: undefined, companyKey: "northwind", body: "Company letter v1." })}
+        seed={{ letter: standard(), label: "your standard letter" }}
+        onSaved={() => {}}
+      />,
+    );
+    expect(dom.container.querySelector("textarea")!.value).toBe(
+      "Company letter v1.",
+    );
+    expect(dom.container.textContent).not.toContain("replaces");
+  });
+
+  it("titles itself by scope, so the user knows which letter they are writing", () => {
+    dom.render(<LetterEditorDialog open onClose={() => {}} onSaved={() => {}} />);
+    expect(dom.container.textContent).toContain("Write your standard letter");
+
+    dom.render(
+      <LetterEditorDialog open onClose={() => {}} jobId="job-1" onSaved={() => {}} />,
+    );
+    expect(dom.container.textContent).toContain("Write a cover letter");
   });
 });
