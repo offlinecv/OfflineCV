@@ -94,6 +94,64 @@ describe("storage: letters CRUD (#711)", () => {
   });
 });
 
+describe("storage: deleting one letter is byte-local (#978)", () => {
+  // The UI-side half of #978 is a delete affordance; this is the property that
+  // affordance rests on. A letter removable only by deleting the job it names
+  // meant the store's own `deleteLetter` had never had a caller in `src/` — so
+  // "does it touch anything else?" had never been asked across the three
+  // scopes the lattice added in #766, only within one job.
+  it("leaves every letter at every other scope byte-identical", async () => {
+    const jobLetter = await saveLetter({ jobId: "job-1", body: "for the job", label: "Job" });
+    await tick();
+    const companyLetter = await saveLetter({
+      companyKey: "northwind",
+      body: "for the company",
+      label: "Company",
+    });
+    await tick();
+    const keptStandard = await saveLetter({ body: "the standard one", label: "Standard" });
+    await tick();
+    const duplicateStandard = await saveLetter({ body: "a second standard", label: "Dupe" });
+
+    // The unreachable duplicate — the record #978 is about. Deleting it must
+    // not so much as re-time the others: `putRecord` manages `updatedAt`, so a
+    // housekeeping pass that rewrote a sibling would be invisible except here.
+    expect(await deleteLetter(duplicateStandard.id)).toBe(true);
+    expect(await getLetter(duplicateStandard.id)).toBeUndefined();
+
+    expect(await getLetter(jobLetter.id)).toEqual(jobLetter);
+    expect(await getLetter(companyLetter.id)).toEqual(companyLetter);
+    expect(await getLetter(keptStandard.id)).toEqual(keptStandard);
+
+    // And the three readers still partition the survivors the same way.
+    expect((await lettersForJob("job-1")).map((l) => l.id)).toEqual([jobLetter.id]);
+    expect((await lettersForCompany("northwind")).map((l) => l.id)).toEqual([
+      companyLetter.id,
+    ]);
+    expect((await standardLetters()).map((l) => l.id)).toEqual([keptStandard.id]);
+  });
+
+  it("answers false on a second delete rather than throwing", async () => {
+    const letter = await saveLetter({ body: "once" });
+    expect(await deleteLetter(letter.id)).toBe(true);
+    // The double-click case the dialog does not branch on: intent is already
+    // satisfied, so this must be a no-op and not an error.
+    expect(await deleteLetter(letter.id)).toBe(false);
+  });
+
+  it("deleting a standard letter leaves the deleteJob cascade untouched", async () => {
+    const job = await saveJob({ title: "Staff Engineer", company: "Northwind" });
+    const ofJob = await saveLetter({ jobId: job.id, body: "job letter" });
+    const standard = await saveLetter({ body: "standard letter" });
+
+    await deleteLetter(standard.id);
+    // Still exactly one letter for the job to cascade to — the property #711
+    // built and #978 must not perturb.
+    expect(await deleteLettersForJob(job.id)).toBe(1);
+    expect(await getLetter(ofJob.id)).toBeUndefined();
+  });
+});
+
 describe("storage: letter scope keys (#766)", () => {
   it("saves a company letter with no jobId and reads it back from lettersForCompany", async () => {
     const saved = await saveLetter({ companyKey: "northwind", body: BODY, label: "Why here" });

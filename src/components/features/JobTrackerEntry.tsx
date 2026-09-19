@@ -46,6 +46,7 @@ import { useState } from "react";
 import { Button, EditableField, RatingStars, StatusBadge } from "@design-system";
 import { JobStatusPicker, jobStatusTone, jobStatusLabel } from "./JobStatusPicker.tsx";
 import { JobLetterIndicator } from "./JobLetterIndicator.tsx";
+import type { InheritedLetter } from "./LetterRevealDialog.tsx";
 import { JobDuplicateNotice } from "./JobDuplicateNotice.tsx";
 import type { JobDuplicateSuggestion } from "../../hooks/useJobDuplicates.ts";
 import type { JobOrigin, JobRecord, JobStatus, LetterRecord } from "../../lib/storage/index.ts";
@@ -88,6 +89,17 @@ interface JobTrackerEntryProps {
    *  renders the "write one" state rather than nothing — see
    *  `JobLetterIndicator`. */
   letters?: readonly LetterRecord[];
+  /** The company or standard letter this job would inherit (#767), already
+   *  resolved and phrased by `JobTracker`. Passed straight through — the row
+   *  neither reads nor renders it; only the indicator's dialogs do. */
+  inherited?: InheritedLetter;
+  /** Company/standard letters no chain can reach (#978) — passed straight
+   *  through to `JobLetterIndicator`. Ordinarily absent. */
+  letterExtras?: readonly InheritedLetter[];
+  /** This job's company as a derived key (#767), or undefined when it has no
+   *  company name. Passed straight through — it enables the indicator's
+   *  "Customize for this company", the only write path to the company tier. */
+  companyKey?: string;
   /** Re-read the letter store after this row writes one. */
   onLettersChanged?: () => Promise<void> | void;
   /** Other saved jobs that look like the same posting (#746). Rendered by the
@@ -120,6 +132,9 @@ export function JobTrackerEntry({
   rated = false,
   rating,
   letters,
+  inherited,
+  letterExtras,
+  companyKey,
   onLettersChanged,
   duplicates,
   onMerge,
@@ -158,6 +173,9 @@ export function JobTrackerEntry({
             <JobLetterIndicator
               jobId={job.id}
               letters={letters}
+              inherited={inherited}
+              extras={letterExtras}
+              companyKey={companyKey}
               onSaved={onLettersChanged}
             />
           </div>
