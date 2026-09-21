@@ -1143,36 +1143,6 @@ describe("isInlineDatedProgram: a date word must be a whole word (#925)", () => 
     expect(isInlineDatedProgram("Presents 2020")).toBe(true);
     expect(isInlineDatedProgram("Presenting 2020")).toBe(true);
   });
-});
-
-describe("isInlineDatedProgram: every open-ended word is a date word (#952)", () => {
-  // The strip used to spell `present` as a literal and omit the rest of
-  // `OPEN_ENDED_ALT`, so a season-led range ending in any other open-ended
-  // word left that word behind as "program text". Season-led only: a month-
-  // or year-led range is rejected earlier by `DATE_LEAD_RE`.
-  it.each([
-    "Fall 2013 - Current",
-    "Fall 2013 - Ongoing",
-    "Fall 2013 - Now",
-    "Fall 2013 – Current",
-    "Fall 2013 – Currently",
-    "Sept 2019 – Present",
-  ])("rejects a season- or month-led open-ended range: %s", (line) => {
-    expect(isInlineDatedProgram(line)).toBe(false);
-  });
-
-  // Multi-word names whose FIRST word is open-ended: the rest carries the
-  // remainder test. The single-word rows pin the whole-word boundary — each
-  // name merely begins with an open-ended word and must not be erased.
-  it.each([
-    "Now Foundations Program 2020",
-    "Current Affairs Certificate 2021",
-    "Ongoing Research Seminar 2022",
-    "Nowhere 2020",
-    "Currency 2021",
-  ])("keeps a program whose name contains an open-ended word: %s", (line) => {
-    expect(isInlineDatedProgram(line)).toBe(true);
-  });
 
   // `extractEducation`-level pins. The predicate-level ones above would not
   // have caught what the #951 review found: the damage shows up here, where a
@@ -1203,32 +1173,47 @@ describe("isInlineDatedProgram: every open-ended word is a date word (#952)", ()
     expect(fabricated[0].institution).toBe("Yale University");
   });
 
-  it("does not let a season-led open-ended range reach an education entry", () => {
-    // The sibling of the block above, and what the `(?:ly)?` inflection exists
-    // for: `main` rejected `Fall 2013 – Presently` through the `[a-z]*` tail,
-    // and dropping that tail turned this into a fabricated credential whose
-    // institution was the date range itself (#951 review round 2). Only the
-    // season-led form ever slipped — `DATE_LEAD_RE` rejects the month- and
-    // year-led shapes before the strip runs at all, which is the same
-    // asymmetry #952 turns on.
-    const fabricated = runEdu([
-      "Yale University",
-      "B.A. History, 2010 - 2014",
-      "Fall 2013 – Presently",
-    ]);
-    expect(fabricated).toHaveLength(1);
-    expect(fabricated[0].institution).toBe("Yale University");
+  // The sibling of the block above, and what the `(?:ly)?` inflection exists
+  // for: `main` rejected `Fall 2013 – Presently` through the `[a-z]*` tail,
+  // and dropping that tail turned this into a fabricated credential whose
+  // institution was the date range itself (#951 review round 2). Only the
+  // season-led form ever slipped — `DATE_LEAD_RE` rejects the month- and
+  // year-led shapes before the strip runs at all, which is the same
+  // asymmetry #952 turns on.
+  //
+  // Swept over the open-ended vocabulary rather than `Presently` alone (#987),
+  // so a regression fails as a wrong entry and not only as a wrong boolean the
+  // #952 block below would catch. The three words #952 added are the ones that
+  // regress: on `main` before #985 the `polluted` half gave Harvard
+  // `field: "Fall"` for `Currently` / `Ongoing` / `Now`, while `Present`,
+  // `Presently` and `Current` came out clean — which is why #952's probe found
+  // nothing at this level. `Presently` stays in the sweep as #951's own pin.
+  //
+  // The `fabricated` half holds for every word in the list on both sides of
+  // #985; it is here as the other direction of the same invariant, not as a
+  // second regression.
+  it.each(["Presently", "Currently", "Ongoing", "Now"])(
+    "does not let a season-led open-ended range ending in %s reach an education entry",
+    (openEnded) => {
+      const fabricated = runEdu([
+        "Yale University",
+        "B.A. History, 2010 - 2014",
+        `Fall 2013 – ${openEnded}`,
+      ]);
+      expect(fabricated).toHaveLength(1);
+      expect(fabricated[0].institution).toBe("Yale University");
 
-    const polluted = runEdu([
-      "Yale University",
-      "B.A. History, 2010 - 2014",
-      "Fall 2013 – Presently",
-      "Harvard Summer School",
-    ]);
-    expect(polluted).toHaveLength(2);
-    expect(polluted[1].institution).toBe("Harvard Summer School");
-    expect(polluted[1].field).toBeUndefined();
-  });
+      const polluted = runEdu([
+        "Yale University",
+        "B.A. History, 2010 - 2014",
+        `Fall 2013 – ${openEnded}`,
+        "Harvard Summer School",
+      ]);
+      expect(polluted).toHaveLength(2);
+      expect(polluted[1].institution).toBe("Harvard Summer School");
+      expect(polluted[1].field).toBeUndefined();
+    },
+  );
 
   it("keeps the month-plural asymmetry honest at the entry level", () => {
     // `education.ts` claims `Junes` / `Marches` flip the predicate but come out
@@ -1255,6 +1240,36 @@ describe("isInlineDatedProgram: every open-ended word is a date word (#952)", ()
     ]);
     expect(alone).toHaveLength(1);
     expect(alone[0].institution).toBe("Yale University");
+  });
+});
+
+describe("isInlineDatedProgram: every open-ended word is a date word (#952)", () => {
+  // The strip used to spell `present` as a literal and omit the rest of
+  // `OPEN_ENDED_ALT`, so a season-led range ending in any other open-ended
+  // word left that word behind as "program text". Season-led only: a month-
+  // or year-led range is rejected earlier by `DATE_LEAD_RE`.
+  it.each([
+    "Fall 2013 - Current",
+    "Fall 2013 - Ongoing",
+    "Fall 2013 - Now",
+    "Fall 2013 – Current",
+    "Fall 2013 – Currently",
+    "Sept 2019 – Present",
+  ])("rejects a season- or month-led open-ended range: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(false);
+  });
+
+  // Multi-word names whose FIRST word is open-ended: the rest carries the
+  // remainder test. The single-word rows pin the whole-word boundary — each
+  // name merely begins with an open-ended word and must not be erased.
+  it.each([
+    "Now Foundations Program 2020",
+    "Current Affairs Certificate 2021",
+    "Ongoing Research Seminar 2022",
+    "Nowhere 2020",
+    "Currency 2021",
+  ])("keeps a program whose name contains an open-ended word: %s", (line) => {
+    expect(isInlineDatedProgram(line)).toBe(true);
   });
 });
 
@@ -1439,3 +1454,4 @@ describe("a one-word line beside a year must not mint a school (#979)", () => {
     }
   });
 });
+
