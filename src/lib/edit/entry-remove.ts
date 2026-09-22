@@ -17,8 +17,8 @@
  * left there goes on grading Specificity / Structure for an entry that is no
  * longer on screen, and goes on showing in "Raw text & flags". So each rendered
  * row is dropped through the existing `removeBullet`, which already knows how to
- * splice one line out of all three line containers (`removeBulletFromRawText` /
- * `…Sections` / `…Descriptions`) and how to reach a user-ADDED row in its
+ * splice one line out of all three line containers (`mutateBulletLine` with
+ * `REMOVE_LINE` in `apply-overrides.ts`) and how to reach a user-ADDED row in its
  * `addedBullets` bucket. `applyRemovedEntries` is deliberately not taught a
  * second kind of text surgery for this: a `•` line the entry does not itself own
  * is not findable from the entry's fields at all, only from the rendered group.
