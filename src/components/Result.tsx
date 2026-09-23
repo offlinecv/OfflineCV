@@ -4,7 +4,7 @@
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, ErrorState } from "@design-system";
-import { AtsScoreReadout } from "./features/AtsScoreReadout.tsx";
+import { ScoreDetails } from "./features/ScoreDetails.tsx";
 import { isScoreRevealed } from "../lib/contact.ts";
 import { useResumeAnalysisLlm } from "../hooks/useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "../hooks/useLlmEscapeHatch.ts";
@@ -12,6 +12,10 @@ import type { LlmRecovery } from "../hooks/useLlmRecovery.ts";
 import type { AutosaveResume } from "../hooks/useAutosaveResume.ts";
 import { ParsedHeader } from "./features/ParsedHeader.tsx";
 import { ResultDetail } from "./features/ResultDetail.tsx";
+import { ResumeTargeting } from "./features/ResumeTargeting.tsx";
+import { LlmEscapeHatchPanel } from "./features/LlmEscapeHatchPanel.tsx";
+import { LocalAiFeedbackSection } from "./features/LocalAiFeedbackSection.tsx";
+import { SECTION_IDS, scrollToSection } from "../lib/anchors.ts";
 
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
@@ -146,13 +150,25 @@ function ParsedCard({
   // offer — while what the pass produces is owned by `App` (`useLlmRecovery`,
   // reaching this component as `recovery`), because two routes into `/jobs/`
   // that `App` owns have to hand over the recovered fields (#823). The panel
-  // itself renders inside `ResultDetail`, as its own card between this score
-  // card and the résumé: it used to be a full-width banner above the score, so
-  // the page opened on our suggestion instead of the user's own result (user
-  // testing, Jul 2026: "we should not have 'Try a local AI pass' so prominently
-  // at the top"), and between #243 and #823 it lived in the on-device-AI tab —
-  // a slot that stopped existing when the tab rail went.
+  // renders below, as the first row of the score card's details region: it
+  // used to be a full-width banner above the score, so the page opened on our
+  // suggestion instead of the user's own result (user testing, Jul 2026: "we
+  // should not have 'Try a local AI pass' so prominently at the top"), then
+  // lived in the on-device-AI tab until the rail went (#823), then in
+  // `ResultDetail` as its own card until #955 folded it in here.
   const escapeHatch = useLlmEscapeHatch(result, parseKey);
+
+  // Whether the recovery offer is still OUTSTANDING — which is a different
+  // question from whether the panel mounts, and deliberately a different
+  // expression. The hatch stays `isAvailable` after a successful pass (it is
+  // keyed on the ORIGINAL result so it can be re-run), so the panel's own gate
+  // below is `isAvailable` ALONE and this one adds `!== "done"`. Swapping them
+  // would unmount the panel in the very render that fires `onRecovered` and
+  // the recovered parse would never reach the score above it (see
+  // `LlmEscapeHatchPanel`'s docblock). Read by `LocalAiFeedbackSection`, which
+  // withholds the critique while an offer stands (#243).
+  const recoveryOffered =
+    escapeHatch.isAvailable && escapeHatch.status.kind !== "done";
 
   // Score ring/verdict reveal (#313) — the threshold gate is BLANK-AUTHORING
   // ONLY. `ParsedCard` is also the primary "drop a PDF → see your score" view
@@ -174,10 +190,11 @@ function ParsedCard({
   const isTwoColumn = result.triggers.includes("two_column");
 
   return (
-    // One scrolling column of stacked surfaces: the score "summary" card, then
-    // whatever `ResultDetail` puts under it (the recovery offer when there is
-    // one, the résumé, and the two collapsed sections). The gap + each
-    // surface's own border draws the separators; nothing here is a tab.
+    // One scrolling column of stacked surfaces: the score "summary" card —
+    // header row, then the score readout and everything that docks with it —
+    // and then whatever `ResultDetail` puts under it (the résumé and the
+    // evidence section). The gap + each surface's own border draws the
+    // separators; nothing here is a tab.
     <div className="flex flex-col gap-4">
       <Card className="flex flex-col gap-6 shadow-xs">
         <ParsedHeader
@@ -196,20 +213,70 @@ function ParsedCard({
           <ErrorState tone="warning">{TWO_COLUMN_BLURB}</ErrorState>
         )}
 
-        {scoreRevealed ? (
-          // `parseIdentity`, not the score: the reveal must re-fire for a new
-          // résumé (or a landed recovery pass) and stay put through the edits
-          // that re-grade `activeScore` — see `AtsScoreReadoutProps.resetKey`.
-          <AtsScoreReadout score={activeScore} resetKey={parseIdentity} />
-        ) : (
-          // No half-populated/near-zero score flashed while contact/experience
-          // are still incomplete (#313) — a quiet placeholder instead of the
-          // ring, so the section doesn't just silently vanish.
-          <p className="text-sm text-content-tertiary">
-            Your score will appear once your contact info and at least one
-            role are filled in below.
-          </p>
-        )}
+        {/* #955: the readout and the three surfaces that explain it are ONE
+            collapse group, so the card docks to `ParsedHeader` + a one-line
+            pill. The ring said `93/100 · STRONG` while the card below said
+            `10 bullets need attention` — two verdicts on the same résumé,
+            separated by a card boundary, with no stated relationship. In one
+            card the score and the reasons it is not 100 read as a single
+            statement, and the rail's `Fix it` stage lands on one place to
+            act.
+
+            `resetKey` is `parseIdentity`, not the score: the reveal must
+            re-fire for a new résumé (or a landed recovery pass) and stay put
+            through the edits that re-grade `activeScore`.
+
+            The children are ordered offer → targeting → critique, and
+            `ScoreDetails` keeps every one of them MOUNTED when docked — a
+            completed critique cost a model download plus inference and a
+            4.5s idle timer must not discard it. */}
+        <ScoreDetails
+          score={scoreRevealed ? activeScore : null}
+          resetKey={parseIdentity}
+          placeholder={
+            // No half-populated/near-zero score flashed while
+            // contact/experience are still incomplete (#313) — a quiet
+            // placeholder instead of the ring, so the section doesn't just
+            // silently vanish.
+            <p className="text-sm text-content-tertiary">
+              Your score will appear once your contact info and at least one
+              role are filled in below.
+            </p>
+          }
+        >
+          {escapeHatch.isAvailable && (
+            // Gated on `isAvailable` ALONE — see `recoveryOffered` above for
+            // why this is not that expression. No `Card` of its own any more:
+            // it is a row of this one, and the panel draws its own heading.
+            <LlmEscapeHatchPanel
+              controller={escapeHatch}
+              onRecovered={recovery.onRecovered}
+            />
+          )}
+
+          {/* `ResumeTargeting`, not `TargetingSection` directly: the authoring
+              lane renders no `Result` at all and needs the same section, so
+              the derivations behind it have one home. That module's docblock
+              states why two call sites still leave one `useSkillsReorder`
+              instance. Its own triage links point DOWN from here into the
+              résumé card — see `TargetingTriageRow`. */}
+          <ResumeTargeting
+            result={activeResult}
+            score={activeScore}
+            edit={edit}
+          />
+
+          <LocalAiFeedbackSection
+            analysis={analysis}
+            result={activeResult}
+            recoveryOffered={recoveryOffered}
+            // Scroll back to the résumé, where the per-role wand button (#3 /
+            // useSectionRewrite) already lives — the panel links each flagged
+            // bullet to that affordance instead of building a parallel
+            // rewrite UI (#244, #273).
+            onGoToRewrite={() => scrollToSection(SECTION_IDS.reconstructed)}
+          />
+        </ScoreDetails>
       </Card>
 
       <ResultDetail
@@ -221,8 +288,6 @@ function ParsedCard({
         sourceKind={sourceKind}
         edit={edit}
         analysis={analysis}
-        escapeHatch={escapeHatch}
-        onRecovered={recovery.onRecovered}
         triggerCount={triggerCount}
         onJdContextChange={onJdContextChange}
         onTailorApplied={onTailorApplied}

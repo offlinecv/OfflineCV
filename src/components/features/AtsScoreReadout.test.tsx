@@ -4,7 +4,17 @@
 // @vitest-environment jsdom
 
 /**
- * Anchor-resolution regression test for the score tiles (#153).
+ * Anchor-resolution regression test for the score tiles (#153), plus the
+ * two-state score widget's own render contract.
+ *
+ * Mounted through `ScoreDetails`, not `AtsScoreReadout` directly. #955 made
+ * the readout CONTROLLED — the countdown, the scroll, the hold and the user
+ * lock all moved up into `ScoreDetails`, because the guarded element now has
+ * to contain the score details beside the ring. Rendering the readout alone
+ * here would still exercise its markup, but the collapse tests below (timer,
+ * click-to-toggle) would have nothing to drive, so the host is the wrapper and
+ * the assertions are unchanged. `ScoreDetails` is given no children, so
+ * everything in these DOMs comes from the readout.
  *
  * The three dimension tiles (Specificity / Structure / Completeness) each link
  * to a section id via `<a href="#…">`. Two of them used to point at
@@ -29,7 +39,7 @@ import { act } from "react";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-import { AtsScoreReadout } from "./AtsScoreReadout.tsx";
+import { ScoreDetails } from "./ScoreDetails.tsx";
 import { ContactCard } from "./ContactCard.tsx";
 import { SECTION_IDS, SCORE_TILE_SECTION_IDS } from "../../lib/anchors.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
@@ -77,7 +87,7 @@ function render(
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root!.render(createElement(AtsScoreReadout, { score, defaultCollapsed }));
+    root!.render(createElement(ScoreDetails, { score, defaultCollapsed }));
   });
   return container;
 }

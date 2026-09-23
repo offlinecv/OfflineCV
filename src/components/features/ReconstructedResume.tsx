@@ -5,8 +5,25 @@
  * ReconstructedResume — the primary post-parse surface. A faithful, read-only
  * render of `result.parsed` in resume shape:
  *
- *   attention strip → contact → roles (header + all bullets, flagged inline) →
- *   education → skills
+ *   contact → roles (header + all bullets, flagged inline) → education → skills
+ *
+ * It opens on the contact block. The advice that used to sit between contact
+ * and the document — `TargetingSection` (role picker, expected skills, triage
+ * findings) — moved OUT of this file in #955, into `ResumeTargeting`, so the
+ * score and the reason it is not 100 read as one statement inside the score
+ * card. Nothing about the document itself changed; this file simply no longer
+ * hosts the advice about it, and no longer derives the inputs that advice
+ * needed (`deriveTitles`, the contact-completeness gaps, the skills-reorder
+ * controller).
+ *
+ * BOTH LANES THAT RENDER THIS COMPONENT NOW MOUNT `ResumeTargeting`
+ * THEMSELVES, and a new render site must too. There are two: `ResultDetail`
+ * (via `Result`, the parse lane) and `App`'s `phase: "authoring"` branch,
+ * which renders this component directly with no `Result` and no score card.
+ * The section used to ride along as a child of this file, so it reached both
+ * for free; it does not any more, and the authoring lane loses its role
+ * picker, skills guidance and triage findings if its mount is dropped
+ * (`App.authoring-lane.test.tsx` pins exactly that).
  *
  * "Faithful" is the contract: the point is to expose the parser↔PDF gap, not to
  * beautify it. So we render every parsed role (even partial ones), every graded
@@ -50,13 +67,6 @@ import {
   toBulletExperience,
 } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
-import { TargetingSection } from "./TargetingSection.tsx";
-import { deriveTitles } from "../../lib/job-search/query-builder.ts";
-import {
-  applyContactOverrides,
-  buildContactFields,
-  contactCompleteness,
-} from "../../lib/contact.ts";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
 import { ResumeBulletRow, BulletFlagLegend } from "./ResumeBulletRow.tsx";
@@ -87,7 +97,6 @@ import {
   survivingParsedIndices,
 } from "../../hooks/useEditableParse.ts";
 import { removeEntryWithBullets } from "../../lib/edit/entry-remove.ts";
-import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 import { useAddedEntryPruneHold } from "../../hooks/useAddedEntryPruneHold.ts";
 import {
   batchUndoTargets,
@@ -1226,7 +1235,6 @@ export function ReconstructedResume({
   jdContext,
   critique,
   onRewriteApplied,
-  skillsOrder,
 }: {
   result: CascadeResult;
   /** EDITED score — re-graded by App from the current overrides. Its
@@ -1246,18 +1254,11 @@ export function ReconstructedResume({
    *  to the rewrite controller; `ResultDetail` decides what it means, since it
    *  is the one that knows whether a JD is steering. */
   onRewriteApplied?: () => void;
-  /** Skills-ordering coaching (#544) — passed straight through to
-   *  `TargetingSection` → `SkillTermGuidance`, the one surface that renders
-   *  it. The controller is owned by `ResultDetail` (a single instance, so the
-   *  apply/undo state is shared) rather than built here; nothing in this file
-   *  reads it. */
-  skillsOrder?: SkillsReorderController;
 }) {
   // Display projection (#443, Stage B) — parsed field core + the user's own
   // section headings, read off the canonical model rather than `result` directly.
   const display = projectDisplay(result.canonical);
   const parsed = display.parsed;
-  const titles = deriveTitles(result.canonical.fields);
   const bullets = score.bullets ?? [];
   const projects = parsed.projects ?? [];
   const achievements = parsed.heuristic_achievements ?? [];
@@ -1313,15 +1314,6 @@ export function ReconstructedResume({
   const extraProfiles = profileOverrides.filter(
     (p) => p.legacyKey === undefined,
   );
-
-  // Contact display fields — the same override-applied path the ContactCard
-  // renders from, so every consumer (AttentionStrip's per-row gaps, the
-  // pre-download critical-field gate) agrees with what the card shows.
-  const contactDisplayFields = applyContactOverrides(
-    buildContactFields(result.canonical),
-    contactOverrides,
-  );
-  const contactMissing = contactCompleteness(contactDisplayFields).missing;
 
   // Added entries are appended to their parsed array by applyOverrides (so they
   // grade + export), which means they already arrive here inside `parsed.*`. We
@@ -1498,29 +1490,12 @@ export function ReconstructedResume({
         onEditProfile={setProfileUrl}
         onRemoveProfile={removeProfile}
       />
-      {/* Decision zone (#605 review, #825, #953): who you are (ContactCard)
-       *  → what you're aiming at, what that target expects, and triage signals
-       *  (TargetingSection). Folded into a single disclosure so the document the
-       *  user dropped a file to see starts higher on the page. Below this line
-       *  the page is the résumé document itself. */}
-      <TargetingSection
-        titles={titles}
-        primary={contactOverrides.headline ?? result.canonical.fields.headline}
-        onPrimaryChange={(value) => setContactField("headline", value)}
-        // Term-quality guidance (#586): same classifier as `/jobs/`'s
-        // `TermQualityAdvisory`, résumé-framed copy, writes only through the
-        // existing `addSkill` inline-edit path.
-        parsed={parsed}
-        onAddSkill={addSkill}
-        // Skills-ordering coaching (#544) rides the same panel: it is scored
-        // against `titles[0]` exactly as the term guidance is, and unlike the
-        // critique lane this surface is not behind a WebGPU model download.
-        skillsOrder={skillsOrder}
-        bullets={bullets}
-        contactMissing={contactMissing}
-      />
-      {/* Document-body anchor (#958): the triage row's bullet jump link
-       *  target — see `DocumentBody.tsx`. */}
+      {/* Who you are (ContactCard), then the document itself. The decision
+       *  zone that used to sit between them — what you're aiming at, what that
+       *  target expects, the triage signals — is `TargetingSection`, mounted in
+       *  the score card since #955. Everything below this line is the résumé
+       *  document, wrapped in the #958 document-body anchor that the triage
+       *  row's bullet jump link targets — see `DocumentBody.tsx`. */}
       <DocumentBody>
         {/* Summary leads the document body, matching the exported model's own
          *  order (`ats-resume-model.ts`: Summary → Experience → …) so the

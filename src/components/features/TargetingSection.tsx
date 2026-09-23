@@ -3,8 +3,21 @@
 
 /**
  * TargetingSection — role targeting, expected skills, and triage findings
- * folded into one collapsed disclosure between the contact block and the
- * résumé document (#825, #953).
+ * folded into one collapsed disclosure (#825, #953), mounted INSIDE THE SCORE
+ * CARD since #955 — in `ScoreDetails`' details region, between the recovery
+ * offer and the local-AI feedback, docking away with the score readout.
+ *
+ * It sat between the contact block and the résumé document until #955, inside
+ * `ReconstructedResume`. The card boundary was the problem: the score card
+ * read `93/100 · STRONG` while this one read `10 bullets need attention` —
+ * two verdicts on the same résumé with no stated relationship. In one card
+ * the score and the reason it is not 100 are a single statement, and the
+ * journey rail's `Fix it` stage has one place to land. Nothing in this file
+ * changed for the move; its props are derived by `ResumeTargeting` now, by the
+ * same helpers `ReconstructedResume` used — one seam, because the from-scratch
+ * authoring lane renders no score card and has to mount this section itself.
+ * One consequence outside it: the triage row's contact jump link points DOWN
+ * from here — see `TargetingTriageRow`.
  *
  * `RolesPanel` ("Which role are you targeting?"), `SkillTermGuidance`
  * ("Skills this role usually asks for"), and the triage signals (bullets

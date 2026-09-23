@@ -299,6 +299,49 @@ describe("user lock", () => {
   });
 });
 
+describe("paused", () => {
+  // #955 review: the score is withheld behind the #313 reveal gate while an
+  // author fills in the résumé, and a countdown or scroll listener running in
+  // that window docked the widget before it was ever shown.
+  it("arms nothing while paused: neither the clock nor a scroll docks", () => {
+    mount({ paused: true });
+    act(() => void vi.advanceTimersByTime(10_000));
+    scrollTo(500);
+    expect(api.collapsed).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("treats leaving the pause as the arrival, clock and scroll baseline both", () => {
+    mount({ paused: true });
+    scrollTo(500);
+    rerender({ paused: false });
+    act(() => void vi.advanceTimersByTime(4400));
+    expect(api.collapsed).toBe(false);
+    // Baseline is where the reveal happened, not 0: a 20px nudge from 500
+    // does not dock…
+    scrollTo(520);
+    expect(api.collapsed).toBe(false);
+    // …and the clock started at the reveal, so it still fires on schedule.
+    act(() => void vi.advanceTimersByTime(200));
+    expect(api.collapsed).toBe(true);
+  });
+
+  it("re-expands on entering the pause, so the next reveal is fresh", () => {
+    mount();
+    act(() => void vi.advanceTimersByTime(4600));
+    expect(api.collapsed).toBe(true);
+    rerender({ paused: true });
+    expect(api.collapsed).toBe(false);
+  });
+
+  it("leaves a user lock alone on entering the pause", () => {
+    mount();
+    act(() => api.toggle(true));
+    rerender({ paused: true });
+    expect(api.collapsed).toBe(true);
+  });
+});
+
 describe("teardown", () => {
   it("leaves no timer pending after unmount", () => {
     // A hold-release timer is armed only while the widget is expanded and

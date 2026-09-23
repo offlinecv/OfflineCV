@@ -7,11 +7,26 @@
  * Was `LlmEscapeHatchBanner`: a tinted, bordered banner rendered ABOVE the
  * score card, so the first thing on the post-drop screen was our suggestion
  * rather than the user's own result. #243 moved it into the on-device-AI tab,
- * whose label carried the offer; #823 took that tab rail away, so it renders
- * as its own card BELOW the score card and above the résumé (`ResultDetail`).
- * Still not first, and still not behind anything — a collapsed section would
- * hide the one affordance that repairs a degenerate parse from exactly the
- * parses that need it.
+ * whose label carried the offer; #823 took that tab rail away, so it rendered
+ * as its own card below the score card and above the résumé, "not behind
+ * anything — a collapsed section would hide the one affordance that repairs a
+ * degenerate parse from exactly the parses that need it."
+ *
+ * #955 REVERSED that last clause, deliberately. The offer is now the first row
+ * of the score card's details region (`ScoreDetails`), which docks with the
+ * readout 4.5s after arrival or on a 40px scroll. The user's call (#955) is
+ * that the offer is part of the same diagnostic as the score it qualifies, so
+ * it goes where the score goes. What keeps that from being the hiding the old
+ * rule warned about:
+ *  - it is on screen at ARRIVAL, directly under the score, for every parse
+ *    that needs it — the countdown only starts at the reveal;
+ *  - hovering or focusing it holds the countdown (`ScoreDetails` puts
+ *    `guardProps` on a wrapper that contains it), so it never docks mid-read;
+ *  - once docked, the pill's `Expand score details` brings it back, unmounted
+ *    never — a pass in flight keeps running while docked.
+ * The residual cost is real and accepted: a reader who looks away and scrolls
+ * finds the offer behind one click, on the parse whose score is least worth
+ * docking to.
  *
  * While the offer stands it is alone: `ResumeQualityPanel` is withheld until
  * the pass has run. Showing both put two model-loading CTAs on one screen, one

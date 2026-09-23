@@ -2,7 +2,8 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * AtsScoreReadout — self-contained, auto-collapsing score widget (#953).
+ * AtsScoreReadout — the two-state score widget (#953), controlled by
+ * `ScoreDetails` since #955.
  *
  * Renders the score in two distinct states:
  * 1. Full Reveal (Expanded): 84px ScoreRing, verdict headline, full recommendation,
@@ -10,17 +11,28 @@
  * 2. Docked Strip (Collapsed): compact score pill with live score and band, inline
  *    dimension metrics, Popover explainer, and expand toggle via `CollapsedScoreBar`.
  *
- * The collapse lifecycle — countdown, scroll, hover/focus hold, and the
- * user-decision lock — belongs to `useAutoCollapse`, not to this component.
- * `guardProps` must be spread on BOTH states' root: the hold is what keeps the
- * widget from docking out from under someone who is still reading it, and a
- * state that forgets to spread it silently loses that for keyboard users first.
+ * CONTROLLED since #955: `collapsed` and `onToggle` are props, and the
+ * lifecycle behind them — countdown, scroll, hover/focus hold, user-decision
+ * lock — lives in `ScoreDetails`, which calls `useAutoCollapse` and spreads
+ * `guardProps` on a wrapper holding this widget AND the score details beside
+ * it. This component owned the hook until then, which scoped the hold to the
+ * ring alone; once the recovery offer, the targeting disclosure and the
+ * local-AI feedback moved into the same collapse group, a hold that stopped at
+ * this section's edge would dock the card out from under someone reading the
+ * findings — the exact defect `useAutoCollapse`'s docblock is written against.
+ * Two elements cannot both be the guarded root, so the hook went up.
+ *
+ * Nothing but the score belongs inside this `<section>`. `e2e/support/
+ * score-hero.ts` resolves the hero as the toggle button's nearest `<section>`
+ * ancestor, `e2e/viewport.spec.ts` bounds its height, and `measureDockedStrip`
+ * reads the docked row as its `:scope > div` — so content added here breaks
+ * three probes at once. It goes in `ScoreDetails`' sibling region instead.
  *
  * The two states are SEPARATE SUBTREES, which is why the toggle moves focus by
  * hand. Activating `Collapse ▴` unmounts the very button that was pressed, so
  * without the restore below focus falls to `<body>` and a keyboard user has to
  * tab in from the top of the document after every toggle. `Popover` — added in
- * this same change — restores focus for exactly this reason; a control that
+ * this same change — restores focus for this same reason; a control that
  * replaces itself owes the same.
  */
 
@@ -28,7 +40,6 @@ import { useEffect, useRef } from "react";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import { getScoreRecommendation } from "../../lib/score/recommendation.ts";
 import { Button } from "@design-system";
-import { useAutoCollapse } from "../../hooks/useAutoCollapse.ts";
 import { ScoreRing } from "./ScoreRing.tsx";
 import { VerdictHeader } from "./VerdictHeader.tsx";
 import {
@@ -44,33 +55,23 @@ import { timeAgo } from "../../lib/date-utils.ts";
 
 export interface AtsScoreReadoutProps {
   score: AnonymousAtsScore;
-  /** Force an initial collapsed state (defaults to false for post-drop reveal). */
-  defaultCollapsed?: boolean;
-  /** Identity of the PARSE behind `score` — a new résumé is a new reveal; an
-   *  edit to the same one is not.
-   *
-   *  It must not be derived from the score. `score` is re-graded by
-   *  `useAnalyzedResume`'s `applyOverrides → re-score` memo on every override,
-   *  so keying the reveal on it re-expanded the docked widget whenever an edit
-   *  moved the number by a point — pushing the résumé being typed in down, then
-   *  back up 4.5s later, twice per edit (#956 review). The parse lane passes
-   *  `recovery.parseIdentity`, which also changes when a recovery pass lands —
-   *  genuinely a new reveal. Omitting it disables the re-reveal entirely. */
-  resetKey?: unknown;
+  /** Which of the two states to render. Owned by `ScoreDetails`, whose
+   *  `useAutoCollapse` also decides WHEN it changes — the countdown, the
+   *  scroll, the hover/focus hold and the user lock are all up there, because
+   *  the guarded element has to contain the score details too. */
+  collapsed: boolean;
+  /** A USER toggle: `useAutoCollapse.toggle`, which locks out the timer and
+   *  the scroll listener for good. Only the two buttons below call it — an
+   *  automatic dock arrives as a `collapsed` change with no call, which is
+   *  what keeps the focus restore below off the automatic path. */
+  onToggle: (collapsed: boolean) => void;
 }
 
 export function AtsScoreReadout({
   score,
-  defaultCollapsed = false,
-  resetKey,
+  collapsed,
+  onToggle,
 }: AtsScoreReadoutProps) {
-  const { collapsed, toggle, guardProps } = useAutoCollapse({
-    defaultCollapsed,
-    // A new parse is a new reveal: re-expand and re-arm so the next résumé gets
-    // its own read time rather than arriving into a docked strip.
-    resetKey,
-  });
-
   const rootRef = useRef<HTMLElement>(null);
   // Only a USER toggle moves focus. An automatic dock — the countdown or a
   // scroll — must not, or the page would yank focus away from whatever the
@@ -79,7 +80,7 @@ export function AtsScoreReadout({
 
   const userToggle = (next: boolean) => {
     restoreFocus.current = true;
-    toggle(next);
+    onToggle(next);
   };
 
   useEffect(() => {
@@ -89,6 +90,12 @@ export function AtsScoreReadout({
     rootRef.current
       ?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
       ?.focus();
+    // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
+    // CLAUDE.md). `collapsed` is a prop now rather than local state, which
+    // changes nothing here: it is still the value the restore reads and still
+    // the only one whose change should run it. `restoreFocus` is a ref, read
+    // at call time; adding it would be inert. The labels are module
+    // constants.
   }, [collapsed]);
 
   const buildDate = __BUILD_DATE__.slice(0, 10);
@@ -101,14 +108,16 @@ export function AtsScoreReadout({
 
   if (collapsed) {
     return (
-      <section ref={rootRef} {...guardProps}>
+      // No wrapper and no second child: `measureDockedStrip` reads the docked
+      // row as this section's `:scope > div`.
+      <section ref={rootRef}>
         <CollapsedScoreBar score={score} onExpand={() => userToggle(false)} />
       </section>
     );
   }
 
   return (
-    <section ref={rootRef} className="flex flex-col gap-2" {...guardProps}>
+    <section ref={rootRef} className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">

@@ -308,10 +308,11 @@ describe("TargetingSection", () => {
     expect(el.textContent).toContain("weak verb");
     // The bullet jump link (#958) points at `SECTION_IDS.documentBody`, not
     // the old, wrong `#reconstructed-resume` (#956 review removed that one
-    // because it wraps this very row, so "Review bullets ↓" scrolled UP past
+    // because it wrapped this very row, so "Review bullets ↓" scrolled UP past
     // the contact card). `documentBody` wraps every résumé section below this
     // disclosure, so it resolves for Projects/Achievements bullets too, not
-    // just Experience.
+    // just Experience — and since #955 moved this section into the score card
+    // it is below in the stronger sense that the whole résumé card is.
     expect(el.textContent).toContain("Review bullets");
     const hrefs = [...el.querySelectorAll("a")].map((a) =>
       a.getAttribute("href"),
@@ -328,7 +329,12 @@ describe("TargetingSection", () => {
     const summary = el.querySelector("summary")!;
     expect(summary.textContent).toContain("Targeting & improvements");
     expect(summary.textContent).toContain("1 contact field missing");
-    expect(el.textContent).toContain("Edit contact ↑");
+    // ↓, not ↑ (#955): this section is the last row of the SCORE card now, so
+    // `SECTION_IDS.contact` — the first child of the résumé card below it —
+    // is downward from here. The arrow is a claim about layout and this is
+    // what pins it; the mirror-image bug is narrated in `TargetingTriageRow`.
+    expect(el.textContent).toContain("Edit contact ↓");
+    expect(el.textContent).not.toContain("Edit contact ↑");
   });
 
   it("summarizes combined bullet and contact triage on the summary row", () => {

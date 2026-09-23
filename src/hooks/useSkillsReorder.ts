@@ -13,11 +13,14 @@
  * `ApplyConfirmation`/`UndoBatchButton` components rather than a new
  * confirm/undo mechanism (the Reuse Gate).
  *
- * One instance per résumé, owned by `ResultDetail` and passed down to the
- * single surface that renders it (`SkillTermGuidance`, via
- * `ReconstructedResume` → `TargetingSection`). The apply/undo state below is
- * this hook's own `useState`, so a second call site would be a second,
- * independent lifecycle over the same list.
+ * One instance per résumé, called by `ResumeTargeting` since #955 (it was
+ * `ResultDetail` while `TargetingSection` lived under it) and passed down to
+ * the single surface that renders it (`SkillTermGuidance`, via
+ * `TargetingSection`). The apply/undo state below is this hook's own
+ * `useState`, so a second call site would be a second, independent lifecycle
+ * over the same list. `ResumeTargeting` is mounted from two places — `Result`
+ * and `App`'s authoring branch — but they are mutually exclusive `state.phase`
+ * arms, so only one is ever mounted; see that module's docblock.
  *
  * `apply()` is a no-op while `canApply` is false — a Skills section grouped
  * into categories renders from the GROUPING, not the flat list's array order

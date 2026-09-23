@@ -55,6 +55,23 @@ export interface AutoCollapseOptions {
    *  seconds later — twice per edit. It now takes a `resetKey` prop fed from
    *  `parseIdentity` (parse lane) or `parseKey` (authoring lane). */
   resetKey?: unknown;
+  /** While true, nothing can dock: no countdown is armed and no scroll
+   *  listener is attached. Flipping it back to false is an ARRIVAL — the
+   *  countdown starts from zero and the scroll baseline is taken there.
+   *
+   *  For a widget whose content is not on screen yet (#955 review). The score
+   *  is withheld behind the #313 reveal gate for as long as an author takes to
+   *  fill in contact + one role; left running, the countdown and the scroll
+   *  listener docked the widget during that window, so it arrived as the pill
+   *  and took the targeting region above the résumé with it, in the render
+   *  where the score first appeared. A `resetKey` flip at the reveal would
+   *  re-expand only in an effect, one committed frame too late.
+   *
+   *  Entering the pause re-expands (unless locked), so a readout that goes
+   *  away and comes back is revealed again rather than restored docked. The
+   *  caller is expected to show nothing dockable while paused, which is what
+   *  makes that re-expand invisible. */
+  paused?: boolean;
 }
 
 export interface AutoCollapseGuardProps {
@@ -78,6 +95,7 @@ export function useAutoCollapse({
   releaseMs = 2500,
   scrollThresholdPx = 40,
   resetKey,
+  paused = false,
 }: AutoCollapseOptions = {}): AutoCollapse {
   const [collapsed, setCollapsed] = useState<boolean>(defaultCollapsed);
   const [locked, setLocked] = useState<boolean>(false);
@@ -118,14 +136,23 @@ export function useAutoCollapse({
     setCollapsed(false);
   }, [resetKey, locked]);
 
-  // Arrival countdown. Skipped once docked or locked, so a collapsed widget
-  // never holds a pending timer. Re-expanding above re-enters this effect,
-  // which is what restarts the clock.
+  // Entering the pause re-expands, so leaving it is a fresh reveal. Only on
+  // the transition: a widget MOUNTED paused keeps its `defaultCollapsed`.
+  const prevPaused = useRef(paused);
   useEffect(() => {
-    if (collapsed || locked) return;
+    if (prevPaused.current === paused) return;
+    prevPaused.current = paused;
+    if (paused && !locked) setCollapsed(false);
+  }, [paused, locked]);
+
+  // Arrival countdown. Skipped once docked, locked or paused, so a collapsed
+  // widget never holds a pending timer. Re-expanding above, or leaving the
+  // pause, re-enters this effect, which is what restarts the clock.
+  useEffect(() => {
+    if (collapsed || locked || paused) return;
     arm(idleMs);
     return clear;
-  }, [resetKey, collapsed, locked, arm, clear, idleMs]);
+  }, [resetKey, collapsed, locked, paused, arm, clear, idleMs]);
 
   // Scrolling away is a stronger "done reading" signal than the clock, so it
   // docks immediately rather than shortening the countdown.
@@ -148,7 +175,7 @@ export function useAutoCollapse({
   // pointer or focus is on the widget is the one case where that reading is
   // certainly wrong.
   useEffect(() => {
-    if (collapsed || locked) return;
+    if (collapsed || locked || paused) return;
     const revealedAt = window.scrollY;
     const onScroll = () => {
       if (hoverRef.current || focusRef.current) return;
@@ -158,20 +185,20 @@ export function useAutoCollapse({
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, [collapsed, locked, scrollThresholdPx]);
+  }, [collapsed, locked, paused, scrollThresholdPx]);
 
   // No separate unmount cleanup for the hold-release timer: `release` returns
-  // early unless `!collapsed && !locked`, which is exactly the condition under
-  // which the countdown effect above is mounted WITH `return clear` — and
-  // `clear` reads `timerRef` at call time, so it cancels whatever is pending
-  // regardless of which path armed it. An effect that reads as a safety net
-  // while being unreachable is worse than none (#956 review).
+  // early unless `!collapsed && !locked && !paused`, which is exactly the
+  // condition under which the countdown effect above is mounted WITH `return
+  // clear` — and `clear` reads `timerRef` at call time, so it cancels whatever
+  // is pending regardless of which path armed it. An effect that reads as a
+  // safety net while being unreachable is worse than none (#956 review).
 
   const release = useCallback(() => {
     if (hoverRef.current || focusRef.current) return;
-    if (collapsed || locked) return;
+    if (collapsed || locked || paused) return;
     arm(releaseMs);
-  }, [arm, collapsed, locked, releaseMs]);
+  }, [arm, collapsed, locked, paused, releaseMs]);
 
   const guardProps: AutoCollapseGuardProps = {
     onMouseEnter: () => {

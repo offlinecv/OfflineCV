@@ -25,8 +25,14 @@ import { createRoot, type Root } from "react-dom/client";
 // WebGPU-capable browser and an engine that returns a parse immediately. No
 // weights are fetched and no analytics fire (`track()` short-circuits without
 // VITE_POSTHOG_KEY), so the rest of this file is unaffected.
+//
+// Mutable rather than a constant so the #544 suite at the bottom can run the
+// NO-WebGPU regime, which is the precondition that made that defect real. It
+// defaults to "available" and every test that flips it restores it, so the
+// rest of the file reads exactly as it did.
+const webgpu = vi.hoisted(() => ({ capability: "available" as string }));
 vi.mock("../lib/webllm/capability.ts", () => ({
-  detectWebGpu: () => Promise.resolve("available"),
+  detectWebGpu: () => Promise.resolve(webgpu.capability),
 }));
 vi.mock("../lib/webllm/web-llm.ts", () => ({
   loadEngine: () => Promise.resolve({ chat: {} }),
@@ -300,6 +306,102 @@ async function renderCapturingEdit(
   return container;
 }
 
+// ── The recovery offer and the critique, in the score card (#955) ───────────
+
+/**
+ * These three blocks moved from `ResultDetail.test.tsx`, where they covered the
+ * same two surfaces before #955 folded them into the score card's details
+ * region. They are stronger here: over there the escape hatch and the analysis
+ * were hand-shaped controller objects, so the `done` transition was a prop
+ * swap; here the real `useLlmEscapeHatch`/`useResumeAnalysisLlm` run against
+ * the stubbed WebLLM modules at the top of this file, and the transition is
+ * what clicking the real CTA produces.
+ */
+describe("Result — the degenerate-parse recovery offer (#243, moved by #955)", () => {
+  it("is inline in the score card, above the résumé, behind no disclosure", async () => {
+    // #243 gave the offer the on-device-AI tab's LABEL so it had a permanent
+    // slot. Behind a collapsed section that slot stops existing, and the one
+    // affordance that repairs a degenerate parse becomes invisible on the
+    // parses that need it.
+    const el = await render(degenerateResult());
+    expect(el.textContent).toContain("Not everything parsed cleanly");
+
+    const offer = [...el.querySelectorAll("h2")].find((n) =>
+      (n.textContent ?? "").includes("Not everything parsed cleanly"),
+    );
+    expect(offer).toBeDefined();
+    // Not inside any `<details>` — the score details region is a plain
+    // `hidden`-toggled div, not a disclosure.
+    expect(offer!.closest("details")).toBeNull();
+
+    // ABOVE the résumé, not merely present: a card below a 1000-line résumé is
+    // as good as behind a collapsed section.
+    const resume = el.querySelector("#reconstructed-resume");
+    expect(resume).not.toBeNull();
+    expect(
+      offer!.compareDocumentPosition(resume!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // One offer at a time — the critique's own model-loading CTA must not sit
+    // beside the recovery pass's.
+    expect(el.textContent).not.toContain("Local AI feedback");
+    expect(el.textContent).not.toContain("What the model checks");
+  });
+
+  it("is not REMOUNTED as the pass completes, and hands the critique back", async () => {
+    // The hatch stays `isAvailable` after a successful pass (it is keyed on
+    // the ORIGINAL result so it can be re-run), so the panel's gate is
+    // `isAvailable` ALONE. Gate it on the offer standing instead and the panel
+    // unmounts in the very render that fires `onRecovered`, and the recovered
+    // parse never reaches the score above it. No node survives to compare by
+    // identity — the panel swaps its own root from the offer `<section>` to a
+    // `role="status"` row at `done` — so the guard is the panel's confirmation
+    // text below: an unmounted panel never renders it. Its TAIL, because
+    // `ParsedHeader`'s provenance badge carries the "Recovered with on-device
+    // AI" prefix too.
+    const el = await render(degenerateResult());
+
+    const cta = [...el.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("Try a local AI pass"),
+    );
+    expect(cta).toBeDefined();
+    await act(async () => cta!.click());
+
+    // Collapsed to its one-line confirmation, still on screen…
+    expect(el.textContent).toContain("your score and fields are updated");
+    expect(el.textContent).not.toContain("Not everything parsed cleanly");
+    // …and the section it was withholding is back. The PANEL's own heading,
+    // not the summary label — those were the same string until the heading was
+    // renamed, so a label assertion never proved the panel mounted.
+    expect(el.textContent).toContain("What the model checks");
+  });
+});
+
+describe("Result — Local AI feedback when WebGPU cannot run (#276, moved by #955)", () => {
+  afterEach(() => {
+    webgpu.capability = "available";
+  });
+
+  it("warn-marks the summary and explains in place instead of vanishing", async () => {
+    webgpu.capability = "no-webgpu";
+    // `degenerateResult`, for its non-empty `markdown` alone: `hasText` reads
+    // `markdown ?? rawText`, and `uploadResultMissingContact` carries an empty
+    // string there — not nullish, so it wins the coalesce and the section is
+    // absent for "no text" rather than for the capability under test. With no
+    // WebGPU the recovery offer is unavailable too, so nothing withholds the
+    // critique and this is the unavailable branch on its own.
+    const el = await render(degenerateResult());
+    const summary = [...el.querySelectorAll("summary")].find((n) =>
+      (n.textContent ?? "").includes("Local AI feedback"),
+    );
+    // Warn marker is announced, not colour-only.
+    expect(summary?.textContent).toContain("setup needed");
+    // The panel explains the unavailability in place.
+    expect(el.textContent).toContain("On-device AI isn't available");
+  });
+});
+
 describe("Result — a completed recovery pass survives an edit (#823)", () => {
   it("keeps the confirmation and the Local AI feedback section after a keystroke", async () => {
     // Under the old tab rail, resetting the escape hatch on a new `result`
@@ -330,5 +432,81 @@ describe("Result — a completed recovery pass survives an edit (#823)", () => {
     expect(el.textContent).toContain("Recovered with on-device AI");
     expect(el.textContent).toContain("Local AI feedback");
     expect(el.textContent).not.toContain("Not everything parsed cleanly");
+  });
+});
+
+// ── Skills-ordering placement (#544, moved here by #955) ──────────────────
+
+/**
+ * The heuristic skills-ordering finding must reach the user WITHOUT the
+ * on-device model. It first shipped inside `CritiqueResults`, which mounts only
+ * under `status.kind === "done"` — so on a browser with no WebGPU the "Local AI
+ * feedback" disclosure is absent entirely and the finding was computed on every
+ * render and then thrown away.
+ *
+ * These lived in `ResultDetail.test.tsx` until #955 moved `TargetingSection`,
+ * and the single `useSkillsReorder` instance behind it, into the score card.
+ * There they asserted a PROP reached a mocked `ReconstructedResume`; here the
+ * whole tree is real, so what is asserted is the row's own copy — the thing
+ * the user can actually read.
+ */
+
+/** Buried-skill résumé: "Engineering Leadership" is the top-scoring skill
+ *  against the title and sits outside the front window (skills-order.ts). */
+function buriedSkillsResult(): CascadeResult {
+  const base = uploadResultMissingContact() as unknown as {
+    canonical: { fields: Record<string, unknown> };
+  };
+  return {
+    ...(base as unknown as CascadeResult),
+    canonical: {
+      ...base.canonical,
+      fields: {
+        ...base.canonical.fields,
+        skills: [
+          "Docker",
+          "AWS",
+          "Kubernetes",
+          "Engineering Leadership",
+          "Terraform",
+        ],
+        experience: [{ title: "Engineering Manager", company: "Acme" }],
+      },
+    },
+  } as unknown as CascadeResult;
+}
+
+/** The coaching row's own sentence (`SkillsOrderFinding.tsx`) — not a testid,
+ *  so a row that renders with the wrong skill named fails. */
+const ORDERING_COPY =
+  '"Engineering Leadership" looks highly relevant to your target role';
+
+describe("Result — skills-ordering placement (#544)", () => {
+  afterEach(() => {
+    webgpu.capability = "available";
+  });
+
+  it("shows the finding on a browser with no WebGPU", async () => {
+    webgpu.capability = "no-webgpu";
+    const el = await render(buriedSkillsResult());
+    // The precondition that made this a real defect: with no WebGPU the
+    // "Local AI feedback" section is absent entirely, so a row hosted inside
+    // it would have been unreachable on this exact render.
+    expect(el.textContent).not.toContain("Local AI feedback");
+    expect(el.textContent).toContain(ORDERING_COPY);
+  });
+
+  it("shows it on a WebGPU browser too — one mount, not two", async () => {
+    const el = await render(buriedSkillsResult());
+    expect(el.textContent).toContain(ORDERING_COPY);
+    // One instance, not two: `SkillsReorderController` is shared state, so a
+    // second mounted row would flip into the confirmation strip on one Apply.
+    const occurrences = (el.textContent ?? "").split(ORDERING_COPY).length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("says nothing for a résumé with nothing buried", async () => {
+    const el = await render(uploadResultMissingContact());
+    expect(el.textContent).not.toContain("looks highly relevant");
   });
 });

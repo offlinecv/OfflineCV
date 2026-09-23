@@ -10,7 +10,9 @@
  * whole-résumé and per-role rewrite panels use — rather than a new mechanism.
  *
  * ITS ONE MOUNT IS `SkillTermGuidance`, the résumé lane's other heuristic
- * skills advisory, which renders on every parse. It was originally a row in
+ * skills advisory, which renders on every parse (reached from
+ * `ResumeTargeting` → `TargetingSection` since #955; `ReconstructedResume` →
+ * `TargetingSection` before it). It was originally a row in
  * `CritiqueResults` and kept the finding-row shape it was given there —
  * an `<li>`, in the visual language of `BulletFindingRow`/`MissingSectionRow`
  * — so its host supplies the `<ul>`. It left that panel because the panel

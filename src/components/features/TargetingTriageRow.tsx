@@ -9,13 +9,20 @@
  * contact fields, with jump links to the contact block and to the bullets
  * themselves.
  *
- * #956 review removed a bullet jump link that pointed at
- * `#reconstructed-resume` — that id sits on the section that WRAPS this row
- * (ContactCard + TargetingSection + the document), so it is above the row,
- * and "Review bullets ↓" scrolled up past the contact card while its arrow
- * and label promised the opposite. #958 adds the corrected version: a link
- * to `SECTION_IDS.documentBody`, a single id wrapping every résumé section
- * below this disclosure (Summary through Skills). It has to be that broad,
+ * BOTH ARROWS POINT DOWN, and that is the current geometry rather than a
+ * coincidence. Since #955 folded `TargetingSection` into the score card, this
+ * row sits ABOVE the résumé card entirely — so `SECTION_IDS.contact` (the
+ * contact block, now the résumé card's first child) is below it, and the
+ * arrow that read "Edit contact ↑" until #955 now reads ↓. This is the exact
+ * mirror of the bug #956's review caught here: a jump link then pointed at
+ * `#reconstructed-resume`, an id on the section that WRAPPED this row, so
+ * "Review bullets ↓" scrolled up past the contact card while its arrow and
+ * label promised the opposite. An arrow here is a claim about layout, and it
+ * has to be re-checked whenever this row moves.
+ *
+ * #958 added the corrected bullet link: `SECTION_IDS.documentBody`, a single
+ * id wrapping every résumé section below this disclosure (Summary through
+ * Skills) — still below after #955, so it stays ↓. It has to be that broad,
  * not an Experience-specific anchor, because `score.bullets` pools project
  * and achievement bullets alongside experience ones (`score.ts` —
  * `scoreSpecificity`/`scoreStructure` both fold in `extraSources`), so an
@@ -176,7 +183,7 @@ export function TargetingTriageRow({
             href={EDIT_CONTACT_HREF}
             className="font-medium text-accent-primary hover:underline"
           >
-            Edit contact ↑
+            Edit contact ↓
           </a>
         )}
       </div>
