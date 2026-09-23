@@ -13,38 +13,37 @@
  * whether they are the same place. So L1 owns navigation now and this surface
  * is a single scrolling column:
  *
- *   [recovery offer, when the parse was degenerate]
  *   the reconstructed résumé            ← the page body, no click to reach it
- *   ▸ Local AI feedback                 ← collapsed
  *   ▸ Raw text & flags                  ← collapsed
  *
- * Three things a future edit must not undo:
+ * It is two surfaces shorter than it was. `TargetingSection` used to open the
+ * résumé card, between the contact block and the document; the recovery offer
+ * was a card above it and "Local AI feedback" a disclosure below. #955 moved
+ * all three UP into the score card's details region (`ScoreDetails`, mounted
+ * by `Result`), so the score and the reasons it is not 100 sit in one surface
+ * and dock together. `useSkillsReorder` went with the targeting section — it
+ * was owned here only to feed it, and there must stay EXACTLY ONE instance of
+ * it (see `SkillTermGuidance`'s docblock), so it moved rather than being
+ * copied. Only "Raw text & flags" stayed: it is evidence about the file, not a
+ * reason the score is what it is, and it belongs under the document it
+ * describes.
  *
- *  1. **The disclosures keep their children MOUNTED.** That is why they are
+ * Two things a future edit must not undo:
+ *
+ *  1. **The disclosure keeps its children MOUNTED.** That is why it is
  *     `Disclosure` (native `<details>`) and not an overflow menu: unmounting
- *     `ResumeQualityPanel` or `SourceDiagnosticsPanel` would discard the panel
- *     state and, in `SourceDiagnosticsPanel`'s case, re-rasterize the PDF on
- *     every reopen. Never gate their children on an open flag.
+ *     `SourceDiagnosticsPanel` would discard its panel state and re-rasterize
+ *     the PDF on every reopen. Never gate its children on an open flag. The
+ *     same rule now also governs the region the other two moved into — see
+ *     `ScoreDetails`, which docks them with `hidden` rather than unmounting.
  *
- *  2. **The recovery offer is inline, above the résumé, not behind a
- *     disclosure.** #243 gave the offer the on-device-AI tab's LABEL precisely
- *     so it had a permanent slot the layout was already paying for. Behind a
- *     collapsed section that slot stops existing, and the one affordance that
- *     repairs a degenerate parse becomes invisible on exactly the parses that
- *     need it. Its card is gated on `escapeHatch.isAvailable` ALONE — which
- *     does not change when the pass completes — so the panel stays mounted
- *     across the `done` transition and collapses to its own one-line
- *     confirmation. Gating it on `recoveryOffered` instead would unmount the
- *     panel in the very render that fires `onRecovered` (see
- *     `LlmEscapeHatchPanel`'s docblock) and the recovered parse would never
- *     reach the score card above.
- *
- *  3. **The two former tab-switch call sites are anchor scrolls now, not
+ *  2. **The two former tab-switch call sites are anchor scrolls now, not
  *     no-ops.** `ResumeQualityPanel`'s "go to rewrite" and a consumed tailor
  *     handoff both used `setTab("reconstructed")`; both now scroll to
  *     `SECTION_IDS.reconstructed`. The reason is unchanged and still
  *     load-bearing: JD steering is worthless if the rewrite affordance is off
- *     screen.
+ *     screen. The first of those call sites lives in `Result` now, with the
+ *     panel; the second is still here.
  *
  * Labels are byte-identical to the tabs they replace — renaming "Raw text &
  * flags" belongs to #680 item 4, and doing it here would collide with it.
@@ -53,20 +52,13 @@
 import { useEffect, useRef } from "react";
 import { Card, Disclosure } from "@design-system";
 import { ReconstructedResume } from "./ReconstructedResume.tsx";
-import { ResumeQualityPanel } from "./ResumeQualityPanel.tsx";
 import { SourceDiagnosticsPanel } from "./SourceDiagnosticsPanel.tsx";
-import { WebGpuUnavailableNotice } from "./WebGpuUnavailableNotice.tsx";
-import { LlmEscapeHatchPanel } from "./LlmEscapeHatchPanel.tsx";
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
-import type { EscapeHatchController } from "../../hooks/useLlmEscapeHatch.ts";
-import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
 import { useTailorHandoff } from "../../hooks/useTailorHandoff.ts";
-import { useSkillsReorder } from "../../hooks/useSkillsReorder.ts";
 import { SECTION_IDS, scrollToSection } from "../../lib/anchors.ts";
-import { deriveTitles } from "../../lib/job-search/query-builder.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
 
@@ -85,14 +77,10 @@ interface ResultDetailProps {
   bytes?: ArrayBuffer;
   sourceKind: SourceKind;
   edit: EditableParse;
+  /** Still threaded here after #955 moved the panel out: a completed critique
+   *  is what `ReconstructedResume`'s rewrite acts on (#608), so this component
+   *  reads `analysis.status` for that one prop and renders none of it. */
   analysis: AnalysisController;
-  /**
-   * Degenerate-parse recovery pass (#243). Rendered as its own card between the
-   * score card and the résumé — see point 2 in the module docblock.
-   */
-  escapeHatch: EscapeHatchController;
-  /** Forwarded to the recovery panel; `App` swaps in the LLM parse. */
-  onRecovered: (llmParsed: LlmParsedResume) => void;
   triggerCount: number;
   /**
    * Reports the JD steering this component consumed, so `/` can mark the
@@ -133,8 +121,6 @@ export function ResultDetail({
   sourceKind,
   edit,
   analysis,
-  escapeHatch,
-  onRecovered,
   triggerCount,
   onJdContextChange,
   onTailorApplied,
@@ -177,73 +163,8 @@ export function ResultDetail({
     // component remounts onto a résumé with no steering.
   }, [jdContext]);
 
-  // The on-device-AI section is the canonical on-device-AI surface (#276). It
-  // shows whenever there's résumé text to analyze — either running the live
-  // analysis (WebGPU available) OR, when WebGPU can't run here, explaining that
-  // in place instead of silently vanishing. `capability === null` (still
-  // detecting) and "no text" both leave it absent, as before.
-  const unavailableCapability =
-    analysis.hasText &&
-    analysis.capability !== null &&
-    analysis.capability !== "available"
-      ? analysis.capability
-      : null;
-
-  // Gated on `!== "done"`: the hatch stays `isAvailable` after a successful
-  // recovery (it is keyed on the ORIGINAL result so the pass can be re-run), so
-  // without this the offer would still read as outstanding once taken.
-  const recoveryOffered =
-    escapeHatch.isAvailable && escapeHatch.status.kind !== "done";
-
-  // One offer at a time (#243). While recovery is on the table the wording
-  // critique is withheld: a critique of a parse the parser itself flagged as
-  // degenerate is close to worthless, and stacking both put two model-loading
-  // CTAs on one screen. That rule is unchanged — but now that the offer is its
-  // own card above rather than this section's body, withholding the panel
-  // leaves nothing here to disclose, so the SECTION goes rather than opening
-  // onto an empty box.
-  const showQualityDisclosure =
-    !recoveryOffered &&
-    (analysis.isAvailable || unavailableCapability !== null);
-
-  // Skills-ordering coaching (#544) — a HEURISTIC finding, independent of
-  // `analysis`'s on-device LLM pass, computed from the same edited fields
-  // `ReconstructedResume` renders (overrides already folded into
-  // `activeResult` — see `useAnalyzedResume.ts`).
-  //
-  // It renders inside `SkillTermGuidance` (via `ReconstructedResume` →
-  // `TargetingSection`), the résumé lane's other heuristic skills advisory —
-  // NOT in the critique lane, where it first shipped. `CritiqueResults` mounts
-  // only under `status.kind === "done"`, so a finding this hook computes on
-  // every parse was reachable only by a visitor who owns a WebGPU browser AND
-  // opts into the model download. "Independent of the on-device LLM" has to be
-  // true of what the user can see, not just of how it is computed.
-  //
-  // Owned here rather than inside that panel because this is the level both
-  // the résumé and the critique lane hang off, and one instance is what keeps
-  // the apply/undo state single — see `SkillTermGuidance`'s docblock.
-  const skillsOrder = useSkillsReorder(
-    activeResult.canonical.fields.skills,
-    activeResult.canonical.fields.skillCategories,
-    deriveTitles(activeResult.canonical.fields),
-    edit.reorderSkills,
-  );
-
   return (
     <>
-      {escapeHatch.isAvailable && (
-        // Between the score card and the résumé, and gated on `isAvailable`
-        // alone — see point 2 in the module docblock. The gate does not move at
-        // the `done` transition, so the panel is never remounted in the render
-        // that reports the recovered parse upward.
-        <Card className="shadow-xs">
-          <LlmEscapeHatchPanel
-            controller={escapeHatch}
-            onRecovered={onRecovered}
-          />
-        </Card>
-      )}
-
       <Card className="shadow-xs">
         <ReconstructedResume
           result={activeResult}
@@ -267,44 +188,8 @@ export function ResultDetail({
               ? analysis.status.critique
               : undefined
           }
-          // #544: passed through to `TargetingSection` → `SkillTermGuidance`,
-          // which is where the heuristic ordering call-out renders. Nothing
-          // between here and there reads it.
-          skillsOrder={skillsOrder}
         />
       </Card>
-
-      {showQualityDisclosure && (
-        // "Local AI feedback", not "AI feedback": the word that matters is the
-        // one saying the model runs here. The panel's own heading carries the
-        // rest. Warn-marked only for the WebGPU case — nothing is broken in the
-        // browser otherwise, and the recovery offer has its own card now.
-        <Disclosure
-          summary="Local AI feedback"
-          warn={!analysis.isAvailable}
-          warnLabel="setup needed"
-        >
-          {analysis.isAvailable ? (
-            /* onGoToRewrite: scroll back to the résumé, where the per-role wand
-               button (#3 / useSectionRewrite) already lives. The quality panel
-               links each flagged bullet to this affordance instead of building
-               a parallel rewrite UI (issue #244, #273). */
-            <ResumeQualityPanel
-              controller={analysis}
-              result={activeResult}
-              onGoToRewrite={() => scrollToSection(SECTION_IDS.reconstructed)}
-            />
-          ) : (
-            /* WebGPU can't run here — explain in place instead of hiding the
-               section (#276). Still guarded: `unavailableCapability` is what
-               opened the section on this branch, so the narrowing is the
-               condition, not an extra one. */
-            unavailableCapability && (
-              <WebGpuUnavailableNotice capability={unavailableCapability} />
-            )
-          )}
-        </Disclosure>
-      )}
 
       {/* Always present and always last — evidence after insight (#263, #273).
           The layout-flag count rides the summary row so the warning count stays

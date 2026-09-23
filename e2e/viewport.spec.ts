@@ -85,15 +85,36 @@ import {
 // measured, which is the regression this ceiling exists to catch.
 const EXPANDED_MAX_PX = 200;
 
-// Measured 275.5px expanded (identical at both viewports). The hero ceilings
+// Measured 415.5px expanded (identical at both viewports). The hero ceilings
 // above and in `score-hero.ts` bound `AtsScoreReadout`'s own <section>; this
 // one bounds the whole score card that holds it — `ParsedHeader`, the
-// two-column `ErrorState` and the `gap-6` + `p-5` chrome add 90px that sits
-// OUTSIDE both hero ceilings while pushing the résumé down exactly the way
-// #953/#956 care about. Without this assertion, `ParsedHeader` growing a row
-// moves the résumé and leaves every other ceiling in this file untouched.
-// +24.5px (~9%), same rendering variance as the other two.
-const CARD_MAX_PX = 300;
+// two-column `ErrorState`, the collapsed targeting and local-AI feedback
+// disclosures and the `gap-6` + `p-5` chrome add 230px (415.5 − 185.5) that
+// sits OUTSIDE both hero ceilings while pushing the résumé down exactly the
+// way #953/#956 care about. Without this assertion, `ParsedHeader` growing a
+// row moves the résumé and leaves every other ceiling in this file untouched.
+//
+// RAISED from 300 by #955, which is the one change allowed to move it, and
+// the raise is only honest alongside what it bought. #955 moved three surfaces
+// INTO this card — `TargetingSection`, the recovery offer and the local-AI
+// feedback disclosure — so that `Score details` means what its toggle label
+// says. That is why ARRIVAL grew, 275.5 -> 415.5.
+//
+// **This ceiling bounds the arrival state only, and arrival is no longer the
+// state the page settles into.** All three of those surfaces dock away with
+// the readout, so the steady state after `useAutoCollapse`'s countdown is
+// `ParsedHeader` + the one-line pill: 116px on this fixture, 226px on the
+// two-column one. Measured Summary tops tell the same story from the other
+// side — 751.5 (pre-#955) -> 779.5 arriving -> 480 docked here, and 833.5 ->
+// 861.5 -> 562 on the two-column fixture. So the arrival number regressed
+// against #953's fold promise while the steady state improved by ~270px, and
+// only the second of those is what a reader actually sits in front of.
+//
+// Keep BOTH facts in view when this constant next moves. A raise paired with a
+// docked state that did not improve is the regression this assertion exists to
+// catch; a raise like this one is a deliberate trade. Re-measure, never nudge.
+// +34.5px (~8.3%), same rendering variance as the other two.
+const CARD_MAX_PX = 450;
 
 /** The score `Card` wrapping the hero — `Result.tsx`'s
  *  `<Card className="flex flex-col gap-6 shadow-xs">`, which also holds

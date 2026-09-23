@@ -14,9 +14,18 @@
  * your attention" signal is co-located; the inline "not detected" pills stay in
  * the contact line, where the field is fixed.
  *
- * This component owns the card chrome and the name heading; the per-segment
- * contact/links rendering (and its inline-edit affordances) lives in
- * `ContactDetails` so the card stays within the ~200 LOC budget.
+ * It no longer owns card chrome (#955). It renders a plain `<section>`: both
+ * lanes wrap the résumé in a `Card` with the identical border/radius/
+ * background/padding (`ResultDetail` on `/`, `App`'s authoring branch for a
+ * from-scratch résumé), and a second copy of that chrome as its
+ * first child drew two nested identical borders carrying no information —
+ * position and type size already say "this is the contact block" — while the
+ * doubled `p-5` cost ~40px of the vertical budget #955 exists to win back.
+ * Deliberately NOT swapped for a tint or an accent: this surface previews a
+ * printed ATS PDF, and tinting the one block that is pure text would imply it
+ * exports that way. What this component still owns is the name heading; the
+ * per-segment contact/links rendering (and its inline-edit affordances) lives
+ * in `ContactDetails` so the card stays within the ~200 LOC budget.
  *
  * Editing (#147): when BOTH `overrides` and `onFieldChange` are provided, the
  * five editable fields (`full_name`, `email`, `phone`, `linkedin_url`,
@@ -30,7 +39,7 @@
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
 import { applyContactOverrides, buildContactFields } from "../../lib/contact.ts";
-import { Card, EditableField } from "@design-system";
+import { EditableField } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import type {
   ContactOverrides,
@@ -130,7 +139,7 @@ export function ContactCard({
     onFieldChange?.(key, v);
 
   return (
-    <Card id={SECTION_IDS.contact} className="scroll-mt-6 text-center">
+    <section id={SECTION_IDS.contact} className="scroll-mt-6 text-center">
       {/* Name heading — the immediate "whose resume" anchor. */}
       <h2 className="text-lg font-semibold text-content-primary">
         {editable ? (
@@ -168,6 +177,6 @@ export function ContactCard({
         onEditProfile={onEditProfile}
         onRemoveProfile={onRemoveProfile}
       />
-    </Card>
+    </section>
   );
 }

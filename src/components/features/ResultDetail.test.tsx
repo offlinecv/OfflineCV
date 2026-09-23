@@ -5,19 +5,22 @@
 
 /**
  * Render coverage for ResultDetail (#275, consolidated in #273, un-tabbed in
- * #823) — everything on `/` below the score card.
+ * #823, narrowed to two surfaces in #955) — everything on `/` below the score
+ * card: the résumé and the "Raw text & flags" disclosure.
  *
- * Both visibility regimes are rendered so every conditional branch executes:
- * (1) analysis unavailable → the résumé plus the "Raw text & flags" disclosure
- * alone; (2) analysis available → the "Local AI feedback" disclosure as well.
  * A tiny host component supplies a real EditableParse via useEditableParse. Raw
  * createRoot, matching the other feature render tests.
  *
  * What the #823 tests below are actually pinning, beyond "it renders": the
- * disclosures must not unmount their children, and the degenerate-parse
- * recovery offer must be reachable without opening anything. Both are silent
- * failures — a collapsed section that discards its panel state, and a repair
- * affordance invisible on exactly the parses that need it.
+ * disclosure must not unmount its children — a silent failure, a collapsed
+ * section that discards its panel state and re-rasterizes the PDF.
+ *
+ * The recovery offer and the "Local AI feedback" disclosure were tested here
+ * until #955 moved both into the score card's details region. Their coverage
+ * moved with them, to `src/components/Result.test.tsx`, where the real tree is
+ * rendered rather than a hand-shaped controller — see the two blocks there.
+ * The `analysis` controller is still built below because `ResultDetail` still
+ * reads `analysis.status` for `ReconstructedResume`'s `critique` prop (#608).
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
@@ -40,7 +43,6 @@ vi.mock("./ReconstructedResume.tsx", async () => {
     ReconstructedResume: (props: {
       jdContext?: string;
       onRewriteApplied?: () => void;
-      skillsOrder?: { finding?: { buried: string[] } };
     }) =>
       createElement(
         "div",
@@ -49,13 +51,6 @@ vi.mock("./ReconstructedResume.tsx", async () => {
           "div",
           { key: "probe", "data-testid": "reconstructed-probe" },
           `jdContext=${props.jdContext ?? "NULL"}`,
-        ),
-        // Its own testid, not appended to the probe above: several assertions
-        // read that probe's whole `textContent` with `toBe`.
-        createElement(
-          "div",
-          { key: "skills-order", "data-testid": "skills-order-probe" },
-          `buried=${props.skillsOrder?.finding?.buried.join(",") ?? "NONE"}`,
         ),
         createElement(
           "div",
@@ -80,7 +75,6 @@ import {
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import type { AnalysisController } from "../../hooks/useResumeAnalysisLlm.ts";
-import type { EscapeHatchController } from "../../hooks/useLlmEscapeHatch.ts";
 import type { WebGpuCapability } from "../../lib/webllm/types.ts";
 import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
 
@@ -135,22 +129,6 @@ interface ControllerOpts {
   isAvailable: boolean;
   capability?: WebGpuCapability | null;
   hasText?: boolean;
-  /** Degenerate-parse recovery offer (#243) — its own card since #823. */
-  escapeHatch?: "offered" | "recovered";
-}
-
-function escapeHatchController(
-  opts: ControllerOpts,
-): EscapeHatchController {
-  return {
-    status:
-      opts.escapeHatch === "recovered"
-        ? { kind: "done", llmParsed: {} }
-        : { kind: "idle" },
-    isAvailable: opts.escapeHatch !== undefined,
-    isBusy: false,
-    run: () => Promise.resolve(),
-  } as unknown as EscapeHatchController;
 }
 
 function controller(opts: ControllerOpts): AnalysisController {
@@ -171,20 +149,9 @@ let root: Root;
 
 const HOST_IDENTITY = parseIdentity();
 
-function Host({
-  opts,
-  summary,
-  buriedSkills,
-}: {
-  opts: ControllerOpts;
-  summary?: string;
-  /** A résumé whose Skills section trips the ordering heuristic (#544). */
-  buriedSkills?: { title: string; skills: string[] };
-}) {
+function Host({ opts, summary }: { opts: ControllerOpts; summary?: string }) {
   const edit = useEditableParse();
-  const res = buriedSkills
-    ? result(summary, buriedSkills.title, buriedSkills.skills)
-    : result(summary);
+  const res = result(summary);
   return createElement(ResultDetail, {
     activeResult: res,
     parseIdentity: HOST_IDENTITY,
@@ -193,22 +160,16 @@ function Host({
     sourceKind: "pdf",
     edit,
     analysis: controller(opts),
-    escapeHatch: escapeHatchController(opts),
-    onRecovered: () => {},
     triggerCount: res.triggers.length,
   });
 }
 
-function render(
-  opts: ControllerOpts,
-  summary?: string,
-  buriedSkills?: { title: string; skills: string[] },
-) {
+function render(opts: ControllerOpts, summary?: string) {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root.render(createElement(Host, { opts, summary, buriedSkills }));
+    root.render(createElement(Host, { opts, summary }));
   });
   return container;
 }
@@ -237,10 +198,25 @@ afterEach(() => {
 });
 
 describe("ResultDetail", () => {
-  it("omits the on-device-AI section while capability is still detecting / no text", () => {
-    const el = render({ isAvailable: false });
-    expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
-    expect(el.textContent).not.toContain("Local AI feedback");
+  it("renders no on-device-AI surface at all, in either capability regime (#955)", () => {
+    // Not "omits it while capability is still detecting" — that was the old
+    // gate. #955 moved the whole section into the score card, so this
+    // component must show nothing of it on ANY controller, which is what
+    // rules out a second copy being left behind here.
+    for (const opts of [
+      { isAvailable: false },
+      { isAvailable: true },
+      { isAvailable: false, capability: "no-webgpu" as const, hasText: true },
+    ]) {
+      const el = render(opts, "Senior engineer.");
+      expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
+      expect(el.textContent).not.toContain("Local AI feedback");
+      expect(el.textContent).not.toContain("What the model checks");
+      act(() => root.unmount());
+      container.remove();
+    }
+    // The shared afterEach unmounts again; re-render so it has a live root.
+    render({ isAvailable: false });
   });
 
   it("has no tab rail and no second route to /jobs/ (#823)", () => {
@@ -254,18 +230,17 @@ describe("ResultDetail", () => {
     expect(el.textContent).not.toContain("Open job workbench");
   });
 
-  it("renders the résumé unconditionally, with both sections collapsed under it", () => {
+  it("renders the résumé unconditionally, with the evidence section collapsed under it", () => {
     const el = render({ isAvailable: true }, "Senior engineer.");
     // The résumé needs no click to reach — it is the page body.
     expect(el.querySelector('[data-testid="reconstructed-probe"]')).not.toBeNull();
-    // Insight before evidence (#263, #273), and both start shut.
-    const labels = summaries(el);
-    // Exact, not `toContain`: "byte-identical to the tab labels they replace"
-    // is the claim, so the assertion has to be able to catch a rename. The
-    // leading glyph is the chevron the summary draws itself.
-    expect(labels).toEqual(["▸Local AI feedback", "▸Raw text & flags1"]);
+    // One disclosure, shut. Exact, not `toContain`: "byte-identical to the tab
+    // labels they replace" is the claim, so the assertion has to be able to
+    // catch a rename. The leading glyph is the chevron the summary draws
+    // itself; the trailing 1 is the layout-flag count.
+    expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
     for (const d of el.querySelectorAll("details")) expect(d.open).toBe(false);
-    // No recovery offer, so no warn mark anywhere.
+    // Nothing warn-marked down here any more.
     expect(el.textContent).not.toContain("setup needed");
   });
 
@@ -304,115 +279,15 @@ describe("ResultDetail", () => {
     expect(details.querySelector('[role="group"]')).toBe(before);
   });
 
-  it("shows the degenerate-parse recovery offer inline, without opening anything (#243)", () => {
-    // #243 gave the offer the on-device-AI tab's LABEL so it had a permanent
-    // slot. Behind a collapsed section that slot stops existing, so the offer
-    // is its own card now — above the résumé, always visible.
-    const el = render(
-      { isAvailable: true, escapeHatch: "offered" },
-      "Senior engineer with a track record of shipping.",
-    );
-    expect(el.textContent).toContain("Not everything parsed cleanly");
-    // Not behind a disclosure: only the evidence section is present at all…
-    expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
-    // …and the offer is not inside the one that IS there.
-    expect(
-      disclosure(el, "Raw text & flags").textContent,
-    ).not.toContain("Not everything parsed cleanly");
-    // One offer at a time — the quality panel's own CTA must not sit beside a
-    // second model-loading CTA.
-    expect(el.textContent).not.toContain("Analyze with on-device model");
-    expect(el.textContent).not.toContain("What the model checks");
-    // ABOVE the résumé, not merely present: the offer's permanent slot is what
-    // #243 bought by giving it the tab's label, and a card below a 1000-line
-    // résumé is as good as behind a collapsed section.
-    const offer = [...el.querySelectorAll("h2")].find((n) =>
-      (n.textContent ?? "").includes("Not everything parsed cleanly"),
-    );
-    const resume = el.querySelector('[data-testid="reconstructed-probe"]');
-    expect(offer).toBeDefined();
-    expect(resume).not.toBeNull();
-    expect(
-      offer!.compareDocumentPosition(resume!) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it("keeps the recovery panel mounted through `done` and hands the section back", () => {
-    // The hatch stays `isAvailable` after a successful pass (it is keyed on the
-    // ORIGINAL result so it can be re-run). The card must therefore be gated on
-    // `isAvailable` ALONE: gating it on the offer standing would unmount the
-    // panel in the very render that fires `onRecovered`.
-    const el = render(
-      { isAvailable: true, escapeHatch: "recovered" },
-      "Senior engineer with a track record of shipping.",
-    );
-    // Collapsed to its one-line confirmation, still on screen.
-    expect(el.textContent).toContain("Recovered with on-device AI");
-    expect(el.textContent).not.toContain("Not everything parsed cleanly");
-    // …and the quality section it was withholding is back. Assert the PANEL's
-    // own heading, not the summary label — those were the same string until the
-    // heading was renamed, so a label assertion never proved the panel mounted.
-    const quality = disclosure(el, "Local AI feedback");
-    expect(quality.textContent).toContain("What the model checks");
-  });
-
-  it("does not REMOUNT the recovery card as the pass completes", () => {
-    // The test above mounts fresh at `recovered`, so it can only see the end
-    // state — wrap the card as `<Card key={escapeHatch.status.kind}>` and it
-    // stays green while `onRecovered` fires from a brand-new panel instance on
-    // every pass. This runs the transition AS a transition, within one mount,
-    // and asserts NODE IDENTITY: a remount is a different element.
-    const opts = (escapeHatch: "offered" | "recovered"): ControllerOpts => ({
-      isAvailable: true,
-      escapeHatch,
-    });
-    function TransitionHost({ done }: { done: boolean }) {
-      const edit = useEditableParse();
-      const res = result("Senior engineer with a track record of shipping.");
-      const o = opts(done ? "recovered" : "offered");
-      return createElement(ResultDetail, {
-        activeResult: res,
-        parseIdentity: HOST_IDENTITY,
-        activeScore: score,
-        result: res,
-        sourceKind: "pdf",
-        edit,
-        analysis: controller(o),
-        escapeHatch: escapeHatchController(o),
-        onRecovered: () => {},
-        triggerCount: res.triggers.length,
-      });
-    }
-
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    act(() => {
-      root.render(createElement(TransitionHost, { done: false }));
-    });
-    // The recovery card is the first child — above the résumé, by design.
-    const cardBefore = container.firstElementChild;
-    expect(cardBefore?.textContent).toContain("Not everything parsed cleanly");
-
-    act(() => {
-      root.render(createElement(TransitionHost, { done: true }));
-    });
-    expect(container.firstElementChild).toBe(cardBefore);
-    expect(cardBefore?.textContent).toContain("Recovered with on-device AI");
-  });
-
-  it("warn-marks the on-device-AI summary and explains in place when WebGPU is unavailable", () => {
-    const el = render(
-      { isAvailable: false, capability: "no-webgpu", hasText: true },
-      "Senior engineer with a track record of shipping.",
-    );
-    const summary = disclosure(el, "Local AI feedback").querySelector("summary");
-    // Warn marker is announced, not colour-only.
-    expect(summary?.textContent).toContain("setup needed");
-    // The panel explains the unavailability in place instead of vanishing.
-    expect(el.textContent).toContain("On-device AI isn't available");
-  });
+  // Three blocks lived here and moved to `src/components/Result.test.tsx` with
+  // the surfaces they cover (#955): the degenerate-parse recovery offer's
+  // placement and its `isAvailable`-alone mount gate, the node-identity proof
+  // that it is not REMOUNTED as the pass completes, and the WebGPU-unavailable
+  // warn mark on the "Local AI feedback" summary. All three are about the
+  // score card's details region now. They gained from the move — over there
+  // the real `useLlmEscapeHatch`/`useResumeAnalysisLlm` controllers run, so
+  // the `done` transition is driven by clicking the real CTA rather than by
+  // swapping a hand-shaped status object.
 
   it("consumes a tailor handoff on mount and steers the rewrite (#576)", () => {
     // The round-trip claim: `/jobs/`'s tailor button stashes an instruction in
@@ -471,8 +346,6 @@ describe("ResultDetail", () => {
         sourceKind: "pdf",
         edit,
         analysis: controller(opts),
-        escapeHatch: escapeHatchController(opts),
-        onRecovered: () => {},
         triggerCount: heuristic.triggers.length,
       });
     }
@@ -537,8 +410,6 @@ describe("ResultDetail", () => {
         sourceKind: "pdf",
         edit,
         analysis: controller(opts),
-        escapeHatch: escapeHatchController(opts),
-        onRecovered: () => {},
         triggerCount: base.triggers.length,
       });
     }
@@ -680,8 +551,6 @@ describe("ResultDetail — the journey rail's steering report (#812)", () => {
         sourceKind: "pdf",
         edit,
         analysis: controller(opts),
-        escapeHatch: escapeHatchController(opts),
-        onRecovered: () => {},
         triggerCount: res.triggers.length,
         onJdContextChange,
         onTailorApplied,
@@ -749,69 +618,13 @@ describe("ResultDetail — the journey rail's steering report (#812)", () => {
   });
 });
 
-// ── Skills-ordering placement (#544) ──────────────────────────────────────────
+// ── Skills-ordering placement (#544) ─────────────────────────────
 
-/**
- * The heuristic skills-ordering finding must reach the user WITHOUT the
- * on-device model. It first shipped inside `CritiqueResults`, which mounts only
- * under `status.kind === "done"` — so on a browser with no WebGPU the "Local AI
- * feedback" disclosure is absent entirely and the finding was computed on every
- * render and then thrown away. These pin the wiring that fixed it: the
- * controller travels to `ReconstructedResume` (→ `TargetingSection` →
- * `SkillTermGuidance`), which renders unconditionally.
- *
- * `ReconstructedResume` is mocked at the top of this file, so what is asserted
- * here is the hand-off, not the row's markup — the row itself is covered in
- * `SkillTermGuidance.test.tsx`.
- */
-describe("ResultDetail — skills-ordering placement (#544)", () => {
-  /** Buried-skill résumé: "Engineering Leadership" is the top-scoring skill
-   *  against the title and sits outside the front window (skills-order.ts). */
-  const BURIED = {
-    title: "Engineering Manager",
-    skills: [
-      "Docker",
-      "AWS",
-      "Kubernetes",
-      "Engineering Leadership",
-      "Terraform",
-    ],
-  };
-
-  function buried(el: HTMLElement): string {
-    return (
-      el.querySelector('[data-testid="skills-order-probe"]')?.textContent ?? ""
-    );
-  }
-
-  /** Substring, not equality: `summaries()` returns the row's whole text, and
-   *  `Disclosure` prefixes its own ▸ glyph. An `toContain` over the array
-   *  would pass vacuously in BOTH directions. */
-  function hasAiSection(el: HTMLElement): boolean {
-    return summaries(el).some((s) => s.includes("Local AI feedback"));
-  }
-
-  it("hands the finding to the résumé surface on a browser with no WebGPU", () => {
-    const el = render({ isAvailable: false }, undefined, BURIED);
-    // The precondition that made this a real defect: with no WebGPU there is
-    // no "Local AI feedback" section at all, so a row hosted inside it would
-    // have been unreachable on this exact render.
-    expect(hasAiSection(el)).toBe(false);
-    expect(buried(el)).toBe("buried=Engineering Leadership");
-  });
-
-  it("hands it over on a WebGPU browser too — one mount, not two", () => {
-    const el = render({ isAvailable: true }, undefined, BURIED);
-    expect(hasAiSection(el)).toBe(true);
-    expect(buried(el)).toBe("buried=Engineering Leadership");
-    // The critique body is the surface it LEFT. A second mount there would put
-    // two rows over one shared controller, so both would enter the
-    // confirmation strip on a single Apply.
-    expect(el.textContent).not.toContain("Skills ordering");
-  });
-
-  it("passes a controller with no finding for a résumé with nothing buried", () => {
-    const el = render({ isAvailable: false });
-    expect(buried(el)).toBe("buried=NONE");
-  });
-});
+// The three tests that pinned "the heuristic skills-ordering finding reaches
+// the user WITHOUT the on-device model" live in `src/components/Result.test.tsx`
+// as of #955. They asserted a hand-off out of THIS component, and #955 moved
+// `TargetingSection` — and with it the single `useSkillsReorder` instance — up
+// into the score card, so `ResultDetail` no longer has the prop to hand off.
+// They did not go away: they are stronger over there, because `Result.test.tsx`
+// renders the real `TargetingSection`/`SkillTermGuidance` rather than a mock
+// that only proves a prop was passed.

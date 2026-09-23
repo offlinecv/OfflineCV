@@ -138,8 +138,16 @@ function RewriteLauncher({
 
   return (
     <>
+      {/* `secondary`, not `primary` (#955): this was the single most
+          dominant control on a page whose stage is "Fix it", and its label
+          frequently reads `Download model · ~1.6 GB` — primary-styled while
+          not yet usable. Placement, label, `aria-label` and `disabled` are
+          unchanged; #67 still puts the trigger inline near `SectionRewrite`.
+          The variant deliberately does NOT depend on whether the model is
+          cached: `cachedIds` lives inside `ModelSelector`, and lifting it out
+          is out of scope. */}
       <Button
-        variant="primary"
+        variant="secondary"
         size="sm"
         onClick={() => setOpen(true)}
         disabled={controller.isLocked}
