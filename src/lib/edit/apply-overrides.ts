@@ -80,7 +80,59 @@ import { bulletIdText, isLegacyBulletKey } from "../score/bullet-id.ts";
  * `fieldConfidence` keeps score + contact-gap display in step with user-affirmed
  * contact edits (#421 Blocking #1 / #3).
  */
-export type ApplyOverridesResult = CanonicalResume & { rawText: string };
+export type ApplyOverridesResult = CanonicalResume & {
+  rawText: string;
+  /**
+   * Every bullet instruction the fold could NOT land (#769) — reported, never
+   * thrown, so the function stays total. Empty on a clean fold; a caller that
+   * does not care reads the same result it always did.
+   *
+   * An override is keyed by the TEXT it replaces (`bullet-id.ts`), and within
+   * one session that text is always present at the override's turn. A delta
+   * that outlives its base is different: the standard résumé edits bullet A to
+   * A′ after a variant stored `id("A") → "B"`, and now no line matches `A`. The
+   * fold used to skip that silently — the variant quietly lost an edit the user
+   * made, and nothing anywhere said so. It is now listed here, with enough of
+   * the instruction (`text`, `edited`) for a stale-delta surface to show it and
+   * let the user re-apply or discard.
+   *
+   * What this does NOT catch: an override whose exact target is gone but whose
+   * text still normalise-matches a DIFFERENT line — an id carries no position,
+   * so that line IS the target as far as the key can tell. See the "across
+   * time" note in `bullet-id.ts`.
+   */
+  unresolved: readonly UnresolvedOverride[];
+};
+
+/** One bullet instruction that named no line at its turn in the fold (#769). */
+export interface UnresolvedOverride {
+  /** The snapshot channel the instruction came from. */
+  channel: "bulletOverrides" | "removedBullets";
+  /** The key exactly as stored in the snapshot. */
+  key: string;
+  /**
+   * The text the key named — the line the fold went looking for.
+   *
+   * ITS SHAPE FOLLOWS THE KEY SPACE, so a consumer must not assume one form.
+   * A modern id key CARRIES its text already normalised, so this is the
+   * lowercased, marker-stripped, whitespace-collapsed form; a legacy numeric
+   * key resolves through `byIndex`, so this is the observation's VERBATIM
+   * text, capitals and leading marker intact. Both are what the matcher
+   * compares (it normalises each candidate line before comparing), so neither
+   * is wrong for the fold — but a surface that DISPLAYS this string will show
+   * the two differently, and that is the divergence to decide before a
+   * stale-delta panel renders it.
+   *
+   * Absent when the key itself names nothing in either key space: a `"<n>|"`
+   * id minted for a marker-only line (#660), or a legacy numeric index with no
+   * observation behind it. Those are inert by construction, and inert-and-
+   * permanent is the definition of stale.
+   */
+  text?: string;
+  /** For `bulletOverrides`: the replacement the user wrote, so the entry can be
+   *  re-applied by hand rather than only discarded. */
+  edited?: string;
+}
 
 /** A `{ rawText, sections }` pair — the two bullet-pool views that every
  *  bullet-line mutation (replace/remove) must keep in lockstep. */
@@ -554,10 +606,10 @@ function applySkillOverrides(
 // different line containers (rawText, an accomplishment section, a role's
 // description) — then either swap or splice that one line. The three
 // `withMatched*` helpers below own the shared "find + clone + mutate" shape;
-// each pair of public replace/remove functions is a thin `mutate` callback
-// over one of them. This collapses what were six near-identical bodies
-// (previously duplicated clone groups flagged by fallow) into three shared
-// traversals.
+// `mutateBulletLine` runs one {@link BulletLineMutation} (replace or remove)
+// through all three of them and reports whether any container had the line
+// (#769). This collapses what were six near-identical bodies (previously
+// duplicated clone groups flagged by fallow) into three shared traversals.
 //
 // They take the match as a PREDICATE rather than as the original text (#856):
 // removing a deleted entry's own header line walks the same three containers,
@@ -664,130 +716,79 @@ function withMatchedDescriptionLine(
   }
 }
 
-// ── Bullet line replacement ──────────────────────────────────────────────────
+// ── Bullet line replacement / removal ────────────────────────────────────────
 
 /**
- * Replace the first rawText line whose stripped form equals `originalText`
- * (matched via `normalizeBulletText`, the same normaliser the grouping uses)
- * with `editedText`, preserving any leading bullet/numbered marker so the line
- * still extracts as a bullet. Returns the text unchanged if no line matches.
+ * One bullet-line mutation, per container kind. The two POOLED containers
+ * (`rawText` and the accomplishment sections) carry the line's leading marker
+ * and must keep it, so the line still extracts as a bullet; a role's
+ * `description` is marker-free and takes the edit verbatim.
  */
-function replaceBulletInRawText(
-  rawText: string,
-  originalText: string,
-  editedText: string,
-): string {
-  return withMatchedRawTextLine(
-    rawText,
-    bulletLineMatcher(originalText),
-    (lines, idx) => {
+interface BulletLineMutation {
+  pooled: (lines: string[], idx: number) => void;
+  description: (lines: string[], idx: number) => void;
+}
+
+/** Replace the matched line with `editedText`, preserving a pooled marker. */
+function replaceLineWith(editedText: string): BulletLineMutation {
+  return {
+    pooled: (lines, idx) => {
       const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
       lines[idx] = marker + editedText;
     },
-  );
-}
-
-/**
- * Replace the first accomplishment-section line whose normalised form equals
- * `originalText` with `editedText`, preserving the leading marker, and return a
- * NEW {@link SectionedResume} with a cloned `byName` map (only the mutated
- * section's array is cloned; the input map and arrays are never mutated).
- * Returns the input unchanged when no line matches.
- *
- * This mirrors `replaceBulletInRawText`'s first-match, preserve-marker logic,
- * but walks the accomplishment sections in policy order so the live edit lands
- * in the exact pool the anonymous scorer grades from (#133).
- */
-function replaceBulletInSections(
-  sections: SectionedResume,
-  originalText: string,
-  editedText: string,
-): SectionedResume {
-  return withMatchedSectionLine(
-    sections,
-    bulletLineMatcher(originalText),
-    (lines, idx) => {
-      const marker = lines[idx].match(LEADING_MARKER_RE)?.[0] ?? "";
-      lines[idx] = marker + editedText;
-    },
-  );
-}
-
-/**
- * Replace the first description line (in any role) whose normalised form equals
- * `originalText` with `editedText`. Mutates the cloned experience entries in
- * place via the returned descriptions. Mirrors `groupBulletsByExperience`'s
- * first-match tiebreak so the bullet lands in the same role the UI grouped it
- * under.
- */
-function replaceBulletInDescriptions(
-  experience: HeuristicParsedResume["experience"],
-  originalText: string,
-  editedText: string,
-): void {
-  withMatchedDescriptionLine(
-    experience,
-    bulletLineMatcher(originalText),
-    (lines, idx) => {
+    description: (lines, idx) => {
       lines[idx] = editedText;
     },
-  );
+  };
 }
 
-/**
- * Remove the first rawText line whose normalised form equals `originalText`.
- * Returns the text unchanged when no line matches. Mirrors
- * `replaceBulletInRawText`'s first-match contract, but drops the line entirely
- * (the rewrite-review "accept this removal" path, #211).
- */
-function removeBulletFromRawText(
-  rawText: string,
-  originalText: string,
-): string {
-  return withMatchedRawTextLine(
-    rawText,
-    bulletLineMatcher(originalText),
-    (lines, idx) => {
-      lines.splice(idx, 1);
-    },
-  );
-}
+/** Drop the matched line entirely (a per-row Remove, or an accepted
+ *  "this bullet was removed" decision from the rewrite review, #211). */
+const REMOVE_LINE: BulletLineMutation = {
+  pooled: (lines, idx) => {
+    lines.splice(idx, 1);
+  },
+  description: (lines, idx) => {
+    lines.splice(idx, 1);
+  },
+};
 
 /**
- * Remove the first accomplishment-section line whose normalised form equals
- * `originalText`, returning a NEW {@link SectionedResume} with only the mutated
- * section's array cloned. This is the pool the anonymous scorer grades from
- * (#133), so an accepted removal must drop the line here to move the score.
+ * Apply `mutation` to the first line whose normalised form equals
+ * `originalText` in each of the three containers — `rawText`, the
+ * accomplishment sections (the pool the anonymous scorer grades from, #133),
+ * and the first role description that carries it (mirroring
+ * `groupBulletsByExperience`'s first-match tiebreak so the edit lands in the
+ * role the UI grouped it under). Returns NEW views (the input is never
+ * mutated; only the touched section array is cloned) and the caller's cloned
+ * experience entries are rewritten in place.
+ *
+ * `matched` is true when ANY container had the line (#769). It is set from
+ * inside the mutate callbacks — the one place the traversal has already
+ * decided the line is there — so the report and the edit cannot disagree
+ * about whether a target existed. The alternative, a separate lookup walk
+ * before the mutation, is two traversals that have to stay in step.
  */
-function removeBulletFromSections(
-  sections: SectionedResume,
-  originalText: string,
-): SectionedResume {
-  return withMatchedSectionLine(
-    sections,
-    bulletLineMatcher(originalText),
-    (lines, idx) => {
-      lines.splice(idx, 1);
-    },
-  );
-}
-
-/**
- * Remove the first description line (in any role) whose normalised form equals
- * `originalText`, mutating the cloned experience entries in place. Mirrors
- * `replaceBulletInDescriptions`' first-match tiebreak.
- */
-function removeBulletFromDescriptions(
+function mutateBulletLine(
+  views: BulletViews,
   experience: HeuristicParsedResume["experience"],
   originalText: string,
-): void {
-  withMatchedDescriptionLine(
-    experience,
-    bulletLineMatcher(originalText),
-    (lines, idx) => {
-      lines.splice(idx, 1);
-    },
-  );
+  mutation: BulletLineMutation,
+): { views: BulletViews; matched: boolean } {
+  const matches = bulletLineMatcher(originalText);
+  let matched = false;
+  const pooled = (lines: string[], idx: number) => {
+    matched = true;
+    mutation.pooled(lines, idx);
+  };
+  const description = (lines: string[], idx: number) => {
+    matched = true;
+    mutation.description(lines, idx);
+  };
+  const rawText = withMatchedRawTextLine(views.rawText, matches, pooled);
+  const sections = withMatchedSectionLine(views.sections, matches, pooled);
+  withMatchedDescriptionLine(experience, matches, description);
+  return { views: { rawText, sections }, matched };
 }
 
 // ── Bullet override application ─────────────────────────────────────────────
@@ -843,25 +844,60 @@ function resolveOverrideOriginal(
  * because a legacy key can arrive by exactly one route: `replay`, which runs
  * before any interactive edit, so nothing an id key would have to compose with
  * exists yet. A legacy key minted mid-session would break the chain silently.
+ *
+ * An entry that lands NOWHERE at its turn is appended to `unresolved` instead
+ * of being skipped silently (#769). In-session that cannot happen — the key
+ * names the text the row currently shows — so the report is empty; it fills
+ * only when a stored delta is replayed over a base that has moved. The
+ * insertion-order walk is what makes "at its turn" the right test: a chain
+ * entry (`id("B") → "C"`) resolves against the views the PREVIOUS entry
+ * produced, not against the base, so a composing chain never reports.
  */
 function applyBulletTextOverrides(
   views: BulletViews,
   experience: HeuristicParsedResume["experience"],
   bullets: BulletOverrides,
   byIndex: ReadonlyMap<number, BulletObservation>,
+  unresolved: UnresolvedOverride[],
 ): BulletViews {
-  let { rawText, sections } = views;
+  let next = views;
   for (const [key, editedRaw] of Object.entries(bullets)) {
     const original = resolveOverrideOriginal(key, byIndex);
-    if (original === undefined) continue;
     const edited = editedRaw.trim();
+    if (original === undefined) {
+      unresolved.push({ channel: "bulletOverrides", key, edited });
+      continue;
+    }
+    // Two writes with nothing to write, skipped BEFORE the fold and so never
+    // reported. Neither consults the containers, so neither is evidence the
+    // target is still there — they are "no instruction", not "not stale".
+    //
+    //   1. `edited === original` compares the user's RAW replacement against
+    //      the key's NORMALISED text, so for a modern id key it fires only
+    //      when the replacement is already in normalised form. That is narrow
+    //      by construction, and what it lets through is a rewrite to the same
+    //      text, which the fold performs and reports as matched anyway.
+    //   2. `edited === ""` is unreachable from the UI — `ResumeBulletRow`
+    //      routes an empty commit to `onRemove` (see this docblock's note on
+    //      why an empty edit does NOT revert), so no surface can mint one.
+    //
+    // Both would have to be reported for "never dropped without saying so" to
+    // hold for a HAND-WRITTEN snapshot; neither can arise from one this app
+    // wrote.
     if (edited === original) continue;
     if (edited === "") continue;
-    rawText = replaceBulletInRawText(rawText, original, edited);
-    sections = replaceBulletInSections(sections, original, edited);
-    replaceBulletInDescriptions(experience, original, edited);
+    const step = mutateBulletLine(next, experience, original, replaceLineWith(edited));
+    next = step.views;
+    if (!step.matched) {
+      unresolved.push({
+        channel: "bulletOverrides",
+        key,
+        text: original,
+        edited,
+      });
+    }
   }
-  return { rawText, sections };
+  return next;
 }
 
 /**
@@ -879,22 +915,31 @@ function applyBulletTextOverrides(
  * being edited carries the id of its EDITED text, and the edit has landed in
  * these views by the time we look for it. Reverse the two and that removal
  * silently misses.
+ *
+ * A removal whose line is already gone from every container — the base deleted
+ * the bullet after the delta was written — is reported to `unresolved` (#769),
+ * not skipped: it is a decision the user made that no longer has anything to
+ * act on, and a stale-delta surface should be able to say so.
  */
 function applyRemovedBulletOverrides(
   views: BulletViews,
   experience: HeuristicParsedResume["experience"],
   removedBullets: ReadonlySet<string>,
   byIndex: ReadonlyMap<number, BulletObservation>,
+  unresolved: UnresolvedOverride[],
 ): BulletViews {
-  let { rawText, sections } = views;
+  let next = views;
   for (const key of removedBullets) {
     const text = resolveOverrideOriginal(key, byIndex);
-    if (text === undefined) continue;
-    rawText = removeBulletFromRawText(rawText, text);
-    sections = removeBulletFromSections(sections, text);
-    removeBulletFromDescriptions(experience, text);
+    if (text === undefined) {
+      unresolved.push({ channel: "removedBullets", key });
+      continue;
+    }
+    const step = mutateBulletLine(next, experience, text, REMOVE_LINE);
+    next = step.views;
+    if (!step.matched) unresolved.push({ channel: "removedBullets", key, text });
   }
-  return { rawText, sections };
+  return next;
 }
 
 // ── Added entries + bullets ──────────────────────────────────────────────────
@@ -1199,7 +1244,7 @@ function dropRemovedEntries(
  * The entry's BULLETS are not this pass's job. They are dropped through
  * `removedBullets` by the caller's own delete handler
  * (`removeEntryWithBullets`), which reuses the tested
- * `removeBulletFromRawText` / `…Sections` / `…Descriptions` trio rather than
+ * `mutateBulletLine` + `REMOVE_LINE` path rather than
  * teaching this pass a second kind of text surgery — and that has to happen
  * there anyway, because a line the entry does not own (an ordinary `•` bullet)
  * is not findable from the entry's fields at all.
@@ -1459,13 +1504,24 @@ export function applyOverrides(
   const byIndex = new Map<number, BulletObservation>();
   for (const o of observations) byIndex.set(o.index, o);
 
+  // Every bullet instruction that named no line at its turn (#769). Both
+  // passes append to the one list, in the order they ran, so a caller sees the
+  // report in the same order the fold consumed the snapshot.
+  const unresolved: UnresolvedOverride[] = [];
   let views: BulletViews = { rawText, sections };
-  views = applyBulletTextOverrides(views, nextParsed.experience, bullets, byIndex);
+  views = applyBulletTextOverrides(
+    views,
+    nextParsed.experience,
+    bullets,
+    byIndex,
+    unresolved,
+  );
   views = applyRemovedBulletOverrides(
     views,
     nextParsed.experience,
     removedBullets,
     byIndex,
+    unresolved,
   );
 
   applyEducationFieldOverrides(nextParsed.education, education);
@@ -1506,6 +1562,7 @@ export function applyOverrides(
   return {
     ...toCanonicalResume(nextParsed, finalViews.sections, nextConfidence),
     rawText: finalViews.rawText,
+    unresolved,
   };
 }
 

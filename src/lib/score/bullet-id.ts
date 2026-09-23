@@ -72,6 +72,35 @@
  * lines differ. The swap is invisible in the résumé's CONTENT either way, which
  * is what makes it bounded, but the two lines need not have looked identical.
  *
+ * ── Across time: a delta that outlives its base (#769) ──
+ * Everything above holds within one editing session, where the text a key
+ * names is always on the page at the moment the key is applied. A STORED
+ * override map — a résumé variant replayed over the standard résumé it was
+ * derived from — has no such guarantee: the base can move after the delta was
+ * written. Two consequences, both of which follow from an id being TEXT and
+ * carrying no position:
+ *
+ *   1. Edit base bullet A to A′ (or delete it), and `id("A") → "B"` names a
+ *      line that no longer exists. `applyOverrides` cannot land it. It used to
+ *      skip such an entry silently; since #769 it REPORTS it, on
+ *      `ApplyOverridesResult.unresolved`, so a stale-delta surface can list the
+ *      instruction and let the user re-apply or discard it. The rule is that a
+ *      delta which cannot be applied is never dropped without saying so.
+ *
+ *   2. Edit A to A′ while some OTHER line still normalises to A, and the
+ *      override lands on that line. This is NOT detectable from the id: the id
+ *      says "the line whose text is A", and that line is exactly what it
+ *      found. It is the same normalise-equal placement tiebreak described
+ *      above, now across time rather than within a session, and it is bounded
+ *      in the same way — the replacement was written FOR that text. Catching
+ *      it would need a second, positional identity alongside the id (the
+ *      `occurrence` ordinal cannot serve: it is a collision discriminator
+ *      allocated around `claimed` keys, so a lone line can legitimately carry
+ *      `1|A` in a retype-back chain, and an "at least n+1 matches" rule would
+ *      break exactly that chain). Two key spaces is the trap the legacy
+ *      migration below is still climbing out of, so that anchor is deferred
+ *      until reconciliation proves noisy in practice.
+ *
  * ── Legacy key space (the persisted-snapshot migration) ──
  * A snapshot written before #648 — a blank draft sitting in localStorage or a
  * saved-library IndexedDB record, or an old cross-surface handoff — holds bare base-pool
