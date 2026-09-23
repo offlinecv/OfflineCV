@@ -118,6 +118,7 @@ import { SkillsSection } from "./ReconstructedSkills.tsx";
 import { DocumentBody } from "./DocumentBody.tsx";
 import { EditableField, SectionHeading } from "@design-system";
 import { SECTION_IDS } from "../../lib/anchors.ts";
+import { buildScoreGuidance, locateBullets } from "../../lib/score/guidance.ts";
 
 
 // ── Section heading + "not detected" gap ──────────────────────────────────────
@@ -1411,6 +1412,47 @@ export function ReconstructedResume({
     ? [...experienceGroups, other]
     : experienceGroups;
 
+  // Located score guidance (#810) — "Experience → Staff Engineer — Acme →
+  // bullet 3" rather than "improve Specificity". Built HERE, and nowhere else,
+  // because this is the only place the bullet→entry attribution exists: the
+  // score ships `BulletObservation`s with no section or role on them, and
+  // `buildEntryGroups` above is what resolves them against all four entry
+  // families. `AtsScoreReadout` is mounted a level up (`Result.tsx`), above
+  // `ResultDetail`, so the grouping is not in scope there at all.
+  //
+  // Headings come from `display.sectionHeadings` — the document's OWN words —
+  // so a résumé whose section reads "Selected Projects" is told about
+  // "Selected Projects", not "Projects".
+  //
+  // A plain derivation, deliberately not a `useMemo`: `exhaustive-deps` is not
+  // linted in this repo (CLAUDE.md), so a hand-written dep array here would be
+  // a stale-closure hazard bought for a few array walks over data already in
+  // hand.
+  const scoreGuidance = buildScoreGuidance({
+    located: locateBullets([
+      {
+        heading: display.sectionHeadings?.get("experience") ?? "Experience",
+        groups: experienceRenderGroups,
+      },
+      {
+        heading: display.sectionHeadings?.get("projects") ?? "Projects",
+        groups: projectGroups,
+      },
+      {
+        heading:
+          display.sectionHeadings?.get("achievements") ?? "Achievements",
+        groups: achievementGroups,
+      },
+      {
+        heading:
+          display.sectionHeadings?.get("certifications") ?? "Certifications",
+        groups: certificationGroups,
+      },
+    ]),
+    contactMissing,
+    completeness: score.completeness,
+  });
+
   // Build the chain-of-sections input for the whole-résumé rewrite CTA (#67).
   // Summary first (when present), then every real role in display order — the
   // "Other" bullets group is excluded because it has no parsed role to anchor
@@ -1518,6 +1560,7 @@ export function ReconstructedResume({
         skillsOrder={skillsOrder}
         bullets={bullets}
         contactMissing={contactMissing}
+        guidance={scoreGuidance}
       />
       {/* Document-body anchor (#958): the triage row's bullet jump link
        *  target — see `DocumentBody.tsx`. */}

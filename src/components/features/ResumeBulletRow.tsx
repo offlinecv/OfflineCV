@@ -29,6 +29,7 @@
 import { useCallback } from "react";
 import type { ReactNode } from "react";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
+import { lengthAdvice } from "../../lib/score/guidance.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { EditableField } from "@design-system";
 import { RemoveButton } from "./ReconstructedAdd.tsx";
@@ -120,12 +121,12 @@ function lengthToken(b: BulletObservation): string {
   return `${b.wordCount}w`;
 }
 
-function lengthTitle(b: BulletObservation): string {
-  const aim = "aim 8–30 words";
-  return b.wordCount < 8
-    ? `Too short — ${aim} (${b.wordCount})`
-    : `Too long — ${aim} (${b.wordCount})`;
-}
+// The length sentence itself lives in `lib/score/guidance.ts` as
+// `lengthAdvice` (#810), interpolated from `BULLET_LENGTH_MIN_WORDS` /
+// `BULLET_LENGTH_MAX_WORDS`. It used to be written out here with the window
+// spelled "8–30" by hand; the score-guidance rows say the same thing about the
+// same bullet, so a second copy is a sentence that can quote a window the
+// scorer no longer uses.
 
 /**
  * Glyph key for the bullet flags. Rendered once at the top of the
@@ -188,8 +189,8 @@ function BulletFlagsInline({ bullet }: { bullet: BulletObservation }) {
       )}
       {!bullet.wellFormedLength && (
         <FlagChip
-          title={lengthTitle(bullet)}
-          ariaLabel={lengthTitle(bullet)}
+          title={lengthAdvice(bullet)}
+          ariaLabel={lengthAdvice(bullet)}
           className="ml-1 align-middle"
         >
           <span className="text-2xs font-medium tabular-nums">

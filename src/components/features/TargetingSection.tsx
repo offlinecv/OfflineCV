@@ -45,6 +45,8 @@ import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
+import { ScoreGuidanceList } from "./ScoreGuidanceList.tsx";
+import type { ScoreGuidanceItem } from "../../lib/score/guidance.ts";
 
 interface TargetingSectionProps {
   /** Distinct role titles, most-recent-first, from `deriveTitles`. */
@@ -64,6 +66,10 @@ interface TargetingSectionProps {
   bullets?: readonly BulletObservation[];
   /** Missing contact fields from contactCompleteness. */
   contactMissing?: ContactDisplayField[];
+  /** Located "what to change" rows (#810), from `buildScoreGuidance`. Built by
+   *  `ReconstructedResume`, which is where the bullet→role attribution the
+   *  paths need has already been resolved. */
+  guidance?: readonly ScoreGuidanceItem[];
 }
 
 export function TargetingSection({
@@ -75,6 +81,7 @@ export function TargetingSection({
   skillsOrder,
   bullets = [],
   contactMissing = [],
+  guidance = [],
 }: TargetingSectionProps) {
   const skills = assessResumeSkills(parsed);
 
@@ -106,7 +113,16 @@ export function TargetingSection({
   // children at all is the point: a fourth child must still be added to this
   // disjunction by hand, but each term restates a child's own null condition,
   // so a stale one is visible rather than inferred.
-  const hasBody = hasTriage || titles.length > 0 || hasSkillGuidance;
+  //
+  // `hasGuidance` is that fourth child, added by hand as the comment above
+  // requires (#810). It is NOT implied by `hasTriage`: the triage terms count
+  // flagged bullets and missing CONTACT fields, while guidance also speaks to
+  // the non-contact completeness checks — a résumé with every bullet passing
+  // and full contact details, but no Summary or Skills section, has no triage
+  // and still has something to say.
+  const hasGuidance = guidance.length > 0;
+  const hasBody =
+    hasTriage || titles.length > 0 || hasSkillGuidance || hasGuidance;
 
   const suggestions = skills.missing.length;
   const noRolePicked = !primary || primary.trim() === "";
@@ -190,6 +206,11 @@ export function TargetingSection({
             hasContactGap={hasContactGap}
           />
         )}
+        {/* Directly under the triage row on purpose (#810): that row gives the
+            counts ("3 missing a metric · 1 weak verb"), this names which
+            bullets and what to do about each. Self-hides when empty, like
+            every other child here. */}
+        <ScoreGuidanceList items={guidance} />
         <RolesPanel
           titles={titles}
           primary={primary}
