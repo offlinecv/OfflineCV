@@ -111,17 +111,25 @@ export interface UnresolvedOverride {
   /** The key exactly as stored in the snapshot. */
   key: string;
   /**
-   * The text the key named — the line the fold went looking for.
+   * The text the key named — the line the fold went looking for — in ONE
+   * documented shape regardless of key space: lowercased, marker-stripped,
+   * whitespace-collapsed (`normalizeBulletText`) (#993). A modern id key
+   * CARRIES its text already normalised — the id IS
+   * `` `${occurrence}|${normalizeBulletText(text)}` `` — and the caller
+   * normalises it once more, a no-op except for a two-marker line (#999),
+   * where the second pass is what keeps it equal to the legacy form. A
+   * legacy numeric key resolves through `byIndex` to the
+   * observation's text (first leading marker already stripped by `score.ts`,
+   * capitals and spacing intact); the caller normalises that value before
+   * storing it here, so both branches report the same form.
    *
-   * ITS SHAPE FOLLOWS THE KEY SPACE, so a consumer must not assume one form.
-   * A modern id key CARRIES its text already normalised, so this is the
-   * lowercased, marker-stripped, whitespace-collapsed form; a legacy numeric
-   * key resolves through `byIndex`, so this is the observation's VERBATIM
-   * text, capitals and leading marker intact. Both are what the matcher
-   * compares (it normalises each candidate line before comparing), so neither
-   * is wrong for the fold — but a surface that DISPLAYS this string will show
-   * the two differently, and that is the divergence to decide before a
-   * stale-delta panel renders it.
+   * This is deliberately lossy, and for a modern id key UNRECOVERABLY so:
+   * once an override is keyed by a modern id, the original casing is gone —
+   * the id never carried it, so no normalisation choice here can bring it
+   * back. A DISPLAY consumer (a stale-delta panel) therefore shows
+   * normalised text for every entry, never the user's original
+   * capitalisation, and its copy should say so rather than imply verbatim
+   * text.
    *
    * Absent when the key itself names nothing in either key space: a `"<n>|"`
    * id minted for a marker-only line (#660), or a legacy numeric index with no
@@ -805,6 +813,18 @@ function mutateBulletLine(
  * persisted draft, or a saved-library résumé) and still
  * resolves through `byIndex`, exactly as it did then. See `bullet-id.ts` for why
  * the two spaces cannot collide.
+ *
+ * The two branches return DIFFERENT SHAPES: the modern branch is already
+ * normalised (an id carries `normalizeBulletText(text)`), the legacy branch is
+ * verbatim apart from its first leading marker (`BulletObservation.text` —
+ * `score.ts` strips one marker; capitals and spacing survive). The matcher this
+ * return feeds normalises again before comparing, which is NOT always a no-op:
+ * `normalizeBulletText` strips only one leading marker (#999). It is also NOT
+ * harmless for a caller that reports this value to a user:
+ * `applyBulletTextOverrides` and `applyRemovedBulletOverrides` normalise
+ * whatever this returns, from either branch, before storing it on
+ * `UnresolvedOverride.text` (#993), so a display consumer sees one shape. Do
+ * not report this function's return value directly.
  */
 function resolveOverrideOriginal(
   key: string,
@@ -892,7 +912,9 @@ function applyBulletTextOverrides(
       unresolved.push({
         channel: "bulletOverrides",
         key,
-        text: original,
+        // Normalised here, not by `resolveOverrideOriginal` itself (#993) —
+        // see that function's docblock for why.
+        text: normalizeBulletText(original),
         edited,
       });
     }
@@ -937,7 +959,13 @@ function applyRemovedBulletOverrides(
     }
     const step = mutateBulletLine(next, experience, text, REMOVE_LINE);
     next = step.views;
-    if (!step.matched) unresolved.push({ channel: "removedBullets", key, text });
+    if (!step.matched)
+      unresolved.push({
+        channel: "removedBullets",
+        key,
+        // Normalised here, not by `resolveOverrideOriginal` itself (#993).
+        text: normalizeBulletText(text),
+      });
   }
   return next;
 }
