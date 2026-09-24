@@ -190,7 +190,27 @@ describe("applyOverrides — unresolved bullet instructions (#769)", () => {
       { bulletOverrides: { "0": B } },
     );
     expect(moved.unresolved).toEqual([
-      { channel: "bulletOverrides", key: "0", text: A, edited: B },
+      { channel: "bulletOverrides", key: "0", text: normalizeBulletText(A), edited: B },
+    ]);
+
+    // Same key space on the removal channel — and the same normalised `text`
+    // an id key reports (#993).
+    const removedGone = applyOverrides(
+      { ...baseFor(["Rewritten since"]), observations: [obs(0, A)] },
+      { removedBullets: [0] },
+    );
+    expect(removedGone.unresolved).toEqual([
+      { channel: "removedBullets", key: "0", text: normalizeBulletText(A) },
+    ]);
+
+    // Normalised, not merely lowercased: the legacy branch collapses the
+    // observation's internal whitespace too, exactly as an id's text is.
+    const spaced = applyOverrides(
+      { ...baseFor(["Rewritten since"]), observations: [obs(0, "Built  the   Ingest pipeline")] },
+      { removedBullets: [0] },
+    );
+    expect(spaced.unresolved).toEqual([
+      { channel: "removedBullets", key: "0", text: "built the ingest pipeline" },
     ]);
   });
 

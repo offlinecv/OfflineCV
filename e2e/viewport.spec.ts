@@ -164,11 +164,13 @@ test.describe("above-the-fold layout (#954)", () => {
     expect(viewport).not.toBeNull();
 
     // The Summary heading, not `#reconstructed-resume` (the outer container
-    // that wraps ContactCard + the TargetingSection disclosure + the whole
-    // document body): a container-top check passes with ~330px of margin to
-    // spare and would keep passing through a large regression — see the
-    // docblock above for why the Summary heading is "the first résumé
-    // section" #955/#956 both measure. `SectionHeading` renders an <h2>; the
+    // that wraps ContactCard + the whole document body — `TargetingSection`
+    // moved out into `ResumeTargeting`, inside the score card, in #955): a
+    // container-top check passes with ~188.5px of margin to spare at
+    // 1280x800 (288.5px at 1440x900, re-measured post-#955) and would keep
+    // passing through a large regression — see the docblock above for why
+    // the Summary heading is "the first résumé section" #955/#956 both
+    // measure. `SectionHeading` renders an <h2>; the
     // fixture's verbatim source heading for this section is "Summary"
     // (`SummarySection` falls back to that same string when the source PDF
     // carries no heading of its own, so this name is stable either way).
@@ -182,8 +184,8 @@ test.describe("above-the-fold layout (#954)", () => {
     // heading that regressed to y = 50 would be sitting underneath it —
     // invisible — and still satisfy `y >= 0`. "Above the fold" has to mean
     // "below the header and above the fold" or it certifies nothing at the
-    // top end. Measured 751.5px against a header bottom of 135, so this holds
-    // with room at both viewports.
+    // top end. Measured 779.5px (post-#955, both viewports) against a header
+    // bottom of 135 — ~20.5px under the 800px fold at 1280x800.
     const headerBox = await page.locator("header.sticky").boundingBox();
     expect(headerBox).not.toBeNull();
 
