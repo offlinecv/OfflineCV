@@ -82,12 +82,21 @@ let root: Root | undefined;
 function render(
   score: AnonymousAtsScore,
   defaultCollapsed?: boolean,
+  guidanceCount?: number,
+  onEnterFixIt?: () => void,
 ): HTMLDivElement {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => {
-    root!.render(createElement(ScoreDetails, { score, defaultCollapsed }));
+    root!.render(
+      createElement(ScoreDetails, {
+        score,
+        defaultCollapsed,
+        guidanceCount,
+        onEnterFixIt,
+      }),
+    );
   });
   return container;
 }
@@ -365,6 +374,86 @@ describe("docked strip is structurally one line, not text-metric luck (#960)", (
     const el = render(makeScore(), true);
     expect(el.innerHTML).toContain("flex-nowrap");
     expect(el.innerHTML).not.toContain("flex-wrap");
+  });
+});
+
+describe("Fix It mode entry point (issue 810)", () => {
+  it("renders prominent primary Fix It button when score is Needs Work (< 60)", () => {
+    const onEnterFixIt = vi.fn();
+    const score = { ...makeScore(), overall: 45 };
+    const el = render(score, false, 5, onEnterFixIt);
+
+    expect(el.textContent).toContain("5 things to fix");
+    const btn = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fix It mode: 5 things to fix"]',
+    )!;
+    expect(btn).toBeDefined();
+    expect(btn.className).toContain("bg-accent-primary");
+
+    act(() => {
+      btn.click();
+    });
+    expect(onEnterFixIt).toHaveBeenCalled();
+  });
+
+  it("renders quiet secondary Fix It affordance when score is Getting There (>= 60) with items", () => {
+    const onEnterFixIt = vi.fn();
+    const score = { ...makeScore(), overall: 75 };
+    const el = render(score, false, 3, onEnterFixIt);
+
+    expect(el.textContent).toContain("3 things to fix");
+    const btn = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fix It mode: 3 things to fix"]',
+    )!;
+    expect(btn).toBeDefined();
+    expect(btn.className).not.toContain("bg-accent-primary");
+  });
+
+  it("renders no count or button when guidance count is zero", () => {
+    const onEnterFixIt = vi.fn();
+    const score = { ...makeScore(), overall: 55 };
+    const el = render(score, false, 0, onEnterFixIt);
+
+    expect(el.textContent).not.toContain("things to fix");
+    expect(el.textContent).not.toContain("Fix It");
+  });
+
+  it("carries the Fix It entry into the docked strip, in place of the dimension tiles", () => {
+    const onEnterFixIt = vi.fn();
+    const score = { ...makeScore(), overall: 45 };
+    const el = render(score, true, 5, onEnterFixIt);
+
+    const btn = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fix It mode: 5 things to fix"]',
+    );
+    expect(btn).not.toBeNull();
+    // Same rung as the expanded readout: one action, not two.
+    expect(btn!.className).toContain("bg-accent-primary");
+    // The tiles would not fit beside it in the strip's fixed width budget.
+    expect(el.querySelector('a[href="#contact"]')).toBeNull();
+
+    act(() => {
+      btn!.click();
+    });
+    expect(onEnterFixIt).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the docked Fix It entry secondary at 60 and above", () => {
+    const score = { ...makeScore(), overall: 75 };
+    const el = render(score, true, 3, vi.fn());
+
+    const btn = el.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fix It mode: 3 things to fix"]',
+    );
+    expect(btn).not.toBeNull();
+    expect(btn!.className).not.toContain("bg-accent-primary");
+  });
+
+  it("shows the dimension tiles in the docked strip when there is nothing to fix", () => {
+    const el = render({ ...makeScore(), overall: 90 }, true, 0, vi.fn());
+
+    expect(el.querySelector('button[aria-label^="Fix It mode"]')).toBeNull();
+    expect(el.querySelector('a[href="#contact"]')).not.toBeNull();
   });
 });
 

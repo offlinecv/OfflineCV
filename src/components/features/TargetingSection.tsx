@@ -4,8 +4,9 @@
 /**
  * TargetingSection — role targeting, expected skills, and triage findings
  * folded into one collapsed disclosure (#825, #953), mounted INSIDE THE SCORE
- * CARD since #955 — in `ScoreDetails`' details region, between the recovery
- * offer and the local-AI feedback, docking away with the score readout.
+ * CARD since #955 — in `ScoreDetails`' details region, first, above the
+ * recovery offer and the local-AI feedback, docking away with the score
+ * readout.
  *
  * It sat between the contact block and the résumé document until #955, inside
  * `ReconstructedResume`. The card boundary was the problem: the score card

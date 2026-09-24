@@ -40,6 +40,8 @@ import type { LegacyLinkKey } from "../../lib/score/types.ts";
 import { ContactExtraLinks } from "./ContactExtraLinks.tsx";
 import { ContactWorkAuthorization } from "./ContactWorkAuthorization.tsx";
 import { ProfileLinkAdd } from "./ProfileLinkAdd.tsx";
+import { FixItTarget } from "./FixItTarget.tsx";
+import { contactFieldAnchorId } from "../../lib/score/guidance.ts";
 
 /** The inline-editable non-link contact fields, mapped 1:1 to their
  *  `ContactOverrides` key. Link fields (linkedin/github/portfolio/website) are
@@ -142,7 +144,12 @@ export function ContactDetails({
           {segments.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">|</span>}
-              {renderContactValue(field, editable, commit, location)}
+              <FixItTarget
+                anchorId={contactFieldAnchorId(field.key)}
+                className="inline-flex items-center"
+              >
+                {renderContactValue(field, editable, commit, location)}
+              </FixItTarget>
             </span>
           ))}
         </p>
@@ -154,7 +161,12 @@ export function ContactDetails({
           {presentLinks.map((field, i) => (
             <span key={field.key} className="inline-flex items-center gap-x-2">
               {i > 0 && <span className="text-content-muted">·</span>}
-              {renderLink(field, editable, onLegacyLinkChange)}
+              <FixItTarget
+                anchorId={contactFieldAnchorId(field.key)}
+                className="inline-flex items-center"
+              >
+                {renderLink(field, editable, onLegacyLinkChange)}
+              </FixItTarget>
             </span>
           ))}
         </p>
@@ -169,9 +181,13 @@ export function ContactDetails({
           (onAddProfile && onEditProfile && onRemoveProfile)) && (
           <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-sm">
             {absentLinks.map((field) => (
-              <span key={field.key} className="inline-flex">
+              <FixItTarget
+                key={field.key}
+                anchorId={contactFieldAnchorId(field.key)}
+                className="inline-flex items-center"
+              >
                 {renderLink(field, editable, onLegacyLinkChange)}
-              </span>
+              </FixItTarget>
             ))}
             {workAuthorizationAbsent && (
               // Wrapped so `AddPill`'s `self-start` (correct for its other,

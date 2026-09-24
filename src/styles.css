@@ -52,6 +52,11 @@ html {
   /* 176px: the 147 + 16 = 163px band, plus 13px so the target is visibly clear
      of the border rather than flush against it. */
   scroll-padding-top: 11rem;
+  /* Fix It's dock (#810) is fixed to the bottom of the viewport, so it is the
+     same problem at the other edge: a step's `scrollIntoView` must stop above
+     it. `FixItDock` measures itself and publishes the clearance while it is
+     mounted; unset, this is 0 (#1002). */
+  scroll-padding-bottom: var(--fixit-dock-clearance, 0px);
 }
 
 @media (min-width: 1024px) {

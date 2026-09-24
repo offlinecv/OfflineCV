@@ -38,6 +38,7 @@
 
 import { useEffect, useRef } from "react";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
+import { getScoreTier } from "../../lib/score/score.ts";
 import { getScoreRecommendation } from "../../lib/score/recommendation.ts";
 import { Button } from "@design-system";
 import { ScoreRing } from "./ScoreRing.tsx";
@@ -51,6 +52,7 @@ import {
   ScoreExplainerPopover,
 } from "./CollapsedScoreBar.tsx";
 import { EXPAND_LABEL, COLLAPSE_LABEL } from "./scoreToggleLabels.ts";
+import { FixItButton } from "./FixItButton.tsx";
 import { timeAgo } from "../../lib/date-utils.ts";
 
 export interface AtsScoreReadoutProps {
@@ -65,12 +67,18 @@ export interface AtsScoreReadoutProps {
    *  automatic dock arrives as a `collapsed` change with no call, which is
    *  what keeps the focus restore below off the automatic path. */
   onToggle: (collapsed: boolean) => void;
+  /** Count of outstanding score guidance items (#810). */
+  guidanceCount?: number;
+  /** Enters guided Fix It step-through mode on the résumé view (#810). */
+  onEnterFixIt?: () => void;
 }
 
 export function AtsScoreReadout({
   score,
   collapsed,
   onToggle,
+  guidanceCount,
+  onEnterFixIt,
 }: AtsScoreReadoutProps) {
   const rootRef = useRef<HTMLElement>(null);
   // Only a USER toggle moves focus. An automatic dock — the countdown or a
@@ -106,15 +114,36 @@ export function AtsScoreReadout({
   const completenessHint = formatCompletenessHint(score.completeness);
   const recommendation = getScoreRecommendation(score);
 
+  const tier = getScoreTier(score.overall);
+  const hasFixIt =
+    guidanceCount !== undefined && guidanceCount > 0 && onEnterFixIt;
+
   if (collapsed) {
     return (
       // No wrapper and no second child: `measureDockedStrip` reads the docked
       // row as this section's `:scope > div`.
       <section ref={rootRef}>
-        <CollapsedScoreBar score={score} onExpand={() => userToggle(false)} />
+        <CollapsedScoreBar
+          score={score}
+          onExpand={() => userToggle(false)}
+          fixIt={
+            hasFixIt ? (
+              <FixItButton
+                count={guidanceCount}
+                tier={tier}
+                onEnter={onEnterFixIt}
+                countClassName="hidden sm:inline"
+              />
+            ) : undefined
+          }
+        />
       </section>
     );
   }
+
+  const fixIt = hasFixIt ? (
+    <FixItButton count={guidanceCount} tier={tier} onEnter={onEnterFixIt} />
+  ) : null;
 
   return (
     <section ref={rootRef} className="flex flex-col gap-2">
@@ -145,7 +174,10 @@ export function AtsScoreReadout({
       <div className="flex flex-col gap-4 md:flex-row md:items-center">
         <div className="flex items-center gap-4 md:min-w-0 md:flex-1">
           <ScoreRing score={score.overall} size={84} />
-          <VerdictHeader score={score.overall} recommendation={recommendation} />
+          <div className="flex flex-col justify-center gap-1">
+            <VerdictHeader score={score.overall} recommendation={recommendation} />
+            {fixIt && <div className="pt-0.5">{fixIt}</div>}
+          </div>
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <ScoreDimensionRow

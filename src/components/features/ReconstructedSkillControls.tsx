@@ -97,7 +97,10 @@ function MoveMenu({
             setOpen(false);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
+            // Handled, so Fix It's `window` listener leaves it alone (#1001).
+            if (e.key !== "Escape") return;
+            e.preventDefault();
+            setOpen(false);
           }}
           className="rounded-full bg-surface-subtle px-2 py-0.5 text-2xs text-content-tertiary hover:text-accent-primary"
         >
@@ -231,6 +234,9 @@ export function AddSkillInput({
         variant="ghost"
         size="sm"
         onClick={() => setExpanded(true)}
+        // The Skills Fix It step lands here, not on the first chip's remove
+        // button (#810).
+        data-fixit-focus
         aria-label={label}
         className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
       >
@@ -256,6 +262,7 @@ export function AddSkillInput({
           type="text"
           value={draft}
           autoFocus
+          data-fixit-focus
           aria-label={label}
           placeholder="Add a skill…"
           onChange={(e) => setDraft(e.target.value)}

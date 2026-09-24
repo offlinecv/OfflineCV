@@ -29,6 +29,8 @@ import { parsedEntryKey } from "../../hooks/useEditableParse.ts";
 import { SectionHeading } from "@design-system";
 import { AddPill, sectionExitBlur } from "./ReconstructedAdd.tsx";
 import { EducationEntry } from "./ReconstructedEducationEntry.tsx";
+import { useFixItTarget } from "../../hooks/useFixItMode.ts";
+import { SECTION_IDS } from "../../lib/anchors.ts";
 
 /** The education fields a USER-ADDED entry can carry. `field` (major), `gpa` and
  *  `honors` have no slot on `AddedEntry`, so their affordances render on PARSED
@@ -98,9 +100,13 @@ export function EducationSection({
   /** Drop a blank added entry when focus leaves the section (#379). */
   onPruneEmpty: () => void;
 }) {
+  const fixIt = useFixItTarget(SECTION_IDS.education, "block");
+
   return (
     <section
-      className="flex flex-col gap-2"
+      id={fixIt.id}
+      tabIndex={fixIt.tabIndex}
+      className={`flex flex-col gap-2 ${fixIt.className}`}
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? "Education"}</SectionHeading>
@@ -148,7 +154,7 @@ export function EducationSection({
           })}
         </ul>
       )}
-      <AddPill label="Add education" onClick={onAddEntry} />
+      <AddPill label="Add education" onClick={onAddEntry} fixItFocus />
     </section>
   );
 }

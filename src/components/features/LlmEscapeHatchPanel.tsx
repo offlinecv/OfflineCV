@@ -12,14 +12,15 @@
  * anything — a collapsed section would hide the one affordance that repairs a
  * degenerate parse from exactly the parses that need it."
  *
- * #955 REVERSED that last clause, deliberately. The offer is now the first row
- * of the score card's details region (`ScoreDetails`), which docks with the
+ * #955 REVERSED that last clause, deliberately. The offer is now a row of the
+ * score card's details region (`ScoreDetails`), which docks with the
  * readout 4.5s after arrival or on a 40px scroll. The user's call (#955) is
  * that the offer is part of the same diagnostic as the score it qualifies, so
  * it goes where the score goes. What keeps that from being the hiding the old
  * rule warned about:
- *  - it is on screen at ARRIVAL, directly under the score, for every parse
- *    that needs it — the countdown only starts at the reveal;
+ *  - it is on screen at ARRIVAL, under the score and the one-line targeting
+ *    summary, for every parse that needs it — the countdown only starts at
+ *    the reveal;
  *  - hovering or focusing it holds the countdown (`ScoreDetails` puts
  *    `guardProps` on a wrapper that contains it), so it never docks mid-read;
  *  - once docked, the pill's `Expand score details` brings it back, unmounted
@@ -34,9 +35,18 @@
  * (user testing, Jul 2026).
  *
  * So the shape here is deliberately `ResumeQualityPanel`'s, not a banner's:
- * same `section` + heading + `max-w-prose` explainer + right-aligned primary
- * Button. A user switching between the two states should see one surface
- * change its offer, not two differently-dressed widgets.
+ * same `section` + heading + `max-w-prose` explainer + right-aligned Button.
+ * A user switching between the two states should see one surface change its
+ * offer, not two differently-dressed widgets.
+ *
+ * The one deliberate difference is the rung: `secondary`, not `primary`
+ * (#810). The offer shares the score card with `FixItButton`, which is the
+ * card's primary action below 60, and two filled accent buttons on one card
+ * read as two equally urgent next steps. The offer is an optional repair, so it sits
+ * below targeting and one rung down. It is NOT inside the targeting
+ * disclosure: that disclosure is collapsed by default, which would hide the
+ * one affordance that repairs a degenerate parse from exactly the parses that
+ * need it — the rule #955 relaxed only as far as the dock.
  *
  * When the LLM pass completes, calls `onRecovered(llmParsed)` so the owner
  * (`App`, via `useLlmRecovery`) can substitute the LLM-parsed fields into the
@@ -108,8 +118,8 @@ export function LlmEscapeHatchPanel({
 
   // Post-recovery this collapses to one quiet row: the offer has been taken,
   // the quality panel renders directly below it, and re-running is a rare
-  // repair action — a `link` Button, not a second primary CTA competing with
-  // the one in that panel.
+  // repair action — a `link` Button, not a second CTA competing with the one
+  // in that panel.
   if (status.kind === "done") {
     return (
       <div
@@ -163,7 +173,7 @@ export function LlmEscapeHatchPanel({
           </p>
         </div>
         <Button
-          variant="primary"
+          variant="secondary"
           size="sm"
           onClick={() => void controller.run()}
           disabled={controller.isBusy}

@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
+  buildEntryGroups,
   groupBulletsByExperience,
   suppressTitleOwnedBullets,
   toBulletExperience,
@@ -396,5 +397,27 @@ describe("suppressTitleOwnedBullets (#224)", () => {
   it("returns the list unchanged when there are no title-only entries", () => {
     const bullets = [makeBullet("Shipped feature X across the org", 0)];
     expect(suppressTitleOwnedBullets(bullets, [])).toEqual(bullets);
+  });
+});
+
+describe("buildEntryGroups memo (#1004)", () => {
+  const experiences: BulletExperience[] = [
+    { title: "Engineer", company: "Acme", description: "Built the thing." },
+  ];
+
+  it("returns the last partition for the same inputs, empty sections included", () => {
+    const bullets: BulletObservation[] = [];
+    const first = buildEntryGroups(experiences, [], [], [], bullets);
+    // Fresh `[]` defaults, as the render passes them, still hit.
+    expect(buildEntryGroups(experiences, [], [], [], bullets)).toBe(first);
+  });
+
+  it("recomputes when an input changes", () => {
+    const bullets: BulletObservation[] = [];
+    const first = buildEntryGroups(experiences, [], [], [], bullets);
+    const regraded = buildEntryGroups(experiences, [], [], [], []);
+    expect(regraded).toBe(first); // an empty pool is an empty pool
+    const edited = [...experiences];
+    expect(buildEntryGroups(edited, [], [], [], bullets)).not.toBe(first);
   });
 });

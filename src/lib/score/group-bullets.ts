@@ -68,6 +68,16 @@ export interface BulletExperience {
   description?: string;
 }
 
+/** The project / achievement / certification shape {@link toBulletExperience} reads. */
+export interface AccomplishmentEntry {
+  title?: string;
+  name?: string;
+  description?: string;
+  start_date?: string;
+  end_date?: string;
+  is_current?: boolean;
+}
+
 /**
  * Coerce a list of parsed entries (experiences, projects, achievements) into
  * the `BulletExperience` shape: `name` falls back to `title`, and the date /
@@ -84,14 +94,7 @@ export interface BulletExperience {
  * immutable.
  */
 export function toBulletExperience(
-  entries: ReadonlyArray<{
-    title?: string;
-    name?: string;
-    description?: string;
-    start_date?: string;
-    end_date?: string;
-    is_current?: boolean;
-  }>,
+  entries: ReadonlyArray<AccomplishmentEntry>,
 ): BulletExperience[] {
   return entries.map((e) => ({
     title: e.title ?? e.name,
@@ -374,4 +377,147 @@ function buildDateRange(exp: BulletExperience): string {
   if (is_current) return "Present";
   if (end_date) return end_date;
   return "";
+}
+
+// ── Section partition ─────────────────────────────────────────────────────────
+
+/**
+ * Group the bullet pool across experiences, projects AND achievements in one
+ * pass, then partition the result so each section renders its own entries with
+ * the SAME "every parsed entry renders, even with zero matched bullets"
+ * guarantee, and the trailing "Other" group only holds bullets matched to none.
+ *
+ * Projects (#95), achievements (#96) and certifications (#884) are each mapped
+ * onto the `BulletExperience` shape (`name`/`title → title`, `description`
+ * verbatim) and concatenated after experiences, so a single
+ * `groupBulletsByExperience` call attributes every bullet. Without this,
+ * project/achievement bullets — which are not in any `experience.description` —
+ * fall into the null "Other" group (the leak #95 fixed). The combined index
+ * space is split back out by source length:
+ * `[experiences | projects | achievements | certifications]`.
+ *
+ * Certifications sit LAST on purpose. Nothing in the graded pool comes from a
+ * certifications section (it is not one of `ACCOMPLISHMENT_SECTION_NAMES`), so
+ * the only bullets they can claim are ones a user ADDED to a certification —
+ * and the grouper's first-match tiebreak means a trailing source can never take
+ * a bullet away from an entry that legitimately owns it.
+ *
+ * We do NOT rely on groupBulletsByExperience's output alone: it omits entries
+ * with no matched bullet, which would silently drop those roles/projects/items.
+ *
+ * Memoised on its last call. `/` runs it twice per re-grade over the same
+ * arrays — Fix It's guidance (`computeScoreGuidance`) and the résumé render
+ * (`ReconstructedResume`) — and both must see the same partition, so the second
+ * call returns the first's result rather than re-running the matcher (#1004).
+ * The inputs are compared by reference, which holds because both read the
+ * override-folded `canonical.fields` and the re-graded score's `bullets`; an
+ * empty array matches any empty array, since callers default a missing section
+ * with a fresh `[]`. Callers must treat the result as read-only.
+ */
+export function buildEntryGroups(
+  experiences: BulletExperience[],
+  projects: ReadonlyArray<AccomplishmentEntry>,
+  achievements: ReadonlyArray<AccomplishmentEntry>,
+  certifications: ReadonlyArray<AccomplishmentEntry>,
+  bullets: readonly BulletObservation[],
+): EntryGroups {
+  const args = [experiences, projects, achievements, certifications, bullets] as const;
+  if (lastEntryGroups && args.every((a, i) => sameList(a, lastEntryGroups!.args[i]!))) {
+    return lastEntryGroups.result;
+  }
+  const result = groupEntries(...args);
+  lastEntryGroups = { args, result };
+  return result;
+}
+
+/** The partition `buildEntryGroups` returns. */
+export interface EntryGroups {
+  experienceGroups: BulletGroup[];
+  projectGroups: BulletGroup[];
+  achievementGroups: BulletGroup[];
+  certificationGroups: BulletGroup[];
+  other: BulletGroup | null;
+}
+
+let lastEntryGroups: {
+  args: readonly (readonly unknown[])[];
+  result: EntryGroups;
+} | null = null;
+
+function sameList(a: readonly unknown[], b: readonly unknown[]): boolean {
+  return a === b || (a.length === 0 && b.length === 0);
+}
+
+function groupEntries(
+  experiences: BulletExperience[],
+  projects: ReadonlyArray<AccomplishmentEntry>,
+  achievements: ReadonlyArray<AccomplishmentEntry>,
+  certifications: ReadonlyArray<AccomplishmentEntry>,
+  bullets: readonly BulletObservation[],
+): EntryGroups {
+  const projectsAsExperience = toBulletExperience(projects);
+  const achievementsAsExperience = toBulletExperience(achievements);
+  const certificationsAsExperience = toBulletExperience(certifications);
+  const combined = [
+    ...experiences,
+    ...projectsAsExperience,
+    ...achievementsAsExperience,
+    ...certificationsAsExperience,
+  ];
+  const grouped = groupBulletsByExperience([...bullets], combined);
+
+  const byIndex = new Map<number, BulletGroup>();
+  let other: BulletGroup | null = null;
+  for (const g of grouped) {
+    if (g.experienceIndex === null) other = g;
+    else byIndex.set(g.experienceIndex, g);
+  }
+
+  // Suppress from "Other" any bullet already owned by a title-only entry — a
+  // one-line achievement/project whose whole line renders as its header but
+  // carries no description for the grouper to match (#224). Left in "Other" it
+  // shows the same content twice. Drop the now-empty group entirely.
+  if (other) {
+    const kept = suppressTitleOwnedBullets(other.bullets, combined);
+    other = kept.length > 0 ? { ...other, bullets: kept } : null;
+  }
+
+  // Each source slices its own window out of the combined index space, falling
+  // back to an empty group so every parsed entry still renders.
+  const sliceGroups = (
+    source: BulletExperience[],
+    offset: number,
+  ): BulletGroup[] =>
+    source.map((exp, i) => {
+      const combinedIdx = offset + i;
+      return (
+        byIndex.get(combinedIdx) ?? {
+          experienceIndex: combinedIdx,
+          experience: exp,
+          bullets: [],
+        }
+      );
+    });
+
+  const experienceGroups: BulletGroup[] = experiences.map((exp, i) => ({
+    ...(byIndex.get(i) ?? { experienceIndex: i, experience: exp, bullets: [] }),
+    experienceIndex: i,
+  }));
+  const projectGroups = sliceGroups(projectsAsExperience, experiences.length);
+  const achievementGroups = sliceGroups(
+    achievementsAsExperience,
+    experiences.length + projects.length,
+  );
+  const certificationGroups = sliceGroups(
+    certificationsAsExperience,
+    experiences.length + projects.length + achievements.length,
+  );
+
+  return {
+    experienceGroups,
+    projectGroups,
+    achievementGroups,
+    certificationGroups,
+    other,
+  };
 }

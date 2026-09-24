@@ -64,6 +64,16 @@ describe("LlmEscapeHatchPanel", () => {
     expect(render({ kind: "idle" }).textContent).toContain("Try a local AI pass");
   });
 
+  it("keeps the idle CTA off the primary rung, below Fix It (#810)", () => {
+    // Fix It is the score card's primary action below 60; a second filled
+    // accent button on the same card read as an equally urgent next step.
+    const btn = render({ kind: "idle" }).querySelector<HTMLButtonElement>(
+      'button[aria-label="Run an on-device AI pass to recover the resume parse"]',
+    );
+    expect(btn).not.toBeNull();
+    expect(btn!.className).not.toContain("bg-accent-primary");
+  });
+
   it("keeps the idle headline free of overstated parser-failure claims (issue 281)", () => {
     // Regression guard: an earlier headline ("We couldn't read much of this
     // resume") was a false claim on the soft-confidence firing path — the

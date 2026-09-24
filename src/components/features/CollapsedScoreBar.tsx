@@ -38,8 +38,12 @@
  * a narrow-viewport-only exposure, not an all-viewport one. The optional
  * `(layout penalty ×N.NN)` span is removed outright (not just re-slotted);
  * it still surfaces in the expanded `AtsScoreReadout` footer.
+ *
+ * When there is score guidance, group 2 is the Fix It entry (#810) instead of
+ * the dimension tiles, at every width — see the comment on that group.
  */
 
+import type { ReactNode } from "react";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 import {
   getScoreLabel,
@@ -55,6 +59,9 @@ import { EXPAND_LABEL } from "./scoreToggleLabels.ts";
 export interface CollapsedScoreBarProps {
   score: AnonymousAtsScore;
   onExpand: () => void;
+  /** The Fix It entry (#810), when there is guidance to step through. It
+   *  takes the dimension tiles' slot — see the group comment below. */
+  fixIt?: ReactNode;
 }
 
 // Not exported: the single consumer is `ScoreExplainerPopover`, directly below.
@@ -140,7 +147,11 @@ function CompactDimension({
   );
 }
 
-export function CollapsedScoreBar({ score, onExpand }: CollapsedScoreBarProps) {
+export function CollapsedScoreBar({
+  score,
+  onExpand,
+  fixIt,
+}: CollapsedScoreBarProps) {
   const tier = getScoreTier(score.overall);
   const tierLabel = getScoreLabel(tier);
 
@@ -225,6 +236,22 @@ export function CollapsedScoreBar({ score, onExpand }: CollapsedScoreBarProps) {
         </Button>
       </div>
 
+      {/* Fix It takes the tiles' slot when there is guidance (#810). The
+          docked strip is the state nearly every user acts from — the widget
+          docks itself ~4.5s after arrival — so an entry that lived only in
+          the expanded readout was one click behind the page's main job. It
+          REPLACES the tiles rather than joining them: the tiles alone need
+          486–496px of a fixed 545–549px budget (group comment below), so no
+          button fits beside them without clipping a tile. The trade is sound
+          on its merits too — the tiles are three numbers that link into the
+          résumé, Fix It is the ordered walk through what those numbers are
+          missing, and the numbers stay one click away behind
+          `Score details ▾`. With no guidance the tiles come back.
+
+          No `overflow-hidden` here, unlike the tile group: it would clip the
+          button's `focus-visible` ring, which is drawn outside its box.
+          `expectDockedStripIsOneLine` asserts this group's `scrollWidth <=
+          clientWidth` across the same regime × width matrix all the same. */}
       {/* All three tiles whole, or none — never a tile cut in half.
           #960's first attempt made this group `min-w-0 overflow-hidden` and
           called it "the one thing allowed to shrink or clip". That traded the
@@ -264,29 +291,35 @@ export function CollapsedScoreBar({ score, onExpand }: CollapsedScoreBarProps) {
           `expectDockedStripIsOneLine` (`e2e/support/score-hero.ts`) asserts
           `scrollWidth <= clientWidth` on this group across the full regime ×
           width matrix, which is what keeps the budget above honest. */}
-      <div className="hidden min-w-0 items-center gap-2 overflow-hidden text-xs text-content-secondary lg:flex">
-        <CompactDimension
-          label="Specificity"
-          value={score.specificity.score}
-          max={score.specificity.max}
-          gradable={score.specificity.gradable}
-          anchor="#reconstructed-resume"
-        />
-        <CompactDimension
-          label="Structure"
-          value={score.structure.score}
-          max={score.structure.max}
-          gradable={score.structure.gradable}
-          anchor="#reconstructed-resume"
-        />
-        <CompactDimension
-          label="Completeness"
-          value={score.completeness.score}
-          max={score.completeness.max}
-          gradable={score.completeness.gradable}
-          anchor="#contact"
-        />
-      </div>
+      {fixIt ? (
+        <div className="flex min-w-0 items-center">
+          {fixIt}
+        </div>
+      ) : (
+        <div className="hidden min-w-0 items-center gap-2 overflow-hidden text-xs text-content-secondary lg:flex">
+          <CompactDimension
+            label="Specificity"
+            value={score.specificity.score}
+            max={score.specificity.max}
+            gradable={score.specificity.gradable}
+            anchor="#reconstructed-resume"
+          />
+          <CompactDimension
+            label="Structure"
+            value={score.structure.score}
+            max={score.structure.max}
+            gradable={score.structure.gradable}
+            anchor="#reconstructed-resume"
+          />
+          <CompactDimension
+            label="Completeness"
+            value={score.completeness.score}
+            max={score.completeness.max}
+            gradable={score.completeness.gradable}
+            anchor="#contact"
+          />
+        </div>
+      )}
 
       <div className="flex shrink-0 items-center gap-2">
         <ScoreExplainerPopover align="end" />
@@ -302,7 +335,15 @@ export function CollapsedScoreBar({ score, onExpand }: CollapsedScoreBarProps) {
           // a local string here would break the restore silently on a rename.
           aria-label={EXPAND_LABEL}
         >
-          Score details ▾
+          {/* Below `sm`, with Fix It in the row, the words go and the chevron
+              stays: at 375px the pill, `ⓘ` and `Score details ▾` leave the
+              Fix It slot ~15px against the ~71px its button needs. The
+              accessible name is `EXPAND_LABEL` at every width, and the score
+              pill beside it is a second, labelled route to the same state. */}
+          <span className={fixIt ? "hidden sm:inline" : undefined}>
+            Score details
+          </span>{" "}
+          ▾
         </Button>
       </div>
     </div>
