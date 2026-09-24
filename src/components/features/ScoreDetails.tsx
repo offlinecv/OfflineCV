@@ -83,6 +83,10 @@ export interface ScoreDetailsProps {
    *  re-grades on every override; see `useAutoCollapse`'s `resetKey`. The
    *  parse lane passes `parseIdentity`, the authoring lane `parseKey`. */
   resetKey?: unknown;
+  /** Count of outstanding score guidance items (#810). */
+  guidanceCount?: number;
+  /** Enters guided Fix It step-through mode on the résumé view (#810). */
+  onEnterFixIt?: () => void;
   /** The score details themselves — the recovery offer, targeting, local-AI
    *  feedback. Every one of them self-hides when it has nothing to say. */
   children?: ReactNode;
@@ -93,6 +97,8 @@ export function ScoreDetails({
   placeholder,
   defaultCollapsed = false,
   resetKey,
+  guidanceCount,
+  onEnterFixIt,
   children,
 }: ScoreDetailsProps) {
   const { collapsed, toggle, guardProps } = useAutoCollapse({
@@ -110,7 +116,13 @@ export function ScoreDetails({
   return (
     <div className="flex flex-col gap-6" {...guardProps}>
       {score !== null ? (
-        <AtsScoreReadout score={score} collapsed={collapsed} onToggle={toggle} />
+        <AtsScoreReadout
+          score={score}
+          collapsed={collapsed}
+          onToggle={toggle}
+          guidanceCount={guidanceCount}
+          onEnterFixIt={onEnterFixIt}
+        />
       ) : (
         placeholder
       )}

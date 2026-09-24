@@ -30,6 +30,8 @@ import { useCallback } from "react";
 import type { ReactNode } from "react";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
+import { bulletAnchorId } from "../../lib/score/guidance.ts";
+import { useFixItTarget } from "../../hooks/useFixItMode.ts";
 import { EditableField } from "@design-system";
 import { RemoveButton } from "./ReconstructedAdd.tsx";
 
@@ -250,6 +252,8 @@ export function ResumeBulletRow({
     [onBulletChange, onRemove],
   );
 
+  const fixIt = useFixItTarget(bulletAnchorId(bullet.id), "inline");
+
   /*
     Read-mode layout: single inline formatting context (a plain block `<li>`,
     NOT a flexbox). The bullet text, the check badges, and the rewrite trigger
@@ -261,7 +265,11 @@ export function ResumeBulletRow({
     stacks below the action row as a block child of the `<li>`.
   */
   return (
-    <li className="py-1 text-sm leading-snug text-content-secondary">
+    <li
+      id={fixIt.id}
+      tabIndex={fixIt.tabIndex}
+      className={`py-1 text-sm leading-snug text-content-secondary ${fixIt.className}`}
+    >
       {editable ? (
         /* Multiline edit mode: block layout, full-width textarea + Save/Cancel,
            the per-bullet remove control trailing on the same row (#626). */

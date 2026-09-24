@@ -52,20 +52,9 @@
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { projectDisplay } from "../../lib/heuristics/projections.ts";
-import type {
-  AnonymousAtsScore,
-  BulletObservation,
-} from "../../lib/score/score.ts";
-import type {
-  BulletGroup,
-  BulletExperience,
-} from "../../lib/score/group-bullets.ts";
-import {
-  groupBulletsByExperience,
-  roleLabel,
-  suppressTitleOwnedBullets,
-  toBulletExperience,
-} from "../../lib/score/group-bullets.ts";
+import type { AnonymousAtsScore } from "../../lib/score/score.ts";
+import type { BulletGroup } from "../../lib/score/group-bullets.ts";
+import { buildEntryGroups, roleLabel } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
@@ -97,7 +86,9 @@ import {
   survivingParsedIndices,
 } from "../../hooks/useEditableParse.ts";
 import { removeEntryWithBullets } from "../../lib/edit/entry-remove.ts";
+import { firstUndatedRoleIndex } from "../../lib/edit/role-display.ts";
 import { useAddedEntryPruneHold } from "../../hooks/useAddedEntryPruneHold.ts";
+import { useFixItTarget } from "../../hooks/useFixItMode.ts";
 import {
   batchUndoTargets,
   type BulletUndoTargets,
@@ -139,110 +130,6 @@ function NotDetected({ what }: { what: string }) {
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────────
-
-/**
- * Group the bullet pool across experiences, projects AND achievements in one
- * pass, then partition the result so each section renders its own entries with
- * the SAME "every parsed entry renders, even with zero matched bullets"
- * guarantee, and the trailing "Other" group only holds bullets matched to none.
- *
- * Projects (#95), achievements (#96) and certifications (#884) are each mapped
- * onto the `BulletExperience` shape (`name`/`title → title`, `description`
- * verbatim) and concatenated after experiences, so a single
- * `groupBulletsByExperience` call attributes every bullet. Without this,
- * project/achievement bullets — which are not in any `experience.description` —
- * fall into the null "Other" group (the leak #95 fixed). The combined index
- * space is split back out by source length:
- * `[experiences | projects | achievements | certifications]`.
- *
- * Certifications sit LAST on purpose. Nothing in the graded pool comes from a
- * certifications section (it is not one of `ACCOMPLISHMENT_SECTION_NAMES`), so
- * the only bullets they can claim are ones a user ADDED to a certification —
- * and the grouper's first-match tiebreak means a trailing source can never take
- * a bullet away from an entry that legitimately owns it.
- *
- * We do NOT rely on groupBulletsByExperience's output alone: it omits entries
- * with no matched bullet, which would silently drop those roles/projects/items.
- */
-function buildEntryGroups(
-  experiences: BulletExperience[],
-  projects: ResumeProject[],
-  achievements: HeuristicAchievement[],
-  certifications: HeuristicAchievement[],
-  bullets: readonly BulletObservation[],
-): {
-  experienceGroups: BulletGroup[];
-  projectGroups: BulletGroup[];
-  achievementGroups: BulletGroup[];
-  certificationGroups: BulletGroup[];
-  other: BulletGroup | null;
-} {
-  const projectsAsExperience = toBulletExperience(projects);
-  const achievementsAsExperience = toBulletExperience(achievements);
-  const certificationsAsExperience = toBulletExperience(certifications);
-  const combined = [
-    ...experiences,
-    ...projectsAsExperience,
-    ...achievementsAsExperience,
-    ...certificationsAsExperience,
-  ];
-  const grouped = groupBulletsByExperience([...bullets], combined);
-
-  const byIndex = new Map<number, BulletGroup>();
-  let other: BulletGroup | null = null;
-  for (const g of grouped) {
-    if (g.experienceIndex === null) other = g;
-    else byIndex.set(g.experienceIndex, g);
-  }
-
-  // Suppress from "Other" any bullet already owned by a title-only entry — a
-  // one-line achievement/project whose whole line renders as its header but
-  // carries no description for the grouper to match (#224). Left in "Other" it
-  // shows the same content twice. Drop the now-empty group entirely.
-  if (other) {
-    const kept = suppressTitleOwnedBullets(other.bullets, combined);
-    other = kept.length > 0 ? { ...other, bullets: kept } : null;
-  }
-
-  // Each source slices its own window out of the combined index space, falling
-  // back to an empty group so every parsed entry still renders.
-  const sliceGroups = (
-    source: BulletExperience[],
-    offset: number,
-  ): BulletGroup[] =>
-    source.map((exp, i) => {
-      const combinedIdx = offset + i;
-      return (
-        byIndex.get(combinedIdx) ?? {
-          experienceIndex: combinedIdx,
-          experience: exp,
-          bullets: [],
-        }
-      );
-    });
-
-  const experienceGroups: BulletGroup[] = experiences.map((exp, i) => ({
-    ...(byIndex.get(i) ?? { experienceIndex: i, experience: exp, bullets: [] }),
-    experienceIndex: i,
-  }));
-  const projectGroups = sliceGroups(projectsAsExperience, experiences.length);
-  const achievementGroups = sliceGroups(
-    achievementsAsExperience,
-    experiences.length + projects.length,
-  );
-  const certificationGroups = sliceGroups(
-    certificationsAsExperience,
-    experiences.length + projects.length + achievements.length,
-  );
-
-  return {
-    experienceGroups,
-    projectGroups,
-    achievementGroups,
-    certificationGroups,
-    other,
-  };
-}
 
 /** Map a RoleHeader field name to the flat AddedEntry field it edits. */
 const EXPERIENCE_FIELD_MAP: Record<
@@ -405,6 +292,31 @@ export function ExperienceSection({
   const parsedIndexOf = (idx: number): number =>
     idx < originalCount ? (parsedIndices[idx] ?? idx) : idx;
 
+  // Fix It (#810): the Experience step lands on this section, and the role-dates
+  // step on the first role with no start date — `firstUndatedRoleIndex`, the
+  // rule the guidance orders the step by, over the same overrides `RoleHeader`
+  // renders, so an override wins even when it cleared the date.
+  const fixIt = useFixItTarget(SECTION_IDS.experience, "block");
+  const roles = groups.filter(
+    (g): g is BulletGroup & {
+      experienceIndex: number;
+      experience: NonNullable<BulletGroup["experience"]>;
+    } =>
+      g.experienceIndex !== null && g.experience !== null,
+  );
+  const datesTargetIndex =
+    roles[
+      firstUndatedRoleIndex(
+        roles.map((g) => g.experience),
+        (i) => {
+          const idx = roles[i]!.experienceIndex;
+          return idx < originalCount
+            ? experienceOverrides[parsedIndexOf(idx)]
+            : undefined;
+        },
+      )
+    ]?.experienceIndex ?? null;
+
   // Per-entry prune hold (#637 half 2). Created HERE — the ids it holds are
   // only meaningful to this section's `pruneEmptyAddedEntries` call, and the
   // holders are the `RoleEntry`s rendered below, plus the "Other bullets" remove
@@ -507,7 +419,9 @@ export function ExperienceSection({
   );
   return (
     <section
-      className="flex flex-col gap-3"
+      id={fixIt.id}
+      tabIndex={fixIt.tabIndex}
+      className={`flex flex-col gap-3 ${fixIt.className}`}
       onBlur={sectionExitBlur(() => onPruneEmpty(pruneHold.isHeld))}
     >
       {/* Heading row: the flag legend sits beside the Experience title (next to
@@ -598,6 +512,7 @@ export function ExperienceSection({
                 }
                 entryKey={roleEntryKey}
                 pruneHold={pruneHold}
+                datesTarget={idx === datesTargetIndex}
               />
             );
             return subHeading ? (
@@ -615,7 +530,7 @@ export function ExperienceSection({
           level so it outlives the group. That bucket is always appended last,
           so this is where its own strip would have rendered anyway. */}
       {otherRemove.strip}
-      <AddPill label="Add experience" onClick={onAddEntry} />
+      <AddPill label="Add experience" onClick={onAddEntry} fixItFocus />
     </section>
   );
 }

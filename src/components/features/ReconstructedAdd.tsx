@@ -87,15 +87,20 @@ export function SectionEmptyHint({ children }: { children: React.ReactNode }) {
 export function AddPill({
   label,
   onClick,
+  fixItFocus = false,
 }: {
   label: string;
   onClick: () => void;
+  /** Mark this as where a Fix It step on its section lands focus (#810) —
+   *  set on a section's own "Add entry" pill, never a per-entry one. */
+  fixItFocus?: boolean;
 }) {
   return (
     <Button
       variant="ghost"
       size="sm"
       onClick={onClick}
+      data-fixit-focus={fixItFocus || undefined}
       aria-label={label}
       className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
     >

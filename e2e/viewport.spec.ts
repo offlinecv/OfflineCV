@@ -237,12 +237,19 @@ test.describe("above-the-fold layout (#954)", () => {
       ["#contact", "contact"],
       ["#reconstructed-resume", "reconstructed-resume"],
     ] as const) {
-      // A real `<a href="#...">` click (ScoreDimensionRow / CollapsedScoreBar)
-      // is a same-document hash navigation, not a full page load — the parsed
+      // A same-document hash navigation, not a full page load — the parsed
       // résumé survives it. A `page.goto("/#...")` would NOT: the parse isn't
       // persisted until the first edit (`useAutosaveResume`), so a full
-      // reload here would land back on the empty drop zone.
-      await page.locator(`a[href="${href}"]`).first().click();
+      // reload here would land back on the empty drop zone. Set through
+      // `location.hash` rather than by clicking an in-page `<a>`: the docked
+      // strip's dimension tiles were the anchors this used to click, and they
+      // give their slot to the Fix It entry whenever there is guidance
+      // (#810) — which there is on this fixture. The scroll a hash navigation
+      // performs, and so the clearance measured below, is the same either
+      // way.
+      await page.evaluate((hash) => {
+        window.location.hash = hash;
+      }, href);
       // Wait for the scroll position to stop moving rather than for a fixed
       // number of frames. The jump itself is instant (styles.css sets no
       // scroll-behavior, so this is not a "smooth" animation) and one frame

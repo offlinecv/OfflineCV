@@ -35,6 +35,8 @@ import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { roleLabel } from "../../lib/score/group-bullets.ts";
 import type { BulletOverrides } from "../../hooks/useEditableParse.ts";
 import type { SectionRewriteApply } from "./SectionRewrite.tsx";
+import { useFixItTarget } from "../../hooks/useFixItMode.ts";
+import { SECTION_IDS } from "../../lib/anchors.ts";
 
 /** The stable section id the summary carries through the rewrite chain — the
  *  key `buildResumeSections` mints and `summaryRewriteApply` is registered
@@ -69,8 +71,14 @@ export function SummarySection({
   /** Commit new summary text. `""` clears the section from the export. */
   onSummaryChange: (value: string) => void;
 }) {
+  const fixIt = useFixItTarget(SECTION_IDS.summary, "block");
+
   return (
-    <section className="flex flex-col gap-2">
+    <section
+      id={fixIt.id}
+      tabIndex={fixIt.tabIndex}
+      className={`flex flex-col gap-2 ${fixIt.className}`}
+    >
       <SectionHeading>{heading ?? "Summary"}</SectionHeading>
       <EditableField
         value={summary}

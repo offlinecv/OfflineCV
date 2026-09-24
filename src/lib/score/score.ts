@@ -167,7 +167,7 @@ const SPECIFICITY_TARGET_RATIO = 0.6;
 
 /** Completeness sub-thresholds — match the authed scorer historically. */
 const COMPLETENESS_SUMMARY_MIN_CHARS = 20;
-const COMPLETENESS_SKILLS_MIN_COUNT = 3;
+export const COMPLETENESS_SKILLS_MIN_COUNT = 3;
 
 // ── Bullet detection helpers ───────────────────────────────────────────────
 
@@ -357,6 +357,44 @@ function analyzeBullets(
   });
 }
 
+/** The anonymous scorer's Specificity weight, in points. */
+const ANON_SPECIFICITY_MAX = 40;
+
+/** 0..100 Specificity for `metric` metric-bearing bullets out of `total`. */
+function specificitySubscore(metric: number, total: number): number {
+  const ratio = metric / total;
+  return Math.min(100, Math.round((ratio / SPECIFICITY_TARGET_RATIO) * 100));
+}
+
+/** Anonymous Specificity points, out of {@link ANON_SPECIFICITY_MAX}. */
+function anonSpecificityPoints(metric: number, total: number): number {
+  return Math.round(
+    (specificitySubscore(metric, total) / 100) * ANON_SPECIFICITY_MAX,
+  );
+}
+
+
+/**
+ * How many more metric-bearing bullets the anonymous Specificity dimension
+ * needs before it is full — 0 once it is. Guidance (#810) reads this so it
+ * never asks for a metric the score has stopped counting: past
+ * {@link SPECIFICITY_TARGET_RATIO} another number changes nothing. Runs the
+ * scorer's own formula rather than inverting it, so the rounding can't drift.
+ */
+export function metricBulletsToFullSpecificity(
+  metric: number,
+  total: number,
+): number {
+  let needed = 0;
+  while (
+    metric + needed < total &&
+    anonSpecificityPoints(metric + needed, total) < ANON_SPECIFICITY_MAX
+  ) {
+    needed++;
+  }
+  return needed;
+}
+
 /**
  * Single source of truth for the per-bullet math both scorers run. Returns
  * the raw 0..100 sub-scores; the caller maps them into whatever weighted
@@ -405,17 +443,13 @@ function scoreBulletPool(bullets: string[]): {
     }
     goodStructure += bulletScore;
   }
-  const ratio = metric / bullets.length;
   return {
     total: bullets.length,
     metric,
     goodStructure,
     verbLed,
     inWindow,
-    specificity: Math.min(
-      100,
-      Math.round((ratio / SPECIFICITY_TARGET_RATIO) * 100),
-    ),
+    specificity: specificitySubscore(metric, bullets.length),
     structure: Math.round((goodStructure / bullets.length) * 100),
   };
 }
@@ -999,7 +1033,7 @@ export function computeAnonymousAtsScore(
   const pool = scoreBulletPool(bullets);
   const observations = analyzeBullets(bullets, input.claimedBulletKeys ?? []);
   const gradable = pool.total >= ANON_MIN_BULLETS_TO_GRADE;
-  const specScore = gradable ? Math.round((pool.specificity / 100) * 40) : 0;
+  const specScore = gradable ? anonSpecificityPoints(pool.metric, pool.total) : 0;
   const structScore = gradable ? Math.round((pool.structure / 100) * 30) : 0;
 
   // ── Completeness (30 pts) ──────────────────────────────────────────────
@@ -1146,7 +1180,7 @@ export function computeAnonymousAtsScore(
     preLayoutOverall,
     specificity: {
       score: specScore,
-      max: 40,
+      max: ANON_SPECIFICITY_MAX,
       gradable,
       metricBullets: pool.metric,
       totalBullets: pool.total,

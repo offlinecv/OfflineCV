@@ -48,6 +48,8 @@ import type {
 import type { LegacyLinkKey } from "../../lib/score/types.ts";
 import { ContactDetails } from "./ContactDetails.tsx";
 import { headlineRoundTripWarning } from "../../lib/edit/headline.ts";
+import { useFixItTarget } from "../../hooks/useFixItMode.ts";
+import { contactFieldAnchorId } from "../../lib/score/guidance.ts";
 
 interface ContactCardProps {
   result: CascadeResult;
@@ -135,13 +137,19 @@ export function ContactCard({
   const contactLine = displayFields.filter((f) => f.group === "contact");
   const links = displayFields.filter((f) => f.group === "link");
 
+  const nameTarget = useFixItTarget(contactFieldAnchorId("full_name"), "inline");
+
   const commit = (key: keyof ContactOverrides, v: string) =>
     onFieldChange?.(key, v);
 
   return (
     <section id={SECTION_IDS.contact} className="scroll-mt-6 text-center">
       {/* Name heading — the immediate "whose resume" anchor. */}
-      <h2 className="text-lg font-semibold text-content-primary">
+      <h2
+        id={nameTarget.id}
+        tabIndex={nameTarget.tabIndex}
+        className={`inline-block text-lg font-semibold text-content-primary ${nameTarget.className}`}
+      >
         {editable ? (
           <EditableField
             value={name && !name.gated ? name.value : undefined}

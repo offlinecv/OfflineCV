@@ -207,13 +207,19 @@ export function Popover({
   // Dismiss on outside click / Escape. The panel is the only thing holding
   // focus, so leaving it any other way would strand it open over the page.
   // This is the single copy of the listener both callers share.
+  //
+  // Escape is marked handled (`preventDefault`): the keydown keeps bubbling to
+  // `window`, where a page-level listener — Fix It's dock (#810) — reads an
+  // unclaimed Escape as its own and would exit too (#1001).
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) close();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      close();
     };
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);

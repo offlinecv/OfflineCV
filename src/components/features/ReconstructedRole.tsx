@@ -9,9 +9,8 @@
  * bullets render plain.
  *
  * Edit mode (#58): when `experienceIndex` + `overrides` + `onFieldChange` are
- * provided, `RoleHeader` exposes inline EditableField affordances for title,
- * company, location, team/department, start_date, and end_date. Overrides are
- * in-memory only.
+ * provided, the heading line (`RoleHeader`, in its own sibling since #810)
+ * exposes inline EditableField affordances for every header field.
  *
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
  * `ResumeBulletRow` / `BulletFlagLegend` live in the sibling `ResumeBulletRow.tsx`
@@ -27,12 +26,6 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { roleLabel } from "../../lib/score/group-bullets.ts";
-import { EditableField } from "@design-system";
-import { validateDate } from "../../lib/edit/field-validators.ts";
-import {
-  normalizeExperienceDates,
-  formatExperienceDateRange,
-} from "../../lib/edit/experience-dates.ts";
 import type {
   AddedBulletRef,
   ExperienceFieldOverrides,
@@ -48,198 +41,11 @@ import {
 } from "./SectionRewrite.tsx";
 import { InlineBulletAdd, RemoveButton } from "./ReconstructedAdd.tsx";
 import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
+import { RoleHeader } from "./RoleHeader.tsx";
 import {
   useBulletRemoveStatus,
   type BulletRemoveControl,
 } from "./BulletRemoveStatus.tsx";
-
-// ── Role header ───────────────────────────────────────────────────────────────
-
-interface RoleHeaderProps {
-  group: BulletGroup;
-  /** Present only when the role is editable (experience has a parsed index). */
-  overrides?: ExperienceFieldOverrides;
-  /** `is_current` is excluded by type: it is derived from the date pair by
-   *  `edit/experience-dates.ts`, so no cell may commit it directly (#672). */
-  onFieldChange?: (
-    field: Exclude<keyof ExperienceFieldOverrides, "is_current">,
-    value: string,
-  ) => void;
-}
-
-/**
- * The role's heading line.
- *
- * Read-only mode: renders "Title — Company · start_date – end_date" (or
- * "Other bullets" / "Untitled role" for partial/absent parses).
- *
- * Edit mode: when `overrides` + `onFieldChange` are provided the header renders
- * inline EditableField affordances — title (multiline), company (multiline),
- * location, team/department, start date, end date — each committed individually. Every field uses the same
- * paradigm as the rest of the reconstructed résumé: the value itself is the
- * click/keyboard/tap target (quiet inline affordance). Cleared fields show
- * "not detected".
- */
-function RoleHeader({ group, overrides, onFieldChange }: RoleHeaderProps) {
-  // Editability hinges on the commit handler alone — `overrides` is `undefined`
-  // for any role the user hasn't edited yet (the per-index map starts empty), so
-  // gating on it would wrongly fall back to the read-only composite for every
-  // un-edited role. Mirror EducationEntry: render fields whenever the section is
-  // editable, treating a missing override map as "no overrides applied yet".
-  const editable = onFieldChange !== undefined;
-  const ov = overrides ?? {};
-
-  // For the "Other bullets" bucket there is no experience entry to edit.
-  if (group.experience === null) {
-    return (
-      <h3 className="text-sm font-semibold text-content-primary">
-        Other bullets
-      </h3>
-    );
-  }
-
-  const exp = group.experience;
-
-  if (!editable) {
-    // Read-only: composite "Title — Company · Location · dates" line.
-    const title = exp.title || undefined;
-    const company = exp.company || undefined;
-    const location = exp.location || undefined;
-    const team = exp.team || undefined;
-
-    // Build date segment. Through the #672 rule, so a role whose only date is an
-    // end date reads the same here, in the edit card, and in the exported PDF.
-    const dateFields = normalizeExperienceDates(exp);
-    const dates = formatExperienceDateRange(dateFields) || undefined;
-
-    // Location rides inline with the company, comma-joined ("Company, City, ST");
-    // the team/department (when present) trails after a "·", mirroring the
-    // Download PDF's "Company, Location · Team" header (#425).
-    const companyLoc =
-      company && location
-        ? `${company}, ${location}`
-        : company || location || undefined;
-    const org =
-      companyLoc && team
-        ? `${companyLoc} · ${team}`
-        : companyLoc || team || undefined;
-
-    // Build composite label.
-    let label = "";
-    if (title && org) label = `${title} — ${org}`;
-    else if (title) label = title;
-    else if (org) label = org;
-    if (dates) label = label ? `${label} · ${dates}` : dates;
-
-    return (
-      <h3 className="text-sm font-semibold text-content-primary">
-        {label || "Untitled role"}
-      </h3>
-    );
-  }
-
-  // Treat empty string as "not present" for display purposes.
-  const toDisplay = (v: string | undefined): string | undefined =>
-    v || undefined;
-
-  // Inline editable: quiet click-to-edit, mirroring the Education section.
-  const title = toDisplay(ov.title !== undefined ? ov.title : exp.title);
-  const company = toDisplay(
-    ov.company !== undefined ? ov.company : exp.company,
-  );
-  const location = toDisplay(
-    ov.location !== undefined ? ov.location : exp.location,
-  );
-  const team = toDisplay(ov.team !== undefined ? ov.team : exp.team);
-  // Dates read directly from the overrides or parsed fields. The normalization
-  // is performed on commit (in useEditableParse / setExperienceField) rather than
-  // on render, so the card always displays the normalized state and subsequent
-  // edits resolve from it. Undo and snapshots restore the normalized dates rather
-  // than raw keystrokes, ensuring consistency across all edit phases.
-  const startVal = ov.start_date !== undefined ? ov.start_date : exp.start_date;
-  const endVal = ov.end_date !== undefined ? ov.end_date : exp.end_date;
-  const isCurrent = ov.is_current !== undefined ? ov.is_current : exp.is_current;
-  const startDate = toDisplay(startVal);
-  const endDate = isCurrent ? "Present" : toDisplay(endVal);
-
-  return (
-    <div className="flex min-w-0 grow flex-col gap-0.5">
-      {/* Single header line: "Title — Company, Location" on the left, the date
-          range flush-right (mirrors the résumé layout). justify-between pins the
-          dates to the right edge; the left group flex-wraps for long values. */}
-      <div className="flex w-full items-baseline justify-between gap-x-3">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-          <EditableField
-            value={title}
-            placeholder="title"
-            label="Job title"
-            textWeight="semibold"
-            textSize="sm"
-            multiline
-            onCommit={(v) => onFieldChange("title", v)}
-          />
-          {(title || company) && <span className="text-content-muted">—</span>}
-          {/* Company + its trailing comma are grouped with NO gap so the comma
-              hugs the company name ("Acme Inc.,"); the location then follows
-              after the normal gap, reading "Company, City, ST" on one line. */}
-          <span className="inline-flex items-baseline">
-            <EditableField
-              value={company}
-              placeholder="company"
-              label="Company"
-              textSize="sm"
-              multiline
-              onCommit={(v) => onFieldChange("company", v)}
-            />
-            {(company || location) && (
-              <span className="text-content-muted">,</span>
-            )}
-          </span>
-          <EditableField
-            value={location}
-            placeholder="location"
-            label="Location"
-            textSize="sm"
-            onCommit={(v) => onFieldChange("location", v)}
-          />
-          {/* Team / department — trails after a "·", mirroring the Download PDF's
-              "Company, Location · Team" header (#425). Always rendered (like
-              Location) so an absent team can be ADDED, not just corrected. */}
-          <span className="text-content-muted" aria-hidden="true">
-            ·
-          </span>
-          <EditableField
-            value={team}
-            placeholder="team"
-            label="Team or department"
-            textSize="sm"
-            onCommit={(v) => onFieldChange("team", v)}
-          />
-        </div>
-        {/* Date range, flush-right and in the tertiary metadata colour. */}
-        <span className="flex shrink-0 items-baseline gap-x-1.5 text-content-tertiary">
-          <EditableField
-            value={startDate}
-            placeholder="start date"
-            label="Start date"
-            textSize="xs"
-            validate={validateDate}
-            onCommit={(v) => onFieldChange("start_date", v)}
-          />
-          <span aria-hidden="true">–</span>
-          <EditableField
-            value={endDate}
-            placeholder="end date"
-            label="End date"
-            textSize="xs"
-            validate={validateDate}
-            onCommit={(v) => onFieldChange("end_date", v)}
-          />
-        </span>
-      </div>
-    </div>
-  );
-}
 
 // ── RoleEntry ───────────────────────────────────────────────────────────────
 
@@ -295,6 +101,9 @@ interface RoleEntryProps {
    *  does. Absent (every parsed role, which survives losing its bullets) → the
    *  role owns and renders its own. */
   removeControl?: BulletRemoveControl;
+  /** This is the first role with no start date: the Fix It role-dates step
+   *  lands on its start date (#810). */
+  datesTarget?: boolean;
 }
 
 /**
@@ -314,6 +123,7 @@ export function RoleEntry({
   removeControl,
   entryKey,
   pruneHold,
+  datesTarget,
 }: RoleEntryProps) {
   // This entry's root element, handed to `useHoldWhile` (#658). The prune that
   // runs when a remove-undo strip collapses asks it two things: does focus still
@@ -433,6 +243,7 @@ export function RoleEntry({
           group={group}
           overrides={overrides}
           onFieldChange={onFieldChange}
+          datesTarget={datesTarget}
         />
         <div className="flex shrink-0 items-center gap-1">
           {rewriteTrigger}

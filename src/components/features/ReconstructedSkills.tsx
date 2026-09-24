@@ -37,6 +37,8 @@
 import { useState } from "react";
 import type { SkillCategory } from "../../lib/heuristics/types.ts";
 import { EditableField, SectionHeading } from "@design-system";
+import { useFixItTarget } from "../../hooks/useFixItMode.ts";
+import { SECTION_IDS } from "../../lib/anchors.ts";
 import {
   AddCategoryInput,
   AddSkillInput,
@@ -219,9 +221,14 @@ export function SkillsSection({
   // grouping it required a category to exist before "+ Add category" ever
   // rendered.
   const showEmptyState = skills.length === 0 && !categorised;
+  const fixIt = useFixItTarget(SECTION_IDS.skills, "block");
 
   return (
-    <section className="flex flex-col gap-2">
+    <section
+      id={fixIt.id}
+      tabIndex={fixIt.tabIndex}
+      className={`flex flex-col gap-2 ${fixIt.className}`}
+    >
       <SectionHeading>{heading ?? "Skills"}</SectionHeading>
       {showEmptyState ? (
         <NotDetected what="skills" />

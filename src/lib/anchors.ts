@@ -62,6 +62,12 @@ export type ScoreTileAnchor = `#${ScoreTileSectionId}`;
 export const SECTION_IDS = {
   ...SCORE_TILE_SECTION_IDS,
   documentBody: "resume-document-body",
+  summary: "resume-summary",
+  experience: "resume-experience",
+  /** The start date of the first role that has none — the Fix It role-dates step (#810). */
+  experienceDates: "resume-experience-dates",
+  education: "resume-education",
+  skills: "resume-skills",
 } as const;
 
 export type SectionId = (typeof SECTION_IDS)[keyof typeof SECTION_IDS];
@@ -114,11 +120,26 @@ export function prefersReducedMotion(): boolean {
  * not throw in a test.
  */
 export function scrollToSection(id: SectionId): void {
-  document.getElementById(id)?.scrollIntoView?.({
+  scrollIntoViewMotionAware(document.getElementById(id), "start");
+}
+
+/**
+ * The one scroll policy: `scrollIntoView` with the reduced-motion preference
+ * honoured. `scrollToSection` and Fix It's steps (#810) both go through it and
+ * differ only in `block` — a step centres its target, or brings it just into
+ * view when an edit re-pins the step — so the motion rule cannot drift between
+ * them. Scroll padding on the root (`styles.css`) keeps the target clear of the
+ * sticky header above and of Fix It's dock below.
+ */
+export function scrollIntoViewMotionAware(
+  el: Element | null,
+  block: ScrollLogicalPosition,
+): void {
+  el?.scrollIntoView?.({
     // See {@link prefersReducedMotion}. A rail click runs `scrollToJourney`
     // too, so a hard-coded "smooth" here would give one preference two answers
     // on one click: an instant jump to the top, then a page-length animation.
     behavior: prefersReducedMotion() ? "auto" : "smooth",
-    block: "start",
+    block,
   });
 }

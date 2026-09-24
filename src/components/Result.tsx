@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
+import { useMemo } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, ErrorState } from "@design-system";
@@ -16,6 +17,9 @@ import { ResumeTargeting } from "./features/ResumeTargeting.tsx";
 import { LlmEscapeHatchPanel } from "./features/LlmEscapeHatchPanel.tsx";
 import { LocalAiFeedbackSection } from "./features/LocalAiFeedbackSection.tsx";
 import { SECTION_IDS, scrollToSection } from "../lib/anchors.ts";
+import { computeScoreGuidance } from "../lib/score/guidance.ts";
+import { FixItContext, useFixItMode } from "../hooks/useFixItMode.ts";
+import { FixItToolbar } from "./features/FixItToolbar.tsx";
 
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
@@ -150,12 +154,13 @@ function ParsedCard({
   // offer — while what the pass produces is owned by `App` (`useLlmRecovery`,
   // reaching this component as `recovery`), because two routes into `/jobs/`
   // that `App` owns have to hand over the recovered fields (#823). The panel
-  // renders below, as the first row of the score card's details region: it
+  // renders below, in the score card's details region after targeting: it
   // used to be a full-width banner above the score, so the page opened on our
   // suggestion instead of the user's own result (user testing, Jul 2026: "we
   // should not have 'Try a local AI pass' so prominently at the top"), then
   // lived in the on-device-AI tab until the rail went (#823), then in
-  // `ResultDetail` as its own card until #955 folded it in here.
+  // `ResultDetail` as its own card until #955 folded it in here, first in the
+  // region until #810 put Fix It on the card and moved it below targeting.
   const escapeHatch = useLlmEscapeHatch(result, parseKey);
 
   // Whether the recovery offer is still OUTSTANDING — which is a different
@@ -184,6 +189,22 @@ function ParsedCard({
     !isBlankAuthored ||
     isScoreRevealed(activeResult.canonical, edit.contactOverrides);
 
+  // Derive deterministic ATS score guidance items (#810)
+  const guidanceItems = useMemo(
+    () =>
+      scoreRevealed
+        ? computeScoreGuidance(activeScore, activeResult.canonical.fields)
+        : [],
+    [scoreRevealed, activeScore, activeResult.canonical.fields],
+  );
+
+  const fixIt = useFixItMode(guidanceItems, parseIdentity);
+  // Memoised so a re-grade that leaves the step alone re-renders no target.
+  const fixItContext = useMemo(
+    () => ({ activeAnchor: fixIt.activeAnchor }),
+    [fixIt.activeAnchor],
+  );
+
   // Two-column layout warning (#356) — detected but previously never
   // surfaced to the user. Inline, not a full-page takeover: two-column
   // output is still usable, unlike the fonts_unmappable case above.
@@ -194,8 +215,10 @@ function ParsedCard({
     // header row, then the score readout and everything that docks with it —
     // and then whatever `ResultDetail` puts under it (the résumé and the
     // evidence section). The gap + each surface's own border draws the
-    // separators; nothing here is a tab.
-    <div className="flex flex-col gap-4">
+    // separators; nothing here is a tab. The bottom padding is the room Fix
+    // It's dock covers, published by `FixItDock` while one is mounted and 0
+    // otherwise, so the last step can scroll clear of it (#1002).
+    <div className="flex flex-col gap-4 pb-[var(--fixit-dock-clearance,0px)]">
       <Card className="flex flex-col gap-6 shadow-xs">
         <ParsedHeader
           isLlmRecovered={isLlmRecovered}
@@ -226,13 +249,15 @@ function ParsedCard({
             re-fire for a new résumé (or a landed recovery pass) and stay put
             through the edits that re-grade `activeScore`.
 
-            The children are ordered offer → targeting → critique, and
+            The children are ordered targeting → offer → critique, and
             `ScoreDetails` keeps every one of them MOUNTED when docked — a
             completed critique cost a model download plus inference and a
             4.5s idle timer must not discard it. */}
         <ScoreDetails
           score={scoreRevealed ? activeScore : null}
           resetKey={parseIdentity}
+          guidanceCount={guidanceItems.length}
+          onEnterFixIt={fixIt.start}
           placeholder={
             // No half-populated/near-zero score flashed while
             // contact/experience are still incomplete (#313) — a quiet
@@ -244,16 +269,6 @@ function ParsedCard({
             </p>
           }
         >
-          {escapeHatch.isAvailable && (
-            // Gated on `isAvailable` ALONE — see `recoveryOffered` above for
-            // why this is not that expression. No `Card` of its own any more:
-            // it is a row of this one, and the panel draws its own heading.
-            <LlmEscapeHatchPanel
-              controller={escapeHatch}
-              onRecovered={recovery.onRecovered}
-            />
-          )}
-
           {/* `ResumeTargeting`, not `TargetingSection` directly: the authoring
               lane renders no `Result` at all and needs the same section, so
               the derivations behind it have one home. That module's docblock
@@ -265,6 +280,19 @@ function ParsedCard({
             score={activeScore}
             edit={edit}
           />
+
+          {escapeHatch.isAvailable && (
+            // Gated on `isAvailable` ALONE — see `recoveryOffered` above for
+            // why this is not that expression. No `Card` of its own any more:
+            // it is a row of this one, and the panel draws its own heading.
+            // Below targeting, beside the critique it stands in for (#810):
+            // first in the region, its CTA competed with Fix It for the
+            // card's one primary action.
+            <LlmEscapeHatchPanel
+              controller={escapeHatch}
+              onRecovered={recovery.onRecovered}
+            />
+          )}
 
           <LocalAiFeedbackSection
             analysis={analysis}
@@ -279,19 +307,30 @@ function ParsedCard({
         </ScoreDetails>
       </Card>
 
-      <ResultDetail
-        activeResult={activeResult}
-        parseIdentity={parseIdentity}
-        activeScore={activeScore}
-        result={result}
-        bytes={bytes}
-        sourceKind={sourceKind}
-        edit={edit}
-        analysis={analysis}
-        triggerCount={triggerCount}
-        onJdContextChange={onJdContextChange}
-        onTailorApplied={onTailorApplied}
-      />
+      <FixItContext.Provider value={fixItContext}>
+        <ResultDetail
+          activeResult={activeResult}
+          parseIdentity={parseIdentity}
+          activeScore={activeScore}
+          result={result}
+          bytes={bytes}
+          sourceKind={sourceKind}
+          edit={edit}
+          analysis={analysis}
+          triggerCount={triggerCount}
+          onJdContextChange={onJdContextChange}
+          onTailorApplied={onTailorApplied}
+        />
+      </FixItContext.Provider>
+
+      {fixIt.active && (
+        <FixItToolbar
+          items={guidanceItems}
+          currentIndex={fixIt.index}
+          onNavigate={fixIt.navigate}
+          onExit={fixIt.exit}
+        />
+      )}
     </div>
   );
 }
