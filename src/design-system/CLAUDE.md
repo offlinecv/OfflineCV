@@ -39,6 +39,18 @@ decorative toggles, `★ ☆` in `StarRating`, `⚠︎` written `U+26A0 U+FE0E` 
 Banned: colour pictographs from the OS emoji font. Before flagging a hit, check for an
 adjacent `U+FE0E` and an `aria-hidden`/`sr-only` pair.
 
+## Edit chrome rests hidden — use the classes, not `group-hover`
+
+The résumé column is also the PDF preview, so controls that never print rest hidden on a fine
+pointer (#913). Use the plain classes in `styles/edit-chrome.css`, never a hand-rolled
+`opacity-0 group-hover:…`: `edit-scope` on the field/row/entry/section whose hover or
+focus-within reveals, `edit-chrome` on the control or empty-field prompt, `edit-reveal` to force a
+subtree visible (Fix It's current step carries it on a field or bullet), and `edit-reveal-focus`
+to force only its `[data-fixit-focus]` control visible (a section step — its Remove and Move
+controls stay at rest). Chrome answers to its **nearest** scope, stays in the tab order
+(`opacity`, never `visibility`/`display`), and always shows on a coarse pointer.
+`AddPill`, `RemoveButton` and an empty `EditableField` already opt in.
+
 ## Type ramp
 
 Audit sizes by consumption: `rg -o 'text-(4xs|3xs|2xs|xs|sm|base|lg|xl|2xl|3xl)' src/ | sort | uniq -c`.

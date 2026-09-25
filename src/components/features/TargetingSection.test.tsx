@@ -27,6 +27,7 @@ import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
   true;
 
 import type { BulletObservation } from "../../lib/score/score.ts";
+import type { GuidanceItem } from "../../lib/score/guidance.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
 import { SECTION_IDS } from "../../lib/anchors.ts";
 import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
@@ -39,10 +40,38 @@ interface RenderOptions {
   primary?: string;
   parsed?: ResumeQueryInput;
   bullets?: readonly BulletObservation[];
+  bulletSteps?: readonly GuidanceItem[];
   contactMissing?: ContactDisplayField[];
   skillsOrder?: SkillsReorderController;
   variant?: "card" | "plain";
 }
+
+/** The Fix It step for `b1` below: no metric, weak verb — what the triage
+ *  counts since #913. */
+const B1_STEP: GuidanceItem = {
+  id: "bullet-b1",
+  dimension: "specificity",
+  dimensions: ["specificity", "structure"],
+  location: "Experience → bullet 1",
+  targetAnchor: "bullet-b1",
+  targetType: "bullet",
+  bulletId: "b1",
+  issues: [
+    {
+      dimension: "specificity",
+      check: "metric",
+      title: "Missing measurable metric",
+      suggestion: "Add a number.",
+    },
+    {
+      dimension: "structure",
+      check: "verb",
+      title: "Weak opening verb",
+      suggestion: "Start with an action verb.",
+    },
+  ],
+  summary: "Missing measurable metric",
+};
 
 /** The same role-resolvable résumé `SkillTermGuidance.test.tsx` uses, so the
  *  classifier's verdicts here are the ones already pinned there. */
@@ -72,6 +101,7 @@ function render({
   primary,
   parsed = resolvableParsed(),
   bullets,
+  bulletSteps,
   contactMissing,
   skillsOrder,
   variant,
@@ -88,6 +118,7 @@ function render({
         parsed,
         onAddSkill: () => {},
         bullets,
+        bulletSteps,
         contactMissing,
         skillsOrder,
         variant,
@@ -301,7 +332,7 @@ describe("TargetingSection", () => {
         wordCount: 8,
       },
     ];
-    const el = render({ bullets: fakeBullets });
+    const el = render({ bullets: fakeBullets, bulletSteps: [B1_STEP] });
     const summary = el.querySelector("summary")!;
     expect(summary.textContent).toContain("Targeting & improvements");
     expect(summary.textContent).toContain("1 bullet needs attention");
@@ -322,6 +353,28 @@ describe("TargetingSection", () => {
     );
     expect(hrefs).not.toContain("#reconstructed-resume");
     expect(hrefs).toContain(`#${SECTION_IDS.documentBody}`);
+  });
+
+  it("counts only bullets Fix It has a step for, and claims no all-clear for a flagged one without (#913)", () => {
+    // Flagged by `needsAttention`, but with no step — a read-only project row,
+    // or a metric-only bullet past the budget. The résumé shows no marker on
+    // it, so the triage must not count it; and it fails a check, so "All 1
+    // bullet passes every check" would be false.
+    const flaggedWithoutStep: BulletObservation[] = [
+      {
+        text: "Did stuff",
+        id: "b1",
+        index: 0,
+        hasMetric: false,
+        startsWithActionVerb: true,
+        wellFormedLength: true,
+        wordCount: 8,
+      },
+    ];
+    const el = render({ bullets: flaggedWithoutStep, bulletSteps: [] });
+    expect(el.textContent).not.toContain("need attention");
+    expect(el.textContent).not.toContain("needs attention");
+    expect(el.textContent).not.toContain("passes every check");
   });
 
   it("summarizes missing contact fields on the summary row", () => {
@@ -355,7 +408,11 @@ describe("TargetingSection", () => {
     const missingContact: ContactDisplayField[] = [
       { key: "email", label: "email", value: "", group: "contact", gated: true },
     ];
-    const el = render({ bullets: fakeBullets, contactMissing: missingContact });
+    const el = render({
+      bullets: fakeBullets,
+      bulletSteps: [B1_STEP],
+      contactMissing: missingContact,
+    });
     const summary = el.querySelector("summary")!;
     expect(summary.textContent).toContain(
       "1 bullet & 1 contact field need attention",

@@ -143,7 +143,9 @@ export function ContactCard({
     onFieldChange?.(key, v);
 
   return (
-    <section id={SECTION_IDS.contact} className="scroll-mt-6 text-center">
+    // The header block is one `edit-scope` (#913): its empty-field prompts and
+    // add pills rest hidden and show while any of it is hovered or focused.
+    <section id={SECTION_IDS.contact} className="edit-scope scroll-mt-6 text-center">
       {/* Name heading — the immediate "whose resume" anchor. */}
       <h2
         id={nameTarget.id}

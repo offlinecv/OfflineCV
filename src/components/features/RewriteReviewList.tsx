@@ -139,7 +139,9 @@ export function BulletReviewRow({
   const lower = kindLabel.toLowerCase();
 
   return (
-    <li className="flex flex-col gap-1.5 rounded border border-border-light bg-surface-card p-2.5">
+    // `edit-reveal` (#913): a proposal under review is mid-edit by definition,
+    // so an empty field in it never rests hidden the way résumé chrome does.
+    <li className="edit-reveal flex flex-col gap-1.5 rounded border border-border-light bg-surface-card p-2.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-3xs font-semibold uppercase tracking-wider text-content-muted">
           {kindLabel}

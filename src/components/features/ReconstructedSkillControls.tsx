@@ -9,6 +9,11 @@
  * skill / add-category inputs, and the confirm-then-delete control for a whole
  * category. All mutation flows up through callbacks — the grouping snapshot lives
  * in the override model (`skills-categories.ts`).
+ *
+ * Every control here is edit chrome (#913, styles/edit-chrome.css): a chip's
+ * Move and Remove controls show while THAT chip is hovered or focused (each
+ * chip is its own `edit-scope`), the category and add controls while their
+ * row or section is. The skill names themselves are content and always show.
  */
 
 import { useMemo, useState } from "react";
@@ -58,7 +63,7 @@ function MoveMenu({
         // and returns null at `targets.length === 0`, so an uncategorised chip
         // has no Move control and needs no separation. Putting it on Remove
         // added 8px of dead space to every chip in the ungrouped `SkillChipRow`.
-        className="mr-2 text-content-muted hover:text-accent-primary"
+        className="edit-chrome mr-2 text-content-muted hover:text-accent-primary"
       >
         <svg
           aria-hidden="true"
@@ -142,7 +147,7 @@ export function SkillChip({
             }
           : undefined
       }
-      className="inline-flex items-center gap-1 rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-secondary"
+      className="edit-scope inline-flex items-center gap-1 rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-secondary"
     >
       {skill}
       {moveTargets && onMove && <MoveMenu targets={moveTargets} onMove={onMove} />}
@@ -154,7 +159,7 @@ export function SkillChip({
         // `mr-2` (#638) — see the rationale there. It lives on the conditional
         // control so an uncategorised chip, which renders no Move trigger, gets
         // no dead space.
-        className="shrink-0 text-content-muted hover:text-content-secondary"
+        className="edit-chrome shrink-0 text-content-muted hover:text-content-secondary"
       >
         <svg
           aria-hidden="true"
@@ -238,7 +243,7 @@ export function AddSkillInput({
         // button (#810).
         data-fixit-focus
         aria-label={label}
-        className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
+        className="edit-chrome self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
       >
         + {label}
       </Button>
@@ -370,7 +375,7 @@ export function DeleteCategoryButton({
         size="sm"
         aria-label={`Delete ${label} category`}
         onClick={() => setOpen(true)}
-        className="text-content-muted hover:text-feedback-error-text"
+        className="edit-chrome text-content-muted hover:text-feedback-error-text"
       >
         <svg
           aria-hidden="true"

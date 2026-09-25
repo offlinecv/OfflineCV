@@ -5,16 +5,20 @@
  * ReconstructedRole — one parsed experience role rendered in resume shape.
  *
  * Renders the role header (Title — Company · dates) followed by every graded
- * bullet for that role: flagged bullets carry inline check badges, passing
- * bullets render plain.
+ * bullet for that role. A bullet Fix It has a step for tints its own `•`
+ * (`BulletMarker`, #913); nothing is drawn beside the text.
+ *
+ * The role is an `edit-scope` (styles/edit-chrome.css): its Rewrite section
+ * trigger, remove control, add-bullet pill and empty header prompts rest
+ * hidden on a fine pointer and show while the role is hovered or holds focus.
  *
  * Edit mode (#58): when `experienceIndex` + `overrides` + `onFieldChange` are
  * provided, the heading line (`RoleHeader`, in its own sibling since #810)
  * exposes inline EditableField affordances for every header field.
  *
  * Split out of ReconstructedResume to keep that container under ~200 LOC.
- * `ResumeBulletRow` / `BulletFlagLegend` live in the sibling `ResumeBulletRow.tsx`
- * (#626), split out for the same reason.
+ * `ResumeBulletRow` lives in the sibling `ResumeBulletRow.tsx` (#626), split
+ * out for the same reason.
  *
  * Per-bullet remove confirmation (#626) is NOT owned here — it lives in
  * `useBulletRemoveStatus` (`BulletRemoveStatus.tsx`). A parsed role hosts its
@@ -237,7 +241,7 @@ export function RoleEntry({
     roleLabel(group.experience),
   );
   return (
-    <div ref={rootRef} className="flex flex-col gap-1.5">
+    <div ref={rootRef} className="edit-scope flex flex-col gap-1.5">
       <div className="flex items-start justify-between gap-2">
         <RoleHeader
           group={group}
@@ -245,7 +249,7 @@ export function RoleEntry({
           onFieldChange={onFieldChange}
           datesTarget={datesTarget}
         />
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="edit-chrome flex shrink-0 items-center gap-1">
           {rewriteTrigger}
           {onRemove && (
             <RemoveButton label="Remove role" onClick={onRemove} />

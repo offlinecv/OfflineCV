@@ -13,6 +13,12 @@
  * (#180), so every section discloses an add affordance the same way instead of
  * each re-rolling it. Built entirely from the @design-system Button primitive +
  * semantic tokens — no raw <button>, no hardcoded palette.
+ *
+ * `AddPill` and `RemoveButton` are edit chrome (#913, styles/edit-chrome.css):
+ * inside the résumé they rest hidden on a fine pointer and show while their
+ * nearest `edit-scope` — row, entry, section, header block — is hovered or
+ * holds focus. They stay in the tab order throughout. Outside any scope they
+ * are always visible, so a reuse elsewhere is unaffected.
  */
 
 import { useState } from "react";
@@ -102,7 +108,7 @@ export function AddPill({
       onClick={onClick}
       data-fixit-focus={fixItFocus || undefined}
       aria-label={label}
-      className="self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
+      className="edit-chrome self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
     >
       + {label}
     </Button>
@@ -146,7 +152,7 @@ export function RemoveButton({
       variant="icon"
       aria-label={label}
       onClick={onClick}
-      className="min-h-6 min-w-6 shrink-0 text-content-muted hover:text-content-secondary"
+      className="edit-chrome min-h-6 min-w-6 shrink-0 text-content-muted hover:text-content-secondary"
     >
       <CloseIcon />
     </Button>

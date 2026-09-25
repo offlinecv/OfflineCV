@@ -442,18 +442,21 @@ describe("compact certifications layout (#899)", () => {
   it("hides the '+ year' affordance on a dateless compact credential AT REST, not from the DOM", () => {
     // One "+ year" permanently on the shared line is the clutter the compact
     // form exists to remove and it competes with the boundary glyph — so it's
-    // `opacity-0` until the row is hovered/focused, not omitted outright. A
-    // parsed dateless credential still stays dateable from this line (#899
-    // AC 5) — see AchievementYearSlot's docblock.
+    // edit chrome (#913: hidden at rest on a fine pointer until the row is
+    // hovered/focused), not omitted outright. A parsed dateless credential
+    // still stays dateable from this line (#899 AC 5) — see
+    // AchievementYearSlot's docblock.
     renderCertsWith([{ title: "CKA" }, { title: "Terraform Associate" }]);
     const addYear = container.querySelector('[aria-label^="Add Year"]');
     expect(addYear).not.toBeNull();
-    // opacity-at-rest lives on the parenthesised wrapper span, not the field
-    // itself — the parens hide alongside the field.
+    // The chrome class lives on the parenthesised wrapper span, not only the
+    // field itself — the parens hide alongside the field — and the row is the
+    // scope whose hover/focus reveals it.
     const wrapper = addYear?.parentElement;
-    expect(wrapper?.className).toContain("opacity-0");
-    expect(wrapper?.className).toContain("group-hover:opacity-100");
-    expect(wrapper?.className).toContain("group-focus-within:opacity-100");
+    expect(wrapper?.classList.contains("edit-chrome")).toBe(true);
+    expect(wrapper?.parentElement?.closest(".edit-scope")?.className).toContain(
+      "inline-flex",
+    );
   });
 
   it("keeps the add-bullet affordance on an ADDED certification", () => {

@@ -30,8 +30,7 @@
  * bullets live in Projects.
  */
 
-import type { BulletObservation } from "../../lib/score/score.ts";
-import { needsAttention } from "../../lib/score/group-bullets.ts";
+import type { BulletCheck, GuidanceItem } from "../../lib/score/guidance.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
 import { SECTION_IDS, type SectionAnchor } from "../../lib/anchors.ts";
 
@@ -70,17 +69,22 @@ export function formatTriageHeadline(
 }
 
 function BulletSegment({
-  bullets,
+  steps,
+  total,
 }: {
-  bullets: readonly BulletObservation[];
+  steps: readonly GuidanceItem[];
+  total: number;
 }) {
-  const total = bullets.length;
-  const flagged = bullets.filter(needsAttention).length;
+  const flagged = steps.length;
   if (flagged === 0) return null;
 
-  const missingMetric = bullets.filter((b) => !b.hasMetric).length;
-  const lengthIssues = bullets.filter((b) => !b.wellFormedLength).length;
-  const weakVerb = bullets.filter((b) => !b.startsWithActionVerb).length;
+  // Tallied from the steps' own issues, so a metric past the budget — which
+  // Fix It does not ask for — is not counted here either (#913).
+  const tally = (check: BulletCheck) =>
+    steps.filter((s) => s.issues.some((i) => i.check === check)).length;
+  const missingMetric = tally("metric");
+  const lengthIssues = tally("length");
+  const weakVerb = tally("verb");
 
   const counts: Array<{ key: string; n: number; label: string }> = [
     { key: "metric", n: missingMetric, label: "missing a metric" },
@@ -145,14 +149,18 @@ function ContactSegment({ missing }: { missing: ContactDisplayField[] }) {
 }
 
 interface TargetingTriageRowProps {
-  bullets: readonly BulletObservation[];
+  /** Fix It's bullet steps — see `TargetingSection`'s `bulletSteps`. */
+  bulletSteps: readonly GuidanceItem[];
+  /** Every graded bullet, for the "of N" denominator. */
+  totalBullets: number;
   contactMissing: ContactDisplayField[];
   hasBulletGap: boolean;
   hasContactGap: boolean;
 }
 
 export function TargetingTriageRow({
-  bullets,
+  bulletSteps,
+  totalBullets,
   contactMissing,
   hasBulletGap,
   hasContactGap,
@@ -160,7 +168,9 @@ export function TargetingTriageRow({
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border border-border-light bg-surface-subtle px-3.5 py-2.5 text-sm">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        {hasBulletGap && <BulletSegment bullets={bullets} />}
+        {hasBulletGap && (
+          <BulletSegment steps={bulletSteps} total={totalBullets} />
+        )}
         {hasBulletGap && hasContactGap && (
           <span
             aria-hidden="true"

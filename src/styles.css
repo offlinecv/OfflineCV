@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./design-system/styles/theme.css"; /* semantic vocabulary → var() — stable contract */
 @import "@design-tokens"; /* default raw values — swappable via the Vite @design-tokens alias */
+@import "./design-system/styles/edit-chrome.css"; /* edit controls hidden at rest, revealed on hover/focus (#913) */
 
 /* `PageShell`'s header is `sticky top-0` (#812), so every scroll target on
    both entries would otherwise come to rest UNDERNEATH the pinned band: the

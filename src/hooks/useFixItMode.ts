@@ -17,6 +17,14 @@
  * treatment lives here once rather than as a class string copied into each
  * section. The context carries only the active anchor id: targets re-render on
  * a step change, never on a keystroke.
+ *
+ * `useFixItStep` is the way in from the résumé itself (#913): a flagged
+ * bullet's tinted marker asks it for that bullet's step, and activating the
+ * marker enters the mode there. It reads the SAME guidance items the dock
+ * steps through, so a marker exists only where a step does — there is no
+ * second definition of "this bullet needs attention" to drift from the count.
+ * Its context is separate from `FixItContext` because its value changes on
+ * every re-grade, which the targets reading the active anchor must not see.
  */
 
 import {
@@ -24,10 +32,16 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import type { GuidanceItem } from "../lib/score/guidance.ts";
+import {
+  computeScoreGuidance,
+  type GuidanceItem,
+  type ResumeStructureInput,
+} from "../lib/score/guidance.ts";
+import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import { scrollIntoViewMotionAware } from "../lib/anchors.ts";
 
 interface FixItContextValue {
@@ -51,6 +65,22 @@ const TARGET_PAD: Record<FixItTargetShape, string> = {
 };
 
 /**
+ * Which of the current step's edit chrome shows while it is current, even with
+ * the pointer and focus elsewhere (#913; styles/edit-chrome.css). `all` suits a
+ * target that is one field — a missing field's "+ email" prompt, the summary's
+ * placeholder. `focus` shows only the control `focusControl` lands on — a
+ * section's `[data-fixit-focus]` add pill — and never every Remove and Move in
+ * the section, on the step that asks for more entries. A block target
+ * defaults to `focus`, so one without a marked control must ask for `all`.
+ */
+type FixItReveal = "all" | "focus";
+
+const REVEAL_CLASS: Record<FixItReveal, string> = {
+  all: "edit-reveal",
+  focus: "edit-reveal-focus",
+};
+
+/**
  * Props that make an element a Fix It anchor: its id, focusable by script
  * only, and the highlight while it is the current step. Merge `className`
  * into the element's own classes.
@@ -58,6 +88,7 @@ const TARGET_PAD: Record<FixItTargetShape, string> = {
 export function useFixItTarget(
   anchorId: string,
   shape: FixItTargetShape,
+  reveal: FixItReveal = shape === "inline" ? "all" : "focus",
 ): { id: string; tabIndex: -1; className: string } {
   const { activeAnchor } = useContext(FixItContext);
   const active = activeAnchor === anchorId;
@@ -65,7 +96,7 @@ export function useFixItTarget(
     id: anchorId,
     tabIndex: -1,
     className: active
-      ? `${TARGET_BASE} ${TARGET_ACTIVE} ${TARGET_PAD[shape]}`
+      ? `${TARGET_BASE} ${TARGET_ACTIVE} ${TARGET_PAD[shape]} ${REVEAL_CLASS[reveal]}`
       : TARGET_BASE,
   };
 }
@@ -76,12 +107,16 @@ export function useFixItTarget(
  * else the target itself. The marker exists because a section's first control
  * is often the wrong one — in Skills it is the first chip's remove button, and
  * Enter there would delete a skill on the step that asks for more.
+ *
+ * A bullet's tinted marker (`data-fixit-marker`, #913) is skipped: it is the
+ * way INTO the step, first in the row, and landing on it would leave Enter
+ * re-entering the step instead of editing the bullet the step is about.
  */
 function focusControl(target: HTMLElement): HTMLElement {
   return (
     target.querySelector<HTMLElement>("[data-fixit-focus]") ??
     target.querySelector<HTMLElement>(
-      "button, input, textarea, [tabindex='0']",
+      "button:not([data-fixit-marker]), input, textarea, [tabindex='0']",
     ) ??
     target
   );
@@ -118,6 +153,53 @@ interface Step {
 
 const START: Step = { id: null, index: 0, pastEnd: false };
 
+/** What a marker needs to enter the mode at its own step — see `useFixItStep`. */
+export interface FixItEntry {
+  /** Each bullet step, keyed by its `bulletId`: every marker looks itself up
+   *  on every re-grade, so the lookup is a map, not a scan of the items. */
+  bulletSteps: ReadonlyMap<string, GuidanceItem>;
+  /** Enter the mode at the item with this id; a no-op for an unknown id. */
+  startAt: (itemId: string) => void;
+}
+
+export const FixItEntryContext = createContext<FixItEntry>({
+  bulletSteps: new Map(),
+  startAt: () => {},
+});
+
+/** The bullet steps of `items`, keyed as `FixItEntry.bulletSteps` is. */
+export function bulletStepsOf(
+  items: readonly GuidanceItem[],
+): ReadonlyMap<string, GuidanceItem> {
+  const steps = new Map<string, GuidanceItem>();
+  for (const item of items) {
+    // First wins, as a `find` over the items would.
+    if (
+      item.targetType === "bullet" &&
+      item.bulletId !== undefined &&
+      !steps.has(item.bulletId)
+    ) {
+      steps.set(item.bulletId, item);
+    }
+  }
+  return steps;
+}
+
+/**
+ * The Fix It step for one bullet, or null when it has none — outside a
+ * provider (`FixItScope`, which both résumé lanes mount), for a bullet
+ * whose checks all pass, and for one Fix It does not step through (a read-only
+ * project/achievement row, or a metric-less bullet past the metric budget:
+ * `computeScoreGuidance` decides, not this hook).
+ */
+export function useFixItStep(
+  bulletId: string,
+): { item: GuidanceItem; enter: () => void } | null {
+  const { bulletSteps, startAt } = useContext(FixItEntryContext);
+  const item = bulletSteps.get(bulletId);
+  return item ? { item, enter: () => startAt(item.id) } : null;
+}
+
 export interface FixItMode {
   active: boolean;
   /** The current item's index, clamped to the list as it shrinks — or
@@ -128,6 +210,8 @@ export interface FixItMode {
   start: () => void;
   navigate: (index: number) => void;
   exit: () => void;
+  /** Feed to `FixItEntryContext` — the markers' way in (#913). */
+  entry: FixItEntry;
 }
 
 /**
@@ -145,7 +229,7 @@ export interface FixItMode {
  * target keeps the highlight under the finished panel, and `navigate` back to
  * the last index returns to it.
  */
-export function useFixItMode(
+function useFixItMode(
   items: readonly GuidanceItem[],
   resetKey: unknown,
 ): FixItMode {
@@ -203,11 +287,32 @@ export function useFixItMode(
     [items],
   );
 
-  const start = useCallback(() => {
-    returnFocusTo.current = returnTarget();
-    setActive(true);
-    navigate(0);
-  }, [navigate]);
+  // Entering from the Fix It button and from a bullet's marker is one path:
+  // either way the control the user was on is where Done hands focus back.
+  // Only on the way IN: a marker clicked while the mode is already on moves
+  // the step, and must not overwrite the control the user entered from.
+  const enter = useCallback(
+    (next: number) => {
+      if (!active) returnFocusTo.current = returnTarget();
+      setActive(true);
+      navigate(next);
+    },
+    [active, navigate],
+  );
+
+  const start = useCallback(() => enter(0), [enter]);
+
+  const startAt = useCallback(
+    (itemId: string) => {
+      const next = items.findIndex((item) => item.id === itemId);
+      if (next >= 0) enter(next);
+    },
+    [items, enter],
+  );
+  const entry = useMemo(
+    () => ({ bulletSteps: bulletStepsOf(items), startAt }),
+    [items, startAt],
+  );
 
   const exit = useCallback(() => {
     setActive(false);
@@ -221,5 +326,25 @@ export function useFixItMode(
     }
   }, []);
 
-  return { active, index, activeAnchor, start, navigate, exit };
+  return { active, index, activeAnchor, start, navigate, exit, entry };
+}
+
+/**
+ * One lane's guidance items and the mode that steps through them — the pair
+ * every lane rendering an editable résumé needs (`Result` on `/`, the
+ * authoring lane), derived once here so the two cannot disagree about which
+ * bullets have a step. `score` is null until the #313 reveal gate opens, and
+ * then there is nothing to step through.
+ */
+export function useScoreFixIt(
+  score: AnonymousAtsScore | null,
+  fields: ResumeStructureInput,
+  resetKey: unknown,
+): { items: readonly GuidanceItem[]; fixIt: FixItMode } {
+  const items = useMemo(
+    () => (score ? computeScoreGuidance(score, fields) : []),
+    [score, fields],
+  );
+  const fixIt = useFixItMode(items, resetKey);
+  return { items, fixIt };
 }

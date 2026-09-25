@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { useMemo } from "react";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { EditableParse } from "../hooks/useEditableParse.ts";
 import { Card, StatusBadge, Button, ErrorState } from "@design-system";
@@ -17,9 +16,8 @@ import { ResumeTargeting } from "./features/ResumeTargeting.tsx";
 import { LlmEscapeHatchPanel } from "./features/LlmEscapeHatchPanel.tsx";
 import { LocalAiFeedbackSection } from "./features/LocalAiFeedbackSection.tsx";
 import { SECTION_IDS, scrollToSection } from "../lib/anchors.ts";
-import { computeScoreGuidance } from "../lib/score/guidance.ts";
-import { FixItContext, useFixItMode } from "../hooks/useFixItMode.ts";
-import { FixItToolbar } from "./features/FixItToolbar.tsx";
+import { useScoreFixIt } from "../hooks/useFixItMode.ts";
+import { FixItScope } from "./features/FixItScope.tsx";
 
 // LAYOUT_TRIGGER_BLURBS for fonts_unmappable is still needed by LimitedParsingCard.
 const FONTS_UNMAPPABLE_BLURB =
@@ -189,20 +187,12 @@ function ParsedCard({
     !isBlankAuthored ||
     isScoreRevealed(activeResult.canonical, edit.contactOverrides);
 
-  // Derive deterministic ATS score guidance items (#810)
-  const guidanceItems = useMemo(
-    () =>
-      scoreRevealed
-        ? computeScoreGuidance(activeScore, activeResult.canonical.fields)
-        : [],
-    [scoreRevealed, activeScore, activeResult.canonical.fields],
-  );
-
-  const fixIt = useFixItMode(guidanceItems, parseIdentity);
-  // Memoised so a re-grade that leaves the step alone re-renders no target.
-  const fixItContext = useMemo(
-    () => ({ activeAnchor: fixIt.activeAnchor }),
-    [fixIt.activeAnchor],
+  // Deterministic ATS score guidance items (#810), and the mode that steps
+  // through them — shared with the authoring lane via `useScoreFixIt`.
+  const { items: guidanceItems, fixIt } = useScoreFixIt(
+    scoreRevealed ? activeScore : null,
+    activeResult.canonical.fields,
+    parseIdentity,
   );
 
   // Two-column layout warning (#356) — detected but previously never
@@ -283,6 +273,7 @@ function ParsedCard({
             // this region already draws the box. The authoring lane has no
             // such card, so it keeps the default.
             variant="plain"
+            guidance={guidanceItems}
           />
 
           {escapeHatch.isAvailable && (
@@ -318,7 +309,7 @@ function ParsedCard({
         </ScoreDetails>
       </Card>
 
-      <FixItContext.Provider value={fixItContext}>
+      <FixItScope fixIt={fixIt} items={guidanceItems}>
         <ResultDetail
           activeResult={activeResult}
           parseIdentity={parseIdentity}
@@ -332,16 +323,7 @@ function ParsedCard({
           onJdContextChange={onJdContextChange}
           onTailorApplied={onTailorApplied}
         />
-      </FixItContext.Provider>
-
-      {fixIt.active && (
-        <FixItToolbar
-          items={guidanceItems}
-          currentIndex={fixIt.index}
-          onNavigate={fixIt.navigate}
-          onExit={fixIt.exit}
-        />
-      )}
+      </FixItScope>
     </div>
   );
 }

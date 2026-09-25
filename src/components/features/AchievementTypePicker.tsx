@@ -58,7 +58,8 @@ export function AchievementTypePicker({
       panelLabel="Achievement type"
       trigger={{
         variant: "ghost",
-        className: "font-semibold text-content-primary",
+        // An unset type is an empty-field prompt: edit chrome (#913).
+        className: `font-semibold text-content-primary${label ? "" : " edit-chrome"}`,
       }}
       triggerContent={
         <>

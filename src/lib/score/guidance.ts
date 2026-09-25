@@ -33,10 +33,16 @@ import { firstUndatedRoleIndex } from "../edit/role-display.ts";
 
 export type GuidanceDimension = "specificity" | "structure" | "completeness";
 
+/** The per-bullet check an issue reports — set only on bullet issues. */
+export type BulletCheck = "metric" | "verb" | "length";
+
 export interface GuidanceIssue {
   dimension: GuidanceDimension;
   title: string;
   suggestion: string;
+  /** Which bullet check failed, so a caller can tally issues by kind without
+   *  matching on `title` (whose length copy carries the word count). */
+  check?: BulletCheck;
 }
 
 export interface GuidanceItem {
@@ -279,6 +285,7 @@ function bulletIssues(b: BulletObservation, flagMetric: boolean): GuidanceIssue[
   if (!b.hasMetric && flagMetric) {
     issues.push({
       dimension: "specificity",
+      check: "metric",
       title: "Missing measurable metric",
       suggestion: "Add numbers, percentages, or dollar amounts to quantify your result (e.g. 'reduced latency by 40%').",
     });
@@ -286,6 +293,7 @@ function bulletIssues(b: BulletObservation, flagMetric: boolean): GuidanceIssue[
   if (!b.startsWithActionVerb) {
     issues.push({
       dimension: "structure",
+      check: "verb",
       title: "Weak opening verb",
       suggestion: "Start with an action verb in past tense (e.g. 'Shipped', 'Built', 'Led', 'Optimized').",
     });
@@ -295,6 +303,7 @@ function bulletIssues(b: BulletObservation, flagMetric: boolean): GuidanceIssue[
     const window = `Aim for ${BULLET_LENGTH_MIN_WORDS}–${BULLET_LENGTH_MAX_WORDS} words.`;
     issues.push({
       dimension: "structure",
+      check: "length",
       title: `${tooShort ? "Too short" : "Too long"} (${b.wordCount} words)`,
       suggestion: tooShort
         ? `${window} Expand with context on what you built, tools used, or the outcome.`
