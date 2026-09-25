@@ -71,6 +71,11 @@ const LLM_PARSE: LlmParsedResume = {
 
 const SCORE = { overall: 40, verdict: "Needs Work", bullets: [] };
 
+/** `useAnalyzedResume.savableResult` — the edits flattened WITH their bullet
+ *  pool (#1022). A distinct object from `HEURISTIC` (`displayResult`), so a
+ *  save that picked the display result instead is visible. */
+const SAVABLE: CascadeResult = { ...HEURISTIC, rawText: "EDITED RAWTEXT" };
+
 // ── Mocks: everything `App` mounts that is not the wiring under test ─────────
 
 // The parse state machine, pinned to a single "done" résumé. Driving the real
@@ -96,6 +101,7 @@ vi.mock("./hooks/useAnalyzedResume.ts", async () => {
         fieldConfidence: {},
       },
       displayResult: HEURISTIC,
+      savableResult: SAVABLE,
       parseKey: HEURISTIC,
       handleFile: async () => {},
       reset: () => {},
@@ -320,6 +326,18 @@ describe("App — the résumé `/` hands to `/jobs/`", () => {
     expect(bar()).toBe(HEURISTIC_TITLE);
     runRecovery(el);
     expect(bar()).toBe(RECOVERED_TITLE);
+  });
+
+  it("saves the flattened edit, not the display result, when no recovery ran (#1022)", async () => {
+    // `displayResult` keeps the BASE bullet pool for display (#445). Saved as
+    // the record, a restore re-graded the pre-edit bullets — the Fix It count
+    // and score moved across a reload. The record has to be the result the
+    // live score was graded from, which is `savableResult`.
+    const el = render();
+    await act(async () => control(el, "button", "save to library").click());
+
+    expect(librarySave).toHaveBeenCalledTimes(1);
+    expect(librarySave.mock.calls[0][0].result).toBe(SAVABLE);
   });
 
   it("saves the RECOVERED parse to the library, not the parse it replaced", async () => {

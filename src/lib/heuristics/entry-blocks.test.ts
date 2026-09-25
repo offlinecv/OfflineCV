@@ -785,6 +785,99 @@ describe("parseEntryBlocks — two-column banded header + placeholder dates (mus
   });
 });
 
+describe("parseEntryBlocks — flush-right location cell above the date anchor (#1021)", () => {
+  // Two-line role header: "Company … City, ST" over "Title … Dates". Line
+  // assembly cuts the company row at the column gap, so the location reaches
+  // the header walk as its own line between the company and the title + date
+  // anchor. The walk skips it (never a company/title) — it must still keep it.
+  const cfg = { anchor: "date_range", collectBody: true, headerLookback: 2 } as const;
+
+  it("keeps the location cell on the block, out of the header lines", () => {
+    const blocks = parseEntryBlocks(
+      xySection([
+        { text: "Northwind Opera", x: 36, y: 100 },
+        { text: "Springfield, IL", x: 522, y: 100 }, // cut from the company's row
+        { text: "Production Intern Jun 2023 - Present", x: 36, y: 113 },
+        { text: "• Supported set changeovers for four productions", x: 54, y: 126 },
+      ]),
+      cfg,
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].headerLines).toEqual(["Northwind Opera", "Production Intern"]);
+    expect(blocks[0].aboveAnchorLocation).toBe("Springfield, IL");
+  });
+
+  it("keeps it on the two-column banded shape too (music_resume25)", () => {
+    const blocks = parseEntryBlocks(
+      xySection([
+        { text: "Acme Opera", x: 36, y: 219 },
+        { text: "Production Intern", x: 36, y: 231 },
+        { text: "Springfield, IL", x: 522, y: 219 },
+        { text: "Month Year - Present", x: 483, y: 231 },
+        { text: "• Supported departmental ticketing during productions", x: 54, y: 245 },
+      ]),
+      cfg,
+    );
+    expect(blocks[0].aboveAnchorLocation).toBe("Springfield, IL");
+  });
+
+  it("does not take a previous bullet's wrapped tail as the next role's location", () => {
+    // The tail is alone on its row — no company beside it — so it is not a cell.
+    const blocks = parseEntryBlocks(
+      xySection([
+        { text: "Globex Theatre", x: 36, y: 100 },
+        { text: "Stage Manager Jan 2020 - May 2022", x: 36, y: 113 },
+        { text: "• Opened the second rehearsal space in", x: 54, y: 126 },
+        { text: "Springfield, IL", x: 64, y: 139 }, // wrapped bullet tail
+        { text: "Northwind Opera", x: 36, y: 160 },
+        { text: "Production Intern Jun 2023 - Present", x: 36, y: 173 },
+        { text: "• Supported set changeovers for four productions", x: 54, y: 186 },
+      ]),
+      cfg,
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].aboveAnchorLocation).toBeUndefined();
+  });
+
+  it("does not take a company welded to its city as a location", () => {
+    // "Freelance Berkeley, CA" matches the pure-location shape, but it is one
+    // merged row (tab-justified, #891), alone on its baseline — reading it as a
+    // location would move the company into `location`.
+    const blocks = parseEntryBlocks(
+      xySection([
+        { text: "Freelance Berkeley, CA", x: 36, y: 100 },
+        { text: "English Tutor Mar 2023 - Dec 2024", x: 36, y: 113 },
+        { text: "• Instructed eight high school students in writing", x: 54, y: 126 },
+      ]),
+      cfg,
+    );
+    expect(blocks[0].aboveAnchorLocation).toBeUndefined();
+  });
+
+  it("does not take the previous role's below-anchor location cell across a paragraph gap", () => {
+    // Role 1 is "Title <dates>" over "Company … City, ST" — its location cell
+    // sits BELOW its own anchor. Role 2 follows after a paragraph-sized gap.
+    // Role 2's header walk reaches "Springfield, IL" only by crossing that gap,
+    // and the gap is what marks the end of role 2's header — the same stop
+    // the company/title lines already honour. Capturing the cell before the
+    // gap check moved role 1's city onto role 2.
+    const blocks = parseEntryBlocks(
+      xySection([
+        { text: "Stage Manager Jan 2020 - May 2022", x: 36, y: 100 },
+        { text: "Globex Theatre", x: 36, y: 113 },
+        { text: "Springfield, IL", x: 522, y: 113 }, // role 1's cell, below its anchor
+        { text: "Northwind Opera", x: 36, y: 150 }, // paragraph gap above
+        { text: "Production Intern Jun 2023 - Present", x: 36, y: 163 },
+        { text: "• Supported set changeovers for four productions", x: 54, y: 176 },
+      ]),
+      cfg,
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].headerLines).toEqual(["Northwind Opera", "Production Intern"]);
+    expect(blocks[1].aboveAnchorLocation).toBeUndefined();
+  });
+});
+
 describe("parseEntryBlocks — role-first glyph-less experience (#215)", () => {
   // The shape that orphaned bullets in #215: a role-first Google-Docs export
   // (Role title → Dates → Company–Location → bullets) whose bullets carry NO

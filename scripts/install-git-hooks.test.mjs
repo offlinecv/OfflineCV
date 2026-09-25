@@ -19,6 +19,8 @@ import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { gitScrubbedEnv, useDecoyGitDir } from "./__test-utils__/git-env.mjs";
+
 const INSTALLER = resolve(import.meta.dirname, "install-git-hooks.mjs");
 const PUSHED = "a".repeat(40);
 const REMOTE = "b".repeat(40);
@@ -33,10 +35,17 @@ const STDIN = [
 let dir;
 let env;
 
+// Scrubbed of GIT_* at the moment of every spawn (see git-env.mjs) — `base`
+// is read from live `process.env` on each call, not captured once, so a
+// GIT_DIR a test sets after `beforeEach` (the regression guard below) is
+// still caught. `env` carries this suite's fixed overrides; `null` forces a
+// key absent regardless of what the ambient process has set (used by
+// "writes nothing outside Claude Code" to unset CLAUDE_CODE_SESSION_ID for
+// real, not just from whatever this suite last set it to).
 function push(extraEnv = {}) {
   return spawnSync("bash", [join(dir, ".git", "hooks", "pre-push"), "origin", "url"], {
     cwd: dir,
-    env: { ...env, ...extraEnv },
+    env: gitScrubbedEnv(process.env, { ...env, ...extraEnv }),
     input: STDIN,
     encoding: "utf8",
   });
@@ -47,15 +56,14 @@ const npmCalled = () => existsSync(join(dir, "npm-called"));
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "install-git-hooks-"));
-  execFileSync("git", ["init", "-q"], { cwd: dir });
-  execFileSync(process.execPath, [INSTALLER], { cwd: dir });
+  execFileSync("git", ["init", "-q"], { cwd: dir, env: gitScrubbedEnv(process.env) });
+  execFileSync(process.execPath, [INSTALLER], { cwd: dir, env: gitScrubbedEnv(process.env) });
   const bin = join(dir, "bin");
   execFileSync("mkdir", [bin]);
   // Stands in for `npm run verify`: records that the gate ran, and passes.
   writeFileSync(join(bin, "npm"), `#!/usr/bin/env bash\ntouch "${join(dir, "npm-called")}"\n`);
   chmodSync(join(bin, "npm"), 0o755);
-  env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CLAUDE_CODE_SESSION_ID: "session-me" };
-  delete env.OFFLINECV_SKIP_HOOKS;
+  env = { PATH: `${bin}:${process.env.PATH}`, CLAUDE_CODE_SESSION_ID: "session-me", OFFLINECV_SKIP_HOOKS: null };
 });
 
 afterEach(() => {
@@ -73,9 +81,34 @@ describe("managed pre-push hook — session push ledger", () => {
   }
 
   it("writes nothing outside Claude Code", () => {
-    delete env.CLAUDE_CODE_SESSION_ID;
+    env.CLAUDE_CODE_SESSION_ID = null;
     const r = push();
     expect(r.status).toBe(0);
     expect(existsSync(ledgerPath())).toBe(false);
+  });
+});
+
+describe("GIT_DIR scrub — regression guard for #1020", () => {
+  // GIT_DIR points at a decoy repo for this whole block — the outer
+  // `git push`'s git-dir, live for the whole hook's lifetime — so the
+  // file-level `beforeEach` (`git init` of the throwaway repo, then the
+  // installer spawn) runs under the leak too, not just the one `push()`.
+  // The `git init` is the exact spawn that re-initialised the real repo in
+  // #1020. See git-env.mjs.
+  const decoy = useDecoyGitDir();
+
+  it("never lets a spawned git see an inherited GIT_DIR", () => {
+    const r = push();
+
+    // The decoy — standing in for the real repo — must come out
+    // byte-for-byte unchanged: no re-init, no core.bare flip (#1020's
+    // actual corruption), nothing written under it.
+    decoy.assertUntouched();
+
+    // And the actual throwaway repo under test still got the real effect —
+    // a leaked GIT_DIR wouldn't just corrupt the decoy, it would also make
+    // the hook write its ledger into the decoy's `.git` instead of ours.
+    expect(r.status).toBe(0);
+    expect(readFileSync(ledgerPath(), "utf8")).toBe(`session-me\t${PUSHED}\trefs/heads/feat\n`);
   });
 });

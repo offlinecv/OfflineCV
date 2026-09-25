@@ -40,6 +40,7 @@ import { useEditableParse, type EditableParse } from "./useEditableParse.ts";
 import { applyOverrides } from "../lib/edit/apply-overrides.ts";
 import {
   editBaseFromResult,
+  flattenEditedResult,
   foldEditedIntoResult,
   probeScoringProfileSlots,
 } from "../lib/edit/edit-pipeline.ts";
@@ -73,6 +74,14 @@ export interface AnalyzedResume {
    *  original parse (phase "done") or the blank base (phase "authoring"),
    *  with `edited.parsed` folded in. Null exactly when `edited` is null. */
   displayResult: CascadeResult | null;
+  /**
+   * The résumé as it should be PERSISTED (#1022): the edits flattened into a
+   * standalone result, edited section pool and rawText included — see
+   * `flattenEditedResult`. Not the same value as `displayResult`, which keeps
+   * the base parse's pool on purpose (#445): a record saved from THAT re-grades
+   * the pre-edit bullets on restore. Null exactly when `displayResult` is.
+   */
+  savableResult: CascadeResult | null;
   /**
    * Opaque identity token for the CURRENT parse — changes exactly when a
    * genuinely new résumé lands (a fresh file, a résumé restored from the
@@ -300,6 +309,17 @@ export function useAnalyzedResume(): AnalyzedResume {
     return foldEditedIntoResult(base, edited.parsed, edited.fieldConfidence);
   }, [base, edited]);
 
+  // What a save persists (#1022). Built off `editedCore` — the value the
+  // `score` memo grades — so a restore that re-grades this record with no
+  // overrides reads the same bullet pool the live score did. Deps hand-audited
+  // both directions (`exhaustive-deps` is NOT enforced): the body reads `base`
+  // and `editedCore` and nothing else. It re-derives on a non-scoring profile
+  // edit too, which is right — the record must still carry the new profile.
+  const savableResult = useMemo<CascadeResult | null>(() => {
+    if (base === null || editedCore === null) return null;
+    return flattenEditedResult(base, editedCore);
+  }, [base, editedCore]);
+
   // Clear edits whenever a fresh parse lands (new file, reset) or a fresh
   // blank-authoring session starts. Resuming a saved draft must NOT clear —
   // `resumeDraft` below replays the draft's overrides BEFORE dismissing the
@@ -358,6 +378,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     edit,
     edited,
     displayResult,
+    savableResult,
     parseKey,
     handleFile,
     reset,

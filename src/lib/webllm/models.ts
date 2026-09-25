@@ -38,9 +38,10 @@
  * `vram_required_MB` rounded down — VRAM and download bytes track within a few
  * percent for 4-bit quantized weights, close enough for a "~1.9 GB" label. The
  * same record lists `required_features: ["shader-f16"]` and a 4096-token
- * context window; the capability probe in `capability.ts` does not check for
- * the feature, so a GPU without f16 shaders reaches a load error rather than
- * a "not supported" notice.
+ * context window; the capability probe in `capability.ts` checks the granted
+ * adapter for that feature and returns `"no-shader-f16"` when it's missing,
+ * so a GPU without f16 shaders sees the same "not supported" notice as no
+ * WebGPU at all, instead of reaching a load error after consent (#1019).
  */
 
 import type { ModelLoadSource } from "./types.ts";

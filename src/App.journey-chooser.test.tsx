@@ -119,6 +119,7 @@ vi.mock("./hooks/useAnalyzedResume.ts", async () => {
                 fieldConfidence: {},
               },
         displayResult: done?.result ?? null,
+        savableResult: done?.result ?? null,
         parseKey: done?.result ?? null,
         handleFile: async () => {},
         reset: () => {},

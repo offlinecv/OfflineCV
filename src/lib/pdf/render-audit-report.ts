@@ -183,16 +183,16 @@ function drawIdentityHeader(layout: ReportLayout, input: AuditReportInput, muted
   layout.advance(8);
 }
 
-/** Layout-flags section: one bullet per fired trigger, or a reassuring line when
- *  none fired. */
+/** Layout-warnings section (renamed from "Layout flags" by #1010/#1018): one
+ *  bullet per fired trigger, or a reassuring line when none fired. */
 function drawLayoutFlags(
   layout: ReportLayout,
   triggers: AuditReportInput["triggers"],
   muted: RGB,
 ) {
-  sectionHeading(layout, "Layout flags");
+  sectionHeading(layout, "Layout warnings");
   if (triggers.length === 0) {
-    layout.drawText("No layout flags — standard single-column, text-selectable PDF.", {
+    layout.drawText("No layout warnings — standard single-column, text-selectable PDF.", {
       size: SIZE_BODY,
       color: muted,
     });
@@ -265,7 +265,7 @@ export async function renderAuditReportPdf(
     });
   }
 
-  // ── Layout flags ──
+  // ── Layout warnings ──
   drawLayoutFlags(layout, input.triggers, muted);
 
   // ── Recommendation ──

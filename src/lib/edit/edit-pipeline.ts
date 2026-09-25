@@ -26,6 +26,7 @@
 
 import {
   applyProfileOverrides,
+  type ApplyOverridesResult,
   type EditBase,
   type LegacyLinkFields,
 } from "./apply-overrides.ts";
@@ -114,7 +115,8 @@ export function probeScoringProfileSlots(
  * `sections` (and `rawText`) stay the BASE's on purpose: display never showed
  * the edited section pool or rawText, only the edited parsed fields (#445).
  * Grading THIS value instead of the `applyOverrides` result is what manufactured
- * #487 — see `score-edited.ts`.
+ * #487 — see `score-edited.ts`. Persisting it did the same on restore (#1022):
+ * save {@link flattenEditedResult} instead.
  */
 export function foldEditedIntoResult(
   base: CascadeResult,
@@ -124,5 +126,47 @@ export function foldEditedIntoResult(
   return {
     ...base,
     canonical: { ...base.canonical, fields, fieldConfidence },
+  };
+}
+
+/**
+ * Flatten an edit fold into a standalone `CascadeResult` — the shape a résumé
+ * is PERSISTED as, so that re-grading it later yields the grade the page showed.
+ *
+ * Unlike {@link foldEditedIntoResult}, the edited `sections` and `rawText` come
+ * along with the edited fields. That difference is the whole point (#1022). A
+ * restore re-grades the stored record with an empty override set, and the scorer
+ * pools its bullets from `sections` (`score-edited.ts`). A record that paired
+ * edited fields with the base pool — which is what saving the display result
+ * produced — graded the pre-edit bullet text on reload: removed bullets came
+ * back, added ones vanished, and rewritten ones reverted. So the Fix It count
+ * and the score changed across a reload for content the user never touched
+ * again, and the reverted bullets rendered on the page where the edits had been.
+ *
+ * `rawText` rides along for the same reason: it is a scorer input (`score.ts`
+ * runs `REDACTED_DATE_RE` over it for the year-stub check), and the live grade
+ * read the edited one. That buys one divergence, deliberately: a restored
+ * record's `rawText` is the EDITED text, so after a reload "How your resume was
+ * read" (`SourceDiagnosticsPanel`) shows the edited text where the live page
+ * showed the extractor's original. The grade agreeing across a reload is worth
+ * more than a diagnostics view that this flattened shape cannot serve
+ * faithfully anyway; the pristine base comes back with #768.
+ *
+ * This is still a FLATTENED record — the edits are baked in, not re-editable.
+ * Storing the pristine base plus the `EditSnapshot` instead is #768; this only
+ * makes the flattened record agree with the grade it was saved beside.
+ */
+export function flattenEditedResult(
+  base: CascadeResult,
+  edited: ApplyOverridesResult,
+): CascadeResult {
+  return {
+    ...base,
+    rawText: edited.rawText,
+    canonical: {
+      fields: edited.fields,
+      sections: edited.sections,
+      fieldConfidence: edited.fieldConfidence,
+    },
   };
 }

@@ -74,7 +74,7 @@ export function ReportGapSection({
         </Heading>
         <p className="max-w-prose text-sm text-content-tertiary">
           Download a small, <strong>structure-only</strong> diagnostic file —
-          section boundaries, counts, and layout flags. It carries{" "}
+          section boundaries, counts, and layout warnings. It carries{" "}
           <strong>none of your résumé text</strong> (no name, email, phone, or
           bullet content), so it's safe to attach to a public issue. Nothing is
           uploaded; the download stays in this browser until you attach it

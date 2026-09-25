@@ -130,3 +130,21 @@ describe("AuthoringResume — Fix It in the from-scratch lane (#913)", () => {
     expect(el.querySelectorAll("button[data-fixit-marker]")).toHaveLength(0);
   });
 });
+
+describe("AuthoringResume — targeting disclosure keeps its own chrome (#1013)", () => {
+  it("mounts the targeting disclosure on the default \"card\" variant", async () => {
+    // Unlike `Result`, this lane never wraps `ScoreDetails` in a `Card` (see
+    // this file's module docblock and `AuthoringResume`'s own) — so the
+    // targeting `Disclosure` must draw its OWN border here, not the borderless
+    // `variant="plain"` row `Result` mounts inside the score card. #1013: a
+    // hardcoded "plain" left this row bare on the page background.
+    const el = await render(authored(true));
+    const summary = [...el.querySelectorAll("summary")].find((n) =>
+      (n.textContent ?? "").includes("Targeting"),
+    );
+    expect(summary).toBeDefined();
+    const details = summary!.closest("details");
+    expect(details?.className).toContain("rounded-xl");
+    expect(details?.className).toContain("bg-surface-card");
+  });
+});

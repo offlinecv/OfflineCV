@@ -285,8 +285,8 @@ const SEMANTIC_MAX_TOKENS = 64;
  * shipped model's terms on a user-initiated surface, it returns the heuristic
  * guess immediately, before probing WebGPU or importing the engine. It then
  * gates on WebGPU capability (`src/lib/webllm/capability.ts`); on
- * `"no-webgpu"` / `"unsupported-os"` it likewise returns the heuristic guess
- * without touching WebLLM. Consent is not enough on its own, either: a
+ * `"no-webgpu"` / `"unsupported-os"` / `"no-shader-f16"` it likewise returns
+ * the heuristic guess without touching WebLLM. Consent is not enough on its own, either: a
  * background classification must never be what starts a ~2 GB download, so
  * unless the model is already resident or fully cached (a local Cache API
  * read, `hasModelWeightsCached`) it returns the heuristic guess too. Only then does it

@@ -126,6 +126,7 @@ vi.mock("./hooks/useAnalyzedResume.ts", async () => {
         fieldConfidence: {},
       },
       displayResult: lane.revealed ? AUTHORED_REVEALED : AUTHORED,
+      savableResult: lane.revealed ? AUTHORED_REVEALED : AUTHORED,
       parseKey: "authoring:0",
       handleFile: async () => {},
       reset: () => {},

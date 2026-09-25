@@ -113,7 +113,7 @@ export function ExportReportRow({
   return (
     <ExportRow
       title="Audit report"
-      description="The audit findings — verdict, score breakdown, layout flags and the recommendation. Not your résumé; a shareable record of what this page found. Generated in this browser; nothing is uploaded."
+      description="The audit findings — verdict, score breakdown, layout warnings and the recommendation. Not your résumé; a shareable record of what this page found. Generated in this browser; nothing is uploaded."
       error={report.error}
       // The one row that is not the résumé, so the one row that sits below the
       // rule rather than in the list. The sentence saying so is still in the

@@ -10,7 +10,8 @@
  * of a blank, the user gets: (1) a compact, capability-specific headline, (2)
  * reassurance that the core ATS score + parsed résumé are unaffected (on-device
  * AI is additive), and (3) a "How to turn this on →" Dialog with guidance
- * auto-selected to their detected browser + OS.
+ * auto-selected to their detected browser + OS — opened as "What this means →"
+ * for `no-shader-f16`, where the guidance knows of nothing to turn on.
  *
  * All the UA-sniffing and the routing matrix live in `lib/webllm/platform.ts`;
  * this component only renders. Internal URLs (`chrome://…`, `about:config`)
@@ -37,6 +38,25 @@ import { trackWebllmNoticeShown } from "../../lib/analytics.ts";
 const HEADLINE: Record<Exclude<WebGpuCapability, "available">, string> = {
   "no-webgpu": "On-device AI isn't available in this browser",
   "unsupported-os": "On-device AI couldn't reach your GPU",
+  "no-shader-f16": "On-device AI isn't supported on your GPU",
+};
+
+// The dialog's opener and title. `no-shader-f16` guidance says we know of no
+// setting that turns it on, so neither may promise one (#1019).
+const ENABLE = {
+  cta: "How to turn this on →",
+  title: "Enable on-device AI rewrite",
+};
+const DIALOG: Record<
+  Exclude<WebGpuCapability, "available">,
+  { cta: string; title: string }
+> = {
+  "no-webgpu": ENABLE,
+  "unsupported-os": ENABLE,
+  "no-shader-f16": {
+    cta: "What this means →",
+    title: "Why on-device AI is off",
+  },
 };
 
 interface Props {
@@ -78,14 +98,14 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
           onClick={() => setOpen(true)}
           className="text-sm text-content-secondary"
         >
-          How to turn this on →
+          {DIALOG[capability].cta}
         </Button>
       </div>
 
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Enable on-device AI rewrite"
+        title={DIALOG[capability].title}
         className="max-w-md"
       >
         <div className="flex flex-col gap-3">
@@ -127,33 +147,36 @@ export function WebGpuUnavailableNotice({ capability }: Props) {
             )}
           </div>
 
-          <details className="border-t border-border-light pt-2">
-            <summary className="cursor-pointer text-sm text-content-tertiary hover:underline">
-              Using a different browser?
-            </summary>
-            <ul className="mt-1.5 flex flex-col gap-1 pl-1 text-2xs text-content-tertiary list-none">
-              <li>
-                <span className="font-semibold text-content-secondary">
-                  Chrome / Edge:
-                </span>{" "}
-                recent versions ship WebGPU by default; enable hardware
-                acceleration if it's off.
-              </li>
-              <li>
-                <span className="font-semibold text-content-secondary">
-                  Firefox:
-                </span>{" "}
-                set <code>dom.webgpu.enabled</code> in <code>about:config</code>,
-                or update to the latest.
-              </li>
-              <li>
-                <span className="font-semibold text-content-secondary">
-                  Safari:
-                </span>{" "}
-                update to a recent version (macOS Sequoia / iOS 18+).
-              </li>
-            </ul>
-          </details>
+          {/* A browser switch cannot supply a GPU feature (#1019). */}
+          {capability !== "no-shader-f16" && (
+            <details className="border-t border-border-light pt-2">
+              <summary className="cursor-pointer text-sm text-content-tertiary hover:underline">
+                Using a different browser?
+              </summary>
+              <ul className="mt-1.5 flex flex-col gap-1 pl-1 text-2xs text-content-tertiary list-none">
+                <li>
+                  <span className="font-semibold text-content-secondary">
+                    Chrome / Edge:
+                  </span>{" "}
+                  recent versions ship WebGPU by default; enable hardware
+                  acceleration if it's off.
+                </li>
+                <li>
+                  <span className="font-semibold text-content-secondary">
+                    Firefox:
+                  </span>{" "}
+                  set <code>dom.webgpu.enabled</code> in{" "}
+                  <code>about:config</code>, or update to the latest.
+                </li>
+                <li>
+                  <span className="font-semibold text-content-secondary">
+                    Safari:
+                  </span>{" "}
+                  update to a recent version (macOS Sequoia / iOS 18+).
+                </li>
+              </ul>
+            </details>
+          )}
 
           <div className="flex justify-end">
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>

@@ -23,6 +23,7 @@
 import { describe, it, expect } from "vitest";
 import {
   editBaseFromResult,
+  flattenEditedResult,
   foldEditedIntoResult,
   probeScoringProfileSlots,
 } from "./edit-pipeline.ts";
@@ -209,6 +210,43 @@ describe("foldEditedIntoResult", () => {
     foldEditedIntoResult(result, baseParsed({ full_name: "Someone Else" }), {});
 
     expect(result.canonical.fields).toBe(before);
+    expect(result.canonical.fields.full_name).toBe("Jane Doe");
+  });
+});
+
+describe("flattenEditedResult (#1022)", () => {
+  it("carries the edited sections and rawText — the pool the live score graded", () => {
+    const result = makeResult(baseParsed());
+    const edited = applyOverrides(editBaseFromResult(result, []), {
+      contactOverrides: { full_name: "Jane Q. Doe" },
+    });
+
+    const out = flattenEditedResult(result, edited);
+
+    expect(out.canonical.fields).toBe(edited.fields);
+    expect(out.canonical.fieldConfidence).toBe(edited.fieldConfidence);
+    // The opposite of `foldEditedIntoResult`: a persisted record is re-graded
+    // on restore, so it must hold the pool the live grade read, or a reload
+    // grades the pre-edit bullets.
+    expect(out.canonical.sections).toBe(edited.sections);
+    expect(out.rawText).toBe(edited.rawText);
+    // Everything that is not an edit output is the base's.
+    expect(out.triggers).toBe(result.triggers);
+    expect(out.confidence).toBe(result.confidence);
+  });
+
+  it("does not mutate the base result", () => {
+    const result = makeResult(baseParsed());
+    const before = result.canonical;
+
+    flattenEditedResult(
+      result,
+      applyOverrides(editBaseFromResult(result, []), {
+        contactOverrides: { full_name: "Someone Else" },
+      }),
+    );
+
+    expect(result.canonical).toBe(before);
     expect(result.canonical.fields.full_name).toBe("Jane Doe");
   });
 });

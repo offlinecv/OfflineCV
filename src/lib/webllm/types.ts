@@ -3,11 +3,16 @@
 
 /**
  * WebGPU detection outcome. `"available"` is the only branch that lights up
- * the rewrite button — the other two collapse to the same UI behavior (hide
- * the CTA) but stay distinct in telemetry so we can tell "device has no GPU
- * driver" from "browser doesn't ship WebGPU yet."
+ * the rewrite button — the other three collapse to the same UI behavior (hide
+ * the CTA, show `WebGpuUnavailableNotice`) but stay distinct in telemetry so
+ * we can tell "device has no GPU driver" from "browser doesn't ship WebGPU
+ * yet" from "GPU lacks the shader precision the shipped model needs" (#1019).
  */
-export type WebGpuCapability = "available" | "no-webgpu" | "unsupported-os";
+export type WebGpuCapability =
+  | "available"
+  | "no-webgpu"
+  | "unsupported-os"
+  | "no-shader-f16";
 
 export interface ProgressUpdate {
   /** 0..1 fraction reported by WebLLM's loader. */
