@@ -34,6 +34,8 @@ case "$*" in
   "auth token --user "*) echo tok ;;
   "api user --jq .login") echo "$FAKE_LOGIN" ;;
   "pr view "*"--json headRefOid"*) echo "$FAKE_HEAD" ;;
+  "pr view "*"--json headRefName"*) echo "$FAKE_REF" ;;
+  "api repos/"*"/reactions -f content=eyes --silent") ;;
   "api repos/"*"/commits --paginate"*)
     [ -n "$FAKE_COMMITS_FAIL" ] && { echo "HTTP 502" >&2; exit 1; }
     printf '%s\\n' $FAKE_COMMITS ;;
@@ -83,6 +85,7 @@ beforeEach(() => {
     PATH: `${bin}:${process.env.PATH}`,
     FAKE_LOGIN: "bot",
     FAKE_HEAD: HEAD,
+    FAKE_REF: "x",
     FAKE_COMMITS: `${EARLIER} ${HEAD}`,
     FAKE_COMMITS_FAIL: "",
     FAKE_LOG: join(dir, "posted.jsonl"),
@@ -116,6 +119,88 @@ describe("gh-as-reviewer.sh review", () => {
     expect(r.status).toBe(0);
   });
 
+  it("allows the APPROVE when this session's pushes all came after its review claim", () => {
+    // The reviewer's own Step 5.5 fix commit — what the approval is meant to cover.
+    ledger([
+      ["session-me", "review-claim", "7"],
+      ["session-me", HEAD, "refs/heads/x"],
+    ]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(0);
+  });
+
+  it("refuses the APPROVE when this session pushed before claiming, even with fixes after", () => {
+    ledger([
+      ["session-me", EARLIER, "refs/heads/x"],
+      ["session-me", "review-claim", "7"],
+      ["session-me", HEAD, "refs/heads/x"],
+    ]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain(`pushed ${EARLIER}`);
+  });
+
+  it("refuses the APPROVE when the author session's pre-claim commit was collapsed away", () => {
+    // `/collapse-pr` rewrote EARLIER off the PR; the push to the head ref remains.
+    env.FAKE_COMMITS = HEAD;
+    ledger([
+      ["session-me", EARLIER, "refs/heads/x"],
+      ["session-me", "review-claim", "7"],
+      ["session-me", HEAD, "refs/heads/x"],
+    ]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain(`pushed ${EARLIER}`);
+  });
+
+  it("counts pushes between a posted review and the next claim as authorship", () => {
+    // review → /revise-pr → review, all in one session.
+    ledger([
+      ["session-me", "review-claim", "7"],
+      ["session-me", "review-posted", "7"],
+      ["session-me", HEAD, "refs/heads/x"],
+      ["session-me", "review-claim", "7"],
+    ]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain(`pushed ${HEAD}`);
+  });
+
+  it("keeps an earlier round's in-window fix approvable on a later round", () => {
+    ledger([
+      ["session-me", "review-claim", "7"],
+      ["session-me", HEAD, "refs/heads/x"],
+      ["session-me", "review-posted", "7"],
+      ["session-me", "review-claim", "7"],
+    ]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(0);
+  });
+
+  it("ignores this session's pushes to another branch whose commits are not on the PR", () => {
+    ledger([["session-me", "c".repeat(40), "refs/heads/other"]]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(0);
+  });
+
+  it("does not let a claim on a different PR exempt this PR's pushes", () => {
+    ledger([
+      ["session-me", "review-claim", "8"],
+      ["session-me", HEAD, "refs/heads/x"],
+    ]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(3);
+  });
+
+  it("closes the review window once a review is posted", () => {
+    ledger([["session-me", "review-claim", "7"]]);
+    const r = run(["review", "7", reviewFile({ event: "COMMENT", body: SIGNED })]);
+    expect(r.status).toBe(0);
+    expect(readFileSync(join(dir, ".git", "offlinecv-session-pushes.log"), "utf8")).toBe(
+      "session-me\treview-claim\t7\nsession-me\treview-posted\t7\n",
+    );
+  });
+
   it("still posts a COMMENT from the session that pushed — only approval is guarded", () => {
     ledger([["session-me", HEAD, "refs/heads/x"]]);
     const r = run(["review", "7", reviewFile({ event: "COMMENT", body: SIGNED })]);
@@ -147,6 +232,25 @@ describe("gh-as-reviewer.sh review", () => {
     const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED, commit_id: EARLIER })]);
     expect(r.status).toBe(3);
     expect(r.stderr).toContain("head is now");
+  });
+});
+
+describe("gh-as-reviewer.sh react-eyes", () => {
+  it("records this session's review claim in the push ledger", () => {
+    const r = run(["react-eyes", "7"]);
+    expect(r.status).toBe(0);
+    expect(readFileSync(join(dir, ".git", "offlinecv-session-pushes.log"), "utf8")).toBe(
+      "session-me\treview-claim\t7\n",
+    );
+  });
+
+  it("makes a later fix push approvable end to end", () => {
+    run(["react-eyes", "7"]);
+    writeFileSync(join(dir, ".git", "offlinecv-session-pushes.log"), `session-me\t${HEAD}\trefs/heads/x\n`, {
+      flag: "a",
+    });
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(0);
   });
 });
 

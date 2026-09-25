@@ -16,20 +16,31 @@
 #
 # Actions:
 #   whoami                              print the login the token resolves to
-#   react-eyes <pr>                     👀 on the PR (the review-started signal)
-#   review <pr> <review.json>           POST a review; prints the review id
+#   react-eyes <pr>                     👀 on the PR (the review-started signal);
+#                                       also records this session's review claim
+#   review <pr> <review.json>           POST a review; prints the review id;
+#                                       closes this session's review claim
 #   reply <pr> <comment-id> <body-file> reply into a review thread
 #   resolve <thread-node-id>            resolve a review thread
 #
 # Two guards, both on `review`, both refusals (exit 3) rather than rewrites — the
 # caller decides what to post instead:
 #   1. Not self-approved. An APPROVE is refused when the Claude Code session
-#      running this script pushed any commit on the PR — the approval would then
-#      mean "the agent that wrote this checked its own work". The evidence is the
-#      push ledger the managed pre-push hook writes
+#      running this script pushed to the PR outside its review claim
+#      — the approval would then mean "the agent that wrote this checked its own
+#      work". The evidence is the push ledger the managed pre-push hook writes
 #      (`scripts/install-git-hooks.mjs`), keyed by CLAUDE_CODE_SESSION_ID. A push
 #      that skipped the hook (`--no-verify`) is not recorded, so this guard is a
 #      backstop for the skill's own rule, not a substitute for it.
+#      The claim is a `<session>\treview-claim\t<pr>` line `react-eyes` appends
+#      to the same ledger, so line order is event order; a posted `review`
+#      appends `<session>\treview-posted\t<pr>`. Pushes inside that window are
+#      the reviewer's own small fixes (pr-review Step 5.5), which the approval is
+#      meant to cover; pushes outside it are authorship — before the first
+#      claim, or between one posted review and the next claim (a `/revise-pr`
+#      round). A push counts when its SHA is on the PR or it went to the PR's
+#      head ref, so a collapse that rewrites every SHA does not erase it. A
+#      session that never claimed has every push counted, as before.
 #      "This session" means one CLAUDE_CODE_SESSION_ID and nothing wider. `/clear`
 #      starts a new ID, and the ledger lives in one clone's `.git`, so a post-
 #      `/clear` context or a push from another clone passes this guard. That is a
@@ -92,28 +103,40 @@ resolve_repo() {
         || die "could not determine the repo; pass --repo owner/name"
 }
 
-# Guard 1: every commit SHA on the PR, checked against this session's pushes.
+ledger_path() {
+    echo "$(git rev-parse --git-common-dir 2>/dev/null)/offlinecv-session-pushes.log"
+}
+
+# Guard 1: the first push this session made to PR <pr> outside a review window.
+# A push counts as authorship when its SHA is a commit on the PR OR it went to
+# the PR's head ref. The ref is what survives a collapse: `/collapse-pr` rewrites
+# every SHA, so a SHA-only check loses the author's pushes the moment the branch
+# is squashed. A window opens at `review-claim <pr>` and closes at
+# `review-posted <pr>`, so pushes between one review and the next claim (a
+# `/revise-pr` round in the same session) count as authorship again.
 session_pushed_any() {
-    local pr="$1" session="${CLAUDE_CODE_SESSION_ID:-}" ledger sha
+    local pr="$1" session="${CLAUDE_CODE_SESSION_ID:-}" ledger
     if [ -z "$session" ]; then
         echo "gh-as-reviewer: warning — CLAUDE_CODE_SESSION_ID unset; the self-approval ledger cannot be consulted" >&2
         return 1
     fi
-    ledger="$(git rev-parse --git-common-dir 2>/dev/null)/offlinecv-session-pushes.log"
+    ledger="$(ledger_path)"
     [ -f "$ledger" ] || return 1
-    # Read into a variable, not a `< <(…)` loop: a failed call there reads as "no
-    # commits" and the guard passes. An unreadable commit list must refuse.
-    local shas
+    # Read into variables, not a `< <(gh …)` loop: a failed call there reads as
+    # "no commits" and the guard passes. An unreadable PR must refuse.
+    local shas ref
     shas="$(gh api "repos/$REPO/pulls/$pr/commits" --paginate --jq '.[].sha')" \
         || refuse "could not list PR #$pr's commits, so self-approval cannot be ruled out"
-    while IFS= read -r sha; do
-        [ -n "$sha" ] || continue
-        if awk -F'\t' -v s="$session" -v h="$sha" '$1 == s && $2 == h { found = 1 } END { exit !found }' "$ledger"; then
-            PUSHED_SHA="$sha"
-            return 0
-        fi
-    done <<< "$shas"
-    return 1
+    ref="$(gh pr view "$pr" --repo "$REPO" --json headRefName -q .headRefName)" \
+        || refuse "could not read PR #$pr's head ref, so self-approval cannot be ruled out"
+    PUSHED_SHA="$(awk -F'\t' -v s="$session" -v pr="$pr" -v ref="refs/heads/$ref" '
+          FNR == NR { if ($0 != "") onpr[$0] = 1; next }
+          $1 != s { next }
+          $2 == "review-claim"  && $3 == pr { open = 1; next }
+          $2 == "review-posted" && $3 == pr { open = 0; next }
+          !open && ($3 == ref || ($2 in onpr)) { print $2; exit }' \
+        <(printf '%s\n' "$shas") "$ledger")"
+    [ -n "$PUSHED_SHA" ]
 }
 
 case "$ACTION" in
@@ -124,6 +147,11 @@ case "$ACTION" in
     react-eyes)
         [ $# -eq 1 ] && is_int "$1" || bad "usage: react-eyes <pr>"
         resolve_repo
+        # Record the claim before the reaction, so it precedes any fix this review
+        # pushes. Without a session id there is no ledger key; guard 1 warns then.
+        if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+            printf '%s\treview-claim\t%s\n' "$CLAUDE_CODE_SESSION_ID" "$1" >> "$(ledger_path)"
+        fi
         # issues/, not pulls/: a PR body's reactions live on the issue endpoint.
         gh api "repos/$REPO/issues/$1/reactions" -f content=eyes --silent
         ;;
@@ -151,7 +179,7 @@ case "$ACTION" in
             # Guard 1 — not self-approved.
             PUSHED_SHA=""
             if session_pushed_any "$PR"; then
-                refuse "this Claude Code session pushed $PUSHED_SHA to PR #$PR; it may not approve its own work. Post the review as COMMENT with the verdict in its first line."
+                refuse "this Claude Code session pushed $PUSHED_SHA to PR #$PR outside a review claim; it may not approve its own work. Post the review as COMMENT with the verdict in its first line."
             fi
             PINNED="$(jq -r '.commit_id // empty' "$INPUT")"
             if [ -n "$PINNED" ] && [ "$PINNED" != "$HEAD" ]; then
@@ -165,6 +193,10 @@ case "$ACTION" in
         trap 'rm -f "$PAYLOAD"' EXIT
         jq --arg head "$HEAD" '.commit_id = (.commit_id // $head)' "$INPUT" > "$PAYLOAD"
         gh api "repos/$REPO/pulls/$PR/reviews" --method POST --input "$PAYLOAD" --jq .id
+        # Close this session's review window: a push after this is authorship.
+        if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+            printf '%s\treview-posted\t%s\n' "$CLAUDE_CODE_SESSION_ID" "$PR" >> "$(ledger_path)"
+        fi
         ;;
 
     reply)

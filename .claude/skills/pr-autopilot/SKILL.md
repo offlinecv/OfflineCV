@@ -49,7 +49,7 @@ here.
   differently is a judgment call; this skill stops and asks rather than picking
   a side.
 - **No new confirmation gate beyond what the three sub-skills already have.**
-  `/pr-review` already auto-fixes and pushes on 0 blockers; `/revise-pr` already
+  `/pr-review` already fixes and pushes small items, blockers or not; `/revise-pr` already
   pushes revisions autonomously; `/pr-ready` already confirms its ping and its
   reminder with the user before sending. This skill doesn't add a fourth
   "are you sure" on top — it inherits the trust level already established.
@@ -122,9 +122,9 @@ If `.mergeable == "MERGEABLE"`, skip straight to Phase 2.
 
 Run `/pr-review <N> [--repo <REPO>] [--effort <effort>]`.
 
-`/pr-review` already: posts 👀, reviews against the linked issue, auto-fixes and
-pushes trivial items when it finds 0 blockers, collapses the branch to one
-commit, and posts its verdict (`APPROVE`/`REQUEST_CHANGES`) on the PR. Read its
+`/pr-review` already: posts 👀, reviews against the linked issue, fixes and
+pushes small items itself (blockers or not), collapses the branch to one
+commit when there are 0 blockers, and posts its verdict (`APPROVE`/`REQUEST_CHANGES`) on the PR. Read its
 outcome; don't re-derive it.
 
 **Self-review is not a special case for this skill — read `/pr-review`'s stated
