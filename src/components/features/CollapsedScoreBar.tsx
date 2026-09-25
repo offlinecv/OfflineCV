@@ -78,9 +78,10 @@ export function ScoreExplainerPopover({
   align,
 }: {
   /** Forwarded to `Popover`. The docked strip puts this trigger in the last
-   *  group of a `justify-between` row — and below `lg` the middle group is
-   *  hidden, pinning it to the right edge — so it opens `end`. The expanded
-   *  readout's header row is left-aligned and keeps the default. */
+   *  group of the row, pinned to the right edge by `ml-auto` (#680), so it
+   *  is flush right at every width whether the middle group holds Fix It or
+   *  the dimension tiles — hence `end`. The expanded readout's header row is
+   *  left-aligned and keeps the default. */
   align?: "start" | "end";
 }) {
   return (
@@ -156,7 +157,15 @@ export function CollapsedScoreBar({
   const tierLabel = getScoreLabel(tier);
 
   return (
-    <div className="flex flex-nowrap items-center justify-between gap-3 text-sm">
+    // No `justify-between` (#680): that split the row's leftover width into
+    // TWO gaps, one on each side of the middle group, which floated Fix It
+    // (a much narrower group than the dimension tiles it replaces, #810) away
+    // from the score pill it acts on instead of sitting right after it. A
+    // plain `gap-3` row plus `ml-auto` on the last group collapses that to
+    // ONE gap — before the last group, holding it at the right edge — so the
+    // score pill and Fix It (or the tiles) always sit their fixed `gap-3`
+    // apart regardless of how much room the row has.
+    <div className="flex flex-nowrap items-center gap-3 text-sm">
       <div className="flex shrink-0 items-center gap-2">
         <Button
           variant="ghost"
@@ -276,8 +285,8 @@ export function CollapsedScoreBar({
           macOS. It is headroom for a copy or padding change: the tile labels
           and the score digits both feed this budget, and `scrollWidth <=
           clientWidth` flips straight from fine to clipped with no warning
-          band, because a `justify-between` item takes its content width and
-          the spare goes into the gaps.
+          band, because this group takes its content width and any spare goes
+          to the row's trailing `ml-auto` (#680), never into this group.
 
           Revealed at `lg`, not `md`: at 768px the budget is only 289–293px,
           which fits no whole set of these tiles. Below `lg` the group is
@@ -321,7 +330,9 @@ export function CollapsedScoreBar({
         </div>
       )}
 
-      <div className="flex shrink-0 items-center gap-2">
+      {/* `ml-auto` (#680) is what pins this group to the right edge now that
+          the row is no longer `justify-between` — see the row comment above. */}
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <ScoreExplainerPopover align="end" />
         <Button
           variant="ghost"

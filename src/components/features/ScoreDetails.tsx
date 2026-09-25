@@ -46,9 +46,9 @@
  *     rule, same reason, as `Tabs`' inactive panels and `ResultDetail`'s
  *     disclosures. Tailwind's preflight makes `[hidden]` `display: none
  *     !important`, so the layout win is identical to unmounting and the
- *     `flex`/`gap-6` classes on the same element are inert while docked.
+ *     `flex`/`gap-3` classes on the same element are inert while docked.
  *     `empty:hidden` (specificity 0,2,0, so it beats `.flex`) keeps a region
- *     with nothing in it from contributing a phantom `gap-6` — every child
+ *     with nothing in it from contributing a phantom gap — every child
  *     here self-hides, so "nothing to show" is a normal state.
  *
  * `score: null` is the #313 reveal gate, not a loading state: a blank authored
@@ -114,7 +114,7 @@ export function ScoreDetails({
   const docked = score !== null && collapsed;
 
   return (
-    <div className="flex flex-col gap-6" {...guardProps}>
+    <div className="flex flex-col gap-4" {...guardProps}>
       {score !== null ? (
         <AtsScoreReadout
           score={score}
@@ -126,7 +126,7 @@ export function ScoreDetails({
       ) : (
         placeholder
       )}
-      <div hidden={docked} className="flex flex-col gap-6 empty:hidden">
+      <div hidden={docked} className="flex flex-col gap-3 empty:hidden">
         {children}
       </div>
     </div>

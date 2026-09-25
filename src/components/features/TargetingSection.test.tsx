@@ -41,6 +41,7 @@ interface RenderOptions {
   bullets?: readonly BulletObservation[];
   contactMissing?: ContactDisplayField[];
   skillsOrder?: SkillsReorderController;
+  variant?: "card" | "plain";
 }
 
 /** The same role-resolvable résumé `SkillTermGuidance.test.tsx` uses, so the
@@ -73,6 +74,7 @@ function render({
   bullets,
   contactMissing,
   skillsOrder,
+  variant,
 }: RenderOptions = {}): HTMLElement {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -88,6 +90,7 @@ function render({
         bullets,
         contactMissing,
         skillsOrder,
+        variant,
       }),
     );
   });
@@ -379,5 +382,21 @@ describe("TargetingSection", () => {
     expect(el.textContent).toContain("Applied");
     const undoButton = el.querySelector('button[aria-label^="Undo"]');
     expect(undoButton).not.toBeNull();
+  });
+});
+
+describe("TargetingSection — the caller picks the Disclosure variant (#680 item 8)", () => {
+  // The authoring lane mounts this with no bordered card around it, so a
+  // hardcoded "plain" left the section bare on the page background there.
+  it("keeps the bordered card look by default", () => {
+    const el = render();
+    expect(el.querySelector("details")?.className).toContain("rounded-xl");
+  });
+
+  it("renders the borderless row when the caller opts in", () => {
+    const el = render({ variant: "plain" });
+    const details = el.querySelector("details");
+    expect(details?.className).not.toContain("rounded-xl");
+    expect(details?.className).toContain("border-b");
   });
 });

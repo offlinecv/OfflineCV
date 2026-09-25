@@ -78,6 +78,11 @@ interface TargetingSectionProps {
   bullets?: readonly BulletObservation[];
   /** Missing contact fields from contactCompleteness. */
   contactMissing?: ContactDisplayField[];
+  /** Forwarded to `Disclosure`. The caller decides, because only the caller
+   *  knows whether an ancestor already draws a border: `Result` mounts this
+   *  inside the score `Card` and passes `"plain"`; the authoring lane has no
+   *  card around it and keeps the default `"card"` (#680 item 8). */
+  variant?: "card" | "plain";
 }
 
 export function TargetingSection({
@@ -89,6 +94,7 @@ export function TargetingSection({
   skillsOrder,
   bullets = [],
   contactMissing = [],
+  variant = "card",
 }: TargetingSectionProps) {
   const skills = assessResumeSkills(parsed);
 
@@ -187,6 +193,7 @@ export function TargetingSection({
     <Disclosure
       summary={summary}
       count={suggestions}
+      variant={variant}
       // Gated on there being a picker to act on. `RolesPanel` returns null
       // without titles, so a résumé with no derivable titles but flagged
       // bullets opens onto the triage row alone — and an ungated mark would

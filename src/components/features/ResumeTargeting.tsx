@@ -55,9 +55,18 @@ interface ResumeTargetingProps {
   score: AnonymousAtsScore;
   /** Lifted edit state (#82) — the write path for every control below. */
   edit: EditableParse;
+  /** Passed straight to `TargetingSection` — the one piece of chrome this
+   *  module forwards rather than owns, because only the lane knows whether
+   *  it has a bordered card around the region (#680 item 8). */
+  variant?: "card" | "plain";
 }
 
-export function ResumeTargeting({ result, score, edit }: ResumeTargetingProps) {
+export function ResumeTargeting({
+  result,
+  score,
+  edit,
+  variant,
+}: ResumeTargetingProps) {
   // The same four derivations `ReconstructedResume` ran before #955, by the
   // same helpers. None is memoized, because none of them was memoized there
   // either: `deriveTitles` and `projectDisplay` both mint a fresh value every
@@ -98,6 +107,7 @@ export function ResumeTargeting({ result, score, edit }: ResumeTargetingProps) {
       skillsOrder={skillsOrder}
       bullets={score.bullets ?? []}
       contactMissing={contactMissing}
+      variant={variant}
     />
   );
 }

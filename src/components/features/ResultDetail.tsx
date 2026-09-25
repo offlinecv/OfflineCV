@@ -14,7 +14,7 @@
  * is a single scrolling column:
  *
  *   the reconstructed résumé            ← the page body, no click to reach it
- *   ▸ Raw text & flags                  ← collapsed
+ *   ▸ How your resume was read          ← collapsed
  *
  * It is two surfaces shorter than it was. `TargetingSection` used to open the
  * résumé card, between the contact block and the document; the recovery offer
@@ -22,11 +22,12 @@
  * all three UP into the score card's details region (`ScoreDetails`, mounted
  * by `Result`), so the score and the reasons it is not 100 sit in one surface
  * and dock together. `useSkillsReorder` went with the targeting section — it
- * was owned here only to feed it, and there must stay EXACTLY ONE instance of
+ * was owned here only to feed it, and there must stay a SINGLE instance of
  * it (see `SkillTermGuidance`'s docblock), so it moved rather than being
- * copied. Only "Raw text & flags" stayed: it is evidence about the file, not a
- * reason the score is what it is, and it belongs under the document it
- * describes.
+ * copied. Only "How your resume was read" (renamed from "Raw text & flags" by
+ * #680, which swept the internal-pipeline vocabulary off this label) stayed:
+ * it is evidence about the file, not a reason the score is what it is, and it
+ * belongs under the document it describes.
  *
  * Two things a future edit must not undo:
  *
@@ -45,8 +46,10 @@
  *     screen. The first of those call sites lives in `Result` now, with the
  *     panel; the second is still here.
  *
- * Labels are byte-identical to the tabs they replace — renaming "Raw text &
- * flags" belongs to #680 item 4, and doing it here would collide with it.
+ * Labels were byte-identical to the tabs they replaced until #680 item 4,
+ * which renamed "Raw text & flags" to "How your resume was read" — the old
+ * name described the parser's internal stage (raw extraction plus layout
+ * triggers), not what the disclosure shows.
  */
 
 import { useEffect, useRef } from "react";
@@ -192,9 +195,10 @@ export function ResultDetail({
       </Card>
 
       {/* Always present and always last — evidence after insight (#263, #273).
-          The layout-flag count rides the summary row so the warning count stays
-          visible without opening the section, exactly as it did on the tab. */}
-      <Disclosure summary="Raw text & flags" count={triggerCount}>
+          The layout-flag count rides the summary row so the warning count
+          stays visible without opening the section, the same as it did on
+          the tab this disclosure replaced. */}
+      <Disclosure summary="How your resume was read" count={triggerCount}>
         <SourceDiagnosticsPanel
           result={result}
           bytes={bytes}

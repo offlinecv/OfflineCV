@@ -287,6 +287,27 @@ export function ProposedPanel({
           added={metricDrift.added}
         />
       )}
+      {/* Top-level Accept all (#680 item 6) — one level up from each section's
+          own Accept all/Reject all. Preview only: it marks every pair across
+          every reviewable section as accepted in `review`, the SAME hook
+          instance `ReviewSectionGroup` and `onApply` read below, so nothing in
+          the résumé changes until "Apply N changes" is pressed and one Undo
+          still reverts the whole batch. Shown only with more than one
+          reviewable section — with only one, it would sit right beside that
+          section's own identically-scoped control and say nothing new. */}
+      {reviewSections.length > 1 && (
+        <div className="flex items-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={review.acceptAll}
+            className="rounded-md px-2 py-0.5 text-2xs text-content-secondary"
+            aria-label="Accept all changes across every section"
+          >
+            Accept all changes
+          </Button>
+        </div>
+      )}
       <ul className="flex flex-col gap-4 list-none">
         {result.sections.map((outcome, i) => {
           const rs = reviewById.get(outcome.input.id);

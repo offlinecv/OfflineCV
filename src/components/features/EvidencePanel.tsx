@@ -6,9 +6,12 @@
  *
  * These were a single stacked 2-up grid (issue #83); #177 splits them into
  * separate tab-panel bodies so Result's Tabs consume each one directly:
- *   – SourcePdfPanel     — the source PDF preview (or DOCX no-preview fallback)
- *   – ExtractedTextPanel — the extracted plain-text <pre>
- * Layout flags reuse the standalone <LayoutFlagsList> directly. Pure display.
+ *   – SourcePdfPanel     — the source PDF preview (or DOCX no-preview fallback),
+ *                          under the "Original PDF" segment
+ *   – ExtractedTextPanel — the extracted plain-text <pre>, under "Plain text"
+ *     (both segment names per #680 item 4; renamed from "PDF" / "Extracted
+ *     text")
+ * Layout warnings reuse the standalone <LayoutFlagsList> directly. Pure display.
  */
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
@@ -21,6 +24,17 @@ interface SourcePdfPanelProps {
   sourceKind: SourceKind;
 }
 
+/** Names what cannot be previewed, so the "Original DOCX" / "Original
+ *  Markdown" segment label reads as a promise the fallback explains rather
+ *  than one it breaks (#680): the segment is about the original file, and
+ *  this says why it is not drawn. A `pdf` lands here only without bytes (a
+ *  restored record), hence "this PDF" rather than the format. */
+const NO_PREVIEW_SUBJECT: Record<SourceKind, string> = {
+  pdf: "this PDF",
+  docx: "DOCX files",
+  markdown: "Markdown files",
+};
+
 export function SourcePdfPanel({ bytes, sourceKind }: SourcePdfPanelProps) {
   if (sourceKind === "pdf" && bytes != null) {
     return (
@@ -31,7 +45,8 @@ export function SourcePdfPanel({ bytes, sourceKind }: SourcePdfPanelProps) {
   }
   return (
     <p className="text-sm text-content-muted">
-      No source preview available for this file type — see the Extracted text view.
+      No source preview available for {NO_PREVIEW_SUBJECT[sourceKind]} — see
+      the Plain text view.
     </p>
   );
 }

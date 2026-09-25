@@ -117,3 +117,26 @@ describe("Disclosure", () => {
     );
   });
 });
+
+describe("Disclosure — variant=\"plain\" (#680 item 8)", () => {
+  it("defaults to the bordered card look", () => {
+    const el = render();
+    expect(details(el).className).toContain("rounded-xl");
+    expect(details(el).className).toContain("bg-surface-card");
+  });
+
+  it("drops the box chrome and draws a bottom rule instead, when opted in", () => {
+    const el = render({ variant: "plain" });
+    const node = details(el);
+    expect(node.className).not.toContain("bg-surface-card");
+    expect(node.className).not.toContain("rounded-xl");
+    expect(node.className).toContain("border-b");
+    // No horizontal inset — a plain row relies on an ancestor's own padding.
+    expect(node.querySelector("summary")?.className).not.toContain("px-5");
+  });
+
+  it("still clears the 44×44 touch floor in the plain variant", () => {
+    const el = render({ variant: "plain" });
+    expect(el.querySelector("summary")?.className).toContain("min-h-11");
+  });
+});

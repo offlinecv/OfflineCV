@@ -456,11 +456,12 @@ export default function App() {
     // defends against an objection the visitor has not formed yet, and on the
     // idle screen it was a second tagline sitting two inches above the
     // headline. The one idea worth keeping — the score rates the file, not the
-    // person — now lives as a plain sentence in the block below the drop zone,
-    // next to the score it qualifies. Dropping it also leaves the star CTA
-    // alone on the header-right instead of sharing it. `/jobs` still passes
-    // one: it opens straight into a form with no headline of its own, so
-    // there the header line is the only orientation.
+    // person — is dropped outright (#680): negation framing ("not a judge")
+    // is the self-serving-negation trap, so it does not get a replacement
+    // sentence anywhere else on this screen. Dropping it also leaves the star
+    // CTA alone on the header-right instead of sharing it. `/jobs` still
+    // passes one: it opens straight into a form with no headline of its own,
+    // so there the header line is the only orientation.
     <PageShell
       badge="alpha"
       onSavedJobsNavigate={goToSavedJobs}
@@ -722,7 +723,7 @@ export default function App() {
                   and the triage findings would simply vanish from
                   from-scratch authoring.
 
-                  It diverges from `/` in exactly two ways, both because the
+                  It diverges from `/` in two ways, both because the
                   surfaces do not exist here: there is no recovery offer (this
                   lane never parsed a file, so nothing can be degenerate) and
                   no `LocalAiFeedbackSection` (no `useResumeAnalysisLlm`

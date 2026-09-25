@@ -219,7 +219,7 @@ function ParsedCard({
     // It's dock covers, published by `FixItDock` while one is mounted and 0
     // otherwise, so the last step can scroll clear of it (#1002).
     <div className="flex flex-col gap-4 pb-[var(--fixit-dock-clearance,0px)]">
-      <Card className="flex flex-col gap-6 shadow-xs">
+      <Card className="flex flex-col gap-4 shadow-xs">
         <ParsedHeader
           isLlmRecovered={isLlmRecovered}
           hasEdits={edit.hasEdits}
@@ -279,6 +279,10 @@ function ParsedCard({
             result={activeResult}
             score={activeScore}
             edit={edit}
+            // Plain, borderless row (#680 item 8): the score `Card` around
+            // this region already draws the box. The authoring lane has no
+            // such card, so it keeps the default.
+            variant="plain"
           />
 
           {escapeHatch.isAvailable && (
@@ -288,10 +292,17 @@ function ParsedCard({
             // Below targeting, beside the critique it stands in for (#810):
             // first in the region, its CTA competed with Fix It for the
             // card's one primary action.
-            <LlmEscapeHatchPanel
-              controller={escapeHatch}
-              onRecovered={recovery.onRecovered}
-            />
+            // The same bottom rule the plain `Disclosure` rows on either side
+            // of it draw (#680 item 8), so the region reads as one list of
+            // divided rows rather than dividing around every row but this one.
+            // `last:` drops it when `LocalAiFeedbackSection` renders nothing.
+            // Safe as a wrapper because the panel never renders null.
+            <div className="border-b border-border-light pb-3 last:border-b-0">
+              <LlmEscapeHatchPanel
+                controller={escapeHatch}
+                onRecovered={recovery.onRecovered}
+              />
+            </div>
           )}
 
           <LocalAiFeedbackSection

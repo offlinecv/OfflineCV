@@ -395,6 +395,176 @@ describe("ProposedPanel — summary review + apply (issue 625)", () => {
   });
 });
 
+// ── Top-level Accept all across sections (#680 item 6) ───────────────────────
+
+const TWO_SECTION_RESULT: ResumeRewriteResult = {
+  allNumbersPreserved: true,
+  sections: [
+    {
+      kind: "experience",
+      input: {
+        kind: "experience",
+        id: "experience:0",
+        label: "Senior Engineer — Acme",
+        bullets: ["Managed a team of 5"],
+      },
+      data: {
+        bullets: ["Led a team of 5 engineers"],
+        numbersPreserved: true,
+        reverted: false,
+        droppedNumbers: [],
+        addedNumbers: [],
+      },
+    },
+    {
+      kind: "experience",
+      input: {
+        kind: "experience",
+        id: "experience:1",
+        label: "Engineer — Beta Corp",
+        bullets: ["Managed a team of 3"],
+      },
+      data: {
+        bullets: ["Led a team of 3 engineers"],
+        numbersPreserved: true,
+        reverted: false,
+        droppedNumbers: [],
+        addedNumbers: [],
+      },
+    },
+  ],
+};
+
+function twoSectionApply(): ResumeRewriteApply {
+  return new Map([
+    [
+      "experience:0",
+      {
+        obsIds: ["0|a"],
+        onReplace: vi.fn(),
+        onRemove: vi.fn(),
+        onAdd: vi.fn(),
+      },
+    ],
+    [
+      "experience:1",
+      {
+        obsIds: ["1|a"],
+        onReplace: vi.fn(),
+        onRemove: vi.fn(),
+        onAdd: vi.fn(),
+      },
+    ],
+  ]);
+}
+
+describe("ProposedPanel — top-level Accept all across sections (#680 item 6)", () => {
+  it("offers no top-level Accept all with only one reviewable section", () => {
+    const map: ResumeRewriteApply = new Map([
+      [
+        "experience:0",
+        {
+          obsIds: ["0|a", "0|b"],
+          onReplace: vi.fn(),
+          onRemove: vi.fn(),
+          onAdd: vi.fn(),
+        },
+      ],
+    ]);
+    const el = render(
+      createElement(ProposedPanel, {
+        result: RESULT,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+        applyBySection: map,
+      }),
+    );
+    expect(
+      [...el.querySelectorAll("button")].find(
+        (b) => b.textContent === "Accept all changes",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("accepts every pair across every section, without touching the resume until Apply is pressed", () => {
+    const map = twoSectionApply();
+    const onApplied = vi.fn();
+    const el = render(
+      createElement(ProposedPanel, {
+        result: TWO_SECTION_RESULT,
+        onDismiss: vi.fn(),
+        onApplied,
+        applyBySection: map,
+      }),
+    );
+
+    const acceptAllChanges = [...el.querySelectorAll("button")].find(
+      (b) => b.textContent === "Accept all changes",
+    ) as HTMLButtonElement;
+    expect(acceptAllChanges).toBeDefined();
+    expect(acceptAllChanges.getAttribute("aria-label")).toBe(
+      "Accept all changes across every section",
+    );
+
+    const apply = el.querySelector(
+      'button[aria-label="Apply accepted changes to the resume"]',
+    ) as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+
+    click(acceptAllChanges);
+
+    // Both sections' pairs are now accepted, but nothing has written back yet.
+    expect(apply.disabled).toBe(false);
+    expect(apply.textContent).toContain("Apply 2 changes");
+    expect(map.get("experience:0")!.onReplace).not.toHaveBeenCalled();
+    expect(map.get("experience:1")!.onReplace).not.toHaveBeenCalled();
+
+    click(apply);
+
+    // One Apply commits the whole batch, across both sections.
+    expect(map.get("experience:0")!.onReplace).toHaveBeenCalledWith(
+      "0|a",
+      "Led a team of 5 engineers",
+    );
+    expect(map.get("experience:1")!.onReplace).toHaveBeenCalledWith(
+      "1|a",
+      "Led a team of 3 engineers",
+    );
+    expect(onApplied).toHaveBeenCalledWith(
+      2,
+      ["Senior Engineer — Acme", "Engineer — Beta Corp"],
+      undefined,
+    );
+  });
+
+  it("leaves each section's own Accept all/Reject all working independently", () => {
+    const map = twoSectionApply();
+    const el = render(
+      createElement(ProposedPanel, {
+        result: TWO_SECTION_RESULT,
+        onDismiss: vi.fn(),
+        onApplied: vi.fn(),
+        applyBySection: map,
+      }),
+    );
+
+    // Section-scoped "Accept all" buttons (one per section) still exist
+    // alongside the new top-level "Accept all changes" control.
+    const sectionAcceptAlls = [...el.querySelectorAll("button")].filter(
+      (b) => b.textContent === "Accept all",
+    );
+    expect(sectionAcceptAlls).toHaveLength(2);
+
+    click(sectionAcceptAlls[0] as HTMLButtonElement);
+
+    const apply = el.querySelector(
+      'button[aria-label="Apply accepted changes to the resume"]',
+    ) as HTMLButtonElement;
+    // Only the first section's one pair is accepted so far.
+    expect(apply.textContent).toContain("Apply 1 change");
+  });
+});
+
 describe("ProposedPanel — rejected rewrites (#778)", () => {
   const REVERTED: ResumeRewriteResult = {
     allNumbersPreserved: true,

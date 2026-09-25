@@ -84,11 +84,12 @@ export interface JourneyStage {
 
 /**
  * The arc, in order. `Fix it` deliberately covers the whole résumé surface —
- * the reconstructed résumé plus the Local AI feedback and Raw text & flags
- * sections collapsed below it — as one L1 stage. L1 marks the arc, the page
- * owns the detail underneath. Those three were peer L2 tabs when this module
- * landed; #823 removed that rail precisely because this stage already named
- * the place they all lived.
+ * the reconstructed résumé, the Local AI feedback section in the score card
+ * above it (#955), and the How your resume was read disclosure (renamed from
+ * Raw text & flags by #680) collapsed below it — as one L1 stage. L1 marks the
+ * arc, the page owns the detail underneath.
+ * Those three were peer L2 tabs when this module landed; #823 removed that
+ * rail precisely because this stage already named the place they all lived.
  */
 export const JOURNEY_STAGES: readonly JourneyStage[] = [
   {

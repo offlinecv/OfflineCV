@@ -50,6 +50,22 @@
  *
  * Open/closed is never carried by colour: the chevron ROTATES, which resolves
  * in a greyscale render and for a user who cannot see the tint at all.
+ *
+ * ## `variant="plain"` (#680 item 8)
+ *
+ * The default (`"card"`) draws its own rounded border and background — the
+ * right look for a disclosure sitting directly on the page, like
+ * `ResultDetail`'s "How your resume was read". Inside a surface that already
+ * has its own outer border — the score card's details region — a second,
+ * nested box around each row read as loose, boxes-inside-a-box chrome rather
+ * than one coherent card. `variant="plain"` drops the border, background and
+ * rounding and the row's own horizontal padding (the card supplies its own
+ * inset), and adds a bottom rule instead: consecutive plain rows share one
+ * line between them rather than two abutting borders, and `last:border-b-0`
+ * drops the trailing one that would otherwise double up against the card's
+ * own bottom edge. `TargetingSection` and `LocalAiFeedbackSection` are the
+ * two rows this shipped for; every other caller keeps `"card"` (the default)
+ * unless it opts in.
  */
 
 import type { ReactNode } from "react";
@@ -70,8 +86,17 @@ interface DisclosureProps {
   /** Start expanded. Collapsed is the default — a disclosure that opens itself
    *  is just a section with extra chrome. */
   defaultOpen?: boolean;
+  /** `"card"` (default): the disclosure draws its own rounded border and
+   *  background, for a section sitting directly on the page. `"plain"`: no
+   *  border, background, rounding or horizontal inset — a one-line row that
+   *  relies on an ancestor's border, with a bottom rule standing in for the
+   *  box it no longer draws. See the docblock's `variant="plain"` section. */
+  variant?: "card" | "plain";
   children: ReactNode;
 }
+
+const SUMMARY_BASE_CLASSES =
+  "flex min-h-11 cursor-pointer list-none items-center gap-1.5 py-2 text-sm font-semibold text-content-primary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary [&::-webkit-details-marker]:hidden";
 
 export function Disclosure({
   summary,
@@ -79,15 +104,21 @@ export function Disclosure({
   warn,
   warnLabel = "setup needed",
   defaultOpen,
+  variant = "card",
   children,
 }: DisclosureProps) {
+  const isPlain = variant === "plain";
   return (
     // `open` is passed only when it is true, so React never writes the
     // attribute in the collapsed default and the user's own toggling is the
     // sole author of the state after mount.
     <details
       open={defaultOpen ? true : undefined}
-      className="group rounded-xl border border-border-light bg-surface-card"
+      className={
+        isPlain
+          ? "group border-b border-border-light last:border-b-0"
+          : "group rounded-xl border border-border-light bg-surface-card"
+      }
     >
       {/* `min-h-11` is 44px — WCAG 2.2 AA SC 2.5.8 asks 24, and this row takes
           the stricter AAA-sized target because it is a whole section's only
@@ -95,8 +126,15 @@ export function Disclosure({
           dialog's rows sit at `min-h-9`. The row is full-width, so the other
           axis is never the binding one. `list-none` + the WebKit marker rule
           drop the UA disclosure triangle — this draws its own, which is the one
-          that animates. */}
-      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-xl px-5 py-2 text-sm font-semibold text-content-primary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-primary [&::-webkit-details-marker]:hidden">
+          that animates. The `card` variant insets the row with `px-5 rounded-xl`
+          to clear its own border; `plain` has neither to draw. */}
+      <summary
+        className={
+          isPlain
+            ? SUMMARY_BASE_CLASSES
+            : `${SUMMARY_BASE_CLASSES} rounded-xl px-5`
+        }
+      >
         {/* U+25B8 — a text-presentation triangle inheriting `currentColor`, not
             an emoji (see the design-system CLAUDE.md's emoji rule). `motion-safe`
             is what honours `prefers-reduced-motion`: the rotation still HAPPENS
@@ -121,7 +159,7 @@ export function Disclosure({
           </>
         )}
       </summary>
-      <div className="px-5 pb-5 pt-1">{children}</div>
+      <div className={isPlain ? "pb-3 pt-1" : "px-5 pb-5 pt-1"}>{children}</div>
     </details>
   );
 }

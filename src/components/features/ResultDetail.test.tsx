@@ -6,7 +6,8 @@
 /**
  * Render coverage for ResultDetail (#275, consolidated in #273, un-tabbed in
  * #823, narrowed to two surfaces in #955) — everything on `/` below the score
- * card: the résumé and the "Raw text & flags" disclosure.
+ * card: the résumé and the "How your resume was read" disclosure (renamed
+ * from "Raw text & flags" by #680 item 4).
  *
  * A tiny host component supplies a real EditableParse via useEditableParse. Raw
  * createRoot, matching the other feature render tests.
@@ -209,7 +210,7 @@ describe("ResultDetail", () => {
       { isAvailable: false, capability: "no-webgpu" as const, hasText: true },
     ]) {
       const el = render(opts, "Senior engineer.");
-      expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
+      expect(summaries(el)).toEqual(["▸How your resume was read1"]);
       expect(el.textContent).not.toContain("Local AI feedback");
       expect(el.textContent).not.toContain("What the model checks");
       act(() => root.unmount());
@@ -234,11 +235,10 @@ describe("ResultDetail", () => {
     const el = render({ isAvailable: true }, "Senior engineer.");
     // The résumé needs no click to reach — it is the page body.
     expect(el.querySelector('[data-testid="reconstructed-probe"]')).not.toBeNull();
-    // One disclosure, shut. Exact, not `toContain`: "byte-identical to the tab
-    // labels they replace" is the claim, so the assertion has to be able to
-    // catch a rename. The leading glyph is the chevron the summary draws
-    // itself; the trailing 1 is the layout-flag count.
-    expect(summaries(el)).toEqual(["▸Raw text & flags1"]);
+    // One disclosure, shut. Exact, not `toContain`: pins the plain-language
+    // rename ("How your resume was read", #680 item 4). The leading glyph is
+    // the chevron the summary draws itself; the trailing 1 is the layout-flag count.
+    expect(summaries(el)).toEqual(["▸How your resume was read1"]);
     for (const d of el.querySelectorAll("details")) expect(d.open).toBe(false);
     // Nothing warn-marked down here any more.
     expect(el.textContent).not.toContain("setup needed");
@@ -249,7 +249,7 @@ describe("ResultDetail", () => {
     // survive the move, or a two-column warning is invisible until the user
     // opens a section they have no reason to open.
     const el = render({ isAvailable: false });
-    const summary = disclosure(el, "Raw text & flags").querySelector("summary");
+    const summary = disclosure(el, "How your resume was read").querySelector("summary");
     expect(summary?.textContent).toContain("1");
     expect(result().triggers).toHaveLength(1);
   });
@@ -261,7 +261,7 @@ describe("ResultDetail", () => {
     // hatch's neighbours, kills effects that report upward. Node IDENTITY, not
     // presence: a remount would produce a different element for the same panel.
     const el = render({ isAvailable: false });
-    const details = disclosure(el, "Raw text & flags");
+    const details = disclosure(el, "How your resume was read");
     const before = details.querySelector('[role="group"]');
     expect(before).not.toBeNull();
 
