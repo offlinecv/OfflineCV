@@ -30,10 +30,6 @@ vi.mock("../lib/webllm/capability.ts", () => ({
   detectWebGpu: () => detectWebGpuMock(),
 }));
 
-let modelId: string = "test-model";
-vi.mock("./useModelSelection.ts", () => ({
-  useModelSelection: () => ({ selectedModelId: modelId }),
-}));
 
 // Semantic orchestrator: a controllable stub whose behavior each test
 // configures. The real `run-llm-match.ts` is transitively pulled in by the
@@ -54,6 +50,7 @@ import { computeCoverage } from "../lib/jd-match/coverage.ts";
 import type { JdMatchResult } from "../lib/jd-match";
 import type { HeuristicParsedResume } from "../lib/heuristics/types.ts";
 import type { ProgressUpdate, WebGpuCapability } from "../lib/webllm/types.ts";
+import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -158,7 +155,6 @@ function expectKeywordReady(): void {
 beforeEach(() => {
   vi.useFakeTimers();
   webgpu = "no-webgpu";
-  modelId = "test-model";
   runLlmMatchMock.mockReset();
   detectWebGpuMock.mockClear();
   latestStatus = { kind: "idle" };
@@ -513,7 +509,7 @@ describe("useJdMatch — semantic path (opt-in + WebGPU available)", () => {
       runLlmMatchMock.mock.calls[0]!;
     expect(jd).toBe(JD_TEXT);
     expect(parsed).toBe(SPARSE_RESUME);
-    expect(modelId).toBe("test-model");
+    expect(modelId).toBe(SHIPPED_MODEL.id);
     expect(typeof onProgress).toBe("function");
     expect(typeof onInferenceStart).toBe("function");
     // #803: the hook owns an AbortController per run and threads its signal
@@ -868,70 +864,6 @@ describe("useJdMatch — transitions & stale-request protection", () => {
     expect(latestStatus).toEqual({ kind: "ready", result: semanticResult });
   });
 
-  it("model change mid-request: the old model's run cannot overwrite the new one", async () => {
-    // Model-selection changing between two `useJdMatch` renders bumps the
-    // `semanticInputs` identity (its dep tuple includes `selectedModelId`),
-    // so the effect fires with a fresh `myId` and the old run's late
-    // callbacks fail the guard. Verifies the request-id + inputs-identity
-    // pair — not just JD-text change — invalidates a stale semantic write.
-    webgpu = "available";
-    let resolveFirst!: (r: JdMatchResult) => void;
-    const firstRun = new Promise<JdMatchResult>((res) => {
-      resolveFirst = res;
-    });
-    const secondRun = new Promise<JdMatchResult>(() => {});
-    runLlmMatchMock
-      .mockReturnValueOnce(firstRun)
-      .mockReturnValueOnce(secondRun);
-
-    modelId = "model-A";
-    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
-    await flushMicrotasks();
-    flushDebounce();
-    await flushMicrotasks();
-    expect(runLlmMatchMock).toHaveBeenCalledTimes(1);
-    expect(runLlmMatchMock.mock.calls[0]![2]).toBe("model-A");
-
-    // Model changes — force the hook to re-run (which is what a real
-    // ExternalStore-backed model change does via useSyncExternalStore).
-    modelId = "model-B";
-    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
-    await flushMicrotasks();
-    expect(runLlmMatchMock).toHaveBeenCalledTimes(2);
-    expect(runLlmMatchMock.mock.calls[1]![2]).toBe("model-B");
-    expect(latestStatus.kind).toBe("loading");
-
-    // The FIRST run (against model-A) lands late with a result — must NOT
-    // overwrite the loading state of the new (model-B) run.
-    const staleResult: JdMatchResult = {
-      path: "semantic",
-      verdicts: [],
-      summary: { met: 42, partial: 0, missing: 0, total: 42 },
-    };
-    await act(async () => {
-      resolveFirst(staleResult);
-      await firstRun;
-    });
-    expect(latestStatus.kind).toBe("loading");
-  });
-
-  // DELIBERATELY NOT TESTED: `setSlotIfCurrent`'s `mountedRef` unmount guard.
-  //
-  // No assertion can distinguish that guard being present from absent, so any
-  // such test would be decoration. Both candidate oracles were tried and both
-  // stay GREEN with `if (!mountedRef.current) return;` deleted:
-  //   - A React console warning. React removed "Can't perform a React state
-  //     update on an unmounted component" in v18; the only "unmounted
-  //     component" strings in react-dom 19.2.6 are the internal "Unable to
-  //     find node on an unmounted component" invariant.
-  //   - A render count after unmount. `root.unmount()` tears the tree down,
-  //     so the late `setSemanticSlot` is a React-level no-op — no render
-  //     happens either way.
-  // The guard stays in the hook as intent (React's no-op-on-unmounted is an
-  // implementation detail, not a contract), but a green test claiming to pin
-  // it would misrepresent the coverage, so there isn't one. The `mountedRef`
-  // RE-SET in the mount effect is a different matter: it IS load-bearing and
-  // IS covered — the StrictMode test above fails if it is dropped.
 });
 
 /**
@@ -1077,28 +1009,6 @@ describe("useJdMatch — Layer-3 abort controller (#803)", () => {
 
     expect(signals[0]!.aborted).toBe(true);
     expect(signals).toHaveLength(1);
-  });
-
-  it("model change aborts the previous run's signal and starts a fresh one", async () => {
-    // Same shape as the JD-change test but the input that changed is the
-    // model id. The layered-inputs equality check (`semanticInputsMatch`)
-    // includes modelId, so a change re-enters the "new run" branch.
-    const signals = trackSignals();
-
-    modelId = "model-A";
-    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
-    await flushMicrotasks();
-    flushDebounce();
-    await flushMicrotasks();
-    expect(signals).toHaveLength(1);
-
-    modelId = "model-B";
-    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
-    await flushMicrotasks();
-
-    expect(signals).toHaveLength(2);
-    expect(signals[0]!.aborted).toBe(true);
-    expect(signals[1]!.aborted).toBe(false);
   });
 
   it("unmount aborts the current run's signal (after the microtask hop)", async () => {

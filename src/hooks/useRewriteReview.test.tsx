@@ -6,7 +6,7 @@
 /**
  * useRewriteReview behaviour, exercised through a probe component rendered with
  * react-dom/client (the project has no @testing-library/react — same pattern as
- * useModelSelection.integration.test.tsx). The pure decision math lives in
+ * ModelConsentHost.test.tsx). The pure decision math lives in
  * apply-accepted.ts (covered there); this file covers the hook's state
  * transitions: single accept/reject, edit-implies-accept, section/all batches,
  * and reset.

@@ -2,7 +2,8 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * Per-role "Rewrite section" CTA. Runs Qwen2.5-1.5B in the browser via WebLLM
+ * Per-role "Rewrite section" CTA. Runs the shipped on-device model
+ * (`SHIPPED_MODEL`, #1015) in the browser via WebLLM
  * (see ../../lib/webllm/) over every bullet of a role at once. The model can
  * dedupe, merge weak bullets, drop pure filler, reorder, and balance verb
  * variety — none of which is reachable from the per-bullet path. The
@@ -12,7 +13,8 @@
  * Non-negotiable rules from issue #63:
  *   - On browsers without WebGPU, returns null. Silent absence — matches
  *     `InlineResult`. Not a greyed CTA, not a banner.
- *   - Model weights download on click only. The shared `loadEngine()` cache
+ *   - Model weights download on click only, and only after the user accepted
+ *     the model's terms (`requestModelConsent`). The shared `loadEngine()` cache
  *     means clicking section-rewrite after per-bullet (or in a sibling role)
  *     reuses the same engine — no second multi-GB download.
  *   - Number-preservation guardrail runs deterministically on every output.
@@ -48,11 +50,11 @@ import type {
 } from "../../lib/webllm/types.ts";
 import type { SectionRewriteResult } from "../../lib/webllm/rewrite-section.ts";
 import { useSectionRewriteLock } from "../../hooks/useSectionRewriteLock.ts";
-import { useModelSelection } from "../../hooks/useModelSelection.ts";
+import { requestModelConsent } from "../../hooks/useModelConsent.ts";
+import { SHIPPED_MODEL } from "../../lib/webllm/models.ts";
 import {
   Button,
   CopyButton,
-  ModelLoadProgress,
   InlineResult,
   InlineDiff,
 } from "@design-system";
@@ -77,6 +79,7 @@ import {
   REVERTED_DIFF_LABEL,
 } from "./NumberPreservationWarning.tsx";
 import { RewriteReviewList } from "./RewriteReviewList.tsx";
+import { ShippedModelLoadProgress } from "./ShippedModelLoadProgress.tsx";
 
 /**
  * Wiring a per-role rewrite to the reconstructed-résumé edit model so accepted
@@ -220,7 +223,6 @@ export function useSectionRewrite(
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const { isLocked, acquire } = useSectionRewriteLock();
-  const { selectedModelId } = useModelSelection();
 
   // Trim blank bullets here once — passed to both the model (so it doesn't
   // see empties) and the before/after panel (so the original column matches
@@ -286,18 +288,19 @@ export function useSectionRewrite(
   }, [trimmedBullets, status]);
 
   const onClick = useCallback(async () => {
+    // Consent before anything else (#1015): a decline leaves the lock, the
+    // status and the engine untouched.
+    if (!(await requestModelConsent())) return;
     // Atomic acquire — null means another instance already holds the lock and
     // we must bail. This is the real "no concurrent generate()" guard; the
     // disabled flag on the button is only the UI surface of the same check
     // (and updates one render late, so it can't be relied on alone).
     const release = acquire();
     if (release === null) return;
-    // Snapshot the model id so the same id is released that we acquired —
-    // ModelSelector could in principle update `selectedModelId` mid-run.
-    const modelId = selectedModelId;
-    // Acquire the inference guard SYNCHRONOUSLY, before any await — closes
-    // the load→use TOCTOU window from #148. A concurrent picker switch's
-    // eviction will see the positive count and park `.unload()` until the
+    const modelId = SHIPPED_MODEL.id;
+    // Acquire the inference guard SYNCHRONOUSLY after the lock, before the
+    // engine await — closes the load→use TOCTOU window from #148 against any
+    // other-model load's eviction, which parks `.unload()` until the
     // matching release runs in `finally`.
     acquireInference(modelId);
     try {
@@ -332,7 +335,7 @@ export function useSectionRewrite(
       releaseInference(modelId);
       release();
     }
-  }, [trimmedBullets, acquire, selectedModelId]);
+  }, [trimmedBullets, acquire]);
 
   const onReject = useCallback(() => {
     setStatus({ kind: "idle" });
@@ -416,11 +419,7 @@ export function useSectionRewrite(
     status.kind === "idle" ? null : (
       <div className="mt-1 flex flex-col gap-2">
         {status.kind === "loading" && (
-          <ModelLoadProgress
-            progress={status.progress.progress}
-            text={status.progress.text}
-            label="Loading the rewrite model (one-time download)"
-          />
+          <ShippedModelLoadProgress progress={status.progress} />
         )}
 
         {status.kind === "rewriting" && (

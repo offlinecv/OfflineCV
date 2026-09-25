@@ -147,6 +147,12 @@ describe("NumberPreservationWarning — reverted copy (#778)", () => {
     expect(html).not.toContain("Review before saving");
   });
 
+  it("says the rewrite came back garbled when no number explains the revert (#1015)", () => {
+    const html = render({ dropped: [], added: [], reverted: true });
+    expect(html).toContain("Kept your original");
+    expect(html).toContain("came back garbled");
+  });
+
   it("keeps the drift copy when the rewrite was applied", () => {
     const html = render({ dropped: [], added: ["99.9%"], reverted: false });
     expect(html).toContain("invented 99.9%");

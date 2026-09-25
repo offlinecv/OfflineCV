@@ -64,9 +64,9 @@
  */
 
 import type { ReactNode } from "react";
-import { ModelLoadProgress } from "@design-system";
 import type { JdMatchStatus } from "../../hooks/useJdMatch.ts";
 import type { WebGpuCapability } from "../../lib/webllm/types.ts";
+import { ShippedModelLoadProgress } from "./ShippedModelLoadProgress.tsx";
 
 interface SemanticAnalysisStatusProps {
   /** The controller's semantic status. */
@@ -110,10 +110,8 @@ export function SemanticAnalysisStatus({
   switch (status.kind) {
     case "loading":
       return (
-        <ModelLoadProgress
-          progress={status.progress.progress}
-          text={status.progress.text}
-          label="Loading the on-device model (one-time download)"
+        <ShippedModelLoadProgress
+          progress={status.progress}
           // No `showExplainer`: the checkbox hint directly above already states
           // that the model downloads and that the text stays in the tab, and
           // `ModelLoadProgress`'s own docblock makes the explainer opt-in so

@@ -8,6 +8,8 @@ import {
   isSector,
 } from "./sector.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
+import { modelConsentKey } from "../webllm/consent.ts";
+import { SHIPPED_MODEL } from "../webllm/models.ts";
 
 // Minimal typed stub over the parsed model, like contact.test.ts — only the
 // fields sector.ts reads (skills + experience titles/companies).
@@ -136,6 +138,100 @@ describe("isSector", () => {
 describe("classifySector", () => {
   beforeEach(() => {
     vi.resetModules();
+    // The semantic path needs recorded consent (#1015); the no-consent case
+    // below removes it.
+    localStorage.setItem(modelConsentKey(SHIPPED_MODEL.id), "accepted");
+  });
+
+  it("without recorded consent: returns the heuristic guess without probing WebGPU or loading the engine", async () => {
+    localStorage.removeItem(modelConsentKey(SHIPPED_MODEL.id));
+    const detectWebGpu = vi.fn().mockResolvedValue("available");
+    const loadEngine = vi.fn();
+    vi.doMock("../webllm/capability.ts", () => ({ detectWebGpu }));
+    vi.doMock("../webllm/web-llm.ts", () => ({
+      loadEngine,
+      acquireInference: vi.fn(),
+      releaseInference: vi.fn(),
+    }));
+
+    const { classifySector: classify } = await import("./sector.ts");
+    const guess = await classify(
+      makeParsed({
+        skills: ["Payments", "KYC"],
+        experience: [{ title: "Payments Engineer", company: "Stripe" }],
+      }),
+    );
+    expect(guess.source).toBe("heuristic");
+    expect(guess.sector).toBe("fintech");
+    expect(detectWebGpu).not.toHaveBeenCalled();
+    expect(loadEngine).not.toHaveBeenCalled();
+  });
+
+  it("an old license-type consent key does not count as consent for the shipped model", async () => {
+    localStorage.removeItem(modelConsentKey(SHIPPED_MODEL.id));
+    localStorage.setItem("offlinecv:webllm:consent:Restricted-Community", "accepted");
+    const loadEngine = vi.fn();
+    vi.doMock("../webllm/capability.ts", () => ({
+      detectWebGpu: vi.fn().mockResolvedValue("available"),
+    }));
+    vi.doMock("../webllm/web-llm.ts", () => ({
+      loadEngine,
+      acquireInference: vi.fn(),
+      releaseInference: vi.fn(),
+    }));
+
+    const { classifySector: classify } = await import("./sector.ts");
+    const guess = await classify(makeParsed({ skills: ["Payments"] }));
+    expect(guess.source).toBe("heuristic");
+    expect(loadEngine).not.toHaveBeenCalled();
+  });
+
+  it("with consent but the model neither cached nor loaded: returns the heuristic guess and starts no download", async () => {
+    const loadEngine = vi.fn();
+    const hasModelWeightsCached = vi.fn().mockResolvedValue(false);
+    vi.doMock("../webllm/model-cache.ts", () => ({ hasModelWeightsCached }));
+    vi.doMock("../webllm/capability.ts", () => ({
+      detectWebGpu: vi.fn().mockResolvedValue("available"),
+    }));
+    vi.doMock("../webllm/web-llm.ts", () => ({
+      loadEngine,
+      acquireInference: vi.fn(),
+      releaseInference: vi.fn(),
+    }));
+
+    const { classifySector: classify } = await import("./sector.ts");
+    const guess = await classify(makeParsed({ skills: ["Payments", "KYC"] }));
+    expect(guess.source).toBe("heuristic");
+    expect(hasModelWeightsCached).toHaveBeenCalledWith(SHIPPED_MODEL.id);
+    expect(loadEngine).not.toHaveBeenCalled();
+  });
+
+  it("with consent and the model already loaded by another feature: runs without a cache check", async () => {
+    const hasModelWeightsCached = vi.fn().mockResolvedValue(false);
+    vi.doMock("../webllm/model-cache.ts", () => ({ hasModelWeightsCached }));
+    vi.doMock("../webllm/capability.ts", () => ({
+      detectWebGpu: vi.fn().mockResolvedValue("available"),
+    }));
+    vi.doMock("../webllm/web-llm.ts", () => ({
+      loadEngine: vi.fn().mockResolvedValue({
+        chat: {
+          completions: {
+            create: vi.fn().mockResolvedValue({
+              choices: [{ message: { content: '{"sector": "devtools"}' } }],
+            }),
+          },
+        },
+      }),
+      acquireInference: vi.fn(),
+      releaseInference: vi.fn(),
+    }));
+
+    const { markEngineLoaded } = await import("../webllm/engine-status.ts");
+    markEngineLoaded(SHIPPED_MODEL.id);
+    const { classifySector: classify } = await import("./sector.ts");
+    const guess = await classify(makeParsed({ skills: ["Payments"] }));
+    expect(guess.source).toBe("semantic");
+    expect(hasModelWeightsCached).not.toHaveBeenCalled();
   });
 
   it("returns the heuristic result unchanged when WebGPU is unavailable", async () => {
@@ -170,8 +266,8 @@ describe("classifySector", () => {
       acquireInference: vi.fn(),
       releaseInference: vi.fn(),
     }));
-    vi.doMock("../webllm/models.ts", () => ({
-      DEFAULT_MODEL_ID: "test-model",
+    vi.doMock("../webllm/model-cache.ts", () => ({
+      hasModelWeightsCached: vi.fn().mockResolvedValue(true),
     }));
 
     const { classifySector: classify } = await import("./sector.ts");
@@ -201,8 +297,8 @@ describe("classifySector", () => {
       acquireInference: vi.fn(),
       releaseInference: vi.fn(),
     }));
-    vi.doMock("../webllm/models.ts", () => ({
-      DEFAULT_MODEL_ID: "test-model",
+    vi.doMock("../webllm/model-cache.ts", () => ({
+      hasModelWeightsCached: vi.fn().mockResolvedValue(true),
     }));
 
     const { classifySector: classify } = await import("./sector.ts");
@@ -224,8 +320,8 @@ describe("classifySector", () => {
       acquireInference: vi.fn(),
       releaseInference: vi.fn(),
     }));
-    vi.doMock("../webllm/models.ts", () => ({
-      DEFAULT_MODEL_ID: "test-model",
+    vi.doMock("../webllm/model-cache.ts", () => ({
+      hasModelWeightsCached: vi.fn().mockResolvedValue(true),
     }));
 
     const { classifySector: classify } = await import("./sector.ts");

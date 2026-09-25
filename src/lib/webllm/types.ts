@@ -14,7 +14,16 @@ export interface ProgressUpdate {
   progress: number;
   /** Human-readable status from WebLLM (e.g. weight file being fetched). */
   text: string;
+  /**
+   * Where the weights are coming from, as `loadEngine` found them before it
+   * started (#1015): `"device"` when every shard was already in Cache
+   * Storage, `"network"` otherwise. Absent until that probe has answered, so
+   * a label must read "absent" as "not known yet", never as either side.
+   */
+  source?: ModelLoadSource;
 }
+
+export type ModelLoadSource = "device" | "network";
 
 /**
  * Narrow contract over `@mlc-ai/web-llm`'s engine — only the surface

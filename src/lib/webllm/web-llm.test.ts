@@ -10,7 +10,13 @@ const mockCreateMLCEngine = vi.fn();
 // to this stub without pulling the real ~6 MB library into the test env.
 vi.mock("@mlc-ai/web-llm", () => ({
   CreateMLCEngine: mockCreateMLCEngine,
+  deleteModelAllInfoInCache: vi.fn(async () => {}),
 }));
+
+// The weights-on-device probe (#1015) reads Cache Storage, which Node lacks;
+// each test states what the cache holds.
+const { hasCachedMock } = vi.hoisted(() => ({ hasCachedMock: vi.fn() }));
+vi.mock("./model-cache.ts", () => ({ hasModelWeightsCached: hasCachedMock }));
 
 const { trackDownloadStartedMock, trackLoadedMock } = vi.hoisted(() => ({
   trackDownloadStartedMock: vi.fn(),
@@ -28,10 +34,17 @@ vi.mock("../analytics.ts", async (importOriginal) => {
 import {
   _resetEngineCacheForTesting,
   acquireInference,
+  clearModel,
   loadEngine,
   releaseInference,
 } from "./web-llm.ts";
-import { DEFAULT_MODEL_ID, MODEL_REGISTRY } from "./models.ts";
+import { getEngineStatus, subscribeEngineStatus } from "./engine-status.ts";
+import { SHIPPED_MODEL } from "./models.ts";
+import {
+  _resetModelConsentForTesting,
+  ModelConsentRequiredError,
+  recordModelConsent,
+} from "./consent.ts";
 import type { WebLlmEngine } from "./types.ts";
 
 interface FakeEngine extends WebLlmEngine {
@@ -49,11 +62,62 @@ function fakeEngine(id: string): FakeEngine {
 
 const noop = () => {};
 
-// Two known-good registry entries we can switch between.
-const MODEL_A = DEFAULT_MODEL_ID; // Apache-2.0
-const MODEL_B = MODEL_REGISTRY.find(
-  (m) => m.licenseType === "Restricted-Community",
-)!.id;
+// The shipped model, and a second id to exercise the cross-model machinery
+// the eval harnesses still rely on.
+const MODEL_A = SHIPPED_MODEL.id;
+const MODEL_B = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+
+// Every test below loads with consent recorded; the consent gate has its own
+// describe block that clears it.
+beforeEach(() => {
+  hasCachedMock.mockReset();
+  hasCachedMock.mockResolvedValue(false);
+  _resetModelConsentForTesting();
+  recordModelConsent(MODEL_A);
+  recordModelConsent(MODEL_B);
+});
+
+describe("loadEngine — consent gate (#1015)", () => {
+  beforeEach(() => {
+    _resetEngineCacheForTesting();
+    mockCreateMLCEngine.mockReset();
+    trackDownloadStartedMock.mockClear();
+    _resetModelConsentForTesting();
+    localStorage.clear();
+  });
+
+  it("rejects without recorded consent and never reaches CreateMLCEngine or telemetry", async () => {
+    await expect(loadEngine(MODEL_A, noop)).rejects.toBeInstanceOf(
+      ModelConsentRequiredError,
+    );
+    expect(mockCreateMLCEngine).not.toHaveBeenCalled();
+    expect(trackDownloadStartedMock).not.toHaveBeenCalled();
+  });
+
+  it("does not count an old license-type consent key as consent for the model", async () => {
+    localStorage.setItem("offlinecv:webllm:consent:Restricted-Community", "accepted");
+    localStorage.setItem("offlinecv:webllm:consent:Apache-2.0", "accepted");
+    await expect(loadEngine(MODEL_A, noop)).rejects.toBeInstanceOf(
+      ModelConsentRequiredError,
+    );
+    expect(mockCreateMLCEngine).not.toHaveBeenCalled();
+  });
+
+  it("consent is per model id: accepting one model does not unlock another", async () => {
+    recordModelConsent(MODEL_B);
+    await expect(loadEngine(MODEL_A, noop)).rejects.toBeInstanceOf(
+      ModelConsentRequiredError,
+    );
+    expect(mockCreateMLCEngine).not.toHaveBeenCalled();
+  });
+
+  it("loads once consent for that id is recorded", async () => {
+    recordModelConsent(MODEL_A);
+    mockCreateMLCEngine.mockResolvedValue(fakeEngine(MODEL_A));
+    await loadEngine(MODEL_A, noop);
+    expect(mockCreateMLCEngine).toHaveBeenCalledOnce();
+  });
+});
 
 describe("loadEngine", () => {
   beforeEach(() => {
@@ -199,7 +263,23 @@ describe("loadEngine", () => {
     await loadEngine(MODEL_A, (u) => {
       captured = u;
     });
-    expect(captured).toEqual({ progress: 0.42, text: "fetching weights" });
+    expect(captured).toEqual({
+      progress: 0.42,
+      text: "fetching weights",
+      source: "network",
+    });
+  });
+
+  it("tags every report with where the weights come from, probed before the load", async () => {
+    hasCachedMock.mockResolvedValue(true);
+    const seen: unknown[] = [];
+    mockCreateMLCEngine.mockImplementationOnce(async (_id, opts) => {
+      opts.initProgressCallback({ progress: 0.5, text: "Loading model from cache[1/9]" });
+      return fakeEngine(MODEL_A);
+    });
+    await loadEngine(MODEL_A, (u) => seen.push(u.source));
+    expect(hasCachedMock).toHaveBeenCalledWith(MODEL_A);
+    expect(seen).toEqual(["device", "device"]);
   });
 
   // ── Per-model telemetry (#64 AC) ─────────────────────────────────────────
@@ -256,7 +336,7 @@ describe("loadEngine", () => {
 // already-loaded engine A, the returned promise resolved synchronously, but
 // the `await` yielded to the microtask queue before `acquireInference(A)`
 // could run (acquire happened INSIDE the rewrite primitive, not before
-// loadEngine). In that gap, a concurrent picker switch to B could run its
+// loadEngine). In that gap, a concurrent load of model B (then: a picker switch) could run its
 // chain entry → `evictAllExcept(B)` → see `inflightInferenceCount[A] === 0`
 // → call `A.unload()` immediately. The rewrite caller's continuation then
 // tried to use a torn-down engine.
@@ -267,6 +347,63 @@ describe("loadEngine", () => {
 // moment the caller releases. The pair below pins both halves: the negative
 // shape (without the contract, the race is real) and the positive shape
 // (with the contract, the engine survives until release).
+describe("engine status published to engine-status.ts (#1015)", () => {
+  beforeEach(() => {
+    _resetEngineCacheForTesting();
+    mockCreateMLCEngine.mockReset();
+  });
+
+  it("reads loading with every progress report, whoever started the load, then loaded", async () => {
+    const seen: string[] = [];
+    const unsubscribe = subscribeEngineStatus(() => {
+      const status = getEngineStatus(MODEL_A);
+      seen.push(status.kind === "loading" ? `loading:${status.progress.text}` : status.kind);
+    });
+    mockCreateMLCEngine.mockImplementationOnce(async (_id, opts) => {
+      opts.initProgressCallback({ progress: 0.5, text: "fetching weights" });
+      return fakeEngine(MODEL_A);
+    });
+    await loadEngine(MODEL_A, noop);
+    unsubscribe();
+    // "Starting…" twice: once when the load is queued, once more — now
+    // carrying the probed `source` — when its turn comes.
+    expect(seen).toEqual([
+      "loading:Starting…",
+      "loading:Starting…",
+      "loading:fetching weights",
+      "loaded",
+    ]);
+  });
+
+  it("returns to idle when the load fails", async () => {
+    mockCreateMLCEngine.mockRejectedValueOnce(new Error("OOM"));
+    await expect(loadEngine(MODEL_A, noop)).rejects.toThrow("OOM");
+    expect(getEngineStatus(MODEL_A).kind).toBe("idle");
+  });
+
+  it("returns to idle when the model is cleared or evicted", async () => {
+    mockCreateMLCEngine.mockResolvedValueOnce(fakeEngine(MODEL_A));
+    await loadEngine(MODEL_A, noop);
+    await clearModel(MODEL_A);
+    expect(getEngineStatus(MODEL_A).kind).toBe("idle");
+
+    mockCreateMLCEngine
+      .mockResolvedValueOnce(fakeEngine(MODEL_A))
+      .mockResolvedValueOnce(fakeEngine(MODEL_B));
+    await loadEngine(MODEL_A, noop);
+    await loadEngine(MODEL_B, noop);
+    expect(getEngineStatus(MODEL_A).kind).toBe("idle");
+    expect(getEngineStatus(MODEL_B).kind).toBe("loaded");
+  });
+
+  it("publishes nothing for a load refused for want of consent", async () => {
+    _resetModelConsentForTesting();
+    localStorage.clear();
+    await expect(loadEngine(MODEL_A, noop)).rejects.toBeInstanceOf(ModelConsentRequiredError);
+    expect(getEngineStatus(MODEL_A).kind).toBe("idle");
+  });
+});
+
 describe("acquire-before-load TOCTOU (#148)", () => {
   beforeEach(() => {
     _resetEngineCacheForTesting();

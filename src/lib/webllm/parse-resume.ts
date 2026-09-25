@@ -20,12 +20,11 @@
  * `releaseInference` itself — those are caller-owned so the modelId param
  * stays out of this function's signature.
  *
- * ## Pinned model
- * Uses `DEFAULT_MODEL_ID` from `./models.ts`
- * (`Qwen2.5-1.5B-Instruct-q4f16_1-MLC`). Referenced in the doc comment
- * below rather than as a runtime import — the caller owns the engine, so
- * this file does not need the constant at runtime. A future eval (issue #241
- * PR writeup) may bump the default; update the comment and models.ts together.
+ * ## Model
+ * Runs on whatever engine the caller loaded — in the product that is always
+ * `SHIPPED_MODEL` from `./models.ts` (#1015). Not imported here: the caller
+ * owns the engine, so this file does not need the constant at runtime. The
+ * prompt was written against Qwen 2.5 (1.5B), the model this shipped with.
  *
  * ## JSON repair
  * Small models often wrap valid JSON in markdown fences or add prose. The
@@ -201,9 +200,7 @@ function buildUserPrompt(input: { rawText: string; markdown?: string }): string 
  * `acquireInference(modelId)` / `releaseInference(modelId)` to guard against
  * concurrent engine eviction.
  *
- * Pinned model: `DEFAULT_MODEL_ID` from `./models.ts`
- * (`Qwen2.5-1.5B-Instruct-q4f16_1-MLC`). The PR #241 eval writeup may
- * bump this; update the constant and this doc comment together.
+ * Model: the caller's engine — `SHIPPED_MODEL` in the product.
  *
  * Input: provide both `rawText` and `markdown` when available — the function
  * prefers `markdown` (more structural signal). `rawText` is the fallback.
@@ -217,8 +214,9 @@ export async function parseResumeWithLlm(
   engine: WebLlmEngine,
 ): Promise<LlmParsedResume> {
   // Max tokens: enough for a dense resume JSON (~600 tok) with headroom.
-  // Qwen2.5-1.5B context window is 32 768 tokens; 1 024 output tokens is
-  // well within budget and keeps latency reasonable for a single-pass parse.
+  // web-llm's prebuilt record gives the shipped model a 4 096-token context
+  // window, shared between the prompt and this output budget; 1 024 output
+  // tokens keeps latency reasonable for a single-pass parse.
   const MAX_TOKENS = 1024;
 
   let raw = "";

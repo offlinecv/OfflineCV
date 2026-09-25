@@ -20,7 +20,7 @@
  * This is that coverage. It asserts on `RolesPanel`'s own heading rather than a
  * testid, so a `ResumeTargeting` that mounts but renders an empty box fails.
  * `ReconstructedResume` is mocked: it is not what is under test, and mounting
- * it drags in `ModelSelector` and the WebGPU capability probe.
+ * it drags in `OnDeviceModelStatus` and the WebGPU capability probe.
  *
  * #955's second pass added the third block below. The targeting surface is now
  * a CHILD of `ScoreDetails` in both lanes, so it docks with the score — which
@@ -156,7 +156,7 @@ vi.mock("./hooks/useAutoRestoreResume.ts", () => ({
   useAutoRestoreResume: () => {},
 }));
 // The résumé document is not under test, and mounting it pulls in
-// `ModelSelector` plus the WebGPU capability probe. `ResumeTargeting` — the
+// `OnDeviceModelStatus` plus the WebGPU capability probe. `ResumeTargeting` — the
 // thing this file exists to pin — is deliberately NOT mocked.
 vi.mock("./components/features/ReconstructedResume.tsx", () => ({
   ReconstructedResume: () => createElement("div", null, "résumé document"),

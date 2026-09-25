@@ -39,8 +39,8 @@ import type {
 } from "./types.ts";
 
 // Pin stable model ids for the section path's telemetry assertions. Using
-// string literals (rather than importing DEFAULT_MODEL_ID) keeps this file
-// independent of registry shape changes.
+// string literals (rather than importing SHIPPED_MODEL) keeps this file
+// independent of which model ships.
 const TEST_MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
 const OTHER_MODEL = "gemma-2-2b-it-q4f16_1-MLC";
 
@@ -215,6 +215,18 @@ describe("rewriteSectionWithLlm", () => {
     expect(out.numbersPreserved).toBe(true);
     expect(out.droppedNumbers).toEqual([]);
     expect(out.addedNumbers).toEqual([]);
+  });
+
+  it("rejects a garbled rewrite and returns the input bullets (#1015)", async () => {
+    const { engine } = makeEngine(async () =>
+      reply(
+        "Here are some examples of how to rewrite the following to be more specific.\nSupported the team.",
+      ),
+    );
+    const input = ["Supported the production team"];
+    const out = await rewriteSectionWithLlm(input, engine, TEST_MODEL);
+    expect(out.bullets).toEqual(input);
+    expect(out.reverted).toBe(true);
   });
 
   it("rejects a rewrite that drops a number and returns the input bullets (#778)", async () => {

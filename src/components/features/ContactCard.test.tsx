@@ -13,7 +13,7 @@
  *
  * Runs in jsdom (per the `@vitest-environment jsdom` pragma) so React +
  * `react-dom/client` have a document to render into; uses raw `createRoot`
- * rather than RTL, matching `useModelSelection.integration.test.tsx`.
+ * rather than RTL, matching `ModelConsentHost.test.tsx`.
  */
 
 import { describe, expect, it, afterEach } from "vitest";

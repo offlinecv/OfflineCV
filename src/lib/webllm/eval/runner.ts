@@ -111,6 +111,7 @@ export async function runEval({
             rubric,
             reverted: output.reverted ?? false,
             revertedNumbers: [...(output.revertedNumbers ?? [])],
+            ...(output.garbled ? { garbled: output.garbled } : {}),
             rewriteDurationMs: now() - cellStart,
             error: null,
           };

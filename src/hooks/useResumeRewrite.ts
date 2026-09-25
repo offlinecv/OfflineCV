@@ -19,8 +19,8 @@
  *     per-role `SectionRewrite` button — exactly the "one rewrite at a
  *     time" contract from #63.
  *   - The orchestrator's inner `rewrite*WithLlm` calls bracket each step
- *     with `acquireInference`, so the cross-model picker can defer
- *     `.unload()` until a step completes.
+ *     with `acquireInference`, so another model's load defers `.unload()`
+ *     until a step completes.
  *
  * WebGPU gating: `available` is the only branch that exposes any
  * interactive surface; the other two collapse to `available === false` so
@@ -49,7 +49,8 @@ import type {
   ProgressUpdate,
   WebGpuCapability,
 } from "../lib/webllm/types.ts";
-import { useModelSelection } from "./useModelSelection.ts";
+import { requestModelConsent } from "./useModelConsent.ts";
+import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
 import { usePersistentFlag } from "./usePersistentFlag.ts";
 import { findingsFromCritique } from "../lib/webllm/rewrite-findings.ts";
 import { findingsKey } from "../lib/webllm/steering.ts";
@@ -242,7 +243,6 @@ export function useResumeRewrite(
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<ResumeRewriteStatus>({ kind: "idle" });
   const { isLocked, acquire } = useSectionRewriteLock();
-  const { selectedModelId } = useModelSelection();
 
   // Steering (#210): freeform instructions + page-length target, persisted so a
   // re-run keeps the user's last intent. pageTarget round-trips through a string
@@ -346,15 +346,16 @@ export function useResumeRewrite(
   }, [rewriteableSections, status]);
 
   const start = useCallback(async () => {
+    // Consent before anything else (#1015): a decline leaves the lock, the
+    // status and the engine untouched.
+    if (!(await requestModelConsent())) return;
     const release = acquire();
     if (release === null) return;
-    // Snapshot the model id so the same id is released that we acquired —
-    // ModelSelector could in principle update `selectedModelId` mid-run.
-    const modelId = selectedModelId;
-    // Acquire the inference guard SYNCHRONOUSLY, before any await — closes
-    // the load→use TOCTOU window from #148. Held across the WHOLE chain
-    // (summary + every experience role) so the engine cannot be torn down
-    // by a concurrent picker switch at any step boundary, not just at the
+    const modelId = SHIPPED_MODEL.id;
+    // Acquire the inference guard SYNCHRONOUSLY, before the engine await —
+    // closes the load→use TOCTOU window from #148. Held across the WHOLE
+    // chain (summary + every experience role) so the engine cannot be torn
+    // down by another model's load at any step boundary, not just at the
     // first loadEngine. Released in `finally` whether the run completes
     // successfully or errors out.
     acquireInference(modelId);
@@ -403,7 +404,7 @@ export function useResumeRewrite(
     // run with last render's intent — reading ONE memoized value instead of
     // five raw ones is one dep to get wrong instead of five, and it is the same
     // value the disclosure shows the user.
-  }, [acquire, rewriteableSections, selectedModelId, steering]);
+  }, [acquire, rewriteableSections, steering]);
 
   const dismiss = useCallback(() => {
     setStatus({ kind: "idle" });

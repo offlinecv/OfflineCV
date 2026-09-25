@@ -212,10 +212,9 @@ function coerceCritiqueHalf(raw: unknown): ResumeCritique {
  * `acquireInference(modelId)` / `releaseInference(modelId)` (the #148
  * snapshot-before-await contract) to guard against concurrent engine eviction.
  *
- * Pinned model: `DEFAULT_MODEL_ID` from `./models.ts`
- * (`Qwen2.5-1.5B-Instruct-q4f16_1-MLC`). The combined prompt + larger JSON
- * output is the AC risk the #262 quality gate measures — bump the constant and
- * this doc together if the eval bakes off a larger default.
+ * Model: the caller's engine — `SHIPPED_MODEL` from `./models.ts` in the
+ * product (#1015). The prompt was tuned against Qwen 2.5 (1.5B); the combined
+ * prompt + larger JSON output is the AC risk the #262 quality gate measures.
  *
  * Input: provide both `rawText` and `markdown` when available — the function
  * prefers `markdown` (more structural signal). `rawText` is the fallback.
@@ -232,8 +231,9 @@ export async function analyzeResumeWithLlm(
   // Max tokens: the parse alone needs ~600 (parse-resume.ts uses 1024). The
   // critique adds ~60 per bullet plus the meta object. The old summed budget
   // across the three separate inferences was ~2480 (1024 + 1200 + 256). 3072
-  // matches that ceiling with headroom for a long resume (30+ bullets) and
-  // stays well within Qwen2.5-1.5B's 32 768-token context window. Truncation
+  // matches that ceiling with headroom for a long resume (30+ bullets). The
+  // context window is the prebuilt record's 4 096 tokens, shared with the
+  // prompt, so a long résumé can leave less than this budget. Truncation
   // here kills the top-level JSON parse and collapses BOTH halves to safe
   // empty shapes — over-budgeting is cheap, under-budgeting is a hard failure.
   const MAX_TOKENS = 3072;

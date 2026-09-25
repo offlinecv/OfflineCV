@@ -67,10 +67,12 @@
  * gates on `escapeHatch.isAvailable`, so there is no internal guard.
  */
 
-import { Button, ModelLoadProgress } from "@design-system";
+import { Button } from "@design-system";
 import type { EscapeHatchController, EscapeHatchStatus } from "../../hooks/useLlmEscapeHatch.ts";
 import type { LlmParsedResume } from "../../lib/webllm/parse-resume.ts";
+import { downloadSizeLabel, SHIPPED_MODEL } from "../../lib/webllm/models.ts";
 import { useEffect, useRef } from "react";
+import { ShippedModelLoadProgress } from "./ShippedModelLoadProgress.tsx";
 
 /** CTA copy keyed off the status lifecycle (idle is the default fallback). */
 const CTA_LABELS: Record<EscapeHatchStatus["kind"], string> = {
@@ -168,8 +170,8 @@ export function LlmEscapeHatchPanel({
           <p className="max-w-prose text-sm text-content-tertiary">
             A small model running in this tab can re-read your file and rebuild
             the fields the parser got wrong. Runs entirely in your browser —
-            nothing leaves this tab. One-time ~1.2&nbsp;GB download, cached for
-            next time.
+            nothing leaves this tab. One-time {downloadSizeLabel(SHIPPED_MODEL)}{" "}
+            download, cached for next time.
           </p>
         </div>
         <Button
@@ -184,12 +186,7 @@ export function LlmEscapeHatchPanel({
       </div>
 
       {status.kind === "loading" && (
-        <ModelLoadProgress
-          progress={status.progress.progress}
-          text={status.progress.text}
-          label="Loading the recovery model (one-time download)"
-          showExplainer
-        />
+        <ShippedModelLoadProgress progress={status.progress} showExplainer />
       )}
 
       {status.kind === "running" && (

@@ -88,7 +88,7 @@ to library** for keeping an unedited parse
 | A keyword string — your job title and skills, never résumé text | You click "Search jobs" | [`lib/job-search/providers/keywords.ts`](../src/lib/job-search/providers/keywords.ts) |
 | A public company slug — no résumé text, no keywords | The same search, against the company boards (Greenhouse, Lever, Ashby) | [`lib/job-search/company-boards.ts`](../src/lib/job-search/company-boards.ts) |
 | A job-description URL | You paste one into the JD panel | [`lib/jd-match/fetch-jd.ts`](../src/lib/jd-match/fetch-jd.ts) |
-| A model-file request — 1.6–2.3 GB from `huggingface.co` and `raw.githubusercontent.com` | You start an on-device AI action and accept that model's licence | [`lib/webllm/web-llm.ts`](../src/lib/webllm/web-llm.ts) |
+| A model-file request — about 1.9 GB from `huggingface.co` and `raw.githubusercontent.com` | You start an on-device AI action and accept the model's terms (once per browser) | [`lib/webllm/web-llm.ts`](../src/lib/webllm/web-llm.ts) |
 | A product-analytics event — and, if you send feedback, the opt-in email and free text you typed | Hosted builds only; dead-code-eliminated when `VITE_POSTHOG_KEY` is unset, so a clone ships none | [`lib/analytics.ts`](../src/lib/analytics.ts) |
 
 One further call carries neither résumé data nor anything you typed — the

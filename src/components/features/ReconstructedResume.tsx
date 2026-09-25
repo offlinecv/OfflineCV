@@ -60,7 +60,7 @@ import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
 import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
 import { Fragment, useMemo } from "react";
-import { ModelSelector } from "./ModelSelector.tsx";
+import { OnDeviceModelStatus } from "./OnDeviceModelStatus.tsx";
 import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
 import type { SectionRewriteApply } from "./SectionRewrite.tsx";
 import type { ResumeRewriteApply } from "./ResumeRewriteProposed.tsx";
@@ -404,7 +404,7 @@ export function ExperienceSection({
     summaryApply,
   ]);
   // The whole-résumé rewrite CTA (#67) lives at the top of Experience next to
-  // the picker. Trigger + panel render only when WebGPU is available AND
+  // the on-device model status line. Trigger + panel render only when WebGPU is available AND
   // there's at least one rewriteable section — same silent-absence rule as
   // SectionRewrite. The hook owns the WebGPU/empty-input gating.
   const {
@@ -425,14 +425,15 @@ export function ExperienceSection({
       onBlur={sectionExitBlur(() => onPruneEmpty(pruneHold.isHeld))}
     >
       <SectionHeading>{topHeading}</SectionHeading>
-      {/* Picker + whole-résumé CTA mounted at the top of Experience —
-          "inline near SectionRewrite, visible only in the rewrite context"
-          per the #64 step 6 spec. Both return null when WebGPU is
+      {/* Model status line + whole-résumé CTA mounted at the top of
+          Experience — "inline near SectionRewrite, visible only in the rewrite
+          context" per the #64 step 6 spec (the picker it held became a status
+          line in #1015). Both return null when WebGPU is
           unavailable, so non-WebGPU browsers see no rewrite chrome at all
           (matches SectionRewrite + ResumeRewrite). */}
       {hasBullets && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <ModelSelector />
+          <OnDeviceModelStatus />
           {resumeRewriteTrigger}
         </div>
       )}

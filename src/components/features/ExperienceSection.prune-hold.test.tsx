@@ -151,7 +151,7 @@ function Harness() {
   return createElement(ExperienceSection, {
     groups,
     resumeSections: [],
-    // false → no ModelSelector / rewrite CTA chrome in the test DOM.
+    // false → no model status line / rewrite CTA chrome in the test DOM.
     hasBullets: false,
     experienceOverrides: {},
     onExperienceFieldChange: () => {},

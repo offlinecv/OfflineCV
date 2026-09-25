@@ -36,6 +36,18 @@
  * load and the two LLM calls on it). One owner, two readers; no duplicate
  * state and no second JD-match controller.
  *
+ * Turning the opt-in ON detects WebGPU first, then goes through
+ * `requestModelConsent` (#1015): the box only ticks once the user has
+ * accepted the on-device model's terms, and a decline leaves it unticked with
+ * nothing downloaded. Without WebGPU there is nothing to consent to — asking
+ * someone to accept a licence for a model that cannot run here would be a
+ * dialog for nothing — so the box ticks with no dialog, and the ticked state
+ * shows `SemanticAnalysisStatus`'s existing "not available" line; `useJdMatch`
+ * loads nothing unless the capability is `"available"`. Detecting on the tick
+ * is the same probe `useJdMatch` runs on opt-in (it is cached per page), so
+ * no capability event fires for a user who never ticks. Turning it OFF never
+ * asks.
+ *
  * NOT gated on the `open` disclosure. Collapsing the panel mid-run would abort
  * a load the user asked for and throw away a partially-finished one, and it
  * would buy nothing on the expensive half: `loadEngine`'s promise is shared
@@ -55,6 +67,8 @@ import {
   buildJdRewriteContextFromVerdicts,
 } from "../../lib/jd-match/rewrite-context.ts";
 import { useJdMatch } from "../../hooks/useJdMatch.ts";
+import { requestModelConsent } from "../../hooks/useModelConsent.ts";
+import { detectWebGpu } from "../../lib/webllm/capability.ts";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 
 interface PasteJdPanelProps {
@@ -73,6 +87,17 @@ export function PasteJdPanel({ parsed, onTailor }: PasteJdPanelProps) {
   // Default OFF — see the docblock. The hook reads this to gate everything
   // WebLLM, so `false` here means no probe, no download and no analytics.
   const [semanticOptIn, setSemanticOptIn] = useState(false);
+  const onSemanticOptInChange = (next: boolean) => {
+    if (!next) {
+      setSemanticOptIn(false);
+      return;
+    }
+    void (async () => {
+      const capability = await detectWebGpu();
+      const accepted = capability !== "available" || (await requestModelConsent());
+      if (accepted) setSemanticOptIn(true);
+    })();
+  };
 
   // Cross-cutting JD-match state (#203) lives in `useJdMatch`. The panel
   // renders its result; the hook owns the debounce, the extract → coverage
@@ -148,7 +173,7 @@ export function PasteJdPanel({ parsed, onTailor }: PasteJdPanelProps) {
           />
           <SemanticAnalysisOptIn
             checked={semanticOptIn}
-            onChange={setSemanticOptIn}
+            onChange={onSemanticOptInChange}
             status={status}
             capability={capability}
           />

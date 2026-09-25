@@ -20,7 +20,7 @@
  * without wiring up cross-instance pub/sub for a one-time confirmation.
  *
  * Fail-silent like every other localStorage-backed flag in this app
- * (`usePersistentFlag.ts`, `useModelSelection.ts`): a locked-down or full
+ * (`usePersistentFlag.ts`, `webllm/consent.ts`): a locked-down or full
  * `localStorage` degrades to "always ask again," never to a crash.
  */
 

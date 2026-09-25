@@ -280,10 +280,17 @@ function buildSemanticUserPrompt(parsed: HeuristicParsedResume): string {
 const SEMANTIC_MAX_TOKENS = 64;
 
 /**
- * Semantic upgrade over `classifySectorHeuristic`. Gates on WebGPU
- * capability (`src/lib/webllm/capability.ts`); on `"no-webgpu"` /
- * `"unsupported-os"` it returns the heuristic guess immediately without
- * touching WebLLM. When a model is available, dynamic-imports the engine
+ * Semantic upgrade over `classifySectorHeuristic`. Background work, so it
+ * never asks for consent (#1015): unless the user has already accepted the
+ * shipped model's terms on a user-initiated surface, it returns the heuristic
+ * guess immediately, before probing WebGPU or importing the engine. It then
+ * gates on WebGPU capability (`src/lib/webllm/capability.ts`); on
+ * `"no-webgpu"` / `"unsupported-os"` it likewise returns the heuristic guess
+ * without touching WebLLM. Consent is not enough on its own, either: a
+ * background classification must never be what starts a ~2 GB download, so
+ * unless the model is already resident or fully cached (a local Cache API
+ * read, `hasModelWeightsCached`) it returns the heuristic guess too. Only then does it
+ * dynamic-import the engine
  * loader, asks it to pick one taxonomy value, and validates the response
  * against `SECTORS` — anything off-enum, unparseable, or a thrown/timed-out
  * engine call falls back to the heuristic guess unchanged. Never rejects.
@@ -294,23 +301,36 @@ export async function classifySector(
   const heuristic = classifySectorHeuristic(parsed);
 
   try {
+    const [{ hasModelConsent }, { SHIPPED_MODEL }] = await Promise.all([
+      import("../webllm/consent.ts"),
+      import("../webllm/models.ts"),
+    ]);
+    const modelId = SHIPPED_MODEL.id;
+    if (!hasModelConsent(modelId)) return heuristic;
+
     const { detectWebGpu } = await import("../webllm/capability.ts");
     const capability = await detectWebGpu();
     if (capability !== "available") return heuristic;
 
     const [
       { loadEngine, acquireInference, releaseInference },
-      { DEFAULT_MODEL_ID },
-      { tryParseJsonObject },
+      { getEngineStatus },
+      { hasModelWeightsCached },
     ] = await Promise.all([
       import("../webllm/web-llm.ts"),
-      import("../webllm/models.ts"),
-      import("../webllm/json-repair.ts"),
+      import("../webllm/engine-status.ts"),
+      import("../webllm/model-cache.ts"),
     ]);
+    const onDevice =
+      getEngineStatus(modelId).kind === "loaded" ||
+      (await hasModelWeightsCached(modelId));
+    if (!onDevice) return heuristic;
 
-    acquireInference(DEFAULT_MODEL_ID);
+    const { tryParseJsonObject } = await import("../webllm/json-repair.ts");
+
+    acquireInference(modelId);
     try {
-      const engine = await loadEngine(DEFAULT_MODEL_ID, () => {});
+      const engine = await loadEngine(modelId, () => {});
       const response = await engine.chat.completions.create({
         messages: [
           { role: "system", content: SEMANTIC_SYSTEM_PROMPT },
@@ -334,7 +354,7 @@ export async function classifySector(
         ...(heuristic.sector !== candidate ? { runnerUp: heuristic.sector } : {}),
       };
     } finally {
-      releaseInference(DEFAULT_MODEL_ID);
+      releaseInference(modelId);
     }
   } catch (err) {
     console.warn(

@@ -22,7 +22,8 @@
  * well-typed input (`HeuristicParsedResume`) rather than a conditional union.
  *
  * **Prompt discipline:** the critique prompt targets a small on-device model
- * (Qwen-2.5-1.5B). It asks for newline-delimited JSON *objects*, one per
+ * (written against Qwen 2.5 (1.5B); the product runs `SHIPPED_MODEL` since
+ * #1015). It asks for newline-delimited JSON *objects*, one per
  * bullet, plus a final JSON object for section and summary findings — avoiding
  * a single large JSON array that risks truncation mid-token.
  *

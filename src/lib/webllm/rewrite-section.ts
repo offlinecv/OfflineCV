@@ -7,7 +7,7 @@ import {
   trackWebllmSectionRewriteStarted,
 } from "../analytics.ts";
 import {
-  applyNumberPreservation,
+  applyRewriteGates,
   cleanRewriteLine,
 } from "./post-process.ts";
 import {
@@ -32,7 +32,8 @@ import { acquireInference, releaseInference } from "./web-llm.ts";
  * deterministically on the output (see preserve-numbers.ts), so the prompt
  * leans on the model to *try* to preserve numbers but doesn't depend on it.
  *
- * Tuned for Qwen2.5-1.5B-Instruct: small models need the rules stated
+ * Tuned against Qwen2.5-1.5B-Instruct, the model it first shipped with (the
+ * product runs `SHIPPED_MODEL` since #1015): small models need the rules stated
  * emphatically. "One bullet per line, no preamble, no numbering, no quotes"
  * has to be repeated because each rule is broken often enough on its own.
  *
@@ -204,7 +205,7 @@ export async function rewriteSectionWithLlm(
     inputBulletCount: bullets.length,
   });
 
-  // Acquire so a concurrent picker switch can't `.unload()` this engine
+  // Acquire so another model's load can't `.unload()` this engine
   // mid-stream. Paired in `finally` so an error path still releases.
   acquireInference(modelId);
   try {
@@ -231,15 +232,18 @@ export async function rewriteSectionWithLlm(
       .filter((line) => line.length > 0);
 
     // #778: a rewrite that drops OR invents a number is rejected here and the
-    // input bullets are returned instead.
-    const outcome = applyNumberPreservation(bullets, rewrittenBullets);
+    // input bullets are returned instead — as is a garbled one (#1015,
+    // `garbled-output.ts`).
+    const outcome = applyRewriteGates(bullets, rewrittenBullets);
 
     // Telemetry measures the MODEL, not the delivered outcome: every property
     // below describes `rewrittenBullets`, so `numbers_preserved` means the
     // same thing after #778 as before it and the series stays comparable
     // across the release. `reverted` is what says whether the gate fired: the
     // gate now covers both halves, so `numbers_preserved: false` with
-    // `reverted: false` narrows to a generation that came back empty.
+    // `reverted: false` narrows to a generation that came back empty. Since
+    // #1015 `reverted: true` with `numbers_preserved: true` is the
+    // garbled-output gate firing on a rewrite whose numbers were intact.
     trackWebllmSectionRewriteCompleted({
       model: modelId,
       inputBulletCount: bullets.length,

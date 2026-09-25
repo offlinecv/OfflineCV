@@ -7,6 +7,7 @@ import { GlobalWorkerOptions } from "pdfjs-dist";
 import pdfjsWorkerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
 import App from "./App";
 import { initAnalytics, setAnalyticsSurface } from "./lib/analytics";
+import { scheduleRetiredModelCleanup } from "./lib/webllm/retired-models";
 import "@fontsource/poppins/400.css";
 import "@fontsource/poppins/500.css";
 import "@fontsource/poppins/600.css";
@@ -16,6 +17,10 @@ import "./styles.css";
 GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 setAnalyticsSurface("parser");
 void initAnalytics();
+// One-time removal of the retired picker models' weights and keys (#1015).
+// Idle-scheduled, and a Cache API read that needs no web-llm import or
+// network request, so it never competes with first paint.
+scheduleRetiredModelCleanup();
 
 // Stale-deploy safety net. A tab loaded before a deploy holds the old
 // index.html, whose hashed tier chunks (dynamic-imported in cascade.ts) are

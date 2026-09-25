@@ -10,8 +10,8 @@ eval-rewrite-<model-slug>-YYYY-MM-DDTHH-MM-SS-sssZ.json
 eval-rewrite-<model-slug>-YYYY-MM-DDTHH-MM-SS-sssZ.md
 ```
 
-To compare all three registry models, run the eval three times (one
-per tab) and commit all three pairs.
+To compare all registry models, run the eval once per model (one tab
+each) and commit each pair.
 
 Reports are append-only — **never overwrite** a prior run. A new commit
 adds a new pair; the historical record is what lets a future maintainer

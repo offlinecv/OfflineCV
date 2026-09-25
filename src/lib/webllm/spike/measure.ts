@@ -352,7 +352,7 @@ export function renderMarkdownReport(report: SpikeReport): string {
   lines.push(`- **Started:** ${report.startedAt}`);
   lines.push(`- **Model:** \`${report.modelId}\``);
   lines.push(`- **Repeats per fixture:** ${report.repeatsPerFixture}`);
-  lines.push(`- **Qwen2.5-1.5B context window:** 32 768 tokens`);
+  lines.push(`- **Context window (web-llm prebuilt record):** 4 096 tokens`);
   lines.push("");
 
   lines.push("## Overall");
@@ -382,8 +382,8 @@ export function renderMarkdownReport(report: SpikeReport): string {
   }
   lines.push("");
   lines.push(
-    "> **Token headroom:** Qwen2.5-1.5B context is 32 768 tokens. " +
-    "Prompt tokens well below 2 000 indicates ample budget for production use.",
+    "> **Token headroom:** web-llm's prebuilt records give these models a 4 096-token " +
+    "context, shared by the prompt and the output budget.",
   );
   lines.push("");
   lines.push("---");

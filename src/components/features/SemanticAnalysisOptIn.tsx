@@ -32,10 +32,9 @@
  *
  * ## What this is NOT
  *
- * Not a model picker, and not a licence-consent gate. Those are separate,
- * already-built mechanisms (`useModelSelection` supplies the selected id;
- * `ConsentDialog` covers restricted-licence downloads on the surfaces that
- * offer them). This is one boolean: "may this panel use the on-device model at
+ * Not a licence-consent gate: `PasteJdPanel` asks for consent to the
+ * on-device model's terms (`requestModelConsent`) before it passes `true`
+ * back down. This is one boolean: "may this panel use the on-device model at
  * all". It deliberately does not persist — a session-scoped `useState` in the
  * panel, no `localStorage` — because #204 asks for an opt-in toggle and
  * nothing in the issue or the repo asks a JD panel to remember it.

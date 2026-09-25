@@ -19,8 +19,11 @@
  * function here — spike runs must not pollute production analytics.
  */
 
-import { MODEL_REGISTRY, getModelById, DEFAULT_MODEL_ID } from "../models.ts";
-import { loadEngine } from "../web-llm.ts";
+import {
+  fillEvalModelSelect,
+  findEvalModel,
+  loadEvalModel,
+} from "../eval/candidate-models.ts";
 import { detectWebGpu } from "../capability.ts";
 import { SPIKE_FIXTURES } from "./fixtures.ts";
 import { measureAll, renderJsonReport, renderMarkdownReport } from "./measure.ts";
@@ -82,16 +85,7 @@ function wireDownload(
 }
 
 function populateModelPicker(refs: DomRefs): void {
-  refs.modelSelect.innerHTML = "";
-  for (const model of MODEL_REGISTRY) {
-    const option = document.createElement("option");
-    option.value = model.id;
-    option.textContent = `${model.name} · ${model.licenseType} · ~${model.downloadSizeMb} MB`;
-    if (model.id === DEFAULT_MODEL_ID) {
-      option.selected = true;
-    }
-    refs.modelSelect.appendChild(option);
-  }
+  fillEvalModelSelect(refs.modelSelect);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,13 +93,13 @@ function populateModelPicker(refs: DomRefs): void {
 // ---------------------------------------------------------------------------
 
 async function runSpike(refs: DomRefs, modelId: string, repeats: number): Promise<void> {
-  const meta = getModelById(modelId);
+  const meta = findEvalModel(modelId);
   const display = meta?.name ?? modelId;
 
   appendLog(refs, `loading model ${modelId}`);
   setStatus(refs, `Loading ${display} …`);
 
-  const engine = await loadEngine(modelId, (update) => {
+  const engine = await loadEvalModel(modelId, (update) => {
     refs.progress.textContent = `${display}: ${(update.progress * 100).toFixed(0)}% — ${update.text}`;
   });
 
@@ -166,7 +160,7 @@ async function main(): Promise<void> {
       }
 
       const modelId = refs.modelSelect.value;
-      const meta = getModelById(modelId);
+      const meta = findEvalModel(modelId);
       if (!meta) {
         setStatus(refs, `Unknown model: ${modelId}`);
         return;

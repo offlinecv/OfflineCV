@@ -19,9 +19,11 @@
  * `judgeEvidence` never throws by contract — its failure mode is per-batch
  * `missing` verdicts, which stay on the semantic path by design.
  *
- * Caller contract: the `detectWebGpu` gate and the ConsentDialog gate for
- * restricted models run BEFORE this is called — this module never prompts.
- * `modelId` is the `useModelSelection` selected id; it is threaded both to
+ * Caller contract: the `detectWebGpu` gate and the model-consent gate
+ * (`PasteJdPanel` asks via `requestModelConsent` before the opt-in turns on)
+ * run BEFORE this is called — this module never prompts, and `loadEngine`
+ * rejects without consent, which lands in the keyword fallback below.
+ * `modelId` is `SHIPPED_MODEL.id` (#1015); it is threaded both to
  * `loadEngine` and to `judgeEvidence`'s inference guard. `onProgress` receives
  * the engine download/load progress (first call on a cold cache is a large
  * weight fetch).
@@ -101,13 +103,14 @@ import { judgeEvidence } from "./judge-evidence.ts";
  * `releaseInference`. Structurally guaranteed because the early return is
  * outside the try/finally.
  *
- * The live path this closes: `job-search/sector.ts` classifies on
- * `DEFAULT_MODEL_ID` on the same `/jobs/` page. If the user's persisted
- * `selectedModelId` differs, that classify reaches
- * `evictAllExcept(DEFAULT_MODEL_ID)` and would tear down our engine mid
- * `extractRequirements` — surfacing as a silent degrade to keyword. The
- * counter is re-entrant, so `judgeEvidence`'s inner acquire still nests
- * correctly underneath this one.
+ * The path this closed when it landed: `job-search/sector.ts` classified on
+ * the default model on the same `/jobs/` page while this ran on the picked
+ * one, so its load reached `evictAllExcept` and could tear our engine down
+ * mid `extractRequirements`. Since #1015 both load the one shipped model, so
+ * no product path evicts it; the bracket stays because it is the #148
+ * contract every inference caller follows, and it costs nothing. The counter
+ * is re-entrant, so `judgeEvidence`'s inner acquire still nests correctly
+ * underneath this one.
  */
 export async function runLlmMatch(
   jdText: string,

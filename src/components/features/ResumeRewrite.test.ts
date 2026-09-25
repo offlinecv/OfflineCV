@@ -238,7 +238,7 @@ describe("ResumeRewritePanel", () => {
         onUndo: () => {},
       }),
     );
-    expect(html).toContain("Loading the rewrite model");
+    expect(html).toContain("Loading Gemma 2 (2B)");
     expect(html).toContain('role="progressbar"');
   });
 
