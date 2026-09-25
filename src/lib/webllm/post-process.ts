@@ -3,7 +3,8 @@
 
 /**
  * Post-processing shared by the per-bullet and section rewrite paths. Two
- * stages, in order:
+ * stages, in order (the second, with the garbled-output check, is
+ * {@link applyRewriteGates}):
  *
  *   1. {@link cleanRewriteLine} — per-line cleanup of the wrappers small
  *      instruct models put around a bullet.
@@ -42,6 +43,7 @@
  * drops them.
  */
 
+import { detectGarbledRewrite, type GarbledReason } from "./garbled-output.ts";
 import { CURRENCY_SYMBOL_CLASS, checkNumbersPreserved } from "./preserve-numbers.ts";
 
 /**
@@ -75,6 +77,16 @@ const PROMPT_ECHO_LINES = new Set([
  * Fix for #150.
  */
 const CHAT_OPENER_PATTERN = /^here (?:are|is) (?:the )?rewritten\b/i;
+
+/**
+ * The wider preamble shape (#1015): a line that opens "Here's / Here is /
+ * Here are" (optionally after "Sure!") and ends in a colon — "Here's a
+ * rewritten version of your bullets:", "Here is your rewritten section:". The
+ * colon is what keeps it off real bullets, which never end in one; "Here are
+ * updated KPIs from Q3." is untouched. Dropped as filler so the garbled-output
+ * gate, which rejects the whole rewrite on narration, never sees it.
+ */
+const PREAMBLE_LINE_PATTERN = /^(?:sure\W+)?here(?:['’]s| is| are)\b.*:$/i;
 
 /**
  * Strip a leading single-word markdown bold like `**Increased**` when
@@ -239,6 +251,7 @@ export function cleanRewriteLine(line: string): string {
   // Final guard: if the resulting line is just the model echoing prompt
   // scaffolding, drop it so the caller's filter treats it as empty.
   if (PROMPT_ECHO_LINES.has(withoutQuotes.toLowerCase())) return "";
+  if (PREAMBLE_LINE_PATTERN.test(withoutQuotes)) return "";
 
   return withoutQuotes;
 }
@@ -274,6 +287,12 @@ export interface NumberPreservationOutcome {
    */
   droppedNumbers: string[];
   addedNumbers: string[];
+  /**
+   * Set when {@link applyRewriteGates} rejected the rewrite as garbage
+   * (`garbled-output.ts`) rather than, or as well as, for its numbers. Always
+   * `null` from {@link applyNumberPreservation} alone.
+   */
+  garbled: GarbledReason | null;
 }
 
 /**
@@ -317,5 +336,30 @@ export function applyNumberPreservation(
     numbersPreserved: shouldRevert ? true : preservation.ok,
     droppedNumbers: preservation.dropped,
     addedNumbers: preservation.added,
+    garbled: null,
+  };
+}
+
+/**
+ * Every reject gate a rewrite passes before it reaches the user, in one
+ * call — what the section and summary paths (and the eval, which must measure
+ * the product) run. A garbled rewrite (`detectGarbledRewrite`: instruction
+ * echo or a repetition loop) is reverted to `original` exactly as a number
+ * drift is, and the number diagnostics are still reported for it. The empty
+ * rewrite stays exempt, as in {@link applyNumberPreservation}.
+ */
+export function applyRewriteGates(
+  original: readonly string[],
+  rewritten: readonly string[],
+): NumberPreservationOutcome {
+  const outcome = applyNumberPreservation(original, rewritten);
+  const garbled = detectGarbledRewrite(original, rewritten);
+  if (garbled === null) return outcome;
+  return {
+    ...outcome,
+    bullets: [...original],
+    reverted: true,
+    numbersPreserved: true,
+    garbled,
   };
 }

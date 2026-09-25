@@ -25,7 +25,7 @@
  * An IndexedDB store would cost a schema-version bump and a place in the backup
  * document, for a preference. localStorage is where this app already keeps
  * durable UI decisions (`letter-egress-ack.ts`, `usePersistentFlag.ts`,
- * `useModelSelection.ts`), and the failure direction is the safe one: if the
+ * `webllm/consent.ts`), and the failure direction is the safe one: if the
  * value is lost — private browsing, a cleared origin, a full quota — the user
  * is asked once more about a pairing they already judged. That costs a prompt,
  * never a record, which is the same asymmetry the whole feature is built on.

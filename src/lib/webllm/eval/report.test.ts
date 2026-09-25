@@ -83,9 +83,9 @@ describe("renderMarkdownReport", () => {
     expect(md).toContain("**LLM judge:** disabled (default)");
   });
 
-  it("renders the aggregate table with model name resolved from the registry", () => {
+  it("renders the aggregate table with model name resolved from the eval candidate list", () => {
     const md = renderMarkdownReport(sampleReport);
-    // The model id resolves to its registry name via getModelById.
+    // The model id resolves to its name via `findEvalModel`.
     expect(md).toContain("| Qwen 2.5 (1.5B) | Baseline (shipped) |");
     expect(md).toContain("**100%**");
   });

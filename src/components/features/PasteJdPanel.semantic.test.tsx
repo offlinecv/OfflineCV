@@ -32,9 +32,11 @@ vi.mock("../../lib/webllm/capability.ts", () => ({
   detectWebGpu: () => detectWebGpuMock(),
 }));
 
-let modelId = "test-model";
-vi.mock("../../hooks/useModelSelection.ts", () => ({
-  useModelSelection: () => ({ selectedModelId: modelId }),
+// The consent gate (#1015): each test decides whether the user accepts.
+let consentAnswer = true;
+const requestModelConsentMock = vi.fn(() => Promise.resolve(consentAnswer));
+vi.mock("../../hooks/useModelConsent.ts", () => ({
+  requestModelConsent: () => requestModelConsentMock(),
 }));
 
 /** One captured `runLlmMatch` invocation, with the handles a test needs to
@@ -81,6 +83,7 @@ import { buildJdRewriteContextFromVerdicts } from "../../lib/jd-match/rewrite-co
 import type { JdMatchResult } from "../../lib/jd-match";
 import type { HeuristicParsedResume } from "../../lib/heuristics/types.ts";
 import type { RequirementVerdict } from "../../lib/jd-match/llm/judge-evidence.ts";
+import { SHIPPED_MODEL } from "../../lib/webllm/models.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -253,7 +256,8 @@ function optInLabel(): string {
 beforeEach(() => {
   vi.useFakeTimers();
   webgpu = "available";
-  modelId = "test-model";
+  consentAnswer = true;
+  requestModelConsentMock.mockClear();
   runs.length = 0;
   detectWebGpuMock.mockClear();
   runLlmMatchMock.mockClear();
@@ -302,6 +306,50 @@ describe("PasteJdPanel — semantic opt-in defaults OFF", () => {
 
 // ── Opting in ──────────────────────────────────────────────────────────────
 
+describe("PasteJdPanel — opting in asks for model consent first (#1015)", () => {
+  it("declined: the box stays unticked and nothing loads", async () => {
+    consentAnswer = false;
+    mount();
+    await setJd(JD_A);
+    await toggleOptIn();
+    expect(requestModelConsentMock).toHaveBeenCalledOnce();
+    expect(optInBox().checked).toBe(false);
+    expect(runs).toHaveLength(0);
+  });
+
+  it("detects WebGPU before asking, and never asks where the model cannot run", async () => {
+    webgpu = "no-webgpu";
+    mount();
+    await setJd(JD_A);
+    await toggleOptIn();
+    expect(detectWebGpuMock).toHaveBeenCalled();
+    expect(requestModelConsentMock).not.toHaveBeenCalled();
+    // Ticked, so the existing "not available" line explains why nothing runs.
+    expect(optInBox().checked).toBe(true);
+    expect(text()).toContain("This browser can't run on-device analysis");
+    expect(runs).toHaveLength(0);
+  });
+
+  it("accepted: the box ticks and the semantic run starts", async () => {
+    mount();
+    await setJd(JD_A);
+    await toggleOptIn();
+    expect(requestModelConsentMock).toHaveBeenCalledOnce();
+    expect(optInBox().checked).toBe(true);
+    expect(runs).toHaveLength(1);
+  });
+
+  it("turning the box off never asks", async () => {
+    mount();
+    await setJd(JD_A);
+    await toggleOptIn();
+    requestModelConsentMock.mockClear();
+    await toggleOptIn();
+    expect(requestModelConsentMock).not.toHaveBeenCalled();
+    expect(optInBox().checked).toBe(false);
+  });
+});
+
 describe("PasteJdPanel — opting in", () => {
   it("probes WebGPU only after the box is ticked, then starts one run", async () => {
     mount();
@@ -310,10 +358,13 @@ describe("PasteJdPanel — opting in", () => {
 
     await toggleOptIn();
 
-    expect(detectWebGpuMock).toHaveBeenCalledTimes(1);
+    // Twice: the panel detects before asking for consent, then `useJdMatch`
+    // on opt-in. The real `detectWebGpu` caches its promise per page, so the
+    // capability event still fires once.
+    expect(detectWebGpuMock).toHaveBeenCalledTimes(2);
     expect(runs).toHaveLength(1);
     expect(runs[0].jdText).toBe(JD_A);
-    expect(runs[0].modelId).toBe("test-model");
+    expect(runs[0].modelId).toBe(SHIPPED_MODEL.id);
   });
 
   it("keeps the keyword floor on screen for the whole engine load", async () => {
@@ -523,23 +574,6 @@ describe("PasteJdPanel — cancellation and races", () => {
     expect(text()).toContain("FRESH C");
     expect(text()).not.toContain("STALE A");
     expect(text()).not.toContain("STALE B");
-  });
-
-  it("a model change mid-run aborts the old run and starts a fresh one", async () => {
-    mount();
-    await setJd(JD_A);
-    await toggleOptIn();
-    expect(runs).toHaveLength(1);
-
-    modelId = "another-model";
-    act(() => {
-      root.render(<PasteJdPanel parsed={SPARSE_RESUME} onTailor={vi.fn()} />);
-    });
-    await settle();
-
-    expect(runs).toHaveLength(2);
-    expect(runs[0].signal?.aborted).toBe(true);
-    expect(runs[1].modelId).toBe("another-model");
   });
 
   it("clearing the JD aborts the run and takes the panel back to nothing", async () => {

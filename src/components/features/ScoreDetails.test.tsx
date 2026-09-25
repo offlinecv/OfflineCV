@@ -8,7 +8,7 @@
  * (#955), each of which fails silently if a later edit undoes it.
  *
  *  1. **Docking must not UNMOUNT the region.** The region holds a critique
- *     that cost a ~1.2 GB model download plus inference, and the docking
+ *     that cost a multi-GB model download plus inference, and the docking
  *     trigger is a 4.5s idle timer — so "conditionally render it instead" is
  *     not a rare data loss, it is one per read. Asserted as node identity plus
  *     a mount counter, not as presence: `{!collapsed && children}` and

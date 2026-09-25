@@ -28,7 +28,7 @@
  * `lib/heuristics/disagreement.ts`.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { detectWebGpu } from "../lib/webllm/capability.ts";
 import {
   loadEngine,
@@ -47,7 +47,8 @@ import {
   trackDisagreementsFound,
   trackLlmParseRan,
 } from "../lib/analytics.ts";
-import { useModelSelection } from "./useModelSelection.ts";
+import { requestModelConsent } from "./useModelConsent.ts";
+import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
 import type { ProgressUpdate, WebGpuCapability } from "../lib/webllm/types.ts";
 import type {
   CascadeResult,
@@ -144,7 +145,6 @@ export function useResumeAnalysisLlm(
 ): AnalysisController {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<AnalysisStatus>({ kind: "idle" });
-  const { selectedModelId } = useModelSelection();
 
   useEffect(() => {
     let cancelled = false;
@@ -167,80 +167,91 @@ export function useResumeAnalysisLlm(
 
   const isBusy = status.kind === "loading" || status.kind === "running";
 
+  // Set synchronously, before the consent await: `status` only turns busy
+  // after the dialog is answered, so without this a double-click queues two
+  // runs behind one consent. Released on decline and on every finish.
+  const inFlightRef = useRef(false);
+
   const run = useCallback(async () => {
-    if (isBusy) return;
-    // Snapshot the model id so the same id is released that we acquired
-    // (#148 contract — guards against model switch mid-inference).
-    const modelId = selectedModelId;
-    acquireInference(modelId);
+    if (inFlightRef.current || isBusy) return;
+    inFlightRef.current = true;
+    const modelId = SHIPPED_MODEL.id;
     try {
-      setStatus({
-        kind: "loading",
-        progress: { progress: 0, text: "Starting…" },
-      });
-      const engine = await loadEngine(modelId, (progress) => {
-        setStatus({ kind: "loading", progress });
-      });
-      setStatus({ kind: "running" });
+      // Consent first (#1015): a decline leaves the panel as it was.
+      if (!(await requestModelConsent())) return;
+      // #148 contract — acquire before the engine await.
+      acquireInference(modelId);
+      try {
+        setStatus({
+          kind: "loading",
+          progress: { progress: 0, text: "Starting…" },
+        });
+        const engine = await loadEngine(modelId, (progress) => {
+          setStatus({ kind: "loading", progress });
+        });
+        setStatus({ kind: "running" });
 
-      const combined = await analyzeResumeWithLlm(
-        {
-          rawText: result.rawText,
-          ...(result.markdown ? { markdown: result.markdown } : {}),
-        },
-        engine,
-      );
+        const combined = await analyzeResumeWithLlm(
+          {
+            rawText: result.rawText,
+            ...(result.markdown ? { markdown: result.markdown } : {}),
+          },
+          engine,
+        );
 
-      // ── Telemetry: the LLM pass ran (sets llm_ran:true downstream). ──
-      trackLlmParseRan({ model: modelId });
+        // ── Telemetry: the LLM pass ran (sets llm_ran:true downstream). ──
+        trackLlmParseRan({ model: modelId });
 
-      // ── Diff the LLM parse against the heuristic parse. ──
-      // Both sides are canonical shapes: the cascade canonical and the LLM
-      // parse coerced through `projectLlmDiff`. `diffParses` derives its
-      // whole-section-drop gate from the heuristic canonical's own section
-      // headers, so the call site no longer computes `presentSections` (#445).
-      const triggers = result.triggers as LayoutTrigger[];
-      const disagreements = diffParses(
-        result.canonical,
-        projectLlmDiff(combined.parse),
-        triggers,
-      );
-      const tally = tallyKinds(disagreements);
-      trackDisagreementsFound({
-        model: modelId,
-        count: disagreements.length,
-        triggers,
-        ...tally,
-      });
+        // ── Diff the LLM parse against the heuristic parse. ──
+        // Both sides are canonical shapes: the cascade canonical and the LLM
+        // parse coerced through `projectLlmDiff`. `diffParses` derives its
+        // whole-section-drop gate from the heuristic canonical's own section
+        // headers, so the call site no longer computes `presentSections` (#445).
+        const triggers = result.triggers as LayoutTrigger[];
+        const disagreements = diffParses(
+          result.canonical,
+          projectLlmDiff(combined.parse),
+          triggers,
+        );
+        const tally = tallyKinds(disagreements);
+        trackDisagreementsFound({
+          model: modelId,
+          count: disagreements.length,
+          triggers,
+          ...tally,
+        });
 
-      // ── Critique telemetry: anonymized — no bullet text, no PII. ──
-      const flaggedCount = combined.critique.bulletFindings.filter(
-        (f) => f.issue !== "ok",
-      ).length;
-      trackCritiqueRan({
-        model: modelId,
-        bulletCount: combined.critique.bulletFindings.length,
-        flaggedCount,
-        missingSectionCount: combined.critique.missingSections.length,
-      });
+        // ── Critique telemetry: anonymized — no bullet text, no PII. ──
+        const flaggedCount = combined.critique.bulletFindings.filter(
+          (f) => f.issue !== "ok",
+        ).length;
+        trackCritiqueRan({
+          model: modelId,
+          bulletCount: combined.critique.bulletFindings.length,
+          flaggedCount,
+          missingSectionCount: combined.critique.missingSections.length,
+        });
 
-      setStatus({
-        kind: "done",
-        disagreements,
-        critique: combined.critique,
-      });
-    } catch (err) {
-      setStatus({
-        kind: "error",
-        message:
-          err instanceof Error
-            ? err.message
-            : "Couldn't load the on-device model",
-      });
+        setStatus({
+          kind: "done",
+          disagreements,
+          critique: combined.critique,
+        });
+      } catch (err) {
+        setStatus({
+          kind: "error",
+          message:
+            err instanceof Error
+              ? err.message
+              : "Couldn't load the on-device model",
+        });
+      } finally {
+        releaseInference(modelId);
+      }
     } finally {
-      releaseInference(modelId);
+      inFlightRef.current = false;
     }
-  }, [result, selectedModelId, isBusy]);
+  }, [result, isBusy]);
 
   const isAvailable = capability === "available" && hasText;
 

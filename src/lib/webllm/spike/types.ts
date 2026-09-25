@@ -112,7 +112,8 @@ export interface SpikeReport {
   overallJudgeFailureRate: number;
   /**
    * Max prompt_tokens seen in any extract call (token-budget headroom signal).
-   * Compare against the model's context window (Qwen2.5-1.5B: 32 768 tokens).
+   * Compare against the model's context window (4 096 tokens in web-llm's
+   * prebuilt records).
    */
   overallMaxExtractPromptTokens: number;
   /**

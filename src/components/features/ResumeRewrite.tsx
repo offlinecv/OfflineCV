@@ -5,8 +5,9 @@
  * Whole-résumé "Rewrite full résumé" feature (issue #67 — Phase 4 of #66).
  *
  * This file owns:
- *   - The single primary CTA (mounted next to the model picker at the
- *     top of the Experience section), which opens a steering dialog
+ *   - The single primary CTA (mounted next to the on-device model status
+ *     line at the top of the Experience section), which opens a steering
+ *     dialog
  *   - The steering dialog (#210 page-length chips + instructions), shown
  *     before the run; "Run rewrite" starts it and closes the dialog. Its
  *     collapsed "copy the prompt instead" disclosure (#609) lives in the
@@ -34,7 +35,7 @@
 
 import { useState } from "react";
 import type { ResumeCritique } from "../../lib/webllm/critique-resume.ts";
-import { Button, Checkbox, Dialog, InlineResult, ModelLoadProgress, TextAreaField } from "@design-system";
+import { Button, Checkbox, Dialog, InlineResult, TextAreaField } from "@design-system";
 import {
   labelForResumeRewrite,
   useResumeRewrite,
@@ -54,6 +55,7 @@ import {
 } from "./ResumeRewriteProposed.tsx";
 import { numberDriftStatus } from "./NumberPreservationWarning.tsx";
 import { RewritePromptDisclosure } from "./RewritePromptDisclosure.tsx";
+import { ShippedModelLoadProgress } from "./ShippedModelLoadProgress.tsx";
 
 export interface ResumeRewriteParts {
   /** The CTA button; opens the steering dialog (#210 steering box now lives
@@ -140,12 +142,12 @@ function RewriteLauncher({
     <>
       {/* `secondary`, not `primary` (#955): this was the single most
           dominant control on a page whose stage is "Fix it", and its label
-          frequently reads `Download model · ~1.6 GB` — primary-styled while
+          frequently read `Download model · ~1.6 GB` — primary-styled while
           not yet usable. Placement, label, `aria-label` and `disabled` are
           unchanged; #67 still puts the trigger inline near `SectionRewrite`.
           The variant deliberately does NOT depend on whether the model is
-          cached: `cachedIds` lives inside `ModelSelector`, and lifting it out
-          is out of scope. */}
+          cached: that probe lives in `useShippedModelDownload`, behind the
+          status line, and lifting it out is out of scope. */}
       <Button
         variant="secondary"
         size="sm"
@@ -316,11 +318,7 @@ export function ResumeRewritePanel({
   if (status.kind === "idle") return null;
   if (status.kind === "loading") {
     return (
-      <ModelLoadProgress
-        progress={status.progress.progress}
-        text={status.progress.text}
-        label="Loading the rewrite model (one-time download)"
-      />
+      <ShippedModelLoadProgress progress={status.progress} />
     );
   }
   if (status.kind === "error") {
@@ -442,7 +440,7 @@ function CompletedList({
             {driftStatus === "reverted" && (
               <span
                 className="rounded bg-feedback-warning-bg px-1.5 py-0.5 text-3xs text-feedback-warning-text"
-                title="The rewrite dropped or invented a metric, so the original was kept"
+                title="The rewrite changed a metric or came back garbled, so the original was kept"
               >
                 kept original
               </span>

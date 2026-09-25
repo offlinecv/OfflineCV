@@ -25,7 +25,7 @@
  *   - No raw <button> in this file.
  */
 
-import { Button, ModelLoadProgress } from "@design-system";
+import { Button } from "@design-system";
 import {
   labelForAnalysis,
   type AnalysisController,
@@ -34,6 +34,7 @@ import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import { CritiqueResults } from "./CritiquePanel.tsx";
 import { DisagreementResults } from "./DisagreementPanel.tsx";
 import { ReportGapSection } from "./ReportGapSection.tsx";
+import { ShippedModelLoadProgress } from "./ShippedModelLoadProgress.tsx";
 
 // ── Public component ──────────────────────────────────────────────────────────
 
@@ -81,12 +82,7 @@ export function ResumeQualityPanel({
       </div>
 
       {status.kind === "loading" && (
-        <ModelLoadProgress
-          progress={status.progress.progress}
-          text={status.progress.text}
-          label="Loading the on-device model (one-time download)"
-          showExplainer
-        />
+        <ShippedModelLoadProgress progress={status.progress} showExplainer />
       )}
 
       {status.kind === "running" && (

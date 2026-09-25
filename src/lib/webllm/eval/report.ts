@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 The offlinecv Authors
 
-import { getModelById } from "../models.ts";
+import { findEvalModel } from "./candidate-models.ts";
 import { getVariantById } from "./prompt-variants.ts";
 import type { EvalReport, RunRecord } from "./types.ts";
 
@@ -46,7 +46,7 @@ export function renderMarkdownReport(report: EvalReport): string {
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const row of report.aggregates) {
-    const modelLabel = getModelById(row.modelId)?.name ?? row.modelId;
+    const modelLabel = findEvalModel(row.modelId)?.name ?? row.modelId;
     const variantLabel = getVariantById(row.variantId)?.label ?? row.variantId;
     lines.push(
       `| ${modelLabel} | ${variantLabel} | ${pct(row.numbersPreservedRate)} | ${pct(row.revertedRate)} | ${pct(row.oneLineRate)} | ${pct(row.actionVerbRate)} | ${pct(row.lengthSanityRate)} | ${pct(row.noPreambleLeakRate)} | ${pctOrDash(row.dedupEffectiveRate)} | ${pctOrDash(row.steeringAdherenceRate)} | ${numOrDash(row.judgeMean)} | **${pct(row.aggregateScore)}** |`,
@@ -57,7 +57,7 @@ export function renderMarkdownReport(report: EvalReport): string {
   lines.push("## Per-cell records");
   lines.push("");
   for (const modelId of report.modelIds) {
-    const modelLabel = getModelById(modelId)?.name ?? modelId;
+    const modelLabel = findEvalModel(modelId)?.name ?? modelId;
     lines.push(`### ${modelLabel}`);
     lines.push("");
     for (const variantId of report.variantIds) {
@@ -99,13 +99,16 @@ function numOrDash(v: number | null): string {
  * The #778 revert cell: not a PASS/fail, because a revert is neither. It reads
  * as the tokens the gate refused to lose or to let through (`REVERTED: $4.2M,
  * 14%`) so the committed report keeps the evidence the rubric can no longer
- * re-derive — the scored bullets ARE the input once a cell reverts.
+ * re-derive — the scored bullets ARE the input once a cell reverts. A cell
+ * the garbled-output gate rejected (#1015) names that reason in parentheses,
+ * so it is never mistaken for a number revert with nothing to show.
  */
 function revertCell(r: RunRecord): string {
   if (!r.reverted) return "";
+  const reason = r.garbled ? ` (garbled: ${r.garbled})` : "";
   return r.revertedNumbers.length === 0
-    ? "REVERTED"
-    : `REVERTED: ${r.revertedNumbers.join(", ")}`;
+    ? `REVERTED${reason}`
+    : `REVERTED${reason}: ${r.revertedNumbers.join(", ")}`;
 }
 
 function tick(v: boolean): string {

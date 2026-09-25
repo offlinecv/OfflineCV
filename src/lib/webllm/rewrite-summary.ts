@@ -2,7 +2,7 @@
 // Copyright 2026 The offlinecv Authors
 
 import {
-  applyNumberPreservation,
+  applyRewriteGates,
   cleanRewriteLine,
 } from "./post-process.ts";
 import {
@@ -31,7 +31,7 @@ import { acquireInference, releaseInference } from "./web-llm.ts";
  *     the cross-model `acquireInference` lock can defer `.unload()` while
  *     this call is in flight.
  *   - Runs the deterministic number-preservation check after the model
- *     responds (same `applyNumberPreservation` used by the section path —
+ *     responds (same `applyRewriteGates` used by the section path —
  *     the set diff is shape-agnostic), including the #778 reject gate:
  *     a rewrite that drops or invents a number returns the ORIGINAL paragraph.
  *   - Returns `numbersPreserved` + `reverted` + `dropped/added` so the UI can
@@ -178,11 +178,11 @@ export async function rewriteSummaryWithLlm(
       .join(" ")
       .trim();
 
-    // #778, applied to the one-unit paragraph shape: `applyNumberPreservation`
-    // works on arrays, so wrap and unwrap. A blank generation stays blank —
+    // #778 (plus the #1015 garbled-output check), applied to the one-unit
+    // paragraph shape: `applyRewriteGates` works on arrays, so wrap and unwrap. A blank generation stays blank —
     // the gate deliberately leaves an empty rewrite to the caller's
     // failed-generation handling rather than dressing it up as "kept yours".
-    const outcome = applyNumberPreservation(
+    const outcome = applyRewriteGates(
       [summary],
       text ? [text] : [],
     );

@@ -1,8 +1,8 @@
 # Rewrite-quality eval harness
 
 Phase 3 of the in-browser AI rewrite epic (issue #65). Scores
-section-rewrite outputs against a deterministic rubric so the default
-model + prompt are picked from measurement rather than vibes.
+section-rewrite outputs against a deterministic rubric so a change to the
+shipped model or prompt can be measured rather than argued.
 
 ## Layout
 
@@ -16,6 +16,7 @@ src/lib/webllm/eval/
 ├── prompt-variants.ts    # the shipped prompt + experimental variants
 ├── runner.ts             # iterates (model × variant × fixture)
 ├── report.ts             # JSON + Markdown formatters
+├── candidate-models.ts   # dev-only model list for every harness dropdown
 └── run-eval-browser.ts   # browser entry — wires real WebLLM engine
 ```
 
@@ -60,8 +61,8 @@ one report file per model and reviewers compare them side-by-side —
 still cheap.
 
 Each downloaded report includes the model slug in the filename
-(`eval-rewrite-qwen2-5-1-5b-…-{timestamp}.{json,md}`) so the three
-per-model files coexist under `tests/fixtures/rewrite/reports/` without
+(`eval-rewrite-qwen2-5-1-5b-…-{timestamp}.{json,md}`) so per-model
+files coexist under `tests/fixtures/rewrite/reports/` without
 collision. Reports are append-only — never overwrite a prior run.
 
 `eval-rewrite.html` is NOT included in `build.rollupOptions.input`, so
@@ -82,9 +83,10 @@ that carry a steering probe — see below.
 
 The **Reverted** column (#778) is a diagnostic, not a criterion, and is the
 one column that must be read *with* another. The harness runs the product's
-number-preservation gate (`applyNumberPreservation`) before scoring, so a cell
-whose rewrite dropped **or invented** a number is scored on the fixture's own
-bullets and passes `Numbers` by construction — `Reverted` is what tells you the
+reject gates (`applyRewriteGates`: number preservation, plus the #1015
+garbled-output check) before scoring, so a cell whose rewrite dropped **or
+invented** a number, or came back garbled (instruction echo or a loop), is
+scored on the fixture's own bullets and passes `Numbers` by construction — `Reverted` is what tells you the
 model did not earn that pass. Because the gate covers both halves `Numbers`
 measures, `Numbers` now reads ~100% on any run where every cell produced
 output; treat `Reverted` as the column that describes the models, and `Numbers`
@@ -92,7 +94,8 @@ as a check that the gate ran. It is excluded from `Aggregate` on purpose: a
 revert is the guardrail working, so counting it as either a pass or a fail
 would misstate the run. Per-cell it prints the tokens that triggered the
 rejection — dropped first, then invented — because the rubric cannot re-derive
-them once the scored bullets are the input.
+them once the scored bullets are the input. A garbled revert says so:
+`REVERTED (garbled: loop)`.
 
 The judge column is `—` until the optional LLM-judge gate is enabled.
 That path is flag-plumbed (`runEval({ judgeEnabled })`) but the
@@ -126,13 +129,38 @@ the array; the browser entry picks all of them up automatically. Keep
 deltas small — one or two rule changes per variant — so a regression in
 any one criterion traces cleanly to the prompt change.
 
-## Choosing a default model
+## Candidate models
+
+The product ships one model, `SHIPPED_MODEL` in
+[`../models.ts`](../models.ts) (Gemma 2 (2B) since #1015), and has no
+picker. The harness dropdowns list
+[`candidate-models.ts`](./candidate-models.ts)'s `EVAL_MODELS` instead:
+the shipped model first (the default selection), then the models a future
+change might be compared against. The same list feeds the parse-eval
+(`parse-eval.html`) and JD spike (`jd-spike.html`) harnesses.
+
+To try another model, append its `model_id` from the pinned
+`@mlc-ai/web-llm`'s `prebuiltAppConfig.model_list` to `EVAL_MODELS`. The
+list is imported only by the harness entries and `report.ts`, and none of
+the harness pages is in `vite.config.ts`'s `rollupOptions.input`, so it
+never reaches the production bundle.
+
+Every WebLLM load requires recorded consent to the model's terms
+(`loadEngine` refuses otherwise). The harnesses record it for the model
+you run when you click **Run** — the dev server serves the product from the
+same origin, so to see the product's consent dialog again afterwards,
+remove `offlinecv:webllm:consent:<model_id>` from `localStorage`.
+
+## Choosing the shipped model
 
 The aggregate's `Aggregate` column is the equal-weight mean of the
-deterministic rates. If two models tie within ~3 points, prefer the
-smaller / Apache-2.0 one — the eval is a measurement floor, not the only
-input (license, download size, and consent friction matter for the
-shipped default).
+deterministic rates, and it is a measurement floor, not the only input:
+license, download size, consent friction and hands-on output quality all
+matter for what ships. #1015 is the worked example — the eval scored
+Gemma 2 (2B) at 54% against Qwen 2.5 (1.5B)'s 67%, and Gemma 2 shipped on
+the maintainer's hands-on rewrites. A proposal to change the shipped model
+should bring a report for the candidate *and* the current model from the
+same harness version, committed under `tests/fixtures/rewrite/reports/`.
 
 ## Steering adherence (#608)
 

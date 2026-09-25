@@ -16,7 +16,8 @@
 /**
  * How many requirements to include per judge batch (call 2).
  *
- * Qwen2.5-1.5B's context is 32 768 tokens. With a medium-size JD (~300
+ * web-llm's prebuilt record gives the model a 4 096-token context (the spike
+ * originally assumed Qwen2.5-1.5B's native 32 768). With a medium-size JD (~300
  * tokens) and a medium-size resume (~400 tokens) that still leaves room for
  * ~8 requirement objects and their verdicts before the prompt starts
  * approaching the model's practical limit. Keep at 8 for the spike; we

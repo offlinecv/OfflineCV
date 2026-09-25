@@ -7,8 +7,8 @@ the combined parse+critique pass
 
 ## What it measures
 
-Given a loaded `Qwen2.5-1.5B-Instruct-q4f16_1-MLC` model (or another registry
-model), runs BOTH passes over 3 inline PII-safe resume fixtures:
+Given a loaded model — the shipped one by default, or any entry in
+[`../eval/candidate-models.ts`](../eval/candidate-models.ts) — runs BOTH passes over 3 inline PII-safe resume fixtures:
 
 - **Separate pass (the #241 baseline)** — `parseResumeWithLlm` followed by
   `critiqueResumeWithLlm`. Two-or-three engine inferences total.
@@ -39,8 +39,9 @@ npm run eval:parse
 # opens http://localhost:5173/parse-eval.html
 ```
 
-1. Select **Qwen 2.5 (1.5B)** (default, Apache-2.0) in the model picker.
-2. Click **Run eval** — the model downloads on first run (~1.6 GB via WebGPU);
+1. Pick a model in the dropdown — the shipped model is preselected; the others
+   are the dev-only candidates (see the eval harness README).
+2. Click **Run eval** — the model downloads on first run (1–2 GB via WebGPU);
    subsequent runs use the cached IndexedDB copy. The harness runs each
    fixture through BOTH the separate and combined passes (~3 inferences per
    fixture), so expect ~3× the runtime of the original parse-only eval.
@@ -121,6 +122,6 @@ directory is imported by `src/main.tsx` or any shipped module.
 | `combined-score.ts` | Side-by-side comparison scorer + critique structural stats (#262) |
 | `combined-score.test.ts` | Vitest unit tests for the comparison scorer |
 | `combined-report.ts` | JSON + Markdown comparison report renderers (#262) |
-| `parse-eval-browser.ts` | Browser entry (model picker, run button, download wiring) |
+| `parse-eval-browser.ts` | Browser entry (candidate dropdown, run button, download wiring) |
 | `README.md` | This file |
 | `../../parse-eval.html` | Dev-only HTML page (repo root) |

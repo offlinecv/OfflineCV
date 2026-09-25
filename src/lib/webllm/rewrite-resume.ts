@@ -22,7 +22,7 @@
  *   - Engine management — `loadEngine` is the caller's problem.
  *   - Inference serialization — the inner `rewrite*WithLlm` primitives
  *     already bracket their model calls with `acquireInference` /
- *     `releaseInference`, so a cross-model picker switch defers `.unload()`
+ *     `releaseInference`, so another model's load defers `.unload()`
  *     until our step completes.
  *   - The cross-instance "one rewrite at a time" UI lock — that's
  *     `useSectionRewriteLock`'s job, held by the hook layer.

@@ -13,10 +13,11 @@
  * THREE DELIBERATE CHOICES:
  *
  * 1. HEURISTIC CLASSIFIER, NOT `classifySector`. `sector.ts` also exports the
- *    semantic `classifySector`, which loads a WebLLM model when WebGPU is
- *    present. Calling it here would kick off a multi-hundred-MB model download
- *    as a side effect of the panel merely rendering — a cost the user never
- *    asked for, on a surface whose whole value is being instant. The heuristic
+ *    semantic `classifySector`, which runs a WebLLM model when WebGPU is
+ *    present and the model is already on the device (#1015). Calling it here
+ *    would spend a model load and an inference as a side effect of the panel
+ *    merely rendering — a cost the user never asked for, on a surface whose
+ *    whole value is being instant. The heuristic
  *    is synchronous, free, and supplies the same `runnerUp` the "not right?"
  *    affordance needs. Upgrading to the semantic guess belongs behind an
  *    explicit user action, not a mount.

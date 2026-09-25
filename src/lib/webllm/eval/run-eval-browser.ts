@@ -10,7 +10,7 @@
  * scores with the deterministic rubric, and renders a downloadable
  * JSON + Markdown report.
  *
- * One model per tab on purpose. Cycling all three registry models in a
+ * One model per tab on purpose. Cycling multiple candidate models in a
  * single tab kept crashing Chrome on consumer GPUs during the
  * eviction-then-reload path — eviction calls `.unload()` but VRAM
  * isn't guaranteed to be free by the time the next model starts
@@ -32,7 +32,7 @@
  */
 
 import {
-  applyNumberPreservation,
+  applyRewriteGates,
   cleanRewriteLine,
 } from "../post-process.ts";
 import {
@@ -40,15 +40,15 @@ import {
   sectionMaxTokens,
 } from "../rewrite-section.ts";
 import { buildSteeringSuffix } from "../steering.ts";
-import { MODEL_REGISTRY, getModelById } from "../models.ts";
-import {
-  acquireInference,
-  loadEngine,
-  releaseInference,
-} from "../web-llm.ts";
+import { acquireInference, releaseInference } from "../web-llm.ts";
 import { detectWebGpu } from "../capability.ts";
 import type { WebLlmEngine } from "../types.ts";
 
+import {
+  fillEvalModelSelect,
+  findEvalModel,
+  loadEvalModel,
+} from "./candidate-models.ts";
 import { REWRITE_FIXTURES } from "./fixtures.ts";
 import { PROMPT_VARIANTS } from "./prompt-variants.ts";
 import { renderJsonReport, renderMarkdownReport } from "./report.ts";
@@ -111,12 +111,13 @@ function makeRealRewriteFn(engine: WebLlmEngine): RewriteFn {
     // half: the gate now fires on invention as well, and an invention-only
     // cell would otherwise print a bare `REVERTED` with no trace of the figure
     // the model made up — the one thing the rubric cannot re-derive.
-    const outcome = applyNumberPreservation(fixture.bullets, cleaned);
+    const outcome = applyRewriteGates(fixture.bullets, cleaned);
     return {
       bullets: outcome.bullets,
       raw,
       reverted: outcome.reverted,
       revertedNumbers: [...outcome.droppedNumbers, ...outcome.addedNumbers],
+      garbled: outcome.garbled,
     } satisfies RawRewriteOutput;
   };
 }
@@ -167,17 +168,11 @@ function wireDownload(
 }
 
 function populateModelPicker(refs: DomRefs): void {
-  refs.modelSelect.innerHTML = "";
-  for (const model of MODEL_REGISTRY) {
-    const option = document.createElement("option");
-    option.value = model.id;
-    option.textContent = `${model.name} · ${model.licenseType} · ~${model.downloadSizeMb} MB`;
-    refs.modelSelect.appendChild(option);
-  }
+  fillEvalModelSelect(refs.modelSelect);
 }
 
 async function runForModel(refs: DomRefs, modelId: string): Promise<void> {
-  const meta = getModelById(modelId);
+  const meta = findEvalModel(modelId);
   const display = meta?.name ?? modelId;
 
   appendLog(refs, `loading model ${modelId}`);
@@ -192,7 +187,7 @@ async function runForModel(refs: DomRefs, modelId: string): Promise<void> {
   // with a different model can't tear down our engine mid-eval.
   acquireInference(modelId);
   try {
-    const engine = await loadEngine(modelId, (update) => {
+    const engine = await loadEvalModel(modelId, (update) => {
       refs.progress.textContent = `${display}: ${(update.progress * 100).toFixed(0)}% — ${update.text}`;
     });
     appendLog(
@@ -264,7 +259,7 @@ async function main(): Promise<void> {
         return;
       }
       const modelId = refs.modelSelect.value;
-      const meta = getModelById(modelId);
+      const meta = findEvalModel(modelId);
       if (!meta) {
         setStatus(refs, `Unknown model: ${modelId}`);
         return;

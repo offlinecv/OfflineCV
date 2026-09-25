@@ -14,6 +14,8 @@
  * `RawRewriteOutput` records, and the runner feeds them into `scoreRubric`.
  */
 
+import type { GarbledReason } from "../garbled-output.ts";
+
 /**
  * Fixture kind drives which rubric criteria are applicable. `redundant`
  * fixtures expect dedup; `numeric` fixtures expect strict number
@@ -166,6 +168,12 @@ export interface RawRewriteOutput {
    * actually lost or made up.
    */
   revertedNumbers?: readonly string[];
+  /**
+   * Set when the revert was the garbled-output gate's (#1015,
+   * `garbled-output.ts`) — the model narrated the task or looped — rather
+   * than, or as well as, a number drift.
+   */
+  garbled?: GarbledReason | null;
 }
 
 /**
@@ -211,6 +219,12 @@ export interface RunRecord {
    * undifferentiated; empty when the gate did not fire.
    */
   revertedNumbers: string[];
+  /**
+   * Why the garbled-output gate reverted this cell (#1015). Optional so the
+   * reports committed before that gate still parse; absent reads as "not
+   * garbled".
+   */
+  garbled?: GarbledReason;
   /** Wall-clock ms spent inside the `RewriteFn` (browser-leg only). */
   rewriteDurationMs: number | null;
   /**

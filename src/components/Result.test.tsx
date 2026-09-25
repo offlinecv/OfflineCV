@@ -34,6 +34,11 @@ const webgpu = vi.hoisted(() => ({ capability: "available" as string }));
 vi.mock("../lib/webllm/capability.ts", () => ({
   detectWebGpu: () => Promise.resolve(webgpu.capability),
 }));
+// The consent dialog lives in `PageShell`, which this suite does not mount;
+// the user is taken to have already accepted the model's terms (#1015).
+vi.mock("../hooks/useModelConsent.ts", () => ({
+  requestModelConsent: () => Promise.resolve(true),
+}));
 vi.mock("../lib/webllm/web-llm.ts", () => ({
   loadEngine: () => Promise.resolve({ chat: {} }),
   acquireInference: () => {},
@@ -208,7 +213,7 @@ describe("Result — exactly one export surface (#823)", () => {
     // nothing failing to say so.
     const el = await render(uploadResultMissingContact());
     // "Download" plus one of the three artifact names. The model-weights CTA in
-    // the on-device panel ("Download model · ~1.6 GB") is deliberately outside
+    // the on-device status line ("Download · ~1.9 GB") is deliberately outside
     // this — it fetches the model, not something the user leaves with.
     const artifact = /\b(pdf|markdown|report|r[ée]sum[ée]|cv\.md)\b/i;
     const downloads = [...el.querySelectorAll("button")]

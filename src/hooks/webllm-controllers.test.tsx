@@ -9,9 +9,11 @@
  * `useParseDisagreement` + `useResumeCritique`) and `useLlmEscapeHatch`.
  *
  * The engine layer (capability probe, loadEngine, the combined analysis pass,
- * the escape-hatch parse pass, model selection, analytics) is mocked, so these
- * tests exercise the React/state glue only — availability gating, the
- * idle→loading→done happy path, and the error path — via a probe component
+ * the escape-hatch parse pass, the consent request, analytics) is mocked, so
+ * these tests exercise the React/state glue only — availability gating, the
+ * consent gate (#1015) and its double-click guard, the idle→loading→done
+ * happy path, and the error path —
+ * via a probe component
  * (the project has no RTL; same pattern as the other hook tests).
  */
 
@@ -26,17 +28,18 @@ import type { SectionName } from "../lib/heuristics/regex.ts";
 
 let webgpu: "available" | "unavailable" = "available";
 let loadShouldThrow = false;
+let consentAnswer = true;
 
 vi.mock("../lib/webllm/capability.ts", () => ({
   detectWebGpu: () => Promise.resolve(webgpu),
 }));
 
 vi.mock("../lib/webllm/web-llm.ts", () => ({
-  loadEngine: (_id: string, onProgress: (p: unknown) => void) => {
+  loadEngine: vi.fn((_id: string, onProgress: (p: unknown) => void) => {
     onProgress({ progress: 0.5, text: "Loading…" });
     if (loadShouldThrow) return Promise.reject(new Error("load failed"));
     return Promise.resolve({ chat: {} });
-  },
+  }),
   acquireInference: vi.fn(),
   releaseInference: vi.fn(),
 }));
@@ -78,8 +81,8 @@ vi.mock("../lib/webllm/parse-resume.ts", () => ({
     }),
 }));
 
-vi.mock("./useModelSelection.ts", () => ({
-  useModelSelection: () => ({ selectedModelId: "test-model" }),
+vi.mock("./useModelConsent.ts", () => ({
+  requestModelConsent: vi.fn(() => Promise.resolve(consentAnswer)),
 }));
 
 vi.mock("../lib/analytics.ts", () => ({
@@ -91,7 +94,13 @@ vi.mock("../lib/analytics.ts", () => ({
 
 import { useResumeAnalysisLlm } from "./useResumeAnalysisLlm.ts";
 import { useLlmEscapeHatch } from "./useLlmEscapeHatch.ts";
-import { acquireInference, releaseInference } from "../lib/webllm/web-llm.ts";
+import {
+  acquireInference,
+  loadEngine,
+  releaseInference,
+} from "../lib/webllm/web-llm.ts";
+import { requestModelConsent } from "./useModelConsent.ts";
+import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
 import {
   trackLlmParseRan,
   trackDisagreementsFound,
@@ -159,6 +168,7 @@ async function mount<T>(useHook: () => T, sink: { current: T | null }) {
 beforeEach(() => {
   webgpu = "available";
   loadShouldThrow = false;
+  consentAnswer = true;
 });
 
 afterEach(() => {
@@ -184,14 +194,57 @@ describe("useResumeAnalysisLlm", () => {
     // The diff and critique both populate from the single inference.
     expect(status.disagreements).toBeDefined();
     expect(status.critique.bulletFindings).toHaveLength(2);
-    // The #148 snapshot-before-await contract: the controller acquires the
-    // inference slot for the selected model and releases the same id.
-    expect(acquireInference).toHaveBeenCalledWith("test-model");
-    expect(releaseInference).toHaveBeenCalledWith("test-model");
+    // Consent was asked first (#1015), then the #148 contract: the
+    // controller acquires the shipped model's inference slot and releases it.
+    expect(requestModelConsent).toHaveBeenCalledOnce();
+    expect(acquireInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
+    expect(releaseInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
     // All three telemetry events fire from the single combined pass.
     expect(trackLlmParseRan).toHaveBeenCalledTimes(1);
     expect(trackDisagreementsFound).toHaveBeenCalledTimes(1);
     expect(trackCritiqueRan).toHaveBeenCalledTimes(1);
+  });
+
+  it("declined consent: nothing loads and the panel stays idle", async () => {
+    consentAnswer = false;
+    const r = result();
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    await mount(() => useResumeAnalysisLlm(r), sink);
+    await act(async () => {
+      await sink.current!.run();
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+    expect(loadEngine).not.toHaveBeenCalled();
+    expect(acquireInference).not.toHaveBeenCalled();
+  });
+
+  it("a double-click while consent is pending starts one run, and a decline frees the next", async () => {
+    const r = result();
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    await mount(() => useResumeAnalysisLlm(r), sink);
+    await act(async () => {
+      const first = sink.current!.run();
+      const second = sink.current!.run();
+      await Promise.all([first, second]);
+    });
+    expect(requestModelConsent).toHaveBeenCalledOnce();
+    expect(loadEngine).toHaveBeenCalledOnce();
+
+    vi.clearAllMocks();
+    consentAnswer = false;
+    await act(async () => {
+      await sink.current!.run();
+    });
+    consentAnswer = true;
+    await act(async () => {
+      await sink.current!.run();
+    });
+    expect(requestModelConsent).toHaveBeenCalledTimes(2);
+    expect(loadEngine).toHaveBeenCalledOnce();
   });
 
   it("is unavailable without WebGPU", async () => {
@@ -217,10 +270,52 @@ describe("useLlmEscapeHatch", () => {
       await sink.current!.run();
     });
     expect(sink.current!.status.kind).toBe("done");
-    // The #148 snapshot-before-await contract: the controller acquires the
-    // inference slot for the selected model and releases the same id.
-    expect(acquireInference).toHaveBeenCalledWith("test-model");
-    expect(releaseInference).toHaveBeenCalledWith("test-model");
+    // Consent was asked first (#1015), then the #148 contract: the
+    // controller acquires the shipped model's inference slot and releases it.
+    expect(requestModelConsent).toHaveBeenCalledOnce();
+    expect(acquireInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
+    expect(releaseInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
+  });
+
+  it("declined consent: nothing loads and the offer stays idle", async () => {
+    consentAnswer = false;
+    const r = result();
+    const sink: { current: ReturnType<typeof useLlmEscapeHatch> | null } = {
+      current: null,
+    };
+    await mount(() => useLlmEscapeHatch(r, r), sink);
+    await act(async () => {
+      await sink.current!.run();
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+    expect(loadEngine).not.toHaveBeenCalled();
+  });
+
+  it("a double-click while consent is pending starts one run, and a decline frees the next", async () => {
+    const r = result();
+    const sink: { current: ReturnType<typeof useLlmEscapeHatch> | null } = {
+      current: null,
+    };
+    await mount(() => useLlmEscapeHatch(r, r), sink);
+    await act(async () => {
+      const first = sink.current!.run();
+      const second = sink.current!.run();
+      await Promise.all([first, second]);
+    });
+    expect(requestModelConsent).toHaveBeenCalledOnce();
+    expect(loadEngine).toHaveBeenCalledOnce();
+
+    vi.clearAllMocks();
+    consentAnswer = false;
+    await act(async () => {
+      await sink.current!.run();
+    });
+    consentAnswer = true;
+    await act(async () => {
+      await sink.current!.run();
+    });
+    expect(requestModelConsent).toHaveBeenCalledTimes(2);
+    expect(loadEngine).toHaveBeenCalledOnce();
   });
 
   it("surfaces an error when the engine fails to load", async () => {

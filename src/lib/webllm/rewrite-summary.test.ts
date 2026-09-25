@@ -128,6 +128,17 @@ describe("rewriteSummaryWithLlm", () => {
     expect(out.numbersPreserved).toBe(true);
   });
 
+  it("rejects a looping rewrite and returns the original paragraph (#1015)", async () => {
+    const { engine } = makeEngine(async () =>
+      reply(
+        "Support for the team's project, and the team's project, and the team's project, and the team's project.",
+      ),
+    );
+    const out = await rewriteSummaryWithLlm("Producer for opera.", engine, TEST_MODEL);
+    expect(out.text).toBe("Producer for opera.");
+    expect(out.reverted).toBe(true);
+  });
+
   it("rejects a rewrite that drops a metric and returns the original paragraph (#778)", async () => {
     const { engine } = makeEngine(async () =>
       reply("Senior engineer with a decade of experience."),

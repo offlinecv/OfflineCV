@@ -15,8 +15,8 @@ On top of that sit the optional surfaces that do use a local language model.
 Each is opt-in, and naming them is more useful than counting them, because the
 list grows: flagging where the heuristic parse and the model disagree,
 critiquing résumé quality, rewriting a bullet or a section, recovering a résumé
-the heuristic parser mangled, matching a pasted job description semantically,
-and inferring a posting's sector during a job search. All of them run through
+the heuristic parser mangled, and matching a pasted job description
+semantically. All of them run through
 [WebLLM](https://github.com/mlc-ai/web-llm) on **WebGPU**, inside the tab. If
 the browser has no WebGPU, the surfaces detect that and say so rather than
 falling back to a server.
@@ -32,17 +32,24 @@ default.
 
 | Model | Size | License |
 |---|---|---|
-| Qwen 2.5 (1.5B) — default | 1630 MB | Apache-2.0 |
-| Gemma 2 (2B) | 1895 MB | Restricted-Community |
-| Llama 3.2 (3B) | 2264 MB | Restricted-Community |
+| Gemma 2 (2B) | 1895 MB | [Gemma Terms of Use](https://ai.google.dev/gemma/terms) |
 
-Registry: [`src/lib/webllm/models.ts`](../src/lib/webllm/models.ts). The
-default is Apache-2.0 deliberately, so a fresh install boots without a licence
-prompt; the other two are gated behind a consent modal that shows the licence
-before anything downloads.
+Every on-device feature uses this one model
+([`src/lib/webllm/models.ts`](../src/lib/webllm/models.ts)). Gemma is not
+Apache-2.0, so nothing downloads until you have accepted
+its terms: the first on-device action you start opens a dialog that links
+them, and declining changes nothing. The job search's sector guess uses a
+keyword heuristic, not the model. The code has a model-backed classifier
+(`classifySector` in
+[`sector.ts`](../src/lib/job-search/sector.ts)), but no surface calls it
+today; if one does, it never asks, and it uses the model only once you have
+accepted its terms and the model is already on your device — otherwise it keeps
+the heuristic, so it can never start a download. Why this model, and how a change to it should be
+measured, is in the `models.ts` docblock and the
+[eval harness README](../src/lib/webllm/eval/README.md).
 
-**What crosses the network is the model, not your résumé.** Choosing a model
-downloads 1.6–2.3 GB of weights from `huggingface.co` and
+**What crosses the network is the model, not your résumé.** The first use
+downloads about 1.9 GB of weights from `huggingface.co` and
 `raw.githubusercontent.com` — the one egress this lane has, and the reason the
 size is shown before you commit to it. The prompt, the résumé text, and the
 output stay in the tab. The full list of what does leave, across every lane, is

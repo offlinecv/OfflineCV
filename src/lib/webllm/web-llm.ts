@@ -2,13 +2,32 @@
 // Copyright 2026 The offlinecv Authors
 
 import { trackWebllmDownloadStarted, trackWebllmLoaded } from "../analytics.ts";
+import { hasModelConsent, ModelConsentRequiredError } from "./consent.ts";
+import {
+  _resetEngineStatusForTesting,
+  markEngineIdle,
+  markEngineLoaded,
+  markEngineLoading,
+} from "./engine-status.ts";
+import { hasModelWeightsCached } from "./model-cache.ts";
 import type { ProgressUpdate, WebLlmEngine } from "./types.ts";
 
 /**
  * Per-model WebLLM engine cache + loader.
  *
- * The picker (PR B of #64) lets the user switch between three models at
- * runtime. Two correctness constraints follow:
+ * **No download without consent (#1015).** `loadEngine` rejects with
+ * `ModelConsentRequiredError` — before touching the cache, the chain, or the
+ * `@mlc-ai/web-llm` import — unless `hasModelConsent(modelId)` holds. The
+ * product surfaces ask first (`requestModelConsent` in
+ * `src/hooks/useModelConsent.ts`) and sector classification checks first, so
+ * this is the backstop that keeps a caller that forgot from downloading
+ * anything, not the place the user is asked.
+ *
+ * The product loads one model (`SHIPPED_MODEL` in `models.ts`), so in the app
+ * the cross-model machinery below never evicts anything. It stays because the
+ * dev-only eval harnesses switch between candidate models in one page, and
+ * because it is what keeps a future model change from holding two multi-GB
+ * engines at once. Two correctness constraints follow:
  *
  *   1. **At most one engine resident.** Holding 2–3 multi-GB quantized
  *      models in WebGPU memory will OOM consumer hardware. Each cross-model
@@ -18,11 +37,9 @@ import type { ProgressUpdate, WebLlmEngine } from "./types.ts";
  *      delete the Map entry and let GC reclaim it."
  *   2. **Cross-model loads serialize.** Two `loadEngine` calls for
  *      different model ids issued in the same microtask must NOT both
- *      start downloading concurrently (the spec's "PR B's picker MUST
- *      serialize"). PR A initially documented this as an unfixed race
- *      because PR A's consumers only ever passed `DEFAULT_MODEL_ID`; PR B
- *      introduces the picker, so this file now actually serializes the
- *      cross-model path via a chained promise.
+ *      start downloading concurrently. This file serializes the
+ *      cross-model path via a chained promise (added with the #64 model
+ *      picker, since retired by #1015).
  *
  * Implementation shape:
  *   - `loadedEngines: Map<modelId, engine>` holds engines whose `.reload()`
@@ -35,13 +52,15 @@ import type { ProgressUpdate, WebLlmEngine } from "./types.ts";
  *     actual download once its turn arrives. Errors in prior entries are
  *     swallowed by a `.catch` on the chain so a failed load doesn't block
  *     subsequent ones.
+ *   - Every transition (loading + progress, loaded, evicted/cleared/failed)
+ *     is published to `engine-status.ts`, so a surface that only reports on
+ *     the model sees a load another caller started.
  *
  * Failure-during-switch is a documented trade-off: if the user is on model
  * A and asks for B, A's `.unload()` is called when B's turn arrives. If B
  * then fails, A is gone — the retry path is "click Y again." Deferring
  * eviction would double peak VRAM and can OOM on a 4 GB GPU, which is the
- * exact failure we're guarding against. PR B's picker surfaces a per-model
- * failure message and lets the user pick again.
+ * exact failure we're guarding against.
  *
  * Telemetry rules (per #64 AC):
  *   - `webllm_download_started({ model })` fires once per model id, ever.
@@ -73,11 +92,11 @@ let serialChain: Promise<unknown> = Promise.resolve();
  * Per-model count of in-flight `engine.chat.completions.create()` calls.
  * `evictAllExcept` consults this before invoking `.unload()` so an engine
  * mid-inference doesn't get torn down underneath its caller — which is
- * reachable in PR B because `SectionRewrite` / `ResumeRewrite` are separate
- * consumers from the picker, not disabled by its loading state. While the
- * picker is downloading model B, a rewrite caller can fast-path to loaded
- * engine A; the picker's chain then arrives at `evictAllExcept(B)` and would
- * call `A.unload()` mid-stream. With this tracker, the unload is deferred
+ * reachable whenever two callers ask for different models: while one is
+ * downloading model B, another can fast-path to loaded engine A; B's chain
+ * entry then arrives at `evictAllExcept(B)` and would call `A.unload()`
+ * mid-stream. (The product loads one model since #1015, so today this is the
+ * eval harness's case — the counter is kept rather than re-derived later.) With this tracker, the unload is deferred
  * into `pendingUnload` until `releaseInference` drains it on completion.
  */
 const inflightInferenceCount = new Map<string, number>();
@@ -89,7 +108,7 @@ const pendingUnload = new Map<string, CacheableEngine>();
  * ## Inference callers MUST acquire BEFORE awaiting (issue #148)
  *
  * The fast path returns `Promise.resolve(engine)`, but `await` still yields
- * to the microtask queue. A concurrent picker switch's chain entry can run
+ * to the microtask queue. A concurrent other-model load's chain entry can run
  * `evictAllExcept(otherId)` in that gap, see `inflightInferenceCount[id]`
  * is 0, and call `engine.unload()` immediately — tearing the engine down
  * before the caller's continuation gets to use it.
@@ -110,7 +129,7 @@ const pendingUnload = new Map<string, CacheableEngine>();
  * `acquireInference` inside the rewrite primitives is defensive belt — it
  * does not close the load→use gap on its own.
  *
- * Non-inference callers (the model picker preloading a model) do NOT need
+ * Non-inference callers (the status line's "Download" preloading the model) do NOT need
  * the wrapper — the gap is harmless if no inference is about to run on the
  * returned engine.
  *
@@ -135,6 +154,12 @@ export function loadEngine(
   modelId: string,
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<WebLlmEngine> {
+  // Consent first, ahead of every fast path: nothing below may run for a
+  // model whose terms the user has not accepted.
+  if (!hasModelConsent(modelId)) {
+    return Promise.reject(new ModelConsentRequiredError(modelId));
+  }
+
   // Fast path A: this model is already loaded.
   const loaded = loadedEngines.get(modelId);
   if (loaded) return Promise.resolve(loaded);
@@ -153,6 +178,7 @@ export function loadEngine(
     rejectOut = rej;
   });
   pendingByModelId.set(modelId, slot);
+  markEngineLoading(modelId, { progress: 0, text: "Starting…" });
 
   const chainEntry = serialChain
     .catch(() => {
@@ -164,6 +190,7 @@ export function loadEngine(
         // model (unlikely with current consumers but cheap to guard).
         const alreadyLoaded = loadedEngines.get(modelId);
         if (alreadyLoaded) {
+          markEngineLoaded(modelId);
           resolveOut(alreadyLoaded);
           return;
         }
@@ -177,9 +204,27 @@ export function loadEngine(
           trackWebllmDownloadStarted({ model: modelId });
         }
 
+        // Probe before web-llm starts writing, so every label can say
+        // whether this is the one-time download or a load from this device
+        // (#1015). A local Cache API read: no network, no web-llm chunk.
+        const source = (await hasModelWeightsCached(modelId))
+          ? "device"
+          : "network";
+        const started: ProgressUpdate = { progress: 0, text: "Starting…", source };
+        markEngineLoading(modelId, started);
+        onProgress(started);
+
         const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
         const engine = (await CreateMLCEngine(modelId, {
-          initProgressCallback: (report) => onProgress(report),
+          initProgressCallback: (report) => {
+            const update: ProgressUpdate = {
+              progress: report.progress,
+              text: report.text,
+              source,
+            };
+            markEngineLoading(modelId, update);
+            onProgress(update);
+          },
         })) as unknown as CacheableEngine;
 
         if (!loadedFiredFor.has(modelId)) {
@@ -191,11 +236,13 @@ export function loadEngine(
         if (pendingByModelId.get(modelId) === slot) {
           pendingByModelId.delete(modelId);
         }
+        markEngineLoaded(modelId);
         resolveOut(engine);
       } catch (err) {
         if (pendingByModelId.get(modelId) === slot) {
           pendingByModelId.delete(modelId);
         }
+        markEngineIdle(modelId);
         rejectOut(err);
       }
     });
@@ -231,6 +278,7 @@ function evictAllExcept(keepId: string): void {
   for (const [id, engine] of loadedEngines) {
     if (id === keepId) continue;
     loadedEngines.delete(id);
+    markEngineIdle(id);
     if ((inflightInferenceCount.get(id) ?? 0) > 0) {
       // Park the unload — releaseInference will drain it when the last
       // mid-flight inference call finishes.
@@ -303,6 +351,7 @@ function unloadEngine(modelId: string): void {
   const engine = loadedEngines.get(modelId);
   if (!engine) return;
   loadedEngines.delete(modelId);
+  markEngineIdle(modelId);
   if ((inflightInferenceCount.get(modelId) ?? 0) > 0) {
     // Park the unload — releaseInference drains it when the last mid-flight
     // inference call finishes (same contract as evictAllExcept).
@@ -317,7 +366,7 @@ function unloadEngine(modelId: string): void {
 /**
  * Clear a downloaded model from BOTH layers:
  *   1. The resident WebGPU/RAM engine — ours, via `unloadEngine`.
- *   2. The on-disk IndexedDB cache — WebLLM's `deleteModelAllInfoInCache`,
+ *   2. The on-disk Cache API cache — WebLLM's `deleteModelAllInfoInCache`,
  *      which drops the model tensors + tokenizer + wasm + chat config (the
  *      same `prebuiltAppConfig` scope our `CreateMLCEngine` loads write).
  *
@@ -326,8 +375,12 @@ function unloadEngine(modelId: string): void {
  * skipping (the flags exist to dedupe *retries of a live session*, not to
  * mask a genuine fresh download after the user wiped the cache).
  *
- * `clearModel` targets a model the picker shows as already cached and idle,
- * so no load is in flight for it; pending loads are therefore not cancelled.
+ * `clearModel` targets a model that is cached and idle — the status line's
+ * "Remove from this device" — so no load is in flight for it; pending loads
+ * are therefore not cancelled. Never call it for a model that may not be
+ * cached: web-llm reads `tensor-cache.json` through `fetchWithCache`, which
+ * fetches it from the network when it is missing. (`retired-models.ts`
+ * deletes Cache API entries directly for that reason.)
  */
 export async function clearModel(modelId: string): Promise<void> {
   unloadEngine(modelId);
@@ -346,4 +399,5 @@ export function _resetEngineCacheForTesting(): void {
   inflightInferenceCount.clear();
   pendingUnload.clear();
   serialChain = Promise.resolve();
+  _resetEngineStatusForTesting();
 }

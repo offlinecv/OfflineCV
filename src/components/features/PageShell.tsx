@@ -35,9 +35,13 @@
  * state in between is `useJourneyGuidance`, which is where the render-time
  * derivation of the blocked stage is documented.
  *
+ * It also mounts `ModelConsentHost`, the single consent dialog for the
+ * on-device model (#1015): both surfaces have WebLLM features, and none of
+ * them renders a dialog of its own.
+ *
  * Reuse: consumes only `@design-system` primitives/shared components, the
- * `JourneyRail` sibling, and the useGitHubStars / useUpdateChecker /
- * useJourneyGuidance hooks. No raw <button> / hardcoded palette.
+ * `JourneyRail` and `ModelConsentHost` siblings, and the useGitHubStars /
+ * useUpdateChecker / useJourneyGuidance hooks. No raw <button> / hardcoded palette.
  */
 
 import { useState, type MouseEvent, type ReactNode } from "react";
@@ -50,6 +54,7 @@ import {
 } from "../../hooks/useJourneyGuidance.ts";
 import { savedJobsHref } from "../../lib/jobs-landing.ts";
 import { JourneyRail, JourneyGuidance } from "./JourneyRail.tsx";
+import { ModelConsentHost } from "./ModelConsentHost.tsx";
 
 /** The rail contract, owned by `useJourneyGuidance` — aliased here because it
  *  is also this component's prop shape. */
@@ -256,6 +261,11 @@ export function PageShell({
       )}
 
       {children}
+
+      {/* The one on-device-model consent dialog per page (#1015). Every
+          surface's WebLLM features ask through it, so it sits in the chrome
+          both surfaces share. */}
+      <ModelConsentHost />
 
       <footer className="mt-auto flex flex-col items-center gap-2 border-t border-border-light pt-6 text-center text-sm text-content-tertiary">
         {/* No prose line here. The privacy sentence that used to sit above

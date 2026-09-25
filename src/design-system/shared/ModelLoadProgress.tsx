@@ -10,10 +10,9 @@
  * bar markup; consumers thread the progress fraction + label + optional
  * loader status line.
  *
- * Used today by section rewrite, resume rewrite, and the model picker
- * (`ModelSelector` in PR B of #64). When PR B's picker drives a model
- * switch, the same panel renders for the new model's download — same
- * chrome, different `label`.
+ * Feature code reaches it through `ShippedModelLoadProgress` (#1015), which
+ * picks the label from where the shipped model's weights are coming from;
+ * this piece stays domain-agnostic.
  *
  * Design rules (CLAUDE.md):
  *   – Semantic tokens only; no hardcoded hex or raw palette classes.
@@ -27,8 +26,8 @@ interface ModelLoadProgressProps {
   progress: number;
   /**
    * Headline label shown to the user. Caller-supplied so the per-bullet
-   * vs section vs picker contexts can name the operation explicitly
-   * (e.g. "Loading the rewrite model (~1.2 GB, one-time download)").
+   * vs section vs status-line contexts can name the operation explicitly
+   * (e.g. "Downloading Gemma 2 (2B) (~1.9 GB, one time)").
    */
   label: string;
   /**

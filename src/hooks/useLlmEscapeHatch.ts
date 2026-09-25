@@ -22,12 +22,13 @@
  * React/engine glue only.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { detectWebGpu } from "../lib/webllm/capability.ts";
 import { loadEngine, acquireInference, releaseInference } from "../lib/webllm/web-llm.ts";
 import { parseResumeWithLlm, type LlmParsedResume } from "../lib/webllm/parse-resume.ts";
 import { trackLlmFallbackRan } from "../lib/analytics.ts";
-import { useModelSelection } from "./useModelSelection.ts";
+import { requestModelConsent } from "./useModelConsent.ts";
+import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
 import type { ProgressUpdate, WebGpuCapability } from "../lib/webllm/types.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 
@@ -65,7 +66,6 @@ export function useLlmEscapeHatch(
 ): EscapeHatchController {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<EscapeHatchStatus>({ kind: "idle" });
-  const { selectedModelId } = useModelSelection();
 
   useEffect(() => {
     let cancelled = false;
@@ -97,37 +97,49 @@ export function useLlmEscapeHatch(
   // none, so the recovery pass would be vacuous — treat as unavailable.
   const hasText = (result.markdown ?? result.rawText).trim().length > 0;
 
+  // Set synchronously, before the consent await: `status` only turns busy
+  // after the dialog is answered, so without this a double-click queues two
+  // runs behind one consent. Released on decline and on every finish.
+  const inFlightRef = useRef(false);
+
   const run = useCallback(async () => {
+    if (inFlightRef.current) return;
     if (status.kind === "loading" || status.kind === "running") return;
-    // Snapshot the model id so the same id is released that we acquired.
-    const modelId = selectedModelId;
-    acquireInference(modelId);
+    inFlightRef.current = true;
+    const modelId = SHIPPED_MODEL.id;
     try {
-      setStatus({ kind: "loading", progress: { progress: 0, text: "Starting…" } });
-      const engine = await loadEngine(modelId, (progress) => {
-        setStatus({ kind: "loading", progress });
-      });
-      setStatus({ kind: "running" });
-      const llmParsed = await parseResumeWithLlm(
-        {
-          rawText: result.rawText,
-          ...(result.markdown ? { markdown: result.markdown } : {}),
-        },
-        engine,
-      );
-      // Report llm_ran: true + final_source: "llm_fallback" (#243).
-      trackLlmFallbackRan({ model: modelId });
-      setStatus({ kind: "done", llmParsed });
-    } catch (err) {
-      setStatus({
-        kind: "error",
-        message:
-          err instanceof Error ? err.message : "Couldn't load the recovery model",
-      });
+      // Consent first (#1015): a decline leaves the offer as it was.
+      if (!(await requestModelConsent())) return;
+      acquireInference(modelId);
+      try {
+        setStatus({ kind: "loading", progress: { progress: 0, text: "Starting…" } });
+        const engine = await loadEngine(modelId, (progress) => {
+          setStatus({ kind: "loading", progress });
+        });
+        setStatus({ kind: "running" });
+        const llmParsed = await parseResumeWithLlm(
+          {
+            rawText: result.rawText,
+            ...(result.markdown ? { markdown: result.markdown } : {}),
+          },
+          engine,
+        );
+        // Report llm_ran: true + final_source: "llm_fallback" (#243).
+        trackLlmFallbackRan({ model: modelId });
+        setStatus({ kind: "done", llmParsed });
+      } catch (err) {
+        setStatus({
+          kind: "error",
+          message:
+            err instanceof Error ? err.message : "Couldn't load the recovery model",
+        });
+      } finally {
+        releaseInference(modelId);
+      }
     } finally {
-      releaseInference(modelId);
+      inFlightRef.current = false;
     }
-  }, [result, selectedModelId, status.kind]);
+  }, [result, status.kind]);
 
   // Only advertise when the cascade flagged this as needing LLM recovery AND
   // WebGPU is available AND there is text to parse.

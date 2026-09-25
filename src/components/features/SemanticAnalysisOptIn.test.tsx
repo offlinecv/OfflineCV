@@ -140,7 +140,9 @@ describe("SemanticAnalysisOptIn status line", () => {
     expect(bar?.getAttribute("aria-valuemin")).toBe("0");
     expect(bar?.getAttribute("aria-valuemax")).toBe("100");
     expect(el.textContent).toContain("params_shard_5.bin");
-    expect(el.textContent).toContain("one-time download");
+    // No `source` yet, so the label claims neither a download nor the cache.
+    expect(el.textContent).toContain("Loading Gemma 2 (2B)");
+    expect(el.textContent).not.toContain("one time");
   });
 
   it("uses truthful running copy with no invented requirement count", () => {

@@ -19,7 +19,8 @@
  * elsewhere and none of them is this: the three things they lack are the
  * `count` badge slot, the `warn` mark, and a summary row that clears the 44×44
  * touch floor. Most are feature code (`Result`, `WebGpuUnavailableNotice`,
- * `ModelSelector`, `RewriteReviewList`, `AtsScoreReadout`, `TargetingSection`,
+ * `OnDeviceModelStatus`, `RewriteReviewList`, `AtsScoreReadout`,
+ * `TargetingSection`,
  * `ResultDetail`, and `SemanticMatch`'s per-verdict Evidence toggle from #204)
  * — one-line "why did this happen?" toggles with no state to carry, and
  * converting them is an explicit #823 non-goal.

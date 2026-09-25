@@ -41,7 +41,7 @@
  *
  *  3. **The region stays MOUNTED when docked — `hidden`, never a conditional
  *     render.** Unmounting `ResumeQualityPanel` discards a critique that cost
- *     a ~1.2 GB model download plus inference, and the docking trigger is a
+ *     a multi-GB model download plus inference, and the docking trigger is a
  *     4.5s idle timer, so the discard would be routine rather than rare. Same
  *     rule, same reason, as `Tabs`' inactive panels and `ResultDetail`'s
  *     disclosures. Tailwind's preflight makes `[hidden]` `display: none

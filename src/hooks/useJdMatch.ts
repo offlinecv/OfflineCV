@@ -15,17 +15,11 @@
  * keyword-only consumer. `detectWebGpu` is called only when `semanticOptIn`
  * flips true; the capability effect is gated on that same input.
  *
- * It is NOT a zero-cost import, and the gap is worth stating exactly rather
- * than rounding to "touches nothing": `useModelSelection` is a hook, so it
- * cannot be called conditionally, which means a keyword-only consumer still
- * pays (a) its module-load `readPersistedModelId()` + `readAllConsent()`
- * localStorage reads, (b) a page-lifetime `storage` listener registered on
- * first subscribe, and (c) a static `capability.ts` → `analytics.ts` edge in
- * the `/jobs/` entry chunk (measured: +0.71 kB gzip, and `run-llm-match` stays
- * a lazy chunk). No analytics EVENT fires — that is the part that would have
- * polluted the WebLLM funnel's top event. Making the imports conditional too
- * would mean moving the semantic machinery into a child hook mounted only on
- * opt-in; #204 can restructure if it turns out to matter.
+ * It is NOT a zero-cost import: a keyword-only consumer still pays a static
+ * `capability.ts` → `analytics.ts` edge in the `/jobs/` entry chunk
+ * (measured at +0.71 kB gzip when it landed; `run-llm-match` stays a lazy
+ * chunk). No analytics EVENT fires — that is the part that would have
+ * polluted the WebLLM funnel's top event.
  *
  * The semantic path (`semanticOptIn === true` AND WebGPU available) delegates
  * to `runLlmMatch` — the same orchestrator #202 landed — through a slot bound
@@ -84,13 +78,13 @@
  *      unverifiable intent rather than tested behaviour — see the note on
  *      `setSlotIfCurrent`.)
  *   2. Slot-vs-current-input VALUE comparison in the derived status memo.
- *      A slot whose stored `jdText`/`modelId` don't match current values, or
+ *      A slot whose stored `jdText` doesn't match the current value, or
  *      whose stored `parsed` reference no longer matches, is invisible to
  *      the render. This is what stops a stale slot from flashing over a
  *      newer render even if a late write slipped past layer 1.
  *   3. `controllerRef` — an `AbortController` per semantic run (#803).
  *      Aborted whenever the id would be bumped: run supersession, opt-out,
- *      JD change to a new value or empty, model change, capability going
+ *      JD change to a new value or empty, capability going
  *      false, unmount. The id guard prevents stale WRITES from becoming
  *      visible; the abort controller stops the WORK — extract's coercion
  *      pass, and every judge batch after the currently in-flight one. The
@@ -129,9 +123,13 @@
  * consumer that derives `parsed` MUST memoize it before handing it here.
  *
  * WebGPU detection uses `detectWebGpu`, which caches the result for the page
- * lifetime — the same signal `useResumeRewrite` reads. `useModelSelection`
- * supplies the persisted model id, so the picker on the WebLLM surfaces
- * drives which model this hook loads.
+ * lifetime — the same signal `useResumeRewrite` reads. The model is always
+ * `SHIPPED_MODEL` (#1015).
+ *
+ * Consent: this hook never prompts. `PasteJdPanel` asks for consent
+ * (`requestModelConsent`) before it lets the opt-in turn on, so a semantic
+ * run only starts after the user accepted the model's terms; `loadEngine`
+ * refuses a download without it regardless.
  *
  * Live since #204: `PasteJdPanel` owns an "Analyze with on-device AI" checkbox
  * (default OFF) and passes it as `semanticOptIn`. With the box unticked every
@@ -154,7 +152,7 @@ import type {
   ProgressUpdate,
   WebGpuCapability,
 } from "../lib/webllm/types.ts";
-import { useModelSelection } from "./useModelSelection.ts";
+import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
 
 /** Debounce interval for the JD text — matches the pre-#203 200ms value
  *  `PasteJdPanel` used inline. Under the perceptual threshold for a "typed a
@@ -257,20 +255,14 @@ const LOADING_START: { kind: "loading"; progress: ProgressUpdate } =
 interface SemanticInputs {
   jdText: string;
   parsed: HeuristicParsedResume;
-  modelId: string;
 }
 
 function semanticInputsMatch(
   slot: SemanticInputs,
   jdText: string,
   parsed: HeuristicParsedResume,
-  modelId: string,
 ): boolean {
-  return (
-    slot.jdText === jdText &&
-    slot.parsed === parsed &&
-    slot.modelId === modelId
-  );
+  return slot.jdText === jdText && slot.parsed === parsed;
 }
 
 /** The semantic sub-state the async orchestration produces. `ready` here is
@@ -297,7 +289,6 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
   const [debouncedJdText, setDebouncedJdText] = useState("");
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [semanticSlot, setSemanticSlot] = useState<SemanticSlot | null>(null);
-  const { selectedModelId } = useModelSelection();
 
   // Canonical trimmed JD. Both keyword extraction and semantic freshness key
   // off THIS value, so a trailing-space edit that trims to the same text
@@ -393,24 +384,12 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     // useMemo cache discard would invalidate a byte-identical slot otherwise.
     if (
       semanticSlot !== null &&
-      semanticInputsMatch(
-        semanticSlot.inputs,
-        trimmedJdText,
-        parsed,
-        selectedModelId,
-      )
+      semanticInputsMatch(semanticSlot.inputs, trimmedJdText, parsed)
     ) {
       return semanticSlot.state;
     }
     return LOADING_START;
-  }, [
-    keywordResult,
-    takingSemanticPath,
-    semanticSlot,
-    trimmedJdText,
-    parsed,
-    selectedModelId,
-  ]);
+  }, [keywordResult, takingSemanticPath, semanticSlot, trimmedJdText, parsed]);
 
   // ── Semantic orchestration ─────────────────────────────────────────────
   //
@@ -528,12 +507,7 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     // new to do. Value comparison, per the layer-2 rationale in the docblock.
     if (
       semanticSlot !== null &&
-      semanticInputsMatch(
-        semanticSlot.inputs,
-        trimmedJdText,
-        parsed,
-        selectedModelId,
-      )
+      semanticInputsMatch(semanticSlot.inputs, trimmedJdText, parsed)
     ) {
       return;
     }
@@ -555,7 +529,6 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     const myInputs: SemanticInputs = {
       jdText: trimmedJdText,
       parsed,
-      modelId: selectedModelId,
     };
     setSemanticSlot({
       inputs: myInputs,
@@ -578,7 +551,7 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
         runLlmMatch(
           myInputs.jdText,
           myInputs.parsed,
-          myInputs.modelId,
+          SHIPPED_MODEL.id,
           (progress) =>
             setSlotIfCurrent(myId, myInputs, { kind: "loading", progress }),
           () => setSlotIfCurrent(myId, myInputs, { kind: "running" }),
@@ -624,7 +597,6 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     takingSemanticPath,
     trimmedJdText,
     parsed,
-    selectedModelId,
     semanticSlot,
     setSlotIfCurrent,
   ]);

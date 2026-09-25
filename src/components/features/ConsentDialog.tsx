@@ -2,24 +2,21 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * ConsentDialog — modal shown before any Restricted-Community model begins
- * downloading. Built on the shared `Dialog` primitive from `@design-system`.
+ * ConsentDialog — the modal shown before the on-device model downloads for
+ * the first time. Built on the shared `Dialog` primitive from `@design-system`.
  *
- * Per the #64 spec:
- *   - Fires before `loadEngine` is called for a Restricted-Community model
- *     when consent has not already been recorded.
- *   - Persistence is per-`licenseType` (handled by `useModelSelection`),
- *     not per-model — accepting Gemma's terms also covers Llama if both
- *     are tagged Restricted-Community.
- *   - The modal DISPLAYS the per-model `licenseUrl` so the user reads the
- *     specific vendor's terms before accepting. Type-level consent +
- *     model-level link disclosure.
- *   - Decline must revert to the previously cached model (or
- *     `DEFAULT_MODEL_ID` if none) and not start any download.
+ *   - Fires before `loadEngine` is ever called, on the first user-initiated
+ *     on-device action (#1015). The request comes from
+ *     `requestModelConsent` in `src/hooks/useModelConsent.ts`, and the one
+ *     instance on the page is mounted by `ModelConsentHost`.
+ *   - Consent is recorded per model id, not per license family, so a later
+ *     model change asks again.
+ *   - Displays the model's `licenseUrl` so the user can read the vendor's
+ *     terms before accepting.
+ *   - Decline starts no download and changes nothing.
  *
- * The dialog owns no persistence — it's a controlled component. The caller
- * (ModelSelector) handles `recordConsent` on accept and "revert selection"
- * on decline.
+ * The dialog owns no persistence — it is a controlled component; the host
+ * records consent on accept.
  *
  * Reuse analysis (CLAUDE.md 3-tier rule):
  *   - Primitive: `Dialog` from `@design-system` owns the modal chrome,
@@ -30,10 +27,13 @@
  */
 
 import { Button, Dialog } from "@design-system";
-import type { ModelMetadata } from "../../lib/webllm/models.ts";
+import {
+  downloadSizeLabel,
+  type ModelMetadata,
+} from "../../lib/webllm/models.ts";
 
 interface ConsentDialogProps {
-  /** The model the user is trying to load. Must be Restricted-Community. */
+  /** The model about to download. */
   model: ModelMetadata;
   open: boolean;
   onAccept: () => void;
@@ -55,27 +55,22 @@ export function ConsentDialog({
     >
       <div className="flex flex-col gap-3">
         <p className="text-sm leading-relaxed text-content-secondary">
-          <strong className="text-content-primary">{model.name}</strong> is
-          released under the{" "}
-          {model.licenseUrl ? (
-            <a
-              href={model.licenseUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent-primary underline underline-offset-2 hover:text-accent-primary-hover"
-            >
-              vendor's terms of use
-            </a>
-          ) : (
-            "vendor's terms of use"
-          )}
-          , which differ from the Apache-2.0 default. The model weights stay
-          on your device, but downloading the model means accepting those
-          terms.
+          The on-device AI features use{" "}
+          <strong className="text-content-primary">{model.name}</strong>, which
+          is released under{" "}
+          <a
+            href={model.licenseUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent-primary underline underline-offset-2 hover:text-accent-primary-hover"
+          >
+            the vendor's terms of use
+          </a>
+          . Downloading the model ({downloadSizeLabel(model)}, one time) means
+          accepting those terms; the weights then stay on your device.
         </p>
         <p className="text-2xs leading-relaxed text-content-tertiary">
-          You only need to accept once per license type — switching to
-          another model under the same license won't re-prompt you.
+          You only need to accept once in this browser.
         </p>
         <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
           <Button

@@ -3,7 +3,7 @@
 
 /**
  * Number-preservation UI vocabulary (#778), shared by every surface that
- * shows the result of `checkNumbersPreserved` / `applyNumberPreservation`
+ * shows the result of `checkNumbersPreserved` / `applyRewriteGates`
  * (`src/lib/webllm/preserve-numbers.ts`, `post-process.ts`): the per-role
  * `SectionRewrite` panel, the whole-résumé `ProposedPanel`
  * (`ResumeRewriteProposed.tsx`), and the in-flight `CompletedList`
@@ -63,7 +63,9 @@ export function NumberPreservationWarning({
    * The rewrite was rejected and the original kept (#778). Changes the copy
    * from "check what the AI changed" to "nothing changed, and here's why" —
    * the delivered bullets are the user's own, so telling them to review a
-   * metric they never lost would be wrong.
+   * metric they never lost would be wrong. With no number diff to name, the
+   * revert was the garbled-output gate's (#1015, `garbled-output.ts`), and
+   * the copy says so.
    */
   reverted?: boolean;
   /**
@@ -80,8 +82,8 @@ export function NumberPreservationWarning({
         className="text-2xs leading-snug text-feedback-warning-text"
       >
         <span aria-hidden="true">⚠ </span>
-        Kept your original — the rewrite {detail}, so I didn’t apply it. Try
-        again for a different attempt.
+        Kept your original — the rewrite {detail || "came back garbled"}, so I
+        didn’t apply it. Try again for a different attempt.
       </p>
     );
   }
