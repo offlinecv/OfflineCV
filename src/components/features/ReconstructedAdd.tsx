@@ -96,14 +96,15 @@ export function SectionEmptyHint({ children }: { children: React.ReactNode }) {
  *            fine pointer (`pointer-fine:gap-8`), or the revealed pill touches
  *            the next one.
  *
- * A floating pill is one line shorter (`py-0.5`, 24px — still the SC 2.5.8
- * target) so it fits the gap it floats in.
+ * A floating pill is one line shorter on a fine pointer (`py-0.5`, 24px —
+ * still the SC 2.5.8 target) so it fits the gap it floats in; on a coarse
+ * pointer it stays in flow, so it keeps the in-flow pill's `py-1`.
  */
 export type AddPillFloat = "heading" | "below";
 
 const FLOAT_CLASS: Record<AddPillFloat, string> = {
-  heading: "edit-float right-0 top-0 py-0.5",
-  below: "edit-float left-0 top-full py-0.5",
+  heading: "edit-float right-0 top-0 py-1 pointer-fine:py-0.5",
+  below: "edit-float left-0 top-full py-1 pointer-fine:py-0.5",
 };
 
 /**

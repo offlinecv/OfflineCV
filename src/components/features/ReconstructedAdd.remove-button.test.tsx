@@ -77,5 +77,10 @@ describe("edit chrome at rest (#913)", () => {
       createElement(InlineBulletAdd, { onAdd: () => {}, float: "below" }),
     );
     expect(below).toMatch(/\bedit-float\b[^"]*\bleft-0\b[^"]*\btop-full\b/u);
+    // Shorter only where it floats: a coarse pointer keeps it in flow at the
+    // in-flow pill's height.
+    for (const markup of [heading, below]) {
+      expect(markup).toMatch(/\bpy-1\b[^"]*\bpointer-fine:py-0\.5\b/u);
+    }
   });
 });

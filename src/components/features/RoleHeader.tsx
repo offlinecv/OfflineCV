@@ -114,7 +114,7 @@ function EditableRoleHeader({
   actions,
 }: EditableRoleHeaderProps) {
   return (
-    <div className="flex min-w-0 grow flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5">
       {/* justify-between pins the dates to the right edge; the left group
           flex-wraps for long values. */}
       <div className="flex w-full items-baseline justify-between gap-x-3">
