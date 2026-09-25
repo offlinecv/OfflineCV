@@ -273,7 +273,7 @@ describe("ScoreDetails — the focus-restore contract survives the lift (#953)",
 describe("ScoreDetails — a region with nothing in it takes no space", () => {
   it("renders no child nodes, under the `empty:hidden` class", () => {
     // Every child self-hides, so "nothing to show" is an ordinary state — and
-    // a zero-height flex item still earns its `gap-6`. `empty:hidden` is what
+    // a zero-height flex item still earns its `gap-3`. `empty:hidden` is what
     // removes it, and it only works while the region is genuinely childless:
     // a stray `{" "}` or a placeholder node would defeat `:empty` silently.
     // Specificity 0,2,0 is what lets it beat the `flex` on the same element;

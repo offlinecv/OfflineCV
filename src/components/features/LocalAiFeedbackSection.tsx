@@ -33,9 +33,12 @@
  *     so instead of silently vanishing. `capability === null` (still
  *     detecting) and "no text" both still leave it absent.
  *
- * The label is byte-identical to the tab it replaced — renaming belongs to
- * #680 item 4. "Local AI feedback", not "AI feedback": the word that matters
- * is the one saying the model runs here.
+ * The label is byte-identical to the tab it replaced. #680 item 4's label
+ * sweep left it alone — it already says what the section shows, not a
+ * pipeline stage — and instead renamed the actual jargon label on this same
+ * page ("Raw text & flags" → "How your resume was read", see `ResultDetail`).
+ * "Local AI feedback", not "AI feedback": the word that matters is the one
+ * saying the model runs here.
  */
 
 import { Disclosure } from "@design-system";
@@ -90,6 +93,9 @@ export function LocalAiFeedbackSection({
       summary="Local AI feedback"
       warn={!analysis.isAvailable}
       warnLabel="setup needed"
+      // Plain, borderless row (#680 item 8) — see `TargetingSection`, its
+      // sibling in the score card's details region.
+      variant="plain"
     >
       {analysis.isAvailable ? (
         <ResumeQualityPanel

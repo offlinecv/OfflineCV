@@ -457,3 +457,24 @@ describe("Fix It mode entry point (issue 810)", () => {
   });
 });
 
+describe("Docked strip spacing (#680 item 8)", () => {
+  it("sits Fix It right after the score pill and pins Score details right, with no justify-between", () => {
+    const el = render({ ...makeScore(), overall: 45 }, true, 5, vi.fn());
+
+    // The row no longer spreads its three groups with `justify-between` — a
+    // fixed `gap-3` plus a trailing `ml-auto` replaces it (see
+    // `CollapsedScoreBar`'s row comment).
+    const expandButton = el.querySelector(
+      'button[aria-label="Expand score details"]',
+    );
+    const trailingGroup = expandButton?.parentElement;
+    const row = trailingGroup?.parentElement;
+    expect(row?.className).not.toContain("justify-between");
+    expect(row?.className).toContain("gap-3");
+
+    // `ml-auto` is what pins the trailing Popover + "Score details" group to
+    // the right edge now that the row itself is no longer `justify-between`.
+    expect(trailingGroup?.className).toContain("ml-auto");
+  });
+});
+

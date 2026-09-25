@@ -85,14 +85,21 @@ import {
 // measured, which is the regression this ceiling exists to catch.
 const EXPANDED_MAX_PX = 200;
 
-// Measured 415.5px expanded (identical at both viewports). The hero ceilings
-// above and in `score-hero.ts` bound `AtsScoreReadout`'s own <section>; this
-// one bounds the whole score card that holds it — `ParsedHeader`, the
-// two-column `ErrorState`, the collapsed targeting and local-AI feedback
-// disclosures and the `gap-6` + `p-5` chrome add 230px (415.5 − 185.5) that
-// sits OUTSIDE both hero ceilings while pushing the résumé down exactly the
-// way #953/#956 care about. Without this assertion, `ParsedHeader` growing a
-// row moves the résumé and leaves every other ceiling in this file untouched.
+// Measured 415.5px expanded (identical at both viewports), against the
+// `gap-6` + `p-5` chrome that #680 tightened to `gap-4` (`ParsedCard`'s
+// `Card`) and `gap-4`/`gap-3` (`ScoreDetails`'s two wrappers) — a strictly
+// SMALLER gap, so this number is now a loose (not tight) ceiling; it has not
+// been re-measured against the new spacing, only checked to still hold as an
+// upper bound (`toBeLessThanOrEqual` only gets easier to satisfy as the real
+// height shrinks). The hero ceilings above and in `score-hero.ts` bound
+// `AtsScoreReadout`'s own <section>; this one bounds the whole score card
+// that holds it — `ParsedHeader`, the two-column `ErrorState`, the collapsed
+// targeting and local-AI feedback disclosures and the card's own gap + `p-5`
+// chrome sit OUTSIDE both hero ceilings while pushing the résumé down exactly
+// the way #953/#956 care about. Without this assertion, `ParsedHeader`
+// growing a row moves the résumé and leaves every other ceiling in this file
+// untouched. Re-measure the exact figure next time this file is touched for
+// an unrelated reason, rather than trusting the pre-#680 number as tight.
 //
 // RAISED from 300 by #955, which is the one change allowed to move it, and
 // the raise is only honest alongside what it bought. #955 moved three surfaces
@@ -117,8 +124,9 @@ const EXPANDED_MAX_PX = 200;
 const CARD_MAX_PX = 450;
 
 /** The score `Card` wrapping the hero — `Result.tsx`'s
- *  `<Card className="flex flex-col gap-6 shadow-xs">`, which also holds
- *  `ParsedHeader` and the two-column `ErrorState`. `Card` renders a
+ *  `<Card className="flex flex-col gap-4 shadow-xs">` (tightened from `gap-6`
+ *  by #680), which also holds `ParsedHeader` and the two-column `ErrorState`.
+ *  `Card` renders a
  *  `<section>` (it keeps the landmark semantics its call sites relied on), so
  *  it is the hero section's own nearest `<section>` ancestor. This is the
  *  surface whose height is the actual above-the-fold budget; the hero is only

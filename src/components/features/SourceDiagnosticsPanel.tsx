@@ -2,13 +2,17 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * SourceDiagnosticsPanel — the "Raw text & flags" primary tab body (#263;
- * the tab's id is still `diagnostics`).
+ * SourceDiagnosticsPanel — the "How your resume was read" primary tab body
+ * (#263; the tab's id is still `diagnostics`). Renamed from "Raw text &
+ * flags" by #680 item 4, along with its three segment labels below — the old
+ * names described the parser's internal stages, not what each view shows.
  *
  * Collapses the three former evidence tabs (Source PDF, Extracted text, Layout
  * flags) into one primary tab. A nested segmented control switches between the
- * three views; the panels themselves are unchanged (SourcePdfPanel,
- * ExtractedTextPanel, LayoutFlagsList) — this only adds the one nesting level.
+ * three views — labelled "Original PDF" (derived from sourceKind: "Original DOCX"
+ * / "Original Markdown"), "Plain text", "Layout warnings"; the panels themselves
+ * are unchanged (SourcePdfPanel, ExtractedTextPanel, LayoutFlagsList) — this only
+ * adds the one nesting level.
  *
  * The control is a peer toggle (segmented control), not a second <Tabs>: these
  * are peer views of the same source, visually subordinate to the primary tab
@@ -31,6 +35,17 @@ import { SourcePdfPanel, ExtractedTextPanel } from "./EvidencePanel.tsx";
 type SourceKind = "pdf" | "docx" | "markdown";
 type Segment = "pdf" | "extracted" | "flags";
 
+function sourceSegmentLabel(sourceKind: SourceKind): string {
+  switch (sourceKind) {
+    case "docx":
+      return "Original DOCX";
+    case "markdown":
+      return "Original Markdown";
+    case "pdf":
+      return "Original PDF";
+  }
+}
+
 interface SourceDiagnosticsPanelProps {
   result: CascadeResult;
   bytes?: ArrayBuffer;
@@ -50,27 +65,27 @@ export function SourceDiagnosticsPanel({
     <div className="flex flex-col gap-4">
       <div
         role="group"
-        aria-label="Raw text & flags views"
+        aria-label="How your resume was read — views"
         className="inline-flex gap-1 self-start rounded-md border border-border-light bg-surface-subtle p-1"
       >
         <SegmentButton
           isActive={segment === "pdf"}
           onClick={() => setSegment("pdf")}
         >
-          PDF
+          {sourceSegmentLabel(sourceKind)}
         </SegmentButton>
         <SegmentButton
           isActive={segment === "extracted"}
           onClick={() => setSegment("extracted")}
         >
-          Extracted text
+          Plain text
         </SegmentButton>
         <SegmentButton
           isActive={segment === "flags"}
           onClick={() => setSegment("flags")}
           count={triggerCount}
         >
-          Layout flags
+          Layout warnings
         </SegmentButton>
       </div>
 

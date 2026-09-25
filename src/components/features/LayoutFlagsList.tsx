@@ -2,7 +2,9 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * LayoutFlagsList — renders the layout-trigger warning list.
+ * LayoutFlagsList — renders the layout-trigger warning list, under the
+ * "Layout warnings" segment of `SourceDiagnosticsPanel` (renamed from "Layout
+ * flags" by #680 item 4; this heading follows suit so the two agree).
  * Extracted from Result.tsx (issue #83). Pure display; no state.
  */
 
@@ -17,11 +19,11 @@ export function LayoutFlagsList({ triggers }: LayoutFlagsListProps) {
   return (
     <section className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-        Layout flags
+        Layout warnings
       </h2>
       {triggers.length === 0 ? (
         <p className="text-sm text-content-tertiary">
-          No layout flags — standard single-column, text-selectable PDF.
+          No layout warnings — standard single-column, text-selectable PDF.
         </p>
       ) : (
         <ul className="flex flex-col gap-1.5">
