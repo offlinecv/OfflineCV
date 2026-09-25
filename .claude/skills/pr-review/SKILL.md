@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits), auto-fix & push small items if 0 blockers exist, collapse the branch back to one commit via /collapse-pr before the review lands, emit suggestion blocks for what it does not push, file a follow-up issue for every finding that outlives the run, post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip — then resolve the threads it disposed of itself, so no finding is lost to a merge and the open threads left blocking are only the ones the author owes an answer to.
+description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits), fix & push every small item itself — with or without blockers — and collapse the branch back to one commit via /collapse-pr before an approval lands, emit suggestion blocks only for what it could not push, file a follow-up issue only for a user-visible defect in code the PR did not touch (everything else is fixed, sent to the author, or recorded in the review — never filed), post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip — then resolve the threads it disposed of itself, so no finding is lost to a merge and the open threads left blocking are only the ones the author owes an answer to.
 argument-hint: <#|#N> [--repo owner/repo] [--local] [--effort low|medium|high] [--no-commit] [--as <login>]
 ---
 
@@ -11,9 +11,9 @@ the thread": check out the diff → **signal that review started** → read the
 **issue**, not the PR's prose → run the built-in `/code-review` for the generic
 correctness pass → **layer the offlinecv-specific gates** → **then** read the PR
 description and audit it against what the code actually does → structure findings
-**Blocking / Secondary / Nits** → **if 0 blockers & small fixes exist**: apply fixes,
-verify gates, commit, collapse the branch back to one commit, push → **file a follow-up
-issue for every finding that outlives the run** → **post the `gh` PR review automatically
+**Blocking / Secondary / Nits** → **if small fixes exist, blockers or not**: apply fixes,
+verify gates, commit, push, and (0 blockers only) collapse the branch back to one commit → **file a follow-up
+issue only for a user-visible defect outside the PR's diff** → **post the `gh` PR review automatically
 at the end** (verdict `APPROVE` if 0 blockers — including when the run pushed the fixes
 itself — `REQUEST_CHANGES` if ≥1 blocker) → **reply to and resolve the threads it disposed
 of itself**. Findings it does *not* push land as ```` ```suggestion ```` blocks the author can
@@ -115,9 +115,17 @@ auto-loaded `STATE.md`, or you recall opening or revising the PR — is the auth
 its session ID says. Post `COMMENT`. Only a context that learned the change from the diff
 and the issue alone reads it independently, and only that one may approve.
 
-**Step 5.5 does not run under `--as`.** Its whole premise is that the reviewer approves the
-commit it just pushed, which is precisely what guard 1 refuses. Nits and Secondary findings
-become Step 5.6 suggestion blocks instead: the author applies them, and the commit is theirs.
+**Step 5.5 runs under `--as` too.** Step 0.6's `react-eyes` records this session's
+*review claim* in the push ledger, and posting the review closes it. Guard 1 exempts only
+the pushes this session made to the PR **inside** that window. The reviewer's own Step 5.5
+fix commit lands there, so the approval can cover it — which is the point: a small fix the
+reviewer makes itself costs no second round, while handing it to the author costs a push, a
+dismissed approval and a fresh review. Authorship pushes fall outside every window — before
+the first claim, or in a `/revise-pr` round between one posted review and the next claim —
+and guard 1 matches them on the PR's head **ref** as well as by SHA, so a `/collapse-pr`
+that rewrites every SHA does not erase them. The rule above still decides first: a context
+that knows it authored the PR posts `COMMENT` whatever the ledger says. Run Step 0.6 before
+any push, or the claim comes too late to cover it.
 
 Everything else still runs under the default `gh` identity: reads, `gh pr checkout`, and
 Step 5.7's follow-up issues (filing an issue approves nothing).
@@ -231,6 +239,11 @@ that could be wrong. That is what lets it precede the work it announces — ever
 other write this skill makes happens only after the findings exist. Say you
 posted it in the Step 7 report.
 
+Under `--as`, the wrapper's `react-eyes` also records this session's **review claim** in
+the push ledger, and posting the review closes it. Guard 1 exempts only pushes inside that
+window, so this call must come before Step 5.5 pushes anything — otherwise the reviewer's own fix commit reads as
+authorship and the approval is refused.
+
 `issues/` is correct — reactions on a PR's top-level body go through the issues
 endpoint; `pulls/$PR_NUM/reactions` does not exist and 404s. Re-reacting is
 idempotent (GitHub returns the existing reaction), so a re-run of this skill will
@@ -276,6 +289,35 @@ git diff --stat "origin/$BASE...HEAD"
 
 `gh pr checkout` is its own command — do **not** compound it with a later
 `git commit` (the `block_commit` hook judges the branch at command *start*).
+
+### Step 1.5 — A re-review reads the delta, not the whole PR again
+
+If the PR already carries a review from this skill (a review body with a `Reviewed by:`
+line) and the author has pushed since, this run is a **re-review**. Read the last such
+review's `commit_id` and review the **delta** since then:
+
+```bash
+gh api "repos/$REPO/pulls/$PR_NUM/reviews" \
+  --jq '[.[] | select(.body | test("(^|\n)Reviewed by: "))] | last | .commit_id'
+git diff "<that commit_id>...HEAD"     # after a collapse, fall back to the range-diff:
+git range-diff "origin/$BASE" "<that commit_id>" HEAD
+```
+
+Scope rules for a re-review:
+
+- **Did the previous round's Blocking findings get fixed?** That is the main question —
+  check each one by name.
+- **Any finding, Blocking or not, may be raised on lines the delta changed.** Small ones go
+  through Step 5.5 as usual.
+- **On lines the delta did not change, raise Blocking findings only.** The previous round
+  already read that code; a new Secondary or Nit there is a finding that round missed, and
+  raising it now restarts the loop this step exists to end. If you notice one, fix it
+  under Step 5.5 when it is in bounds, or leave it out of the review.
+
+If the collapse rewrote the SHA so the previous `commit_id` no longer exists on the branch,
+use `git range-diff` as above; if even that is unreadable, review the whole PR but keep
+the same rule — non-Blocking findings only on code that differs from what the last review
+quoted.
 
 ### Step 2 — Generic correctness pass (delegate to `/code-review`)
 
@@ -464,7 +506,10 @@ and a **fix** — a diff or exact command, not just a complaint. Cite the source
 
 ### Step 5 — Pick the verdict (must match the findings)
 
-- **≥1 Blocking → `REQUEST_CHANGES`.** (Do NOT commit or push fixes.)
+- **≥1 Blocking → `REQUEST_CHANGES`.** Step 5.5 still fixes and pushes every small
+  item, so the author's revision round carries only the Blocking findings — but it does
+  **not** collapse (the author is about to build on the branch; `/revise-pr` collapses at
+  the end of their round).
 - **0 Blocking → `APPROVE`**, even if Secondary/Nits remain. Do **not** soft-gate on
   nits — list them as non-blocking and approve. Verdict-inconsistency (findings say
   "looks good" but state is REQUEST_CHANGES, or vice-versa) is itself a review defect.
@@ -502,25 +547,42 @@ already fixed. Whether it also leaves *mergeable* depends on what Step 6.5 could
 close — report that, don't assume it.
 
 **What keeps that safe is the bound on Step 5.5, so hold the bound.** The head commit
-lands unread by a second party, so the auto-fix is confined to changes that cannot alter
-behaviour (formatting, comment wording, naming, dead-code removal), gated on a green
-`npm run verify`, and only when there are **0 Blocking findings**. Anything that changes
-what the code *does* — however small it looks — is a finding for the author, not an
-auto-fix. When in doubt about whether an edit is behavioural, it is: leave it as a comment
-and still `APPROVE`.
+lands unread by a second party, so the fix is confined to **small** changes, gated on a
+green `npm run verify`:
 
-### Step 5.5 — Auto-fix small items, then collapse (0 Blockers)
+- **Non-behavioural** (formatting, comment wording, naming, dead-code removal, a hoisted
+  constant): always in bounds.
+- **Behavioural, but small and unambiguous** — a wrong condition, a missed edge case, an
+  off-by-one, a missing `await`, a stale copy string — in bounds **when** it lives in a
+  file the PR already touches, has exactly one reasonable fix you can state in a sentence,
+  and ships with a test that fails without it (or an existing test tightened to pin it).
+- **Out of bounds:** a design choice (two reasonable fixes → the author picks), a new
+  public API or export, a change outside the files the PR touches, anything touching
+  fixture binaries, and every Blocking finding. Those are findings for the author.
 
-If 0 Blocking findings exist AND small fixes (Secondary or Nits) exist AND none of
-`--no-commit`, `--local` or `--as` is set (`--local` is a preview — it commits, pushes and
-collapses nothing; its fixes are printed as findings; `--as` skips this step because its
-approval may not cover a commit this session pushed — see Input):
+The fixed findings are listed in the body under `## Fixed in <sha>` with one line each,
+so the approval says exactly what it covers beyond the author's diff.
+
+**Why the bar moved (2026-09-25).** Confining the fix to non-behavioural edits, and turning
+it off under `--as`, sent every small logic finding to the author or to a follow-up issue.
+The author path costs a push, a dismissed approval and a fresh adversarial review that
+finds new small things; the issue path grew the backlog from 66 to 104 in six weeks. A
+reviewer that fixes the small thing itself closes the loop in one round.
+
+### Step 5.5 — Fix small items yourself, then collapse (collapse at 0 Blockers only)
+
+If small fixes (Secondary or Nits within the bound above) exist AND neither `--no-commit`
+nor `--local` is set (`--local` is a preview — it commits, pushes and collapses nothing; its
+fixes are printed as findings). **Blocking findings do not stop this step** — fix the small
+items anyway so the author's round carries only the blockers. Under `--as` it runs too,
+provided Step 0.6 recorded the claim first (see Input).
 
 **The order is the whole of this step**, and it is not rearrangeable:
 
 ```
-fix nits → commit → plain push (fast-forward) → collapse to one commit
-        → derive inline anchors (Step 6)      → post APPROVE on the collapsed head
+fix small items → commit → plain push (fast-forward)
+   0 Blocking:  → collapse to one commit → derive inline anchors (Step 6) → post APPROVE
+  ≥1 Blocking:  → (no collapse)          → derive inline anchors (Step 6) → post REQUEST_CHANGES
 ```
 
 Three constraints pin it:
@@ -557,14 +619,15 @@ reason, the fix is *already pushed*, so "fall back to the plain push" needs no e
    `--untracked-files=no`: this repo's `.git/info/exclude` un-ignores
    `node_modules`, so `??` entries are noise here, not provenance.
 
-2. **Apply the small fixes** in the checked-out worktree (formatting, comment wording,
-   naming, non-behavioral quality fixes). Append each path written to `FIXED_PATHS`.
+2. **Apply the small fixes** in the checked-out worktree — everything within the bound
+   in Step 5, including small behavioural fixes with the test that pins each one. Append
+   each path written (tests included) to `FIXED_PATHS`.
 3. **Run verification gates** (`npm run verify` or the relevant lint/test commands) to
    confirm a green build and no regressions.
 4. **If verification passes**, commit — then check for a mid-review push, and push:
    ```bash
    git add -- "${FIXED_PATHS[@]}"        # stage by path, never `git add -A`/`.`
-   git commit -m "fix(review): address review nits"
+   git commit -m "fix(review): address small review findings"
    # A path that was ALREADY in $PRE_DIRTY_FILE commits the UNION of your fix and
    # the user's in-progress edit — `git add <file>` cannot stage only your hunks.
    # Do not fix a nit in a file the user is mid-edit on; leave it as a suggestion
@@ -584,9 +647,14 @@ reason, the fix is *already pushed*, so "fall back to the plain push" needs no e
    them. This push is plain and fast-forward-only — the only force-push in this step is
    the one `/collapse-pr` makes in step 5, under its own gates.
 
-5. **Only if step 4 pushed.** If verification failed, or the branch moved mid-review, skip
-   straight to step 6 — nothing was pushed, so there is nothing to restore and **no licence
-   to force-push**. Those paths abandon the auto-fix; a collapse there would rewrite a
+5. **Only if step 4 pushed, and only at 0 Blocking.** With ≥1 Blocking finding, stop
+   here: the fix commit stays as a separate commit, the author revises on top of it, and
+   `/revise-pr` collapses at the end of their round — a force-push now would rewrite the
+   branch they are about to pull. Say so in the review body — "Pushed `<sha>` with the
+   small fixes; `git pull` before revising" — or a contributor with unpushed local work
+   hits a non-fast-forward they cannot explain. If verification failed, or the branch moved mid-review,
+   skip straight to step 6 — nothing was pushed, so there is nothing to restore and **no
+   licence to force-push**. Those paths abandon the auto-fix; a collapse there would rewrite a
    branch on a run that deliberately decided not to touch it, dismissing whatever approval
    the PR already had, for no gain.
 
@@ -615,7 +683,7 @@ reason, the fix is *already pushed*, so "fall back to the plain push" needs no e
 
    **Hand it the author's message — do not let it compose one.** The common case is a PR
    that `open-pr` already left at one hand-authored commit, on top of which step 4 added
-   `fix(review): address review nits`. The correct collapsed message is the author's,
+   `fix(review): address small review findings`. The correct collapsed message is the author's,
    unchanged: the added commit is *process, not change*, and a reviewer composing a fresh
    description of someone else's work — which then lands in `main` verbatim — is not the
    reviewer's call to make.
@@ -767,9 +835,11 @@ only what the author still has to act on.
 
 ### Step 5.6 — Suggestion blocks for what you did not push
 
-Every path through Step 5.5 that ends without a pushed fix — `--no-commit`, a fork, a
-contributor branch, a red gate, ≥1 Blocking finding — leaves findings the author has to
-apply by hand. For a whole class of them that hand-application is unnecessary work:
+**This is the fallback, not the default.** Step 5.5 fixes small items itself, blockers or
+not. Suggestion blocks are for the paths where it could not push — `--no-commit`, a fork
+without maintainer edit access, a red gate, a branch that moved mid-review, or a file the
+user is mid-edit on — which leave findings the author has to apply by hand. For a whole
+class of them that hand-application is unnecessary work:
 
 **Emit a ```` ```suggestion ```` block for every Secondary or Nit finding that is a
 localized textual replacement of lines the diff already touches.** GitHub renders it with
@@ -795,14 +865,14 @@ Four mechanics, each of which silently breaks the button if you get it wrong:
   block must contain the full replacement for that whole range.
 - **A blocking finding is not a suggestion.** These carry Secondary and Nit findings only.
 
-**What never becomes a suggestion is anything behavioural.** The bound is the same one that
-governs Step 5.5's auto-fix, for the same reason: an *Apply suggestion* click is a one-line
-review, and a behavioural change presented as a one-click fix is a behavioural change
-nobody reviewed. Rename a variable, tighten a comment, hoist a constant, drop a dead
+**What never becomes a suggestion is anything behavioural.** This is stricter than Step
+5.5, deliberately: Step 5.5 ships a behavioural fix with a test and a green `verify`, while
+an *Apply suggestion* click is a one-line review with neither, and a behavioural change
+presented as a one-click fix is a behavioural change nobody tested. Rename a variable, tighten a comment, hoist a constant, drop a dead
 export — yes. Change a condition, reorder an await, adjust a regex — no; that is a finding
 written in prose, with the failing input spelled out, for the author to decide on.
 
-### Step 5.7 — File a follow-up issue for every finding that outlives the run
+### Step 5.7 — File a follow-up issue only for a user-visible defect outside the diff
 
 **Never in `--local` mode.** Filing is a public write, and `--local` promises to stop without
 posting to GitHub. Under `--local`, print each issue this step *would* file — title, labels,
@@ -819,40 +889,59 @@ Both were right.
 
 **So the reviewer files them, at review time, not the author.** The contributor is not the
 one who found it, the PR is not the place to track it, and "the author will open an issue"
-is the assumption that failed twice.
+is the assumption that failed twice. Under today's Step 5.5, #930 — a small defect in
+the PR's own code — would simply have been fixed in the review commit; only #931's shape,
+code the PR never touched, is still a candidate for an issue.
 
-**File when *not* filing loses information.** That bar is the whole gate — it is not "file
-every Secondary":
+**The filing bar is very high — all four must hold.** The backlog grew from 66 to 104 open issues
+between 2026-08-12 and 2026-09-25 while closures fell from 189 to 55 a month, and most of
+the growth was review follow-ups: small, real, and never picked up. An issue nobody works
+costs attention every time the backlog is read, and someone has to sweep it later. So a
+finding becomes an issue only when:
+
+1. **It is a user-visible defect** — a concrete input that produces wrong output a user
+   sees or ships: a wrong score, a lost or mangled field, a broken export, a privacy or
+   egress leak, a crash. #931 (an `is_current` decision taken from a stale word list, in
+   a file the PR did not touch) is the model.
+2. **It reproduces** on `origin/main` (see re-verify below).
+3. **It is outside this PR's diff** — code the PR did not touch (#931's shape: a sibling
+   copy, an adjacent file). **A finding inside the diff is never filed**: a small one is
+   fixed by Step 5.5, and anything else is the author's to fix in this PR — as a Blocking
+   finding if it is wrong on normal use, otherwise as a comment they may decline.
+4. **It cannot land in this run** — too large for Step 5.5 to fix alongside the review.
+
+**Never filed, whatever their merit:** refactors, duplication and DRY consolidation,
+missing or weak tests, docs and comments, naming, fallow complexity/CRAP, and hypothetical
+edges with no concrete failing input. They stay in the review body — that is their
+record — and nowhere else.
+
+**Prefer folding over filing.** If an open issue already covers the area, add the finding
+there as a comment instead of opening a new one. If several findings clear the bar, file
+one issue that lists them, not one per finding.
 
 | Finding | Filed? |
 |---|---|
-| A defect that survives the merge with nobody acting on it | **yes** — this is the #930/#931 class |
-| Out of this PR's scope, but real and locatable (a sibling copy, an adjacent file) | **yes** |
+| Inside this PR's diff, any severity | no — Step 5.5 fixes it, or it goes to the author in this PR |
+| Outside this PR's diff, a user-visible defect, locatable, too big to fix here (#931's shape) | **yes** |
+| Real but not user-visible (refactor, DRY, test gap, docs, naming, complexity) | no — record it in the review body and resolve its thread |
 | Already fixed by Step 5.5 | no — it is in the head commit |
 | Emitted as a Step 5.6 suggestion block | no — one click and it is gone |
 | A trade-off the code documents and you agree with | no — reply saying so, and resolve |
 | Blocking | no — that is `REQUEST_CHANGES`, and an issue would launder it into a nit |
 
-**On a `REQUEST_CHANGES` verdict, file only the out-of-scope row.** The author is coming back
-to revise, so an in-scope Secondary is not a defect nobody acts on — it is one they are about
-to act on, in the round where fixing it costs nothing. Leave it as a thread for that round.
-Filing it would mint a backlog issue and let Step 6.5 resolve the very thread the author
-needed to see.
-
 **Write it as a standalone issue, not as a pointer to the review.** The reader arrives from
 the backlog with no memory of this PR: restate the defect, the failing input and the wrong
-output, where it lives (the re-verify table below says which ref, and whether a line number
-survives), why it matters, a proposed fix, and acceptance criteria. Link the **PR** as
+output, where it lives (`file:line` on `main`), why it matters, a proposed fix, and acceptance criteria. Link the **PR** as
 provenance, never as the body — not a review comment, because this step runs before Step 6
 posts one and no comment URL exists yet. The link runs the other way too: Step 6.5's reply
-on the thread names the issue. One issue per finding.
+on the thread names the issue. One issue per defect, or one issue listing several.
 
 ```bash
 # from the repo root; body as a file so tables/backticks/fences survive
 scripts/create-gh-issue.sh \
   --title "<the defect, not 'review follow-up from #924'>" \
   --body-file /tmp/pr-review-followup-<slug>.md \
-  --labels bug            # or refactor/improvement — must already exist
+  --labels bug            # user-visible defects only, so always a bug
 # → prints "<owner/repo>#<number>\t<URL>"
 ```
 
@@ -861,12 +950,8 @@ No milestone and no assignee: new issues land in the backlog and get scheduled s
 **Re-verify each one before filing, on the ref where the defect actually lives** — never
 against your own review prose. A finding written at review time can already be stale by
 the time the run reaches this step, and a follow-up issue that does not reproduce is
-worse than the comment it replaced, because it outlives it. Which ref depends on the row:
-
-| Finding | Verify on | Cite |
-|---|---|---|
-| In code this PR adds (#930's shape) | the **PR branch** — that code is not on `origin/main` yet, so verifying there reproduces nothing and files nothing | the path, **no line number** — the squash moves it |
-| Out of scope, already on `main` (#931's shape — a sibling copy, an adjacent file) | **`origin/main`** | `file:line` on `main` |
+worse than the comment it replaced, because it outlives it. Since only code outside the
+diff is filed, verify on **`origin/main`** and cite `file:line` there.
 
 Carry the numbers into Step 6: each filed issue is named in the finding it came from (both
 in the body and in its inline thread), so the author sees the disposition rather than an
@@ -1038,6 +1123,7 @@ Resolve a thread when **you** closed the loop, and only then:
 | Thread | Reviewer action |
 |---|---|
 | Filed as a follow-up issue (5.7) | reply naming the issue → **resolve** |
+| Below the 5.7 filing bar — recorded in the review body only | reply "recorded in the review, not filed" → **resolve** |
 | A trade-off you examined and agree with — no action wanted | reply saying so → **resolve** |
 | A Step 5.6 suggestion block | **leave open** — the author's Apply commits the change but does **not** resolve the thread (GitHub marks it outdated, nothing more); Step 7 says so, so they resolve it by hand or run `/revise-pr`, which does |
 | Asks the author a question, or needs their judgement | **leave open** — this is the exit they owe |
@@ -1137,7 +1223,7 @@ open threads are suggestions the author still has to resolve by hand after apply
 greyed-out threads with the merge still blocked is otherwise unexplained. Name every follow-up issue Step 5.7 filed, with its number and
 title; a filed issue that only exists in a PR comment is the failure mode this whole path
 exists to remove. If the run filed none, say why in three words (all fixed / all suggested
-/ nothing survived).
+/ nothing survived / below the bar).
 
 Also report **the Step 5.5 push outcome in one line**, because it is the only part of the
 run that rewrote someone's branch: whether the branch was collapsed or left multi-commit
@@ -1175,6 +1261,8 @@ recoverable. Carry its classification across too (*already upstream* / *merely b
   `/code-review` already found — fold it in.
 - **Verify before flagging.** Read the file at each cited line; drop findings that
   don't reproduce. A wrong finding costs more trust than a missed nit.
+- **A re-review reads the delta (Step 1.5).** Check the previous round's blockers by name;
+  raise non-Blocking findings only on lines the author changed since then.
 - **Verdict matches findings.** 0 Blocking → APPROVE; ≥1 Blocking → REQUEST_CHANGES.
   Never soft-gate on nits. State the rule you applied. A fix this run pushed itself does
   **not** downgrade the verdict — approving your own auto-fix commit is the intended
@@ -1185,8 +1273,9 @@ recoverable. Carry its classification across too (*already upstream* / *merely b
   to `COMMENT`, and state the real verdict as the first line of the body and again
   in Step 7 (Step 6). Never skip posting because the "natural" event is blocked.
 - **`--as` never approves this session's own work.** Under `--as`, every reviewer-identity
-  write goes through `scripts/gh-as-reviewer.sh`, Step 5.5 is off, and a PR this session
-  pushed to gets `COMMENT` with the real verdict in the first line. A wrapper refusal is
+  write goes through `scripts/gh-as-reviewer.sh`; Step 5.5 runs, covered by the review
+  claim Step 0.6 records; and a PR this session pushed to *outside* a claim — or one this
+  context knows it authored — gets `COMMENT` with the real verdict in the first line. A wrapper refusal is
   final — never retry it under another identity or with a hand-built `GH_TOKEN` command.
 - **Blocking bar is specific:** correctness-on-normal-use, real fixture PII,
   hardcoded colors / wrong component tier, a command bug that breaks every
@@ -1213,12 +1302,14 @@ recoverable. Carry its classification across too (*already upstream* / *merely b
   file), no review post, no replies or resolves. Outside `--local`, the reaction is safe
   *early* because it carries no prose; everything after it happens only once the findings exist, and each is
   bounded by the rules below.
-- **Auto-fix small items, then approve — including your own commit.** If 0 Blockers exist
-  and small fixes remain, apply them, verify (`npm run verify`), commit with a clean
-  message (no trailers), push to the head branch, and post `APPROVE`. That the approval
+- **Fix small items yourself, then approve — including your own commit.** Whenever small
+  fixes remain (within Step 5's bound, a test pinning any behavioural one), apply them,
+  verify (`npm run verify`), commit with a clean message (no trailers), push to the head
+  branch, and post `APPROVE` at 0 Blockers. That the approval
   covers a commit this run authored is deliberate: it removes the nit → push →
   dismissed-approval → re-review cycle, and it is why no follow-up issue is filed for a nit
-  that is already fixed. ≥1 Blocker → commit nothing, post `REQUEST_CHANGES`.
+  that is already fixed. ≥1 Blocker → still push the small fixes, skip the collapse, and
+  post `REQUEST_CHANGES` naming only the blockers.
 - **Restore the one-commit invariant before the review lands (Step 5.5).** The auto-fix
   commit is what breaks it, so the collapse rides in the same slot: fix → commit → plain
   push → `/collapse-pr` → derive anchors → post. The plain push comes first because
@@ -1248,15 +1339,14 @@ recoverable. Carry its classification across too (*already upstream* / *merely b
   agent-authored in-repo branch. A named contributor's branch or a fork gets the plain
   push at most — a force-push there destroys their local work and republishes it under our
   name. `/collapse-pr`'s ownership gate has no override flag, by design.
-- **A finding that outlives the run gets an issue, filed by the reviewer (Step 5.7).**
-  The bar is *not filing loses information*: a defect that survives the merge with nobody
-  acting on it, or a real finding outside this PR's scope. Not for anything Step 5.5 fixed,
-  anything Step 5.6 suggested, a documented trade-off, or anything Blocking — that last one
-  is `REQUEST_CHANGES`, and an issue would launder it into a nit. Write it standalone
-  and re-verify it where the defect lives — the PR branch for code this PR adds (cite the
-  path; the squash moves the line), `origin/main` for an out-of-scope copy (cite `file:line`).
-  On `REQUEST_CHANGES`, file only the out-of-scope ones; the author is about to revise.
-  #930 and #931 are what this rule costs when it is missing.
+- **Only a user-visible defect outside the diff gets an issue (Step 5.7).** All four must
+  hold: a concrete input produces wrong output a user sees or ships, it reproduces on
+  `origin/main`, it is in code this PR did not touch, and it is too big to fix in this run.
+  Nothing inside the diff is ever filed — the reviewer fixes it or the author does.
+  Refactors, DRY, test gaps, docs, naming and complexity are recorded in the review body
+  and never filed. Fold into an existing open issue before opening one, and batch several
+  qualifying findings into one issue. Write it standalone, citing `file:line` on `main`.
+  #931 is what this rule costs when it is missing.
 - **Reply, then resolve — and only what you disposed of yourself (Step 6.5).**
   `required_conversation_resolution: true` makes every open thread a merge gate. Close the
   ones you closed the loop on (filed as `#N`, trade-off you agree with),
@@ -1266,14 +1356,15 @@ recoverable. Carry its classification across too (*already upstream* / *merely b
   opened (the `REVIEW_ID` filter); another reviewer's thread gets a reply, never a resolve.
   Never resolve a thread to clear the merge path; an `APPROVE` beside an open thread is a
   coherent state and Step 7 reports it as one.
-- **When you don't push, suggest (Step 5.6).** Every Secondary/Nit that is a localized
-  textual replacement of a `+` line becomes a ```` ```suggestion ```` block, so the author
-  applies it in one click and owns the commit. Behavioural findings never do — same bound
-  as the auto-fix.
-- **The bound is behaviour, not size.** The auto-fix commit merges unread by a second
-  party, so it may only contain changes that cannot alter behaviour, on a green
-  `npm run verify`, with 0 Blockers. A behavioural edit is a finding for the author no
-  matter how small it looks — and "is this behavioural?" resolves to yes when unsure.
+- **Only when you could not push, suggest (Step 5.6).** Suggestion blocks are the
+  fallback for `--no-commit`, a fork, a red gate or a moved branch — never a substitute for
+  a fix Step 5.5 could have made. Behavioural findings never become suggestions.
+- **The bound is small and unambiguous, pinned by a test.** The fix commit merges unread by
+  a second party, so it carries non-behavioural edits plus small behavioural fixes that have
+  one reasonable answer, live in files the PR touches, and ship with a test that fails
+  without them — on a green `npm run verify`. A design choice, a new export, an out-of-diff
+  change, or any Blocking finding goes to the author. When unsure whether a fix has one
+  reasonable answer, it does not.
 - **The auto-fix revert names paths.** Never `git checkout -- .` — it destroys the user's
   unrelated in-progress work with no reflog while leaving the failed fix's new files
   behind. `git restore --source="$PRE_FIX_SHA" … -- "${FIXED_PATHS[@]}"` plus

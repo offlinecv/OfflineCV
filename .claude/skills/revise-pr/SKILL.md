@@ -203,8 +203,9 @@ branch's), decide, and act:
 - **Actionable change requested** → make the fix in code. Keep the diff scoped to
   what the thread asks; don't fold in unrelated cleanup.
 - **Question** → answer it. If the answer reveals a real fix, make the fix too.
-- **Out of scope / deferred** → don't force it into this PR. Reply explaining why,
-  and if it's worth tracking, file a follow-up issue and link it in the reply.
+- **Out of scope / deferred** → don't force it into this PR. Reply explaining why.
+  File a follow-up issue only under `/pr-review` Step 5.7's bar — a user-visible defect
+  in code this PR did not touch, too big to fix here; otherwise the reply is the record.
 - **Already addressed / outdated** → nothing to change; you'll resolve it in
   Step 6.
 
