@@ -234,25 +234,22 @@ export function AddSkillInput({
   };
 
   if (!expanded) {
+    // The Skills Fix It step lands here, not on the first chip's remove
+    // button (#810). Wrapped so `AddPill`'s `self-start` does not ride high
+    // in a category's `items-center` chip line: `self-start` only affects a
+    // direct flex child, and this span is that child (as in ContactDetails).
     return (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setExpanded(true)}
-        // The Skills Fix It step lands here, not on the first chip's remove
-        // button (#810).
-        data-fixit-focus
-        aria-label={label}
-        className="edit-chrome self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
-      >
-        + {label}
-      </Button>
+      <span className="inline-flex">
+        <AddPill label={label} onClick={() => setExpanded(true)} fixItFocus />
+      </span>
     );
   }
 
   return (
     <div
-      className="flex flex-col gap-1.5"
+      // `basis-full`: a category row hosts this inside its chip line, where the
+      // open input must break onto its own line rather than squeeze in.
+      className="flex basis-full flex-col gap-1.5"
       onBlur={(e) => {
         if (
           !e.currentTarget.contains(e.relatedTarget as Node | null) &&
@@ -317,7 +314,11 @@ export function AddSkillInput({
 export function AddCategoryInput({ onAdd }: { onAdd: (label: string) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   if (draft === null) {
-    return <AddPill label="Add category" onClick={() => setDraft("")} />;
+    // Floats level with the Skills heading (#913 follow-up): a section-level
+    // add, like every other section's "+ Add entry" pill.
+    return (
+      <AddPill label="Add category" onClick={() => setDraft("")} float="heading" />
+    );
   }
   const commit = () => {
     const trimmed = draft.trim();

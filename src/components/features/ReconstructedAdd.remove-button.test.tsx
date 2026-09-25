@@ -61,4 +61,30 @@ describe("edit chrome at rest (#913)", () => {
       expect(renderToStaticMarkup(node)).toMatch(/^<button[^>]*class="[^"]*\bedit-chrome\b/u);
     }
   });
+
+  it("floats a pill out of flow only when asked, at the requested spot", () => {
+    // A pill on its own row reserves a blank line at rest; `float` is how a
+    // section or entry opts out of that (styles/edit-chrome.css `edit-float`).
+    const plain = renderToStaticMarkup(
+      createElement(AddPill, { label: "Add project", onClick: () => {} }),
+    );
+    expect(plain).not.toContain("edit-float");
+    const heading = renderToStaticMarkup(
+      createElement(AddPill, { label: "Add project", onClick: () => {}, float: "heading" }),
+    );
+    // Level with the heading even when Fix It pads the section (`p-2`), via
+    // the inset the padded host sets.
+    expect(heading).toMatch(
+      /\bedit-float\b[^"]*\btop-\[var\(--edit-float-inset,0px\)\][^"]*\bright-\[var\(--edit-float-inset,0px\)\]/u,
+    );
+    const below = renderToStaticMarkup(
+      createElement(InlineBulletAdd, { onAdd: () => {}, float: "below" }),
+    );
+    expect(below).toMatch(/\bedit-float\b[^"]*\bleft-0\b[^"]*\btop-full\b/u);
+    // Shorter only where it floats: a coarse pointer keeps it in flow at the
+    // in-flow pill's height.
+    for (const markup of [heading, below]) {
+      expect(markup).toMatch(/\bpy-1\b[^"]*\bpointer-fine:py-0\.5\b/u);
+    }
+  });
 });

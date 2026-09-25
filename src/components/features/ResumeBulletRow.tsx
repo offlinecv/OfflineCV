@@ -5,8 +5,8 @@
  * ResumeBulletRow — one graded bullet line in the reconstructed résumé.
  *
  * Carries no in-text annotation (#913). An editable bullet Fix It has a step
- * for shows it through its own `•`, tinted and activatable (`BulletMarker`);
- * the check it failed is named in Fix It's dock, never beside the text, so the
+ * for shows it through a warning mark in the gutter left of its `•`, which is
+ * activatable (`BulletMarker`); the check it failed is named in Fix It's dock, never beside the text, so the
  * row reads the way the exported PDF prints it. A read-only row (project,
  * achievement, certification) is never a Fix It step, so it shows nothing.
  *
@@ -44,7 +44,7 @@ import { BulletMarker } from "./BulletMarker.tsx";
 /**
  * One bullet line in the reconstructed resume. The bullet text is editable
  * (#82) via the shared EditableField primitive — committing an edit feeds the
- * authoritative re-grade in App (rawText + description), so the marker's tint
+ * authoritative re-grade in App (rawText + description), so the gutter mark
  * re-evaluates live with the Fix It steps it reads.
  */
 export function ResumeBulletRow({

@@ -57,6 +57,14 @@ describe("edit-chrome.css", () => {
     expect(css).not.toMatch(/pointer: coarse/u);
   });
 
+  it("drops a float that holds an open input back into flow, only on a fine pointer", () => {
+    // The user opened that field, so the content below makes room for it
+    // rather than sitting under it (#1030 review).
+    expect(css).toMatch(
+      /@media \(pointer: fine\) \{[^@]*\.edit-float:has\(input, textarea\) \{\s*position: static;/u,
+    );
+  });
+
   it("hides with opacity, never visibility or display (both leave the tab order)", () => {
     const rules = css.replace(/\/\*[\s\S]*?\*\//gu, "");
     expect(rules).toMatch(/opacity: 0/u);

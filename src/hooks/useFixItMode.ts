@@ -61,7 +61,9 @@ const TARGET_ACTIVE =
   "ring-2 ring-accent-primary ring-offset-2 ring-offset-surface-card bg-accent-forward-bg/25 rounded";
 const TARGET_PAD: Record<FixItTargetShape, string> = {
   inline: "px-1",
-  block: "p-2",
+  // The inset tells a heading float (`AddPill float="heading"`) how far the
+  // padding moved the heading, so the pill stays level with it.
+  block: "p-2 [--edit-float-inset:0.5rem]",
 };
 
 /**

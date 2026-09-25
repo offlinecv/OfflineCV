@@ -49,7 +49,10 @@ subtree visible (Fix It's current step carries it on a field or bullet), and `ed
 to force only its `[data-fixit-focus]` control visible (a section step — its Remove and Move
 controls stay at rest). Chrome answers to its **nearest** scope, stays in the tab order
 (`opacity`, never `visibility`/`display`), and always shows on a coarse pointer.
-`AddPill`, `RemoveButton` and an empty `EditableField` already opt in.
+`AddPill`, `RemoveButton` and an empty `EditableField` already opt in. Chrome that would
+otherwise hold a **row of its own** (a section's "+ Add entry", an entry's "+ Add bullet", the
+header's add row) takes `edit-float` too — out of flow on a fine pointer, so it reserves no blank
+line at rest and reflows nothing on reveal; `AddPill`'s `float` prop picks the spot.
 
 ## Type ramp
 
