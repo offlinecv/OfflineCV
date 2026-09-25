@@ -191,6 +191,41 @@ describe("ContactCard", () => {
     expect(row!.contains(workAuthPill)).toBe(true);
   });
 
+  it("puts an absent headline's prompt in the floating add row, not a blank line of its own", () => {
+    // At rest the prompt is hidden edit chrome, so a line of its own under the
+    // name held blank space there; the add row floats out of flow instead.
+    const el = render(makeResult(), {
+      overrides: {},
+      onFieldChange: () => {},
+      onAddProfile: () => undefined,
+      onEditProfile: () => {},
+      onRemoveProfile: () => {},
+    });
+    const headlineAdd = el.querySelector('[aria-label="Add Headline"]');
+    const profilePill = el.querySelector('[aria-label="Add a profile"]');
+    expect(headlineAdd).not.toBeNull();
+    const row = profilePill!.closest("div");
+    expect(row!.contains(headlineAdd)).toBe(true);
+    expect(row!.classList.contains("edit-float")).toBe(true);
+  });
+
+  it("keeps a present headline on its own line under the name", () => {
+    const el = render(
+      makeResult({ headline: "Staff Engineer" }, { headline: 0.9 }),
+      {
+        overrides: {},
+        onFieldChange: () => {},
+        onAddProfile: () => undefined,
+        onEditProfile: () => {},
+        onRemoveProfile: () => {},
+      },
+    );
+    const headline = el.querySelector('[aria-label="Edit Headline"]');
+    expect(headline?.textContent).toBe("Staff Engineer");
+    const row = el.querySelector('[aria-label="Add a profile"]')!.closest("div");
+    expect(row!.contains(headline)).toBe(false);
+  });
+
   it("renders a detected link as a clickable new-tab slug anchor", () => {
     const el = render(
       makeResult(

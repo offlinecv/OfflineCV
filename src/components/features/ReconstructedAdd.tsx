@@ -86,6 +86,27 @@ export function SectionEmptyHint({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * Where a floating pill sits on a fine pointer (`edit-float`, styles/
+ * edit-chrome.css), relative to its `relative` host:
+ *
+ *   heading  top-right of a section, level with its `SectionHeading` — the
+ *            section's own "+ Add entry" pill.
+ *   below    in the gap under an entry — a role's "+ Add bullet". The host's
+ *            list must leave more than the pill's height between entries on a
+ *            fine pointer (`pointer-fine:gap-8`), or the revealed pill touches
+ *            the next one.
+ *
+ * A floating pill is one line shorter (`py-0.5`, 24px — still the SC 2.5.8
+ * target) so it fits the gap it floats in.
+ */
+export type AddPillFloat = "heading" | "below";
+
+const FLOAT_CLASS: Record<AddPillFloat, string> = {
+  heading: "edit-float right-0 top-0 py-0.5",
+  below: "edit-float left-0 top-full py-0.5",
+};
+
+/**
  * The collapsed progressive-disclosure trigger — a chip-shaped "+ <label>" pill
  * that sits inline with the content it adds to. Quiet by default; warms to the
  * brand accent on hover.
@@ -94,12 +115,15 @@ export function AddPill({
   label,
   onClick,
   fixItFocus = false,
+  float,
 }: {
   label: string;
   onClick: () => void;
   /** Mark this as where a Fix It step on its section lands focus (#810) —
    *  set on a section's own "Add entry" pill, never a per-entry one. */
   fixItFocus?: boolean;
+  /** Take the pill out of flow on a fine pointer — see {@link AddPillFloat}. */
+  float?: AddPillFloat;
 }) {
   return (
     <Button
@@ -108,7 +132,7 @@ export function AddPill({
       onClick={onClick}
       data-fixit-focus={fixItFocus || undefined}
       aria-label={label}
-      className="edit-chrome self-start rounded-full bg-surface-subtle px-2.5 py-1 text-sm text-content-tertiary hover:text-accent-primary"
+      className={`edit-chrome self-start rounded-full bg-surface-subtle px-2.5 text-sm text-content-tertiary hover:text-accent-primary ${float ? FLOAT_CLASS[float] : "py-1"}`}
     >
       + {label}
     </Button>
@@ -164,15 +188,20 @@ export function RemoveButton({
  * pill, expands on click to an autofocused field + Add button, and collapses
  * back on Escape or empty blur. Stays open after a commit so several lines can
  * be added in a row. Mirrors the Skills add pattern, minus skill suggestions.
+ *
+ * `float` applies to the collapsed pill only: the open input is in flow, since
+ * the user asked for it and the content below it should make room.
  */
 export function InlineBulletAdd({
   onAdd,
   label = "Add bullet",
   placeholder = "Bullet text…",
+  float,
 }: {
   onAdd: (text: string) => void;
   label?: string;
   placeholder?: string;
+  float?: AddPillFloat;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState("");
@@ -185,7 +214,9 @@ export function InlineBulletAdd({
   };
 
   if (!expanded) {
-    return <AddPill label={label} onClick={() => setExpanded(true)} />;
+    return (
+      <AddPill label={label} onClick={() => setExpanded(true)} float={float} />
+    );
   }
 
   return (

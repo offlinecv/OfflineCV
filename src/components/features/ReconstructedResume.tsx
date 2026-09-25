@@ -421,7 +421,7 @@ export function ExperienceSection({
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
-      className={`edit-scope flex flex-col gap-3 ${fixIt.className}`}
+      className={`edit-scope relative flex flex-col gap-3 ${fixIt.className}`}
       onBlur={sectionExitBlur(() => onPruneEmpty(pruneHold.isHeld))}
     >
       <SectionHeading>{topHeading}</SectionHeading>
@@ -441,7 +441,10 @@ export function ExperienceSection({
       {roleCount === 0 ? (
         <NotDetected what="roles" />
       ) : (
-        <div className="flex flex-col gap-4">
+        // Wider on a fine pointer: there each role's "+ Add bullet" pill floats
+        // into this gap on hover (`InlineBulletAdd float="below"`) and needs
+        // its height plus air; on touch it keeps its own row, as before.
+        <div className="flex flex-col gap-4 pointer-fine:gap-8">
           {groups.map((group, i) => {
             const idx = group.experienceIndex;
             // Inline experience-category sub-heading (#311) before the first role
@@ -525,7 +528,7 @@ export function ExperienceSection({
           level so it outlives the group. That bucket is always appended last,
           so this is where its own strip would have rendered anyway. */}
       {otherRemove.strip}
-      <AddPill label="Add experience" onClick={onAddEntry} fixItFocus />
+      <AddPill label="Add experience" onClick={onAddEntry} fixItFocus float="heading" />
     </section>
   );
 }
@@ -583,7 +586,7 @@ function ProjectsSection({
 }) {
   return (
     <section
-      className="edit-scope flex flex-col gap-3"
+      className="edit-scope relative flex flex-col gap-3"
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? "Projects"}</SectionHeading>
@@ -678,7 +681,7 @@ function ProjectsSection({
           );
         })}
       </div>
-      <AddPill label="Add project" onClick={onAddEntry} />
+      <AddPill label="Add project" onClick={onAddEntry} float="heading" />
     </section>
   );
 }
@@ -979,7 +982,7 @@ export function AchievementsSection({
     achievements.filter((_, idx) => joinsCompactLine(idx)).length >= 2;
   return (
     <section
-      className="edit-scope flex flex-col gap-3"
+      className="edit-scope relative flex flex-col gap-3"
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? fallbackHeading}</SectionHeading>
@@ -1100,7 +1103,7 @@ export function AchievementsSection({
       {achievements.length === 0 && (
         <SectionEmptyHint>{emptyHint}</SectionEmptyHint>
       )}
-      <AddPill label={`Add ${entryNoun}`} onClick={onAddEntry} />
+      <AddPill label={`Add ${entryNoun}`} onClick={onAddEntry} float="heading" />
     </section>
   );
 }
@@ -1381,7 +1384,10 @@ export function ReconstructedResume({
   return (
     <section
       id={SECTION_IDS.reconstructed}
-      className="edit-scope scroll-mt-6 flex flex-col gap-6"
+      // gap-8: the header's add row floats into this gap on hover (see
+      // `ContactDetails`), and it is the only thing separating the header from
+      // the body now that the header draws no rule of its own (#955).
+      className="edit-scope scroll-mt-6 flex flex-col gap-8"
     >
       <ContactCard
         result={result}

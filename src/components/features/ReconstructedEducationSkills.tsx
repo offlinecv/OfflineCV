@@ -106,7 +106,7 @@ export function EducationSection({
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
-      className={`edit-scope flex flex-col gap-2 ${fixIt.className}`}
+      className={`edit-scope relative flex flex-col gap-2 ${fixIt.className}`}
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? "Education"}</SectionHeading>
@@ -154,7 +154,7 @@ export function EducationSection({
           })}
         </ul>
       )}
-      <AddPill label="Add education" onClick={onAddEntry} fixItFocus />
+      <AddPill label="Add education" onClick={onAddEntry} fixItFocus float="heading" />
     </section>
   );
 }

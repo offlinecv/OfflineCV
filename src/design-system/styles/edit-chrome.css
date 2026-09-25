@@ -39,6 +39,20 @@
  *
  * Only on `(pointer: fine)`. A touch screen has no hover to reveal with, so on
  * a coarse (or absent) pointer everything stays visible.
+ *
+ *   edit-float   takes a block of chrome OUT OF FLOW on a fine pointer, so a
+ *                row of hidden controls stops reserving blank space at rest.
+ *                `opacity: 0` keeps a control's box; for an inline control
+ *                that costs width, but for a control on its own row it costs a
+ *                whole blank line, and a résumé full of empty "+ Add" rows
+ *                reads as broken spacing. Collapsing those rows on hover
+ *                instead would reflow the page under the pointer, so the row
+ *                floats: it sits over a gap its host guarantees (a section
+ *                heading's right end, the gap below an entry) and appears in
+ *                place without moving anything. The caller supplies the
+ *                offsets (`top-full left-0`, `top-0 right-0`) and a `relative`
+ *                host; on a coarse pointer the element stays static, the
+ *                offsets are inert, and it keeps its row as before.
  */
 @layer components {
   @media (pointer: fine) {
@@ -50,6 +64,13 @@
         .edit-reveal-focus [data-fixit-focus] *
       ) {
       opacity: 0;
+    }
+  }
+
+  @media (pointer: fine) {
+    .edit-float {
+      position: absolute;
+      z-index: 10;
     }
   }
 }

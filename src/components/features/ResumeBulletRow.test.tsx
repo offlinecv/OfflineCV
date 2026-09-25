@@ -5,8 +5,8 @@
 
 /**
  * Render tests for `ResumeBulletRow` (#626) — the per-bullet remove control
- * and the empty-commit-drops-the-bullet resolution — and its tinted `•`
- * marker (#913), the in-résumé way into a bullet's Fix It step.
+ * and the empty-commit-drops-the-bullet resolution — and its Fix It
+ * gutter marker (#913), the in-résumé way into a bullet's Fix It step.
  *
  * Runs in jsdom with raw `createRoot`, matching `RewriteReviewList.test.tsx`
  * (the sibling rewrite-review surface).
@@ -218,18 +218,23 @@ const editableRow = (bullet: BulletObservation) =>
 const marker = (el: HTMLElement) =>
   el.querySelector<HTMLButtonElement>("button[data-fixit-marker]");
 
-describe("ResumeBulletRow — tinted marker (issue 913)", () => {
-  it("tints a stepped bullet's own • in the warning token, described by the failed checks", () => {
+describe("ResumeBulletRow — gutter marker (issue 913)", () => {
+  it("hangs a warning mark in the gutter, keeps the • itself, and describes the failed checks", () => {
     const el = render(withSteps(editableRow(WEAK), () => {}));
     const btn = marker(el);
     expect(btn).not.toBeNull();
-    // The tint is on the glyph box itself, not on a chip beside the text.
+    // The bullet keeps its own muted • — the column reads like the PDF…
     const box = btn!.parentElement!;
-    expect(box.className).toContain("text-feedback-warning-text");
-    // Never colour-only (WCAG 1.4.1): a flagged bullet's glyph is a different
-    // shape, not just a different colour…
-    expect(box.querySelector('[aria-hidden="true"]')?.textContent).toBe("▲");
-    // …and the control's description names every failed check.
+    expect(box.firstElementChild?.textContent).toBe("•");
+    expect(box.className).toContain("text-content-muted");
+    // …and the flag is a separate mark hung LEFT of the column, in the token.
+    // Never colour-only (WCAG 1.4.1): a passing bullet has no mark at all.
+    const mark = btn!.previousElementSibling as HTMLElement;
+    expect(mark.textContent).toBe("\u26A0\uFE0E");
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+    expect(mark.className).toMatch(/\babsolute\b[^"]*\bright-full\b/u);
+    expect(mark.className).toContain("text-feedback-warning-text");
+    // The control's description names every failed check.
     const describedBy = btn!.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     const description = document.getElementById(describedBy!)?.textContent;
@@ -247,16 +252,17 @@ describe("ResumeBulletRow — tinted marker (issue 913)", () => {
     expect(startAt).toHaveBeenCalledExactlyOnceWith(WEAK_ITEM.id);
   });
 
-  it("adds no width: the glyph box keeps the unflagged classes bar colour, and the control is absolutely positioned", () => {
+  it("adds no width: the glyph box is identical flagged or not, and the mark and control are absolutely positioned", () => {
     const flagged = render(withSteps(editableRow(WEAK), () => {}));
     const flaggedBox = marker(flagged)!.parentElement!;
     const plainBox = render(withSteps(editableRow(BULLET), () => {})).querySelector(
       "li div > span",
     ) as HTMLElement;
-    const strip = (c: string) =>
-      c.replace("text-feedback-warning-text", "").replace("text-content-muted", "").trim();
-    expect(strip(flaggedBox.className)).toBe(strip(plainBox.className));
+    expect(flaggedBox.className).toBe(plainBox.className);
     expect(marker(flagged)!.className).toContain("absolute");
+    expect((marker(flagged)!.previousElementSibling as HTMLElement).className).toContain(
+      "absolute",
+    );
   });
 
   it("renders a plain muted • — no control — for a bullet Fix It has no step for", () => {

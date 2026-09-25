@@ -5,12 +5,15 @@
  * ReconstructedRole — one parsed experience role rendered in resume shape.
  *
  * Renders the role header (Title — Company · dates) followed by every graded
- * bullet for that role. A bullet Fix It has a step for tints its own `•`
- * (`BulletMarker`, #913); nothing is drawn beside the text.
+ * bullet for that role. A bullet Fix It has a step for carries a warning mark
+ * in the gutter left of its `•` (`BulletMarker`, #913); nothing is drawn
+ * beside the text.
  *
  * The role is an `edit-scope` (styles/edit-chrome.css): its Rewrite section
  * trigger, remove control, add-bullet pill and empty header prompts rest
  * hidden on a fine pointer and show while the role is hovered or holds focus.
+ * The add-bullet pill also floats (`edit-float`) into the gap below the role,
+ * which is why the root is `relative` and the role list leaves room for it.
  *
  * Edit mode (#58): when `experienceIndex` + `overrides` + `onFieldChange` are
  * provided, the heading line (`RoleHeader`, in its own sibling since #810)
@@ -233,7 +236,7 @@ export function RoleEntry({
     ownBucketRef,
     captureUndo,
   ]);
-  // The "Rewrite section" trigger sits on the header row (right of the title);
+  // The "Rewrite section" trigger sits on the header row, left of the dates;
   // its result panel renders full-width below the bullet list.
   const { trigger: rewriteTrigger, panel: rewritePanel } = useSectionRewrite(
     sectionBullets,
@@ -241,21 +244,21 @@ export function RoleEntry({
     roleLabel(group.experience),
   );
   return (
-    <div ref={rootRef} className="edit-scope flex flex-col gap-1.5">
-      <div className="flex items-start justify-between gap-2">
-        <RoleHeader
-          group={group}
-          overrides={overrides}
-          onFieldChange={onFieldChange}
-          datesTarget={datesTarget}
-        />
-        <div className="edit-chrome flex shrink-0 items-center gap-1">
-          {rewriteTrigger}
-          {onRemove && (
-            <RemoveButton label="Remove role" onClick={onRemove} />
-          )}
-        </div>
-      </div>
+    <div ref={rootRef} className="edit-scope relative flex flex-col gap-1.5">
+      <RoleHeader
+        group={group}
+        overrides={overrides}
+        onFieldChange={onFieldChange}
+        datesTarget={datesTarget}
+        actions={
+          <span className="edit-chrome flex shrink-0 items-center gap-1">
+            {rewriteTrigger}
+            {onRemove && (
+              <RemoveButton label="Remove role" onClick={onRemove} />
+            )}
+          </span>
+        }
+      />
       {group.bullets.length > 0 ? (
         <>
           <ul className="list-none">
@@ -299,7 +302,9 @@ export function RoleEntry({
           bullets" bucket) is rendered by that ancestor, which outlives this
           role's own disappearance. */}
       {hostsStrip && ownRemove.strip}
-      {onAddBullet && <InlineBulletAdd onAdd={onAddBullet} />}
+      {/* Floats into the gap under the role (#913 follow-up), so a role with
+          nothing to add does not end in a blank row at rest. */}
+      {onAddBullet && <InlineBulletAdd onAdd={onAddBullet} float="below" />}
     </div>
   );
 }

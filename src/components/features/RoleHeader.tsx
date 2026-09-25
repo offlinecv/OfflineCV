@@ -12,7 +12,15 @@
  * Edit mode: every field is an `EditableField` whose value is the click /
  * keyboard / tap target, the same quiet affordance as the rest of the résumé.
  * Cleared fields show their placeholder. Overrides are in-memory only.
+ *
+ * `actions` (the role's Rewrite + Remove chrome) sits immediately LEFT of the
+ * dates, not after them: hidden chrome keeps its box (styles/edit-chrome.css),
+ * so trailing the dates it pushed them ~56px short of the column's right edge.
+ * Between the title and the dates it spends slack the row already has, and
+ * costs width only when a long title needs it.
  */
+
+import type { ReactNode } from "react";
 
 import { EditableField } from "@design-system";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
@@ -40,6 +48,8 @@ export interface RoleHeaderProps {
   onFieldChange?: RoleFieldChange;
   /** Carry the Fix It role-dates anchor on the start date (#810). */
   datesTarget?: boolean;
+  /** Role-level controls, rendered just left of the dates. */
+  actions?: ReactNode;
 }
 
 const HEADING_CLASS = "text-sm font-semibold text-content-primary";
@@ -49,24 +59,39 @@ export function RoleHeader({
   overrides,
   onFieldChange,
   datesTarget = false,
+  actions,
 }: RoleHeaderProps) {
   // The "Other bullets" bucket has no experience entry to show or edit.
   if (group.experience === null) {
-    return <h3 className={HEADING_CLASS}>Other bullets</h3>;
+    return <StaticHeader label="Other bullets" actions={actions} />;
   }
   // Editability hinges on the commit handler alone — `overrides` is `undefined`
   // for any role the user hasn't edited yet (the per-index map starts empty),
   // so gating on it would render every un-edited role read-only. Mirrors
   // EducationEntry.
   if (onFieldChange === undefined) {
-    return <h3 className={HEADING_CLASS}>{roleHeadingLabel(group.experience)}</h3>;
+    return (
+      <StaticHeader label={roleHeadingLabel(group.experience)} actions={actions} />
+    );
   }
   return (
     <EditableRoleHeader
       display={resolveRoleDisplay(group.experience, overrides)}
       onFieldChange={onFieldChange}
       datesTarget={datesTarget}
+      actions={actions}
     />
+  );
+}
+
+/** A read-only heading (the "Other bullets" bucket, a role with no commit
+ *  handler), its actions trailing on the right. */
+function StaticHeader({ label, actions }: { label: string; actions: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <h3 className={HEADING_CLASS}>{label}</h3>
+      {actions}
+    </div>
   );
 }
 
@@ -74,6 +99,7 @@ interface EditableRoleHeaderProps {
   display: RoleDisplay;
   onFieldChange: RoleFieldChange;
   datesTarget: boolean;
+  actions: ReactNode;
 }
 
 /**
@@ -85,6 +111,7 @@ function EditableRoleHeader({
   display: { title, company, location, team, startDate, endDate },
   onFieldChange,
   datesTarget,
+  actions,
 }: EditableRoleHeaderProps) {
   return (
     <div className="flex min-w-0 grow flex-col gap-0.5">
@@ -142,12 +169,15 @@ function EditableRoleHeader({
             onCommit={(v) => onFieldChange("team", v)}
           />
         </div>
-        <RoleDateRange
-          startDate={startDate}
-          endDate={endDate}
-          onFieldChange={onFieldChange}
-          datesTarget={datesTarget}
-        />
+        <span className="flex shrink-0 items-baseline gap-x-2">
+          <span className="self-center">{actions}</span>
+          <RoleDateRange
+            startDate={startDate}
+            endDate={endDate}
+            onFieldChange={onFieldChange}
+            datesTarget={datesTarget}
+          />
+        </span>
       </div>
     </div>
   );

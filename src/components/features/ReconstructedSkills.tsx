@@ -122,8 +122,10 @@ function SkillCategoryRow({
             (empty — add a skill or delete this category)
           </span>
         )}
+        {/* At the end of the chip line, not on a row of its own: hidden at
+            rest (#913), a row of its own is a blank line under every category. */}
+        <AddSkillInput skills={skills} onAdd={onAddSkill} label="Add to category" />
       </div>
-      <AddSkillInput skills={skills} onAdd={onAddSkill} label="Add to category" />
     </div>
   );
 }
@@ -227,7 +229,7 @@ export function SkillsSection({
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
-      className={`edit-scope flex flex-col gap-2 ${fixIt.className}`}
+      className={`edit-scope relative flex flex-col gap-2 ${fixIt.className}`}
     >
       <SectionHeading>{heading ?? "Skills"}</SectionHeading>
       {showEmptyState ? (

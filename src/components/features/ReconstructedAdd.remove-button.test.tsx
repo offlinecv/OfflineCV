@@ -61,4 +61,21 @@ describe("edit chrome at rest (#913)", () => {
       expect(renderToStaticMarkup(node)).toMatch(/^<button[^>]*class="[^"]*\bedit-chrome\b/u);
     }
   });
+
+  it("floats a pill out of flow only when asked, at the requested spot", () => {
+    // A pill on its own row reserves a blank line at rest; `float` is how a
+    // section or entry opts out of that (styles/edit-chrome.css `edit-float`).
+    const plain = renderToStaticMarkup(
+      createElement(AddPill, { label: "Add project", onClick: () => {} }),
+    );
+    expect(plain).not.toContain("edit-float");
+    const heading = renderToStaticMarkup(
+      createElement(AddPill, { label: "Add project", onClick: () => {}, float: "heading" }),
+    );
+    expect(heading).toMatch(/\bedit-float\b[^"]*\bright-0\b[^"]*\btop-0\b/u);
+    const below = renderToStaticMarkup(
+      createElement(InlineBulletAdd, { onAdd: () => {}, float: "below" }),
+    );
+    expect(below).toMatch(/\bedit-float\b[^"]*\bleft-0\b[^"]*\btop-full\b/u);
+  });
 });

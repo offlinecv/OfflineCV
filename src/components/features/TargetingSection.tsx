@@ -78,7 +78,7 @@ interface TargetingSectionProps {
   /** Graded bullets across the entire résumé — the "of N" total, and the
    *  all-clear test. */
   bullets?: readonly BulletObservation[];
-  /** Fix It's bullet steps: the same list the résumé's tinted markers and the
+  /** Fix It's bullet steps: the same list the résumé's gutter marks and the
    *  dock read (#913). What the triage COUNTS, so the headline never names a
    *  bullet the page shows no mark on — a read-only project row, or a
    *  metric-only bullet past the metric budget, is flagged by

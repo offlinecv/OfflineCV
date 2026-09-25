@@ -23,6 +23,7 @@
  * because a hidden optional row is otherwise unreachable.
  */
 
+import type { ReactNode } from "react";
 import { formatLinkDisplay, type ContactDisplayField } from "../../lib/contact.ts";
 import { EditableField } from "@design-system";
 import { classifyProfile } from "../../lib/contact/profile-registry.ts";
@@ -101,6 +102,10 @@ interface ContactDetailsProps {
   onAddProfile?: (url: string) => string | undefined;
   onEditProfile?: (id: string, url: string) => void;
   onRemoveProfile?: (id: string) => void;
+  /** An empty-field prompt the card hands down to lead the add row — the
+   *  headline's, when there is none, so it does not hold a blank line of its
+   *  own under the name. */
+  leadingAdd?: ReactNode;
 }
 
 export function ContactDetails({
@@ -113,6 +118,7 @@ export function ContactDetails({
   onAddProfile,
   onEditProfile,
   onRemoveProfile,
+  leadingAdd,
 }: ContactDetailsProps) {
   // The parsed location, threaded into the phone validator's region default so a
   // non-US local-form number isn't falsely flagged (see `validatorFor`).
@@ -174,12 +180,18 @@ export function ContactDetails({
 
       {/* The absent links, work-authorization, and extra-links "+ Add" affordances
           share one row (#953) — grouping all secondary/optional add affordances on a
-          single line instead of stacking separate rows. */}
+          single line instead of stacking separate rows. Every item on it is
+          edit chrome, so on a fine pointer the row floats (`edit-float`) just
+          under the card instead of holding a blank line above the résumé body;
+          `pt-1` rather than a margin, so the pointer crosses from the contact
+          line onto the row without leaving the card's hover scope. */}
       {editable &&
-        (absentLinks.length > 0 ||
+        (leadingAdd ||
+          absentLinks.length > 0 ||
           workAuthorizationAbsent ||
           (onAddProfile && onEditProfile && onRemoveProfile)) && (
-          <div className="mt-2 flex flex-wrap items-center justify-center gap-2 text-sm">
+          <div className="edit-float inset-x-0 top-full flex flex-wrap items-center justify-center gap-2 pt-1 text-sm">
+            {leadingAdd}
             {absentLinks.map((field) => (
               <FixItTarget
                 key={field.key}
