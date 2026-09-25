@@ -42,6 +42,7 @@ import {
   type ResumeStructureInput,
 } from "../lib/score/guidance.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import type { BulletFinding } from "../lib/webllm/critique-resume.ts";
 import { scrollIntoViewMotionAware } from "../lib/anchors.ts";
 
 interface FixItContextValue {
@@ -337,15 +338,21 @@ function useFixItMode(
  * authoring lane), derived once here so the two cannot disagree about which
  * bullets have a step. `score` is null until the #313 reveal gate opens, and
  * then there is nothing to step through.
+ *
+ * `critiqueFindings` are the on-device critique's bullet findings once the
+ * user has run it (#1008) — `/` passes them, the authoring lane has no
+ * critique. Pass a stable reference: a new array re-derives every step.
  */
 export function useScoreFixIt(
   score: AnonymousAtsScore | null,
   fields: ResumeStructureInput,
   resetKey: unknown,
+  critiqueFindings?: readonly BulletFinding[],
 ): { items: readonly GuidanceItem[]; fixIt: FixItMode } {
   const items = useMemo(
-    () => (score ? computeScoreGuidance(score, fields) : []),
-    [score, fields],
+    () =>
+      score ? computeScoreGuidance(score, fields, critiqueFindings) : [],
+    [score, fields, critiqueFindings],
   );
   const fixIt = useFixItMode(items, resetKey);
   return { items, fixIt };

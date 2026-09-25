@@ -5,15 +5,17 @@
  * TrustIcons — hand-inlined SVG icon set for decorative chip/badge glyphs.
  *
  * #514: the landing trust-chip row (`⚡ 🔒 ✓ 🔁`) used raw emoji as icons —
- * OS-font rendered, uncolourable, and inconsistent across platforms. CLAUDE.md
- * calls for Lucide-style SVG icons instead. Rather than add `lucide-react` as
- * a runtime dependency (a real cost for an app that deliberately keeps its
- * entry chunk small — see vite.config.ts rollupOptions), this module
- * hand-inlines the handful of icons actually needed, following the exact
- * convention already used by `EditableField.tsx`'s `ShapeWarningGlyph`:
+ * OS-font rendered, uncolourable, and inconsistent across platforms — the
+ * colour pictographs the design-system CLAUDE.md's emoji rule bans
+ * (src/design-system/CLAUDE.md § "Emoji rule is about presentation, not
+ * codepoint"), so the chips use Lucide-style SVG icons instead. Rather than add
+ * `lucide-react` as a runtime dependency (a real cost for an app that
+ * deliberately keeps its entry chunk small — see vite.config.ts rollupOptions),
+ * this module hand-inlines the handful of icons actually needed, following the
+ * exact convention already used by `EditableField.tsx`'s `ShapeWarningGlyph`:
  * 24×24 viewBox, `stroke="currentColor"`, 2px stroke, round caps/joins, no
- * fill. Adding a real icon-library dependency later is a separate decision
- * (see #514's PR notes) — this module is deliberately small and swappable.
+ * fill. Adding a real icon-library dependency later is a separate decision (see
+ * #514's PR notes) — this module is deliberately small and swappable.
  *
  * #517 then replaced that chip row with `CapabilityStrip`, which keeps only
  * the privacy rail — so `LockIcon` is the single icon with a consumer, and

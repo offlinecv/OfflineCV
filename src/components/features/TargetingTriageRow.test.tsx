@@ -228,4 +228,26 @@ describe("TargetingTriageRow counts Fix It's bullet steps (#913)", () => {
     expect(text).toContain("2 weak verbs");
     expect(text).not.toContain("length");
   });
+
+  it("tallies a step carried only by a local-AI finding (#1008)", () => {
+    // `vague` has no heuristic equivalent, so without its own tally the
+    // breakdown would leave this step unexplained under the headline.
+    const vague: GuidanceIssue = {
+      dimension: "specificity",
+      check: "critique",
+      title: "Local AI: vague wording",
+      suggestion: "Make it specific.",
+    };
+    const el = render({
+      bulletSteps: [makeStep([VERB], 0), makeStep([vague], 1)],
+      totalBullets: 5,
+      contactMissing: [],
+      hasBulletGap: true,
+      hasContactGap: false,
+    });
+    const text = el.textContent ?? "";
+    expect(text).toContain("2 of 5 bullets need attention");
+    expect(text).toContain("1 weak verb");
+    expect(text).toContain("1 flagged by local AI");
+  });
 });

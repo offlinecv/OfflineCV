@@ -141,7 +141,12 @@ function ParsedCard({
   // advertised on WebGPU-capable browsers with extractable text; on everything
   // else it is silently absent. The panel's single CTA triggers the combined
   // run; status (loading/running/done/error) is owned by the panel.
-  const analysis = useResumeAnalysisLlm(result);
+  //
+  // Reset on `parseKey`, not on `result`: `result` is edit-folded and
+  // re-memoized on every keystroke, so keying on it wiped a finished critique
+  // — a model download plus an inference — at the first edit, and with it
+  // every finding Fix It folds in below (#1008).
+  const analysis = useResumeAnalysisLlm(result, parseKey);
 
   // Degenerate-case LLM escape hatch (#243). Only available when
   // `result.suggestedEscalation === "llm"` AND WebGPU is available AND there is
@@ -188,11 +193,16 @@ function ParsedCard({
     isScoreRevealed(activeResult.canonical, edit.contactOverrides);
 
   // Deterministic ATS score guidance items (#810), and the mode that steps
-  // through them — shared with the authoring lane via `useScoreFixIt`.
+  // through them — shared with the authoring lane via `useScoreFixIt`. A
+  // finished critique's bullet findings fold into the same steps (#1008); the
+  // `done` status object is stable until the next run, so this reference is.
   const { items: guidanceItems, fixIt } = useScoreFixIt(
     scoreRevealed ? activeScore : null,
     activeResult.canonical.fields,
     parseIdentity,
+    analysis.status.kind === "done"
+      ? analysis.status.critique.bulletFindings
+      : undefined,
   );
 
   // Two-column layout warning (#356) — detected but previously never

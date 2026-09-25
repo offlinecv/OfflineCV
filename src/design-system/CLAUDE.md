@@ -32,12 +32,12 @@ rename/merge to a repaint; prefer consuming an existing accent to defining a new
 
 ## Emoji rule is about presentation, not codepoint
 
-Root `CLAUDE.md` forbids emoji as icons. A codepoint-range grep over-reports ~4x — most
-hits are deliberate **text-presentation marks**, not violations. Allowed: monochrome marks
-that inherit `currentColor` and carry an `aria-hidden` + `sr-only`/label pair (e.g. `✓ ✗`
-decorative toggles, `★ ☆` in `StarRating`, `⚠︎` written `U+26A0 U+FE0E` in `Tabs.tsx`).
-Banned: colour pictographs from the OS emoji font. Before flagging a hit, check for an
-adjacent `U+FE0E` and an `aria-hidden`/`sr-only` pair.
+No colour emoji as icons — this section is where that rule lives. A codepoint-range grep
+over-reports ~4x — most hits are deliberate **text-presentation marks**, not violations.
+Allowed: monochrome marks that inherit `currentColor` and carry an `aria-hidden` +
+`sr-only`/label pair (e.g. `✓ ✗` decorative toggles, `★ ☆` in `StarRating`, `⚠︎` written
+`U+26A0 U+FE0E` in `Tabs.tsx`). Banned: colour pictographs from the OS emoji font. Before
+flagging a hit, check for an adjacent `U+FE0E` and an `aria-hidden`/`sr-only` pair.
 
 ## Edit chrome rests hidden — use the classes, not `group-hover`
 

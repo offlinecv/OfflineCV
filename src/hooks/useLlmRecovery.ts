@@ -66,9 +66,23 @@ export interface LlmRecovery {
 }
 
 /**
- * @param result   the edit-folded heuristic parse on screen, or null when there
- *                 is nothing parsed yet.
- * @param score    `result`'s edited score, or null on the same terms.
+ * @param result   the edit-folded heuristic parse to recover onto, or null
+ *                 when there is nothing parsed yet. MUST carry an edited
+ *                 `canonical.sections` pool, not just edited `canonical.
+ *                 fields` — pass `useAnalyzedResume.savableResult`
+ *                 (`flattenEditedResult`), never `displayResult`
+ *                 (`foldEditedIntoResult`), which keeps the BASE pool on
+ *                 purpose (#445) and is exactly the #487-shaped mistake
+ *                 `score-edited.ts` documents grading it would be (#1028):
+ *                 `activeScore` below pools Specificity/Structure straight off
+ *                 `result.canonical.sections` once a recovery is active, so a
+ *                 base-pool `result` freezes the re-grade at whatever the pool
+ *                 was before the recovery pass, and a bullet edit made after
+ *                 never moves it again.
+ * @param score    `result`'s edited score, or null on the same terms. Returned
+ *                 UNCHANGED while no recovery is active — this hook never
+ *                 re-grades `result` itself, so `result`'s sections are only
+ *                 load-bearing once `activeScore` starts reading them below.
  * @param parseKey the pristine-parse identity behind `result` — see
  *                 `useAnalyzedResume.parseKey`. `result` changes on every
  *                 keystroke; this does not.
@@ -114,10 +128,17 @@ export function useLlmRecovery(
 
   const activeScore = useMemo(() => {
     if (llmOverride === null || activeResult === null) return score;
+    // `scoreParsedResume` pools Specificity/Structure from `activeResult.
+    // canonical.sections` — `result`'s sections, untouched by the merge (see
+    // `mergeLlmParse`). This is why `result`'s contract (see the param doc
+    // above) requires an EDITED pool: grading a base one here is the #487
+    // mistake `score-edited.ts` exists to rule out, and #1028 was exactly
+    // that mistake reached through this hook instead of the base scorer.
     return scoreParsedResume(activeResult);
     // Deps hand-audited both directions (`exhaustive-deps` is NOT enforced —
-    // CLAUDE.md): `activeResult` carries the merge, `llmOverride` selects the
-    // branch, and `score` is the value the un-recovered branch returns.
+    // CLAUDE.md): `activeResult` carries the merge (and, transitively, a live
+    // bullet edit — #1028), `llmOverride` selects the branch, and `score` is
+    // the value the un-recovered branch returns.
   }, [activeResult, llmOverride, score]);
 
   if (activeResult === null || activeScore === null) return null;

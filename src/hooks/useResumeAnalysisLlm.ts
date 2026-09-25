@@ -140,8 +140,19 @@ function tallyKinds(disagreements: readonly ParseDisagreement[]): KindTally {
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
+/**
+ * `resetKey` is the parse identity (`useAnalyzedResume.parseKey`): a new résumé
+ * returns the panel to idle, an edit does not. `result` is edit-folded and
+ * changes on every keystroke, so it cannot be the key — keyed on it, the first
+ * edit discarded a finished critique, including the findings Fix It steps
+ * through (#1008). A run reads the current `result` object, but its text input
+ * (`result.markdown ?? result.rawText`) is the extractor's original text —
+ * `foldEditedIntoResult` does not edit it — so a run made after an edit grades
+ * the pre-edit wording, and a finding for an edited bullet will not match it.
+ */
 export function useResumeAnalysisLlm(
   result: CascadeResult,
+  resetKey: unknown,
 ): AnalysisController {
   const [capability, setCapability] = useState<WebGpuCapability | null>(null);
   const [status, setStatus] = useState<AnalysisStatus>({ kind: "idle" });
@@ -156,10 +167,11 @@ export function useResumeAnalysisLlm(
     };
   }, []);
 
-  // A fresh parse (new file) resets the panels — keyed on result identity.
+  // A fresh parse (new file) resets the panels — keyed on the parse identity,
+  // never on `result` (see the docblock).
   useEffect(() => {
     setStatus({ kind: "idle" });
-  }, [result]);
+  }, [resetKey]);
 
   // Whether there is any text for the LLM to analyze. A scanned/empty PDF has
   // none, so the combined pass would be vacuous — treat as unavailable.

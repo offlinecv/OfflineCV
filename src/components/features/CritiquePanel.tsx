@@ -19,6 +19,14 @@
  * navigates to the "Your resume" tab, where the per-role wand
  * button (useSectionRewrite) already lives.
  *
+ * This is the COMPLETE list of what the model flagged, and must stay so
+ * (#1008). Findings that match an editable bullet by text also fold into Fix
+ * It's steps (`matchCritiqueFindings`), but one can fail to match — the model
+ * re-worded the line, the text is on a read-only row, or the user edited the
+ * bullet after the critique ran. This list is where those stay readable, so
+ * it is not filtered down to the unmatched ones either: which findings match
+ * changes with every edit, and a row here must not appear and vanish with it.
+ *
  * Everything rendered here is LLM output, and deliberately so. The heuristic
  * skills-ordering finding (#544) briefly rendered in this body too, for the
  * finding-row visual language; it moved to `SkillTermGuidance`, because this

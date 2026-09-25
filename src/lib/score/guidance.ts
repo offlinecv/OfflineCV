@@ -8,9 +8,13 @@
  * actionable guidance items tied to individual fields or bullets.
  *
  * Invariants:
- *  - Deterministic: Derived solely from existing score inputs (no LLM, no WebGPU).
+ *  - Deterministic: Derived solely from its inputs — the score, the parse, and
+ *    optionally the on-device critique's bullet findings the caller already
+ *    holds (#1008). This module never runs a model; with no findings passed,
+ *    the output is exactly the heuristic guidance.
  *  - Precise location: Points at a specific target (e.g. "Experience → Role → bullet 2").
- *  - House copy rules: No vendor implications, no false precision, no self-serving negation.
+ *  - House copy rules: No vendor implications, no false precision, no self-serving negation
+ *    (docs/CONTRIBUTING-PROCESS.md § "Copy rules (user-facing text)").
  *  - Algo version untouched: This interprets the score, it does not alter ATS_SCORE_ALGO_VERSION.
  */
 
@@ -28,13 +32,17 @@ import {
   type AccomplishmentEntry,
   type BulletGroup,
 } from "./group-bullets.ts";
+import { matchCritiqueFindings } from "./critique-match.ts";
+import type { BulletFinding } from "../webllm/critique-resume.ts";
 import { SECTION_IDS } from "../anchors.ts";
 import { firstUndatedRoleIndex } from "../edit/role-display.ts";
 
 export type GuidanceDimension = "specificity" | "structure" | "completeness";
 
-/** The per-bullet check an issue reports — set only on bullet issues. */
-export type BulletCheck = "metric" | "verb" | "length";
+/** The per-bullet check an issue reports — set only on bullet issues. The
+ *  first three are the heuristic checks; `critique` is a finding from the
+ *  on-device critique, folded in by text match (#1008). */
+export type BulletCheck = "metric" | "verb" | "length" | "critique";
 
 export interface GuidanceIssue {
   dimension: GuidanceDimension;
@@ -313,6 +321,71 @@ function bulletIssues(b: BulletObservation, flagMetric: boolean): GuidanceIssue[
   return issues;
 }
 
+type FlaggedIssue = Exclude<BulletFinding["issue"], "ok">;
+
+/**
+ * How each critique category reads in Fix It. Titled apart from the heuristic
+ * checks ("Local AI:") so the dock never presents a model's opinion as one of
+ * the score's own checks; `vague` has no heuristic equivalent at all.
+ * `duplicates` names the heuristic check a suggestion-less finding would only
+ * repeat — see `critiqueIssue`.
+ */
+const CRITIQUE_ISSUE: Record<
+  FlaggedIssue,
+  {
+    dimension: GuidanceDimension;
+    title: string;
+    fallback: string;
+    duplicates?: BulletCheck;
+  }
+> = {
+  no_quantification: {
+    dimension: "specificity",
+    title: "Local AI: no measurable result",
+    fallback: "Add a number, scale, or outcome that is true for this work.",
+    duplicates: "metric",
+  },
+  weak_verb: {
+    dimension: "structure",
+    title: "Local AI: weak opening verb",
+    fallback: "Lead with a stronger action verb (e.g. 'Shipped', 'Built', 'Led').",
+    duplicates: "verb",
+  },
+  vague: {
+    dimension: "specificity",
+    title: "Local AI: vague wording",
+    fallback: "Make it specific: name the system, the scope, or the result.",
+  },
+};
+
+/**
+ * The Fix It issue for one matched critique finding, or null when it adds
+ * nothing: an `ok` finding, or one with no suggestion that only restates a
+ * heuristic check this bullet already fails. The finding stays listed in
+ * `CritiqueResults` either way. A model suggestion can carry a figure the
+ * user never wrote, so it is offered as wording, with the caveat, never as
+ * the fix.
+ */
+function critiqueIssue(
+  finding: BulletFinding | undefined,
+  heuristic: readonly GuidanceIssue[],
+): GuidanceIssue | null {
+  if (!finding || finding.issue === "ok") return null;
+  const spec = CRITIQUE_ISSUE[finding.issue];
+  const suggestion = finding.suggestion?.trim();
+  if (!suggestion && heuristic.some((i) => i.check === spec.duplicates)) {
+    return null;
+  }
+  return {
+    dimension: spec.dimension,
+    check: "critique",
+    title: spec.title,
+    suggestion: suggestion
+      ? `Suggested rewrite: "${suggestion}" Keep only details that are true.`
+      : spec.fallback,
+  };
+}
+
 /** One rendered entry's bullets, labelled the way the résumé names it. */
 interface BulletRun {
   section: string;
@@ -382,10 +455,13 @@ function metricBudget(score: AnonymousAtsScore): number {
 }
 
 /** One item per bullet with at least one issue, in run order. `budget` is
- *  shared across calls so the metric shortfall is spent in document order. */
+ *  shared across calls so the metric shortfall is spent in document order.
+ *  `critique` is the matched critique finding per bullet id — a critique
+ *  issue trails the bullet's heuristic ones, and can be its only one. */
 function bulletGuidanceItems(
   runs: readonly BulletRun[],
   budget: { metric: number },
+  critique: ReadonlyMap<string, BulletFinding>,
 ): GuidanceItem[] {
   const items: GuidanceItem[] = [];
   for (const { section, group } of runs) {
@@ -394,6 +470,8 @@ function bulletGuidanceItems(
       const flagMetric = !b.hasMetric && budget.metric > 0;
       if (flagMetric) budget.metric--;
       const issues = bulletIssues(b, flagMetric);
+      const fromCritique = critiqueIssue(critique.get(b.id), issues);
+      if (fromCritique) issues.push(fromCritique);
       if (issues.length === 0) return;
       const dimensions = new Set(issues.map((i) => i.dimension));
       items.push({
@@ -418,10 +496,18 @@ function bulletGuidanceItems(
  * role-dates item in front of the role it lands on, then the section's
  * unmatched bullets) → Education → Skills. Bullets outside Experience are not
  * stepped through — see `editableBulletRuns`.
+ *
+ * `critiqueFindings` — the on-device critique's per-bullet findings, when the
+ * user has run it (#1008) — are matched to the SAME editable bullets by text
+ * (`matchCritiqueFindings`), so a matched finding lands on the bullet's own
+ * step and marker and a read-only row never gains one. Findings are not
+ * budgeted: they do not move the score, and one leaves Fix It the moment its
+ * bullet is edited or removed.
  */
 export function computeScoreGuidance(
   score: AnonymousAtsScore,
   parsed: ResumeStructureInput,
+  critiqueFindings: readonly BulletFinding[] = [],
 ): GuidanceItem[] {
   const missing = new Set(score.completeness.missing);
   const experienceItem = experienceCompletenessItem(score, missing);
@@ -433,8 +519,14 @@ export function computeScoreGuidance(
       ? datesRunIndex(runs, parsed)
       : 0;
   const budget = { metric: metricBudget(score) };
-  const before = bulletGuidanceItems(runs.slice(0, split), budget);
-  const from = bulletGuidanceItems(runs.slice(split), budget);
+  // Matched over every run at once, in render order, so the duplicate-text
+  // pairing sees the whole section rather than one side of the dates split.
+  const critique = matchCritiqueFindings(
+    critiqueFindings,
+    runs.flatMap((run) => run.group.bullets),
+  );
+  const before = bulletGuidanceItems(runs.slice(0, split), budget, critique);
+  const from = bulletGuidanceItems(runs.slice(split), budget, critique);
   return [
     ...completenessItems(LEADING_COMPLETENESS, missing),
     ...before,
