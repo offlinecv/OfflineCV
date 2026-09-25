@@ -158,7 +158,8 @@ describe("JdInput — privacy contract", () => {
   it("copy confirms JD text stays in the browser tab (affirmative framing)", () => {
     const html = renderIdle();
     // Must contain affirmative copy; must NOT contain self-serving negation
-    // ("we never upload", "we don't send") per CLAUDE.md copy discipline.
+    // ("we never upload", "we don't send") — see docs/CONTRIBUTING-PROCESS.md
+    // "Copy rules (user-facing text)".
     expect(html.toLowerCase()).toContain("stays in this browser tab");
     expect(html.toLowerCase()).not.toMatch(/we never|we don't send|we do not/);
   });

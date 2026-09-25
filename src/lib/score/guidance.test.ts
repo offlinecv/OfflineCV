@@ -12,6 +12,7 @@ import {
   type AnonymousAtsScore,
   type BulletObservation,
 } from "./score.ts";
+import type { BulletFinding } from "../webllm/critique-resume.ts";
 
 function createMockScore(overrides?: Partial<AnonymousAtsScore>): AnonymousAtsScore {
   return {
@@ -409,6 +410,183 @@ describe("guidance.ts — score guidance generator (#810)", () => {
         "Experience → Dates",
         "Experience → Lead — Co → bullet 1",
       ]);
+    });
+  });
+
+  describe("folds the on-device critique's bullet findings in (#1008)", () => {
+    // The three mock bullets: 0 fails metric + length, 1 fails the verb check,
+    // 2 passes everything.
+    const parsed = {
+      experience: [
+        {
+          title: "Senior Engineer",
+          company: "Acme Corp",
+          description:
+            "Shipped something great\nHelped with 5 projects across the engineering organization\nEngineered high-throughput pipeline handling 100k requests daily",
+        },
+      ],
+    };
+    const PIPELINE = "Engineered high-throughput pipeline handling 100k requests daily";
+    const bulletItem = (items: ReturnType<typeof computeScoreGuidance>, id: string) =>
+      items.find((i) => i.bulletId === id);
+
+    it("changes nothing when no critique is passed", () => {
+      const score = createMockScore();
+      expect(computeScoreGuidance(score, parsed, [])).toEqual(
+        computeScoreGuidance(score, parsed),
+      );
+    });
+
+    it("gives a bullet every heuristic check passed a step of its own, with the model's suggestion", () => {
+      const findings: BulletFinding[] = [
+        { bullet: PIPELINE, issue: "vague", suggestion: "Built the order pipeline" },
+      ];
+      const items = computeScoreGuidance(createMockScore(), parsed, findings);
+      const item = bulletItem(items, `2|${PIPELINE.toLowerCase()}`)!;
+      expect(item).toBeDefined();
+      expect(item.targetType).toBe("bullet");
+      expect(item.targetAnchor).toBe(bulletAnchorId(item.bulletId!));
+      expect(item.location).toBe("Experience → Senior Engineer — Acme Corp → bullet 3");
+      expect(item.dimension).toBe("specificity");
+      expect(item.issues).toHaveLength(1);
+      expect(item.issues[0]).toMatchObject({
+        check: "critique",
+        title: "Local AI: vague wording",
+      });
+      expect(item.issues[0].suggestion).toContain('"Built the order pipeline"');
+      // In document order with the heuristic steps, not appended at the end.
+      expect(items.filter((i) => i.targetType === "bullet").map((i) => i.bulletId)).toEqual([
+        "0|shipped something great",
+        "1|helped with 5 projects",
+        `2|${PIPELINE.toLowerCase()}`,
+      ]);
+    });
+
+    it("adds the finding to a bullet's existing step, after its heuristic issues", () => {
+      const items = computeScoreGuidance(createMockScore(), parsed, [
+        { bullet: "Shipped something great", issue: "vague" },
+      ]);
+      const item = bulletItem(items, "0|shipped something great")!;
+      expect(item.issues.map((i) => i.check)).toEqual(["metric", "length", "critique"]);
+      expect(item.summary).toContain("Local AI: vague wording");
+      // No suggestion from the model: the category's own advice stands in.
+      expect(item.issues[2].suggestion).toMatch(/specific/);
+    });
+
+    it("injects nothing for an `ok` finding", () => {
+      const score = createMockScore();
+      const findings: BulletFinding[] = [
+        { bullet: PIPELINE, issue: "ok" },
+        { bullet: "Shipped something great", issue: "ok" },
+      ];
+      expect(computeScoreGuidance(score, parsed, findings)).toEqual(
+        computeScoreGuidance(score, parsed),
+      );
+    });
+
+    it("drops a suggestion-less finding that only restates a check the bullet already fails", () => {
+      const items = computeScoreGuidance(createMockScore(), parsed, [
+        { bullet: "Helped with 5 projects across the engineering organization", issue: "weak_verb" },
+      ]);
+      expect(bulletItem(items, "1|helped with 5 projects")!.issues.map((i) => i.check)).toEqual([
+        "verb",
+      ]);
+      // …but keeps it when the model offered wording to try.
+      const withSuggestion = computeScoreGuidance(createMockScore(), parsed, [
+        {
+          bullet: "Helped with 5 projects across the engineering organization",
+          issue: "weak_verb",
+          suggestion: "Delivered 5 projects across engineering",
+        },
+      ]);
+      expect(
+        bulletItem(withSuggestion, "1|helped with 5 projects")!.issues.map((i) => i.check),
+      ).toEqual(["verb", "critique"]);
+    });
+
+    it("does not spend the metric budget", () => {
+      // Gradable, 2 of 3 bullets carry a metric: the shortfall to full
+      // specificity decides how many metric asks survive. A critique finding
+      // on the one metric-less bullet must not change that.
+      const score = createMockScore();
+      const base = computeScoreGuidance(score, parsed);
+      const withCritique = computeScoreGuidance(score, parsed, [
+        { bullet: "Shipped something great", issue: "no_quantification", suggestion: "Shipped X" },
+      ]);
+      const metricAsks = (items: typeof base) =>
+        items.filter((i) => i.issues.some((x) => x.check === "metric")).length;
+      expect(metricAsks(withCritique)).toBe(metricAsks(base));
+    });
+
+    it("gives a read-only project bullet no step, even with a finding for its text", () => {
+      const withProject = {
+        experience: [
+          {
+            title: "Senior Engineer",
+            company: "Acme Corp",
+            description:
+              "Shipped something great\nHelped with 5 projects across the engineering organization",
+          },
+        ],
+        projects: [{ title: "Data Engine", description: PIPELINE }],
+      };
+      const items = computeScoreGuidance(createMockScore(), withProject, [
+        { bullet: PIPELINE, issue: "vague", suggestion: "anything" },
+      ]);
+      expect(items.find((i) => i.bulletId?.includes("pipeline"))).toBeUndefined();
+    });
+
+    it("drops a finding from Fix It once its bullet is edited (stale)", () => {
+      const findings: BulletFinding[] = [{ bullet: PIPELINE, issue: "vague" }];
+      const edited = "Engineered an order pipeline handling 100k requests daily";
+      const score = createMockScore({
+        bullets: createMockScore().bullets!.map((b) =>
+          b.index === 2 ? { ...b, id: `2|${edited.toLowerCase()}`, text: edited } : b,
+        ),
+      });
+      const editedParsed = {
+        experience: [
+          {
+            ...parsed.experience[0]!,
+            description: parsed.experience[0]!.description.replace(PIPELINE, edited),
+          },
+        ],
+      };
+      const items = computeScoreGuidance(score, editedParsed, findings);
+      expect(items.some((i) => i.issues.some((x) => x.check === "critique"))).toBe(false);
+    });
+
+    it("tie-breaks duplicate text across roles: agreeing findings mark both rows", () => {
+      const dup = "Led weekly 1:1s with the whole platform engineering team";
+      const obs = (i: number): BulletObservation => ({
+        id: `${i}|${dup.toLowerCase()}`,
+        text: dup,
+        index: i,
+        hasMetric: true,
+        startsWithActionVerb: true,
+        wellFormedLength: true,
+        wordCount: 9,
+      });
+      const score = createMockScore({ bullets: [obs(0), obs(1)] });
+      const twoRoles = {
+        experience: [
+          { title: "Lead", company: "A", description: dup },
+          { title: "Lead", company: "B", description: dup },
+        ],
+      };
+      const vague: BulletFinding = { bullet: dup, issue: "vague" };
+      const both = computeScoreGuidance(score, twoRoles, [vague, { ...vague }]);
+      expect(both.filter((i) => i.targetType === "bullet")).toHaveLength(2);
+      // Disagreeing verdicts pair in render order: only the second row. (Which
+      // role the grouper files each copy under is its own concern, so this
+      // asserts the row's identity rather than its breadcrumb.)
+      const paired = computeScoreGuidance(score, twoRoles, [
+        { bullet: dup, issue: "ok" },
+        vague,
+      ]);
+      expect(
+        paired.filter((i) => i.targetType === "bullet").map((i) => i.bulletId),
+      ).toEqual([`1|${dup.toLowerCase()}`]);
     });
   });
 });

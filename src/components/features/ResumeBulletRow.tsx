@@ -32,6 +32,7 @@
  */
 
 import { useCallback } from "react";
+import type { ReactNode } from "react";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { bulletAnchorId } from "../../lib/score/guidance.ts";
 import { useFixItTarget } from "../../hooks/useFixItMode.ts";
@@ -51,6 +52,7 @@ export function ResumeBulletRow({
   bullet,
   onBulletChange,
   onRemove,
+  trailing,
 }: {
   /** The graded row as the RE-GRADED pool minted it, so `bullet.text` is
    *  already the post-edit text. There is deliberately no `override` prop to
@@ -68,6 +70,10 @@ export function ResumeBulletRow({
    *  storing `""` (the pre-#626 behaviour), for any caller that hasn't wired
    *  the remove path. */
   onRemove?: () => void;
+  /** Extra per-row content rendered after the editable text, before Remove
+   *  (#1007) — the "Other bullets" bucket's export-fidelity mark + "move to
+   *  role" menu (`OtherBulletTrailing`). Absent for every other row. */
+  trailing?: ReactNode;
 }) {
   const editable = onBulletChange !== undefined;
   const displayText = bullet.text;
@@ -107,7 +113,7 @@ export function ResumeBulletRow({
       {editable ? (
         /* Multiline edit mode: block layout, full-width textarea + Save/Cancel,
            the per-bullet remove control trailing on the same row (#626). */
-        <div className="flex items-start gap-1.5">
+        <div className="flex flex-wrap items-start gap-1.5">
           <BulletMarker bulletId={bullet.id} anchorId={fixIt.id} />
           <div className="min-w-0 flex-1">
             <EditableField
@@ -121,6 +127,7 @@ export function ResumeBulletRow({
               onCommit={handleCommit}
             />
           </div>
+          {trailing}
           {/* `RemoveButton` carries the 24×24 minimum target (WCAG 2.2 AA SC
               2.5.8, 24 not 44 — see #581/#591); at 44 a dense per-bullet
               control list would bleed into the next row's target. */}

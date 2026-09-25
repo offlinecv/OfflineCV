@@ -5,9 +5,9 @@
  * TargetingTriageRow — the compact bullet and contact issue breakdown
  * rendered at the top of the expanded TargetingSection disclosure (#953).
  *
- * Co-locates flagged bullet totals (metric, length, weak verb) and missing
- * contact fields, with jump links to the contact block and to the bullets
- * themselves.
+ * Co-locates flagged bullet totals (metric, length, weak verb, local-AI
+ * findings) and missing contact fields, with jump links to the contact block
+ * and to the bullets themselves.
  *
  * BOTH ARROWS POINT DOWN, and that is the current geometry rather than a
  * coincidence. Since #955 folded `TargetingSection` into the score card, this
@@ -85,6 +85,10 @@ function BulletSegment({
   const missingMetric = tally("metric");
   const lengthIssues = tally("length");
   const weakVerb = tally("verb");
+  // A step can carry only a local-AI finding (#1008) — `vague` has no
+  // heuristic equivalent — so it is tallied too, or the breakdown would not
+  // account for every step in the headline.
+  const fromCritique = tally("critique");
 
   const counts: Array<{ key: string; n: number; label: string }> = [
     { key: "metric", n: missingMetric, label: "missing a metric" },
@@ -98,6 +102,7 @@ function BulletSegment({
       n: weakVerb,
       label: weakVerb === 1 ? "weak verb" : "weak verbs",
     },
+    { key: "critique", n: fromCritique, label: "flagged by local AI" },
   ].filter((c) => c.n > 0);
 
   return (

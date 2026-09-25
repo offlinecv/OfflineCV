@@ -1,7 +1,7 @@
 {
   "schemaVersion": 6,
   "cascade": {
-    "confidence": 0.88,
+    "confidence": 0.9,
     "triggers": [],
     "tiers": [
       "t0_layout",
@@ -75,7 +75,7 @@
     "sectionSource": "regex",
     "pageCount": 1,
     "rawCharCount": 2223,
-    "extractedCharCount": 1843,
+    "extractedCharCount": 1862,
     "sections": [
       {
         "name": "profile",

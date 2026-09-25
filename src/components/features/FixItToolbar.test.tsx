@@ -9,7 +9,11 @@ import { EditableField, Popover } from "@design-system";
 import { createRoot, type Root } from "react-dom/client";
 import { FixItToolbar } from "./FixItToolbar.tsx";
 import { SkillChip } from "./ReconstructedSkillControls.tsx";
-import type { GuidanceItem } from "../../lib/score/guidance.ts";
+import {
+  computeScoreGuidance,
+  type GuidanceItem,
+} from "../../lib/score/guidance.ts";
+import type { AnonymousAtsScore } from "../../lib/score/score.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -456,5 +460,45 @@ describe("FixItToolbar.tsx (#810)", () => {
       doneBtn.click();
     });
     expect(onExit).toHaveBeenCalled();
+  });
+
+  it("shows a matched on-device critique finding the way it shows a heuristic issue (#1008)", () => {
+    // Through the real join: the finding reaches the dock as the bullet's own
+    // step — title plus the model's suggestion — not a second surface.
+    const text = "Engineered high-throughput pipeline handling 100k requests daily";
+    const score = {
+      overall: 90,
+      preLayoutOverall: 90,
+      specificity: { score: 40, max: 40, gradable: true, metricBullets: 1, totalBullets: 1 },
+      structure: {
+        score: 30, max: 30, gradable: true,
+        goodBullets: 1, verbLedBullets: 1, inWindowBullets: 1, totalBullets: 1,
+      },
+      completeness: { score: 30, max: 30, gradable: true, missing: [] },
+      layout: { triggers: [], multiplier: 1, scanned: false },
+      bullets: [
+        {
+          id: `0|${text.toLowerCase()}`, text, index: 0,
+          hasMetric: true, startsWithActionVerb: true, wellFormedLength: true, wordCount: 8,
+        },
+      ],
+    } as AnonymousAtsScore;
+    const items = computeScoreGuidance(
+      score,
+      { experience: [{ title: "Dev", company: "Acme", description: text }] },
+      [{ bullet: text, issue: "vague", suggestion: "Built the order pipeline" }],
+    );
+    expect(items).toHaveLength(1);
+
+    const dom = renderToolbar({
+      items,
+      currentIndex: 0,
+      onNavigate: vi.fn(),
+      onExit: vi.fn(),
+    });
+    expect(dom.textContent).toContain("Step 1 of 1");
+    expect(dom.textContent).toContain("Local AI: vague wording");
+    expect(dom.textContent).toContain('"Built the order pipeline"');
+    expect(dom.textContent).toContain("Experience → Dev — Acme → bullet 1");
   });
 });

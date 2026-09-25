@@ -316,9 +316,16 @@ export interface EntryBlock {
    * header mapping byte-identical. `experience.ts` is the only reader — it
    * fills `location` from here only when the header itself yielded none.
    *
-   * Known gap: in a section with no bullet glyphs, the walk's `isGlyphlessBody`
-   * break runs before this capture, so a flush-right cell far right of the
-   * body margin still ends the walk and the location (and company) is dropped.
+   * Also filled from a company row pdfjs WELDED to its flush-right cell (#1026,
+   * the Skia/Chromium export of the same layout): one wide whitespace item
+   * bridges the gap, so no cut happens and the walk peels the cell off with
+   * `peelFlushRightLocation` instead — the company half stays a header line,
+   * the location half lands here.
+   *
+   * Captured in a section with no bullet glyphs too (#1027): the cell sits far
+   * right of the glyph-less body indent, so the walk exempts a row-partnered
+   * cell from its `isGlyphlessBody` break rather than ending there and losing
+   * both the location and the company to its left.
    */
   aboveAnchorLocation?: string;
 }
@@ -1323,7 +1330,9 @@ function nextHeaderStart(
 }
 
 /**
- * Peel a flush-right bare-location trailer off a below-anchor header line.
+ * Peel a flush-right bare-location trailer off a role-header line — below the
+ * anchor (#891), and above it on the company row of a two-line header (#1026),
+ * where `buildEntryBlock` routes the trailer to `aboveAnchorLocation`.
  *
  * A tab-justified sub-line ("Software Developer" at the left margin, "Remote"
  * right-aligned on the SAME PDF row) reaches us as one `PdfLine`: pdfjs draws
@@ -1553,10 +1562,34 @@ function buildEntryBlock(
       // A bullet, a prose paragraph, or — for a glyph-less section — an indented
       // marker-less body line (#215) marks the previous entry's body. Stop: it is
       // never this entry's company/title.
-      if (isBulletLine(l) || isProseLine(l.text) || isGlyphlessBody(l, bodyMarginX)) {
+      //
+      // #1027 — except a flush-right `City, ST` cell of this role's header row.
+      // It sits far right of the glyph-less body indent, so the indent test
+      // alone reads it as body and ends the walk before the #1021 capture below
+      // can keep it — dropping the location AND the company to its left. The
+      // row partner is what tells the two apart: a body line, even one wrapped
+      // down to a bare `City, ST` tail, is alone on its row. The cell then takes
+      // the ordinary location branch below, paragraph-gap rule included.
+      if (
+        isBulletLine(l) ||
+        isProseLine(l.text) ||
+        (isGlyphlessBody(l, bodyMarginX) &&
+          !(isLocationLine(l.text) && isRoleHeaderLocationCell(lines, i)))
+      ) {
         break;
       }
-      const text = l.text.trim();
+      // #1026 — a company row whose flush-right `City, ST` cell pdfjs welded on
+      // with one wide whitespace item (the #891 tab-justified shape: Skia /
+      // Chromium exports bridge the column gap that way, so line assembly never
+      // cuts it). Peel it here, before the pure-location test: "Freelance
+      // Berkeley, CA" is itself `Word Word, ST`-shaped and would otherwise be
+      // skipped as a location, dropping the company; a longer welded row keeps
+      // the city glued onto the company. The head is judged as the header line
+      // it really is; the cell is this role's location, recorded exactly as
+      // the #1021 row-partner capture records the unwelded (Word/Quartz) twin.
+      const peeled = peelFlushRightLocation(l);
+      const [head, cell] = peeled.length === 2 ? peeled : [l, undefined];
+      const text = head.text.trim();
       const pastParagraphGap =
         baseline > 0 && lastKeptY !== null && lastKeptY - l.y > BODY_GAP_FACTOR * baseline;
       if (text && isLocationLine(text)) {
@@ -1577,7 +1610,8 @@ function buildEntryBlock(
       if (pastParagraphGap) {
         break;
       }
-      aboveLines.unshift(l);
+      aboveLines.unshift(head);
+      if (cell) aboveAnchorLocation ??= cell.text;
       lastKeptY = l.y;
       claimed++;
     }

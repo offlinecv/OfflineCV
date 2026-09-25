@@ -555,3 +555,34 @@ describe("tab-justified flush-right location (#891)", () => {
     expect(roles[0].location).toBe("Bellevue, WA");
   });
 });
+
+describe("two-line role header, flush-right location, no bullet glyphs (#1027)", () => {
+  // "Company … City, ST" over "Title … Dates", with a role body written as
+  // plain indented paragraphs (no glyph). Line assembly cuts the company row at
+  // the column gap, so the `City, ST` cell reaches the header walk as its own
+  // line — far right of the glyph-less body indent. Pre-fix the walk's
+  // glyph-less-body break fired on that cell before the #1021 location capture
+  // could keep it, and the company above it was never reached:
+  // `{ title: "Production Intern", company: "" }` and no location.
+  it("keeps the company and the flush-right location on the role", () => {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13, lineIndex: 0 },
+      { text: "Northwind Opera", x: 36, lineIndex: 1 },
+      { text: "Springfield, IL", x: 522, lineIndex: 1 },
+      { text: "Production Intern", x: 36, lineIndex: 2 },
+      { text: "Jun 2023 - Present", x: 480, lineIndex: 2 },
+      { text: "Supported set changeovers for four productions", x: 54, lineIndex: 3 },
+      { text: "Coordinated crew call sheets for the season", x: 54, lineIndex: 4 },
+    ]);
+    expect(roles).toHaveLength(1);
+    expect(roles[0]).toMatchObject({
+      title: "Production Intern",
+      company: "Northwind Opera",
+      location: "Springfield, IL",
+      start_date: "Jun 2023",
+      is_current: true,
+    });
+    expect(roles[0].description).toContain("set changeovers");
+    expect(roles[0].description).toContain("crew call sheets");
+  });
+});

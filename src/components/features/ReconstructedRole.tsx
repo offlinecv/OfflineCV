@@ -53,6 +53,8 @@ import {
   useBulletRemoveStatus,
   type BulletRemoveControl,
 } from "./BulletRemoveStatus.tsx";
+import { OtherBulletTrailing } from "./OtherBulletMove.tsx";
+import type { MoveTarget } from "../../lib/edit/move-targets.ts";
 
 // ── RoleEntry ───────────────────────────────────────────────────────────────
 
@@ -111,6 +113,15 @@ interface RoleEntryProps {
   /** This is the first role with no start date: the Fix It role-dates step
    *  lands on its start date (#810). */
   datesTarget?: boolean;
+  /** "Move to role" destinations for the "Other bullets" bucket (#1007) —
+   *  every OTHER rendered entry across Experience/Projects/Achievements/
+   *  Certifications. Only meaningful (and only ever passed) alongside
+   *  {@link onMoveBullet} for the `experienceIndex === null` group; absent for
+   *  every real role. */
+  moveTargets?: readonly MoveTarget[];
+  /** Reattach a bullet from "Other bullets" to a real entry (#1007) — see
+   *  {@link moveTargets}. */
+  onMoveBullet?: (id: string, text: string, target: MoveTarget) => void;
 }
 
 /**
@@ -131,6 +142,8 @@ export function RoleEntry({
   entryKey,
   pruneHold,
   datesTarget,
+  moveTargets,
+  onMoveBullet,
 }: RoleEntryProps) {
   // This entry's root element, handed to `useHoldWhile` (#658). The prune that
   // runs when a remove-undo strip collapses asks it two things: does focus still
@@ -275,6 +288,16 @@ export function RoleEntry({
                   onRemoveBullet
                     ? () => removes.removeBullet(b.id, b.text)
                     : undefined
+                }
+                trailing={
+                  onMoveBullet && (
+                    <OtherBulletTrailing
+                      bulletId={b.id}
+                      bulletText={b.text}
+                      targets={moveTargets ?? []}
+                      onMove={onMoveBullet}
+                    />
+                  )
                 }
               />
             ))}

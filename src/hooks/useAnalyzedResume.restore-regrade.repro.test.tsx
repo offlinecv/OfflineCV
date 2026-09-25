@@ -27,95 +27,37 @@
  * `ExperienceSection`'s `rewriteApplyBySection` in `ReconstructedResume.tsx`
  * for a role, and the real `summaryRewriteApply` for the summary — with the
  * same arguments, including the bucket ref a role's rewrite passes through.
- * The résumé is inline markdown over a synthetic persona, parsed by the real
- * cascade.
+ * The résumé is the shared Riley fixture (`__test-utils__/riley-resume.ts`),
+ * a synthetic persona parsed by the real cascade.
  */
 
 import { describe, it, expect, afterEach } from "vitest";
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { useAnalyzedResume, type AnalyzedResume } from "./useAnalyzedResume.ts";
-import { parsedEntryKey, type AddedBulletRef } from "./useEditableParse.ts";
-import { runCascadeFromMarkdown } from "../lib/heuristics/cascade.ts";
-import { parseMarkdownFile } from "../lib/ingest/markdown.ts";
+import { parsedEntryKey } from "./useEditableParse.ts";
 import { scoreParsedResume } from "../lib/score/score-cascade.ts";
 import { computeScoreGuidance } from "../lib/score/guidance.ts";
 import { summaryRewriteApply } from "../components/features/ReconstructedSummary.tsx";
-import type { CascadeResult } from "../lib/heuristics/types.ts";
-import type { AnonymousAtsScore } from "../lib/score/score.ts";
+import {
+  createProbeRoot,
+  loadRiley,
+  obsId,
+  parseRileyResume,
+  ref,
+} from "./__test-utils__/riley-resume.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-const RESUME_MD = `# Riley Nakamura
-
-riley.nakamura@example.com · (312) 555-0123 · Chicago, IL
-
-<https://linkedin.com/in/rileynakamura>
-
-## Summary
-
-Platform engineer who ships checkout and catalog systems for mid-size retailers.
-
-## Experience
-
-**Staff Engineer**, Example Corp — 2020–2024
-
-- Led the catalog migration that cut checkout latency 40%.
-- Ran on-call.
-- Responsible for the pricing service and its many downstream consumers across teams.
-
-**Senior Engineer**, Northwind Systems — 2016–2020
-
-- Rebuilt the pricing service.
-- Helped with hiring.
-
-## Education
-
-Example State University — B.S. Computer Science — 2016
-
-## Skills
-
-TypeScript, Go, Postgres, Kubernetes, AWS, React
-`;
-
 let api: AnalyzedResume;
-let container: HTMLDivElement | null = null;
-let root: Root | null = null;
+const probe = createProbeRoot();
 
 function Probe() {
   api = useAnalyzedResume();
   return null;
 }
 
-function mount(): void {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
-  act(() => root!.render(<Probe />));
-}
-
-function unmount(): void {
-  act(() => root?.unmount());
-  container?.remove();
-  root = null;
-  container = null;
-}
-
-afterEach(unmount);
-
-/** Hydrate the "done" state — a fresh parse or a library record, one door. */
-function load(result: CascadeResult, score: AnonymousAtsScore): void {
-  act(() =>
-    api.loadSavedResume({
-      fileName: "riley.md",
-      fileSize: RESUME_MD.length,
-      sourceKind: "markdown",
-      result,
-      score,
-    }),
-  );
-}
+afterEach(() => probe.unmount());
 
 /** The Fix It list the score card counts: `Result.tsx`'s `useScoreFixIt`
  *  inputs, reduced to what a reader sees per item. */
@@ -131,24 +73,11 @@ function gradedTexts(): string[] {
   return (api.edited!.score.bullets ?? []).map((b) => b.text);
 }
 
-/** The graded bullet whose text is `text` — the `obsId` the review hands back. */
-function obsId(text: string): string {
-  const found = api.edited!.score.bullets?.find((b) => b.text === text);
-  if (!found) throw new Error(`no graded bullet reads "${text}"`);
-  return found.id;
-}
-
-/** The `AddedBulletRef` a role's apply callbacks pass (`bucketRef`). */
-function ref(entryKey: string, text: string): AddedBulletRef {
-  return { entryKey, text };
-}
-
 describe("whole-résumé Apply → reload grades the same résumé (#1022)", () => {
   it("re-grades live on Apply, and a restore of the autosaved record agrees", async () => {
-    const { rawText, markdown } = parseMarkdownFile(RESUME_MD);
-    const parsed = await runCascadeFromMarkdown(rawText, markdown);
-    mount();
-    load(parsed, scoreParsedResume(parsed));
+    const parsed = await parseRileyResume();
+    probe.mount(<Probe />);
+    loadRiley(api, parsed, scoreParsedResume(parsed));
 
     // A user-added role with one bullet — the rewrite has to reach its bucket.
     let addedRole = "";
@@ -163,12 +92,13 @@ describe("whole-résumé Apply → reload grades the same résumé (#1022)", () 
     const staff = parsedEntryKey("experience", 0);
     const northwind = parsedEntryKey("experience", 1);
     const ids = {
-      onCall: obsId("Ran on-call."),
+      onCall: obsId(api, "Ran on-call."),
       pricing: obsId(
+        api,
         "Responsible for the pricing service and its many downstream consumers across teams.",
       ),
-      hiring: obsId("Helped with hiring."),
-      integrations: obsId("Did integrations."),
+      hiring: obsId(api, "Helped with hiring."),
+      integrations: obsId(api, "Did integrations."),
     };
 
     // One Apply across four sections: replace, replace, remove + add, a
@@ -225,9 +155,9 @@ describe("whole-résumé Apply → reload grades the same résumé (#1022)", () 
     });
 
     // Reload: a fresh mount, hydrated from the record with no edits.
-    unmount();
-    mount();
-    load(record.result, record.score);
+    probe.unmount();
+    probe.mount(<Probe />);
+    loadRiley(api, record.result, record.score);
     expect(api.edit.hasEdits).toBe(false);
 
     expect(guidance()).toEqual(live);
@@ -238,19 +168,18 @@ describe("whole-résumé Apply → reload grades the same résumé (#1022)", () 
   it("a restore of an UNEDITED record grades as the fresh parse did", async () => {
     // The flatten must be a no-op on a clean parse, or every record saved
     // through the header's explicit save would drift on restore instead.
-    const { rawText, markdown } = parseMarkdownFile(RESUME_MD);
-    const parsed = await runCascadeFromMarkdown(rawText, markdown);
-    mount();
-    load(parsed, scoreParsedResume(parsed));
+    const parsed = await parseRileyResume();
+    probe.mount(<Probe />);
+    loadRiley(api, parsed, scoreParsedResume(parsed));
     const fresh = guidance();
     const record = structuredClone({
       result: api.savableResult!,
       score: api.edited!.score,
     });
 
-    unmount();
-    mount();
-    load(record.result, record.score);
+    probe.unmount();
+    probe.mount(<Probe />);
+    loadRiley(api, record.result, record.score);
 
     expect(guidance()).toEqual(fresh);
   });

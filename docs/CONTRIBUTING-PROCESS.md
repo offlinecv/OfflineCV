@@ -34,6 +34,32 @@ PDF fixtures under `tests/fixtures/pdfs/<category>/` **must use synthetic person
 - The `*.expected.json` snapshots are lossy by design (keys/counts only, never field values), so they stay PII-free automatically — but that safety does **not** extend to the PDF itself.
 - Full policy + add-fixture workflow: `tests/fixtures/pdfs/README.md` (Privacy section).
 
+## Copy rules (user-facing text)
+
+Four rules recur across product copy reviews and are cited from several places in `src/` —
+this is their one written home; point a citation here rather than restating or re-deriving them.
+
+- **No self-serving negation.** Don't reassure by negating an action the reader may already
+  believe happened ("we never upload your file" reads as a contradiction to someone who just
+  dropped a file on the page) and don't add meta-commentary defending our own choices ("we won't
+  publish X because that would help gaming the score"). State what the product *does*
+  affirmatively instead.
+- **No false precision.** Don't use "exactly" / "precisely" / "definitively" to describe
+  heuristic output, and don't frame our parser's read as *the* ATS view ("what an ATS sees").
+  First-person framing that acknowledges variance — "what our parser pulls", "one parser's
+  read" — is the defensible version.
+- **No vendor implication.** Don't name a specific vendor or product unless the code that makes
+  the claim true ships in this same repo, so the claim and the code it describes can't drift
+  apart. Name the class of thing ("a model's API"), not the vendor, once that guarantee no
+  longer holds.
+- **Affirmative reassurance.** Privacy and safety language describes what *does* happen
+  ("bytes stay in your browser") rather than what doesn't ("we don't upload your file") — see
+  "No self-serving negation" above; the two rules share one underlying reason.
+
+These are review-time judgment calls, not lint rules — nothing in `verify` enforces them. A
+test or docblock that invokes one of these by name should cite this section, not `CLAUDE.md`,
+which doesn't define them.
+
 ## AI attribution — suppressed by configuration, not by prose
 
 Claude Code appends attribution to the commits and PRs it creates: a `Co-Authored-By:` trailer, a

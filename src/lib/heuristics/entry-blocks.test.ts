@@ -15,6 +15,7 @@ import { groupIntoLines, splitIntoSections, findSection } from "./sections.ts";
 import { parseEntryBlocks, mergeWrappedContinuations } from "./entry-blocks.ts";
 import { mkItems } from "./__test-utils__/mkItem.ts";
 import type { PdfSection, PdfLine } from "./sections.ts";
+import type { PdfTextItem } from "./types.ts";
 
 /** Build an experience section from line specs (the date_range anchor case). */
 function experienceSection(
@@ -870,6 +871,196 @@ describe("parseEntryBlocks — flush-right location cell above the date anchor (
         { text: "Production Intern Jun 2023 - Present", x: 36, y: 163 },
         { text: "• Supported set changeovers for four productions", x: 54, y: 176 },
       ]),
+      cfg,
+    );
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].headerLines).toEqual(["Northwind Opera", "Production Intern"]);
+    expect(blocks[1].aboveAnchorLocation).toBeUndefined();
+  });
+
+  describe("in a section with no bullet glyphs (#1027)", () => {
+    // The body is plain paragraphs indented past the header margin, so the
+    // glyph-less body margin is live (x=54) — and the flush-right cell at x=522
+    // sits far right of it. The walk's glyph-less-body break used to fire on
+    // the cell before the capture above could keep it, and the company above
+    // the cell was never reached.
+    it("keeps the location cell and the company above it", () => {
+      const blocks = parseEntryBlocks(
+        xySection([
+          { text: "Northwind Opera", x: 36, y: 100 },
+          { text: "Springfield, IL", x: 522, y: 100 },
+          { text: "Production Intern Jun 2023 - Present", x: 36, y: 113 },
+          { text: "Supported set changeovers for four productions", x: 54, y: 126 },
+          { text: "Coordinated crew call sheets for the season", x: 54, y: 139 },
+        ]),
+        cfg,
+      );
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0].headerLines).toEqual(["Northwind Opera", "Production Intern"]);
+      expect(blocks[0].aboveAnchorLocation).toBe("Springfield, IL");
+      expect(blocks[0].bulletCount).toBe(2);
+    });
+
+    it("keeps each role's own cell, and still stops at the previous role's body", () => {
+      const blocks = parseEntryBlocks(
+        xySection([
+          { text: "Globex Theatre", x: 36, y: 100 },
+          { text: "Peoria, IL", x: 522, y: 100 },
+          { text: "Stage Manager Jan 2020 - May 2022", x: 36, y: 113 },
+          { text: "Ran rehearsal reports for the season", x: 54, y: 126 },
+          { text: "Northwind Opera", x: 36, y: 147 },
+          { text: "Springfield, IL", x: 522, y: 147 },
+          { text: "Production Intern Jun 2023 - Present", x: 36, y: 160 },
+          { text: "Supported set changeovers for four productions", x: 54, y: 173 },
+        ]),
+        cfg,
+      );
+      expect(blocks).toHaveLength(2);
+      expect(blocks[0].headerLines).toEqual(["Globex Theatre", "Stage Manager"]);
+      expect(blocks[0].aboveAnchorLocation).toBe("Peoria, IL");
+      expect(blocks[0].body).toBe("Ran rehearsal reports for the season");
+      expect(blocks[1].headerLines).toEqual(["Northwind Opera", "Production Intern"]);
+      expect(blocks[1].aboveAnchorLocation).toBe("Springfield, IL");
+    });
+
+    it("still stops at a previous body line shaped like a location but alone on its row", () => {
+      // A wrapped glyph-less body tail ("…opened the office in" / "Springfield,
+      // IL") has no row partner, so it is body, not a cell — the break holds
+      // and neither it nor anything above it joins role 2's header.
+      const blocks = parseEntryBlocks(
+        xySection([
+          { text: "Globex Theatre", x: 36, y: 100 },
+          { text: "Stage Manager Jan 2020 - May 2022", x: 36, y: 113 },
+          { text: "Opened the second rehearsal space in", x: 54, y: 126 },
+          { text: "Springfield, IL", x: 54, y: 139 },
+          { text: "Production Intern Jun 2023 - Present", x: 36, y: 152 },
+          { text: "Supported set changeovers for four productions", x: 54, y: 165 },
+        ]),
+        cfg,
+      );
+      expect(blocks).toHaveLength(2);
+      expect(blocks[1].headerLines).toEqual(["Production Intern"]);
+      expect(blocks[1].aboveAnchorLocation).toBeUndefined();
+    });
+  });
+});
+
+describe("parseEntryBlocks — welded company … City, ST row above the date anchor (#1026)", () => {
+  // The Skia/Chromium twin of the #1021 shape: pdfjs bridges the company row's
+  // column gap with ONE wide whitespace-only item (the #891 tab-justified
+  // shape), so line assembly never cuts it and the walk sees one welded line.
+  const cfg = { anchor: "date_range", collectBody: true, headerLookback: 2 } as const;
+  const item = (str: string, x: number, width: number, y: number): PdfTextItem => ({
+    page: 1,
+    str,
+    x,
+    y,
+    width,
+    height: 11,
+    fontSize: 11,
+    fontName: "font-11",
+    hasEOL: false,
+  });
+  /** A row whose left cell and flush-right cell pdfjs joined with one blank
+   *  item spanning the gap — adjacent-pair gaps are ~0 on both sides. */
+  function weldedRow(left: string, right: string, y: number): PdfLine {
+    const leftW = left.length * 5.5;
+    const rightX = 522;
+    const items = [
+      item(left, 36, leftW, y),
+      item("   ", 36 + leftW, rightX - (36 + leftW), y),
+      item(right, rightX, right.length * 5.5, y),
+    ];
+    return {
+      page: 1,
+      y,
+      x: 36,
+      items,
+      text: `${left} ${right}`,
+      maxFontSize: 11,
+      allCaps: false,
+      gapAbove: 0,
+    };
+  }
+  const plain = (text: string, x: number, y: number): PdfLine => ({
+    page: 1,
+    y,
+    x,
+    items: [],
+    text,
+    maxFontSize: 11,
+    allCaps: false,
+    gapAbove: 0,
+  });
+
+  it("peels a one-word company off its city instead of skipping the row as a location", () => {
+    // "Freelance Berkeley, CA" matches the pure-location shape as text; the
+    // geometry says it is a company cell plus a city cell.
+    const blocks = parseEntryBlocks(
+      {
+        name: "experience",
+        lines: [
+          weldedRow("Freelance", "Berkeley, CA", 100),
+          plain("English Tutor Mar 2023 - Dec 2024", 36, 113),
+          plain("• Instructed eight high school students in writing", 54, 126),
+        ],
+      },
+      cfg,
+    );
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].headerLines).toEqual(["Freelance", "English Tutor"]);
+    expect(blocks[0].aboveAnchorLocation).toBe("Berkeley, CA");
+  });
+
+  it("peels the city off a longer company that already carries a comma", () => {
+    const blocks = parseEntryBlocks(
+      {
+        name: "experience",
+        lines: [
+          weldedRow("University of California, Berkeley", "Berkeley, CA", 100),
+          plain("Transfer Center Peer Sep 2025 - Present", 36, 113),
+          plain("• Designed programming for transfer students", 54, 126),
+        ],
+      },
+      cfg,
+    );
+    expect(blocks[0].headerLines).toEqual([
+      "University of California, Berkeley",
+      "Transfer Center Peer",
+    ]);
+    expect(blocks[0].aboveAnchorLocation).toBe("Berkeley, CA");
+  });
+
+  it("leaves a welded row alone when the flush-right cell is not a location", () => {
+    const blocks = parseEntryBlocks(
+      {
+        name: "experience",
+        lines: [
+          weldedRow("Northwind Opera", "Lighting Crew", 100),
+          plain("Production Intern Jun 2023 - Present", 36, 113),
+          plain("• Supported set changeovers for four productions", 54, 126),
+        ],
+      },
+      cfg,
+    );
+    expect(blocks[0].headerLines).toEqual(["Northwind Opera Lighting Crew", "Production Intern"]);
+    expect(blocks[0].aboveAnchorLocation).toBeUndefined();
+  });
+
+  it("does not take a welded row's city across a paragraph gap", () => {
+    // Role 1's below-anchor "Company … City, ST" row sits a paragraph gap above
+    // role 2's header: the gap ends role 2's walk before the peel is recorded.
+    const blocks = parseEntryBlocks(
+      {
+        name: "experience",
+        lines: [
+          plain("Stage Manager Jan 2020 - May 2022", 36, 100),
+          weldedRow("Globex Theatre", "Springfield, IL", 113),
+          plain("Northwind Opera", 36, 150),
+          plain("Production Intern Jun 2023 - Present", 36, 163),
+          plain("• Supported set changeovers for four productions", 54, 176),
+        ],
+      },
       cfg,
     );
     expect(blocks).toHaveLength(2);

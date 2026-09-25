@@ -11,8 +11,8 @@
  *      is caught by the window-level listener in the hook, so the overlay must
  *      not intercept the event.
  *   2. A confirmation Dialog for the dropped file. Replacing discards the
- *      current parse and inline edits, so we confirm before acting
- *      (CLAUDE.md / UX: confirm before destructive actions).
+ *      current parse and inline edits, so we confirm before acting — an
+ *      irreversible, destructive action gets a confirm step.
  */
 
 import { Dialog, Button } from "@design-system";

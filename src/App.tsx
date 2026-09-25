@@ -20,12 +20,11 @@ import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionB
 import { ExportDialog } from "./components/features/ExportDialog.tsx";
 import { ResumeChooserDialog } from "./components/features/ResumeChooserDialog.tsx";
 import { FeedbackDialog } from "./components/features/FeedbackDialog.tsx";
-import { useAnalyzedResume } from "./hooks/useAnalyzedResume.ts";
+import { useActiveResume } from "./hooks/useActiveResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { useAutoRestoreResume } from "./hooks/useAutoRestoreResume.ts";
 import { useAutosaveResume } from "./hooks/useAutosaveResume.ts";
-import { useLlmRecovery } from "./hooks/useLlmRecovery.ts";
 import { useFeedbackDialog } from "./hooks/useFeedbackDialog.ts";
 import {
   departToJobs,
@@ -56,21 +55,17 @@ export default function App() {
     resumeDraft,
     startOverBlank,
     loadSavedResume,
-  } = useAnalyzedResume();
-
-  // What a degenerate-parse recovery pass produced (#243), owned HERE since
-  // #823 rather than inside `ParsedCard`. Everything that hands the résumé
-  // somewhere else runs at this level — the rail's Match-jobs stage, the
-  // header's "Saved jobs" link, the export dialog — and while this state lived
-  // one level down, none of them could see it: a user who repaired a broken
-  // parse with the on-device pass then searched jobs against the fields the
-  // parser got wrong. `recovery.activeResult` is the parse the page shows, and
-  // it is now the parse every one of those routes uses.
-  const recovery = useLlmRecovery(
-    displayResult,
-    edited?.score ?? null,
-    parseKey,
-  );
+    // What a degenerate-parse recovery pass produced (#243), owned HERE since
+    // #823 rather than inside `ParsedCard`. Everything that hands the résumé
+    // somewhere else runs at this level — the rail's Match-jobs stage, the
+    // header's "Saved jobs" link, the export dialog — and while this state
+    // lived one level down, none of them could see it: a user who repaired a
+    // broken parse with the on-device pass then searched jobs against the
+    // fields the parser got wrong. `recovery.activeResult` is the parse the
+    // page shows, and it is now the parse every one of those routes uses.
+    // Which parse it recovers ONTO is `useActiveResume`'s call (#1028).
+    recovery,
+  } = useActiveResume();
   // The résumé to hand over / export. Null exactly when there is nothing
   // parsed; identical to `displayResult` until a recovery pass lands.
   const activeFields = recovery?.activeResult.canonical.fields;
@@ -141,14 +136,21 @@ export default function App() {
   // parse, never `displayResult`: a user who repaired a degenerate parse with
   // the on-device pass must not find the broken version saved over their work.
   //
-  // Without a recovery pass the record is `savableResult`, not `activeResult`
-  // (#1022). `activeResult` is `displayResult` there, which keeps the BASE
-  // bullet pool for display (#445) — so a restore re-graded the pre-edit
-  // bullets, and the Fix It count and score moved across a reload. Each branch
-  // stores the result its own `activeScore` was graded from: a recovered score
-  // is `scoreParsedResume(activeResult)`, an unrecovered one grades
-  // `savableResult`'s pool. That pairing is what makes a restore agree with the
-  // page the user left.
+  // Without a recovery pass the record is `savableResult` directly, read
+  // straight off `useAnalyzedResume` rather than through `recovery.
+  // activeResult` — the two are the SAME value since #1028 (`useLlmRecovery`
+  // is fed `savableResult` and its un-recovered branch returns its `result`
+  // input unchanged), but naming `savableResult` here keeps this branch
+  // independent of `useLlmRecovery`'s internals, exactly as before #1028 (when
+  // the two values genuinely differed — `activeResult` was `displayResult`'s
+  // BASE-pool shape, #445 — and reading `savableResult` here rather than
+  // `recovery.activeResult` was the ONLY thing that made the #1022 fix land:
+  // a restore of the un-recovered path re-grading the pre-edit bullets).
+  // Each branch stores the result its own `activeScore` was graded from: a
+  // recovered score is `scoreParsedResume(activeResult)`, an unrecovered one
+  // grades `savableResult`'s pool — the SAME pool now, so this pairing holds
+  // by construction rather than by the two branches agreeing to build the
+  // same shape twice.
   const autosave = useAutosaveResume({
     library,
     parseKey,
@@ -466,7 +468,8 @@ export default function App() {
     // idle screen it was a second tagline sitting two inches above the
     // headline. The one idea worth keeping — the score rates the file, not the
     // person — is dropped outright (#680): negation framing ("not a judge")
-    // is the self-serving-negation trap, so it does not get a replacement
+    // is the self-serving-negation trap (docs/CONTRIBUTING-PROCESS.md § "Copy
+    // rules (user-facing text)"), so it does not get a replacement
     // sentence anywhere else on this screen. Dropping it also leaves the star
     // CTA alone on the header-right instead of sharing it. `/jobs` still
     // passes one: it opens straight into a form with no headline of its own,

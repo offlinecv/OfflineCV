@@ -58,6 +58,8 @@ import { buildEntryGroups, roleLabel } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
+import { useOtherBulletMove } from "./OtherBulletMove.tsx";
+import { buildMoveTargets, type MoveTarget } from "../../lib/edit/move-targets.ts";
 import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
 import { Fragment, useMemo } from "react";
 import { OnDeviceModelStatus } from "./OnDeviceModelStatus.tsx";
@@ -210,6 +212,7 @@ export function ExperienceSection({
   captureBulletUndo,
   summaryApply,
   onPruneEmpty,
+  moveTargets = [],
 }: {
   /** Verbatim source heading (#285); falls back to "Experience" when absent. */
   heading?: string;
@@ -279,6 +282,12 @@ export function ExperienceSection({
    *  on the pass a collapsing strip triggers (#658). Both come from
    *  {@link useAddedEntryPruneHold}. */
   onPruneEmpty: (isHeld?: (entryId: string) => boolean) => void;
+  /** "Move to role" destinations for the "Other bullets" bucket (#1007) — every
+   *  OTHER rendered entry across Experience/Projects/Achievements/
+   *  Certifications, built once by the caller since only it sees all four
+   *  sections' groups. Defaults to `[]` for every existing test harness that
+   *  predates #1007 and does not wire it. */
+  moveTargets?: readonly MoveTarget[];
 }) {
   // "Other" is appended with a null index; real roles carry their index.
   const roleCount = groups.filter((g) => g.experienceIndex !== null).length;
@@ -341,6 +350,17 @@ export function ExperienceSection({
     onRemoveBullet,
     captureBulletUndo,
     pruneHold,
+  });
+  // The "Other bullets" bucket's MOVE confirmation (#1007) — a sibling of
+  // `otherRemove` above, same reason it is section-owned: the group can
+  // vanish with its last bullet, so a row-hosted strip would unmount with it.
+  // Unlike removal, a move never needs the text-based bucket resolver — the
+  // "Other" group owns no bucket of its own to resolve, only the TARGET does,
+  // and the picker names that target directly.
+  const otherMove = useOtherBulletMove({
+    onAddBullet,
+    onRemoveBullet,
+    captureBulletUndo,
   });
 
   const { topHeading, inlineHeadings } = computeExperienceHeadings(
@@ -463,6 +483,11 @@ export function ExperienceSection({
                   // RoleEntry drives it but does not host its strip, because
                   // this RoleEntry is the thing that disappears.
                   removeControl={otherRemove}
+                  // Export-fidelity affordance (#1007) — the "won't appear in
+                  // Download PDF" mark + "move to role" menu render per bullet
+                  // only when both are present, which is only ever true here.
+                  moveTargets={moveTargets}
+                  onMoveBullet={otherMove.moveBullet}
                 />
               );
             }
@@ -524,13 +549,17 @@ export function ExperienceSection({
           })}
         </div>
       )}
-      {/* The "Other bullets" bucket's Removed/Reverted strip, hosted at section
-          level so it outlives the group. That bucket is always appended last,
-          so this is where its own strip would have rendered anyway. */}
-      {/* On a fine pointer the last role's "+ Add bullet" floats into the
-          gap above this strip, so the strip leaves it room. */}
-      {otherRemove.strip && (
-        <div className="pointer-fine:mt-4">{otherRemove.strip}</div>
+      {/* The "Other bullets" bucket's Removed/Reverted and Moved/Reverted
+          (#1007) strips, hosted at section level so they outlive the group.
+          That bucket is always appended last, so this is where its own strips
+          would have rendered anyway. On a fine pointer the last role's
+          "+ Add bullet" floats into the gap above them, so they leave it
+          room. */}
+      {(otherRemove.strip || otherMove.strip) && (
+        <div className="pointer-fine:mt-4">
+          {otherRemove.strip}
+          {otherMove.strip}
+        </div>
       )}
       <AddPill label="Add experience" onClick={onAddEntry} fixItFocus float="heading" />
     </section>
@@ -1313,6 +1342,18 @@ export function ReconstructedResume({
     ? [...experienceGroups, other]
     : experienceGroups;
 
+  // "Move to role" destinations for the "Other bullets" bucket (#1007) — one
+  // list spanning all four sections, since only THIS scope sees every
+  // section's groups + added entries at once (each Section component below
+  // only ever sees its own). Resolves each rendered role to the SAME bucket
+  // key its own section already resolves per-row (`buildSectionMoveTargets`).
+  const otherMoveTargets = buildMoveTargets([
+    ["experience", experienceGroups, expParsedIndices, addedExperience, originalExpCount],
+    ["projects", projectGroups, projParsedIndices, addedProjects, originalProjCount],
+    ["achievements", achievementGroups, achParsedIndices, addedAchievements, originalAchCount],
+    ["certifications", certificationGroups, certParsedIndices, addedCertifications, originalCertCount],
+  ]);
+
   // Build the chain-of-sections input for the whole-résumé rewrite CTA (#67).
   // Summary first (when present), then every real role in display order — the
   // "Other" bullets group is excluded because it has no parsed role to anchor
@@ -1455,6 +1496,7 @@ export function ReconstructedResume({
           onAddBullet={addBullet}
           captureBulletUndo={captureBulletUndo}
           summaryApply={summaryApply}
+          moveTargets={otherMoveTargets}
         />
         <ProjectsSection
           heading={display.sectionHeadings?.get("projects")}

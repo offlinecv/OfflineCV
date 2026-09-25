@@ -183,7 +183,7 @@ describe("useResumeAnalysisLlm", () => {
     const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
       current: null,
     };
-    await mount(() => useResumeAnalysisLlm(r), sink);
+    await mount(() => useResumeAnalysisLlm(r, r), sink);
     expect(sink.current!.isAvailable).toBe(true);
     await act(async () => {
       await sink.current!.run();
@@ -211,7 +211,7 @@ describe("useResumeAnalysisLlm", () => {
     const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
       current: null,
     };
-    await mount(() => useResumeAnalysisLlm(r), sink);
+    await mount(() => useResumeAnalysisLlm(r, r), sink);
     await act(async () => {
       await sink.current!.run();
     });
@@ -225,7 +225,7 @@ describe("useResumeAnalysisLlm", () => {
     const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
       current: null,
     };
-    await mount(() => useResumeAnalysisLlm(r), sink);
+    await mount(() => useResumeAnalysisLlm(r, r), sink);
     await act(async () => {
       const first = sink.current!.run();
       const second = sink.current!.run();
@@ -253,8 +253,44 @@ describe("useResumeAnalysisLlm", () => {
     const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
       current: null,
     };
-    await mount(() => useResumeAnalysisLlm(r), sink);
+    await mount(() => useResumeAnalysisLlm(r, r), sink);
     expect(sink.current!.isAvailable).toBe(false);
+  });
+
+  it("an edit keeps a finished critique; a new résumé resets it (#1008)", async () => {
+    // `Result` hands this hook an edit-folded parse that is a NEW object on
+    // every keystroke. Keyed on that object, the first edit wiped a finished
+    // critique — and with it the findings Fix It steps through.
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    function Probe({ r, parseKey }: { r: CascadeResult; parseKey: unknown }) {
+      sink.current = useResumeAnalysisLlm(r, parseKey);
+      return null;
+    }
+    const parseKey = {};
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={parseKey} />);
+    });
+    await act(async () => {
+      await sink.current!.run();
+    });
+    expect(sink.current!.status.kind).toBe("done");
+
+    // An edit: a new result object, the same parse.
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={parseKey} />);
+    });
+    expect(sink.current!.status.kind).toBe("done");
+
+    // A new résumé.
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={{}} />);
+    });
+    expect(sink.current!.status.kind).toBe("idle");
   });
 });
 
