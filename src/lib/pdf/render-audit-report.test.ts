@@ -72,6 +72,9 @@ describe("renderAuditReportPdf", () => {
     expect(text).toMatch(/Structure/i);
     expect(text).toMatch(/Completeness/i);
     expect(text).toMatch(/multi-column|column/i); // trigger blurb
+    // #1014/#1018: one name for the section, on the page and in the export.
+    expect(text).toContain("Layout warnings");
+    expect(text).not.toContain("Layout flags");
     expect(text).toContain("Fix the multi-column layout first.");
   });
 

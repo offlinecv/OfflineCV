@@ -286,6 +286,26 @@ export function enableGuidance(
     };
   }
 
+  // `no-shader-f16` — WebGPU works and an adapter was granted, but it doesn't
+  // report the `shader-f16` feature the shipped model needs (#1019). This is
+  // a GPU/driver capability gap, and we know of no browser flag or toggle to
+  // point at — same shape as an `unsupported-os` adapter miss. The copy says
+  // only what we know: we have not measured which GPUs or driver updates
+  // change it, so it names neither a cause nor a likely fix as fact.
+  if (capability === "no-shader-f16") {
+    return {
+      platformLabel: label,
+      steps: [
+        `${label} reaches a GPU, but it doesn't support the shader precision (f16) the on-device model needs.`,
+        "We don't know of a browser setting that enables it — it depends on the GPU and its driver.",
+        "A newer GPU or a driver update may change this.",
+      ],
+      copyPaths: [],
+      links: [LINK_VERIFY],
+      mayBeUnfixable: true,
+    };
+  }
+
   // `no-webgpu` — navigator.gpu is absent: wrong/old browser, a disabled flag,
   // or (in dev) an insecure context.
   if (browser === "firefox") {

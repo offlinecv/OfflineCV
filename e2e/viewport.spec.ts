@@ -85,43 +85,41 @@ import {
 // measured, which is the regression this ceiling exists to catch.
 const EXPANDED_MAX_PX = 200;
 
-// Measured 415.5px expanded (identical at both viewports), against the
-// `gap-6` + `p-5` chrome that #680 tightened to `gap-4` (`ParsedCard`'s
-// `Card`) and `gap-4`/`gap-3` (`ScoreDetails`'s two wrappers) — a strictly
-// SMALLER gap, so this number is now a loose (not tight) ceiling; it has not
-// been re-measured against the new spacing, only checked to still hold as an
-// upper bound (`toBeLessThanOrEqual` only gets easier to satisfy as the real
-// height shrinks). The hero ceilings above and in `score-hero.ts` bound
-// `AtsScoreReadout`'s own <section>; this one bounds the whole score card
-// that holds it — `ParsedHeader`, the two-column `ErrorState`, the collapsed
-// targeting and local-AI feedback disclosures and the card's own gap + `p-5`
-// chrome sit OUTSIDE both hero ceilings while pushing the résumé down exactly
-// the way #953/#956 care about. Without this assertion, `ParsedHeader`
-// growing a row moves the résumé and leaves every other ceiling in this file
-// untouched. Re-measure the exact figure next time this file is touched for
-// an unrelated reason, rather than trusting the pre-#680 number as tight.
+// Re-measured 389.5px expanded (#1017), identically at both 1280x800 and
+// 1440x900, against the `gap-6` + `p-5` chrome that #680 tightened to
+// `gap-4` (`ParsedCard`'s `Card`) and `gap-4`/`gap-3` (`ScoreDetails`'s two
+// wrappers) — down from the pre-#680 415.5px this ceiling used to defend.
+// The hero ceilings above and in `score-hero.ts` bound `AtsScoreReadout`'s
+// own <section>; this one bounds the whole score card that holds it —
+// `ParsedHeader`, the two-column `ErrorState`, the collapsed targeting and
+// local-AI feedback disclosures and the card's own gap + `p-5` chrome sit
+// OUTSIDE both hero ceilings while pushing the résumé down exactly the way
+// #953/#956 care about. Without this assertion, `ParsedHeader` growing a row
+// moves the résumé and leaves every other ceiling in this file untouched.
+// Re-measure the exact figure whenever the card's own spacing changes again,
+// rather than trusting this number as tight forever.
 //
-// RAISED from 300 by #955, which is the one change allowed to move it, and
-// the raise is only honest alongside what it bought. #955 moved three surfaces
-// INTO this card — `TargetingSection`, the recovery offer and the local-AI
-// feedback disclosure — so that `Score details` means what its toggle label
-// says. That is why ARRIVAL grew, 275.5 -> 415.5.
+// RAISED from 300 by #955 (before #680 tightened the spacing above), which
+// is the one change allowed to move it, and the raise is only honest
+// alongside what it bought. #955 moved three surfaces INTO this card —
+// `TargetingSection`, the recovery offer and the local-AI feedback
+// disclosure — so that `Score details` means what its toggle label says.
+// That is why ARRIVAL grew, 275.5 -> 415.5, before #680's `gap-6` -> `gap-4`/
+// `gap-3` trims brought it back down to 389.5.
 //
 // **This ceiling bounds the arrival state only, and arrival is no longer the
 // state the page settles into.** All three of those surfaces dock away with
 // the readout, so the steady state after `useAutoCollapse`'s countdown is
-// `ParsedHeader` + the one-line pill: 116px on this fixture, 226px on the
-// two-column one. Measured Summary tops tell the same story from the other
-// side — 751.5 (pre-#955) -> 779.5 arriving -> 480 docked here, and 833.5 ->
-// 861.5 -> 562 on the two-column fixture. So the arrival number regressed
-// against #953's fold promise while the steady state improved by ~270px, and
-// only the second of those is what a reader actually sits in front of.
+// `ParsedHeader` + the one-line pill — #1017 did not re-measure the docked
+// figures (#680 did not touch that state's spacing), so treat the pre-#680
+// docked numbers in this file's history as stale rather than re-citing them
+// here.
 //
-// Keep BOTH facts in view when this constant next moves. A raise paired with a
-// docked state that did not improve is the regression this assertion exists to
-// catch; a raise like this one is a deliberate trade. Re-measure, never nudge.
-// +34.5px (~8.3%), same rendering variance as the other two.
-const CARD_MAX_PX = 450;
+// Keep BOTH facts in view when this constant next moves. A raise paired with
+// a docked state that did not improve is the regression this assertion
+// exists to catch; a raise like this one is a deliberate trade. Re-measure,
+// never nudge. +30.5px (~7.8%), same rendering variance as the other two.
+const CARD_MAX_PX = 420;
 
 /** The score `Card` wrapping the hero — `Result.tsx`'s
  *  `<Card className="flex flex-col gap-4 shadow-xs">` (tightened from `gap-6`

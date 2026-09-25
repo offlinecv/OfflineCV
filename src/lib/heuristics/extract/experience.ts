@@ -483,8 +483,13 @@ function experienceFromBlock(block: EntryBlock): {
   const preemptedIsHeader = Boolean(
     preemptedFields?.title || preemptedFields?.company,
   );
-  const { title, company, team, location } = promoted?.fields ??
+  const { title, company, team, location: headerLocation } = promoted?.fields ??
     (preemptedIsHeader ? preemptedFields! : parsedFields);
+  // A bare `City, ST` line the header walk stepped over above the anchor
+  // (#1021) — the flush-right location cell of a two-line "Company … City, ST /
+  // Title … Dates" header. Only a fallback: a location the header text itself
+  // carried always wins.
+  const location = headerLocation ?? block.aboveAnchorLocation;
   const description = resolveDescription(
     block,
     promoted,

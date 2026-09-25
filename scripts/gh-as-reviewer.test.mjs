@@ -21,6 +21,8 @@ import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { gitScrubbedEnv, useDecoyGitDir } from "./__test-utils__/git-env.mjs";
+
 const SCRIPT = resolve(import.meta.dirname, "gh-as-reviewer.sh");
 const HEAD = "a".repeat(40);
 const EARLIER = "b".repeat(40);
@@ -44,10 +46,16 @@ esac
 let dir;
 let env;
 
+// `env` holds this suite's fixed overrides (mutated in-test, e.g.
+// `env.FAKE_LOGIN = "someone-else"`); the spawn's actual env is scrubbed of
+// GIT_* from live `process.env` on every call, not captured once — so a
+// GIT_DIR the ambient process has set at spawn time (the pre-push hook's
+// inherited one, or the regression guard below simulating it) never reaches
+// `gh-as-reviewer.sh`'s own `git rev-parse --git-common-dir`. See git-env.mjs.
 function run(args) {
   return spawnSync("bash", [SCRIPT, "--as", "bot", "--repo", "o/r", ...args], {
     cwd: dir,
-    env,
+    env: gitScrubbedEnv(process.env, env),
     encoding: "utf8",
   });
 }
@@ -66,13 +74,12 @@ const SIGNED = "Looks right.\n\n---\nReviewed by: Claude Opus 5 (high)";
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "gh-as-reviewer-"));
-  execFileSync("git", ["init", "-q"], { cwd: dir });
+  execFileSync("git", ["init", "-q"], { cwd: dir, env: gitScrubbedEnv(process.env) });
   const bin = join(dir, "bin");
   execFileSync("mkdir", [bin]);
   writeFileSync(join(bin, "gh"), FAKE_GH);
   chmodSync(join(bin, "gh"), 0o755);
   env = {
-    ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
     FAKE_LOGIN: "bot",
     FAKE_HEAD: HEAD,
@@ -155,5 +162,27 @@ describe("gh-as-reviewer.sh surface", () => {
     const r = run(["whoami"]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("resolves to 'someone-else'");
+  });
+});
+
+describe("GIT_DIR scrub — regression guard for #1020", () => {
+  // GIT_DIR points at a decoy repo for this whole block — so the file-level
+  // `beforeEach` (`git init` of the throwaway repo) runs under the leak too,
+  // not just the one spawn of the script. See git-env.mjs.
+  const decoy = useDecoyGitDir();
+
+  it("never lets the script's `git rev-parse --git-common-dir` see an inherited GIT_DIR", () => {
+    // THIS session pushed the head commit, so the APPROVE must be REFUSED
+    // (status 3, naming the SHA). The ledger lives in the throwaway repo's
+    // `.git`; if GIT_DIR leaked, the script would look for it under the
+    // decoy instead, find none, treat that as "nothing pushed" and ALLOW
+    // the approval (status 0) — the self-approval the ledger exists to stop.
+    // A missing ledger is not a fail-closed path, so an "allowed" assertion
+    // could not tell a leak from a healthy run; only a refusal can.
+    ledger([["session-me", HEAD, "refs/heads/x"]]);
+    const r = run(["review", "7", reviewFile({ event: "APPROVE", body: SIGNED })]);
+    expect(r.status).toBe(3);
+    expect(r.stderr).toContain(`pushed ${HEAD}`);
+    decoy.assertUntouched();
   });
 });

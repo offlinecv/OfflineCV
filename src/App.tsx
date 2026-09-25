@@ -47,6 +47,7 @@ export default function App() {
     edit,
     edited,
     displayResult,
+    savableResult,
     parseKey,
     handleFile,
     reset,
@@ -139,17 +140,28 @@ export default function App() {
   // exactly as the blank-authoring lane has done since #313. Fed the RECOVERED
   // parse, never `displayResult`: a user who repaired a degenerate parse with
   // the on-device pass must not find the broken version saved over their work.
+  //
+  // Without a recovery pass the record is `savableResult`, not `activeResult`
+  // (#1022). `activeResult` is `displayResult` there, which keeps the BASE
+  // bullet pool for display (#445) — so a restore re-graded the pre-edit
+  // bullets, and the Fix It count and score moved across a reload. Each branch
+  // stores the result its own `activeScore` was graded from: a recovered score
+  // is `scoreParsedResume(activeResult)`, an unrecovered one grades
+  // `savableResult`'s pool. That pairing is what makes a restore agree with the
+  // page the user left.
   const autosave = useAutosaveResume({
     library,
     parseKey,
     hasEdits: edit.hasEdits,
     resume:
-      state.phase === "done" && recovery !== null
+      state.phase === "done" && recovery !== null && savableResult !== null
         ? {
             filename: state.fileName,
             bytes: state.bytes,
             sourceKind: state.sourceKind,
-            result: recovery.activeResult,
+            result: recovery.isLlmRecovered
+              ? recovery.activeResult
+              : savableResult,
             score: recovery.activeScore,
           }
         : // Only the parsed lane autosaves to the library. A blank-authoring

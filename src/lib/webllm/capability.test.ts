@@ -49,13 +49,37 @@ describe("detectWebGpu", () => {
     await expect(detectWebGpu()).resolves.toBe("no-webgpu");
   });
 
-  it("returns 'available' when navigator.gpu.requestAdapter resolves to an adapter", async () => {
+  it("returns 'available' when the adapter reports shader-f16", async () => {
+    setNavigator({
+      gpu: {
+        requestAdapter: vi.fn().mockResolvedValue({
+          name: "Apple M1",
+          features: { has: (f: string) => f === "shader-f16" },
+        }),
+      },
+    });
+    await expect(detectWebGpu()).resolves.toBe("available");
+  });
+
+  it("returns 'no-shader-f16' when the adapter's features don't include shader-f16", async () => {
+    setNavigator({
+      gpu: {
+        requestAdapter: vi.fn().mockResolvedValue({
+          name: "Intel HD Graphics",
+          features: { has: () => false },
+        }),
+      },
+    });
+    await expect(detectWebGpu()).resolves.toBe("no-shader-f16");
+  });
+
+  it("returns 'no-shader-f16' (fails closed) when the adapter has no features set", async () => {
     setNavigator({
       gpu: {
         requestAdapter: vi.fn().mockResolvedValue({ name: "Apple M1" }),
       },
     });
-    await expect(detectWebGpu()).resolves.toBe("available");
+    await expect(detectWebGpu()).resolves.toBe("no-shader-f16");
   });
 
   it("returns 'unsupported-os' when requestAdapter resolves to null", async () => {
@@ -74,6 +98,18 @@ describe("detectWebGpu", () => {
       },
     });
     await expect(detectWebGpu()).resolves.toBe("unsupported-os");
+  });
+
+  it("requests the adapter the way web-llm's detectGPUDevice does (high-performance)", async () => {
+    // On a dual-GPU machine a different powerPreference can yield a different
+    // adapter with a different feature set; the probe must inspect the one
+    // the engine will actually use.
+    const requestAdapter = vi.fn().mockResolvedValue({
+      features: { has: (f: string) => f === "shader-f16" },
+    });
+    setNavigator({ gpu: { requestAdapter } });
+    await detectWebGpu();
+    expect(requestAdapter).toHaveBeenCalledWith({ powerPreference: "high-performance" });
   });
 
   it("caches the result for the page lifetime — requestAdapter is called once", async () => {

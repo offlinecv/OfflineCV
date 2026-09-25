@@ -108,6 +108,8 @@ vi.mock("./hooks/useAnalyzedResume.ts", async () => {
             ? null
             : { parsed: loaded.result.canonical.fields, rawText: "", score: loaded.score, fieldConfidence: {} },
         displayResult: loaded?.result ?? null,
+        // No edit pipeline here, so the flattened record IS the loaded parse.
+        savableResult: loaded?.result ?? null,
         parseKey: loaded?.result ?? null,
         handleFile: async () => {},
         reset: () => setLoaded(null),

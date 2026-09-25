@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored by reading the PDF (pdftotext -layout) under #1021. NOT derived from the parser's output — where the two disagree, the disagreement is recorded as a knownWrong entry, never by editing the values here. Roles 2 and 3 draw the unfilled template placeholders \"Month Year - Present\" / \"Month Year - Month Year\" in the date slot; those are not dates, so no `dates` is recorded for them (the page states no date value). The per-role flush-right `City, ST` locations this fixture exists for are not a ground-truth axis; they are pinned by two-line-role-header-right-location.repro.test.ts.",
+  "contact": {
+    "full_name": "ROWAN ELLERY",
+    "email": "rowan.ellery@example.com",
+    "phone": "(404) 555-0142",
+    "location": "Decatur, GA"
+  },
+  "experience": [
+    {
+      "title": "Production Intern",
+      "company": "Riverbend Opera Company",
+      "dates": "Jun 2023 - Present"
+    },
+    {
+      "title": "Camp Counselor",
+      "company": "Maple Street Music Camp"
+    },
+    {
+      "title": "Retail Sales Associate",
+      "company": "Lakeside Instrument Outlet"
+    }
+  ],
+  "education": [
+    {
+      "degree": "Bachelor of Music in Composition",
+      "institution": "Piedmont State University"
+    }
+  ],
+  "skills": []
+}

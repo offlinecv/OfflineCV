@@ -515,3 +515,23 @@ describe("Result — skills-ordering placement (#544)", () => {
     expect(el.textContent).not.toContain("looks highly relevant");
   });
 });
+
+// ── Targeting disclosure chrome — this mount is inside a bordered Card (#1013) ──
+
+describe("Result — targeting disclosure rides the score card's own border (#1013)", () => {
+  it("mounts the targeting disclosure on the borderless \"plain\" variant", async () => {
+    // `Result` mounts `ResumeTargeting` inside `ScoreDetails`, which sits
+    // inside the score card's own bordered `Card` — a second, nested border
+    // here would read as boxes-inside-a-box. `AuthoringResume`'s equivalent
+    // mount (see `AuthoringResume.test.tsx` #1013) has no such ancestor and
+    // keeps the default "card" variant instead.
+    const el = await render(uploadResultMissingContact());
+    const summary = [...el.querySelectorAll("summary")].find((n) =>
+      (n.textContent ?? "").includes("Targeting"),
+    );
+    expect(summary).toBeDefined();
+    const details = summary!.closest("details");
+    expect(details?.className).not.toContain("rounded-xl");
+    expect(details?.className).toContain("border-b");
+  });
+});

@@ -174,6 +174,27 @@ describe("platformLabel", () => {
   });
 });
 
+describe("enableGuidance — no-shader-f16 (adapter granted, feature missing)", () => {
+  it("has no copy-path — it's a hardware/driver gap, not a toggle", () => {
+    const g = enableGuidance("no-shader-f16", { browser: "chrome", os: "windows" });
+    expect(g.copyPaths).toHaveLength(0);
+    expect(g.mayBeUnfixable).toBe(true);
+  });
+
+  it("names the platform and mentions shader precision, not a browser fix", () => {
+    const g = enableGuidance("no-shader-f16", { browser: "chrome", os: "windows" });
+    expect(g.steps.join(" ")).toContain("f16");
+    expect(g.platformLabel).toBe("Chrome on Windows");
+  });
+
+  it("claims only what we know — no unmeasured cause or fix stated as fact", () => {
+    const steps = enableGuidance("no-shader-f16", { browser: "chrome", os: "windows" }).steps.join(" ");
+    expect(steps).toContain("We don't know of a browser setting");
+    expect(steps).toContain("may change this");
+    expect(steps).not.toMatch(/usually|no toggle/);
+  });
+});
+
 describe("enableGuidance — unsupported-os (adapter miss)", () => {
   it("Linux Chromium leads with the Vulkan flag as a copy-path", () => {
     const g = enableGuidance("unsupported-os", {

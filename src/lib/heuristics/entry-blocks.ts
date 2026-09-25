@@ -47,7 +47,7 @@ import {
   looksLikeBelowAnchorProse,
   stripBullet,
 } from "./line-primitives.ts";
-import { mergeItemText, splitOnFlushRightGap } from "./line-assembly.ts";
+import { LINE_Y_EPS, mergeItemText, splitOnFlushRightGap } from "./line-assembly.ts";
 import { MIDDOT } from "../resume-format/index.ts";
 
 // ── Shared entry-header shape recognition ───────────────────────────────────
@@ -299,6 +299,28 @@ export interface EntryBlock {
    * reporting"`). Wrap-continuations are folded to match `belowAnchorBodyProse`.
    */
   belowAnchorLines?: string[];
+  /**
+   * The bare `City, ST` line the above-anchor header walk stepped over, when
+   * there was one (#1021) — the one nearest the anchor if there were several.
+   *
+   * The walk skips a pure location line without spending the lookback budget,
+   * because it is never the company or title. Skipping is right for the budget,
+   * but it used to discard the value outright, and two real layouts put the
+   * role's location exactly there: a two-line header whose company row carries
+   * a flush-right `City, ST` cell (line assembly cuts that row at the column
+   * gap, so the cell becomes its own line just above the title + date anchor),
+   * and a two-column header that bands the right-column location above the
+   * date anchor. Kept OUT of `headerLines` on purpose: it is already known to
+   * be a location, so it has no business in the company/title disambiguation,
+   * and leaving `headerLines` / `anchorHeaderIndex` untouched keeps every other
+   * header mapping byte-identical. `experience.ts` is the only reader — it
+   * fills `location` from here only when the header itself yielded none.
+   *
+   * Known gap: in a section with no bullet glyphs, the walk's `isGlyphlessBody`
+   * break runs before this capture, so a flush-right cell far right of the
+   * body margin still ends the walk and the location (and company) is dropped.
+   */
+  aboveAnchorLocation?: string;
 }
 
 /** True if the line is an anchor for the given config. */
@@ -624,6 +646,35 @@ function looksLikeBodyParagraph(text: string): boolean {
 const PURE_LOCATION_RE = /^[A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)?,\s*[A-Z]{2}$/;
 function isLocationLine(text: string): boolean {
   return PURE_LOCATION_RE.test(text.trim());
+}
+
+/**
+ * True when the pure-location line at `lines[idx]` is the flush-right CELL of a
+ * role-header row (#1021): it shares its baseline with another, non-empty line
+ * that starts to its left — the company it sat right of, cut apart from it at
+ * the column gap by line assembly, or the left-column company a two-column
+ * banding split it from.
+ *
+ * Requiring the row partner is what keeps the capture honest, because
+ * `isLocationLine` alone cannot tell a location from two other lines that
+ * match the same `Word Word, ST` shape:
+ *   - the wrapped tail of the previous entry's last bullet ("…opened the office
+ *     in" / "Springfield, IL"), which is alone on its row; and
+ *   - a company and city welded into one line ("Freelance Berkeley, CA" — a
+ *     tab-justified row pdfjs merged, #891), also alone on its row. Read as a
+ *     location it would move the company into `location`.
+ * Neither has a partner on its baseline; a genuine flush-right cell always does.
+ */
+function isRoleHeaderLocationCell(lines: PdfLine[], idx: number): boolean {
+  const line = lines[idx];
+  return lines.some(
+    (other, j) =>
+      j !== idx &&
+      other.page === line.page &&
+      Math.abs(other.y - line.y) <= LINE_Y_EPS &&
+      other.x < line.x &&
+      other.text.trim() !== "",
+  );
 }
 
 /** Leftmost x of any bullet line in the section — the bullet *marker* margin.
@@ -1493,6 +1544,7 @@ function buildEntryBlock(
   // last, far from its title; a fixed index window of `lookback` lines would be
   // exhausted on the blanks and the location before reaching company/title.
   const aboveLines: PdfLine[] = [];
+  let aboveAnchorLocation: string | undefined;
   if (lookback > 0) {
     let claimed = 0;
     let lastKeptY: number | null = null;
@@ -1505,10 +1557,24 @@ function buildEntryBlock(
         break;
       }
       const text = l.text.trim();
-      if (!text || isWrappedContinuation(l, markerX) || isLocationLine(text)) {
+      const pastParagraphGap =
+        baseline > 0 && lastKeptY !== null && lastKeptY - l.y > BODY_GAP_FACTOR * baseline;
+      if (text && isLocationLine(text)) {
+        // Skip without spending budget — but keep the value (#1021): it is this
+        // role's location, and nothing downstream can recover it once dropped.
+        // The gap check comes FIRST, as it does for company/title below: a cell
+        // past a paragraph gap is the previous role's below-anchor
+        // "Company … City, ST" row, not this role's. This branch must stay
+        // above the `isWrappedContinuation` skip, which would swallow the
+        // flush-right cell as an indented tail.
+        if (pastParagraphGap) break;
+        if (isRoleHeaderLocationCell(lines, i)) aboveAnchorLocation ??= text;
         continue;
       }
-      if (baseline > 0 && lastKeptY !== null && lastKeptY - l.y > BODY_GAP_FACTOR * baseline) {
+      if (!text || isWrappedContinuation(l, markerX)) {
+        continue;
+      }
+      if (pastParagraphGap) {
         break;
       }
       aboveLines.unshift(l);
@@ -1715,5 +1781,6 @@ function buildEntryBlock(
       belowAnchorBodyProse.length > 0 ? belowAnchorBodyProse : undefined,
     belowAnchorLines:
       belowHeaderCandidates.length > 0 ? belowHeaderCandidates : undefined,
+    ...(aboveAnchorLocation ? { aboveAnchorLocation } : {}),
   };
 }
