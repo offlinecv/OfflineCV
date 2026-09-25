@@ -71,13 +71,15 @@ export function SummarySection({
   /** Commit new summary text. `""` clears the section from the export. */
   onSummaryChange: (value: string) => void;
 }) {
-  const fixIt = useFixItTarget(SECTION_IDS.summary, "block");
+  // `all`: the section is one field, and its placeholder is what the step asks
+  // the user to fill — there is no `[data-fixit-focus]` control to reveal.
+  const fixIt = useFixItTarget(SECTION_IDS.summary, "block", "all");
 
   return (
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
-      className={`flex flex-col gap-2 ${fixIt.className}`}
+      className={`edit-scope flex flex-col gap-2 ${fixIt.className}`}
     >
       <SectionHeading>{heading ?? "Summary"}</SectionHeading>
       <EditableField

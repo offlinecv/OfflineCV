@@ -1,0 +1,55 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright 2026 The offlinecv Authors */
+
+/*
+ * Edit chrome at rest (#913) — the reconstructed résumé is both the editor and
+ * the preview of the exported PDF, so the controls that never print (remove
+ * X's, "+ Add" pills, empty-field placeholders, the per-role Rewrite trigger)
+ * rest hidden and come back when the user reaches for them.
+ *
+ * Plain classes, not Tailwind variants, because the rule needs a
+ * relationship Tailwind's `group-*` cannot state: a control belongs to its
+ * NEAREST scope. A bullet's remove button should appear when that bullet is
+ * hovered, not whenever the pointer is anywhere in the Experience section.
+ *
+ *   edit-scope   a field, row, entry, section or the header block — the region
+ *                whose hover or focus-within reveals the chrome inside it.
+ *   edit-chrome  a control (or an empty-field prompt) hidden at rest.
+ *   edit-reveal  forces every chrome inside it visible. Fix It's current step
+ *                carries it on a one-field target (a contact field, a bullet,
+ *                the summary), so a step on a missing field always shows that
+ *                field's prompt.
+ *   edit-reveal-focus
+ *                the same for a section step, but only for the control Fix It
+ *                focuses there, the one marked `[data-fixit-focus]`. A
+ *                section-wide reveal would unhide every Remove and Move in it,
+ *                on the step that asks for MORE entries.
+ *
+ * How "nearest" falls out of one selector: hover and focus-within both
+ * propagate UP the tree, so when the nearest scope is active every scope above
+ * it is too. Chrome is therefore hidden when, and only when, some ancestor
+ * scope is inactive — the same as its nearest scope being inactive. Chrome with
+ * no scope above it is never hidden, so a control used outside the résumé fails
+ * open rather than disappearing.
+ *
+ * `opacity`, never `visibility: hidden` or `display: none`: both of those take
+ * the control out of the tab order, and keyboard users reach every control by
+ * tabbing to it. A tabbed-to control is inside its scope, so focus-within
+ * reveals it (and its neighbours) the moment it takes focus.
+ *
+ * Only on `(pointer: fine)`. A touch screen has no hover to reveal with, so on
+ * a coarse (or absent) pointer everything stays visible.
+ */
+@layer components {
+  @media (pointer: fine) {
+    .edit-scope:not(:hover, :focus-within)
+      .edit-chrome:not(
+        .edit-reveal,
+        .edit-reveal *,
+        .edit-reveal-focus [data-fixit-focus],
+        .edit-reveal-focus [data-fixit-focus] *
+      ) {
+      opacity: 0;
+    }
+  }
+}

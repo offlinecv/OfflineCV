@@ -258,6 +258,11 @@ describe("ContactCard", () => {
     expect(field).not.toBeNull();
     expect(field?.getAttribute("role")).toBe("button");
     expect(field?.getAttribute("tabindex")).toBe("0");
+    // Seen at a glance, not only on hover (#913): the warning pill is never
+    // edit chrome, and it forces the empty field's placeholder inside it on.
+    const pill = field!.closest(".bg-feedback-warning-bg")!;
+    expect(pill.classList.contains("edit-chrome")).toBe(false);
+    expect(pill.classList.contains("edit-reveal")).toBe(true);
   });
 
   it("no longer renders the detected/total completeness footer (moved to the AttentionStrip)", () => {

@@ -32,7 +32,7 @@ import { act } from "react";
 import { formatTriageHeadline, TargetingTriageRow } from "./TargetingTriageRow.tsx";
 import { DocumentBody } from "./DocumentBody.tsx";
 import { SECTION_IDS } from "../../lib/anchors.ts";
-import type { BulletObservation } from "../../lib/score/score.ts";
+import type { GuidanceIssue, GuidanceItem } from "../../lib/score/guidance.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -72,16 +72,31 @@ describe("formatTriageHeadline", () => {
   });
 });
 
-function makeBullet(overrides: Partial<BulletObservation> = {}): BulletObservation {
+const METRIC: GuidanceIssue = {
+  dimension: "specificity",
+  check: "metric",
+  title: "Missing measurable metric",
+  suggestion: "Add a number.",
+};
+const VERB: GuidanceIssue = {
+  dimension: "structure",
+  check: "verb",
+  title: "Weak opening verb",
+  suggestion: "Start with an action verb.",
+};
+
+/** One Fix It bullet step — what the row counts since #913. */
+function makeStep(issues: GuidanceIssue[] = [VERB], n = 0): GuidanceItem {
   return {
-    text: "did stuff",
-    id: "0|did stuff",
-    index: 0,
-    hasMetric: false,
-    startsWithActionVerb: false,
-    wellFormedLength: true,
-    wordCount: 2,
-    ...overrides,
+    id: `bullet-${n}`,
+    dimension: issues[0]!.dimension,
+    dimensions: issues.map((i) => i.dimension),
+    location: `Experience → bullet ${n + 1}`,
+    targetAnchor: `bullet-anchor-${n}`,
+    targetType: "bullet",
+    bulletId: `${n}|did stuff`,
+    issues,
+    summary: issues[0]!.title,
   };
 }
 
@@ -98,7 +113,8 @@ let container: HTMLDivElement | undefined;
 let root: Root | undefined;
 
 function render(props: {
-  bullets: readonly BulletObservation[];
+  bulletSteps: readonly GuidanceItem[];
+  totalBullets: number;
   contactMissing: ContactDisplayField[];
   hasBulletGap: boolean;
   hasContactGap: boolean;
@@ -133,7 +149,8 @@ describe("TargetingTriageRow anchors (#958)", () => {
 
   it("points the bullet jump link at a known scroll target", () => {
     const el = render({
-      bullets: [makeBullet()],
+      bulletSteps: [makeStep()],
+      totalBullets: 1,
       contactMissing: [],
       hasBulletGap: true,
       hasContactGap: false,
@@ -148,7 +165,8 @@ describe("TargetingTriageRow anchors (#958)", () => {
 
   it("renders both jump links, each resolving to a known target, when both gaps are present", () => {
     const el = render({
-      bullets: [makeBullet()],
+      bulletSteps: [makeStep()],
+      totalBullets: 1,
       contactMissing: [MISSING_PHONE],
       hasBulletGap: true,
       hasContactGap: true,
@@ -164,7 +182,8 @@ describe("TargetingTriageRow anchors (#958)", () => {
 
   it("does not resurrect the dead #reconstructed-resume bullet link (#956)", () => {
     const el = render({
-      bullets: [makeBullet()],
+      bulletSteps: [makeStep()],
+      totalBullets: 1,
       contactMissing: [],
       hasBulletGap: true,
       hasContactGap: false,
@@ -187,5 +206,26 @@ describe("scroll-target render (end-to-end wiring, #958)", () => {
     const target = container.querySelector(`#${SECTION_IDS.documentBody}`);
     expect(target).not.toBeNull();
     expect(target?.textContent).toBe("body");
+  });
+});
+
+describe("TargetingTriageRow counts Fix It's bullet steps (#913)", () => {
+  it("counts steps against the total, and tallies each check from the steps' own issues", () => {
+    // Two steps out of five graded bullets. The other three are flagged by
+    // `needsAttention` elsewhere (a read-only project row, a metric past the
+    // budget) but carry no step, so no marker — and the row must not count
+    // them either.
+    const el = render({
+      bulletSteps: [makeStep([METRIC, VERB], 0), makeStep([VERB], 1)],
+      totalBullets: 5,
+      contactMissing: [],
+      hasBulletGap: true,
+      hasContactGap: false,
+    });
+    const text = el.textContent ?? "";
+    expect(text).toContain("2 of 5 bullets need attention");
+    expect(text).toContain("1 missing a metric");
+    expect(text).toContain("2 weak verbs");
+    expect(text).not.toContain("length");
   });
 });

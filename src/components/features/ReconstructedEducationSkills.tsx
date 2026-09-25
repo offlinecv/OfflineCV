@@ -106,7 +106,7 @@ export function EducationSection({
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
-      className={`flex flex-col gap-2 ${fixIt.className}`}
+      className={`edit-scope flex flex-col gap-2 ${fixIt.className}`}
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? "Education"}</SectionHeading>

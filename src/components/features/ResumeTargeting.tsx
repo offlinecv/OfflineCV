@@ -36,6 +36,7 @@
 
 import type { CascadeResult } from "../../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../../lib/score/score.ts";
+import type { GuidanceItem } from "../../lib/score/guidance.ts";
 import type { EditableParse } from "../../hooks/useEditableParse.ts";
 import {
   applyContactOverrides,
@@ -59,6 +60,9 @@ interface ResumeTargetingProps {
    *  module forwards rather than owns, because only the lane knows whether
    *  it has a bordered card around the region (#680 item 8). */
   variant?: "card" | "plain";
+  /** The lane's Fix It guidance — the list its résumé markers and dock read.
+   *  The triage counts its bullet steps, so all three agree (#913). */
+  guidance: readonly GuidanceItem[];
 }
 
 export function ResumeTargeting({
@@ -66,6 +70,7 @@ export function ResumeTargeting({
   score,
   edit,
   variant,
+  guidance,
 }: ResumeTargetingProps) {
   // The same four derivations `ReconstructedResume` ran before #955, by the
   // same helpers. None is memoized, because none of them was memoized there
@@ -106,6 +111,7 @@ export function ResumeTargeting({
       // critique lane this surface is not behind a WebGPU model download.
       skillsOrder={skillsOrder}
       bullets={score.bullets ?? []}
+      bulletSteps={guidance.filter((item) => item.targetType === "bullet")}
       contactMissing={contactMissing}
       variant={variant}
     />

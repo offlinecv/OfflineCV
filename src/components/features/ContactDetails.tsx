@@ -274,8 +274,12 @@ function EditableValue({
   );
 
   if (absent) {
+    // NOT edit chrome (#913): the pill exists so a missing REQUIRED field is
+    // seen at a glance, and before the #313 reveal there is no Fix It step to
+    // bring it back. `edit-reveal` keeps the empty field's own placeholder
+    // (chrome, inside) visible, or the pill would rest empty.
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-feedback-warning-bg px-2 py-0.5 text-sm text-feedback-warning-text">
+      <span className="edit-reveal inline-flex items-center gap-1 rounded-full bg-feedback-warning-bg px-2 py-0.5 text-sm text-feedback-warning-text">
         <span aria-hidden="true">⚠</span>
         {editor}
       </span>
@@ -348,7 +352,7 @@ function renderLink(
             href={field.value}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-accent-primary hover:underline"
+            className="edit-chrome text-accent-primary hover:underline"
             aria-label={`Open ${field.label} in a new tab`}
           >
             ↗

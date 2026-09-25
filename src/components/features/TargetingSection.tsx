@@ -57,6 +57,7 @@ import {
 import type { ResumeQueryInput } from "../../lib/job-search/query-builder.ts";
 import type { SkillsReorderController } from "../../hooks/useSkillsReorder.ts";
 import type { BulletObservation } from "../../lib/score/score.ts";
+import type { GuidanceItem } from "../../lib/score/guidance.ts";
 import { needsAttention } from "../../lib/score/group-bullets.ts";
 import type { ContactDisplayField } from "../../lib/contact.ts";
 
@@ -74,8 +75,15 @@ interface TargetingSectionProps {
   /** Skills-ordering coaching (#544) — forwarded straight to
    *  `SkillTermGuidance`, which hosts the row. */
   skillsOrder?: SkillsReorderController;
-  /** Graded bullets across the entire résumé. */
+  /** Graded bullets across the entire résumé — the "of N" total, and the
+   *  all-clear test. */
   bullets?: readonly BulletObservation[];
+  /** Fix It's bullet steps: the same list the résumé's tinted markers and the
+   *  dock read (#913). What the triage COUNTS, so the headline never names a
+   *  bullet the page shows no mark on — a read-only project row, or a
+   *  metric-only bullet past the metric budget, is flagged by
+   *  `needsAttention` but is not a step. */
+  bulletSteps?: readonly GuidanceItem[];
   /** Missing contact fields from contactCompleteness. */
   contactMissing?: ContactDisplayField[];
   /** Forwarded to `Disclosure`. The caller decides, because only the caller
@@ -93,6 +101,7 @@ export function TargetingSection({
   onAddSkill,
   skillsOrder,
   bullets = [],
+  bulletSteps = [],
   contactMissing = [],
   variant = "card",
 }: TargetingSectionProps) {
@@ -106,7 +115,7 @@ export function TargetingSection({
     skills.missing.length > 0 ||
     showSkillsOrder;
 
-  const flaggedBullets = bullets.filter(needsAttention).length;
+  const flaggedBullets = bulletSteps.length;
   const missingContactCount = contactMissing.length;
   const hasBulletGap = flaggedBullets > 0;
   const hasContactGap = missingContactCount > 0;
@@ -152,7 +161,11 @@ export function TargetingSection({
       ? "All 1 bullet passes every check"
       : `All ${bullets.length} bullets pass every check`;
 
-  const allBulletsClear = !hasTriage && bullets.length > 0;
+  // "Pass every check" is a claim about every bullet, so it is tested against
+  // `needsAttention` over all of them, not against the step list: a bullet
+  // with no step can still fail a check, and then the line would be false.
+  const allBulletsClear =
+    !hasTriage && bullets.length > 0 && !bullets.some(needsAttention);
 
   // Nothing to say at all, and nothing to open onto.
   if (!hasBody && !allBulletsClear) return null;
@@ -205,7 +218,8 @@ export function TargetingSection({
       <div className="flex flex-col gap-6">
         {hasTriage && (
           <TargetingTriageRow
-            bullets={bullets}
+            bulletSteps={bulletSteps}
+            totalBullets={bullets.length}
             contactMissing={contactMissing}
             hasBulletGap={hasBulletGap}
             hasContactGap={hasContactGap}

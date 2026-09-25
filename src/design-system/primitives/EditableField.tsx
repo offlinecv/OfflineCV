@@ -32,6 +32,11 @@
  *                 the visible one (WCAG 2.5.3 Label in Name).
  *             `emptyAffordance="plain"` opts a field out of the glyph and the
  *             "Add" verb — for fields whose empty state is a STATE, not a gap.
+ *             Either way an empty field is edit chrome (#913,
+ *             styles/edit-chrome.css): inside an `edit-scope` it rests hidden
+ *             on a fine pointer and shows on the scope's hover/focus-within,
+ *             staying in the tab order. A filled field is content, and its
+ *             only affordance — the hover tint — already shows on hover alone.
  *   • edit  — inline <input> (default) or auto-growing <textarea> (multiline)
  *             pre-filled with the current value.
  *             Single-line: blurring or pressing Enter/Escape commits/cancels.
@@ -98,8 +103,8 @@ interface EditableFieldProps {
    *            never breaks across lines. Default — right for short fields
    *            (title, company, contact chips).
    *   inline — `inline` flow; the value wraps as real text and following inline
-   *            siblings (e.g. bullet check badges) flow right after the last
-   *            word. Use for long-form prose like a resume bullet.
+   *            siblings flow right after the last word. Use for long-form
+   *            prose like a resume bullet.
    */
   display?: "flex" | "inline";
   /**
@@ -378,7 +383,7 @@ export function EditableField({
         "outline-hidden focus-visible:ring-1 focus-visible:ring-accent-primary",
         sizeCls,
         weightCls,
-        hasValue ? "text-content-primary" : "text-content-muted italic",
+        hasValue ? "text-content-primary" : "edit-chrome text-content-muted italic",
         className ?? "",
       ]
         .filter(Boolean)

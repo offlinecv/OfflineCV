@@ -5,7 +5,7 @@
  * ReconstructedResume — the primary post-parse surface. A faithful, read-only
  * render of `result.parsed` in resume shape:
  *
- *   contact → roles (header + all bullets, flagged inline) → education → skills
+ *   contact → roles (header + all bullets) → education → skills
  *
  * It opens on the contact block. The advice that used to sit between contact
  * and the document — `TargetingSection` (role picker, expected skills, triage
@@ -23,7 +23,7 @@
  * The section used to ride along as a child of this file, so it reached both
  * for free; it does not any more, and the authoring lane loses its role
  * picker, skills guidance and triage findings if its mount is dropped
- * (`App.authoring-lane.test.tsx` pins exactly that).
+ * (`App.authoring-lane.test.tsx` pins that).
  *
  * "Faithful" is the contract: the point is to expose the parser↔PDF gap, not to
  * beautify it. So we render every parsed role (even partial ones), every graded
@@ -32,7 +32,7 @@
  *
  * No parsing or scoring happens here. Bullets come from `score.bullets`
  * (BulletObservation, the same pool the scorer grades) routed through
- * `groupBulletsByExperience` so inline flags line up with the grades — never
+ * `groupBulletsByExperience` so each row is the bullet the scorer graded — never
  * re-split from `ResumeExperience.description`.
  *
  * This replaces PerBulletFeedback as the owner of the "render + grade the
@@ -41,8 +41,8 @@
  * to ResumeBulletRow's flagged branch.
  *
  * Decomposed to keep this container closer to ~200 LOC: `RoleEntry` lives in
- * `ReconstructedRole.tsx`, `ResumeBulletRow` / `BulletFlagLegend` in
- * `ResumeBulletRow.tsx` (split out of ReconstructedRole by #626), and the
+ * `ReconstructedRole.tsx`, `ResumeBulletRow` in `ResumeBulletRow.tsx` (split
+ * out of ReconstructedRole by #626), and the
  * per-bullet remove confirmation in `BulletRemoveStatus.tsx`. `ExperienceSection`
  * below owns one instance of that last one for the "Other bullets" bucket — the
  * one group that disappears when its last bullet goes, taking a role-hosted strip
@@ -58,7 +58,7 @@ import { buildEntryGroups, roleLabel } from "../../lib/score/group-bullets.ts";
 import { ContactCard } from "./ContactCard.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
-import { ResumeBulletRow, BulletFlagLegend } from "./ResumeBulletRow.tsx";
+import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
 import { Fragment, useMemo } from "react";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { useResumeRewriteUi } from "./ResumeRewrite.tsx";
@@ -421,16 +421,10 @@ export function ExperienceSection({
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
-      className={`flex flex-col gap-3 ${fixIt.className}`}
+      className={`edit-scope flex flex-col gap-3 ${fixIt.className}`}
       onBlur={sectionExitBlur(() => onPruneEmpty(pruneHold.isHeld))}
     >
-      {/* Heading row: the flag legend sits beside the Experience title (next to
-          where the inline glyphs actually appear), not at the top of the
-          section where it reads as detached. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-        <SectionHeading>{topHeading}</SectionHeading>
-        {hasBullets && <BulletFlagLegend />}
-      </div>
+      <SectionHeading>{topHeading}</SectionHeading>
       {/* Picker + whole-résumé CTA mounted at the top of Experience —
           "inline near SectionRewrite, visible only in the rewrite context"
           per the #64 step 6 spec. Both return null when WebGPU is
@@ -588,7 +582,7 @@ function ProjectsSection({
 }) {
   return (
     <section
-      className="flex flex-col gap-3"
+      className="edit-scope flex flex-col gap-3"
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? "Projects"}</SectionHeading>
@@ -613,7 +607,7 @@ function ProjectsSection({
           return (
             // The ENTRY key, not the render position (#856) — see the same note
             // in `ExperienceSection`.
-            <div key={entryKey} className="flex flex-col gap-1.5">
+            <div key={entryKey} className="edit-scope flex flex-col gap-1.5">
               <div className="flex items-start justify-between gap-2">
                 {added ? (
                   <EditableField
@@ -749,7 +743,10 @@ function AchievementHeader({
             value={type || undefined}
             onSelect={(v) => onFieldChange("type", v)}
           />
-          <span className="text-content-muted" aria-hidden="true">
+          <span
+            className={`text-content-muted${type ? "" : " edit-chrome"}`}
+            aria-hidden="true"
+          >
             ·
           </span>
         </>
@@ -795,7 +792,7 @@ function AchievementHeader({
  * both halves, and both changes exist because that line reuses ONE glyph for two
  * jobs (#899):
  *
- *   - the year is PARENTHESISED rather than middot-separated, exactly as
+ *   - the year is PARENTHESISED rather than middot-separated, the same way
  *     `compactCredentialHeader` does it in `ats-resume-model.ts` and under the
  *     same condition (a source separator that is neither absent nor the default
  *     middot is still re-emitted verbatim). Without this the line reads
@@ -803,9 +800,8 @@ function AchievementHeader({
  *     that ends a year from the one that ends a credential — and the view would
  *     be drawing a line the PDF does not.
  *   - a MISSING year draws its "+ year" add-affordance at zero cost AT REST:
- *     `opacity-0`, revealed only on `group-hover`/`group-focus-within` of the
- *     row (the row is already a hover target for the remove control, so this
- *     adds no new surface). Every dateless credential would otherwise
+ *     it is edit chrome (#913), revealed on the row's hover/focus-within like
+ *     the remove control beside it, and always shown on a touch screen. Every dateless credential would otherwise
  *     permanently contribute a "+ year" to the shared line — both the clutter
  *     the compact form exists to remove and one more thing competing with the
  *     boundary glyph — but hiding it outright made a parsed, undated
@@ -843,20 +839,11 @@ function AchievementYearSlot({
     (!sourceSeparator ||
       sourceSeparator === DEFAULT_ACHIEVEMENT_YEAR_SEPARATOR)
   ) {
-    // A dateless credential's add-affordance costs nothing AT REST (opacity-0)
-    // and reveals on the row's hover/focus (`group` on the row wrapper below) —
-    // the row is already a hover target for the remove control, so this adds
-    // no new surface. A credential that already carries a year stays visible
-    // as normal running text.
-    const hiddenAtRest = !year;
+    // A dateless credential's add-affordance, parentheses included, is edit
+    // chrome: hidden at rest, revealed on the row's hover/focus (its
+    // `edit-scope`). A credential that carries a year shows it as running text.
     return (
-      <span
-        className={`inline-flex items-baseline${
-          hiddenAtRest
-            ? " opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-            : ""
-        }`}
-      >
+      <span className={`inline-flex items-baseline${year ? "" : " edit-chrome"}`}>
         <span className="text-content-muted" aria-hidden="true">
           (
         </span>
@@ -886,8 +873,8 @@ function AchievementYearSlot({
 
 /**
  * Achievements render as their OWN section (#96), mirroring ProjectsSection: a
- * title-led header + the same graded `ResumeBulletRow`s used everywhere else, so
- * achievement bullets are checked and flagged identically. Achievements carry a
+ * title-led header + the same graded `ResumeBulletRow`s used everywhere else
+ * (read-only, so never flagged: #913). Achievements carry a
  * single `year`, not a date range, so the header equivalent of
  * `buildProjectDates` is just the year string.
  *
@@ -991,7 +978,7 @@ export function AchievementsSection({
     achievements.filter((_, idx) => joinsCompactLine(idx)).length >= 2;
   return (
     <section
-      className="flex flex-col gap-3"
+      className="edit-scope flex flex-col gap-3"
       onBlur={sectionExitBlur(onPruneEmpty)}
     >
       <SectionHeading>{heading ?? fallbackHeading}</SectionHeading>
@@ -1078,7 +1065,7 @@ export function AchievementsSection({
             return (
               <div
                 key={entryKey}
-                className="group inline-flex items-baseline gap-1"
+                className="edit-scope inline-flex items-baseline gap-1"
               >
                 {header}
                 {removeButton}
@@ -1095,7 +1082,7 @@ export function AchievementsSection({
             // in `ExperienceSection`.
             <div
               key={entryKey}
-              className={`flex flex-col gap-1.5${compact ? " w-full" : ""}`}
+              className={`edit-scope flex flex-col gap-1.5${compact ? " w-full" : ""}`}
             >
               <div className="flex items-start justify-between gap-2">
                 {header}
@@ -1393,7 +1380,7 @@ export function ReconstructedResume({
   return (
     <section
       id={SECTION_IDS.reconstructed}
-      className="scroll-mt-6 flex flex-col gap-6"
+      className="edit-scope scroll-mt-6 flex flex-col gap-6"
     >
       <ContactCard
         result={result}

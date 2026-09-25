@@ -21,6 +21,9 @@
  * 10. Section steps focus the section's add control, never a remove button.
  * 11. Done never returns focus to <body>, and past the last step no target
  *     keeps the highlight.
+ * 12. A flagged bullet's tinted marker (#913) enters the mode at THAT bullet's
+ *     step, landing focus on the bullet text rather than the marker; nothing
+ *     enters the mode, moves focus or scrolls on render alone.
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -372,6 +375,32 @@ describe("Result — Fix It guided step-through mode (#810)", () => {
     expect(document.activeElement).toBe(entry);
   });
 
+  it("still hands focus back to the Fix It button after a marker moved the step mid-mode (#913)", async () => {
+    const el = await renderEditing(mockResultWithIssues(), { current: null });
+    const entry = fixItButton(el)!;
+
+    entry.focus();
+    await act(async () => {
+      entry.click();
+    });
+    // The marker takes focus the way a click does in Chrome, then moves the
+    // step while the mode is already on.
+    const marker = el.querySelector<HTMLButtonElement>("button[data-fixit-marker]")!;
+    marker.focus();
+    await act(async () => {
+      marker.click();
+    });
+
+    const done = Array.from(
+      el.querySelectorAll<HTMLButtonElement>('[aria-label="Fix It guidance"] button'),
+    ).find((b) => b.textContent?.trim() === "Done")!;
+    await act(async () => {
+      done.click();
+    });
+
+    expect(document.activeElement).toBe(entry);
+  });
+
   it("sends Done to the last step when entry left focus on <body> (#1003)", async () => {
     // Safari and macOS Firefox do not focus a button on click, so the entry
     // click leaves <body> active. Returning focus there strands the user.
@@ -503,5 +532,52 @@ describe("Result — Fix It guided step-through mode (#810)", () => {
     expect(section?.contains(document.activeElement)).toBe(true);
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Add experience");
     expect(el.querySelector("#contact")?.contains(document.activeElement)).toBe(false);
+  });
+
+  it("enters Fix It at a bullet's own step when its tinted marker is clicked (#913)", async () => {
+    const el = await renderEditing(mockResultWithIssues(), { current: null });
+    const markers = el.querySelectorAll<HTMLButtonElement>("button[data-fixit-marker]");
+    // "Developed features." is the one stepped bullet in this parse.
+    expect(markers).toHaveLength(1);
+    const row = markers[0]!.closest("li")!;
+
+    await act(async () => {
+      markers[0]!.click();
+    });
+
+    const dock = el.querySelector('[aria-label="Fix It guidance"]');
+    expect(dock).not.toBeNull();
+    // Not step 1 — the leading contact steps come first — but the bullet's.
+    expect(dock?.textContent).toContain("bullet 1");
+    expect(dock?.textContent).not.toContain("Step 1 of");
+    expect(row.className).toContain("ring-accent-primary");
+    // Focus lands on the thing the step edits, never back on the marker.
+    expect(row.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(markers[0]);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Edit Bullet text");
+  });
+
+  it("moves no focus, scrolls nothing and opens no dock on render alone (#913)", async () => {
+    const original = Element.prototype.scrollIntoView;
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    try {
+      (document.activeElement as HTMLElement | null)?.blur();
+      const el = await renderEditing(mockResultWithIssues(), { current: null });
+      expect(el.querySelector('[aria-label="Fix It guidance"]')).toBeNull();
+      expect(document.activeElement).toBe(document.body);
+      expect(scrolled).not.toHaveBeenCalled();
+      expect(el.querySelector(".ring-accent-primary")).toBeNull();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("rules every section heading, never the header block (#913)", async () => {
+    const el = await renderEditing(mockResultWithIssues(), { current: null });
+    const headings = el.querySelectorAll("#resume-experience h2, #resume-skills h2");
+    expect(headings.length).toBeGreaterThan(0);
+    for (const h of headings) expect(h.className).toContain("border-b");
+    expect(el.querySelector("#contact [class*='border-b']")).toBeNull();
   });
 });

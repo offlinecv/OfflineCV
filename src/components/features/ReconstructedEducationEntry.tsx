@@ -61,7 +61,7 @@ export function EducationEntry({
   const yearOnly = !startDate && !endDate && Boolean(dates);
 
   return (
-    <li className="flex flex-col gap-0.5 text-sm">
+    <li className="edit-scope flex flex-col gap-0.5 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
           {!majorInPrimary && (

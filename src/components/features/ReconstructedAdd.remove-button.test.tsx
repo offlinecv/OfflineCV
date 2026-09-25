@@ -24,7 +24,7 @@
 import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RemoveButton } from "./ReconstructedAdd.tsx";
+import { AddPill, InlineBulletAdd, RemoveButton } from "./ReconstructedAdd.tsx";
 
 describe("RemoveButton visible box (#638 review)", () => {
   const html = renderToStaticMarkup(
@@ -45,5 +45,20 @@ describe("RemoveButton visible box (#638 review)", () => {
     expect(html).toContain("after:h-6");
     expect(html).toContain("after:w-6");
     expect(html).toContain("relative");
+  });
+});
+
+describe("edit chrome at rest (#913)", () => {
+  // The stylesheet (`design-system/styles/edit-chrome.css`) does the hiding;
+  // these pin that the shared add/remove controls opt into it, so every
+  // section that reuses them rests clean without a class of its own.
+  it("marks RemoveButton, AddPill and InlineBulletAdd's collapsed pill as edit chrome", () => {
+    for (const node of [
+      createElement(RemoveButton, { label: "Remove role", onClick: () => {} }),
+      createElement(AddPill, { label: "Add experience", onClick: () => {} }),
+      createElement(InlineBulletAdd, { onAdd: () => {} }),
+    ]) {
+      expect(renderToStaticMarkup(node)).toMatch(/^<button[^>]*class="[^"]*\bedit-chrome\b/u);
+    }
   });
 });

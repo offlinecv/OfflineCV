@@ -12,9 +12,7 @@ import {
 } from "@design-system";
 import { DropZone } from "./components/DropZone";
 import { Result } from "./components/Result";
-import { ReconstructedResume } from "./components/features/ReconstructedResume.tsx";
-import { ResumeTargeting } from "./components/features/ResumeTargeting.tsx";
-import { ScoreDetails } from "./components/features/ScoreDetails.tsx";
+import { AuthoringResume } from "./components/features/AuthoringResume.tsx";
 import { PageShell } from "./components/features/PageShell.tsx";
 import { ReplaceResumeDropOverlay } from "./components/features/ReplaceResumeDropOverlay.tsx";
 import { ResumeLibrary } from "./components/features/ResumeLibrary.tsx";
@@ -41,7 +39,6 @@ import {
 import { useJourneyProgress } from "./hooks/useJourneyProgress.ts";
 import { fingerprintParse } from "./lib/tailor-handoff.ts";
 import type { LoadedResume } from "./lib/resume-library.ts";
-import { isScoreRevealed } from "./lib/contact.ts";
 import { SECTION_IDS, scrollToSection } from "./lib/anchors.ts";
 
 export default function App() {
@@ -708,62 +705,15 @@ export default function App() {
           !showingDraftPrompt &&
           edited &&
           displayResult && (
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <Button variant="link" size="sm" onClick={reset}>
-                  ← Back
-                </Button>
-              </div>
-              {/* The same collapse group `/` builds (#955): the readout, and
-                  under it the targeting/triage surface, docking together.
-                  This lane renders `ReconstructedResume` directly — no
-                  `Result`, no score `Card` — so when #955 moved that section
-                  out of `ReconstructedResume` it had to be mounted here
-                  explicitly, or the role picker, the expected-skills guidance
-                  and the triage findings would simply vanish from
-                  from-scratch authoring.
-
-                  It diverges from `/` in two ways, both because the
-                  surfaces do not exist here: there is no recovery offer (this
-                  lane never parsed a file, so nothing can be degenerate) and
-                  no `LocalAiFeedbackSection` (no `useResumeAnalysisLlm`
-                  controller is created on this branch). And no score
-                  `Card` around it: this lane never had one.
-
-                  `score: null` is the #313 reveal gate — the readout's slot
-                  stays empty until contact and one role are filled in, with
-                  no placeholder, as it always has here. The targeting surface
-                  is visible throughout, which is the point: it is what tells
-                  an author what to fill in next. `parseKey` moves only on a
-                  genuinely new session (`authoring:<generation>`), which is
-                  the one moment the reveal should fire again; keying on the
-                  score would re-expand on every field typed in. */}
-              <ScoreDetails
-                score={
-                  isScoreRevealed(displayResult.canonical, edit.contactOverrides)
-                    ? edited.score
-                    : null
-                }
-                resetKey={parseKey}
-              >
-                <ResumeTargeting
-                  result={displayResult}
-                  score={edited.score}
-                  edit={edit}
-                />
-              </ScoreDetails>
-              {/* The same `Card` `ResultDetail` wraps the résumé in on `/`.
-                  #955 took the chrome off `ContactCard` because that wrapper
-                  already drew it; without this one, a from-scratch résumé's
-                  contact block would be bare text on the page background. */}
-              <Card className="shadow-xs">
-                <ReconstructedResume
-                  result={displayResult}
-                  score={edited.score}
-                  edit={edit}
-                />
-              </Card>
-            </div>
+            // Its own component so it can own the Fix It hooks `/` has
+            // (#913) — see `AuthoringResume`.
+            <AuthoringResume
+              result={displayResult}
+              score={edited.score}
+              edit={edit}
+              parseKey={parseKey}
+              onBack={reset}
+            />
           )}
       </ErrorBoundary>
 

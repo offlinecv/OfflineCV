@@ -90,7 +90,7 @@ function SkillCategoryRow({
 }) {
   return (
     <div
-      className="flex flex-col gap-1.5 rounded-md p-1"
+      className="edit-scope flex flex-col gap-1.5 rounded-md p-1"
       onDragOver={(e) => e.preventDefault()}
       onDrop={() => onDropSkill(index)}
     >
@@ -227,7 +227,7 @@ export function SkillsSection({
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
-      className={`flex flex-col gap-2 ${fixIt.className}`}
+      className={`edit-scope flex flex-col gap-2 ${fixIt.className}`}
     >
       <SectionHeading>{heading ?? "Skills"}</SectionHeading>
       {showEmptyState ? (

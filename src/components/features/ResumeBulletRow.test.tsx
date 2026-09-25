@@ -5,7 +5,8 @@
 
 /**
  * Render tests for `ResumeBulletRow` (#626) — the per-bullet remove control
- * and the empty-commit-drops-the-bullet resolution.
+ * and the empty-commit-drops-the-bullet resolution — and its tinted `•`
+ * marker (#913), the in-résumé way into a bullet's Fix It step.
  *
  * Runs in jsdom with raw `createRoot`, matching `RewriteReviewList.test.tsx`
  * (the sibling rewrite-review surface).
@@ -22,6 +23,11 @@ import { act } from "react";
 import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
 import type { BulletObservation } from "../../lib/score/score.ts";
 import { bulletId } from "../../lib/score/bullet-id.ts";
+import { bulletAnchorId, type GuidanceItem } from "../../lib/score/guidance.ts";
+import {
+  bulletStepsOf,
+  FixItEntryContext,
+} from "../../hooks/useFixItMode.ts";
 
 const BULLET_TEXT = "Cut p99 checkout latency by 38% via edge caching.";
 const BULLET: BulletObservation = {
@@ -159,5 +165,135 @@ describe("ResumeBulletRow — remove control (issue 626)", () => {
       el.querySelector('[aria-label="Save Bullet text"]') as HTMLElement,
     );
     expect(onBulletChange).toHaveBeenCalledWith("");
+  });
+});
+
+const WEAK_TEXT = "Worked on the billing service.";
+const WEAK: BulletObservation = {
+  text: WEAK_TEXT,
+  id: bulletId(WEAK_TEXT, 1),
+  index: 1,
+  hasMetric: false,
+  startsWithActionVerb: false,
+  wellFormedLength: false,
+  wordCount: 5,
+};
+
+/** The guidance item `computeScoreGuidance` would mint for `WEAK` — only the
+ *  fields the marker reads matter. */
+const WEAK_ITEM: GuidanceItem = {
+  id: `bullet-${WEAK.id}`,
+  dimension: "specificity",
+  dimensions: ["specificity", "structure"],
+  location: "Experience → Engineer · Acme → bullet 2",
+  targetAnchor: bulletAnchorId(WEAK.id),
+  targetType: "bullet",
+  bulletId: WEAK.id,
+  issues: [
+    { dimension: "specificity", title: "Missing measurable metric", suggestion: "" },
+    { dimension: "structure", title: "Weak opening verb", suggestion: "" },
+  ],
+  summary: "Missing measurable metric · Weak opening verb",
+};
+
+function withSteps(
+  node: React.ReactNode,
+  startAt: (id: string) => void,
+  items: readonly GuidanceItem[] = [WEAK_ITEM],
+) {
+  return createElement(
+    FixItEntryContext.Provider,
+    { value: { bulletSteps: bulletStepsOf(items), startAt } },
+    node,
+  );
+}
+
+const editableRow = (bullet: BulletObservation) =>
+  createElement(ResumeBulletRow, {
+    bullet,
+    onBulletChange: () => {},
+    onRemove: () => {},
+  });
+
+const marker = (el: HTMLElement) =>
+  el.querySelector<HTMLButtonElement>("button[data-fixit-marker]");
+
+describe("ResumeBulletRow — tinted marker (issue 913)", () => {
+  it("tints a stepped bullet's own • in the warning token, described by the failed checks", () => {
+    const el = render(withSteps(editableRow(WEAK), () => {}));
+    const btn = marker(el);
+    expect(btn).not.toBeNull();
+    // The tint is on the glyph box itself, not on a chip beside the text.
+    const box = btn!.parentElement!;
+    expect(box.className).toContain("text-feedback-warning-text");
+    // Never colour-only (WCAG 1.4.1): a flagged bullet's glyph is a different
+    // shape, not just a different colour…
+    expect(box.querySelector('[aria-hidden="true"]')?.textContent).toBe("▲");
+    // …and the control's description names every failed check.
+    const describedBy = btn!.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy!)?.textContent;
+    expect(description).toContain("Missing measurable metric");
+    expect(description).toContain("Weak opening verb");
+  });
+
+  it("enters Fix It at THAT bullet's step on click, and on Enter/Space via the native button", () => {
+    const startAt = vi.fn();
+    const el = render(withSteps(editableRow(WEAK), startAt));
+    const btn = marker(el)!;
+    // A real <button>, so Enter and Space activate it with no key handler.
+    expect(btn.tagName).toBe("BUTTON");
+    click(btn);
+    expect(startAt).toHaveBeenCalledExactlyOnceWith(WEAK_ITEM.id);
+  });
+
+  it("adds no width: the glyph box keeps the unflagged classes bar colour, and the control is absolutely positioned", () => {
+    const flagged = render(withSteps(editableRow(WEAK), () => {}));
+    const flaggedBox = marker(flagged)!.parentElement!;
+    const plainBox = render(withSteps(editableRow(BULLET), () => {})).querySelector(
+      "li div > span",
+    ) as HTMLElement;
+    const strip = (c: string) =>
+      c.replace("text-feedback-warning-text", "").replace("text-content-muted", "").trim();
+    expect(strip(flaggedBox.className)).toBe(strip(plainBox.className));
+    expect(marker(flagged)!.className).toContain("absolute");
+  });
+
+  it("renders a plain muted • — no control — for a bullet Fix It has no step for", () => {
+    const el = render(withSteps(editableRow(BULLET), () => {}));
+    expect(marker(el)).toBeNull();
+    expect(el.innerHTML).not.toContain("text-feedback-warning-text");
+    expect(el.querySelector("li div > span")?.textContent).toBe("•");
+  });
+
+  it("renders no marker of any kind on a READ-ONLY row, even with a step keyed to its id", () => {
+    // Project / achievement / certification rows are never Fix It steps; the
+    // item here is contrived to prove the row does not even look.
+    const el = render(
+      withSteps(createElement(ResumeBulletRow, { bullet: WEAK }), () => {}),
+    );
+    expect(marker(el)).toBeNull();
+    expect(el.querySelector("[aria-describedby]")).toBeNull();
+    expect(el.innerHTML).not.toContain("text-feedback-warning-text");
+    expect(el.textContent).toContain(WEAK_TEXT);
+  });
+
+  it("shows no marker outside a Fix It provider (the authoring lane has no steps)", () => {
+    const el = render(editableRow(WEAK));
+    expect(marker(el)).toBeNull();
+  });
+
+  it("moves no focus on render — only the marker click enters the step", () => {
+    const before = document.activeElement;
+    render(withSteps(editableRow(WEAK), () => {}));
+    expect(document.activeElement).toBe(before);
+  });
+
+  it("is an edit-scope whose remove control is edit chrome", () => {
+    const el = render(withSteps(editableRow(WEAK), () => {}));
+    expect(el.querySelector("li")!.classList.contains("edit-scope")).toBe(true);
+    expect(
+      el.querySelector('[aria-label="Remove bullet"]')!.classList.contains("edit-chrome"),
+    ).toBe(true);
   });
 });

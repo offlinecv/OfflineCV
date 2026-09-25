@@ -126,8 +126,12 @@ function EditableRoleHeader({
             onCommit={(v) => onFieldChange("location", v)}
           />
           {/* Team / department trails after a "·", mirroring the Download PDF's
-              "Company, Location · Team" header (#425). */}
-          <span className="text-content-muted" aria-hidden="true">
+              "Company, Location · Team" header (#425). With no team the "·"
+              rides with the empty "+ team" prompt as edit chrome (#913). */}
+          <span
+            className={`text-content-muted${team ? "" : " edit-chrome"}`}
+            aria-hidden="true"
+          >
             ·
           </span>
           <EditableField
@@ -180,7 +184,13 @@ function RoleDateRange({
       <FixItTarget anchorId={datesTarget ? SECTION_IDS.experienceDates : undefined}>
         {startField}
       </FixItTarget>
-      <span aria-hidden="true">–</span>
+      {/* Edit chrome unless both ends show (#913), or it dangles at rest. */}
+      <span
+        aria-hidden="true"
+        className={startDate && endDate ? undefined : "edit-chrome"}
+      >
+        –
+      </span>
       <EditableField
         value={endDate}
         placeholder="end date"
