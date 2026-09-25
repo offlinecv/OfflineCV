@@ -72,7 +72,11 @@ describe("edit chrome at rest (#913)", () => {
     const heading = renderToStaticMarkup(
       createElement(AddPill, { label: "Add project", onClick: () => {}, float: "heading" }),
     );
-    expect(heading).toMatch(/\bedit-float\b[^"]*\bright-0\b[^"]*\btop-0\b/u);
+    // Level with the heading even when Fix It pads the section (`p-2`), via
+    // the inset the padded host sets.
+    expect(heading).toMatch(
+      /\bedit-float\b[^"]*\btop-\[var\(--edit-float-inset,0px\)\][^"]*\bright-\[var\(--edit-float-inset,0px\)\]/u,
+    );
     const below = renderToStaticMarkup(
       createElement(InlineBulletAdd, { onAdd: () => {}, float: "below" }),
     );

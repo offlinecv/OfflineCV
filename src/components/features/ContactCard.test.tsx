@@ -209,6 +209,23 @@ describe("ContactCard", () => {
     expect(row!.classList.contains("edit-float")).toBe(true);
   });
 
+  it("keeps the add row in flow once it holds a profile the user added", () => {
+    // An added profile is content (it prints), not edit chrome, so it must not
+    // float over the résumé body (#1030 review).
+    const withProfile = render(makeResult(), {
+      overrides: {},
+      onFieldChange: () => {},
+      extraProfiles: [
+        { id: "profile:0", url: "https://gitlab.com/jane", network: "GitLab", kind: "code" },
+      ],
+      onAddProfile: () => undefined,
+      onEditProfile: () => {},
+      onRemoveProfile: () => {},
+    });
+    const row = withProfile.querySelector('[aria-label="Add a profile"]')!.closest("div");
+    expect(row!.classList.contains("edit-float")).toBe(false);
+  });
+
   it("keeps a present headline on its own line under the name", () => {
     const el = render(
       makeResult({ headline: "Staff Engineer" }, { headline: 0.9 }),

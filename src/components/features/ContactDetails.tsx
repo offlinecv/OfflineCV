@@ -180,17 +180,26 @@ export function ContactDetails({
 
       {/* The absent links, work-authorization, and extra-links "+ Add" affordances
           share one row (#953) — grouping all secondary/optional add affordances on a
-          single line instead of stacking separate rows. Every item on it is
-          edit chrome, so on a fine pointer the row floats (`edit-float`) just
+          single line instead of stacking separate rows. While every item on it
+          is edit chrome, a fine pointer floats the row (`edit-float`) just
           under the card instead of holding a blank line above the résumé body;
-          `pt-1` rather than a margin, so the pointer crosses from the contact
-          line onto the row without leaving the card's hover scope. */}
+          `pt-1` rather than a margin there, so the pointer crosses from the
+          contact line onto the row without leaving the card's hover scope.
+          A profile the user added is content, not chrome — it prints — so
+          once one exists the row stays in flow. An open input also drops it
+          back into flow (styles/edit-chrome.css). */}
       {editable &&
         (leadingAdd ||
           absentLinks.length > 0 ||
           workAuthorizationAbsent ||
           (onAddProfile && onEditProfile && onRemoveProfile)) && (
-          <div className="edit-float inset-x-0 top-full flex flex-wrap items-center justify-center gap-2 pt-1 text-sm">
+          <div
+            className={`mt-2 flex flex-wrap items-center justify-center gap-2 text-sm ${
+              extraProfiles && extraProfiles.length > 0
+                ? ""
+                : "edit-float inset-x-0 top-full pointer-fine:mt-0 pointer-fine:pt-1"
+            }`}
+          >
             {leadingAdd}
             {absentLinks.map((field) => (
               <FixItTarget

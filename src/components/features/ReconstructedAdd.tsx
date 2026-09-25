@@ -103,7 +103,8 @@ export function SectionEmptyHint({ children }: { children: React.ReactNode }) {
 export type AddPillFloat = "heading" | "below";
 
 const FLOAT_CLASS: Record<AddPillFloat, string> = {
-  heading: "edit-float right-0 top-0 py-1 pointer-fine:py-0.5",
+  heading:
+    "edit-float top-[var(--edit-float-inset,0px)] right-[var(--edit-float-inset,0px)] py-1 pointer-fine:py-0.5",
   below: "edit-float left-0 top-full py-1 pointer-fine:py-0.5",
 };
 

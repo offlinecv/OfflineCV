@@ -53,6 +53,13 @@
  *                offsets (`top-full left-0`, `top-0 right-0`) and a `relative`
  *                host; on a coarse pointer the element stays static, the
  *                offsets are inert, and it keeps its row as before.
+ *                A float that holds an open input (`input`, `textarea`) drops
+ *                back into flow: the user asked for that field, so the content
+ *                below should make room rather than sit under it — the same
+ *                rule `InlineBulletAdd` follows by un-floating when it opens.
+ *                A heading float reads `--edit-float-inset` for its offsets, so
+ *                a host that pads itself (Fix It's block target, `p-2`) can
+ *                keep the pill level with its heading.
  */
 @layer components {
   @media (pointer: fine) {
@@ -71,6 +78,10 @@
     .edit-float {
       position: absolute;
       z-index: 10;
+    }
+
+    .edit-float:has(input, textarea) {
+      position: static;
     }
   }
 }

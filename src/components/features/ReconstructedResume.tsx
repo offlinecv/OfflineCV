@@ -527,7 +527,11 @@ export function ExperienceSection({
       {/* The "Other bullets" bucket's Removed/Reverted strip, hosted at section
           level so it outlives the group. That bucket is always appended last,
           so this is where its own strip would have rendered anyway. */}
-      {otherRemove.strip}
+      {/* On a fine pointer the last role's "+ Add bullet" floats into the
+          gap above this strip, so the strip leaves it room. */}
+      {otherRemove.strip && (
+        <div className="pointer-fine:mt-4">{otherRemove.strip}</div>
+      )}
       <AddPill label="Add experience" onClick={onAddEntry} fixItFocus float="heading" />
     </section>
   );
@@ -1387,7 +1391,7 @@ export function ReconstructedResume({
       // gap-8: the header's add row floats into this gap on hover (see
       // `ContactDetails`), and it is the only thing separating the header from
       // the body now that the header draws no rule of its own (#955).
-      className="edit-scope scroll-mt-6 flex flex-col gap-8"
+      className="edit-scope scroll-mt-6 flex flex-col gap-6 pointer-fine:gap-8"
     >
       <ContactCard
         result={result}

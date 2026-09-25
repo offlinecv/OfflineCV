@@ -235,8 +235,14 @@ export function AddSkillInput({
 
   if (!expanded) {
     // The Skills Fix It step lands here, not on the first chip's remove
-    // button (#810).
-    return <AddPill label={label} onClick={() => setExpanded(true)} fixItFocus />;
+    // button (#810). Wrapped so `AddPill`'s `self-start` does not ride high
+    // in a category's `items-center` chip line: `self-start` only affects a
+    // direct flex child, and this span is that child (as in ContactDetails).
+    return (
+      <span className="inline-flex">
+        <AddPill label={label} onClick={() => setExpanded(true)} fixItFocus />
+      </span>
+    );
   }
 
   return (
