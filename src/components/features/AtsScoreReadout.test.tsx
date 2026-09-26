@@ -282,6 +282,33 @@ describe("collapsible score widget (#953)", () => {
   });
 });
 
+// Shared by the two band-loop tests below: renders each of the three verdict
+// bands, hands the caller's assertion the rendered root + word, and checks
+// that whatever width class it returns is the SAME across all three bands —
+// the actual fix for the #960/#988 wrap, since it makes the slot's width
+// independent of which band rendered rather than of whether the word renders
+// at all. The per-test assertions differ (pill-scoped vs strip-wide lookup,
+// `sm:w-` vs bare `w-`, the `hidden` check), so only this loop is shared.
+const VERDICT_BANDS = [
+  [92, "Strong"],
+  [72, "Getting There"],
+  [40, "Needs Work"],
+] as const;
+
+function expectSharedWidthClassAcrossBands(
+  widthClassFor: (el: HTMLElement, word: string) => string | undefined,
+): void {
+  const widthClasses = new Set<string>();
+  for (const [overall, word] of VERDICT_BANDS) {
+    const score = { ...makeScore(), overall };
+    const el = render(score, true);
+    const widthClass = widthClassFor(el, word);
+    expect(widthClass, `${word} slot width class`).toBeDefined();
+    widthClasses.add(widthClass!);
+  }
+  expect(widthClasses.size).toBe(1);
+}
+
 describe("docked strip is structurally one line, not text-metric luck (#960)", () => {
   // jsdom has no layout engine and can never see a wrap — that regression
   // proof lives in `e2e/viewport.spec.ts` / `e2e/mobile/*.spec.ts`. What jsdom
@@ -293,14 +320,7 @@ describe("docked strip is structurally one line, not text-metric luck (#960)", (
   // width no longer depends on which band rendered. The optional layout
   // penalty span still renders nowhere in the docked pill.
   it("renders the verdict word for every band, inside the SAME fixed-width slot", () => {
-    const widthClasses = new Set<string>();
-    for (const [overall, word] of [
-      [92, "Strong"],
-      [72, "Getting There"],
-      [40, "Needs Work"],
-    ] as const) {
-      const score = { ...makeScore(), overall };
-      const el = render(score, true);
+    expectSharedWidthClassAcrossBands((el, word) => {
       const pill = [...el.querySelectorAll("button")].find((b) =>
         b.getAttribute("aria-label")?.startsWith("Resume score"),
       );
@@ -314,16 +334,34 @@ describe("docked strip is structurally one line, not text-metric luck (#960)", (
       const wordEl = [...(pill?.querySelectorAll("span") ?? [])].find(
         (s) => s.textContent === word,
       );
-      const widthClass = [...(wordEl?.classList ?? [])].find((c) =>
-        c.startsWith("sm:w-"),
+      return [...(wordEl?.classList ?? [])].find((c) => c.startsWith("sm:w-"));
+    });
+  });
+
+  it("renders the verdict word below `sm` too, in its own narrower fixed-width slot (#988)", () => {
+    // #965/#960 shipped this word `hidden` below `sm`, leaving the coloured
+    // dot as the only visible band signal on a phone screen — a WCAG 1.4.1
+    // regression, since the docked strip is where the widget spends most of
+    // its life. #988 restores the word there too, in a narrower slot
+    // (`w-5`) than the `sm:w-28` one used at `sm`+ — jsdom applies no CSS
+    // so it cannot prove either slot actually fits the row (that's
+    // `e2e/mobile/score-strip.spec.ts`), but it CAN prove the class contract:
+    // no `hidden` class gating the word away below `sm`, and one shared
+    // width class across all three bands so the slot's width still does not
+    // depend on which band rendered.
+    expectSharedWidthClassAcrossBands((el, word) => {
+      const wordEl = [...el.querySelectorAll("span")].find(
+        (s) => s.textContent === word,
       );
-      expect(widthClass, `${word} slot width class`).toBeDefined();
-      widthClasses.add(widthClass!);
-    }
-    // One slot width shared by all three bands — the actual fix for the
-    // wrap, since it makes group 1's width independent of which band
-    // rendered rather than of whether the word renders at all.
-    expect(widthClasses.size).toBe(1);
+      expect(wordEl, `${word} slot`).toBeDefined();
+      expect(
+        [...(wordEl?.classList ?? [])],
+        `${word} slot must not be hidden below sm`,
+      ).not.toContain("hidden");
+      return [...(wordEl?.classList ?? [])].find(
+        (c) => c.startsWith("w-") && !c.startsWith("sm:"),
+      );
+    });
   });
 
   it("keeps the verdict word unwrappable inside its fixed-width slot", () => {
@@ -336,11 +374,7 @@ describe("docked strip is structurally one line, not text-metric luck (#960)", (
     // without any code change. jsdom cannot see the wrap; `e2e/viewport.spec.ts`
     // forces the font-size up and asserts the row holds. This pins the class
     // that makes that possible.
-    for (const [overall, word] of [
-      [92, "Strong"],
-      [72, "Getting There"],
-      [40, "Needs Work"],
-    ] as const) {
+    for (const [overall, word] of VERDICT_BANDS) {
       const el = render({ ...makeScore(), overall }, true);
       const wordEl = [...el.querySelectorAll("span")].find(
         (s) => s.textContent === word,

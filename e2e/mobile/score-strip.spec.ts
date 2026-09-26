@@ -2,14 +2,20 @@
 // Copyright 2026 The offlinecv Authors
 
 /**
- * e2e/mobile/score-strip.spec.ts — the mobile-375 regression proof for #960.
+ * e2e/mobile/score-strip.spec.ts — the mobile-375 regression proof for #960,
+ * and (since #988) for the verdict word staying visible there too.
  *
  * Adding a spec under `e2e/mobile/` activates the `mobile-375` Playwright
  * project (`playwright.config.ts`), which was configured but dormant — its
  * `testMatch` only looks here, and nothing existed yet. #960 is one of the
  * two issues expected to add this file (the other is #959, Popover
  * containment, which is stacked on top and reuses this same drop/dock
- * plumbing from `e2e/support/score-hero.ts`).
+ * plumbing from `e2e/support/score-hero.ts`). #988 added the
+ * `expectVerdictWordVisible` assertion below rather than a third file: same
+ * drop/dock plumbing, same three regimes, and the two things it checks (one
+ * line, band visible) must hold together — a slot narrow enough to avoid a
+ * wrap but too narrow to actually show the word would pass #960's test and
+ * fail #988's, or vice versa.
  *
  * At 375px the dimension-track group (`CompactDimension` × 3) is already
  * `hidden` below `lg` (1024px), by design — below that width the row has no
@@ -31,6 +37,8 @@ import {
   dropFixtureAndWaitForParse,
   expectDockedStripIsOneLine,
   expectRegimeBand,
+  expectVerdictWordGlyphVisible,
+  expectVerdictWordVisible,
   scoreRegime,
 } from "../support/score-hero.ts";
 
@@ -46,6 +54,17 @@ test.describe("docked score strip is one line at 375px (#960)", () => {
       await dropFixtureAndWaitForParse(page, regime.fixture);
       await dockScoreHero(page);
       await expectRegimeBand(page, regime);
+
+      // #988: at 375px the band must have a visible TEXT form, not just the
+      // pill's aria-label (screen readers only) and the dot's colour (WCAG
+      // 1.4.1). #965/#960 shipped this word `hidden` below `sm`; this is the
+      // regression proof it stays on screen there.
+      await expectVerdictWordVisible(page, regime);
+
+      // #1060: the DOM-presence check above cannot tell "Strong" from "S…" —
+      // this measures the actual painted glyphs at the 20px slot width and
+      // fails only if the ellipsis ever swallows the whole word.
+      await expectVerdictWordGlyphVisible(page, regime);
 
       // Same shared assertion the desktop widths use, rather than a second
       // copy of the block — it also checks that the toggle and the ⓘ

@@ -160,6 +160,64 @@ export async function expectRegimeBand(
   ).toBeVisible();
 }
 
+/** Assert the docked pill's verdict word is on-screen for this regime — the
+ *  direct proof for #988 (WCAG 1.4.1: colour must not be the sole visible
+ *  carrier of the band below `sm`, where #965/#960 had shipped it `hidden`
+ *  and left only the coloured dot). Reads the DOM text, not what the box
+ *  paints: CSS `text-overflow: ellipsis` (`truncate`) never touches
+ *  `textContent`, so the two-word bands that visually clip inside their
+ *  narrower-below-`sm` slot still report their full label here — this is a
+ *  presence check, not a rendered-glyphs check, and `toBeVisible()` already
+ *  covers "the box is on screen with a non-zero size" regardless of any
+ *  ellipsis inside it. */
+export async function expectVerdictWordVisible(
+  page: Page,
+  regime: ScoreRegime,
+): Promise<void> {
+  const word = page
+    .getByRole("button", { name: /^Resume score/ })
+    .locator(`span:text-is("${regime.band}")`);
+  await expect(
+    word,
+    `${regime.name}: verdict word "${regime.band}" not visible`,
+  ).toBeVisible();
+}
+
+/** The rendered-glyphs counterpart to `expectVerdictWordVisible` above — that
+ *  one proves the DOM node is on-screen, not what `truncate`'s ellipsis
+ *  leaves paintable inside it (its own docstring says so). At the below-`sm`
+ *  slot (`w-5`, 20px) the box is narrow enough that only the band's first
+ *  glyph or two survive before the ellipsis; this measures that count with
+ *  the box's own computed font via `CanvasRenderingContext2D.measureText`
+ *  (real font metrics, unlike jsdom) and fails if it ever reaches zero — the
+ *  point at which colour would again be the only carrier of the band. */
+export async function expectVerdictWordGlyphVisible(
+  page: Page,
+  regime: ScoreRegime,
+): Promise<void> {
+  const word = page
+    .getByRole("button", { name: /^Resume score/ })
+    .locator(`span:text-is("${regime.band}")`);
+  const visibleGlyphs = await word.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d")!;
+    ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const text = el.textContent ?? "";
+    const maxWidth = el.clientWidth;
+    let shown = 0;
+    for (let i = 1; i <= text.length; i += 1) {
+      if (ctx.measureText(text.slice(0, i)).width > maxWidth) break;
+      shown = i;
+    }
+    return shown;
+  });
+  expect(
+    visibleGlyphs,
+    `${regime.name}: verdict word "${regime.band}" paints 0 glyphs at its slot width — colour would be the only carrier`,
+  ).toBeGreaterThan(0);
+}
+
 /** Default fixture for specs that only need ONE parse, not the full matrix
  *  (kept identical to `viewport.spec.ts`'s pre-#960 constant so its own
  *  above-the-fold/hash-anchor assertions, unrelated to the score bug, keep
