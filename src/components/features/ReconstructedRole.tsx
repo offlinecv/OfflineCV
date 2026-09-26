@@ -40,6 +40,7 @@ import type {
 import { isAddedEntryKey } from "../../hooks/useEditableParse.ts";
 import {
   useHoldWhile,
+  useRegisterEntryHost,
   type AddedEntryPruneHold,
 } from "../../hooks/useAddedEntryPruneHold.ts";
 import {
@@ -208,6 +209,13 @@ export function RoleEntry({
     hostsStrip && removes.pending,
     rootRef,
   );
+
+  // Publish this root under this entry's own id so a DIFFERENT holder — the
+  // "Other bullets" control, whose splice can empty THIS role while its own
+  // strip lives in a different subtree — can test this row's focus/draft state
+  // on release instead of its own (#684; see `useOtherBulletsRemove` and the
+  // `useAddedEntryPruneHold` docblock).
+  useRegisterEntryHost(pruneHold, entryKey, isAdded, rootRef);
 
   // Section rewrite sees the text the user actually edited — `group.bullets`
   // comes from the RE-GRADED pool, so `b.text` IS the post-edit text. This used

@@ -118,6 +118,29 @@
  * releases the hold on unmount, and treating that as a stay ending would prune
  * on an explicit "Remove role", on a fresh parse, and — the reason this is a
  * rule and not a preference — on the very unmount the prune itself causes.
+ *
+ * ## A holder whose own subtree is the WRONG subtree (#684)
+ *
+ * The gate above assumes the holder and the entry it is holding are the same
+ * subtree — true for `ReconstructedRole`'s own hold, false for
+ * `useOtherBulletsRemove`. That control's strip is section-hosted because it can
+ * outlive the "Other bullets" GROUP disappearing, but the entry a removal on that
+ * path empties is a real ROLE elsewhere in the section — a different subtree than
+ * the one taking the hold. Passing `host` there would test the wrong node (every
+ * release would read as "unfocused, no draft" regardless of what the emptied role
+ * actually holds), so #658 shipped it with no `host` at all — the documented,
+ * conservative "treat every release as still in use" — leaving this one path to
+ * the section-exit pass alone.
+ *
+ * `registerHost`/`getHost` close that gap by letting the entry that OWNS a
+ * subtree publish it under its own id, so a holder that isn't that subtree can
+ * still look it up by the id it is about to release. `ReconstructedRole`
+ * registers its `rootRef` under its own `entryKey` for every ADDED role,
+ * independent of whether that role currently holds anything itself — the row a
+ * splice on the "Other bullets" path empties usually is not the one whose own
+ * strip is live. `useOtherBulletsRemove` then passes `getHost` as `hostFor` to
+ * {@link useHoldWhile} instead of a `host`, so the gate reads the EMPTIED role's
+ * own focus/draft state rather than the pseudo-entry taking the hold.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -135,6 +158,17 @@ export interface AddedEntryPruneHold {
    * the trigger for the re-run prune, scoped to that one entry.
    */
   noteHoldReleased: (id: string) => void;
+  /**
+   * Publish `id`'s own root element so a holder that isn't `id`'s own subtree
+   * (#684 — see the module docblock) can still test it via `getHost`. Returns
+   * an unregister function; safe to call every render, since it only replaces
+   * the entry when the ref identity itself changes.
+   */
+  registerHost: (id: string, host: RefObject<HTMLElement | null>) => () => void;
+  /** The root element `id` last registered, or undefined if it never has (a
+   *  PARSED entry, an id already unmounted, or a holder that is its own
+   *  subtree and never needs a lookup). */
+  getHost: (id: string) => RefObject<HTMLElement | null> | undefined;
 }
 
 /** Create a registry. One per section that prunes — the ids it holds are only
@@ -146,6 +180,9 @@ export function useAddedEntryPruneHold(
   prune?: (isSpared: (entryId: string) => boolean) => void,
 ): AddedEntryPruneHold {
   const held = useRef<Set<string>>(new Set());
+  // Not React state: read only by a lookup a timer later (`getHost`, from
+  // inside `useHoldWhile`'s effect), same reasoning as `held` above.
+  const hosts = useRef<Map<string, RefObject<HTMLElement | null>>>(new Map());
 
   // Latest-value cache, not a dep: the section passes a fresh arrow every
   // render, and `noteHoldReleased` — like `setHold` and `isHeld` — has to keep
@@ -170,12 +207,30 @@ export function useAddedEntryPruneHold(
     pruneRef.current?.((entryId) => entryId !== id);
   }, []);
 
+  const registerHost = useCallback(
+    (id: string, host: RefObject<HTMLElement | null>) => {
+      hosts.current.set(id, host);
+      return () => {
+        // Only clear an entry this exact registration owns — a re-render can
+        // register-then-unregister out of order (StrictMode), and unregistering
+        // unconditionally could drop a NEWER registration for the same id.
+        if (hosts.current.get(id) === host) hosts.current.delete(id);
+      };
+    },
+    [],
+  );
+
+  const getHost = useCallback(
+    (id: string) => hosts.current.get(id),
+    [],
+  );
+
   // Memoized, not a fresh literal: this object is a dep of every holder's
   // effect, so a churning identity would tear the hold down and re-take it on
   // every single render of the section.
   return useMemo(
-    () => ({ setHold, isHeld, noteHoldReleased }),
-    [setHold, isHeld, noteHoldReleased],
+    () => ({ setHold, isHeld, noteHoldReleased, registerHost, getHost }),
+    [setHold, isHeld, noteHoldReleased, registerHost, getHost],
   );
 }
 
@@ -209,16 +264,23 @@ function keepsEntry(host: RefObject<HTMLElement | null> | undefined): boolean {
  * has no registry or no id — a parsed role has no added-entry id to hold, and
  * nothing outside the editable experience section supplies a registry at all.
  *
- * @param host The holder's root element. Focus inside it — or an open draft
- *   inside it — stands the release prune down (#658). Omitted → every release is
- *   treated as in-use, i.e. only the section-exit pass ever prunes this holder's
- *   entry.
+ * @param host The holder's root element, when the holder IS the subtree the
+ *   release prune should test. Focus inside it — or an open draft inside it —
+ *   stands the release prune down (#658). Omitted with no `hostFor` either →
+ *   every release is treated as in-use, i.e. only the section-exit pass ever
+ *   prunes this holder's entry.
+ * @param hostFor Looked up with the RELEASED id when `host` is omitted, for a
+ *   holder whose own subtree is the wrong one to test (#684) — pass the
+ *   registry's `getHost` so the gate reads the entry actually being released,
+ *   not the holder taking the hold. Must be stable across renders (e.g.
+ *   `registry.getHost`, not a fresh arrow) — see the `host` note below.
  */
 export function useHoldWhile(
   registry: AddedEntryPruneHold | undefined,
   id: string | undefined,
   held: boolean,
   host?: RefObject<HTMLElement | null>,
+  hostFor?: (id: string) => RefObject<HTMLElement | null> | undefined,
 ): void {
   // The id this holder currently holds, if any. A ref because the end of a stay
   // is a TRANSITION (held true → false) and has to be told apart both from
@@ -230,18 +292,56 @@ export function useHoldWhile(
   useEffect(() => {
     if (registry === undefined || id === undefined) return;
     registry.setHold(id, held);
-    const released = holdingRef.current;
+    const wasHolding = holdingRef.current;
     holdingRef.current = held ? id : undefined;
     // StrictMode re-runs an effect on mount (run → cleanup → run), so a hold
-    // this holder still has can legitimately be seen twice; only an id it no
-    // longer holds ended a stay.
-    if (released !== undefined && !(held && released === id)) {
-      // Still focused, or still holding a draft → stand down for good rather
-      // than retry: `holdingRef` is already cleared, and the section-exit pass
-      // is the intended fallback.
-      if (!keepsEntry(host)) registry.noteHoldReleased(released);
+    // this holder still has can legitimately be seen twice; only an ACTUAL
+    // held true → false transition for the SAME id ended a stay. `id` alone
+    // changing while `held` stays true (`useOtherBulletsRemove` shares one
+    // `heldEntry`/`pending` pair across every removal on that control, so a
+    // second removal can move `id` from A to B before A's own stay ends) says
+    // nothing about whether A was released — only that this holder's
+    // attention moved on. Treating that as A's release let the release prune
+    // drop A on B's focus/draft state instead of A's own; requiring
+    // `wasHolding === id` leaves that case to the section-exit pass instead,
+    // the same conservative default an unregistered host already gets.
+    if (wasHolding !== undefined && wasHolding === id && !held) {
+      // `host` names the holder's own subtree; `hostFor` looks up the RELEASED
+      // entry's subtree when the holder isn't it (#684). Still focused, or
+      // still holding a draft → stand down for good rather than retry:
+      // `holdingRef` is already cleared, and the section-exit pass is the
+      // intended fallback.
+      if (!keepsEntry(host ?? hostFor?.(wasHolding))) {
+        registry.noteHoldReleased(wasHolding);
+      }
     }
     return () => registry.setHold(id, false);
-    // `host` is a ref object — stable identity, so it never re-fires this.
-  }, [registry, id, held, host]);
+    // `host` is a ref object and `hostFor` is expected to be a registry method
+    // (e.g. `getHost`) — both stable identities, so neither re-fires this.
+  }, [registry, id, held, host, hostFor]);
+}
+
+/**
+ * Publish `id`'s own root element under its own id for as long as it names a
+ * user-added entry, so a holder whose own subtree is the WRONG subtree (#684 —
+ * `useOtherBulletsRemove`) can still test this row's focus/draft state on
+ * release. Independent of whatever hold this row takes on itself via
+ * {@link useHoldWhile}: the row a splice on that path empties is usually not
+ * the one whose own strip is live, so this has to run whenever the row is an
+ * added entry at all, not just while it holds itself.
+ *
+ * No-ops when the registry, id, or `isAdded` is absent — a parsed role has no
+ * added-entry id to publish, and nothing outside the editable experience
+ * section supplies a registry at all.
+ */
+export function useRegisterEntryHost(
+  registry: AddedEntryPruneHold | undefined,
+  id: string | undefined,
+  isAdded: boolean,
+  host: RefObject<HTMLElement | null>,
+): void {
+  useEffect(() => {
+    if (registry === undefined || !isAdded || id === undefined) return;
+    return registry.registerHost(id, host);
+  }, [registry, id, isAdded, host]);
 }
