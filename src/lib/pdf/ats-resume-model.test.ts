@@ -234,6 +234,35 @@ describe("buildAtsResumeModel", () => {
     );
   });
 
+  it("keeps a non-bullet description line alongside graded bullets (#844)", () => {
+    // Reproduces `headerless-experience.pdf` role 0: a scope line
+    // ("Leads the automation guild.") reached `description` via
+    // `belowAnchorBodyProse`/the anchor-prose tail, never through a glyph
+    // bullet, so it has no `BulletObservation` behind it. The old
+    // "any graded bullets? then ONLY those" branch dropped it the moment the
+    // role had even one real bullet — this pins that it survives instead.
+    const result = makeResult({
+      experience: [
+        {
+          title: "Senior QA Engineer",
+          company: "Northwind Systems",
+          start_date: "2021",
+          is_current: true,
+          description:
+            "Leads the automation guild.\nCut the nightly regression suite from six hours to forty minutes",
+        },
+      ],
+    });
+    const score = makeScore([
+      bullet("Cut the nightly regression suite from six hours to forty minutes", 0),
+    ]);
+    const model = buildAtsResumeModel(result, score);
+    expect(model.sections[0].entries[0].bullets).toEqual([
+      "Leads the automation guild.",
+      "Cut the nightly regression suite from six hours to forty minutes",
+    ]);
+  });
+
   it("promotes Achievements above Experience when placement says so", () => {
     const result = makeResult({
       heuristic_achievements: [{ title: "Patent US123", year: "2022" }],
