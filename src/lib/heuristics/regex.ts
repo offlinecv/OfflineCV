@@ -219,8 +219,16 @@ export const STRICT_MONTH_YEAR_RE = new RegExp(
 /** "01/2020", "1/2020", "01-2020". */
 export const NUMERIC_MONTH_YEAR_RE = /\b(0?[1-9]|1[0-2])[\/\-]\d{4}\b/g;
 
+/**
+ * Source fragment for a plausible résumé year, 1900–2099. Exported (not a
+ * compiled RegExp) so a consumer that needs the shape inline — e.g.
+ * phone.ts's date-range fabrication guard — composes with it instead of
+ * re-deriving the `(19|20)` prefix on its own.
+ */
+export const YEAR_SHAPE = `(?:19|20)\\d{2}`;
+
 /** Bare 4-digit year, used as a weaker signal. */
-export const YEAR_RE = /\b(19|20)\d{2}\b/g;
+export const YEAR_RE = new RegExp(`\\b${YEAR_SHAPE}\\b`, "g");
 
 /** "Present" / "Current" / "Now" — open-ended end dates. */
 export const PRESENT_RE = new RegExp(`\\b(${OPEN_ENDED_ALT})\\b`, "i");
