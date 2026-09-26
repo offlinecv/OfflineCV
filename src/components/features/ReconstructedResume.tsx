@@ -59,6 +59,7 @@ import { ContactCard } from "./ContactCard.tsx";
 import { RoleEntry } from "./ReconstructedRole.tsx";
 import { useOtherBulletsRemove } from "./OtherBulletsRemove.ts";
 import { useOtherBulletMove } from "./OtherBulletMove.tsx";
+import { findAddedBulletEntry } from "../../lib/edit/added-bullets.ts";
 import { buildMoveTargets, type MoveTarget } from "../../lib/edit/move-targets.ts";
 import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
 import { Fragment, useMemo } from "react";
@@ -252,10 +253,11 @@ export function ExperienceSection({
    *  recorded — false when the write found nothing to drop, which the
    *  confirmation strip must not report as a success (#648). */
   onRemoveBullet: (id: string, added?: AddedBulletRef) => boolean;
-  /** Every user-added bullet bucket, read ONLY by the "Other bullets" remove
-   *  path: that group carries no entry, so the bucket a degenerate added line
-   *  sits in has to be resolved from the line's text (#660). Every other path
-   *  knows its own `entryKey` and never consults this. */
+  /** Every user-added bullet bucket, read by the "Other bullets" group's remove
+   *  AND edit paths: that group carries no entry, so the bucket a degenerate
+   *  added line sits in has to be resolved from the line's text (#660 remove,
+   *  #679 edit). Every other path knows its own `entryKey` and never consults
+   *  this. */
   addedBullets: AddedBullets;
   /** User-added experience entries, append-aligned to indices ≥ originalCount. */
   addedExperience: AddedEntry[];
@@ -362,6 +364,18 @@ export function ExperienceSection({
     onRemoveBullet,
     captureBulletUndo,
   });
+  // The "Other bullets" bucket's EDIT resolution (#679) — a sibling of
+  // `otherRemove` above, and the same reason it needs one: the group owns no
+  // `entryKey` of its own, so an edit landing here could not tell `onBulletChange`
+  // which bucket line to rewrite and always fell to `bulletOverrides`, even for a
+  // degenerate ADDED line whose Remove already resolves through
+  // `findAddedBulletEntry`. That filed a permanent, unresolvable override (#679)
+  // — the removal-side defect #660 fixed, mirrored on the write. Unlike removal,
+  // this needs no snapshot or prune hold: an edit never empties an entry.
+  const resolveOtherBulletRef = (text: string): AddedBulletRef | undefined => {
+    const entryKey = findAddedBulletEntry(addedBullets, text);
+    return entryKey === undefined ? undefined : { entryKey, text };
+  };
 
   const { topHeading, inlineHeadings } = computeExperienceHeadings(
     groups,
@@ -483,6 +497,9 @@ export function ExperienceSection({
                   // RoleEntry drives it but does not host its strip, because
                   // this RoleEntry is the thing that disappears.
                   removeControl={otherRemove}
+                  // Resolves an edit's bucket from the row's text (#679), the
+                  // same way `otherRemove` already resolves a removal's.
+                  resolveBucketRef={resolveOtherBulletRef}
                   // Export-fidelity affordance (#1007) — the "won't appear in
                   // Download PDF" mark + "move to role" menu render per bullet
                   // only when both are present, which is only ever true here.

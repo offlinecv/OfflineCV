@@ -122,6 +122,15 @@ interface RoleEntryProps {
   /** Reattach a bullet from "Other bullets" to a real entry (#1007) — see
    *  {@link moveTargets}. */
   onMoveBullet?: (id: string, text: string, target: MoveTarget) => void;
+  /** Resolve the added-bullets bucket a row's TEXT names, overriding the
+   *  `entryKey`-based {@link ownBucketRef} below (#679). Set only for the
+   *  "Other bullets" group, which owns no `entryKey` of its own — an edit on
+   *  one of its rows otherwise always resolved to `undefined`, so committing an
+   *  edit on a degenerate line (one `findAddedBulletEntry` can still locate by
+   *  text) filed a permanent, unresolvable `bulletOverrides` entry instead of
+   *  landing in the bucket the same line's Remove already reaches. Absent for
+   *  every real role, which resolves through its own `entryKey` instead. */
+  resolveBucketRef?: (text: string) => AddedBulletRef | undefined;
 }
 
 /**
@@ -144,6 +153,7 @@ export function RoleEntry({
   datesTarget,
   moveTargets,
   onMoveBullet,
+  resolveBucketRef,
 }: RoleEntryProps) {
   // This entry's root element, handed to `useHoldWhile` (#658). The prune that
   // runs when a remove-undo strip collapses asks it two things: does focus still
@@ -166,6 +176,10 @@ export function RoleEntry({
       entryKey === undefined ? undefined : { entryKey, text },
     [entryKey],
   );
+  // The "Other bullets" group supplies its own text-based resolver instead
+  // (#679) — see `resolveBucketRef`'s docblock for why `ownBucketRef` alone
+  // can never reach it.
+  const bucketRefFor = resolveBucketRef ?? ownBucketRef;
   const removeOwnBullet = useCallback(
     (id: string, text: string) =>
       onRemoveBullet?.(id, ownBucketRef(text)) ?? false,
@@ -281,7 +295,7 @@ export function RoleEntry({
                 bullet={b}
                 onBulletChange={
                   onBulletChange
-                    ? (value) => onBulletChange(b.id, value, ownBucketRef(b.text))
+                    ? (value) => onBulletChange(b.id, value, bucketRefFor(b.text))
                     : undefined
                 }
                 onRemove={
