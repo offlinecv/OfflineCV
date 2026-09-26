@@ -192,6 +192,8 @@ jobs:
       - name: Run goose
         env:
           GOOSE_PROVIDER: claude-acp
+          # `current` = the adapter's own default model; goose refuses to start without one.
+          GOOSE_MODEL: current
           GOOSE_MODE: auto
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
           # Telemetry hosts are blocked anyway; skip them instead of retrying.
