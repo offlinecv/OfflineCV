@@ -376,6 +376,34 @@ describe("parseHeuristic — soft-wrapped skills lines rejoined (#220)", () => {
     );
     expect(result.parsed.skills).not.toContain("Machine Learning Data Analysis");
   });
+
+  // #834: the mirror-image order of the case above — a complete comma-list
+  // ("Python, Go, Rust") followed by a standalone final skill that carries no
+  // comma of its own AND is the section's last line ("Machine Learning"). This
+  // is lexically indistinguishable from the actual #834 bug (a comma-list
+  // whose LAST wrap drops its final comma, e.g. "…, gRPC, Distributed" ⏎
+  // "Systems") — both are a short comma-less last line following a pending
+  // fragment that has a comma and doesn't end on one. Locks in that the parser
+  // does NOT merge this case, because any join narrow enough to rejoin the
+  // real bug also rejoins this one — see the Condition B′ writeup in
+  // `isSoftWrapContinuation` (skills.ts) for why no such join was added.
+  it("does not merge a standalone final skill into a preceding complete comma-list (#834)", () => {
+    const items = mkItems([
+      { text: "Riley Park", fontSize: 18 },
+      { text: "riley.park@example.com  (206) 555-0133  Seattle, WA", fontSize: 10 },
+      { text: "", fontSize: 10 },
+      { text: "SKILLS", fontSize: 13 },
+      { text: "Python, Go, Rust", fontSize: 10 },
+      { text: "Machine Learning", fontSize: 10 },
+    ]);
+    const pages = mkDefaultPages(items);
+    const result = parseHeuristic(items, pages);
+
+    expect(result.parsed.skills).toEqual(
+      expect.arrayContaining(["Python", "Go", "Rust", "Machine Learning"]),
+    );
+    expect(result.parsed.skills).not.toContain("Rust Machine Learning");
+  });
 });
 
 // ── Issue #221: Interests/Hobbies sub-labels must not bleed into skills ───────
