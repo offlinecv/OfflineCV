@@ -3,8 +3,9 @@
 
 /**
  * useAddedEntryPruneHold — a per-entry stay of execution over
- * `pruneEmptyAddedEntries` (#637), and the prune that runs when a stay ENDS
- * (#658).
+ * `pruneEmptyAddedEntries` (#637), the prune that runs when a stay ENDS
+ * (#658), and the same live-draft gate reused at the SECTION-EXIT call site
+ * (#677).
  *
  * Once removing a user-added role's last bullet ACTUALLY empties it (#637 half
  * 1 — before that the bucket never shrank, so the entry was never empty and the
@@ -103,22 +104,6 @@
  * the rAF runs — so the query sees it and a collapse landing exactly there
  * spares the entry.
  *
- * ## What this does NOT close (pre-existing, filed separately)
- *
- * The gate is on the RELEASE trigger #658 added, and only that. The
- * SECTION-EXIT pass has always treated an open draft as emptiness, with no
- * removal involved: open "+ Add bullet" under a role from "+ Add experience",
- * type, blur, leave the section, and `pruneEmptyAddedEntries` drops the entry —
- * because `isAddedEntryEmpty` reads committed state and a draft is by definition
- * uncommitted. Fixing that means counting an open draft toward emptiness, which
- * changes prune semantics on a path none of #658/#659/#660 owns; it is filed on
- * its own. So the class is narrowed here, not retired.
- *
- * Release is a MOUNTED-only signal. {@link useHoldWhile}'s cleanup also
- * releases the hold on unmount, and treating that as a stay ending would prune
- * on an explicit "Remove role", on a fresh parse, and — the reason this is a
- * rule and not a preference — on the very unmount the prune itself causes.
- *
  * ## A holder whose own subtree is the WRONG subtree (#684)
  *
  * The gate above assumes the holder and the entry it is holding are the same
@@ -141,6 +126,35 @@
  * strip is live. `useOtherBulletsRemove` then passes `getHost` as `hostFor` to
  * {@link useHoldWhile} instead of a `host`, so the gate reads the EMPTIED role's
  * own focus/draft state rather than the pseudo-entry taking the hold.
+ *
+ * ## The section-exit pass gets the same gate (#677)
+ *
+ * #658 only closed the RELEASE trigger. The SECTION-EXIT pass (#379) has
+ * always treated an open draft as emptiness, with no removal involved at all:
+ * open "+ Add bullet" under a role from "+ Add experience", type, blur, leave
+ * the section — `pruneEmptyAddedEntries` drops the entry, because
+ * `isAddedEntryEmpty` reads committed state and a draft is by definition
+ * uncommitted. That gap outlived #658 on purpose (giving a pure data predicate
+ * a dependency on live DOM state is a bigger decision than #658's own slice
+ * wanted to make) and was filed separately as its own issue.
+ *
+ * It closes the same way `noteHoldReleased` does, without touching
+ * `isAddedEntryEmpty`, and without a registry of its own: {@link keepsDraft}
+ * reuses the very registry #684 introduced — `registerHost`, already called
+ * unconditionally by `useRegisterEntryHost` for every added role regardless of
+ * whether that role currently holds anything — and runs the same `keepsEntry`
+ * check against whatever host `getHost` finds for `id`. The experience
+ * section's own section-exit blur handler ORs `keepsDraft` into the spare
+ * predicate it was already passing `isHeld` into, so an entry with an open
+ * draft survives the exit sweep the same way a held one already did.
+ * `isAddedEntryEmpty` stays a pure data predicate throughout; the DOM read
+ * lives entirely in this module, behind the registry, same as the release
+ * gate.
+ *
+ * Release is a MOUNTED-only signal. {@link useHoldWhile}'s cleanup also
+ * releases the hold on unmount, and treating that as a stay ending would prune
+ * on an explicit "Remove role", on a fresh parse, and — the reason this is a
+ * rule and not a preference — on the very unmount the prune itself causes.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -169,6 +183,16 @@ export interface AddedEntryPruneHold {
    *  PARSED entry, an id already unmounted, or a holder that is its own
    *  subtree and never needs a lookup). */
   getHost: (id: string) => RefObject<HTMLElement | null> | undefined;
+  /**
+   * Does `id`'s registered host (see {@link getHost}) still hold focus or an
+   * open, uncommitted draft (#677)? Reuses the release prune's own gate (see
+   * `keepsEntry`) so the SECTION-EXIT pass can spare an entry the same way —
+   * the gap `noteHoldReleased` never covered, because it only ever runs when a
+   * live undo strip collapses, not when the section is simply left. An id
+   * with no registered host (nothing ever mounted, or already unmounted)
+   * reads false: there is nothing left to keep.
+   */
+  keepsDraft: (id: string) => boolean;
 }
 
 /** Create a registry. One per section that prunes — the ids it holds are only
@@ -180,8 +204,12 @@ export function useAddedEntryPruneHold(
   prune?: (isSpared: (entryId: string) => boolean) => void,
 ): AddedEntryPruneHold {
   const held = useRef<Set<string>>(new Set());
-  // Not React state: read only by a lookup a timer later (`getHost`, from
-  // inside `useHoldWhile`'s effect), same reasoning as `held` above.
+  // Every currently-mounted holder's root, independent of `held` — a role that
+  // holds no undo strip still registers here (#684), which is what lets
+  // `keepsDraft` answer for an entry `isHeld` never tracked in the first place
+  // (#677). Not React state: read only by a lookup a timer later (`getHost`,
+  // from inside `useHoldWhile`'s effect, and `keepsDraft`), same reasoning as
+  // `held` above.
   const hosts = useRef<Map<string, RefObject<HTMLElement | null>>>(new Map());
 
   // Latest-value cache, not a dep: the section passes a fresh arrow every
@@ -225,12 +253,30 @@ export function useAddedEntryPruneHold(
     [],
   );
 
+  const keepsDraft = useCallback((id: string) => {
+    // Unlike `keepsEntry`'s own no-host case (still in use — see the module
+    // docblock's release-gate note), an id nothing has registered a host for
+    // reads false here: nothing mounted for the section-exit pass to spare, so
+    // a genuinely-empty ghost still gets swept rather than surviving on an
+    // unprovable technicality.
+    const host = hosts.current.get(id);
+    if (host === undefined) return false;
+    return keepsEntry(host);
+  }, []);
+
   // Memoized, not a fresh literal: this object is a dep of every holder's
   // effect, so a churning identity would tear the hold down and re-take it on
   // every single render of the section.
   return useMemo(
-    () => ({ setHold, isHeld, noteHoldReleased, registerHost, getHost }),
-    [setHold, isHeld, noteHoldReleased, registerHost, getHost],
+    () => ({
+      setHold,
+      isHeld,
+      noteHoldReleased,
+      registerHost,
+      getHost,
+      keepsDraft,
+    }),
+    [setHold, isHeld, noteHoldReleased, registerHost, getHost, keepsDraft],
   );
 }
 
