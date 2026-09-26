@@ -466,12 +466,18 @@ describe("ExperienceSection — a collapsing strip re-runs the prune (#658)", ()
     expect(draft.value).toBe("Staff Engineer");
     expect(document.activeElement).toBe(draft);
 
-    // And the lease really did lapse: the entry is no longer HELD, so the
-    // section-exit pass drops it — that pass runs with focus outside the whole
-    // section by definition, so it never faces this question. This is the
-    // guarantee the reworded #637 test above used to carry.
+    // The lease has lapsed — the entry is no longer HELD — but the draft is
+    // still open. Before #677 that did not matter: the section-exit pass
+    // called `pruneEmptyAddedEntries` with only `isHeld`, which this entry no
+    // longer satisfies, so leaving the section altogether dropped the row and
+    // the typed title with it. #677 closes that gap by handing the same
+    // open-draft gate the release prune already uses to the section-exit call
+    // site too, so the row — and the text still in it — survives.
+    await blur(draft);
     await exitSection(el);
-    expect(api.addedEntries).toHaveLength(0);
+    expect(api.addedEntries.map((e) => e.id)).toContain(held);
+    expect(draft.value).toBe("Staff Engineer");
+    expect(el.contains(draft)).toBe(true);
   });
 
   it("stands down for a header draft the user blurred without saving", async () => {
@@ -555,6 +561,62 @@ describe("ExperienceSection — a collapsing strip re-runs the prune (#658)", ()
     expect(api.addedEntries.map((e) => e.id)).toContain(held);
     expect(el.contains(draft)).toBe(true);
     expect(draft.value).toBe("Grew ARR 30% in two quarters");
+  });
+});
+
+describe("ExperienceSection — the section-exit pass itself spares an open draft (#677)", () => {
+  /**
+   * The bug's own repro, with NO removal anywhere in it: "+ Add experience",
+   * type into "+ Add bullet", leave without committing, leave the section.
+   * Before #677 this dropped the row — `onPruneEmpty` handed the section-exit
+   * pass only `pruneHold.isHeld`, which a role that never armed an undo strip
+   * never satisfies, so `isAddedEntryEmpty` (which cannot see an uncommitted
+   * draft at all) called it empty and the typed text went with it.
+   */
+  it("preserves a typed bullet draft through a real section exit", async () => {
+    const el = await render();
+    act(() => {
+      api.addEntry("experience");
+    });
+    await act(async () => {});
+    expect(api.addedEntries).toHaveLength(1);
+
+    // Pills in document order: the parsed role's, then the added role's.
+    const pills = el.querySelectorAll<HTMLElement>(
+      'button[aria-label="Add bullet"]',
+    );
+    expect(pills).toHaveLength(2);
+    await click(pills[1]!);
+
+    const draft = el.querySelector<HTMLInputElement>(
+      'input[aria-label="Add bullet"]',
+    )!;
+    await type(draft, "Grew ARR 30% in two quarters");
+    await blur(draft);
+    expect(document.activeElement).toBe(document.body);
+    // Never committed — the same reason `isAddedEntryEmpty` alone gets this
+    // wrong: the bucket is still empty.
+    expect(api.addedBullets).toEqual({});
+
+    await exitSection(el);
+
+    // AC 1: not pruned, and the typed text is still there to be committed.
+    expect(api.addedEntries).toHaveLength(1);
+    expect(el.contains(draft)).toBe(true);
+    expect(draft.value).toBe("Grew ARR 30% in two quarters");
+  });
+
+  it("still drops a genuinely empty added role — no draft, no bullets (#379/AC 2 unchanged)", async () => {
+    const el = await render();
+    act(() => {
+      api.addEntry("experience");
+    });
+    await act(async () => {});
+    expect(api.addedEntries).toHaveLength(1);
+
+    await exitSection(el);
+
+    expect(api.addedEntries).toHaveLength(0);
   });
 });
 

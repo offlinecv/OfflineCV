@@ -280,9 +280,10 @@ export function ExperienceSection({
   summaryApply: SectionRewriteApply;
   /** Drop a blank added entry when focus leaves the section (#379). The
    *  predicate spares individual entries: those whose remove-undo strip is still
-   *  live on the section-exit pass (#637), and every entry but the released one
-   *  on the pass a collapsing strip triggers (#658). Both come from
-   *  {@link useAddedEntryPruneHold}. */
+   *  live on the section-exit pass (#637), those still holding an open,
+   *  uncommitted draft on that same pass (#677), and every entry but the
+   *  released one on the pass a collapsing strip triggers (#658). All three
+   *  come from {@link useAddedEntryPruneHold}. */
   onPruneEmpty: (isHeld?: (entryId: string) => boolean) => void;
   /** "Move to role" destinations for the "Other bullets" bucket (#1007) — every
    *  OTHER rendered entry across Experience/Projects/Achievements/
@@ -451,12 +452,18 @@ export function ExperienceSection({
     critique,
     onRewriteApplied,
   );
+  // #677: an entry with a live undo strip (`isHeld`) OR an open, uncommitted
+  // draft (`keepsDraft`) survives the exit sweep — the latter is what a
+  // typed-but-uncommitted multiline title/bullet needs, since
+  // `isAddedEntryEmpty` cannot see it at all.
+  const isSpared = (id: string) =>
+    pruneHold.isHeld(id) || pruneHold.keepsDraft(id);
   return (
     <section
       id={fixIt.id}
       tabIndex={fixIt.tabIndex}
       className={`edit-scope relative flex flex-col gap-3 ${fixIt.className}`}
-      onBlur={sectionExitBlur(() => onPruneEmpty(pruneHold.isHeld))}
+      onBlur={sectionExitBlur(() => onPruneEmpty(isSpared))}
     >
       <SectionHeading>{topHeading}</SectionHeading>
       {/* Model status line + whole-résumé CTA mounted at the top of
