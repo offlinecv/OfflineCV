@@ -44,9 +44,18 @@ import type { ProgressUpdate, WebLlmEngine } from "./types.ts";
  * Implementation shape:
  *   - `loadedEngines: Map<modelId, engine>` holds engines whose `.reload()`
  *     finished. Only these are candidates for eviction's `.unload()` call.
- *   - `pendingByModelId: Map<modelId, Promise<engine>>` dedupes concurrent
+ *   - `pendingByModelId: Map<modelId, PendingLoad>` dedupes concurrent
  *     same-id calls — every caller for the same model gets the same
- *     promise.
+ *     promise, AND has its `onProgress` added to the load's subscriber set
+ *     (#804), so a caller who arrives after the first no longer loses its
+ *     progress callback silently. `initProgressCallback` fans each report
+ *     out to every subscriber instead of the one that happened to create
+ *     the slot; a subscriber joining mid-load is replayed the last update
+ *     immediately rather than sitting at 0 until the next report. A
+ *     throwing subscriber is isolated so it can't fail the load for the
+ *     others (same reasoning as the `onInferenceStart` isolation in
+ *     `run-llm-match.ts`). The subscriber set is cleared when the load
+ *     settles, on both the resolve and reject paths.
  *   - `serialChain: Promise<unknown>` is the cross-model rate-limit. Every
  *     NEW load chains onto it; the chain entry's body only starts the
  *     actual download once its turn arrives. Errors in prior entries are
@@ -82,8 +91,21 @@ interface CacheableEngine extends WebLlmEngine {
   unload?: () => Promise<void>;
 }
 
+/**
+ * One in-flight `loadEngine` call for a given model id, shared by every
+ * concurrent caller asking for that same id (#804). `subscribers` fans a
+ * single `initProgressCallback` out to every caller's `onProgress`;
+ * `lastUpdate` lets a caller who joins mid-load be replayed the most recent
+ * report instead of sitting at 0 until the next one arrives.
+ */
+interface PendingLoad {
+  promise: Promise<WebLlmEngine>;
+  subscribers: Set<(update: ProgressUpdate) => void>;
+  lastUpdate: ProgressUpdate | null;
+}
+
 const loadedEngines = new Map<string, CacheableEngine>();
-const pendingByModelId = new Map<string, Promise<WebLlmEngine>>();
+const pendingByModelId = new Map<string, PendingLoad>();
 const downloadStartedFiredFor = new Set<string>();
 const loadedFiredFor = new Set<string>();
 let serialChain: Promise<unknown> = Promise.resolve();
@@ -165,19 +187,33 @@ export function loadEngine(
   if (loaded) return Promise.resolve(loaded);
 
   // Fast path B: this model is already being loaded (concurrent same-id
-  // calls share one load).
+  // calls share one load). Join the subscriber set instead of discarding
+  // this caller's onProgress (#804) — replay the last report immediately so
+  // a late joiner isn't stuck at 0 until the next one arrives.
   const pending = pendingByModelId.get(modelId);
-  if (pending) return pending;
+  if (pending) {
+    const isNewSubscriber = !pending.subscribers.has(onProgress);
+    pending.subscribers.add(onProgress);
+    if (isNewSubscriber && pending.lastUpdate) {
+      notifySubscriber(onProgress, pending.lastUpdate);
+    }
+    return pending.promise;
+  }
 
   // Slow path: chain onto the serial tail. The promise we hand back
   // resolves once our chain entry's body actually finishes loading.
   let resolveOut!: (engine: WebLlmEngine) => void;
   let rejectOut!: (err: unknown) => void;
-  const slot = new Promise<WebLlmEngine>((res, rej) => {
+  const promise = new Promise<WebLlmEngine>((res, rej) => {
     resolveOut = res;
     rejectOut = rej;
   });
-  pendingByModelId.set(modelId, slot);
+  const entry: PendingLoad = {
+    promise,
+    subscribers: new Set([onProgress]),
+    lastUpdate: null,
+  };
+  pendingByModelId.set(modelId, entry);
   markEngineLoading(modelId, { progress: 0, text: "Starting…" });
 
   const chainEntry = serialChain
@@ -190,6 +226,10 @@ export function loadEngine(
         // model (unlikely with current consumers but cheap to guard).
         const alreadyLoaded = loadedEngines.get(modelId);
         if (alreadyLoaded) {
+          if (pendingByModelId.get(modelId) === entry) {
+            pendingByModelId.delete(modelId);
+          }
+          entry.subscribers.clear();
           markEngineLoaded(modelId);
           resolveOut(alreadyLoaded);
           return;
@@ -212,7 +252,7 @@ export function loadEngine(
           : "network";
         const started: ProgressUpdate = { progress: 0, text: "Starting…", source };
         markEngineLoading(modelId, started);
-        onProgress(started);
+        notifySubscribers(entry, started);
 
         const { CreateMLCEngine } = await import("@mlc-ai/web-llm");
         const engine = (await CreateMLCEngine(modelId, {
@@ -223,7 +263,7 @@ export function loadEngine(
               source,
             };
             markEngineLoading(modelId, update);
-            onProgress(update);
+            notifySubscribers(entry, update);
           },
         })) as unknown as CacheableEngine;
 
@@ -233,22 +273,49 @@ export function loadEngine(
         }
 
         loadedEngines.set(modelId, engine);
-        if (pendingByModelId.get(modelId) === slot) {
+        if (pendingByModelId.get(modelId) === entry) {
           pendingByModelId.delete(modelId);
         }
+        entry.subscribers.clear();
         markEngineLoaded(modelId);
         resolveOut(engine);
       } catch (err) {
-        if (pendingByModelId.get(modelId) === slot) {
+        if (pendingByModelId.get(modelId) === entry) {
           pendingByModelId.delete(modelId);
         }
+        entry.subscribers.clear();
         markEngineIdle(modelId);
         rejectOut(err);
       }
     });
 
   serialChain = chainEntry;
-  return slot;
+  return promise;
+}
+
+/**
+ * Call a single progress subscriber, isolated in its own `try`/`catch` so a
+ * throwing consumer callback can't fail the shared load for every other
+ * subscriber — same reasoning as the `onInferenceStart` isolation in
+ * `run-llm-match.ts`.
+ */
+function notifySubscriber(
+  subscriber: (update: ProgressUpdate) => void,
+  update: ProgressUpdate,
+): void {
+  try {
+    subscriber(update);
+  } catch (err) {
+    console.warn("[webllm] onProgress callback threw:", err);
+  }
+}
+
+/** Record the update as the load's most recent, then fan it out (#804). */
+function notifySubscribers(entry: PendingLoad, update: ProgressUpdate): void {
+  entry.lastUpdate = update;
+  for (const subscriber of entry.subscribers) {
+    notifySubscriber(subscriber, update);
+  }
 }
 
 /**
