@@ -56,6 +56,17 @@ const NO_TITLES = "No title yet";
 const NO_SKILLS = "No skills yet";
 const NO_FILTERS = "Anywhere, nothing ruled out";
 const NOTHING_TO_SEND = "Nothing to search for yet";
+export const LOCAL_ONLY = "local only";
+
+/** Whether the "local only" segment should show: `locationOnly` is inert
+ *  without a location, so both summarizers gate on it through this one
+ *  condition rather than each re-deriving it. */
+export function isLocalOnlyArmed(
+  location: string | undefined,
+  locationOnly: boolean | undefined,
+): boolean {
+  return Boolean(location) && locationOnly === true;
+}
 
 /**
  * The one hint on the Titles step. Two facts, in the order they matter:
@@ -91,7 +102,9 @@ function skillsSummary(query: JobQuery): string {
 
 function filtersSummary(query: JobQuery, companyCount: number): string {
   const parts: string[] = [];
-  if (query.location) parts.push(query.location);
+  const location = query.location?.trim();
+  if (location) parts.push(location);
+  if (isLocalOnlyArmed(location, query.locationOnly)) parts.push(LOCAL_ONLY);
   const excluded = query.excludeTerms?.length ?? 0;
   if (excluded > 0) parts.push(`${excluded} excluded`);
   if (query.compFloor) parts.push(`from $${query.compFloor.toLocaleString("en-US")}`);
@@ -115,6 +128,7 @@ export const QUERY_STEP_COPY: readonly string[] = [
   NO_SKILLS,
   NO_FILTERS,
   NOTHING_TO_SEND,
+  LOCAL_ONLY,
   ROLE_HINT,
 ];
 
