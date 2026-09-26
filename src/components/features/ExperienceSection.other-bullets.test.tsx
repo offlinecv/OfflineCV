@@ -722,7 +722,7 @@ describe("ExperienceSection — the Undo this Remove arms must actually revert i
     expect(api.addedEntries).toHaveLength(0);
   });
 
-  it("still leaves the emptied role to the section-exit pass while it holds an open draft (#684)", async () => {
+  it("spares the emptied role from the section-exit pass too while it holds an open draft (#684, #677)", async () => {
     // The live-input gate `useAddedEntryPruneHold` already enforces for a role
     // holding ITSELF (#658) has to hold here too, now that the release prune can
     // reach a role via a DIFFERENT holder's release. Typing into the emptied
@@ -754,11 +754,13 @@ describe("ExperienceSection — the Undo this Remove arms must actually revert i
     // `keepsEntry` reads as still holding an open text control.
     expect(api.addedEntries.map((e) => e.id)).toEqual([added]);
 
-    // The section-exit pass has always treated an open draft as emptiness
-    // (pre-existing, filed separately) — it eventually sweeps the ghost either
-    // way, so this is not a permanent reprieve.
+    // #677 closes the section-exit pass's own version of this gap: it now
+    // asks the same `keepsDraft` question the release prune already asked via
+    // `getHost`, so leaving the section altogether no longer drops a role
+    // that still holds an open draft either.
     await exitSection(el);
-    expect(api.addedEntries).toHaveLength(0);
+    expect(api.addedEntries.map((e) => e.id)).toEqual([added]);
+    expect(el.querySelector('[aria-label="Job title"]')).not.toBeNull();
   });
 
   it("does not let a PARSED entry's splice displace a live added role's hold", async () => {
