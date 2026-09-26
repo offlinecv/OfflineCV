@@ -713,7 +713,8 @@ const MARGIN_TOL = 2;
  *  single-column résumé clusters every line within a dozen points of one left
  *  margin (header, indented wrap tail, hanging-indent bullet); a two-column
  *  layout parks a whole column 200–370 pt to the right, so this sits safely
- *  between. Gates the #436 complete-date header fold. */
+ *  between. Gates the #436 complete-date header fold and, in
+ *  `buildEntryBlock`'s body-collection loop, the #936 far-column stop. */
 const MULTI_COLUMN_SPREAD = 150;
 
 /** True when every line sits within {@link MULTI_COLUMN_SPREAD} of the section's
@@ -1753,6 +1754,37 @@ function buildEntryBlock(
       // it carries no x signal worth trusting and would otherwise truncate every
       // bullet after it. Skip it before the indent-drop break below.
       if (!lines[i].text.trim()) continue;
+      // Column-flattened sidebar tail (#936): on a two-column page, a
+      // same-named `experience` PdfSection fragment from the sidebar column
+      // lands AFTER the real section's lines (`groupExperienceSections`'s doc
+      // in `openresume.ts` explains why #311 keeps that fragment merged
+      // rather than split into a spurious role). Every entry but the LAST has
+      // a next anchor bounding its body window before that tail; the last
+      // entry's window runs to `lines.length` and reaches it. A line this far
+      // past the bullet-marker margin is never this entry's own body — a
+      // genuine wrapped-bullet tail indents by a hanging-indent's worth of
+      // points, never a whole column's worth, so {@link MULTI_COLUMN_SPREAD}
+      // (the same bound that keeps the #436 header fold off a sidebar cell)
+      // is the right line to stop collecting at, rather than mint the
+      // sidebar text as a phantom extra bullet.
+      if (
+        Number.isFinite(markerX) &&
+        lines[i].x > markerX + MULTI_COLUMN_SPREAD
+      ) {
+        break;
+      }
+      // Same #936 tail, glyph-less rendering: `markerX` and `bodyMarginX` are
+      // finite exactly one at a time (bullet-marker vs glyph-less mode), so the
+      // break above never fires here — and `isGlyphlessBody` below only bounds
+      // the indent from below, so a far-right sidebar line still reads as an
+      // in-range body indent and glues on forever. Apply the same
+      // {@link MULTI_COLUMN_SPREAD} far-column bound in glyph-less mode.
+      if (
+        Number.isFinite(bodyMarginX) &&
+        lines[i].x > bodyMarginX + MULTI_COLUMN_SPREAD
+      ) {
+        break;
+      }
       if (
         Number.isFinite(bodyMarginX) &&
         !isBulletLine(lines[i]) &&
