@@ -24,20 +24,29 @@
  * over — but sized to FIT it, never to be clipped into it; see the comment
  * on that group for the width budget. To keep group 1's width independent of
  * the score DATA (not just of the wrap decision), the docked pill's verdict
- * word sits in a FIXED-width `sm:w-28` slot (112px, against a widest measured
- * label of 89.3px for "Getting There") instead of at its own intrinsic width,
- * and `truncate` keeps that slot from wrapping its two-word label back into a
- * second line — a fixed-width box holding "Getting There" is the same wrap
- * bug one level down, and it needs no code change to trigger. Dropping the
- * word to color-only (an earlier version of this fix) is a
- * WCAG 1.4.1 regression, since the coloured dot next to it was always
- * supplementary to the word, never a stand-in for it. Below `sm` (640px)
- * the fixed slot doesn't fit next to the score digits and the toggle group
- * without risking the #959 horizontal-overflow finding, so the word is
- * hidden there and the dot + the pill's `aria-label` carry the band alone —
- * a narrow-viewport-only exposure, not an all-viewport one. The optional
- * `(layout penalty ×N.NN)` span is removed outright (not just re-slotted);
- * it still surfaces in the expanded `AtsScoreReadout` footer.
+ * word sits in a FIXED-width slot (`w-5` below `sm`, `sm:w-28` at `sm`+)
+ * instead of at its own intrinsic width, and `truncate` keeps that slot from
+ * wrapping its two-word label back into a second line — a fixed-width box
+ * holding "Getting There" is the same wrap bug one level down, and it needs
+ * no code change to trigger. Dropping the word to color-only (an earlier
+ * version of this fix, and a regression #965 briefly reintroduced below `sm`)
+ * is a WCAG 1.4.1 violation, since the coloured dot next to it was always
+ * supplementary to the word, never a stand-in for it (#988). Below `sm` the
+ * slot is narrower, not absent — but its width is bounded by group 2, not by
+ * the verdict word's own legibility: an earlier `w-14` (56px), sized only to
+ * clear "Strong" (48.6px) whole, ships fine when group 2 is the dimension
+ * tiles (`hidden` below `lg`, so it contributes nothing to the row at this
+ * width) but steals 56px from the SAME row's budget when group 2 is the Fix
+ * It entry instead — which, unlike the tiles, has no width gate and renders
+ * at every width (see that group's comment). `expectDockedStripIsOneLine`
+ * caught this at 375px in all three `MOBILE_REGIMES` fixtures (#988 follow-up):
+ * the Fix It button alone needs 73–75px there, and `w-14` left only 44px for
+ * it. `w-5` (20px) gives that back — measured 5–8px of slack across those
+ * three regimes, real margin rather than an exact fit — at the cost of
+ * truncating "Strong" too, not just the two longer labels; the pill's
+ * `aria-label` still carries the untruncated band regardless of width.
+ * The optional `(layout penalty ×N.NN)` span is removed outright (not just
+ * re-slotted); it still surfaces in the expanded `AtsScoreReadout` footer.
  *
  * When there is score guidance, group 2 is the Fix It entry (#810) instead of
  * the dimension tiles, at every width — see the comment on that group.
@@ -181,9 +190,9 @@ export function CollapsedScoreBar({
           // "Expand score details" left the score, its denominator and its band
           // unreadable to a screen reader — and because the widget docks itself
           // a few seconds after arrival, that is the state nearly every user
-          // ends up in, so the score became unhearable entirely. Below `sm`
-          // the visible pill hides the verdict word too (#960); this label is
-          // the one place it keeps reading at every width.
+          // ends up in, so the score became unhearable entirely. The visible
+          // pill's verdict word (below) reads at every width too (#988); this
+          // label is the accessible-name copy screen readers use instead of it.
           aria-label={`Resume score ${score.overall} out of 100, ${tierLabel}. Expand score details.`}
         >
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border-light bg-surface-subtle px-2.5 py-0.5 text-xs font-medium">
@@ -199,17 +208,17 @@ export function CollapsedScoreBar({
               aria-hidden="true"
             />
             {/* Colour is never the SOLE carrier of the band (WCAG 1.4.1) — the
-                dot above is supplementary, this word is the actual signal.
-                `w-28` (not the label's own intrinsic width) is what keeps
-                group 1's width constant across all three bands — the actual
-                fix for the wrap (#960). Measured natural widths against the
-                real compiled CSS: "Strong" 48.6px, "Needs Work" 76.8px,
-                "Getting There" 89.3px, so `w-28` (112px) clears the widest
-                by 22.7px at `sm`+.
+                dot above is supplementary, this word is the actual signal, at
+                every width (#988). `w-28`/`w-14` (not the label's own
+                intrinsic width) is what keeps group 1's width constant across
+                all three bands — the actual fix for the wrap (#960). Measured
+                natural widths against the real compiled CSS: "Strong" 48.6px,
+                "Needs Work" 76.8px, "Getting There" 89.3px, so `sm:w-28`
+                (112px) clears the widest by 22.7px at `sm`+.
                 `truncate` is load-bearing, not cosmetic. A fixed-width slot
                 holding a TWO-WORD label is a wrap waiting to happen: the
                 span defaulted to `white-space: normal`, so as soon as the
-                label needs more than 112px it breaks at its space, becomes
+                label needs more than the slot it breaks at its space, becomes
                 two lines, and re-inflates the pill — the exact failure class
                 this whole layer exists to eliminate, reintroduced one level
                 down. That is reachable without any code change: Chrome's
@@ -223,21 +232,37 @@ export function CollapsedScoreBar({
                 carries the full band either way, so nothing is lost that a
                 screen reader was relying on. `e2e/viewport.spec.ts` forces
                 the font-size up and asserts the row holds.
-                Hidden below `sm` rather than the `lg` the dimension
-                group uses: a throwaway Playwright probe (not checked in —
-                this comment only has to defend the number, not rederive it)
-                confirmed the full-width slot does NOT fit next to the score
-                digits and the toggle group at 375-639px without widening the
-                pre-existing #959 horizontal-overflow finding (measured
+                Narrower below `sm` rather than absent (#988 fixes the WCAG
+                1.4.1 regression #965/#960 shipped here — the word used to be
+                `hidden` there, leaving the dot's colour as the only visible
+                band signal on a phone screen, which is where the docked strip
+                spends most of ITS life). Not `sm:w-28`: the full 112px slot
+                measured too wide to add next to the score digits and the
+                toggle group at 375-639px without growing the pre-existing
+                #959 page-level horizontal-overflow finding (measured
                 scrollWidth 435-442 vs clientWidth 375 at 375px — present
-                whether or not this word renders, so not something this
-                change added, but not something to make worse either). So
-                the word is the one thing still narrow-viewport-gated below
-                `sm`; the dot + `aria-label` above carry the band there
-                instead — a narrow-viewport-only exposure, not an
-                all-viewport one. */}
+                whether or not this word renders, so not something this change
+                added, but not something to make worse either).
+                A first cut used `w-14` (56px, clearing "Strong" whole) — but
+                that budget was derived only against the dimension-tile group
+                (`hidden` below `lg`, so weightless at 375px), not against Fix
+                It (#810), which has no width gate and renders at every width
+                when there is guidance. `expectDockedStripIsOneLine` caught it
+                in all three `MOBILE_REGIMES` fixtures: the Fix It button needs
+                73–75px at 375px, and `w-14` left only 44px of the row for it.
+                `w-5` (20px) is the number instead — chosen for margin, not for
+                an exact fit: measured 5–8px of slack across those three
+                regimes once group 2 is Fix It, real headroom against the two
+                budgets (group 2's content, and the #959 overflow ceiling
+                above) moving again. It truncates "Strong" too now, not just
+                the two longer labels — still a distinct, visible, per-band
+                text string, so colour is no longer the sole carrier at any
+                width; the pill's `aria-label` carries the untruncated band
+                regardless. Re-measure both this and the Fix It button's width
+                (`FixItButton.tsx`) together before changing either — they
+                share this one row's budget at 375-639px. */}
             <span
-              className={`hidden truncate text-2xs font-semibold uppercase tracking-wider sm:inline-block sm:w-28 sm:text-center ${scoreBandTextClass(tier)}`}
+              className={`inline-block w-5 truncate text-center text-2xs font-semibold uppercase tracking-wider sm:w-28 ${scoreBandTextClass(tier)}`}
             >
               {tierLabel}
             </span>
@@ -256,6 +281,12 @@ export function CollapsedScoreBar({
           résumé, Fix It is the ordered walk through what those numbers are
           missing, and the numbers stay one click away behind
           `Score details ▾`. With no guidance the tiles come back.
+
+          Unlike the tiles, this group has no `lg`+ gate, so it also renders
+          at 375px — where it shares the row with group 1's verdict-word slot
+          (see the comment on that span) rather than with the tiles, which
+          are weightless there. A slot sized only against the tiles' absence
+          below `lg` clipped this group instead; re-measure both together.
 
           No `overflow-hidden` here, unlike the tile group: it would clip the
           button's `focus-visible` ring, which is drawn outside its box.
