@@ -11,6 +11,7 @@ import {
   STRICT_MONTH_YEAR_RE,
   NUMERIC_MONTH_YEAR_RE,
   US_STATE_CODE_RE,
+  US_STATE_NAME_RE,
   COUNTRY_GAZETTEER,
   PROGRAM_NOTE_RE,
   MONTH,
@@ -935,20 +936,34 @@ function stripInstitutionLocation(s: string): {
   institution: string;
   location?: string;
 } {
+  // The trailing region capture, shared by every boundary below: a USPS code
+  // OR a spelled-out state name ("Ohio Valley State University — Columbus,
+  // Ohio", #831). Permissive here on purpose — it is validated below by
+  // `isUsRegion` against the closed `US_STATE_CODE_RE`/`US_STATE_NAME_RE`
+  // vocabulary, not by shape, so a non-locality tail never masquerades as one.
+  // Widening this (rather than leaving the pre-#831 `[A-Z]{2}` everywhere)
+  // matters beyond the new dash boundary: the reconstructed education
+  // sub-line this repo's own exporter emits joins institution and location
+  // with a middot (`ats-resume-model.ts`), so a spelled-out location that
+  // MIDDOT_US_RE could not re-parse would round-trip institution+location
+  // right back into one glued string.
+  const US_REGION = "[A-Z][A-Za-z.\\-]+(?:\\s+[A-Z][A-Za-z.\\-]+)*";
   // US "…, City, ST" (comma boundary → multi-word city) or "… City, ST"
   // (column-gap/space boundary → single-token city).
-  const COMMA_US_RE =
-    /,\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
+  const COMMA_US_RE = new RegExp(
+    `,\\s*([A-Z][A-Za-z.\\-]+(?:\\s+[A-Z][A-Za-z.\\-]+)*),\\s*(${US_REGION})$`,
+  );
   // Require a 2+ space column gap (not a single word-space) so a normal space
   // inside the institution name isn't read as a city boundary — otherwise
   // "Stanford University, CA" (state-only, no city) wrongly yields
   // institution "Stanford" + location "University, CA".
-  const SPACE_US_RE = /\s{2,}([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
+  const SPACE_US_RE = new RegExp(`\\s{2,}([A-Z][A-Za-z.\\-]+),\\s*(${US_REGION})$`);
   // " · City, ST" middot boundary — the shape the reconstructed education
   // sub-line emits ("Institution · City, ST", #291/#294). `stripInstitutionDate`
   // has already peeled any trailing dates by the time this runs.
-  const MIDDOT_US_RE =
-    /\s*·\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z]{2})$/;
+  const MIDDOT_US_RE = new RegExp(
+    `\\s*·\\s*([A-Z][A-Za-z.\\-]+(?:\\s+[A-Z][A-Za-z.\\-]+)*),\\s*(${US_REGION})$`,
+  );
   // #366 — 1-space fallback for LaTeX two-column line assembly, which joins
   // institution and city with only ONE space ("Lakeside Institute of Technology
   // Seattle, WA"). Fires only when the surviving institution prefix has ≥2
@@ -960,12 +975,26 @@ function stripInstitutionLocation(s: string): {
   // ambiguous with a state-suffixed institution and stay glued too. Tried
   // AFTER the 2+ space primary so "… University  City, ST" still matches the
   // strict shape.
-  const SPACE1_US_RE = /\s([A-Z][A-Za-z.\-]+),\s*([A-Z]{2})$/;
+  const SPACE1_US_RE = new RegExp(`\\s([A-Z][A-Za-z.\\-]+),\\s*(${US_REGION})$`);
+  // Em/en-dash boundary ("Ohio Valley State University — Columbus, Ohio",
+  // #831) — the shape a résumé draws when institution and location share one
+  // line with no column gap and no middot, mirroring how EXPERIENCE's own
+  // em-dash header split already recovers a location. Whitespace is REQUIRED
+  // on both sides of the dash: a bare "–"/"—" with no surrounding space is a
+  // hyphenated proper noun ("Wilkes–Barre"), never a boundary. A non-locality
+  // tail ("State University — Board of Regents") still fails to split — there
+  // is no comma there for this regex to anchor on.
+  const DASH_US_RE = new RegExp(
+    `\\s+[—–]\\s+([A-Z][A-Za-z.\\-]+(?:\\s+[A-Z][A-Za-z.\\-]+)*),\\s*(${US_REGION})$`,
+  );
   // Lowercase words that must not sit at the tail of an institution prefix.
   // Case-insensitive because a title-cased "Of"/"The" is the same tell.
   const INST_PREFIX_STOP_TAIL = /^(?:of|the|a|an|and|for|in|on|at|to)$/i;
   let mUS =
-    s.match(COMMA_US_RE) ?? s.match(SPACE_US_RE) ?? s.match(MIDDOT_US_RE);
+    s.match(COMMA_US_RE) ??
+    s.match(SPACE_US_RE) ??
+    s.match(MIDDOT_US_RE) ??
+    s.match(DASH_US_RE);
   if (!mUS) {
     const m1 = s.match(SPACE1_US_RE);
     if (m1) {
@@ -980,7 +1009,13 @@ function stripInstitutionLocation(s: string): {
       if (guarded) mUS = m1;
     }
   }
-  if (mUS && US_STATE_CODE_RE.test(mUS[2])) {
+  // Closed vocabulary that validates the permissive `US_REGION` capture above
+  // — a USPS code or a spelled-out state name, never an arbitrary capitalized
+  // tail (mirrors how `COUNTRY_GAZETTEER` gates the international branch
+  // below).
+  const isUsRegion = (region: string) =>
+    US_STATE_CODE_RE.test(region) || US_STATE_NAME_RE.test(region);
+  if (mUS && isUsRegion(mUS[2])) {
     const before = s
       .slice(0, mUS.index)
       .replace(/,\s*$/, "")
@@ -999,7 +1034,11 @@ function stripInstitutionLocation(s: string): {
     // reconstructed education sub-line (#294).
     const MIDDOT_INTL_RE =
       /\s*·\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
-    const mIntl = s.match(INTL_RE) ?? s.match(MIDDOT_INTL_RE);
+    // Em/en-dash boundary, international counterpart of `DASH_US_RE` above.
+    const DASH_INTL_RE =
+      /\s+[—–]\s+([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*),\s*([A-Z][A-Za-z.\-]+(?:\s+[A-Z][A-Za-z.\-]+)*)$/;
+    const mIntl =
+      s.match(INTL_RE) ?? s.match(MIDDOT_INTL_RE) ?? s.match(DASH_INTL_RE);
     if (mIntl && COUNTRY_GAZETTEER.has(mIntl[2].toLowerCase())) {
       const before = s
         .slice(0, mIntl.index)

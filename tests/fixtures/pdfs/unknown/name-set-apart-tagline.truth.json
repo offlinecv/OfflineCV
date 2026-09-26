@@ -25,17 +25,5 @@
       "institution": "State University"
     }
   ],
-  "skills": [],
-  "knownWrong": {
-    "education.degree": {
-      "issue": null,
-      "status": "unfiled",
-      "note": "The whole education line “State University — B.F.A. in Graphic Design” lands in institution and the degree comes back EMPTY: the em-dash Institution—Degree shape is never split."
-    },
-    "education.institution": {
-      "issue": null,
-      "status": "unfiled",
-      "note": "Same root as education.degree: institution holds the entire “State University — B.F.A. in Graphic Design” line rather than the institution alone."
-    }
-  }
+  "skills": []
 }
