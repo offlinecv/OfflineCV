@@ -45,7 +45,7 @@ vi.mock("../lib/webllm/web-llm.ts", () => ({
 }));
 
 vi.mock("../lib/webllm/analyze-resume.ts", () => ({
-  analyzeResumeWithLlm: () =>
+  analyzeResumeWithLlm: vi.fn(() =>
     Promise.resolve({
       parse: {
         full_name: "LLM Name",
@@ -57,14 +57,29 @@ vi.mock("../lib/webllm/analyze-resume.ts", () => ({
         experience: [],
         education: [],
       },
+      // Unused by useResumeAnalysisLlm since #1036 — the hook takes its
+      // critique from critiqueResumeWithLlm instead. Kept non-empty here so a
+      // test that asserted on the wrong source fails loudly, not by luck.
       critique: {
         bulletFindings: [
-          { bullet: "x", issue: "weak_verb" },
-          { bullet: "y", issue: "ok" },
+          { bullet: "STALE — from analyzeResumeWithLlm", issue: "vague" },
         ],
         missingSections: ["skills"],
       },
     }),
+  ),
+}));
+
+vi.mock("../lib/webllm/critique-resume.ts", () => ({
+  critiqueResumeWithLlm: vi.fn(() =>
+    Promise.resolve({
+      bulletFindings: [
+        { bullet: "x", issue: "weak_verb" },
+        { bullet: "y", issue: "ok" },
+      ],
+      missingSections: ["skills"],
+    }),
+  ),
 }));
 
 vi.mock("../lib/webllm/parse-resume.ts", () => ({
@@ -99,6 +114,10 @@ import {
   loadEngine,
   releaseInference,
 } from "../lib/webllm/web-llm.ts";
+import { analyzeResumeWithLlm } from "../lib/webllm/analyze-resume.ts";
+import { critiqueResumeWithLlm } from "../lib/webllm/critique-resume.ts";
+import { matchCritiqueFindings } from "../lib/score/critique-match.ts";
+import type { BulletObservation } from "../lib/score/score.ts";
 import { requestModelConsent } from "./useModelConsent.ts";
 import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
 import {
@@ -106,6 +125,19 @@ import {
   trackDisagreementsFound,
   trackCritiqueRan,
 } from "../lib/analytics.ts";
+
+/** A graded bullet stub. Only `id` and `text` take part in the critique join. */
+function bullet(id: string, text: string): BulletObservation {
+  return {
+    id,
+    text,
+    index: 0,
+    hasMetric: true,
+    startsWithActionVerb: true,
+    wellFormedLength: true,
+    wordCount: 8,
+  };
+}
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -191,18 +223,81 @@ describe("useResumeAnalysisLlm", () => {
     const status = sink.current!.status;
     expect(status.kind).toBe("done");
     if (status.kind !== "done") return;
-    // The diff and critique both populate from the single inference.
+    // The diff comes from analyzeResumeWithLlm; the critique comes from the
+    // separate critiqueResumeWithLlm pass (#1036) — never the combined pass's
+    // own (discarded) critique half.
     expect(status.disagreements).toBeDefined();
     expect(status.critique.bulletFindings).toHaveLength(2);
+    expect(status.critique.bulletFindings.map((f) => f.bullet)).not.toContain(
+      "STALE — from analyzeResumeWithLlm",
+    );
+    expect(critiqueResumeWithLlm).toHaveBeenCalledOnce();
     // Consent was asked first (#1015), then the #148 contract: the
     // controller acquires the shipped model's inference slot and releases it.
     expect(requestModelConsent).toHaveBeenCalledOnce();
     expect(acquireInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
     expect(releaseInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
-    // All three telemetry events fire from the single combined pass.
+    // All three telemetry events fire from the one run, across both passes.
     expect(trackLlmParseRan).toHaveBeenCalledTimes(1);
     expect(trackDisagreementsFound).toHaveBeenCalledTimes(1);
     expect(trackCritiqueRan).toHaveBeenCalledTimes(1);
+  });
+
+  it("critiques the EDITED wording, not the extractor's original text (#1036)", async () => {
+    // `foldEditedIntoResult` edits `canonical.fields` but keeps `rawText` /
+    // `markdown` as the extractor's original — so this result is exactly what
+    // `Result.tsx` hands the hook after a bullet edit: the parse fields carry
+    // the rewrite, the raw text still carries the pre-edit page.
+    const base = result();
+    const edited: CascadeResult = {
+      ...base,
+      canonical: {
+        ...base.canonical,
+        fields: {
+          ...base.canonical.fields,
+          experience: [
+            {
+              ...base.canonical.fields.experience![0]!,
+              description: "Rebuilt the payments API",
+            },
+          ],
+        },
+      },
+    };
+    vi.mocked(critiqueResumeWithLlm).mockResolvedValueOnce({
+      bulletFindings: [
+        { bullet: "Rebuilt the payments API", issue: "weak_verb" },
+      ],
+      missingSections: [],
+    });
+
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    await mount(() => useResumeAnalysisLlm(edited, edited), sink);
+    await act(async () => {
+      await sink.current!.run();
+    });
+
+    // The critique read the EDITED fields...
+    expect(critiqueResumeWithLlm).toHaveBeenCalledWith(
+      edited.canonical.fields,
+      expect.anything(),
+    );
+    // ...while the parse/diff pass still read the extractor's ORIGINAL text.
+    expect(analyzeResumeWithLlm).toHaveBeenCalledWith(
+      { rawText: edited.rawText, markdown: edited.markdown },
+      expect.anything(),
+    );
+
+    const status = sink.current!.status;
+    expect(status.kind).toBe("done");
+    if (status.kind !== "done") return;
+    // A finding for the edited bullet matches it in Fix It (#1008).
+    const matched = matchCritiqueFindings(status.critique.bulletFindings, [
+      bullet("exp-0-bullet-0", "Rebuilt the payments API"),
+    ]);
+    expect(matched.get("exp-0-bullet-0")?.issue).toBe("weak_verb");
   });
 
   it("declined consent: nothing loads and the panel stays idle", async () => {
