@@ -32,6 +32,22 @@
  * PII-free: this asserts field mapping (counts, degree/title/company strings that
  * are synthetic-persona by policy), never dumps a snapshot of values.
  *
+ * `experience[].description` is deliberately NOT one of the compared fields
+ * (`invariantFailures`/`harnessDiff`/`localizeRoundtripHop` in
+ * `localize/roundtrip.ts` all key on `["title", "company", "start_date",
+ * "end_date"]`), even after #844 fixed `resolveBullets` to stop dropping
+ * non-bullet description content from the export. #844's own fix changes the
+ * SHAPE a prose line round-trips as — a bare description line with no glyph
+ * marker is exported as a genuine `•` bullet, so it re-parses as one, which is
+ * a legitimate content-preserving change of representation, not a value the
+ * gate should demand byte-stability on. Folding `description` into the
+ * compared set would require auditing every corpus fixture's bullet-vs-prose
+ * shape to tell an intentional representation change from an actual
+ * regression, which is a bigger project than this issue's fix; #844's own
+ * regression coverage instead pins the fix at the unit level
+ * (`ats-resume-model.test.ts`). Revisit if a future PR wants `description`
+ * fidelity as its own corpus-wide invariant.
+ *
  * ── Known-failure baseline (ratchet) ──
  * The round-trip is NOT yet clean across the whole corpus — the audit that
  * motivated this gate surfaced a batch of latent renderer/parser bugs (education

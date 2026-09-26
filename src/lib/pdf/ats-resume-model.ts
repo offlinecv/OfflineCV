@@ -45,6 +45,7 @@ import type {
 } from "../score/types.ts";
 import {
   groupBulletsByExperience,
+  normalizeBulletText,
   toBulletExperience,
 } from "../score/group-bullets.ts";
 import {
@@ -394,20 +395,37 @@ function bulletsFromDescription(description: string | undefined): string[] {
 }
 
 /**
- * Resolve the bullets for one entry from the graded `BulletObservation` pool —
- * which already IS what the surface shows, edits included, because the score
- * handed in here is re-graded off the override-applied sections. Falls back to
- * the raw `description` split when no graded bullets were attributed to the
- * entry.
+ * Resolve the bullets for one entry, keeping every line of `description` —
+ * not just the ones the graded `BulletObservation` pool covers (#844). The
+ * pool is built from glyph-marker (`•`) lines only (`group-bullets.ts`), but
+ * `description` can also carry non-bullet prose that reached it by another
+ * route — `belowAnchorBodyProse` (#615/#708) or the anchor-prose tail
+ * `splitAnchorProseTail` peels (#492). The old "any graded bullets? then use
+ * ONLY those" branch discarded that prose the moment the entry had even one
+ * glyph bullet, which is exactly the export-fidelity bug #844 reports.
+ *
+ * Each description line is matched to its graded observation by
+ * {@link normalizeBulletText} — the same key `groupBulletsByExperience` used
+ * to attribute `observations` to this entry in the first place — so a
+ * matched line renders the observation's (possibly edited) text and is
+ * consumed from the pool exactly once: a glyph-bulleted line is read off
+ * `observations` alone and can never double-emit. A line with no match is
+ * genuinely non-bullet content and renders verbatim instead of being dropped.
  */
 function resolveBullets(
   observations: BulletObservation[] | undefined,
   description: string | undefined,
 ): string[] {
-  if (observations && observations.length > 0) {
-    return observations.map((b) => b.text.trim()).filter(Boolean);
-  }
-  return bulletsFromDescription(description);
+  const lines = bulletsFromDescription(description);
+  if (!observations || observations.length === 0) return lines;
+  const pool = [...observations];
+  return lines
+    .map((line) => {
+      const key = normalizeBulletText(line);
+      const idx = pool.findIndex((b) => normalizeBulletText(b.text) === key);
+      return idx === -1 ? line : pool.splice(idx, 1)[0]!.text.trim();
+    })
+    .filter(Boolean);
 }
 
 function experienceDateRange(exp: {
