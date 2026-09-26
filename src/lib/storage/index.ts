@@ -73,6 +73,7 @@ export {
   lettersForJob,
   deleteLetter,
   clearLetterResumeLink,
+  updateLetter,
 } from "./letters.ts";
 // `lettersForCompany`, `standardLetters` (`letters.ts`) and `deriveCompanyKey`
 // (`company-key.ts`) are still deliberately NOT re-exported here (#766, #767).
