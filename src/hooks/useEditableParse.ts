@@ -46,6 +46,14 @@
  * nothing but a marker normalises to the empty key, which is the one key
  * `groupBulletsByExperience` skips, so it could never be attributed to the entry
  * whose bucket held it.
+ * Issue #679 mirrors that guard onto `setBulletField`: `removeBullet` already
+ * refused an id whose text half is empty (unresolvable in either key space), but
+ * an EDIT of the same degenerate row fell straight to `bulletOverrides`, filing
+ * the identical permanent phantom on the write side. `setBulletField` now
+ * refuses it too, and the "Other bullets" group's edit path (`ExperienceSection`,
+ * `ReconstructedResume.tsx`) resolves its `AddedBulletRef` from the row's text
+ * the same way that group's Remove already does, so a degenerate ADDED line can
+ * still be edited back into a real bullet instead of only ever being refused.
  * Overrides are held in component state and lost on reset — no persistence
  * is expected or provided.
  *
@@ -1155,6 +1163,16 @@ export function useEditableParse(): EditableParse {
         // through to the override map below.
         if (isAddedEntryKey(added.entryKey)) return;
       }
+      // An id whose text half is empty names no line in EITHER key space (a
+      // pooled line that is nothing but a marker, `"<n>|"`) — recording an
+      // override under it would be inert AND permanent, exactly the removal-side
+      // defect #660 fixed and `removeBullet`'s own {@link isUnresolvableBulletKey}
+      // guard above prevents. Reachable here for a PARSED degenerate row: the
+      // bucket branch above only ever fires for a resolved ADDED bucket, so this
+      // one has to guard the fall-through on its own (#679). Only for a WRITE —
+      // clearing an existing key (`value === undefined`) is always safe, since
+      // this guard already keeps such a key from ever being written.
+      if (value !== undefined && isUnresolvableBulletKey(id)) return;
       setBulletOverrides((prev) => {
         const next = { ...prev };
         if (value === undefined) {

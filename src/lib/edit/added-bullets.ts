@@ -219,10 +219,12 @@ export function removeAddedBulletLine(
  * removeAddedBulletLine}).
  *
  * Same first-match tiebreak, same shared matcher, and the same caveats as
- * {@link removeAddedBulletLine}. The empty-target branch of that matcher is
- * unreachable from here today — a degenerate row always groups into "Other
- * bullets", which supplies no `AddedBulletRef` for an edit — but it costs nothing
- * and keeps the three helpers one rule rather than two.
+ * {@link removeAddedBulletLine}. The empty-target branch of that matcher IS
+ * reachable from here (#679): a degenerate row always groups into "Other
+ * bullets", and `ExperienceSection` resolves that group's edits through
+ * {@link findAddedBulletEntry} the same way it already resolved removals
+ * (#660), so an edit on a degenerate ADDED line reaches this function carrying
+ * its verbatim marker text.
  */
 export function replaceAddedBulletLine(
   addedBullets: AddedBullets,

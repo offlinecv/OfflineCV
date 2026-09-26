@@ -297,6 +297,54 @@ function removeButtonFor(el: HTMLDivElement, text: string): HTMLButtonElement {
   return button!;
 }
 
+/** The click-to-edit affordance (the bullet text itself) on the ONE row
+ *  rendering `text`. Mirrors {@link removeButtonFor}'s uniqueness assertion. */
+function bulletTextButtonFor(el: HTMLDivElement, text: string): HTMLElement {
+  const rows = Array.from(el.querySelectorAll("li")).filter((li) =>
+    li.textContent?.includes(text),
+  );
+  expect(rows).toHaveLength(1);
+  const button = rows[0]!.querySelector<HTMLElement>('[role="button"]');
+  expect(button).not.toBeNull();
+  return button!;
+}
+
+/** Set a textarea's value through the native setter — a direct `el.value = x`
+ *  bypasses React's value tracker, so the ensuing `input` event fires no
+ *  `onChange` (house convention, matches `ResumeBulletRow.test.tsx`). */
+function setTextareaValue(el: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value",
+  )!.set!;
+  act(() => {
+    setter.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+/**
+ * Commit an edit on the row currently rendering `text`, through the real
+ * `ResumeBulletRow` → `EditableField` Save button — the exact path the issue's
+ * repro uses ("via the Save button — a multiline EditableField ignores Enter").
+ * Only ever one row is in edit mode at a time here, so the textarea is found
+ * without re-scoping to `text` (edit mode replaces the row's text content with
+ * the draft textarea, which no longer contains the pre-edit `text`).
+ */
+async function editBulletViaSave(
+  el: HTMLDivElement,
+  text: string,
+  next: string,
+): Promise<void> {
+  await click(bulletTextButtonFor(el, text));
+  const textarea = el.querySelector<HTMLTextAreaElement>("li textarea");
+  expect(textarea).not.toBeNull();
+  setTextareaValue(textarea!, next);
+  await click(
+    el.querySelector<HTMLElement>('[aria-label="Save Bullet text"]')!,
+  );
+}
+
 /**
  * Add a real bullet to the parsed role, then commit a contentless line over it —
  * the shipped `ResumeBulletRow` edit call, with the `AddedBulletRef` that row
@@ -725,5 +773,101 @@ describe("ExperienceSection — the Undo this Remove arms must actually revert i
     await exitSection(el);
     expect(api.addedEntries.map((e) => e.id)).toEqual([added]);
     expect(api.addedBullets[added]).toEqual([DEGENERATE]);
+  });
+});
+
+/**
+ * Regression test for #679 — the mirror image of #660 half 2, on the EDIT half
+ * of the same pair of call sites. The "Other bullets" group's Remove already
+ * resolved its bucket from the row's text; its edit path did not, so
+ * committing an edit on a degenerate row (via the Save button — a `multiline`
+ * `EditableField` ignores Enter) filed a `bulletOverrides` entry keyed `"<n>|"`
+ * that `resolveOverrideOriginal` can never resolve: the edit was inert AND
+ * permanent, riding along in every snapshot with `hasEdits` stuck true.
+ *
+ * Two shapes, same as #660's own split:
+ *   - a degenerate line inside an `addedBullets` bucket (added the reachable
+ *     way — an in-place edit down to a marker-only line, `mintDegenerateLine`)
+ *     now resolves through `findAddedBulletEntry` exactly as Remove already
+ *     did, so committing a real replacement lands IN the bucket instead of
+ *     filing an unresolvable override.
+ *   - a PARSED degenerate line belongs to no bucket at all, so the resolver
+ *     cannot help it; `setBulletField`'s own `isUnresolvableBulletKey` guard
+ *     (mirroring `removeBullet`'s) refuses the write outright rather than
+ *     filing the phantom.
+ *
+ * Both are driven through the real `ResumeBulletRow` → `EditableField` Save
+ * button, over the real `useEditableParse` + `ExperienceSection` wiring — a
+ * hook-level call to `setBulletField` alone would not exercise the component
+ * wiring the issue's actual bug lived in (the "Other bullets" `RoleEntry`
+ * always resolved `undefined`, having no `entryKey` of its own).
+ */
+describe("ExperienceSection — 'Other bullets' Edit on a degenerate ADDED line (#679)", () => {
+  it("writes the edit into the bucket instead of filing a permanent override", async () => {
+    const el = await render();
+    mintDegenerateLine();
+    await act(async () => {});
+    expect(rowsFor(el, DEGENERATE)).toHaveLength(1);
+
+    const REAL_TEXT = "Shipped a real bullet with 30% impact.";
+    await editBulletViaSave(el, DEGENERATE, REAL_TEXT);
+
+    // Landed in the bucket the degenerate line actually lived in…
+    expect(api.addedBullets).toEqual({ "experience:0": [REAL_TEXT] });
+    // …not as an unresolvable override.
+    expect(api.bulletOverrides).toEqual({});
+    // The row now renders the edited text, not the marker it replaced.
+    expect(el.textContent).toContain(REAL_TEXT);
+    expect(rowsFor(el, DEGENERATE)).toHaveLength(0);
+  });
+
+  it("keeps the edit reachable by a later Remove (no ordering hazard)", async () => {
+    // Same trap #657's own ordering case guards: had the edit been recorded as
+    // an override instead of landing in the bucket, the bucket would still read
+    // the PRE-edit text while the row (and the Remove's `AddedBulletRef.text`)
+    // read the edited one, and a later Remove would miss.
+    const el = await render();
+    mintDegenerateLine();
+    const REAL_TEXT = "Recovered a real bullet with 30% impact.";
+    await editBulletViaSave(el, DEGENERATE, REAL_TEXT);
+
+    await click(removeButtonFor(el, REAL_TEXT));
+
+    expect(api.addedBullets).toEqual({});
+    expect(api.removedBullets.size).toBe(0);
+    expect(el.textContent).not.toContain(REAL_TEXT);
+  });
+});
+
+describe("ExperienceSection — Edit on a PARSED degenerate line is refused, not filed (#679)", () => {
+  it("files no unresolvable override and leaves hasEdits false", async () => {
+    extraPooledLines = [PARSED_DEGENERATE];
+    const el = await render();
+    await act(async () => {});
+    expect(api.addedBullets).toEqual({});
+
+    const REAL_TEXT = "Recovered a real bullet with 30% impact.";
+    await editBulletViaSave(el, "4.", REAL_TEXT);
+
+    // Refused rather than silently rewritten: no override, no phantom edit.
+    expect(api.bulletOverrides).toEqual({});
+    expect(api.hasEdits).toBe(false);
+    // The row is left exactly as it was — an honest no-op, not a lie that
+    // shows the typed text while nothing downstream can resolve it.
+    expect(el.textContent).not.toContain(REAL_TEXT);
+    expect(rowsFor(el, "4.")).toHaveLength(1);
+  });
+
+  it("still lets a genuinely-unmatched PARSED bullet be edited normally", async () => {
+    // The control: ORPHAN_BULLET is real text in no bucket, so it must still
+    // resolve to the ordinary override path — the guard is on the id's SHAPE,
+    // not on "Other bullets" membership.
+    const el = await render();
+
+    const EDITED = "Presented quarterly reviews to the whole company.";
+    await editBulletViaSave(el, ORPHAN_BULLET, EDITED);
+
+    expect(Object.values(api.bulletOverrides)).toEqual([EDITED]);
+    expect(el.textContent).toContain(EDITED);
   });
 });
