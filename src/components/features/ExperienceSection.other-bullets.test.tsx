@@ -631,7 +631,7 @@ describe("ExperienceSection — the Undo this Remove arms must actually revert i
     expect(api.hasEdits).toBe(true);
   });
 
-  it("holds the added role its splice emptied back from the section-exit prune", async () => {
+  it("holds the added role its splice emptied back from the section-exit prune, THEN prunes it on release (#684)", async () => {
     // #637 half 2, one level up. Half 2 of #660 made this removal splice a real
     // bucket, so it can empty a user-added ROLE — while the strip holding that
     // role's Undo is hosted by the SECTION, which the prune never unmounts. The
@@ -656,15 +656,57 @@ describe("ExperienceSection — the Undo this Remove arms must actually revert i
     expect(api.addedEntries.map((e) => e.id)).toEqual([added]);
     expect(el.querySelector(`[aria-label="${UNDO_LABEL}"]`)).not.toBeNull();
 
-    // The hold is a lease on the LIVE strip, not an exemption. This control
-    // registers no host element — `host` governs only the release prune (#658),
-    // and the subtree that could answer it is the emptied role's, not this
-    // section's — so a collapse stands down rather than pruning, and the
-    // section-exit pass is what eventually sweeps the ghost.
+    // #684: the strip collapses with the role holding neither focus nor an open
+    // draft, so `pruneHold.getHost(added)` — published by `ReconstructedRole`
+    // under its own `entryKey`, since it is a different subtree than this
+    // control's own — reads it as no longer in use, and the release prune drops
+    // it immediately. No more waiting on a section exit the user may never
+    // trigger.
     await collapseStrip();
     expect(el.textContent).not.toContain("Removed 1 change");
+    expect(api.addedEntries).toHaveLength(0);
+
+    // Idempotent: a section exit finding nothing left to prune is a no-op, not
+    // an error.
+    await exitSection(el);
+    expect(api.addedEntries).toHaveLength(0);
+  });
+
+  it("still leaves the emptied role to the section-exit pass while it holds an open draft (#684)", async () => {
+    // The live-input gate `useAddedEntryPruneHold` already enforces for a role
+    // holding ITSELF (#658) has to hold here too, now that the release prune can
+    // reach a role via a DIFFERENT holder's release. Typing into the emptied
+    // role's own title while its Undo collapses must not yank the row out from
+    // under that draft.
+    const el = await render();
+    const added = mintDegenerateAddedRole();
+    await act(async () => {});
+
+    await click(removeButtonFor(el, DEGENERATE));
+    await exitSection(el);
     expect(api.addedEntries.map((e) => e.id)).toEqual([added]);
 
+    // The one field every `RoleEntry` renders even with a blank header — empty,
+    // so its accessible name is "Add …" rather than "Edit …" (EditableField),
+    // which is also what tells it apart from the parsed role's own filled title.
+    const titleField = el.querySelector<HTMLElement>(
+      '[aria-label="Add Job title"]',
+    )!;
+    await click(titleField);
+    // Multiline `EditableField` commits only on an explicit Save, so this stays
+    // mounted regardless of focus — the open-draft half of the gate, not focus
+    // containment.
+    expect(el.querySelector('[aria-label="Job title"]')).not.toBeNull();
+
+    await collapseStrip();
+
+    // Spared: `pruneHold.getHost(added)` finds the role's own root, which
+    // `keepsEntry` reads as still holding an open text control.
+    expect(api.addedEntries.map((e) => e.id)).toEqual([added]);
+
+    // The section-exit pass has always treated an open draft as emptiness
+    // (pre-existing, filed separately) — it eventually sweeps the ghost either
+    // way, so this is not a permanent reprieve.
     await exitSection(el);
     expect(api.addedEntries).toHaveLength(0);
   });

@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, it, afterEach, beforeEach } from "vitest";
-import { createElement, useRef } from "react";
+import { createElement, useEffect, useRef } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -227,5 +227,127 @@ describe("useHoldWhile — the live-input gate (#658, answering #637's rejection
     render({ held: false, withHost: false });
 
     expect(runs).toHaveLength(0);
+  });
+});
+
+/**
+ * `registerHost`/`getHost` — the #684 half of the registry. `Entry` above models
+ * a holder that IS its own subtree (`ReconstructedRole`'s own hold); these model
+ * a holder that ISN'T (`useOtherBulletsRemove`), which publishes no subtree of
+ * its own and instead looks up the RELEASED id's subtree, registered by
+ * something else entirely, at the moment of release.
+ */
+
+/** Publishes its root under `hostId` for a DIFFERENT holder to test — stands in
+ *  for `ReconstructedRole` registering its own `entryKey`. Takes no hold on
+ *  itself, mirroring the fact that the role a splice on the "Other bullets"
+ *  path empties usually is not the one whose own strip is live. */
+function HostRole({ hostId, editing }: { hostId: string; editing: boolean }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => registry.registerHost(hostId, rootRef), [hostId]);
+  return createElement(
+    "div",
+    { ref: rootRef },
+    editing
+      ? createElement("input", { "aria-label": "draft" })
+      : createElement("button", { "aria-label": "field" }),
+  );
+}
+
+/** A holder with no subtree of its own — stands in for `useOtherBulletsRemove`,
+ *  which passes `undefined` for `host` and the registry's `getHost` as
+ *  `hostFor` instead. */
+function CrossHolder({
+  targetId,
+  held,
+}: {
+  targetId: string | undefined;
+  held: boolean;
+}) {
+  useHoldWhile(registry, targetId, held, undefined, registry.getHost);
+  return null;
+}
+
+function CrossSection({
+  held,
+  targetId = ID,
+  hostEditing = false,
+  hostMounted = true,
+}: {
+  held: boolean;
+  targetId?: string;
+  hostEditing?: boolean;
+  hostMounted?: boolean;
+}) {
+  registry = useAddedEntryPruneHold((isSpared) => {
+    runs.push(isSpared);
+  });
+  return createElement(
+    "div",
+    null,
+    hostMounted ? createElement(HostRole, { hostId: ID, editing: hostEditing }) : null,
+    hostMounted ? createElement(HostRole, { hostId: SIBLING, editing: false }) : null,
+    createElement(CrossHolder, { targetId, held }),
+  );
+}
+
+function renderCross(props: Parameters<typeof CrossSection>[0]) {
+  act(() => {
+    root!.render(createElement(CrossSection, props));
+  });
+  return container!;
+}
+
+describe("useHoldWhile — hostFor resolves the RELEASED id's own registered subtree (#684)", () => {
+  it("prunes the released id when its registered host holds no focus or draft", () => {
+    renderCross({ held: true });
+    expect(registry.isHeld(ID)).toBe(true);
+
+    renderCross({ held: false });
+
+    expect(registry.isHeld(ID)).toBe(false);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!(ID)).toBe(false);
+    expect(runs[0]!(SIBLING)).toBe(true);
+  });
+
+  it("stands down when the registered host still holds an open draft", () => {
+    renderCross({ held: true, hostEditing: true });
+
+    renderCross({ held: false, hostEditing: true });
+
+    expect(registry.isHeld(ID)).toBe(false);
+    expect(runs).toHaveLength(0);
+  });
+
+  it("treats an id with no registered host as still in use — the same conservative default an omitted `host` gives #658", () => {
+    renderCross({ held: true, hostMounted: false });
+
+    renderCross({ held: false, hostMounted: false });
+
+    expect(registry.isHeld(ID)).toBe(false);
+    expect(runs).toHaveLength(0);
+  });
+
+  it("does not prune the first id when the held id moves to a second one while held stays true (#684 follow-up)", () => {
+    // `useOtherBulletsRemove` shares one `heldEntry`/`pending` pair across every
+    // removal on that control, so a second "Other bullets" remove that empties a
+    // DIFFERENT added role can move the target id from ID to SIBLING while
+    // `held` never goes false in between — no release of ID ever happened, so
+    // nothing should fire for it, even though the id changed.
+    renderCross({ held: true, targetId: ID });
+    expect(registry.isHeld(ID)).toBe(true);
+
+    renderCross({ held: true, targetId: SIBLING });
+
+    expect(registry.isHeld(SIBLING)).toBe(true);
+    expect(runs).toHaveLength(0);
+
+    // The second id's own eventual release still works normally.
+    renderCross({ held: false, targetId: SIBLING });
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!(SIBLING)).toBe(false);
+    expect(runs[0]!(ID)).toBe(true);
   });
 });

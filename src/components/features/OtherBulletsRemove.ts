@@ -85,12 +85,19 @@
  * the Undo is still on screen and still offering to restore it — #637's defect a
  * level up, and losing a role rather than a bullet.
  *
- * No `host` element is passed to {@link useHoldWhile}, deliberately. `host`
- * governs only the RELEASE prune (#658), and the subtree that could answer it is
- * the emptied role's, not this section's; an omitted host is documented as
- * "treat every release as still in use", which spares the entry and leaves it to
- * the section-exit pass. That is the conservative half of the choice, and it
- * introduces no new prune trigger on a path #658 never analysed.
+ * No STATIC `host` element is passed to {@link useHoldWhile}. `host` governs the
+ * RELEASE prune (#658), and the subtree that could answer it is the emptied
+ * role's, not this control's own — this control owns no entry and no DOM row of
+ * its own to test. #684 closes that gap with `hostFor`: `pruneHold.getHost`,
+ * looked up with the RELEASED id rather than a fixed ref, so the gate reads
+ * whatever role the last landed removal actually emptied. `ReconstructedRole`
+ * publishes its root under its own `entryKey` via `pruneHold.registerHost` for
+ * every added role, independent of whether that role currently holds anything
+ * itself — see that module and the `useAddedEntryPruneHold` docblock's "#684"
+ * section for the full argument. A release whose id was never registered (or
+ * whose registration has since been torn down) still falls back to "treat as
+ * still in use", so a lookup miss remains the same conservative default #658
+ * shipped — this closes the common case, not a guarantee.
  *
  * The held id is STATE, not a ref: the effect that takes the hold has to see it
  * on the render `pending` flips true on, and that render is caused by the same
@@ -182,6 +189,6 @@ export function useOtherBulletsRemove({
   );
 
   const control = useBulletRemoveStatus(removeBullet, captureUndo);
-  useHoldWhile(pruneHold, heldEntry, control.pending);
+  useHoldWhile(pruneHold, heldEntry, control.pending, undefined, pruneHold.getHost);
   return control;
 }
