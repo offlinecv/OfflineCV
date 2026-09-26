@@ -9,9 +9,15 @@
  * Replaces the previous `useParseDisagreement` + `useResumeCritique` pair
  * (each of which owned its own inference). One controller means:
  *   - One model load (already shared via `loadEngine`).
- *   - One inference (`analyzeResumeWithLlm`) returning both halves.
- *   - One acquire/release bracket around the call (the #148 contract).
+ *   - One acquire/release bracket around the whole run (the #148 contract).
  *   - One CTA the user clicks; both panels populate from the same status.
+ *
+ * The single-inference part of that story (`analyzeResumeWithLlm` returning
+ * both halves) held until #1036: its `parse`/`critique` halves need to read
+ * DIFFERENT text once the user has edited a bullet (see the docblock on the
+ * hook below), so a run now also calls `critiqueResumeWithLlm` and discards
+ * `analyzeResumeWithLlm`'s own critique half. Still one model load and one
+ * acquire/release bracket — just no longer one inference call.
  *
  * The escape hatch (#243) stays a separate, degenerate-case pass (different
  * trigger + provenance) — see `useLlmEscapeHatch`.
@@ -23,8 +29,9 @@
  * counting completed parses does not also count LLM passes — see the docblock on
  * `trackLlmParseRan` in `lib/analytics.ts`.
  *
- * Pure React/engine glue. The combined LLM logic lives in
- * `lib/webllm/analyze-resume.ts`; the diff lives in
+ * Pure React/engine glue. The combined parse+diff logic lives in
+ * `lib/webllm/analyze-resume.ts`; the critique logic lives in
+ * `lib/webllm/critique-resume.ts`; the diff lives in
  * `lib/heuristics/disagreement.ts`.
  */
 
@@ -36,7 +43,10 @@ import {
   releaseInference,
 } from "../lib/webllm/web-llm.ts";
 import { analyzeResumeWithLlm } from "../lib/webllm/analyze-resume.ts";
-import type { ResumeCritique } from "../lib/webllm/critique-resume.ts";
+import {
+  critiqueResumeWithLlm,
+  type ResumeCritique,
+} from "../lib/webllm/critique-resume.ts";
 import {
   diffParses,
   type ParseDisagreement,
@@ -145,10 +155,20 @@ function tallyKinds(disagreements: readonly ParseDisagreement[]): KindTally {
  * returns the panel to idle, an edit does not. `result` is edit-folded and
  * changes on every keystroke, so it cannot be the key — keyed on it, the first
  * edit discarded a finished critique, including the findings Fix It steps
- * through (#1008). A run reads the current `result` object, but its text input
- * (`result.markdown ?? result.rawText`) is the extractor's original text —
- * `foldEditedIntoResult` does not edit it — so a run made after an edit grades
- * the pre-edit wording, and a finding for an edited bullet will not match it.
+ * through (#1008).
+ *
+ * A run drives TWO passes over one loaded engine, deliberately reading two
+ * different texts (#1036):
+ *   - `analyzeResumeWithLlm` reads `result.rawText` / `result.markdown` — the
+ *     extractor's ORIGINAL text, unedited by `foldEditedIntoResult` on
+ *     purpose (#445) — because its `parse` half feeds `diffParses`, which
+ *     answers "what did the extractor misread", not "what did the user
+ *     rewrite". Its `critique` half is discarded.
+ *   - `critiqueResumeWithLlm` reads `result.canonical.fields` — which IS
+ *     edited, since `foldEditedIntoResult` folds overrides onto exactly that
+ *     — so a run made after an edit grades the wording on the page, and a
+ *     finding for an edited bullet matches it in Fix It (`matchCritiqueFindings`,
+ *     #1008).
  */
 export function useResumeAnalysisLlm(
   result: CascadeResult,
@@ -211,6 +231,15 @@ export function useResumeAnalysisLlm(
           engine,
         );
 
+        // The critique must grade the wording on the page, not the extractor's
+        // original text `combined` was built from (#1036) — re-run it over the
+        // current (possibly edited) canonical fields. `combined.critique` is
+        // discarded.
+        const critique = await critiqueResumeWithLlm(
+          result.canonical.fields,
+          engine,
+        );
+
         // ── Telemetry: the LLM pass ran (sets llm_ran:true downstream). ──
         trackLlmParseRan({ model: modelId });
 
@@ -234,20 +263,20 @@ export function useResumeAnalysisLlm(
         });
 
         // ── Critique telemetry: anonymized — no bullet text, no PII. ──
-        const flaggedCount = combined.critique.bulletFindings.filter(
+        const flaggedCount = critique.bulletFindings.filter(
           (f) => f.issue !== "ok",
         ).length;
         trackCritiqueRan({
           model: modelId,
-          bulletCount: combined.critique.bulletFindings.length,
+          bulletCount: critique.bulletFindings.length,
           flaggedCount,
-          missingSectionCount: combined.critique.missingSections.length,
+          missingSectionCount: critique.missingSections.length,
         });
 
         setStatus({
           kind: "done",
           disagreements,
-          critique: combined.critique,
+          critique,
         });
       } catch (err) {
         setStatus({
