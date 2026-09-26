@@ -10,7 +10,8 @@
 #     workflow_run would only ever fire from `main`.
 #   - source=human: a comment, a review with a body, or a new inline comment from
 #     someone with write access. Thread replies and empty reply-only reviews are
-#     ignored, so answering a thread does not start a run.
+#     ignored, so answering a thread does not start a run. A comment starting
+#     with `/gaal` is a request for gaal-agent.yml, so it is ignored here too.
 # Outsiders' comments never drive it: on a public repo that would let anyone
 # steer an agent whose output gets pushed.
 #
@@ -23,8 +24,9 @@
 # threads with github.token (contents: read, so it cannot push). After it
 # exits, the workflow folds everything back into the PR's single commit,
 # refuses diffs to .github/ or the package manifests (a workflow the agent
-# wrote would run with secrets on the very next review), and force-pushes with
-# GOOSE_PAT under a lease, so the push triggers CI and the next review.
+# wrote would run with secrets on the very next review), and force-pushes as
+# the gaal-agent app under a lease, so the push triggers CI and the next
+# review. The app token is minted only after the agent exits.
 # Status comments use github.token so they cannot re-trigger anything.
 # Kill switch: repo variable PR_AUTO_REVISE=false.
 name: PR revise
@@ -54,7 +56,7 @@ jobs:
       vars.PR_AUTO_REVISE != 'false' && (
         inputs.source == 'bot' ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
-         !contains(github.event.comment.body, '@goose-ai')) ||
+         !startsWith(github.event.comment.body, '/gaal')) ||
         (github.event_name == 'pull_request_review' && github.event.review.body != '') ||
         (github.event_name == 'pull_request_review_comment' && !github.event.comment.in_reply_to_id))
     runs-on: ubuntu-latest
@@ -155,6 +157,8 @@ jobs:
       BRANCH: ${{ needs.gate.outputs.branch }}
       HEAD_SHA: ${{ needs.gate.outputs.head }}
       SOURCE: ${{ needs.gate.outputs.source }}
+      APP_BOT: gaal-agent[bot]
+      APP_CLIENT_ID: Iv23lijWO2RZ8KF2POYi
     steps:
       - uses: actions/checkout@v5
         with:
@@ -174,6 +178,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
           github_token: ${{ github.token }}
+          # The previous round's push came from the app, so the actor may be its bot.
+          allowed_bots: gaal-agent
           claude_args: >-
             --max-turns 150
             --allowedTools "Bash,Read,Edit,Write,Glob,Grep,Skill,Task,TodoWrite"
@@ -192,9 +198,17 @@ jobs:
               it. When you push back, reply with the reason and leave it open.
             - Replies are terse: one line, the fix or the reason, no preamble.
 
+      # Minted only now, after the agent has exited: no push token existed while it ran.
+      - name: Mint the gaal-agent app token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ env.APP_CLIENT_ID }}
+          private-key: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
+
       - name: Fold into one commit and push
         env:
-          GH_TOKEN: ${{ secrets.GOOSE_PAT }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           GITHUB_TOKEN_RO: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -223,17 +237,18 @@ jobs:
             exit 1
           fi
 
-          # Keep the PR's own commit message; strip any attribution trailers.
+          # Keep the PR's own commit message and author; strip any attribution trailers.
           msg="$RUNNER_TEMP/msg"
           first=$(git rev-list --reverse origin/main..HEAD | head -1)
+          author=$(git log -1 --format='%an <%ae>' "$first")
           git log -1 --format=%B "$first" |
             grep -viE '^[[:space:]]*(co-authored-by|claude-session|generated[- ]by|signed-off-by):|generated with \[?claude' > "$msg" || true
           [ -s "$msg" ] || printf 'chore: revise PR #%s\n' "$PR" > "$msg"
 
           git reset --soft "$(git merge-base origin/main HEAD)"
-          login=$(gh api user --jq .login)
-          uid=$(gh api user --jq .id)
-          git -c user.name="$login" -c user.email="$uid+$login@users.noreply.github.com" commit -q -F "$msg"
+          bot_id=$(gh api "users/$APP_BOT" --jq .id)
+          git -c user.name="$APP_BOT" -c user.email="$bot_id+$APP_BOT@users.noreply.github.com" \
+            commit -q --author="$author" -F "$msg"
 
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
           if ! git push --force-with-lease="refs/heads/$BRANCH:$HEAD_SHA" origin "HEAD:refs/heads/$BRANCH"; then
