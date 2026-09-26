@@ -212,6 +212,24 @@ describe("extractEducation — coursework loop must not over-consume (#184)", ()
     expect(value[0].degree).toMatch(/B\.S\./);
   });
 
+  // #831 — same "Institution — Degree" reverse ordering as above, but with a
+  // dotted 3-letter credential DEGREE_RE could not see at all before this
+  // issue: `B\.?A\.?` requires an "A" right after "B", so "B.F.A." matched
+  // nothing and the whole line fell through to the institution-hint path
+  // (institution = the entire line, degree = empty) instead of reaching this
+  // em-dash split.
+  it("splits 'Institution — B.F.A. in Field' now that DEGREE_RE sees the credential", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University — B.F.A. in Graphic Design",
+        "2013 - 2017",
+      ]),
+    );
+    expect(value[0].institution).toBe("State University");
+    expect(value[0].degree).toBe("B.F.A.");
+    expect(value[0].field).toBe("Graphic Design");
+  });
+
   // #366 — LaTeX two-column line assembly joins institution and city with a
   // single space. The 1-space fallback splits when the surviving institution
   // prefix has ≥2 tokens; a single-token remainder ("Stanford CA") is
@@ -451,6 +469,55 @@ describe("extractEducation — degree/field split + location peel (#222)", () =>
     );
     expect(value[0].degree).toBe("M.Sc.");
     expect(value[0].field).toBe("Data Science");
+  });
+});
+
+describe("extractEducation — em-dash institution/location boundary (#831)", () => {
+  it("peels a spelled-out state off an em-dash-joined institution + city", () => {
+    // Shape B from #831: no column gap, no middot — just an em dash, and the
+    // state is spelled out ("Ohio") rather than abbreviated ("OH"), so the
+    // USPS-code-only boundaries never fired at all.
+    const { value } = extractEducation(
+      mkEduSection([
+        "Ohio Valley State University — Columbus, Ohio",
+        "B.S. in Computer Science",
+      ]),
+    );
+    expect(value[0].institution).toBe("Ohio Valley State University");
+    expect(value[0].location).toBe("Columbus, Ohio");
+  });
+
+  it("peels the same boundary with a spelled-out USPS code", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "Northgate State University — Columbus, OH",
+        "B.S. in Computer Science",
+      ]),
+    );
+    expect(value[0].institution).toBe("Northgate State University");
+    expect(value[0].location).toBe("Columbus, OH");
+  });
+
+  it("does NOT split a hyphenated proper noun with no surrounding whitespace", () => {
+    // "Wilkes–Barre" is drawn with an en dash but no spaces — a hyphenated
+    // place name, not a separator. Splitting it would strand "Barre College"
+    // as a fabricated location.
+    const { value } = extractEducation(
+      mkEduSection(["Wilkes–Barre College", "B.S. in Computer Science"]),
+    );
+    expect(value[0].institution).toBe("Wilkes–Barre College");
+    expect(value[0].location).toBeUndefined();
+  });
+
+  it("does NOT split an em-dash tail that is not a locality", () => {
+    const { value } = extractEducation(
+      mkEduSection([
+        "State University — Board of Regents",
+        "B.S. in Computer Science",
+      ]),
+    );
+    expect(value[0].institution).toBe("State University — Board of Regents");
+    expect(value[0].location).toBeUndefined();
   });
 });
 
