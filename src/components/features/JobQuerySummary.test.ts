@@ -64,6 +64,23 @@ describe("summarizeQuery", () => {
     ]);
   });
 
+  it("says 'local only' when the hard location filter is armed", () => {
+    expect(
+      summarizeQuery(
+        { ...base, titles: ["Designer"], location: "Austin, TX", locationOnly: true },
+        0,
+      ),
+    ).toEqual(["Designer", "Austin, TX", "local only", "0 companies"]);
+  });
+
+  it("stays byte-identical when locationOnly is armed with no location set", () => {
+    // The flag is inert without a location (`refineSearchResult` ignores it),
+    // so it must not conjure a segment out of an unset location.
+    expect(
+      summarizeQuery({ ...base, titles: ["Designer"], locationOnly: true }, 0),
+    ).toEqual(["Designer", "anywhere", "0 companies"]);
+  });
+
   it("does not report a location that is only whitespace", () => {
     expect(summarizeQuery({ ...base, titles: ["PM"], location: "   " }, 2)).toContain(
       "anywhere",
