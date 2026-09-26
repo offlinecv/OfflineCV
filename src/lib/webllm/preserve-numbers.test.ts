@@ -1199,15 +1199,85 @@ describe("checkNumbersPreserved", () => {
     });
 
     it("flags a substituted rupee figure before spaced magnitude lakh", () => {
-      // The spaced word 'lakh' is not part of the key on purpose (same as '$5 million'
-      // keying as '$5'), so this assertion pins the digits: ₹20 vs ₹30.
+      // The spaced word 'lakh' IS part of the key (#944), so this catches both
+      // a digit swap and a magnitude-word swap under the same assertion.
       const result = checkNumbersPreserved(
         ["Saved ₹20 lakh in costs."],
         ["Saved ₹30 lakh in costs."],
       );
       expect(result.ok).toBe(false);
-      expect(result.dropped).toEqual(["₹20"]);
-      expect(result.added).toEqual(["₹30"]);
+      expect(result.dropped).toEqual(["₹20 lakh"]);
+      expect(result.added).toEqual(["₹30 lakh"]);
+    });
+
+    it("flags a magnitude-word swap that keeps the digits unchanged (#944)", () => {
+      const million = checkNumbersPreserved(
+        ["Saved $4.2 million in costs."],
+        ["Saved $4.2 billion in costs."],
+      );
+      expect(million.ok).toBe(false);
+      expect(million.dropped).toEqual(["$4.2 million"]);
+      expect(million.added).toEqual(["$4.2 billion"]);
+
+      const bare = checkNumbersPreserved(
+        ["Grew ARR by 20 million."],
+        ["Grew ARR by 20 billion."],
+      );
+      expect(bare.ok).toBe(false);
+      expect(bare.dropped).toEqual(["20 million"]);
+      expect(bare.added).toEqual(["20 billion"]);
+
+      const rupee = checkNumbersPreserved(
+        ["Saved ₹2 crore in costs."],
+        ["Saved ₹2 lakh in costs."],
+      );
+      expect(rupee.ok).toBe(false);
+      expect(rupee.dropped).toEqual(["₹2 crore"]);
+      expect(rupee.added).toEqual(["₹2 lakh"]);
+    });
+
+    it("flags a magnitude-word swap on a hyphenated compound modifier (#944)", () => {
+      const swap = checkNumbersPreserved(
+        ["Led a $20-million contract renewal."],
+        ["Led a $20-billion contract renewal."],
+      );
+      expect(swap.ok).toBe(false);
+      expect(swap.dropped).toEqual(["$20-million"]);
+      expect(swap.added).toEqual(["$20-billion"]);
+
+      const digitOnly = checkNumbersPreserved(
+        ["Led a $20-million contract renewal."],
+        ["Led a $30-million contract renewal."],
+      );
+      expect(digitOnly.ok).toBe(false);
+      expect(digitOnly.dropped).toEqual(["$20-million"]);
+      expect(digitOnly.added).toEqual(["$30-million"]);
+    });
+
+    it("treats a hyphenated and spaced spelled-out magnitude as the same claim (#944)", () => {
+      const result = checkNumbersPreserved(
+        ["Led a $20-million contract renewal."],
+        ["Led a $20 million contract renewal."],
+      );
+      expect(result).toEqual({ ok: true, dropped: [], added: [] });
+    });
+
+    it("treats singular and plural spelled-out magnitudes as the same claim (#944)", () => {
+      const result = checkNumbersPreserved(
+        ["Managed a budget of ₹50 lakh effectively."],
+        ["Managed a budget of ₹50 lakhs effectively."],
+      );
+      expect(result).toEqual({ ok: true, dropped: [], added: [] });
+    });
+
+    it("still flags the control: a glued magnitude figure changing value", () => {
+      const result = checkNumbersPreserved(
+        ["Saved $4.2M in costs."],
+        ["Saved $3.2M in costs."],
+      );
+      expect(result.ok).toBe(false);
+      expect(result.dropped).toEqual(["$4.2M"]);
+      expect(result.added).toEqual(["$3.2M"]);
     });
 
     it("flags sign loss on negative rupee figures", () => {

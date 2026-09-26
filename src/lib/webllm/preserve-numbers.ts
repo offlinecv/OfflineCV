@@ -22,6 +22,8 @@
  *   - Money with $, €, £, ¥, or ₹: `$5`, `€500K`, `£1.2M`, `¥1,000`, `₹2Cr`  (#940)
  *   - Percent: `40%`, `12.5%`, `-15%`
  *   - Magnitude: `5K`, `10M`, `1.2B`, `10MB`, `2GB`, `2Cr`, `20L`  (#940)
+ *   - Spelled-out magnitude words: `4.2 million`, `20 billion`, `2 crore`,
+ *     `50 lakh`/`50 lakhs`  (#944)
  *   - Multipliers: `10x`, `3.5x`  (#778)
  *   - Approximations: `~50`, `~$4.2M`, `≈30%`  (#778)
  *   - At-least markers: `10+`, `500+`, `$1M+`  (#778)
@@ -151,6 +153,42 @@
 export const CURRENCY_SYMBOL_CLASS = "[$€£¥₹]";
 
 /**
+ * A regex fragment matching `word` case-insensitively, without relying on the
+ * `i` flag — {@link ATOM} cannot carry `i` globally, because `magnitude` and
+ * `multiplier` already spell out both cases explicitly (`[kKmMbBgGtT]`,
+ * `[xX]`) on purpose, and an `i` flag would silently widen every future
+ * letter-bearing group added to the pattern instead of just this one.
+ */
+function caseInsensitiveLiteral(word: string): string {
+  return word
+    .split("")
+    .map((ch) => `[${ch.toLowerCase()}${ch.toUpperCase()}]`)
+    .join("");
+}
+
+/**
+ * Spelled-out magnitude words {@link ATOM} recognises after a digit body
+ * (#944). `thousand`/`million`/`billion`/`trillion` are the Western scale;
+ * `lakh`/`crore` are the Indian scale, spelled out at least as often as glued
+ * (`20L`/`2Cr`, #940) in résumé prose. A trailing `s` (`lakhs`, `crores`) is
+ * consumed by {@link ATOM} but not part of this list — singular and plural
+ * are the same claim, so the plural collapses onto the singular key in
+ * {@link classifyAtom} rather than living here as a second word.
+ */
+const MAGNITUDE_WORDS = [
+  "thousand",
+  "million",
+  "billion",
+  "trillion",
+  "lakh",
+  "crore",
+];
+
+const MAGNITUDE_WORD_ALTERNATION = MAGNITUDE_WORDS.map(
+  caseInsensitiveLiteral,
+).join("|");
+
+/**
  * Atom regex: one numeric occurrence with all its optional decorations.
  *   1. optional approximation marker (`~`, `∼`, `≈`)
  *   2. optional leading `-` (preceded by start, whitespace, or punctuation —
@@ -158,8 +196,10 @@ export const CURRENCY_SYMBOL_CLASS = "[$€£¥₹]";
  *   3. optional currency symbol ({@link CURRENCY_SYMBOL_CLASS}: $, €, £, ¥, ₹)
  *   4. digit body (comma-grouped, decimal, or bare integer)
  *   5. optional magnitude suffix (k/m/b/g/t with optional b/B for data
- *      sizes like MB / GB, or Cr/L for Indian magnitudes) OR an `x` multiplier
- *      — alternatives, never both
+ *      sizes like MB / GB, or Cr/L for Indian magnitudes), OR an `x`
+ *      multiplier, OR a spaced, spelled-out magnitude word
+ *      ({@link MAGNITUDE_WORD_ALTERNATION}, with an optional trailing `s`,
+ *      #944) — alternatives, never more than one
  *   6. optional trailing `%`
  *   7. optional trailing `+` ("at least this much")
  *
@@ -168,12 +208,30 @@ export const CURRENCY_SYMBOL_CLASS = "[$€£¥₹]";
  * what keeps `1920x1080` and `2x2` from matching at all: the multiplier
  * branch needs a non-word character after the `x`, and the bare-digit branch
  * needs one after the digits, so neither side of a dimension pair qualifies.
+ * The same trailing lookahead is what rejects `20 millionaire`: the
+ * `magnitudeWord` branch can match `million` inside it, but the atom only
+ * commits to that read once nothing word-shaped follows.
  *
- * Named groups, not positional: seven optional decorations read as noise
+ * The bare-integer alternative carries its own guard, `(?!\.\d)`: without it,
+ * a glued magnitude word with no space (`4.2million` — `magnitudeWord` needs
+ * `\s+`) fails the decimal alternative's trailing `(?!\w)`, backtracks into
+ * the bare-integer alternative, and commits to a truncated `4` — reported as
+ * an invented number rather than the dropped `4.2 million`. The guard makes
+ * that position fail to match at all instead, so the number is silently
+ * unclassified (and correctly flagged as dropped) rather than misreported
+ * as invented.
+ *
+ * Named groups, not positional: eight optional decorations read as noise
  * positionally, and the group order is not the order they are assembled in.
+ *
+ * `magnitudeWord` separates the digits from the word with `[\s-]+`, not just
+ * `\s+`: a compound modifier hyphenates instead of spacing (`$20-million
+ * contract`), and without the hyphen alternative that reads as an unclaimed
+ * bare `20` next to a plain word, so a magnitude swap on the hyphenated form
+ * (`$20-million` \u2192 `$20-billion`) passed this "hard block" gate silently.
  */
 const ATOM = new RegExp(
-  String.raw`(?<!\w)(?<approx>[~\u223C\u2248])?(?<sign>-)?(?<currency>${CURRENCY_SYMBOL_CLASS})?(?<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+)(?:(?<magnitude>[kKmMbBgGtT][bB]?|[cC][rR]|[lL])|(?<multiplier>[xX]))?(?<percent>%)?(?<plus>\+)?(?!\w)`,
+  String.raw`(?<!\w)(?<approx>[~\u223C\u2248])?(?<sign>-)?(?<currency>${CURRENCY_SYMBOL_CLASS})?(?<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d+(?!\.\d))(?:(?<magnitude>[kKmMbBgGtT][bB]?|[cC][rR]|[lL])|(?<multiplier>[xX])|(?<magnitudeWord>[\s-]+(?:${MAGNITUDE_WORD_ALTERNATION})s?))?(?<percent>%)?(?<plus>\+)?(?!\w)`,
   "g",
 );
 
@@ -309,8 +367,9 @@ function isRangeEndpoint(match: RegExpExecArray, bullet: string): boolean {
 
 /**
  * Does this atom carry a decoration that makes it a numeric fact on its own?
- * Approximation, sign, currency, magnitude, multiplier, `%` and `+` all change
- * what the number claims, so any of them is enough — no context needed.
+ * Approximation, sign, currency, magnitude, multiplier, a spelled-out
+ * magnitude word (#944), `%` and `+` all change what the number claims, so
+ * any of them is enough — no context needed.
  */
 function isDecorated(groups: Record<string, string | undefined>): boolean {
   return (
@@ -319,6 +378,7 @@ function isDecorated(groups: Record<string, string | undefined>): boolean {
     groups.currency !== undefined ||
     groups.magnitude !== undefined ||
     groups.multiplier !== undefined ||
+    groups.magnitudeWord !== undefined ||
     groups.percent !== undefined ||
     groups.plus !== undefined
   );
@@ -605,8 +665,18 @@ function classifyAtom(match: RegExpExecArray, bullet: string): ClassifiedAtom {
   const digits = g.digits!;
 
   const prefix = (g.approx ?? "") + (g.sign ?? "") + (g.currency ?? "");
-  const suffix =
-    (g.magnitude ?? g.multiplier ?? "") + (g.percent ?? "") + (g.plus ?? "");
+  // A spelled-out magnitude word (#944) is kept verbatim — whitespace, case,
+  // and plural `s` as written — for `display`, which quotes the bullet back
+  // to the user. The KEY normalises it separately below: `lakh` and `lakhs`
+  // are the same claim, so the key collapses the plural rather than treating
+  // it as a fifth spelling of the figure.
+  const trailing = (g.percent ?? "") + (g.plus ?? "");
+  const suffix = (g.magnitude ?? g.multiplier ?? g.magnitudeWord ?? "") + trailing;
+  const magnitudeWordKey = g.magnitudeWord
+    ? ` ${g.magnitudeWord.replace(/^[\s-]+/, "").toLowerCase().replace(/s$/, "")}`
+    : undefined;
+  const keySuffix =
+    (g.magnitude ?? g.multiplier ?? magnitudeWordKey ?? "") + trailing;
   const display = prefix + digits + suffix;
 
   // Grouping commas are presentation, not value: `1,200` and `1200` are the
@@ -617,7 +687,7 @@ function classifyAtom(match: RegExpExecArray, bullet: string): ClassifiedAtom {
 
   if (isDecorated(g)) {
     return {
-      key: (prefix + value + suffix).toLowerCase(),
+      key: (prefix + value + keySuffix).toLowerCase(),
       display,
       claim: "form",
     };
