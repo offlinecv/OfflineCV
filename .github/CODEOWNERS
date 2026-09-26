@@ -1,0 +1,9 @@
+# Paths whose mistakes can't be undone by a follow-up commit. Enforced only
+# while branch protection on `main` has "Require review from Code Owners" on.
+#
+# Fixtures: the repo is public, so a PDF with real contact data leaks the
+# moment it merges (see docs/CONTRIBUTING-PROCESS.md, PII policy).
+/tests/fixtures/ @s-annam
+
+# Workflows run with repo secrets and write tokens.
+/.github/ @s-annam
