@@ -62,6 +62,49 @@ function fakeEngine(id: string): FakeEngine {
 
 const noop = () => {};
 
+/**
+ * Wait until `loadEngine`'s slow path has actually reached `CreateMLCEngine`.
+ * The path chains a `.catch().then()` onto `serialChain` and awaits
+ * `hasModelWeightsCached` plus the dynamic `import("@mlc-ai/web-llm")` first,
+ * both real async hops (not a fixed number of microtask ticks), so a test
+ * that wants to drive `initProgressCallback` mid-load has to poll rather
+ * than guess a tick count.
+ */
+async function waitForCreateMLCEngineCall(afterCalls: number): Promise<void> {
+  await vi.waitFor(() => {
+    if (mockCreateMLCEngine.mock.calls.length <= afterCalls) {
+      throw new Error("CreateMLCEngine not called yet");
+    }
+  });
+}
+
+type InitProgressCallback = (r: { progress: number; text: string }) => void;
+
+/**
+ * Queue one `CreateMLCEngine` call that hangs until `resolveCreate` is
+ * invoked, capturing the `initProgressCallback` it was given so a test can
+ * drive progress updates mid-load.
+ */
+function interceptCreateMLCEngine(): {
+  resolveCreate: (engine: FakeEngine) => void;
+  getInitProgressCallback: () => InitProgressCallback;
+} {
+  let resolveCreate!: (engine: FakeEngine) => void;
+  let capturedCallback: InitProgressCallback | null = null;
+  mockCreateMLCEngine.mockImplementationOnce(
+    (_id: string, opts: { initProgressCallback: InitProgressCallback }) => {
+      capturedCallback = opts.initProgressCallback;
+      return new Promise((res) => {
+        resolveCreate = res;
+      });
+    },
+  );
+  return {
+    resolveCreate: (engine) => resolveCreate(engine),
+    getInitProgressCallback: () => capturedCallback!,
+  };
+}
+
 // The shipped model, and a second id to exercise the cross-model machinery
 // the eval harnesses still rely on.
 const MODEL_A = SHIPPED_MODEL.id;
@@ -252,6 +295,105 @@ describe("loadEngine", () => {
     // MODEL_A, the second's is MODEL_B.
     expect(mockCreateMLCEngine.mock.calls[0]![0]).toBe(MODEL_A);
     expect(mockCreateMLCEngine.mock.calls[1]![0]).toBe(MODEL_B);
+  });
+
+  // ── Fan-out to every concurrent subscriber (#804) ────────────────────────
+
+  it("fans progress out to every concurrent caller sharing one load, not just the first", async () => {
+    const { resolveCreate, getInitProgressCallback } = interceptCreateMLCEngine();
+
+    const seenA: unknown[] = [];
+    const seenB: unknown[] = [];
+    const loadA = loadEngine(MODEL_A, (u) => seenA.push(u));
+    // Second caller arrives while the first load is still in flight — the
+    // bug this closes: only the first caller's onProgress ever fired.
+    const loadB = loadEngine(MODEL_A, (u) => seenB.push(u));
+    await waitForCreateMLCEngineCall(0);
+
+    getInitProgressCallback()({ progress: 0.5, text: "fetching weights" });
+
+    const engine = fakeEngine(MODEL_A);
+    resolveCreate(engine);
+    await expect(loadA).resolves.toBe(engine);
+    await expect(loadB).resolves.toBe(engine);
+
+    expect(mockCreateMLCEngine).toHaveBeenCalledTimes(1);
+    expect(seenA).toContainEqual({ progress: 0.5, text: "fetching weights", source: "network" });
+    expect(seenB).toContainEqual({ progress: 0.5, text: "fetching weights", source: "network" });
+  });
+
+  it("replays the last progress update to a caller who joins mid-load", async () => {
+    const { resolveCreate, getInitProgressCallback } = interceptCreateMLCEngine();
+
+    const loadA = loadEngine(MODEL_A, noop);
+    await waitForCreateMLCEngineCall(0);
+    getInitProgressCallback()({ progress: 0.8, text: "almost there" });
+
+    const late: unknown[] = [];
+    const loadB = loadEngine(MODEL_A, (u) => late.push(u));
+
+    // Replayed synchronously on join — no further report needed.
+    expect(late).toEqual([{ progress: 0.8, text: "almost there", source: "network" }]);
+
+    const engine = fakeEngine(MODEL_A);
+    resolveCreate(engine);
+    await loadA;
+    await loadB;
+  });
+
+  it("rejoining with the same stable onProgress reference does not replay the last update twice", async () => {
+    const { resolveCreate, getInitProgressCallback } = interceptCreateMLCEngine();
+
+    const seen: unknown[] = [];
+    const onProgress = (u: unknown) => seen.push(u);
+    const loadA = loadEngine(MODEL_A, onProgress);
+    await waitForCreateMLCEngineCall(0);
+    getInitProgressCallback()({ progress: 0.8, text: "almost there" });
+    const countAfterUpdate = seen.length;
+
+    // Same caller, same memoized callback — already subscribed, so joining
+    // again must not replay `lastUpdate` a second time.
+    const loadAgain = loadEngine(MODEL_A, onProgress);
+    expect(seen).toHaveLength(countAfterUpdate);
+
+    const engine = fakeEngine(MODEL_A);
+    resolveCreate(engine);
+    await loadA;
+    await loadAgain;
+  });
+
+  it("a throwing progress subscriber does not fail the load or block other subscribers", async () => {
+    mockCreateMLCEngine.mockImplementationOnce(async (_id, opts) => {
+      opts.initProgressCallback({ progress: 0.3, text: "loading" });
+      return fakeEngine(MODEL_A);
+    });
+
+    const goodSeen: unknown[] = [];
+    const throwing = loadEngine(MODEL_A, () => {
+      throw new Error("boom");
+    });
+    const good = loadEngine(MODEL_A, (u) => goodSeen.push(u));
+
+    await expect(throwing).resolves.toBeTruthy();
+    await expect(good).resolves.toBeTruthy();
+    expect(goodSeen).toContainEqual({ progress: 0.3, text: "loading", source: "network" });
+  });
+
+  it("subscribers are released when the load settles — a later load for the same id does not notify a stale subscriber", async () => {
+    mockCreateMLCEngine.mockResolvedValueOnce(fakeEngine(MODEL_A));
+    const seen: unknown[] = [];
+    await loadEngine(MODEL_A, (u) => seen.push(u));
+    const countAfterFirstLoad = seen.length;
+
+    // Clear the resident engine to force a fresh load, then load again with
+    // a different callback. The first callback must not be invoked again.
+    await clearModel(MODEL_A);
+    mockCreateMLCEngine.mockImplementationOnce(async (_id, opts) => {
+      opts.initProgressCallback({ progress: 0.1, text: "again" });
+      return fakeEngine(MODEL_A);
+    });
+    await loadEngine(MODEL_A, noop);
+    expect(seen.length).toBe(countAfterFirstLoad);
   });
 
   it("forwards initProgressCallback reports to the supplied onProgress", async () => {
