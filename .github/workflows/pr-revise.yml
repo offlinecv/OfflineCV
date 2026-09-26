@@ -77,6 +77,7 @@ jobs:
       pr: ${{ steps.gate.outputs.pr }}
       branch: ${{ steps.gate.outputs.branch }}
       head: ${{ steps.gate.outputs.head }}
+      base: ${{ steps.gate.outputs.base }}
       source: ${{ steps.gate.outputs.source }}
     steps:
       - name: Decide whether to revise
@@ -104,7 +105,7 @@ jobs:
           fi
 
           pr=$(gh pr view "$PR" --repo "$REPO" \
-            --json state,isDraft,isCrossRepository,reviewDecision,headRefName,headRefOid)
+            --json state,isDraft,isCrossRepository,reviewDecision,headRefName,headRefOid,baseRefName)
           [ "$(jq -r .state <<<"$pr")" = OPEN ] || skip "PR is not open"
           [ "$(jq -r .isDraft <<<"$pr")" = false ] || skip "PR is a draft"
           [ "$(jq -r .isCrossRepository <<<"$pr")" = false ] || skip "fork PR"
@@ -130,6 +131,7 @@ jobs:
             echo "run=true"
             echo "branch=$(jq -r .headRefName <<<"$pr")"
             echo "head=$(jq -r .headRefOid <<<"$pr")"
+            echo "base=$(jq -r .baseRefName <<<"$pr")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Hand over to a human at the round limit
@@ -160,6 +162,9 @@ jobs:
       PR: ${{ needs.gate.outputs.pr }}
       BRANCH: ${{ needs.gate.outputs.branch }}
       HEAD_SHA: ${{ needs.gate.outputs.head }}
+      # The PR's base, not `main`: a stacked PR's base is its parent's branch, and
+      # folding from main would swallow the parent's commits into this one.
+      BASE_REF: ${{ needs.gate.outputs.base }}
       SOURCE: ${{ needs.gate.outputs.source }}
       APP_BOT: gaal-agent[bot]
       APP_CLIENT_ID: Iv23lijWO2RZ8KF2POYi
@@ -246,13 +251,13 @@ jobs:
 
           # Keep the PR's own commit message and author; strip any attribution trailers.
           msg="$RUNNER_TEMP/msg"
-          first=$(git rev-list --reverse origin/main..HEAD | head -1)
+          first=$(git rev-list --reverse "origin/$BASE_REF..HEAD" | head -1)
           author=$(git log -1 --format='%an <%ae>' "$first")
           git log -1 --format=%B "$first" |
             grep -viE '^[[:space:]]*(co-authored-by|claude-session|generated[- ]by|signed-off-by):|generated with \[?claude' > "$msg" || true
           [ -s "$msg" ] || printf 'chore: revise PR #%s\n' "$PR" > "$msg"
 
-          git reset --soft "$(git merge-base origin/main HEAD)"
+          git reset --soft "$(git merge-base "origin/$BASE_REF" HEAD)"
           bot_id=$(gh api "users/$APP_BOT" --jq .id)
           git -c user.name="$APP_BOT" -c user.email="$bot_id+$APP_BOT@users.noreply.github.com" \
             commit -q --author="$author" -F "$msg"

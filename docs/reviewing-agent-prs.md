@@ -57,5 +57,22 @@ CI enforces most of these, but look anyway:
 | Something specific is wrong | Comment `/gaal <exactly what to change>`. Gaal revises and the bot reviews again. Be concrete: name the file, the behaviour and the criterion. |
 | You're unsure, or it's a product or design question | Comment with your take and tag the maintainer. Don't approve yet. |
 | It's labelled `needs-human` | Write your recommendation as a comment and tag the maintainer; you'll decide together. |
+| GitHub says it has conflicts | See [Conflicts](#conflicts) below. |
 
-A new push dismisses earlier approvals. If Gaal revises after you approved, look at the new commit and approve again.
+A new push dismisses earlier approvals. If Gaal revises or rebases after you approved, look at the new commit and approve again.
+
+## Conflicts
+
+You usually don't need to do anything. When `main` moves and a Gaal PR stops merging cleanly, `pr-auto-rebase.yml` rebases it within a few minutes and leaves a status comment saying what it did:
+
+- **"Rebased … no conflicts"**: the change itself is the same, so the bot doesn't review it again. Re-approve if your approval was dismissed.
+- **"Rebased …, resolving conflicts in …"**: Gaal combined its change with what landed on `main`. Treat the resolution as new code: read the summary in the comment, check each resolved file, and re-check the preview.
+- **"… need a human"** plus the `needs-human` label: the conflict was too large or touched something sensitive (fixtures, workflows, `package.json`), or Gaal couldn't resolve it cleanly. Nothing was pushed. Either steer it with `/gaal <how to combine the two changes>`, or tag the maintainer.
+
+You can also ask for a rebase yourself, on any PR, with a comment:
+
+| Comment | What it does |
+|---|---|
+| `/gaal rebase` | Brings the PR up to date with its base branch. A clean rebase runs no agent; a conflict is resolved by Gaal. |
+| `/gaal <what to change>` | Revises the PR. It rebases first too, so it also clears a conflict. |
+| `/gaal help` | Lists the commands. |

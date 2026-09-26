@@ -1,9 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 The offlinecv Authors
 #
-# Gaal — the repo's coding agent (Claude Code via claude-code-action). Two triggers:
+# Gaal — the repo's coding agent (Claude Code via claude-code-action). Triggers:
 #   - an issue labelled `gaal`             → new branch `gaal/issue-<N>` + a new PR
-#   - a PR comment starting with `/gaal`   → a revision folded into that PR's commit
+#   - a PR comment `/gaal <change>`        → a revision folded into that PR's commit
+#   - a PR comment `/gaal rebase`          → the PR replayed onto its base; Claude
+#                                            runs only if that conflicts
+#   - a PR comment `/gaal` or `/gaal help` → the command list, as a reply
+# Every PR-comment run starts from the PR replayed onto its CURRENT base
+# (.github/scripts/pr-replay.sh), so a revision also brings a stale or
+# conflicting PR up to date, stacked PRs included. pr-auto-rebase.yml does the
+# same unasked for Gaal's own PRs when they conflict.
 # `/gaal` is a command, not an @mention: it pings nobody, and a passing mention
 # of the name cannot start a run. Pushes and PRs go out as the `gaal-agent`
 # GitHub App, so an agent PR is authored by `gaal-agent[bot]` and any maintainer
@@ -44,20 +51,53 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: gaal-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
+  help:
+    if: >
+      github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+      (github.event.comment.body == '/gaal' || startsWith(github.event.comment.body, '/gaal help')) &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Reply with the command list
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          cat > "$RUNNER_TEMP/help.md" <<'EOF'
+          **Gaal commands** (anyone with write access, as a PR comment):
+
+          | Command | What it does |
+          |---|---|
+          | `/gaal <what to change>` | Revise this PR. Be concrete: the file, the behaviour, the acceptance criterion. |
+          | `/gaal rebase` | Bring this PR up to date with its base branch. Conflicts are resolved by Gaal; a clean rebase runs no agent at all. |
+          | `/gaal help` | This list. |
+
+          Every `/gaal` run starts by rebasing onto the PR's base, so `/gaal <change>` on a conflicting PR resolves the conflict too. Gaal's own PRs are also rebased automatically when they conflict (`pr-auto-rebase.yml`); a conflict too large to hand to an agent is labelled `needs-human` instead.
+          EOF
+          sed -i 's/^          //' "$RUNNER_TEMP/help.md"
+          gh pr comment "$NUMBER" --repo "$REPO" --body-file "$RUNNER_TEMP/help.md"
+
   run-gaal:
     if: >
       (github.event_name == 'issues' && github.event.label.name == 'gaal') ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
        startsWith(github.event.comment.body, '/gaal') &&
+       github.event.comment.body != '/gaal' && !startsWith(github.event.comment.body, '/gaal help') &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # On this job, not the workflow: a workflow-level group would also queue the
+    # read-only `help` job behind an agent run, and since a group keeps only one
+    # PENDING run, a `/gaal help` would cancel someone's queued `/gaal <change>`.
+    concurrency:
+      group: gaal-${{ github.event.issue.number }}
+      cancel-in-progress: false
     permissions:
       contents: read
       issues: write
@@ -92,6 +132,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           set -euo pipefail
           # Fails the run on an API error rather than guessing either way.
@@ -110,47 +151,108 @@ jobs:
           require_write "$AUTHOR" author
 
           if [ "$EVENT" = issues ]; then
-            { echo "mode=issue"; echo "branch=gaal/issue-$NUMBER"; echo "ref=main"; } >> "$GITHUB_OUTPUT"
+            { echo "mode=issue"; echo "branch=gaal/issue-$NUMBER"; } >> "$GITHUB_OUTPUT"
           else
             pr=$(gh pr view "$NUMBER" --repo "$REPO" --json headRefName,isCrossRepository)
             if [ "$(jq -r .isCrossRepository <<<"$pr")" = true ]; then
               echo "::error::PR #$NUMBER is from a fork; Gaal only pushes to branches in $REPO."
               exit 1
             fi
-            head=$(jq -r .headRefName <<<"$pr")
-            { echo "mode=pr"; echo "branch=$head"; echo "ref=$head"; } >> "$GITHUB_OUTPUT"
+            # `/gaal rebase` alone replays the PR and needs Claude only on a conflict.
+            first=$(head -1 <<<"$COMMENT_BODY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            command=change
+            [ "$first" != "/gaal rebase" ] || command=rebase
+            { echo "mode=pr"; echo "branch=$(jq -r .headRefName <<<"$pr")"; echo "command=$command"; } >> "$GITHUB_OUTPUT"
           fi
 
+      # The default branch in both modes: a PR run replays the PR onto its base
+      # below, and the replay script must come from `main`, not from the PR.
       - uses: actions/checkout@v5
         with:
-          ref: ${{ steps.gate.outputs.ref }}
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Prepare branch
+        id: prep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.gate.outputs.mode }}
+          BRANCH: ${{ steps.gate.outputs.branch }}
+          COMMAND: ${{ steps.gate.outputs.command }}
+        run: |
+          set -euo pipefail
+          note() { gh issue comment "$NUMBER" --repo "$REPO" --body "$1"; }
+          if [ "$MODE" = issue ]; then
+            git switch -c "$BRANCH"
+            echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+            echo "agent=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          replay="$RUNNER_TEMP/pr-replay.sh"
+          cp .github/scripts/pr-replay.sh "$replay"
+          "$replay" resolve "$NUMBER" > "$RUNNER_TEMP/pr.json"
+          if [ "$(jq -r .inQueue "$RUNNER_TEMP/pr.json")" = true ]; then
+            note "Gaal did not run: this PR is in the merge queue, and a push would take it out. Remove it from the queue first."
+            exit 0
+          fi
+          "$replay" apply "$RUNNER_TEMP/pr.json" | tee "$RUNNER_TEMP/replay.env"
+          # key=value lines; values may hold spaces (file lists), so never `source` them.
+          while IFS='=' read -r k v; do printf -v "$k" '%s' "$v"; done < "$RUNNER_TEMP/replay.env"
+          cat "$RUNNER_TEMP/replay.env" >> "$GITHUB_OUTPUT"
+          {
+            echo "head_sha=$(jq -r .headSha "$RUNNER_TEMP/pr.json")"
+            echo "base_ref=$(jq -r .baseRef "$RUNNER_TEMP/pr.json")"
+          } >> "$GITHUB_OUTPUT"
+
+          case "$status" in
+            moved)
+              note "Gaal did not run: \`$BRANCH\` moved while it was starting. Comment \`/gaal\` again to retry."
+              exit 1 ;;
+            refused)
+              if [ "$reason" = own-commits ]; then
+                note "Gaal can't rebase this PR: it has ${own_commits:-several} commits of its own on top of \`$target\`, and this repo keeps one commit per PR. Collapse the branch to one commit (\`/collapse-pr\`), then comment \`/gaal\` again."
+              else
+                note "Gaal can't rebase this PR: its head is a merge commit. Rebase it onto \`$target\` by hand (one commit), then comment \`/gaal\` again."
+              fi
+              exit 1 ;;
+            empty)
+              note "Nothing to do: this PR's change is already in \`$target\`. It can probably be closed."
+              exit 0 ;;
+          esac
+          if [ "$COMMAND" = rebase ]; then
+            case "$status" in
+              current) note "Already up to date with \`$target\`; nothing to rebase." ;;
+              clean) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+              conflict) { echo "agent=true"; echo "publish=true"; } >> "$GITHUB_OUTPUT" ;;
+            esac
+          else
+            { echo "agent=true"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v5
+        if: steps.prep.outputs.agent == 'true'
         with:
           # No npm cache: its storage hosts would widen the egress allowlist.
           node-version: '20'
 
-      - run: npm ci
-
-      - name: Prepare branch
-        env:
-          MODE: ${{ steps.gate.outputs.mode }}
-          BRANCH: ${{ steps.gate.outputs.branch }}
-        run: |
-          set -euo pipefail
-          if [ "$MODE" = issue ]; then
-            git switch -c "$BRANCH"
-          fi
-          echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - if: steps.prep.outputs.agent == 'true'
+        run: npm ci
 
       - name: Build the prompt (issue text via env only)
+        if: steps.prep.outputs.agent == 'true'
         env:
           MODE: ${{ steps.gate.outputs.mode }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
           COMMENT_BODY: ${{ github.event.comment.body }}
+          STATUS: ${{ steps.prep.outputs.status }}
+          TARGET: ${{ steps.prep.outputs.target }}
+          HEAD_SHA: ${{ steps.prep.outputs.head_sha }}
+          OWN_BASE: ${{ steps.prep.outputs.own_base }}
+          TIP: ${{ steps.prep.outputs.tip }}
+          CONFLICT_FILES: ${{ steps.prep.outputs.conflict_files }}
         run: |
           set -euo pipefail
           p="$RUNNER_TEMP/prompt.md"
@@ -158,8 +260,25 @@ jobs:
             echo "You are Gaal, the automated developer agent for the offlinecv repository."
             echo "Read CLAUDE.md first and follow it."
             echo
+            if [ "$MODE" = pr ] && [ "$STATUS" != current ]; then
+              echo "This PR's change (commit $HEAD_SHA) has been replayed onto the current"
+              echo "\`$TARGET\` ($TIP). The work tree holds the result, uncommitted."
+              if [ "$STATUS" = conflict ]; then
+                echo "The replay CONFLICTED in: $CONFLICT_FILES"
+                echo "Resolve every conflict marker in those files FIRST: keep what \`$TARGET\`"
+                echo "changed AND what this PR intended; never drop either side silently."
+                echo "See the PR's own change with \`git show $HEAD_SHA\` and what the base"
+                echo "changed with \`git log -p $OWN_BASE..$TIP -- <file>\`. If a hunk cannot be"
+                echo "combined safely, leave its markers in place: the workflow will then hand"
+                echo "the PR to a human instead of publishing."
+              fi
+              echo
+            fi
             echo "Rules for this run:"
             echo "- Only edit files in the working tree. Do NOT run git commit, git push, or gh."
+            echo "- Do NOT run git merge, rebase, reset, stash or checkout: the workflow has"
+            echo "  already put the right base under you, and folds everything into one"
+            echo "  commit afterwards."
             echo "- Do NOT modify anything under .github/, package.json, package-lock.json or .npmrc."
             echo "- Before finishing, run \`npm run verify:quick\` and fix what it reports."
             echo "- Finally, write a Conventional Commits message to the file"
@@ -197,6 +316,7 @@ jobs:
           } > "$p"
 
       - name: Run Gaal
+        if: steps.prep.outputs.agent == 'true'
         uses: anthropics/claude-code-action@v1
         env:
           # Telemetry hosts are blocked anyway; skip them instead of retrying.
@@ -216,6 +336,7 @@ jobs:
 
       # Minted only now, after the agent has exited: no push token existed while it ran.
       - name: Mint the gaal-agent app token
+        if: steps.gate.outputs.mode == 'issue' || steps.prep.outputs.publish == 'true'
         id: app
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -223,10 +344,10 @@ jobs:
           private-key: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
 
       - name: Fold into one commit, push, and open / update the PR
+        if: steps.gate.outputs.mode == 'issue'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           GITHUB_TOKEN_RO: ${{ github.token }}
-          MODE: ${{ steps.gate.outputs.mode }}
           BRANCH: ${{ steps.gate.outputs.branch }}
         run: |
           set -euo pipefail
@@ -248,60 +369,80 @@ jobs:
             exit 1
           fi
 
-          # The commit message: the agent's for a new PR, the PR's own for a revision.
-          # A revision also keeps the PR commit's original author.
+          # The agent's commit message, attribution stripped.
           msg="$RUNNER_TEMP/commit-msg.clean"
           strip='^[[:space:]]*(co-authored-by|claude-session|generated[- ]by|signed-off-by):|generated with \[?claude'
           bot_id=$(gh api "users/$APP_BOT" --jq .id)
           bot_email="$bot_id+$APP_BOT@users.noreply.github.com"
-          author="$APP_BOT <$bot_email>"
-          if [ "$MODE" = issue ]; then
-            src="$RUNNER_TEMP/commit-msg.txt"
-          else
-            src="$RUNNER_TEMP/commit-msg.pr"
-            first=$(git rev-list --reverse origin/main.."$BASE_SHA" | head -1)
-            if [ -n "$first" ]; then
-              git log -1 --format=%B "$first" > "$src"
-              author=$(git log -1 --format='%an <%ae>' "$first")
-            fi
-          fi
+          src="$RUNNER_TEMP/commit-msg.txt"
           if [ -s "$src" ]; then grep -viE "$strip" "$src" > "$msg" || true; fi
           [ -s "$msg" ] || printf 'chore: Gaal changes for #%s\n' "$NUMBER" > "$msg"
-
-          # One commit per PR: a revision is folded into the PR's existing commit.
-          if [ "$MODE" = pr ]; then
-            git reset --soft "$(git merge-base origin/main HEAD)"
-          fi
           git -c user.name="$APP_BOT" -c user.email="$bot_email" \
-            commit -q --author="$author" -F "$msg"
+            commit -q --author="$APP_BOT <$bot_email>" -F "$msg"
 
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
-          if [ "$MODE" = issue ]; then
-            git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
-            if gh pr view "$BRANCH" --repo "$REPO" >/dev/null 2>&1; then
-              note "Gaal re-ran for #$NUMBER and force-pushed."
-            else
-              # The agent's description; failing that, the commit body with its
-              # 72-column wrapping joined back into one line per paragraph.
-              body="$RUNNER_TEMP/pr-body.md"
-              desc="$RUNNER_TEMP/pr-description.md"
-              {
-                if [ -s "$desc" ]; then
-                  grep -viE "$strip|^[[:space:]]*(closes|fixes|resolves) #[0-9]+[[:space:]]*$" "$desc" || true
-                else
-                  tail -n +3 "$msg" | awk 'NF { printf "%s%s", (p ? " " : ""), $0; p = 1; next }
-                                           p { print ""; p = 0 } { print } END { if (p) print "" }'
-                fi
-                # shellcheck disable=SC2016 # the backticks are Markdown, not a substitution
-                printf '\nCloses #%s\n\nOpened by Gaal (`gaal-agent.yml`). Review before merging.\n' "$NUMBER"
-              } > "$body"
-              gh pr create --repo "$REPO" --base main --head "$BRANCH" \
-                --title "$(head -1 "$msg")" --body-file "$body"
-            fi
+          git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+          if gh pr view "$BRANCH" --repo "$REPO" >/dev/null 2>&1; then
+            note "Gaal re-ran for #$NUMBER and force-pushed."
           else
-            if ! git push --force-with-lease="refs/heads/$BRANCH:$BASE_SHA" origin "HEAD:refs/heads/$BRANCH"; then
-              note "Gaal's revision was not pushed: \`$BRANCH\` moved during the run. Comment \`/gaal\` again to retry."
-              exit 1
-            fi
-            note "Gaal pushed $(git rev-parse --short HEAD)."
+            # The agent's description; failing that, the commit body with its
+            # 72-column wrapping joined back into one line per paragraph.
+            body="$RUNNER_TEMP/pr-body.md"
+            desc="$RUNNER_TEMP/pr-description.md"
+            {
+              if [ -s "$desc" ]; then
+                grep -viE "$strip|^[[:space:]]*(closes|fixes|resolves) #[0-9]+[[:space:]]*$" "$desc" || true
+              else
+                tail -n +3 "$msg" | awk 'NF { printf "%s%s", (p ? " " : ""), $0; p = 1; next }
+                                         p { print ""; p = 0 } { print } END { if (p) print "" }'
+              fi
+              # shellcheck disable=SC2016 # the backticks are Markdown, not a substitution
+              printf '\nCloses #%s\n\nOpened by Gaal (`gaal-agent.yml`). Review before merging. Comment `/gaal <change>` to revise, `/gaal rebase` to update it, `/gaal help` for more.\n' "$NUMBER"
+            } > "$body"
+            gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+              --title "$(head -1 "$msg")" --body-file "$body"
           fi
+
+      # A revision: the replayed PR plus the agent's edits, folded into the PR's
+      # one commit by the same script that replayed it.
+      - name: Fold into the PR's commit and push
+        if: steps.gate.outputs.mode == 'pr' && steps.prep.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GITHUB_TOKEN_RO: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+          BRANCH: ${{ steps.gate.outputs.branch }}
+          HEAD_SHA: ${{ steps.prep.outputs.head_sha }}
+          BASE_REF: ${{ steps.prep.outputs.base_ref }}
+          TARGET: ${{ steps.prep.outputs.target }}
+          TIP: ${{ steps.prep.outputs.tip }}
+          STATUS: ${{ steps.prep.outputs.status }}
+          REPLAY_TREE: ${{ steps.prep.outputs.replay_tree }}
+        run: |
+          set -euo pipefail
+          # Status comments go out as github.token so they cannot trigger pr-revise.
+          note() { GH_TOKEN="$GITHUB_TOKEN_RO" gh issue comment "$NUMBER" --repo "$REPO" --body "$1"; }
+          handoff() {
+            GH_TOKEN="$GITHUB_TOKEN_RO" gh pr edit "$NUMBER" --repo "$REPO" --add-label needs-human
+            note "$1"
+          }
+
+          git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
+          "$RUNNER_TEMP/pr-replay.sh" publish | tee "$RUNNER_TEMP/publish.env"
+          # key=value lines; values may hold spaces (file lists), so never `source` them.
+          while IFS='=' read -r k v; do printf -v "$k" '%s' "$v"; done < "$RUNNER_TEMP/publish.env"
+          rebased=""
+          [ "$STATUS" = current ] || rebased=" Rebased onto \`$TARGET\` @ ${TIP:0:7}${retargeted:+, and retargeted there because the old base merged}."
+          case "$result" in
+            pushed) note "Gaal pushed ${sha:0:7}.$rebased" ;;
+            unchanged) note "Gaal ran but produced no changes." ;;
+            empty) note "Nothing to push: with the agent's edits, this PR no longer changes anything in \`$TARGET\`." ;;
+            moved) note "Gaal's revision was not pushed: \`$BRANCH\` moved during the run, possibly an automatic rebase. Check the latest commit, and comment \`/gaal\` again if your request still applies."; exit 1 ;;
+            markers)
+              handoff "Gaal could not resolve every conflict with \`$TARGET\`; markers remain in: $files. Nothing was pushed. Resolve by hand (rebase onto \`$TARGET\`, one commit), or comment \`/gaal <how to combine them>\`."
+              exit 1 ;;
+            blocked)
+              handoff "Gaal's change touches $files, which automation may not publish. Nothing was pushed. Needs a human."
+              exit 1 ;;
+            *) echo "::error::unexpected publish result: $result"; exit 1 ;;
+          esac
