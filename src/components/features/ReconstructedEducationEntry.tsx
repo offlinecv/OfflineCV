@@ -16,7 +16,7 @@ import type { EducationFieldOverrides } from "../../hooks/useEditableParse.ts";
 import { resolveEducationDisplay } from "../../lib/edit/education-display.ts";
 import { EditableField } from "@design-system";
 import { validateDate } from "../../lib/edit/field-validators.ts";
-import { RemoveButton } from "./ReconstructedAdd.tsx";
+import { EntryRemoveButton } from "./ReconstructedAdd.tsx";
 
 export function EducationEntry({
   edu,
@@ -94,7 +94,13 @@ export function EducationEntry({
           />
         </div>
         {onRemove && (
-          <RemoveButton label="Remove education" onClick={onRemove} />
+          <EntryRemoveButton
+            label="Remove education"
+            entryNoun="education entry"
+            bulletCount={0}
+            identity={institution || undefined}
+            onRemove={onRemove}
+          />
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-1.5 text-content-tertiary">
