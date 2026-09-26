@@ -359,12 +359,11 @@ describe("Result — the degenerate-parse recovery offer (#243, moved by #955)",
     // the ORIGINAL result so it can be re-run), so the panel's gate is
     // `isAvailable` ALONE. Gate it on the offer standing instead and the panel
     // unmounts in the very render that fires `onRecovered`, and the recovered
-    // parse never reaches the score above it. No node survives to compare by
-    // identity — the panel swaps its own root from the offer `<section>` to a
-    // `role="status"` row at `done` — so the guard is the panel's confirmation
-    // text below: an unmounted panel never renders it. Its TAIL, because
-    // `ParsedHeader`'s provenance badge carries the "Recovered with on-device
-    // AI" prefix too.
+    // parse never reaches the score above it. The behavioural guard is the
+    // panel's confirmation text below: an unmounted panel never renders it.
+    // Its TAIL, because `ParsedHeader`'s provenance badge carries the
+    // "Recovered with on-device AI" prefix too. The test below this one pins
+    // the same invariant by DOM identity instead of text.
     const el = await render(degenerateResult());
 
     const cta = [...el.querySelectorAll("button")].find((b) =>
@@ -380,6 +379,49 @@ describe("Result — the degenerate-parse recovery offer (#243, moved by #955)",
     // not the summary label — those were the same string until the heading was
     // renamed, so a label assertion never proved the panel mounted.
     expect(el.textContent).toContain("What the model checks");
+  });
+
+  it("keeps the escape-hatch wrapper's element type stable across done (#687)", async () => {
+    // #687: the previous test's confirmation-text guard cannot tell a panel
+    // that stays mounted through `done` from one unmounted and remounted at
+    // `done` — a fresh instance renders the same confirmation text on its
+    // first (and only) render too. This test instead captures the DOM node of
+    // `LlmEscapeHatchPanel`'s OWN `<div className="contents">` wrapper (#687),
+    // which is unconditionally the same element across every branch inside the
+    // panel — the panel's inner root swaps element type at `done` (`section` →
+    // `div[role=status]`), so this is the shallowest node whose identity is
+    // meaningful to compare. `Result`'s own `border-b` wrapper one level above
+    // it is NOT meaningful here: it is gated on `escapeHatch.isAvailable`
+    // alone, which does not flip at `done` either, so it stays put even if the
+    // panel instance below it remounts. A regression that re-adds a
+    // `status.kind !== "done"` mount gate would remove this wrapper (and the
+    // panel inside it) the moment `done` is reached, so `confirmationAfter`
+    // would be undefined and the `toBeDefined` below would already fail; a
+    // regression that keys the panel on `status.kind` instead would replace
+    // this wrapper with a fresh instance, which the `toBe` below catches.
+    const el = await render(degenerateResult());
+
+    const headingBefore = [...el.querySelectorAll("h2")].find((n) =>
+      (n.textContent ?? "").includes("Not everything parsed cleanly"),
+    );
+    expect(headingBefore).toBeDefined();
+    // heading -> …-> `contents` div (panel's own stable wrapper, #687).
+    const wrapperBefore = headingBefore!.closest(".contents");
+    expect(wrapperBefore).not.toBeNull();
+
+    const cta = [...el.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").includes("Try a local AI pass"),
+    );
+    expect(cta).toBeDefined();
+    await act(async () => cta!.click());
+
+    const confirmationAfter = [...el.querySelectorAll("p")].find((n) =>
+      (n.textContent ?? "").includes("your score and fields are updated"),
+    );
+    expect(confirmationAfter).toBeDefined();
+    const wrapperAfter = confirmationAfter!.closest(".contents");
+
+    expect(wrapperAfter).toBe(wrapperBefore);
   });
 });
 
