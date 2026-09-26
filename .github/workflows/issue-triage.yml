@@ -4,8 +4,8 @@
 # Issue triage with Claude. Decides whether a new issue is clear enough to
 # implement and labels it:
 #   ready-for-agent      → clear; gets a type label. If the author has write
-#                          access, `goose` is added too, which starts
-#                          goose-agent.yml (issue → PR).
+#                          access, `gaal` is added too, which starts
+#                          gaal-agent.yml (issue → PR).
 #   needs-clarification  → a `**Triage** —` comment asks the author; their
 #                          reply (or an edit to the issue) re-runs triage.
 #   duplicate            → labelled + linked, never closed by the bot.
@@ -16,10 +16,10 @@
 # GitHub write token. The `decide` job reads a pre-fetched copy of the issue
 # and writes a JSON decision; the `apply` job validates it against an
 # allowlist and makes the writes itself. The worst an injected issue can do is
-# mislabel itself. `goose` is added with GOOSE_PAT (labels added with
+# mislabel itself. `gaal` is added as the gaal-agent app (labels added with
 # github.token do not trigger workflows) and only for a write-access author,
 # so a stranger's issue text never reaches the implementing agent unreviewed.
-# Set the repo variable TRIAGE_AUTO_GOOSE=false to stop the auto-chain.
+# Set the repo variable TRIAGE_AUTO_GAAL=false to stop the auto-chain.
 name: Issue triage
 
 on:
@@ -57,7 +57,7 @@ jobs:
           set -euo pipefail
           since=$(date -u -d '3 days ago' +%F)
           gh issue list --repo "$REPO" --state open --limit 50 \
-            --search "created:>=$since -label:ready-for-agent -label:needs-clarification -label:duplicate -label:goose" \
+            --search "created:>=$since -label:ready-for-agent -label:needs-clarification -label:duplicate -label:gaal" \
             --json number --jq '.[].number' |
           while read -r n; do
             # One failed dispatch must not drop the rest of the batch.
@@ -173,10 +173,10 @@ jobs:
       issues: write
     steps:
       - name: Apply labels and comment
+        id: apply
         env:
           GH_TOKEN: ${{ github.token }}
-          GOOSE_PAT: ${{ secrets.GOOSE_PAT }}
-          AUTO_GOOSE: ${{ vars.TRIAGE_AUTO_GOOSE }}
+          AUTO_GAAL: ${{ vars.TRIAGE_AUTO_GAAL }}
           REPO: ${{ github.repository }}
           NUMBER: ${{ needs.decide.outputs.number }}
           DECISION: ${{ needs.decide.outputs.decision }}
@@ -203,14 +203,31 @@ jobs:
 
           # Auto-chain to the implementing agent, only for a write-access author.
           [ "$verdict" = ready ] || exit 0
-          [ "$AUTO_GOOSE" = false ] && exit 0
+          [ "$AUTO_GAAL" = false ] && exit 0
           author=$(gh issue view "$NUMBER" --repo "$REPO" --json author --jq .author.login)
           # An API error fails the run rather than reading as "not a collaborator".
           perm=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .permission) \
             || { echo "::error::could not read $author's permission"; exit 1; }
           case "$perm" in
             admin|maintain|write)
-              GH_TOKEN="$GOOSE_PAT" gh issue edit "$NUMBER" --repo "$REPO" --add-label goose ;;
+              echo "handoff=true" >> "$GITHUB_OUTPUT" ;;
             *)
-              echo "Author $author has '$perm' permission; leaving goose for a maintainer to add." ;;
+              echo "Author $author has '$perm' permission; leaving gaal for a maintainer to add." ;;
           esac
+
+      # The app token exists only for this one label write.
+      - name: Mint the gaal-agent app token
+        id: app
+        if: steps.apply.outputs.handoff == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: Iv23lijWO2RZ8KF2POYi
+          private-key: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
+
+      - name: Hand the issue to Gaal
+        if: steps.apply.outputs.handoff == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ needs.decide.outputs.number }}
+        run: gh issue edit "$NUMBER" --repo "$REPO" --add-label gaal

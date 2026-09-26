@@ -50,6 +50,12 @@ jobs:
           REPO: ${{ github.repository }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
+          # Gaal's PRs are authored by its app, which is not a collaborator. It
+          # only opens PRs from write-access issues (see gaal-agent.yml).
+          if [ "$AUTHOR" = "gaal-agent[bot]" ]; then
+            echo "trusted=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # An API error fails the run rather than reading as "not a collaborator".
           perm=$(gh api "repos/$REPO/collaborators/$AUTHOR/permission" --jq .permission) \
             || { echo "::error::could not read $AUTHOR's permission"; exit 1; }
@@ -90,6 +96,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
           github_token: ${{ github.token }}
+          # Gaal's pushes come from its app, so the actor may be its bot.
+          allowed_bots: gaal-agent
           claude_args: >-
             --max-turns 200
             --allowedTools "Bash,Read,Glob,Grep,Skill,Task,TodoWrite"
