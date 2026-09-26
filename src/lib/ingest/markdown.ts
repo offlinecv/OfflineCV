@@ -17,6 +17,7 @@ import {
   extractLinkDefinitions,
   flattenAutolinks,
   resolveReferenceLinks,
+  resolveSetextHeadings,
   stripInlineImages,
 } from "../markdown-link-refs.ts";
 
@@ -43,6 +44,12 @@ export interface MarkdownParseResult {
  * shape this misses is raw markdown shown to the user AND a disagreement with
  * what the extractors saw.
  *
+ *   - Setext headings (`Text\n====` / `Text\n----`) resolve to their ATX form
+ *     through the shared `resolveSetextHeadings` (#961), run once over the
+ *     whole document before the per-line map — like reference links, this is
+ *     a *pair*-of-lines rule and cannot be decided line-by-line. Without it
+ *     the underline survived as a literal `====`/`----` line printed straight
+ *     into the Evidence panel.
  *   - Autolinks (`<https://…>`) flatten through the shared `flattenAutolinks`
  *     (#610). Skipping them here left `<https://linkedin.com/in/…>` — angle
  *     brackets and all — in the panel while the extractors read the bare URL.
@@ -70,7 +77,7 @@ export interface MarkdownParseResult {
  */
 export function mdToPlainText(text: string): string {
   const { definitions, body } = extractLinkDefinitions(text);
-  return stripInlineImages(body)
+  return stripInlineImages(resolveSetextHeadings(body))
     .split("\n")
     .map((line) =>
       // Reference resolution runs with the link rules, before emphasis: it

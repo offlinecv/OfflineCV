@@ -289,3 +289,100 @@ export function flattenAutolinks(text: string): string {
     .replace(AUTOLINK_URI_RE, (_m, url: string) => url)
     .replace(AUTOLINK_EMAIL_RE, (_m, email: string) => email);
 }
+
+/**
+ * A setext underline: a line of nothing but `=` or `-` (2 or more), the
+ * second CommonMark heading form. CommonMark accepts a single `=`/`-` too,
+ * but that is indistinguishable from other one-character lines a regex this
+ * cheap would rather not touch, and no real document underlines with one.
+ */
+const SETEXT_UNDERLINE_RE = /^[ \t]{0,3}(={2,}|-{2,})[ \t]*\r?$/;
+
+/** A bullet-list item marker — mirrors `markdown-lines.ts`'s `BULLET_PREFIX_RE`. */
+const BULLET_LINE_RE = /^\s*[-*+]\s+/;
+
+/** An ATX heading (`#`…`######`) — mirrors `markdown-lines.ts`'s `ATX_HEADING_RE`. */
+const ATX_HEADING_LINE_RE = /^#{1,6}\s/;
+
+/** The five reasons a setext underline's preceding line can't be promoted — see `resolveSetextHeadings`. */
+function disqualifiesSetextPromotion(rawPrev: string | undefined): boolean {
+  return (
+    rawPrev === undefined ||
+    rawPrev.trim() === "" ||
+    SETEXT_UNDERLINE_RE.test(rawPrev) ||
+    BULLET_LINE_RE.test(rawPrev) ||
+    ATX_HEADING_LINE_RE.test(rawPrev.trim())
+  );
+}
+
+/**
+ * Resolve CommonMark setext headings (`Text\n====` / `Text\n----`) to their
+ * ATX equivalent (`# Text` / `## Text`), dropping the underline (#961).
+ *
+ * Turndown's default `headingStyle` is `"setext"`, so mammoth's `<h1>`/`<h2>`
+ * (Word's `Heading1`/`Heading2` styles) round-trip through `docx.ts` as this
+ * shape even after #961 requests `"atx"` there — a hand-authored `.md` can
+ * still carry it, and CommonMark makes it valid there. Neither
+ * `markdown-lines.ts` (which reads `ATX_HEADING_RE` for the level) nor
+ * `mdToPlainText` (which strips a leading `#`) has any rule for it, so
+ * without this pass the underline survives as an ordinary prose line and the
+ * heading text loses its level.
+ *
+ * A setext heading is a *pair* of lines — the underline alone carries no
+ * signal, only the text above it does — so unlike every other rule in this
+ * module this cannot run per-line; it needs the RAW (pre-transform)
+ * preceding line, which is why it takes the whole document and returns one
+ * back, and why it must run before `stripInlineImages` / `flattenLinks`
+ * touch anything (running after would still work, but there is no benefit
+ * to paying for it twice, and running first lets `normalizeSplitLetterHeaders`
+ * in `markdown-lines.ts` see the promoted ATX marker too).
+ *
+ * Precedence, checked against the RAW previous line:
+ *   - undefined, blank, itself an underline, a bullet item, or already an
+ *     ATX heading disqualifies promotion. A `-` run there is a CommonMark
+ *     thematic break (`<hr>`) — not content either, so it is dropped rather
+ *     than kept as prose, whichever of those five reasons disqualified it. A
+ *     `=` run there has no separate CommonMark meaning and is left as an
+ *     ordinary line (matches current behavior). Without the ATX check, an
+ *     already-promoted (or hand-authored) `## Team Lead` directly followed by
+ *     a stray `----` re-promoted to `## ## Team Lead` — a literal `##` leaked
+ *     into the heading text.
+ *   - otherwise the preceding line is promoted in place (`=` → `# text`,
+ *     `-` → `## text`) and the underline line is dropped.
+ *
+ * A GFM table separator (`|---|---|`) never matches `SETEXT_UNDERLINE_RE` —
+ * it admits only `=`/`-`, no pipes — so `TABLE_SEPARATOR_RE` in
+ * `markdown-lines.ts` still owns that shape untouched.
+ *
+ * Splits on bare `"\n"`, not `/\r?\n/`: a CRLF document's `\r` rides along
+ * attached to the end of each line's content (same convention `mdToPlainText`
+ * uses for its own split/join), so a document with no setext heading at all
+ * comes back byte-identical instead of silently losing every `\r`.
+ * `SETEXT_UNDERLINE_RE` tolerates that trailing `\r` explicitly; the promoted
+ * heading line carries its predecessor's `\r` forward too.
+ */
+export function resolveSetextHeadings(markdown: string): string {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const underline = SETEXT_UNDERLINE_RE.exec(line);
+    if (!underline) {
+      out.push(line);
+      continue;
+    }
+    const rawPrev = i > 0 ? lines[i - 1] : undefined;
+    const isDash = underline[1][0] === "-";
+    if (!disqualifiesSetextPromotion(rawPrev)) {
+      const level = isDash ? 2 : 1;
+      const hadCr = rawPrev!.endsWith("\r");
+      out[out.length - 1] = `${"#".repeat(level)} ${rawPrev!.trim()}${hadCr ? "\r" : ""}`;
+      continue; // drop the underline line
+    }
+    if (isDash) {
+      continue; // thematic break (whatever disqualified it) — drop, not prose
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}

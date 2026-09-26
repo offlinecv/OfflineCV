@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractLinkDefinitions,
   resolveReferenceLinks,
+  resolveSetextHeadings,
   stripReferenceImages,
 } from "./markdown-link-refs.ts";
 
@@ -156,6 +157,62 @@ describe("resolveReferenceLinks", () => {
   it("is a no-op when the document defines nothing", () => {
     const text = "Owned the [warehouse indexer] rewrite [2019]";
     expect(resolveReferenceLinks(text, new Map())).toBe(text);
+  });
+});
+
+describe("resolveSetextHeadings (#961)", () => {
+  // The two consumers (`markdown-lines.ts`, `mdToPlainText`) pin the shapes
+  // that reach a user (see their own test files); this file owns the one edge
+  // neither exercises — a chained pair of rule lines, where the disqualifier
+  // must look at the RAW preceding line, not one this function already
+  // rewrote, or the second rule re-promotes the just-built ATX heading.
+  it("promotes a `=` underline to an h1 ATX heading", () => {
+    expect(resolveSetextHeadings("Jane Doe\n========")).toBe("# Jane Doe");
+  });
+
+  it("promotes a `-` underline to an h2 ATX heading", () => {
+    expect(resolveSetextHeadings("Experience\n----------")).toBe("## Experience");
+  });
+
+  it("does not re-promote an already-promoted heading when two rule lines are chained", () => {
+    // `====` promotes "Some text"; the immediately following `----` must see
+    // that ITS raw predecessor was a rule line and refuse to fire again — and,
+    // disqualified by that same underline predecessor, it is a thematic
+    // break in its own right, so it is dropped rather than kept as prose.
+    expect(resolveSetextHeadings("Some text\n====\n----")).toBe("# Some text");
+  });
+
+  it("leaves a lone `=` run with no preceding prose untouched (no separate meaning)", () => {
+    expect(resolveSetextHeadings("====\nMore text")).toBe("====\nMore text");
+  });
+
+  it("drops a lone `-` run with no preceding line (thematic break)", () => {
+    expect(resolveSetextHeadings("----\nMore text")).toBe("More text");
+  });
+
+  it("drops a `-` run disqualified by a preceding bullet item, not just a blank predecessor", () => {
+    // Same thematic-break reasoning as the no-predecessor case above, but the
+    // disqualifier here is a preceding list item — the exact #961 leak this
+    // module exists to close.
+    expect(resolveSetextHeadings("- Shipped things.\n----------------\n\nNext paragraph.")).toBe(
+      "- Shipped things.\n\nNext paragraph.",
+    );
+  });
+
+  it("is a no-op on text with no underline-shaped line", () => {
+    const text = "Just prose.\n\nMore prose.";
+    expect(resolveSetextHeadings(text)).toBe(text);
+  });
+
+  it("preserves CRLF line endings on a document with no setext heading", () => {
+    const text = "Just prose.\r\n\r\nMore prose.\r\n";
+    expect(resolveSetextHeadings(text)).toBe(text);
+  });
+
+  it("preserves the CRLF line ending of a promoted heading line", () => {
+    expect(resolveSetextHeadings("Experience\r\n----------\r\nMore text")).toBe(
+      "## Experience\r\nMore text",
+    );
   });
 });
 
