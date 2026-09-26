@@ -431,6 +431,190 @@ describe("applyOverrides", () => {
     );
   });
 
+  it("edits a glyph+numbered stacked-marker line (\"• 1. …\") via a modern id key (#999)", () => {
+    const obsText = "1. Led team of five engineers";
+    const rawText = "• 1. Led team of five engineers";
+    const {
+      fields: out,
+      rawText: outRaw,
+      sections: outSections,
+      unresolved,
+    } = applyOverrides(
+      {
+        parsed: {
+          ...baseParsed(),
+          experience: [
+            {
+              title: "Engineer",
+              company: "Acme",
+              description: obsText,
+            },
+          ],
+        },
+        rawText,
+        sections: makeSections([rawText]),
+        observations: [obs(0, obsText)],
+      },
+      {
+        bulletOverrides: { [bulletId(obsText, 0)]: "Led a team of eight" },
+      },
+    );
+    expect(outRaw).toBe("• 1. Led a team of eight");
+    expect(outSections.byName.get("experience")).toEqual([
+      "• 1. Led a team of eight",
+    ]);
+    expect(out.experience[0].description).toBe("Led a team of eight");
+    expect(unresolved).toEqual([]);
+  });
+
+  it("edits the same stacked-marker line via a legacy numeric key (#999)", () => {
+    const obsText = "1. Led team of five engineers";
+    const rawText = "• 1. Led team of five engineers";
+    const {
+      fields: out,
+      rawText: outRaw,
+      sections: outSections,
+      unresolved,
+    } = applyOverrides(
+      {
+        parsed: {
+          ...baseParsed(),
+          experience: [
+            {
+              title: "Engineer",
+              company: "Acme",
+              description: obsText,
+            },
+          ],
+        },
+        rawText,
+        sections: makeSections([rawText]),
+        observations: [obs(0, obsText)],
+      },
+      {
+        bulletOverrides: { 0: "Led a team of eight" },
+      },
+    );
+    expect(outRaw).toBe("• 1. Led a team of eight");
+    expect(outSections.byName.get("experience")).toEqual([
+      "• 1. Led a team of eight",
+    ]);
+    expect(out.experience[0].description).toBe("Led a team of eight");
+    expect(unresolved).toEqual([]);
+  });
+
+  it("does not treat a decimal point in numeric-content bullet as part of the marker", () => {
+    const obsText = "1.5M raised in Series A funding";
+    const rawText = "• 1.5M raised in Series A funding";
+    const {
+      rawText: outRaw,
+      sections: outSections,
+      unresolved,
+    } = applyOverrides(
+      {
+        parsed: {
+          ...baseParsed(),
+          experience: [
+            {
+              title: "Engineer",
+              company: "Acme",
+              description: obsText,
+            },
+          ],
+        },
+        rawText,
+        sections: makeSections([rawText]),
+        observations: [obs(0, obsText)],
+      },
+      {
+        bulletOverrides: { [bulletId(obsText, 0)]: "Raised $2M in Series A" },
+      },
+    );
+    expect(outRaw).toBe("• Raised $2M in Series A");
+    expect(outSections.byName.get("experience")).toEqual([
+      "• Raised $2M in Series A",
+    ]);
+    expect(unresolved).toEqual([]);
+  });
+
+  it("removes a stacked-marker line from rawText, sections, and description via a modern id key (#999)", () => {
+    const obsText = "1. Led team of five engineers";
+    const rawText = "• 1. Led team of five engineers\n• Shipped another thing";
+    const {
+      fields: out,
+      rawText: outRaw,
+      sections: outSections,
+      unresolved,
+    } = applyOverrides(
+      {
+        parsed: {
+          ...baseParsed(),
+          experience: [
+            {
+              title: "Engineer",
+              company: "Acme",
+              description: `${obsText}\nShipped another thing`,
+            },
+          ],
+        },
+        rawText,
+        sections: makeSections([
+          "• 1. Led team of five engineers",
+          "• Shipped another thing",
+        ]),
+        observations: [obs(0, obsText), obs(1, "Shipped another thing")],
+      },
+      {
+        removedBullets: [bulletId(obsText, 0)],
+      },
+    );
+    expect(outRaw).toBe("• Shipped another thing");
+    expect(outSections.byName.get("experience")).toEqual([
+      "• Shipped another thing",
+    ]);
+    expect(out.experience[0].description).toBe("Shipped another thing");
+    expect(unresolved).toEqual([]);
+  });
+
+  it("removes the same stacked-marker line via a legacy numeric key (#999)", () => {
+    const obsText = "1. Led team of five engineers";
+    const rawText = "• 1. Led team of five engineers\n• Shipped another thing";
+    const {
+      fields: out,
+      rawText: outRaw,
+      sections: outSections,
+      unresolved,
+    } = applyOverrides(
+      {
+        parsed: {
+          ...baseParsed(),
+          experience: [
+            {
+              title: "Engineer",
+              company: "Acme",
+              description: `${obsText}\nShipped another thing`,
+            },
+          ],
+        },
+        rawText,
+        sections: makeSections([
+          "• 1. Led team of five engineers",
+          "• Shipped another thing",
+        ]),
+        observations: [obs(0, obsText), obs(1, "Shipped another thing")],
+      },
+      {
+        removedBullets: ["0"],
+      },
+    );
+    expect(outRaw).toBe("• Shipped another thing");
+    expect(outSections.byName.get("experience")).toEqual([
+      "• Shipped another thing",
+    ]);
+    expect(out.experience[0].description).toBe("Shipped another thing");
+    expect(unresolved).toEqual([]);
+  });
+
   it("removes a bullet from rawText, sections, and the role description", () => {
     const rawText = "• Built a thing\n• Shipped another thing";
     const {

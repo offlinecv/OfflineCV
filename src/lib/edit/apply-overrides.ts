@@ -163,8 +163,17 @@ const CONTACT_KEYS: readonly (keyof ContactOverrides)[] = [
   "work_authorization",
 ];
 
-/** Leading bullet/numbered markers — mirrors group-bullets.ts LEADING_MARKER_RE. */
-const LEADING_MARKER_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)]) */;
+/** Leading bullet/numbered markers — mirrors group-bullets.ts LEADING_MARKER_RE.
+ *  The outer group repeats so a stacked marker (`"• 1. "`) is preserved whole
+ *  when a replace re-prepends it, matching what {@link normalizeBulletText}
+ *  now strips in one pass (#999). Each marker must be followed by whitespace
+ *  or end-of-line, not just optional spaces — otherwise `\d+[.)]` matches the
+ *  decimal point in a numeric-content bullet like `"1.5M raised"` and corrupts
+ *  it to `"5M raised"`. The trailing separator is `[ \t]+`, not `\s+` — a bare
+ *  `\s+` lets a marker's separator swallow a `\n` and chain into a marker on
+ *  the next line as if it stacked with the first, over-stripping a multi-line
+ *  string in one pass. */
+const LEADING_MARKER_RE = /^(?:[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)])(?:[ \t]+|$))+/;
 
 /**
  * Fold `contact` overrides into `nextParsed` in place. Empty string clears a

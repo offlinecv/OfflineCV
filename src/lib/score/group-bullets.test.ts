@@ -72,6 +72,35 @@ describe("normalizeBulletText", () => {
   it("collapses internal whitespace", () => {
     expect(normalizeBulletText("Led  the   team")).toBe("led the team");
   });
+
+  it("strips a glyph marker stacked with a numbered marker in one pass (#999)", () => {
+    expect(normalizeBulletText("• 1. Led team of five engineers")).toBe(
+      "led team of five engineers",
+    );
+    expect(normalizeBulletText("- - foo")).toBe("foo");
+  });
+
+  it("does not consume a decimal point in numeric-content bullets", () => {
+    expect(normalizeBulletText("• 1.5M raised in Series A funding")).toBe(
+      "1.5m raised in series a funding",
+    );
+    expect(normalizeBulletText("• 3.5 GPA")).toBe("3.5 gpa");
+  });
+
+  it("is idempotent — re-normalizing an already-normalized text is a no-op (#999)", () => {
+    const inputs = [
+      "• 1. Led team of five engineers",
+      "- - foo",
+      "1. • Led the project",
+      "Plain text with no marker",
+      "",
+      "• 4.",
+    ];
+    for (const input of inputs) {
+      const once = normalizeBulletText(input);
+      expect(normalizeBulletText(once)).toBe(once);
+    }
+  });
 });
 
 // ── groupBulletsByExperience ──────────────────────────────────────────────────
