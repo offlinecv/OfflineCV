@@ -18,6 +18,16 @@
  * so trailing the dates it pushed them ~56px short of the column's right edge.
  * Between the title and the dates it spends slack the row already has, and
  * costs width only when a long title needs it.
+ *
+ * Below `sm` (issue #1031): the title/company/location/team group and the
+ * actions+dates cluster stack into two rows instead of sharing one. At phone
+ * width the cluster's ~200px was `shrink-0` — it never gave up space — so the
+ * title got whatever was left of a ~300px column and a multi-word title (e.g.
+ * "Founding Member & Site Reliability Engineer & Infrastructure Team Lead")
+ * broke after every word. Stacking gives the title the FULL column width to
+ * wrap across, and the actions+dates cluster its own full-width row below,
+ * right-aligned so the dates still read as "the end of the row". `sm:` and up
+ * restores the single flush-right row, unchanged from before.
  */
 
 import type { ReactNode } from "react";
@@ -115,9 +125,11 @@ function EditableRoleHeader({
 }: EditableRoleHeaderProps) {
   return (
     <div className="flex flex-col gap-0.5">
-      {/* justify-between pins the dates to the right edge; the left group
-          flex-wraps for long values. */}
-      <div className="flex w-full items-baseline justify-between gap-x-3">
+      {/* Stacked below `sm` (#1031) so the title owns the full column width
+          instead of splitting it with a `shrink-0` sibling; `sm:` restores
+          the single row where `justify-between` pins the dates to the right
+          edge and the left group flex-wraps for long values. */}
+      <div className="flex w-full flex-col gap-x-3 gap-y-1 sm:flex-row sm:items-baseline sm:justify-between">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
           <EditableField
             value={title}
@@ -169,7 +181,12 @@ function EditableRoleHeader({
             onCommit={(v) => onFieldChange("team", v)}
           />
         </div>
-        <span className="flex shrink-0 items-baseline gap-x-2">
+        {/* `justify-end` right-aligns this cluster on its own stacked row
+            below `sm`; above it the span is sized to its content, so the
+            class has no visible effect there and `sm:shrink-0` is what keeps
+            the flush-right desktop behaviour (this cluster never gives up
+            space to the title group). */}
+        <span className="flex items-baseline justify-end gap-x-2 sm:shrink-0">
           <span className="self-center">{actions}</span>
           <RoleDateRange
             startDate={startDate}
