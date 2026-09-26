@@ -33,6 +33,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { BulletGroup } from "../../lib/score/group-bullets.ts";
 import { roleLabel } from "../../lib/score/group-bullets.ts";
+import { isUnresolvableBulletKey } from "../../lib/score/bullet-id.ts";
 import type {
   AddedBulletRef,
   ExperienceFieldOverrides,
@@ -297,32 +298,46 @@ export function RoleEntry({
       {group.bullets.length > 0 ? (
         <>
           <ul className="list-none">
-            {group.bullets.map((b) => (
-              <ResumeBulletRow
-                key={b.id}
-                bullet={b}
-                onBulletChange={
-                  onBulletChange
-                    ? (value) => onBulletChange(b.id, value, bucketRefFor(b.text))
-                    : undefined
-                }
-                onRemove={
-                  onRemoveBullet
-                    ? () => removes.removeBullet(b.id, b.text)
-                    : undefined
-                }
-                trailing={
-                  onMoveBullet && (
-                    <OtherBulletTrailing
-                      bulletId={b.id}
-                      bulletText={b.text}
-                      targets={moveTargets ?? []}
-                      onMove={onMoveBullet}
-                    />
-                  )
-                }
-              />
-            ))}
+            {group.bullets.map((b) => {
+              // A marker-only line PARSED into no bucket (#1052): its id's text
+              // half is empty, so `setBulletField`/`removeBullet` refuse it
+              // outright. `resolveBucketRef` is what tells this apart from the
+              // same-shaped id a user typed themselves — #1048 routes THAT one
+              // through the "Other bullets" bucket it resolves to, so it must
+              // stay editable. Checked here rather than `bucketRefFor`, which
+              // for a real role always resolves (its own `entryKey` names a
+              // bucket regardless of resolvability) — this id shape only ever
+              // reaches "Other bullets" in the first place.
+              const writeRefused =
+                isUnresolvableBulletKey(b.id) &&
+                resolveBucketRef?.(b.text) === undefined;
+              return (
+                <ResumeBulletRow
+                  key={b.id}
+                  bullet={b}
+                  onBulletChange={
+                    onBulletChange && !writeRefused
+                      ? (value) => onBulletChange(b.id, value, bucketRefFor(b.text))
+                      : undefined
+                  }
+                  onRemove={
+                    onRemoveBullet && !writeRefused
+                      ? () => removes.removeBullet(b.id, b.text)
+                      : undefined
+                  }
+                  trailing={
+                    onMoveBullet && (
+                      <OtherBulletTrailing
+                        bulletId={b.id}
+                        bulletText={b.text}
+                        targets={moveTargets ?? []}
+                        onMove={onMoveBullet}
+                      />
+                    )
+                  }
+                />
+              );
+            })}
           </ul>
           {rewritePanel}
         </>

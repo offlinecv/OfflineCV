@@ -428,16 +428,14 @@ describe("ExperienceSection — 'Other bullets' Remove on an added line (#660 ha
     expect(el.textContent).toContain("Removed 1 change");
   });
 
-  it("declines rather than splice the WRONG role's bucket when two rows tie (#683)", async () => {
+  it("renders BOTH tied rows read-only rather than let either guess (#683, #1052)", async () => {
     // Two added roles each holding a contentless line of the SAME verbatim text.
     // `sameBulletLine`'s verbatim fallback tells `"3."` from `"4."` but cannot
     // tell one `"3."` from another, so both rows in "Other bullets" name the same
-    // ambiguous target text.
-    //
-    // This case CLICKS THE SECOND ROW on purpose — the row whose bucket loses
-    // the old first-bucket-wins tiebreak. Clicking the winner would go green
-    // whether the resolver were right or wrong, and that blindness is why #683
-    // survived two review rounds (AC 3).
+    // ambiguous target text — `resolveOtherBulletRef` refuses to pick one (#683),
+    // which since #1052 means NEITHER row offers an action: the write is exactly
+    // as un-landable as the unambiguous unresolvable case is, even though both
+    // lines are otherwise user-added (#1048).
     const el = await render();
     mintDegenerateLine();
     let second = "";
@@ -459,26 +457,17 @@ describe("ExperienceSection — 'Other bullets' Remove on an added line (#660 ha
       li.textContent?.includes(DEGENERATE),
     );
     expect(rows).toHaveLength(2);
-    await click(
-      rows[1]!.querySelector<HTMLButtonElement>('[aria-label="Remove bullet"]')!,
-    );
+    for (const row of rows) {
+      expect(
+        row.querySelector('[aria-label="Remove bullet"]'),
+      ).toBeNull();
+      expect(row.querySelector('[role="button"]')).toBeNull();
+    }
 
-    // #683 fixed: an ambiguous resolution refuses rather than guesses. Neither
-    // bucket is touched — not the clicked row's own bucket, and not the
-    // bystander's — and nothing is filed by id either, so the click is an
-    // honest no-op instead of removing a line from a role the user never
-    // clicked.
+    // Neither bucket is touched merely by rendering, and nothing is filed by id.
     expect(api.addedBullets["experience:0"]).toEqual([DEGENERATE]);
     expect(api.addedBullets[second]).toEqual([DEGENERATE]);
     expect(api.removedBullets.size).toBe(0);
-    expect(el.textContent).not.toContain("Removed 1 change");
-    // Both rows are still on screen, unresolved until the user edits one to
-    // differ — the documented cost of refusing rather than guessing.
-    expect(
-      Array.from(el.querySelectorAll("li")).filter((li) =>
-        li.textContent?.includes(DEGENERATE),
-      ),
-    ).toHaveLength(2);
   });
 });
 
@@ -488,37 +477,34 @@ describe("ExperienceSection — a PARSED degenerate line (#660 AC 2, uncondition
    * (nothing was ever added), so `findAddedBulletEntry` misses and the removal
    * falls through to the id-keyed path — carrying an id whose text half is empty.
    */
-  function expectDegenerateRow(el: HTMLDivElement): HTMLButtonElement {
+  /** Since #1052, the row itself carries neither Remove nor click-to-edit — a
+   *  write can never land here, so the click-then-assert-no-op shape the tests
+   *  below used pre-#1052 no longer applies; asserting the row's rendering is
+   *  the whole test now. */
+  function expectDegenerateRowReadOnly(el: HTMLDivElement): void {
     expect(el.textContent).toContain("Other bullets");
-    expect(api.addedBullets).toEqual({});
     expect(bulletId("4.", 0)).toBe("0|");
-    return removeButtonFor(el, "4.");
+    const rows = rowsFor(el, "4.");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.querySelector('[aria-label="Remove bullet"]')).toBeNull();
+    expect(rows[0]!.querySelector('[role="button"]')).toBeNull();
   }
 
-  it("files no unresolvable id and arms no strip for it", async () => {
+  it("renders read-only: no Remove, no click-to-edit, and no phantom edit (#1052)", async () => {
     extraPooledLines = [PARSED_DEGENERATE];
     const el = await render();
     await act(async () => {});
+    expect(api.addedBullets).toEqual({});
 
-    await click(expectDegenerateRow(el));
+    expectDegenerateRowReadOnly(el);
 
-    // Pre-fix this was `Set { "0|" }` — an id `resolveOverrideOriginal` resolves
-    // to nothing, so it removed nothing yet stayed in the set forever, keeping
-    // the résumé permanently "dirty" with a phantom edit no Undo could clear.
+    // Pre-#1052 a click here filed `Set { "0|" }` — an id `resolveOverrideOriginal`
+    // resolves to nothing, so it removed nothing yet stayed in the set forever,
+    // keeping the résumé permanently "dirty" with a phantom edit no Undo could
+    // clear. With no control to click, none of that can happen at all.
     expect(api.removedBullets.size).toBe(0);
     expect(api.hasEdits).toBe(false);
-    // #659 AC 1 — a removal that did nothing renders no "Removed" strip. Both
-    // ACs ride the same `false`, which is why one guard closes them together.
     expect(el.textContent).not.toContain("Removed 1 change");
-    // The row itself is still there, and that is the honest post-fix state: the
-    // click is now a truthful no-op instead of a lie. Making the line removable
-    // means keeping it out of the pool, which moves the Specificity denominator
-    // for every résumé carrying one — a scoring change, filed on its own.
-    expect(
-      Array.from(el.querySelectorAll("li")).filter((li) =>
-        li.textContent?.includes("4."),
-      ),
-    ).toHaveLength(1);
   });
 
   it("does the same for the #30 lone-bullet-merge shape", async () => {
@@ -529,19 +515,23 @@ describe("ExperienceSection — a PARSED degenerate line (#660 AC 2, uncondition
     extraPooledLines = ["•", "4."];
     const el = await render();
     await act(async () => {});
+    expect(api.addedBullets).toEqual({});
 
-    await click(expectDegenerateRow(el));
+    expectDegenerateRowReadOnly(el);
 
     expect(api.removedBullets.size).toBe(0);
     expect(api.hasEdits).toBe(false);
     expect(el.textContent).not.toContain("Removed 1 change");
   });
 
-  it("does not splice a DIFFERENT role's contentless line (wrong-bucket splice)", async () => {
-    // The resolver runs before the id-shape guard, so a bucket it wrongly matches
-    // is spliced and reported as success — the guard never sees the call. Both
-    // texts normalise to `""`, so the normalised key cannot discriminate them:
-    // the parsed row reads "4." and the bucket holds "1.".
+  it("never risks splicing a DIFFERENT role's contentless line (wrong-bucket splice)", async () => {
+    // Pre-#1052 this clicked the parsed "4." row's Remove to prove the resolver
+    // does not mismatch it against the unrelated "1." bucket. That control no
+    // longer renders at all — both texts normalise to `""`, so the normalised
+    // key cannot discriminate them, and `findAddedBulletEntry` is exercised
+    // directly in `added-bullets.test.ts` (#683). Here the only thing left to
+    // pin is that the parsed row stays read-only while its added bystander does
+    // not.
     extraPooledLines = [PARSED_DEGENERATE];
     const el = await render();
     mintDegenerateLine("1.");
@@ -552,30 +542,19 @@ describe("ExperienceSection — a PARSED degenerate line (#660 AC 2, uncondition
     expect(el.textContent).toContain("Other bullets");
     expect(api.addedBullets).toEqual({ "experience:0": ["1."] });
 
-    await click(removeButtonFor(el, "4."));
-
-    // The clicked row is PARSED and in no bucket, so nothing may be spliced. Left
-    // unguarded, `findAddedBulletEntry` matched `""` against the `"1."` bucket and
-    // `removeAddedBulletLine` — which matches on the same normalised form —
-    // deleted a line the user never clicked, from another role, and returned true.
-    expect(api.addedBullets).toEqual({ "experience:0": ["1."] });
-    expect(api.removedBullets.size).toBe(0);
-    expect(el.textContent).not.toContain("Removed 1 change");
-    // Both rows still rendered: the clicked one (nothing can remove it yet) and
-    // the bystander (nothing should).
-    expect(removeButtonFor(el, "4.")).toBeTruthy();
+    expectDegenerateRowReadOnly(el);
+    // The bystander is user-added and unambiguous, so it keeps its Remove.
     expect(removeButtonFor(el, "1.")).toBeTruthy();
     // `hasEdits` stays TRUE here, and correctly so — the user really did add and
-    // edit a bullet. It is the bystander bucket, not this flag, that carries the
-    // signal in this case.
+    // edit a bullet.
     expect(api.hasEdits).toBe(true);
   });
 
   it("still splices the RIGHT bucket when the clicked row is the added one", async () => {
-    // The other side of the discrimination, and the reason the fix cannot simply
-    // refuse an empty normalised target: #660 half 2 IS a degenerate row
-    // resolving to its own bucket. Same tree shape as the case above — a parsed
-    // "4." row present — with the click on the added "1." row instead.
+    // The other side of the discrimination: #660 half 2 IS a degenerate row
+    // resolving to its own bucket, which stays actionable. Same tree shape as
+    // the case above — a read-only parsed "4." row present — with the click on
+    // the added "1." row instead.
     extraPooledLines = [PARSED_DEGENERATE];
     const el = await render();
     mintDegenerateLine("1.");
@@ -586,8 +565,9 @@ describe("ExperienceSection — a PARSED degenerate line (#660 AC 2, uncondition
     expect(api.addedBullets).toEqual({});
     expect(api.removedBullets.size).toBe(0);
     expect(el.textContent).toContain("Removed 1 change");
-    // The parsed degenerate row is the bystander this time, and is untouched.
-    expect(removeButtonFor(el, "4.")).toBeTruthy();
+    // The parsed degenerate row is the bystander this time: still rendered,
+    // still read-only.
+    expectDegenerateRowReadOnly(el);
   });
 
   it("still removes the genuinely-unmatched orphan alongside it", async () => {
@@ -884,23 +864,24 @@ describe("ExperienceSection — 'Other bullets' Edit on a degenerate ADDED line 
   });
 });
 
-describe("ExperienceSection — Edit on a PARSED degenerate line is refused, not filed (#679)", () => {
-  it("files no unresolvable override and leaves hasEdits false", async () => {
+describe("ExperienceSection — Edit on a PARSED degenerate line is refused, not filed (#679, #1052)", () => {
+  it("offers no click-to-edit at all, so no override can ever be filed", async () => {
     extraPooledLines = [PARSED_DEGENERATE];
     const el = await render();
     await act(async () => {});
     expect(api.addedBullets).toEqual({});
 
-    const REAL_TEXT = "Recovered a real bullet with 30% impact.";
-    await editBulletViaSave(el, "4.", REAL_TEXT);
+    // Pre-#1052 this row offered a click-to-edit that `setBulletField` always
+    // refused; since #1052 the row renders with none of the affordances a
+    // refused write would sit behind (`ResumeBulletRow`'s `editable` and
+    // `RemoveButton` are both driven by the presence of a callback).
+    const rows = rowsFor(el, "4.");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.querySelector('[role="button"]')).toBeNull();
+    expect(rows[0]!.querySelector('[aria-label="Remove bullet"]')).toBeNull();
 
-    // Refused rather than silently rewritten: no override, no phantom edit.
     expect(api.bulletOverrides).toEqual({});
     expect(api.hasEdits).toBe(false);
-    // The row is left exactly as it was — an honest no-op, not a lie that
-    // shows the typed text while nothing downstream can resolve it.
-    expect(el.textContent).not.toContain(REAL_TEXT);
-    expect(rowsFor(el, "4.")).toHaveLength(1);
   });
 
   it("still lets a genuinely-unmatched PARSED bullet be edited normally", async () => {
