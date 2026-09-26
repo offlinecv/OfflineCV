@@ -4,7 +4,9 @@
 /**
  * FixItDock — the fixed bottom chrome both Fix It panels sit in (#810):
  * `FixItToolbar` while stepping, `FixItFinished` at the end. One definition,
- * so the dock cannot change width when one panel swaps for the other.
+ * so the dock cannot change width when one panel swaps for the other. It is
+ * also the page's only fixed bottom dock, so the feedback nudge borrows it
+ * (`FeedbackNudgeDock`, #1005) when no Fix It panel is there to host it.
  *
  * The dock is drawn over the page, so it also owns the space it covers
  * (#1002). It measures itself and publishes the clearance a target needs as

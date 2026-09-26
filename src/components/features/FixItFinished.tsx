@@ -18,6 +18,7 @@
 import { useEffect, useRef } from "react";
 import { Button } from "@design-system";
 import { FixItDock } from "./FixItDock.tsx";
+import { FeedbackNudgeSlot } from "./FeedbackNudge.tsx";
 
 export function FixItFinished({
   remaining,
@@ -87,6 +88,7 @@ export function FixItFinished({
           </Button>
         </div>
       </div>
+      <FeedbackNudgeSlot raise />
     </FixItDock>
   );
 }

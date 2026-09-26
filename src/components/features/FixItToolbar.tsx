@@ -16,6 +16,8 @@
  *    what is still open.
  *  - Keyboard reachable through `useFixItKeyboard`: ←/→ step, Escape finishes,
  *    for keys nothing else on the page claimed.
+ *  - Hosts the feedback nudge (`FeedbackNudgeSlot`, #1005) while stepping, so an
+ *    export finished mid-Fix It asks here rather than drawing a second dock.
  *  - Reuses @design-system primitives (Button, StatusBadge, etc.).
  */
 
@@ -25,6 +27,7 @@ import type { GuidanceItem, GuidanceDimension } from "../../lib/score/guidance.t
 import { useFixItKeyboard } from "../../hooks/useFixItKeyboard.ts";
 import { FixItDock } from "./FixItDock.tsx";
 import { FixItFinished } from "./FixItFinished.tsx";
+import { FeedbackNudgeSlot } from "./FeedbackNudge.tsx";
 
 export interface FixItToolbarProps {
   items: readonly GuidanceItem[];
@@ -153,6 +156,7 @@ export function FixItToolbar({
           </div>
         </div>
       </div>
+      <FeedbackNudgeSlot />
     </FixItDock>
   );
 }

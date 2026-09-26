@@ -16,9 +16,16 @@
  * its own form state, and together they'd push this file well past
  * CLAUDE.md's ~200 LOC feature-component ceiling.
  *
- * Open/close, the automatic-vs-ambient triggers, and the localStorage
- * capping all live in `useFeedbackDialog` (`src/hooks/`) — this component is
- * display + step routing + the actual `trackFeedback` call only.
+ * Open/close, the triggers, and the localStorage cooldown all live in
+ * `useFeedbackDialog` (`src/hooks/`) — this component is display + step
+ * routing + the actual `trackFeedback` call only.
+ *
+ * Since #912 this dialog is only ever opened by the USER: the ambient
+ * `[★ Feedback]` button, or a star on the inline `FeedbackNudge` (which is
+ * what the export milestone now raises instead of opening this directly). A
+ * modal is the right instrument for a flow someone chose to enter and the
+ * wrong one for an invitation they did not — see `FeedbackNudge`'s docblock.
+ * `initialRating` is how a star picked out there arrives here.
  *
  * In-place confirmation only (issue §3 — no toast/snackbar): submitting from
  * either step 2 body lands on a terminal `thanks` step rather than closing.
@@ -38,6 +45,12 @@ import { FeedbackConstructiveStep } from "./FeedbackConstructiveStep.tsx";
 interface FeedbackDialogProps {
   open: boolean;
   onClose: () => void;
+  /** A rating the user already picked before this opened — the inline
+   *  `FeedbackNudge`'s stars (#912). Opens straight onto that rating's branch;
+   *  `0` (the default) opens on the star step as before. Asking someone to
+   *  pick a star they just picked is the kind of small betrayal that stops
+   *  people answering the next one. */
+  initialRating?: number;
   /** Fired after a successful submission so the caller can persist
    *  `ocv_feedback_submitted` — see `useFeedbackDialog`. */
   onSubmitted: () => void;
@@ -56,19 +69,34 @@ const TITLES: Record<Step, string> = {
  *  shell already knows from routing Step 1. */
 type StepSubmission = Omit<FeedbackArgs, "rating">;
 
-export function FeedbackDialog({ open, onClose, onSubmitted }: FeedbackDialogProps) {
+/** Which step a rating routes to. One definition, used both by the star step's
+ *  own handler and by the pre-picked `initialRating` path, so the 4★ threshold
+ *  cannot come to mean two different things depending on where the star was
+ *  clicked. */
+function stepForRating(rating: number): Step {
+  return rating >= 4 ? "positive" : "constructive";
+}
+
+export function FeedbackDialog({
+  open,
+  onClose,
+  initialRating = 0,
+  onSubmitted,
+}: FeedbackDialogProps) {
   const [step, setStep] = useState<Step>("rating");
   const [rating, setRating] = useState(0);
   const thanksRef = useRef<HTMLDivElement>(null);
 
   // Fresh every time the dialog opens — a snoozed-then-reopened session
-  // should never land on last time's step or rating.
+  // should never land on last time's step or rating. `initialRating` is a dep
+  // as well as `open` because the nudge can hand over a different star on a
+  // later open without this component unmounting in between.
   useEffect(() => {
     if (open) {
-      setStep("rating");
-      setRating(0);
+      setRating(initialRating);
+      setStep(initialRating >= 1 ? stepForRating(initialRating) : "rating");
     }
-  }, [open]);
+  }, [open, initialRating]);
 
   // Submitting unmounts the button that was just activated, which would drop
   // focus to `<body>` — outside the dialog's tab ring — while the whole body
@@ -80,7 +108,7 @@ export function FeedbackDialog({ open, onClose, onSubmitted }: FeedbackDialogPro
 
   function handleRate(value: number): void {
     setRating(value);
-    setStep(value >= 4 ? "positive" : "constructive");
+    setStep(stepForRating(value));
   }
 
   function handleSubmit(fields: StepSubmission): void {

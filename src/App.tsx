@@ -20,12 +20,16 @@ import { ShareWithExtensionBar } from "./components/features/ShareWithExtensionB
 import { ExportDialog } from "./components/features/ExportDialog.tsx";
 import { ResumeChooserDialog } from "./components/features/ResumeChooserDialog.tsx";
 import { FeedbackDialog } from "./components/features/FeedbackDialog.tsx";
+import { FeedbackNudgeDock } from "./components/features/FeedbackNudge.tsx";
 import { useActiveResume } from "./hooks/useActiveResume.ts";
 import { useResumeLibrary } from "./hooks/useResumeLibrary.ts";
 import { useReplaceResumeOnDrop } from "./hooks/useReplaceResumeOnDrop.ts";
 import { useAutoRestoreResume } from "./hooks/useAutoRestoreResume.ts";
 import { useAutosaveResume } from "./hooks/useAutosaveResume.ts";
-import { useFeedbackDialog } from "./hooks/useFeedbackDialog.ts";
+import {
+  FeedbackNudgeContext,
+  useFeedbackDialog,
+} from "./hooks/useFeedbackDialog.ts";
 import {
   departToJobs,
   departToJobsAndNavigate,
@@ -121,9 +125,14 @@ export default function App() {
   // The multi-step feedback interstitial (#900) — one controller for both
   // ways in: the ambient `[★ Feedback]` button (threaded through `Result` to
   // `ParsedHeader`) and the automatic trigger, earned below from the export
-  // dialog's résumé-only callback and flushed when that dialog closes. Owned
-  // here, next to `exportOpen`, since both dialogs are page-level siblings.
-  const feedback = useFeedbackDialog();
+  // dialog's résumé-only callback and flushed when that dialog closes, and from
+  // finishing Fix It (#1005). Owned here, next to `exportOpen`, since both
+  // dialogs are page-level siblings. Keyed on `journeyKey` — the pristine-parse
+  // fingerprint, stable across edits and reloads — so each résumé is asked
+  // about once; null while authoring, which is never asked.
+  const feedback = useFeedbackDialog(
+    state.phase === "done" ? journeyKey : null,
+  );
 
   // Local-first resume library (#322) — save/reload parsed resumes without
   // re-uploading. Loading hydrates the "done" state from the cached parse.
@@ -649,34 +658,40 @@ export default function App() {
       <ErrorBoundary onReset={reset}>
         {state.phase === "done" && edited && displayResult && recovery && (
           <>
-            <Result
-              // `parsed` carries the edited experience descriptions so
-              // `groupBulletsByExperience` (in ReconstructedResume) attributes
-              // edited bullets to the SAME role they came from. Without this,
-              // an edit displaces the bullet into the trailing "Other bullets"
-              // group because the original description no longer substring-
-              // matches the edited bullet text. `rawText` stays original on
-              // purpose — EvidencePanel shows "what the PDF extracted", not
-              // "what the user typed."
-              //
-              // This is the pre-LLM-override parse; the one the surface renders
-              // (plus its score and its identity token) travels in `recovery`.
-              result={displayResult}
-              bytes={state.bytes}
-              sourceKind={state.sourceKind}
-              onReset={reset}
-              edit={edit}
-              recovery={recovery}
-              parseKey={parseKey}
-              autosave={autosave}
-              onJdContextChange={setJdContext}
-              // #826 — a whole-résumé rewrite applied while a JD was steering
-              // it IS the Tailor stage, done. `ResultDetail` owns the pairing;
-              // the key it is recorded under is only knowable here.
-              onTailorApplied={() => progress.mark("tailor")}
-              // #900 — ambient feedback button trigger.
-              onOpenFeedback={feedback.openDialog}
-            />
+            {/* The nudge reaches Fix It's dock, three components down, through
+                context — see `FeedbackNudgeContext`. Around `Result` only: the
+                authoring lane's dock hosts no nudge, since nothing there is
+                ever asked. */}
+            <FeedbackNudgeContext.Provider value={feedback}>
+              <Result
+                // `parsed` carries the edited experience descriptions so
+                // `groupBulletsByExperience` (in ReconstructedResume) attributes
+                // edited bullets to the SAME role they came from. Without this,
+                // an edit displaces the bullet into the trailing "Other bullets"
+                // group because the original description no longer substring-
+                // matches the edited bullet text. `rawText` stays original on
+                // purpose — EvidencePanel shows "what the PDF extracted", not
+                // "what the user typed."
+                //
+                // This is the pre-LLM-override parse; the one the surface renders
+                // (plus its score and its identity token) travels in `recovery`.
+                result={displayResult}
+                bytes={state.bytes}
+                sourceKind={state.sourceKind}
+                onReset={reset}
+                edit={edit}
+                recovery={recovery}
+                parseKey={parseKey}
+                autosave={autosave}
+                onJdContextChange={setJdContext}
+                // #826 — a whole-résumé rewrite applied while a JD was steering
+                // it IS the Tailor stage, done. `ResultDetail` owns the pairing;
+                // the key it is recorded under is only knowable here.
+                onTailorApplied={() => progress.mark("tailor")}
+                // #900 — ambient feedback button trigger.
+                onOpenFeedback={feedback.openDialog}
+              />
+            </FeedbackNudgeContext.Provider>
             {/* Hand the parse to the capture extension (#620) — self-hides when
                 no extension answers a probe, so it costs nothing on the visit
                 of everyone who runs none. `recovery.activeResult`, on the same
@@ -732,6 +747,15 @@ export default function App() {
           )}
       </ErrorBoundary>
 
+      {/* #1005 — the nudge's own dock, only while no Fix It dock is hosting it.
+          Fixed to the bottom, never in the flow above `<Result>`: the export
+          dialog is opened from the sticky header, so the user can be anywhere
+          on the page, and a block up there would shove the docked score card
+          down. See `FeedbackNudge`. */}
+      {feedback.nudgeVisible && !feedback.nudgeHosted && (
+        <FeedbackNudgeDock nudge={feedback} />
+      )}
+
       {recovery && (
         // The one export surface (#823) — PDF, Markdown and the audit report,
         // each row naming its artifact. Mounted at page level rather than
@@ -741,10 +765,10 @@ export default function App() {
         // artifact matches what the page shows.
         <ExportDialog
           open={exportOpen}
-          // #900 — closing is also when a pending feedback milestone flushes.
+          // #900/#912 — closing is when a pending feedback milestone flushes.
           // The export dialog stays open after a download on purpose (#421),
-          // so opening the interstitial any earlier would stack a second
-          // native modal over the findings the download just produced.
+          // and the nudge raised here would sit behind it, unseen, if it were
+          // shown any earlier.
           onClose={() => {
             setExportOpen(false);
             feedback.notifyExportClosed();
@@ -756,17 +780,19 @@ export default function App() {
           // Download stage, the audit report included: the ledger records that
           // the user went through here, and the report is downloaded from it.
           onExported={() => progress.mark("download")}
-          // #900 — the résumé-only subset of the same success point feeds the
-          // feedback dialog's automatic first-export trigger.
+          // #900 — the résumé-only subset of the same success point is a
+          // feedback milestone: it arms the nudge (#912, #1005).
           onResumeExported={feedback.notifyResumeExported}
         />
       )}
 
       {/* #900 — the multi-step feedback interstitial. Page level, beside the
-          export dialog whose résumé-only callback can open it automatically. */}
+          export dialog. Only ever opened by a user gesture since #912: the
+          ambient button, or a star on the nudge. */}
       <FeedbackDialog
         open={feedback.open}
         onClose={feedback.close}
+        initialRating={feedback.initialRating}
         onSubmitted={feedback.markSubmitted}
       />
 
