@@ -194,6 +194,60 @@ describe("parseEntryBlocks — date_range anchor", () => {
     ).toBe(true);
   });
 
+  it("stops the LAST entry's body before a column-flattened sidebar tail (#936)", () => {
+    // The last entry's body window has no next anchor to bound it, so it runs
+    // to the end of the section's lines. On a two-column résumé, `findSection`
+    // concatenates a same-named sidebar `experience` fragment (#311) onto the
+    // end of those lines — far right of the bullet marker (x 431 vs marker
+    // x 64), never a modest wrapped-bullet indent. Without the far-column stop
+    // this glues onto the last real bullet ("… end to end. Grew and steadied
+    // teams…") and strands the clean bullet's twin in the scorer's "Other
+    // bullets" group, because the graded pool keys off the UNCORRUPTED text.
+    const section = xSection("experience", [
+      { text: "Northwind Labs  Jul 2025 - Present", x: 50 },
+      { text: "• Documented architecture and managed changes with peers.", x: 64 },
+      { text: "• Owned the release process end to end.", x: 64 },
+      { text: "Grew and steadied teams across sites.", x: 431 },
+      { text: "Reliability, on-call health.", x: 431 },
+    ]);
+    const [block] = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(block.body).toBe(
+      "Documented architecture and managed changes with peers.\n" +
+        "Owned the release process end to end.",
+    );
+    expect(block.bulletCount).toBe(2);
+  });
+
+  it("stops the LAST entry's body before a sidebar tail, glyph-less rendering (#936)", () => {
+    // Same defect as above, but for a section whose bullets carry no leading
+    // glyph (`bulletMarkerX` is Infinity, so `markerX` never gates this path —
+    // `bodyMarginX`, the glyph-less body-indent margin, does instead). Body
+    // lines sit indented past the header margin (x 70 vs header x 50); the
+    // flattened sidebar tail is far right of THAT indent (x 431), never a
+    // modest paragraph indent, so it must stop the body the same way.
+    const section = xSection("experience", [
+      { text: "Northwind Labs  Jul 2025 - Present", x: 50 },
+      { text: "Documented architecture and managed changes with peers.", x: 70 },
+      { text: "Owned the release process end to end.", x: 70 },
+      { text: "Grew and steadied teams across sites.", x: 431 },
+      { text: "Reliability, on-call health.", x: 431 },
+    ]);
+    const [block] = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(block.body).toBe(
+      "Documented architecture and managed changes with peers.\n" +
+        "Owned the release process end to end.",
+    );
+    expect(block.bulletCount).toBe(2);
+  });
+
   it("honors headerLookback=0 — no lines above the anchor join the header", () => {
     const section = experienceSection([
       { text: "EXPERIENCE", fontSize: 13 },
