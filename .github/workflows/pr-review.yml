@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The offlinecv Authors
+#
+# Automated PR review with Claude, running the repo's own /pr-review skill.
+#
+# Cooldown: every push restarts a 3-minute timer (the `cooldown` job's
+# concurrency group cancels the previous run's timer), so the review runs once
+# the author has stopped pushing for 3 minutes, not on every fixup push.
+#
+# Scope: same-repo PRs from authors with write access, not drafts. The skill
+# checks out the branch and runs `npm install`, i.e. executes the PR's code
+# with the Claude token in the environment. For a write-access author that
+# adds no exposure (they can already edit workflows); for a fork PR it would,
+# so forks are never reviewed here.
+#
+# CI overrides to the skill's defaults: `--no-commit` (no fix pushes, no
+# collapse), the review is always posted as COMMENT (never APPROVE or
+# REQUEST_CHANGES — the verdict goes in the body), and no follow-up issues are
+# filed. Repo settings let Actions approve PRs, so the review job dismisses any
+# approval it leaves — delete that step to let bot approvals count.
+#
+# Loop: the `revise` job then runs pr-revise.yml on the review's open threads;
+# its push starts the next run of this workflow, up to PR_REVISE_MAX_ROUNDS.
+name: PR review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  cooldown:
+    if: >
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: pr-review-cooldown-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    outputs:
+      trusted: ${{ steps.gate.outputs.trusted }}
+    steps:
+      - name: Gate on author permission
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          # An API error fails the run rather than reading as "not a collaborator".
+          perm=$(gh api "repos/$REPO/collaborators/$AUTHOR/permission" --jq .permission) \
+            || { echo "::error::could not read $AUTHOR's permission"; exit 1; }
+          case "$perm" in
+            admin|maintain|write) echo "trusted=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "trusted=false" >> "$GITHUB_OUTPUT"; echo "$AUTHOR has '$perm' permission; skipping review." ;;
+          esac
+
+      - name: Wait 3 minutes (a newer push cancels this and restarts the timer)
+        if: steps.gate.outputs.trusted == 'true'
+        run: sleep 180
+
+  review:
+    needs: cooldown
+    if: needs.cooldown.outputs.trusted == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: pr-review-${{ github.event.pull_request.number }}
+      # A newer head's review supersedes this one; don't finish reviewing stale code.
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --max-turns 200
+            --allowedTools "Bash,Read,Glob,Grep,Skill,Task,TodoWrite"
+          prompt: |
+            /pr-review ${{ github.event.pull_request.number }} --no-commit
+
+            You are running unattended in GitHub Actions. These override the skill:
+            - Post the review with event COMMENT, never APPROVE or REQUEST_CHANGES.
+              State the verdict you would have given in the first line of the body.
+            - Do not file follow-up issues (Step 5.7); list them in the review body instead.
+            - Do not push, commit, or collapse anything.
+
+            Output style (terse — the review is read on a phone as often as not):
+            - Body: the verdict line, then at most ~15 lines. No preamble about how
+              you ran, which gates did not apply, or what the PR does.
+            - One line per finding, in the body and in each inline comment:
+              `<file>:L<line>: <severity>: <problem>. <fix>.`
+              with severity `🔴 blocking`, `🟡 secondary`, `🔵 nit`, or `❓ q`.
+            - Exact symbols in backticks; a concrete fix, never "consider …".
+            - Drop hedging ("might", "perhaps"), restating the diff, and praise.
+            - Exception: a security or architecture finding gets one short
+              paragraph with the why — then back to one-liners.
+
+      # Actions may approve PRs in this repo and `main` needs one approval, so a
+      # bot APPROVE would let an agent-written PR merge unread. The prompt asks
+      # for COMMENT; this makes it true regardless of what the model did.
+      - name: Dismiss any approval this job left
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          ids=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and .state == "APPROVED") | .id')
+          failed=0
+          for id in $ids; do
+            gh api -X PUT "repos/$REPO/pulls/$PR/reviews/$id/dismissals" \
+              -f message="The CI review is advisory; a human approves." -f event=DISMISS ||
+              { echo "::error::could not dismiss bot approval $id"; failed=1; }
+          done
+          exit "$failed"
+
+  # Close the loop in the same run: revise from the review's threads. Calling
+  # pr-revise.yml here (not via workflow_run, which only fires from `main`) keeps
+  # the loop on the PR's own branch. Its push starts the next review; its gate
+  # stops on no open threads, approval, or the round cap.
+  revise:
+    needs: review
+    if: needs.review.result == 'success'
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    uses: ./.github/workflows/pr-revise.yml
+    with:
+      pr: ${{ github.event.pull_request.number }}
+      source: bot
+    secrets: inherit
