@@ -29,7 +29,7 @@ function pageCountLabel(pages: number): string {
 
 /**
  * The badge for a save state — extracted for the same reason as the two helpers
- * above, a four-arm inline ternary being exactly what they exist to prevent.
+ * above, a four-arm inline ternary being just what they exist to prevent.
  *
  * Tones come from `StatusBadge`'s existing vocabulary; none is invented, and no
  * state is carried by colour alone — the label is the whole message and `none`
@@ -75,8 +75,8 @@ export function ParsedHeader({
 }: ParsedHeaderProps) {
   const save = saveBadge(saveState);
   return (
-    <header className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
+    <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="flex flex-wrap items-center gap-3">
         <StatusBadge tone="ok">Parsed</StatusBadge>
         {isLlmRecovered && (
           <StatusBadge tone="info">Recovered with on-device AI</StatusBadge>
@@ -95,7 +95,7 @@ export function ParsedHeader({
           {elapsedMs} ms
         </span>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {onOpenFeedback && (
           <Button variant="link" onClick={onOpenFeedback}>
             <span aria-hidden="true">★</span> Feedback
