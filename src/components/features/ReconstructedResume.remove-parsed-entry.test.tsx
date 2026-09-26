@@ -147,6 +147,9 @@ describe("the parsed-entry remove affordance (#856)", () => {
 
   it("deletes by the entry's parsedEntryKey, and takes its bullets", () => {
     const spies = render(PARSED);
+    // First click arms the confirm (#860); the write only lands on the second.
+    act(() => removeButtons()[1].click());
+    expect(spies.onRemoveEntry).not.toHaveBeenCalled();
     act(() => removeButtons()[1].click());
 
     expect(spies.onRemoveEntry).toHaveBeenCalledExactlyOnceWith(
@@ -162,6 +165,7 @@ describe("the parsed-entry remove affordance (#856)", () => {
 
   it("deletes a bullet-less entry with no bullet writes at all", () => {
     const spies = render(PARSED);
+    act(() => removeButtons()[0].click());
     act(() => removeButtons()[0].click());
     expect(spies.onRemoveEntry).toHaveBeenCalledExactlyOnceWith(
       "achievements:0",
@@ -181,7 +185,66 @@ describe("the parsed-entry remove affordance (#856)", () => {
       [added],
     );
     act(() => removeButtons()[3].click());
+    act(() => removeButtons()[3].click());
     expect(spies.onRemoveEntry).toHaveBeenCalledExactlyOnceWith("added:7");
+  });
+
+  it("arms on the first click and does nothing on escape or cancel (#860)", () => {
+    const spies = render(PARSED);
+
+    // Escape disarms with no write.
+    act(() => removeButtons()[0].click());
+    act(() =>
+      removeButtons()[0].dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+    );
+    expect(container.textContent).not.toContain("Remove this achievement");
+    expect(spies.onRemoveEntry).not.toHaveBeenCalled();
+
+    // An explicit Cancel disarms with no write.
+    act(() => removeButtons()[0].click());
+    const cancel = [
+      ...container.querySelectorAll<HTMLElement>("button"),
+    ].find((b) => b.textContent === "Cancel");
+    expect(cancel).toBeDefined();
+    act(() => cancel!.click());
+    expect(container.textContent).not.toContain("Remove this achievement");
+    expect(spies.onRemoveEntry).not.toHaveBeenCalled();
+  });
+
+  it("disarms with no write when focus leaves the confirm control (#860)", async () => {
+    const spies = render(PARSED);
+    act(() => removeButtons()[0].click());
+    expect(container.textContent).toContain("Remove this achievement");
+
+    // Same "focusout" idiom `sectionExitBlur` answers to elsewhere
+    // (`__test-utils__/experience-section-dom.ts`'s `exitSection`); the disarm
+    // is deferred one macrotask, same as that helper's prune.
+    await act(async () => {
+      removeButtons()[0].dispatchEvent(
+        new FocusEvent("focusout", {
+          bubbles: true,
+          relatedTarget: document.body,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(container.textContent).not.toContain("Remove this achievement");
+    expect(spies.onRemoveEntry).not.toHaveBeenCalled();
+  });
+
+  it("names the entry's bullet count in the confirm copy", () => {
+    render(PARSED);
+    // The middle entry ("Best Paper") carries one bullet — see `groupsFor`.
+    act(() => removeButtons()[1].click());
+    expect(container.textContent).toContain(
+      "Remove this achievement and its 1 bullet?",
+    );
+    // The first entry carries none.
+    act(() => removeButtons()[0].click());
+    expect(container.textContent).toContain("Remove this achievement?");
   });
 });
 
@@ -195,6 +258,7 @@ describe("index resolution after a deletion (#856)", () => {
     const spies = render(AFTER, REMOVED);
     expect(removeButtons()).toHaveLength(2);
 
+    act(() => removeButtons()[0].click());
     act(() => removeButtons()[0].click());
     // Render position 0 — "achievements:0" here would be a no-op re-delete of
     // the entry that is already gone, leaving this one un-deletable forever.
@@ -292,13 +356,16 @@ describe("the same section rendered for certifications (#884)", () => {
 
   it("deletes by a certifications-scoped key, never an achievements one", () => {
     const onRemoveEntry = renderCerts();
-    const buttons = [
+    const certButtons = () => [
       ...container.querySelectorAll<HTMLElement>(
         '[aria-label="Remove certification"]',
       ),
     ];
-    expect(buttons).toHaveLength(2);
-    act(() => buttons[1].click());
+    expect(certButtons()).toHaveLength(2);
+    // First click arms the confirm (#860); the second confirms the write.
+    act(() => certButtons()[1]!.click());
+    expect(onRemoveEntry).not.toHaveBeenCalled();
+    act(() => certButtons()[1]!.click());
     expect(onRemoveEntry).toHaveBeenCalledExactlyOnceWith("certifications:1");
   });
 
