@@ -380,23 +380,16 @@ describe("ExperienceSection — 'Other bullets' Remove on an added line (#660 ha
     expect(el.textContent).toContain("Removed 1 change");
   });
 
-  it("splices the FIRST bucket even when the SECOND row was clicked (#683, known)", async () => {
+  it("declines rather than splice the WRONG role's bucket when two rows tie (#683)", async () => {
     // Two added roles each holding a contentless line of the SAME verbatim text.
     // `sameBulletLine`'s verbatim fallback tells `"3."` from `"4."` but cannot
-    // tell one `"3."` from another, so `findAddedBulletEntry` falls back to
-    // first-bucket-wins and BOTH rows resolve to the same bucket.
+    // tell one `"3."` from another, so both rows in "Other bullets" name the same
+    // ambiguous target text.
     //
-    // This case CLICKS THE SECOND ROW on purpose. It used to click the first —
-    // the row whose bucket wins the tiebreak — which made it green whether the
-    // resolver was right or wrong, and that blindness is why #683 survived two
-    // review rounds. Clicking the loser is what makes the assertion mean
-    // something.
-    //
-    // What it pins is therefore the KNOWN-WRONG behaviour, so it goes red when
-    // #683 is fixed — which is the point. The harm is bounded (only contentless
-    // lines reach this branch, the undo snapshot agrees with the splice, and a
-    // second click converges), which is why it ships open rather than blocking.
-    // See #683 for the two candidate fixes and what each costs.
+    // This case CLICKS THE SECOND ROW on purpose — the row whose bucket loses
+    // the old first-bucket-wins tiebreak. Clicking the winner would go green
+    // whether the resolver were right or wrong, and that blindness is why #683
+    // survived two review rounds (AC 3).
     const el = await render();
     mintDegenerateLine();
     let second = "";
@@ -422,13 +415,22 @@ describe("ExperienceSection — 'Other bullets' Remove on an added line (#660 ha
       rows[1]!.querySelector<HTMLButtonElement>('[aria-label="Remove bullet"]')!,
     );
 
-    // #683: the SECOND row was clicked, but the FIRST bucket in insertion order
-    // is what loses its line — the clicked row's own bucket is untouched. Exactly
-    // one line goes per click (a resolver returning every match would empty
-    // both), and nothing is filed by id, so the bucket splice did report success.
-    expect("experience:0" in api.addedBullets).toBe(false);
+    // #683 fixed: an ambiguous resolution refuses rather than guesses. Neither
+    // bucket is touched — not the clicked row's own bucket, and not the
+    // bystander's — and nothing is filed by id either, so the click is an
+    // honest no-op instead of removing a line from a role the user never
+    // clicked.
+    expect(api.addedBullets["experience:0"]).toEqual([DEGENERATE]);
     expect(api.addedBullets[second]).toEqual([DEGENERATE]);
     expect(api.removedBullets.size).toBe(0);
+    expect(el.textContent).not.toContain("Removed 1 change");
+    // Both rows are still on screen, unresolved until the user edits one to
+    // differ — the documented cost of refusing rather than guessing.
+    expect(
+      Array.from(el.querySelectorAll("li")).filter((li) =>
+        li.textContent?.includes(DEGENERATE),
+      ),
+    ).toHaveLength(2);
   });
 });
 
@@ -677,8 +679,9 @@ describe("ExperienceSection — the Undo this Remove arms must actually revert i
     // live, handing it straight back to the section-exit prune.
     //
     // Two degenerate rows with DIFFERENT markers so the resolver is unambiguous
-    // (identical text is #683, a separate defect): one in the added role's
-    // bucket, one in the parsed `experience:0` bucket.
+    // (identical text is the #683 ambiguous-resolution case, exercised on its
+    // own above): one in the added role's bucket, one in the parsed
+    // `experience:0` bucket.
     const el = await render();
     const added = mintDegenerateAddedRole();
     mintDegenerateLine("1.");
