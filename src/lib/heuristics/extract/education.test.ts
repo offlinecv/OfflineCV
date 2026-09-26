@@ -19,6 +19,16 @@ import {
   splitDoubledCity,
 } from "./education.ts";
 import { type PdfLine, type PdfSection } from "../sections.ts";
+import { OPEN_ENDED_ALT } from "../regex.ts";
+
+// Every real-word inflection `inlineDatedProgramText`'s `(?:${OPEN_ENDED_ALT})(?:ly)?`
+// recognises — the pattern also matches nonsense like `Nowly`/`Ongoingly`, which
+// this list deliberately omits. Derived from `OPEN_ENDED_ALT` rather than
+// restated, so a future word added there cannot ship unpinned at either sweep
+// below (#992).
+const OPEN_ENDED_FORMS = OPEN_ENDED_ALT.split("|").flatMap((word) =>
+  word === "Present" || word === "Current" ? [word, `${word}ly`] : [word],
+);
 
 const mkLine = (text: string): PdfLine => ({
   page: 0,
@@ -1183,16 +1193,19 @@ describe("isInlineDatedProgram: a date word must be a whole word (#925)", () => 
   //
   // Swept over the open-ended vocabulary rather than `Presently` alone (#987),
   // so a regression fails as a wrong entry and not only as a wrong boolean the
-  // #952 block below would catch. The three words #952 added are the ones that
-  // regress: on `main` before #985 the `polluted` half gave Harvard
-  // `field: "Fall"` for `Currently` / `Ongoing` / `Now`, while `Present`,
-  // `Presently` and `Current` came out clean — which is why #952's probe found
-  // nothing at this level. `Presently` stays in the sweep as #951's own pin.
+  // #952 block below would catch. Of the six forms, three regress: on `main`
+  // before #985 the `polluted` half gave Harvard `field: "Fall"` for
+  // `Currently` / `Ongoing` / `Now`, while `Present`, `Presently` and
+  // `Current` came out clean — which is why #952's probe found nothing at
+  // this level. `Presently` stays in the sweep as #951's own pin; `Present`
+  // and `Current` are swept here too (#992) because a predicate-level pin
+  // does not protect this entry-level invariant, and the whole sweep is
+  // derived from `OPEN_ENDED_ALT` so a future word cannot ship unpinned.
   //
   // The `fabricated` half holds for every word in the list on both sides of
   // #985; it is here as the other direction of the same invariant, not as a
   // second regression.
-  it.each(["Presently", "Currently", "Ongoing", "Now"])(
+  it.each(OPEN_ENDED_FORMS)(
     "does not let a season-led open-ended range ending in %s reach an education entry",
     (openEnded) => {
       const fabricated = runEdu([
@@ -1247,17 +1260,25 @@ describe("isInlineDatedProgram: every open-ended word is a date word (#952)", ()
   // The strip used to spell `present` as a literal and omit the rest of
   // `OPEN_ENDED_ALT`, so a season-led range ending in any other open-ended
   // word left that word behind as "program text". Season-led only: a month-
-  // or year-led range is rejected earlier by `DATE_LEAD_RE`.
-  it.each([
-    "Fall 2013 - Current",
-    "Fall 2013 - Ongoing",
-    "Fall 2013 - Now",
-    "Fall 2013 – Current",
-    "Fall 2013 – Currently",
-    "Sept 2019 – Present",
-  ])("rejects a season- or month-led open-ended range: %s", (line) => {
-    expect(isInlineDatedProgram(line)).toBe(false);
-  });
+  // or year-led range is rejected earlier by `DATE_LEAD_RE`. Derived from
+  // `OPEN_ENDED_ALT` (via `OPEN_ENDED_FORMS`, #992) rather than restated, so
+  // this vocabulary can't drift from the entry-level sweep above it.
+  it.each(OPEN_ENDED_FORMS.map((word) => `Fall 2013 - ${word}`))(
+    "rejects a season-led open-ended range: %s",
+    (line) => {
+      expect(isInlineDatedProgram(line)).toBe(false);
+    },
+  );
+
+  // The en dash and the month-led lead test different axes (separator, lead
+  // word) than the vocabulary swept above, so one representative word per
+  // row is enough here — literal on purpose, not a second vocabulary copy.
+  it.each(["Fall 2013 – Current", "Fall 2013 – Currently", "Sept 2019 – Present"])(
+    "rejects other separator/lead-word variants of an open-ended range: %s",
+    (line) => {
+      expect(isInlineDatedProgram(line)).toBe(false);
+    },
+  );
 
   // Multi-word names whose FIRST word is open-ended: the rest carries the
   // remainder test. The single-word rows pin the whole-word boundary — each
