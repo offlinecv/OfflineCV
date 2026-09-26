@@ -278,7 +278,7 @@ const BARE_YEAR_RANGE_RE = new RegExp(
 /**
  * Whether `span` should be rejected as a fabricated date range for `region`.
  *
- * Mirrors `mightHavePhone`'s NANP/non-NANP split (phone.ts:204): outside
+ * Mirrors `mightHavePhone`'s NANP/non-NANP split (phone.ts:209): outside
  * NANP-like regions (US/CA), a bare `YYYY - YYYY` span is not rejected,
  * because it may be a real number (see {@link BARE_YEAR_RANGE_RE}) — every
  * other shape `FABRICATED_DATE_RANGE_RE` matches (an `MM`-prefixed anchor on
