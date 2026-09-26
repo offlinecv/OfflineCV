@@ -37,8 +37,9 @@ import {
 import type { LetterRecord } from "../../lib/storage/index.ts";
 
 const saveLetter = vi.hoisted(() => vi.fn());
+const updateLetter = vi.hoisted(() => vi.fn());
 const deleteLetter = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/storage/index.ts", () => ({ saveLetter, deleteLetter }));
+vi.mock("../../lib/storage/index.ts", () => ({ saveLetter, updateLetter, deleteLetter }));
 
 const { StandardLetterButton } = await import("./StandardLetterButton.tsx");
 
@@ -48,6 +49,8 @@ const dom = setupDomRoot();
 beforeEach(() => {
   saveLetter.mockReset();
   saveLetter.mockResolvedValue(undefined);
+  updateLetter.mockReset();
+  updateLetter.mockResolvedValue(undefined);
   deleteLetter.mockReset();
   deleteLetter.mockResolvedValue(true);
   // The acknowledgement is a single global flag, not per-letter — so a test
@@ -99,12 +102,13 @@ describe("StandardLetterButton (#767)", () => {
     click("Save letter");
     await act(async () => {});
 
-    const [input] = saveLetter.mock.calls[0]!;
-    // The SAME id — `saveLetter` upserts, so this replaces the body. A new id
-    // here would leave two standard letters and make which one applies a
-    // matter of `updatedAt` luck.
-    expect(input.id).toBe("standard-1");
-    expect("jobId" in input).toBe(false);
+    // Revising, so this goes through `updateLetter` rather than `saveLetter`
+    // (#929) — the SAME id, first argument, not a second standard letter that
+    // would make which one applies a matter of `updatedAt` luck.
+    expect(saveLetter).not.toHaveBeenCalled();
+    const [id, patch] = updateLetter.mock.calls[0]!;
+    expect(id).toBe("standard-1");
+    expect("jobId" in patch).toBe(false);
   });
 
   it("re-reads the store after a write, so rows pick up the new letter", async () => {
