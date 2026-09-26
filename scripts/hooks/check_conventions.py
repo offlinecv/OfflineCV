@@ -51,10 +51,114 @@ TIER_MODULES = ("pdf-extract", "openresume", "regex-fallback")
 CASCADE_REL = "lib/heuristics/cascade.ts"
 
 
-def strip_line_comments(src: str) -> str:
-    """Drop // single-line comments. Block comments stay (they often
-    wrap JSX literals, and our policy applies to those too)."""
-    return re.sub(r"//[^\n]*", "", src)
+def strip_comments(src: str) -> str:
+    """Drop both // line comments and /* */ block comments before a
+    copy-discipline regex scan, so a word inside a docblock (prose
+    *about* the rule) can't trip a check meant to police JSX/string
+    literals. See #969: a `/* */` docblock's "exactly" fired check 2
+    on every edit to a file that doesn't contain the pattern it exists
+    to catch.
+
+    Walks the source char-by-char instead of using a single alternation
+    regex:
+
+    - A bare `/*`-shaped sequence inside a string/template literal
+      (e.g. ``"a/*b"``) is not a comment start — matching it as one
+      swallows everything up to the next unrelated `*/`, hiding real
+      content (like a later JSX "precisely") from checks 2 and 5. String
+      and template-literal spans are copied through untouched; only
+      text outside them is scanned for comment markers.
+    - A `${…}` interpolation inside a template literal is live code, not
+      string text, and can itself hold a nested template literal (see
+      `canonicalJobUrl` in `job-url.ts`) or an object literal — so
+      template/brace nesting is tracked with an explicit stack rather
+      than "read until the next backtick", which closes on a *nested*
+      literal's opening backtick and desyncs every quote after it.
+    - A `//` immediately preceded by a backslash is the second slash of
+      an escaped `\\/` inside a regex literal (`/^https?:\\/\\//i`), not
+      a comment start; matching it as one would drop the rest of that
+      line from checks 2 and 5.
+    - An unterminated `/*` is invalid JS; keep the tail as ordinary text
+      instead of silently dropping it from the scan.
+    """
+    out = []
+    i, n = 0, len(src)
+    # 'template': raw template-literal text (a bare backtick closes it).
+    # 'brace': live code inside a `${…}` interpolation, or a nested `{…}`
+    # within one — tracked so its closing `}` doesn't get mistaken for
+    # the interpolation's end.
+    stack: list[str] = []
+    while i < n:
+        if stack and stack[-1] == "template":
+            c = src[i]
+            if c == "\\":
+                out.append(c)
+                i += 1
+                if i < n:
+                    out.append(src[i])
+                    i += 1
+                continue
+            if c == "`":
+                out.append(c)
+                i += 1
+                stack.pop()
+                continue
+            if src[i : i + 2] == "${":
+                out.append("${")
+                i += 2
+                stack.append("brace")
+                continue
+            out.append(c)
+            i += 1
+            continue
+        two = src[i : i + 2]
+        if two == "//" and not (i > 0 and src[i - 1] == "\\"):
+            j = src.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        if two == "/*":
+            j = src.find("*/", i + 2)
+            if j == -1:
+                out.append(src[i:])
+                i = n
+            else:
+                i = j + 2
+            continue
+        ch = src[i]
+        if ch in ("'", '"'):
+            out.append(ch)
+            i += 1
+            while i < n:
+                c = src[i]
+                out.append(c)
+                i += 1
+                if c == "\\":
+                    if i < n:
+                        out.append(src[i])
+                        i += 1
+                    continue
+                if c == ch:
+                    break
+            continue
+        if ch == "`":
+            out.append(ch)
+            i += 1
+            stack.append("template")
+            continue
+        if stack and stack[-1] == "brace":
+            if ch == "{":
+                out.append(ch)
+                i += 1
+                stack.append("brace")
+                continue
+            if ch == "}":
+                out.append(ch)
+                i += 1
+                stack.pop()
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
 
 
 def main() -> None:
@@ -102,7 +206,7 @@ def main() -> None:
 
     # 2: copy discipline — no "exactly" / "precisely" in user-facing files.
     if rel.parts[0] in USER_FACING_TOP and not is_test:
-        scan = strip_line_comments(contents)
+        scan = strip_comments(contents)
         m = re.search(r"\b(exactly|precisely)\b", scan, re.IGNORECASE)
         if m:
             fail(
@@ -143,7 +247,7 @@ def main() -> None:
 
     # 5: no raw console.log in src/lib/.
     if rel.parts[0] == "lib" and not is_test:
-        scan = strip_line_comments(contents)
+        scan = strip_comments(contents)
         if re.search(r"\bconsole\.log\s*\(", scan):
             fail(
                 PREFIX,
