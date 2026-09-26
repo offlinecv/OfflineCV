@@ -186,9 +186,30 @@ describe("findAddedBulletEntry", () => {
     ).toBeUndefined();
   });
 
-  it("returns the FIRST bucket when two carry the line", () => {
+  it("refuses to resolve when two buckets carry the SAME contentless marker (#683)", () => {
+    // Verbatim text is the only discriminator for an empty-normalised target,
+    // and it cannot tell one bucket's "1." from another's — so a second match
+    // is an ambiguous resolution, not a tiebreak. Guessing the first one used
+    // to splice a bystander role's line while the clicked row's own bucket
+    // stayed intact; refusing sends the removal to the id-keyed path instead,
+    // where it becomes an honest no-op.
     const buckets = { "added:0": ["1."], "added:1": ["1."] };
+    expect(findAddedBulletEntry(buckets, "1.")).toBeUndefined();
+  });
+
+  it("still resolves a contentless marker when only ONE bucket carries it", () => {
+    // The unambiguous case must keep working (#660 AC 2) — a third, unrelated
+    // bucket does not make this ambiguous.
+    const buckets = { "added:0": ["1."], "added:1": ["Real bullet"] };
     expect(findAddedBulletEntry(buckets, "1.")).toBe("added:0");
+  });
+
+  it("still returns the FIRST bucket for a non-empty duplicate", () => {
+    // Unaffected by #683: a normalise-equal REAL bullet in two buckets is
+    // "correct in effect" either way (the surviving text is identical), so the
+    // plain first-match tiebreak still applies.
+    const buckets = { "added:0": ["Shipped it"], "added:1": ["Shipped it"] };
+    expect(findAddedBulletEntry(buckets, "Shipped it")).toBe("added:0");
   });
 
   it("does NOT match a DIFFERENT contentless line", () => {

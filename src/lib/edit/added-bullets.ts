@@ -161,17 +161,36 @@ export function isContentlessBulletLine(text: string): boolean {
  *
  * First bucket wins, in key-insertion order — the same tiebreak, and the same
  * "not necessarily the row the user clicked" caveat, as
- * {@link removeAddedBulletLine}.
+ * {@link removeAddedBulletLine}. EXCEPT when `text` normalises to empty: there
+ * the verbatim comparison is the only discriminator there is, and it cannot
+ * tell one bucket's `"1."` from another's — so a SECOND match makes the
+ * resolution ambiguous rather than a tiebreak, and this returns `undefined`
+ * instead of guessing (#683). That sends the removal to the id-keyed
+ * `removedBullets` path, where `isUnresolvableBulletKey` already turns it into
+ * an honest no-op (no splice, no "Removed" strip) rather than splicing a
+ * bystander role's line while reporting success. A non-empty target keeps the
+ * plain first-match-wins rule: those duplicates are still "correct in effect"
+ * per the module docblock, so refusing them would only make an unambiguous
+ * case decline for no benefit.
  */
 export function findAddedBulletEntry(
   addedBullets: AddedBullets,
   text: string,
 ): string | undefined {
   const matches = sameBulletLine(text);
-  for (const [entryKey, lines] of Object.entries(addedBullets)) {
-    if (lines.some(matches)) return entryKey;
+  if (normalizeBulletText(text) !== "") {
+    for (const [entryKey, lines] of Object.entries(addedBullets)) {
+      if (lines.some(matches)) return entryKey;
+    }
+    return undefined;
   }
-  return undefined;
+  let found: string | undefined;
+  for (const [entryKey, lines] of Object.entries(addedBullets)) {
+    if (!lines.some(matches)) continue;
+    if (found !== undefined) return undefined;
+    found = entryKey;
+  }
+  return found;
 }
 
 /**
