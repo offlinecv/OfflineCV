@@ -53,6 +53,11 @@ export function EducationEntry({
   // the degree after a comma ("Bachelor of Science, Mechanical Engineering & …").
   const majorInPrimary = !degree && Boolean(field);
   const showMajor = !isAdded && Boolean(field);
+  // The em dash between the primary label (degree/major) and the institution
+  // is edit chrome unless both sides have a value (mirrors the date dash
+  // below and RoleHeader's separators) — otherwise it dangles in front of an
+  // empty "+ institution" prompt.
+  const hasLabel = Boolean(degree) || Boolean(field);
 
   // The editable start/end fields ARE the date display, so the compact `dates`
   // string would duplicate them. Show it ONLY in the legacy year-only fallback
@@ -60,32 +65,48 @@ export function EducationEntry({
   // surfaces it otherwise.
   const yearOnly = !startDate && !endDate && Boolean(dates);
 
+  // Honors and GPA are both edit-chrome affordances when empty (#883); when
+  // BOTH are empty this row has nothing to show at rest, so it floats
+  // (styles/edit-chrome.css) into the gap the list reserves below the entry
+  // instead of holding a blank line open. Opening either field (`:has(input)`)
+  // drops it back into flow, matching InlineBulletAdd.
+  const honorsGpaEmpty = !honors && !gpa;
+
   return (
-    <li className="edit-scope flex flex-col gap-0.5 text-sm">
+    <li className="edit-scope relative flex flex-col gap-0.5 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-          {!majorInPrimary && (
+          {/* Degree + its trailing comma are grouped with NO gap so the comma
+              hugs the degree ("B.S.,"); the major then follows after the
+              normal gap, reading "B.S., Computer Science" on one line. */}
+          <span className="inline-flex items-baseline">
+            {!majorInPrimary && (
+              <EditableField
+                value={degree}
+                placeholder="degree"
+                label="Degree"
+                textWeight="semibold"
+                onCommit={(v) => onFieldChange("degree", v)}
+              />
+            )}
+            {showMajor && degree && (
+              <span className="text-content-muted">,</span>
+            )}
+          </span>
+          {showMajor && (
             <EditableField
-              value={degree}
-              placeholder="degree"
-              label="Degree"
-              textWeight="semibold"
-              onCommit={(v) => onFieldChange("degree", v)}
+              value={field}
+              placeholder="major"
+              label="Field of study"
+              textWeight={majorInPrimary ? "semibold" : undefined}
+              onCommit={(v) => onFieldChange("field", v)}
             />
           )}
-          {showMajor && (
-            <>
-              {degree && <span className="text-content-muted">,</span>}
-              <EditableField
-                value={field}
-                placeholder="major"
-                label="Field of study"
-                textWeight={majorInPrimary ? "semibold" : undefined}
-                onCommit={(v) => onFieldChange("field", v)}
-              />
-            </>
-          )}
-          <span className="text-content-muted">—</span>
+          <span
+            className={`text-content-muted${hasLabel && institution ? "" : " edit-chrome"}`}
+          >
+            —
+          </span>
           <EditableField
             value={institution}
             placeholder="institution"
@@ -106,7 +127,13 @@ export function EducationEntry({
           validate={validateDate}
           onCommit={(v) => onFieldChange("start_date", v)}
         />
-        <span aria-hidden="true">–</span>
+        {/* Edit chrome unless both ends show (mirrors RoleHeader's dash). */}
+        <span
+          aria-hidden="true"
+          className={startDate && endDate ? undefined : "edit-chrome"}
+        >
+          –
+        </span>
         <EditableField
           value={endDate}
           placeholder="end"
@@ -124,8 +151,13 @@ export function EducationEntry({
         // degree, and an uncorrectable miss reaches the exported PDF. The
         // "GPA:" prefix appears only alongside a value: on an empty field the
         // add affordance already names the thing ("+ GPA"), and a static label
-        // in front of it would read as "GPA: + GPA".
-        <div className="flex flex-wrap items-center gap-x-1.5 text-content-tertiary">
+        // in front of it would read as "GPA: + GPA". When both are empty the
+        // row itself is chrome — see `honorsGpaEmpty` above.
+        <div
+          className={`flex flex-wrap items-center gap-x-1.5 text-content-tertiary${
+            honorsGpaEmpty ? " edit-float left-0 top-full" : ""
+          }`}
+        >
           <EditableField
             value={honors}
             placeholder="honors"
@@ -133,7 +165,12 @@ export function EducationEntry({
             textSize="xs"
             onCommit={(v) => onFieldChange("honors", v)}
           />
-          <span aria-hidden="true">·</span>
+          <span
+            aria-hidden="true"
+            className={`text-content-muted${honors && gpa ? "" : " edit-chrome"}`}
+          >
+            ·
+          </span>
           {gpa && <span className="text-content-muted">GPA:</span>}
           <EditableField
             value={gpa}
