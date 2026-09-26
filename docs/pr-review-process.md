@@ -3,7 +3,9 @@
 The path a pull request takes from "I pushed a branch" to "it is in `main`",
 and the two rules along it that surprise people. Companion to
 [Architecture at a glance](./architecture.md) — that page tells you where your
-change goes, this one tells you what happens to it afterwards.
+change goes, this one tells you what happens to it afterwards. Reviewing a PR
+opened by the Gaal coding agent? Use the checklist in
+[Reviewing a Gaal PR](./reviewing-agent-prs.md).
 
 ## The path
 
