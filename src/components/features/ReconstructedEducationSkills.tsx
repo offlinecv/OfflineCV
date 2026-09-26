@@ -113,7 +113,10 @@ export function EducationSection({
       {education.length === 0 ? (
         <NotDetected what="education" />
       ) : (
-        <ul className="flex flex-col gap-2.5 list-none">
+        // Wider on a fine pointer: an entry whose honors/GPA are both empty
+        // floats that row (`edit-float`) into this gap instead of holding a
+        // blank line open, mirroring the roles list's `pointer-fine:gap-8`.
+        <ul className="flex flex-col gap-2.5 pointer-fine:gap-6 list-none">
           {education.map((edu, i) => {
             const added =
               i >= originalCount
