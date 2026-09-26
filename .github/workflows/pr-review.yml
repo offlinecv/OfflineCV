@@ -42,6 +42,7 @@ jobs:
       cancel-in-progress: true
     outputs:
       trusted: ${{ steps.gate.outputs.trusted }}
+      unchanged: ${{ steps.replay.outputs.unchanged }}
     steps:
       - name: Gate on author permission
         id: gate
@@ -68,9 +69,34 @@ jobs:
         if: steps.gate.outputs.trusted == 'true'
         run: sleep 180
 
+      # A clean automatic rebase (pr-auto-rebase.yml) moves the PR onto a new base
+      # without changing its own change, so a review would re-read reviewed code.
+      # That workflow says so in its status comment, keyed to the exact head.
+      - name: Skip a clean automatic rebase
+        id: replay
+        if: steps.gate.outputs.trusted == 'true' && github.event.action == 'synchronize'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          n=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"<!-- gaal:clean-replay $HEAD_SHA -->\")))] | length" |
+            jq -s add)
+          # Only when some earlier head was reviewed: a clean rebase is no reason
+          # to skip a change nobody has looked at.
+          reviewed=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
+            --jq '[.[] | select(.user.login == "github-actions[bot]")] | length' | jq -s add)
+          if [ "${n:-0}" -gt 0 ] && [ "${reviewed:-0}" -gt 0 ]; then
+            echo "Head $HEAD_SHA is a clean rebase of an already-reviewed change; skipping the review."
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+          fi
+
   review:
     needs: cooldown
-    if: needs.cooldown.outputs.trusted == 'true'
+    if: needs.cooldown.outputs.trusted == 'true' && needs.cooldown.outputs.unchanged != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
