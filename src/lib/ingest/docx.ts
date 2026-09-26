@@ -29,8 +29,12 @@ interface TurndownService {
   turndown(html: string): string;
 }
 
+interface TurndownOptions {
+  headingStyle?: "setext" | "atx";
+}
+
 interface TurndownModule {
-  default: new () => TurndownService;
+  default: new (options?: TurndownOptions) => TurndownService;
 }
 
 // Minimal JSZip surface (hand-rolled like MammothLib above so we neither bundle
@@ -46,7 +50,8 @@ interface JSZipCtor {
 }
 
 let mammothCached: Promise<MammothLib> | null = null;
-let turndownCached: Promise<new () => TurndownService> | null = null;
+let turndownCached: Promise<new (options?: TurndownOptions) => TurndownService> | null =
+  null;
 let jszipCached: Promise<JSZipCtor> | null = null;
 
 async function loadMammoth(): Promise<MammothLib> {
@@ -59,7 +64,9 @@ async function loadMammoth(): Promise<MammothLib> {
   return mammothCached;
 }
 
-async function loadTurndown(): Promise<new () => TurndownService> {
+async function loadTurndown(): Promise<
+  new (options?: TurndownOptions) => TurndownService
+> {
   if (turndownCached) return turndownCached;
   turndownCached = (async () => {
     const mod = (await import("turndown")) as TurndownModule;
@@ -217,7 +224,12 @@ export async function parseDocx(bytes: ArrayBuffer): Promise<DocxParseResult> {
     extractHeaderFooterLinks(bytes),
   ]);
 
-  const td = new TurndownService();
+  // Turndown's default headingStyle is "setext", which renders Word's
+  // Heading1/Heading2 styles (mammoth maps them to <h1>/<h2>) as `Text\n====` /
+  // `Text\n----`. Neither markdown-lines.ts nor mdToPlainText reads that form,
+  // so the underline survived as a junk prose line and the heading lost its
+  // level entirely (#961). Force ATX (`# Text`) instead.
+  const td = new TurndownService({ headingStyle: "atx" });
   let markdown = td.turndown(htmlResult.value);
   let rawText = textResult.value;
 

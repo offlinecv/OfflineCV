@@ -61,6 +61,48 @@ describe("mdToPlainText", () => {
   });
 });
 
+describe("mdToPlainText — setext headings (#961)", () => {
+  const SETEXT = [
+    "Jane Doe",
+    "========",
+    "",
+    "Summary",
+    "=======",
+    "",
+    "Seasoned engineer.",
+    "",
+    "Experience",
+    "----------",
+    "",
+    "Staff Engineer, Acme",
+    "--------------------",
+    "",
+    "- Shipped things.",
+  ].join("\n");
+
+  it("resolves both `=` and `-` underlines to plain heading text, with no rule line surviving", () => {
+    const result = mdToPlainText(SETEXT);
+    expect(result).not.toMatch(/^=+$/m);
+    expect(result).not.toMatch(/^-{2,}$/m);
+    expect(result).toContain("Jane Doe");
+    expect(result).toContain("Summary");
+    expect(result).toContain("Experience");
+    expect(result).toContain("Staff Engineer, Acme");
+  });
+
+  it("drops a `---` thematic break rather than emitting it as prose", () => {
+    expect(mdToPlainText("Some paragraph.\n\n---\n\nMore text.")).toBe(
+      "Some paragraph.\n\n\nMore text.",
+    );
+  });
+
+  it("never treats a bullet line as the heading text an underline promotes", () => {
+    // The bullet disqualifies promotion, and the dash run is then a thematic
+    // break like the `---` case above — dropped, not left as a literal line.
+    expect(mdToPlainText("- Shipped things.\n----------------")).toBe("Shipped things.");
+  });
+});
+
 describe("mdToPlainText — reference-style links (#611)", () => {
   // `rawText` is rendered verbatim by `EvidencePanel`, so these two rewrites
   // are user-visible in their own right — and they are what keeps this reading
