@@ -26,7 +26,12 @@ import {
   type CountryCode,
   type PhoneNumber,
 } from "libphonenumber-js/min";
-import { PHONE_RE, US_LOCATION_RE, INTL_LOCATION_RE } from "./regex.ts";
+import {
+  PHONE_RE,
+  US_LOCATION_RE,
+  INTL_LOCATION_RE,
+  YEAR_SHAPE,
+} from "./regex.ts";
 
 // ── Region inference ─────────────────────────────────────────────────────────
 
@@ -206,12 +211,93 @@ function mightHavePhone(text: string, region: CountryCode): boolean {
 }
 
 /**
+ * A 4-digit token shaped like a plausible résumé year — 1900 through 2099.
+ * Narrower than bare `\d{4}`: an 8-digit international number is often
+ * grouped as two 4-digit runs (Hong Kong `2872-1234`, or the trailing
+ * `2345-6789` of a Taiwanese `02-2345-6789`), and those runs land outside
+ * this range far more often than a real date does — #480 caught both
+ * rejected outright by the un-narrowed version. Reuses `regex.ts`'s
+ * `YEAR_SHAPE` fragment rather than re-deriving the `(19|20)` prefix.
+ */
+const RESUME_YEAR = YEAR_SHAPE;
+
+/**
+ * One numeric date anchor: `MM.YYYY`, `MM/YYYY`, `MM-YYYY`, or a bare
+ * `YYYY` — where `YYYY` must be {@link RESUME_YEAR}-shaped, not just any
+ * 4 digits (see {@link FABRICATED_DATE_RANGE_RE}). The `MM` side is capped
+ * at two digits before the separator — a real phone number's area code /
+ * exchange groups run 3+ digits, so they can never fit this shape.
+ *
+ * Carries a bare top-level `|` — same footgun `regex.ts`'s `DATE_ANCHOR`
+ * docblock warns about. Any consumer MUST wrap it in a non-capturing group
+ * before anchoring (`^(?:${NUMERIC_DATE_ANCHOR})$`), else `^`/`$` bind only
+ * to the first alternative.
+ */
+const NUMERIC_DATE_ANCHOR = `\\d{1,2}[./-]${RESUME_YEAR}|${RESUME_YEAR}`;
+
+/**
+ * Rejects a candidate phone span that IS a date range, rather than
+ * allow-listing punctuation.
+ *
+ * `findPhoneNumbersInText` doesn't stop at word boundaries — it will fold
+ * digits across arbitrary punctuation into one candidate number and hand
+ * back whichever span happens to validate. Given "(555) 018-2390" (invalid:
+ * 555 isn't a real NANP area code) followed by a "06/2017 – 03/2021" date
+ * range, it skips the invalid header number and returns a *valid* number
+ * fabricated from the date's digits ("2017 – 03/2021" → (201) 703-2021) —
+ * see #480. The same fabrication happens with a `.`-separated range
+ * ("11.2022 – 05.2020"), and neither punctuation mark can simply be banned:
+ * `/` is a real area-code separator in some locales (German `030/12345678`),
+ * and `.` folds harmlessly into `mightHavePhone`'s pre-filter too. So the
+ * gate checks the matched span's SHAPE instead of its characters: two
+ * numeric anchors joined by a dash-family separator, each either a bare
+ * {@link RESUME_YEAR} or an `MM` + {@link RESUME_YEAR} pair, is a date range
+ * and nothing else — a real number's digit groups are always either
+ * unbroken, split into 3+-digit groups, or (see {@link RESUME_YEAR}) land
+ * outside the plausible-year window.
+ */
+const FABRICATED_DATE_RANGE_RE = new RegExp(
+  `^\\s*(?:${NUMERIC_DATE_ANCHOR})\\s*[‒–—-]\\s*(?:${NUMERIC_DATE_ANCHOR})\\s*$`,
+);
+
+/**
+ * A span shaped like a bare `YYYY - YYYY` range, with NEITHER side carrying
+ * an `MM` prefix. Unlike the `MM`-prefixed anchors (whose 3+ digit area-code
+ * groups can never collide with a real number), this bare shape can BE a
+ * real phone number in non-NANP locales: several group an 8-digit number as
+ * two bare 4-digit runs (Hong Kong `2019 2021`), and when both runs happen
+ * to be {@link RESUME_YEAR}-shaped it is indistinguishable from a
+ * fabricated date range by shape alone. NANP regions (US/CA) have no such
+ * native grouping — an area code is always 3 digits — so this shape is
+ * unambiguous only there.
+ */
+const BARE_YEAR_RANGE_RE = new RegExp(
+  `^\\s*${RESUME_YEAR}\\s*[‒–—-]\\s*${RESUME_YEAR}\\s*$`,
+);
+
+/**
+ * Whether `span` should be rejected as a fabricated date range for `region`.
+ *
+ * Mirrors `mightHavePhone`'s NANP/non-NANP split (phone.ts:209): outside
+ * NANP-like regions (US/CA), a bare `YYYY - YYYY` span is not rejected,
+ * because it may be a real number (see {@link BARE_YEAR_RANGE_RE}) — every
+ * other shape `FABRICATED_DATE_RANGE_RE` matches (an `MM`-prefixed anchor on
+ * at least one side) is still rejected everywhere.
+ */
+function isFabricatedDateRange(span: string, region: CountryCode): boolean {
+  if (!FABRICATED_DATE_RANGE_RE.test(span)) return false;
+  if (region === "US" || region === "CA") return true;
+  return !BARE_YEAR_RANGE_RE.test(span);
+}
+
+/**
  * Locate and normalize the first phone number found in `text`.
  *
  * Uses a cheap pre-filter (`PHONE_RE` + `+\d` heuristic, relaxed for non-US
  * regions): if no digit sequence looks like a phone, the heavier
- * `findPhoneNumbersInText` call is skipped entirely. When a hit is found,
- * the number is formatted per `formatPhoneNumber`.
+ * `findPhoneNumbersInText` call is skipped entirely. Of the hits found, the
+ * first one whose matched span is NOT a fabricated date range
+ * (`isFabricatedDateRange`) wins.
  *
  * @param text   Full text to search (e.g. the joined contact-header lines).
  * @param region ISO 3166-1 alpha-2 default region. Defaults to `"US"`.
@@ -224,7 +310,10 @@ export function findFirstPhone(
   if (!mightHavePhone(text, region)) return undefined;
 
   const hits = findPhoneNumbersInText(text, region);
-  if (hits.length === 0) return undefined;
-  const pn = hits[0].number;
+  const hit = hits.find(
+    (h) => !isFabricatedDateRange(text.slice(h.startsAt, h.endsAt), region),
+  );
+  if (!hit) return undefined;
+  const pn = hit.number;
   return { formatted: formatPhoneNumber(pn), isValid: pn.isValid() };
 }

@@ -117,6 +117,79 @@ describe("findFirstPhone — extraction from text", () => {
     const r2 = findFirstPhone(text);
     expect(r1?.formatted).toBe(r2?.formatted);
   });
+
+  it("does not fabricate a phone from experience date digits (#480)", () => {
+    // 06/2017 – 03/2021 folds to 2017032021 -> "(201) 703-2021", a VALID NJ
+    // number that appears nowhere in the résumé. An invalid-but-phone-shaped
+    // number in the header is what opens the scan, so it must be present.
+    const raw = "(555) 018-2390\nEXPERIENCE\nStaff Engineer, Acme\n06/2017 – 03/2021";
+    expect(findFirstPhone(raw, "US")).toBeUndefined();
+  });
+
+  it("still finds a valid contact phone ahead of a date range (#480)", () => {
+    const raw = "(312) 555-0123\n06/2017 – 03/2021";
+    expect(findFirstPhone(raw, "US")?.formatted).toBe("(312) 555-0123");
+  });
+
+  it("does not fabricate a phone from a dot-separated date range (#480)", () => {
+    // 11.2022 – 05.2020 folds to "(202) 205-2020", a VALID DC number that
+    // appears nowhere in the résumé. Same fabrication as the slash-separated
+    // case, via the `.` month/year separator instead of `/`.
+    const raw = "(555) 018-2390\nEXPERIENCE\nStaff Engineer, Acme\n11.2022 – 05.2020";
+    expect(findFirstPhone(raw, "US")).toBeUndefined();
+  });
+
+  it("finds a German number using '/' as its area-code separator (#480)", () => {
+    // 030/12345678 is a real Berlin number shape — banning `/` outright to
+    // reject the date-range fabrication above would also reject this.
+    const result = findFirstPhone("Tel: 030/12345678", "DE");
+    expect(result).toBeDefined();
+    expect(result!.formatted).toBe("+49 30 12345678");
+    expect(result!.isValid).toBe(true);
+  });
+
+  it("finds a Hong Kong number whose 4+4 digit grouping is not a date range (#1054)", () => {
+    // 2872-1234 is two bare 4-digit groups joined by a dash — the same shape
+    // as a fabricated year range. Neither group is year-shaped (1900-2099),
+    // so RESUME_YEAR keeps FABRICATED_DATE_RANGE_RE from rejecting it.
+    const result = findFirstPhone("Tel: 2872-1234", "HK");
+    expect(result).toBeDefined();
+    expect(result!.formatted).toBe("+852 2872 1234");
+    expect(result!.isValid).toBe(true);
+  });
+
+  it("finds a Taiwanese number whose trailing 4+4 group is not a date range (#1054)", () => {
+    // The trailing "2345-6789" of "02-2345-6789" parses as an MM/YYYY-shaped
+    // anchor ("02-2345") joined to a bare "6789" — both fail RESUME_YEAR,
+    // since 2345 and 6789 land outside 1900-2099.
+    const result = findFirstPhone("Tel: 02-2345-6789", "TW");
+    expect(result).toBeDefined();
+    expect(result!.formatted).toBe("+886 2 2345 6789");
+    expect(result!.isValid).toBe(true);
+  });
+
+  it("finds a Hong Kong number even when both 4-digit groups are year-shaped (#1054)", () => {
+    // "2019-2021" is two bare 4-digit groups that are BOTH RESUME_YEAR-shaped
+    // (19xx/20xx), the exact case FABRICATED_DATE_RANGE_RE alone would reject
+    // as a date range. NANP has no native bare 4+4 grouping (an area code is
+    // always 3+ digits), so isFabricatedDateRange only rejects this shape for
+    // US/CA — a non-NANP region gets the benefit of the doubt and the real
+    // number is returned.
+    const result = findFirstPhone("Tel: 2019-2021", "HK");
+    expect(result).toBeDefined();
+    expect(result!.formatted).toBe("+852 2019 2021");
+    expect(result!.isValid).toBe(true);
+  });
+
+  it("skips a rejected date-range hit and still finds a real number that follows it (#1054)", () => {
+    // The fabrication-shaped span is not necessarily the LAST candidate in
+    // the text — hits.find() must keep scanning past a rejected hit rather
+    // than stopping at the first candidate.
+    const raw =
+      "EXPERIENCE\nStaff Engineer, Acme\n06/2017 – 03/2021\nContact: (312) 555-0123";
+    const result = findFirstPhone(raw, "US");
+    expect(result?.formatted).toBe("(312) 555-0123");
+  });
 });
 
 // ── regionFromLocation ───────────────────────────────────────────────────────
