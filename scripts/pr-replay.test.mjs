@@ -77,7 +77,9 @@ const kv = (out) => Object.fromEntries(out.trim().split("\n").filter(Boolean).ma
 
 function clone(name) {
   const path = join(dir, name);
-  sh(dir, "git", ["clone", "-q", join(dir, "origin.git"), path]);
+  // file:// makes it a real fetch: a plain-path clone copies the whole object
+  // store, unreachable commits included, which GitHub never does.
+  sh(dir, "git", ["clone", "-q", `file://${join(dir, "origin.git")}`, path]);
   git(path, "config", "user.name", "Author Person");
   git(path, "config", "user.email", "author@example.com");
   git(path, "config", "commit.gpgsign", "false");
@@ -108,7 +110,7 @@ function apply(runner, json) {
 
 function publish(runner, json, applied) {
   const j = JSON.parse(readFileSync(json, "utf8"));
-  git(runner, "remote", "set-url", "origin", join(dir, "origin.git"));
+  git(runner, "remote", "set-url", "origin", `file://${join(dir, "origin.git")}`);
   return kv(
     run(runner, ["publish"], {
       PR: "7",
@@ -145,6 +147,8 @@ beforeEach(() => {
     HOME: dir,
   };
   sh(dir, "git", ["init", "-q", "--bare", "-b", "main", "origin.git"]);
+  // GitHub serves a repo's commits by SHA even after a force-push dropped them.
+  git(join(dir, "origin.git"), "config", "uploadpack.allowAnySHA1InWant", "true");
   author = clone("author");
   commit(author, { "a.txt": lines(20), "b.txt": "b\n" }, "chore: seed");
   git(author, "push", "-q", "origin", "HEAD:main");
@@ -346,6 +350,23 @@ describe("apply + publish: a stacked PR", () => {
     expect(git(author, "diff", "--name-only", "origin/p1", "origin/c1")).toBe("c.txt");
   });
 
+  it("E2. child built BELOW the parent's old head: fetched by SHA to prove it is base", () => {
+    git(author, "checkout", "-q", "-B", "p1", "main");
+    const parentFirst = commit(author, { "b.txt": "parent 1\n" }, "feat: p1 part 1");
+    const oldParentHead = commit(author, { "d.txt": "parent 2\n" }, "feat: p1 part 2");
+    git(author, "push", "-q", "-f", "origin", "HEAD:refs/heads/p1");
+    const head = prBranch("c1", parentFirst, { "c.txt": "child\n" });
+    const newParent = prBranch("p1", "main", { "b.txt": "parent v2\n" });
+    runner = clone("runner");
+    // Only the parent's old HEAD is on record, and nothing the runner fetched reaches it.
+    const json = prJson({ headRef: "c1", headSha: head, baseRef: "p1", known: [oldParentHead, newParent] });
+    const a = apply(runner, json);
+    expect(a).toMatchObject({ status: "clean", own_base: parentFirst });
+    expect(publish(runner, json, a).result).toBe("pushed");
+    git(author, "fetch", "-q", "origin");
+    expect(git(author, "diff", "--name-only", "origin/p1", "origin/c1")).toBe("c.txt");
+  });
+
   it("F. parent squash-merged into main: the child lands on main alone and is retargeted", () => {
     const parentHead = prBranch("p1", "main", { "b.txt": "parent\n" });
     const head = prBranch("c1", "p1", { "c.txt": "child\n" });
@@ -414,6 +435,14 @@ describe("resolve", () => {
     graphHeads("p2", [{ number: 6, state: "MERGED", baseRefName: "p1", head: "2".repeat(40) }]);
     graphHeads("p1", [{ number: 5, state: "MERGED", baseRefName: "main", head: "1".repeat(40) }]);
     expect(resolvePr()).toMatchObject({ target: "main", known: ["1".repeat(40), "2".repeat(40)] });
+  });
+
+  it("accepts a chain of exactly 10 merged parents that ends on main", () => {
+    graphPr({ baseRefName: "p10" });
+    for (let i = 10; i >= 1; i--) {
+      graphHeads(`p${i}`, [{ number: 100 + i, state: "MERGED", baseRefName: i === 1 ? "main" : `p${i - 1}`, head: String(i % 10).repeat(40) }]);
+    }
+    expect(resolvePr()).toMatchObject({ target: "main" });
   });
 
   it("finds the old parent of a PR someone retargeted by hand", () => {

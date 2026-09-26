@@ -182,6 +182,13 @@ jobs:
 
       - run: npm ci
 
+      # Out of the agent's reach before it runs, and from the default branch: the
+      # checkout is the PR's, which may predate the file (see publish-policy.sh).
+      - name: Keep the publish policy out of the work tree
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: git show "origin/$DEFAULT_BRANCH:.github/scripts/publish-policy.sh" > "$RUNNER_TEMP/publish-policy.sh"
+
       - name: Revise
         uses: anthropics/claude-code-action@v1
         with:
@@ -230,6 +237,8 @@ jobs:
             GH_TOKEN="$GITHUB_TOKEN_RO" gh pr edit "$PR" --repo "$REPO" --add-label needs-human
             note "$1"
           }
+          # shellcheck source=/dev/null # BLOCKED_PATHS, ATTRIBUTION
+          . "$RUNNER_TEMP/publish-policy.sh"
 
           git add -A
           if git diff --cached --quiet && [ "$(git rev-parse HEAD)" = "$HEAD_SHA" ]; then
@@ -242,8 +251,7 @@ jobs:
           fi
           # A workflow the agent wrote would run with secrets on the next review,
           # and the next review runs `npm install`, so manifests count too.
-          blocked=$(git diff --cached --name-only "$HEAD_SHA" |
-            grep -E '^(\.github(/|$)|package\.json$|package-lock\.json$|\.npmrc$)' || true)
+          blocked=$(git diff --cached --name-only "$HEAD_SHA" | grep -E "$BLOCKED_PATHS" || true)
           if [ -n "$blocked" ]; then
             handoff "**Auto-revise not pushed** — the revision touches $(paste -sd' ' <<<"$blocked"), which automation may not push. Needs a human."
             exit 1
@@ -254,7 +262,7 @@ jobs:
           first=$(git rev-list --reverse "origin/$BASE_REF..HEAD" | head -1)
           author=$(git log -1 --format='%an <%ae>' "$first")
           git log -1 --format=%B "$first" |
-            grep -viE '^[[:space:]]*(co-authored-by|claude-session|generated[- ]by|signed-off-by):|generated with \[?claude' > "$msg" || true
+            grep -viE "$ATTRIBUTION" > "$msg" || true
           [ -s "$msg" ] || printf 'chore: revise PR #%s\n' "$PR" > "$msg"
 
           git reset --soft "$(git merge-base "origin/$BASE_REF" HEAD)"
@@ -263,7 +271,8 @@ jobs:
             commit -q --author="$author" -F "$msg"
 
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
-          if ! git push --force-with-lease="refs/heads/$BRANCH:$HEAD_SHA" origin "HEAD:refs/heads/$BRANCH"; then
+          # `npm ci` installed the repo's pre-push hook; CI runs `verify` on the push anyway.
+          if ! OFFLINECV_SKIP_HOOKS=1 git push --force-with-lease="refs/heads/$BRANCH:$HEAD_SHA" origin "HEAD:refs/heads/$BRANCH"; then
             note "**Auto-revise not pushed** — \`$BRANCH\` moved during the run. The next review or comment will retry."
             exit 1
           fi

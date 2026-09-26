@@ -12,7 +12,11 @@
 #                             without a conflict, or its diff keeps showing the
 #                             parent's superseded change. A merged parent's
 #                             children are retargeted to its base.
-#   - workflow_dispatch     → one PR, by number.
+#   - workflow_dispatch     → one PR, by number. Also how the two events above
+#                             reach the rebase: claude-code-action rejects `push`
+#                             ("Unsupported event type: push", the first live run),
+#                             so `select` dispatches one run per PR instead of
+#                             rebasing inline. One path, on an event it accepts.
 # A clean replay is pushed with no agent at all. A conflict goes to the Gaal
 # agent only when it is small (PR_AUTO_REBASE_MAX_FILES / _MAX_HUNKS, default 3
 # files / 10 hunks), touches nothing sensitive (fixtures, .github/, manifests),
@@ -24,8 +28,8 @@
 # Human PRs are never touched: force-pushing a person's branch under them is a
 # surprise even with the lease. They can ask with `/gaal rebase`.
 #
-# Trust: `push` and `pull_request_target` both run this file from the default
-# branch, and the replay script is copied from that checkout before any PR code
+# Trust: every trigger runs this file from the default branch (the dispatch
+# names `--ref` explicitly), and the replay script is copied from that checkout before any PR code
 # lands in the work tree, so a PR cannot change what rebases it. The agent sees
 # only Gaal-authored PRs, whose text comes from write-access issues (see
 # gaal-agent.yml), under the same egress block and no-push-token rules.
@@ -45,6 +49,10 @@ on:
         description: Gaal PR number to rebase
         required: true
         type: number
+      agent:
+        description: Let the agent resolve a small conflict (false hands every conflict to a human)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -53,16 +61,16 @@ jobs:
   select:
     if: >
       vars.PR_AUTO_REBASE != 'false' && (
-        github.event_name != 'pull_request_target' || (
+        github.event_name == 'push' || (
+          github.event_name == 'pull_request_target' &&
           github.event.pull_request.head.repo.full_name == github.repository &&
           (github.event.action == 'synchronize' || github.event.pull_request.merged)))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: write
       contents: read
       pull-requests: read
-    outputs:
-      prs: ${{ steps.select.outputs.prs }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -80,26 +88,26 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR: ${{ inputs.pr }}
           AGENT_CAP: ${{ vars.PR_AUTO_REBASE_AGENT_CAP || '3' }}
+          WORKFLOW: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
           prs=$(.github/scripts/pr-replay.sh select)
           echo "$prs"
-          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+          # A dispatch made with github.token is the one kind of token-made event
+          # that does start a workflow.
+          workflow=${WORKFLOW%@*}; workflow=${workflow##*/}
+          jq -r '.[] | "\(.pr) \(.agent)"' <<<"$prs" | while read -r pr agent; do
+            gh workflow run "$workflow" --repo "$REPO" --ref "$DEFAULT_BRANCH" -f pr="$pr" -f agent="$agent"
+          done
 
   rebase:
-    needs: select
-    if: needs.select.outputs.prs != '' && needs.select.outputs.prs != '[]'
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        include: ${{ fromJSON(needs.select.outputs.prs) }}
+    if: github.event_name == 'workflow_dispatch' && vars.PR_AUTO_REBASE != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
       # A newer base supersedes this replay. Deliberately NOT gaal-agent.yml's
       # group: a queued run there would be cancelled by one here.
-      group: pr-auto-rebase-${{ matrix.pr }}
+      group: pr-auto-rebase-${{ inputs.pr }}
       cancel-in-progress: true
     permissions:
       contents: read
@@ -107,8 +115,8 @@ jobs:
       pull-requests: write
     env:
       REPO: ${{ github.repository }}
-      PR: ${{ matrix.pr }}
-      AGENT_OK: ${{ matrix.agent }}
+      PR: ${{ inputs.pr }}
+      AGENT_OK: ${{ inputs.agent }}
       APP_BOT: gaal-agent[bot]
       APP_CLIENT_ID: Iv23lijWO2RZ8KF2POYi
     steps:
@@ -145,7 +153,9 @@ jobs:
         run: |
           set -euo pipefail
           replay="$RUNNER_TEMP/pr-replay.sh"
-          cp .github/scripts/pr-replay.sh "$replay"
+          cp .github/scripts/pr-replay.sh .github/scripts/publish-policy.sh "$RUNNER_TEMP/"
+          # shellcheck source=/dev/null # BLOCKED_PATHS
+          . "$RUNNER_TEMP/publish-policy.sh"
           note() { printf '%s\n' "$1" > "$RUNNER_TEMP/note.md"; "$replay" note "$PR" "$RUNNER_TEMP/note.md"; }
           handoff() { gh pr edit "$PR" --repo "$REPO" --add-label needs-human >/dev/null; note "$1"; }
           retry="Comment \`/gaal rebase\` to have Gaal try anyway, \`/gaal <how to combine them>\` to steer it, or rebase by hand onto"
@@ -157,9 +167,12 @@ jobs:
             { echo "PR #$PR is no longer an open, queue-free Gaal PR; skipping."; exit 0; }
 
           "$replay" apply "$RUNNER_TEMP/pr.json" | tee "$RUNNER_TEMP/replay.env"
-          # key=value lines; values may hold spaces (file lists), so never `source` them.
-          while IFS='=' read -r k v; do printf -v "$k" '%s' "$v"; done < "$RUNNER_TEMP/replay.env"
-          cat "$RUNNER_TEMP/replay.env" >> "$GITHUB_OUTPUT"
+          # Only our key=value lines (a push hook or tool may print more), re-quoted with
+          # %q so a value holding spaces or quotes (a file list) sources as data.
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/replay.env" | while IFS='=' read -r k v; do printf '%s=%q\n' "$k" "$v"; done > "$RUNNER_TEMP/replay.vars"
+          # shellcheck source=/dev/null # our own key=value lines, re-quoted by %q
+          . "$RUNNER_TEMP/replay.vars"
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/replay.env" >> "$GITHUB_OUTPUT"
           {
             echo "head_sha=$(jq -r .headSha "$RUNNER_TEMP/pr.json")"
             echo "base_ref=$(jq -r .baseRef "$RUNNER_TEMP/pr.json")"
@@ -177,7 +190,7 @@ jobs:
 
           # A conflict: hand the small ones to the agent, the rest to a human.
           sensitive=$(tr ' ' '\n' <<<"$conflict_files" |
-            grep -E '^(tests/fixtures/|\.github/|package\.json$|package-lock\.json$|\.npmrc$)' | paste -sd' ' - || true)
+            grep -E "^tests/fixtures/|$BLOCKED_PATHS" | paste -sd' ' - || true)
           if [ -n "$sensitive" ]; then
             handoff "**Conflicts with \`$target\` need a human.** They touch $sensitive, which automation does not resolve. $retry \`$target\`."
           elif [ "$conflict_count" -gt "$MAX_FILES" ] || [ "$conflict_hunks" -gt "$MAX_HUNKS" ]; then
@@ -251,9 +264,8 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
           github_token: ${{ github.token }}
-          # The actor is whoever moved the base: a merge (the merge queue's bot)
-          # or Gaal's own push to a stack parent.
-          allowed_bots: gaal-agent,github-merge-queue
+          # A run dispatched by `select` has github-actions[bot] as its actor.
+          allowed_bots: github-actions
           claude_args: >-
             --max-turns 80
             --allowedTools "Bash,Read,Edit,Write,Glob,Grep,TodoWrite"
@@ -292,7 +304,9 @@ jobs:
 
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
           "$replay" publish | tee "$RUNNER_TEMP/publish.env"
-          while IFS='=' read -r k v; do printf -v "$k" '%s' "$v"; done < "$RUNNER_TEMP/publish.env"
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/publish.env" | while IFS='=' read -r k v; do printf '%s=%q\n' "$k" "$v"; done > "$RUNNER_TEMP/publish.vars"
+          # shellcheck source=/dev/null # our own key=value lines, re-quoted by %q
+          . "$RUNNER_TEMP/publish.vars"
 
           where="\`$TARGET\` @ ${TIP:0:7}${retargeted:+ (retargeted: the old base \`$BASE_REF\` has merged)}"
           case "$result" in

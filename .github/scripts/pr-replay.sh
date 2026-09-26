@@ -29,7 +29,7 @@
 # Subcommands (REPO=owner/name and GH_TOKEN in the environment):
 #   select             pr-auto-rebase.yml: which PRs to replay for this event.
 #                      Env EVENT, DEFAULT_BRANCH, and HEAD_REF (the pushed or
-#                      merged PR's branch) or PR. Prints a JSON array.
+#                      merged PR's branch). Prints a JSON array.
 #   resolve <pr>       The PR's state, its replay target and the commits known
 #                      to be base rather than the PR's own. Prints JSON.
 #   apply <json>       Fetch, check, and replay onto origin/<target>, leaving the
@@ -43,10 +43,10 @@ set -euo pipefail
 : "${REPO:?REPO=owner/name is required}"
 
 STATUS_MARKER='<!-- gaal:rebase-status -->'
-# Paths automation may not publish: a workflow runs with secrets, and the next
-# review runs `npm install`, so a manifest script would execute unreviewed.
-BLOCKED_PATHS='^(\.github(/|$)|package\.json$|package-lock\.json$|\.npmrc$)'
-ATTRIBUTION='^[[:space:]]*(co-authored-by|claude-session|generated[- ]by|signed-off-by):|generated with \[?claude'
+# BLOCKED_PATHS and ATTRIBUTION. Workflows run a copy of both files taken before
+# their agent starts, so this is the copy next to this script, never the work tree's.
+# shellcheck source=/dev/null # BLOCKED_PATHS, ATTRIBUTION
+. "$(dirname "${BASH_SOURCE[0]}")/publish-policy.sh"
 GAAL_LOGIN=gaal-agent
 
 die() { echo "pr-replay: $*" >&2; exit 1; }
@@ -105,7 +105,8 @@ cmd_resolve() {
     merged=$(jq -c '[.[] | select(.state == "MERGED")][0]' <<<"$prs")
     [ "$merged" != null ] || break
     target=$(jq -r .baseRefName <<<"$merged")
-    [ "$hop" -lt 10 ] || die "base chain of #$n is longer than 10 merged PRs"
+    # Checked after the step: the 10th merged parent may land on the default branch.
+    [ "$hop" -lt 10 ] || [ "$target" = "$default" ] || die "base chain of #$n is longer than 10 merged PRs"
   done
 
   # A PR retargeted by hand (e.g. onto main after its parent merged) still sits
@@ -134,6 +135,15 @@ is_known_base() {
     fi
   done
   jq -e --arg c "$c" '.known | index($c)' <<<"$json" >/dev/null && return 0
+  # <commit> may sit BELOW an old parent head, e.g. a child built on the first of
+  # a parent's two commits before the parent was force-pushed. Nothing fetched so
+  # far reaches that old head, so fetch the known heads we lack, by SHA (GitHub
+  # serves a repo's own commits by SHA even after a force-push dropped them).
+  local missing=()
+  for k in $(jq -r '.known[]' <<<"$json"); do
+    git cat-file -e "$k^{commit}" 2>/dev/null || missing+=("$k")
+  done
+  [ "${#missing[@]}" -eq 0 ] || git fetch -q origin "${missing[@]}" 2>/dev/null || true
   for k in $(jq -r '.known[]' <<<"$json"); do
     if git cat-file -e "$k^{commit}" 2>/dev/null && git merge-base --is-ancestor "$c" "$k"; then
       return 0
@@ -249,7 +259,11 @@ cmd_publish() {
   git -c user.name="$APP_BOT" -c user.email="$bot_email" commit -q --author="$author" -F "$msg"
   rm -f "$msg"
 
-  if ! git push -q --force-with-lease="refs/heads/$BRANCH:$HEAD_SHA" origin "HEAD:refs/heads/$BRANCH"; then
+  # `npm ci` installs the repo's pre-push hook, which would run the whole
+  # `verify` here; CI runs it on the push anyway. Push chatter goes to stderr:
+  # stdout is this command's key=value result.
+  if ! OFFLINECV_SKIP_HOOKS=1 git push -q --force-with-lease="refs/heads/$BRANCH:$HEAD_SHA" \
+      origin "HEAD:refs/heads/$BRANCH" >&2; then
     out result=moved; return
   fi
   if [ "$TARGET" != "$BASE_REF" ]; then
@@ -280,7 +294,6 @@ cmd_note() {
 #   a PR pushed or merged (HEAD_REF) → open Gaal PRs stacked on its branch. They
 #     are replayed even without a conflict, or their diff keeps showing the
 #     parent's superseded change.
-#   workflow_dispatch → PR.
 # Oldest first, so the agent budget (AGENT_CAP) goes to the longest-waiting.
 cmd_select() {
   local cap=${AGENT_CAP:-3} list n state
@@ -292,9 +305,6 @@ cmd_select() {
     pull_request_target)
       list=$(gh pr list --repo "$REPO" --base "${HEAD_REF:?}" --state open --limit 200 \
         --json number,author,isDraft,isCrossRepository)
-      ;;
-    workflow_dispatch)
-      jq -cn --argjson pr "${PR:?}" '[{pr: $pr, agent: true}]'; return
       ;;
     *) die "unknown event $EVENT" ;;
   esac
@@ -323,7 +333,7 @@ cmd_select() {
         esac
       done
       pending=(${still[@]+"${still[@]}"})
-      [ "${#pending[@]}" -gt 0 ] && [ "$round" -lt 12 ] || break
+      if [ "${#pending[@]}" -eq 0 ] || [ "$round" -eq 12 ]; then break; fi
       sleep "${MERGEABLE_POLL_SECONDS:-10}"
     done
     # Keep the oldest-first order the agent budget relies on.

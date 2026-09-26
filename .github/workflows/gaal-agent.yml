@@ -52,10 +52,16 @@ permissions:
   contents: read
 
 jobs:
+  # `/gaal help` must be the whole first line: `/gaal help me fix …` is a revision
+  # request. Expressions have no regex, so the line end is matched literally
+  # (fromJSON gives a real newline; `\r` covers the web editor's CRLF). The same
+  # predicate, negated, gates run-gaal below.
   help:
     if: >
       github.event_name == 'issue_comment' && github.event.issue.pull_request &&
-      (github.event.comment.body == '/gaal' || startsWith(github.event.comment.body, '/gaal help')) &&
+      (github.event.comment.body == '/gaal' || github.event.comment.body == '/gaal help' ||
+       startsWith(github.event.comment.body, format('/gaal help{0}', fromJSON('"\\n"'))) ||
+       startsWith(github.event.comment.body, format('/gaal help{0}', fromJSON('"\\r"')))) &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -88,7 +94,9 @@ jobs:
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request &&
        startsWith(github.event.comment.body, '/gaal') &&
-       github.event.comment.body != '/gaal' && !startsWith(github.event.comment.body, '/gaal help') &&
+       !(github.event.comment.body == '/gaal' || github.event.comment.body == '/gaal help' ||
+       startsWith(github.event.comment.body, format('/gaal help{0}', fromJSON('"\\n"'))) ||
+       startsWith(github.event.comment.body, format('/gaal help{0}', fromJSON('"\\r"')))) &&
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -158,10 +166,12 @@ jobs:
               echo "::error::PR #$NUMBER is from a fork; Gaal only pushes to branches in $REPO."
               exit 1
             fi
-            # `/gaal rebase` alone replays the PR and needs Claude only on a conflict.
-            first=$(head -1 <<<"$COMMENT_BODY" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            # `/gaal rebase` ALONE replays the PR and needs Claude only on a conflict.
+            # With anything after it, it is a revision request (which rebases too),
+            # so the extra lines reach the agent instead of being silently dropped.
+            whole=$(tr -d '\r' <<<"$COMMENT_BODY" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed '/^$/d')
             command=change
-            [ "$first" != "/gaal rebase" ] || command=rebase
+            [ "$whole" != "/gaal rebase" ] || command=rebase
             { echo "mode=pr"; echo "branch=$(jq -r .headRefName <<<"$pr")"; echo "command=$command"; } >> "$GITHUB_OUTPUT"
           fi
 
@@ -183,6 +193,8 @@ jobs:
         run: |
           set -euo pipefail
           note() { gh issue comment "$NUMBER" --repo "$REPO" --body "$1"; }
+          # Out of the agent's reach before it runs (see publish-policy.sh).
+          cp .github/scripts/pr-replay.sh .github/scripts/publish-policy.sh "$RUNNER_TEMP/"
           if [ "$MODE" = issue ]; then
             git switch -c "$BRANCH"
             echo "BASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
@@ -191,16 +203,18 @@ jobs:
           fi
 
           replay="$RUNNER_TEMP/pr-replay.sh"
-          cp .github/scripts/pr-replay.sh "$replay"
           "$replay" resolve "$NUMBER" > "$RUNNER_TEMP/pr.json"
           if [ "$(jq -r .inQueue "$RUNNER_TEMP/pr.json")" = true ]; then
             note "Gaal did not run: this PR is in the merge queue, and a push would take it out. Remove it from the queue first."
             exit 0
           fi
           "$replay" apply "$RUNNER_TEMP/pr.json" | tee "$RUNNER_TEMP/replay.env"
-          # key=value lines; values may hold spaces (file lists), so never `source` them.
-          while IFS='=' read -r k v; do printf -v "$k" '%s' "$v"; done < "$RUNNER_TEMP/replay.env"
-          cat "$RUNNER_TEMP/replay.env" >> "$GITHUB_OUTPUT"
+          # Only our key=value lines (a push hook or tool may print more), re-quoted with
+          # %q so a value holding spaces or quotes (a file list) sources as data.
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/replay.env" | while IFS='=' read -r k v; do printf '%s=%q\n' "$k" "$v"; done > "$RUNNER_TEMP/replay.vars"
+          # shellcheck source=/dev/null # our own key=value lines, re-quoted by %q
+          . "$RUNNER_TEMP/replay.vars"
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/replay.env" >> "$GITHUB_OUTPUT"
           {
             echo "head_sha=$(jq -r .headSha "$RUNNER_TEMP/pr.json")"
             echo "base_ref=$(jq -r .baseRef "$RUNNER_TEMP/pr.json")"
@@ -353,6 +367,8 @@ jobs:
           set -euo pipefail
           # Status comments go out as github.token so they cannot trigger pr-revise.
           note() { GH_TOKEN="$GITHUB_TOKEN_RO" gh issue comment "$NUMBER" --repo "$REPO" --body "$1"; }
+          # shellcheck source=/dev/null # BLOCKED_PATHS, ATTRIBUTION
+          . "$RUNNER_TEMP/publish-policy.sh"
 
           # Fold anything the agent committed despite the rules back into the tree.
           git reset --soft "$BASE_SHA"
@@ -361,8 +377,7 @@ jobs:
             note "Gaal ran but produced no changes."
             exit 0
           fi
-          blocked=$(git diff --cached --name-only |
-            grep -E '^(\.github(/|$)|package\.json$|package-lock\.json$|\.npmrc$)' || true)
+          blocked=$(git diff --cached --name-only | grep -E "$BLOCKED_PATHS" || true)
           if [ -n "$blocked" ]; then
             note "Gaal's change touches $(paste -sd' ' <<<"$blocked"), which automation may not publish. Needs a human."
             echo "::error::refusing to publish changes to: $blocked"
@@ -371,17 +386,17 @@ jobs:
 
           # The agent's commit message, attribution stripped.
           msg="$RUNNER_TEMP/commit-msg.clean"
-          strip='^[[:space:]]*(co-authored-by|claude-session|generated[- ]by|signed-off-by):|generated with \[?claude'
           bot_id=$(gh api "users/$APP_BOT" --jq .id)
           bot_email="$bot_id+$APP_BOT@users.noreply.github.com"
           src="$RUNNER_TEMP/commit-msg.txt"
-          if [ -s "$src" ]; then grep -viE "$strip" "$src" > "$msg" || true; fi
+          if [ -s "$src" ]; then grep -viE "$ATTRIBUTION" "$src" > "$msg" || true; fi
           [ -s "$msg" ] || printf 'chore: Gaal changes for #%s\n' "$NUMBER" > "$msg"
           git -c user.name="$APP_BOT" -c user.email="$bot_email" \
             commit -q --author="$APP_BOT <$bot_email>" -F "$msg"
 
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
-          git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
+          # `npm ci` installed the repo's pre-push hook; CI runs `verify` on the push anyway.
+          OFFLINECV_SKIP_HOOKS=1 git push --force-with-lease origin "HEAD:refs/heads/$BRANCH"
           if gh pr view "$BRANCH" --repo "$REPO" >/dev/null 2>&1; then
             note "Gaal re-ran for #$NUMBER and force-pushed."
           else
@@ -391,7 +406,7 @@ jobs:
             desc="$RUNNER_TEMP/pr-description.md"
             {
               if [ -s "$desc" ]; then
-                grep -viE "$strip|^[[:space:]]*(closes|fixes|resolves) #[0-9]+[[:space:]]*$" "$desc" || true
+                grep -viE "$ATTRIBUTION|^[[:space:]]*(closes|fixes|resolves) #[0-9]+[[:space:]]*$" "$desc" || true
               else
                 tail -n +3 "$msg" | awk 'NF { printf "%s%s", (p ? " " : ""), $0; p = 1; next }
                                          p { print ""; p = 0 } { print } END { if (p) print "" }'
@@ -429,8 +444,11 @@ jobs:
 
           git remote set-url origin "https://x-access-token:$GH_TOKEN@github.com/$REPO.git"
           "$RUNNER_TEMP/pr-replay.sh" publish | tee "$RUNNER_TEMP/publish.env"
-          # key=value lines; values may hold spaces (file lists), so never `source` them.
-          while IFS='=' read -r k v; do printf -v "$k" '%s' "$v"; done < "$RUNNER_TEMP/publish.env"
+          # Only our key=value lines (a push hook or tool may print more), re-quoted with
+          # %q so a value holding spaces or quotes (a file list) sources as data.
+          grep -E '^[a-z_]+=' "$RUNNER_TEMP/publish.env" | while IFS='=' read -r k v; do printf '%s=%q\n' "$k" "$v"; done > "$RUNNER_TEMP/publish.vars"
+          # shellcheck source=/dev/null # our own key=value lines, re-quoted by %q
+          . "$RUNNER_TEMP/publish.vars"
           rebased=""
           [ "$STATUS" = current ] || rebased=" Rebased onto \`$TARGET\` @ ${TIP:0:7}${retargeted:+, and retargeted there because the old base merged}."
           case "$result" in
