@@ -17,13 +17,30 @@ import { splitAchievementType } from "./entry-dates.ts";
 
 // ── Normalization ─────────────────────────────────────────────────────────────
 
-/** Leading bullet/numbered markers (mirrors BULLET_MARKER_RE + NUMBERED_BULLET_RE in score.ts). */
-const LEADING_MARKER_RE = /^[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)]) */;
+/**
+ * Leading bullet/numbered markers (mirrors BULLET_MARKER_RE + NUMBERED_BULLET_RE
+ * in score.ts). The outer group repeats (`+`) so a line stacking two markers —
+ * a glyph followed by a numbered prefix, e.g. `"• 1. Led team"` — strips BOTH in
+ * one pass; a single `.replace` with a non-repeating group only strips the
+ * first, which made `normalizeBulletText` non-idempotent and left such a line
+ * unmatched against its once-stripped `BulletObservation.text` counterpart
+ * (#999). Each marker must be followed by whitespace or end-of-line, not just
+ * optional spaces — otherwise `\d+[.)]` matches the decimal point in a
+ * numeric-content bullet like `"1.5M raised"` and corrupts its normalized key.
+ * The trailing separator is `[ \t]+`, not `\s+` — a bare `\s+` lets a marker's
+ * separator swallow a `\n` and chain into a marker on the NEXT line as if it
+ * stacked with the first, over-stripping a multi-line string (e.g. a WebLLM
+ * critique `bullet` field of `"1.\n• Led the effort"`) in one pass.
+ */
+const LEADING_MARKER_RE =
+  /^(?:[\s ]*(?:[-*•●–▪◦‣▶►·�]|\d+[.)])(?:[ \t]+|$))+/;
 
 /**
  * Normalize a bullet line for fuzzy matching: lowercase, strip any leading
- * bullet/numbered marker, collapse all internal whitespace to single spaces,
- * trim.
+ * bullet/numbered marker(s), collapse all internal whitespace to single
+ * spaces, trim. Idempotent — `normalizeBulletText(normalizeBulletText(x)) ===
+ * normalizeBulletText(x)` — because {@link LEADING_MARKER_RE} strips every
+ * leading marker in one pass rather than just the first.
  */
 export function normalizeBulletText(s: string): string {
   return s
