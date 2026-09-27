@@ -31,8 +31,9 @@
 #      the app token is minted only after the agent exits, in the publish step.
 #   4. The agent only edits files. The workflow folds everything into the PR's
 #      single commit, strips attribution, and refuses to publish a diff that
-#      touches .github/ or the package manifests (the next review runs
-#      `npm install`, so a manifest script would execute before a human looks).
+#      touches a path in .github/scripts/publish-policy.sh: workflows, package
+#      manifests, agent configuration and hook scripts, each of which runs or
+#      steers something before a human has read the change.
 #   5. Fork PRs are refused: their branch is not ours to push to.
 #   6. Defence in depth for 1: the job's outbound network is blocked except for
 #      GitHub, npm, the Claude Code installer and Anthropic's API (harden-runner,
@@ -269,6 +270,8 @@ jobs:
           CONFLICT_FILES: ${{ steps.prep.outputs.conflict_files }}
         run: |
           set -euo pipefail
+          # shellcheck source=/dev/null # BLOCKED_DESC
+          . "$RUNNER_TEMP/publish-policy.sh"
           p="$RUNNER_TEMP/prompt.md"
           {
             echo "You are Gaal, the automated developer agent for the offlinecv repository."
@@ -293,7 +296,8 @@ jobs:
             echo "- Do NOT run git merge, rebase, reset, stash or checkout: the workflow has"
             echo "  already put the right base under you, and folds everything into one"
             echo "  commit afterwards."
-            echo "- Do NOT modify anything under .github/, package.json, package-lock.json or .npmrc."
+            echo "- Do NOT modify any of: $BLOCKED_DESC."
+            echo "  The workflow refuses to publish a change to them."
             echo "- Before finishing, run \`npm run verify:quick\` and fix what it reports."
             echo "- Finally, write a Conventional Commits message to the file"
             echo "  $RUNNER_TEMP/commit-msg.txt: a subject <= 72 chars, a blank line, then"

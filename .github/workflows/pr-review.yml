@@ -175,11 +175,20 @@ jobs:
   # stops on no open threads, approval, or the round cap.
   revise:
     needs: review
-    if: needs.review.result == 'success'
+    # A failed review still runs the round: a review bot's gate may have skipped
+    # its own round on the promise of this one (pr-revise.yml), and the gate
+    # still requires open threads. Skipped (untrusted author) and cancelled
+    # (a newer push started its own run) stay skipped. `!cancelled()`, not
+    # `always()`: a cancelled run must also stop a round already under way.
+    if: ${{ !cancelled() && (needs.review.result == 'success' || needs.review.result == 'failure') }}
+    # Every scope pr-revise.yml's jobs ask for: a called workflow cannot hold
+    # more than its caller grants, and GitHub refuses the whole run at startup
+    # if it asks.
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      actions: read
     uses: $/.github/workflows/pr-revise.yml
     with:
       pr: ${{ github.event.pull_request.number }}
