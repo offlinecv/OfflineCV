@@ -44,6 +44,12 @@ on:
       source:
         type: string
         default: bot
+    # Declared so the caller passes exactly these, not `secrets: inherit`.
+    secrets:
+      CLAUDE_PAT_FOR_GOOSE:
+        required: true
+      GAAL_APP_PRIVATE_KEY:
+        required: true
   issue_comment:
     types: [created]
   pull_request_review:
@@ -169,13 +175,13 @@ jobs:
       APP_BOT: gaal-agent[bot]
       APP_CLIENT_ID: Iv23lijWO2RZ8KF2POYi
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.gate.outputs.branch }}
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -190,7 +196,7 @@ jobs:
         run: git show "origin/$DEFAULT_BRANCH:.github/scripts/publish-policy.sh" > "$RUNNER_TEMP/publish-policy.sh"
 
       - name: Revise
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
           github_token: ${{ github.token }}
@@ -224,6 +230,12 @@ jobs:
         with:
           client-id: ${{ env.APP_CLIENT_ID }}
           private-key: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
+          # Scoped to what the steps below use; without these the token gets
+          # every permission the app install has. No `workflows` scope, so it
+          # cannot push a change to .github/workflows.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
 
       - name: Fold into one commit and push
         env:

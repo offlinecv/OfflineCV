@@ -38,7 +38,11 @@
 # change. Kill switch: repo variable PR_AUTO_REBASE=false.
 name: PR auto-rebase
 
-on:
+# pull_request_target is deliberate: it runs THIS file from the default branch,
+# so a PR cannot rewrite what rebases it. It only reaches `select`, which is
+# gated to same-repo PRs, checks out the default branch (never PR code), holds
+# no secrets, and only dispatches runs of this workflow.
+on: # zizmor: ignore[dangerous-triggers]
   push:
     branches: [main]
   pull_request_target:
@@ -72,7 +76,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: .github/scripts
@@ -137,7 +141,7 @@ jobs:
             downloads.claude.ai:443
             api.anthropic.com:443
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
@@ -201,7 +205,7 @@ jobs:
             { echo "agent=true"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         if: steps.prep.outputs.agent == 'true'
         with:
           # No npm cache: its storage hosts would widen the egress allowlist.
@@ -257,7 +261,7 @@ jobs:
 
       - name: Resolve the conflicts
         if: steps.prep.outputs.agent == 'true'
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
         env:
           # Telemetry hosts are blocked anyway; skip them instead of retrying.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
@@ -281,6 +285,12 @@ jobs:
         with:
           client-id: ${{ env.APP_CLIENT_ID }}
           private-key: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
+          # Scoped to what the steps below use; without these the token gets
+          # every permission the app install has. No `workflows` scope, so it
+          # cannot push a change to .github/workflows.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
 
       - name: Fold into the PR's commit and push
         if: steps.prep.outputs.publish == 'true'

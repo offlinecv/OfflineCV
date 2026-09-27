@@ -88,7 +88,7 @@ jobs:
       number: ${{ steps.fetch.outputs.number }}
       decision: ${{ steps.read.outputs.decision }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -108,7 +108,7 @@ jobs:
           echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Decide
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
           github_token: ${{ github.token }}
@@ -223,6 +223,9 @@ jobs:
         with:
           client-id: Iv23lijWO2RZ8KF2POYi
           private-key: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
+          # Scoped to the one label write below; without this the token gets every
+          # permission the app install has.
+          permission-issues: write
 
       - name: Hand the issue to Gaal
         if: steps.apply.outputs.handoff == 'true'

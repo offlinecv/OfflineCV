@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The offlinecv Authors
+#
+# Keeps the SHA-pinned actions in .github/workflows current. zizmor (ci.yml)
+# requires every `uses:` to be pinned to a commit, and a pin nobody moves goes
+# stale; Dependabot bumps the SHA and its `# vX.Y.Z` comment together. Grouped
+# into one weekly PR, and a release must be a week old before it is proposed,
+# so a compromised release has time to be caught and yanked first.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
