@@ -8,6 +8,7 @@ import {
   matchSectionAnchorToken,
   DATE_RANGE_RE,
   STRICT_MONTH_YEAR_RE,
+  DEGREE_RE,
 } from "./regex.ts";
 import {
   dateSeparator,
@@ -695,5 +696,56 @@ describe("stripDateRange — trailing separator trim", () => {
     expect(stripDateRange("Northern Trust · Jan 2019 - Mar 2021")).toBe(
       "Northern Trust ·",
     );
+  });
+});
+
+describe("DEGREE_RE — dotted 3-letter credentials (#831)", () => {
+  // Before #831 `B\.?A\.?` consumed "B" + "." and then required "A" where
+  // "B.F.A." has "F" — no branch matched at all, so the whole line fell through
+  // to the institution-hint path instead of being recognized as a degree.
+  it.each([
+    "B.F.A.",
+    "BFA",
+    "M.F.A.",
+    "B.B.A.",
+    "B.C.A.",
+    "LL.B.",
+    "LL.M.",
+    "D.D.S.",
+  ])("matches %s", (credential) => {
+    expect(DEGREE_RE.test(`${credential} in Design`)).toBe(true);
+  });
+
+  // Regression guard named in the file's own NOTE: a reordered alternation
+  // must not let `B.S.`'s shorter branch win over `B.Sc.`'s longer one and
+  // strand the "c." on the field side.
+  it("still matches the full B.Sc. token, not just B.S", () => {
+    expect(DEGREE_RE.exec("B.Sc. Computer Science")?.[0]).toBe("B.Sc.");
+  });
+
+  it("still matches every credential it matched before #831", () => {
+    const before = [
+      "B.A.",
+      "B.Sc.",
+      "B.S.",
+      "B.Eng.",
+      "B.E.",
+      "B.Tech.",
+      "M.A.",
+      "M.Sc.",
+      "M.S.",
+      "M.Eng.",
+      "M.B.A.",
+      "Ph.D.",
+      "M.D.",
+      "J.D.",
+      "Bachelor",
+      "Master",
+      "Doctor",
+      "Associate",
+    ];
+    for (const credential of before) {
+      expect(DEGREE_RE.test(`${credential} of Science`)).toBe(true);
+    }
   });
 });

@@ -51,6 +51,14 @@ export const INTL_LOCATION_RE =
 export const US_STATE_CODE_RE =
   /^(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|PR|GU|VI|AS|MP)$/;
 
+/** Full US state name, spelled out rather than abbreviated ("Columbus, Ohio",
+ *  #831) — a résumé draws either shape and only the abbreviation had a closed
+ *  vocabulary before. Mirrors `US_STATE_CODE_RE`'s job: a closed list so a
+ *  trailing capitalized phrase is never accepted as a region on shape alone
+ *  (the same role `COUNTRY_GAZETTEER` plays for the international branch). */
+export const US_STATE_NAME_RE =
+  /^(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|District of Columbia)$/;
+
 /**
  * Closed country gazetteer for international suffix stripping (Pass C of
  * `stripLocationSuffix`). Built from ISO 3166-1 alpha-2 names via
@@ -715,7 +723,11 @@ export const DEGREE_RE =
   // NOTE: longer credential variants precede their prefixes (`B.Sc.` before
   // `B.S.`, `M.Sc.` before `M.S.`) so alternation picks the full token — else
   // `M.Sc.` matches only `M.S`, stranding `c.` to bleed into the parsed field.
-  /\b(B\.?A\.?|B\.?Sc\.?|B\.?S\.?|B\.?Eng\.?|B\.?E\.?|B\.?Tech\.?|M\.?A\.?|M\.?Sc\.?|M\.?S\.?|M\.?Eng\.?|M\.?B\.?A\.?|Ph\.?D\.?|M\.?D\.?|J\.?D\.?|Bachelor|Master|Doctor|Associate)(?:\s+of\s+[A-Za-z ]{2,40})?/;
+  // The dotted 3-letter credentials (#831) are listed first for the same
+  // reason, though none of them actually collides today: `B\.?A\.?` requires
+  // an `A` immediately after `B`, so it never matches `B.F.A.`'s `F` at all —
+  // without these branches the line just isn't recognized as a degree line.
+  /\b(B\.?F\.?A\.?|M\.?F\.?A\.?|B\.?B\.?A\.?|B\.?C\.?A\.?|LL\.?M\.?|LL\.?B\.?|D\.?D\.?S\.?|B\.?A\.?|B\.?Sc\.?|B\.?S\.?|B\.?Eng\.?|B\.?E\.?|B\.?Tech\.?|M\.?A\.?|M\.?Sc\.?|M\.?S\.?|M\.?Eng\.?|M\.?B\.?A\.?|Ph\.?D\.?|M\.?D\.?|J\.?D\.?|Bachelor|Master|Doctor|Associate)(?:\s+of\s+[A-Za-z ]{2,40})?/;
 
 export const INSTITUTION_HINTS =
   /\b(University|College|Institute|School|Academy|Polytechnic)s?\b/i;
