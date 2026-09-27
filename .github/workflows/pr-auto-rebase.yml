@@ -225,6 +225,8 @@ jobs:
           CONFLICT_FILES: ${{ steps.prep.outputs.conflict_files }}
         run: |
           set -euo pipefail
+          # shellcheck source=/dev/null # BLOCKED_DESC
+          . "$RUNNER_TEMP/publish-policy.sh"
           gh pr view "$PR" --repo "$REPO" --json title,body --jq '"Title: \(.title)\n\n\(.body)"' > "$RUNNER_TEMP/pr-text.md"
           {
             echo "You are Gaal, the automated developer agent for the offlinecv repository."
@@ -246,7 +248,8 @@ jobs:
             echo "- Do NOT run git merge, rebase, reset, stash or checkout: the workflow has"
             echo "  already put the right base under you, and folds everything into one"
             echo "  commit afterwards."
-            echo "- Do NOT modify anything under .github/, package.json, package-lock.json or .npmrc."
+            echo "- Do NOT modify any of: $BLOCKED_DESC."
+            echo "  The workflow refuses to publish a change to them."
             echo "- Before finishing, run \`npm run verify:quick\` and fix only what the"
             echo "  resolution broke."
             echo "- Finally, write to $RUNNER_TEMP/resolution.md one Markdown bullet per file:"
