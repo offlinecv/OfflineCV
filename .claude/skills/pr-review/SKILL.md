@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits), fix & push every small item itself — with or without blockers — and collapse the branch back to one commit via /collapse-pr before an approval lands, emit suggestion blocks only for what it could not push, file a follow-up issue only for a user-visible defect in code the PR did not touch (everything else is fixed, sent to the author, or recorded in the review — never filed), post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip — then resolve the threads it disposed of itself, so no finding is lost to a merge and the open threads left blocking are only the ones the author owes an answer to.
+description: Review an offlinecv pull request adversarially, the way a maintainer does — signal 👀 that review started, judge the diff against the linked issue's acceptance criteria, run the generic /code-review correctness pass, layer offlinecv's own gates, audit description accuracy, structure findings (Blocking / Secondary / Nits / Pre-existing), fix & push every small item itself — with or without blockers — and collapse the branch back to one commit via /collapse-pr before an approval lands, emit suggestion blocks only for what it could not push, file a follow-up issue only for a user-visible defect in code the PR did not touch (everything else is fixed, sent to the author, or recorded in the review — never filed), post the PR review autonomously at the end — approving the PR including its own fix commit, so a clean PR needs no second round-trip — then resolve the threads it disposed of itself, so no finding is lost to a merge and the open threads left blocking are only the ones the author owes an answer to.
 argument-hint: <#|#N> [--repo owner/repo] [--local] [--effort low|medium|high] [--no-commit] [--as <login>]
 ---
 
@@ -11,7 +11,7 @@ the thread": check out the diff → **signal that review started** → read the
 **issue**, not the PR's prose → run the built-in `/code-review` for the generic
 correctness pass → **layer the offlinecv-specific gates** → **then** read the PR
 description and audit it against what the code actually does → structure findings
-**Blocking / Secondary / Nits** → **if small fixes exist, blockers or not**: apply fixes,
+**Blocking / Secondary / Nits / Pre-existing** → **if small fixes exist, blockers or not**: apply fixes,
 verify gates, commit, push, and (0 blockers only) collapse the branch back to one commit → **file a follow-up
 issue only for a user-visible defect outside the PR's diff** → **post the `gh` PR review automatically
 at the end** (verdict `APPROVE` if 0 blockers — including when the run pushed the fixes
@@ -307,12 +307,24 @@ Scope rules for a re-review:
 
 - **Did the previous round's Blocking findings get fixed?** That is the main question —
   check each one by name.
-- **Any finding, Blocking or not, may be raised on lines the delta changed.** Small ones go
-  through Step 5.5 as usual.
-- **On lines the delta did not change, raise Blocking findings only.** The previous round
-  already read that code; a new Secondary or Nit there is a finding that round missed, and
-  raising it now restarts the loop this step exists to end. If you notice one, fix it
-  under Step 5.5 when it is in bounds, or leave it out of the review.
+- **Only a Blocking finding opens a thread, on any line.** That holds on lines the delta
+  changed too — which, after a `/revise-pr` round, is mostly the reviser's own fix. A
+  Secondary or Nit there is fixed under Step 5.5 when it is in bounds, or goes in the body
+  as one line with no inline anchor. A thread is a work item: the reviser works every open
+  one and the merge waits on it, so a thread per nit on each round's fix is how a loop
+  never converges. The previous round had its chance at the small stuff.
+- **On lines the delta did not change, raise Blocking findings only**, and in the body the
+  same way. The previous round already read that code; a new Secondary or Nit there is a
+  finding that round missed, and raising it now restarts the loop this step exists to end.
+  If you notice one, fix it under Step 5.5 when it is in bounds, or leave it out of the
+  review. A **Pre-existing** defect is the exception: it is about code no PR round touched,
+  so no earlier round owned it. List it under `## Pre-existing` with no inline thread, and
+  let Step 5.7 decide whether it is filed.
+- **Re-check your own open threads from earlier rounds.** If the delta answered one — fixed
+  it, or made its question moot — say so in the body by `path:line`, so a maintainer can
+  resolve it without re-deriving the answer. (#1074: a round asked a question about a
+  concurrency race, the next push fixed the race, and the round after it still called the
+  thread open "for the author".)
 
 If the collapse rewrote the SHA so the previous `commit_id` no longer exists on the branch,
 use `git range-diff` as above; if even that is unreadable, review the whole PR but keep
@@ -482,7 +494,7 @@ Skip this gate only if the body is empty, and say so in the report.
 
 ### Step 4 — Structure the findings
 
-Merge `/code-review`'s findings with the gate results into three buckets. **Verify
+Merge `/code-review`'s findings with the gate results into four buckets. **Verify
 each finding against the file first** — read the code at the cited line; drop
 anything that doesn't reproduce (a plausible-but-wrong finding erodes the whole
 review):
@@ -499,6 +511,31 @@ unmet. An unmet AC under a `Closes #N` is Blocking (3f).
   vs behaviour mismatches; edge-case bugs.
 - **Nits** — style, idempotency niceties, doc polish. Explicitly labelled
   non-blocking.
+- **Pre-existing** — a real defect in code this PR neither changed nor made reachable.
+  Never Blocking and never an inline thread: it goes in the body under `## Pre-existing`,
+  and Step 5.7 alone decides whether it becomes an issue. Without this tier it lands as a
+  Secondary thread, and the reviser — which works every open thread — spends a round
+  fixing a bug the PR did not introduce, in code outside the PR's scope. **The PR owns it
+  once it touches it:** a defect the diff makes reachable, widens, or depends on is the
+  PR's, graded like any other. (#1074's concurrency race predated the PR, but the PR's new
+  180-second wait opened the window that made it reachable, so it was the PR's to fix.)
+
+**Questions (`❓ q`) are not a severity, and they open threads sparingly.** A question
+opens a thread only in the first round, and only when the author owes an answer the diff
+cannot give. After round 1, a question goes in the body. Your view on *another reviewer's*
+open thread always goes in the body, never in a new thread of your own: that thread already
+holds the merge, and a second one on the same point doubles the block and splits the
+discussion. Say whether you think it is real and why; the maintainer resolves theirs.
+
+**A live run outranks a static reading.** A finding that rests on what a platform accepts —
+a workflow syntax, an action input, a CLI flag, an API field — is only as good as the
+linter's or your own knowledge of that platform, and both lag its releases. Before raising
+one, check whether this PR's own CI runs already exercised the construct
+(`gh run view <id> --log`); if a run shows the platform accepting it, drop the finding. (#1073:
+a round called `uses: $/.github/workflows/pr-revise.yml` invalid because actionlint did not
+know the syntax, while run 36288480602's log showed GitHub resolving it.) The same holds in
+reverse: a green lint does not prove a run will start, so do not approve a workflow change
+on lint alone when the construct has never run.
 
 For each finding give: the file:line, the concrete failure (inputs → wrong result),
 and a **fix** — a diff or exact command, not just a complaint. Cite the source
@@ -960,7 +997,7 @@ open-ended complaint. Step 6.5 then resolves those threads.
 ### Step 6 — Draft & post (Autonomous)
 
 Assemble the review body (Markdown: a one-line stance, then `## Blocking` /
-`## Secondary` / `## Nits`, findings most-severe first, plus the `## Fixed in <sha>` list
+`## Secondary` / `## Nits` / `## Pre-existing`, findings most-severe first, plus the `## Fixed in <sha>` list
 from Step 5.5 — or, if the fixes could not land, why they didn't).
 
 **Self-review: GitHub refuses `APPROVE`/`REQUEST_CHANGES` from the PR's own author.**
@@ -1019,14 +1056,15 @@ round-trip to every subagent and still couldn't be trusted
 
 **Anchor findings to the code by default.** A finding sitting in the body makes the
 author scroll and hunt for `regex.ts:512`; the same finding inline lands on the line
-they are about to change and threads with their reply. Anchor every finding you can;
-keep the body for the stance, the gate results, and findings that have no line to
-land on.
+they are about to change and threads with their reply. Anchor every finding that may
+open a thread (on a re-review, Step 1.5 limits that to Blocking findings); keep the
+body for the stance, the gate results, and findings that have no line to land on.
 
 **Split the findings.** For each one, ask: does it point at a line this PR *added or
 changed*? That's the only thing GitHub will anchor to.
 
 - **Anchorable** — the finding's line is a `+` line in the patch → inline comment.
+  On a re-review, a Secondary or Nit is body-only even on a `+` line (Step 1.5).
 - **Body-only** — the finding is about *unchanged* code (a call path the diff newly
   reaches, a caller it breaks), about a **missing** thing (no test, no guard), or
   about the PR as a whole → body. Don't contort these onto a nearby `+` line; a
@@ -1192,7 +1230,7 @@ it.
 ### Step 7 — Report
 
 Print: the verdict + the rule that produced it, the finding counts
-(Blocking/Secondary/Nits), **the AC checklist result per linked issue** (met /
+(Blocking/Secondary/Nits/Pre-existing), **the AC checklist result per linked issue** (met /
 unmet / no issue linked), **the 3f description-accuracy verdict** (accurate /
 overclaims / omits — with what), **how many landed inline vs stayed in the body**
 (and why the body ones had no anchor), that the 👀 start-signal was posted

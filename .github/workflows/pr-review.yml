@@ -142,7 +142,8 @@ jobs:
               you ran, which gates did not apply, or what the PR does.
             - One line per finding, in the body and in each inline comment:
               `<file>:L<line>: <severity>: <problem>. <fix>.`
-              with severity `🔴 blocking`, `🟡 secondary`, `🔵 nit`, or `❓ q`.
+              with severity `🔴 blocking`, `🟡 secondary`, `🔵 nit`, `⚪ pre-existing`,
+              or `❓ q`. The skill decides which of these open an inline thread.
             - Exact symbols in backticks; a concrete fix, never "consider …".
             - Drop hedging ("might", "perhaps"), restating the diff, and praise.
             - Exception: a security or architecture finding gets one short
