@@ -108,17 +108,18 @@ jobs:
       pull-requests: write
       issues: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Review
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
           github_token: ${{ github.token }}
@@ -179,8 +180,10 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-    uses: ./.github/workflows/pr-revise.yml
+    uses: $/.github/workflows/pr-revise.yml
     with:
       pr: ${{ github.event.pull_request.number }}
       source: bot
-    secrets: inherit
+    secrets:
+      CLAUDE_PAT_FOR_GOOSE: ${{ secrets.CLAUDE_PAT_FOR_GOOSE }}
+      GAAL_APP_PRIVATE_KEY: ${{ secrets.GAAL_APP_PRIVATE_KEY }}
