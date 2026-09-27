@@ -15,10 +15,13 @@ you add any PDF), AI attribution, squash messages, and deploy.
 
 ```bash
 npm install
-npm run dev        # vite dev server on http://localhost:5173
-npm run test       # vitest run (189 tests, ~1s)
+npm run dev        # vite dev server on https://localhost:5173 (self-signed; see README)
+npm run test       # vitest run
 npm run typecheck  # tsc -b --noEmit
 ```
+
+`npm run dev:http` serves plain HTTP for LAN demos, but drops WebGPU (and so the
+on-device WebLLM lane) — see [Quick start](./README.md#quick-start) in the README.
 
 Requires Node 20+. `.env` and `.env.deploy` are both gitignored; neither
 is needed to develop, run tests, or build. They only matter for opt-in
