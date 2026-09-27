@@ -31,9 +31,7 @@
  * break on the subject line.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
 import { describe, it, expect } from "vitest";
 import { matchSectionHeader } from "../heuristics/regex.ts";
@@ -47,9 +45,7 @@ import {
   extractPdfDrawnLines,
   type PdfDrawnLine,
 } from "./render-ats-pdf.test-utils.ts";
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
+import { FIXTURE_ROOT, walkPdfs } from "../heuristics/corpus-gate.test-utils.ts";
 
 /** The canonical fallback headings `buildAtsResumeModel` emits when a section
  *  carried no recognized verbatim heading (see the `?? "..."` fallbacks). Plus
@@ -62,16 +58,6 @@ const CANONICAL_FALLBACK_HEADINGS = [
   "Education",
   "Skills",
 ] as const;
-
-function walkPdfs(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkPdfs(p));
-    else if (e.isFile() && e.name.toLowerCase().endsWith(".pdf")) out.push(p);
-  }
-  return out.sort();
-}
 
 function scoreFor(cascade: CascadeResult) {
   return computeAnonymousAtsScore({
