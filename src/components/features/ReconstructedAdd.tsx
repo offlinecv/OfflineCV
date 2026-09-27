@@ -21,9 +21,9 @@
  * are always visible, so a reuse elsewhere is unaffected.
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { FocusEvent } from "react";
-import { Button } from "@design-system";
+import { Button, InlineResult } from "@design-system";
 
 /**
  * Build an `onBlur` handler for a section container that fires `onExit` when
@@ -182,6 +182,158 @@ export function RemoveButton({
     >
       <CloseIcon />
     </Button>
+  );
+}
+
+/**
+ * A two-step remove control for a résumé ENTRY (role / project / achievement /
+ * education) — as opposed to {@link RemoveButton}'s bare one-click affordance,
+ * which is what every entry used until #860.
+ *
+ * Deleting an entry takes every bullet rendered under it with it
+ * (`removeEntryWithBullets`), and for a PARSED entry the only way back is
+ * `resetAll` (which discards every edit in the session) or re-uploading the
+ * PDF — the more expensive, less recoverable action, guarded by nothing, while
+ * the per-bullet remove one level down (`useBulletRemoveStatus`, #626) at
+ * least confirms AFTER the fact with an Undo. This confirms BEFORE instead: the
+ * first click arms the row, naming the blast radius; a second click on
+ * "Remove" is what actually calls `onRemove`. Escape, a blur out of the
+ * control, or the explicit Cancel all disarm with no write to the edit model.
+ *
+ * Plain local `useState`, not the lifted `removes.pending` shape
+ * `useBulletRemoveStatus` needs — that hook lives ABOVE the bullet row because
+ * a bullet remove is immediate and unmounts the row before any state it held
+ * could paint a confirmation. Here the write has not happened yet, so the row
+ * this button lives in is still mounted while it is armed, and there is
+ * nothing to lift.
+ *
+ * `autoFocus` on Cancel matters beyond keyboard reachability: in
+ * `ReconstructedRole`, this button renders inside an `edit-chrome`-classed
+ * actions span, which rests at opacity 0 unless its `edit-scope` is hovered or
+ * `focus-within`. Arming can leave the pointer wherever the old button used to
+ * be, not necessarily over the new confirm row, so the moved focus is what
+ * keeps `focus-within` — and the confirmation itself — visible.
+ *
+ * `compact` drops the `InlineResult` warning chrome (border/bg/padding)
+ * entirely — for the certifications middot-joined line (`ReconstructedResume`'s
+ * `AchievementsSection`), that chrome's own `p-3` pushed the armed row's
+ * baseline off its still-idle siblings sharing the same wrapped flex line. A
+ * bare inline cluster keeps the same baseline the idle button sat on.
+ *
+ * `identity` disambiguates two entries of the same kind armed at once: every
+ * role's confirm row otherwise carries the same "Remove role" / "Cancel"
+ * pair, so arming a second role before resolving the first gives AT two
+ * identical-sounding control groups. The confirm row is wrapped in a named
+ * `role="group"` (`entryNoun` + `identity`) rather than renaming the buttons
+ * themselves, because the idle affordance and the armed "Remove" button
+ * share one `aria-label` on purpose (existing `[aria-label="Remove …"]` test
+ * selectors click straight through the arm→confirm transition on it).
+ * Callers pass whatever already identifies the entry on screen (a role's
+ * `roleLabel`, an education's institution, a project's or achievement's
+ * title) — never a fresh lookup.
+ */
+export function EntryRemoveButton({
+  label,
+  entryNoun,
+  bulletCount,
+  onRemove,
+  compact = false,
+  identity,
+}: {
+  /** `aria-label` for the idle affordance, e.g. "Remove role". */
+  label: string;
+  /** Singular noun naming what's being removed in the confirm copy, e.g.
+   *  "role", "project", "certification", "education entry". */
+  entryNoun: string;
+  /** Bullets that go with the entry, named in the confirm copy so the blast
+   *  radius is not a surprise (#860). Zero (Education, which owns no bullets)
+   *  drops the clause instead of claiming a count that isn't there. */
+  bulletCount: number;
+  onRemove: () => void;
+  /** Set for an entry sharing the certifications compact middot line — skips
+   *  the `InlineResult` chrome so the armed confirm keeps the row's shared
+   *  baseline instead of growing a bordered/padded strip mid-line. */
+  compact?: boolean;
+  /** Text naming THIS entry (a company, an institution, a title) — folded
+   *  into the armed confirm row's group name so two entries of the same kind
+   *  armed at once don't announce identically. Omitted (blank added entry)
+   *  falls back to the bare `entryNoun`. */
+  identity?: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  const disarm = useCallback(() => setArmed(false), []);
+  const bulletClause =
+    bulletCount > 0
+      ? ` and its ${bulletCount} bullet${bulletCount === 1 ? "" : "s"}`
+      : "";
+  const confirmCopy = `Remove this ${entryNoun}${bulletClause}?`;
+  // Rendered unconditionally (empty while idle), same idiom as CopyButton's
+  // live region: assistive tech needs the node in the DOM before arming
+  // changes its text, or the first arm announces nothing.
+  const liveRegion = (
+    <span className="sr-only" role="status" aria-live="polite">
+      {armed ? confirmCopy : ""}
+    </span>
+  );
+
+  if (!armed) {
+    return (
+      <span className="inline-flex">
+        <RemoveButton label={label} onClick={() => setArmed(true)} />
+        {liveRegion}
+      </span>
+    );
+  }
+
+  const confirmContent = (
+    <>
+      <span className="text-content-secondary">{confirmCopy}</span>
+      <Button
+        variant="secondary"
+        size="sm"
+        aria-label={label}
+        onClick={onRemove}
+      >
+        Remove
+      </Button>
+      <Button variant="ghost" size="sm" autoFocus onClick={disarm}>
+        Cancel
+      </Button>
+    </>
+  );
+
+  return (
+    <span
+      className="inline-flex"
+      // Named group, not a rename of the Remove/Cancel buttons themselves —
+      // two entries armed at once would otherwise still expose two identical
+      // "Remove <noun>"/"Cancel" names (existing `[aria-label="Remove …"]`
+      // test selectors key on that shared name for the idle→confirm
+      // transition). The group name is what lets AT tell the pairs apart.
+      role="group"
+      aria-label={identity ? `${entryNoun}: ${identity}` : entryNoun}
+      onBlur={sectionExitBlur(disarm)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          disarm();
+        }
+      }}
+    >
+      {compact ? (
+        <span className="inline-flex flex-wrap items-baseline gap-2 text-sm">
+          {confirmContent}
+        </span>
+      ) : (
+        <InlineResult
+          tone="warning"
+          className="flex flex-wrap items-center gap-2 py-1.5 text-sm"
+        >
+          {confirmContent}
+        </InlineResult>
+      )}
+      {liveRegion}
+    </span>
   );
 }
 

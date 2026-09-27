@@ -98,7 +98,7 @@ import {
 } from "../../lib/rewrite-review/undo-batch.ts";
 import {
   AddPill,
-  RemoveButton,
+  EntryRemoveButton,
   InlineBulletAdd,
   SectionEmptyHint,
   sectionExitBlur,
@@ -685,9 +685,12 @@ function ProjectsSection({
                     {header || "Untitled project"}
                   </h3>
                 )}
-                <RemoveButton
+                <EntryRemoveButton
                   label="Remove project"
-                  onClick={() =>
+                  entryNoun="project"
+                  bulletCount={group?.bullets.length ?? 0}
+                  identity={project.name || undefined}
+                  onRemove={() =>
                     removeEntryWithBullets(entryKey, group?.bullets ?? [], {
                       onRemoveEntry,
                       onRemoveBullet,
@@ -1093,9 +1096,13 @@ export function AchievementsSection({
             />
           );
           const removeButton = (
-            <RemoveButton
+            <EntryRemoveButton
               label={`Remove ${entryNoun}`}
-              onClick={() =>
+              entryNoun={entryNoun}
+              bulletCount={group?.bullets.length ?? 0}
+              compact={inline}
+              identity={(added ? added.title : achievement.title) || undefined}
+              onRemove={() =>
                 removeEntryWithBullets(entryKey, group?.bullets ?? [], {
                   onRemoveEntry,
                   onRemoveBullet,

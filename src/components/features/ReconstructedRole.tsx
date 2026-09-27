@@ -47,7 +47,7 @@ import {
   useSectionRewrite,
   type SectionRewriteApply,
 } from "./SectionRewrite.tsx";
-import { InlineBulletAdd, RemoveButton } from "./ReconstructedAdd.tsx";
+import { EntryRemoveButton, InlineBulletAdd } from "./ReconstructedAdd.tsx";
 import { ResumeBulletRow } from "./ResumeBulletRow.tsx";
 import { RoleHeader } from "./RoleHeader.tsx";
 import {
@@ -289,7 +289,13 @@ export function RoleEntry({
           <span className="edit-chrome flex shrink-0 items-center gap-1">
             {rewriteTrigger}
             {onRemove && (
-              <RemoveButton label="Remove role" onClick={onRemove} />
+              <EntryRemoveButton
+                label="Remove role"
+                entryNoun="role"
+                bulletCount={group.bullets.length}
+                identity={roleLabel(group.experience)}
+                onRemove={onRemove}
+              />
             )}
           </span>
         }
