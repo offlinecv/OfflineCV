@@ -39,8 +39,8 @@
   ],
   "knownWrong": {
     "skills": {
-      "issue": null,
-      "status": "unfiled",
+      "issue": 834,
+      "status": "open",
       "note": "The two-word skill “Distributed Systems” is split into two tokens, “Distributed” and “Systems”, so the list runs one entry long and neither half is a real skill."
     }
   }

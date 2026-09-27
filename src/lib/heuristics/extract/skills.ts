@@ -576,6 +576,21 @@ function isSoftWrapContinuation(
   )
     return true;
 
+  // Condition B′, investigated for #834 and deliberately NOT implemented: B's
+  // mirror for the FINAL wrap of a list, where `nextText` carries no comma of
+  // its own ("…, gRPC, Distributed" ⏎ "Systems") because it IS the end of the
+  // list. The text available here cannot tell that case apart from a genuine
+  // standalone final skill ("Python, Go, Rust" ⏎ "Machine Learning") — both are
+  // a short, comma-less last line following a pending fragment that already
+  // has a comma and doesn't end on one. Word-count and "is this the section's
+  // last cell" (the two guards that looked promising) are identical for both,
+  // so any join narrow enough to rejoin the former also rejoins the latter,
+  // trading one shredded skill for a different lost one. Separating them needs
+  // the line's geometry (did `pending`'s last physical line actually run out to
+  // the column width, i.e. a forced wrap, vs. a short line that just ends) —
+  // `isSoftWrapContinuation` sees only joined text, not `PdfLine.x`/item
+  // widths, so that signal isn't available here. See #834.
+
   return false;
 }
 
