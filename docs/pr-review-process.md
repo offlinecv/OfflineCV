@@ -18,7 +18,7 @@ open a PR against main  title in conventional form, `Resolves #<n>` in the body
       ↓
 CI runs `verify`        the one required check — see below
       ↓
-review                  findings sorted Blocking / Secondary / Nit
+review                  findings sorted Blocking / Secondary / Nit / Pre-existing
       ↓
 one approval            required; a later push dismisses it
       ↓
@@ -64,7 +64,7 @@ pre-flight, not a promise that CI will pass.
 
 ## What a reviewer is looking for
 
-Findings are sorted into three buckets, and the label is a claim about the
+Findings are sorted into four buckets, and the label is a claim about the
 merge, not about tone:
 
 - **Blocking** — must change before merge: a bug that fires on normal use, real
@@ -73,6 +73,8 @@ merge, not about tone:
   that claims behaviour the code does not have.
 - **Secondary** — a real pattern worth fixing, not a merge blocker.
 - **Nit** — style and polish, explicitly non-blocking.
+- **Pre-existing** — a real defect the PR neither changed nor made reachable.
+  Reported in the review body, not as an inline thread.
 
 Two properties of the review are worth knowing as an author. The **issue is the
 spec** — a PR that says `Resolves #N` while an acceptance criterion of #N is
