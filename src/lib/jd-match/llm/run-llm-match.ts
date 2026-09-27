@@ -42,6 +42,11 @@ import {
   loadEngine,
   releaseInference,
 } from "../../webllm/web-llm.ts";
+import { ModelConsentRequiredError } from "../../webllm/consent.ts";
+import {
+  trackJdSemanticFailed,
+  type JdSemanticFailureReasonClass,
+} from "../../analytics.ts";
 import { extractJdTerms } from "../extract-jd-terms.ts";
 import { computeCoverage } from "../coverage.ts";
 import type { JdMatchResult, SemanticMatchSummary } from "../types.ts";
@@ -127,6 +132,15 @@ export async function runLlmMatch(
     return keywordMatch(jdText, parsed);
   }
 
+  // Telemetry (#206): which stage a failure caught below happened in.
+  // `extractRequirements` and `judgeEvidence` report their OWN failures at
+  // their own throw/catch sites (they know the precise reason; this
+  // orchestrator would only be guessing from a re-thrown error). This stays
+  // "load" only until the `extractRequirements` call is actually reached, so
+  // the catch below fires `jd_semantic_failed` for a `loadEngine` failure —
+  // the one stage nothing else observes — and stays silent for anything past
+  // it, since that has already been reported.
+  let stage: "load" | "extract" = "load";
   acquireInference(modelId);
   try {
     const engine = await loadEngine(modelId, onProgress);
@@ -144,7 +158,8 @@ export async function runLlmMatch(
     } catch (err) {
       console.warn("[run-llm-match] onInferenceStart callback threw:", err);
     }
-    const requirements = await extractRequirements(jdText, engine, signal);
+    stage = "extract";
+    const requirements = await extractRequirements(jdText, engine, signal, modelId);
     // Boundary 5: aborted between extract returning and judge starting.
     // (The internal boundaries 3/4 live inside `extractRequirements`.)
     if (signal?.aborted) return keywordMatch(jdText, parsed);
@@ -186,6 +201,19 @@ export async function runLlmMatch(
       "[run-llm-match] semantic path failed; falling back to keyword:",
       err,
     );
+    // Only a `loadEngine` failure reaches this catch un-reported — see the
+    // `stage` docblock above. `!signal?.aborted` guards the case the
+    // `isAbortError` check above doesn't: a run already superseded when
+    // `loadEngine` rejects with a non-AbortError-shaped failure (e.g. the
+    // engine's own network error surfacing after cancellation) would
+    // otherwise count as a semantic failure for work the caller discards.
+    if (stage === "load" && !signal?.aborted) {
+      trackJdSemanticFailed({
+        model: modelId,
+        stage: "load",
+        reasonClass: classifyLoadFailure(err),
+      });
+    }
     return keywordMatch(jdText, parsed);
   } finally {
     // Paired with the `acquireInference` above on EVERY exit — the semantic
@@ -196,6 +224,19 @@ export async function runLlmMatch(
     // page's lifetime and park every later cross-model `.unload()` forever.
     releaseInference(modelId);
   }
+}
+
+/**
+ * Coarse `jd_semantic_failed` reason for a `loadEngine` rejection (#206). Only
+ * the consent gate is distinguishable by type; every other rejection —
+ * network failure, WebGPU device-lost, `CreateMLCEngine` OOM — collapses to
+ * `"engine_error"` rather than inspecting the message (which could echo
+ * engine-internal detail we don't want in an analytics payload).
+ */
+function classifyLoadFailure(err: unknown): JdSemanticFailureReasonClass {
+  if (err instanceof ModelConsentRequiredError) return "consent_required";
+  if (err instanceof Error) return "engine_error";
+  return "unknown";
 }
 
 /** Tally verdict statuses once so the renderer never re-counts. */

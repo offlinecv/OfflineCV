@@ -27,10 +27,20 @@
  * see `abort.ts` for why we can't safely `interruptGenerate()` a shared
  * engine — so the residual wasted work is bounded to the currently in-flight
  * completion.
+ *
+ * Telemetry (#206): see the `modelId` param below — optional, so this stays
+ * pure extraction glue for a caller that has no use for it, but it's what
+ * lets a successful return fire `jd_semantic_extract_completed` and a thrown
+ * `RequirementExtractionError` fire `jd_semantic_failed` (`stage: "extract"`)
+ * with the precise reason, before the orchestrator ever sees the error.
  */
 
 import type { WebLlmEngine } from "../../webllm/types.ts";
 import { tryParseJsonArray } from "../../webllm/json-repair.ts";
+import {
+  trackJdSemanticExtractCompleted,
+  trackJdSemanticFailed,
+} from "../../analytics.ts";
 import { abortError, isAbortError } from "./abort.ts";
 import {
   EXTRACT_SYSTEM_PROMPT,
@@ -81,11 +91,20 @@ const MAX_TOKENS = 1024;
  *   distinct from `RequirementExtractionError`.
  * @throws {RequirementExtractionError} on engine failure or unparseable output.
  * @throws {DOMException} with `name === "AbortError"` when `signal` fires.
+ * @param modelId — optional, telemetry-only (#206). When supplied, a
+ *   successful return fires `jd_semantic_extract_completed` and a thrown
+ *   `RequirementExtractionError` fires `jd_semantic_failed` with
+ *   `stage: "extract"` first. Trailing and optional (unlike `judgeEvidence`'s
+ *   required `modelId`) so every pre-#206 call site — including every test in
+ *   `extract-requirements.test.ts` — stays valid unchanged; an abort never
+ *   fires either event, matching the orchestrator's "cancellation is not a
+ *   failure" contract.
  */
 export async function extractRequirements(
   jdText: string,
   engine: WebLlmEngine,
   signal?: AbortSignal,
+  modelId?: string,
 ): Promise<JdRequirement[]> {
   // Pre-check: an already-aborted signal must never trigger the expensive
   // LLM call. This is the boundary #803's "check before starting the
@@ -114,6 +133,9 @@ export async function extractRequirements(
     // signal is re-thrown into the orchestrator's silent cancellation branch
     // and the real failure leaves no diagnostic trail (see `abort.ts`).
     if (isAbortError(err) && signal?.aborted) throw err;
+    if (modelId !== undefined) {
+      trackJdSemanticFailed({ model: modelId, stage: "extract", reasonClass: "engine_error" });
+    }
     throw new RequirementExtractionError(
       `Requirement extraction engine call failed: ${
         err instanceof Error ? err.message : String(err)
@@ -130,12 +152,23 @@ export async function extractRequirements(
 
   const parsed = tryParseJsonArray(content);
   if (!parsed.ok || !Array.isArray(parsed.value)) {
+    if (modelId !== undefined) {
+      trackJdSemanticFailed({ model: modelId, stage: "extract", reasonClass: "parse_error" });
+    }
     throw new RequirementExtractionError(
       "Requirement extraction returned no parseable JSON array",
     );
   }
 
-  return coerceRequirements(parsed.value);
+  const requirements = coerceRequirements(parsed.value);
+  if (modelId !== undefined) {
+    trackJdSemanticExtractCompleted({
+      model: modelId,
+      requirementCount: requirements.length,
+      parseRepaired: parsed.repaired,
+    });
+  }
+  return requirements;
 }
 
 /** Coerce a raw array into typed requirements, dropping unusable entries. */

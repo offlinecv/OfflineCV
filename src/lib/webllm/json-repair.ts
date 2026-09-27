@@ -20,7 +20,7 @@
  */
 
 export type JsonParseOutcome =
-  | { ok: true; value: unknown }
+  | { ok: true; value: unknown; repaired: boolean }
   | { ok: false };
 
 /**
@@ -55,7 +55,7 @@ function runRepairLadder(
   raw: string,
   extractSpan: (s: string) => string | null,
 ): JsonParseOutcome {
-  const attempt = (s: string): JsonParseOutcome => {
+  const attempt = (s: string): { ok: true; value: unknown } | { ok: false } => {
     try {
       return { ok: true, value: JSON.parse(s) };
     } catch {
@@ -63,9 +63,11 @@ function runRepairLadder(
     }
   };
 
-  // 1. Strict parse.
+  // 1. Strict parse. `repaired: false` — this is the only rung that reflects
+  // well-formed model output; every rung below means the ladder had to do
+  // work the model itself should have done, which `repaired: true` reports.
   const strict = attempt(raw);
-  if (strict.ok) return strict;
+  if (strict.ok) return { ok: true, value: strict.value, repaired: false };
 
   // 2. Strip ```json ... ``` (and bare ``` ... ```) fences.
   const stripped = raw
@@ -73,13 +75,13 @@ function runRepairLadder(
     .replace(/\s*```\s*$/, "")
     .trim();
   const fenced = attempt(stripped);
-  if (fenced.ok) return fenced;
+  if (fenced.ok) return { ok: true, value: fenced.value, repaired: true };
 
   // 3. Extract the first *balanced* span.
   const span = extractSpan(stripped);
   if (span !== null) {
     const extracted = attempt(span);
-    if (extracted.ok) return extracted;
+    if (extracted.ok) return { ok: true, value: extracted.value, repaired: true };
   }
 
   return { ok: false };

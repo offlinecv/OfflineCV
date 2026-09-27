@@ -153,6 +153,7 @@ import type {
   WebGpuCapability,
 } from "../lib/webllm/types.ts";
 import { SHIPPED_MODEL } from "../lib/webllm/models.ts";
+import { trackJdMatchPathSelected } from "../lib/analytics.ts";
 
 /** Debounce interval for the JD text — matches the pre-#203 200ms value
  *  `PasteJdPanel` used inline. Under the perceptual threshold for a "typed a
@@ -263,6 +264,27 @@ function semanticInputsMatch(
   parsed: HeuristicParsedResume,
 ): boolean {
   return slot.jdText === jdText && slot.parsed === parsed;
+}
+
+/** `SemanticInputs` plus the set of `path:capability` outcomes already fired
+ *  for this analysis — the path-selected telemetry's dedup key, distinct
+ *  from the semantic slot's (which never needs to distinguish arms).
+ *
+ *  A SET, not a single last-seen outcome: `capability` can flap (opt-out
+ *  clears it, opt-in re-probes it) and revisiting an outcome already fired
+ *  for the SAME `(jdText, parsed)` pair must not refire it, while a
+ *  genuinely new outcome (e.g. the semantic arm completing after an earlier
+ *  keyword-ready render) still must. A single-value tracker can't tell those
+ *  apart once a toggle interposes a different outcome in between. */
+interface TrackedAnalysis extends SemanticInputs {
+  firedOutcomes: Set<string>;
+}
+
+function outcomeKey(
+  path: JdMatchResult["path"],
+  capability: WebGpuCapability | null,
+): string {
+  return `${path}:${capability ?? "null"}`;
 }
 
 /** The semantic sub-state the async orchestration produces. `ready` here is
@@ -390,6 +412,72 @@ export function useJdMatch(options: UseJdMatchOptions): JdMatchController {
     }
     return LOADING_START;
   }, [keywordResult, takingSemanticPath, semanticSlot, trimmedJdText, parsed]);
+
+  // Telemetry (#206): `jd_match_path_selected` fires once per distinct
+  // OUTCOME — a `(path, capability)` pair — reached for the current
+  // `(trimmedJdText, parsed)` analysis. This is the ONLY place that knows
+  // both which arm won AND the WebGPU `capability` that led there
+  // (`runLlmMatch` never sees `capability` at all, and never runs when the
+  // keyword arm wins because opt-in is off or WebGPU isn't there — exactly
+  // the cases this event needs to distinguish from a semantic pipeline that
+  // ran and degraded). Keyed by VALUE like the semantic slot
+  // (`semanticInputsMatch`) PLUS the outcome — a keyword-ready render can
+  // fire this event before the user opts into the semantic path, and a later
+  // semantic completion for the SAME `(jdText, parsed)` is a distinct,
+  // more-informative outcome that must fire its own event rather than being
+  // deduped against the earlier keyword one.
+  //
+  // Two guards on top of that:
+  //   - Skip while `semanticOptIn` is true but `capability` hasn't resolved
+  //     yet. Without this, an opt-in whose probe is still pending renders
+  //     `ready` with the keyword result (⁠`takingSemanticPath` requires
+  //     `capability === "available"`⁠) and would fire `capability: null` —
+  //     which the event's own contract reads as "opt-in was off, the probe
+  //     never ran". That is false here: opt-in is ON, the probe just hasn't
+  //     settled. Waiting avoids recording a capability value that lies about
+  //     why the keyword arm is showing.
+  //   - Force `capability` to `null` in the RECORDED outcome whenever
+  //     `semanticOptIn` is false, rather than trusting the `capability` state
+  //     value directly. `setCapability(null)` on opt-out happens in a
+  //     SEPARATE effect, so the commit that flips `semanticOptIn` off can
+  //     render `status: ready(keyword)` for one tick BEFORE that effect
+  //     clears `capability` — reading the raw state here would momentarily
+  //     record `keyword`/`available`, a transient artifact of effect
+  //     ordering rather than a real outcome the analysis reached.
+  //   - Track a SET of fired outcomes per `(jdText, parsed)`, not the single
+  //     last one. The effective capability above still flaps across an
+  //     opt-out/opt-in toggle (forced `null` on opt-out, re-probed on
+  //     opt-in), which can revisit an outcome already fired for this exact
+  //     analysis — e.g. semantic completes (`semantic`/`available`), the user
+  //     opts out (`keyword`/`null`) and back in, landing on the same cached
+  //     `ready` slot (`semantic`/`available` again). A single-value tracker
+  //     would see that as "new" relative to the interposed keyword outcome
+  //     and refire it, inflating one analysis into repeated events — the
+  //     toggle taught the funnel nothing, so it must not look like a second
+  //     completed analysis.
+  const trackedAnalysisRef = useRef<TrackedAnalysis | null>(null);
+  useEffect(() => {
+    if (status.kind !== "ready") return;
+    if (semanticOptIn && capability === null) return;
+    const effectiveCapability = semanticOptIn ? capability : null;
+
+    let tracked = trackedAnalysisRef.current;
+    if (
+      tracked === null ||
+      !semanticInputsMatch(tracked, trimmedJdText, parsed)
+    ) {
+      tracked = { jdText: trimmedJdText, parsed, firedOutcomes: new Set() };
+      trackedAnalysisRef.current = tracked;
+    }
+
+    const key = outcomeKey(status.result.path, effectiveCapability);
+    if (tracked.firedOutcomes.has(key)) return;
+    tracked.firedOutcomes.add(key);
+    trackJdMatchPathSelected({
+      path: status.result.path,
+      capability: effectiveCapability,
+    });
+  }, [status, trimmedJdText, parsed, capability, semanticOptIn]);
 
   // ── Semantic orchestration ─────────────────────────────────────────────
   //

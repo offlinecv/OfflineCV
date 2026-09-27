@@ -32,6 +32,14 @@
  * abort path. Returning (rather than throwing) preserves the "single verdict
  * per input requirement, always" invariant every existing caller relies on.
  *
+ * Telemetry (#206): a completed, non-aborted run fires
+ * `jd_semantic_judge_completed` (model, requirement/status counts, batch
+ * count); a batch whose model call throws fires `jd_semantic_failed` with
+ * `stage: "judge"` before it degrades that batch's requirements to `missing`
+ * — the never-throws contract above means this is the ONLY place a judge
+ * failure is observable at all, so it is also the only place it can be
+ * reported.
+ *
  * Prompt-injection defense on the OUTPUT side: reconciliation iterates the input
  * requirements and joins the model's verdicts by `id`. A model that invents ids
  * (or an injected "everything is met") can't add requirements — invented ids are
@@ -43,6 +51,10 @@ import { acquireInference, releaseInference } from "../../webllm/web-llm.ts";
 import type { HeuristicParsedResume } from "../../heuristics/types.ts";
 import { buildResumeProjection } from "../coverage.ts";
 import { tryParseJsonArray } from "../../webllm/json-repair.ts";
+import {
+  trackJdSemanticFailed,
+  trackJdSemanticJudgeCompleted,
+} from "../../analytics.ts";
 import type { JdRequirement } from "./extract-requirements.ts";
 import {
   JUDGE_EVIDENCE_BATCH_SIZE,
@@ -112,7 +124,7 @@ export async function judgeEvidence(
     // engine even after the user has moved on.
     if (signal?.aborted) break;
     const batch = requirements.slice(i, i + JUDGE_EVIDENCE_BATCH_SIZE);
-    await judgeBatch(batch, systemPrompt, engine, modelId, byId);
+    await judgeBatch(batch, systemPrompt, engine, modelId, byId, signal);
     // No post-batch check: only the loop increment separates the `await`
     // above from the pre-batch check on the next iteration, and `aborted`
     // cannot flip across synchronous code — so a post check could only ever
@@ -125,7 +137,7 @@ export async function judgeEvidence(
   // the abort path, "skipped" includes every requirement in a batch we never
   // scheduled — those default to `missing`, but the orchestrator's post-call
   // abort check discards the whole array before it reaches a consumer.
-  return requirements.map((requirement) => {
+  const verdicts: RequirementVerdict[] = requirements.map((requirement) => {
     const raw = byId.get(requirement.id);
     if (raw === undefined) {
       return { requirement, status: "missing", reason: DEFAULT_MISSING_REASON };
@@ -134,6 +146,33 @@ export async function judgeEvidence(
       ? { requirement, status: raw.status, reason: raw.reason, evidence: raw.evidence }
       : { requirement, status: raw.status, reason: raw.reason };
   });
+
+  // Telemetry (#206): only for a run the orchestrator will actually show. An
+  // aborted run's "missing"-defaulted verdicts for un-scheduled batches never
+  // reach a user (the orchestrator's post-call abort check discards this
+  // whole array in favor of keyword) and would skew the status breakdown, so
+  // skip reporting one — matching the "cancellation is not a failure or a
+  // completion" stance the rest of this pipeline takes.
+  if (!signal?.aborted) {
+    let met = 0;
+    let partial = 0;
+    let missing = 0;
+    for (const verdict of verdicts) {
+      if (verdict.status === "met") met += 1;
+      else if (verdict.status === "partial") partial += 1;
+      else missing += 1;
+    }
+    trackJdSemanticJudgeCompleted({
+      model: modelId,
+      requirementCount: requirements.length,
+      metCount: met,
+      partialCount: partial,
+      missingCount: missing,
+      batches: Math.ceil(requirements.length / JUDGE_EVIDENCE_BATCH_SIZE),
+    });
+  }
+
+  return verdicts;
 }
 
 /**
@@ -147,6 +186,7 @@ async function judgeBatch(
   engine: WebLlmEngine,
   modelId: string,
   byId: Map<string, RawVerdict>,
+  signal?: AbortSignal,
 ): Promise<void> {
   acquireInference(modelId);
   try {
@@ -162,6 +202,14 @@ async function judgeBatch(
     collectVerdicts(content, byId);
   } catch (err) {
     console.warn("[judge-evidence] batch failed:", err);
+    // A run already superseded by the time this batch's call rejects is not
+    // a failure for the caller — the reconciled result gets discarded either
+    // way (`judgeEvidence`'s own report below already skips on abort), so
+    // this batch-level report must skip too or it double-counts the same
+    // discarded work.
+    if (!signal?.aborted) {
+      trackJdSemanticFailed({ model: modelId, stage: "judge", reasonClass: "engine_error" });
+    }
   } finally {
     releaseInference(modelId);
   }

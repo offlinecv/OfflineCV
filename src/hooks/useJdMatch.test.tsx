@@ -40,6 +40,14 @@ vi.mock("../lib/jd-match/llm/run-llm-match.ts", () => ({
   runLlmMatch: (...args: unknown[]) => runLlmMatchMock(...args),
 }));
 
+const { trackPathSelectedMock } = vi.hoisted(() => ({
+  trackPathSelectedMock: vi.fn(),
+}));
+vi.mock("../lib/analytics.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/analytics.ts")>();
+  return { ...actual, trackJdMatchPathSelected: trackPathSelectedMock };
+});
+
 import {
   useJdMatch,
   type JdMatchStatus,
@@ -156,7 +164,21 @@ beforeEach(() => {
   vi.useFakeTimers();
   webgpu = "no-webgpu";
   runLlmMatchMock.mockReset();
+  // Well-typed default so a test that opts into the semantic path without
+  // caring about the resolved value (e.g. the capability-probing tests below)
+  // still produces a real `JdMatchResult` — `mockReset()` alone leaves the
+  // mock resolving `undefined`, which `useJdMatch` would (correctly, per its
+  // contract with the real `runLlmMatch`, which never resolves `undefined`)
+  // treat as a `JdMatchResult` and crash the #206 path-selected telemetry
+  // effect on `.result.path`. Tests that care about the actual value
+  // override this with their own `mockResolvedValue`/`mockImplementation`.
+  runLlmMatchMock.mockResolvedValue({
+    path: "semantic",
+    verdicts: [],
+    summary: { met: 0, partial: 0, missing: 0, total: 0 },
+  } satisfies JdMatchResult);
   detectWebGpuMock.mockClear();
+  trackPathSelectedMock.mockClear();
   latestStatus = { kind: "idle" };
   latestKeyword = null;
   latestCapability = null;
@@ -1122,5 +1144,191 @@ describe("useJdMatch — Layer-3 abort controller (#803)", () => {
     });
 
     expect(latestStatus.kind).toBe("loading"); // run B still loading, not overwritten
+  });
+});
+
+describe("useJdMatch — jd_match_path_selected telemetry (#206)", () => {
+  it("fires once with path: keyword and capability: null for a keyword-only consumer", async () => {
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT });
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(trackPathSelectedMock).toHaveBeenCalledExactlyOnceWith({
+      path: "keyword",
+      capability: null,
+    });
+  });
+
+  it("fires path: keyword with the detected capability when WebGPU isn't available", async () => {
+    webgpu = "no-webgpu";
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(trackPathSelectedMock).toHaveBeenCalledExactlyOnceWith({
+      path: "keyword",
+      capability: "no-webgpu",
+    });
+  });
+
+  it("fires path: semantic with capability: available once a semantic run resolves", async () => {
+    webgpu = "available";
+    const semanticResult: JdMatchResult = {
+      path: "semantic",
+      verdicts: [],
+      summary: { met: 0, partial: 0, missing: 0, total: 0 },
+    };
+    runLlmMatchMock.mockResolvedValue(semanticResult);
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(latestStatus).toEqual({ kind: "ready", result: semanticResult });
+    expect(trackPathSelectedMock).toHaveBeenCalledExactlyOnceWith({
+      path: "semantic",
+      capability: "available",
+    });
+  });
+
+  it("does NOT re-fire for the same analysis across unrelated re-renders", async () => {
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT });
+    flushDebounce();
+    await flushMicrotasks();
+    expect(trackPathSelectedMock).toHaveBeenCalledTimes(1);
+
+    // Re-render with byte-identical inputs.
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT });
+    await flushMicrotasks();
+
+    expect(trackPathSelectedMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires again for a genuinely new analysis (JD text changed)", async () => {
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT });
+    flushDebounce();
+    await flushMicrotasks();
+    expect(trackPathSelectedMock).toHaveBeenCalledTimes(1);
+
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT + " more requirements here" });
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(trackPathSelectedMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fire while idle (empty JD)", async () => {
+    await mount({ parsed: SPARSE_RESUME, jdText: "" });
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(trackPathSelectedMock).not.toHaveBeenCalled();
+  });
+
+  it("fires again for the SAME (jdText, parsed) when opting into semantic after a keyword-ready render", async () => {
+    // Keyword-ready first — matches a user who pastes a JD before ticking
+    // "Analyze with on-device AI".
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT });
+    flushDebounce();
+    await flushMicrotasks();
+    expect(trackPathSelectedMock).toHaveBeenCalledExactlyOnceWith({
+      path: "keyword",
+      capability: null,
+    });
+
+    // Now opt in. Same inputs, but the semantic run produces a genuinely
+    // different, more-informative outcome — the old (jdText, parsed)-only
+    // dedup key would wrongly treat this as the already-tracked analysis.
+    webgpu = "available";
+    const semanticResult: JdMatchResult = {
+      path: "semantic",
+      verdicts: [],
+      summary: { met: 0, partial: 0, missing: 0, total: 0 },
+    };
+    runLlmMatchMock.mockResolvedValue(semanticResult);
+
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(latestStatus).toEqual({ kind: "ready", result: semanticResult });
+    expect(trackPathSelectedMock).toHaveBeenCalledTimes(2);
+    expect(trackPathSelectedMock).toHaveBeenNthCalledWith(2, {
+      path: "semantic",
+      capability: "available",
+    });
+  });
+
+  it("does not fire a premature `capability: null` event while opted in and the probe is still pending", async () => {
+    // Opt-in from mount, but don't let the WebGPU probe resolve before the
+    // debounce fires: the keyword-ready render that follows must NOT report
+    // `capability: null` — that value is documented to mean "opt-in was off,
+    // the probe never ran", which would be false here (opt-in is ON; the
+    // probe just hasn't settled yet).
+    webgpu = "available";
+    // `mockReturnValueOnce`, not `mockReturnValue` — this must not leak the
+    // never-resolving promise into later tests (`mockClear()` in
+    // `beforeEach` resets call tracking, not a standing implementation).
+    detectWebGpuMock.mockReturnValueOnce(new Promise(() => {}));
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    flushDebounce();
+    await flushMicrotasks();
+
+    expect(readStatus()).toEqual({
+      kind: "ready",
+      result: expect.objectContaining({ path: "keyword" }),
+    });
+    expect(trackPathSelectedMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT refire an outcome already tracked for this analysis after an opt-out/opt-in toggle", async () => {
+    // Mirrors the "opt-out preserves a completed semantic result" behavior:
+    // semantic completes, the user opts out (falls back to keyword/null),
+    // then opts back in and lands on the SAME cached semantic/available
+    // outcome. That round trip taught the funnel nothing new, so the second
+    // `semantic`/`available` must not refire.
+    webgpu = "available";
+    const semanticResult: JdMatchResult = {
+      path: "semantic",
+      verdicts: [],
+      summary: { met: 0, partial: 0, missing: 0, total: 0 },
+    };
+    runLlmMatchMock.mockResolvedValue(semanticResult);
+
+    await mount({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    flushDebounce();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    expect(trackPathSelectedMock).toHaveBeenCalledExactlyOnceWith({
+      path: "semantic",
+      capability: "available",
+    });
+
+    // Opt out — falls back to keyword/null, a genuinely new outcome.
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: false });
+    await flushMicrotasks();
+    expect(trackPathSelectedMock).toHaveBeenCalledTimes(2);
+    expect(trackPathSelectedMock).toHaveBeenNthCalledWith(2, {
+      path: "keyword",
+      capability: null,
+    });
+
+    // Opt back in — the cached semantic/available slot comes straight back.
+    update({ parsed: SPARSE_RESUME, jdText: JD_TEXT, semanticOptIn: true });
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const optedBackIn = readStatus();
+    if (optedBackIn.kind !== "ready") throw new Error("unreachable");
+    expect(optedBackIn.result).toBe(semanticResult);
+    // Still 2 — the semantic/available outcome was already tracked.
+    expect(trackPathSelectedMock).toHaveBeenCalledTimes(2);
   });
 });

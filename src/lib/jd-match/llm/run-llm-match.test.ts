@@ -37,7 +37,14 @@ vi.mock("./judge-evidence.ts", async (importOriginal) => {
   return { ...actual, judgeEvidence: vi.fn() };
 });
 
+const { trackFailedMock } = vi.hoisted(() => ({ trackFailedMock: vi.fn() }));
+vi.mock("../../analytics.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../analytics.ts")>();
+  return { ...actual, trackJdSemanticFailed: trackFailedMock };
+});
+
 import { runLlmMatch } from "./run-llm-match.ts";
+import { ModelConsentRequiredError } from "../../webllm/consent.ts";
 import {
   acquireInference,
   loadEngine,
@@ -152,11 +159,13 @@ describe("runLlmMatch — happy path", () => {
     // Trailing `undefined` signal argument (#803): the orchestrator always
     // passes its own `signal` parameter through even when the caller didn't
     // supply one, so the collaborator's arg tuple carries a positional
-    // `undefined` we have to match here.
+    // `undefined` we have to match here. `MODEL` (#206) is the trailing
+    // telemetry-only `modelId` — see `extractRequirements`'s docblock.
     expect(extractMock).toHaveBeenCalledExactlyOnceWith(
       JD_TEXT,
       engine,
       undefined,
+      MODEL,
     );
     expect(judgeMock).toHaveBeenCalledExactlyOnceWith(
       requirements,
@@ -669,5 +678,60 @@ describe("runLlmMatch — cancellation (#803)", () => {
 
     expect(result).toEqual(freshKeywordResult(resume));
     expect(console.warn).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runLlmMatch — jd_semantic_failed telemetry (#206)", () => {
+  it("fires stage: load, reason_class: engine_error on a generic loadEngine rejection", async () => {
+    loadEngineMock.mockRejectedValue(new Error("WebGPU unavailable"));
+
+    await runLlmMatch(JD_TEXT, parsed(), MODEL, vi.fn());
+
+    expect(trackFailedMock).toHaveBeenCalledExactlyOnceWith({
+      model: MODEL,
+      stage: "load",
+      reasonClass: "engine_error",
+    });
+  });
+
+  it("fires stage: load, reason_class: consent_required on ModelConsentRequiredError", async () => {
+    loadEngineMock.mockRejectedValue(new ModelConsentRequiredError(MODEL));
+
+    await runLlmMatch(JD_TEXT, parsed(), MODEL, vi.fn());
+
+    expect(trackFailedMock).toHaveBeenCalledExactlyOnceWith({
+      model: MODEL,
+      stage: "load",
+      reasonClass: "consent_required",
+    });
+  });
+
+  it("does NOT re-report an extraction failure — extractRequirements already reported it", async () => {
+    extractMock.mockRejectedValue(
+      new RequirementExtractionError("no parseable JSON array"),
+    );
+
+    await runLlmMatch(JD_TEXT, parsed(), MODEL, vi.fn());
+
+    // The orchestrator's catch only fires for a `loadEngine` failure; an
+    // extraction failure is `extract-requirements.ts`'s own to report (it has
+    // the precise reason — this module would only be guessing).
+    expect(trackFailedMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fire on cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await runLlmMatch(
+      JD_TEXT,
+      parsed(),
+      MODEL,
+      vi.fn(),
+      undefined,
+      controller.signal,
+    );
+
+    expect(trackFailedMock).not.toHaveBeenCalled();
   });
 });
