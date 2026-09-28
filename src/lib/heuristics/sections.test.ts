@@ -26,6 +26,7 @@ import {
   splitIntoSections,
   splitIntoSectionsWithMarkdown,
   toSectionedResume,
+  type PdfLine,
   type PdfSection,
 } from "./sections.ts";
 import type { PdfTextItem } from "./types.ts";
@@ -1254,18 +1255,23 @@ describe("mergeItemText — letter-spaced heading recovery (#330)", () => {
 });
 
 describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#374)", () => {
-  // Markdown that promotes ONLY Experience + Education to headings — the shape
-  // the PDF emitter produces when a wrapped "Technical Skills" header gets
+  // A heading set that promotes ONLY Experience + Education — the shape the
+  // PDF emitter produces when a wrapped "Technical Skills" header gets
   // flattened into the two-column skills grid and never reaches `##`. The
   // splitter runs (>=2 canonical sections) but, without the fold, strands the
   // skills content in `profile`.
-  const MD = "## Experience\n\nrole\n\n## Education\n\ndegree";
+  const PROMOTED = /^(Experience|Education)$/;
 
   /** Build PdfLines from line-by-line text (one item per line). */
   function md(
     specs: Array<Omit<Parameters<typeof mkItems>[0][number], "lineIndex">>,
   ) {
     return groupIntoLines(mkItems(specs));
+  }
+
+  /** The emitter's `headings` set for `lines`: the matching line OBJECTS. */
+  function headingsOf(lines: PdfLine[], promoted: RegExp = PROMOTED) {
+    return new Set(lines.filter((l) => promoted.test(l.text)));
   }
 
   it("folds `Technical` / `Skills` into a skills header and opens the section", () => {
@@ -1281,7 +1287,7 @@ describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#3
       { text: "Education" },
       { text: "BS Computer Science" },
     ]);
-    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    const sections = splitIntoSectionsWithMarkdown(lines, headingsOf(lines))!;
     expect(sections).not.toBeNull();
     expect(names(sections)).toContain("skills");
     const skills = sections.find((s) => s.name === "skills")!;
@@ -1303,7 +1309,7 @@ describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#3
       { text: "Education" },
       { text: "degree" },
     ]);
-    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    const sections = splitIntoSectionsWithMarkdown(lines, headingsOf(lines))!;
     expect(names(sections)).toContain("skills");
     expect(
       sections.find((s) => s.name === "skills")!.lines.map((l) => l.text),
@@ -1320,7 +1326,7 @@ describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#3
       { text: "Education" },
       { text: "degree" },
     ]);
-    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    const sections = splitIntoSectionsWithMarkdown(lines, headingsOf(lines))!;
     expect(names(sections)).not.toContain("skills");
     expect(names(sections)).not.toContain("projects");
     // Both lines stay as content in the profile.
@@ -1340,7 +1346,7 @@ describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#3
       { text: "Education" },
       { text: "degree" },
     ]);
-    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    const sections = splitIntoSectionsWithMarkdown(lines, headingsOf(lines))!;
     expect(names(sections)).not.toContain("skills");
   });
 
@@ -1353,7 +1359,7 @@ describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#3
       { text: "Education" },
       { text: "degree" },
     ]);
-    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    const sections = splitIntoSectionsWithMarkdown(lines, headingsOf(lines))!;
     expect(names(sections)).not.toContain("skills");
   });
 
@@ -1369,7 +1375,7 @@ describe("splitIntoSectionsWithMarkdown — two-line-wrapped header recovery (#3
       { text: "Education" },
       { text: "degree" },
     ]);
-    const sections = splitIntoSectionsWithMarkdown(lines, MD)!;
+    const sections = splitIntoSectionsWithMarkdown(lines, headingsOf(lines))!;
     const expIdx = sections.findIndex((s) => s.name === "experience");
     expect(expIdx).toBeGreaterThanOrEqual(0);
     // The bare "Skills" line stays as content under Experience, not a new header.
@@ -1689,5 +1695,63 @@ describe("recoverHeaderlessExperience — opening on entry shape (#492)", () => 
     ]);
     expect(names(sections)).not.toContain("experience");
     expect(sectionContaining(sections, "ISTQB")?.name).toBe("certifications");
+  });
+});
+
+describe("splitIntoSectionsWithMarkdown — opens sections by line identity (#651)", () => {
+  const RESUME = [
+    { text: "Jordan Reyes" },
+    { text: "jordan@example.com" },
+    { text: "Experience" },
+    { text: "Software Engineer" },
+    { text: "Education" },
+    { text: "BS Computer Science" },
+    { text: "Skills" },
+    { text: "Java" },
+  ];
+
+  it("opens a section at exactly the promoted line objects", () => {
+    const lines = groupIntoLines(mkItems(RESUME));
+    const headings = new Set([lines[2], lines[4], lines[6]]);
+    const sections = splitIntoSectionsWithMarkdown(lines, headings)!;
+    expect(sections.map((s) => s.name)).toEqual([
+      "profile",
+      "experience",
+      "education",
+      "skills",
+    ]);
+    // The section body lines are the same references, not re-assembled copies.
+    expect(sections[1].lines[0]).toBe(lines[3]);
+    expect(sections[3].lines[0]).toBe(lines[7]);
+  });
+
+  it("does NOT open a section for a structural clone — identity, not text equality", () => {
+    const lines = groupIntoLines(mkItems(RESUME));
+    // Same text and geometry as the real Experience/Education lines, but
+    // different objects: the promotion gate is only meaningful when the
+    // promoted object IS the line being classified.
+    const clones = new Set([{ ...lines[2] }, { ...lines[4] }]);
+    expect(splitIntoSectionsWithMarkdown(lines, clones)).toBeNull();
+  });
+
+  it("returns null for an empty heading set", () => {
+    const lines = groupIntoLines(mkItems(RESUME));
+    expect(splitIntoSectionsWithMarkdown(lines, new Set())).toBeNull();
+  });
+
+  it("leaves a promoted non-canonical line (the name) as content, and a body-size keyword line unopened", () => {
+    const lines = groupIntoLines(mkItems(RESUME));
+    // Name promoted (as an H1 would be) but "Skills" NOT promoted: the
+    // keyword alone must not open a section — that is the false positive the
+    // markdown path exists to avoid.
+    const headings = new Set([lines[0], lines[2], lines[4]]);
+    const sections = splitIntoSectionsWithMarkdown(lines, headings)!;
+    expect(sections.map((s) => s.name)).toEqual(["profile", "experience", "education"]);
+    expect(sections[0].lines[0]).toBe(lines[0]);
+    expect(sections[2].lines.map((l) => l.text)).toEqual([
+      "BS Computer Science",
+      "Skills",
+      "Java",
+    ]);
   });
 });

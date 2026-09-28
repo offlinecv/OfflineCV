@@ -3,55 +3,39 @@
 
 /**
  * Unit tests for the PDF → markdown emitter. Covers the exported utility
- * functions individually plus end-to-end `emitMarkdown()` scenarios.
+ * functions individually, the `emitMarkdownFromLines` heading-identity
+ * contract (#651), and end-to-end `emitMarkdown()` scenarios.
  */
 
 import {
-  computeBodyFontSize,
   emitMarkdown,
-  groupItemsIntoLines,
+  emitMarkdownFromLines,
   isBulletLine,
   needsParagraphBreak,
   renderLine,
   stripBulletPrefix,
 } from "./markdown-emit.ts";
+import { computeBodyFontSize, groupIntoLines } from "./line-assembly.ts";
+import type { PdfLine } from "./line-model.ts";
 import { mkDefaultPages, mkItems } from "./__test-utils__/mkItem.ts";
-import type { RenderLine } from "./markdown-emit.ts";
 
-describe("markdown-emit: groupItemsIntoLines", () => {
-  it("returns empty array on empty input", () => {
-    expect(groupItemsIntoLines([])).toEqual([]);
-  });
-
-  it("groups items at the same y-coord into one line", () => {
-    const items = mkItems([
-      { text: "Hello ", lineIndex: 0, x: 72 },
-      { text: "world", lineIndex: 0, x: 110 },
-    ]);
-    const lines = groupItemsIntoLines(items);
-    expect(lines).toHaveLength(1);
-    expect(lines[0].text).toBe("Hello world");
-  });
-
-  it("separates items on different y-coords", () => {
-    const items = mkItems([
-      { text: "Line one", lineIndex: 0 },
-      { text: "Line two", lineIndex: 1 },
-    ]);
-    const lines = groupItemsIntoLines(items);
-    expect(lines).toHaveLength(2);
-    expect(lines.map((l) => l.text)).toEqual(["Line one", "Line two"]);
-  });
-
-  it("uses the max font size when items on a line have differing sizes", () => {
-    const items = mkItems([
-      { text: "small ", lineIndex: 0, fontSize: 10 },
-      { text: "BOLD", lineIndex: 0, x: 110, fontSize: 10 },
-    ]);
-    const lines = groupItemsIntoLines(items);
-    expect(lines[0].fontSize).toBe(10);
-  });
-});
+/** A `PdfLine` literal with only the fields the emitter reads filled in. */
+function line(
+  text: string,
+  maxFontSize: number,
+  extra: Partial<Pick<PdfLine, "page" | "y" | "x">> = {},
+): PdfLine {
+  return {
+    page: extra.page ?? 1,
+    y: extra.y ?? 100,
+    x: extra.x ?? 72,
+    items: [],
+    text,
+    maxFontSize,
+    allCaps: text === text.toUpperCase(),
+    gapAbove: 0,
+  };
+}
 
 describe("markdown-emit: computeBodyFontSize", () => {
   it("returns default 10 for empty input", () => {
@@ -61,24 +45,12 @@ describe("markdown-emit: computeBodyFontSize", () => {
   it("picks the character-weighted mode, not the line-count mode", () => {
     // Two short 18pt header lines and three long 11pt body lines. Character
     // weighting should pick 11pt even though there are almost equal counts.
-    const lines: RenderLine[] = [
-      { page: 1, y: 72, x: 72, text: "HEAD", fontSize: 18 },
-      { page: 1, y: 100, x: 72, text: "HEAD2", fontSize: 18 },
-      {
-        page: 1, y: 120, x: 72,
-        text: "this is a much longer line of body text that should dominate",
-        fontSize: 11,
-      },
-      {
-        page: 1, y: 134, x: 72,
-        text: "and another long body paragraph line keeps the weight on 11pt",
-        fontSize: 11,
-      },
-      {
-        page: 1, y: 148, x: 72,
-        text: "third body line for good measure keeps the mode at 11",
-        fontSize: 11,
-      },
+    const lines = [
+      line("HEAD", 18, { y: 72 }),
+      line("HEAD2", 18, { y: 100 }),
+      line("this is a much longer line of body text that should dominate", 11, { y: 120 }),
+      line("and another long body paragraph line keeps the weight on 11pt", 11, { y: 134 }),
+      line("third body line for good measure keeps the mode at 11", 11, { y: 148 }),
     ];
     expect(computeBodyFontSize(lines)).toBe(11);
   });
@@ -91,7 +63,7 @@ describe("markdown-emit: isBulletLine / stripBulletPrefix", () => {
     expect(isBulletLine("* Shipped v2")).toBe(true);
     expect(isBulletLine("▪ Shipped v2")).toBe(true);
     expect(isBulletLine("◦ Shipped v2")).toBe(true);
-    expect(isBulletLine("\uF0B7 Wingdings bullet")).toBe(true);
+    expect(isBulletLine(" Wingdings bullet")).toBe(true);
   });
 
   it("rejects lines that do not start with a bullet glyph + space", () => {
@@ -103,15 +75,12 @@ describe("markdown-emit: isBulletLine / stripBulletPrefix", () => {
   it("strips the leading bullet and whitespace", () => {
     expect(stripBulletPrefix("• Drove revenue 30%")).toBe("Drove revenue 30%");
     expect(stripBulletPrefix("  - Shipped v2")).toBe("Shipped v2");
-    expect(stripBulletPrefix("\uF0B7 Wingdings item")).toBe("Wingdings item");
+    expect(stripBulletPrefix(" Wingdings item")).toBe("Wingdings item");
   });
 });
 
 describe("markdown-emit: renderLine", () => {
   const bodySize = 10;
-  const line = (text: string, fontSize: number): RenderLine => ({
-    page: 1, y: 100, x: 72, text, fontSize,
-  });
 
   it("promotes to # H1 at ratio >= 1.5", () => {
     expect(renderLine(line("TITLE", 16), bodySize)).toBe("# TITLE");
@@ -140,24 +109,93 @@ describe("markdown-emit: renderLine", () => {
 
 describe("markdown-emit: needsParagraphBreak", () => {
   const body = 10;
-  const line = (page: number, y: number, fontSize = body): RenderLine => ({
-    page, y, x: 72, text: "x", fontSize,
-  });
+  const at = (page: number, y: number, fontSize = body) =>
+    line("x", fontSize, { page, y });
 
   it("breaks on page change", () => {
-    expect(needsParagraphBreak(line(1, 700), line(2, 72), body)).toBe(true);
+    expect(needsParagraphBreak(at(1, 700), at(2, 72), body)).toBe(true);
   });
 
   it("breaks on large y-gap", () => {
-    expect(needsParagraphBreak(line(1, 100), line(1, 100 + body * 2), body)).toBe(true);
+    expect(needsParagraphBreak(at(1, 100), at(1, 100 + body * 2), body)).toBe(true);
   });
 
   it("does not break on normal line spacing", () => {
-    expect(needsParagraphBreak(line(1, 100), line(1, 114), body)).toBe(false);
+    expect(needsParagraphBreak(at(1, 100), at(1, 114), body)).toBe(false);
   });
 
   it("breaks on font-size change (header transition)", () => {
-    expect(needsParagraphBreak(line(1, 100, 10), line(1, 114, 14), body)).toBe(true);
+    expect(needsParagraphBreak(at(1, 100, 10), at(1, 114, 14), body)).toBe(true);
+  });
+});
+
+describe("markdown-emit: emitMarkdownFromLines shares line objects with the parser (#651)", () => {
+  it("reports promoted headings as the very PdfLine objects it was given", () => {
+    const lines = groupIntoLines(
+      mkItems([
+        { text: "Priya Ramachandran", fontSize: 18 },
+        { text: "priya@example.com · (312) 555-0123", fontSize: 10 },
+        { text: "Experience", fontSize: 14 },
+        { text: "Staff Engineer, Stripe", fontSize: 11 },
+        { text: "• Shipped v2 of payments API for the platform team", fontSize: 10 },
+        { text: "• Drove revenue 30% through pricing experiments", fontSize: 10 },
+        { text: "Education", fontSize: 14 },
+        { text: "B.S. Computer Science, State University", fontSize: 10 },
+      ]),
+    );
+    const emission = emitMarkdownFromLines(lines)!;
+    expect(emission).toBeDefined();
+
+    // Every heading is one of the input objects — identity, not a copy.
+    for (const h of emission.headings) {
+      expect(lines.some((l) => l === h)).toBe(true);
+    }
+    // And the heading set is exactly the lines that rendered as `#…` lines.
+    const rendered = emission.markdown
+      .split("\n")
+      .filter((l) => /^#{1,3} /.test(l))
+      .map((l) => l.replace(/^#{1,3} /, ""));
+    expect([...emission.headings].map((l) => l.text)).toEqual(rendered);
+    expect(rendered).toEqual(["Priya Ramachandran", "Experience", "Education"]);
+    expect(emission.headings.has(lines[2])).toBe(true);
+    expect(emission.headings.has(lines[3])).toBe(false);
+  });
+
+  it("skips empty-text lines and does not count them toward the minimum", () => {
+    // The shared assembler keeps a line for a whitespace-only item; the
+    // private grouper this replaced dropped it. Two real lines plus a blank one
+    // must still be "too sparse".
+    const lines = groupIntoLines(
+      mkItems([{ text: "Hi" }, { text: "   " }, { text: "there" }]),
+    );
+    expect(lines).toHaveLength(3);
+    expect(emitMarkdownFromLines(lines)).toBeUndefined();
+
+    const dense = groupIntoLines(
+      mkItems([{ text: "Hi" }, { text: "   " }, { text: "there" }, { text: "friend" }]),
+    );
+    const md = emitMarkdownFromLines(dense)!.markdown;
+    expect(md.split("\n").filter((l) => l.length > 0)).toEqual(["Hi", "there", "friend"]);
+  });
+
+  it("renders a heading cleanly when a right-column value shares its baseline", () => {
+    // Same row, >50pt gap: the shared assembler cuts the row into two lines
+    // (`columnGapCuts`), so the heading text is "EXPERIENCE" and not
+    // "EXPERIENCE Python". The old private grouper welded them.
+    const lines = groupIntoLines(
+      mkItems([
+        { text: "Jordan Reyes", lineIndex: 0, fontSize: 18 },
+        { text: "jordan@example.com", lineIndex: 1, fontSize: 10 },
+        { text: "EXPERIENCE", lineIndex: 2, x: 72, fontSize: 13 },
+        { text: "Python", lineIndex: 2, x: 400, fontSize: 10 },
+        { text: "Engineer at Globex, building billing systems", lineIndex: 3, fontSize: 10 },
+      ]),
+    );
+    const emission = emitMarkdownFromLines(lines)!;
+    const heading = [...emission.headings].find((l) => l.text === "EXPERIENCE");
+    expect(heading).toBeDefined();
+    expect(emission.markdown).toContain("## EXPERIENCE");
+    expect(emission.markdown).not.toContain("EXPERIENCE Python");
   });
 });
 
@@ -177,7 +215,7 @@ describe("markdown-emit: emitMarkdown end-to-end", () => {
   it("renders a simple resume with headings, bullets, and body prose", () => {
     const items = mkItems([
       { text: "Priya Ramachandran", lineIndex: 0, fontSize: 18 },
-      { text: "priya@example.com · (555) 123-4567", lineIndex: 1, fontSize: 10 },
+      { text: "priya@example.com · (312) 555-0123", lineIndex: 1, fontSize: 10 },
       { text: "Experience", lineIndex: 3, fontSize: 14 },
       { text: "Staff Engineer, Stripe", lineIndex: 4, fontSize: 11 },
       { text: "2019–2023", lineIndex: 5, fontSize: 10 },
@@ -190,6 +228,20 @@ describe("markdown-emit: emitMarkdown end-to-end", () => {
     expect(md).toContain("## Experience");
     expect(md).toContain("- Shipped v2 of payments API");
     expect(md).toContain("- Drove revenue 30%");
+  });
+
+  it("joins same-baseline items with an inferred space, so a split bullet still lists", () => {
+    // pdfjs often emits the glyph and the text as separate items. Raw
+    // concatenation gave "•Shipped", which fails the bullet regex's `\s+`.
+    const items = mkItems([
+      { text: "Priya Ramachandran", lineIndex: 0, fontSize: 18 },
+      { text: "priya@example.com", lineIndex: 1, fontSize: 10 },
+      { text: "•", lineIndex: 2, x: 72, fontSize: 10 },
+      { text: "Shipped v2 of payments API", lineIndex: 2, x: 84, fontSize: 10 },
+      { text: "more body text on the next line", lineIndex: 3, fontSize: 10 },
+    ]);
+    const md = emitMarkdown(items, mkDefaultPages(items))!;
+    expect(md).toContain("- Shipped v2 of payments API");
   });
 
   it("inserts blank lines at page breaks", () => {

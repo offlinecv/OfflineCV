@@ -202,6 +202,11 @@ export interface HeuristicResult {
    *  font-size-promoted heading passed the emitter's promotion gate) from
    *  regex-on-line parses. Optional; missing is treated as "regex". */
   sectionSource?: "markdown" | "regex";
+  /** Structure-preserving markdown rendered by `emitMarkdownFromLines` from the
+   *  same `PdfLine[]` the section splitter consumed (#651). Present only when
+   *  the caller asked for emission and the document was dense enough for the
+   *  emitter; the cascade carries it onto `CascadeResult.markdown`. */
+  markdown?: string;
   /** Typed view of the detected section structure (#132). The cascade carries
    *  this onto `CascadeResult.sections`; the scorer derives the skills-exclusion
    *  set from `sections.byName.get("skills")` rather than a hand-serialized
@@ -240,11 +245,12 @@ export interface CascadeResult {
   /** Full concatenated text from Tier 0 — lets callers skip the server-side
    *  text-extraction round-trip when they accept the heuristic as canonical. */
   rawText: string;
-  /** Structure-preserving markdown rendering of the PDF. Produced by
-   *  `emitMarkdown()` from positioned text items + font-size analysis.
-   *  Present when Tier 0 ran successfully on a non-scanned PDF; absent on
-   *  scanned PDFs or when the emitter could not produce useful structure.
-   *  Section splitters prefer this over `rawText` when present. */
+  /** Structure-preserving markdown rendering of the PDF. Produced inside
+   *  Tier 1 by `emitMarkdownFromLines` from the same assembled lines the
+   *  section splitter consumed (#651), with headings promoted by font-size
+   *  ratio. Present when Tier 1 ran on a non-scanned PDF dense enough for the
+   *  emitter; absent on scanned PDFs or when the emitter could not produce
+   *  useful structure. LLM prompts prefer this over `rawText` when present. */
   markdown?: string;
   /** Link annotations Tier 0 lifted off the PDF. Surfaces URLs hyperlinked
    *  behind visible words; also the only credible recovered signal on

@@ -221,7 +221,7 @@ export const DERIVED_SIGNAL_KEYS = [
   // reported as "no defect class is exhibited by this parse".
   "textOracleUnavailable",
   // HEADER oracle — `cascade.markdown` is undefined (scanned PDF, or a document
-  // too sparse for `emitMarkdown()`). Both `skillsHeaderCandidateRejected` and
+  // too sparse for `emitMarkdownFromLines()`). Both `skillsHeaderCandidateRejected` and
   // `educationHeaderCandidateRejected` are derived EXCLUSIVELY from markdown
   // headers, so on such a parse they are false because there was nothing to look
   // at — NOT because no header was rejected.

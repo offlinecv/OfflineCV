@@ -140,7 +140,7 @@
       "NAME_CONFIDENCE_FLOOR", "SOFT_PENALTY", "FIELD_CONFIDENCE_TARGETS",
       "FIELD_WEIGHTS", "TWO_COLUMN_CONFIDENCE_CAP", "getThresholdsFor",
       "CascadeBranch", "CascadeThresholds", "CASCADE_VERSION",
-      "emitMarkdown", "RenderLine",
+      "emitMarkdown",
       "CascadeResult", "HeuristicResult", "HeuristicParsedResume",
       "FieldConfidence", "LayoutProbes", "LayoutTrigger", "EscalationSuggestion",
       "ExtractionFailureReason", "PdfExtractResult", "PdfLinkAnnotation",

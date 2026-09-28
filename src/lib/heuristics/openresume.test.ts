@@ -105,13 +105,7 @@ describe("parseHeuristic — two-column name-recovery fallback (issue #349)", ()
       { text: "Jan 2015 - Present", lineIndex: 4, x: 320, fontSize: 10 },
     ]);
     const boundaries = new Map<number, number>([[1, 250]]);
-    const result = parseHeuristic(
-      items,
-      mkDefaultPages(items),
-      undefined,
-      [],
-      boundaries,
-    );
+    const result = parseHeuristic(items, mkDefaultPages(items), [], boundaries);
     expect(result.parsed.full_name).toBe("Jane Smith");
     // Recovered from the alternate profile — same extractor, so confidence
     // must clear the score's contact-confidence floor.
@@ -132,8 +126,9 @@ describe("parseHeuristic — two-column name-recovery fallback (issue #349)", ()
 });
 
 describe("parseHeuristic — markdown-anchored section splitting", () => {
-  // Reusable clean resume items. The cascade emitter would promote 13pt
-  // lines to `##` relative to the 10-11pt body.
+  // Reusable clean resume items. Over the 10–11pt body the 13pt headers clear
+  // the emitter's promotion gate, and the 18pt name promotes as an H1 that
+  // matches no canonical section.
   const cleanResumeItems = () =>
     mkItems([
       { text: "Jane Q. Doe", fontSize: 18 },
@@ -151,77 +146,63 @@ describe("parseHeuristic — markdown-anchored section splitting", () => {
       { text: "Kotlin, TypeScript, Go", fontSize: 10 },
     ]);
 
-  const cleanResumeMarkdown = [
-    "# Jane Q. Doe",
-    "jane.doe@example.com · (415) 555-0199",
-    "",
-    "## EXPERIENCE",
-    "Acme Corp.                              Jan 2022 – Present",
-    "Senior Software Engineer",
-    "- Led payments migration.",
-    "",
-    "## EDUCATION",
-    "Stanford University — B.S. Computer Science — 2019",
-    "",
-    "## SKILLS",
-    "Kotlin, TypeScript, Go",
-  ].join("\n");
+  const parseWithMarkdown = (items: ReturnType<typeof mkItems>) =>
+    parseHeuristic(items, mkDefaultPages(items), [], undefined, {
+      emitMarkdown: true,
+    });
 
-  it("records sectionSource='markdown' when markdown yields canonical sections", () => {
-    const items = cleanResumeItems();
-    const result = parseHeuristic(items, mkDefaultPages(items), cleanResumeMarkdown);
+  it("records sectionSource='markdown' and carries the markdown when the emitter promotes canonical headings", () => {
+    const result = parseWithMarkdown(cleanResumeItems());
     expect(result.sectionSource).toBe("markdown");
+    expect(result.markdown).toMatch(/^#{1,3} EXPERIENCE$/m);
+    expect(result.markdown).toMatch(/^#{1,3} EDUCATION$/m);
+    expect(result.markdown).toMatch(/^#{1,3} SKILLS$/m);
     expect(result.parsed.experience.length).toBeGreaterThan(0);
     expect(result.parsed.education.length).toBe(1);
     expect(result.parsed.skills.length).toBeGreaterThan(0);
   });
 
-  it("falls back to regex splitter when markdown is absent", () => {
+  it("uses the regex splitter and emits no markdown when emission is off (the default)", () => {
     const items = cleanResumeItems();
     const result = parseHeuristic(items, mkDefaultPages(items));
     expect(result.sectionSource).toBe("regex");
+    expect(result.markdown).toBeUndefined();
     expect(result.parsed.experience.length).toBeGreaterThan(0);
     expect(result.parsed.education.length).toBe(1);
   });
 
-  it("falls back to regex when markdown is an empty string", () => {
-    const items = cleanResumeItems();
-    const result = parseHeuristic(items, mkDefaultPages(items), "");
+  it("falls back to regex when nothing clears the promotion gate (one font size throughout)", () => {
+    const items = mkItems([
+      { text: "Jane Q. Doe" },
+      { text: "jane.doe@example.com" },
+      { text: "EXPERIENCE" },
+      { text: "Acme Corp. Jan 2022 – Present Senior Software Engineer" },
+      { text: "• Led payments migration." },
+      { text: "EDUCATION" },
+      { text: "Stanford University — B.S. Computer Science — 2019" },
+    ]);
+    const result = parseWithMarkdown(items);
     expect(result.sectionSource).toBe("regex");
+    // The emitter still ran — markdown is carried even when the splitter
+    // declined it, so the LLM prompt keeps the structure-free rendering.
+    expect(result.markdown).toBeDefined();
+    expect(result.markdown).not.toMatch(/^#/m);
   });
 
-  it("falls back to regex when markdown has no canonical headings", () => {
-    const items = cleanResumeItems();
-    const markdownWithoutHeadings = [
-      "Jane Q. Doe",
-      "jane.doe@example.com",
-      "Acme Corp. Jan 2022 – Present Senior Software Engineer",
-      "- Led payments migration.",
-      "Stanford University — B.S. Computer Science — 2019",
-    ].join("\n");
-    const result = parseHeuristic(
-      items,
-      mkDefaultPages(items),
-      markdownWithoutHeadings,
-    );
+  it("falls back to regex when fewer than two canonical headings are promoted", () => {
+    const items = mkItems([
+      { text: "Jane Q. Doe", fontSize: 18 },
+      { text: "jane.doe@example.com", fontSize: 10 },
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Acme Corp. Jan 2022 – Present", fontSize: 10 },
+      { text: "Senior Software Engineer", fontSize: 10 },
+      { text: "EDUCATION", fontSize: 10 },
+      { text: "Stanford University — B.S. Computer Science — 2019", fontSize: 10 },
+    ]);
+    const result = parseWithMarkdown(items);
     expect(result.sectionSource).toBe("regex");
-  });
-
-  it("falls back to regex when markdown has fewer than two canonical sections", () => {
-    const items = cleanResumeItems();
-    const markdownOneSection = [
-      "# Jane Q. Doe",
-      "jane.doe@example.com",
-      "",
-      "## EXPERIENCE",
-      "Acme Corp. Jan 2022 – Present",
-    ].join("\n");
-    const result = parseHeuristic(
-      items,
-      mkDefaultPages(items),
-      markdownOneSection,
-    );
-    expect(result.sectionSource).toBe("regex");
+    expect(result.markdown).toMatch(/^#{1,3} EXPERIENCE$/m);
+    expect(result.markdown).not.toMatch(/^#{1,3} EDUCATION$/m);
   });
 
   it("prevents a body-sized keyword line from becoming a false-positive section header", () => {
@@ -244,29 +225,84 @@ describe("parseHeuristic — markdown-anchored section splitting", () => {
       { text: "EDUCATION", fontSize: 13 },
       { text: "Stanford University — B.S. Computer Science — 2019", fontSize: 11 },
     ]);
-    // Markdown with promoted headings; "Skills" on its own line at body
-    // size does NOT appear as `## Skills`.
-    const markdown = [
-      "# Jane Doe",
-      "jane@example.com",
-      "",
-      "## PROFILE",
-      "Skills",
-      "",
-      "## EXPERIENCE",
-      "Acme Corp. Jan 2022 – Present",
-      "Senior Software Engineer",
-      "",
-      "## EDUCATION",
-      "Stanford University — B.S. Computer Science — 2019",
-    ].join("\n");
-    const result = parseHeuristic(items, mkDefaultPages(items), markdown);
+    const result = parseWithMarkdown(items);
     expect(result.sectionSource).toBe("markdown");
+    expect(result.markdown).not.toMatch(/^#{1,3} Skills$/m);
     // Experience survives because the Skills false-positive did not steal
     // the line that would have opened the real EXPERIENCE section in the
     // regex path (both paths get it right here — the assertion captures
     // the markdown path's independent correctness).
     expect(result.parsed.experience.length).toBe(1);
     expect(result.parsed.education.length).toBe(1);
+  });
+
+  // The #651 regression trio: heading rows the emitter's retired private
+  // assembler rendered differently from the parser's lines, so the old
+  // text-equality match failed and the whole document fell back to regex.
+  // With one assembler and identity matching, each stays on the markdown path.
+  describe("stays on the markdown path where the old private assembler disagreed (#651)", () => {
+    const body = [
+      { text: "Acme Corp. Jan 2022 – Present", fontSize: 10 },
+      { text: "Senior Software Engineer", fontSize: 10 },
+      { text: "• Led payments migration for the platform team.", fontSize: 10 },
+      { text: "EDUCATION", fontSize: 13 },
+      { text: "Stanford University — B.S. Computer Science — 2019", fontSize: 10 },
+    ];
+
+    it("a heading split across two same-baseline items that needs an inferred space", () => {
+      // "WORK" + "EXPERIENCE" as two items with a gap: raw concatenation gave
+      // "WORKEXPERIENCE", which is no section alias.
+      const items = mkItems([
+        { text: "Jane Q. Doe", lineIndex: 0, fontSize: 18 },
+        { text: "jane.doe@example.com", lineIndex: 1, fontSize: 10 },
+        { text: "WORK", lineIndex: 2, x: 72, fontSize: 13 },
+        { text: "EXPERIENCE", lineIndex: 2, x: 101, fontSize: 13 },
+        ...body.map((b, i) => ({ ...b, lineIndex: 3 + i })),
+      ]);
+      const result = parseWithMarkdown(items);
+      expect(result.markdown).toMatch(/^#{1,3} WORK EXPERIENCE$/m);
+      expect(result.sectionSource).toBe("markdown");
+      expect(result.parsed.experience.length).toBe(1);
+      expect(result.parsed.education.length).toBe(1);
+    });
+
+    it("a letter-spaced heading that only the shared assembler de-tracks", () => {
+      // "S K I L L S" collapses to "SKILLS" in `mergeItemText`; the old
+      // private grouper kept the spaces, and "s k i l l s" matches nothing.
+      const items = mkItems([
+        { text: "Jane Q. Doe", fontSize: 18 },
+        { text: "jane.doe@example.com", fontSize: 10 },
+        { text: "EXPERIENCE", fontSize: 13 },
+        ...body.slice(0, 3),
+        { text: "S K I L L S", fontSize: 13 },
+        { text: "Kotlin, TypeScript, Go", fontSize: 10 },
+      ]);
+      const result = parseWithMarkdown(items);
+      expect(result.markdown).toMatch(/^#{1,3} SKILLS$/m);
+      expect(result.sectionSource).toBe("markdown");
+      expect(result.parsed.skills).toEqual(
+        expect.arrayContaining(["Kotlin", "TypeScript", "Go"]),
+      );
+    });
+
+    it("a heading sharing its baseline with a far-right value the assembler cuts off", () => {
+      // A body-size, non-date value >50pt to the right of the heading. The
+      // shared assembler splits the row at the column gap so the heading line
+      // reads "EXPERIENCE"; the old grouper welded it to "EXPERIENCEPython".
+      // (A flush-right DATE is exempt from the cut — #425 — so it is not the
+      // case this test guards.)
+      const items = mkItems([
+        { text: "Jane Q. Doe", lineIndex: 0, fontSize: 18 },
+        { text: "jane.doe@example.com", lineIndex: 1, fontSize: 10 },
+        { text: "EXPERIENCE", lineIndex: 2, x: 72, fontSize: 13 },
+        { text: "Python", lineIndex: 2, x: 400, fontSize: 10 },
+        ...body.map((b, i) => ({ ...b, lineIndex: 3 + i })),
+      ]);
+      const result = parseWithMarkdown(items);
+      expect(result.markdown).toMatch(/^#{1,3} EXPERIENCE$/m);
+      expect(result.sectionSource).toBe("markdown");
+      expect(result.parsed.experience.length).toBe(1);
+      expect(result.parsed.education.length).toBe(1);
+    });
   });
 });

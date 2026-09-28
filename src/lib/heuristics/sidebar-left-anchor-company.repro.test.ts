@@ -59,7 +59,9 @@ describe("#574 — a sidebar-LEFT body must not run the unguarded anchor lookup"
   it("routes sections through the line-regex splitter on a two-column page", () => {
     // The band gate lives in `splitIntoSections`; the markdown-anchored splitter
     // bypasses it. If the emitter ever starts promoting this fixture's headers,
-    // every assertion below would pass for the wrong reason.
+    // every assertion below would pass for the wrong reason. It does not today:
+    // the generator draws every section header at body size (9pt), so nothing
+    // but the name clears the emitter's font-ratio gate.
     expect(cascade.triggers).toContain("two_column");
     expect(cascade.diagnostics.sectionSource).toBe("regex");
   });
