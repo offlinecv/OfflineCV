@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "provenance": "Hand-authored per #1088's own repro spec (the generator, scripts/fixtures/gen-glyphless-prose-role-description.mjs, draws exactly this text). Not derived from the parser's output.",
+  "contact": {
+    "full_name": "Jordan Rivera",
+    "email": "jordan.rivera@example.com",
+    "phone": "(312) 555-0123",
+    "location": "Chicago, IL"
+  },
+  "experience": [
+    {
+      "title": "Senior Software Engineer",
+      "company": "Acme Corp",
+      "dates": "Jan 2021 – Present"
+    },
+    {
+      "title": "Software Engineer",
+      "company": "Globex Inc",
+      "dates": "Jun 2018 – Dec 2020"
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. Computer Science",
+      "institution": "State University"
+    }
+  ],
+  "skills": [
+    "Python",
+    "TypeScript",
+    "React",
+    "PostgreSQL",
+    "AWS"
+  ]
+}
