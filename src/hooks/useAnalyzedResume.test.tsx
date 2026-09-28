@@ -20,8 +20,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { useAnalyzedResume, type AnalyzedResume } from "./useAnalyzedResume.ts";
+import { parsedEntryKey } from "./useEditableParse.ts";
 import { isScoreRevealed } from "../lib/contact.ts";
 import { BLANK_DRAFT_STORAGE_KEY } from "./useResumeAnalysis.ts";
+import type {
+  CascadeResult,
+  FieldConfidence,
+  HeuristicParsedResume,
+} from "../lib/heuristics/types.ts";
+import type { SectionedResume } from "../lib/heuristics/sections.ts";
+import { scoreParsedResume } from "../lib/score/score-cascade.ts";
+import { groupBulletsByExperience } from "../lib/score/group-bullets.ts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -314,5 +323,130 @@ describe("useAnalyzedResume — score memo scoped to scoring inputs (#428)", () 
 
     expect(api.edited?.score).not.toBe(scoreBefore);
     expect(api.edited?.parsed.github_url).toBe("https://github.com/janedoe");
+  });
+});
+
+describe("useAnalyzedResume — a description edit re-grades the score (#933)", () => {
+  // A glyph-less-prose parse: the Experience section carries no `•` marker
+  // lines (`sections.byName` has no "experience" entry at all), so
+  // `computeAnonymousAtsScore`'s bullet pool falls back to pooling
+  // `experience[].description` verbatim (score.ts's `poolExperienceDescriptions`
+  // branch). That is the one field `descriptionOverrides` writes.
+  const ORIGINAL_DESCRIPTION = [
+    "Led the checkout redesign project.",
+    "Partnered with design and data teams.",
+    "Helped the team raise conversion this year.",
+  ].join("\n");
+
+  function buildGlyphlessProseResult(): CascadeResult {
+    const fields: HeuristicParsedResume = {
+      full_name: "Taylor Kim",
+      email: "taylor.kim@example.com",
+      phone: "(312) 555-0175",
+      location: "Denver, CO",
+      skills: ["TypeScript", "Go", "Postgres"],
+      experience: [
+        {
+          title: "Product Engineer",
+          company: "Ridgemont Labs",
+          start_date: "2021",
+          end_date: "2024",
+          description: ORIGINAL_DESCRIPTION,
+        },
+      ],
+      education: [],
+    };
+    const fieldConfidence: FieldConfidence = {
+      full_name: 1,
+      email: 1,
+      phone: 1,
+      location: 1,
+    };
+    const sections: SectionedResume = {
+      byName: new Map([["skills", ["TypeScript, Go, Postgres"]]]),
+      accomplishmentSections: ["experience", "projects", "achievements"],
+      source: "regex",
+    };
+    return {
+      canonical: { fields, sections, fieldConfidence },
+      confidence: 0.9,
+      triggers: [],
+      suggestedEscalation: "none",
+      tiers: ["t1_openresume"],
+      rawText: ORIGINAL_DESCRIPTION,
+      linkAnnotations: [],
+      diagnostics: {
+        rawCharCount: ORIGINAL_DESCRIPTION.length,
+        extractedCharCount: ORIGINAL_DESCRIPTION.length,
+        pages: 1,
+        elapsedMs: 0,
+      },
+      timings: { t0_layout_ms: 0, t1_openresume_ms: 0 },
+    };
+  }
+
+  const EDITED_DESCRIPTION = [
+    "Owned the checkout redesign end to end.",
+    "Cut cart abandonment by 18 percent.",
+    "Lifted conversion 12 percent across every market.",
+  ].join("\n");
+
+  function loadGlyphlessProseResume(): void {
+    const result = buildGlyphlessProseResult();
+    act(() =>
+      api.loadSavedResume({
+        fileName: "taylor.pdf",
+        fileSize: 1024,
+        sourceKind: "pdf",
+        result,
+        score: scoreParsedResume(result),
+      }),
+    );
+  }
+
+  it("mints a new score object with the edited text and a changed overall", () => {
+    loadGlyphlessProseResume();
+    expect(api.edited?.score.bullets?.map((b) => b.text)).toEqual(
+      expect.arrayContaining(ORIGINAL_DESCRIPTION.split("\n")),
+    );
+    const scoreBefore = api.edited?.score;
+    const overallBefore = scoreBefore?.overall;
+
+    act(() => {
+      api.edit.setDescriptionField(
+        parsedEntryKey("experience", 0),
+        EDITED_DESCRIPTION,
+      );
+    });
+
+    // New score object, not the stale one.
+    expect(api.edited?.score).not.toBe(scoreBefore);
+    expect(api.edited?.score.overall).not.toBe(overallBefore);
+    // `score.bullets` carries the edited text, not the pre-edit text.
+    const texts = api.edited?.score.bullets?.map((b) => b.text) ?? [];
+    expect(texts).toEqual(expect.arrayContaining(EDITED_DESCRIPTION.split("\n")));
+    for (const line of ORIGINAL_DESCRIPTION.split("\n")) {
+      expect(texts).not.toContain(line);
+    }
+  });
+
+  it("groupBulletsByExperience attributes the edited bullet back to its role, not 'Other'", () => {
+    loadGlyphlessProseResume();
+    act(() => {
+      api.edit.setDescriptionField(
+        parsedEntryKey("experience", 0),
+        EDITED_DESCRIPTION,
+      );
+    });
+
+    const groups = groupBulletsByExperience(
+      api.edited!.score.bullets ?? [],
+      api.edited!.parsed.experience,
+    );
+    const editedLine = EDITED_DESCRIPTION.split("\n")[0];
+    const editedGroup = groups.find((g) =>
+      g.bullets.some((b) => b.text === editedLine),
+    );
+    expect(editedGroup?.experienceIndex).toBe(0);
   });
 });
