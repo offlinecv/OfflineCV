@@ -42,6 +42,7 @@ import {
 import { useJourneyProgress } from "./hooks/useJourneyProgress.ts";
 import { fingerprintParse } from "./lib/tailor-handoff.ts";
 import type { LoadedResume } from "./lib/resume-library.ts";
+import { scoreParsedResume } from "./lib/score/score-cascade.ts";
 import { SECTION_IDS, scrollToSection } from "./lib/anchors.ts";
 
 export default function App() {
@@ -174,6 +175,14 @@ export default function App() {
               ? recovery.activeResult
               : savableResult,
             score: recovery.activeScore,
+            // The pristine base + delta (#768) — un-recovered saves only.
+            // `recovery.activeResult` is NOT `base` + `edit` when a recovery
+            // pass has run, so storing a delta beside it would let a restore
+            // replay `edit` onto the wrong base; such a save stores neither and
+            // degrades to today's flattened record (see `resume-library.ts`).
+            ...(recovery.isLlmRecovered
+              ? {}
+              : { baseResult: state.result, edit: edit.snapshot }),
           }
         : // Only the parsed lane autosaves to the library. A blank-authoring
           // session is a résumé too, but it already persists through its own
@@ -187,6 +196,29 @@ export default function App() {
   // different fields.
   const hydrateFromLibrary = useCallback(
     (loaded: LoadedResume) => {
+      // Restore keying (#768): a record carrying a delta must be re-editable
+      // from the PRISTINE parse, not the flattened `result` — so this branch
+      // hydrates `done` with `baseResult` (and adopts the record on it), never
+      // on `result`. `restoredEdit` rides along in the SAME `setState` so
+      // `useAnalyzedResume`'s reset effect can replay it without a same-event
+      // race — see that effect's docblock. `scoreParsedResume` is the shared
+      // base-grade recipe `loadResumeFromLibrary`'s own re-parse path already
+      // uses, so a restored delta's base is graded exactly as a fresh upload
+      // would be (`editBaseFromResult` reads the done score's bullets).
+      if (loaded.baseResult !== undefined && loaded.edit !== undefined) {
+        const baseResult = loaded.baseResult;
+        loadSavedResume({
+          fileName: loaded.filename,
+          fileSize: loaded.fileSize,
+          bytes: loaded.bytes,
+          sourceKind: loaded.sourceKind,
+          result: baseResult,
+          score: scoreParsedResume(baseResult),
+          restoredEdit: loaded.edit,
+        });
+        autosave.adopt(baseResult, loaded.id, loaded.edit);
+        return;
+      }
       loadSavedResume({
         fileName: loaded.filename,
         fileSize: loaded.fileSize,

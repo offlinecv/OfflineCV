@@ -22,6 +22,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  computeSavableResult,
   editBaseFromResult,
   flattenEditedResult,
   foldEditedIntoResult,
@@ -29,10 +30,24 @@ import {
 } from "./edit-pipeline.ts";
 import { applyOverrides } from "./apply-overrides.ts";
 import type { EditBase } from "./apply-overrides.ts";
-import type { ProfileOverride } from "../../hooks/useEditableParse.ts";
+import type {
+  EditSnapshot,
+  ProfileOverride,
+} from "../../hooks/useEditableParse.ts";
 import type { HeuristicParsedResume } from "../heuristics/types.ts";
 import type { CascadeResult } from "../heuristics/types.ts";
 import type { SectionedResume } from "../heuristics/sections.ts";
+
+const EMPTY_SNAPSHOT: EditSnapshot = {
+  contactOverrides: {},
+  experienceOverrides: {},
+  bulletOverrides: {},
+  removedBullets: [],
+  educationOverrides: {},
+  skillsOverride: { removed: [], added: [] },
+  addedEntries: [],
+  addedBullets: {},
+};
 
 function makeSections(): SectionedResume {
   return {
@@ -248,5 +263,71 @@ describe("flattenEditedResult (#1022)", () => {
 
     expect(result.canonical).toBe(before);
     expect(result.canonical.fields.full_name).toBe("Jane Doe");
+  });
+});
+
+describe("computeSavableResult (#768) — the ONE fold a save produces and a restore reproduces", () => {
+  it("is exactly flattenEditedResult(base, applyOverrides(editBaseFromResult(base, bullets), edit))", () => {
+    const result = makeResult(baseParsed());
+    const edit: EditSnapshot = {
+      ...EMPTY_SNAPSHOT,
+      contactOverrides: { full_name: "Jane Q. Doe" },
+    };
+
+    const out = computeSavableResult(result, [], edit);
+    const expected = flattenEditedResult(
+      result,
+      applyOverrides(editBaseFromResult(result, []), edit),
+    );
+
+    expect(out).toEqual(expected);
+    expect(out.canonical.fields.full_name).toBe("Jane Q. Doe");
+  });
+
+  it("reproduces the saved result over baseResult + edit AS A RESTORE READS THEM BACK (the restore invariant)", () => {
+    // The property the acceptance criteria pins: a save writes `baseResult` +
+    // `edit`, and re-running THIS helper over the pair a restore reads back
+    // must deep-equal the `result` the save also wrote. Calling the helper
+    // twice on the SAME in-memory `base`/`edit` objects would be tautological
+    // for a pure function and prove nothing; `structuredClone` stands in for
+    // the IndexedDB structured-clone round-trip `resume-library.ts` documents
+    // as the real restore path, so this only passes if the fold survives that
+    // round-trip too (the `sections` Map included).
+    const base = makeResult(
+      baseParsed({ linkedin_url: "https://linkedin.com/in/stale" }),
+    );
+    const edit: EditSnapshot = {
+      ...EMPTY_SNAPSHOT,
+      contactOverrides: { full_name: "Jane Q. Doe", location: "Remote" },
+      profileOverrides: [
+        { id: "p1", url: "https://linkedin.com/in/jane", network: "linkedin", kind: "social", legacyKey: "linkedin_url" },
+      ],
+    };
+
+    const savedResult = computeSavableResult(base, [], edit);
+    const restoredBase = structuredClone(base);
+    const restoredEdit = structuredClone(edit);
+    const reproduced = computeSavableResult(restoredBase, [], restoredEdit);
+
+    expect(reproduced).toEqual(savedResult);
+  });
+
+  it("no override at all reproduces a fold equal to the base's own fields", () => {
+    const base = makeResult(baseParsed());
+    const out = computeSavableResult(base, [], EMPTY_SNAPSHOT);
+    expect(out.canonical.fields).toEqual(base.canonical.fields);
+  });
+
+  it("does not mutate the base result", () => {
+    const base = makeResult(baseParsed());
+    const before = base.canonical;
+
+    computeSavableResult(base, [], {
+      ...EMPTY_SNAPSHOT,
+      contactOverrides: { full_name: "Someone Else" },
+    });
+
+    expect(base.canonical).toBe(before);
+    expect(base.canonical.fields.full_name).toBe("Jane Doe");
   });
 });

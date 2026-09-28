@@ -12,7 +12,7 @@ import "fake-indexeddb/auto";
 import { deleteDB } from "idb";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as storage from "./storage/index.ts";
-import { DB_NAME, closeDB, saveResume } from "./storage/index.ts";
+import { DB_NAME, closeDB, getResume, saveResume } from "./storage/index.ts";
 import type { ResumeRecord } from "./storage/types.ts";
 import {
   saveResumeToLibrary,
@@ -26,6 +26,7 @@ import { toCanonicalResume } from "./heuristics/canonical.ts";
 import { ACCOMPLISHMENT_SECTION_NAMES } from "./heuristics/sections.ts";
 import type { CascadeResult } from "./heuristics/types.ts";
 import type { AnonymousAtsScore } from "./score/score.ts";
+import type { EditSnapshot } from "../hooks/useEditableParse.ts";
 
 // The stale-shape guard re-parses from the stored blob via `runCascade`; mock it
 // so the test doesn't need a real parseable PDF, and so we can assert the loaded
@@ -381,5 +382,246 @@ describe("resume-library: DOCX (no source bytes)", () => {
     expect(loaded!.sourceKind).toBe("docx");
     expect(loaded!.bytes).toBeUndefined();
     expect(loaded!.score.overall).toBe(60);
+  });
+});
+
+describe("resume-library: pristine base + delta (#768)", () => {
+  // A distinct marker from `result()` — proves the loaded `baseResult` is the
+  // PRISTINE parse, not aliased to the edited `result`.
+  const baseResult = () =>
+    ({
+      marker: "cascade-base-42",
+      triggers: [],
+      canonical: {
+        fields: {},
+        sections: { byName: new Map([["skills", 1]]) },
+        fieldConfidence: {},
+      },
+    }) as unknown as CascadeResult;
+
+  const editSnapshot = () =>
+    ({
+      contactOverrides: { full_name: "Edited Persona" },
+      experienceOverrides: {},
+      bulletOverrides: {},
+      removedBullets: [],
+      educationOverrides: {},
+      skillsOverride: { removed: [], added: [] },
+      addedEntries: [],
+      addedBullets: {},
+    }) as unknown as EditSnapshot;
+
+  it("stores and reloads the pristine base alongside the delta", async () => {
+    const id = await saveResumeToLibrary({
+      filename: "cv.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: result(),
+      score: score(72),
+      baseResult: baseResult(),
+      edit: editSnapshot(),
+    });
+
+    const loaded = await loadResumeFromLibrary(id);
+    expect(loaded).toBeDefined();
+    // The edited result is unchanged — listing/scoring still reads it directly.
+    expect((loaded!.result as unknown as { marker: string }).marker).toBe(
+      "cascade-42",
+    );
+    expect((loaded!.baseResult as unknown as { marker: string }).marker).toBe(
+      "cascade-base-42",
+    );
+    expect(loaded!.edit).toEqual(editSnapshot());
+  });
+
+  it("a record saved before this change (no baseResult, no edit) still loads flat", async () => {
+    const id = await save("legacy.pdf", 58);
+    const loaded = await loadResumeFromLibrary(id);
+    expect(loaded).toBeDefined();
+    expect(loaded!.baseResult).toBeUndefined();
+    expect(loaded!.edit).toBeUndefined();
+    expect(loaded!.score.overall).toBe(58);
+  });
+
+  it("does not re-parse an existing-shape record on load (runCascade untouched)", async () => {
+    const id = await saveResumeToLibrary({
+      filename: "cv.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: result(),
+      score: score(72),
+      baseResult: baseResult(),
+      edit: editSnapshot(),
+    });
+    await loadResumeFromLibrary(id);
+    expect(runCascade).not.toHaveBeenCalled();
+  });
+
+  it("degrades a lone baseResult (no edit) to a flat record — malformed, never produced by this module", async () => {
+    // Stamp a real record first so the current `CACHE_SHAPE_VERSION` (private
+    // to this module) is on hand, then rewrite its `parse` to the malformed
+    // half-a-delta shape at that SAME version, so this exercises the
+    // both-or-neither guard rather than the stale-shape re-parse path.
+    const id = await saveResumeToLibrary({
+      filename: "half.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: result(),
+      score: score(50),
+    });
+    const stamped = await getResume(id);
+    await saveResume({
+      id,
+      filename: "half.pdf",
+      blob: stamped!.blob,
+      parse: {
+        ...(stamped!.parse as Record<string, unknown>),
+        baseResult: baseResult(),
+        // `edit` deliberately absent.
+      },
+    });
+
+    const loaded = await loadResumeFromLibrary(id);
+    expect(runCascade).not.toHaveBeenCalled();
+    expect(loaded!.baseResult).toBeUndefined();
+    expect(loaded!.edit).toBeUndefined();
+  });
+
+  it.each([
+    ["a malformed baseResult", () => ({ marker: "no-canonical" })],
+    // What every backup import produces: JSON turns the `byName` Map into `{}`,
+    // and `scoreParsedResume` then throws on `byName.get` mid-restore.
+    ["a JSON round-tripped baseResult", () => JSON.parse(JSON.stringify(baseResult()))],
+  ])("degrades %s to a flat record instead of restoring it (review, #1087)", async (_label, badBase) => {
+    const id = await saveResumeToLibrary({
+      filename: "imported.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: result(),
+      score: score(64),
+    });
+    const stamped = await getResume(id);
+    await saveResume({
+      id,
+      filename: "imported.pdf",
+      blob: stamped!.blob,
+      parse: {
+        ...(stamped!.parse as Record<string, unknown>),
+        baseResult: badBase(),
+        edit: editSnapshot(),
+      },
+    });
+
+    const loaded = await loadResumeFromLibrary(id);
+    expect(runCascade).not.toHaveBeenCalled();
+    expect(loaded!.baseResult).toBeUndefined();
+    expect(loaded!.edit).toBeUndefined();
+    expect(loaded!.score.overall).toBe(64);
+  });
+
+  it("a save made while LLM-recovered stores neither field (App.tsx contract)", async () => {
+    // This module has no opinion on recovery — it is App.tsx's call site that
+    // omits `baseResult`/`edit` for that branch. Pinned here as the storage
+    // half of that contract: omitting both fields on the way in must read back
+    // as a flat record, exactly like a pre-#768 save.
+    const id = await saveResumeToLibrary({
+      filename: "recovered.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: result(),
+      score: score(80),
+    });
+    const loaded = await loadResumeFromLibrary(id);
+    expect(loaded!.baseResult).toBeUndefined();
+    expect(loaded!.edit).toBeUndefined();
+  });
+
+  it("a stale-shape re-parse comes back without baseResult/edit even if the stale record somehow had them", async () => {
+    const reparsed = reparsedResult();
+    vi.mocked(runCascade).mockResolvedValue(reparsed);
+
+    const rec = await saveResume({
+      filename: "old.pdf",
+      blob: new Blob([bytes().buffer], { type: "application/pdf" }),
+      parse: {
+        result: { parsed: { full_name: "Stale Persona" }, sections: { byName: new Map() } },
+        score: score(41),
+        sourceKind: "pdf",
+        baseResult: baseResult(),
+        edit: editSnapshot(),
+        // shapeVersion intentionally absent — a pre-#445 record.
+      },
+    });
+
+    const loaded = await loadResumeFromLibrary(rec.id);
+    expect(runCascade).toHaveBeenCalledTimes(1);
+    expect(loaded!.baseResult).toBeUndefined();
+    expect(loaded!.edit).toBeUndefined();
+  });
+
+  it("listLibrary still reads the score without touching baseResult/edit", async () => {
+    await saveResumeToLibrary({
+      filename: "cv.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: result(),
+      score: score(72),
+      baseResult: baseResult(),
+      edit: editSnapshot(),
+    });
+    const [entry] = await listLibrary();
+    expect(entry.scoreOverall).toBe(72);
+    expect(entry.hasCachedParse).toBe(true);
+  });
+
+  it("stays JSON-safe: survives export → import → export unchanged", async () => {
+    // Fully Map-free `result`/`baseResult` — a `sections.byName` Map (the shape
+    // `result()` above stubs for the IndexedDB-only tests) is not JSON-safe,
+    // and `resume-record-contract.ts` REFUSES such a record on JSON reimport
+    // outright rather than degrading it — the whole `parse` payload has to
+    // clear that bar, not just the two new fields. That refusal is exactly why
+    // the record round-trips through IndexedDB structured clone in ordinary
+    // use, never through this backup path (see `resume-library.ts`'s module
+    // docblock); this test pins that a genuinely JSON-safe record — including
+    // its `baseResult`/`edit` — stays STABLE across a second export/import.
+    const jsonSafeResult = { marker: "cascade-jsonsafe" } as unknown as CascadeResult;
+    const jsonSafeBase = { marker: "cascade-base-jsonsafe" } as unknown as CascadeResult;
+
+    await saveResumeToLibrary({
+      filename: "cv.pdf",
+      bytes: bytes().buffer,
+      sourceKind: "pdf",
+      result: jsonSafeResult,
+      score: score(72),
+      baseResult: jsonSafeBase,
+      edit: editSnapshot(),
+    });
+
+    const { exportAll, importAll } = await import("./storage/backup.ts");
+    const firstDump = await exportAll();
+    expect(firstDump.resumes).toHaveLength(1);
+    const firstParse = firstDump.resumes[0]!.parse as Record<string, unknown>;
+    expect(firstParse.baseResult).toEqual(jsonSafeBase);
+    expect(firstParse.edit).toEqual(editSnapshot());
+
+    await closeDB();
+    await deleteDB(DB_NAME);
+    await importAll(firstDump);
+
+    const secondDump = await exportAll();
+    // Both dumps carry a fresh `exportedAt`; compare everything else.
+    const { exportedAt: _a, ...firstRest } = firstDump;
+    const { exportedAt: _b, ...secondRest } = secondDump;
+    expect(secondRest).toEqual(firstRest);
+
+    // The pair round-trips byte-stable, but a base that has crossed JSON is
+    // not RESTORABLE (no live `byName` Map for `scoreParsedResume`), so the
+    // load degrades to the flat record rather than throwing mid-restore
+    // (review, #1087).
+    const [entryId] = (await listLibrary()).map((e) => e.id);
+    const reloaded = await loadResumeFromLibrary(entryId!);
+    expect(reloaded!.baseResult).toBeUndefined();
+    expect(reloaded!.edit).toBeUndefined();
+    expect(reloaded!.score.overall).toBe(72);
   });
 });

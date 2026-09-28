@@ -25,6 +25,7 @@
  */
 
 import {
+  applyOverrides,
   applyProfileOverrides,
   type ApplyOverridesResult,
   type EditBase,
@@ -36,7 +37,10 @@ import type {
   FieldConfidence,
   HeuristicParsedResume,
 } from "../heuristics/types.ts";
-import type { ProfileOverride } from "../../hooks/useEditableParse.ts";
+import type {
+  EditSnapshot,
+  ProfileOverride,
+} from "../../hooks/useEditableParse.ts";
 
 /**
  * Read the frozen half of an edit fold off a cascade result — the pristine
@@ -169,4 +173,28 @@ export function flattenEditedResult(
       fieldConfidence: edited.fieldConfidence,
     },
   };
+}
+
+/**
+ * The savable result of a pristine base plus a delta (#768) — the ONE
+ * definition of "re-run the fold `useAnalyzedResume` performs to reproduce a
+ * stored `SavedResumeSnapshot.result` from its `baseResult` + `edit`".
+ *
+ * Both the live `savableResult` memo and the restore-invariant test call this,
+ * so the fold that PRODUCES a saved record and the fold that VERIFIES one
+ * cannot drift into two descriptions of the same thing — which is exactly how
+ * a persisted delta rots silently. `scoreBullets` is the pristine parse's
+ * `score.bullets ?? []`, mirroring {@link editBaseFromResult}'s own parameter:
+ * it resolves only LEGACY numeric bullet keys, so `[]` is correct whenever the
+ * delta carries none.
+ */
+export function computeSavableResult(
+  base: CascadeResult,
+  scoreBullets: readonly BulletObservation[],
+  edit: EditSnapshot,
+): CascadeResult {
+  return flattenEditedResult(
+    base,
+    applyOverrides(editBaseFromResult(base, scoreBullets), edit),
+  );
 }

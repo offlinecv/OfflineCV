@@ -39,8 +39,8 @@ import {
 import { useEditableParse, type EditableParse } from "./useEditableParse.ts";
 import { applyOverrides } from "../lib/edit/apply-overrides.ts";
 import {
+  computeSavableResult,
   editBaseFromResult,
-  flattenEditedResult,
   foldEditedIntoResult,
   probeScoringProfileSlots,
 } from "../lib/edit/edit-pipeline.ts";
@@ -301,16 +301,23 @@ export function useAnalyzedResume(): AnalyzedResume {
     return foldEditedIntoResult(base, edited.parsed, edited.fieldConfidence);
   }, [base, edited]);
 
-  // What a save persists (#1022). Built off `editedCore` — the value the
-  // `score` memo grades — so a restore that re-grades this record with no
-  // overrides reads the same bullet pool the live score did. Deps hand-audited
-  // both directions (`exhaustive-deps` is NOT enforced): the body reads `base`
-  // and `editedCore` and nothing else. It re-derives on a non-scoring profile
-  // edit too, which is right — the record must still carry the new profile.
+  // What a save persists (#1022, #768): the SAME fold the restore-invariant
+  // test re-runs over a stored `baseResult` + `edit`, via the one exported
+  // helper — see `computeSavableResult`'s docblock. Calling it here (instead
+  // of reusing `editedCore`, which already holds the same
+  // `applyOverrides(editBaseFromResult(base, doneScoreBullets), snapshot)`
+  // fold) re-runs that pass a second time, but a hand-reused shortcut is
+  // exactly the drift #768's invariant exists to rule out: `savableResult`
+  // and the test must call the identical symbol, not two expressions a future
+  // edit to either fold could silently diverge. Deps hand-audited both
+  // directions (`exhaustive-deps` is NOT enforced): mirrors `editedCore`'s own
+  // `[base, doneScoreBullets, snapshot]`, so a non-scoring profile edit (which
+  // moves `snapshot`) still re-derives it — the record must still carry the
+  // new profile.
   const savableResult = useMemo<CascadeResult | null>(() => {
-    if (base === null || editedCore === null) return null;
-    return flattenEditedResult(base, editedCore);
-  }, [base, editedCore]);
+    if (base === null) return null;
+    return computeSavableResult(base, doneScoreBullets, snapshot);
+  }, [base, doneScoreBullets, snapshot]);
 
   // Clear edits whenever a fresh parse lands (new file, reset) or a fresh
   // blank-authoring session starts. Resuming a saved draft must NOT clear —
@@ -334,9 +341,26 @@ export function useAnalyzedResume(): AnalyzedResume {
       : state.phase === "authoring"
         ? `authoring:${state.generation}`
         : null;
+  // A delta restored from the library (#768) travels WITH the hydrated `done`
+  // state (`state.restoredEdit`) rather than through a same-event `replay`
+  // call, because `loadSavedResume` and this effect's `resetAll()` land in the
+  // same render/commit cycle — a same-event replay would be wiped by the reset
+  // that follows it. Replaying HERE, inside the effect that already owns
+  // "clear edits for a fresh parse", means there is no window for the reset to
+  // clobber it. Reading `state` from the closure rather than listing it as a
+  // dep is safe: `restoredEdit` is set in the SAME `setState` as the `result`
+  // that defines `parseKey`, so whenever this effect re-runs (because
+  // `parseKey` changed), the closure it runs with already carries the paired
+  // value — see `useResumeAnalysis.loadSavedResume`. `replay` is additive
+  // (#768), which is exactly why `resetAll()` must run first in every
+  // invocation, including StrictMode's replayed second one: reset → replay
+  // twice in a row lands on the same state a single reset → replay does.
   useEffect(() => {
     resetAll();
-  }, [parseKey, resetAll]);
+    if (state.phase === "done" && state.restoredEdit) {
+      edit.replay(state.restoredEdit);
+    }
+  }, [parseKey, resetAll, edit.replay]);
 
   // Autosave the in-progress blank draft (#313), debounced on edit. Only
   // while the authoring editor is actually mounted (no pending prompt) — a

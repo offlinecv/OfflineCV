@@ -29,6 +29,7 @@ import {
   type AnonymousAtsScore,
 } from "./score/score.ts";
 import { scoreParsedResume } from "./score/score-cascade.ts";
+import type { EditSnapshot } from "../hooks/useEditableParse.ts";
 
 type SourceKind = "pdf" | "docx" | "markdown";
 
@@ -52,6 +53,13 @@ const CACHE_SHAPE_VERSION = `${ATS_SCORE_ALGO_VERSION}:${CANONICAL_SHAPE_VERSION
  *  results view without re-parsing. Internal to this module — callers go through
  *  the save/load functions, not the raw snapshot. */
 interface SavedResumeSnapshot {
+  /** The EDITED (flattened) result — kept even once {@link baseResult} and
+   *  {@link edit} are also stored, for two reasons. `listLibrary` reads
+   *  `score.overall` (below) without replaying anything, and this is the only
+   *  thing that guarantees a reloaded résumé looks byte-identical to what the
+   *  user saved even if `applyOverrides` later changes behaviour — the two are
+   *  not one because `applyOverrides` evolving between the save and the load is
+   *  exactly the drift #769 is scoped to handle, not this issue. */
   result: CascadeResult;
   score: AnonymousAtsScore;
   sourceKind: SourceKind;
@@ -59,6 +67,18 @@ interface SavedResumeSnapshot {
    *  Absent on pre-#445 records — those read as `undefined`, which never matches
    *  the current version, so they re-parse rather than deserialize. */
   shapeVersion?: string;
+  /**
+   * The PRISTINE parse `edit` is a delta over (#768). Present only alongside
+   * {@link edit} — a lone one is meaningless (there is nothing to replay it
+   * onto, or nothing to derive from) so {@link readSnapshot} drops it unless
+   * both are there. Absent on any record saved before this change, and on one
+   * saved while `recovery.isLlmRecovered` was true (that `result` is not
+   * `base` + `edit` — see `App.tsx`'s `useAutosaveResume` call).
+   */
+  baseResult?: CascadeResult;
+  /** The delta that turns {@link baseResult} into {@link result} — see
+   *  {@link baseResult} for when this is present. */
+  edit?: EditSnapshot;
 }
 
 /** A row in the library list — the light metadata the picker renders. */
@@ -92,16 +112,63 @@ export interface LoadedResume {
   sourceKind: SourceKind;
   result: CascadeResult;
   score: AnonymousAtsScore;
+  /** The pristine parse `edit` is a delta over (#768) — present only when the
+   *  stored snapshot carries both this and `edit`; see {@link readSnapshot}. */
+  baseResult?: CascadeResult;
+  /** The delta that turns `baseResult` into `result` (#768). */
+  edit?: EditSnapshot;
+}
+
+/** Both-or-neither (#768): a lone `baseResult` has no delta to apply, and a
+ *  lone `edit` has nothing to apply it to — either is a malformed pair this
+ *  module never produces itself, so both {@link readSnapshot} and
+ *  {@link saveResumeToLibrary} degrade to a flat record rather than reading or
+ *  writing a half-formed delta. One definition so the two guards cannot drift. */
+function hasDelta(
+  baseResult: CascadeResult | undefined,
+  edit: EditSnapshot | undefined,
+): boolean {
+  return baseResult !== undefined && edit !== undefined;
+}
+
+/** Whether a STORED delta pair can actually be restored — checked on read only,
+ *  because a write from this module always passes it. `hydrateFromLibrary`
+ *  hands `baseResult` straight to `scoreParsedResume` and `edit` to `replay`,
+ *  so a pair that fails here would throw mid-restore instead of loading (review,
+ *  #1087). Two ways a record gets here: a hand-edited backup, and — the common
+ *  one — ANY backup import, because a JSON round-trip turns
+ *  `sections.byName`'s `Map` into `{}` (`record-contract.ts` spells out that
+ *  rewrite). The `Map` check is what tells a structured-clone-intact parse from
+ *  one that crossed JSON; the rest is the minimum `scoreParsedResume` and
+ *  `replay` dereference. A pair that fails degrades to the flat `result` and
+ *  `score`, the same record a pre-#768 build would have loaded. */
+function isRestorableDelta(baseResult: unknown, edit: unknown): boolean {
+  const base = baseResult as Partial<CascadeResult> | null | undefined;
+  const snapshot = edit as Partial<EditSnapshot> | null | undefined;
+  return (
+    base?.canonical?.sections?.byName instanceof Map &&
+    typeof base.canonical.fields === "object" &&
+    base.canonical.fields !== null &&
+    Array.isArray(base.triggers) &&
+    typeof snapshot === "object" &&
+    snapshot !== null &&
+    Array.isArray(snapshot.removedBullets)
+  );
 }
 
 function readSnapshot(parse: unknown): SavedResumeSnapshot | null {
   const snap = parse as Partial<SavedResumeSnapshot> | undefined;
   if (snap?.result == null || snap.score == null) return null;
+  const delta =
+    hasDelta(snap.baseResult, snap.edit) &&
+    isRestorableDelta(snap.baseResult, snap.edit);
   return {
     result: snap.result,
     score: snap.score,
     sourceKind: snap.sourceKind ?? "pdf",
     shapeVersion: snap.shapeVersion,
+    baseResult: delta ? snap.baseResult : undefined,
+    edit: delta ? snap.edit : undefined,
   };
 }
 
@@ -114,6 +181,11 @@ export interface SaveResumeToLibraryInput {
   sourceKind: SourceKind;
   result: CascadeResult;
   score: AnonymousAtsScore;
+  /** The pristine parse `edit` is a delta over (#768). Optional, and both-or-
+   *  neither with {@link edit} — see {@link SavedResumeSnapshot.baseResult}. */
+  baseResult?: CascadeResult;
+  /** The delta that turns `baseResult` into `result` (#768). */
+  edit?: EditSnapshot;
   /**
    * The caller asserts that the record at `id` already holds exactly the bytes
    * this save would otherwise write, so the stored Blob may be carried forward
@@ -162,11 +234,14 @@ export async function saveResumeToLibrary(
   input: SaveResumeToLibraryInput,
 ): Promise<string> {
   const blob = await blobForSave(input);
+  const delta = hasDelta(input.baseResult, input.edit);
   const snapshot: SavedResumeSnapshot = {
     result: input.result,
     score: input.score,
     sourceKind: input.sourceKind,
     shapeVersion: CACHE_SHAPE_VERSION,
+    baseResult: delta ? input.baseResult : undefined,
+    edit: delta ? input.edit : undefined,
   };
   const record = await saveResume({
     id: input.id,
@@ -313,6 +388,8 @@ export async function loadResumeFromLibrary(
     sourceKind: snap.sourceKind,
     result: snap.result,
     score: snap.score,
+    baseResult: snap.baseResult,
+    edit: snap.edit,
   };
 }
 
