@@ -11,7 +11,10 @@ import {
 import {
   BARE_LOCATION_RE,
   MULTIWORD_US_CITY_ALT,
+  TRAILING_SEPARATOR_RE,
   isBareLocationString,
+  resolveBareLocationString,
+  unwrapEmphasisLocation,
 } from "../line-primitives.ts";
 import { looksLikeTitle, looksLikeCompany } from "./shared.ts";
 import { MIDDOT, MIDDOT_SPLIT_RE } from "../../resume-format/index.ts";
@@ -128,7 +131,7 @@ function looksLikeLocationTail(after: string): boolean {
  *  legit company never ends in a bare separator, so this only ever cleans the
  *  artifact, never real company text. */
 function stripDanglingSeparator(s: string): string {
-  return s.replace(/[\s,–—\-|·]+$/, "").trim();
+  return s.replace(TRAILING_SEPARATOR_RE, "").trim();
 }
 
 /** A comma-delimited intl "city" (Pass C group 1) whose FIRST token is a legal
@@ -259,14 +262,19 @@ const KNOWN_MULTIWORD_US_CITY_RE = new RegExp(MULTIWORD_US_CITY_ALT);
  *  `stripDateRange` has already cleared with the same `DATE_RANGE_RE`, so any
  *  glued range is gone before this sees the cell (#409 review). */
 function locationFromAnchorCell(cell: string): string | undefined {
-  const c = cell.trim();
-  return isBareLocationString(c) ? c : undefined;
+  return resolveBareLocationString(cell.trim());
 }
 
 function stripLocationSuffix(s: string): {
   text: string;
   location: string | undefined;
 } {
+  // #1034 — unwrap a markdown-emphasis pair glued around a location
+  // ("Acme Consulting, _Springfield, IL_,", the literal residue of a PDF
+  // exported by a Markdown renderer that printed emphasis syntax as glyphs
+  // instead of applying it) so the passes below see the plain "City, ST" text
+  // they already know how to peel. No-op when `s` carries no such pair.
+  s = unwrapEmphasisLocation(s);
   // Pass A — comma-delimited "…, City, ST": comma boundary lets the city be
   // multi-word (one+ capitalized words).
   const COMMA_LOCATION_RE =
@@ -1129,8 +1137,8 @@ function rescueTeamLocation(
 ): { company?: string; team?: string; location?: string } {
   if (!team) return { company, team };
   const teamStrip = stripLocationSuffix(team);
-  const teamIsBareLocation = isBareLocationString(team);
-  if (teamStrip.location && !teamIsBareLocation) {
+  const bareTeamLocation = resolveBareLocationString(team);
+  if (teamStrip.location && bareTeamLocation === undefined) {
     // Rotate: real-company (strip remainder) → company, old company → team —
     // unless the old company is the #382 title mirror, which is not a team.
     return {
@@ -1139,8 +1147,8 @@ function rescueTeamLocation(
       location: teamStrip.location,
     };
   }
-  if (teamIsBareLocation) {
-    return { company, team: undefined, location: team };
+  if (bareTeamLocation !== undefined) {
+    return { company, team: undefined, location: bareTeamLocation };
   }
   return { company, team };
 }
@@ -1311,8 +1319,12 @@ function cleanFieldArtifacts(fields: Fields): Fields {
   //     location and keeps its title. The leading `!looksLikeTitle` check is a
   //     cheap belt-and-suspenders early-out for the keyword-bearing titles
   //     ("Marketing Manager, San Francisco").
-  if (title && !location && !looksLikeTitle(title) && isBareLocationString(title)) {
-    location = title;
+  const bareTitleLocation =
+    title && !location && !looksLikeTitle(title)
+      ? resolveBareLocationString(title)
+      : undefined;
+  if (bareTitleLocation !== undefined) {
+    location = bareTitleLocation;
     title = undefined;
   }
 

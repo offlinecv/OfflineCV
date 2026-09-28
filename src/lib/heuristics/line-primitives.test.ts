@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { isLoneDateRange } from "./line-primitives.ts";
+import { isLoneDateRange, unwrapEmphasisLocation } from "./line-primitives.ts";
 
 describe("isLoneDateRange — range behaviour is byte-identical (default and allowSingle)", () => {
   it.each([
@@ -147,4 +147,40 @@ describe("isLoneDateRange — empty / whitespace / arbitrary text", () => {
       expect(isLoneDateRange(text, { allowSingle: true })).toBe(false);
     },
   );
+});
+
+describe("unwrapEmphasisLocation (#1034, #1090 review)", () => {
+  it("scans past an earlier, unrelated emphasis pair to reach the real location", () => {
+    const s = "Senior Engineer (_Contract_), Acme Consulting, _Springfield, IL_,";
+    expect(unwrapEmphasisLocation(s)).toBe(
+      "Senior Engineer (_Contract_), Acme Consulting, Springfield, IL",
+    );
+  });
+
+  it("does not strip an intraword underscore run that merely sandwiches a state code", () => {
+    expect(unwrapEmphasisLocation("Manager_IN_Training")).toBe("Manager_IN_Training");
+  });
+
+  it("still unwraps a properly word-boundary-flanked single pair", () => {
+    expect(unwrapEmphasisLocation("Acme Consulting, _Springfield, IL_,")).toBe(
+      "Acme Consulting, Springfield, IL",
+    );
+  });
+
+  it("leaves a non-location emphasis pair untouched", () => {
+    const s = "Acme Consulting, _internal_tools_";
+    expect(unwrapEmphasisLocation(s)).toBe(s);
+  });
+
+  it("unwraps an earlier qualifying pair AND the real trailing location, not just the first", () => {
+    const s = "Senior Engineer, _Remote_, Acme Consulting, _Springfield, IL_,";
+    expect(unwrapEmphasisLocation(s)).toBe(
+      "Senior Engineer, Remote, Acme Consulting, Springfield, IL",
+    );
+  });
+
+  it("known gap: a doubled-underscore (bold) wrapper is not unwrapped", () => {
+    const s = "Acme Consulting, __Springfield, IL__";
+    expect(unwrapEmphasisLocation(s)).toBe(s);
+  });
 });

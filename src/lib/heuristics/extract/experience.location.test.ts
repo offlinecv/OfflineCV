@@ -586,3 +586,60 @@ describe("two-line role header, flush-right location, no bullet glyphs (#1027)",
     expect(roles[0].description).toContain("crew call sheets");
   });
 });
+
+describe("literal markdown-emphasis glyphs around a location (#1034)", () => {
+  // A PDF whose source was exported by a Markdown renderer that printed
+  // emphasis syntax as literal glyphs on the page instead of applying it: the
+  // page text carries "_Springfield, IL_," verbatim, never through
+  // `mdToPlainText`/`markdown-lines.ts`'s own `_..._` strip (that path only
+  // ever sees real markdown source, and was already verified clean — see the
+  // issue). `stripLocationSuffix`'s comma-delimited passes require the tail to
+  // end exactly in `[A-Z]{2}$`, so the wrapping underscores and the dangling
+  // comma the emphasis close leaves behind both broke every pass and the raw
+  // glyphs rode into `location` untouched.
+  it("strips the wrapping underscores and trailing comma from a company sub-line", () => {
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Senior Engineer", fontSize: 11 },
+      { text: "Acme Consulting, _Springfield, IL_,", fontSize: 11 },
+      { text: "Jan 2020 - Present", fontSize: 11 },
+      { text: "• Led the platform migration.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+    expect(role.company).toBe("Acme Consulting");
+    expect(role.location).toBe("Springfield, IL");
+    expect(role.location).not.toContain("_");
+  });
+
+  it("strips a wrapped location that is the whole anchor-row cell (#373 shape)", () => {
+    const roles = roleFromSection([
+      { text: "Experience", fontSize: 13 },
+      { text: "Staff Engineer, Platform", fontSize: 11 },
+      { text: "Initech | _Austin, TX_, July 2022 - August 2024", fontSize: 11 },
+      { text: "• Owned the deploy pipeline.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+    expect(role.company).toBe("Initech");
+    expect(role.location).toBe("Austin, TX");
+    expect(role.location).not.toContain("_");
+  });
+
+  it("does not strip underscores from ordinary header text (no location match)", () => {
+    // A literal snake_case token that is NOT a location must survive verbatim
+    // — the unwrap is gated on the wrapped interior reading as a whole
+    // location, not on underscores alone.
+    const roles = roleFromSection([
+      { text: "EXPERIENCE", fontSize: 13 },
+      { text: "Software Engineer", fontSize: 11 },
+      { text: "Jan 2020 - Present", fontSize: 11 },
+      { text: "Acme Consulting, _internal_tools_", fontSize: 11 },
+      { text: "• Owned the core API.", fontSize: 11 },
+    ]);
+    expect(roles.length).toBeGreaterThanOrEqual(1);
+    const role = roles[0];
+    expect(role.company).toContain("_internal_tools_");
+    expect(role.location).toBeUndefined();
+  });
+});

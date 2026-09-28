@@ -387,6 +387,84 @@ export const BARE_LOCATION_RE = new RegExp(
   "i",
 );
 
+/** Trailing field-separator glyphs left dangling once a wrapped location is
+ *  unwrapped ("Acme Consulting, _Springfield, IL_," → "…Springfield, IL,") —
+ *  the same trailing set `experience-disambiguate.ts`'s `stripDanglingSeparator`
+ *  trims after peeling a location suffix. Exported so that caller reuses this
+ *  literal instead of carrying a second copy — `experience-disambiguate.ts`
+ *  already imports from this module (see {@link unwrapEmphasisLocation}), so
+ *  importing the regex too doesn't add a new edge to the graph. */
+export const TRAILING_SEPARATOR_RE = /[\s,–—\-|·]+$/;
+
+/**
+ * Unwrap a markdown-emphasis pair (`_..._`) that wraps a location, dropping
+ * the pair and any trailing separator left dangling after its close, ONLY
+ * when the wrapped interior reads as a complete location (recursively, via
+ * {@link isBareLocationString}) — the same closed-vocabulary discipline every
+ * location predicate in this module applies, so a literal `snake_case_name`
+ * or SDK symbol elsewhere in the text is never mistaken for emphasis.
+ *
+ * Scans every `_..._` pair in `s`, not just the first: a header can carry an
+ * unrelated emphasis run before the location one ("Senior Engineer
+ * (_Contract_), Acme Consulting, _Springfield, IL_,"), and bailing on the
+ * first pair's vocabulary miss would ship the real trailing location with its
+ * literal underscores still attached.
+ *
+ * Also requires each pair to be non-intraword, CommonMark's own test for
+ * whether `_..._` is emphasis at all (the character immediately outside each
+ * underscore must not be a word character) — without it, an ordinary
+ * snake_case token that happens to sandwich a 2-letter state code
+ * ("Manager_IN_Training") reads as a wrapped "IN" and gets stripped down to
+ * "ManagerINTraining". Known gap, deliberately not chased: `\w` also counts
+ * `_` itself, so a doubled-underscore (bold, `__..__`) wrapper reads as
+ * intraword on both sides and is left fully untouched. Narrowing the check
+ * to letters/digits only trades that no-op for a worse one — the regex's
+ * `[^_]+` core still can't cross the inner pair of underscores, so it would
+ * unwrap only the innermost `_..._` and leave one stray literal underscore
+ * on each side rather than none. Emphasis (`_..._`) is the shape #1034's
+ * PDFs exercise; bold-wrapped locations haven't shown up in the corpus.
+ *
+ * Fixes the literal-underscore residue left by a PDF whose source was
+ * exported by a Markdown renderer that printed emphasis syntax as glyphs on
+ * the page instead of applying it (#1034) — that text reaches the parser as
+ * ordinary characters, so neither `mdToPlainText` nor `markdown-lines.ts`'s
+ * own emphasis strip (which only ever sees real markdown source) ever touches
+ * it. Leaves `s` unchanged when no pair both qualifies as emphasis and reads
+ * as a location.
+ *
+ * Shared by {@link isBareLocationString} (the whole-string case — a location
+ * with nothing else on its line) and `experience-disambiguate.ts`'s
+ * `stripLocationSuffix` (the suffix case — a location glued after a company),
+ * so a header line and a bare location cell parse to the same clean value
+ * regardless of which field the emphasis run landed in.
+ *
+ * Unwraps every qualifying pair it finds, not just the first: a header can
+ * carry an earlier emphasis run that independently reads as a location too
+ * ("Senior Engineer, _Remote_, Acme Consulting, _Springfield, IL_,") —
+ * stopping at that first success would leave the real trailing location's
+ * underscores in place.
+ */
+export function unwrapEmphasisLocation(s: string): string {
+  const re = /_([^_]+)_/g;
+  let result = "";
+  let copiedThrough = 0;
+  let unwrappedAny = false;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const before = m.index > 0 ? s[m.index - 1] : undefined;
+    const afterIndex = m.index + m[0].length;
+    const after = afterIndex < s.length ? s[afterIndex] : undefined;
+    const isIntraword = (before !== undefined && /\w/.test(before)) || (after !== undefined && /\w/.test(after));
+    if (isIntraword || !isBareLocationString(m[1].trim())) continue;
+    result += s.slice(copiedThrough, m.index) + m[1].trim();
+    copiedThrough = afterIndex;
+    unwrappedAny = true;
+  }
+  if (!unwrappedAny) return s;
+  result += s.slice(copiedThrough);
+  return result.replace(TRAILING_SEPARATOR_RE, "").trim();
+}
+
 /**
  * True when `s` is ENTIRELY a bare location string — a lone US state code, a
  * bare well-known city, or a "City, ST" / "City, Country" shape that spans the
@@ -421,16 +499,33 @@ export const BARE_LOCATION_RE = new RegExp(
  * layers from disagreeing about what counts as a location.
  */
 export function isBareLocationString(s: string): boolean {
-  const usLoc = US_LOCATION_RE.exec(s);
-  const intlLoc = INTL_LOCATION_RE.exec(s);
-  return (
-    US_STATE_CODE_RE.test(s) ||
-    BARE_LOCATION_RE.test(s) ||
-    (usLoc !== null && usLoc[0].length === s.length && US_STATE_CODE_RE.test(usLoc[2])) ||
+  return resolveBareLocationString(s) !== undefined;
+}
+
+/**
+ * Like {@link isBareLocationString}, but returns the CLEANED value (emphasis
+ * unwrapped, #1034) instead of a boolean, for the callers that go on to store
+ * the string as the parsed `location` — `locationFromAnchorCell` and the
+ * `team`/`title`→location rescues in `experience-disambiguate.ts`. Returning
+ * the raw `s` on a match would ship the literal `_Springfield, IL_` glyphs the
+ * unwrap exists to remove; `isBareLocationString` itself only needs the
+ * boolean, so it stays a thin wrapper over this.
+ */
+export function resolveBareLocationString(s: string): string | undefined {
+  // Unwrap a whole-string markdown-emphasis wrapper first (#1034) — a no-op
+  // (returns `s` itself) whenever `s` carries no `_..._` pair, so the common
+  // case pays only one extra regex test.
+  const cleaned = unwrapEmphasisLocation(s);
+  const usLoc = US_LOCATION_RE.exec(cleaned);
+  const intlLoc = INTL_LOCATION_RE.exec(cleaned);
+  const isBare =
+    US_STATE_CODE_RE.test(cleaned) ||
+    BARE_LOCATION_RE.test(cleaned) ||
+    (usLoc !== null && usLoc[0].length === cleaned.length && US_STATE_CODE_RE.test(usLoc[2])) ||
     (intlLoc !== null &&
-      intlLoc[0].length === s.length &&
-      COUNTRY_GAZETTEER.has(intlLoc[2].toLowerCase()))
-  );
+      intlLoc[0].length === cleaned.length &&
+      COUNTRY_GAZETTEER.has(intlLoc[2].toLowerCase()));
+  return isBare ? cleaned : undefined;
 }
 
 /** Collapse internal whitespace and trim — the canonical date-token normalizer. */
