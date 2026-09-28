@@ -131,6 +131,7 @@ export function useAnalyzedResume(): AnalyzedResume {
     contactOverrides,
     experienceOverrides,
     bulletOverrides,
+    descriptionOverrides,
     removedBullets,
     removedEntries,
     educationOverrides,
@@ -143,14 +144,6 @@ export function useAnalyzedResume(): AnalyzedResume {
     profileOverrides,
     snapshot,
   } = edit;
-  // `descriptionOverrides` is deliberately NOT pulled out here: since #652 every
-  // override map reaches `applyOverrides` through `snapshot`, and the only
-  // reason to name one individually is to list it as a `score` dep below.
-  // `descriptionOverrides` is not one of those — it was not a `score` dep before
-  // #652 either, and the `score` dep list is unchanged by that refactor.
-  // (`editedCore`'s deps DID change — 14 named override maps collapsed to
-  // `[base, doneScoreBullets, snapshot]` — but equivalently, because
-  // `useEditableParse` memoizes `snapshot` over exactly those same 14.)
 
   // The base CascadeResult overrides fold onto: the original parse in "done",
   // a fresh `buildBlankResult()` once an authoring session has no pending
@@ -237,11 +230,6 @@ export function useAnalyzedResume(): AnalyzedResume {
   // hand, so the omission has no local signal at all. Hence this list:
   //   - `profileOverrides` — deliberate, replaced by
   //     `scoreAffectingProfileSlots` per the invariant above (#428).
-  //   - `descriptionOverrides` — a KNOWN PRE-EXISTING BUG, not a decision. It
-  //     moves `editedCore` and can move the score (an edited description feeds
-  //     the bullet pool), but it was never a dep here and #652 did not change
-  //     that. Left as-is on purpose: fixing it is its own change with its own
-  //     repro, not a refactor's drive-by.
   // Anything else absent from the array below is unaccounted for — either add
   // it or add it to this list with the reason.
   const score = useMemo(() => {
@@ -267,6 +255,10 @@ export function useAnalyzedResume(): AnalyzedResume {
     contactOverrides,
     experienceOverrides,
     bulletOverrides,
+    // An edited role/project description is the bullet-pool fallback for a
+    // glyph-less-prose résumé (score.ts's `poolExperienceDescriptions` branch),
+    // so it must re-grade like every other bullet-affecting channel (#933).
+    descriptionOverrides,
     educationOverrides,
     achievementOverrides,
     certificationOverrides,
