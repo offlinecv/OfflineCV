@@ -369,8 +369,8 @@ describe("extractEducation — capstone/project sub-line stays annotation, not s
   });
 
   it("does NOT split an honor-society line into a phantom entry, even with a year (#883 review round 2)", () => {
-    // "Phi Beta Kappa, cum laude 2021" carries no EDUCATION_ANNOTATION_RE
-    // keyword ("honor society" isn't "honors"), and once the trailing "cum
+    // "Phi Beta Kappa, cum laude 2021" carried no EDUCATION_ANNOTATION_RE
+    // keyword before #982 named the phrase ("honor society" isn't "honors"), and once the trailing "cum
     // laude" note is cut for the #883 GPA-rescue check, "Phi Beta Kappa"
     // reads exactly like a real degree-less program title. This is why
     // isInlineDatedProgram's #883 rescue is scoped to GPA-kind notes only —
@@ -1540,6 +1540,256 @@ describe("a one-word line beside a year must not mint a school (#979)", () => {
       expect(isInlineDatedProgram(line), line).toBe(false);
       expect(isInlineDatedProgramEntry(line), line).toBe(false);
     }
+  });
+});
+
+describe("a mangled date must not mint a school through a range or an honors partner (#982)", () => {
+  // Same BASE as the #979 suite: a degreed entry a boundary line has to be
+  // measured against.
+  const BASE = ["Yale University", "B.A. History, 2010 - 2014"];
+
+  it.each([
+    "Setember 2021 – Agust 2022",
+    "Setember 2021 - Agust 2022",
+    "Setember 2021-Agust 2022",
+  ])(
+    "route 1: does not open a second entry on a two-misspelled-month range: %s",
+    (line) => {
+      // #979's fix only reached a LONE mangled date, because a mangled date is
+      // one token by construction. A range of two mangled months is two tokens
+      // by the same construction, so it cleared #979's "more than one token"
+      // bar and the whole line became a fabricated institution.
+      const { value } = extractEducation(mkEduSection([...BASE, line]));
+      expect(value, line).toHaveLength(1);
+      expect(value[0].institution, line).toBe("Yale University");
+    },
+  );
+
+  it("route 1: isInlineDatedProgramEntry rejects the two-month-range shape directly", () => {
+    for (const line of [
+      "Setember 2021 – Agust 2022",
+      "Setember 2021 - Agust 2022",
+      "Jnuary 2019 – Setember 2020",
+    ]) {
+      expect(isInlineDatedProgramEntry(line), line).toBe(false);
+    }
+  });
+
+  it("route 1: a real multi-word program title is not mistaken for a mangled range", () => {
+    // These have a dash somewhere in them (an intra-word hyphen, or none at
+    // all) but do not split into two independent "word + year" halves, so the
+    // shape gate must not reject them.
+    for (const line of [
+      "Marketing Certificate 2020",
+      "MIT Applied Data Science (2023)",
+      "Post-Graduate Diploma 2019",
+    ]) {
+      expect(isInlineDatedProgramEntry(line), line).toBe(true);
+    }
+  });
+
+  it("route 1: a genuine two-program title is not rejected for sharing the mangled-range shape (review, #1081)", () => {
+    // "Photography 2020 – Painting 2022" DOES split into two independent
+    // "word + year" halves around the dash, the same structural shape as
+    // "Setember 2021 – Agust 2022" — but neither "Photography" nor "Painting"
+    // is a mangled month, so the shape alone must not be enough to reject it.
+    expect(isInlineDatedProgramEntry("Photography 2020 – Painting 2022")).toBe(
+      true,
+    );
+  });
+
+  it("route 2: a Dean's List line under a mangled date lead mints no institution named Dean's List", () => {
+    const { value } = extractEducation(
+      mkEduSection([...BASE, "Setember 2021", "Dean's List"]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Yale University");
+    expect(value.some((e) => e.institution === "Dean's List")).toBe(false);
+  });
+
+  it("route 2: named honor-society phrases under a mangled date lead mint no institution (review, #1081)", () => {
+    // "President's List", "Valedictorian", "Phi Beta Kappa" and "Order of the
+    // Coif" contain neither "honors" nor "awards", so they slipped past
+    // `EDUCATION_ANNOTATION_RE` before it named them explicitly.
+    for (const phrase of [
+      "President's List",
+      "Valedictorian",
+      "Phi Beta Kappa",
+      "Order of the Coif",
+    ]) {
+      const { value } = extractEducation(
+        mkEduSection([...BASE, "Setember 2021", phrase]),
+      );
+      expect(value, phrase).toHaveLength(1);
+      expect(value[0].institution, phrase).toBe("Yale University");
+      expect(
+        value.some((e) => e.institution === phrase),
+        phrase,
+      ).toBe(false);
+    }
+  });
+
+  it("route 2: a typographic apostrophe in President's List is still recognised as an annotation (review, #1081)", () => {
+    // `EDUCATION_ANNOTATION_RE`'s apostrophe was straight-quote-only (`'?`), so
+    // a PDF text layer using the curly `’` (as many do) slipped past it and
+    // minted "President’s List" as a fabricated institution.
+    const { value } = extractEducation(
+      mkEduSection([...BASE, "Setember 2021", "President’s List"]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Yale University");
+    expect(
+      value.some((e) => e.institution === "President’s List"),
+    ).toBe(false);
+  });
+
+  it("route 2: an unlabelled honors phrase under a mangled date lead is rejected the same way", () => {
+    // "First Class" carries no `EDUCATION_ANNOTATION_RE` keyword of its own —
+    // unlike "Magna Cum Laude", which that regex's own `cum laude` alternative
+    // already denies — so this is the case that actually exercises
+    // `isGradeAnnotationLine`, not a second hit on the same keyword path.
+    const { value } = extractEducation(
+      mkEduSection([...BASE, "Setember 2021", "First Class"]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Yale University");
+    expect(value.some((e) => e.institution === "First Class")).toBe(false);
+  });
+
+  it("route 2 control: a real school partner is still preserved (#979 AC 2 trade-off)", () => {
+    // Tightening `isInstitutionLine` must not touch the accepted #979 trade-off:
+    // a REAL school following a mangled one-word lead is still minted.
+    const { value } = extractEducation(
+      mkEduSection([...BASE, "Setember 2021", "Harvard Summer School"]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value[0].institution).toBe("Yale University");
+    expect(value[1].institution).toBe("Harvard Summer School");
+  });
+
+  it("route 2 control: an institution name containing an annotation word is still preserved", () => {
+    // `EDUCATION_ANNOTATION_RE` matches "Honors" — `isInstitutionLine` must
+    // check `INSTITUTION_HINTS` FIRST so a real school whose name contains an
+    // annotation word ("Schreyer Honors College") is still recognised as the
+    // partner, not rejected as an honors annotation line.
+    const { value } = extractEducation(
+      mkEduSection([...BASE, "Setember 2021", "Schreyer Honors College"]),
+    );
+    expect(value).toHaveLength(2);
+    expect(value[0].institution).toBe("Yale University");
+    expect(value[1].institution).toBe("Schreyer Honors College");
+  });
+
+  it("route 2: an honors label ahead of an institution hint on the same line is not paired as the mangled lead's institution (review, #1081)", () => {
+    // "Dean's List, College of Engineering" contains BOTH a rejected honors
+    // clause AND a generic institution-hint word ("College"). Before this fix,
+    // `isInstitutionLine` matched `INSTITUTION_HINTS` anywhere in the text and
+    // returned before the leading-annotation reject ever ran, so
+    // `isProgramLeadAt` paired it as "Setember 2021"'s own school and
+    // fabricated a `field: "Setember"` / `end_date: "2021"` onto it. The
+    // line's own institution-hint word still opens its own hint-based entry
+    // independently — that part is the general, pre-existing "an
+    // institution-hint line opens a new entry" chunker rule (#184/#882) and is
+    // not this thread's concern. What this fix removes is the fabricated
+    // pairing with the mangled lead above it.
+    const { value } = extractEducation(
+      mkEduSection([
+        ...BASE,
+        "Setember 2021",
+        "Dean's List, College of Engineering",
+      ]),
+    );
+    const fabricated = value.find(
+      (e) => e.institution === "Dean's List, College of Engineering",
+    );
+    expect(fabricated).toBeDefined();
+    expect(fabricated?.field).toBeUndefined();
+    expect(fabricated?.end_date).toBeUndefined();
+  });
+
+  it("route 1 institution-lead: a mangled range lead does not fabricate a field via isProgramLeadAt", () => {
+    // `isProgramLeadAt`'s lead test (`isInlineDatedProgram`) never ran
+    // `isMangledDateRangeShape` before this fix, so a mangled range followed by
+    // a REAL institution still qualified as a program lead and minted a
+    // fabricated `field` from the mangled range text.
+    const { value } = extractEducation(
+      mkEduSection(["Setember 2021 – Agust 2022", "Boston University"]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Boston University");
+    expect(value[0].field).toBeUndefined();
+  });
+
+  it("route 1: isMangledDateRangeShape also rejects redacted-year, reversed, and 3-segment ranges", () => {
+    for (const line of [
+      "Setember 20XX – Agust 20XX",
+      "Setember 2021 – 2022 Agust",
+      "Setember 2021 – Agust 2022 – Jnuary 2023",
+    ]) {
+      expect(isInlineDatedProgramEntry(line), line).toBe(false);
+    }
+  });
+
+  it("route 1: a mangled range with a trailing location is still rejected", () => {
+    // `isMangledDateRangeShape` used to check the raw line, so a trailing
+    // "| City, Region" location kept the shape from matching (the same
+    // location tail `inlineDatedProgramText` already strips before measuring
+    // the program remainder).
+    expect(
+      isInlineDatedProgramEntry("Setember 2021 – Agust 2022 | Boston, MA"),
+    ).toBe(false);
+  });
+
+  it("route 1: a mangled range with a multi-word city location is still rejected", () => {
+    // `stripTrailingLocation` used to strip only the LAST word before a
+    // trailing location, so "| New York, NY" left "| New York" glued onto the
+    // second date and `isMangledDateRangeShape` no longer recognised the
+    // range shape (review, #1081).
+    expect(
+      isInlineDatedProgramEntry("Setember 2021 – Agust 2022 | New York, NY"),
+    ).toBe(false);
+  });
+
+  it.each([
+    "Setember 2021 - Agust 2022 | Cape Town, South Africa",
+    "Setember 2021 - Agust 2022 | Rio de Janeiro, Brazil",
+  ])(
+    "route 1: a multi-word or connector-bearing location tail does not hide the range: %s",
+    (line) => {
+      // The location strip took ONE token after the region comma, so "South
+      // Africa" or "Rio de Janeiro" left the tail in place and the range shape
+      // was never seen (review, #1081).
+      const { value } = extractEducation(mkEduSection([...BASE, line]));
+      expect(value, line).toHaveLength(1);
+      expect(value[0].institution, line).toBe("Yale University");
+    },
+  );
+
+  it.each([
+    ["Valedictorian, Class of 2020", "2020"],
+    ["Phi Beta Kappa, 2019", "2019"],
+    ["President's List, Fall 2019", "2019"],
+  ])(
+    "a named honor line that is the entry's only date source keeps its date: %s",
+    (line, year) => {
+      // Naming these phrases as annotations (so they are refused as a school)
+      // must not also drop them from the date scan, or an entry whose only
+      // date rides on one of them loses it (review, #1081).
+      const { value } = extractEducation(
+        mkEduSection(["Overland Park High School", line]),
+      );
+      expect(value).toHaveLength(1);
+      expect(value[0].end_date).toBe(year);
+    },
+  );
+
+  it("control: one-word degree-less programs still parse (#302 round-trip shape)", () => {
+    const { value } = extractEducation(
+      mkEduSection(["Photography 2020", "Coursera"]),
+    );
+    expect(value).toHaveLength(1);
+    expect(value[0].institution).toBe("Coursera");
+    expect(value[0].field).toBe("Photography");
   });
 });
 
