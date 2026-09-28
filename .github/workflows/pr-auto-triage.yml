@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The offlinecv Authors
+#
+# Automated PR triage & low-risk approval workflow.
+#
+# Automates two maintenance tasks:
+# 1. Resolves review threads where the automated review bot has given an APPROVE
+#    verdict (clearing non-blocking nits or agreed design choices that stalled).
+# 2. Safely auto-approves strictly classified low-risk PRs (docs-only, test-only
+#    refactors) when CI verify is green, single commit exists, all threads are
+#    resolved, and bot review approved.
+name: PR auto-triage
+
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Specific PR number to triage (leave blank to scan all open Gaal PRs)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Run in dry-run mode without making changes'
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Run periodically every 30 minutes to triage newly eligible PRs
+    - cron: '*/30 * * * *'
+
+concurrency:
+  group: pr-auto-triage-${{ github.event.inputs.pr || github.event.pull_request.number || 'cron' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  triage:
+    if: >
+      github.event_name != 'pull_request_review' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Always run the default branch's triage script. On `pull_request_review`
+      # the default ref is the PR's merge commit, so checking that out would run
+      # the PR's own copy of the script with this job's write token. The PR is
+      # inspected through the API, never through the working tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+
+      - name: Run pr-auto-triage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # Inputs reach the shell as env vars, never as template expansions
+          # inside `run:` — zizmor's template-injection audit.
+          EVENT: ${{ github.event_name }}
+          INPUT_PR: ${{ inputs.pr }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          REVIEW_PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ -n "$INPUT_PR" ]; then
+              [[ "$INPUT_PR" =~ ^[0-9]+$ ]] || { echo "::error::pr must be a PR number, got '$INPUT_PR'"; exit 1; }
+              args+=(--pr "$INPUT_PR")
+            fi
+            if [ "$INPUT_DRY_RUN" = "true" ]; then
+              args+=(--dry-run)
+            fi
+          elif [ "$EVENT" = "pull_request_review" ]; then
+            args+=(--pr "$REVIEW_PR")
+          fi
+
+          if [ ${#args[@]} -gt 0 ]; then
+            node scripts/pr-auto-triage.mjs "${args[@]}"
+          else
+            node scripts/pr-auto-triage.mjs
+          fi
