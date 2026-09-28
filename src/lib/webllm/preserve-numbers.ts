@@ -111,6 +111,32 @@
  *    (`a team comprising 5` → `5 engineers`) reverting as an invention; that is
  *    the deliberate trade for catching a headcount the model made up.
  *
+ * ## Known residual: false reverts from a same-value merge across a strict
+ * year cue (#919)
+ *
+ * Rule 1's strict tier is right to prevent a coincidental digit from masking a
+ * dropped year — but a STRICT cue immediately before the digit (a comma, an
+ * open parenthesis, a bullet-leading position with nothing before the year at
+ * all, or a month name) means that if an unrelated bullet's SAME-VALUE bare
+ * integer is merged away elsewhere, strict count parity reports the year as
+ * dropped even though it is still sitting in the output, just without the cue
+ * that made it strict there. Confirmed shapes, all `ok: true` before #919:
+ *   - `["Shipped in March 2000 units.", "Counted 2000 units."]` →
+ *     `["Counted 2000 units shipped in March."]` —
+ *     `{ ok: false, dropped: ["2000"] }` (month name)
+ *   - `["Speaker (2019) at the internal summit.", "Handled 2019 support tickets."]` →
+ *     `["Handled 2019 support tickets; spoke at the internal summit."]` —
+ *     `{ ok: false, dropped: ["2019"] }` (parenthesis)
+ *   - `["B.S. CS, 2019.", "Closed 2019 issues."]` →
+ *     `["Closed 2019 issues after earning a B.S. in CS."]` —
+ *     `{ ok: false, dropped: ["2019"] }` (comma)
+ *   - `["2019: Founded the venture.", "Closed 2019 issues."]` →
+ *     `["Closed 2019 issues after founding the venture."]` —
+ *     `{ ok: false, dropped: ["2019"] }` (bullet-leading)
+ * The trade is deliberate, not a bug: the cost is one discarded rewrite with a
+ * visible warning, and the alternative is losing the degree/talk/award year
+ * defence #876 exists for.
+ *
  * Sign sensitivity: a leading `-` (between a word boundary and the digit) is
  * captured into the token. This is what catches "Reduced costs 15%" being
  * rewritten as "Reduced costs -15%" — same magnitude, inverted meaning. The
@@ -248,7 +274,16 @@ const RANGE_DASH = /[\u002D\u2010-\u2015\u2212]/;
  * The open-ended end-date words — `present`, `current`, `now`, `ongoing` — that
  * turn a neighbouring 4-digit number into a year (`2019 – Present`). The one copy
  * in this module: the six sites in {@link LEADING_DATE_ANCHOR_SEPARATOR} and
- * {@link YEAR_FOLLOW_CUE} that used to spell it out all derive from it.
+ * {@link YEAR_FOLLOW_CUE} that used to spell it out all derive from it. The
+ * bare, unseparated `onwards?|${OPEN_ENDED_WORDS}` alternative in
+ * `YEAR_FOLLOW_CUE` (a year followed by only whitespace before the word, with
+ * no dash and no `to`/`until`/`through`) looks dead by grammar — nobody types
+ * "2019 Present" — but it is reachable: a PDF extractor drops the separator
+ * between adjacent text runs as often as it preserves one, so "2019 – Present"
+ * on the page can arrive here as "2019 Present" with the dash gone before this
+ * module ever sees it (`parseDateRange("Feb. 2022 Present")` in
+ * `heuristics/regex.test.ts` pins the same separator-less shape one layer
+ * down). Keep it.
  *
  * A LOCAL copy of the parser lexicon's `OPEN_ENDED_ALT` (`heuristics/regex.ts`),
  * on purpose. Importing it would be this module's first dependency, and not a
@@ -457,6 +492,13 @@ const YEAR_PREFIX_CUE = new RegExp(
  * Mapped to the lenient "verb" / `year_verb` tier so legitimate bullet merges
  * on quantities (e.g. "Reduced by 2000 hours" + "Tracked 2000 bugs") do not
  * false-revert on count parity, while dropping the year completely is caught.
+ * Load-bearing for evaluation order, not just outcome (#928 tried to delete
+ * this as redundant with `bareIntegerClaim`'s unconditional year fallback —
+ * it isn't: this tier short-circuits `isYearContext` *before*
+ * `bareIntegerClaim` reaches `isRangeEndpoint`, so a weak-cue year abutting a
+ * tight range dash (`"the 1996-97 academic year"`) still classifies as
+ * `year_verb` instead of being reclassified as a `range` atom, which
+ * `countUnclaimedByKey` tallies differently).
  */
 const YEAR_PREFIX_WEAK_CUE = new RegExp(
   "\\b(?:from|by|for|of|over|the|our|this|early|mid|late)[\\s-]*$",
@@ -591,20 +633,24 @@ function isYearContext(
  * What, if anything, makes this bare integer worth defending, given the words
  * around it?
  *
- * Three ways to qualify — a headcount, a year, or one endpoint of a tight
- * range. Everything else ("the 3 of us", "phase 2", "section 4", "suite 1900")
- * is noise: on the drop side, it is not required to be preserved unless matched
- * on the other side. On the add side, hallucinated numbers are guarded by
- * checking whether newly introduced values existed in the input.
+ * Four ways to qualify — a headcount, a strict year, a lenient
+ * (`year_verb`) year, or one endpoint of a tight range. Everything else
+ * ("the 3 of us", "phase 2", "section 4", "suite 1900") is noise: on the drop
+ * side, it is not required to be preserved unless matched on the other side.
+ * On the add side, hallucinated numbers are guarded by checking whether newly
+ * introduced values existed in the input.
  *
  * The match index IS the digit index on this branch: every prefix decoration
  * (approximation, sign, currency) implies `isDecorated`, so a caller that
  * reaches here has nothing between `match.index` and the first digit.
  *
- * Years are checked before ranges, which is what keeps `2019-2021` scoring as a
- * pair of years rather than a range — the two classifications now share the
- * `num:` key namespace, but a 4-digit year qualifies without needing a dash, so
- * `2019` in "between 2019 and 2021" stays claimed.
+ * Years — strict AND lenient — are checked before ranges, which is what keeps
+ * `2019-2021` scoring as a pair of years rather than a range, and what keeps a
+ * weak-cue year abutting a tight range dash (`"the 1996-97 academic year"`)
+ * classifying as `year_verb` rather than being reclassified as a `range` atom
+ * one branch later — the two classifications share the `num:` key namespace,
+ * but `countUnclaimedByKey` tallies them differently, so the order here is
+ * load-bearing, not incidental (#928).
  */
 function bareIntegerClaim(
   match: RegExpExecArray,

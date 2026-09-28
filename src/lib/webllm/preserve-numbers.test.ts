@@ -1119,20 +1119,54 @@ describe("checkNumbersPreserved", () => {
       expect(result.dropped).toEqual([]);
     });
 
-    it("pins accepted residual: comma/parenthesis cues across two occurrences (#876 review)", () => {
+    it("pins accepted residual: comma/parenthesis/month/bullet-leading cues across two occurrences (#876 review)", () => {
       // In phrases like "Cut infra spend, 2000 servers decommissioned", the comma
       // immediately preceding 2000 triggers the year cue in YEAR_PREFIX_CUE (supporting "B.S. CS, 2019").
       // Under strict count parity, if the surviving output 2000 is merged without a year cue,
       // it reports dropped 2000. This is an explicit accepted residual trade-off.
-      const result = checkNumbersPreserved(
+      const commaResult = checkNumbersPreserved(
         [
           "Cut infra spend, 2000 servers decommissioned.",
           "Retired 2000 legacy VMs.",
         ],
         ["Cut infra spend and retired 2000 legacy VMs."],
       );
-      expect(result.ok).toBe(false);
-      expect(result.dropped).toEqual(["2000"]);
+      expect(commaResult.ok).toBe(false);
+      expect(commaResult.dropped).toEqual(["2000"]);
+
+      // Same mechanism, the parenthesis cue: "Speaker (2019)" makes 2019 strict,
+      // and merging the unrelated "2019 support tickets" away elsewhere still
+      // reports 2019 as dropped even though it survives in the output.
+      const parenResult = checkNumbersPreserved(
+        [
+          "Speaker (2019) at the internal summit.",
+          "Handled 2019 support tickets.",
+        ],
+        ["Handled 2019 support tickets; spoke at the internal summit."],
+      );
+      expect(parenResult.ok).toBe(false);
+      expect(parenResult.dropped).toEqual(["2019"]);
+
+      // Same mechanism, the month-name cue: "in March 2000" makes 2000 strict,
+      // and merging the unrelated "2000 units" away elsewhere still reports
+      // 2000 as dropped even though it survives in the output.
+      const monthResult = checkNumbersPreserved(
+        ["Shipped in March 2000 units.", "Counted 2000 units."],
+        ["Counted 2000 units shipped in March."],
+      );
+      expect(monthResult.ok).toBe(false);
+      expect(monthResult.dropped).toEqual(["2000"]);
+
+      // Same mechanism, the bullet-leading cue: a year with nothing before it
+      // and only a separator after ("2019: Founded...") makes 2019 strict, and
+      // merging the unrelated "2019 issues" away elsewhere still reports 2019
+      // as dropped even though it survives in the output.
+      const bulletLeadingResult = checkNumbersPreserved(
+        ["2019: Founded the venture.", "Closed 2019 issues."],
+        ["Closed 2019 issues after founding the venture."],
+      );
+      expect(bulletLeadingResult.ok).toBe(false);
+      expect(bulletLeadingResult.dropped).toEqual(["2019"]);
     });
 
     it("keeps a range/form drop lenient — an unclaimed same-value digit elsewhere still counts as present", () => {
