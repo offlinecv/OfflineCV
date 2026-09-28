@@ -155,15 +155,46 @@ function educationDateFields(
   };
 }
 
-/** Honors / awards / activity keyword denylist for entry-level annotation lines
- *  ("Dean's List 2015–2017", "Cum Laude", "Study Abroad, Florence 2021"). Used
- *  by both {@link isInlineDatedProgram} — to reject an annotation-lead as a
- *  phantom second entry — and by {@link filterAnnotationLinesForDates} — to
- *  keep an annotation's dates from being picked up as attendance dates on the
- *  parent entry (#371). Shared so the two consumers can never drift on which
- *  phrases count as annotations. */
-const EDUCATION_ANNOTATION_RE =
-  /\b(dean'?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project)\b/i;
+/** Honors / awards / activity keywords for entry-level annotation lines
+ *  ("Dean's List 2015–2017", "Cum Laude", "Study Abroad, Florence 2021"). The
+ *  source for both annotation regexes below, so the two consumers can never
+ *  drift on which KEYWORDS count as annotations.
+ *
+ *  The apostrophe class accepts both the straight (`'`) and the typographic
+ *  (`’`) form — a PDF's own text layer routinely uses the curly quote, which a
+ *  bare `'?` cannot see (review, #1081). */
+const ANNOTATION_KEYWORD_SRC = String.raw`dean['’]?s? list|awards?|honou?rs?|thesis|teaching assistant|research assistant|study abroad|coursework|scholarships?|fellowships?|cum laude|capstone|(?:senior|final|independent|group|team)\s+project`;
+
+/** Named honor-society / rank phrases that CONTAIN none of the generic
+ *  `honou?rs?`/`awards?` keywords (#982, review #1081) — without them, a
+ *  mangled-date lead sitting above one of these lines could still mint it as a
+ *  fabricated institution via {@link isInstitutionLine}. Still a closed
+ *  vocabulary that cannot enumerate every honor-society name — see
+ *  {@link isInstitutionLine}'s docblock for the accepted residual gap.
+ *
+ *  Kept OUT of {@link DATE_ANNOTATION_RE}, deliberately: these phrases often
+ *  carry the entry's GRADUATION year ("Valedictorian, Class of 2020"), and on
+ *  an entry with no other date-bearing line, dropping that line from the date
+ *  scan loses the only date the entry has (review, #1081). */
+const NAMED_HONOR_SRC = String.raw`president['’]?s list|valedictorian|phi beta kappa|order of the coif`;
+
+/** Whether a line reads as an annotation rather than an entry — used by
+ *  {@link isInlineDatedProgram} to reject an annotation-lead as a phantom
+ *  second entry, and by {@link isInstitutionLine} to refuse one as a program
+ *  lead's institution partner (#982). */
+const EDUCATION_ANNOTATION_RE = new RegExp(
+  String.raw`\b(${NAMED_HONOR_SRC}|${ANNOTATION_KEYWORD_SRC})\b`,
+  "i",
+);
+
+/** The keyword-only subset {@link filterAnnotationLinesForDates} strips from
+ *  the date scan, so an annotation's dates are never picked up as attendance
+ *  dates on the parent entry (#371). Excludes {@link NAMED_HONOR_SRC} — see
+ *  its docblock for why. */
+const DATE_ANNOTATION_RE = new RegExp(
+  String.raw`\b(${ANNOTATION_KEYWORD_SRC})\b`,
+  "i",
+);
 
 /** A month-year attendance/graduation date range sitting at the very END of a
  *  line — "… Data Mining. Aug 2023 – May 2025" — captured in the `date` group.
@@ -218,7 +249,7 @@ function trailingAttendanceDate(line: string): string | undefined {
  *  this whole-chunk path cannot express. */
 function filterAnnotationLinesForDates(lines: readonly string[]): string[] {
   return lines.filter(
-    (l) => DEGREE_RE.test(l) || !EDUCATION_ANNOTATION_RE.test(l),
+    (l) => DEGREE_RE.test(l) || !DATE_ANNOTATION_RE.test(l),
   );
 }
 
@@ -354,6 +385,38 @@ const CLEAN_FIELD_DATE_RE = new RegExp(
   "i",
 );
 
+/** Strip a trailing "| City, Region" / ", City, Region" location tail off
+ *  `text`. Shared by {@link inlineDatedProgramText} (a date+location line must
+ *  not pass the program-remainder test on its city words) and {@link
+ *  isMangledDateRangeShape} (a location tail after the second date must not
+ *  hide the mangled-range shape from the check — #982 review) so the two
+ *  never drift on what counts as a location suffix.
+ *
+ *  The CITY may be more than one word ("New York, NY", "San Francisco, CA") —
+ *  a single-word-only city left a multi-word one only half-stripped
+ *  ("… | New York, NY" → "… | New York"), which kept a mangled-range lead's
+ *  trailing location from being recognised at all and let it slip past
+ *  {@link isMangledDateRangeShape} (review, #1081). The multi-word run is
+ *  scoped to whitespace-joined Title-case words only — it cannot cross a
+ *  comma — so it cannot reach past the region/country segments that follow.
+ *
+ *  The REGION/COUNTRY segment may be multi-word too ("Cape Town, South
+ *  Africa"), and either segment may carry a lowercase place-name connector
+ *  ("Rio de Janeiro, Brazil") — a single-token region left the whole tail
+ *  unstripped, so a mangled range carrying one still minted a fabricated
+ *  institution (review, #1081). The connectors are a closed list, so an
+ *  arbitrary lowercase word still ends the match rather than letting it run
+ *  into prose. */
+const LOCATION_CONNECTOR_SRC = String.raw`(?:de|da|do|dos|das|del|della|di|du|la|le|los|las|el|of|on|upon|am|an|der|den|van|von|y)`;
+const LOCATION_WORD_SRC = String.raw`[A-Z][A-Za-z.\-]*`;
+const LOCATION_WORD_TAIL_SRC = String.raw`(?:\s+(?:${LOCATION_CONNECTOR_SRC}\s+)*${LOCATION_WORD_SRC})*`;
+const TRAILING_LOCATION_RE = new RegExp(
+  String.raw`[|,]\s*${LOCATION_WORD_SRC}${LOCATION_WORD_TAIL_SRC}(?:\s*,\s*[A-Za-z.\-]+${LOCATION_WORD_TAIL_SRC})*$`,
+);
+function stripTrailingLocation(text: string): string {
+  return text.replace(TRAILING_LOCATION_RE, "");
+}
+
 /** Whether `line` is a hint-less, degree-less PROGRAM NAME that carries its own
  *  graduation year inline — the second-school shape from #219, e.g.
  *  "MIT Applied Data Science (2023)" or "Google Data Analytics Certificate 2022".
@@ -400,7 +463,7 @@ function inlineDatedProgramText(line: string): string | null {
   // Drop a trailing "| City, Region" location segment before measuring the
   // program remainder — a date+location line ("… 2011 | Kolkata, India") must
   // not pass on the strength of its city words.
-  const noLocation = t.replace(/[|,]\s*[A-Z][A-Za-z.\-]+(?:\s*,\s*[A-Za-z.\-]+)*$/, "");
+  const noLocation = stripTrailingLocation(t);
   // Strip years and date connective words (seasons / months / range words) —
   // a real program name leaves substantive text, a bare date line leaves
   // nothing. Done BEFORE the note-cut and the annotation-keyword test below
@@ -542,6 +605,102 @@ export function isInlineDatedProgram(line: string): boolean {
 const PROGRAM_TITLE_WORD_RE =
   /^(certificate|certification|certified|programme?|diploma|bootcamp|course|residency|nanodegree|apprenticeship|traineeship|training|specialisation|specialization|university|college|institute|school|academy|polytechnic)s?$/i;
 
+/** Full month names — the target set a mangled-range segment's word is
+ *  fuzzy-matched against by {@link isMangledMonthWord}. Every {@link
+ *  STRICT_MONTH} abbreviation (`Jan`, `Feb`, …) is deliberately excluded: a
+ *  3-4 letter target sits within one edit of far too many ordinary short
+ *  words ("Way", "Ma") to discriminate anything, and a REAL, correctly-spelled
+ *  month lead never reaches this far anyway — {@link DATE_LEAD_RE} already
+ *  rejects it earlier, inside {@link inlineDatedProgramText}. */
+const FULL_MONTH_NAMES = STRICT_MONTH.split("|").filter((m) => m.length > 4);
+
+/** Levenshtein edit distance between `a` and `b`. */
+function levenshteinDistance(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
+    new Array<number>(b.length + 1).fill(0),
+  );
+  for (let i = 0; i <= a.length; i++) dp[i]![0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i]![j] = Math.min(
+        dp[i - 1]![j]! + 1,
+        dp[i]![j - 1]! + 1,
+        dp[i - 1]![j - 1]! + cost,
+      );
+    }
+  }
+  return dp[a.length]![b.length]!;
+}
+
+/** Whether `word` reads as a ONE-CHARACTER-OFF typo of a full month name —
+ *  "Setember"/September, "Agust"/August, "Jnuary"/January are the actual
+ *  shapes a résumé's own extraction has produced (#982 route 1), every one a
+ *  single dropped letter. Deliberately distance-1 rather than looser: a real
+ *  program word ("Photography", "Painting") sits nowhere near any month name
+ *  at distance 1, which is what lets {@link isMangledDateRangeShape} reject a
+ *  genuinely mangled date range without also rejecting a genuine two-program
+ *  title that happens to share its "word + year, word + year" shape (review,
+ *  #1081). A two-or-more-character-off month typo is a known, accepted
+ *  residual gap, the same way {@link isInstitutionLine}'s docblock accepts one
+ *  for an un-denylisted honor-society name — widening the distance would start
+ *  trading it for false rejections of real program titles instead. */
+function isMangledMonthWord(word: string): boolean {
+  const w = word.toLowerCase();
+  return FULL_MONTH_NAMES.some(
+    (month) => levenshteinDistance(w, month.toLowerCase()) <= 1,
+  );
+}
+
+/** Whether `line` is shaped like a date RANGE whose segments are each a single
+ *  MANGLED-MONTH word plus a year, in either order — "Setember 2021 – Agust
+ *  2022", "Setember 2021 – 2022 Agust", or a 3-segment "Setember 2021 – Agust
+ *  2022 – Jnuary 2023" (#982 route 1, widened past its first two-segment,
+ *  word-then-year-only cut by review).
+ *
+ *  {@link DATE_LEAD_RE} only rejects a REAL month LEAD, so a misspelling in
+ *  the FIRST slot already slips past it; a misspelling in a LATER slot then
+ *  survives {@link inlineDatedProgramText}'s date-strip as another
+ *  letter-bearing token, which used to satisfy {@link
+ *  isInlineDatedProgramEntry}'s "more than one token ⇒ credential" rule. That
+ *  rule's justification — "a mangled date is one token by construction" — does
+ *  not hold for a RANGE of mangled months: each segment is its own token by
+ *  construction, so a range of two or more always clears the multi-token bar
+ *  whether or not any month is real.
+ *
+ *  Split on every range dash and check EVERY segment reads as "word, year" or
+ *  "year, word" AND that its word is a mangled month ({@link
+ *  isMangledMonthWord}). The word check is load-bearing, not decoration: a
+ *  genuine multi-word program title CAN split into independent "word + year"
+ *  halves on every side of a dash — "Photography 2020 – Painting 2022" is
+ *  exactly that shape — so the structural test alone used to reject a real
+ *  two-program title on the strength of a coincidence (review, #1081). Gating
+ *  on the word being month-shaped is what tells "Setember"/"Agust" apart from
+ *  "Photography"/"Painting".
+ *
+ *  The trailing location a range can carry ("Setember 2021 – Agust 2022 |
+ *  Boston, MA") is stripped first via {@link stripTrailingLocation} — the same
+ *  helper {@link inlineDatedProgramText} uses — so a location suffix cannot
+ *  hide the shape from this check by attaching itself to the last segment. */
+const MANGLED_RANGE_SEGMENT_RE = new RegExp(
+  String.raw`^(?:(?<word1>[A-Za-z][A-Za-z.'’]*)\s+` +
+    YEAR_OR_REDACTED_SRC +
+    String.raw`\.?|` +
+    YEAR_OR_REDACTED_SRC +
+    String.raw`\.?\s+(?<word2>[A-Za-z][A-Za-z.'’]*))$`,
+  "i",
+);
+function isMangledDateRangeShape(line: string): boolean {
+  const segments = stripTrailingLocation(line.trim()).split(/\s*[–—-]\s*/);
+  if (segments.length < 2) return false;
+  return segments.every((s) => {
+    const m = MANGLED_RANGE_SEGMENT_RE.exec(s.trim());
+    const word = m?.groups?.word1 ?? m?.groups?.word2;
+    return word !== undefined && isMangledMonthWord(word.replace(/[.'’-]+$/, ""));
+  });
+}
+
 /**
  * Whether `line` may OPEN AN EDUCATION ENTRY as a dated program lead (#979).
  *
@@ -574,10 +733,19 @@ const PROGRAM_TITLE_WORD_RE =
  * partner lookaheads ({@link isProgramLeadAt} and {@link isInstitutionLeadAt})
  * deliberately ask the loose predicate {@link isInlineDatedProgram} (see the
  * comments there).
+ *
+ * The "two tokens is enough" argument has one hole a lone mangled date can't
+ * reach on its own: a RANGE of two mangled months (#982 route 1). `Setember
+ * 2021 – Agust 2022` strips to two letter-bearing tokens — `Setember` and
+ * `Agust` — same as `Marketing Certificate 2020`, so the token count alone
+ * cannot tell them apart. {@link isMangledDateRangeShape} catches that one
+ * shape structurally (does the line split into two independent "word + year"
+ * halves around a range dash?) before the token count is ever consulted.
  */
 export function isInlineDatedProgramEntry(line: string): boolean {
   const text = inlineDatedProgramText(line);
   if (text === null) return false;
+  if (isMangledDateRangeShape(line)) return false;
   // Apostrophes, ampersands, periods and hyphens stay INSIDE a word, so
   // "Dean's", "R&D", "B.Sc." and "Post-Graduate" each count once rather than
   // splitting into a false second token that would satisfy the gate.
@@ -605,10 +773,50 @@ export function isInlineDatedProgramEntry(line: string): boolean {
  *  bare date, not a GPA/Minor note) and must NOT itself be a degree line — a
  *  following degree opens a NEW entry, it is not the program's institution. Used
  *  only to confirm a program-title lead is followed by its own school, so the
- *  pair forms one entry that splits cleanly off the next (#238). */
+ *  pair forms one entry that splits cleanly off the next (#238).
+ *
+ *  Also rejects an honors/awards/activity ANNOTATION line ("Dean's List",
+ *  "First Class") as a partner (#982 route 2). `isProgramLeadAt`'s lead test is
+ *  deliberately loose (a mangled one-word date like "Setember 2021" passes it
+ *  the same as a real one-word program), so this partner test is the ONLY thing
+ *  standing between a mangled lead and a fabricated institution — before this,
+ *  an honors line under it (which is entry-header-shaped: capitalised, not a
+ *  date, not prose) satisfied `isEntryHeaderShape` and got minted as the school.
+ *  `EDUCATION_ANNOTATION_RE` recognises the labelled keywords (`Dean's List`,
+ *  `awards`, …); `isGradeAnnotationLine` recognises an unlabelled Latin-honors
+ *  or class-of-degree phrase (`First Class`) that carries no keyword of its own
+ *  — the two cover different shapes, so both are consulted.
+ *
+ *  A LEADING honors clause is rejected before `INSTITUTION_HINTS` gets a look
+ *  at the rest of the line (review, #1081): "Dean's List, College of
+ *  Engineering" must not be minted as an institution just because "College"
+ *  turns up after the comma. Scoped to the line's FIRST `EDUCATION_SEGMENT_SPLIT_SRC`
+ *  segment, and gated on THAT segment carrying no institution hint of its own
+ *  — which is what keeps a real school whose own name happens to contain an
+ *  annotation word ("Schreyer Honors College", "The Honors College") safe: its
+ *  lead segment (there being no comma to split it from anything) IS the
+ *  institution hint, so the early reject never fires and `INSTITUTION_HINTS`
+ *  still recognises it a few lines down. Both denylists are closed-vocabulary
+ *  and cannot enumerate every honor-society name — `EDUCATION_ANNOTATION_RE`
+ *  now names "President's List", "Phi Beta Kappa", "Valedictorian" and "Order
+ *  of the Coif" (review, #1081), but that list can never be exhaustive the way
+ *  `INSTITUTION_HINTS`' own docblock warns it cannot enumerate every school
+ *  name — a mangled lead under some OTHER, un-denylisted honor-society phrase
+ *  is a known, accepted gap, not a regression of the #982 fix. */
 function isInstitutionLine(text: string): boolean {
   if (DEGREE_RE.test(text)) return false;
+  const [leadSegment] = text.split(new RegExp(EDUCATION_SEGMENT_SPLIT_SRC));
+  const lead = leadSegment?.trim() ?? "";
+  if (
+    lead &&
+    !INSTITUTION_HINTS.test(lead) &&
+    (EDUCATION_ANNOTATION_RE.test(lead) || isGradeAnnotationLine(lead))
+  ) {
+    return false;
+  }
   if (INSTITUTION_HINTS.test(text)) return true;
+  if (EDUCATION_ANNOTATION_RE.test(text) || isGradeAnnotationLine(text))
+    return false;
   return isEntryHeaderShape(text);
 }
 
@@ -632,7 +840,14 @@ function isInstitutionLine(text: string): boolean {
  *  here would drop legitimate one-word programs and break round-trip fidelity.
  *  It can afford the loose predicate because its conservatism lives in the
  *  partner lookahead: `isInstitutionLine(partner)` requires an institution line
- *  under it, whereas a lone misspelled date has no institution partner. */
+ *  under it, whereas a lone misspelled date has no institution partner. That
+ *  lookahead alone is not enough against a mangled RANGE lead, though
+ *  (#982 review): `isInlineDatedProgram` never ran {@link
+ *  isMangledDateRangeShape} in the first place — that check was added to
+ *  {@link isInlineDatedProgramEntry} only — so a mangled range lead followed by
+ *  a REAL institution partner still qualified here. Reject that shape
+ *  directly, on top of the loose predicate rather than instead of it, so a
+ *  genuine one-word program lead is untouched. */
 function isProgramLeadAt(
   lines: { text: string }[],
   i: number,
@@ -642,6 +857,7 @@ function isProgramLeadAt(
   if (lead === undefined || partner === undefined) return false;
   if (DEGREE_RE.test(lead) || INSTITUTION_HINTS.test(lead)) return false;
   if (!isInlineDatedProgram(lead)) return false;
+  if (isMangledDateRangeShape(lead)) return false;
   return isInstitutionLine(partner);
 }
 
