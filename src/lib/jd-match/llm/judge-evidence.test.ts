@@ -17,6 +17,19 @@ vi.mock("../../webllm/web-llm.ts", () => ({
   releaseInference: vi.fn(),
 }));
 
+const { trackJudgeCompletedMock, trackFailedMock } = vi.hoisted(() => ({
+  trackJudgeCompletedMock: vi.fn(),
+  trackFailedMock: vi.fn(),
+}));
+vi.mock("../../analytics.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../analytics.ts")>();
+  return {
+    ...actual,
+    trackJdSemanticJudgeCompleted: trackJudgeCompletedMock,
+    trackJdSemanticFailed: trackFailedMock,
+  };
+});
+
 import { judgeEvidence } from "./judge-evidence.ts";
 import { acquireInference, releaseInference } from "../../webllm/web-llm.ts";
 import type { JdRequirement } from "./extract-requirements.ts";
@@ -289,5 +302,90 @@ describe("judgeEvidence — cancellation (#803)", () => {
 
     expect(verdicts).toHaveLength(2);
     expect(verdicts.every((v) => v.status === "met")).toBe(true);
+  });
+});
+
+describe("judgeEvidence — telemetry (#206)", () => {
+  it("fires jd_semantic_judge_completed with tallied statuses and batch count", async () => {
+    const reqs = [
+      req("req-1"),
+      req("req-2"),
+      req("req-3"),
+      req("req-4"),
+    ];
+    const engine = makeMockEngine([
+      JSON.stringify([
+        { id: "req-1", status: "met", reason: "ok" },
+        { id: "req-2", status: "met", reason: "ok" },
+        { id: "req-3", status: "partial", reason: "ok" },
+        // req-4 omitted → missing.
+      ]),
+    ]);
+    await judgeEvidence(reqs, parsed(), engine, MODEL);
+
+    expect(trackJudgeCompletedMock).toHaveBeenCalledExactlyOnceWith({
+      model: MODEL,
+      requirementCount: 4,
+      metCount: 2,
+      partialCount: 1,
+      missingCount: 1,
+      batches: 1,
+    });
+  });
+
+  it("counts multiple batches", async () => {
+    const reqs = Array.from({ length: 10 }, (_, i) => req(`req-${i + 1}`));
+    const verdict = (id: string) => ({ id, status: "met", reason: "ok" });
+    const engine = makeMockEngine([
+      JSON.stringify(reqs.slice(0, 8).map((r) => verdict(r.id))),
+      JSON.stringify(reqs.slice(8).map((r) => verdict(r.id))),
+    ]);
+    await judgeEvidence(reqs, parsed(), engine, MODEL);
+
+    expect(trackJudgeCompletedMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ batches: 2, requirementCount: 10 }),
+    );
+  });
+
+  it("does NOT fire jd_semantic_judge_completed for a run discarded by abort", async () => {
+    const reqs = Array.from({ length: 24 }, (_, i) => req(`req-${i + 1}`));
+    const controller = new AbortController();
+    const create = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      return { choices: [{ message: { content: "[]" } }] };
+    });
+    const engine: WebLlmEngine = { chat: { completions: { create } } };
+
+    await judgeEvidence(reqs, parsed(), engine, MODEL, controller.signal);
+
+    expect(trackJudgeCompletedMock).not.toHaveBeenCalled();
+  });
+
+  it("fires jd_semantic_failed(stage: judge, reason_class: engine_error) when a batch's model call throws", async () => {
+    const reqs = [req("req-1")];
+    const engine: WebLlmEngine = {
+      chat: {
+        completions: { create: vi.fn().mockRejectedValue(new Error("OOM")) },
+      },
+    };
+    await judgeEvidence(reqs, parsed(), engine, MODEL);
+
+    expect(trackFailedMock).toHaveBeenCalledExactlyOnceWith({
+      model: MODEL,
+      stage: "judge",
+      reasonClass: "engine_error",
+    });
+  });
+
+  it("does NOT fire jd_semantic_failed on an unparseable (not thrown) batch response", async () => {
+    // Unparseable output degrades the batch's requirements to `missing`
+    // without the engine call itself failing — a parse hiccup on the judge
+    // side has no distinct reason class in the schema (unlike extract), so
+    // it is intentionally not reported as a stage failure.
+    const reqs = [req("req-1")];
+    const engine = makeMockEngine(["not json at all"]);
+    await judgeEvidence(reqs, parsed(), engine, MODEL);
+
+    expect(trackFailedMock).not.toHaveBeenCalled();
   });
 });

@@ -178,6 +178,26 @@ set `VITE_POSTHOG_KEY` (and optionally `VITE_POSTHOG_HOST`, defaulting to
 `https://us.i.posthog.com`, and `VITE_POSTHOG_ENV` to override the inferred
 `environment` super-property above) in the environment at build time.
 
+### JD-match semantic events
+
+The on-device semantic JD-match path (paste a job description, opt into
+on-device AI, and the app extracts + judges requirements against your résumé
+with the shipped WebLLM model) emits four events, under the same
+`VITE_POSTHOG_KEY` gate as everything else on this page:
+
+| Event | Payload | Fires |
+|---|---|---|
+| `jd_match_path_selected` | `path` (`keyword` / `semantic`), `capability` | once per analysis, for whichever arm was actually shown |
+| `jd_semantic_extract_completed` | `model`, `requirement_count`, `parse_repaired` | once per requirement-extraction call that didn't hard-fail |
+| `jd_semantic_judge_completed` | `model`, `requirement_count`, `met_count`, `partial_count`, `missing_count`, `batches` | once per evidence-judging run that wasn't superseded by a newer one |
+| `jd_semantic_failed` | `model`, `stage` (`load` / `extract` / `judge`), `reason_class` | once per failure at that stage — never the raw error text |
+
+Same privacy contract as every other event on this page: no JD text, no
+résumé content, no field values — only counts, model ids, and enums. The
+on-device model download itself reuses the existing `webllm_download_started`
+/ `webllm_loaded` events (`loadEngine` already fires those); no separate
+download event was added for this path.
+
 ### Browser storage
 
 Beyond PostHog, the app writes a few functional `localStorage` keys to

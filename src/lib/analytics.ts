@@ -6,6 +6,7 @@ import type { LayoutTrigger, ParseEvent } from "./heuristics/types.ts";
 import type { WebGpuCapability } from "./webllm/types.ts";
 import type { Browser, Os } from "./webllm/platform.ts";
 import type { AtsPlatform } from "./jd-match/fetch-jd.ts";
+import type { JdMatchResult } from "./jd-match/types.ts";
 
 type PostHog = {
   capture: (event: string, props?: Record<string, unknown>) => void;
@@ -629,6 +630,115 @@ export function trackJdUrlFetch(args: {
   track("jd_url_fetch", {
     outcome: args.outcome,
     platform: args.platform,
+  });
+}
+
+// Semantic JD-match funnel (#206, anchor #156 — "JD Matching v2"). Covers the
+// WebLLM-native match path (`extract-requirements.ts` → `judge-evidence.ts`,
+// orchestrated by `run-llm-match.ts`) end to end: which arm an analysis
+// resolved to, whether each LLM call finished, and where it failed when it
+// didn't. Same privacy contract as the rest of this funnel: no JD text, no
+// résumé content, no field values — only counts, model ids, and enums. The
+// model download itself reuses the existing `webllm_download_started` /
+// `webllm_loaded` events (`loadEngine` fires those already); nothing new is
+// added for that part of the flow.
+
+/**
+ * Which arm a JD-match analysis resolved to (#206). Fired once per completed
+ * analysis — i.e. once per distinct (JD text, parsed résumé) pair that
+ * reaches a `ready` result, regardless of which arm produced it. `capability`
+ * is `useJdMatch`'s own WebGPU probe result at that moment: `null` when the
+ * semantic opt-in was off (so the probe never ran), letting a `path: "keyword"`
+ * event be split into "never tried semantic" vs. "tried and WebGPU wasn't
+ * there" vs. "tried, WebGPU was there, and the semantic pipeline itself
+ * degraded" (the last one is `capability: "available"` with `path: "keyword"`).
+ */
+export function trackJdMatchPathSelected(args: {
+  path: JdMatchResult["path"];
+  capability: WebGpuCapability | null;
+}): void {
+  track("jd_match_path_selected", {
+    path: args.path,
+    capability: args.capability,
+  });
+}
+
+/**
+ * Requirement extraction (LLM call #1, `extract-requirements.ts`) finished
+ * without a hard failure — including a legitimate empty extraction, which is
+ * not a failure per #200's contract. `parse_repaired` reports whether the
+ * model's own JSON was well-formed (`false`) or needed the fence-strip /
+ * balanced-span rungs of `json-repair.ts`'s ladder (`true`) — a proxy for how
+ * often the shipped model's raw output needs recovery.
+ */
+export function trackJdSemanticExtractCompleted(args: {
+  model: string;
+  requirementCount: number;
+  parseRepaired: boolean;
+}): void {
+  track("jd_semantic_extract_completed", {
+    model: args.model,
+    requirement_count: args.requirementCount,
+    parse_repaired: args.parseRepaired,
+  });
+}
+
+/**
+ * Evidence judging (LLM call #2, `judge-evidence.ts`) finished — every
+ * requirement in the run got a verdict, tallied by status. Fired once per
+ * `judgeEvidence` call that was NOT superseded by an abort (#803): a
+ * discarded partial run reports nothing, since its `missing`-defaulted
+ * verdicts for un-scheduled batches never reach a user and would skew the
+ * status breakdown. `batches` is the number of `JUDGE_EVIDENCE_BATCH_SIZE`
+ * chunks the run scheduled, so the funnel can correlate a slow run with its
+ * requirement count independent of `requirement_count` alone.
+ */
+export function trackJdSemanticJudgeCompleted(args: {
+  model: string;
+  requirementCount: number;
+  metCount: number;
+  partialCount: number;
+  missingCount: number;
+  batches: number;
+}): void {
+  track("jd_semantic_judge_completed", {
+    model: args.model,
+    requirement_count: args.requirementCount,
+    met_count: args.metCount,
+    partial_count: args.partialCount,
+    missing_count: args.missingCount,
+    batches: args.batches,
+  });
+}
+
+/** Which stage of the semantic pipeline a `jd_semantic_failed` event reports. */
+export type JdSemanticFailureStage = "extract" | "judge" | "load";
+
+/**
+ * Coarse failure bucket for `jd_semantic_failed` — deliberately NOT the raw
+ * error message, which for a JD-match failure could echo a fragment of the
+ * pasted job description or the résumé projection back through PostHog.
+ * `"consent_required"` and `"parse_error"` are the two buckets a call site can
+ * tell apart precisely (the model-consent gate, and the JSON-repair ladder
+ * exhausting itself); anything else collapses to `"engine_error"`, and a
+ * thrown non-`Error` value (defensive only — every real throw site in this
+ * pipeline throws an `Error` subclass) collapses to `"unknown"`.
+ */
+export type JdSemanticFailureReasonClass =
+  | "consent_required"
+  | "engine_error"
+  | "parse_error"
+  | "unknown";
+
+export function trackJdSemanticFailed(args: {
+  model: string;
+  stage: JdSemanticFailureStage;
+  reasonClass: JdSemanticFailureReasonClass;
+}): void {
+  track("jd_semantic_failed", {
+    model: args.model,
+    stage: args.stage,
+    reason_class: args.reasonClass,
   });
 }
 

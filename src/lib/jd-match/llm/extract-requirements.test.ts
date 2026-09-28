@@ -8,12 +8,31 @@
  * and every hard-failure path (malformed JSON, non-array, engine throw).
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const { trackExtractCompletedMock, trackFailedMock } = vi.hoisted(() => ({
+  trackExtractCompletedMock: vi.fn(),
+  trackFailedMock: vi.fn(),
+}));
+vi.mock("../../analytics.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../analytics.ts")>();
+  return {
+    ...actual,
+    trackJdSemanticExtractCompleted: trackExtractCompletedMock,
+    trackJdSemanticFailed: trackFailedMock,
+  };
+});
+
 import {
   extractRequirements,
   RequirementExtractionError,
 } from "./extract-requirements.ts";
 import type { WebLlmEngine } from "../../webllm/types.ts";
+
+beforeEach(() => {
+  trackExtractCompletedMock.mockClear();
+  trackFailedMock.mockClear();
+});
 
 /** A stub engine that returns `responses` in call order (empty string after). */
 function makeMockEngine(responses: string[]): WebLlmEngine {
@@ -241,5 +260,75 @@ describe("extractRequirements — cancellation (#803)", () => {
     await expect(extractRequirements("jd", engine)).resolves.toEqual([
       { id: "req-1", kind: "skill", text: "TypeScript" },
     ]);
+  });
+});
+
+describe("extractRequirements — telemetry (#206)", () => {
+  it("omits BOTH events when no modelId is supplied (every pre-#206 call site)", async () => {
+    const engine = makeMockEngine(["[]"]);
+    await extractRequirements("jd", engine);
+    expect(trackExtractCompletedMock).not.toHaveBeenCalled();
+    expect(trackFailedMock).not.toHaveBeenCalled();
+  });
+
+  it("fires jd_semantic_extract_completed with parse_repaired=false on a strict-JSON response", async () => {
+    const engine = makeMockEngine([
+      JSON.stringify([{ id: "req-1", kind: "skill", text: "TypeScript" }]),
+    ]);
+    await extractRequirements("jd", engine, undefined, "test-model");
+    expect(trackExtractCompletedMock).toHaveBeenCalledExactlyOnceWith({
+      model: "test-model",
+      requirementCount: 1,
+      parseRepaired: false,
+    });
+    expect(trackFailedMock).not.toHaveBeenCalled();
+  });
+
+  it("reports parse_repaired=true when the fence/balanced-span ladder had to run", async () => {
+    const engine = makeMockEngine([
+      'Sure!\n```json\n[{"id":"req-1","kind":"responsibility","text":"Lead the team"}]\n```\nDone.',
+    ]);
+    await extractRequirements("jd", engine, undefined, "test-model");
+    expect(trackExtractCompletedMock).toHaveBeenCalledExactlyOnceWith({
+      model: "test-model",
+      requirementCount: 1,
+      parseRepaired: true,
+    });
+  });
+
+  it("fires jd_semantic_failed(stage: extract, reason_class: engine_error) when the engine call throws", async () => {
+    const engine = makeThrowingEngine(new Error("OOM"));
+    await expect(
+      extractRequirements("jd", engine, undefined, "test-model"),
+    ).rejects.toBeInstanceOf(RequirementExtractionError);
+    expect(trackFailedMock).toHaveBeenCalledExactlyOnceWith({
+      model: "test-model",
+      stage: "extract",
+      reasonClass: "engine_error",
+    });
+    expect(trackExtractCompletedMock).not.toHaveBeenCalled();
+  });
+
+  it("fires jd_semantic_failed(stage: extract, reason_class: parse_error) on unparseable output", async () => {
+    const engine = makeMockEngine(["not json at all"]);
+    await expect(
+      extractRequirements("jd", engine, undefined, "test-model"),
+    ).rejects.toBeInstanceOf(RequirementExtractionError);
+    expect(trackFailedMock).toHaveBeenCalledExactlyOnceWith({
+      model: "test-model",
+      stage: "extract",
+      reasonClass: "parse_error",
+    });
+  });
+
+  it("fires neither event on an aborted call — cancellation is not a failure", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const engine = makeMockEngine(["[]"]);
+    await expect(
+      extractRequirements("jd", engine, controller.signal, "test-model"),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(trackExtractCompletedMock).not.toHaveBeenCalled();
+    expect(trackFailedMock).not.toHaveBeenCalled();
   });
 });
