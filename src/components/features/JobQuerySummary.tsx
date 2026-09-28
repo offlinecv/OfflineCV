@@ -16,7 +16,9 @@
  * an empty exclude list is the neutral default, and printing it would imply a
  * filter is doing work when it isn't. Location is the one exception: it always
  * shows ("anywhere" when unset), because a location-blind search is a result the
- * user will otherwise read as a bug.
+ * user will otherwise read as a bug. `locationOnly` (#809) is the inverse case —
+ * a HARD filter that removes postings — so it gets its own "local only" segment
+ * whenever it is armed and a location is set (it is inert without one); #950.
  *
  * `summarizeQuery` is exported separately from the component so the segment logic
  * is testable without a DOM.
@@ -28,6 +30,7 @@
  */
 
 import type { JobQuery } from "../../lib/job-search/query-builder.ts";
+import { LOCAL_ONLY, isLocalOnlyArmed } from "../../lib/job-search/query-steps.ts";
 
 /**
  * Human-readable segments describing `query`, in the order the fields appear in
@@ -43,6 +46,7 @@ export function summarizeQuery(
   if (query.titles.length > 0) parts.push(query.titles.join(" / "));
   const location = query.location?.trim();
   parts.push(location ? location : "anywhere");
+  if (isLocalOnlyArmed(location, query.locationOnly)) parts.push(LOCAL_ONLY);
   if (query.seniority) parts.push(query.seniority);
   if (query.skills.length > 0) {
     parts.push(`${query.skills.length} skill${query.skills.length === 1 ? "" : "s"}`);

@@ -81,6 +81,21 @@ describe("describeQuerySteps", () => {
     );
   });
 
+  it("names the hard location filter when it is armed", () => {
+    expect(
+      summaryOf(
+        { titles: [], skills: [], location: "Austin, TX", locationOnly: true },
+        "filters",
+      ),
+    ).toBe("Austin, TX · local only");
+
+    // Inert without a location — `refineSearchResult` ignores the flag then, so
+    // the summary must not claim a filter that cannot do anything.
+    expect(
+      summaryOf({ titles: [], skills: [], locationOnly: true }, "filters"),
+    ).toBe("Anywhere, nothing ruled out");
+  });
+
   it("quotes the review step from the egress helper itself, not a copy", () => {
     const query: JobQuery = {
       titles: ["Founder & CEO", "Engineering Lead"],
