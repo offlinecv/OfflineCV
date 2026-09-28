@@ -18,12 +18,11 @@
  *      — and carries none of the render model's layout hints.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
 import { describe, it, expect } from "vitest";
 import { toJsonResume, JSON_RESUME_SCHEMA } from "./to-json-resume.ts";
+import { FIXTURE_ROOT, walkPdfs } from "../heuristics/corpus-gate.test-utils.ts";
 import {
   projectAtsExport,
   type AtsExportProjection,
@@ -262,19 +261,6 @@ describe("projectAtsExport — faithful, layout-free extraction (#442)", () => {
 // did — so `toJsonResume` output cannot change. Run it over the WHOLE fixture
 // corpus (synthetic personas only — see tests/fixtures/pdfs/README.md), not one
 // fixture, so any layout-shape that projects wrong is caught.
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
-
-function walkPdfs(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkPdfs(p));
-    else if (e.isFile() && e.name.toLowerCase().endsWith(".pdf")) out.push(p);
-  }
-  return out.sort();
-}
 
 describe("projectAtsExport — corpus parity (synthetic personas)", { timeout: 20000 }, () => {
   const fixtures = walkPdfs(FIXTURE_ROOT);

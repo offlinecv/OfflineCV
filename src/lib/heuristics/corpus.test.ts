@@ -31,7 +31,7 @@
  * the bottom of this file for exactly what is enforced versus only reported.
  */
 
-import { promises as fsp, readdirSync } from "node:fs";
+import { promises as fsp } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -61,10 +61,10 @@ import {
   unfiledFields,
   type TruthTotals,
 } from "./__test-utils__/ground-truth.ts";
+import { FIXTURE_ROOT, walkPdfs } from "./corpus-gate.test-utils.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "../../..");
-const FIXTURE_ROOT = join(REPO_ROOT, "tests/fixtures/pdfs");
 const UPDATE = process.env.UPDATE_FIXTURES === "1";
 
 /** Bump when the snapshot shape below changes so existing .expected.json
@@ -112,22 +112,6 @@ const SNAPSHOT_SCHEMA_VERSION = CORPUS_SNAPSHOT_SCHEMA_VERSION;
  */
 async function bakeDerived(cascade: CascadeResult): Promise<DerivedSignals> {
   return sweepParse(cascade, await runRoundtripHop(cascade)).derived;
-}
-
-function walkPdfs(dir: string): string[] {
-  const out: string[] = [];
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkPdfs(p));
-    else if (e.isFile() && e.name.toLowerCase().endsWith(".pdf")) out.push(p);
-  }
-  return out.sort();
 }
 
 function fieldsPopulated(parsed: HeuristicParsedResume): string[] {

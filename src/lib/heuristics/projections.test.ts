@@ -26,9 +26,7 @@
  * Fixtures are synthetic personas only — see tests/fixtures/pdfs/README.md.
  */
 
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
 import { describe, it, expect } from "vitest";
 import { toCanonicalResume, type CanonicalResume } from "./canonical.ts";
@@ -42,6 +40,7 @@ import { runCascade } from "./cascade.ts";
 import { computeAnonymousAtsScore } from "../score/score.ts";
 import type { SectionedResume } from "./sections.ts";
 import type { HeuristicParsedResume } from "./types.ts";
+import { FIXTURE_ROOT, walkPdfs } from "./corpus-gate.test-utils.ts";
 
 describe("canonical projections — identity-holder semantics (#443, Stage B)", () => {
   const fields = {
@@ -113,19 +112,6 @@ describe("canonical projections — identity-holder semantics (#443, Stage B)", 
 });
 
 // ── Corpus proof: projections are content-faithful across every fixture ───────
-
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_ROOT = join(HERE, "../../..", "tests/fixtures/pdfs");
-
-function walkPdfs(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkPdfs(p));
-    else if (e.isFile() && e.name.toLowerCase().endsWith(".pdf")) out.push(p);
-  }
-  return out.sort();
-}
 
 describe("canonical projections — corpus parity (synthetic personas)", { timeout: 20000 }, () => {
   const fixtures = walkPdfs(FIXTURE_ROOT);
