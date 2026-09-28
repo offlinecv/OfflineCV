@@ -176,6 +176,75 @@ describe("sectionizeMarkdown — inline link flattening (#610)", () => {
 
 });
 
+describe("sectionizeMarkdown — setext headings (#961)", () => {
+  // The exact repro string from the issue: two `=`-underlined (h1) headings,
+  // two `-`-underlined (h2) headings, a bullet, and blank-line separators.
+  const SETEXT = [
+    "Jane Doe",
+    "========",
+    "",
+    "Summary",
+    "=======",
+    "",
+    "Seasoned engineer.",
+    "",
+    "Experience",
+    "----------",
+    "",
+    "Staff Engineer, Acme",
+    "--------------------",
+    "",
+    "- Shipped things.",
+  ].join("\n");
+
+  it("collapses the 10 non-blank source lines to 6 — every underline is gone", () => {
+    const { lines } = sectionizeMarkdown(SETEXT);
+    expect(lines).toHaveLength(6);
+    expect(lines.some((l) => /^=+$/.test(l.text) || /^-{2,}$/.test(l.text))).toBe(
+      false,
+    );
+  });
+
+  it("promotes `====`-underlined text to H1 font size", () => {
+    const { lines } = sectionizeMarkdown(SETEXT);
+    expect(lines.find((l) => l.text === "Jane Doe")?.maxFontSize).toBe(16);
+    expect(lines.find((l) => l.text === "Summary")?.maxFontSize).toBe(16);
+  });
+
+  it("promotes `----`-underlined text to H2 font size", () => {
+    const { lines } = sectionizeMarkdown(SETEXT);
+    expect(lines.find((l) => l.text === "Experience")?.maxFontSize).toBe(14);
+    expect(lines.find((l) => l.text === "Staff Engineer, Acme")?.maxFontSize).toBe(
+      14,
+    );
+  });
+
+  it("does not treat a GFM table separator row as a setext underline", () => {
+    // The one real collision: `|---|---|` is pure `-` once the pipes are
+    // stripped by eye, but the regex requires NO pipes, so `TABLE_SEPARATOR_RE`
+    // still owns this shape.
+    const { lines } = sectionizeMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
+    expect(lines.map((l) => l.text)).toEqual(["A | B", "1 | 2"]);
+  });
+
+  it("drops a `---` thematic break (blank line before it) rather than promoting or keeping it as prose", () => {
+    const { lines } = sectionizeMarkdown("Some paragraph.\n\n---\n\nMore text.");
+    expect(lines.map((l) => l.text)).toEqual(["Some paragraph.", "More text."]);
+  });
+
+  it("does not promote a bullet line into a heading when a dash run follows it", () => {
+    const { lines } = sectionizeMarkdown(
+      "- Shipped things.\n----------------\n\nNext paragraph.",
+    );
+    const texts = lines.map((l) => l.text);
+    // The bullet line survives as a bullet, not as promoted heading text.
+    expect(texts).toContain("- Shipped things.");
+    expect(lines.find((l) => l.text === "- Shipped things.")?.maxFontSize).toBe(
+      10,
+    );
+  });
+});
+
 describe("sectionizeMarkdown — reference-link flattening (#611)", () => {
   /** Convenience: the text of the single NON-blank line produced by `md`. */
   const lineText = (md: string): string => {
