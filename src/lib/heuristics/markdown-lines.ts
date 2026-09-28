@@ -13,6 +13,14 @@
  * while keeping the adapter small enough to audit.
  *
  * Pre-cleaning pass (real-world DOCX artifacts):
+ *   - Resolve setext headings (`Text\n====` / `Text\n----`) to their ATX
+ *     equivalent before anything else runs (#961). Turndown's default
+ *     `headingStyle` is `"setext"`, so a DOCX built with Word's `Heading1`/
+ *     `Heading2` styles round-trips through mammoth+turndown as this shape;
+ *     without this, the underline survives as a junk prose line and the
+ *     heading text loses its level (`ATX_HEADING_RE` below never matches it).
+ *     Shared with `mdToPlainText` via `resolveSetextHeadings` in
+ *     `../markdown-link-refs.ts` so the two readings agree.
  *   - Strip inline images `![alt](url)`, including the base64 data URIs
  *     mammoth+turndown emits for embedded images — they can bloat markdown 3×
  *     with zero signal for parsing. Shared with `mdToPlainText` since #613.
@@ -52,6 +60,7 @@ import {
   extractLinkDefinitions,
   flattenAutolinks,
   resolveReferenceLinks,
+  resolveSetextHeadings,
   stripInlineImages,
   stripReferenceImages,
 } from "../markdown-link-refs.ts";
@@ -232,6 +241,11 @@ function normalizeSplitLetterHeaders(markdown: string): string {
  */
 function preprocessMarkdown(markdown: string): string {
   let out = markdown;
+  // Runs first (#961): promotes a setext heading (`Text\n====`) to its ATX
+  // equivalent (`# Text`) so `ATX_HEADING_RE` below can see the level, and so
+  // `normalizeSplitLetterHeaders` — which only looks at ATX/bold/all-caps
+  // lines — gets a shot at a split-letter setext heading too.
+  out = resolveSetextHeadings(out);
   out = stripInlineImages(out);
   out = flattenLinks(out);
   out = unescapeBackslashes(out);
