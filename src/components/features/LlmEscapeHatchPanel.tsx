@@ -10,7 +10,7 @@
  * whose label carried the offer; #823 took that tab rail away, so it rendered
  * as its own card below the score card and above the résumé, "not behind
  * anything — a collapsed section would hide the one affordance that repairs a
- * degenerate parse from exactly the parses that need it."
+ * degenerate parse from the very parses that need it."
  *
  * #955 REVERSED that last clause, deliberately. The offer is now a row of the
  * score card's details region (`ScoreDetails`), which docks with the
@@ -45,7 +45,7 @@
  * read as two equally urgent next steps. The offer is an optional repair, so it sits
  * below targeting and one rung down. It is NOT inside the targeting
  * disclosure: that disclosure is collapsed by default, which would hide the
- * one affordance that repairs a degenerate parse from exactly the parses that
+ * one affordance that repairs a degenerate parse from the very parses that
  * need it — the rule #955 relaxed only as far as the dock.
  *
  * When the LLM pass completes, calls `onRecovered(llmParsed)` so the owner
@@ -118,88 +118,96 @@ export function LlmEscapeHatchPanel({
     }
   }, [status, onRecovered]);
 
-  // Post-recovery this collapses to one quiet row: the offer has been taken,
-  // the quality panel renders directly below it, and re-running is a rare
-  // repair action — a `link` Button, not a second CTA competing with the one
-  // in that panel.
-  if (status.kind === "done") {
-    return (
-      <div
-        role="status"
-        className="flex flex-wrap items-center justify-between gap-2"
-      >
-        <p className="text-sm text-feedback-success-text">
-          Recovered with on-device AI — your score and fields are updated.
-        </p>
-        <Button
-          variant="link"
-          size="sm"
-          onClick={() => void controller.run()}
-          disabled={controller.isBusy}
-          aria-label="Run the on-device AI recovery pass again"
-        >
-          {ctaLabel(status)}
-        </Button>
-      </div>
-    );
-  }
-
+  // A `contents`-display wrapper, unconditionally the same element across
+  // every branch below: `display: contents` makes it invisible to layout (its
+  // child participates in the parent's flow as if this div weren't there), so
+  // it costs nothing visually. It exists so the mount-across-`done` invariant
+  // above is falsifiable in `LlmEscapeHatchPanel.test.tsx` — the two branches
+  // return different root element types (`section` vs `div[role=status]`), so
+  // without a shared outer node there is no DOM reference a test could capture
+  // before the transition and compare after it.
   return (
-    <section aria-label="AI recovery suggestion" className="flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          {/*
-            Headline copy must stay honest across every firing path in
-            `chooseEscalation` (confidence.ts): hard failures (missing email,
-            low extraction ratio, etc.) AND soft confidence dips below the
-            canonical threshold. An earlier "We couldn't read much of this
-            resume" wording overstated the failure on the soft path — resumes
-            where the parser recovered most fields but confidence sat just
-            below 0.85 (e.g. missing dates on some roles) got a headline that
-            claimed the parser had failed. Speak to the parse quality
-            neutrally: "not everything parsed cleanly" is true across all
-            paths without misattributing content-quality issues to a parser
-            failure.
-
-            Heading level and treatment match `ResumeQualityPanel`'s, since
-            the two alternate in the same tab body.
-          */}
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
-            Not everything parsed cleanly
-          </h2>
-          <p className="max-w-prose text-sm text-content-tertiary">
-            A small model running in this tab can re-read your file and rebuild
-            the fields the parser got wrong. Runs entirely in your browser —
-            nothing leaves this tab. One-time {downloadSizeLabel(SHIPPED_MODEL)}{" "}
-            download, cached for next time.
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => void controller.run()}
-          disabled={controller.isBusy}
-          aria-label="Run an on-device AI pass to recover the resume parse"
+    <div className="contents">
+      {status.kind === "done" ? (
+        // Post-recovery this collapses to one quiet row: the offer has been
+        // taken, the quality panel renders directly below it, and re-running
+        // is a rare repair action — a `link` Button, not a second CTA
+        // competing with the one in that panel.
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2"
         >
-          {ctaLabel(status)}
-        </Button>
-      </div>
+          <p className="text-sm text-feedback-success-text">
+            Recovered with on-device AI — your score and fields are updated.
+          </p>
+          <Button
+            variant="link"
+            size="sm"
+            onClick={() => void controller.run()}
+            disabled={controller.isBusy}
+            aria-label="Run the on-device AI recovery pass again"
+          >
+            {ctaLabel(status)}
+          </Button>
+        </div>
+      ) : (
+        <section aria-label="AI recovery suggestion" className="flex flex-col gap-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              {/*
+                Headline copy must stay honest across every firing path in
+                `chooseEscalation` (confidence.ts): hard failures (missing email,
+                low extraction ratio, etc.) AND soft confidence dips below the
+                canonical threshold. An earlier "We couldn't read much of this
+                resume" wording overstated the failure on the soft path — resumes
+                where the parser recovered most fields but confidence sat just
+                below 0.85 (e.g. missing dates on some roles) got a headline that
+                claimed the parser had failed. Speak to the parse quality
+                neutrally: "not everything parsed cleanly" is true across all
+                paths without misattributing content-quality issues to a parser
+                failure.
 
-      {status.kind === "loading" && (
-        <ShippedModelLoadProgress progress={status.progress} showExplainer />
-      )}
+                Heading level and treatment match `ResumeQualityPanel`'s, since
+                the two alternate in the same tab body.
+              */}
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-content-muted">
+                Not everything parsed cleanly
+              </h2>
+              <p className="max-w-prose text-sm text-content-tertiary">
+                A small model running in this tab can re-read your file and rebuild
+                the fields the parser got wrong. Runs entirely in your browser —
+                nothing leaves this tab. One-time {downloadSizeLabel(SHIPPED_MODEL)}{" "}
+                download, cached for next time.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void controller.run()}
+              disabled={controller.isBusy}
+              aria-label="Run an on-device AI pass to recover the resume parse"
+            >
+              {ctaLabel(status)}
+            </Button>
+          </div>
 
-      {status.kind === "running" && (
-        <p className="text-sm text-content-secondary" role="status">
-          Parsing with on-device AI…
-        </p>
-      )}
+          {status.kind === "loading" && (
+            <ShippedModelLoadProgress progress={status.progress} showExplainer />
+          )}
 
-      {status.kind === "error" && (
-        <p role="alert" className="text-sm text-feedback-error-text">
-          {status.message}
-        </p>
+          {status.kind === "running" && (
+            <p className="text-sm text-content-secondary" role="status">
+              Parsing with on-device AI…
+            </p>
+          )}
+
+          {status.kind === "error" && (
+            <p role="alert" className="text-sm text-feedback-error-text">
+              {status.message}
+            </p>
+          )}
+        </section>
       )}
-    </section>
+    </div>
   );
 }

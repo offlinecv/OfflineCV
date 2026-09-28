@@ -8,6 +8,23 @@
  * CTA. Drives a fake controller through each status so every render branch plus
  * the `ctaLabel` lookup executes, and asserts the done state fires `onRecovered`.
  * Raw createRoot, matching the other feature render tests.
+ *
+ * #687: "fires onRecovered when the pass completes" below mounts a component
+ * already `kind: "done"` — no `running → done` TRANSITION ever happens, so it
+ * cannot tell a panel that stays mounted through `done` (the invariant three
+ * docblocks assert) from one unmounted and remounted at `done` (a fresh
+ * instance whose mount-time effect fires the callback just the same, so a
+ * plain "onRecovered was called" assertion cannot tell them apart either —
+ * verified by hand: a `React.Profiler` around the panel reports the same
+ * `"update"` phase whichever happens, since the phase tracks the PROFILER's
+ * own boundary, not a remounted descendant). The "without remounting" test
+ * below instead drives a real transition on one root and compares the DOM
+ * identity of the panel's own `contents`-display wrapper (see
+ * `LlmEscapeHatchPanel.tsx`) before and after — the one node whose element
+ * type never changes across `status.kind`, so a genuine update reuses it and
+ * a remount (verified by temporarily adding `key={status.kind}` to the
+ * `LlmEscapeHatchPanel` element below, which must turn this test red) creates
+ * a fresh one.
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest";
@@ -94,7 +111,15 @@ describe("LlmEscapeHatchPanel", () => {
   });
 
   it("renders loading, running, and error states", () => {
-    expect(render({ kind: "loading", progress: { progress: 0.4, text: "…" } }).textContent).toBeTruthy();
+    // `source` is absent on this ProgressUpdate — the shipped-model label falls
+    // back to "Loading {name}" (no download-size / device-cache framing) — and
+    // the 40% must come from the 0.4 fraction, not merely "some text present".
+    const loading = render({
+      kind: "loading",
+      progress: { progress: 0.4, text: "…" },
+    }).textContent;
+    expect(loading).toContain("Loading Gemma 2 (2B)");
+    expect(loading).toContain("40%");
     act(() => root.unmount());
     container.remove();
     expect(render({ kind: "running" }).textContent).toContain("Parsing");
@@ -106,6 +131,36 @@ describe("LlmEscapeHatchPanel", () => {
   it("fires onRecovered when the pass completes", () => {
     const onRecovered = vi.fn();
     render({ kind: "done", llmParsed }, onRecovered);
+    expect(onRecovered).toHaveBeenCalledWith(llmParsed);
+  });
+
+  it("fires onRecovered on a running→done transition without remounting (#687)", () => {
+    // Falsifiability check performed by hand while writing this test: adding
+    // `key={status.kind}` to the `createElement(LlmEscapeHatchPanel, …)` call
+    // below forces React to tear down the panel and mount a fresh instance at
+    // the transition — `wrapperAfter` then fails the `toBe` below even though
+    // `onRecovered` still fires from the fresh instance's mount-time effect.
+    // That key is deliberately NOT part of the committed test.
+    const onRecovered = vi.fn();
+    const el = render({ kind: "running" }, onRecovered);
+    const wrapperBefore = el.firstElementChild;
+    expect(wrapperBefore?.className).toBe("contents");
+    expect(onRecovered).not.toHaveBeenCalled();
+
+    act(() => {
+      root.render(
+        createElement(LlmEscapeHatchPanel, {
+          controller: controller({ kind: "done", llmParsed }),
+          onRecovered,
+        }),
+      );
+    });
+
+    const wrapperAfter = el.firstElementChild;
+    // The SAME `contents` wrapper node survives the transition — a remount
+    // would replace it with a new (equal-looking, but distinct) element.
+    expect(wrapperAfter).toBe(wrapperBefore);
+    expect(onRecovered).toHaveBeenCalledTimes(1);
     expect(onRecovered).toHaveBeenCalledWith(llmParsed);
   });
 
