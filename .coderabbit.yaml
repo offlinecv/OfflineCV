@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 The offlinecv Authors
+#
+# CodeRabbit runs beside the repo's own review bot (pr-review.yml), whose
+# revise round (pr-revise.yml) works every open thread. CodeRabbit is kept for
+# its security findings; the two settings below stop it from feeding that loop
+# on every push.
+#
+# - One review per PR. Re-reviewing each push, it found fresh edge cases in
+#   the code the last revise round wrote, so the loop ran to its round cap
+#   (#1081: 2, then 1, then 3 new findings across three pushes). Comment
+#   `@coderabbitai review` to ask for another pass.
+# - No unprompted replies. Its "thanks, confirmed" answers to thread replies
+#   each post as a bot review, and every bot review starts a revise gate that
+#   can cancel another gate still waiting out its debounce. It still answers
+#   when mentioned.
+#
+# `inheritance: true` merges this file over the settings in CodeRabbit's web UI.
+# Without it the file replaces them, and anything set only there reverts to the
+# default.
+inheritance: true
+reviews:
+  auto_review:
+    auto_incremental_review: false
+chat:
+  auto_reply: false
