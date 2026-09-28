@@ -388,8 +388,48 @@ jobs:
             echo "::warning::discarded changes to blocked paths: $dropped"
           fi
 
+          resolve_threads() {
+            local list="$RUNNER_TEMP/resolve-threads.txt"
+            [ -s "$list" ] || return 0
+            # shellcheck disable=SC2016 # $id is a GraphQL variable
+            { grep -oE '^PRRT_[A-Za-z0-9_-]+$' "$list" || true; } | sort -u | while read -r id; do
+              t=$(gh api graphql -f id="$id" -f query='
+                query($id:ID!){ node(id:$id){ ... on PullRequestReviewThread {
+                  isResolved path pullRequest { number } } } }' \
+                --jq '.data.node | "\(.pullRequest.number) \(.isResolved) \(.path)"') || t=""
+              read -r tpr tresolved tpath <<<"$t" || true
+              if [ "${tpr:-} ${tresolved:-}" != "$PR false" ]; then
+                echo "::warning::not resolving $id ($t)"; continue
+              fi
+              if [ -n "$blocked" ] && grep -qxF -- "$tpath" <<<"$blocked"; then
+                echo "::warning::not resolving $id: its fix to $tpath was discarded"; continue
+              fi
+              # shellcheck disable=SC2016 # $id is a GraphQL variable
+              gh api graphql -f id="$id" -f query='
+                mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved } } }' \
+                > /dev/null || echo "::warning::could not resolve $id"
+            done
+          }
+
           if git diff --cached --quiet "$HEAD_SHA"; then
             echo "No changes to push."
+            resolve_threads
+            owner=${REPO%/*}; name=${REPO#*/}
+            # Every page counts, and a failed query is "unknown", never "none
+            # open": only a successful count of 0 may declare the threads done.
+            # A discarded blocked-path edit still owes its handoff below, so it
+            # never takes this exit.
+            # shellcheck disable=SC2016 # GraphQL variables
+            unresolved=$(gh api graphql --paginate -F owner="$owner" -F name="$name" -F n="$PR" -f query='
+              query($owner:String!,$name:String!,$n:Int!,$endCursor:String){ repository(owner:$owner,name:$name){
+                pullRequest(number:$n){ reviewThreads(first:100,after:$endCursor){
+                  nodes{ isResolved } pageInfo{ hasNextPage endCursor } } } } }' \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length' |
+              awk '{ n += $1 } END { print n }') || unresolved=""
+            if [ "$unresolved" = 0 ] && [ -z "$dropped" ]; then
+              note "**Auto-revise resolved the open threads without code changes.**"
+              exit 0
+            fi
             # A bot round that changed nothing ends the loop; say so if threads remain.
             if [ -n "$dropped" ]; then
               handoff "**Auto-revise made no publishable changes** — its only edits were to $dropped, which need the owner's approval. Discarded; see the suggestions on the threads."
@@ -430,27 +470,5 @@ jobs:
           fi
           GH_TOKEN="$GITHUB_TOKEN_RO" gh pr comment "$PR" --repo "$REPO" --body-file "$body"
 
-          # Resolve the threads the agent says it fixed, now that the fix is on
-          # the branch. Only well-formed ids for open threads on THIS PR count,
-          # and never a thread on a path whose edit was just discarded: the
-          # agent may list one against the prompt, and its fix is not pushed.
-          list="$RUNNER_TEMP/resolve-threads.txt"
-          [ -s "$list" ] || exit 0
-          # shellcheck disable=SC2016 # $id is a GraphQL variable
-          { grep -oE '^PRRT_[A-Za-z0-9_-]+$' "$list" || true; } | sort -u | while read -r id; do
-            t=$(gh api graphql -f id="$id" -f query='
-              query($id:ID!){ node(id:$id){ ... on PullRequestReviewThread {
-                isResolved path pullRequest { number } } } }' \
-              --jq '.data.node | "\(.pullRequest.number) \(.isResolved) \(.path)"') || t=""
-            read -r tpr tresolved tpath <<<"$t" || true
-            if [ "${tpr:-} ${tresolved:-}" != "$PR false" ]; then
-              echo "::warning::not resolving $id ($t)"; continue
-            fi
-            if [ -n "$blocked" ] && grep -qxF -- "$tpath" <<<"$blocked"; then
-              echo "::warning::not resolving $id: its fix to $tpath was discarded"; continue
-            fi
-            # shellcheck disable=SC2016 # $id is a GraphQL variable
-            gh api graphql -f id="$id" -f query='
-              mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ isResolved } } }' \
-              > /dev/null || echo "::warning::could not resolve $id"
-          done
+          # Resolve the threads the agent says it fixed, now that the fix is on the branch.
+          resolve_threads
