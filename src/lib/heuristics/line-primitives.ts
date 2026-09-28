@@ -150,6 +150,18 @@ export function isProseLine(text: string): boolean {
  * second-chance {@link recoverLeadingBodyProse} in `experience.ts` catches
  * them via token coverage; if disambiguation misroutes one (a separate defect
  * class from #615), a broader predicate would need its own repro + tests.
+ *
+ * 5. {@link looksLikeUnpunctuatedRunningSentence} — a sentence carrying NONE
+ *    of the above tells at all (#1088). A Word / Google-Docs résumé role
+ *    description is routinely a single plain-paragraph sentence with no `;`,
+ *    no grade-code middot, no lexicon action-verb lead ("Worked" is
+ *    deliberately excluded from {@link ACTION_VERBS} as a weak generic verb,
+ *    same reasoning as #708's "Founding"), and — when the source simply omits
+ *    the trailing period — no `.!?` either. Every one of signals 1-4 misses
+ *    that shape, so it survived as a header candidate: entry-blocks.ts's
+ *    above-anchor and next-header-start walks (which stop on this same
+ *    predicate) had nothing to stop them from claiming it as the NEXT role's
+ *    title, dropping the role it actually described.
  */
 // `\b` at the start is load-bearing (PR #688 review B1): without it,
 // `Co\.?$` matches "co." at the end of any word — "San Francisco.", "off
@@ -179,8 +191,104 @@ export function looksLikeBelowAnchorProse(text: string): boolean {
   if (trimmed.includes(";")) return true;
   if (looksLikeMiddotMetadata(trimmed)) return true;
   if (looksLikeVerbLedScope(trimmed)) return true;
-  if (!/[.!?]$/.test(trimmed)) return false;
-  return !LEGAL_TERMINAL_SUFFIX_RE.test(trimmed);
+  if (/[.!?]$/.test(trimmed)) return !LEGAL_TERMINAL_SUFFIX_RE.test(trimmed);
+  return looksLikeUnpunctuatedRunningSentence(trimmed);
+}
+
+/**
+ * Signal 5 of {@link looksLikeBelowAnchorProse} (#1088): a running sentence
+ * with no `;`, no grade-code middot, no lexicon verb lead, and no trailing
+ * `.!?` to key on — the shape a Word/Google-Docs role description takes when
+ * it is a single plain paragraph and the source simply omits the period.
+ *
+ * Three structural signals, all required, stand in for the punctuation/grammar
+ * tells the other four signals use:
+ *   - it carries NO comma — the mark of a "Company, City, ST" header or a
+ *     comma-delimited tech-stack list, never a résumé sentence's own clause
+ *     boundary (same CSV exemption `looksLikeVerbLedScope` and
+ *     `looksLikeBodyParagraph`, entry-blocks.ts, already apply). Checked
+ *     AFTER the parenthetical strip below, so a comma living only inside a
+ *     parenthetical aside ("…billing (payments, inventory, invoicing)
+ *     systems…") does not disqualify an otherwise-clean running sentence —
+ *     the aside is not the CSV/header shape this check guards against;
+ *   - it carries NO two consecutive Title-Cased words — the tell of a job
+ *     title or org name ("Director of Business Development", "Doubleclick
+ *     Advertising Solutions", "Data Platform Engineering Team"). A genuine
+ *     sentence carries exactly one capitalized word (the sentence-initial
+ *     one); anything that stays capitalized for a second word running is a
+ *     header/title fragment wearing this signal's other two tells by
+ *     coincidence, not a résumé sentence; and
+ *   - it carries at least TWO lowercase CONTENT words
+ *     ({@link isLowercaseContentWord}) — not merely lowercase-initial, since a
+ *     Title-Cased org name routinely carries one lowercase connector
+ *     ("Planned Parenthood of Greater Ohio", #708). Two is deliberately
+ *     stricter than {@link looksLikeVerbLedScope}'s "one after the verb":
+ *     that signal has a verb lead to anchor on, this one has no grammatical
+ *     anchor at all, so it asks for more content evidence before preempting a
+ *     header candidate.
+ * All three are gated on a {@link PROSE_MIN_WORDS}-word floor — the same
+ * floor {@link isProseLine} uses — so a short label (every reject case in
+ * `line-primitives.below-anchor-prose.test.ts` is under 8 words) never
+ * qualifies regardless of its connector words.
+ *
+ * A parenthesized qualifier is stripped before any count runs. A role title
+ * routinely carries one ("Quality Assurance Intern (40 hours per week)",
+ * "Peer Tutor (15 to 20 hours per week)" — both real ground-truth titles in
+ * `google-docs-skia-proxy-role-first-experience.truth.json`): short once the
+ * parenthetical is removed, but AT the 8-word floor with 2-3 lowercase
+ * content words INSIDE it, which false-positived this signal before the strip
+ * and dropped the second role's title outright. A genuine unbroken sentence
+ * is unaffected either way — removing a parenthetical aside never turns a
+ * real 13-word description into a phrase under the floor.
+ *
+ * A single leading Title-Cased word is not itself evidence either way — a
+ * genuine sentence's own sentence-initial word looks identical — UNLESS the
+ * word immediately after it is a bare gerund/participle (PR #1089 review): "X
+ * serving enterprise clients…" / "Team supporting analytics…" is the shape a
+ * one-line company-plus-tagline header takes, never a real sentence (a real
+ * sentence needs a finite verb, not a bare "-ing" form, right after its
+ * subject). Checked BEFORE the adjacency loop below so a single-word company
+ * name glued to its tagline by {@link buildEntryBlock}'s wrap-fold doesn't
+ * survive as "exactly one capitalized word" and get read as prose, silently
+ * dropping the name.
+ */
+const NON_GERUND_ING_WORDS = new Set([
+  "during", "spring", "string", "morning", "evening",
+  "something", "anything", "everything", "nothing",
+]);
+function isBareGerund(word: string): boolean {
+  const bare = word.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+  return (
+    LOWERCASE_WORD_RE.test(bare) &&
+    bare.length > 4 &&
+    bare.endsWith("ing") &&
+    !NON_GERUND_ING_WORDS.has(bare)
+  );
+}
+function looksLikeUnpunctuatedRunningSentence(text: string): boolean {
+  const withoutParens = text.replace(/\([^)]*\)/g, " ");
+  if (withoutParens.includes(",")) return false;
+  const words = withoutParens.split(/\s+/).filter(Boolean);
+  if (words.length < PROSE_MIN_WORDS) return false;
+  let leadingCapRunEnd = 0;
+  while (leadingCapRunEnd < words.length && /^[A-Z]/.test(words[leadingCapRunEnd])) {
+    leadingCapRunEnd++;
+  }
+  if (
+    leadingCapRunEnd === 1 &&
+    leadingCapRunEnd < words.length &&
+    isBareGerund(words[leadingCapRunEnd])
+  ) {
+    return false;
+  }
+  let contentWords = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (isLowercaseContentWord(words[i])) contentWords++;
+    if (i > 0 && /^[A-Z]/.test(words[i - 1]) && /^[A-Z]/.test(words[i])) {
+      return false;
+    }
+  }
+  return contentWords >= 2;
 }
 
 /**

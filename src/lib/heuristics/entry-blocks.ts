@@ -515,6 +515,13 @@ function collectAnchors(lines: PdfLine[], anchor: EntryAnchor): number[] {
 const DANGLING_BULLET_TAIL_RE =
   /\b(and|or|with|the|to|of|for|a|an|in|on|at|by|as|&)\s*$/i;
 
+/** {@link DANGLING_BULLET_TAIL_RE}'s word list, case-SENSITIVE, for header-shaped
+ *  lines: a trailing US state code ("Indianapolis, IN", "Portland, OR") is a
+ *  complete location, not a dangling "in"/"or", so the `/i` form would misread a
+ *  company line as a wrap. */
+const DANGLING_CONNECTIVE_TAIL_RE =
+  /\b(and|or|with|the|to|of|for|a|an|in|on|at|by|as|&)\s*$/;
+
 /** Whether the (non-bullet) header run starting at `i` introduces a bullet body
  *  before the next real date anchor — a header with no body is a stray line, not
  *  a recoverable role. Walks forward over the header run; reaching a date anchor
@@ -1307,6 +1314,15 @@ function nextHeaderStart(
     if (
       isBulletLine(l) ||
       isProseLine(l.text) ||
+      // A glyph-less description sentence (#1088) that `isProseLine` misses —
+      // it needs an INTERNAL two-sentence break, which a role's own
+      // single-sentence prose line never carries. Without this, a uniformly
+      // spaced glyph-less template (no bullet marker AND no paragraph-sized
+      // gap ahead of the next role's header, so neither the marker check nor
+      // the y-gap backstop below fires) lets the walk claim the PREVIOUS
+      // role's description as the header run of THIS one — stealing its
+      // title and leaving the previous role's description empty.
+      looksLikeBelowAnchorProse(text) ||
       isWrappedContinuation(l, markerX) ||
       // Glyph-less body line (#215): an indented marker-less bullet of THIS
       // entry, sitting just above the next role's header. Stop — it belongs to
@@ -1319,7 +1335,8 @@ function nextHeaderStart(
     // between this candidate and the line just claimed below it means we've
     // stepped up out of the next entry's tight header run into the previous
     // entry's description — stop before claiming a periodless body line that
-    // `isProseLine` would not catch.
+    // neither `isProseLine` nor `looksLikeBelowAnchorProse` would catch
+    // (e.g. a short dangling fragment).
     if (claimed > 0 && baseline > 0) {
       const gapToClaimed = lines[i + 1].y - lines[i].y;
       if (gapToClaimed > BODY_GAP_FACTOR * baseline) break;
@@ -1443,6 +1460,47 @@ function foldBelowAnchorLines(
       wrapsPrev &&
       prev !== undefined &&
       /[.!?]$/.test(prev.text.trim())
+    ) {
+      wrapsPrev = false;
+    }
+    // Header-candidate guard (#1088): a below-anchor run can carry TWO
+    // distinct lines at the SAME uniform line pitch as a real wrap — a
+    // company/institution line (variant C's "Title + date on the anchor,
+    // company below it") immediately above the role's own glyph-less
+    // description. Nothing here is a sentence continuation, so the period
+    // guard above never fires (the company line has no terminal
+    // punctuation at all), and without this the two get glued into one
+    // string that then mis-classifies as pure prose — dropping the company.
+    // Gated on `prev` being BOTH header-shaped (`isEntryHeaderShape`) AND
+    // not itself already read as prose (`looksLikeBelowAnchorProse`): a
+    // genuine wrapped sentence fragment ("Designed and provisioned the
+    // entire infrastructure on AWS to meet security compliance and acquire
+    // a") also leads with a capital and carries no terminator, but signal 5
+    // of `looksLikeBelowAnchorProse` (#1088) now recognizes it as prose by
+    // its lowercase content words, so this guard leaves it alone and the
+    // fold still fires for every fixture the module docblock above names.
+    //
+    // AND on the CURRENT line also being capital-led: a lowercase-initial
+    // continuation ("Worked on the billing service and" / "helped the team
+    // with various backend tasks") is never itself header-shaped, but each
+    // half can be too short to trip `looksLikeBelowAnchorProse` on its own —
+    // so without this, `prev` reads as an (incorrectly) header-shaped,
+    // non-prose line and the guard cancels a fold that should have joined
+    // the two fragments into one description. A real company-then-description
+    // transition has the description line lead with its OWN capital (a fresh
+    // sentence), so requiring `text` to be capital-led still cancels the fold
+    // there.
+    //
+    // AND on `prev` not ending on a dangling lowercase connective ("Researcher
+    // at the" / "Robot Learning Lab"): no company or title line ends on "the"
+    // or "at", so that tail is a mid-phrase cut and the fold must still fire.
+    if (
+      wrapsPrev &&
+      prev !== undefined &&
+      isEntryHeaderShape(prev.text.trim()) &&
+      !looksLikeBelowAnchorProse(prev.text.trim()) &&
+      !DANGLING_CONNECTIVE_TAIL_RE.test(prev.text.trim()) &&
+      /^[A-Z0-9]/.test(text)
     ) {
       wrapsPrev = false;
     }
@@ -1571,9 +1629,16 @@ function buildEntryBlock(
       // row partner is what tells the two apart: a body line, even one wrapped
       // down to a bare `City, ST` tail, is alone on its row. The cell then takes
       // the ordinary location branch below, paragraph-gap rule included.
+      //
+      // #1088 — `looksLikeBelowAnchorProse` catches the glyph-less description
+      // sentence `isProseLine` misses (a single sentence, no internal break):
+      // without it, the PREVIOUS role's own description walks straight into
+      // THIS role's header run as a bogus "title" line, when the section has
+      // no bullets/indent AND no paragraph-sized gap to stop on otherwise.
       if (
         isBulletLine(l) ||
         isProseLine(l.text) ||
+        looksLikeBelowAnchorProse(l.text) ||
         (isGlyphlessBody(l, bodyMarginX) &&
           !(isLocationLine(l.text) && isRoleHeaderLocationCell(lines, i)))
       ) {
@@ -1704,10 +1769,17 @@ function buildEntryBlock(
   // #492 — the anchor line's own glued scope sentence LEADS the run: it sits on
   // the anchor line, above every below-anchor line, and `resolveDescription`
   // emits this bucket in array order.
+  // Gated to `date_range`: `belowAnchorBodyProse`'s sole reader is
+  // `experience.ts` (see the field's own docblock), so classifying a line into
+  // it under `institution` or `first_line` does not relabel the line into a
+  // description — it drops it. `first_line` in particular has no other place
+  // for a below-anchor line to land once it fails the header run (PR #1089
+  // review): leave it in `belowHeaderCandidates` instead, same as it would be
+  // wrongly filed as before `looksLikeBelowAnchorProse` gained signal 5.
   const belowAnchorBodyProse: string[] = anchorProseTail ? [anchorProseTail] : [];
   const belowHeaderCandidates: string[] = [];
   for (const text of foldedBelow) {
-    if (looksLikeBelowAnchorProse(text)) {
+    if (cfg.anchor === "date_range" && looksLikeBelowAnchorProse(text)) {
       belowAnchorBodyProse.push(text);
     } else {
       belowHeaderCandidates.push(text);

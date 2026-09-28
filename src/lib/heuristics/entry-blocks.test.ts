@@ -1193,3 +1193,210 @@ describe("parseEntryBlocks — role-first glyph-less experience (#215)", () => {
     expect(b.body).toContain("p99 latency");
   });
 });
+
+describe("parseEntryBlocks — glyph-less single-sentence role description (#1088)", () => {
+  // The shape that stole a title: a section with NO bullets AND no indent
+  // difference between header and body at all (every line at x=50, uniform
+  // 16pt line pitch — no geometry signal survives to distinguish them). A
+  // role's description is a single sentence, so `isProseLine` (which needs an
+  // INTERNAL two-sentence break) misses it, and it used to walk straight into
+  // the NEXT role's header run as a bogus title.
+  const PROSE_1 =
+    "Worked on the billing service and helped the team with various backend tasks.";
+  const PROSE_2 = "Worked on APIs and did general maintenance on the platform.";
+
+  it("keeps each role's title/company and routes its own prose line to description, not the next role's header", () => {
+    const section = xySection([
+      { text: "Senior Software Engineer", x: 50, y: 100 },
+      { text: "Acme Corp, Chicago, IL  Jan 2021 - Present", x: 50, y: 116 },
+      { text: PROSE_1, x: 50, y: 132 },
+      { text: "Software Engineer", x: 50, y: 148 },
+      { text: "Globex Inc, Chicago, IL  Jun 2018 - Dec 2020", x: 50, y: 164 },
+      { text: PROSE_2, x: 50, y: 180 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(2);
+
+    expect(blocks[0].headerLines).toContain("Senior Software Engineer");
+    expect(blocks[0].headerLines.some((h) => h.includes("Acme Corp"))).toBe(true);
+    expect(blocks[0].headerLines).not.toContain(PROSE_1);
+    expect(blocks[0].belowAnchorBodyProse).toContain(PROSE_1);
+
+    // The reported defect: role 2's real title dropped, role 1's description
+    // took its place.
+    expect(blocks[1].headerLines).toContain("Software Engineer");
+    expect(blocks[1].headerLines.some((h) => h.includes("Globex Inc"))).toBe(true);
+    expect(blocks[1].headerLines).not.toContain(PROSE_1);
+    expect(blocks[1].headerLines).not.toContain(PROSE_2);
+    expect(blocks[1].belowAnchorBodyProse).toContain(PROSE_2);
+  });
+
+  it("is punctuation-independent — no trailing period on either prose line", () => {
+    const withoutPeriods = xySection([
+      { text: "Senior Software Engineer", x: 50, y: 100 },
+      { text: "Acme Corp, Chicago, IL  Jan 2021 - Present", x: 50, y: 116 },
+      { text: PROSE_1.replace(/\.$/, ""), x: 50, y: 132 },
+      { text: "Software Engineer", x: 50, y: 148 },
+      { text: "Globex Inc, Chicago, IL  Jun 2018 - Dec 2020", x: 50, y: 164 },
+      { text: PROSE_2.replace(/\.$/, ""), x: 50, y: 180 },
+    ]);
+    const blocks = parseEntryBlocks(withoutPeriods, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].headerLines).toContain("Senior Software Engineer");
+    expect(blocks[0].belowAnchorBodyProse?.[0]).toContain("billing service");
+    expect(blocks[1].headerLines).toContain("Software Engineer");
+    expect(blocks[1].headerLines.some((h) => h.startsWith("Worked on"))).toBe(false);
+    expect(blocks[1].belowAnchorBodyProse?.[0]).toContain("general maintenance");
+  });
+
+  it("also holds when the title+date share a line and the company sits below it (variant C)", () => {
+    const section = xySection([
+      { text: "Senior Software Engineer  Jan 2021 - Present", x: 50, y: 100 },
+      { text: "Acme Corp, Chicago, IL", x: 50, y: 116 },
+      { text: PROSE_1, x: 50, y: 132 },
+      { text: "Software Engineer  Jun 2018 - Dec 2020", x: 50, y: 148 },
+      { text: "Globex Inc, Chicago, IL", x: 50, y: 164 },
+      { text: PROSE_2, x: 50, y: 180 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(2);
+
+    expect(blocks[0].headerLines.some((h) => h.includes("Senior Software Engineer"))).toBe(
+      true,
+    );
+    expect(blocks[0].headerLines.some((h) => h.includes("Acme Corp"))).toBe(true);
+    expect(blocks[0].belowAnchorBodyProse).toContain(PROSE_1);
+
+    expect(blocks[1].headerLines.some((h) => h.includes("Software Engineer"))).toBe(true);
+    expect(blocks[1].headerLines.some((h) => h.includes("Globex Inc"))).toBe(true);
+    expect(blocks[1].headerLines).not.toContain(PROSE_1);
+    expect(blocks[1].belowAnchorBodyProse).toContain(PROSE_2);
+  });
+
+  it("does not disturb the bulleted control shape (variant D)", () => {
+    const bulleted = xySection([
+      { text: "Senior Software Engineer", x: 50, y: 100 },
+      { text: "Acme Corp, Chicago, IL  Jan 2021 - Present", x: 50, y: 116 },
+      { text: `• ${PROSE_1}`, x: 50, y: 132 },
+      { text: "Software Engineer", x: 50, y: 148 },
+      { text: "Globex Inc, Chicago, IL  Jun 2018 - Dec 2020", x: 50, y: 164 },
+      { text: `• ${PROSE_2}`, x: 50, y: 180 },
+    ]);
+    const blocks = parseEntryBlocks(bulleted, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0].headerLines).toContain("Senior Software Engineer");
+    expect(blocks[0].bulletCount).toBe(1);
+    expect(blocks[0].body).toContain("billing service");
+    expect(blocks[1].headerLines).toContain("Software Engineer");
+    expect(blocks[1].bulletCount).toBe(1);
+    expect(blocks[1].body).toContain("general maintenance");
+  });
+
+  it("still folds a wrapped description whose lead fragment reads header-shaped on its own (PR #1089 review)", () => {
+    // Each fragment alone is under the 8-word floor, so neither trips
+    // `looksLikeBelowAnchorProse` by itself — and the first, capital-led,
+    // unterminated fragment ("Worked on the billing service and") passes
+    // `isEntryHeaderShape`. Without also requiring the SECOND fragment to be
+    // capital-led, the fold guard added for #1088 cancelled the fold here too,
+    // leaving both fragments as bogus header candidates instead of one
+    // description line. The last (and only) entry, so `nextHeaderStart`'s
+    // lookback has no next role to compete with — isolates the fold guard
+    // from that unrelated windowing boundary.
+    const section = xySection([
+      { text: "Senior Software Engineer", x: 50, y: 100 },
+      { text: "Acme Corp, Chicago, IL  Jan 2021 - Present", x: 50, y: 116 },
+      { text: "Worked on the billing service and", x: 50, y: 132 },
+      { text: "helped the team with various backend tasks", x: 50, y: 140 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].belowAnchorBodyProse).toEqual([
+      "Worked on the billing service and helped the team with various backend tasks",
+    ]);
+    expect(blocks[0].headerLines).not.toContain("Worked on the billing service and");
+    expect(blocks[0].headerLines).not.toContain(
+      "helped the team with various backend tasks",
+    );
+  });
+});
+
+describe("parseEntryBlocks — company descriptor above the anchor is not mistaken for below-anchor prose (PR #1089 review)", () => {
+  it("keeps an above-anchor company line whose trailing phrase reads like signal 5's shape", () => {
+    // "Doubleclick Advertising Solutions serving Fortune 500 clients worldwide"
+    // is comma-less, ≥8 words, and carries 2+ lowercase content words — signal
+    // 5's shape — but it is a genuine company header line, not a role
+    // description. Before the two-consecutive-Title-Case-words guard, this
+    // false-positived `looksLikeBelowAnchorProse`, and the above-anchor walk's
+    // #1088 guard then discarded the line entirely: not claimed as this
+    // entry's header, and not salvaged anywhere else either.
+    const section = xySection([
+      { text: "Doubleclick Advertising Solutions serving Fortune 500 clients worldwide", x: 50, y: 100 },
+      { text: "Senior Software Engineer   Jan 2021 - Present", x: 50, y: 116 },
+    ]);
+    const blocks = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(blocks).toHaveLength(1);
+    expect(
+      blocks[0].headerLines.some((h) => h.includes("Doubleclick Advertising Solutions")),
+    ).toBe(true);
+  });
+});
+
+describe("parseEntryBlocks — header-candidate fold guard vs a dangling-connective wrap (PR #1089 review)", () => {
+  it("still folds a short wrap cut after a lowercase connective", () => {
+    // "Researcher at the" is header-shaped and too short to read as prose, and
+    // its tail is capital-led — every other condition of the #1088 guard holds.
+    // The dangling "the" is what marks it a mid-phrase cut.
+    const section = xySection([
+      { text: "Senior Software Engineer", x: 50, y: 100 },
+      { text: "Acme Corp, Chicago, IL  Jan 2021 - Present", x: 50, y: 116 },
+      { text: "Researcher at the", x: 50, y: 132 },
+      { text: "Robot Learning Lab", x: 50, y: 148 },
+    ]);
+    const [block] = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(block.headerLines).toContain("Researcher at the Robot Learning Lab");
+    expect(block.headerLines).not.toContain("Researcher at the");
+  });
+
+  it("does not read a trailing state code as a dangling connective (variant C, Indiana)", () => {
+    const section = xySection([
+      { text: "Senior Software Engineer  Jan 2021 - Present", x: 50, y: 100 },
+      { text: "Acme Corp, Indianapolis, IN", x: 50, y: 116 },
+      { text: "Worked on the billing service and helped the team with various backend tasks.", x: 50, y: 132 },
+    ]);
+    const [block] = parseEntryBlocks(section, {
+      anchor: "date_range",
+      collectBody: true,
+      headerLookback: 2,
+    });
+    expect(block.headerLines.some((h) => h.includes("Acme Corp"))).toBe(true);
+    expect(block.belowAnchorBodyProse?.[0]).toMatch(/^Worked on the billing/);
+  });
+});

@@ -47,6 +47,22 @@ describe("looksLikeBelowAnchorProse — accepts body prose", () => {
     // gerund and deliberately not in the lexicon), so this still exercises
     // the terminator branch that signal 3 would otherwise short-circuit.
     ["Founding site leader for the new office in San Francisco."],
+    // Signal 5 — an unpunctuated running sentence (#1088): no `;`, no grade
+    // code, no lexicon verb lead ("Worked" is deliberately excluded, same as
+    // "Founding" above), AND no trailing terminator at all — the shape a
+    // Word/Google-Docs role description takes when the source omits the
+    // period. Invisible to every other signal.
+    [
+      "Worked on the billing service and helped the team with various backend tasks",
+    ],
+    // Signal 5, comma-in-parens fix (PR #1089 review): the comma check runs on
+    // the text AFTER the parenthetical strip, so a comma living only inside a
+    // parenthetical aside — not the "Company, City, ST" / CSV shape the check
+    // guards against — no longer disqualifies an otherwise-clean running
+    // sentence.
+    [
+      "Worked on the migration of billing (payments, inventory, invoicing) systems for enterprise clients",
+    ],
   ])("%s", (line) => {
     expect(looksLikeBelowAnchorProse(line)).toBe(true);
   });
@@ -89,6 +105,39 @@ describe("looksLikeBelowAnchorProse — rejects real header lines", () => {
     ["Software Engineer · Google"],
     [""],
     ["   "],
+    // Signal 5 negatives (#1088). A real ground-truth role title carrying a
+    // parenthesized qualifier — "Quality Assurance Intern (40 hours per
+    // week)" is 8 words with 2 lowercase content words INSIDE the
+    // parenthetical (`hours`, `per`, `week`), which false-positived signal 5
+    // before it learned to strip parens first
+    // (google-docs-skia-proxy-role-first-experience.truth.json).
+    ["Quality Assurance Intern (40 hours per week)"],
+    ["Peer Tutor (15 to 20 hours per week)"],
+    // A comma anywhere disqualifies signal 5 outright, even with plenty of
+    // words and lowercase content — the "Company, City, ST" / CSV shape.
+    [
+      "Northwind Robotics, Springfield, IL, a leading robotics manufacturer",
+    ],
+    // Signal 5, no-grammatical-anchor false positives (PR #1089 review): a
+    // comma-less, ≥8-word, sentence-cased line with 2+ lowercase connector
+    // words is exactly a real title/subtitle line's shape whenever it carries
+    // a trailing prepositional phrase. Two consecutive Title-Cased words is
+    // the tell those genuine header lines share and a real running sentence
+    // never does (it carries exactly one capitalized word — its own
+    // sentence-initial lead).
+    ["Director of Business Development for strategic partnerships and alliances"],
+    ["Doubleclick Advertising Solutions serving Fortune 500 clients worldwide"],
+    [
+      "Data Platform Engineering Team supporting analytics across every business unit",
+    ],
+    ["Backend Engineer supporting distributed systems for fintech clients daily"],
+    // Signal 5, single-word-company-plus-tagline false positive (PR #1089
+    // review, round 2): a single leading Title-Cased word followed
+    // immediately by a bare gerund ("serving") never has an adjacent cap
+    // pair to catch it, so without the leading-gerund check this whole line
+    // — company name included — false-positived as prose and was silently
+    // dropped rather than kept as a header candidate.
+    ["Doubleclick serving enterprise clients across the finance sector worldwide"],
   ])("%s", (line) => {
     expect(looksLikeBelowAnchorProse(line)).toBe(false);
   });
