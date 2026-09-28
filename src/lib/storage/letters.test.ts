@@ -29,6 +29,7 @@ import {
   deleteLetter,
   deleteLettersForJob,
   clearLetterResumeLink,
+  updateLetter,
 } from "./letters.ts";
 import { saveJob, getAllJobs, deleteJob } from "./jobs.ts";
 import { deriveCompanyKey } from "./company-key.ts";
@@ -91,6 +92,77 @@ describe("storage: letters CRUD (#711)", () => {
     await deleteLetter(b.id);
     expect(await getLetter(b.id)).toBeUndefined();
     expect((await lettersForJob("job-1")).map((l) => l.id)).toEqual([a.id]);
+  });
+});
+
+describe("storage: updateLetter merges rather than replaces (#929)", () => {
+  it("preserves producer, resumeId, and unknown extra keys the patch doesn't mention", async () => {
+    // Reproduces #929's mechanism directly: `LetterEditorDialog` sends a
+    // partial record, and a caller that used `saveLetter` for that (a full
+    // REPLACE) silently destroyed exactly these fields.
+    await importAll(
+      backupWith([
+        {
+          id: "letter-1",
+          jobId: "job-1",
+          body: "Outside-drafted text.",
+          resumeId: "resume-1",
+          label: "First draft",
+          producer: { contract: 1, producer: "some-outside-producer" },
+          tone: "warm",
+        },
+      ]),
+    );
+
+    const updated = await updateLetter("letter-1", { body: "Edited text." });
+
+    expect(updated.body).toBe("Edited text.");
+    expect(updated.resumeId).toBe("resume-1");
+    expect(updated.producer).toEqual({ contract: 1, producer: "some-outside-producer" });
+    expect((updated as unknown as Record<string, unknown>).tone).toBe("warm");
+
+    const reloaded = await getLetter("letter-1");
+    expect(reloaded).toEqual(updated);
+  });
+
+  it("preserves createdAt and advances updatedAt, the same as a direct saveLetter edit", async () => {
+    const original = await saveLetter({ jobId: "job-1", body: "v1" });
+    await tick();
+    const updated = await updateLetter(original.id, { body: "v2" });
+    expect(updated.createdAt).toBe(original.createdAt);
+    expect(updated.updatedAt).toBeGreaterThan(original.updatedAt);
+    expect(await getAllLetters()).toHaveLength(1);
+  });
+
+  it("an explicit undefined in the patch CLEARS a field, an omitted key leaves it alone", async () => {
+    const original = await saveLetter({
+      jobId: "job-1",
+      body: "v1",
+      label: "First draft",
+      resumeId: "resume-1",
+    });
+    const updated = await updateLetter(original.id, { label: undefined });
+    expect(updated.label).toBeUndefined();
+    // `resumeId` was never mentioned, so it survives — the property the whole
+    // fix rests on.
+    expect(updated.resumeId).toBe("resume-1");
+  });
+
+  it("throws when the letter is missing, rather than inserting one", async () => {
+    await expect(updateLetter("nope", { body: "x" })).rejects.toThrow(
+      /no letter with id/,
+    );
+    expect(await getAllLetters()).toEqual([]);
+  });
+
+  it("refuses a write against a tombstoned letter rather than resurrecting it", async () => {
+    const letter = await saveLetter({ jobId: "job-1", body: "gone soon" });
+    await deleteLetter(letter.id);
+
+    await expect(updateLetter(letter.id, { body: "back again" })).rejects.toThrow(
+      /no letter with id/,
+    );
+    expect(await getAllLetters()).toEqual([]);
   });
 });
 

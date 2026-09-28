@@ -6,22 +6,30 @@
 /**
  * LetterEditorDialog — the in-app author/revise surface for one cover letter.
  *
- * The assertions here are about what reaches `saveLetter`, because that is
- * where this component can do lasting damage to a record it did not create:
+ * The assertions here are about what reaches `saveLetter`/`updateLetter`,
+ * because that is where this component can do lasting damage to a record it
+ * did not create:
  *
  *  - It must NOT write a `producer` block. An absent block is how
  *    `docs/cover-letter-contract.md` §6 says "offlinecv wrote this", and it is
  *    what `JobLetterIndicator` reads to decide whether to warn about egress. A
  *    synthesized block would make the app claim a letter left the device.
- *  - Editing an existing letter must carry its `id` through, or every save
- *    would mint a new draft and the user's edit would read as a duplicate.
+ *  - Editing an existing letter must go through `updateLetter`, carrying the
+ *    id as the first argument rather than in the patch — a save through
+ *    `saveLetter` instead would mint a new draft, and one that dropped the id
+ *    some other way would read the user's edit as a duplicate (#929).
+ *  - The revise patch must never name `producer` or `resumeId`: `updateLetter`
+ *    merges it onto the stored record, so omitting them is what preserves
+ *    them, and naming either explicitly (even with the record's own value)
+ *    would make this component an author of provenance it did not create.
  *  - A blank body must not be writable at all: `saveLetter` accepts `""`, and
  *    a blank record renders as "Empty draft." — a row claiming a letter that
  *    shows nothing.
  *
- * `saveLetter` is mocked rather than driven through a fake IndexedDB: what is
- * under test is the ARGUMENT this component builds, and a real store would
- * assert the storage layer's behaviour instead.
+ * `saveLetter` and `updateLetter` are mocked rather than driven through a fake
+ * IndexedDB: what is under test is the ARGUMENT this component builds, and a
+ * real store would assert the storage layer's behaviour instead (see
+ * `letters.test.ts` for that, and the store's own preservation guarantee).
  *
  * jsdom lacks `HTMLDialogElement.showModal`/`close`; the polyfill and per-test
  * root come from `__test-utils__/dialog-dom.ts`.
@@ -38,7 +46,8 @@ import {
 import type { LetterRecord } from "../../lib/storage/index.ts";
 
 const saveLetter = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/storage/index.ts", () => ({ saveLetter }));
+const updateLetter = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/storage/index.ts", () => ({ saveLetter, updateLetter }));
 
 const { LetterEditorDialog } = await import("./LetterEditorDialog.tsx");
 
@@ -48,6 +57,8 @@ const dom = setupDomRoot();
 beforeEach(() => {
   saveLetter.mockReset();
   saveLetter.mockResolvedValue(undefined);
+  updateLetter.mockReset();
+  updateLetter.mockResolvedValue(undefined);
 });
 
 function findButton(text: string) {
@@ -58,6 +69,23 @@ function findButton(text: string) {
 
 const click = (text: string) => clickButtonIn(dom.container, text);
 const typeBody = (text: string) => typeIntoTextArea(dom.container, text);
+
+/** The "Draft name" field has no shared primitive (see the dialog's own
+ *  comment on why), so it is a plain `<input>` — `typeIntoTextArea` only
+ *  drives a `<textarea>`, and this needs the same native-setter dance for the
+ *  other element type. */
+function typeLabel(text: string) {
+  const input = dom.container.querySelector("input");
+  if (!input) throw new Error("typeLabel: no <input> in the container");
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  act(() => {
+    setter.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 
 function existing(over: Partial<LetterRecord> = {}): LetterRecord {
   return {
@@ -104,13 +132,13 @@ describe("LetterEditorDialog", () => {
     expect(input).not.toHaveProperty("id");
   });
 
-  it("carries the id through when revising, and never names the producer", async () => {
+  it("revises through updateLetter, id first and never naming producer or resumeId (#929)", async () => {
     dom.render(
       <LetterEditorDialog
         open
         onClose={() => {}}
         jobId="job-1"
-        letter={existing()}
+        letter={existing({ resumeId: "resume-1" })}
         onSaved={() => {}}
       />,
     );
@@ -118,13 +146,42 @@ describe("LetterEditorDialog", () => {
     click("Save letter");
     await act(async () => {});
 
-    const [input] = saveLetter.mock.calls[0]!;
-    expect(input.id).toBe("letter-1");
-    expect(input.body).toBe("Revised body.");
-    // `saveLetter` spreads the input over the stored record, so an untouched
-    // key survives. Naming `producer` here — even with the record's own value —
-    // would make this component an author of provenance it did not create.
-    expect(input).not.toHaveProperty("producer");
+    // The revise path goes through `updateLetter`, never `saveLetter` — a save
+    // through the raw upsert would be the full-replace bug #929 fixed.
+    expect(saveLetter).not.toHaveBeenCalled();
+    expect(updateLetter).toHaveBeenCalledTimes(1);
+    const [id, patch] = updateLetter.mock.calls[0]!;
+    expect(id).toBe("letter-1");
+    expect(patch.body).toBe("Revised body.");
+    // `updateLetter` merges the patch onto the stored record, so leaving these
+    // two OUT of the patch is what preserves them — naming either here, even
+    // with the record's own value, would make this component an author of
+    // provenance and a résumé link it did not create.
+    expect(patch).not.toHaveProperty("producer");
+    expect(patch).not.toHaveProperty("resumeId");
+  });
+
+  it("clears a label by sending it as an explicit undefined, not by omitting it (#929)", async () => {
+    // `updateLetter` merges `{ ...existing, ...patch }`: an OMITTED key leaves
+    // the existing value alone, so clearing a label the user blanks out needs
+    // an own `label` key with value `undefined`, not the absence the insert
+    // path used to send for the same blank input.
+    dom.render(
+      <LetterEditorDialog
+        open
+        onClose={() => {}}
+        jobId="job-1"
+        letter={existing({ label: "First draft" })}
+        onSaved={() => {}}
+      />,
+    );
+    typeLabel("");
+    click("Save letter");
+    await act(async () => {});
+
+    const [, patch] = updateLetter.mock.calls[0]!;
+    expect("label" in patch).toBe(true);
+    expect(patch.label).toBeUndefined();
   });
 
   it("seeds from the record it was opened with", () => {
@@ -335,7 +392,10 @@ describe("LetterEditorDialog scopes and start-from (#767)", () => {
 
     click("Save letter");
     await act(async () => {});
-    expect(saveLetter.mock.calls[0]![0].id).toBe("letter-1");
+    // Revising, so the write goes through `updateLetter` with the id as the
+    // first argument, not through `saveLetter`.
+    expect(saveLetter).not.toHaveBeenCalled();
+    expect(updateLetter.mock.calls[0]![0]).toBe("letter-1");
   });
 
   it("retires the picker once a starting point is taken, so a mis-click cannot wipe the draft", () => {
@@ -460,12 +520,15 @@ describe("LetterEditorDialog scopes and start-from (#767)", () => {
 
     click("Save letter");
     await act(async () => {});
-    const [input] = saveLetter.mock.calls[0]!;
-    // Carries the OCCUPANT's id: an upsert over the tier's record, not a second
-    // record at the same key.
-    expect(input.id).toBe("company-1");
-    expect(input.companyKey).toBe("northwind");
-    expect(input.body).toBe("My standard letter.");
+    // Revising the occupant, so this goes through `updateLetter` — an upsert
+    // over the tier's record via `saveLetter` here would risk minting a
+    // second record at the same key if the id were ever dropped.
+    expect(saveLetter).not.toHaveBeenCalled();
+    const [id, patch] = updateLetter.mock.calls[0]!;
+    // Carries the OCCUPANT's id as the first argument.
+    expect(id).toBe("company-1");
+    expect(patch.companyKey).toBe("northwind");
+    expect(patch.body).toBe("My standard letter.");
   });
 
   it("keeps the record's own body when the caller does NOT ask for the seed", () => {

@@ -87,6 +87,34 @@ export async function getLetter(id: string): Promise<LetterRecord | undefined> {
   return record !== undefined && isLive(record) ? record : undefined;
 }
 
+/**
+ * Apply a partial update to an existing letter, preserving every field the
+ * patch doesn't mention — the read-modify-write `saveLetter` deliberately
+ * does NOT do (see its own docblock and `putRecord`'s). Mirrors `updateJob`
+ * (`job-tracker.ts`).
+ *
+ * This is what a caller revising a record it did not author in full — the
+ * only case that matters here is `LetterEditorDialog` — must go through
+ * instead of a raw `saveLetter`: a partial input handed to `saveLetter`
+ * replaces the whole stored record, so `producer`, `resumeId`, and any
+ * unknown extra key the caller doesn't name are dropped, not preserved
+ * (#929). `saveLetter` itself stays a plain upsert — `importAll` and the
+ * `touch: false` housekeeping writes in this file already pass complete
+ * records and depend on a verbatim write.
+ *
+ * Throws on a missing OR TOMBSTONED id, rather than resurrecting one:
+ * `getLetter` reads a tombstoned record as gone (#730), so a patch can never
+ * land on it — the same refusal `getJob`'s docblock states for jobs.
+ */
+export async function updateLetter(
+  id: string,
+  patch: Partial<LetterRecord>,
+): Promise<LetterRecord> {
+  const existing = await getLetter(id);
+  if (!existing) throw new Error(`letters: no letter with id ${id}`);
+  return saveLetter({ ...existing, ...patch, id });
+}
+
 /** Every live letter. Tombstones are filtered by `getAllRecords`'s default. */
 export function getAllLetters(): Promise<LetterRecord[]> {
   return getAllRecords<LetterRecord>("letters");

@@ -15,21 +15,30 @@
  * A letter written HERE carries no `producer` block, and that absence is
  * meaningful rather than incidental: `docs/cover-letter-contract.md` §6 reads
  * an absent `producer` as "written by offlinecv itself". So this dialog must
- * never synthesize one — `saveLetter` is handed `id`/`jobId`/`label`/`body`
- * and nothing else. What that buys is the egress rule in `JobLetterIndicator`:
- * a hand-typed letter sent nothing anywhere, so it must not be gated behind a
- * warning that says it did.
+ * never synthesize one — `save` below hands the store only `jobId`/
+ * `companyKey`/`label`/`body`, and nothing else. What that buys is the egress
+ * rule in `JobLetterIndicator`: a hand-typed letter sent nothing anywhere, so
+ * it must not be gated behind a warning that says it did.
  *
  * A previous version of this paragraph claimed an existing record's own keys
  * survive the edit because "`saveLetter` spreads the input over the stored
- * record". That is false, and worth stating rather than deleting: `putRecord`
- * (`src/lib/storage/crud.ts`) writes `{...record, createdAt, updatedAt}` and
- * never spreads `existing`, so a partial save is a full REPLACE — revising a
- * producer's draft here drops its `producer` block along with anything else
- * this dialog does not send. That is #929's to fix at the store, and this
- * dialog's payload is deliberately unchanged until it lands; what comes out
- * is only the sentence asserting the opposite, which is the one a future
- * reader would have trusted over the store (#767 review).
+ * record". That was false: `putRecord` (`src/lib/storage/crud.ts`) writes
+ * `{...record, createdAt, updatedAt}` and never spreads `existing`, so handing
+ * `saveLetter` a partial input is a full REPLACE — revising a producer's draft
+ * through it would drop its `producer` block along with anything else the
+ * caller doesn't send. That is what made the wrong sentence dangerous rather
+ * than merely stale: it was the stated reason this dialog was allowed to send
+ * a partial record.
+ *
+ * #929 closed the gap at the store instead of here: `updateLetter`
+ * (`src/lib/storage/letters.ts`) does the read-modify-write `saveLetter`
+ * deliberately doesn't, and `save` below calls it for the REVISE path — every
+ * key this dialog doesn't name (`producer`, `resumeId`, unknown extras) rides
+ * through untouched because the patch never mentions it, not because this
+ * component knows to carry it. The INSERT path (composing, including a
+ * start-from copy) still calls `saveLetter` directly: there is no existing
+ * record to merge with, and carrying a source's `id` into it would be the
+ * bug #767 built start-from to avoid, not #929's.
  *
  * Save is DISABLED on an empty body rather than silently writing one.
  * `saveLetter` requires `body` at the type level but accepts `""`, and a blank
@@ -74,7 +83,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Dialog, TextAreaField } from "@design-system";
-import { saveLetter } from "../../lib/storage/index.ts";
+import { saveLetter, updateLetter } from "../../lib/storage/index.ts";
 import type { LetterRecord } from "../../lib/storage/index.ts";
 import { capitalizePhrase } from "../../lib/letters/scope-phrase.ts";
 
@@ -96,7 +105,7 @@ interface LetterEditorDialogProps {
   open: boolean;
   onClose: () => void;
   /** The job this letter is for. Absent composes a company or standard letter
-   *  instead — see `companyKey`. Exactly one of the two, or neither: a record
+   *  instead — see `companyKey`. One of the two, or neither: a record
    *  carrying both is refused by `validateLetterRecord`, so passing both here
    *  is a caller bug that surfaces as a failed save. */
   jobId?: string;
@@ -292,24 +301,36 @@ export function LetterEditorDialog({
     if (isBlank || saving) return;
     setSaving(true);
     setFailed(false);
+    // Only the key this scope owns, the body, and the label — never
+    // `producer`, `resumeId`, or an unknown extra key, and that is the point
+    // on the REVISE path: `updateLetter` merges this onto the stored record,
+    // so a key left out of `patch` rides through untouched rather than being
+    // dropped. The INSERT path has no existing record to merge with, so the
+    // same shape is simply the whole new record.
+    const patch = {
+      // Sending `jobId: undefined` explicitly would be harmless today
+      // (`checkDeclaredFields` reads an explicit `undefined` as absent), but
+      // spreading only what exists keeps the written record the exact shape
+      // the scope claims.
+      ...(jobId !== undefined ? { jobId } : {}),
+      ...(companyKey !== undefined ? { companyKey } : {}),
+      body,
+      // Explicit `undefined` on a blank label, not an omitted key: on the
+      // revise path `updateLetter`'s `{ ...existing, ...patch }` only clears a
+      // previous label because this key is its OWN property, even though its
+      // value reads as absent to the reveal (falls back to "Cover letter")
+      // and to a fresh insert (nothing to clear).
+      label: label.trim() || undefined,
+    };
     try {
-      await saveLetter({
-        // No `id` when composing — including on a draft seeded from another
-        // letter. That absence is what makes start-from a copy: `saveLetter`
-        // upserts, so carrying the source's id would OVERWRITE the source.
-        ...(letter?.id ? { id: letter.id } : {}),
-        // Only the key this scope owns. Sending `jobId: undefined` explicitly
-        // would be harmless today (`checkDeclaredFields` reads an explicit
-        // `undefined` as absent), but spreading only what exists keeps the
-        // written record the exact shape the scope claims.
-        ...(jobId !== undefined ? { jobId } : {}),
-        ...(companyKey !== undefined ? { companyKey } : {}),
-        body,
-        // A blank label is stored as absent, not as `""`: the reveal falls back
-        // to "Cover letter" on a missing label, and an empty string would make
-        // the draft picker render a nameless chip instead.
-        ...(label.trim() ? { label: label.trim() } : {}),
-      });
+      if (letter) {
+        await updateLetter(letter.id, patch);
+      } else {
+        // No `id` — including on a draft seeded from another letter. That
+        // absence is what makes start-from a copy: `saveLetter` upserts, so
+        // carrying the source's id would OVERWRITE the source.
+        await saveLetter(patch);
+      }
     } catch {
       // The write can fail for reasons the user can act on — a full quota, a
       // browser blocking storage. Say so and KEEP the text on screen; closing
