@@ -66,6 +66,7 @@ import { trackResumeSaved, type ResumeSaveSource } from "../lib/analytics.ts";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { AnonymousAtsScore } from "../lib/score/score.ts";
 import type { ResumeLibrary } from "./useResumeLibrary.ts";
+import type { EditSnapshot } from "./useEditableParse.ts";
 
 /** Quiet period after the last edit before a write. Mirrors the blank-draft
  *  autosave (#313) — the same debounce over the same `hasEdits` signal. */
@@ -102,6 +103,18 @@ export interface AutosavableResume {
   result: CascadeResult;
   /** {@link result}'s score, on the same terms. */
   score: AnonymousAtsScore;
+  /**
+   * The PRISTINE parse `edit` is a delta over (#768) — `state.result`, before
+   * the edit layer and before any recovery pass. Optional, and both-or-neither
+   * with {@link edit}: pass neither while `recovery.isLlmRecovered` is true, so
+   * such a save degrades to today's flattened record rather than storing a
+   * delta whose target `result` is not actually `base` + `edit` (see
+   * `App.tsx`'s call site).
+   */
+  baseResult?: CascadeResult;
+  /** The delta that turns {@link baseResult} into {@link result} — the live
+   *  `edit.snapshot`. See {@link baseResult}. */
+  edit?: EditSnapshot;
 }
 
 export interface AutosaveResumeOptions {
@@ -124,8 +137,14 @@ export interface AutosaveResume {
    * `CascadeResult` handed to the parse state — that object becomes `parseKey`,
    * so the binding is already correct on the very next render and there is no
    * commit in which the restored résumé looks unsaved.
+   *
+   * `pendingEdit`, when given, is the `EditSnapshot` a delta-carrying record
+   * (#768) is about to replay onto `parse`. Such a restore lands with
+   * `hasEdits` already true — the replay, not a user action — so `writtenFrom:
+   * null` would read as dirty on the very first render and fire a spurious
+   * write. See {@link SavedRecord.pendingEditJSON} for how that is held off.
    */
-  adopt: (parse: CascadeResult, id: string) => void;
+  adopt: (parse: CascadeResult, id: string, pendingEdit?: EditSnapshot) => void;
 }
 
 /** The id of the record this parse lives in, plus what was last written to it. */
@@ -137,6 +156,73 @@ interface SavedRecord {
    *  id adopted from a restore (nothing was written HERE, but the record is by
    *  definition current with the parse it was just loaded from). */
   writtenFrom: unknown;
+  /**
+   * `snapshotIdentityKey` of the `EditSnapshot` a delta-carrying adopt is
+   * waiting to see replayed (#768), or undefined once synced / for a plain
+   * adopt.
+   *
+   * `useAnalyzedResume`'s reset-and-replay effect and this hook's own
+   * catch-up effect (below) run in the SAME passive-effect flush, so a gate
+   * that just waited for "one render since adopt" would fire against the
+   * STALE pre-replay `edit.snapshot` still sitting from whatever the page
+   * showed before the restore. Content comparison (not reference — a
+   * snapshot is JSON, see `EditSnapshot`'s own docblock) is what actually
+   * distinguishes "not replayed yet" from "replayed", so `dirty` stays
+   * suppressed and `writtenFrom` stays unseeded until the live snapshot
+   * genuinely matches this one — through `snapshotIdentityKey`, not a raw
+   * `JSON.stringify`, because `replay()` mints FRESH ids for added entries and
+   * profile extras (`useEditableParse.ts`'s `addEntry`/`addProfile`), so a raw
+   * stringify of the replayed snapshot never equals the one it was replayed
+   * from and this comparison would never resolve same-tick — see
+   * `snapshotIdentityKey`.
+   */
+  pendingEditJSON?: string;
+}
+
+/**
+ * A content-comparable stand-in for an `EditSnapshot`, safe to diff across a
+ * `replay()` call. `replay` mints a fresh id for every added entry
+ * (`addEntry`) and profile extra (`addProfile`) rather than reusing the ids
+ * the snapshot was written with, so the snapshot it PRODUCES is never
+ * `JSON.stringify`-equal to the one it was replayed from, even when replay
+ * reproduced it exactly. Confirmed by repro (#768 review): comparing raw
+ * `JSON.stringify` here read a replayed delta as still-pending forever, which
+ * fell through to `awaitingReplay`'s one-tick escape hatch and fired a
+ * spurious `autosave` write on every restore of a record with an added entry
+ * or a profile extra.
+ *
+ * Both `addedEntries[].id` and `profileOverrides[].id` are replaced by their
+ * POSITION in the array — stable across a re-mint because `replay` iterates
+ * `snapshot.addedEntries` in order and mints exactly one id per entry, in
+ * that same order (`useEditableParse.ts`'s `replay`). Any `addedBullets` key
+ * that names one of those added-entry ids is remapped the same way, since
+ * `replay` keys a re-minted entry's bullets by its NEW id
+ * (`idMap.get(entryKey) ?? entryKey`); a key naming a PARSED entry
+ * (`parsedEntryKey`) is untouched by replay and so is left as-is here.
+ */
+function snapshotIdentityKey(snapshot: EditSnapshot): string {
+  const addedEntryIds = new Map<string, string>();
+  const addedEntries = snapshot.addedEntries.map((entry, i) => {
+    const placeholder = `#${i}`;
+    addedEntryIds.set(entry.id, placeholder);
+    return { ...entry, id: placeholder };
+  });
+  const addedBullets = Object.fromEntries(
+    Object.entries(snapshot.addedBullets).map(([key, bullets]) => [
+      addedEntryIds.get(key) ?? key,
+      bullets,
+    ]),
+  );
+  const profileOverrides = snapshot.profileOverrides?.map((override, i) => ({
+    ...override,
+    id: `#${i}`,
+  }));
+  return JSON.stringify({
+    ...snapshot,
+    addedEntries,
+    addedBullets,
+    profileOverrides,
+  });
 }
 
 export function useAutosaveResume({
@@ -161,6 +247,8 @@ export function useAutosaveResume({
   const sourceKind = resume?.sourceKind;
   const result = resume?.result ?? null;
   const score = resume?.score ?? null;
+  const baseResult = resume?.baseResult;
+  const editSnapshot = resume?.edit;
 
   const [stored, setStored] = useState<SavedRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -175,15 +263,33 @@ export function useAutosaveResume({
   // See the docblock: an id belonging to a different parse is not an id.
   const record = stored !== null && stored.parseKey === parseKey ? stored : null;
 
+  // True while a delta-carrying adopt (#768) is still waiting to see its own
+  // `EditSnapshot` replayed — see `SavedRecord.pendingEditJSON`. `editSnapshot`
+  // undefined (the LLM-recovered branch, which never restores a delta) can
+  // never satisfy a pending snapshot, so it reads as still-awaiting rather than
+  // throwing away the guard.
+  const editSnapshotJSON =
+    record?.pendingEditJSON !== undefined && editSnapshot !== undefined
+      ? snapshotIdentityKey(editSnapshot)
+      : undefined;
+  const awaitingReplay =
+    record !== null &&
+    record.pendingEditJSON !== undefined &&
+    record.pendingEditJSON !== editSnapshotJSON;
+
   // Is what is on screen different from what the record holds? There is
   // something to write, the user has made work, and `result` — a fresh object on
   // every edit and a stable one otherwise — is not the one already written. An
   // adopted record (`writtenFrom: null`) reads as dirty only once `hasEdits`
   // turns true, which is exactly right: a restore lands with edits cleared, so
-  // it settles on "saved" without writing anything.
+  // it settles on "saved" without writing anything — UNLESS the restore itself
+  // carried a delta, in which case `hasEdits` is already true the moment it
+  // replays and `awaitingReplay` is the guard that keeps this from reading
+  // dirty before (and for one render after) that replay lands.
   const dirty =
     result !== null &&
     hasEdits &&
+    !awaitingReplay &&
     (record === null || record.writtenFrom !== result);
 
   // What the DEBOUNCE acts on — dirty, minus the attempt that already failed for
@@ -220,6 +326,8 @@ export function useAutosaveResume({
           sourceKind,
           result,
           score,
+          baseResult,
+          edit: editSnapshot,
         });
         // `parseKey` and `result` as they were when this write STARTED. If a new
         // résumé landed while it was in flight, the pairing is stale by
@@ -247,7 +355,18 @@ export function useAutosaveResume({
         setSaving(false);
       }
     },
-    [librarySave, record, parseKey, filename, bytes, sourceKind, result, score],
+    [
+      librarySave,
+      record,
+      parseKey,
+      filename,
+      bytes,
+      sourceKind,
+      result,
+      score,
+      baseResult,
+      editSnapshot,
+    ],
   );
 
   // The debounce. `performSave` changes identity on every edit (it closes over
@@ -269,13 +388,60 @@ export function useAutosaveResume({
     return () => clearTimeout(timer);
   }, [writeOwed, saving, performSave]);
 
+  // Resolves a delta-carrying adopt (#768) once its replay actually lands —
+  // see `awaitingReplay` and `SavedRecord.pendingEditJSON`. `writtenFrom` is
+  // seeded from `result` AS COMPUTED ON THIS RENDER (the first one where the
+  // live snapshot matches what was restored), not from a value guessed at
+  // adopt time, because `result` is a fresh object every time `computeSavable
+  // Result`'s deps change and only this render's reference is the one `dirty`
+  // will actually compare against afterward. A plain adopt (no delta) never
+  // sets `pendingEditJSON`, so this effect is a no-op for it.
+  useEffect(() => {
+    if (record === null || record.pendingEditJSON === undefined) return;
+    if (!awaitingReplay) {
+      if (result === null) return;
+      setStored({ ...record, writtenFrom: result, pendingEditJSON: undefined });
+      return;
+    }
+    // Bounded escape hatch. Ordinarily this resolves same-tick (the branch
+    // above): `useAnalyzedResume`'s reset-and-replay effect and this one run
+    // in the same passive-effect flush. But nothing guarantees a caller's
+    // `resume.edit` ever reaches the exact shape it adopted with — a future
+    // branch that drops it (the LLM-recovered arm already does, see
+    // `AutosavableResume.baseResult`'s docblock), or a shape drift this hook
+    // cannot foresee — and waiting on that forever would suppress every
+    // future write for this parse, silently, which is worse than the one
+    // spurious write this guard exists to prevent. One tick without a match
+    // gives up and reverts to the pre-#768 behaviour: `writtenFrom` stays
+    // `null`, so `dirty` falls back to gating on `hasEdits` alone.
+    const timer = setTimeout(() => {
+      setStored((prev) =>
+        prev !== null && prev.pendingEditJSON !== undefined
+          ? { ...prev, pendingEditJSON: undefined }
+          : prev,
+      );
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [record, awaitingReplay, result]);
+
   const save = useCallback(() => {
     void performSave("header");
   }, [performSave]);
 
-  const adopt = useCallback((parse: CascadeResult, id: string) => {
-    setStored({ parseKey: parse, id, writtenFrom: null });
-  }, []);
+  const adopt = useCallback(
+    (parse: CascadeResult, id: string, pendingEdit?: EditSnapshot) => {
+      setStored({
+        parseKey: parse,
+        id,
+        writtenFrom: null,
+        pendingEditJSON:
+          pendingEdit !== undefined
+            ? snapshotIdentityKey(pendingEdit)
+            : undefined,
+      });
+    },
+    [],
+  );
 
   return { state, save, adopt };
 }

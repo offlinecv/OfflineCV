@@ -63,6 +63,9 @@ export type ParseState =
       sourceKind: SourceKind;
       result: CascadeResult;
       score: AnonymousAtsScore;
+      /** A delta restored from the library alongside a pristine `result` (#768)
+       *  — see `useAnalyzedResume`'s reset effect, the one place this is read. */
+      restoredEdit?: EditSnapshot;
     }
   | {
       phase: "authoring";
@@ -113,6 +116,9 @@ export interface LoadedDoneState {
   sourceKind: SourceKind;
   result: CascadeResult;
   score: AnonymousAtsScore;
+  /** A delta to replay onto `result` once it lands (#768) — see the `done`
+   *  phase's own field on {@link ParseState}. */
+  restoredEdit?: EditSnapshot;
 }
 
 // ── Draft persistence (#313) ─────────────────────────────────────────────────
