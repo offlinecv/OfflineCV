@@ -23,6 +23,7 @@ import { createRoot, type Root } from "react-dom/client";
 import type { CascadeResult } from "../lib/heuristics/types.ts";
 import type { SectionedResume } from "../lib/heuristics/sections.ts";
 import type { SectionName } from "../lib/heuristics/regex.ts";
+import type { WebLlmEngine } from "../lib/webllm/types.ts";
 
 // ── Mocks (engine layer only) ──────────────────────────────────────────────────
 
@@ -127,6 +128,20 @@ import {
   trackCritiqueRan,
   trackAnalysisAborted,
 } from "../lib/analytics.ts";
+
+/** The `parse` half of a paused `analyzeResumeWithLlm` resolution, mirroring the module mock's default. */
+function stubLlmParse() {
+  return {
+    full_name: "LLM Name",
+    email: null,
+    phone: null,
+    location: null,
+    summary: null,
+    skills: [],
+    experience: [],
+    education: [],
+  };
+}
 
 /** A graded bullet stub. Only `id` and `text` take part in the critique join. */
 function bullet(id: string, text: string): BulletObservation {
@@ -485,6 +500,177 @@ describe("useResumeAnalysisLlm", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("a reset mid-inference discards the stale run instead of overwriting the panel (#1099)", async () => {
+    let resolveAnalyze!: (v: {
+      parse: ReturnType<typeof stubLlmParse>;
+      critique: { bulletFindings: never[]; missingSections: never[] };
+    }) => void;
+    vi.mocked(analyzeResumeWithLlm).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAnalyze = resolve;
+        }),
+    );
+
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    function Probe({ r, parseKey }: { r: CascadeResult; parseKey: unknown }) {
+      sink.current = useResumeAnalysisLlm(r, parseKey);
+      return null;
+    }
+    const parseKeyA = {};
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={parseKeyA} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = sink.current!.run();
+      // Let consent resolve, the engine load, and the run reach the paused
+      // `analyzeResumeWithLlm` await.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sink.current!.status.kind).toBe("running");
+
+    // A new résumé arrives while the old one is still analyzing.
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={{}} />);
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+
+    // The stale run finally settles — its result must not land on the panel.
+    await act(async () => {
+      resolveAnalyze({
+        parse: stubLlmParse(),
+        critique: { bulletFindings: [], missingSections: [] },
+      });
+      await runPromise;
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+    // Resource bookkeeping for the stale run still ran to completion.
+    expect(releaseInference).toHaveBeenCalledWith(SHIPPED_MODEL.id);
+  });
+
+  it("a reset during model load gives the same result (#1099)", async () => {
+    let resolveLoad!: (engine: WebLlmEngine) => void;
+    vi.mocked(loadEngine).mockImplementationOnce((_id, onProgress) => {
+      onProgress({ progress: 0.1, text: "Loading…" });
+      return new Promise((resolve) => {
+        resolveLoad = resolve;
+      });
+    });
+
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    function Probe({ r, parseKey }: { r: CascadeResult; parseKey: unknown }) {
+      sink.current = useResumeAnalysisLlm(r, parseKey);
+      return null;
+    }
+    const parseKeyA = {};
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={parseKeyA} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    let runPromise!: Promise<void>;
+    await act(async () => {
+      runPromise = sink.current!.run();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sink.current!.status.kind).toBe("loading");
+
+    // A new résumé arrives while the model is still loading.
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={{}} />);
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+
+    await act(async () => {
+      resolveLoad({ chat: {} } as unknown as WebLlmEngine);
+      await runPromise;
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+    // A reset mid-load skips the inference pass entirely.
+    expect(analyzeResumeWithLlm).not.toHaveBeenCalled();
+  });
+
+  it("frees inFlightRef on reset so the new résumé can be analyzed immediately (#1099)", async () => {
+    let resolveAnalyze!: (v: {
+      parse: ReturnType<typeof stubLlmParse>;
+      critique: { bulletFindings: never[]; missingSections: never[] };
+    }) => void;
+    vi.mocked(analyzeResumeWithLlm).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveAnalyze = resolve;
+        }),
+    );
+
+    const sink: { current: ReturnType<typeof useResumeAnalysisLlm> | null } = {
+      current: null,
+    };
+    function Probe({ r, parseKey }: { r: CascadeResult; parseKey: unknown }) {
+      sink.current = useResumeAnalysisLlm(r, parseKey);
+      return null;
+    }
+    const parseKeyA = {};
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={parseKeyA} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    let stalePromise!: Promise<void>;
+    await act(async () => {
+      stalePromise = sink.current!.run();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(sink.current!.status.kind).toBe("running");
+
+    await act(async () => {
+      root.render(<Probe r={result()} parseKey={{}} />);
+    });
+    expect(sink.current!.status.kind).toBe("idle");
+
+    // The new résumé's run is not blocked behind the stale one settling.
+    await act(async () => {
+      await sink.current!.run();
+    });
+    expect(loadEngine).toHaveBeenCalledTimes(2);
+    expect(sink.current!.status.kind).toBe("done");
+
+    // Let the stale run drain so no unresolved promise leaks into the next test.
+    await act(async () => {
+      resolveAnalyze({
+        parse: stubLlmParse(),
+        critique: { bulletFindings: [], missingSections: [] },
+      });
+      await stalePromise;
+    });
   });
 });
 
