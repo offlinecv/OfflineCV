@@ -248,17 +248,23 @@ export function useResumeAnalysisLlm(
         // parse coerced through `projectLlmDiff`. `diffParses` derives its
         // whole-section-drop gate from the heuristic canonical's own section
         // headers, so the call site no longer computes `presentSections` (#445).
+        // `groundingText` is the EXACT prompt body `analyzeResumeWithLlm` was
+        // given above (#1093) — never a re-derived or edited text — so a card
+        // is shown only for content demonstrably on the page the model read.
         const triggers = result.triggers as LayoutTrigger[];
-        const disagreements = diffParses(
+        const groundingText = result.markdown ?? result.rawText;
+        const { disagreements, rejectedUngrounded } = diffParses(
           result.canonical,
           projectLlmDiff(combined.parse),
           triggers,
+          groundingText,
         );
         const tally = tallyKinds(disagreements);
         trackDisagreementsFound({
           model: modelId,
           count: disagreements.length,
           triggers,
+          rejectedUngrounded,
           ...tally,
         });
 

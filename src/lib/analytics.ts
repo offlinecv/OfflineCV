@@ -570,6 +570,10 @@ export function trackDisagreementsFound(args: {
   droppedSection: number;
   missingField: number;
   mergedRoles: number;
+  /** How many candidate gaps the grounding gate (#1093) discarded because the
+   *  LLM's value never demonstrably occurred in the text it read — a count
+   *  only, never a value, so the funnel shows how often the gate fires. */
+  rejectedUngrounded: number;
   /** Active layout triggers — already anonymized (a fixed enum, no PII). */
   triggers: readonly LayoutTrigger[];
 }): void {
@@ -580,6 +584,7 @@ export function trackDisagreementsFound(args: {
     dropped_section: args.droppedSection,
     missing_field: args.missingField,
     merged_roles: args.mergedRoles,
+    rejected_ungrounded: args.rejectedUngrounded,
     triggers: [...args.triggers],
   });
 }
